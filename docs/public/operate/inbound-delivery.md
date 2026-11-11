@@ -219,6 +219,55 @@ nothing a caller supplies.
 See [data origins](../concepts/data-origins.md) for the contract and
 `integrations/CLAUDE.md` for the recipe.
 
+### When a connector's try fails
+
+A delivery a connector could not work is tried again, unless the failure is
+one no retry changes: a permanent refusal, a grant that does not cover the
+domain, a domain the connection never asked for, or a capability the
+connector does not have. The refusals the dispatcher makes before it asks the
+connector -- another tier's secret, no verified signature, metadata that does
+not parse -- are facts about the stored row, and are not tried again either.
+
+**Four tries at most**, the first included:
+
+| Try | When |
+|---|---|
+| 1 | When the delivery is staged. |
+| 2 | 1 minute after the first. |
+| 3 | 5 minutes after the second. |
+| 4 | 30 minutes after the third. |
+
+Each failed try stamps the row `failed` with its `attempts` and its
+`nextAttemptAt` (empty when there is no next try). The
+`retryFailedInboundDeliveries` automation runs **every minute** and takes one
+page of fifty rows whose next try has come, least recently written first. It
+claims each row
+before dispatching it, so a pass that overlaps the last one never tries one
+delivery twice at once, and a retry passes the same checks the first try did.
+
+**Given up.** A delivery that is `failed` with four tries counted is given
+up. Nothing tries it again by itself. `inboundRequestsGivenUp(source:)` lists
+them, most recently written first; leave `source` out for every source. For a
+mirror, the connector's reconciliation sweep is the net under all four tries.
+
+**Try again.** `datasyncRequeueInbound(source: "<source>")` puts every
+given-up delivery of one source back in line: its tries start again from none
+and it is due now, so the next pass -- within a minute -- tries it. A
+delivery still waiting for its next try is not given up, and is left as it
+is. The builtin is for a cluster owner. In MemQL OS the same act is "Try
+again" under "Changes that could not be recorded" in **Cluster → Data**, and,
+for one Shopify store, "Try again" on its Store page
+([the Shopify connector](shopify-connector.md#the-storefronts-store-panel)).
+
+**A source no connector serves.** When a due delivery's source is served by no
+connector on the node -- its store was removed, or the node binds no
+connector -- the delivery is taken out of the retries with one write: still
+`failed`, no next try, its try count as it was, and a `lastError` such as
+`no connector on this node serves source "shopify-example", so the delivery is
+not tried again`. When the node cannot tell whether a connector serves the
+source (the connector could not read its own list), the row is left as it is
+and judged again on the next pass.
+
 ### Writing an automation instead
 
 Still supported, and still the right answer when the delivery is not
@@ -344,9 +393,11 @@ Check the product automation's trigger and filter.
 
 - **No per-source rate limiting.** The body cap bounds a single request; it does
   not bound a flood. Rate limiting is the ingress's job today.
-- **No engine-side retry of product handling failures.** A row stamped `failed`
-  sits there until something looks at it -- the engine does not know what
-  retrying a business event means.
+- **No engine-side retry of product handling failures.** A row an automation
+  stamps `failed` sits there until something looks at it -- the engine does
+  not know what retrying a business event means. A delivery a connector works
+  is the exception, and is tried again
+  ([When a connector's try fails](#when-a-connectors-try-fails)).
 - **No binary payloads.** `body` is text; a non-UTF-8 request is refused with
   `400` rather than staged corrupted.
 - **No NUL bytes in the body.** U+0000 is valid UTF-8, so it passes the check

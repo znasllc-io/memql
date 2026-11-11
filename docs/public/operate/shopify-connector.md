@@ -111,7 +111,9 @@ Three of them need more than a checkbox:
 
 - **`read_all_orders`** unlocks orders older than 60 days. It needs Shopify's
   approval, requested from the app's configuration. Without it the mirror's
-  order history begins 60 days ago and nothing says so except a thin backfill.
+  order history begins 60 days before the store connected. The store's health
+  records that day as `ordersFrom`, and the Store page shows it as "Orders
+  since".
 - **Protected customer data** is a separate approval with two levels. Level 1
   covers customer records; Level 2 covers the fields marked as protected
   (name, email, phone, address). Below the level a field needs, Shopify
@@ -130,6 +132,83 @@ credential from the Admin token.
 2027-01-01. A custom-distribution app's token does not expire today; the
 connector stores every token by reference so a rotation is a secret change
 rather than a code change.
+
+### What a managed connection asks for
+
+The list above is for a store connected with its own app. A store connected
+through Connect Shopify with the shared app -- a *managed* connection -- asks
+for a smaller, fixed set, and everything about that store is measured against
+this set rather than the list above: a scope it does not ask for is never
+missing, and a domain it does not reach is never an error.
+
+| Scope | What it is used for |
+|---|---|
+| `unauthenticated_read_product_listings`, `unauthenticated_read_checkouts`, `unauthenticated_write_checkouts`, `unauthenticated_read_customers` | The storefront: reading its catalog and holding a cart. Without them no Storefront token can be minted. |
+| `write_products` | Products, variants and collections, and the `memql` metafields product-content delivery writes. It includes `read_products`. |
+| `read_inventory` | Inventory items and levels, inventory transfers and inventory shipments. |
+| `read_locations` | Locations. |
+| `read_orders` | Orders with their lines, transactions and refunds; abandoned checkouts; payments. |
+| `read_customers` | Customers, customer segments, companies, company locations and their contacts. |
+| `write_customers` | Only the wholesale pack's customer tag and creating a customer. It is asked for now so that a store approves once rather than twice. |
+| `read_discounts` | Discounts. |
+| `read_returns` | Returns. |
+
+`read_all_orders` is not asked for, so a managed store's orders begin 60 days
+before it connected (`ordersFrom`, above). The authoritative copy of the list
+is `managedConnectScopes` in `integrations/shopify/connections.go`, and
+[Connect Shopify](shopify-connect.md) prints it for registering on the app.
+
+### The data declaration
+
+Shopify treats orders, customers, draft orders, abandoned checkouts, refunds and
+transactions as protected customer data. Until the app declares that it uses
+it, Shopify refuses those domains, and the store's Store page says so, naming
+them: "Shopify refuses orders for this app, because the app has not declared
+the customer data it uses." MemQL cannot make the declaration. An operator
+makes it once, for the app:
+
+1. Open the app in the Shopify Dev Dashboard (or the Partner Dashboard, for an
+   app created there) and find its protected customer data settings. The Store
+   page's act, "Declare the customer data", links to Shopify's own page on it.
+2. Request access to protected customer data.
+3. Select the fields **name**, **email** and **address**. Do not select
+   **phone**: nothing in MemQL uses a phone number, and Shopify approves only
+   what an app needs.
+4. For a **development store**, that is all: the selection needs no review.
+5. For a **merchant's live store**, Shopify reviews the declaration before the
+   app may read that store's orders, and the wait is Shopify's. Submit the
+   request as soon as the declaration is made, well before the store is
+   connected, so the wait runs while everything else is set up.
+
+Declaring name, email and address is Shopify's Level 2, and its requirements
+(encryption, retention, test data kept apart, an incident procedure) are the
+operator's. The privacy topics of step 5 already redact on request.
+
+Nothing on the cluster changes. Each refused domain is asked again on its own
+sweep interval, and the first clean sweep of a domain Shopify had refused
+queues that domain's backfill, so the store's past arrives with nobody
+pressing Backfill.
+
+### When the list grows
+
+A release can add scopes to what a managed connection asks for -- this one
+added `read_customers`, `write_customers`, `read_discounts` and `read_returns`.
+Then:
+
+1. **Register the new scopes on the app.** Add them to the app's access scopes
+   in its configuration at Shopify, beside the ones it already has.
+2. **Each store approves again.** A store connected earlier approved the older
+   list. Its Store page says "This store approved an older list of
+   permissions.", with the scopes it lacks beneath, and -- for the store's
+   owner or a cluster owner -- the act "Open MemQL OS from the store's Shopify
+   admin and approve", which links to the store's apps page in its Shopify
+   admin (`https://example-store.myshopify.com/admin/apps`). Somebody on the
+   store's staff opens MemQL OS from there and approves the new list when
+   Shopify asks.
+3. **The rest is automatic.** The approval returns through the connect
+   callback, which records the new grant and queues the backfill of each
+   domain the new grant unlocked. The store reads "Starting" while those run,
+   then "Recording".
 
 ---
 
@@ -305,9 +384,11 @@ fails its creation and is listed under `subscriptions.failed`.
 
 A topic is outside the grant when the store holds none of the scopes its
 domain reads under -- the rule reconciliation uses to skip a domain. A store
-connected through Connect Shopify holds the storefront's scopes only, so the
-customer, fulfillment-order, return and discount topics are not asked for;
-Shopify would refuse each one. They are listed on the store's health as
+connected through Connect Shopify holds the managed scopes
+([What a managed connection asks for](#what-a-managed-connection-asks-for)),
+so the topics of domains none of them reads -- fulfillment orders, gift cards,
+draft orders and most of the rest -- are not asked for; Shopify would refuse
+each one. They are listed on the store's health as
 `subscriptions.notGranted`, a standing fact about the connection rather than a
 failure. A store whose grant was never recorded is asked for every topic.
 
@@ -322,12 +403,42 @@ store's health is where you see that it happened.
 query, writes a JSONL file, and the connector streams it in resumable
 batches, persisting the line offset as the domain's cursor. Bulk queries are
 exempt from the cost limit, which is why a hundred thousand orders are
-affordable at all. It is OPERATOR-DRIVEN -- nothing schedules it -- from the
-MemQL OS Cluster app's Data origins section or with
-`datasyncStartBackfill(connector: "shopify", conceptId: "v1:shopify:order")`.
+affordable at all.
+
+**A backfill starts by itself.** Nobody has to press anything for a store's
+past to arrive. A domain's backfill is QUEUED:
+
+- by a connect. A store that is new, was uninstalled, had its data removed by
+  Shopify, or had no Admin token queues every bulk domain of its connection,
+  and a backfill left running from before starts again from nothing. Any other
+  connect queues only the domains the new grant unlocked.
+- at boot, for a domain of an ingesting store that no backfill ever wrote.
+- by the first clean sweep of a domain Shopify had refused (a wider grant, a
+  data declaration made since).
+
+The `continueQueuedBackfills` automation then carries every queued or running
+backfill on by one page budget **every five minutes**. It takes at most one
+domain per store at a time, so a store runs one backfill at a time, and it
+leaves a paused domain alone. While any of them is queued or running, the
+store's Store page reads "Starting".
+
+A backfill can still be started by hand: "Backfill now" on a domain in
+**Cluster → Data**, or
+`datasyncStartBackfill(connector: "shopify", conceptId: "v1:shopify:order", partitionKey: "<storeId>")`.
+
+**Where a store's orders begin.** Without `read_all_orders`, Shopify lists
+only a store's last 60 days of orders. When a store's orders are queued, the
+day 60 days before then is recorded on its health as `ordersFrom`, once: a
+later connect does not move it. A store whose data Shopify removed is the
+exception -- its mirrored orders are gone, so reconnecting it records the day
+anew.
 
 Domains are applied **parents first** (`generated.ApplyOrder`), so a line
-item never lands before its order.
+item never lands before its order. An order with more than a hundred lines
+is read whole: the lines after the first hundred are read a page at a time,
+up to fifty pages in all, before the order is written. An order still
+promising more lines at that ceiling is kept as far as it was read, and the
+node's log says so.
 
 **Live delivery.** A webhook arrives at the inbound receiver, is verified
 against the store's own secret, and is staged. The runtime's dispatcher
@@ -336,6 +447,20 @@ webhook id, fetches the object by GID with the generated selection set, and
 returns the rows; the runtime applies them under the version guard, so a
 write whose `updatedAt` is older than the stored row's is recorded as *stale*
 and dropped.
+
+**A failed delivery is tried again.** A delivery the connector could not work
+-- the Admin API did not answer, the write failed -- gets **four tries at
+most**: the first, then one minute after it, five minutes after the second,
+and thirty minutes after the third. A refusal no retry changes -- a scope the
+grant lacks, a domain the connection does not ask for -- is not tried again. A
+delivery that used all four tries is *given up*: it stays `failed` and nothing
+tries it again by itself. The domain's next clean sweep reads what it named,
+and from then on it no longer counts against the store. Until then the Store
+page says "3 changes could not be recorded." (or "1 change could not be
+recorded."), and its act, "Try again", puts every given-up delivery of that
+store back in line, with its tries counted from none. The retry pass runs
+every minute, so they are tried within a minute. The full rules are in
+[Inbound delivery](inbound-delivery.md#when-a-connectors-try-fails).
 
 **Reconciliation.** Every ten minutes the runtime sweeps the domains whose
 own interval has elapsed. Domains whose root connection accepts a `query:`
@@ -640,20 +765,62 @@ boundary.
 
 ### The storefront's Store panel
 
-MemQL OS → Deployables → the storefront → **Store**. Per store: status, the
-granted scopes against the allowlist's needs, the protected-data level, the
-last subscription reconcile and what it changed, the cost bucket, and every
-domain's sync state with its drift counters. The development store paired to
-it, when there is one, reads beneath. Privacy deliveries refused on the
-store's own URL, when there are any, read FIRST, as an error naming the URL
-to configure.
+MemQL OS → Deployables → the storefront → **Store**. The page answers one
+question for each store bound to the storefront: **is this store being
+recorded, and if not, what fixes it?** The engine decides the answer -- the
+store's *verdict*, `shopifyStoreVerdict(storeId)` -- and words every sentence
+of it; the page draws what it is given. What the page shows besides is in
+[Deployables](deployables.md#the-store-slot-and-the-store-page).
 
-Backfilling, reconciling and pausing an individual DOMAIN are not here: they
-belong to every connector, so the **Data origins** surface owns them and this
-panel does not repeat the same three buttons. What is here is what is
-Shopify's alone -- the credentials, the scopes, the subscriptions, the cost
-bucket, and the per-STORE pause, which is a different switch: it stops
-ingestion for one merchant while their deliveries keep being staged.
+**The five states.** The first that holds is the store's state:
+
+| State | The page says | When |
+|---|---|---|
+| `not connected` | Uninstalled, or Data removed ("Not connected" while the store's own row does not say which) | Shopify reported the app uninstalled from the store, or removed the store's data. |
+| `paused` | Paused | Somebody paused recording for the store ([Pausing a store](#pausing-a-store)). |
+| `needs attention` | Needs attention | At least one of the reasons below holds. |
+| `starting` | Starting | A backfill of a domain in the store's connection is queued or running, or a domain has never been checked. |
+| `recording` | Recording | None of the above: every domain in the connection has been checked, and no reason holds. |
+
+A paused or not-connected store carries no reasons: nothing it would say is
+something to act on while nobody is recording it. When the verdict itself
+could not be read, the store reads "Status unknown" and the page says
+"Whether the store is being recorded could not be read.", with "Try again".
+
+**The reasons.** Each reason a store needs attention is one notice: the
+engine's sentence, its detail beneath, and at most one act. A store bound to
+both destinations shows each reason once. A domain is named in plain words
+("orders", "product variants"), never by its concept id.
+
+| Reason | The sentence | Beneath it | The act |
+|---|---|---|---|
+| `data_not_declared` | "Shopify refuses orders for this app, because the app has not declared the customer data it uses." -- naming every refused domain, as in "orders and customers" | -- | "Declare the customer data": a link to Shopify's page on protected customer data. The steps are [The data declaration](#the-data-declaration). |
+| `approval_outdated` | "This store approved an older list of permissions." | The scopes the store's grant lacks. | "Open MemQL OS from the store's Shopify admin and approve": a link to the store's apps page in its Shopify admin ([When the list grows](#when-the-list-grows)). |
+| `grant_lost` | "MemQL can no longer reach this store." | The error the store's last check recorded. | "Reconnect in Settings", which opens the Shopify connections. |
+| `events_not_registered` | "Shopify is not sending every change." | The subscriptions that failed, or "The last registration left 20 of the 24 subscriptions it wanted." | "Register again": the store's subscription pass, run now. It is refused within a minute of the last pass, and for a store that is not recording. |
+| `check_failing` | "The last check of orders failed" | The engine's reason, then "The next check is at" a time, or "The next check is due now." | None: the next check is named instead. |
+| `changes_not_recorded` | "3 changes could not be recorded." -- or "1 change could not be recorded.", and "At least 3 changes could not be recorded." when the count is a floor | -- | "Try again": every delivery of the store that used its four tries, back in line. |
+
+A check is *failing* when a domain's backfill failed, at once, or when twice
+the domain's own sweep interval has passed with no clean sweep. That time is
+counted from the latest of three: the domain's last clean sweep, the store's
+connection, and the store's last return from paused or not connected. So a
+store resumed after a long pause is not late until two of its intervals have
+passed. An error about the store's grant is `grant_lost`, never this.
+
+A change is *not recorded* when a delivery used its four tries and its domain
+has had no clean sweep since it arrived. Once that sweep runs, it has read what
+the delivery named, and the delivery stops counting.
+
+**Who sees the acts.** The page is for anyone holding `execute
+app:deployables/store`, and any of them sees the state and the reasons. The
+acts are drawn only for the store's owner and for a cluster owner; for anyone
+else a reason is its sentence and nothing to press.
+
+**What the page does not repeat.** Each domain's own detail -- its sync state,
+drift, last error, "Backfill now", "Pause" and "Resume" for that one domain --
+is on **Cluster → Data**, grouped by store, and the Store page does not repeat
+it. What the Store page acts on is the whole store.
 
 ### What the numbers mean
 
@@ -669,9 +836,28 @@ ingestion for one merchant while their deliveries keep being staged.
   and twos are normal (Shopify redelivers). A climbing number means something
   is replaying old deliveries.
 - **tombstoned** -- rows the origin no longer has.
-- **phase** -- `idle`, `backfilling`, `reconciling`, `paused`, `error`, and
-  `not granted` for a domain the store's grant does not reach (a standing
-  fact about the connection, not a fault; the reason is on the row).
+- **phase** -- `idle`, `backfilling` (a backfill queued or running),
+  `paused`, `error`; `not granted` for a domain the store's connection asks
+  for and its grant does not reach (a standing fact about the connection, not
+  a fault; the reason is on the row); and `not requested` for a domain outside
+  the store's connection -- never asked for, so there is nothing to grant. A
+  `not requested` domain is never a reason and never an error: the Store page
+  lists it under "Not part of this connection".
+- **scopesNeeded, scopesMissing, domainsNotGranted** -- measured against the
+  store's OWN connection: for a managed store, the
+  [managed set](#what-a-managed-connection-asks-for); for a store connected
+  with its own app, the full list of step 2. `scopesNeeded` is that list;
+  `scopesMissing` is what it asks for and the recorded grant does not reach (a
+  write scope reaches its read), and is empty when no grant was recorded;
+  `domainsNotGranted` is the domains inside the connection the grant reaches
+  none of the scopes for. A scope the connection does not ask for is never
+  missing.
+- **domainsOutside** -- the swept domains the store's connection does not ask
+  for. Never requested, and not an error.
+- **health.ordersFrom** -- the day (`YYYY-MM-DD`) the store's mirrored orders
+  begin: 60 days before its orders were first queued under a grant without
+  `read_all_orders`. Absent when the grant holds `read_all_orders`. The Store
+  page shows it as "Orders since".
 - **lastError** on a domain reading `not granted: shopify needs read_content`
   -- the store was connected without any scope that domain reads under. The
   sweep does not ask the origin about it (the answer is known here) and
@@ -709,9 +895,88 @@ ingestion for one merchant while their deliveries keep being staged.
 
 ### Pausing a store
 
-Set its status to `paused`. Deliveries are still **staged** and simply not
-applied, so a pause loses telemetry rather than events and resuming does not
-need a backfill.
+On the storefront's Store page, the bar carries one of two acts for the store
+the page leads with (Production's, else Testing's): **"Pause recording"**
+while it is recording, starting or needs attention, and **"Resume"** while it
+is paused -- never both. A store that is not connected has neither; its act
+is the reconnect its notice offers. The page draws them for the store's owner
+and for a cluster owner. The write underneath is `setStoreStatus`, which sets
+the store's status to `paused`, or back to `live`; changing a store's status
+is a cluster owner's act (see
+[Who may read and change a store row](#step-3----attach-the-store-to-its-storefront)).
+
+While a store is paused:
+
+- Deliveries are still **staged** and simply not applied, so a pause loses
+  telemetry rather than events, and resuming does not need a backfill.
+- Its state is Paused. It carries no reasons, and its owner is not emailed.
+- After "Resume", a late check is counted from the resume, so the store does
+  not read as failing because it was paused.
+
+This is the whole store. Pausing one domain of one store is "Pause" on that
+domain in **Cluster → Data**.
+
+### When a store stops being recorded: the owner's email
+
+A watch runs **every five minutes** (the `watchShopifyStores` automation, on
+the cluster's schedule leader). For every store it computes the same verdict
+the Store page shows, records it on the store's health as `verdict`, and
+emails the store's owner at most twice for each *episode*.
+
+**An episode** is one unbroken stretch in which the store is not recorded and
+nobody chose that: needs attention and not connected, in any order. It starts
+at the first of them; a move between the two does not start another. Starting,
+paused and recording end it. Paused never sends an email (somebody chose it),
+and neither does starting (the store is on its way).
+
+**The first email** goes when an episode has lasted the *alert wait* and was
+not mailed yet:
+
+- Subject: `example-store.myshopify.com is not being recorded`
+- Body: "MemQL has not been recording example-store.myshopify.com since" the
+  episode's start, then each reason's sentence, one to a line, then "Open the
+  storefront's Store page in MemQL OS to see what fixes it:" with MemQL OS's
+  address (left out when the cluster names no domain), then "This email
+  carries no order and nothing about a customer."
+
+**The second email** goes when the store is recording again after an episode
+that was mailed:
+
+- Subject: `example-store.myshopify.com is being recorded again`
+- Body: "MemQL is recording example-store.myshopify.com again. It was not
+  recording from" the episode's start "to" now.
+
+The recovery email is sent even when the first could not be delivered. Times
+are written in UTC. A reason's detail never travels: it is the engine's or
+Shopify's text, and a mailbox is not the place for it.
+
+**The alert wait** is 30 minutes unless set. A cluster owner sets it in
+**Settings → Connections → Shopify**, under "Store alerts": "Email a store's
+owner after" a number of "minutes without recording", then "Save". It is a
+whole number from 1 to 1440 (one day), kept in the global variable
+`SHOPIFY_STORE_ALERT_MINUTES`. A value that is missing, not a whole number,
+out of range, or switched off reads as the 30-minute default. The field is
+absent for anyone who is not a cluster owner.
+
+**Who is told.** The store's owner: the MemQL user named as the store's owner,
+at their primary address, read when the email is staged and recorded nowhere
+else. The email is staged through the outbox
+([Outbound delivery](outbound-delivery.md)), so the owner's address must be
+admitted by the cluster's email allowlist.
+
+**When the owner cannot be told**, the Store page says "The alert could not be
+sent.", with why beneath it:
+
+- "This store names no owner to tell." -- the store names no owner, or its
+  owner is not found, deactivated, or has no address. No recovery email is
+  sent for that episode either.
+- The outbox's own reason, when it gave up on the email -- which is how an
+  address the allowlist refuses is named. Every address in that reason is
+  replaced by the words "the owner's address". "The outbox could not send the
+  email." when it gave none.
+- "The outbox holds no record of this email."
+
+The notice is shown only while the store is still not recorded.
 
 ### The dev-store smoke
 
@@ -780,3 +1045,7 @@ before it matters:
 - Whether an explicit compliance-topic exemption exists for custom-
   distribution apps. The connector implements them either way.
 - Whether merchant-configured pixels run on a non-Hydrogen SPA.
+- Whether an order's fulfilments are readable under `read_orders` alone. A
+  managed connection does not ask for `read_fulfillments`, which the
+  allowlist names for fulfilments; until this is confirmed against a store,
+  assume an order's fulfilments may be missing from a managed store's mirror.
