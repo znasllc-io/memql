@@ -101,9 +101,6 @@ automation grantOnApproval {
 }
 ```
 
-The automation runs as the system, but the entitlement it writes belongs to the
-application's owner, so the merchant lists and revokes it like any of their rows.
-
 A process with a review step, a threshold and somebody to tell looks different
 and needs nothing new from the pack — open your own review row on
 `v1:wholesale:application`, route it through
@@ -244,8 +241,6 @@ write, against your own concept, from your own route. See
 Submissions are refused when this store's `applicationsOpen` is false, and
 **absent settings are closed**: a merchant who has never touched their wholesale
 settings has not asked the internet for their customers' business details.
-The switch holds whoever flipped it: the form reads the store's gate itself, not
-as the site owner, so applications a developer or a second owner opened are open.
 
 ## 5. There is no public read of an application
 
