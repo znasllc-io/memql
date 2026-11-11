@@ -129,7 +129,7 @@ func (r *Runner) resolve(ctx context.Context, connectorName, conceptID, partitio
 	p, partitioned := connector.(memqlsync.Partitioned)
 	if strings.TrimSpace(partition) != "" {
 		if !partitioned {
-			return nil, nil, nil, fmt.Errorf("datasync: connector %q has no partitions, so partition %q names nothing it serves", connectorName, strings.TrimSpace(partition))
+			return nil, nil, nil, noPartitions(connectorName, partition)
 		}
 		return connector, nil, specs, nil
 	}
@@ -141,6 +141,13 @@ func (r *Runner) resolve(ctx context.Context, connectorName, conceptID, partitio
 		return nil, nil, nil, fmt.Errorf("datasync: listing the partitions of %q: %w", connectorName, err)
 	}
 	return connector, cleanPartitions(parts), specs, nil
+}
+
+// noPartitions is the refusal of a call naming a partition on a connector
+// that does not implement memqlsync.Partitioned: its runners only ever read
+// the shared row, so a partition's row would be one nothing reads.
+func noPartitions(connectorName, partition string) error {
+	return fmt.Errorf("datasync: connector %q has no partitions, so partition %q names nothing it serves", connectorName, strings.TrimSpace(partition))
 }
 
 // cleanPartitions drops blank and repeated partitions: a blank one would
@@ -306,7 +313,7 @@ func (r *Runner) Reconcile(ctx context.Context, connectorName, conceptID, partit
 	_, partitioned := connector.(memqlsync.Partitioned)
 	partition = strings.TrimSpace(partition)
 	if partition != "" && !partitioned {
-		return ReconcileResult{}, fmt.Errorf("datasync: connector %q has no partitions, so partition %q names nothing it serves", connectorName, partition)
+		return ReconcileResult{}, noPartitions(connectorName, partition)
 	}
 	if !partitioned || partition != "" {
 		return r.reconcileOne(ctx, connector, conceptID, partition)
@@ -447,6 +454,8 @@ func (r *Runner) ReconcileDue(ctx context.Context, connectorName string, spec me
 	partition = strings.TrimSpace(partition)
 	parts, fanOut, err := r.fanOut(ctx, connectorName, partition)
 	if err != nil {
+		// Partitions could not be listed, or the partition names nothing
+		// this connector serves: not due, and nothing is read.
 		return false
 	}
 	if !fanOut {
@@ -462,16 +471,22 @@ func (r *Runner) ReconcileDue(ctx context.Context, connectorName string, spec me
 
 // fanOut reports whether a call naming this partition fans out -- a
 // partitioned connector asked for none -- and over which partitions. A
-// connector that is not bound, or has no partitions, does not fan out.
+// connector that is not bound, or has no partitions, does not fan out. A
+// partition named on a bound connector without partitions is refused, as
+// resolve refuses it: its row would be one this connector's runners never
+// read.
 func (r *Runner) fanOut(ctx context.Context, connectorName, partition string) ([]string, bool, error) {
-	if partition != "" {
-		return nil, false, nil
-	}
 	connector, ok := r.lookup(connectorName)
 	if !ok || connector == nil {
 		return nil, false, nil
 	}
 	p, partitioned := connector.(memqlsync.Partitioned)
+	if partition != "" {
+		if !partitioned {
+			return nil, false, noPartitions(connectorName, partition)
+		}
+		return nil, false, nil
+	}
 	if !partitioned {
 		return nil, false, nil
 	}

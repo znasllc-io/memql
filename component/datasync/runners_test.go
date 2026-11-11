@@ -450,6 +450,26 @@ func TestARunnerRefusesAPartitionToAConnectorWithNone(t *testing.T) {
 	if len(c.backfillSeen) != 0 || len(c.reconcileSince) != 0 {
 		t.Error("the shared methods were called for a named partition")
 	}
+
+	// A pause naming a partition would write a four-part row this
+	// connector's runners never read: a pause that does not hold, and an
+	// orphan row on the Data origins page.
+	engine := newFakeEngine()
+	r = testRunner(engine, newFakeWriter(), c)
+	if err := r.SetPaused(context.Background(), "shopify", testMirrorConcept, "a", true); err == nil {
+		t.Error("a pause of partition a succeeded on a connector that has no partitions")
+	} else if !strings.Contains(err.Error(), "has no partitions") {
+		t.Errorf("refusal = %q, want the runner's own has-no-partitions refusal", err)
+	}
+	if n := engine.countContaining("mutation "); n != 0 {
+		t.Errorf("a refused pause still wrote %d rows: %v", n, engine.callsContaining("mutation "))
+	}
+	if r.ReconcileDue(context.Background(), "shopify", c.domains[0], "a") {
+		t.Error("partition a reported itself due on a connector that has no partitions")
+	}
+	if n := engine.countContaining("syncStateById"); n != 0 {
+		t.Errorf("a partition the connector does not have was read %d times", n)
+	}
 }
 
 func TestAPauseIsOnePartitionsOwn(t *testing.T) {
