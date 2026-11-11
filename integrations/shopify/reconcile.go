@@ -345,6 +345,22 @@ func (c *Connector) reconcileByUpdatedAt(ctx context.Context, store Store, spec 
 	return report, nil
 }
 
+// relistListsPartially names the full re-list domains whose origin listing
+// does not return every object the mirror may hold, and why. Tombstoning
+// is an argument from absence, valid only against a listing that would
+// have named the row, so these domains are healed by the walk and never
+// tombstoned by it; a deletion reaches them through a delete topic or not
+// at all. Every other full re-list domain is listed with no query, no date
+// floor and no status filter (relist sends first and after only).
+var relistListsPartially = map[string]string{
+	"fulfillmentOrder": "fulfillmentOrders lists open fulfillment orders only (includeClosed defaults to false), " +
+		"and only those the grant's fulfillment scopes reach",
+	"abandonedCheckout": "order data read under read_orders; without read_all_orders, which is not requested, " +
+		"Shopify answers recent order data only, so an older checkout is absent without being gone",
+	"tenderTransaction": "order data read under read_orders; without read_all_orders, which is not requested, " +
+		"Shopify answers recent order data only, so an older transaction is absent without being gone",
+}
+
 // relist walks a whole domain and tombstones what the origin no longer
 // has.
 //
@@ -400,6 +416,9 @@ func (c *Connector) relist(ctx context.Context, store Store, spec *generated.Typ
 			"store", store.ID, "concept", spec.Concept, "rows", relistRowCap)
 		return report, nil
 	}
+	if _, partial := relistListsPartially[spec.Concept]; partial {
+		return report, nil
+	}
 
 	absent, err := c.liveRowsAbsentFrom(ctx, store, spec, seen)
 	if err != nil {
@@ -417,25 +436,59 @@ func (c *Connector) relist(ctx context.Context, store Store, spec *generated.Typ
 	return report, nil
 }
 
+// liveRowPageCap bounds the read of a domain's live mirror rows, in pages
+// of the generated read (100 rows, newest first). It is the re-list's own
+// row cap and one page over, so a domain the walk could list whole is read
+// whole; a mirror past it leaves its oldest rows untombstoned this pass,
+// which errs toward keeping a row.
+const liveRowPageCap = relistRowCap/100 + 1
+
 // liveRowsAbsentFrom lists the mirror's live GIDs for a domain and returns
-// the ones the origin walk did not produce.
+// the ones the origin walk did not produce. The generated read pages, newest
+// first, and the oldest rows are the likeliest to be gone, so it is read to
+// its end, the cursor riding the context as walk's does.
 func (c *Connector) liveRowsAbsentFrom(ctx context.Context, store Store, spec *generated.TypeSpec, seen map[string]bool) ([]string, error) {
 	var absent []string
 	// operatorContext, not connectorContext: the generated mirror reads
 	// filter on actor.isClusterOwner, which a connector actor never is, so
 	// under its own identity the connector read none of the rows it wrote
 	// (F10). TestTheConnectorReadsBackTheMirrorRowsItWrote holds it.
-	res, err := c.engine.Execute(operatorContext(ctx), renderCall(spec.ForStoreFn, map[string]any{"storeId": store.ID}))
-	if err != nil {
-		return nil, fmt.Errorf("shopify: list mirrored %s: %w", spec.Concept, err)
-	}
-	for _, row := range memql.MaterializeRows(res) {
-		gid := mapString(row, "gid")
-		if gid == "" || seen[gid] {
-			continue
+	base := operatorContext(ctx)
+	call := renderCall(spec.ForStoreFn, map[string]any{"storeId": store.ID})
+	cursor := ""
+	for page := 0; page < liveRowPageCap; page++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
-		absent = append(absent, gid)
+		pageCtx := base
+		if cursor != "" {
+			pageCtx = memql.ContextWithCursor(base, cursor)
+		}
+		res, err := c.engine.Execute(pageCtx, call)
+		if err != nil {
+			return nil, fmt.Errorf("shopify: list mirrored %s: %w", spec.Concept, err)
+		}
+		rows := memql.MaterializeRows(res)
+		for _, row := range rows {
+			gid := mapString(row, "gid")
+			if gid == "" || seen[gid] {
+				continue
+			}
+			absent = append(absent, gid)
+		}
+		next := ""
+		if res != nil {
+			if meta := res.GetMeta(); meta != nil {
+				next = strings.TrimSpace(meta.Cursor)
+			}
+		}
+		if next == "" || next == cursor || len(rows) == 0 {
+			return absent, nil
+		}
+		cursor = next
 	}
+	c.logger.Warn("shopify: the mirror holds more live rows than one tombstone pass reads; the oldest are kept",
+		"store", store.ID, "concept", spec.Concept, "pages", liveRowPageCap)
 	return absent, nil
 }
 

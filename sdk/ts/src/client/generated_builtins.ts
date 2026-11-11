@@ -1234,7 +1234,7 @@ QueryClient.prototype.clusterStorageStatus = function (this: QueryClient, args: 
   return this.executeNamed("clusterStorageStatus", buildClusterStorageStatus(args), opts);
 };
 
-/** One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both. */
+/** One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both. For the store's owner or a cluster owner; anybody else is refused before the mirror is read. */
 export interface CommerceCompanyArgs {
   storeId?: string;
   companyGid?: string;
@@ -1261,7 +1261,7 @@ QueryClient.prototype.commerceCompany = function (this: QueryClient, args: Comme
   return this.executeNamed("commerceCompany", buildCommerceCompany(args), opts);
 };
 
-/** Repeat-customer and refund rates for a window, from the mirror. Repeat rate is customers with more than one order over customers with any; refund rate is refunds over orders. */
+/** Repeat-customer and refund rates for a window, from the mirror. Repeat rate is customers with more than one order over customers with any; refund rate is refunds over orders. For the store's owner or a cluster owner; anybody else is refused before the mirror is read. */
 export interface CommerceCustomersArgs {
   storeId?: string;
   from?: string;
@@ -1286,7 +1286,7 @@ QueryClient.prototype.commerceCustomers = function (this: QueryClient, args: Com
   return this.executeNamed("commerceCustomers", buildCommerceCustomers(args), opts);
 };
 
-/** What sold in a window, grouped by product or by variant, read entirely from the mirror -- no Admin API call and no cost points. Reports units and orders per line, and reports truncated=true when the walk hit its page cap rather than returning a smaller number and letting the caller believe it. */
+/** What sold in a window, grouped by product or by variant, read entirely from the mirror -- no Admin API call and no cost points. Reports units and orders per line, and reports truncated=true when the walk hit its page cap rather than returning a smaller number and letting the caller believe it. For the store's owner or a cluster owner; anybody else is refused before the mirror is read. */
 export interface CommerceSoldArgs {
   storeId?: string;
   from?: string;
@@ -1313,7 +1313,7 @@ QueryClient.prototype.commerceSold = function (this: QueryClient, args: Commerce
   return this.executeNamed("commerceSold", buildCommerceSold(args), opts);
 };
 
-/** Inventory levels below a threshold at one location. Shopify models inventory as NAMED quantities (available, committed, on_hand), so the threshold is applied in Go and a level with no `available` count reads as unknown rather than as a stockout. */
+/** Inventory levels below a threshold at one location. Shopify models inventory as NAMED quantities (available, committed, on_hand), so the threshold is applied in Go and a level with no `available` count reads as unknown rather than as a stockout. For the store's owner or a cluster owner; anybody else is refused before the mirror is read. */
 export interface CommerceStockArgs {
   storeId?: string;
   locationGid?: string;
@@ -7017,7 +7017,7 @@ QueryClient.prototype.shopifyEnsureSubscriptions = function (this: QueryClient, 
   return this.executeNamed("shopifyEnsureSubscriptions", buildShopifyEnsureSubscriptions(args), opts);
 };
 
-/** Read a mirrored Shopify product by GID or handle. Answers from the mirror, so it costs no Admin API call and no cost points. Tokens never appear in the reply. */
+/** Read a mirrored Shopify product by GID or handle. Answers from the mirror, so it costs no Admin API call and no cost points. Tokens never appear in the reply. For the store's owner or a cluster owner; anybody else is refused before the mirror is read. */
 export interface ShopifyFetchProductArgs {
   storeId?: string;
   id?: string;

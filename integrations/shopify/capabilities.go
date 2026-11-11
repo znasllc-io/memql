@@ -50,7 +50,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "fetchProduct",
-			Description: "Read a mirrored Shopify product by GID or handle. Answers from the mirror, so it costs no Admin API call and no cost points. Tokens never appear in the reply.",
+			Description: "Read a mirrored Shopify product by GID or handle. Answers from the mirror, so it costs no Admin API call and no cost points. Tokens never appear in the reply. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.",
 			Handler:     i.handleFetchProduct,
 			ArgsSchema: map[string]string{
 				"storeId": "string (optional) - the store; the only configured store when omitted",
@@ -69,7 +69,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "commerceSold",
-			Description: "What sold in a window, grouped by product or by variant, read entirely from the mirror -- no Admin call and no cost points. Reports units and orders per line, and says so when the walk hit its page cap rather than returning a smaller number.",
+			Description: "What sold in a window, grouped by product or by variant, read entirely from the mirror -- no Admin call and no cost points. Reports units and orders per line, and says so when the walk hit its page cap rather than returning a smaller number. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.",
 			Handler:     i.handleCommerceSold,
 			ArgsSchema: map[string]string{
 				"storeId": "string (optional) - the store; the only configured one when omitted",
@@ -80,7 +80,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "commerceStock",
-			Description: "Inventory levels below a threshold at one location. The threshold is applied here because Shopify models inventory as NAMED quantities and a level with no `available` count reads as unknown rather than as a stockout.",
+			Description: "Inventory levels below a threshold at one location. The threshold is applied here because Shopify models inventory as NAMED quantities and a level with no `available` count reads as unknown rather than as a stockout. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.",
 			Handler:     i.handleCommerceStock,
 			ArgsSchema: map[string]string{
 				"storeId":     "string (optional) - the store",
@@ -90,7 +90,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "commerceCustomers",
-			Description: "Repeat-customer and refund rates for a window, from the mirror. Repeat rate is customers with more than one order over customers with any; refund rate is refunds over orders.",
+			Description: "Repeat-customer and refund rates for a window, from the mirror. Repeat rate is customers with more than one order over customers with any; refund rate is refunds over orders. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.",
 			Handler:     i.handleCommerceCustomers,
 			ArgsSchema: map[string]string{
 				"storeId": "string (optional) - the store",
@@ -100,7 +100,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "commerceCompany",
-			Description: "One B2B account: its orders in a window, how many have payment terms still outstanding, and its MemQL-owned credit limit. The two halves come from different systems and the question a rep asks -- can this account order -- needs both.",
+			Description: "One B2B account: its orders in a window, how many have payment terms still outstanding, and its MemQL-owned credit limit. The two halves come from different systems and the question a rep asks -- can this account order -- needs both. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.",
 			Handler:     i.handleCommerceCompany,
 			ArgsSchema: map[string]string{
 				"storeId":    "string (optional) - the store",
@@ -164,7 +164,7 @@ func (i *Integration) handleFetchProduct(ctx context.Context, args map[string]an
 	if c == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
-	store, err := c.resolveStoreArg(ctx, argString(args, "storeId"))
+	store, err := c.mirrorStoreForCaller(ctx, argString(args, "storeId"), "shopifyFetchProduct")
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +204,7 @@ func (i *Integration) handleCommerceSold(ctx context.Context, args map[string]an
 	if c == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
-	store, err := c.resolveStoreArg(ctx, argString(args, "storeId"))
+	store, err := c.mirrorStoreForCaller(ctx, argString(args, "storeId"), "commerceSold")
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +221,7 @@ func (i *Integration) handleCommerceStock(ctx context.Context, args map[string]a
 	if c == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
-	store, err := c.resolveStoreArg(ctx, argString(args, "storeId"))
+	store, err := c.mirrorStoreForCaller(ctx, argString(args, "storeId"), "commerceStock")
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +241,7 @@ func (i *Integration) handleCommerceCustomers(ctx context.Context, args map[stri
 	if c == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
-	store, err := c.resolveStoreArg(ctx, argString(args, "storeId"))
+	store, err := c.mirrorStoreForCaller(ctx, argString(args, "storeId"), "commerceCustomers")
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +258,7 @@ func (i *Integration) handleCommerceCompany(ctx context.Context, args map[string
 	if c == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
-	store, err := c.resolveStoreArg(ctx, argString(args, "storeId"))
+	store, err := c.mirrorStoreForCaller(ctx, argString(args, "storeId"), "commerceCompany")
 	if err != nil {
 		return nil, err
 	}
@@ -501,6 +501,32 @@ func fieldsDeniedAny(in map[string][]string) map[string]any {
 		out[concept] = toAny(fields)
 	}
 	return out
+}
+
+// mirrorStoreForCaller resolves the store a mirror-reading builtin names --
+// or, when it names none, the store resolveStoreArg defaults to -- and
+// refuses, before any mirror read, a caller who is neither that store's
+// owner nor a cluster owner.
+//
+// The mirror reads run as the operator (F10), and the generated reads'
+// actor.isClusterOwner conjunct then admits every one of them; this is
+// what keeps a caller to the stores they may act on. There is no
+// internal-origin escape: no automation or connector pass reaches these
+// builtins, and one that did would run as a system actor, which is a
+// cluster owner.
+func (c *Connector) mirrorStoreForCaller(ctx context.Context, storeID, builtin string) (Store, error) {
+	may := func(s Store) bool { return c.mayActOnStore(ctx, s) }
+	if storeID != "" {
+		return c.storeForCaller(ctx, storeID, builtin, actRefusal, may)
+	}
+	store, err := c.resolveStoreArg(ctx, "")
+	if err != nil {
+		return Store{}, err
+	}
+	if !may(store) {
+		return Store{}, fmt.Errorf("shopify: %s %s", builtin, actRefusal)
+	}
+	return store, nil
 }
 
 // resolveStoreArg resolves the store a capability call names, defaulting to

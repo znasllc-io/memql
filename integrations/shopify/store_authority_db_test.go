@@ -346,6 +346,11 @@ func TestTheConnectorsOwnConceptsAreReadableAndWritable(t *testing.T) {
 			call:      renderCall("syncStateById", map[string]any{"stateId": "dbtest-authority-syncstate"}),
 			connector: refused,
 		},
+		// The three mirror reads below state the ENGINE's answer per
+		// identity; they call the engine directly, so they stay green if a
+		// production read moves back to connectorContext.
+		// connector_reads_db_test.go drives the connector's own methods and
+		// is what fails then.
 		{
 			what:      "the store's mirrored rows -- the full re-list's tombstone pass and the product capability by handle",
 			concept:   "v1:shopify:product",

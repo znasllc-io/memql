@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,7 +36,7 @@ func mirrorReadsStore() Store {
 
 // mirrorReadsConnector wires a connector against the real engine and, for
 // the Admin side, the package's fake origin.
-func mirrorReadsConnector(t *testing.T, eng *memql.MemQLEngine) (*Connector, *fakeAdmin) {
+func mirrorReadsConnector(t *testing.T, eng memql.IntegrationEngineAccess) (*Connector, *fakeAdmin) {
 	t.Helper()
 	admin := newFakeAdmin(t)
 	registry := NewStoreRegistry(eng, func(context.Context, string) (string, error) { return "shpat_test", nil })
@@ -134,23 +135,57 @@ func TestTheConnectorReadsBackTheMirrorRowsItWrote(t *testing.T) {
 	}
 }
 
+// otherStoreID holds a row of the same concept that store A's origin never
+// lists: A's re-list must not reach it.
+const otherStoreID = "dbtest-authority-other"
+
+// latestRow is a row id's newest stored version: its payload, and how many
+// versions there are.
+func latestRow(t *testing.T, db *sql.DB, concept, rowID string) (string, int) {
+	t.Helper()
+	var payload string
+	var versions int
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT count(*) OVER (), payload::text FROM "MemoryNodes" WHERE concept = $1 AND id LIKE $2 ORDER BY "createdAt" DESC LIMIT 1`,
+		generated.ConceptID(concept), "%"+rowID).Scan(&versions, &payload); err != nil {
+		t.Fatalf("read %s %s: %v", concept, rowID, err)
+	}
+	return payload, versions
+}
+
+func latestDeleted(t *testing.T, db *sql.DB, concept, storeID, gid string) bool {
+	t.Helper()
+	var deleted bool
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT COALESCE((payload->>'deleted')::boolean, false) FROM "MemoryNodes" WHERE concept = $1 AND payload->>'storeId' = $2 AND payload->>'gid' = $3 ORDER BY "createdAt" DESC LIMIT 1`,
+		generated.ConceptID(concept), storeID, gid).Scan(&deleted); err != nil {
+		t.Fatalf("read %s %s: %v", concept, gid, err)
+	}
+	return deleted
+}
+
 func TestAFullRelistTombstonesWhatTheOriginNoLongerHas(t *testing.T) {
 	eng, db := authorityEngine(t)
 	if eng == nil {
 		return
 	}
 	cleanMirrored(t, db, "giftCard")
-	c, admin := mirrorReadsConnector(t, eng)
-	const kept, gone = "gid://shopify/GiftCard/5610", "gid://shopify/GiftCard/5611"
+	cleanStoreMirror(t, db, otherStoreID, "giftCard")
+	rec := &recordingEngine{MemQLEngine: eng}
+	c, admin := mirrorReadsConnector(t, rec)
+	const kept, gone, others = "gid://shopify/GiftCard/5610", "gid://shopify/GiftCard/5611", "gid://shopify/GiftCard/5612"
 	for _, gid := range []string{kept, gone} {
 		writeMirrored(t, c, "giftCard", map[string]any{"id": gid, "note": "mirrored", "updatedAt": "2026-09-01T00:00:00Z"})
 	}
+	writeStoreMirrored(t, c, otherStoreID, "giftCard", map[string]any{"id": others, "note": "another store's", "updatedAt": "2026-09-01T00:00:00Z"})
 	if got := liveGIDs(t, eng, "giftCard"); fmt.Sprint(got) != fmt.Sprint([]string{kept, gone}) {
 		t.Fatalf("a cluster owner reads %v before the re-list, want both gift cards", got)
 	}
+	otherBefore, otherVersions := latestRow(t, db, "giftCard", MirrorRowID(otherStoreID, others))
 
 	admin.reply("ShopifyListGiftCard", listPageReply("giftCards", false, "",
 		map[string]any{"id": kept, "note": "mirrored", "updatedAt": "2026-09-01T00:00:00Z"}))
+	rec.reset()
 	if _, err := c.relist(context.Background(), mirrorReadsStore(), generated.Types["giftCard"]); err != nil {
 		t.Fatalf("relist: %v", err)
 	}
@@ -158,13 +193,73 @@ func TestAFullRelistTombstonesWhatTheOriginNoLongerHas(t *testing.T) {
 	if got := liveGIDs(t, eng, "giftCard"); fmt.Sprint(got) != fmt.Sprint([]string{kept}) {
 		t.Errorf("after the re-list a cluster owner reads %v, want only %s: the card the origin no longer lists was not tombstoned", got, kept)
 	}
-	var deleted bool
-	if err := db.QueryRowContext(context.Background(),
-		`SELECT COALESCE((payload->>'deleted')::boolean, false) FROM "MemoryNodes" WHERE concept = $1 AND payload->>'gid' = $2 ORDER BY "createdAt" DESC LIMIT 1`,
-		generated.ConceptID("giftCard"), gone).Scan(&deleted); err != nil {
-		t.Fatalf("read the absent card's row: %v", err)
-	}
-	if !deleted {
+	if !latestDeleted(t, db, "giftCard", authorityTestStoreId, gone) {
 		t.Errorf("the absent card's latest row is not marked deleted")
+	}
+
+	// The other store's card: never in A's listing, still live and
+	// unchanged, because A's pass reads and retires A's rows only.
+	otherAfter, otherVersionsAfter := latestRow(t, db, "giftCard", MirrorRowID(otherStoreID, others))
+	if otherAfter != otherBefore || otherVersionsAfter != otherVersions || latestDeleted(t, db, "giftCard", otherStoreID, others) {
+		t.Errorf("store A's re-list changed another store's row:\n before (%d versions) %s\n after (%d versions) %s",
+			otherVersions, otherBefore, otherVersionsAfter, otherAfter)
+	}
+	retired := 0
+	for _, stmt := range rec.statements() {
+		if !strings.Contains(stmt, `"deleted":true`) {
+			continue
+		}
+		retired++
+		if !strings.Contains(stmt, MirrorRowID(authorityTestStoreId, gone)) || !strings.Contains(stmt, `"storeId":"`+authorityTestStoreId+`"`) {
+			t.Errorf("a tombstone that is not store A's absent card was written: %s", stmt)
+		}
+	}
+	if retired != 1 {
+		t.Errorf("%d tombstones were written, want the one absent card", retired)
+	}
+}
+
+// The mirror's read pages 100 rows, newest first, and the oldest row is
+// the likeliest to be gone: a tombstone pass that read one page would never
+// compare it.
+func TestAFullRelistTombstonesAnAbsentRowPastTheFirstPageOfTheMirror(t *testing.T) {
+	eng, db := authorityEngine(t)
+	if eng == nil {
+		return
+	}
+	cleanMirrored(t, db, "giftCard")
+	c, admin := mirrorReadsConnector(t, eng)
+	const cards = 101
+	base := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	var listed []map[string]any
+	oldest := ""
+	for n := 0; n < cards; n++ {
+		gid := fmt.Sprintf("gid://shopify/GiftCard/%d", 7000+n)
+		card := map[string]any{"id": gid, "note": "mirrored", "updatedAt": base.Add(time.Duration(n) * time.Minute).Format(time.RFC3339)}
+		writeMirrored(t, c, "giftCard", card)
+		if n == 0 {
+			oldest = gid
+			continue
+		}
+		listed = append(listed, card)
+	}
+
+	admin.reply("ShopifyListGiftCard", listPageReply("giftCards", false, "", listed...))
+	if _, err := c.relist(context.Background(), mirrorReadsStore(), generated.Types["giftCard"]); err != nil {
+		t.Fatalf("relist: %v", err)
+	}
+	if !latestDeleted(t, db, "giftCard", authorityTestStoreId, oldest) {
+		t.Errorf("the oldest card, on the mirror read's second page and absent from the origin, was not tombstoned")
+	}
+	var live int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT count(*) FROM (
+		  SELECT DISTINCT ON (id) COALESCE((payload->>'deleted')::boolean, false) AS deleted
+		  FROM "MemoryNodes" WHERE concept = $1 AND payload->>'storeId' = $2 ORDER BY id, "createdAt" DESC
+		) latest WHERE NOT deleted`, generated.ConceptID("giftCard"), authorityTestStoreId).Scan(&live); err != nil {
+		t.Fatalf("count live cards: %v", err)
+	}
+	if live != cards-1 {
+		t.Errorf("%d cards are live after the re-list, want the %d the origin lists", live, cards-1)
 	}
 }

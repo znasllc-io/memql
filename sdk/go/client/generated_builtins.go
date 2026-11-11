@@ -1616,7 +1616,7 @@ func ClusterStorageStatusBuild(args ClusterStorageStatusArgs) string {
 	return "builtin clusterStorageStatus()"
 }
 
-// CommerceCompany -- One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both.
+// CommerceCompany -- One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.
 type CommerceCompanyArgs struct {
 	StoreId    string
 	CompanyGid string
@@ -1662,7 +1662,7 @@ func CommerceCompanyBuild(args CommerceCompanyArgs) string {
 	return b.String()
 }
 
-// CommerceCustomers -- Repeat-customer and refund rates for a window, from the mirror. Repeat rate is customers with more than one order over customers with any; refund rate is refunds over orders.
+// CommerceCustomers -- Repeat-customer and refund rates for a window, from the mirror. Repeat rate is customers with more than one order over customers with any; refund rate is refunds over orders. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.
 type CommerceCustomersArgs struct {
 	StoreId string
 	From    string
@@ -1700,7 +1700,7 @@ func CommerceCustomersBuild(args CommerceCustomersArgs) string {
 	return b.String()
 }
 
-// CommerceSold -- What sold in a window, grouped by product or by variant, read entirely from the mirror -- no Admin API call and no cost points. Reports units and orders per line, and reports truncated=true when the walk hit its page cap rather than returning a smaller number and letting the caller believe it.
+// CommerceSold -- What sold in a window, grouped by product or by variant, read entirely from the mirror -- no Admin API call and no cost points. Reports units and orders per line, and reports truncated=true when the walk hit its page cap rather than returning a smaller number and letting the caller believe it. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.
 type CommerceSoldArgs struct {
 	StoreId string
 	From    string
@@ -1746,7 +1746,7 @@ func CommerceSoldBuild(args CommerceSoldArgs) string {
 	return b.String()
 }
 
-// CommerceStock -- Inventory levels below a threshold at one location. Shopify models inventory as NAMED quantities (available, committed, on_hand), so the threshold is applied in Go and a level with no `available` count reads as unknown rather than as a stockout.
+// CommerceStock -- Inventory levels below a threshold at one location. Shopify models inventory as NAMED quantities (available, committed, on_hand), so the threshold is applied in Go and a level with no `available` count reads as unknown rather than as a stockout. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.
 type CommerceStockArgs struct {
 	StoreId     string
 	LocationGid string
@@ -9143,7 +9143,7 @@ func ShopifyEnsureSubscriptionsBuild(args ShopifyEnsureSubscriptionsArgs) string
 	return "builtin shopifyEnsureSubscriptions()"
 }
 
-// ShopifyFetchProduct -- Read a mirrored Shopify product by GID or handle. Answers from the mirror, so it costs no Admin API call and no cost points. Tokens never appear in the reply.
+// ShopifyFetchProduct -- Read a mirrored Shopify product by GID or handle. Answers from the mirror, so it costs no Admin API call and no cost points. Tokens never appear in the reply. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.
 type ShopifyFetchProductArgs struct {
 	StoreId string
 	Id      string
