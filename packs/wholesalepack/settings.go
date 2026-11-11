@@ -8,6 +8,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // settings.go -- ONE STORE'S WHOLESALE SETTINGS: who sets a store up, who
@@ -28,6 +29,10 @@ import (
 // Both write at internal origin, which the row gate does not owner-check, so
 // neither relies on the row's tier: each establishes its caller before it reads
 // or writes, and neither ever moves the row to whoever wrote.
+
+// ChangedWhileEditingSentence is the refusal of a save that lost its fence: the
+// row changed between the read the change was merged into and the write.
+const ChangedWhileEditingSentence = "These settings changed while you were editing. Reload and try again."
 
 // NotSetUpSentence is the refusal of a change to a store with no settings row.
 // The OS shows it as written.
@@ -115,9 +120,11 @@ func (p *Provider) setWholesaleSettings(ctx context.Context, args map[string]any
 		"entitlementAdapter": adapter,
 		"introText":          asString(args["introText"]),
 		// EVERY FIELD EXPLICIT: the row's organization and site are the named
-		// site's, or kept, or, for a new row, the one site bound to the store.
-		"accountId": place.accountID,
-		"siteId":    place.siteID,
+		// site's, or kept, or, for a new row, the one site bound to the store;
+		// the staff address is the one the row held (none on a new row).
+		"accountId":  place.accountID,
+		"siteId":     place.siteID,
+		"staffEmail": place.staffEmail,
 	}); err != nil {
 		return nil, err
 	}
@@ -159,6 +166,8 @@ const storeLookupActor = "wholesale-store-lookup"
 // and the organization and site it is tied to.
 type settingsPlace struct {
 	owner, accountID, siteID string
+	// staffEmail is the address the row already holds, written back whole.
+	staffEmail string
 }
 
 // settingsOwner is who owns a store's settings row after this write.
@@ -199,7 +208,7 @@ func (p *Provider) settingsOwner(ctx context.Context, storeID, siteID string) (s
 	if existing != nil {
 		if owner := trimmed(existing["ownerUserId"]); owner != "" {
 			place := settingsPlace{owner: userRef(owner), accountID: trimmed(existing["accountId"]),
-				siteID: trimmed(existing["siteId"])}
+				siteID: trimmed(existing["siteId"]), staffEmail: trimmed(existing["staffEmail"])}
 			if named != nil {
 				place.accountID, place.siteID = trimmed(named["accountId"]), bareID(trimmed(named["id"]))
 			}
@@ -340,9 +349,17 @@ func (p *Provider) updateSettings(ctx context.Context, args map[string]any, _ in
 	if rowStore == "" {
 		rowStore = storeID
 	}
+	// FENCED ON THE VERSION READ: a change merged into a row that another save
+	// replaced meanwhile would put back what that save changed. The loser is
+	// refused, not retried, so the person re-reads what is there now.
+	read := rowTime(row["createdAt"])
+	if read.IsZero() {
+		return nil, fmt.Errorf("wholesale: store %q's settings carry no version to save against; reload and try again", storeID)
+	}
+	fenced := memql.ContextWithRowVersionFence(ctx, settingsConcept, SettingsRowID(storeID), read)
 	// EVERY FIELD, the empty and false ones included: a write at an existing id
 	// merges into the row's current version, and this one means the whole row.
-	if err := p.write(ctx, "putWholesaleSettingsRow", map[string]any{
+	if err := p.write(fenced, "putWholesaleSettingsRow", map[string]any{
 		"settingsId":         SettingsRowID(storeID),
 		"ownerUserId":        owner,
 		"storeId":            rowStore,
@@ -353,6 +370,9 @@ func (p *Provider) updateSettings(ctx context.Context, args map[string]any, _ in
 		"accountId":          next.AccountID,
 		"siteId":             next.SiteID,
 	}); err != nil {
+		if errors.Is(err, memql.ErrRowVersionChanged) {
+			return nil, errors.New(ChangedWhileEditingSentence)
+		}
 		return nil, err
 	}
 	return confirm("wholesale:settings:written", map[string]any{

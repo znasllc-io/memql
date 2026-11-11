@@ -49,3 +49,20 @@ func BackfillForTest(ctx context.Context, eng memql.IntegrationEngineAccess, arg
 	}
 	return out, nil
 }
+
+// UpdateSettingsForTest runs wholesaleUpdateSettings over eng with a hook run
+// before its write, so a test can land a concurrent save between its read and
+// its write.
+func UpdateSettingsForTest(ctx context.Context, eng memql.IntegrationEngineAccess, args map[string]any,
+	before func(ctx context.Context, mutation string, args map[string]any)) ([]byte, error) {
+	p := &Provider{
+		engine: eng,
+		reader: &engineRowReader{engine: eng},
+		writer: hookedWriter{inner: &engineWriter{engine: eng}, before: before},
+	}
+	nodes, err := p.updateSettings(ctx, args, 0)
+	if err != nil || len(nodes) == 0 {
+		return nil, err
+	}
+	return nodes[0].Payload, nil
+}

@@ -321,7 +321,7 @@ func (r *backfillRun) one(query, arg, value string) (map[string]any, error) {
 func (r *backfillRun) tieDecisions(merchant context.Context, app map[string]any, account string) error {
 	appID := bareID(trimmed(app["id"]))
 	owner := userRef(trimmed(app["ownerUserId"]))
-	decisions, err := r.p.rowsFor(r.sys, "decisionsForApplication", map[string]string{"applicationId": appID})
+	decisions, err := r.p.rowsForApplication(r.sys, "decisionsForApplication", appID)
 	if err != nil {
 		return err
 	}
@@ -332,7 +332,7 @@ func (r *backfillRun) tieDecisions(merchant context.Context, app map[string]any,
 		}
 		decisionID := bareID(trimmed(d["id"]))
 		reread := func() (map[string]any, error) {
-			rows, err := r.p.rowsFor(r.sys, "decisionsForApplication", map[string]string{"applicationId": appID})
+			rows, err := r.p.rowsForApplication(r.sys, "decisionsForApplication", appID)
 			for _, row := range rows {
 				if bareID(trimmed(row["id"])) == decisionID {
 					return row, err
@@ -370,12 +370,17 @@ func (r *backfillRun) tieEntitlement(merchant context.Context, appID, account st
 		r.alreadyTied++
 		return nil
 	}
-	_, err = r.tieRow(merchant, entitlementConcept, EntitlementRowID(appID), ent, account,
+	// The row it read is the row it ties, at that row's own id.
+	entID := bareID(trimmed(ent["id"]))
+	if entID == "" {
+		entID = EntitlementRowID(appID)
+	}
+	_, err = r.tieRow(merchant, entitlementConcept, entID, ent, account,
 		func() (map[string]any, error) { return r.p.entitlementRow(r.sys, appID) },
 		func(row map[string]any) (string, map[string]any) {
 			created, _ := row["customerCreated"].(bool)
 			return "backfillEntitlementRow", map[string]any{
-				"entitlementId":     EntitlementRowID(appID),
+				"entitlementId":     entID,
 				"ownerUserId":       userRef(trimmed(row["ownerUserId"])),
 				"applicationId":     trimmed(row["applicationId"]),
 				"storeId":           trimmed(row["storeId"]),

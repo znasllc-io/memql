@@ -226,8 +226,13 @@ func AdapterNames() []string {
 // of one logical row rather than a second row a read would have to choose
 // between -- and "revoked when" is that version's own createdAt, which is
 // why the concept carries no revokedAt.
+//
+// DERIVED FROM THE BARE ID, whichever form the caller named the application
+// by: the engine does not join the two forms, and an id derived from each would
+// be two rows for one application -- a provision under one and a retry under
+// the other.
 func EntitlementRowID(applicationID string) string {
-	return "wholesale-entitlement-" + slugOf(applicationID)
+	return "wholesale-entitlement-" + slugOf(bareID(strings.TrimSpace(applicationID)))
 }
 
 // provisionActor is the system actor provisioning READS as.
@@ -270,6 +275,10 @@ func (p *Provider) revokeEntitlement(ctx context.Context, args map[string]any, _
 // an approved application is provisioned again, and a revoked one whose access
 // is still on (its entitlement row exists and is not revoked) is revoked again.
 // Anything else is refused by name before any route is called.
+//
+// A RETRY DECIDES NOTHING (X26): the decision log already says approved or
+// revoked, and this only makes the store say the same, so X4's refusal of the
+// cluster's operators does not apply and an operator holding the part may retry.
 //
 // It runs applyEntitlement under the same identities the automation's call
 // does -- read as the deployment, the route called and the row written as the
@@ -353,22 +362,31 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 	}
 
 	grant := Grant{
-		StoreID:       storeID,
-		ApplicationID: applicationID,
+		StoreID: storeID,
+		// The application's own short id, whichever form the caller named it
+		// by, so an adapter is told one id for one application.
+		ApplicationID: bareID(applicationID),
 		CompanyName:   trimmed(app["companyName"]),
 		BuyerName:     trimmed(app["applicantName"]),
 		BuyerEmail:    trimmed(app["applicantEmail"]),
 	}
 	owner := userRef(trimmed(app["ownerUserId"]))
 	account := trimmed(app["accountId"])
-	write := func(adapterName, state string, res Outcome, code, text string) ([]memorynodes.MemoryNode, error) {
-		return p.writeEntitlement(merchant, applicationID, storeID, owner, account, grant,
-			adapterName, state, res, code, text)
-	}
-
 	prior, err := p.entitlementRow(sys, applicationID)
 	if err != nil {
 		return nil, err
+	}
+	// ONE ROW PER APPLICATION: a prior row is written at its own id, so a row
+	// written before ids were derived from the bare form stays the one row.
+	rowID := EntitlementRowID(applicationID)
+	if prior != nil {
+		if id := bareID(trimmed(prior["id"])); id != "" {
+			rowID = id
+		}
+	}
+	write := func(adapterName, state string, res Outcome, code, text string) ([]memorynodes.MemoryNode, error) {
+		return p.writeEntitlement(merchant, rowID, applicationRef(applicationID), storeID, owner, account, grant,
+			adapterName, state, res, code, text)
 	}
 	var priorAdapter, priorRef, priorCustomerID string
 	var priorCreated bool
@@ -607,8 +625,8 @@ func (p *Provider) storePlan(ctx context.Context, storeID string) string {
 
 // entitlementRow reads the current entitlement for an application.
 func (p *Provider) entitlementRow(ctx context.Context, applicationID string) (map[string]any, error) {
-	rows, err := p.rowsFor(ctx, "entitlementForApplication",
-		map[string]string{"applicationId": applicationID})
+	// Both forms of the id, newest first (rowsForApplication).
+	rows, err := p.rowsForApplication(ctx, "entitlementForApplication", applicationID)
 	if err != nil {
 		return nil, err
 	}
@@ -626,7 +644,10 @@ func (p *Provider) entitlementRow(ctx context.Context, applicationID string) (ma
 // and written as that merchant: a row owned by anybody else is invisible to
 // the merchant who granted it. accountId is the application's organization,
 // copied off it, so the people who read the application read what was granted.
-func (p *Provider) writeEntitlement(ctx context.Context, applicationID, storeID, ownerUserID, accountID string, g Grant,
+//
+// rowID is the row's id (EntitlementRowID, or a prior row's own); applicationID
+// is written in canonical form, as a decision's is.
+func (p *Provider) writeEntitlement(ctx context.Context, rowID, applicationID, storeID, ownerUserID, accountID string, g Grant,
 	adapterName, state string, result Outcome, errCode, errText string) ([]memorynodes.MemoryNode, error) {
 	reference := result.Reference
 	if reference == "" {
@@ -636,7 +657,7 @@ func (p *Provider) writeEntitlement(ctx context.Context, applicationID, storeID,
 		reference = g.Reference
 	}
 	if err := p.write(ctx, "writeEntitlementRow", map[string]any{
-		"entitlementId": EntitlementRowID(applicationID),
+		"entitlementId": rowID,
 		"ownerUserId":   ownerUserID,
 		"accountId":     accountID,
 		"applicationId": applicationID,

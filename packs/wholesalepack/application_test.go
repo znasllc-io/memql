@@ -344,8 +344,8 @@ func TestACallerSuppliedDecidedByNamingSomeoneElseIsIgnored(t *testing.T) {
 	if writer.writes[0].actor != "staff-1" {
 		t.Fatalf("the decision was written as %q, want the caller staff-1, whose id the row stamps", writer.writes[0].actor)
 	}
-	if got["decidedBy"] != "staff-1" {
-		t.Fatalf("the receipt names decider %v, want the caller staff-1", got["decidedBy"])
+	if got["decidedBy"] != "v1:identity:user:staff-1" {
+		t.Fatalf("the receipt names decider %v, want the caller in the canonical form the row holds", got["decidedBy"])
 	}
 	if _, echoed := got["claimedBy"]; echoed {
 		t.Fatalf("the receipt still echoes the caller's claim: %+v", got)
@@ -446,7 +446,7 @@ func TestUpdateSettingsMergesAndRefusesAStoreWithNoSettings(t *testing.T) {
 
 	reader.settings = map[string][]map[string]any{"store-live": {{"storeId": "store-live", "ownerUserId": "merchant-1",
 		"applicationsOpen": true, "entitlementAdapter": AdapterCustomerTag, "introText": "Apply here.",
-		"accountId": "acct-north", "siteId": "site-1"}}}
+		"accountId": "acct-north", "siteId": "site-1", "createdAt": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}}}
 	if _, err := p.updateSettings(staffCtx("staff-1"), map[string]any{"siteId": "site-1", "storeId": "store-live",
 		"staffEmail": "desk@example.com"}, 0); err != nil {
 		t.Fatalf("updateSettings: %v", err)
@@ -558,7 +558,7 @@ func TestAStaffAddressWithoutAnAtIsRefused(t *testing.T) {
 	writer := &fakeWriter{}
 	p := &Provider{writer: writer, reader: &fixtureReader{sites: []map[string]any{settingsSite()},
 		settings: map[string][]map[string]any{"store-live": {{"storeId": "store-live", "ownerUserId": "merchant-1",
-			"applicationsOpen": true}}}}}
+			"applicationsOpen": true, "createdAt": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}}}}}
 	for _, bad := range []string{"desk.example.com", "desk@@example.com", "a@b@example.com", strings.Repeat("a", 310) + "@example.com"} {
 		if _, err := p.updateSettings(staffCtx("staff-1"), map[string]any{"siteId": "site-1", "storeId": "store-live",
 			"staffEmail": bad}, 0); err == nil {
@@ -1289,5 +1289,191 @@ func TestTheBackfillWalkRefusesAWindowThatSharesOneCreationTime(t *testing.T) {
 	_, err := p.backfillAccounts(operatorCtx("operator-1"), map[string]any{"storeId": "store-1"}, 0)
 	if err == nil || !strings.Contains(err.Error(), "one creation time") {
 		t.Fatalf("a window sharing one creation time was walked or refused for another reason: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fix round 1
+// ---------------------------------------------------------------------------
+
+// systemLog answers decisions and entitlements only to the pack's own system
+// actor, as the real tier does for a row written before the account tie (no
+// ownerUserId, no accountId): the store's side reads none of it.
+type systemLog struct {
+	*fixtureReader
+	t *testing.T
+	// forbidSystem fails a decision read as the system.
+	forbidSystem bool
+}
+
+func (r systemLog) Rows(ctx context.Context, query string, args map[string]string) ([]map[string]any, error) {
+	if query == "decisionsForApplication" || query == "entitlementForApplication" {
+		if !strings.Contains(actorOf(ctx), provisionActor) {
+			return nil, nil
+		}
+		if r.forbidSystem {
+			r.t.Fatalf("%s was read as the system for a caller who cannot read the application", query)
+		}
+	}
+	return r.fixtureReader.Rows(ctx, query, args)
+}
+
+// A DECISION'S LEGALITY IS JUDGED AGAINST THE WHOLE LOG (X27): a rejection the
+// caller cannot read, from before the account tie, still makes an approve
+// illegal, and the refusal is the one an illegal transition always gets.
+func TestALegalityFoldReadsTheWholeLog(t *testing.T) {
+	reader := &fixtureReader{
+		apps:      map[string][]map[string]any{"app-1": {{"id": "app-1", "storeId": "store-live", "ownerUserId": "merchant-1"}}},
+		decisions: map[string][]map[string]any{"app-1": {{"id": "d-1", "transition": TransitionReject}}},
+	}
+	writer := &fakeWriter{}
+	p := &Provider{reader: systemLog{fixtureReader: reader, t: t}, writer: writer}
+	_, err := p.recordDecision(staffCtx("merchant-1"), map[string]any{"applicationId": "app-1", "transition": TransitionApprove}, 0)
+	if err == nil || err.Error() != LegalTransition(StateRejected, TransitionApprove).Error() {
+		t.Fatalf("an approve over an unreadable rejection: %v", err)
+	}
+	if len(writer.writes) != 0 {
+		t.Fatalf("an illegal decision was written: %+v", writer.writes)
+	}
+}
+
+// THE STATE IS FOLDED FROM THE WHOLE LOG FOR A CALLER WHO READS THE
+// APPLICATION, and a caller who cannot read it is told submitted -- what any
+// id they cannot see answers -- with no decision read as the system for them.
+func TestTheStateIsFoldedFromTheWholeLogOnlyForAReaderOfTheApplication(t *testing.T) {
+	reader := &fixtureReader{
+		apps:      map[string][]map[string]any{"app-1": {{"id": "app-1", "storeId": "store-live", "ownerUserId": "merchant-1"}}},
+		decisions: map[string][]map[string]any{"app-1": {{"id": "d-1", "transition": TransitionApprove}}},
+	}
+	p := &Provider{reader: systemLog{fixtureReader: reader, t: t}}
+	if got := decodedBy(t)(p.applicationState(staffCtx("merchant-1"), map[string]any{"applicationId": "app-1"}, 0)); got["state"] != StateApproved {
+		t.Fatalf("the merchant is told %v, want approved", got["state"])
+	}
+	stranger := &fixtureReader{decisions: reader.decisions} // reads no application
+	p = &Provider{reader: systemLog{fixtureReader: stranger, t: t, forbidSystem: true}}
+	got := decodedBy(t)(p.applicationState(staffCtx("stranger-1"), map[string]any{"applicationId": "app-1"}, 0))
+	if got["state"] != StateSubmitted || got["stage"] != StageReadyToReview {
+		t.Fatalf("a caller who cannot read the application is told %+v, want submitted", got)
+	}
+}
+
+// A DECISION ROW NAMES ITS APPLICATION IN CANONICAL FORM, and every read keyed
+// by an application id asks both forms, so a log written under either is whole.
+func TestReadsKeyedByAnApplicationIdAskBothForms(t *testing.T) {
+	registerShippedAdapters()
+	canon := "v1:wholesale:application:app-1"
+	writer := &fakeWriter{}
+	reader := &fixtureReader{apps: map[string][]map[string]any{"app-1": {{"id": "app-1", "storeId": "store-live", "ownerUserId": "merchant-1"}}}}
+	p := &Provider{reader: reader, writer: writer}
+	if _, err := p.recordDecision(staffCtx("staff-1"), map[string]any{"applicationId": "app-1", "transition": TransitionApprove}, 0); err != nil {
+		t.Fatalf("recordDecision: %v", err)
+	}
+	if got := writer.only(t, "appendApplicationDecision")["applicationId"]; got != canon {
+		t.Fatalf("the decision names its application %v, want %s", got, canon)
+	}
+	// A log kept under the canonical form is folded for a caller naming the bare id.
+	reader.decisions = map[string][]map[string]any{canon: {{"id": "d-1", "transition": TransitionReject}}}
+	if _, err := p.recordDecision(staffCtx("staff-1"), map[string]any{"applicationId": "app-1", "transition": TransitionApprove}, 0); err == nil {
+		t.Fatal("a rejection kept under the canonical id was not folded for the bare id")
+	}
+	// And an entitlement kept under one form is found by the other.
+	fx := approvedFixture()
+	fx.decisions["app-1"] = []map[string]any{{"transition": TransitionRevoke}}
+	fx.ents[canon] = []map[string]any{{"applicationId": canon, "storeId": "store-live", "adapter": AdapterCustomerTag,
+		"state": EntitlementGranted, "reference": "customer=gid://shopify/Customer/1;tag=acme-trade"}}
+	caller := &fakeCaller{}
+	if _, err := (&Provider{reader: fx, writer: &fakeWriter{}, caller: caller}).retryAccess(staffCtx("staff-1"),
+		map[string]any{"applicationId": "app-1"}, 0); err != nil || len(caller.calls) != 1 {
+		t.Fatalf("an entitlement kept under the canonical id was not found for the bare id: %v, calls %v", err, caller.calls)
+	}
+}
+
+// A RETRY OVER AN APPROVED APPLICATION PROVISIONS, AS ITS MERCHANT -- and a
+// granted row survives a retry that finds no route.
+func TestRetryAccessProvisionsAnApprovedApplicationAndKeepsAGrant(t *testing.T) {
+	registerShippedAdapters()
+	reader := approvedFixture()
+	writer, caller := &fakeWriter{}, &fakeCaller{}
+	p := &Provider{reader: reader, writer: writer, caller: caller}
+	got := decodedBy(t)(p.retryAccess(staffCtx("staff-1"), map[string]any{"applicationId": "app-1"}, 0))
+	if len(caller.calls) != 1 || caller.calls[0] != "shopifyTagWholesaleCustomer" || caller.actors[0] != "merchant-1" {
+		t.Fatalf("the retry called %v as %v, want the tag put on once as the merchant", caller.calls, caller.actors)
+	}
+	if w := writer.only(t, "writeEntitlementRow"); w["state"] != EntitlementGranted || got["state"] != EntitlementGranted {
+		t.Fatalf("the retry wrote %v and answered %v, want granted", w["state"], got["state"])
+	}
+	reader.ents["app-1"] = []map[string]any{{"applicationId": "app-1", "storeId": "store-live", "adapter": AdapterCustomerTag,
+		"state": EntitlementGranted, "reference": "customer=gid://shopify/Customer/1;tag=acme-trade"}}
+	reader.settings["store-live"][0]["entitlementAdapter"] = ""
+	writer.writes, caller.calls = nil, nil
+	got = decodedBy(t)(p.retryAccess(staffCtx("staff-1"), map[string]any{"applicationId": "app-1"}, 0))
+	if len(writer.writes) != 0 || len(caller.calls) != 0 || got["state"] != EntitlementGranted {
+		t.Fatalf("a retry with no route touched the grant: writes %+v, calls %v, answer %+v", writer.writes, caller.calls, got)
+	}
+}
+
+// AN UPDATE IS FENCED ON THE VERSION IT READ, and a cleared staff address is
+// written as the empty value.
+func TestAnUpdateIsFencedAndClearsTheStaffAddress(t *testing.T) {
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	writer := &fakeWriter{}
+	p := &Provider{writer: writer, reader: &fixtureReader{sites: []map[string]any{settingsSite()},
+		settings: map[string][]map[string]any{"store-live": {{"storeId": "store-live", "ownerUserId": "merchant-1",
+			"applicationsOpen": true, "staffEmail": "desk@example.com", "createdAt": at}}}}}
+	if _, err := p.updateSettings(staffCtx("staff-1"), map[string]any{"siteId": "site-1", "storeId": "store-live",
+		"staffEmail": ""}, 0); err != nil {
+		t.Fatalf("updateSettings: %v", err)
+	}
+	if got := writer.only(t, "putWholesaleSettingsRow")["staffEmail"]; got != "" {
+		t.Fatalf("a cleared staff address was written as %v", got)
+	}
+	if !memql.HasRowVersionFence(writer.writes[0].ctx, "v1:wholesale:wholesaleSettings", SettingsRowID("store-live")) {
+		t.Fatal("the update was not fenced on the version it read")
+	}
+	// A save that loses the fence is refused with the sentence the OS shows.
+	lost := &Provider{reader: p.reader, writer: &fakeWriter{err: memql.ErrRowVersionChanged}}
+	if _, err := lost.updateSettings(staffCtx("staff-1"), map[string]any{"siteId": "site-1", "storeId": "store-live",
+		"introText": "x"}, 0); err == nil || err.Error() != "These settings changed while you were editing. Reload and try again." {
+		t.Fatalf("a save that lost its fence: %v", err)
+	}
+}
+
+// A RE-SET-UP BY THE OPERATORS WRITES EVERY FIELD, the staff address the row
+// already held included.
+func TestASetUpKeepsTheStaffAddress(t *testing.T) {
+	writer := &fakeWriter{}
+	p := &Provider{writer: writer, reader: &fixtureReader{settings: map[string][]map[string]any{"store-live": {{
+		"storeId": "store-live", "ownerUserId": "merchant-1", "applicationsOpen": true, "staffEmail": "desk@example.com"}}}}}
+	if _, err := p.setWholesaleSettings(operatorCtx("operator-1"), map[string]any{"storeId": "store-live", "applicationsOpen": false}, 0); err != nil {
+		t.Fatalf("setWholesaleSettings: %v", err)
+	}
+	if got, named := writer.only(t, "setWholesaleSettingsRow")["staffEmail"]; !named || got != "desk@example.com" {
+		t.Fatalf("the re-set-up wrote staffEmail %v (named %v), want the address it held", got, named)
+	}
+}
+
+// A SITE OF ANOTHER ORGANIZATION THAT BINDS THE STORE CANNOT ACT ON IT once its
+// settings are tied to one: not to update them, read them, or set them up.
+func TestASiteOfAnotherOrganizationIsRefusedOnTheStoresSettings(t *testing.T) {
+	registerShippedAdapters()
+	south := map[string]any{"id": "site-s", "ownerUserId": "merchant-2", "accountId": "acct-south",
+		"binding": map[string]any{"storeId": "store-live"}}
+	reader := &fixtureReader{sites: []map[string]any{settingsSite(), south},
+		settings: map[string][]map[string]any{"store-live": {{"storeId": "store-live", "ownerUserId": "merchant-1",
+			"applicationsOpen": true, "accountId": "acct-north", "siteId": "site-1"}}}}
+	writer := &fakeWriter{}
+	p := &Provider{reader: reader, writer: writer}
+	args := map[string]any{"siteId": "site-s", "storeId": "store-live", "applicationsOpen": false}
+	for name, call := range map[string]func() error{
+		"wholesaleUpdateSettings": func() error { _, err := p.updateSettings(staffCtx("staff-s"), args, 0); return err },
+		"wholesaleStoreSettings":  func() error { _, err := p.storeSettings(staffCtx("staff-s"), args, 0); return err },
+		"wholesaleSetSettings":    func() error { _, err := p.setWholesaleSettings(operatorCtx("operator-1"), args, 0); return err },
+	} {
+		if err := call(); err == nil || !strings.Contains(err.Error(), "another organization") {
+			t.Errorf("%s through a site of another organization: %v", name, err)
+		}
+	}
+	if len(writer.writes) != 0 {
+		t.Fatalf("a refused call wrote: %+v", writer.writes)
 	}
 }

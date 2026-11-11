@@ -417,25 +417,20 @@ func (p *Provider) recordDecision(ctx context.Context, args map[string]any, _ in
 	if err != nil {
 		return nil, err
 	}
-	// LEGALITY IS CHECKED AGAINST THE LOG, not against an argument. The
-	// caller does not say what state it believes the application is in,
-	// because a caller that could would be the one deciding.
-	state, err := p.stateOf(ctx, applicationID)
+	// LEGALITY IS CHECKED AGAINST THE WHOLE LOG, not against an argument and
+	// not against the part of it the caller can read (X27). The caller's own
+	// read of the application admitted them; the log is then folded as the
+	// system, because a decision written before the account tie names no
+	// merchant and the store's side cannot read it -- and an approve judged
+	// against the readable part would re-decide a rejected application.
+	state, err := p.stateOf(auth.ContextWithSystemActor(ctx, provisionActor), applicationID)
 	if err != nil {
 		return nil, err
 	}
 	if err := LegalTransition(state, transition); err != nil {
 		return nil, err
 	}
-	// THE DECISION NAMES THE APPLICATION AS THE CALLER DID, which is the form
-	// the caller then reads its log by (decisionsForApplication compares the
-	// field as written).
-	subject := make(map[string]any, len(app))
-	for k, v := range app {
-		subject[k] = v
-	}
-	subject["id"] = applicationID
-	if err := p.appendDecision(ctx, subject, transition, asString(args["note"])); err != nil {
+	if err := p.appendDecision(ctx, app, transition, asString(args["note"])); err != nil {
 		return nil, err
 	}
 	after := StateAfter(transition)
@@ -443,9 +438,10 @@ func (p *Provider) recordDecision(ctx context.Context, args map[string]any, _ in
 		"applicationId": applicationID,
 		"storeId":       trimmed(app["storeId"]),
 		"transition":    transition,
-		"decidedBy":     decider,
-		"state":         after,
-		"stage":         StageOf(after, false, false),
+		// The value the row holds: the actor's id, in canonical form.
+		"decidedBy": userRef(decider),
+		"state":     after,
+		"stage":     StageOf(after, false, false),
 	})
 }
 
@@ -464,9 +460,13 @@ func (p *Provider) recordDecision(ctx context.Context, args map[string]any, _ in
 // somebody else's approval to them permanently. mutations.memql says the same
 // thing from the other side.
 //
-// The row's applicationId is app's "id" exactly as app carries it.
+// THE ROW NAMES ITS APPLICATION IN CANONICAL FORM (applicationRef). The engine
+// compares the field as written and does not join a bare id with a canonical
+// one, so a log written in whichever form each caller used would split; every
+// read keyed by an application id asks both forms (rowsForApplication), so the
+// rows written before this version are found too.
 func (p *Provider) appendDecision(ctx context.Context, app map[string]any, transition, note string) error {
-	applicationID := trimmed(app["id"])
+	applicationID := applicationRef(trimmed(app["id"]))
 	storeID := trimmed(app["storeId"])
 	if applicationID == "" {
 		return fmt.Errorf("wholesale: the application being decided carries no id")
@@ -490,9 +490,19 @@ func (p *Provider) applicationState(ctx context.Context, args map[string]any, _ 
 	if applicationID == "" {
 		return nil, fmt.Errorf("wholesale: applicationId is required")
 	}
-	state, err := p.stateOf(ctx, applicationID)
+	// THE CALLER READS THE APPLICATION FIRST. One who cannot is answered what
+	// an id nobody can see answers -- submitted -- and nothing is read as the
+	// system for them, so a foreign id is not told from a missing one. One who
+	// can is answered the WHOLE log's fold (X27), read as the system.
+	state := StateSubmitted
+	rows, err := p.rowsFor(ctx, "applicationById", map[string]string{"applicationId": applicationID})
 	if err != nil {
 		return nil, err
+	}
+	if len(rows) > 0 {
+		if state, err = p.stateOf(auth.ContextWithSystemActor(ctx, provisionActor), applicationID); err != nil {
+			return nil, err
+		}
 	}
 	payload, err := json.Marshal(map[string]any{
 		"applicationId": applicationID,
@@ -540,8 +550,7 @@ func (p *Provider) applicationRow(ctx context.Context, applicationID string) (ma
 
 // stateOf folds one application's decision log.
 func (p *Provider) stateOf(ctx context.Context, applicationID string) (string, error) {
-	rows, err := p.rowsFor(ctx, "decisionsForApplication",
-		map[string]string{"applicationId": applicationID})
+	rows, err := p.rowsForApplication(ctx, "decisionsForApplication", applicationID)
 	if err != nil {
 		return "", err
 	}

@@ -13,6 +13,7 @@ package wholesalepack_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -68,7 +69,8 @@ func newAccessStore(t *testing.T, eng *memql.MemQLEngine, label string) accessSt
 
 func (s accessStore) decisions(t *testing.T, eng *memql.MemQLEngine, ctx context.Context) []map[string]any {
 	t.Helper()
-	return wsRows(t, eng, ctx, `query decisionsForApplication(applicationId: `+quote(s.appID)+`)`)
+	// Decisions name their application in canonical form (ruling 27).
+	return wsRows(t, eng, ctx, `query decisionsForApplication(applicationId: `+quote("v1:wholesale:application:"+s.appID)+`)`)
 }
 
 // approve is a decision with neither principalKind nor decidedBy: both are
@@ -172,5 +174,153 @@ func TestADecisionWrittenBeforeThisVersionIsReadableByTheMerchantAfterTheBackfil
 	rows := wsRows(t, eng, signedIn(merchant), `query decisionsForApplication(applicationId: `+quote(r.appID)+`)`)
 	if len(rows) != 1 || rows[0]["note"] != "known to us" {
 		t.Fatalf("after the backfill the merchant reads %+v, want the old decision", rows)
+	}
+}
+
+// seedOldLog writes an untied application of the merchant and, for each
+// transition, one decision exactly as this pack wrote them before the account
+// tie: no ownerUserId, no accountId. Under the decision's new tier the store's
+// side reads none of them until the backfill.
+func seedOldLog(t *testing.T, eng *memql.MemQLEngine, merchant, store string, transitions ...string) string {
+	t.Helper()
+	n := strconv.FormatInt(time.Now().UnixNano(), 36)
+	appID := "old-log-" + n
+	insert := func(concept, rowID string, payload map[string]any) {
+		raw, _ := json.Marshal(payload)
+		wsExec(t, eng, seedCtx(), `insert(`+quote(concept)+`, id=`+quote(rowID)+`, payload=`+string(raw)+`)`)
+	}
+	insert("v1:wholesale:application", appID, map[string]any{"ownerUserId": userRef(merchant), "storeId": store,
+		"companyName": "Old Log Trading", "applicantName": "Pat Old", "applicantEmail": "pat@oldlog.example.com"})
+	for i, transition := range transitions {
+		insert("v1:wholesale:applicationDecision", appID+"-d"+strconv.Itoa(i), map[string]any{"applicationId": appID,
+			"storeId": store, "transition": transition, "decidedBy": "user-old-decider-" + n, "principalKind": "client"})
+		time.Sleep(5 * time.Millisecond) // a log's order is its rows' creation order
+	}
+	return appID
+}
+
+// A DECISION'S LEGALITY IS JUDGED AGAINST THE WHOLE LOG (X27): an old rejection
+// or revocation the merchant cannot read still makes their approve illegal,
+// refused exactly as an illegal transition always is.
+func TestAnApproveOverAnOldUnreadableFinalDecisionIsRefusedAgainstTheLog(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	merchant, store, _ := wholesaleScope()
+	decider := asDecider(t, eng, merchant)
+	for state, log := range map[string][]string{
+		wholesalepack.StateRejected: {"reject"},
+		wholesalepack.StateRevoked:  {"approve", "revoke"},
+	} {
+		appID := seedOldLog(t, eng, merchant, store, log...)
+		if rows := wsRows(t, eng, decider, `query decisionsForApplication(applicationId: `+quote(appID)+`)`); len(rows) != 0 {
+			t.Fatalf("%s: the merchant reads %d old decisions; the case needs a log they cannot read", state, len(rows))
+		}
+		_, err := eng.Execute(decider, `builtin wholesaleRecordDecision(applicationId: `+quote(appID)+`, transition: "approve")`)
+		want := wholesalepack.LegalTransition(state, wholesalepack.TransitionApprove)
+		if err == nil || !strings.Contains(err.Error(), want.Error()) {
+			t.Fatalf("%s: an approve over the old log answered %v, want %v", state, err, want)
+		}
+	}
+}
+
+// THE STATE OF AN APPLICATION WHOSE ONLY DECISION IS AN OLD UNTIED APPROVAL is
+// approved, for the shopper path's borrowed authority and for the merchant
+// signed in.
+func TestTheStateOfAnOldApprovalIsApprovedForItsReaders(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	merchant, store, _ := wholesaleScope()
+	appID := seedOldLog(t, eng, merchant, store, "approve")
+	for name, ctx := range map[string]context.Context{"the shopper path": asSiteOwner(merchant), "the merchant": signedIn(merchant)} {
+		got := answerOf(t, eng, ctx, `builtin wholesaleApplicationState(applicationId: `+quote(appID)+`)`)
+		if got["state"] != wholesalepack.StateApproved {
+			t.Fatalf("%s is told %v, want approved", name, got["state"])
+		}
+	}
+}
+
+// TWO UPDATES FROM ONE READ: the save that loses the fence is refused with the
+// sentence the OS shows, and the change that landed first stays.
+func TestTheSecondOfTwoUpdatesFromOneReadIsRefused(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	merchant, store, site, _ := tiedStore(t, eng, "fence-update")
+	operator := asOperator("operator-" + merchant)
+	wsExec(t, eng, operator, `builtin wholesaleSetSettings(siteId: `+quote(site)+`, storeId: `+quote(store)+
+		`, applicationsOpen: true, entitlementAdapter: "customerTag")`)
+	fired := false
+	_, err := wholesalepack.UpdateSettingsForTest(operator, eng,
+		map[string]any{"siteId": site, "storeId": store, "introText": "the second save"},
+		func(context.Context, string, map[string]any) {
+			if fired {
+				return
+			}
+			fired = true
+			wsExec(t, eng, operator, `builtin wholesaleUpdateSettings(siteId: `+quote(site)+`, storeId: `+quote(store)+
+				`, introText: "the first save")`)
+		})
+	if !fired {
+		t.Fatal("the concurrent save did not run")
+	}
+	if err == nil || !strings.Contains(err.Error(), "These settings changed while you were editing. Reload and try again.") {
+		t.Fatalf("the save that lost its fence answered %v", err)
+	}
+	if got := settingsOf(t, eng, operator, store)["introText"]; got != "the first save" {
+		t.Fatalf("the settings read %v after the refused save, want the first save kept", got)
+	}
+}
+
+// RULING 27, MEASURED: the engine does not join a bare and a canonical
+// application id in a decision's field, so a log written under one form would
+// be missed by a fold asked with the other. The pack writes the canonical form
+// and folds both, so a decision made under either form is found under either.
+func TestADecisionIsFoundUnderEitherFormOfItsApplicationsId(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	for _, canonical := range []bool{false, true} {
+		merchant, store, _ := wholesaleScope()
+		ctx := asSiteOwner(merchant)
+		openApplications(t, eng, ctx, store, wholesalepack.AdapterCustomerTag)
+		bare := submit(t, eng, ctx, store, "Either Form Trading", "buyer@either.example.com")
+		canon := "v1:wholesale:application:" + bare
+		named := bare
+		if canonical {
+			named = canon
+		}
+		decide(t, eng, asDecider(t, eng, merchant), named, wholesalepack.TransitionReject, merchant, "either")
+		rows := wsRows(t, eng, ctx, `query decisionsForApplication(applicationId: `+quote(canon)+`)`)
+		if len(rows) != 1 || rows[0]["applicationId"] != canon {
+			t.Fatalf("decided under %q: the row is %+v, want one naming %s", named, rows, canon)
+		}
+		if raw := wsRows(t, eng, ctx, `query decisionsForApplication(applicationId: `+quote(bare)+`)`); len(raw) != 0 {
+			t.Fatalf("the engine now joins the two forms (%d rows under the bare id); the fold's second read is no longer needed", len(raw))
+		}
+		for _, asked := range []string{bare, canon} {
+			if got := answerOf(t, eng, ctx, `builtin wholesaleApplicationState(applicationId: `+quote(asked)+`)`); got["state"] != wholesalepack.StateRejected {
+				t.Fatalf("decided under %q, asked under %q: %v, want rejected", named, asked, got["state"])
+			}
+		}
+	}
+}
+
+// A PERSON OF THE SAME ORGANIZATION WHO DOES NOT HOLD THE PART decides nothing
+// and reads no settings: the merchant here is one, in a group with no part.
+func TestAPersonOfTheOrganizationWithoutThePartIsRefused(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	s := newAccessStore(t, eng, "nopart")
+	for name, call := range map[string]string{
+		"wholesaleRecordDecision": `builtin wholesaleRecordDecision(applicationId: ` + quote(s.appID) + `, transition: "approve")`,
+		"wholesaleStoreSettings":  `builtin wholesaleStoreSettings(siteId: ` + quote(s.site) + `, storeId: ` + quote(s.store) + `)`,
+	} {
+		if _, err := eng.Execute(signedIn(s.merchant), call); err == nil || !strings.Contains(err.Error(), memql.CodeCapabilityNotHeld) {
+			t.Fatalf("%s by a person without the part: %v, want %s", name, err, memql.CodeCapabilityNotHeld)
+		}
+	}
+}
+
+// THE RECEIPT NAMES THE DECIDER THE ROW HOLDS.
+func TestTheDecisionReceiptNamesTheDeciderTheRowHolds(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	s := newAccessStore(t, eng, "receipt")
+	got := answerOf(t, eng, signedIn(s.staff), `builtin wholesaleRecordDecision(applicationId: `+quote(s.appID)+`, transition: "approve")`)
+	rows := s.decisions(t, eng, signedIn(s.staff))
+	if len(rows) != 1 || got["decidedBy"] != rows[0]["decidedBy"] {
+		t.Fatalf("the receipt names %v, the row %+v", got["decidedBy"], rows)
 	}
 }

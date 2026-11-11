@@ -145,7 +145,8 @@ func trimmed(v any) string { return strings.TrimSpace(asString(v)) }
 //     gate against the APPLICATION's organization; then a signed-in person
 //     who is not one of the cluster's operators (deciderOf -- the decider is
 //     always the caller); then the application read under the CALLER, so a
-//     caller who cannot read it cannot decide it; then the legality fold;
+//     caller who cannot read it cannot decide it; then the legality fold over the
+//     WHOLE log, read as the system (X27);
 //   - wholesaleRetryAccess: the part against the application's organization,
 //     the application read under the caller, then the decision log and the
 //     entitlement row decide whether there is access to retry;
@@ -282,6 +283,57 @@ func userRef(id string) string {
 		return id
 	}
 	return userIDPrefix + id
+}
+
+// applicationRef is an application's id in canonical form.
+func applicationRef(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" || strings.HasPrefix(id, applicationConcept+":") {
+		return id
+	}
+	return applicationConcept + ":" + bareID(id)
+}
+
+// rowsForApplication runs a query keyed by applicationId under BOTH forms of
+// the id, bare and canonical, and answers the rows of both, newest first.
+//
+// THE ENGINE DOES NOT JOIN THE TWO FORMS: a decision or an entitlement written
+// naming the bare id is not found by a read naming the canonical one, and the
+// reverse (measured in access_db_test.go). Rows were written in whichever form
+// each caller used before decisions were written canonical, so a read that
+// asked one form would miss part of a log -- and a fold over part of a log is
+// an application shown as submitted after somebody rejected it.
+func (p *Provider) rowsForApplication(ctx context.Context, query, applicationID string) ([]map[string]any, error) {
+	seen := map[string]bool{}
+	var out []map[string]any
+	for _, form := range uniqueForms(bareID(strings.TrimSpace(applicationID)), applicationRef(applicationID)) {
+		rows, err := p.rowsFor(ctx, query, map[string]string{"applicationId": form})
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			if id := trimmed(row["id"]); id != "" {
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
+			}
+			out = append(out, row)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return rowTime(out[i]["createdAt"]).After(rowTime(out[j]["createdAt"])) })
+	return out, nil
+}
+
+// uniqueForms drops an empty or repeated form.
+func uniqueForms(forms ...string) []string {
+	var out []string
+	for _, f := range forms {
+		if f != "" && (len(out) == 0 || out[len(out)-1] != f) {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // write runs one of the pack's own mutations through the seam.

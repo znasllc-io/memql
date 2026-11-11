@@ -170,8 +170,9 @@ func TestAClientGrantAutomationProvisionsAnApprovedApplication(t *testing.T) {
 	var ent map[string]any
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
+		// An entitlement names its application in canonical form (ruling 27).
 		rows := wsRows(t, eng, ctx,
-			`query entitlementForApplication(applicationId: `+wsQuote(appID)+`)`)
+			`query entitlementForApplication(applicationId: `+wsQuote("v1:wholesale:application:"+appID)+`)`)
 		if len(rows) > 0 && rows[0]["state"] == wholesalepack.EntitlementGranted {
 			ent = rows[0]
 			break

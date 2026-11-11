@@ -37,7 +37,8 @@
 //     gate against the APPLICATION's organization; then a signed-in person
 //     who is not one of the cluster's operators (the decider is always the
 //     caller); then the application read under the CALLER, so a caller who
-//     cannot read it cannot decide it; then the legality fold;
+//     cannot read it cannot decide it; then the legality fold over the
+//     WHOLE log, read as the system (X27);
 //   - wholesaleRetryAccess: the part against the application's organization,
 //     the application read under the caller, then the decision log and the
 //     entitlement row decide whether there is access to retry;
@@ -146,9 +147,10 @@ mutation wholesaleSettings setWholesaleSettingsRow {
     introText           string   @maxLength(2000)
     accountId           string
     siteId              string
+    staffEmail          string   @maxLength(320)
   }
   insert {
-    accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText, accountId, siteId }
+    accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText, accountId, siteId, staffEmail }
     stamp {
       id: args.settingsId
     }
