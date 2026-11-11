@@ -9404,7 +9404,7 @@ func ShopifyStoreRetryDeliveriesBuild(args ShopifyStoreRetryDeliveriesArgs) stri
 }
 
 // ShopifyStoreVerdict -- One store's verdict (U6): whether it is being recorded, and when it is not, why and the one act that fixes each reason. Computed in the engine from the store row, its sync state and its given-up deliveries, so a screen draws it without a copy of the rules.
-// `state` is recording, starting, paused, needs attention or not connected, and `since` when it began. Each reason has a `code` (data_not_declared, approval_outdated, grant_lost, events_not_registered, check_failing, changes_not_recorded), one `sentence` for a person, and an `act` with its `actLabel` and `actUrl` (or none). `outside` and `withheld` are plain words. `may.act` says whether the caller may take the acts. For the store's owner, a cluster owner, or a caller who may read stores; anyone else is refused before the store's state is read.
+// `state` is recording, starting, paused, needs attention or not connected, `since` when it began, and `resumedAt` when the store last left paused or not connected (empty when it never has). Each reason has a `code` (data_not_declared, approval_outdated, grant_lost, events_not_registered, check_failing, changes_not_recorded), one `sentence` for a person, and an `act` with its `actLabel` and `actUrl` (or none). `outside` and `withheld` are plain words. `may.act` says whether the caller may take the acts. For the store's owner, a cluster owner, or a caller who may read stores; anyone else is refused before the store's state is read.
 type ShopifyStoreVerdictArgs struct {
 	// The store.
 	StoreId string

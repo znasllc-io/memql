@@ -80,6 +80,7 @@ type RecordedKind struct{ Kind, LastChangeAt, LastCheckedAt string }
 type Verdict struct {
 	StoreID, Domain, State string
 	Since                  time.Time
+	ResumedAt              time.Time
 	Reasons                []VerdictReason
 	Recorded               []RecordedKind
 	Outside, Withheld      []string
@@ -94,7 +95,10 @@ type verdictInput struct {
 	GivenUp   []map[string]any         // this store's given-up deliveries
 	Denied    map[string][]string      // fieldsDenied
 	Previous  map[string]any           // health.verdict as last recorded
-	Now       time.Time
+	// ConnectedAt is when the store was connected, or zero when the row
+	// does not say. One of the three times a late check is measured from.
+	ConnectedAt time.Time
+	Now         time.Time
 }
 
 // recordedKinds are the kinds "What is recorded" lists, each with the domain
@@ -128,8 +132,10 @@ func computeVerdict(in verdictInput) Verdict {
 		v.State = VerdictNotConnected
 	case store.Status == StatusPaused:
 		v.State = VerdictPaused
-	default:
-		v.Reasons = reasonsOf(in, rows)
+	}
+	v.ResumedAt = resumedAtOf(in.Previous, v.State == "", in.Now)
+	if v.State == "" {
+		v.Reasons = reasonsOf(in, rows, lateFrom(in.ConnectedAt, v.ResumedAt))
 		switch {
 		case len(v.Reasons) > 0:
 			v.State = VerdictNeedsAttention
@@ -150,7 +156,7 @@ func askedDomains(store Store) []string {
 	return sweptDomains(func(spec *generated.TypeSpec) bool { return domainInConnection(store, spec) })
 }
 
-func reasonsOf(in verdictInput, rows map[string]map[string]any) []VerdictReason {
+func reasonsOf(in verdictInput, rows map[string]map[string]any, from time.Time) []VerdictReason {
 	store := in.Store
 	asked := askedDomains(store)
 	var out []VerdictReason
@@ -209,7 +215,7 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any) []VerdictReason 
 	}
 
 	for _, concept := range inside {
-		if r, ok := checkFailing(concept, rows[concept], intervalOf(in.Intervals, concept), in.Now); ok {
+		if r, ok := checkFailing(concept, rows[concept], intervalOf(in.Intervals, concept), from, in.Now); ok {
 			out = append(out, r)
 		}
 	}
@@ -281,12 +287,22 @@ func eventsNotRegistered(store Store) (string, bool) {
 	return fmt.Sprintf("The last registration left %d of the %d subscriptions it wanted.", left, mapInt(sub, "desired")-outside), true
 }
 
-// checkFailing is one domain's failing check: a backfill that failed, or no
-// clean sweep within twice the domain's interval on a row that was attempted.
-// That stands for "failed its last two sweeps" without a counter of its own.
+// checkFailing is one domain's failing check: a backfill that failed, at
+// once; or, on a row that was attempted, twice the domain's interval passed
+// since its baseline with no clean sweep after it. That stands for "failed
+// its last two sweeps" without a counter of its own.
+//
+// THE BASELINE is the latest of the domain's last clean sweep, the store's
+// connection (from) and its last return from paused or not connected
+// (from). Measured from the clean sweep alone, a store resumed after a long
+// pause read late until its first sweep, and a domain never yet swept clean
+// was late at its first error. With no baseline at all -- no clean sweep, no
+// connection time, never resumed -- an attempted domain with no clean sweep
+// is late, as nothing says how long it has been waiting.
+//
 // An error about the grant is its own reason and never this one, and a domain
 // an operator paused is not failing.
-func checkFailing(concept string, row map[string]any, interval time.Duration, now time.Time) (VerdictReason, bool) {
+func checkFailing(concept string, row map[string]any, interval time.Duration, from, now time.Time) (VerdictReason, bool) {
 	if row == nil {
 		return VerdictReason{}, false
 	}
@@ -317,7 +333,11 @@ func checkFailing(concept string, row map[string]any, interval time.Duration, no
 		// Never attempted: the store is starting, not failing.
 		return VerdictReason{}, false
 	}
-	if !clean.IsZero() && now.Sub(clean) <= 2*interval {
+	baseline := clean
+	if from.After(baseline) {
+		baseline = from
+	}
+	if !baseline.IsZero() && now.Sub(baseline) <= 2*interval {
 		return VerdictReason{}, false
 	}
 	if lastError != "" {
@@ -396,6 +416,29 @@ func starting(store Store, rows map[string]map[string]any) bool {
 		}
 	}
 	return false
+}
+
+// lateFrom is the later of the store's connection and its last resume: the
+// part of a late check's baseline that is the store's rather than a domain's.
+func lateFrom(connectedAt, resumedAt time.Time) time.Time {
+	if resumedAt.After(connectedAt) {
+		return resumedAt
+	}
+	return connectedAt
+}
+
+// resumedAtOf is when the store last left paused or not connected: now, when
+// the last recorded verdict held one of the two and the store is active
+// again; otherwise what that verdict carried, unchanged, or zero when it
+// carried none.
+func resumedAtOf(previous map[string]any, active bool, now time.Time) time.Time {
+	if previous == nil {
+		return time.Time{}
+	}
+	if was := mapString(previous, "state"); active && (was == VerdictPaused || was == VerdictNotConnected) {
+		return now.UTC()
+	}
+	return rowTime(previous, "resumedAt")
 }
 
 // sinceOf is when the state began: kept from the last recorded verdict while

@@ -555,14 +555,39 @@ func (c *Connector) storeVerdict(ctx context.Context, store Store) (Verdict, err
 	}
 	previous, _ := store.Health["verdict"].(map[string]any)
 	return computeVerdict(verdictInput{
-		Store:     store,
-		States:    states,
-		Intervals: sweepIntervals(c.Domains()),
-		GivenUp:   givenUp,
-		Denied:    c.FieldsDenied(store.ID),
-		Previous:  previous,
-		Now:       c.now().UTC(),
+		Store:       store,
+		States:      states,
+		Intervals:   sweepIntervals(c.Domains()),
+		GivenUp:     givenUp,
+		Denied:      c.FieldsDenied(store.ID),
+		Previous:    previous,
+		ConnectedAt: connectedAtOf(store),
+		Now:         c.now().UTC(),
 	}), nil
+}
+
+// connectedAtOf is when the store was connected, as far as its row says.
+//
+// THE ROW RECORDS NO CONNECT TIME. Its only stable trace of the connection is
+// health.ordersFrom, stamped once at the first connect as that day less the
+// sixty days read_orders reaches (stampOrdersFrom), and anew after a purge.
+// So this is the START of the connect day, in UTC: never later than the
+// connect, which can only make a late check fire sooner than it should, never
+// hide one. row.createdAt is not it: every write of the row moves it, health
+// included. Zero when ordersFrom is absent.
+func connectedAtOf(store Store) time.Time {
+	day, err := time.Parse("2006-01-02", healthString(store.Health, "ordersFrom"))
+	if err != nil {
+		return time.Time{}
+	}
+	return day.AddDate(0, 0, ordersWindowDays).UTC()
+}
+
+func timeOrEmpty(at time.Time) string {
+	if at.IsZero() {
+		return ""
+	}
+	return at.UTC().Format(time.RFC3339)
 }
 
 // storeInboundSource is the inbound source a store's deliveries are staged
@@ -599,7 +624,8 @@ func verdictPayload(v Verdict) map[string]any {
 	}
 	return map[string]any{
 		"storeId": v.StoreID, "domain": v.Domain, "state": v.State, "since": v.Since.UTC().Format(time.RFC3339),
-		"reasons": reasons, "recorded": recorded, "outside": toAny(v.Outside), "withheld": toAny(v.Withheld),
+		"resumedAt": timeOrEmpty(v.ResumedAt),
+		"reasons":   reasons, "recorded": recorded, "outside": toAny(v.Outside), "withheld": toAny(v.Withheld),
 		"ordersFrom": v.OrdersFrom,
 	}
 }

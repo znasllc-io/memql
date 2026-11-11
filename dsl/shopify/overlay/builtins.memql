@@ -39,8 +39,8 @@ builtin shopifyStoreHealth {
 /// that fixes each reason. Computed in the engine from the store row, its sync state and its
 /// given-up deliveries, so a screen draws it without a copy of the rules.
 ///
-/// `state` is recording, starting, paused, needs attention or not connected, and `since` when it
-/// began. Each reason has a `code` (data_not_declared, approval_outdated, grant_lost,
+/// `state` is recording, starting, paused, needs attention or not connected, `since` when it began,
+/// and `resumedAt` when the store last left paused or not connected (empty when it never has). Each reason has a `code` (data_not_declared, approval_outdated, grant_lost,
 /// events_not_registered, check_failing, changes_not_recorded), one `sentence` for a person, and an
 /// `act` with its `actLabel` and `actUrl` (or none). `outside` and `withheld` are plain words.
 /// `may.act` says whether the caller may take the acts. For the store's owner, a cluster owner, or a
@@ -48,7 +48,7 @@ builtin shopifyStoreHealth {
 @sdk
 @executor("integration.shopify.storeVerdict")
 @requiresCapability("execute", "app:deployables/store")
-@description("One store's verdict: state (recording, starting, paused, needs attention, not connected) and since; reasons, each {code, domain, sentence, detail, count, act, actLabel, actUrl}; recorded, each {kind, lastChangeAt, lastCheckedAt}; outside and withheld in plain words; ordersFrom; alert {state, reason}; may {act}. For the store's owner, a cluster owner, or a caller who may read stores.")
+@description("One store's verdict: state (recording, starting, paused, needs attention, not connected), since and resumedAt; reasons, each {code, domain, sentence, detail, count, act, actLabel, actUrl}; recorded, each {kind, lastChangeAt, lastCheckedAt}; outside and withheld in plain words; ordersFrom; alert {state, reason}; may {act}. For the store's owner, a cluster owner, or a caller who may read stores.")
 builtin shopifyStoreVerdict {
   storeId  string!  @description("The store.")
 }

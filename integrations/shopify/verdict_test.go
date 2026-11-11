@@ -709,7 +709,7 @@ func TestTheVerdictReplyCarriesEveryKey(t *testing.T) {
 	if err := json.Unmarshal(nodes[0].Payload, &reply); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"storeId", "domain", "state", "since", "reasons", "recorded", "outside", "withheld", "ordersFrom", "alert", "may"} {
+	for _, key := range []string{"storeId", "domain", "state", "since", "resumedAt", "reasons", "recorded", "outside", "withheld", "ordersFrom", "alert", "may"} {
 		if _, ok := reply[key]; !ok {
 			t.Errorf("reply has no %q: %v", key, reply)
 		}
@@ -753,5 +753,123 @@ func TestEveryPageOfGivenUpDeliveriesIsRead(t *testing.T) {
 	}
 	if len(rows) != 3 {
 		t.Errorf("read %d given-up deliveries; want every page's", len(rows))
+	}
+}
+
+// staleRows is every asked domain last swept clean three days ago: far more
+// than twice any interval.
+func staleRows(store Store) []map[string]any {
+	rows := cleanRows(store)
+	old := verdictNow.Add(-72 * time.Hour)
+	for _, r := range rows {
+		r["lastReconcileAt"] = old.Add(-2 * time.Minute).Format(time.RFC3339)
+		r["lastAttemptAt"] = old.Format(time.RFC3339)
+	}
+	return rows
+}
+
+func failingDomains(v Verdict) []string {
+	out := []string{}
+	for _, r := range v.Reasons {
+		if r.Code == ReasonCheckFailing {
+			out = append(out, r.Domain)
+		}
+	}
+	return out
+}
+
+func TestAResumedStoreIsNotLateUntilTwoIntervalsAfterItResumed(t *testing.T) {
+	store := verdictStore()
+	in := verdictInputOf(store, staleRows(store))
+	for _, was := range []string{VerdictPaused, VerdictNotConnected} {
+		in.Previous = map[string]any{"state": was, "since": verdictNow.Add(-72 * time.Hour).Format(time.RFC3339)}
+		v := computeVerdict(in)
+		if failing := failingDomains(v); len(failing) != 0 {
+			t.Errorf("resumed from %s: check_failing for %v; nothing is late the moment a store resumes", was, failing)
+		}
+		if v.State != VerdictRecording {
+			t.Errorf("resumed from %s: state = %q; want recording", was, v.State)
+		}
+		if !v.ResumedAt.Equal(verdictNow) {
+			t.Errorf("resumed from %s: resumedAt = %v; want now", was, v.ResumedAt)
+		}
+	}
+
+	// Later, the verdict recorded as recording with that resumedAt: orders
+	// sweep hourly, so they are late two hours after the resume and not
+	// before.
+	resumed := verdictNow
+	in.Previous = map[string]any{"state": VerdictRecording, "since": resumed.Format(time.RFC3339), "resumedAt": resumed.Format(time.RFC3339)}
+	in.Now = resumed.Add(90 * time.Minute)
+	if failing := failingDomains(computeVerdict(in)); len(failing) != 0 {
+		t.Errorf("90 minutes after the resume: check_failing for %v; want none", failing)
+	}
+	in.Now = resumed.Add(3 * time.Hour)
+	v := computeVerdict(in)
+	if !strings.Contains("|"+strings.Join(failingDomains(v), "|")+"|", "|orders|") {
+		t.Errorf("three hours after the resume: check_failing for %v; want orders", failingDomains(v))
+	}
+	if !v.ResumedAt.Equal(resumed) {
+		t.Errorf("resumedAt = %v; carried from the recorded verdict, want %v", v.ResumedAt, resumed)
+	}
+}
+
+func TestAFirstSweepErrorIsNotLateUntilTwoIntervalsAfterTheConnect(t *testing.T) {
+	store := verdictStore()
+	rows := setRow(cleanRows(store), "order", func(r map[string]any) {
+		r["lastError"] = "shopify admin: HTTP 503"
+		delete(r, "lastReconcileAt")
+		delete(r, "lastAttemptAt")
+		r["backfillStatus"] = "complete"
+	})
+	in := verdictInputOf(store, rows)
+	in.ConnectedAt = verdictNow.Add(-time.Minute)
+	if failing := failingDomains(computeVerdict(in)); len(failing) != 0 {
+		t.Errorf("connected a minute ago: check_failing for %v; a first error is not a late check", failing)
+	}
+	in.ConnectedAt = verdictNow.Add(-3 * time.Hour)
+	r := reasonNamed(t, computeVerdict(in), ReasonCheckFailing)
+	if r.Domain != "orders" || !strings.Contains(r.Detail, "HTTP 503") {
+		t.Errorf("reason = %+v; want orders, with the error as the detail", r)
+	}
+}
+
+func TestResumedAtIsCarriedWhileTheStateHolds(t *testing.T) {
+	store := verdictStore()
+	earlier := verdictNow.Add(-5 * time.Hour)
+	in := verdictInputOf(store, cleanRows(store))
+
+	in.Previous = map[string]any{"state": VerdictRecording, "since": earlier.Format(time.RFC3339), "resumedAt": earlier.Format(time.RFC3339)}
+	if v := computeVerdict(in); !v.ResumedAt.Equal(earlier) {
+		t.Errorf("resumedAt = %v; carried unchanged while the state holds, want %v", v.ResumedAt, earlier)
+	}
+	paused := store
+	paused.Status = StatusPaused
+	in.Store = paused
+	in.Previous = map[string]any{"state": VerdictPaused, "since": earlier.Format(time.RFC3339), "resumedAt": earlier.Format(time.RFC3339)}
+	if v := computeVerdict(in); !v.ResumedAt.Equal(earlier) {
+		t.Errorf("still paused: resumedAt = %v; carried unchanged, want %v", v.ResumedAt, earlier)
+	}
+	in.Store = store
+	for name, previous := range map[string]map[string]any{
+		"never recorded":           nil,
+		"never paused or detached": {"state": VerdictRecording, "since": earlier.Format(time.RFC3339)},
+	} {
+		in.Previous = previous
+		if v := computeVerdict(in); !v.ResumedAt.IsZero() {
+			t.Errorf("%s: resumedAt = %v; want absent", name, v.ResumedAt)
+		}
+	}
+}
+
+// The row records no connect time; its one stable trace is ordersFrom, the
+// connect day less sixty days. Absent, there is none.
+func TestTheConnectTimeIsTheStartOfTheDayOrdersFromCountsBackFrom(t *testing.T) {
+	store := verdictStore()
+	if got, want := connectedAtOf(store), time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC); !got.Equal(want) {
+		t.Errorf("connectedAtOf = %v, want %v", got, want)
+	}
+	if got := connectedAtOf(managedStore(commerceSet...)); !got.IsZero() {
+		t.Errorf("connectedAtOf with no ordersFrom = %v, want zero", got)
 	}
 }
