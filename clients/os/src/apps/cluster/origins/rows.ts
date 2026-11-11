@@ -44,6 +44,12 @@ export interface OriginRow {
   origin: string;
   mirroredTo: string[];
   connector: string;
+  /** The one store (partition) of a partitioned connector this row is about,
+   *  or "" for a connector that keeps no partitions apart. */
+  partition: string;
+  /** The connection never asked for this domain: the engine's own sentence
+   *  starts `connector: not requested`. Never an error on screen. */
+  notRequested: boolean;
   /** "inbound" | "outbound" | "" when nothing has reported and the
    *  declaration implies none. */
   direction: string;
@@ -118,6 +124,10 @@ export function joinOrigins(inventoryRows: readonly Row[], healthRows: readonly 
 
   // Health, bucketed by the pairing it reports on.
   const health = new Map<string, Row[]>();
+  // The stores of every connector that keeps them apart. A connector named
+  // here has written at least one row with a partition, and from then on its
+  // rows with none are history: what it wrote before it kept its stores apart.
+  const partitions = new Map<string, Set<string>>();
   for (const raw of healthRows) {
     const row = flatten(raw);
     const conceptId = stringOf(row, "conceptId");
@@ -127,7 +137,15 @@ export function joinOrigins(inventoryRows: readonly Row[], healthRows: readonly 
     const list = health.get(key) ?? [];
     list.push(row);
     health.set(key, list);
+    const partition = stringOf(row, "partitionKey");
+    if (partition !== "") {
+      const held = partitions.get(connector) ?? new Set<string>();
+      held.add(partition);
+      partitions.set(connector, held);
+    }
   }
+  const isHistory = (row: Row): boolean =>
+    stringOf(row, "partitionKey") === "" && partitions.has(stringOf(row, "connector"));
 
   const rows: OriginRow[] = [];
   const connectors = new Set<string>();
@@ -137,19 +155,28 @@ export function joinOrigins(inventoryRows: readonly Row[], healthRows: readonly 
     for (const connector of declaration.connectors) {
       connectors.add(connector);
       const key = `${declaration.conceptId}|${connector}`;
-      const found = health.get(key) ?? [];
-      if (found.length === 0) {
-        rows.push(unmeasuredRow(declaration, connector));
+      const found = (health.get(key) ?? []).filter((row) => !isHistory(row));
+      matched.add(key);
+      const stores = partitions.get(connector);
+      if (stores === undefined) {
+        if (found.length === 0) rows.push(unmeasuredRow(declaration, connector, ""));
+        for (const row of found) rows.push(measuredRow(declaration, connector, row));
         continue;
       }
-      matched.add(key);
-      for (const row of found) rows.push(measuredRow(declaration, connector, row));
+      // A partitioned connector: every store it serves is its own pairing,
+      // and a store nothing has reported on for this domain is unmeasured
+      // there -- not hidden because another store reported.
+      for (const store of stores) {
+        const own = found.filter((row) => stringOf(row, "partitionKey") === store);
+        if (own.length === 0) rows.push(unmeasuredRow(declaration, connector, store));
+        for (const row of own) rows.push(measuredRow(declaration, connector, row));
+      }
     }
   }
 
   let unmatchedHealth = 0;
   for (const [key, list] of health.entries()) {
-    if (!matched.has(key)) unmatchedHealth += list.length;
+    if (!matched.has(key)) unmatchedHealth += list.filter((row) => !isHistory(row)).length;
   }
 
   rows.sort((a, b) => a.key.localeCompare(b.key));
@@ -163,14 +190,16 @@ export function joinOrigins(inventoryRows: readonly Row[], healthRows: readonly 
   };
 }
 
-function unmeasuredRow(declaration: OriginDeclaration, connector: string): OriginRow {
+function unmeasuredRow(declaration: OriginDeclaration, connector: string, partition: string): OriginRow {
   return {
-    key: `${declaration.conceptId}|${connector}|`,
+    key: `${declaration.conceptId}|${connector}|${partition}|`,
     conceptId: declaration.conceptId,
     dataState: declaration.dataState,
     origin: declaration.origin,
     mirroredTo: declaration.mirroredTo,
     connector,
+    partition,
+    notRequested: false,
     direction: impliedDirection(declaration.dataState, declaration.origin, connector),
     hasHealth: false,
     backfillStatus: "",
@@ -190,13 +219,17 @@ function unmeasuredRow(declaration: OriginDeclaration, connector: string): Origi
 
 function measuredRow(declaration: OriginDeclaration, connector: string, row: Row): OriginRow {
   const direction = stringOf(row, "direction");
+  const partition = stringOf(row, "partitionKey");
+  const lastError = stringOf(row, "lastError");
   return {
-    key: `${declaration.conceptId}|${connector}|${direction}`,
+    key: `${declaration.conceptId}|${connector}|${partition}|${direction}`,
     conceptId: declaration.conceptId,
     dataState: declaration.dataState,
     origin: declaration.origin,
     mirroredTo: declaration.mirroredTo,
     connector,
+    partition,
+    notRequested: isNotRequested(lastError),
     direction,
     hasHealth: true,
     backfillStatus: stringOf(row, "backfillStatus"),
@@ -209,7 +242,7 @@ function measuredRow(declaration: OriginDeclaration, connector: string, row: Row
     outboxDepth: figureFrom(row, "outboxDepth"),
     deadLetterCount: figureFrom(row, "deadLetterCount"),
     paused: boolOr(row, "paused", false),
-    lastError: stringOf(row, "lastError"),
+    lastError,
     lastReconcileAt: stringOf(row, "lastReconcileAt"),
   };
 }
@@ -271,7 +304,8 @@ export function connectorCoverage(rows: readonly OriginRow[]): ConnectorCoverage
     if (row.hasHealth) {
       held.reported += 1;
       if (row.paused) held.paused += 1;
-      if (row.lastError !== "") held.withError += 1;
+      // What the connection never asked for is not a failure of it.
+      if (row.lastError !== "" && !row.notRequested) held.withError += 1;
     }
     byConnector.set(row.connector, held);
   }
@@ -350,6 +384,67 @@ export function dataStateSentence(state: string, origin: string, mirroredTo: rea
   }
   if (state === "native") return "MemQL owns this data and nobody else holds a copy.";
   return "";
+}
+
+/** The engine's own sentence for a domain the connection never asked for. */
+const NOT_REQUESTED = "connector: not requested";
+
+export function isNotRequested(lastError: string): boolean {
+  return lastError.startsWith(NOT_REQUESTED);
+}
+
+/** One store's domains: those its connection reaches, and -- apart, because
+ *  neither is a fault -- those it never asked for. */
+export interface PartitionGroup {
+  /** The store, or "" for the rows of connectors that keep no stores apart. */
+  partition: string;
+  rows: OriginRow[];
+  outside: OriginRow[];
+}
+
+/**
+ * The table, by store. The group of connectors that keep no stores apart
+ * (partition "") comes first and is drawn as the table always was; each store
+ * follows, by name. Rows keep the order they arrive in.
+ *
+ * History -- a partitioned connector's rows from before it kept its stores
+ * apart -- never reaches here: `joinOrigins` leaves it out, so the coverage
+ * above the table counts exactly what the table draws.
+ */
+export function groupByPartition(rows: readonly OriginRow[]): PartitionGroup[] {
+  const groups = new Map<string, PartitionGroup>();
+  for (const row of rows) {
+    const group = groups.get(row.partition) ?? { partition: row.partition, rows: [], outside: [] };
+    (row.notRequested ? group.outside : group.rows).push(row);
+    groups.set(row.partition, group);
+  }
+  return [...groups.values()].sort((a, b) => a.partition.localeCompare(b.partition));
+}
+
+/** One inbound source's deliveries that used their four tries. */
+export interface GivenUpSource {
+  source: string;
+  count: number;
+  /** The reason the most recently written one gave up, as the engine wrote it. */
+  lastError: string;
+}
+
+/**
+ * `inboundRequestsGivenUp` by source, in the order the sources first appear.
+ * The query answers most recently written first, so a source's first row is
+ * its last reason, and the most recent source leads.
+ */
+export function givenUpBySource(rows: readonly Row[]): GivenUpSource[] {
+  const bySource = new Map<string, GivenUpSource>();
+  for (const raw of rows) {
+    const row = flatten(raw);
+    const source = stringOf(row, "source");
+    if (source === "") continue;
+    const held = bySource.get(source);
+    if (held === undefined) bySource.set(source, { source, count: 1, lastError: stringOf(row, "lastError") });
+    else held.count += 1;
+  }
+  return [...bySource.values()];
 }
 
 /** The acts this row's state offers. Legal-only, per DESIGN.md rule 12:

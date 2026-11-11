@@ -12,7 +12,7 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 const { OriginsSection } = await import("../../src/apps/cluster/origins/OriginsSection");
-const { dataOriginRow, fakeConnection, syncStateRow, withSession } = await import("./harness");
+const { dataOriginRow, fakeConnection, inboundRequestRow, pagedRead, syncStateRow, withSession } = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -371,5 +371,249 @@ describe("connector coverage", () => {
     const reporting = screen.getByText("1 of 1 reported").closest(".os-record-row");
     expect(silent?.querySelector(".os-record-status")?.getAttribute("data-tone")).toBe("warn");
     expect(reporting?.querySelector(".os-record-status")?.getAttribute("data-tone")).toBe("muted");
+  });
+});
+
+// CLUSTER > DATA, BY STORE (U7). A connector that serves several stores keeps
+// each store's sync state apart, and every row carries the store as its
+// partition. The page groups a connector's domains by store, keeps what a
+// connection never asked for out of the errors, and does not draw the rows the
+// connector wrote before it kept its stores apart.
+describe("data origins, by store", () => {
+  const STORE = "acme-widgets";
+  const DEV = "acme-widgets-dev";
+
+  const mirror = (conceptId: string, connector = "shopify") =>
+    dataOriginRow({ conceptId, dataState: "mirror", origin: connector, connectors: [connector] });
+  const ORDER = mirror("v1:shopify:order");
+  const CHECKOUT = mirror("v1:shopify:abandonedCheckout");
+  const INVOICE = mirror("v1:books:invoice", "quickBooks");
+
+  const state = (conceptId: string, partitionKey: string, over: Record<string, unknown> = {}) =>
+    syncStateRow({
+      id: `v1:platform:syncState:${conceptId}-${partitionKey}`,
+      conceptId,
+      connector: "shopify",
+      partitionKey,
+      lagSeconds: 1,
+      driftCount: 0,
+      outboxDepth: 0,
+      deadLetterCount: 0,
+      backfillStatus: "complete",
+      paused: false,
+      ...over,
+    });
+  const INVOICE_HEALTH = syncStateRow({ conceptId: "v1:books:invoice", connector: "quickBooks", lagSeconds: 2 });
+
+  it("groups a connector's domains by store", async () => {
+    mount(
+      fakeConnection({
+        dataOrigins: [ORDER, INVOICE],
+        syncStatesAll: [state("v1:shopify:order", STORE), state("v1:shopify:order", DEV), INVOICE_HEALTH],
+      }),
+    );
+    const own = await screen.findByRole("group", { name: STORE });
+    const dev = screen.getByRole("group", { name: DEV });
+    // Each store is headed by its partition, in plain text.
+    expect(within(own).getByRole("heading", { name: STORE })).toBeTruthy();
+    expect(within(own).getByText("v1:shopify:order")).toBeTruthy();
+    expect(within(dev).getByText("v1:shopify:order")).toBeTruthy();
+    // A connector that keeps no stores apart is drawn as it always was: in
+    // no store's group, and with no heading of its own.
+    const invoice = await rowFor("v1:books:invoice");
+    expect(own.contains(invoice)).toBe(false);
+    expect(dev.contains(invoice)).toBe(false);
+    expect(screen.queryByRole("group", { name: "" })).toBeNull();
+  });
+
+  it("reads health past the first page", async () => {
+    const connection = fakeConnection({ dataOrigins: [ORDER, CHECKOUT] });
+    connection.query.syncStatesAll = pagedRead([
+      [state("v1:shopify:order", STORE)],
+      [state("v1:shopify:abandonedCheckout", STORE, { lagSeconds: 7 })],
+    ]);
+    mount(connection);
+    const group = await screen.findByRole("group", { name: STORE });
+    expect(await within(group).findByText("7")).toBeTruthy();
+    expect(connection.query.syncStatesAll).toHaveBeenCalledTimes(2);
+    expect(connection.query.syncStatesAll).toHaveBeenLastCalledWith({}, expect.objectContaining({ cursor: "p1" }));
+  });
+
+  it("keeps what a connection never asked for behind one closed line, and out of the error count", async () => {
+    mount(
+      fakeConnection({
+        dataOrigins: [ORDER, CHECKOUT],
+        syncStatesAll: [
+          state("v1:shopify:order", STORE),
+          state("v1:shopify:abandonedCheckout", STORE, { lastError: "connector: not requested: read_checkouts is not in the grant" }),
+        ],
+      }),
+    );
+    const group = await screen.findByRole("group", { name: STORE });
+    const line = within(group).getByText("Not part of this connection");
+    const details = line.closest("details") as HTMLDetailsElement;
+    expect(details).not.toBeNull();
+    expect(details.open).toBe(false);
+    // Behind the line, and not a row of the store's list.
+    expect(details.textContent).toContain("v1:shopify:abandonedCheckout");
+    const list = within(group).getByRole("list", { name: STORE });
+    expect(within(list).queryByText("v1:shopify:abandonedCheckout")).toBeNull();
+    // Never an error: not in the connector's count, not in error ink, not a Notice.
+    expect(screen.queryByText(/carries an error|carry an error/)).toBeNull();
+    expect(document.querySelector(".os-cluster-row-error")).toBeNull();
+    expect(screen.queryByText(/connector: not requested/, { selector: ".os-notice *" })).toBeNull();
+    expect(document.querySelector(".os-notice")).toBeNull();
+  });
+
+  it("counts a store's real failure as an error, beside what its connection never asked for", async () => {
+    // The control for the test above: a page that dropped every lastError
+    // would pass it.
+    mount(
+      fakeConnection({
+        dataOrigins: [ORDER, CHECKOUT],
+        syncStatesAll: [
+          state("v1:shopify:order", STORE, { lastError: "the Admin API answered 503" }),
+          state("v1:shopify:abandonedCheckout", STORE, { lastError: "connector: not requested" }),
+        ],
+      }),
+    );
+    expect(await screen.findByText(/1 of them carries an error/)).toBeTruthy();
+    const row = await rowFor("v1:shopify:order");
+    expect(within(row).getByText("the Admin API answered 503").className).toContain("os-cluster-row-error");
+  });
+
+  it("does not draw a shared row of a connector that now keeps its stores apart", async () => {
+    mount(
+      fakeConnection({
+        dataOrigins: [ORDER, INVOICE],
+        syncStatesAll: [
+          state("v1:shopify:order", STORE),
+          syncStateRow({ conceptId: "v1:shopify:order", connector: "shopify", lastError: "a failure from before the stores were kept apart" }),
+          INVOICE_HEALTH,
+        ],
+      }),
+    );
+    await screen.findByRole("group", { name: STORE });
+    expect(screen.getAllByText("v1:shopify:order")).toHaveLength(1);
+    expect(screen.queryByText("a failure from before the stores were kept apart")).toBeNull();
+    // A connector with no partitioned row at all keeps its row.
+    expect(await rowFor("v1:books:invoice")).toBeTruthy();
+    // And the history is not counted either: each connector has one pairing.
+    expect(screen.getAllByText("1 of 1 reported")).toHaveLength(2);
+    expect(screen.queryByText("2 of 2 reported")).toBeNull();
+  });
+
+  it("sends the store with Backfill, Pause and Resume", async () => {
+    const connection = fakeConnection({
+      dataOrigins: [ORDER, INVOICE],
+      syncStatesAll: [
+        state("v1:shopify:order", STORE),
+        state("v1:shopify:order", DEV, { paused: true }),
+        INVOICE_HEALTH,
+      ],
+    });
+    mount(connection);
+    const own = await screen.findByRole("group", { name: STORE });
+    const dev = screen.getByRole("group", { name: DEV });
+
+    await click(within(own).getByRole("button", { name: /^Backfill now/ }));
+    expect(connection.query.datasyncStartBackfill).toHaveBeenLastCalledWith({
+      connector: "shopify",
+      conceptId: "v1:shopify:order",
+      partitionKey: STORE,
+    });
+    await click(within(own).getByRole("button", { name: /^Pause/ }));
+    expect(connection.query.datasyncSetSyncPaused).toHaveBeenLastCalledWith({
+      connector: "shopify",
+      conceptId: "v1:shopify:order",
+      partitionKey: STORE,
+      paused: true,
+    });
+    await click(within(dev).getByRole("button", { name: /^Resume/ }));
+    expect(connection.query.datasyncSetSyncPaused).toHaveBeenLastCalledWith({
+      connector: "shopify",
+      conceptId: "v1:shopify:order",
+      partitionKey: DEV,
+      paused: false,
+    });
+
+    // A row of a connector that keeps no stores apart sends none, as before.
+    const invoice = await rowFor("v1:books:invoice");
+    await click(within(invoice).getByRole("button", { name: /^Pause/ }));
+    expect(connection.query.datasyncSetSyncPaused).toHaveBeenLastCalledWith({
+      connector: "quickBooks",
+      conceptId: "v1:books:invoice",
+      paused: true,
+    });
+  });
+
+  it("does not read given-up deliveries until somebody asks", async () => {
+    const connection = fakeConnection({ dataOrigins: [ORDER] });
+    mount(connection);
+    await screen.findByText("v1:shopify:order");
+    expect(connection.query.inboundRequestsGivenUp).not.toHaveBeenCalled();
+
+    const section = screen.getByRole("region", { name: "Changes that could not be recorded" });
+    await click(within(section).getByRole("button", { name: "Check" }));
+    expect(connection.query.inboundRequestsGivenUp).toHaveBeenCalledWith({}, expect.anything());
+  });
+
+  it("lists given-up deliveries by source and tries one source again", async () => {
+    const connection = fakeConnection({
+      dataOrigins: [ORDER],
+      inboundRequestsGivenUp: [
+        inboundRequestRow({ id: "in-3", source: "shopify-acme-widgets", lastError: "the Admin API answered 503" }),
+        inboundRequestRow({ id: "in-2", source: "shopify-acme-widgets-dev", lastError: "the topic is not handled" }),
+        inboundRequestRow({ id: "in-1", source: "shopify-acme-widgets", lastError: "an older reason" }),
+      ],
+    });
+    mount(connection);
+    await screen.findByText("v1:shopify:order");
+    const section = screen.getByRole("region", { name: "Changes that could not be recorded" });
+    await click(within(section).getByRole("button", { name: "Check" }));
+
+    const list = await within(section).findByRole("list", { name: "Changes that could not be recorded" });
+    const own = within(list).getByText("shopify-acme-widgets").closest("li") as HTMLElement;
+    const dev = within(list).getByText("shopify-acme-widgets-dev").closest("li") as HTMLElement;
+    // One line per source, its count and its LAST reason, as the engine wrote it.
+    expect(within(own).getByText("2 changes")).toBeTruthy();
+    expect(within(own).getByText("the Admin API answered 503")).toBeTruthy();
+    expect(within(own).queryByText("an older reason")).toBeNull();
+    expect(within(dev).getByText("1 change")).toBeTruthy();
+    expect(within(dev).getByText("the topic is not handled")).toBeTruthy();
+
+    expect(connection.query.inboundRequestsGivenUp).toHaveBeenCalledTimes(1);
+    await click(within(own).getByRole("button", { name: "Try again" }));
+    expect(connection.query.datasyncRequeueInbound).toHaveBeenCalledTimes(1);
+    expect(connection.query.datasyncRequeueInbound).toHaveBeenCalledWith({ source: "shopify-acme-widgets" });
+    // And the section is read again.
+    expect(connection.query.inboundRequestsGivenUp).toHaveBeenCalledTimes(2);
+  });
+
+  it("draws each count as a floor when pages remain after twenty", async () => {
+    const connection = fakeConnection({ dataOrigins: [ORDER] });
+    connection.query.inboundRequestsGivenUp = pagedRead(
+      Array.from({ length: 25 }, (_, i) => [inboundRequestRow({ id: `in-${i}`, source: "shopify-acme-widgets" })]),
+    );
+    mount(connection);
+    await screen.findByText("v1:shopify:order");
+    const section = screen.getByRole("region", { name: "Changes that could not be recorded" });
+    await click(within(section).getByRole("button", { name: "Check" }));
+    expect(await within(section).findByText("At least 20 changes")).toBeTruthy();
+    expect(connection.query.inboundRequestsGivenUp).toHaveBeenCalledTimes(20);
+  });
+
+  it("draws a refusal of Try again as the engine wrote it", async () => {
+    const connection = fakeConnection({
+      dataOrigins: [ORDER],
+      inboundRequestsGivenUp: [inboundRequestRow({ id: "in-1", source: "shopify-acme-widgets" })],
+    });
+    connection.query.datasyncRequeueInbound.mockRejectedValueOnce(new Error("datasync: requeue refused: not a cluster owner"));
+    mount(connection);
+    await screen.findByText("v1:shopify:order");
+    const section = screen.getByRole("region", { name: "Changes that could not be recorded" });
+    await click(within(section).getByRole("button", { name: "Check" }));
+    await click(await within(section).findByRole("button", { name: "Try again" }));
+    expect(within(section).getByText("datasync: requeue refused: not a cluster owner")).toBeTruthy();
   });
 });

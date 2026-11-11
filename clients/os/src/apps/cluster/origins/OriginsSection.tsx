@@ -12,10 +12,14 @@ import {
   coverageSentence,
   coverageTone,
   dataStateSentence,
+  givenUpBySource,
+  groupByPartition,
   joinOrigins,
   originActs,
   type ConnectorCoverage,
+  type GivenUpSource,
   type OriginRow,
+  type PartitionGroup,
 } from "./rows";
 
 // Data origins: what this cluster owns, what it mirrors, and how the
@@ -54,8 +58,11 @@ export function OriginsSection() {
   const readHealth = useCallback(
     async (signal: AbortSignal): Promise<Row[]> => {
       if (connection === null) throw new Error("not connected");
-      const result = await connection.query.syncStatesAll({}, { signal });
-      return result.rows();
+      // To the last page, with the cursor each page hands back: a connector
+      // that serves several stores writes a row per domain per store, and a
+      // page that stopped at the first answer would draw the rest as never
+      // reported.
+      return readPages((cursor) => connection.query.syncStatesAll({}, { signal, ...(cursor ? { cursor } : {}) }), Infinity).then((read) => read.rows);
     },
     [connection],
   );
@@ -75,6 +82,8 @@ export function OriginsSection() {
   );
 
   const coverage = useMemo(() => connectorCoverage(join.rows), [join.rows]);
+  const groups = useMemo(() => groupByPartition(join.rows), [join.rows]);
+  const [givenUpOpen, setGivenUpOpen] = useState(false);
 
   const [openConnector, setOpenConnector] = useState("");
   const [busyKey, setBusyKey] = useState("");
@@ -85,16 +94,21 @@ export function OriginsSection() {
       if (connection === null) return;
       setBusyKey(`${row.key}:${which}`);
       setRefusal("");
+      const store = row.partition === "" ? {} : { partitionKey: row.partition };
       try {
         if (which === "backfill") {
           await connection.query.datasyncStartBackfill({
             connector: row.connector,
             conceptId: row.conceptId,
+            ...store,
           });
         } else {
+          // The row's own store: a pause with no partition is fanned out to
+          // every store the connector serves.
           await connection.query.datasyncSetSyncPaused({
             connector: row.connector,
             conceptId: row.conceptId,
+            ...store,
             paused: which === "pause",
           });
         }
@@ -191,16 +205,9 @@ export function OriginsSection() {
       {join.rows.length === 0 ? null : (
         <Panel label="Concepts">
           <Subhead meta={inventory.state === "read" && !inventory.error ? join.rows.length : undefined}>Concepts with a connector</Subhead>
-          <RecordList as="ul" label="Data origins">
-            {join.rows.map((row) => (
-              <OriginLine
-                key={row.key}
-                row={row}
-                busyKey={busyKey}
-                onAct={(which) => void act(row, which)}
-              />
-            ))}
-          </RecordList>
+          {groups.map((group) => (
+            <PartitionLines key={group.partition} group={group} busyKey={busyKey} onAct={(row, which) => void act(row, which)} />
+          ))}
           <Caption>
             An em dash is not a zero. It means nothing has reported that figure yet -- a connector
             that has never run has no lag and no drift, which is a different answer from a sweep
@@ -243,6 +250,19 @@ export function OriginsSection() {
           {openConnector === "" ? null : <DeadLetterBand connector={openConnector} />}
         </Panel>
       ) : null}
+
+      {/* A DELIVERY IS A STORE'S, NOT A DOMAIN'S, so it is not on a row above.
+          Read on demand, as the dead letters are: on a healthy cluster the
+          answer is empty. */}
+      <Panel label="Changes that could not be recorded">
+        <Subhead>Changes that could not be recorded</Subhead>
+        <div className="os-cluster-connectors">
+          <Button tone={givenUpOpen ? "primary" : "quiet"} ariaExpanded={givenUpOpen} onClick={() => setGivenUpOpen((held) => !held)}>
+            {givenUpOpen ? "Close" : "Check"}
+          </Button>
+        </div>
+        {givenUpOpen ? <GivenUpBand /> : null}
+      </Panel>
 
       {inventory.at === null ? null : (
         <Caption>
@@ -292,6 +312,142 @@ function CoverageLine({ coverage }: { coverage: ConnectorCoverage }) {
       )}
     </RecordRow>
   );
+}
+
+/**
+ * One store's domains, headed by the store in plain text -- or, for the
+ * connectors that keep no stores apart, the list as it always was. What the
+ * connection never asked for sits behind one closed line: it is not a fault,
+ * so it is neither a row with an error nor counted as one.
+ */
+function PartitionLines({
+  group,
+  busyKey,
+  onAct,
+}: {
+  group: PartitionGroup;
+  busyKey: string;
+  onAct: (row: OriginRow, which: "backfill" | "pause" | "resume") => void;
+}) {
+  const list = (
+    <>
+      <RecordList as="ul" label={group.partition === "" ? "Data origins" : group.partition}>
+        {group.rows.map((row) => (
+          <OriginLine key={row.key} row={row} busyKey={busyKey} onAct={(which) => onAct(row, which)} />
+        ))}
+      </RecordList>
+      {group.outside.length === 0 ? null : (
+        <details className="os-caption">
+          <summary>Not part of this connection</summary>
+          <ul>{group.outside.map((row) => <li key={row.key}>{row.conceptId}</li>)}</ul>
+        </details>
+      )}
+    </>
+  );
+  if (group.partition === "") return list;
+  return (
+    <div role="group" aria-label={group.partition}>
+      <Subhead>{group.partition}</Subhead>
+      {list}
+    </div>
+  );
+}
+
+/** At most this many pages of given-up deliveries are read (ruling 42). */
+const GIVEN_UP_PAGES = 20;
+
+/**
+ * The deliveries that used their four tries, one line per source, LOADED ONLY
+ * WHEN ASKED: the band mounts on demand and the read is its own mount, as the
+ * dead-letter band's is. When pages remain after the last one read, each count
+ * is a floor and says so.
+ */
+function GivenUpBand() {
+  const connection = useOsConnection();
+  const read = useCallback(
+    async (signal: AbortSignal) => {
+      if (connection === null) throw new Error("not connected");
+      const pages = await readPages(
+        (cursor) => connection.query.inboundRequestsGivenUp({}, { signal, ...(cursor ? { cursor } : {}) }),
+        GIVEN_UP_PAGES,
+      );
+      return { sources: givenUpBySource(pages.rows), capped: pages.more };
+    },
+    [connection],
+  );
+  const reading = useReading<{ sources: GivenUpSource[]; capped: boolean }>(
+    "cluster:origins:givenup",
+    connection === null ? null : read,
+  );
+  const [busy, setBusy] = useState("");
+  const [refusal, setRefusal] = useState("");
+
+  const tryAgain = useCallback(
+    async (source: string) => {
+      if (connection === null) return;
+      setBusy(source);
+      setRefusal("");
+      try {
+        await connection.query.datasyncRequeueInbound({ source });
+        reading.reread();
+      } catch (err: unknown) {
+        setRefusal(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy("");
+      }
+    },
+    [connection, reading],
+  );
+
+  const sources = reading.value?.sources ?? [];
+  const capped = reading.value?.capped ?? false;
+  return (
+    <div className="os-cluster-band">
+      {reading.state === "failed" ? (
+        <Notice tone="error" sentence="The cluster did not answer the changes that could not be recorded." detail={reading.error} />
+      ) : null}
+      {refusal === "" ? null : (
+        <Notice tone="error" sentence="The cluster refused, and nothing changed." detail={refusal} />
+      )}
+      {reading.state === "reading" && reading.value === null ? (
+        <RecordListSkeleton label="Loading the changes that could not be recorded" />
+      ) : null}
+      {reading.state === "read" && sources.length === 0 ? (
+        <Caption>No change has used all four tries.</Caption>
+      ) : null}
+      <RecordList as="ul" label="Changes that could not be recorded">
+        {sources.map((s) => (
+          <RecordRow key={s.source} name={s.source} tone="warn"
+            actions={<Button tone="quiet" busy={busy === s.source} busyLabel="Working" onClick={() => void tryAgain(s.source)}>Try again</Button>}>
+            <span>{capped ? "At least " : ""}{s.count} {s.count === 1 ? "change" : "changes"}</span>
+            {s.lastError ? <span className="os-cluster-dl-error os-mono">{s.lastError}</span> : null}
+          </RecordRow>
+        ))}
+      </RecordList>
+    </div>
+  );
+}
+
+/**
+ * Read a paginated query page by page, with the cursor each page hands back,
+ * up to `limit` pages. `more` is true when the last page read still handed
+ * one back. A cursor seen twice stops the walk rather than looping on it.
+ */
+async function readPages(
+  page: (cursor: string) => Promise<{ rows: () => Row[]; meta: () => { cursor?: string } | null | undefined }>,
+  limit: number,
+): Promise<{ rows: Row[]; more: boolean }> {
+  const rows: Row[] = [];
+  const seen = new Set<string>();
+  let cursor = "";
+  for (let read = 0; read < limit; read++) {
+    const result = await page(cursor);
+    rows.push(...result.rows());
+    cursor = result.meta()?.cursor ?? "";
+    if (cursor === "" || seen.has(cursor)) return { rows, more: false };
+    seen.add(cursor);
+  }
+  return { rows, more: true };
 }
 
 function OriginLine({
