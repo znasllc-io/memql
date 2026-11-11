@@ -8675,6 +8675,7 @@
         "applicationId",
         "decidedBy",
         "note",
+        "ownerUserId",
         "principalKind",
         "storeId",
         "transition"

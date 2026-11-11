@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -125,6 +126,12 @@ func trimmed(v any) string { return strings.TrimSpace(asString(v)) }
 // Writer is how this pack PERSISTS. It renders one of the pack's own
 // mutations and runs it under the caller's own actor.
 //
+// THE MUTATIONS ARE @serverOnly. Each is reached only from the builtin that
+// judges it, so a client calling one directly -- a decision appended around
+// the legality fold -- is refused by the engine. engineWriter stamps internal
+// origin for exactly its one call; the caller's actor still runs it, so the
+// row gate still decides whether this caller may write this row.
+//
 // SEPARATE FROM Caller BECAUSE THE CALL FORMS DIFFER AND THE DIFFERENCE IS
 // EASY TO LOSE: a mutation is `name(args)`, a builtin is `builtin
 // name(args)`. Separate from rowReader because a write is not a read and a
@@ -142,7 +149,8 @@ func (w *engineWriter) Write(ctx context.Context, mutation string, args map[stri
 	if w == nil || w.engine == nil {
 		return fmt.Errorf("wholesale: the pack has no engine handle, so %q cannot be written", mutation)
 	}
-	if _, err := w.engine.Execute(ctx, renderMutationCall(mutation, args)); err != nil {
+	// INLINE, so the internal stamp dies with this one call (auth.ContextWithInternalOrigin).
+	if _, err := w.engine.Execute(auth.ContextWithInternalOrigin(ctx), renderMutationCall(mutation, args)); err != nil {
 		return fmt.Errorf("wholesale: %s: %w", mutation, err)
 	}
 	return nil

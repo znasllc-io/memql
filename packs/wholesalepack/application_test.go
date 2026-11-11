@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
@@ -25,10 +26,12 @@ type fixtureReader struct {
 	ents      map[string][]map[string]any // applicationId -> rows
 	stores    map[string][]map[string]any // storeId -> rows
 	asked     []string
+	readAs    []string // the actor each read ran as, in order
 }
 
-func (f *fixtureReader) Rows(_ context.Context, query string, args map[string]string) ([]map[string]any, error) {
+func (f *fixtureReader) Rows(ctx context.Context, query string, args map[string]string) ([]map[string]any, error) {
 	f.asked = append(f.asked, query)
+	f.readAs = append(f.readAs, actorOf(ctx))
 	switch query {
 	case "wholesaleSettingsForStore":
 		return f.settings[args["storeId"]], nil
@@ -66,14 +69,29 @@ type fakeWriter struct {
 type writeCall struct {
 	mutation string
 	args     map[string]any
+	actor    string // the user the write ran as
 }
 
-func (f *fakeWriter) Write(_ context.Context, mutation string, args map[string]any) error {
+func (f *fakeWriter) Write(ctx context.Context, mutation string, args map[string]any) error {
 	if f.err != nil {
 		return f.err
 	}
-	f.writes = append(f.writes, writeCall{mutation: mutation, args: args})
+	f.writes = append(f.writes, writeCall{mutation: mutation, args: args, actor: actorOf(ctx)})
 	return nil
+}
+
+// asShopperPath is the borrowed authority the shopper handler submits under:
+// the site owner's actor.
+func asShopperPath() context.Context {
+	return auth.ContextWithUserActor(context.Background(), "site-owner-1")
+}
+
+// actorOf is the user id a context acts as, or "" when it carries none.
+func actorOf(ctx context.Context) string {
+	if ac, ok := auth.AccessFromContext(ctx); ok {
+		return ac.UserId
+	}
+	return ""
 }
 
 // only returns the single write of a named mutation, failing when there is
@@ -304,6 +322,29 @@ func TestDecisionCopiesStoreFromItsSubject(t *testing.T) {
 	}
 }
 
+// A DECISION RECORDS THE APPLICATION'S MERCHANT, copied off the application
+// rather than taken from the caller, so the merchant and their staff read one
+// log whoever decided.
+func TestADecisionRecordsTheApplicationsMerchant(t *testing.T) {
+	writer := &fakeWriter{}
+	p := &Provider{writer: writer, reader: &fixtureReader{
+		apps: map[string][]map[string]any{
+			"app-1": {{"id": "app-1", "storeId": "store-live", "ownerUserId": "merchant-1"}},
+		},
+	}}
+	ctx := auth.ContextWithUserActor(context.Background(), "staff-1")
+	if _, err := p.recordDecision(ctx, map[string]any{
+		"applicationId": "app-1", "transition": TransitionApprove,
+		"principalKind": PrincipalClient, "decidedBy": "staff-1",
+	}, 0); err != nil {
+		t.Fatalf("recordDecision: %v", err)
+	}
+	wrote := writer.only(t, "appendApplicationDecision")
+	if wrote["ownerUserId"] != "merchant-1" {
+		t.Fatalf("ownerUserId = %v, want the application's merchant merchant-1", wrote["ownerUserId"])
+	}
+}
+
 // THE LOG DECIDES LEGALITY, not an argument. A caller that could say what
 // state it believed the application was in would be the one deciding.
 func TestIllegalTransitionIsRefusedAgainstTheLog(t *testing.T) {
@@ -333,7 +374,7 @@ func TestIllegalTransitionIsRefusedAgainstTheLog(t *testing.T) {
 // business details.
 func TestAbsentSettingsRefuseASubmission(t *testing.T) {
 	p := &Provider{reader: &fixtureReader{}, writer: &fakeWriter{}}
-	_, err := p.submitApplication(context.Background(), map[string]any{
+	_, err := p.submitApplication(asShopperPath(), map[string]any{
 		"submissionId": "sub-1", "storeId": "store-live", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0)
@@ -348,7 +389,7 @@ func TestClosedApplicationsRefuseASubmission(t *testing.T) {
 			"store-live": {{"storeId": "store-live", "applicationsOpen": false}},
 		},
 	}}
-	if _, err := p.submitApplication(context.Background(), map[string]any{
+	if _, err := p.submitApplication(asShopperPath(), map[string]any{
 		"submissionId": "sub-1", "storeId": "store-live", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0); err == nil {
@@ -367,7 +408,7 @@ func TestTheGateIsPerStore(t *testing.T) {
 			"store-dev":  {{"storeId": "store-dev", "applicationsOpen": false}},
 		},
 	}}
-	if _, err := p.submitApplication(context.Background(), map[string]any{
+	if _, err := p.submitApplication(asShopperPath(), map[string]any{
 		"submissionId": "sub-1", "storeId": "store-live", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0); err != nil {
@@ -377,7 +418,7 @@ func TestTheGateIsPerStore(t *testing.T) {
 	if wrote["storeId"] != "store-live" {
 		t.Fatalf("storeId = %v", wrote["storeId"])
 	}
-	if _, err := p.submitApplication(context.Background(), map[string]any{
+	if _, err := p.submitApplication(asShopperPath(), map[string]any{
 		"submissionId": "sub-2", "storeId": "store-dev", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0); err == nil {
@@ -403,7 +444,7 @@ func TestTheMinimumAnApplicationNeedsToBeOne(t *testing.T) {
 			"applicantName": "Sam", "applicantEmail": "sam@example.com",
 		}
 		delete(args, missing)
-		if _, err := p.submitApplication(context.Background(), args, 0); err == nil {
+		if _, err := p.submitApplication(asShopperPath(), args, 0); err == nil {
 			t.Errorf("an application with no %s is not an application", missing)
 		}
 	}
@@ -486,7 +527,7 @@ func TestTheApplicationIsWrittenAtTheSubmissionId(t *testing.T) {
 			"store-live": {{"storeId": "store-live", "applicationsOpen": true}},
 		},
 	}}
-	if _, err := p.submitApplication(context.Background(), map[string]any{
+	if _, err := p.submitApplication(asShopperPath(), map[string]any{
 		"submissionId": "sub-abc", "storeId": "store-live", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0); err != nil {
@@ -496,6 +537,11 @@ func TestTheApplicationIsWrittenAtTheSubmissionId(t *testing.T) {
 	if wrote["applicationId"] != "sub-abc" {
 		t.Fatalf("applicationId = %v, want sub-abc -- a client extension relates to this id",
 			wrote["applicationId"])
+	}
+	// AND IT IS OWNED BY THE SITE OWNER whose authority the handler borrowed,
+	// passed explicitly now that the mutation no longer stamps it.
+	if wrote["ownerUserId"] != "site-owner-1" {
+		t.Fatalf("ownerUserId = %v, want the borrowed site owner site-owner-1", wrote["ownerUserId"])
 	}
 }
 
@@ -509,7 +555,7 @@ func TestASubmissionWithNoSubmissionIdIsRefused(t *testing.T) {
 			"store-live": {{"storeId": "store-live", "applicationsOpen": true}},
 		},
 	}}
-	if _, err := p.submitApplication(context.Background(), map[string]any{
+	if _, err := p.submitApplication(asShopperPath(), map[string]any{
 		"storeId": "store-live", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0); err == nil {

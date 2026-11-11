@@ -5,6 +5,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // entitlement_test.go -- the seam, exercised without Shopify (epic
@@ -22,11 +25,13 @@ type fakeCaller struct {
 	err     error
 	calls   []string
 	args    []map[string]any
+	actors  []string // the actor each call ran as
 }
 
-func (f *fakeCaller) Call(_ context.Context, construct string, args map[string]any) (map[string]any, error) {
+func (f *fakeCaller) Call(ctx context.Context, construct string, args map[string]any) (map[string]any, error) {
 	f.calls = append(f.calls, construct)
 	f.args = append(f.args, args)
+	f.actors = append(f.actors, actorOf(ctx))
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -36,11 +41,19 @@ func (f *fakeCaller) Call(_ context.Context, construct string, args map[string]a
 	return map[string]any{"status": "ok"}, nil
 }
 
+// internalAsMerchant is a direct call as the provisioning builtins accept
+// one: internal origin, as the store's automation arrives, acting as the
+// merchant -- the internal-package twin of the live tests'
+// auth.ContextWithInternalOrigin(asSiteOwner(merchant)).
+func internalAsMerchant() context.Context {
+	return auth.ContextWithInternalOrigin(auth.ContextWithUserActor(context.Background(), "merchant-1"))
+}
+
 func approvedFixture() *fixtureReader {
 	return &fixtureReader{
 		apps: map[string][]map[string]any{
 			"app-1": {{
-				"id": "app-1", "storeId": "store-live", "companyName": "Acme Trading",
+				"id": "app-1", "ownerUserId": "merchant-1", "storeId": "store-live", "companyName": "Acme Trading",
 				"applicantName": "Sam Rivers", "applicantEmail": "sam@acme.example",
 			}},
 		},
@@ -73,7 +86,7 @@ func TestOnlyAnApprovedApplicationIsProvisioned(t *testing.T) {
 	reader.decisions["app-1"] = nil // back to submitted
 	p := &Provider{reader: reader, caller: &fakeCaller{}, writer: &fakeWriter{}}
 
-	_, err := p.provisionEntitlement(context.Background(),
+	_, err := p.provisionEntitlement(internalAsMerchant(),
 		map[string]any{"applicationId": "app-1"}, 0)
 	if err == nil {
 		t.Fatal("an application nobody approved has no entitlement to provision")
@@ -89,7 +102,7 @@ func TestOnlyAnApprovedApplicationIsProvisioned(t *testing.T) {
 func TestRevokeNeedsItsDecisionFirst(t *testing.T) {
 	registerShippedAdapters()
 	p := &Provider{reader: approvedFixture(), caller: &fakeCaller{}, writer: &fakeWriter{}}
-	_, err := p.revokeEntitlement(context.Background(),
+	_, err := p.revokeEntitlement(internalAsMerchant(),
 		map[string]any{"applicationId": "app-1"}, 0)
 	if err == nil {
 		t.Fatal("revoking an approved (not revoked) application must be refused")
@@ -112,7 +125,7 @@ func TestATransientFailureLeavesTheEntitlementPending(t *testing.T) {
 		writer: writer,
 		caller: &fakeCaller{err: errors.New("shopify: 503 from the Admin API")},
 	}
-	if _, err := p.provisionEntitlement(context.Background(),
+	if _, err := p.provisionEntitlement(internalAsMerchant(),
 		map[string]any{"applicationId": "app-1"}, 0); err != nil {
 		t.Fatalf("a push failure must not be returned as an error: %v", err)
 	}
@@ -145,7 +158,7 @@ func TestAnAdapterRefusalIsRecordedAsFailed(t *testing.T) {
 			},
 		}},
 	}
-	if _, err := p.provisionEntitlement(context.Background(),
+	if _, err := p.provisionEntitlement(internalAsMerchant(),
 		map[string]any{"applicationId": "app-1"}, 0); err != nil {
 		t.Fatalf("provision: %v", err)
 	}
@@ -170,7 +183,7 @@ func TestAFailedPushStillWritesARow(t *testing.T) {
 		writer: writer,
 		caller: &fakeCaller{err: errors.New("network unreachable")},
 	}
-	if _, err := p.provisionEntitlement(context.Background(),
+	if _, err := p.provisionEntitlement(internalAsMerchant(),
 		map[string]any{"applicationId": "app-1"}, 0); err != nil {
 		t.Fatalf("a push failure must not be returned as an error: %v", err)
 	}
@@ -200,7 +213,7 @@ func TestASuccessfulGrantRecordsItsReference(t *testing.T) {
 	}}
 	writer := &fakeWriter{}
 	p := &Provider{reader: approvedFixture(), caller: caller, writer: writer}
-	nodes, err := p.provisionEntitlement(context.Background(),
+	nodes, err := p.provisionEntitlement(internalAsMerchant(),
 		map[string]any{"applicationId": "app-1"}, 0)
 	if err != nil {
 		t.Fatalf("provision: %v", err)
@@ -240,7 +253,7 @@ func TestNoAdapterConfiguredRefusesByName(t *testing.T) {
 		"storeId": "store-live", "applicationsOpen": true, "entitlementAdapter": "",
 	}}
 	p := &Provider{reader: reader, caller: &fakeCaller{}, writer: &fakeWriter{}}
-	_, err := p.provisionEntitlement(context.Background(),
+	_, err := p.provisionEntitlement(internalAsMerchant(),
 		map[string]any{"applicationId": "app-1"}, 0)
 	if err == nil {
 		t.Fatal("a store with no adapter configured must refuse by name")
@@ -322,7 +335,7 @@ func TestRevokeUsesTheAdapterThatGranted(t *testing.T) {
 	writer := &fakeWriter{}
 	p := &Provider{reader: reader, caller: caller, writer: writer}
 
-	if _, err := p.revokeEntitlement(context.Background(),
+	if _, err := p.revokeEntitlement(internalAsMerchant(),
 		map[string]any{"applicationId": "app-1"}, 0); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
@@ -483,7 +496,7 @@ func TestAnUnavailableAdapterIsRecordedOnTheRow(t *testing.T) {
 	writer := &fakeWriter{}
 	p := &Provider{reader: reader, caller: caller, writer: writer}
 
-	if _, err := p.provisionEntitlement(context.Background(),
+	if _, err := p.provisionEntitlement(internalAsMerchant(),
 		map[string]any{"applicationId": "app-1"}, 0); err != nil {
 		t.Fatalf("an unavailable adapter must be recorded, not returned: %v", err)
 	}
@@ -498,5 +511,140 @@ func TestAnUnavailableAdapterIsRecordedOnTheRow(t *testing.T) {
 	// AND NOTHING WAS PUSHED. The refusal is decided before any call.
 	if len(caller.calls) != 0 {
 		t.Fatalf("an unavailable adapter must not reach Shopify, got %v", caller.calls)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Who provisioning runs as
+// ---------------------------------------------------------------------------
+
+// refusingReader fails the test on any read: a refusal that has to come
+// before the builtin reads anything is asserted by reaching none.
+type refusingReader struct{ t *testing.T }
+
+func (r refusingReader) Rows(_ context.Context, query string, _ map[string]string) ([]map[string]any, error) {
+	r.t.Fatalf("a call refused for its origin still read %s", query)
+	return nil, nil
+}
+
+func (r refusingReader) RowsWithList(_ context.Context, query string, _ map[string]string,
+	_ string, _ []string) ([]map[string]any, error) {
+	r.t.Fatalf("a call refused for its origin still read %s", query)
+	return nil, nil
+}
+
+// THE STORE'S AUTOMATION, AND NOTHING ELSE. Both builtins read as the
+// deployment and act as the application's merchant, so a client that could
+// call them would provision any application it can name; a call without
+// internal origin is refused before anything is read.
+func TestProvisionAndRevokeRefuseACallWithoutInternalOrigin(t *testing.T) {
+	registerShippedAdapters()
+	writer := &fakeWriter{}
+	caller := &fakeCaller{}
+	p := &Provider{reader: refusingReader{t: t}, caller: caller, writer: writer}
+	client := auth.ContextWithClientOrigin(auth.ContextWithUserActor(context.Background(), "merchant-1"))
+
+	for name, call := range map[string]func() error{
+		"wholesaleProvisionEntitlement": func() error {
+			_, err := p.provisionEntitlement(client, map[string]any{"applicationId": "app-1"}, 0)
+			return err
+		},
+		"wholesaleRevokeEntitlement": func() error {
+			_, err := p.revokeEntitlement(client, map[string]any{"applicationId": "app-1"}, 0)
+			return err
+		},
+	} {
+		err := call()
+		if err == nil {
+			t.Fatalf("%s ran for a client-origin call", name)
+		}
+		want := "wholesale: " + name + " is called by the store's automation, not by a client"
+		if err.Error() != want {
+			t.Fatalf("%s refused with %q, want %q", name, err.Error(), want)
+		}
+	}
+	if len(writer.writes) != 0 || len(caller.calls) != 0 {
+		t.Fatalf("a refused call still acted: writes %+v, calls %v", writer.writes, caller.calls)
+	}
+}
+
+// READ AS THE SYSTEM, WRITE AS THE MERCHANT. The automation's own actor owns
+// nothing, so every read runs as the named system actor; and a row written
+// as a system actor is owned by nobody, so the adapter call and the
+// entitlement write run as the application's merchant.
+func TestProvisionReadsAsTheSystemAndWritesAsTheMerchant(t *testing.T) {
+	registerShippedAdapters()
+	reader := approvedFixture()
+	reader.apps["app-1"][0]["ownerUserId"] = "merchant-1"
+	caller := &fakeCaller{}
+	writer := &fakeWriter{}
+	p := &Provider{reader: reader, caller: caller, writer: writer}
+	automation := auth.ContextWithInternalOrigin(
+		auth.ContextWithSystemActor(context.Background(), "contosoGrantAfterChain"))
+
+	if _, err := p.provisionEntitlement(automation, map[string]any{"applicationId": "app-1"}, 0); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if len(reader.readAs) == 0 {
+		t.Fatal("provisioning read nothing")
+	}
+	for i, actor := range reader.readAs {
+		if actor != "system:wholesale-provision" {
+			t.Fatalf("read %s ran as %q, want the system actor system:wholesale-provision",
+				reader.asked[i], actor)
+		}
+	}
+	if len(caller.actors) != 1 || caller.actors[0] != "merchant-1" {
+		t.Fatalf("the adapter's call ran as %v, want the merchant merchant-1", caller.actors)
+	}
+	out := writer.only(t, "writeEntitlementRow")
+	if writer.writes[0].actor != "merchant-1" {
+		t.Fatalf("the entitlement was written as %q, want the merchant merchant-1", writer.writes[0].actor)
+	}
+	if out["ownerUserId"] != "merchant-1" {
+		t.Fatalf("the entitlement's ownerUserId = %v, want the application's merchant", out["ownerUserId"])
+	}
+
+	// AN APPLICATION WITH NO MERCHANT IS REFUSED, rather than written as
+	// whoever the context happened to carry.
+	delete(reader.apps["app-1"][0], "ownerUserId")
+	before := len(writer.writes)
+	if _, err := p.provisionEntitlement(automation, map[string]any{"applicationId": "app-1"}, 0); err == nil {
+		t.Fatal("an application with no ownerUserId was provisioned")
+	}
+	if len(writer.writes) != before {
+		t.Fatal("an application with no ownerUserId still wrote an entitlement")
+	}
+}
+
+// originEngine records the call origin of every Execute it is handed.
+type originEngine struct {
+	memql.IntegrationEngineAccess
+	origins []auth.CallOrigin
+}
+
+func (e *originEngine) Execute(ctx context.Context, _ string) (*memql.ExecuteResult, error) {
+	e.origins = append(e.origins, auth.OriginFromContext(ctx))
+	return &memql.ExecuteResult{}, nil
+}
+
+// THE WRITER STAMPS INTERNAL ORIGIN ON ITS ONE CALL, so the pack's
+// @serverOnly mutations are reachable from its builtins and from nothing
+// else -- and the stamp is inline, so the caller's own context is untouched.
+func TestTheWriterStampsInternalOriginOnItsOneCall(t *testing.T) {
+	eng := &originEngine{}
+	w := &engineWriter{engine: eng}
+	ctx := auth.ContextWithClientOrigin(auth.ContextWithUserActor(context.Background(), "merchant-1"))
+	if err := w.Write(ctx, "appendApplicationDecision", map[string]any{"applicationId": "app-1"}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if len(eng.origins) != 1 {
+		t.Fatalf("the writer made %d engine calls, want 1", len(eng.origins))
+	}
+	if !eng.origins[0].IsInternal() {
+		t.Fatalf("the write ran at origin %v, want internal", eng.origins[0])
+	}
+	if auth.OriginFromContext(ctx).IsInternal() {
+		t.Fatal("the stamp leaked into the caller's own context")
 	}
 }

@@ -67,6 +67,7 @@ shape application applicationFull {
 shape applicationDecision applicationDecisionFull {
   row.id
   applicationId
+  ownerUserId
   storeId
   transition
   decidedBy

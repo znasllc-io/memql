@@ -80,7 +80,7 @@ concept application {
   applicantEmail string!   @description("The applicant's email, unverified. DATA, never an identity. It is how a decision reaches them and how an entitlement adapter finds the Shopify customer to entitle, and it is why the public-facing reads of this pack project nothing at all -- an application is somebody's business contact details and there is no storefront read that returns one.")
 }
 
-@version("1.0.0")
+@version("1.1.0")
 @description("An append-only decision on a wholesale application, in the manner of v1:reviews:moderationAction. A new row is a new decision; there is no in-place update and no undo-by-overwrite, so WHY an application was refused survives the next decision. decidedBy is a Client principal -- a Provider operator is refused on the write path exactly as reviewspack's ClientMayModerate refuses one. WHO may approve, in what order and against what threshold is deliberately NOT here: dsl/commerce already ships approvalChain for a client that wants one, and a client that does not must not have to edit this pack to say so.")
 @displayCard(primary="transition", secondary="applicationId", tertiary="decidedBy")
 @rowAuthz(owner="decidedBy", clusterOwner)
@@ -89,6 +89,7 @@ concept applicationDecision {
   storeId       string!  @description("The store the decided application belongs to (design D9), copied from that application by the Go capability rather than supplied. A decision scoped to a store its subject is not on would be a decision against somebody else's trade desk.")
   transition    enum("approve", "reject", "revoke")!  @description("The act, not the resulting state. approve and reject are legal from submitted; revoke is legal only from approved. The Go capability folds the decision log to find the current state and refuses an illegal transition by name -- a cross-row read no mutation body can make.")
   decidedBy     string!  @description("v1:identity:user.id of the Client principal that authored this decision. Provider operators are refused on the write path.")
+  ownerUserId   string   @description("The application's merchant, copied off it.")
   principalKind enum("client")!  @description("The only expressible principal kind is client. provider is inexpressible -- the enum does not contain it.")
   note          string   @description("Optional client-visible reason. THE ONE FREE-TEXT FIELD IN THE PACK, and it earns its place: append-only storage is only worth having if the reason a decision was made is still there after the next one.")
 }

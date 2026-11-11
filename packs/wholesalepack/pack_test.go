@@ -180,3 +180,58 @@ func newTestProvider(t *testing.T) memql.IntegrationProvider {
 	}
 	return p
 }
+
+// EVERY PACK MUTATION IS @serverOnly. Each is reached only from the builtin
+// that judges it -- the applications-open gate, the legality fold, the
+// entitlement's state machine -- so a client calling one directly would write
+// around the check that makes the write legal. The engine refuses that call,
+// and this keeps a new mutation from arriving without the annotation.
+func TestEveryPackMutationIsServerOnly(t *testing.T) {
+	tree := wholesalepack.Tree()
+	found := 0
+	err := fs.WalkDir(tree, ".", func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() || !strings.HasSuffix(path, ".memql") {
+			return walkErr
+		}
+		raw, readErr := fs.ReadFile(tree, path)
+		if readErr != nil {
+			t.Errorf("%s: read: %v", path, readErr)
+			return nil
+		}
+		// The annotations of a construct are the @ lines directly above it.
+		var annotations []string
+		for i, line := range strings.Split(string(raw), "\n") {
+			trimmed := strings.TrimSpace(line)
+			switch {
+			case strings.HasPrefix(trimmed, "@"):
+				annotations = append(annotations, trimmed)
+				continue
+			case strings.HasPrefix(trimmed, "///"):
+				continue
+			case strings.HasPrefix(trimmed, "mutation "):
+				found++
+				if !slicesContainsPrefix(annotations, "@serverOnly") {
+					t.Errorf("%s:%d %s carries no @serverOnly; a client could write around "+
+						"the builtin that judges it", path, i+1, trimmed)
+				}
+			}
+			annotations = nil
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk pack tree: %v", err)
+	}
+	if found == 0 {
+		t.Fatal("found no mutation in the pack tree; the walk read nothing")
+	}
+}
+
+func slicesContainsPrefix(lines []string, prefix string) bool {
+	for _, l := range lines {
+		if strings.HasPrefix(l, prefix) {
+			return true
+		}
+	}
+	return false
+}

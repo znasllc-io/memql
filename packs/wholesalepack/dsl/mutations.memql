@@ -15,21 +15,26 @@
 // store accepting applications, what store is this application on, what
 // does the decision log fold to, is this transition legal -- and then
 // calls the matching mutation here through the engine, under the caller's
-// own actor.
+// own actor (or, from the store's automation, the application's merchant).
 //
-// That split is not a workaround; it is the right seam. `stamp {
-// ownerUserId: actor.userId }` is the ENGINE's way of saying who owns a
-// row, and every concept in this pack is @rowAuthz(owner="ownerUserId",
-// clusterOwner) -- so a row written any other way is owned by nobody and
-// invisible to the merchant who just made it. Letting the mutation stamp
-// it means the pack's Go never has to know how an actor becomes an owner.
+// # Every one of these is @serverOnly
 //
-// # None of these is the shopper's entry point
+// Each is reached ONLY from the builtin that judges it, through reader.go's
+// engineWriter, which stamps internal origin for that one call. A client
+// calling one directly would write around the check that makes the write
+// legal -- a decision appended past the legality fold, an entitlement
+// nobody approved -- so the engine refuses it. The caller's actor still
+// runs the mutation, so the row gate still decides whether it may write.
 //
-// The declared shopper form names the BUILTIN, so the gate cannot be
-// skipped from outside. These are reachable by an authenticated caller on
-// their own store, which is the operator and import path -- exactly the
-// asymmetry reviewspack draws between createReview and submitReview.
+// # ownerUserId is an ARGUMENT, accepted
+//
+// Every concept in this pack is @rowAuthz(owner="ownerUserId",
+// clusterOwner), so a row's owner is the merchant it belongs to. The Go
+// names that merchant -- the borrowed site owner on submission, the
+// application's ownerUserId on a decision and an entitlement -- because
+// the actor running a write is not always that merchant: provisioning from
+// the store's automation reads as the deployment, and a row stamped from a
+// system actor is owned by nobody.
 
 use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings }
 
@@ -37,10 +42,14 @@ use wholesale.concepts.{ application, applicationDecision, entitlement, wholesal
 /// caller is a member of the public, `id` is a name the shopper surface
 /// refuses outright, and a shopper who could choose a row id could
 /// overwrite another applicant's. The engine derives one.
+/// ownerUserId is the site owner whose authority the shopper handler
+/// borrowed, which is the calling actor.
+@serverOnly
 @actor
 mutation application createApplicationRow {
   args {
     applicationId   string!
+    ownerUserId     string!
     storeId         string!
     siteId          string
     companyName     string!  @maxLength(200)
@@ -48,10 +57,9 @@ mutation application createApplicationRow {
     applicantEmail  string!  @maxLength(320)
   }
   insert {
-    accept { storeId, siteId, companyName, applicantName, applicantEmail }
+    accept { ownerUserId, storeId, siteId, companyName, applicantName, applicantEmail }
     stamp {
       id: args.applicationId
-      ownerUserId: actor.userId
     }
   }
 }
@@ -67,17 +75,20 @@ mutation application createApplicationRow {
 /// because a caller-supplied decider on an APPEND-ONLY log is a way to
 /// attribute somebody else's approval to them permanently, with no later
 /// write able to correct it. When the two disagree the actor wins, which
-/// is the only one of them that cannot be forged.
+/// is the only one of them that cannot be forged. ownerUserId is the
+/// application's merchant, copied off it by the builtin.
+@serverOnly
 @actor
 mutation applicationDecision appendApplicationDecision {
   args {
     applicationId  string!
+    ownerUserId    string
     storeId        string!
     transition     string!  @enum("approve", "reject", "revoke")
     note           string   @maxLength(2000)
   }
   insert {
-    accept { applicationId, storeId, transition, note }
+    accept { applicationId, ownerUserId, storeId, transition, note }
     stamp {
       decidedBy: actor.userId
       principalKind: "client"
@@ -88,6 +99,7 @@ mutation applicationDecision appendApplicationDecision {
 /// Write one store's settings. NAMES ITS ID, derived from the store, so
 /// there is exactly one row per store and a second write is a new VERSION
 /// of it rather than a second row a read would have to choose between.
+@serverOnly
 @actor
 mutation wholesaleSettings setWholesaleSettingsRow {
   args {
@@ -109,11 +121,15 @@ mutation wholesaleSettings setWholesaleSettingsRow {
 /// Write one application's entitlement. NAMES ITS ID, derived from the
 /// application, so a re-provision after a failure is a new version of one
 /// logical row -- and "revoked when" is that version's own createdAt,
-/// which is why the concept carries no revokedAt.
+/// which is why the concept carries no revokedAt. ownerUserId is the
+/// application's merchant: the write runs as that merchant, and a row owned
+/// by anybody else is invisible to the merchant who granted it.
+@serverOnly
 @actor
 mutation entitlement writeEntitlementRow {
   args {
     entitlementId  string!
+    ownerUserId    string!
     applicationId  string!
     storeId        string!
     buyerEmail     string!
@@ -123,10 +139,9 @@ mutation entitlement writeEntitlementRow {
     error          string   @maxLength(4000)
   }
   insert {
-    accept { applicationId, storeId, buyerEmail, adapter, state, reference, error }
+    accept { ownerUserId, applicationId, storeId, buyerEmail, adapter, state, reference, error }
     stamp {
       id: args.entitlementId
-      ownerUserId: actor.userId
     }
   }
 }

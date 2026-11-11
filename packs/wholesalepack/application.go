@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
@@ -218,10 +219,11 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 	}
 	// THE BUILTIN DECIDED; THE MUTATION WRITES. A builtin's returned nodes
 	// are the expression's VALUE and are never persisted, so the row is
-	// written through the pack's own mutation -- which also stamps
-	// ownerUserId from the actor, the engine's own way of saying who owns a
-	// row. Every concept here is @rowAuthz(owner="ownerUserId",
-	// clusterOwner), so a row written any other way is owned by nobody.
+	// written through the pack's own mutation. ownerUserId is the CALLING
+	// ACTOR -- on the shopper path the site owner whose authority the handler
+	// borrowed -- passed explicitly, because every concept here is
+	// @rowAuthz(owner="ownerUserId", clusterOwner) and a row owned by nobody
+	// is invisible to the merchant it was submitted to.
 	// THE ROW ID IS THE SUBMISSION ID THE BFF MINTED (design record
 	// 2026-09-21, D4). It was derived by the engine until this seam
 	// existed, which left the new row's id known to nobody -- and a client
@@ -234,8 +236,17 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 		return nil, fmt.Errorf("wholesale: submissionId is required; it is minted per " +
 			"submission and stamped by the bff, and it is the id this application is written at")
 	}
+	owner := ""
+	if ac, ok := auth.AccessFromContext(ctx); ok {
+		owner = strings.TrimSpace(ac.UserId)
+	}
+	if owner == "" {
+		return nil, fmt.Errorf("wholesale: an application is written as the site owner, and " +
+			"this call carries no actor")
+	}
 	if err := p.write(ctx, "createApplicationRow", map[string]any{
 		"applicationId":  applicationID,
+		"ownerUserId":    owner,
 		"storeId":        storeID,
 		"siteId":         trimmed(args["siteId"]),
 		"companyName":    company,
@@ -294,8 +305,11 @@ func (p *Provider) recordDecision(ctx context.Context, args map[string]any, _ in
 	// caller-supplied decider on an append-only log is a way to attribute
 	// somebody else's approval to them permanently. mutations.memql says
 	// the same thing from the other side.
+	// ownerUserId IS THE APPLICATION'S MERCHANT, copied off it like storeId,
+	// so the decision says whose trade desk it belongs to whoever decided.
 	if err := p.write(ctx, "appendApplicationDecision", map[string]any{
 		"applicationId": applicationID,
+		"ownerUserId":   trimmed(app["ownerUserId"]),
 		"storeId":       storeID,
 		"transition":    transition,
 		"note":          asString(args["note"]),

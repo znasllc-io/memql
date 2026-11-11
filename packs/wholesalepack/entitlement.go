@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -210,24 +211,51 @@ func EntitlementRowID(applicationID string) string {
 	return "wholesale-entitlement-" + slugOf(applicationID)
 }
 
+// provisionActor is the system actor provisioning READS as.
+//
+// The automation that calls these builtins runs as the scheduler's own
+// synthetic reader, which owns nothing a merchant's row is readable by -- so
+// read under it, the application answers "not readable by this caller" and no
+// row is written. The deployment reads instead, by name, and the writes go
+// out as the application's merchant (asMerchant), because a row written as a
+// system actor is owned by nobody.
+const provisionActor = "wholesale-provision"
+
 // provisionEntitlement grants through the store's chosen adapter.
+//
+// FOR THE STORE'S AUTOMATION ONLY. It reads as the deployment and acts as the
+// application's merchant, so a client that could call it could provision any
+// application it can name; the refusal comes before anything is read.
 func (p *Provider) provisionEntitlement(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireInternal(ctx, "wholesaleProvisionEntitlement"); err != nil {
+		return nil, err
+	}
 	return p.applyEntitlement(ctx, args, false)
 }
 
-// revokeEntitlement takes one back through the adapter that granted it.
+// revokeEntitlement takes one back through the adapter that granted it. For
+// the store's automation only, for the reason provisionEntitlement gives.
 func (p *Provider) revokeEntitlement(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireInternal(ctx, "wholesaleRevokeEntitlement"); err != nil {
+		return nil, err
+	}
 	return p.applyEntitlement(ctx, args, true)
 }
 
 // applyEntitlement is both directions, because they differ in three lines
 // and sharing them keeps the state machine in one place.
+//
+// IT CHECKS NO ORIGIN, and that is deliberate: the two capabilities above
+// decide who may reach it. It reads the application, its decisions, the
+// settings and the store's plan as the deployment, and calls the adapter and
+// writes the entitlement as the application's merchant.
 func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, revoking bool) ([]memorynodes.MemoryNode, error) {
 	applicationID := trimmed(args["applicationId"])
 	if applicationID == "" {
 		return nil, fmt.Errorf("wholesale: applicationId is required")
 	}
-	app, err := p.applicationRow(ctx, applicationID)
+	sys := auth.ContextWithSystemActor(ctx, provisionActor)
+	app, err := p.applicationRow(sys, applicationID)
 	if err != nil {
 		return nil, err
 	}
@@ -235,12 +263,16 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 	if storeID == "" {
 		return nil, fmt.Errorf("wholesale: application %q carries no storeId", applicationID)
 	}
+	merchant, err := p.asMerchant(ctx, app)
+	if err != nil {
+		return nil, err
+	}
 
 	// THE DECISION LOG DECIDES WHETHER THIS IS ALLOWED, not an argument.
 	// Provisioning an application nobody approved would grant trade terms
 	// on the strength of a caller's say-so; revoking one nobody revoked
 	// would leave the pack's state disagreeing with its own history.
-	state, err := p.stateOf(ctx, applicationID)
+	state, err := p.stateOf(sys, applicationID)
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +286,7 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 			"application has an entitlement to provision", applicationID, state)
 	}
 
-	adapterName, err := p.adapterFor(ctx, storeID)
+	adapterName, err := p.adapterFor(sys, storeID)
 	if err != nil {
 		return nil, err
 	}
@@ -273,10 +305,10 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 	// THE PLAN IS READ, NOT ASKED FOR. A caller that supplied its own would
 	// be the one deciding whether an adapter is available, which is the
 	// check's whole content.
-	grant.Plan = p.storePlan(ctx, storeID)
+	grant.Plan = p.storePlan(sys, storeID)
 
 	if revoking {
-		prior, err := p.entitlementRow(ctx, applicationID)
+		prior, err := p.entitlementRow(sys, applicationID)
 		if err != nil {
 			return nil, err
 		}
@@ -315,9 +347,9 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 	var result Outcome
 	if applyErr == nil {
 		if revoking {
-			result, applyErr = adapter.Revoke(ctx, p.caller, grant)
+			result, applyErr = adapter.Revoke(merchant, p.caller, grant)
 		} else {
-			result, applyErr = adapter.Provision(ctx, p.caller, grant)
+			result, applyErr = adapter.Provision(merchant, p.caller, grant)
 		}
 	}
 
@@ -344,7 +376,8 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 		errText = applyErr.Error()
 	}
 
-	node, err := p.writeEntitlement(ctx, applicationID, storeID, grant, adapterName, entState, result, errText)
+	node, err := p.writeEntitlement(merchant, applicationID, storeID, trimmed(app["ownerUserId"]),
+		grant, adapterName, entState, result, errText)
 	if err != nil {
 		return nil, err
 	}
@@ -353,6 +386,22 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 	// merchant would have an approved application with nothing anywhere
 	// saying a push had been attempted and failed. The row carries it.
 	return node, nil
+}
+
+// asMerchant is ctx acting as the application's merchant: its ownerUserId,
+// the owner of the deployable it was submitted through.
+//
+// REFUSED WHEN THE APPLICATION NAMES NONE, because auth.ContextWithUserActor
+// returns ctx unchanged for a blank id, and the write would then go out as
+// whoever the context happened to carry -- for an automation, a system actor
+// whose rows nobody owns.
+func (p *Provider) asMerchant(ctx context.Context, app map[string]any) (context.Context, error) {
+	owner := trimmed(app["ownerUserId"])
+	if owner == "" {
+		return nil, fmt.Errorf("wholesale: application %q names no ownerUserId, so there is no "+
+			"merchant to act as", trimmed(app["id"]))
+	}
+	return auth.ContextWithUserActor(ctx, owner), nil
 }
 
 // adapterFor reads the store's chosen adapter name.
@@ -409,10 +458,10 @@ func (p *Provider) entitlementRow(ctx context.Context, applicationID string) (ma
 //
 // THROUGH THE MUTATION, for the reason mutations.memql gives at length: a
 // builtin's returned nodes are the expression's value and are never
-// persisted, and the mutation is also what stamps ownerUserId from the
-// actor. A row written any other way is owned by nobody and invisible to
+// persisted. ownerUserId is the application's merchant, passed explicitly
+// and written as that merchant: a row owned by anybody else is invisible to
 // the merchant who granted it.
-func (p *Provider) writeEntitlement(ctx context.Context, applicationID, storeID string, g Grant,
+func (p *Provider) writeEntitlement(ctx context.Context, applicationID, storeID, ownerUserID string, g Grant,
 	adapterName, state string, result Outcome, errText string) ([]memorynodes.MemoryNode, error) {
 	reference := result.Reference
 	if reference == "" {
@@ -423,6 +472,7 @@ func (p *Provider) writeEntitlement(ctx context.Context, applicationID, storeID 
 	}
 	if err := p.write(ctx, "writeEntitlementRow", map[string]any{
 		"entitlementId": EntitlementRowID(applicationID),
+		"ownerUserId":   ownerUserID,
 		"applicationId": applicationID,
 		"storeId":       storeID,
 		"buyerEmail":    g.BuyerEmail,

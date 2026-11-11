@@ -339,9 +339,13 @@ func TestLiveE2E_ApprovalProvisionsAndAFailedPushKeepsTheApproval(t *testing.T) 
 	}
 	appID, _ := rows[0]["id"].(string)
 
+	// THE PROVISIONING BUILTINS ARE THE STORE'S AUTOMATION'S, which calls
+	// with internal origin; a direct call here arrives the same way.
+	automation := auth.ContextWithInternalOrigin(ctx)
+
 	// PROVISIONING AN UNAPPROVED APPLICATION IS REFUSED. The decision log
 	// decides, not an argument.
-	if _, err := eng.Execute(ctx, `builtin wholesaleProvisionEntitlement(applicationId: `+
+	if _, err := eng.Execute(automation, `builtin wholesaleProvisionEntitlement(applicationId: `+
 		wsQuote(appID)+`)`); err == nil {
 		t.Fatal("an application nobody approved was provisioned")
 	}
@@ -355,7 +359,7 @@ func TestLiveE2E_ApprovalProvisionsAndAFailedPushKeepsTheApproval(t *testing.T) 
 	// engine. That is the case worth measuring, because it is the one the
 	// design speaks to -- "a provisioning failure leaves the application
 	// approved and the entitlement pending with its error".
-	wsExec(t, eng, ctx, `builtin wholesaleProvisionEntitlement(applicationId: `+wsQuote(appID)+`)`)
+	wsExec(t, eng, automation, `builtin wholesaleProvisionEntitlement(applicationId: `+wsQuote(appID)+`)`)
 
 	ents := wsRows(t, eng, ctx,
 		`query entitlementForApplication(applicationId: `+wsQuote(appID)+`)`)
@@ -387,7 +391,7 @@ func TestLiveE2E_ApprovalProvisionsAndAFailedPushKeepsTheApproval(t *testing.T) 
 	}
 
 	// A REVOKE NEEDS ITS DECISION FIRST, so the state and the history agree.
-	if _, err := eng.Execute(ctx, `builtin wholesaleRevokeEntitlement(applicationId: `+
+	if _, err := eng.Execute(automation, `builtin wholesaleRevokeEntitlement(applicationId: `+
 		wsQuote(appID)+`)`); err == nil {
 		t.Fatal("an entitlement was revoked with no revoke decision behind it")
 	}

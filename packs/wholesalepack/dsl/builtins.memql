@@ -57,14 +57,14 @@ builtin wholesaleSetSettings {
 
 @executor("integration.wholesale.provisionEntitlement")
 @args(profile="object")
-@description("Grant wholesale prices through this store's chosen adapter. Only an APPROVED application has an entitlement to provision, and the decision log decides that rather than an argument. A FAILED PUSH LEAVES THE APPLICATION APPROVED and writes the entitlement `pending` carrying the error -- an approval is a decision somebody made, and a push that failed is not a reason to undo it. An adapter REFUSAL (a plan ceiling, a buyer with no customer account) writes `failed` instead, because it will fail identically for ever and retrying it is how a queue stops draining.")
+@description("Grant wholesale prices through this store's chosen adapter. CALLED BY THE STORE'S AUTOMATION, on an approve decision: it refuses any call without internal origin before it reads anything, reads as the deployment (the automation's own actor owns nothing), and grants and records the entitlement as the application's merchant. Only an APPROVED application has an entitlement to provision, and the decision log decides that rather than an argument. A FAILED PUSH LEAVES THE APPLICATION APPROVED and writes the entitlement `pending` carrying the error -- an approval is a decision somebody made, and a push that failed is not a reason to undo it. An adapter REFUSAL (a plan ceiling, a buyer with no customer account) writes `failed` instead, because it will fail identically for ever and retrying it is how a queue stops draining.")
 builtin wholesaleProvisionEntitlement {
   applicationId  string!  @description("The approved application to provision against.")
 }
 
 @executor("integration.wholesale.revokeEntitlement")
 @args(profile="object")
-@description("Take an entitlement back, through the adapter that GRANTED it rather than whatever the settings name today -- a merchant who switches adapters must still be able to undo what the old one gave. Requires a revoke decision to have been recorded first, so the pack's state and its history agree.")
+@description("Take an entitlement back. CALLED BY THE STORE'S AUTOMATION: it refuses any call without internal origin before it reads anything, reads as the deployment, and takes the entitlement back and records it as the application's merchant -- through the adapter that GRANTED it rather than whatever the settings name today -- a merchant who switches adapters must still be able to undo what the old one gave. Requires a revoke decision to have been recorded first, so the pack's state and its history agree.")
 builtin wholesaleRevokeEntitlement {
   applicationId  string!  @description("The revoked application whose entitlement to take back.")
 }
