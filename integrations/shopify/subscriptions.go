@@ -131,7 +131,7 @@ func (c *Connector) EnsureSubscriptions(ctx context.Context) error {
 func (c *Connector) subscriptionPass(ctx context.Context, store Store) (SubscriptionReport, error) {
 	report, err := c.EnsureSubscriptionsForStore(ctx, store)
 	if err != nil {
-		c.logger.Warn("shopify: could not read the store's webhook subscriptions", "store", store.ID)
+		c.logger.Warn("shopify: could not read the store's webhook subscriptions", "store", store.ID, "error", err.Error())
 		report.Failed = append(report.Failed, subscriptionsUnreadable)
 	}
 	if recErr := c.recordSubscriptionHealth(ctx, store, report); recErr != nil {

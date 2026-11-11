@@ -118,11 +118,6 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 		scopes = []string{}
 	}
 	update := map[string]any{"storeId": storeID, "adminTokenRef": adminRef, "apiVersion": generated.APIVersion, "scopesGranted": scopes}
-	if startsAfresh(prior, found) {
-		// The store's recording starts here: the clock a late check is
-		// measured from. A connect that only widens the grant keeps it.
-		update["connectedAt"] = c.now().UTC().Format(time.RFC3339)
-	}
 	if promoted {
 		webhookRef, err := seedSecret(opCtx, c.engine, storeSecretName(storeID, suffixWebhookSecret), grant.ClientSecret, connectSealDescription, person)
 		if err != nil {
@@ -158,6 +153,18 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 		if _, err := c.engine.Execute(opCtx, renderCall("updateStore", update)); err != nil {
 			c.logger.Warn("shopify: Connect could not update the store row", "store", storeID, "error", err.Error())
 			return connectReasonExchangeFailed, keptResult
+		}
+	}
+	// 12a. The store's recording starts here when the connect starts it
+	// afresh: the clock a late check is measured from. A connect that only
+	// widens the grant keeps it. Through its own server-only write, so no
+	// client-callable store write takes it; a failure is logged, and the
+	// verdict then measures from the store's sweeps alone.
+	if startsAfresh(prior, found) {
+		if _, err := c.engine.Execute(opCtx, renderCall("markStoreConnected", map[string]any{
+			"storeId": storeID, "connectedAt": c.now().UTC().Format(time.RFC3339),
+		})); err != nil {
+			c.logger.Warn("shopify: Connect could not record when the store's recording started", "store", storeID, "error", err.Error())
 		}
 	}
 	if promoted && !managed {

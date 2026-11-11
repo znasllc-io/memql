@@ -28,7 +28,6 @@ mutation store createStore {
     scopesGranted       []string
     isDevelopment         boolean
     developmentOfStoreId  string
-    connectedAt           datetime
   }
   insert {
     stamp {
@@ -48,7 +47,6 @@ mutation store createStore {
       health:             {}
       isDevelopment:        args.isDevelopment ?? false
       developmentOfStoreId: args.developmentOfStoreId ?? ""
-      connectedAt:          args.connectedAt ?? ""
     }
   }
 }
@@ -71,10 +69,9 @@ mutation store updateStore {
     ownerUserId         string
     isDevelopment         boolean
     developmentOfStoreId  string
-    connectedAt           datetime
   }
   update {
-    accept { name, appClientId, adminTokenRef, storefrontTokenRef, webhookSecretRef, apiVersion, protectedDataLevel, plan, scopesGranted, ownerUserId, isDevelopment, developmentOfStoreId, connectedAt }
+    accept { name, appClientId, adminTokenRef, storefrontTokenRef, webhookSecretRef, apiVersion, protectedDataLevel, plan, scopesGranted, ownerUserId, isDevelopment, developmentOfStoreId }
     stamp {
       id:                 args.storeId
     }
@@ -179,6 +176,29 @@ mutation store markStoreReconnected {
       id:            args.storeId
       uninstalledAt: ""
       redactedAt:    ""
+    }
+  }
+}
+
+/// Record when a connect started the store's recording afresh: its first
+/// connect, or one after an uninstall, a purge, or with no Admin token. The
+/// verdict measures a late check from it.
+///
+/// Server-only, and actor.userId scoping is not the fix: the caller is Connect
+/// Shopify's verified callback writing as the deployment, and what the row
+/// asserts -- that Shopify approved a connect at this time -- is the callback's
+/// to say, never a person's. A client-callable version would let a caller move
+/// the clock a late check is measured from, and hide one.
+@serverOnly
+mutation store markStoreConnected {
+  args {
+    storeId      string!
+    connectedAt  datetime!
+  }
+  update {
+    accept { connectedAt }
+    stamp {
+      id:  args.storeId
     }
   }
 }

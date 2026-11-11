@@ -69,6 +69,7 @@ const subscriptionsUnreadable = "subscriptions: the store's webhook subscription
 type VerdictReason struct {
 	Code, Domain, Sentence, Detail string
 	Count                          int
+	AtLeast                        bool
 	Act, ActLabel, ActURL          string // Act: "", "approve", "reconnect", "register", "retry", "declare"
 }
 
@@ -94,8 +95,11 @@ type verdictInput struct {
 	States    []map[string]any         // this store's sync-state rows
 	Intervals map[string]time.Duration // concept id to its sweep interval
 	GivenUp   []map[string]any         // this store's given-up deliveries
-	Denied    map[string][]string      // fieldsDenied
-	Previous  map[string]any           // health.verdict as last recorded
+	// GivenUpFloor says GivenUp is not all of them: the read ran out of
+	// budget, so what it counts is a floor.
+	GivenUpFloor bool
+	Denied       map[string][]string // fieldsDenied
+	Previous     map[string]any      // health.verdict as last recorded
 	// ConnectedAt is when the store was connected, or zero when the row
 	// does not say. One of the three times a late check is measured from.
 	ConnectedAt time.Time
@@ -151,6 +155,58 @@ func computeVerdict(in verdictInput) Verdict {
 	return v
 }
 
+// storeInactive is a store the verdict asks nothing of: disconnected or
+// paused. Its state carries no reasons, so nothing a reason reads is read.
+func storeInactive(store Store) bool {
+	return store.UninstalledAt != "" || store.RedactedAt != "" || store.Status == StatusPaused
+}
+
+// verdictDomains is the domains, by concept id, whose rows the verdict reads:
+// the domains it asks about, and any other domain of the connection a
+// backfill reads (which can hold the store at starting). Recorded and Outside
+// need no others: Recorded's kinds are asked domains, and a domain outside
+// the connection is named from the connection alone.
+func verdictDomains(store Store) []string {
+	var out []string
+	for _, concept := range generated.ApplyOrder {
+		spec := generated.Types[concept]
+		if spec != nil && domainInConnection(store, spec) && (spec.Reconcile != generated.ReconcileNone || bulkDomain(spec)) {
+			out = append(out, generated.ConceptID(concept))
+		}
+	}
+	return out
+}
+
+// givenUpBound is the oldest clean sweep among the domains a given-up
+// delivery can count toward: a delivery received before it cannot count,
+// whatever domain it routes to. Zero when any such domain has never been
+// swept clean -- every delivery routed to that one counts, however old.
+func givenUpBound(store Store, states []map[string]any) time.Time {
+	rows := rowsByConcept(states)
+	var bound time.Time
+	for _, concept := range insideDomains(store, rows) {
+		clean := rowTime(rows[concept], "lastReconcileAt")
+		if clean.IsZero() {
+			return time.Time{}
+		}
+		if bound.IsZero() || clean.Before(bound) {
+			bound = clean
+		}
+	}
+	return bound
+}
+
+// insideDomains is the asked domains less those refused as not requested.
+func insideDomains(store Store, rows map[string]map[string]any) []string {
+	var inside []string
+	for _, concept := range askedDomains(store) {
+		if !isNotRequested(mapString(rows[concept], "lastError")) {
+			inside = append(inside, concept)
+		}
+	}
+	return inside
+}
+
 // askedDomains is what the verdict asks about: the domains the sweep
 // considers on its own, inside the store's connection. A child read with its
 // parent, and a domain the connection never asks for, are never asked.
@@ -160,23 +216,16 @@ func askedDomains(store Store) []string {
 
 func reasonsOf(in verdictInput, rows map[string]map[string]any, from time.Time) []VerdictReason {
 	store := in.Store
-	asked := askedDomains(store)
 	var out []VerdictReason
 
 	// A row refused as not requested -- a scope the connection never asks
 	// for, a feature the plan does not have -- is outside the connection and
 	// never a reason, whatever else holds below.
-	inside := asked[:0:0]
-	for _, concept := range asked {
-		if !isNotRequested(mapString(rows[concept], "lastError")) {
-			inside = append(inside, concept)
-		}
-	}
+	inside := insideDomains(store, rows)
 
 	var undeclared []string
 	for _, concept := range inside {
-		lastError := mapString(rows[concept], "lastError")
-		if isNotGranted(lastError) && protectedDataRefusal(lastError) {
+		if undeclaredData(rows[concept]) {
 			undeclared = append(undeclared, plainDomain(concept))
 		}
 	}
@@ -227,12 +276,32 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from time.Time) 
 		if n == 1 {
 			sentence = "1 change could not be recorded."
 		}
+		if in.GivenUpFloor {
+			// The read ran out of budget: at least this many.
+			sentence = "At least " + sentence
+		}
 		out = append(out, VerdictReason{
-			Code: ReasonChangesNotRecorded, Sentence: sentence, Count: n,
+			Code: ReasonChangesNotRecorded, Sentence: sentence, Count: n, AtLeast: in.GivenUpFloor,
 			Act: ActRetry, ActLabel: "Try again",
 		})
 	}
 	return out
+}
+
+// backfillRefusedPrefix opens the lastError of a backfill the origin refused
+// although the sweep reads the domain, as component/datasync writes it
+// (runners.go). Recognised here only to read the refusal underneath it.
+const backfillRefusedPrefix = "backfill refused: "
+
+// undeclaredData reports whether a domain's row is Shopify's protected-data
+// refusal: the sweep's standing not-granted answer, or a failed backfill
+// refused with it.
+func undeclaredData(row map[string]any) bool {
+	lastError := mapString(row, "lastError")
+	if mapString(row, "backfillStatus") == "failed" {
+		lastError = strings.TrimPrefix(lastError, backfillRefusedPrefix)
+	}
+	return isNotGranted(lastError) && protectedDataRefusal(lastError)
 }
 
 // grantLost reports whether a domain's error says the store's grant no longer
@@ -314,6 +383,10 @@ func checkFailing(concept string, row map[string]any, interval time.Duration, fr
 	}
 	word := plainDomain(concept)
 	r := VerdictReason{Code: ReasonCheckFailing, Domain: word, Sentence: "The last check of " + word + " failed"}
+	if undeclaredData(row) {
+		// data_not_declared, with its act.
+		return VerdictReason{}, false
+	}
 	if mapString(row, "backfillStatus") == "failed" {
 		// Without this, a store whose past could not be brought in would
 		// read recording while its sweeps are clean.
@@ -335,10 +408,7 @@ func checkFailing(concept string, row map[string]any, interval time.Duration, fr
 		// Never attempted: the store is starting, not failing.
 		return VerdictReason{}, false
 	}
-	baseline := clean
-	if from.After(baseline) {
-		baseline = from
-	}
+	baseline := baselineOf(clean, from, now)
 	if !baseline.IsZero() && now.Sub(baseline) <= 2*interval {
 		return VerdictReason{}, false
 	}
@@ -356,7 +426,8 @@ func checkFailing(concept string, row map[string]any, interval time.Duration, fr
 }
 
 // changesNotRecorded counts the given-up deliveries received after the last
-// clean sweep of the domain their topic routes to. One older than that sweep
+// clean sweep of the domain their topic routes to -- for a child read with
+// its parent, the parent's, since the parent's sweep is what records it. One older than that sweep
 // is not counted: the sweep read what it named. One whose topic routes to no
 // domain asked about is not counted either.
 func changesNotRecorded(givenUp []map[string]any, inside []string, rows map[string]map[string]any) int {
@@ -370,7 +441,7 @@ func changesNotRecorded(givenUp []map[string]any, inside []string, rows map[stri
 		if !ok {
 			continue
 		}
-		concept := generated.ConceptID(route.Concept)
+		concept := generated.ConceptID(sweptParentOf(route.Concept))
 		if !asked[concept] {
 			continue
 		}
@@ -381,6 +452,20 @@ func changesNotRecorded(givenUp []map[string]any, inside []string, rows map[stri
 		}
 	}
 	return n
+}
+
+// sweptParentOf is the domain whose sweep records a concept: the concept
+// itself, or, for a child read with its parent, the nearest ancestor swept on
+// its own -- by the generated tables' Parent link.
+func sweptParentOf(concept string) string {
+	for seen := 0; seen < len(generated.ApplyOrder); seen++ {
+		spec := generated.Types[concept]
+		if spec == nil || spec.Reconcile != generated.ReconcileNone || spec.Parent == "" {
+			return concept
+		}
+		concept = spec.Parent
+	}
+	return concept
 }
 
 // topicHeaderOf is a staged delivery's X-Shopify-Topic header. The receiver
@@ -418,6 +503,20 @@ func starting(store Store, rows map[string]map[string]any) bool {
 		}
 	}
 	return false
+}
+
+// baselineOf is the later of a domain's clean sweep and the store's own
+// baseline, a time in the future counting as now: a clock that ran ahead
+// holds nothing back past twice an interval from now.
+func baselineOf(clean, from, now time.Time) time.Time {
+	baseline := clean
+	if from.After(baseline) {
+		baseline = from
+	}
+	if baseline.After(now) {
+		return now
+	}
+	return baseline
 }
 
 // lateFrom is the later of the store's connection and its last resume: the
@@ -611,8 +710,12 @@ func rowsByConcept(states []map[string]any) map[string]map[string]any {
 }
 
 // rowTime reads a datetime field, or the zero time when it is absent or
-// unreadable.
+// unreadable. A payload field arrives as text; a row's own createdAt, from a
+// shaped read, arrives as a time.Time.
 func rowTime(row map[string]any, key string) time.Time {
+	if at, ok := rowValue(row, key).(time.Time); ok {
+		return at.UTC()
+	}
 	at, err := time.Parse(time.RFC3339Nano, mapString(row, key))
 	if err != nil {
 		return time.Time{}

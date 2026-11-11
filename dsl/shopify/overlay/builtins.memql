@@ -44,13 +44,13 @@ builtin shopifyStoreHealth {
 /// `connectedAt` when a connect last started its recording afresh (empty for a store connected before
 /// that was recorded). Each reason has a `code` (data_not_declared, approval_outdated, grant_lost,
 /// events_not_registered, check_failing, changes_not_recorded), one `sentence` for a person, and an
-/// `act` with its `actLabel` and `actUrl` (or none). `outside` and `withheld` are plain words.
+/// `act` with its `actLabel` and `actUrl` (or none); `count` is a floor when `atLeast` is true. `outside` and `withheld` are plain words.
 /// `may.act` says whether the caller may take the acts. For the store's owner, a cluster owner, or a
 /// caller who may read stores; anyone else is refused before the store's state is read.
 @sdk
 @executor("integration.shopify.storeVerdict")
 @requiresCapability("execute", "app:deployables/store")
-@description("One store's verdict: state (recording, starting, paused, needs attention, not connected), since, resumedAt and connectedAt; reasons, each {code, domain, sentence, detail, count, act, actLabel, actUrl}; recorded, each {kind, lastChangeAt, lastCheckedAt}; outside and withheld in plain words; ordersFrom; alert {state, reason}; may {act}. For the store's owner, a cluster owner, or a caller who may read stores.")
+@description("One store's verdict: state (recording, starting, paused, needs attention, not connected), since, resumedAt and connectedAt; reasons, each {code, domain, sentence, detail, count, atLeast, act, actLabel, actUrl} (atLeast: the count is a floor); recorded, each {kind, lastChangeAt, lastCheckedAt}; outside and withheld in plain words; ordersFrom; alert {state, reason}; may {act}. For the store's owner, a cluster owner, or a caller who may read stores.")
 builtin shopifyStoreVerdict {
   storeId  string!  @description("The store.")
 }

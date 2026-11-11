@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/num"
@@ -406,9 +405,19 @@ func (i *Integration) handleStoreHealth(ctx context.Context, args map[string]any
 // component/datasync, and a connector that declared a parallel read of
 // it would be a second answer to a question the runtime already answers.
 func (c *Connector) storeSyncStates(ctx context.Context, storeID string) ([]map[string]any, error) {
-	out := []map[string]any{}
+	all := make([]string, 0, len(generated.ApplyOrder))
 	for _, concept := range generated.ApplyOrder {
-		stateID := memqlsync.StateID(generated.ConceptID(concept), ConnectorName, string(memqlsync.DirectionInbound), storeID)
+		all = append(all, generated.ConceptID(concept))
+	}
+	return c.syncStatesOf(ctx, storeID, all)
+}
+
+// syncStatesOf is storeSyncStates for the named domains (concept ids) only:
+// the store's row of each, by id, and only those that have one.
+func (c *Connector) syncStatesOf(ctx context.Context, storeID string, concepts []string) ([]map[string]any, error) {
+	out := []map[string]any{}
+	for _, concept := range concepts {
+		stateID := memqlsync.StateID(concept, ConnectorName, string(memqlsync.DirectionInbound), storeID)
 		res, err := c.engine.Execute(operatorContext(ctx), renderCall("syncStateById", map[string]any{"stateId": stateID}))
 		if err != nil {
 			return nil, fmt.Errorf("shopify: read sync state: %w", err)
@@ -418,211 +427,6 @@ func (c *Connector) storeSyncStates(ctx context.Context, storeID string) ([]map[
 		}
 	}
 	return out, nil
-}
-
-// verdictCapabilities is the Store page's verdict and its two acts. Each is
-// declared with @requiresCapability("execute", "app:deployables/store") in
-// dsl/shopify/overlay/builtins.memql, which the engine asks before the
-// handler runs; who may see or act on THIS store is asked in the handler.
-func (i *Integration) verdictCapabilities() []memql.IntegrationCapability {
-	store := map[string]string{"storeId": "string - the store"}
-	return []memql.IntegrationCapability{
-		{
-			Name:        "storeVerdict",
-			Description: "One store's verdict -- recording, starting, paused, needs attention or not connected -- with each reason a store needs attention, its one act, what is recorded, what is outside the connection and what Shopify withholds. For the store's owner, a cluster owner, or a caller who may read stores.",
-			Handler:     i.handleStoreVerdict,
-			ArgsSchema:  store,
-		},
-		{
-			Name:        "storeRegisterEvents",
-			Description: "Run one store's subscription pass now and record it on the store's health: Register again. For the store's owner or a cluster owner.",
-			Handler:     i.handleStoreRegisterEvents,
-			ArgsSchema:  store,
-		},
-		{
-			Name:        "storeRetryDeliveries",
-			Description: "Put one store's deliveries that used their four tries back in line: Try again. For the store's owner or a cluster owner.",
-			Handler:     i.handleStoreRetryDeliveries,
-			ArgsSchema:  store,
-		},
-	}
-}
-
-// mayActOnStore reports whether the caller may act on a store: its owner, or
-// a cluster owner -- who may connect it.
-func (c *Connector) mayActOnStore(ctx context.Context, store Store) bool {
-	ac, ok := auth.AccessFromContext(ctx)
-	if !ok || ac == nil {
-		return false
-	}
-	if ac.IsClusterOwner() {
-		return true
-	}
-	caller := strings.TrimSpace(ac.UserId)
-	owner := strings.TrimSpace(store.OwnerUserID)
-	return caller != "" && owner != "" && memql.BareShortId(caller) == memql.BareShortId(owner)
-}
-
-// storeForCaller resolves the store a verdict call names and asks `may` of
-// the caller before anything else about the store is read. A refused caller
-// is told the same thing whether or not the store exists.
-func (c *Connector) storeForCaller(ctx context.Context, storeID, builtin string, may func(Store) bool) (Store, error) {
-	refused := fmt.Errorf("shopify: %s is for the store's owner or a cluster owner", builtin)
-	if storeID == "" {
-		return Store{}, fmt.Errorf("shopify: %s needs a storeId", builtin)
-	}
-	store, ok := c.stores.ByID(ctx, storeID)
-	if !ok || !may(store) {
-		if !ok && may(Store{}) {
-			return Store{}, fmt.Errorf("shopify: store %q is not configured", storeID)
-		}
-		return Store{}, refused
-	}
-	return store, nil
-}
-
-func (i *Integration) handleStoreVerdict(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	c := i.connector
-	if c == nil {
-		return resultNode("shopify", map[string]any{"status": "unconfigured"})
-	}
-	store, err := c.storeForCaller(ctx, argString(args, "storeId"), "shopifyStoreVerdict", func(s Store) bool {
-		return c.mayActOnStore(ctx, s) || c.mayReadStores(ctx)
-	})
-	if err != nil {
-		return nil, err
-	}
-	v, err := c.storeVerdict(ctx, store)
-	if err != nil {
-		return nil, err
-	}
-	reply := verdictPayload(v)
-	reply["alert"] = map[string]any{"state": "", "reason": ""}
-	reply["may"] = map[string]any{"act": c.mayActOnStore(ctx, store)}
-	return resultNode("shopify", reply)
-}
-
-func (i *Integration) handleStoreRegisterEvents(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	c := i.connector
-	if c == nil {
-		return resultNode("shopify", map[string]any{"status": "unconfigured"})
-	}
-	store, err := c.storeForCaller(ctx, argString(args, "storeId"), "shopifyStoreRegisterEvents", func(s Store) bool { return c.mayActOnStore(ctx, s) })
-	if err != nil {
-		return nil, err
-	}
-	if !store.Ingests() {
-		return nil, fmt.Errorf("shopify: store %q is not recording, so its events are not registered", store.ID)
-	}
-	report, readErr := c.subscriptionPass(ctx, store)
-	status := "registered"
-	if readErr != nil || len(report.Failed) > 0 {
-		status = "failed"
-	}
-	return resultNode("shopify", map[string]any{
-		"status": status, "storeId": store.ID, "desired": report.Desired, "existing": report.Existing,
-		"created": toAny(report.Created), "failed": toAny(report.Failed),
-	})
-}
-
-func (i *Integration) handleStoreRetryDeliveries(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	c := i.connector
-	if c == nil {
-		return resultNode("shopify", map[string]any{"status": "unconfigured"})
-	}
-	store, err := c.storeForCaller(ctx, argString(args, "storeId"), "shopifyStoreRetryDeliveries", func(s Store) bool { return c.mayActOnStore(ctx, s) })
-	if err != nil {
-		return nil, err
-	}
-	source := storeInboundSource(store.ID)
-	if _, err := c.engine.Execute(operatorContext(ctx), "builtin "+renderCall("datasyncRequeueInbound", map[string]any{"source": source})); err != nil {
-		return nil, fmt.Errorf("shopify: the store's deliveries could not be put back in line: %w", err)
-	}
-	return resultNode("shopify", map[string]any{"status": "requeued", "storeId": store.ID, "source": source})
-}
-
-// storeVerdict gathers one store's verdict input and computes it: its
-// domains read by id, every page of its given-up deliveries, the fields
-// Shopify withholds, and the verdict last recorded on its health.
-func (c *Connector) storeVerdict(ctx context.Context, store Store) (Verdict, error) {
-	states, err := c.storeSyncStates(ctx, store.ID)
-	if err != nil {
-		return Verdict{}, err
-	}
-	givenUp, err := c.givenUpDeliveries(ctx, store.ID)
-	if err != nil {
-		return Verdict{}, err
-	}
-	previous, _ := store.Health["verdict"].(map[string]any)
-	return computeVerdict(verdictInput{
-		Store:       store,
-		States:      states,
-		Intervals:   sweepIntervals(c.Domains()),
-		GivenUp:     givenUp,
-		Denied:      c.FieldsDenied(store.ID),
-		Previous:    previous,
-		ConnectedAt: connectedAtOf(store),
-		Now:         c.now().UTC(),
-	}), nil
-}
-
-// connectedAtOf is when a connect last started the store's recording afresh,
-// from the store row's own connectedAt. Zero for a store connected before it
-// was recorded: nothing else on the row is a connect time (row.createdAt
-// moves with every write).
-func connectedAtOf(store Store) time.Time {
-	at, err := time.Parse(time.RFC3339Nano, store.ConnectedAt)
-	if err != nil {
-		return time.Time{}
-	}
-	return at.UTC()
-}
-
-func timeOrEmpty(at time.Time) string {
-	if at.IsZero() {
-		return ""
-	}
-	return at.UTC().Format(time.RFC3339)
-}
-
-// storeInboundSource is the inbound source a store's deliveries are staged
-// under.
-func storeInboundSource(storeID string) string { return ConnectorName + "-" + storeID }
-
-// givenUpDeliveries reads EVERY page of the store's deliveries that used
-// their four tries: a count read from the first page alone would stop at 50.
-func (c *Connector) givenUpDeliveries(ctx context.Context, storeID string) ([]map[string]any, error) {
-	var out []map[string]any
-	query := renderCall("inboundRequestsGivenUp", map[string]any{"source": storeInboundSource(storeID)})
-	err := memql.WalkQueryPages(operatorContext(ctx), c.engine.Execute, query, 1000, func(res *memql.ExecuteResult) error {
-		out = append(out, memql.MaterializeRows(res)...)
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("shopify: read given-up deliveries: %w", err)
-	}
-	return out, nil
-}
-
-// verdictPayload is the verdict as the reply carries it.
-func verdictPayload(v Verdict) map[string]any {
-	reasons := make([]any, 0, len(v.Reasons))
-	for _, r := range v.Reasons {
-		reasons = append(reasons, map[string]any{
-			"code": r.Code, "domain": r.Domain, "sentence": r.Sentence, "detail": r.Detail, "count": r.Count,
-			"act": r.Act, "actLabel": r.ActLabel, "actUrl": r.ActURL,
-		})
-	}
-	recorded := make([]any, 0, len(v.Recorded))
-	for _, k := range v.Recorded {
-		recorded = append(recorded, map[string]any{"kind": k.Kind, "lastChangeAt": k.LastChangeAt, "lastCheckedAt": k.LastCheckedAt})
-	}
-	return map[string]any{
-		"storeId": v.StoreID, "domain": v.Domain, "state": v.State, "since": v.Since.UTC().Format(time.RFC3339),
-		"resumedAt": timeOrEmpty(v.ResumedAt), "connectedAt": timeOrEmpty(v.ConnectedAt),
-		"reasons": reasons, "recorded": recorded, "outside": toAny(v.Outside), "withheld": toAny(v.Withheld),
-		"ordersFrom": v.OrdersFrom,
-	}
 }
 
 // phaseOf renders the runtime's syncState fields as the one word the

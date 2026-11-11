@@ -656,8 +656,11 @@ func TestAStoreActIsRefusedForSomebodyWhoIsNeitherItsOwnerNorAClusterOwner(t *te
 		},
 	}
 	for name, handle := range handlers {
-		if _, err := handle(stranger, args, 0); err == nil {
+		_, err := handle(stranger, args, 0)
+		if err == nil {
 			t.Errorf("%s: a caller who is neither the store's owner nor a cluster owner was admitted", name)
+		} else if name == "verdict" && !strings.Contains(err.Error(), "may read stores") {
+			t.Errorf("verdict refusal = %q; it names everybody the read admits", err)
 		}
 	}
 	if n := len(h.admin.seen()); n != 0 {
@@ -747,7 +750,7 @@ func TestEveryPageOfGivenUpDeliveriesIsRead(t *testing.T) {
 		pages = append(pages, []map[string]any{givenUp("orders/updated", verdictNow.Add(time.Duration(n)*time.Second))})
 	}
 	h.conn.engine = &pagedGivenUpEngine{fakeEngine: h.engine, pages: pages}
-	rows, err := h.conn.givenUpDeliveries(context.Background(), testStoreID)
+	rows, _, err := h.conn.givenUpDeliveries(context.Background(), testStoreID, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -888,5 +891,337 @@ func TestAStoreWithNoBaselineIsJudgedAsBefore(t *testing.T) {
 	r := reasonNamed(t, computeVerdict(verdictInputOf(store, rows)), ReasonCheckFailing)
 	if r.Domain != "orders" || !strings.Contains(r.Detail, "HTTP 503") {
 		t.Errorf("reason = %+v", r)
+	}
+}
+
+// ---- Fix round 1 ----
+
+// givenUpPages is an engine answering inboundRequestsGivenUp from fixed
+// pages, counting the pages read.
+type givenUpPages struct {
+	*fakeEngine
+	pages [][]map[string]any
+	read  int
+}
+
+func (e *givenUpPages) Execute(ctx context.Context, q string) (*memql.ExecuteResult, error) {
+	if callName(q) != "inboundRequestsGivenUp" {
+		return e.fakeEngine.Execute(ctx, q)
+	}
+	page := 0
+	if c := memql.CursorFromContext(ctx); c != "" {
+		fmt.Sscanf(c, "page-%d", &page)
+	}
+	e.fakeEngine.mu.Lock()
+	e.read++
+	e.fakeEngine.mu.Unlock()
+	res := resultWithRows(e.pages[page])
+	if page+1 < len(e.pages) {
+		res.Meta = &memql.ResultMeta{Cursor: fmt.Sprintf("page-%d", page+1), HasMore: true}
+	}
+	return res, nil
+}
+
+// writtenAt is a given-up delivery received and last written at `at`.
+func writtenAt(topic string, at time.Time) map[string]any {
+	row := givenUp(topic, at)
+	row["createdAt"] = at.Format(time.RFC3339)
+	return row
+}
+
+func pagesOf(n int, at func(int) time.Time) [][]map[string]any {
+	var out [][]map[string]any
+	for i := 0; i < n; i++ {
+		out = append(out, []map[string]any{writtenAt("orders/updated", at(i))})
+	}
+	return out
+}
+
+func TestTheGivenUpWalkStopsAtThePageOlderThanEverySweep(t *testing.T) {
+	h := newHarness(t)
+	bound := verdictNow.Add(-time.Hour)
+	// Newest first: pages 0 and 1 after the bound, page 2 entirely before it.
+	engine := &givenUpPages{fakeEngine: h.engine, pages: pagesOf(6, func(i int) time.Time {
+		return verdictNow.Add(-time.Duration(i) * 40 * time.Minute)
+	})}
+	h.conn.engine = engine
+	rows, floor, err := h.conn.givenUpDeliveries(context.Background(), testStoreID, bound)
+	if err != nil || floor {
+		t.Fatalf("err = %v, floor = %v", err, floor)
+	}
+	if engine.read != 3 || len(rows) != 2 {
+		t.Errorf("read %d pages and kept %d rows; want the walk to stop after the third page, the first older than every sweep", engine.read, len(rows))
+	}
+	// With no bound the walk reads on.
+	engine.read = 0
+	if rows, _, _ := h.conn.givenUpDeliveries(context.Background(), testStoreID, time.Time{}); engine.read != 6 || len(rows) != 6 {
+		t.Errorf("unbounded: read %d pages, %d rows; want all six", engine.read, len(rows))
+	}
+}
+
+func TestTheGivenUpBoundIsTheOldestCleanSweepOfTheAskedDomains(t *testing.T) {
+	store := verdictStore()
+	rows := cleanRows(store)
+	oldest := verdictNow.Add(-5 * time.Hour)
+	rows = setRow(rows, "customer", func(r map[string]any) { r["lastReconcileAt"] = oldest.Format(time.RFC3339) })
+	if got := givenUpBound(store, rows); !got.Equal(oldest) {
+		t.Errorf("bound = %v, want the oldest clean sweep %v", got, oldest)
+	}
+	// A domain never swept clean counts every delivery routed to it, so
+	// nothing bounds the walk.
+	rows = setRow(rows, "order", func(r map[string]any) { delete(r, "lastReconcileAt") })
+	if got := givenUpBound(store, rows); !got.IsZero() {
+		t.Errorf("bound = %v with a domain never swept clean; want none", got)
+	}
+}
+
+func TestAPausedOrDisconnectedStoreReadsNoGivenUpPage(t *testing.T) {
+	for name, fields := range map[string]map[string]any{
+		"paused":       {"status": StatusPaused},
+		"uninstalled":  {"uninstalledAt": "2026-08-01T00:00:00Z"},
+		"data removed": {"redactedAt": "2026-08-01T00:00:00Z"},
+	} {
+		h := newHarness(t)
+		row := h.engine.rows["stores"][0]
+		for k, v := range fields {
+			row[k] = v
+		}
+		engine := &givenUpPages{fakeEngine: h.engine, pages: pagesOf(2, func(int) time.Time { return verdictNow })}
+		h.conn.engine = engine
+		h.conn.stores.engine = engine
+		if _, err := h.conn.storeVerdict(context.Background(), h.store(t)); err != nil {
+			t.Fatal(err)
+		}
+		if engine.read != 0 {
+			t.Errorf("%s: read %d pages of given-up deliveries; a store with no reasons reads none", name, engine.read)
+		}
+	}
+}
+
+func TestABudgetThatRunsOutIsAFloorNotAnError(t *testing.T) {
+	saved := givenUpPageBudget
+	givenUpPageBudget = 2
+	t.Cleanup(func() { givenUpPageBudget = saved })
+	h := newHarness(t)
+	engine := &givenUpPages{fakeEngine: h.engine, pages: pagesOf(5, func(int) time.Time { return h.now })}
+	h.conn.engine = engine
+	v, err := h.conn.storeVerdict(context.Background(), h.store(t))
+	if err != nil {
+		t.Fatalf("a walk that ran out of budget failed the verdict: %v", err)
+	}
+	r := reasonNamed(t, v, ReasonChangesNotRecorded)
+	if !r.AtLeast || r.Count != 2 || r.Sentence != "At least 2 changes could not be recorded." {
+		t.Errorf("reason = %+v; want a floor of two", r)
+	}
+	// The exact case keeps the constraints' sentence.
+	in := verdictInputOf(verdictStore(), cleanRows(verdictStore()))
+	in.GivenUp = []map[string]any{givenUp("orders/updated", verdictNow)}
+	if r := reasonNamed(t, computeVerdict(in), ReasonChangesNotRecorded); r.AtLeast || r.Sentence != "1 change could not be recorded." {
+		t.Errorf("exact count: reason = %+v", r)
+	}
+	payload := verdictPayload(v)
+	if reasons, _ := payload["reasons"].([]any); len(reasons) == 0 || reasons[len(reasons)-1].(map[string]any)["atLeast"] != true {
+		t.Errorf("the reply does not say the count is a floor: %v", payload["reasons"])
+	}
+}
+
+// childTopic is a generated topic whose domain is read with its parent, and
+// that parent.
+func childTopic(t *testing.T, store Store) (header, parent string) {
+	t.Helper()
+	for _, topic := range generated.SubscribedTopics {
+		route, ok := generated.Topics[topic]
+		if !ok {
+			continue
+		}
+		spec := generated.Types[route.Concept]
+		if spec == nil || spec.Reconcile != generated.ReconcileNone || spec.Parent == "" {
+			continue
+		}
+		if p := generated.Types[spec.Parent]; p != nil && p.Reconcile != generated.ReconcileNone && domainInConnection(store, p) {
+			return generated.EnumToTopicHeader(topic), spec.Parent
+		}
+	}
+	t.Fatal("no child topic whose parent is swept inside the connection")
+	return "", ""
+}
+
+func TestAChildDomainDeliveryCountsTowardItsParent(t *testing.T) {
+	store := verdictStore()
+	header, parent := childTopic(t, store)
+	swept := verdictNow.Add(-20 * time.Minute)
+	rows := setRow(cleanRows(store), parent, func(r map[string]any) { r["lastReconcileAt"] = swept.Format(time.RFC3339) })
+	in := verdictInputOf(store, rows)
+	in.GivenUp = []map[string]any{givenUp(header, swept.Add(time.Minute)), givenUp(header, swept.Add(-time.Minute))}
+	r := reasonNamed(t, computeVerdict(in), ReasonChangesNotRecorded)
+	if r.Count != 1 {
+		t.Errorf("%s (read with %s): count = %d; the one after the parent's clean sweep counts, the one before does not", header, parent, r.Count)
+	}
+}
+
+func TestAMalformedOrMissingTopicIsNotCounted(t *testing.T) {
+	in := verdictInputOf(verdictStore(), cleanRows(verdictStore()))
+	broken := givenUp("orders/updated", verdictNow)
+	broken["headersJson"] = "{not json"
+	none := givenUp("orders/updated", verdictNow)
+	none["headersJson"] = `{"x-shopify-hmac-sha256":"abc"}`
+	empty := givenUp("orders/updated", verdictNow)
+	delete(empty, "headersJson")
+	in.GivenUp = []map[string]any{broken, none, empty}
+	if codes := reasonCodes(computeVerdict(in)); len(codes) != 0 {
+		t.Errorf("reasons = %v; a delivery with no readable topic is not counted", codes)
+	}
+}
+
+func TestAProtectedDataBackfillRefusalIsDataNotDeclared(t *testing.T) {
+	store := verdictStore()
+	rows := setRow(cleanRows(store), "order", func(r map[string]any) {
+		r["backfillStatus"] = "failed"
+		r["lastError"] = "backfill refused: " + protectedRefusal
+	})
+	v := computeVerdict(verdictInputOf(store, rows))
+	if codes := reasonCodes(v); len(codes) != 1 || codes[0] != ReasonDataNotDeclared {
+		t.Fatalf("reasons = %v; want data_not_declared alone", codes)
+	}
+	if r := v.Reasons[0]; r.Domain != "orders" || r.Act != ActDeclare {
+		t.Errorf("reason = %+v", r)
+	}
+	// Any other refused backfill is still a failing check.
+	rows = setRow(cleanRows(store), "order", func(r map[string]any) {
+		r["backfillStatus"] = "failed"
+		r["lastError"] = "backfill refused: shopify admin: HTTP 500"
+	})
+	if codes := reasonCodes(computeVerdict(verdictInputOf(store, rows))); len(codes) != 1 || codes[0] != ReasonCheckFailing {
+		t.Errorf("reasons = %v; want check_failing", codes)
+	}
+}
+
+// A baseline in the future counts as now: a clock that ran ahead neither
+// makes a domain late nor holds it back past twice its interval from now.
+func TestAFutureBaselineCountsAsNow(t *testing.T) {
+	store := verdictStore()
+	rows := setRow(cleanRows(store), "order", func(r map[string]any) {
+		r["lastError"] = "shopify admin: HTTP 503"
+		r["lastReconcileAt"] = verdictNow.Add(5 * time.Hour).Format(time.RFC3339)
+	})
+	in := verdictInputOf(store, rows)
+	in.ConnectedAt = verdictNow.Add(10 * time.Hour)
+	if got := baselineOf(rowTime(rows[len(rows)-1], "lastReconcileAt"), in.ConnectedAt, verdictNow); !got.Equal(verdictNow) {
+		t.Errorf("baseline = %v; a baseline in the future counts as now (%v)", got, verdictNow)
+	}
+	if failing := failingDomains(computeVerdict(in)); len(failing) != 0 {
+		t.Errorf("check_failing for %v; a future baseline is now, and nothing is late yet", failing)
+	}
+}
+
+func TestTheDailyPassClearsAnUnreadableFailureOnceItReads(t *testing.T) {
+	h := newHarness(t)
+	h.admin.httpStatus("ShopifyWebhookSubscriptions", http.StatusInternalServerError)
+	_ = h.conn.EnsureSubscriptions(context.Background())
+	h.admin.httpStatus("ShopifyWebhookSubscriptions", http.StatusOK)
+	h.admin.reply("ShopifyWebhookSubscriptions", webhookList())
+	h.admin.reply("ShopifyWebhookCreate", map[string]any{"webhookSubscriptionCreate": map[string]any{"userErrors": []any{}}})
+	if err := h.conn.EnsureSubscriptions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	calls := h.engine.callsTo("recordStoreHealth")
+	if len(calls) != 2 || !strings.Contains(calls[0], subscriptionsUnreadable) || strings.Contains(calls[1], subscriptionsUnreadable) {
+		t.Fatalf("health writes = %d; the later pass must record without the unreadable failure", len(calls))
+	}
+	store := verdictStore()
+	store.Health = map[string]any{"subscriptions": map[string]any{"desired": 12, "existing": 0, "created": toAny(generated.SubscribedTopics[:12]), "failed": []any{}}}
+	if codes := reasonCodes(computeVerdict(verdictInputOf(store, cleanRows(store)))); len(codes) != 0 {
+		t.Errorf("after a pass that read and registered everything: reasons = %v", codes)
+	}
+}
+
+func TestRegisterAgainWaitsAMinuteAfterAPass(t *testing.T) {
+	for name, tc := range map[string]struct {
+		ago  time.Duration
+		runs bool
+	}{"30 seconds ago": {30 * time.Second, false}, "90 seconds ago": {90 * time.Second, true}} {
+		h, _, integ := verdictHarness(t)
+		h.engine.rows["stores"][0]["health"] = map[string]any{"subscriptions": map[string]any{"at": h.now.Add(-tc.ago).Format(time.RFC3339)}}
+		_, err := integ.handleStoreRegisterEvents(actorCtx("user-1", auth.RoleWriter), map[string]any{"storeId": testStoreID}, 0)
+		ran := h.admin.countOp("ShopifyWebhookSubscriptions") > 0
+		if ran != tc.runs {
+			t.Errorf("%s: the pass ran = %v, want %v (err %v)", name, ran, tc.runs, err)
+		}
+		if !tc.runs && (err == nil || !strings.Contains(err.Error(), "just now")) {
+			t.Errorf("%s: err = %v; want a sentence saying it ran just now", name, err)
+		}
+	}
+}
+
+func TestRegisterAgainSaysWhyAPassFailed(t *testing.T) {
+	h, _, integ := verdictHarness(t)
+	h.admin.httpStatus("ShopifyWebhookSubscriptions", http.StatusInternalServerError)
+	nodes, err := integ.handleStoreRegisterEvents(actorCtx("user-1", auth.RoleWriter), map[string]any{"storeId": testStoreID}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reply map[string]any
+	_ = json.Unmarshal(nodes[0].Payload, &reply)
+	if reply["status"] != "failed" || !strings.Contains(fmt.Sprint(reply["detail"]), "500") {
+		t.Errorf("reply = %v; a failed pass says why", reply)
+	}
+}
+
+func TestAVerdictReadsOnlyTheDomainsItAsks(t *testing.T) {
+	h := newHarness(t)
+	withManagedScopes(t, h, commerceSet...)
+	if _, err := h.conn.storeVerdict(context.Background(), h.store(t)); err != nil {
+		t.Fatal(err)
+	}
+	want := len(verdictDomains(h.store(t)))
+	if got := len(h.engine.callsTo("syncStateById")); got != want || got >= len(generated.ApplyOrder) {
+		t.Errorf("a verdict made %d point reads; want one for each of the %d domains it reads, not all %d", got, want, len(generated.ApplyOrder))
+	}
+}
+
+// shapedPages answers inboundRequestsGivenUp as the real engine's shaped
+// read does: rows whose createdAt is a time.Time (measured against the real
+// engine), not a string.
+type shapedPages struct {
+	*fakeEngine
+	pages [][]map[string]any
+	read  int
+}
+
+func (e *shapedPages) Execute(ctx context.Context, q string) (*memql.ExecuteResult, error) {
+	if callName(q) != "inboundRequestsGivenUp" {
+		return e.fakeEngine.Execute(ctx, q)
+	}
+	page := 0
+	if c := memql.CursorFromContext(ctx); c != "" {
+		fmt.Sscanf(c, "page-%d", &page)
+	}
+	e.read++
+	rows := []any{}
+	for _, r := range e.pages[page] {
+		row := map[string]any{}
+		for k, v := range r {
+			row[k] = v
+		}
+		at, _ := time.Parse(time.RFC3339, r["createdAt"].(string))
+		row["createdAt"] = at
+		rows = append(rows, row)
+	}
+	res := memql.NewResultWithOutput(rows)
+	if page+1 < len(e.pages) {
+		res.Meta = &memql.ResultMeta{Cursor: fmt.Sprintf("page-%d", page+1), HasMore: true}
+	}
+	return res, nil
+}
+
+func TestTheWalkBoundReadsTheEnginesOwnTimeValue(t *testing.T) {
+	h := newHarness(t)
+	engine := &shapedPages{fakeEngine: h.engine, pages: pagesOf(4, func(i int) time.Time {
+		return verdictNow.Add(-time.Duration(i) * 40 * time.Minute)
+	})}
+	h.conn.engine = engine
+	rows, _, err := h.conn.givenUpDeliveries(context.Background(), testStoreID, verdictNow.Add(-time.Hour))
+	if err != nil || engine.read != 3 || len(rows) != 2 {
+		t.Errorf("read %d pages, kept %d rows, err %v; a time.Time createdAt must bound the walk", engine.read, len(rows), err)
 	}
 }

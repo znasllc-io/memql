@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -895,23 +896,31 @@ func TestOrdersFromMovesAfterAPurge(t *testing.T) {
 	}
 }
 
-// connectedAtStamped reports whether the connect's store-row write stamped
-// connectedAt.
-func (h *writeHarness) connectedAtStamped() bool {
+// connectedAtStamped reports whether the connect stamped connectedAt, through
+// the server-only write and nothing else: no client-callable store write
+// carries it.
+func (h *writeHarness) connectedAtStamped(t *testing.T) bool {
+	t.Helper()
 	for _, name := range []string{"createStore", "updateStore"} {
 		for _, c := range h.engine.callsNamed(name) {
-			if strings.Contains(c.query, "connectedAt: ") {
-				return true
+			if strings.Contains(c.query, "connectedAt") {
+				t.Errorf("%s carried connectedAt: %s", name, c.query)
 			}
 		}
 	}
-	return false
+	calls := h.engine.callsNamed("markStoreConnected")
+	for _, c := range calls {
+		if !c.internal || !strings.Contains(c.query, "connectedAt: ") {
+			t.Errorf("markStoreConnected ran without internal origin or a time: %+v", c)
+		}
+	}
+	return len(calls) > 0
 }
 
 func TestAConnectThatStartsRecordingAfreshStampsConnectedAt(t *testing.T) {
 	h := newWriteHarness(t)
 	h.managedConnect(t, managedConnectScopes())
-	if !h.connectedAtStamped() {
+	if !h.connectedAtStamped(t) {
 		t.Error("a first connect did not stamp connectedAt")
 	}
 	for name, fields := range map[string]map[string]any{
@@ -922,7 +931,7 @@ func TestAConnectThatStartsRecordingAfreshStampsConnectedAt(t *testing.T) {
 		fields["scopesGranted"] = commerceScopesAny()
 		h := reconnectHarness(t, managedRow(fields))
 		h.managedConnect(t, managedConnectScopes())
-		if !h.connectedAtStamped() {
+		if !h.connectedAtStamped(t) {
 			t.Errorf("%s: a reconnect that starts recording afresh did not move connectedAt", name)
 		}
 	}
@@ -932,8 +941,35 @@ func TestAWiderGrantDoesNotMoveConnectedAt(t *testing.T) {
 	for _, scopes := range [][]any{olderManagedScopes(), commerceScopesAny()} {
 		h := reconnectHarness(t, managedRow(map[string]any{"scopesGranted": scopes, "connectedAt": "2026-08-01T00:00:00Z"}))
 		h.managedConnect(t, managedConnectScopes())
-		if h.connectedAtStamped() {
+		if h.connectedAtStamped(t) {
 			t.Errorf("a connect of a recording store (granted %d scopes before) moved connectedAt", len(scopes))
 		}
+	}
+}
+
+// connectedAt is the connect's to write: the client-callable store writes do
+// not take it, and the one that does is server-only.
+func TestConnectedAtIsWrittenOnlyByTheConnect(t *testing.T) {
+	raw, err := os.ReadFile("../../dsl/shopify/overlay/mutations.memql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(raw)
+	block := func(name string) string {
+		i := strings.Index(src, "mutation store "+name+" {")
+		if i < 0 {
+			t.Fatalf("no mutation %s", name)
+		}
+		j := strings.Index(src[i:], "\n}\n")
+		return src[i : i+j]
+	}
+	for _, name := range []string{"createStore", "updateStore"} {
+		if strings.Contains(block(name), "connectedAt") {
+			t.Errorf("%s, which a client may call, takes connectedAt", name)
+		}
+	}
+	i := strings.Index(src, "mutation store markStoreConnected {")
+	if i < 0 || !strings.Contains(src[strings.LastIndex(src[:i], "\n\n"):i], "@serverOnly") {
+		t.Error("markStoreConnected is missing or not @serverOnly")
 	}
 }

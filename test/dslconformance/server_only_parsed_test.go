@@ -1706,12 +1706,18 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// again. Client-callable, it would erase the record of a purge or put
 		// a disconnected store back online with a dead grant.
 		//
+		// markStoreConnected records when a connect Connect Shopify's callback
+		// verified started the store's recording afresh. Client-callable, it
+		// would let a caller move the clock the store's verdict measures a
+		// late check from, and so hide one.
+		//
 		// markExternalConnectionDisconnected runs under the selection owner's
 		// borrowed identity, so actor.userId scoping would pass; what it
 		// asserts -- that the provider ended the grant -- is the verified
 		// delivery's to say, never the person's.
 		{Path: "shopify/overlay/mutations.memql", Name: "markStoreUninstalled"}:        true,
 		{Path: "shopify/overlay/mutations.memql", Name: "markStoreReconnected"}:        true,
+		{Path: "shopify/overlay/mutations.memql", Name: "markStoreConnected"}:          true,
 		{Path: "platform/mutations.memql", Name: "markExternalConnectionDisconnected"}: true,
 		// epic memql#4434, the release-cut pair. One argument covers both, and it
 		// is not "the caller is a machine" -- the caller here is a signed-in
