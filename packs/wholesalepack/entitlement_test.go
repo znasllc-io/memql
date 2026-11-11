@@ -838,3 +838,64 @@ func TestRevokingWithNoEntitlementRowWritesRevoked(t *testing.T) {
 		t.Fatalf("no adapter may be called, got %v", caller.calls)
 	}
 }
+
+func TestSettingsNamingARouteThisEngineDoesNotHaveLeaveAFailedRowNamingNoRoute(t *testing.T) {
+	reader := approvedFixture()
+	reader.settings["store-live"] = []map[string]any{{
+		"storeId": "store-live", "applicationsOpen": true, "entitlementAdapter": "draftOrders",
+	}}
+	out, caller := provisionWith(t, reader, &fakeCaller{})
+	requireFailedWith(t, out, EntitlementFailed, ErrorNoRoute)
+	if out["adapter"] != AdapterNone {
+		t.Fatalf("adapter = %v, want %v", out["adapter"], AdapterNone)
+	}
+	if !strings.Contains(asString(out["error"]), `"draftOrders"`) {
+		t.Fatalf("the sentence must name the route, got %v", out["error"])
+	}
+	if len(caller.calls) != 0 {
+		t.Fatalf("no adapter may be called, got %v", caller.calls)
+	}
+}
+
+func TestARevokeKeepsTheCustomerTheGrantLandedOn(t *testing.T) {
+	registerShippedAdapters()
+	reader := revokedFixture([]map[string]any{{
+		"applicationId": "app-1", "storeId": "store-live", "adapter": AdapterCustomerTag,
+		"state": EntitlementGranted, "reference": "customer=gid://shopify/Customer/1;tag=memql-wholesale",
+		"shopifyCustomerId": "gid://shopify/Customer/1", "customerCreated": true,
+	}})
+	writer := &fakeWriter{}
+	p := &Provider{reader: reader, caller: &fakeCaller{}, writer: writer}
+	if _, err := p.revokeEntitlement(internalAsMerchant(), map[string]any{"applicationId": "app-1"}, 0); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	out := writer.only(t, "writeEntitlementRow")
+	if out["state"] != EntitlementRevoked || out["shopifyCustomerId"] != "gid://shopify/Customer/1" || out["customerCreated"] != true {
+		t.Fatalf("got %v/%v/%v", out["state"], out["shopifyCustomerId"], out["customerCreated"])
+	}
+}
+
+// A GRANTED ROW WHOSE ADAPTER IS NO LONGER REGISTERED cannot be revoked by
+// it, so the row must not claim revoked: it stays pending, naming no_route.
+func TestARevokeThroughAnAdapterThatIsGoneIsNotClaimedRevoked(t *testing.T) {
+	registerShippedAdapters()
+	reader := revokedFixture([]map[string]any{{
+		"applicationId": "app-1", "storeId": "store-live", "adapter": "draftOrders",
+		"state": EntitlementGranted, "reference": "ref-1",
+		"shopifyCustomerId": "gid://shopify/Customer/1", "customerCreated": true,
+	}})
+	caller := &fakeCaller{}
+	writer := &fakeWriter{}
+	p := &Provider{reader: reader, caller: caller, writer: writer}
+	if _, err := p.revokeEntitlement(internalAsMerchant(), map[string]any{"applicationId": "app-1"}, 0); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	out := writer.only(t, "writeEntitlementRow")
+	if out["state"] != EntitlementPending || out["errorCode"] != ErrorNoRoute || out["adapter"] != "draftOrders" ||
+		out["reference"] != "ref-1" || out["shopifyCustomerId"] != "gid://shopify/Customer/1" {
+		t.Fatalf("got %v", out)
+	}
+	if !strings.Contains(asString(out["error"]), `"draftOrders"`) || len(caller.calls) != 0 {
+		t.Fatalf("error %v calls %v", out["error"], caller.calls)
+	}
+}

@@ -314,6 +314,9 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 	owner := trimmed(app["ownerUserId"])
 	var adapter Adapter
 	adapterName := ""
+	// A revoke keeps the customer the grant landed on: the prior row's values
+	// are written back explicitly, since the write would otherwise blank them.
+	priorCustomerID, priorCreated := "", false
 
 	if revoking {
 		prior, err := p.entitlementRow(sys, applicationID)
@@ -324,6 +327,8 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 		if prior != nil {
 			grant.Reference = trimmed(prior["reference"])
 			was = trimmed(prior["adapter"])
+			priorCustomerID = trimmed(prior["shopifyCustomerId"])
+			priorCreated, _ = prior["customerCreated"].(bool)
 		}
 		// NO ROW, OR A ROW THAT NEVER REACHED A STORE (X17). An approval
 		// that granted nothing has nothing to take back, and the decision
@@ -331,7 +336,8 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 		// called against a store nobody was ever entitled on.
 		if prior == nil || was == AdapterNone {
 			return p.writeEntitlement(merchant, applicationID, storeID, owner, grant,
-				AdapterNone, EntitlementRevoked, Outcome{}, "", "")
+				AdapterNone, EntitlementRevoked,
+				Outcome{CustomerID: priorCustomerID, CustomerCreated: priorCreated}, "", "")
 		}
 		// REVOKED THROUGH THE ADAPTER THAT GRANTED IT, read off the row --
 		// not through whatever the settings say TODAY. A merchant who
@@ -340,9 +346,15 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 		if was != "" {
 			adapter, err = AdapterByName(was)
 			if err != nil {
-				return nil, fmt.Errorf("wholesale: entitlement for %q was granted by %q, "+
-					"which this build no longer registers, so it cannot be revoked through "+
-					"the pack: %w", applicationID, was, err)
+				// NOT CLAIMED REVOKED. An adapter this engine no longer has
+				// cannot take the grant back, so the row stays pending (the
+				// un-grant has not landed) naming no_route, with its adapter,
+				// reference and customer kept. A row, not an error, for the
+				// reason the no-settings case gives (spec N3).
+				return p.writeEntitlement(merchant, applicationID, storeID, owner, grant,
+					was, EntitlementPending,
+					Outcome{CustomerID: priorCustomerID, CustomerCreated: priorCreated},
+					ErrorNoRoute, unknownRouteSentence(was))
 			}
 			adapterName = was
 		}
@@ -372,7 +384,11 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 		}
 		adapter, err = AdapterByName(adapterName)
 		if err != nil {
-			return nil, err
+			// A ROUTE THIS ENGINE DOES NOT HAVE is the same nothing-to-call
+			// case as no route: a row naming it, never a returned error (N3).
+			return p.writeEntitlement(merchant, applicationID, storeID, owner, grant,
+				AdapterNone, EntitlementFailed, Outcome{}, ErrorNoRoute,
+				unknownRouteSentence(adapterName))
 		}
 	}
 
@@ -430,8 +446,18 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 	// builtin that returned the error would leave no row at all, and the
 	// merchant would have an approved application with nothing anywhere
 	// saying a push had been attempted and failed. The row carries it.
+	if revoking && result.CustomerID == "" {
+		result.CustomerID, result.CustomerCreated = priorCustomerID, priorCreated
+	}
 	return p.writeEntitlement(merchant, applicationID, storeID, owner, grant,
 		adapterName, entState, result, errCode, errText)
+}
+
+// unknownRouteSentence says which route a store's settings name that this
+// engine does not have registered.
+func unknownRouteSentence(name string) string {
+	return fmt.Sprintf("wholesale: the store's settings name the route %q, which this engine "+
+		"does not have; this build has %s", name, strings.Join(AdapterNames(), ", "))
 }
 
 // errorCodeOf names the cause of an adapter error for the entitlement row.
