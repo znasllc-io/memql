@@ -46,8 +46,9 @@ func MirrorRowID(storeID, gid string) string {
 // applies in order never writes a child whose parentGid names a row that is
 // not there yet.
 //
-// `at` is when the object was read: the row's syncedAt, and its version only
-// where the origin gives none (originVersion).
+// `at` is when the origin was read for it, on this engine's clock: the
+// row's syncedAt, and its version only where the origin gives none
+// (originVersion).
 func mapObject(spec *generated.TypeSpec, storeID string, obj map[string]any, parentGID string, at time.Time) []memqlsync.MirrorWrite {
 	return mapObjectUnder(spec, storeID, obj, parentGID, "", at)
 }
@@ -68,7 +69,8 @@ func mapObjectUnder(spec *generated.TypeSpec, storeID string, obj map[string]any
 		"gid":           gid,
 		"updatedAt":     version,
 		"versionSource": source,
-		"syncedAt":      at.UTC().Format(time.RFC3339),
+		"syncedAt":      memqlsync.ReadTime(at),
+		"versionReadAt": memqlsync.ReadTime(at),
 		"deleted":       false,
 	}
 	// A directly-fetched child resolves its own lineage: the selection
@@ -129,10 +131,12 @@ func mapObjectUnder(spec *generated.TypeSpec, storeID string, obj map[string]any
 
 	// The children carry this row's version where they have none of their
 	// own -- an order's lines move with the order's updatedAt -- and only
-	// when it is the origin's: a read time handed down would stamp the
-	// children with a clock the origin never used.
+	// when it is the origin's and one that MOVES: a createdAt never does, so
+	// a return's reverse fulfilment orders would hold it for good, and a read
+	// time handed down would stamp the children with a clock the origin never
+	// used.
 	inherited := ""
-	if source == memqlsync.VersionFromOrigin {
+	if source == memqlsync.VersionFromOrigin && spec.VersionField == "updatedAt" {
 		inherited = version
 	}
 	for _, child := range spec.Children {
@@ -218,12 +222,11 @@ func idlessChildOf(parent *generated.TypeSpec, obj map[string]any) *generated.Ty
 // no longer have a source for would be inventing the row's contents at
 // the moment we learned it does not exist.
 //
-// `at` is its version, and it is the origin's in the sense the guard needs:
-// a moment by which the record was gone -- the delete's event time, when a
-// fetch found nothing, or when the listing that did not name it began. Any
-// state of the record the origin ever published is older, so the tombstone
-// refuses a snapshot taken before the delete, and is itself refused by a
-// state written after `at`.
+// `at` is when the origin was read for it, on this engine's clock: the
+// delete's receipt, the fetch that found nothing, or the start of the listing
+// that did not name it. Its standing is that read time, not a version
+// (memqlsync.Refuses): it retires a row the origin was last read for before
+// `at`, and is itself refused by a row read after it.
 func tombstone(conceptName, storeID, gid string, at time.Time) memqlsync.MirrorWrite {
 	return memqlsync.MirrorWrite{
 		Concept: generated.ConceptID(conceptName),
@@ -232,8 +235,9 @@ func tombstone(conceptName, storeID, gid string, at time.Time) memqlsync.MirrorW
 			"storeId":       storeID,
 			"gid":           gid,
 			"updatedAt":     at.UTC().Format(time.RFC3339),
-			"versionSource": memqlsync.VersionFromOrigin,
-			"syncedAt":      at.UTC().Format(time.RFC3339),
+			"versionSource": memqlsync.VersionFromRead,
+			"syncedAt":      memqlsync.ReadTime(at),
+			"versionReadAt": memqlsync.ReadTime(at),
 		},
 		Version:   at.UTC().Format(time.RFC3339),
 		Retire:    true,
@@ -294,7 +298,7 @@ func objectsOf(v any) []map[string]any {
 //
 // The type's VersionField, which every generated document selects for that
 // purpose (emit_graphql.go); else, for a child with none of its own, its
-// parent's origin version; else the READ TIME, which makes that domain
+// parent's origin updatedAt (mapObjectUnder); else the READ TIME, which makes that domain
 // last-write-wins. That last is a property of Shopify's schema rather than a
 // choice -- about forty of the sixty-five mirrored types publish no version
 // at all -- and it is recorded on the TypeSpec so an operator reading the

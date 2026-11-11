@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
@@ -117,63 +116,56 @@ func retireFieldsFor(payload map[string]any) map[string]any {
 	return map[string]any{"deleted": true}
 }
 
-// StoredVersion returns the version MemQL holds for a row.
+// StoredVersion returns the version MemQL holds for a row, as the guard
+// reads it (memqlsync.StoredStamp), and whether the row exists.
 func (w *EngineMirrorWriter) StoredVersion(ctx context.Context, spec memqlsync.DomainSpec, rowID string) (string, bool, error) {
+	row, exists, err := w.StoredRow(ctx, spec, rowID)
+	if err != nil || !exists {
+		return "", exists, err
+	}
+	return memqlsync.StoredStamp(spec, row).Version, true, nil
+}
+
+// StoredRow returns the payload MemQL holds for a row.
+//
+// The row is a PAYLOAD read: the raw read answers bundle rows whose top level
+// holds only the intrinsics, and the version is a payload field
+// (DomainSpec.VersionField) -- read at the top level it was empty on every row
+// and the guard refused nothing (memql#5638). Which of its values count is
+// the contract's rule (memqlsync.StoredStamp).
+//
+// A spec with no VersionField falls back to D6 -- the version is when MemQL
+// last applied a delivery for the row -- and that READS NOTHING TODAY, left
+// alone on purpose (memql#5638): the raw read carries the row's creation time
+// as `created_at`, a protobuf timestamp, not as a payload field, and no
+// connector declares a domain without a VersionField, so turning it on is a
+// decision for the first one that does rather than a repair.
+func (w *EngineMirrorWriter) StoredRow(ctx context.Context, spec memqlsync.DomainSpec, rowID string) (map[string]any, bool, error) {
 	if w == nil || w.engine == nil {
-		return "", false, fmt.Errorf("datasync: no engine wired for mirror reads")
+		return nil, false, fmt.Errorf("datasync: no engine wired for mirror reads")
 	}
 	conceptID := strings.TrimSpace(spec.Concept)
 	rowID = strings.TrimSpace(rowID)
 	if conceptID == "" || rowID == "" {
-		return "", false, nil
+		return nil, false, nil
 	}
 
 	// The row id is a literal, quoted as WriteMirror quotes it (memql#5625's
 	// sweep). It is the connector's to mint and the contract types it as a
 	// string: pasted bare, an id carrying a quote or a space failed to parse,
-	// and since this read runs before every versioned write, such a row could
-	// never be applied at all. The concept is the connector's declared domain
-	// and stays bare.
+	// and since this read runs before every write, such a row could never be
+	// applied at all. The concept is the connector's declared domain and
+	// stays bare.
 	q := fmt.Sprintf("concept==%s && id==%s", conceptID, langparser.QuoteString(rowID))
 	res, err := w.engine.Execute(ctx, q)
 	if err != nil {
-		return "", false, fmt.Errorf("datasync: reading the stored version of %s %q: %w", conceptID, rowID, err)
+		return nil, false, fmt.Errorf("datasync: reading the stored version of %s %q: %w", conceptID, rowID, err)
 	}
 	rows := memql.MaterializeRows(res)
 	if len(rows) == 0 {
-		return "", false, nil
+		return nil, false, nil
 	}
-	row := rows[0]
-
-	if strings.TrimSpace(spec.VersionField) != "" {
-		// The origin's own version, kept on the row. It is a PAYLOAD field
-		// (DomainSpec.VersionField says so), and the raw read above answers
-		// bundle rows whose top level holds only the intrinsics: read there,
-		// it was empty on every row and the guard refused nothing
-		// (memql#5638). Which stored value counts as a version at all is the
-		// contract's rule (memqlsync.StoredVersion): a row written before the
-		// connector said where its versions come from holds none.
-		return memqlsync.StoredVersion(spec, payloadOf(row)), true, nil
-	}
-	// The fallback (D6): the origin publishes no version, so the version
-	// is when MemQL last applied a delivery for this row.
-	//
-	// IT READS NOTHING TODAY, and that is left alone on purpose (memql#5638).
-	// The raw read carries the row's creation time as `created_at`, a
-	// protobuf timestamp, not as `createdAt`, so every row answers "no
-	// version" here. Reading it would compare a connector-stamped delivery
-	// time against MemQL's own write clock, and no connector declares a
-	// domain without a VersionField, so turning it on is a decision for the
-	// first one that does rather than a repair.
-	if t := timeField(row, "createdAt"); !t.IsZero() {
-		return t.UTC().Format(time.RFC3339Nano), true, nil
-	}
-	// A row whose createdAt cannot be read is a row we cannot order
-	// against. Reported as EXISTING WITH NO VERSION, which the guard
-	// reads as "not stale" -- applying a possibly-older write is
-	// recoverable by the next reconciliation, while refusing every write
-	// to such a row is not.
-	return "", true, nil
+	return payloadOf(rows[0]), true, nil
 }
 
 // payloadOf is a raw read's row payload: the bundle row's `payload`, or the

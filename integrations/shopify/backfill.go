@@ -57,13 +57,17 @@ type backfillCursor struct {
 	// it completes with, so a completed domain's row says which rule read it
 	// (backfillReadUnderRule).
 	Rule int `json:"v,omitempty"`
+	// At is when this engine started the export the cursor follows
+	// (memqlsync.ReadTime): the time the origin was read for every line of it.
+	At string `json:"at,omitempty"`
 }
 
 // originVersionRule is the write rule under which every bulk line carries the
-// origin's own version. Before it, a line was stamped with the time it was
-// streamed, and a snapshot older than a delivery could replace what the
-// delivery recorded; a domain read whole under the earlier rule is read once
-// more (finished, queueUnstartedBackfills).
+// origin's own version and the time its export was started. Before it, a
+// line was stamped with the time it was streamed, and a snapshot older than a
+// delivery could replace what the delivery recorded; a domain read whole
+// under the earlier rule is read once more (queueUnstartedBackfills), and one
+// being read when this build started begins again (BackfillStore).
 const originVersionRule = 1
 
 // backfillReadUnderRule reports whether a domain's stored cursor says its
@@ -193,16 +197,32 @@ func (c *Connector) BackfillStore(ctx context.Context, store Store, concept, cur
 		// A backfill beginning: its every line carries the origin's version.
 		cur.Rule = originVersionRule
 	}
+	if !cur.underRule() {
+		// A backfill an earlier build began, running when this build
+		// started. Its lines were stamped with the time they were streamed,
+		// and its cursor does not say when its export started, which is the
+		// read time every line must carry (memqlsync.Refuses): continued, a
+		// line from an export started before a delete would bring the record
+		// back. It is begun again now, once, under the rule; the lines it has
+		// not reached would be read again by that re-read anyway.
+		c.logger.Info("shopify: a backfill begun before every line carried the origin's version and its export's start; beginning it again",
+			"store", store.ID, "concept", spec.Concept)
+		return memqlsync.BackfillPage{NextCursor: backfillCursor{Rule: originVersionRule}.encode()}, nil
+	}
 	if cur.OpIndex >= len(spec.BulkOps) {
-		return c.finished(store, spec, cur), nil
+		return c.finished(cur), nil
 	}
 
-	// 1. No operation yet: start one.
+	// 1. No operation yet: start one. Its start is the read time of every
+	// line it exports, however much later the file is streamed: the origin
+	// takes its snapshot after this moment.
 	if cur.OperationID == "" {
+		startedAt := c.now()
 		op, err := c.startBulkOperation(ctx, store, spec, cur.OpIndex)
 		if err != nil {
 			return memqlsync.BackfillPage{}, err
 		}
+		cur.At = memqlsync.ReadTime(startedAt)
 		cur.OperationID = op.ID
 		cur.Line = 0
 		cur.URL = ""
@@ -221,7 +241,7 @@ func (c *Connector) BackfillStore(ctx context.Context, store Store, concept, cur
 				// A completed operation with no URL means the query
 				// matched nothing. That is a legitimate empty domain and
 				// the step is done, not stuck.
-				return c.advanceOperation(store, cur, spec, "no rows")
+				return c.advanceOperation(cur, spec, "no rows")
 			}
 			cur.URL = op.URL
 			cur.Line = 0
@@ -249,7 +269,8 @@ func (c *Connector) BackfillStore(ctx context.Context, store Store, concept, cur
 	}
 
 	// 3. Stream the next batch of lines.
-	writes, consumed, eof, err := c.streamBulk(ctx, store, spec, cur.URL, cur.Line, backfillBatchLines)
+	startedAt, _ := memqlsync.VersionTime(cur.At)
+	writes, consumed, eof, err := c.streamBulk(ctx, store, spec, cur.URL, cur.Line, backfillBatchLines, startedAt)
 	var gone bulkDownloadGone
 	if errors.As(err, &gone) && cur.Restarts < maxDownloadRestarts {
 		// The link outlived its week (a backfill paused or stopped past it),
@@ -268,7 +289,7 @@ func (c *Connector) BackfillStore(ctx context.Context, store Store, concept, cur
 	if !eof {
 		return memqlsync.BackfillPage{Writes: writes, NextCursor: cur.encode()}, nil
 	}
-	next, err := c.advanceOperation(store, cur, spec, fmt.Sprintf("%d lines", cur.Line))
+	next, err := c.advanceOperation(cur, spec, fmt.Sprintf("%d lines", cur.Line))
 	if err != nil {
 		return memqlsync.BackfillPage{}, err
 	}
@@ -277,29 +298,26 @@ func (c *Connector) BackfillStore(ctx context.Context, store Store, concept, cur
 }
 
 // advanceOperation moves to the next bulk operation of a multi-part domain,
-// or reports the domain done.
-func (c *Connector) advanceOperation(store Store, cur backfillCursor, spec *generated.TypeSpec, note string) (memqlsync.BackfillPage, error) {
+// or reports the domain done. The next part is a new export, with a start of
+// its own.
+func (c *Connector) advanceOperation(cur backfillCursor, spec *generated.TypeSpec, note string) (memqlsync.BackfillPage, error) {
 	if cur.OpIndex+1 < len(spec.BulkOps) {
 		return memqlsync.BackfillPage{
 			NextCursor: backfillCursor{OpIndex: cur.OpIndex + 1, Restarts: cur.Restarts, Rule: cur.Rule}.encode()}, nil
 	}
-	return c.finished(store, spec, cur), nil
+	return c.finished(cur), nil
 }
 
-// finished is a backfill's last step. One that began under originVersionRule
-// is done, and completes with a cursor saying so, which the boot pass reads
-// (queueUnstartedBackfills). One an earlier build began -- running when this
-// build started, its early lines stamped with the time they were streamed --
-// is not done: it begins again from the domain's first operation, once, under
-// the rule, because those early lines may have put an older snapshot over a
-// newer delivery. Its restart carries the rule, so its own end is the end.
-func (c *Connector) finished(store Store, spec *generated.TypeSpec, cur backfillCursor) memqlsync.BackfillPage {
-	if cur.Rule < originVersionRule {
-		c.logger.Info("shopify: a backfill begun before every line carried the origin's version reached its end; reading the domain once more",
-			"store", store.ID, "concept", spec.Concept)
-		return memqlsync.BackfillPage{NextCursor: backfillCursor{Rule: originVersionRule}.encode()}
-	}
+// finished is a backfill's last step: done, with a cursor naming the rule it
+// read the domain under, which the boot pass reads (queueUnstartedBackfills).
+func (c *Connector) finished(cur backfillCursor) memqlsync.BackfillPage {
 	return memqlsync.BackfillPage{Done: true, NextCursor: backfillCursor{Rule: cur.Rule}.encode()}
+}
+
+// underRule reports whether a cursor belongs to a backfill begun under
+// originVersionRule, whose every export records when it was started.
+func (c backfillCursor) underRule() bool {
+	return c.Rule >= originVersionRule && (c.OperationID == "" || c.At != "")
 }
 
 func (c *Connector) startBulkOperation(ctx context.Context, store Store, spec *generated.TypeSpec, opIndex int) (bulkOperation, error) {
@@ -392,7 +410,9 @@ func operationBody(document, operation string) (string, error) {
 // streamBulk downloads the JSONL and maps up to `limit` lines starting at
 // `skip`, returning the writes, how many lines were consumed, and whether the
 // file ended.
-func (c *Connector) streamBulk(ctx context.Context, store Store, spec *generated.TypeSpec, url string, skip, limit int) ([]memqlsync.MirrorWrite, int, bool, error) {
+//
+// Every line carries readAt, when its export was started (BackfillStore).
+func (c *Connector) streamBulk(ctx context.Context, store Store, spec *generated.TypeSpec, url string, skip, limit int, readAt time.Time) ([]memqlsync.MirrorWrite, int, bool, error) {
 	// The URL arrived inside a bulk-operation status rather than from a
 	// caller, which makes it more trusted than a request parameter and not
 	// trusted enough to fetch unchecked: the status came from a host named on
@@ -444,7 +464,7 @@ func (c *Connector) streamBulk(ctx context.Context, store Store, spec *generated
 		}
 		if lastParent != "" {
 			if obj, err := decodeJSONObject(lastParent); err == nil {
-				c.mapBulkLineUnder(store, spec, obj, parents)
+				c.mapBulkLineUnder(store, spec, obj, parents, readAt)
 			}
 			lastParent = ""
 		}
@@ -464,7 +484,7 @@ func (c *Connector) streamBulk(ctx context.Context, store Store, spec *generated
 			c.logger.Warn("shopify: skipping unparseable bulk line", "store", store.ID, "concept", spec.Concept, "line", line)
 			continue
 		}
-		writes = append(writes, c.mapBulkLineUnder(store, spec, obj, parents)...)
+		writes = append(writes, c.mapBulkLineUnder(store, spec, obj, parents, readAt)...)
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, consumed, false, downloadFailed(store, spec, url, err)
@@ -539,13 +559,14 @@ func carriesLink(text, link string) bool {
 // different connections, so the only thing that identifies a line is what it
 // says it is.
 func (c *Connector) mapBulkLine(store Store, spec *generated.TypeSpec, obj map[string]any) []memqlsync.MirrorWrite {
-	return c.mapBulkLineUnder(store, spec, obj, nil)
+	return c.mapBulkLineUnder(store, spec, obj, nil, c.now())
 }
 
-// mapBulkLineUnder is mapBulkLine within one stream: a parent line records
-// its origin version in parents (when parents is not nil), and a child line
-// carries its parent's where it has none of its own (mapObjectUnder).
-func (c *Connector) mapBulkLineUnder(store Store, spec *generated.TypeSpec, obj map[string]any, parents map[string]string) []memqlsync.MirrorWrite {
+// mapBulkLineUnder is mapBulkLine within one stream, read at readAt: a parent
+// line versioned by its updatedAt records it in parents (when parents is not
+// nil), and a child line carries its parent's where it has none of its own
+// (mapObjectUnder).
+func (c *Connector) mapBulkLineUnder(store Store, spec *generated.TypeSpec, obj map[string]any, parents map[string]string, readAt time.Time) []memqlsync.MirrorWrite {
 	parentGID, _ := obj["__parentId"].(string)
 	gid, _ := obj["id"].(string)
 	lineSpec := spec
@@ -566,8 +587,8 @@ func (c *Connector) mapBulkLineUnder(store Store, spec *generated.TypeSpec, obj 
 		// under a running operation.
 		return nil
 	}
-	writes := mapObjectUnder(lineSpec, store.ID, obj, parentGID, parents[parentGID], c.now())
-	if parentGID == "" && parents != nil && len(writes) > 0 && writes[0].Payload["versionSource"] == memqlsync.VersionFromOrigin {
+	writes := mapObjectUnder(lineSpec, store.ID, obj, parentGID, parents[parentGID], readAt)
+	if parentGID == "" && parents != nil && lineSpec.VersionField == "updatedAt" && len(writes) > 0 && writes[0].Payload["versionSource"] == memqlsync.VersionFromOrigin {
 		parents[gid] = writes[0].Version
 	}
 	return writes

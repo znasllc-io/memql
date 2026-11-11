@@ -182,29 +182,48 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 	}
 
 	if route.Action == generated.ActionDelete {
-		return []memqlsync.MirrorWrite{tombstone(spec.Concept, store.ID, gid, deliveredAt(req, c.now()))}, nil
+		// Its time is when the delivery was RECEIVED (staged), on this
+		// engine's clock: a moment by which the record was gone, kept by a
+		// retry, and ordered against when the origin was last read for the
+		// row (memqlsync.Refuses).
+		return []memqlsync.MirrorWrite{tombstone(spec.Concept, store.ID, gid, receivedAt(req, c.now()))}, nil
 	}
 
-	writes, err := c.fetchAndMap(ctx, store, spec, gid)
+	writes, gone, readAt, err := c.fetchAndMap(ctx, store, spec, gid)
 	if err != nil {
 		c.forgetDelivery(req, gid)
 		return nil, err
 	}
-	if writes == nil {
-		// The object is gone. A create/update topic for something Shopify
-		// no longer has is the RACE this arm exists for: the delete
-		// delivery may arrive later, out of order, or never. Tombstoning
-		// on an empty fetch is what makes the mirror converge without it.
+	if gone {
+		// The origin answered cleanly that it has no such record. A
+		// create/update topic for something Shopify no longer has is the
+		// RACE this arm exists for: the delete delivery may arrive later,
+		// out of order, or never. Tombstoning on an empty fetch is what makes
+		// the mirror converge without it.
 		//
-		// Its version is the FETCH's time, not this delivery's event time:
-		// the fetch is what proves the record gone, and by then every state
-		// the origin published of it is older. The event time is not: a
-		// delivery retried after a later one landed carries an event older
-		// than the state that later one wrote, and its tombstone was refused
-		// as stale, leaving a deleted record live.
-		return []memqlsync.MirrorWrite{tombstone(spec.Concept, store.ID, gid, c.now())}, nil
+		// Its time is the FETCH's: that read is what found the record gone.
+		// A record the mirror does not hold has nothing to retire -- a
+		// create delivery can arrive before its record is readable -- so
+		// nothing is written, and the record arrives with the next read that
+		// finds it.
+		held, err := c.mirrorHoldsRow(ctx, spec, store.ID, gid)
+		if err != nil {
+			c.forgetDelivery(req, gid)
+			return nil, err
+		}
+		if !held {
+			return nil, nil
+		}
+		return []memqlsync.MirrorWrite{tombstone(spec.Concept, store.ID, gid, readAt)}, nil
 	}
 	return writes, nil
+}
+
+// mirrorHoldsRow reports whether the mirror holds a row for a gid, live or
+// retired.
+func (c *Connector) mirrorHoldsRow(ctx context.Context, spec *generated.TypeSpec, storeID, gid string) (bool, error) {
+	stored, err := c.storedMirrorRow(ctx, memqlsync.MirrorWrite{Concept: generated.ConceptID(spec.Concept), RowId: MirrorRowID(storeID, gid)})
+	return stored != nil, err
 }
 
 func (c *Connector) deduped(req memqlsync.InboundRequest, gid string) bool {
@@ -254,56 +273,83 @@ func (c *Connector) ForgetInbound(_ context.Context, req memqlsync.InboundReques
 	}
 }
 
-// FetchByGID reads one object with the generated selection set and maps it.
-// Returns nil writes when the object no longer exists.
-func (c *Connector) fetchAndMap(ctx context.Context, store Store, spec *generated.TypeSpec, gid string) ([]memqlsync.MirrorWrite, error) {
+// fetchAndMap reads one object with the generated selection set and maps it,
+// every write carrying readAt: when this fetch began, on this engine's clock.
+//
+// gone is true only for a CLEAN answer that the origin has no such record:
+// the object null, and no error at all. Every other answer without the
+// object is an error and retires nothing:
+//   - the node itself refused (how Shopify refuses protected customer data on
+//     node(id:)): not granted, permanent (callWithGrant);
+//   - a denial still nulling the object after the prune limit (a partial
+//     answer): not granted, permanent;
+//   - a reply with no data, or data without the object's key: a failure the
+//     retry lane tries again;
+//   - any other error: as the client classed it.
+func (c *Connector) fetchAndMap(ctx context.Context, store Store, spec *generated.TypeSpec, gid string) (writes []memqlsync.MirrorWrite, gone bool, readAt time.Time, err error) {
 	if !spec.Fetchable {
 		// A type with no node(id:) resolution and no singleton query is
 		// only ever materialised with its parent. Reaching here means a
 		// topic routes to it directly, which the allowlist should not
 		// allow -- so it is a configuration error, said plainly.
-		return nil, fmt.Errorf("shopify: %s cannot be fetched by GID (it is materialised with its parent)", spec.GraphQLType)
+		return nil, false, readAt, fmt.Errorf("shopify: %s cannot be fetched by GID (it is materialised with its parent)", spec.GraphQLType)
 	}
 	vars := map[string]any{}
 	if spec.Singleton == "" {
 		vars["id"] = gid
 	}
+	readAt = c.now()
 	resp, err := c.callWithGrant(ctx, store, spec, spec.FetchOp, vars)
 	if err != nil {
 		if memqlsync.IsNotGranted(err) {
 			// A delivery for a domain the grant does not cover: no
 			// number of retries fetches it, so the drain must not spend
 			// them.
-			return nil, memqlsync.Permanent(err)
+			return nil, false, readAt, memqlsync.Permanent(err)
 		}
-		return nil, err
+		return nil, false, readAt, err
 	}
 	data, err := resp.DataMap()
 	if err != nil {
-		return nil, err
+		return nil, false, readAt, err
 	}
-	obj := fetchedObject(data, spec)
+	key := "node"
+	if spec.Singleton != "" {
+		key = spec.Singleton
+	}
+	raw, present := data[key]
+	if !present {
+		return nil, false, readAt, fmt.Errorf("shopify: %s answered no %s for %s", spec.FetchOp, key, gid)
+	}
+	obj, _ := raw.(map[string]any)
 	if obj == nil {
-		return nil, nil
+		if len(resp.Errors) > 0 {
+			// A partial answer: the origin refused part of the selection and
+			// what is left has no object. That is the grant, not a deletion.
+			return nil, false, readAt, memqlsync.Permanent(fmt.Errorf("%w: %s for %s answered no object beside: %v",
+				memqlsync.ErrNotGranted, spec.FetchOp, gid, adminErrors(resp.Errors)))
+		}
+		return nil, true, readAt, nil
 	}
 	// node(id:) resolves ANY type, and an inline fragment on the wrong one
 	// returns an object carrying nothing but __typename. Without this check
 	// that becomes a mirror row with every field blank -- a silent
 	// corruption rather than an error.
 	if tn, _ := obj["__typename"].(string); tn != "" && tn != spec.GraphQLType {
-		return nil, fmt.Errorf("shopify: %s resolved to a %s, not a %s", gid, tn, spec.GraphQLType)
+		return nil, false, readAt, fmt.Errorf("shopify: %s resolved to a %s, not a %s", gid, tn, spec.GraphQLType)
 	}
-	if _, ok := obj["id"].(string); !ok && spec.Singleton != "" {
-		// The singleton query returns the object directly and Shop's own
-		// id is in the selection; a missing one is a malformed response.
-		return nil, fmt.Errorf("shopify: %s response carried no id", spec.GraphQLType)
+	if _, ok := obj["id"].(string); !ok {
+		// Both the node and the singleton select the object's own id; an
+		// object without one is a malformed answer, not a record to write
+		// or a deletion.
+		return nil, false, readAt, fmt.Errorf("shopify: %s response carried no id", spec.GraphQLType)
 	}
 	// Before the object is mapped, so the later pages' children are
 	// mapped with the rest: under this parent, on this store's partition.
 	if err := c.completeChildren(ctx, store, spec, obj); err != nil {
-		return nil, err
+		return nil, false, readAt, err
 	}
-	return mapObject(spec, store.ID, obj, "", c.now()), nil
+	return mapObject(spec, store.ID, obj, "", readAt), false, readAt, nil
 }
 
 // fetchedObject digs the object out of whichever shape the operation used.
@@ -345,19 +391,25 @@ func deliveredGID(body []byte, graphqlType string) string {
 	return ""
 }
 
+// receivedAt is when a delivery was received (staged), on this engine's
+// clock, or `fallback` for one that carries none. A retry keeps it: it is the
+// staged row's, not the try's.
+func receivedAt(req memqlsync.InboundRequest, fallback time.Time) time.Time {
+	if !req.ReceivedAt.IsZero() {
+		return req.ReceivedAt.UTC()
+	}
+	return fallback.UTC()
+}
+
 // deliveredAt reads the origin's own timestamp for the delivery, falling back
-// to now. Used as the version on a delete topic's tombstone, where there is
-// no object left to read a version from: the delete's own event time.
+// to its receipt and then to now: the event's time, for the uninstall audit.
 func deliveredAt(req memqlsync.InboundRequest, fallback time.Time) time.Time {
 	if raw := header(req, HeaderTriggeredAt); raw != "" {
 		if t, err := time.Parse(time.RFC3339, raw); err == nil {
 			return t.UTC()
 		}
 	}
-	if !req.ReceivedAt.IsZero() {
-		return req.ReceivedAt.UTC()
-	}
-	return fallback.UTC()
+	return receivedAt(req, fallback)
 }
 
 func isComplianceTopic(topic string) bool {

@@ -229,13 +229,17 @@ func (c *Connector) Domains() []memqlsync.DomainSpec {
 // publishes no version for, the connector stamps the time of reading into
 // that field and the guard degrades to last-write-wins -- recorded on the
 // TypeSpec rather than discovered at runtime. `versionSource` says which of
-// the two a row holds, and a row without it was written before every write
-// said: it holds no version (memqlsync.StoredVersion).
+// the two a row holds, `syncedAt` when the origin was read for it, and
+// `versionReadAt` pairs the marker with that read: a row without the pair was
+// written before every write said, and holds no version
+// (memqlsync.StoredStamp).
 func mirrorDomain(conceptID string) memqlsync.DomainSpec {
 	return memqlsync.DomainSpec{
 		Concept:            conceptID,
 		VersionField:       "updatedAt",
 		VersionSourceField: "versionSource",
+		ReadAtField:        "syncedAt",
+		VersionReadAtField: "versionReadAt",
 		Direction:          memqlsync.DirectionInbound,
 	}
 }

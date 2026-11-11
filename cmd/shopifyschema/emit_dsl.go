@@ -126,7 +126,7 @@ func childLabel(p *TypePlan) string {
 	return "partOf" + strings.ToUpper(p.ParentConcept[:1]) + p.ParentConcept[1:]
 }
 
-// mirrorColumns are the six (seven with a parent) fields every mirror row
+// mirrorColumns are the seven (eight with a parent) fields every mirror row
 // carries regardless of type.
 func mirrorColumns(p *TypePlan) string {
 	var b strings.Builder
@@ -141,14 +141,18 @@ func mirrorColumns(p *TypePlan) string {
 	b.WriteString("  gid        string!\n")
 	b.WriteString("  /// The ORIGIN's version. A write whose updatedAt is older than the stored one is refused as stale.\n")
 	b.WriteString("  updatedAt  datetime!\n")
-	b.WriteString("  /// Where updatedAt came from: \"origin\", Shopify's own version (or, on a tombstone, when the row was found gone), or\n")
-	b.WriteString("  /// \"read\", when MemQL read a row Shopify publishes no version for. Empty on a row written before every write said; its\n")
-	b.WriteString("  /// updatedAt is then a time MemQL read it, and the guard reads it as holding no version.\n")
+	b.WriteString("  /// Where updatedAt came from: \"origin\", Shopify's own version; or \"read\", a time MemQL read Shopify -- for a row\n")
+	b.WriteString("  /// Shopify publishes no version for, and for a tombstone, whose standing is when it was read (syncedAt), not a version.\n")
+	b.WriteString("  /// Counted only beside versionReadAt equal to syncedAt; otherwise the row was written before every write said, and the\n")
+	b.WriteString("  /// guard reads it as holding no version.\n")
 	b.WriteString("  versionSource string\n")
-	b.WriteString("  /// When MemQL last wrote a change to this row: a delivery, or a reconciliation pass that found it different. A pass that\n")
+	b.WriteString("  /// When MemQL read Shopify for the write that last changed this row, on MemQL's clock: the fetch, the page, the start of a\n")
+	b.WriteString("  /// relist's listing or of a bulk export, the receipt of a delete. Whether the record exists is judged by it. A pass that\n")
 	b.WriteString("  /// finds the row unchanged writes nothing, so this is not when it was last checked; the domain's sync state (lastReconcileAt) is.\n")
 	b.WriteString("  syncedAt   datetime!\n")
-	b.WriteString("  /// Tombstone. A delete topic, or a fetch that finds nothing, sets it; the row and its history stay.\n")
+	b.WriteString("  /// The syncedAt of the write that set versionSource, which that marker counts beside.\n")
+	b.WriteString("  versionReadAt string\n")
+	b.WriteString("  /// Tombstone. A delete topic, a clean fetch that finds nothing, or a relist that does not list the row sets it; the row and its history stay.\n")
 	b.WriteString("  deleted    bool\n")
 	if p.ParentConcept != "" {
 		b.WriteString("  /// The parent's GID, from the nested selection on a fetch and from __parentId on a bulk stream.\n")

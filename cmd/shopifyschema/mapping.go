@@ -53,7 +53,7 @@ const (
 // is the one outcome the generator must not have.
 var mirrorOwnFields = map[string]bool{
 	"storeId": true, "gid": true, "updatedAt": true, "versionSource": true,
-	"syncedAt": true, "deleted": true, "parentGid": true,
+	"syncedAt": true, "versionReadAt": true, "deleted": true, "parentGid": true,
 }
 
 // engineReservedFields mirrors component/database/memory-nodes'

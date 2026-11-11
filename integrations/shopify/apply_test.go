@@ -174,6 +174,10 @@ func TestEveryDeleteTopicTombstonesWithoutAFetch(t *testing.T) {
 func TestAFetchThatFindsNothingTombstones(t *testing.T) {
 	h := newHarness(t)
 	h.admin.reply("ShopifyFetchProduct", map[string]any{"node": nil})
+	// A record the mirror holds: one it does not hold has nothing to retire
+	// (TestAnEmptyFetchForARecordNotHeldWritesNothing).
+	rowID := MirrorRowID(testStoreID, "gid://shopify/Product/1")
+	h.engine.setRows(`concept==v1:shopify:product && id=="`+rowID+`"`, []map[string]any{{"id": rowID, "gid": "gid://shopify/Product/1"}})
 
 	writes, err := h.conn.Apply(context.Background(), delivery("products/update", "gid://shopify/Product/1"))
 	if err != nil {

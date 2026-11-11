@@ -121,6 +121,20 @@ type DomainSpec struct {
 	// reads it as holding no version (StoredVersion). Empty means every
 	// stored version is compared, as before the field existed.
 	VersionSourceField string
+	// ReadAtField, when set, names the payload field carrying when the origin
+	// was read for the write that set the row (ReadTime, this engine's clock):
+	// the fetch, the listing's start, the export's start, the delivery's
+	// receipt. Whether a record EXISTS is judged by it (Refuses), never by
+	// the record's version. Empty leaves retirements ordered by version.
+	ReadAtField string
+	// VersionReadAtField, when set, names the payload field the connector
+	// writes beside VersionSourceField with the same value as ReadAtField. A
+	// marker counts only beside the read time of the write that set it: a
+	// write that leaves the marker out -- an earlier build's, during a rolling
+	// upgrade -- moves ReadAtField but not this, and the engine's read-merge
+	// would otherwise keep the old marker beside a version it does not
+	// describe.
+	VersionReadAtField string
 	// ReconcileInterval is how often the reconciliation runner should
 	// sweep this domain. Zero means "do not schedule" -- reconciliation
 	// is then operator-driven only.

@@ -250,3 +250,65 @@ func TestADomainReadBeforeThisRuleIsQueuedOnceMore(t *testing.T) {
 		}
 	}
 }
+
+// THE MARKER MUST NOT OUTLIVE THE WRITE THAT SET IT. During a rolling
+// upgrade a node on the earlier build writes a row with its read time as
+// updatedAt and no versionSource; the engine's insert read-merges an omitted
+// field from the stored row (component/memql/executor_mutation.go, the
+// ENGINE-LEVEL READ-MERGE), so the stored versionSource survives beside a
+// version that is not the origin's. The marker counts only beside the read
+// time of the write that set it, so that row reads as written before the
+// rule, and the origin's state replaces it.
+func TestAnOlderBuildsWriteLeavesNoMarkerBehind(t *testing.T) {
+	eng, db := authorityEngine(t)
+	if eng == nil {
+		return
+	}
+	cleanMirrored(t, db, "product")
+	c := &Connector{engine: eng, logger: slog.New(slog.NewTextHandler(io.Discard, nil)), now: time.Now}
+	specs := map[string]memqlsync.DomainSpec{}
+	for _, spec := range c.Domains() {
+		specs[spec.Concept] = spec
+	}
+	writer := datasync.NewEngineMirrorWriter(anyEngine{eng})
+	applier := datasync.NewApplier(datasync.NewStore(anyEngine{eng}), writer)
+	connCtx := auth.ContextWithConnectorActor(context.Background(), ConnectorName)
+	const gid = "gid://shopify/Product/13101"
+	spec := generated.Types["product"]
+	apply := func(title, updatedAt string, read time.Time) datasync.ApplyResult {
+		t.Helper()
+		res, err := applier.Apply(connCtx, ConnectorName, specs, mapObject(spec, authorityTestStoreId, map[string]any{"id": gid, "title": title, "updatedAt": updatedAt}, "", read))
+		if err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		return res
+	}
+	title := func() string {
+		t.Helper()
+		var out string
+		if err := db.QueryRowContext(context.Background(),
+			`SELECT payload->>'title' FROM "MemoryNodes" WHERE concept = $1 AND payload->>'gid' = $2 AND payload->>'storeId' = $3 ORDER BY "createdAt" DESC LIMIT 1`,
+			generated.ConceptID("product"), gid, authorityTestStoreId).Scan(&out); err != nil {
+			t.Fatalf("read the title: %v", err)
+		}
+		return out
+	}
+
+	// Marked: written under the rule.
+	if res := apply("Marked", "2026-11-11T11:00:00Z", time.Date(2026, 11, 11, 11, 30, 0, 0, time.UTC)); res.Applied != 1 {
+		t.Fatalf("the marked write applied %d", res.Applied)
+	}
+	// The earlier build's write: its read time as updatedAt and syncedAt, no marker.
+	if err := writer.WriteMirror(connCtx, ConnectorName, memqlsync.MirrorWrite{
+		Concept: generated.ConceptID("product"), RowId: MirrorRowID(authorityTestStoreId, gid),
+		Payload: map[string]any{"storeId": authorityTestStoreId, "gid": gid, "title": "Older build",
+			"updatedAt": "2026-11-11T12:00:00Z", "syncedAt": "2026-11-11T12:00:00Z", "deleted": false},
+	}); err != nil {
+		t.Fatalf("the earlier build's write: %v", err)
+	}
+	// The origin's state, older than that read time: applied.
+	res := apply("Origin", "2026-11-11T11:45:00Z", time.Date(2026, 11, 11, 12, 30, 0, 0, time.UTC))
+	if res.Applied != 1 || title() != "Origin" {
+		t.Errorf("applied %d (stale %d), title %q: a row an earlier build rewrote must not keep the marker the rule set", res.Applied, res.Stale, title())
+	}
+}

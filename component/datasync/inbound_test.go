@@ -102,8 +102,10 @@ func TestAWriteCarryingNoVersionIsAlwaysApplied(t *testing.T) {
 // document selected the origin's updatedAt. Compared against the origin's own
 // version, that clock refuses every honest write -- the read time is later
 // than the last change it read -- so such a row holds no version, and the
-// first write carrying the origin's replaces it. A row the connector did
-// stamp is guarded as always, from either source.
+// first write carrying the origin's replaces it. A row the connector stamped
+// with the origin's version is guarded as always; one stamped with a read
+// time does not refuse the origin's version either (versions of different
+// kinds are never compared).
 func TestAStoredRowWithNoOriginVersionNeverRefusesOneThatHasIt(t *testing.T) {
 	spec := memqlsync.DomainSpec{Concept: testMirrorConcept, VersionField: "updatedAt", VersionSourceField: "versionSource", Direction: memqlsync.DirectionInbound}
 	specs := map[string]memqlsync.DomainSpec{testMirrorConcept: spec}
@@ -125,15 +127,17 @@ func TestAStoredRowWithNoOriginVersionNeverRefusesOneThatHasIt(t *testing.T) {
 		t.Fatalf("applied=%d stale=%d over a row written before the rule, want 1/0: its read time is no version", res.Applied, res.Stale)
 	}
 
-	// Written under the rule, from either source: guarded as always.
-	for _, source := range []string{memqlsync.VersionFromOrigin, memqlsync.VersionFromRead} {
+	// Written under the rule with the origin's version: guarded as always.
+	// With a read time: versions of different kinds are never compared, so
+	// it does not refuse the origin's.
+	for source, stale := range map[string]int{memqlsync.VersionFromOrigin: 1, memqlsync.VersionFromRead: 0} {
 		res, err := stored(map[string]any{"updatedAt": "2026-08-23T12:00:00Z", "syncedAt": "2026-08-23T12:00:05Z", "versionSource": source}).
 			Apply(context.Background(), "shopify", specs, older)
 		if err != nil {
 			t.Fatalf("Apply: %v", err)
 		}
-		if res.Applied != 0 || res.Stale != 1 {
-			t.Errorf("applied=%d stale=%d over a row whose version came from %q, want 0/1", res.Applied, res.Stale, source)
+		if res.Stale != stale || res.Applied != 1-stale {
+			t.Errorf("applied=%d stale=%d over a row whose version came from %q, want stale %d", res.Applied, res.Stale, source, stale)
 		}
 	}
 

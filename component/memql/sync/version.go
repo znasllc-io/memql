@@ -19,41 +19,135 @@ import (
 
 // The values a connector writes in DomainSpec.VersionSourceField.
 const (
-	// VersionFromOrigin: the version is the origin's own -- its updated_at,
-	// its event time -- or, for a row retired because the origin was found
-	// not to have it, the moment that was found.
+	// VersionFromOrigin: the version is the origin's own, its updated_at or
+	// created_at.
 	VersionFromOrigin = "origin"
-	// VersionFromRead: the origin publishes no version for the row, and the
-	// version is when MemQL read it.
+	// VersionFromRead: the version is a time MemQL read the origin -- for a
+	// row the origin publishes no version for, and for a tombstone, whose
+	// standing is its read time (Refuses), not a version.
 	VersionFromRead = "read"
 )
 
-// StoredVersion is the version a stored mirror row holds, as the guard
-// compares it: the payload's VersionField, or "" when the row holds none --
-// the spec names no VersionField, or names a VersionSourceField the row does
-// not carry, which is a row written before the connector said where its
-// versions come from.
+// Stamp is what the guard knows of one side of a write: the row MemQL holds,
+// or the write that would replace it.
+type Stamp struct {
+	// Held is false for a row MemQL does not hold, and for one it cannot
+	// order anything against: a live row written before its connector said
+	// where its versions come from.
+	Held bool
+	// Retired is a tombstone: the record gone at the origin.
+	Retired bool
+	// Source is where Version came from: VersionFromOrigin, VersionFromRead,
+	// or "" for a row that holds no version.
+	Source  string
+	Version string
+	// ReadAt is when the origin was read for it (ReadTime), "" when unknown.
+	ReadAt string
+}
+
+// StoredStamp is how the guard reads a stored row, and the ONE place a row
+// written under the connector's rule is told from one written before it.
 //
-// This is the ONE place a row written under the old rule is told from one
-// written under the new: the applier's read (datasync) and a connector's
-// heal both call it.
-func StoredVersion(spec DomainSpec, payload map[string]any) string {
-	field := strings.TrimSpace(spec.VersionField)
-	if field == "" || payload == nil {
+// A spec that names no VersionSourceField compares every stored version, as
+// before the field existed. One that names it counts the marker only when it
+// was written by the same write as the row's read time (VersionReadAtField
+// equal to ReadAtField): an unmarked row, or one whose marker an earlier
+// build's write left behind, holds no version. Such a LIVE row orders nothing
+// and is not Held; such a TOMBSTONE still records when the record was found
+// gone, by its read time, so an older snapshot does not bring it back.
+func StoredStamp(spec DomainSpec, payload map[string]any) Stamp {
+	if payload == nil {
+		return Stamp{}
+	}
+	out := Stamp{Held: true, Retired: payload["deleted"] == true, ReadAt: field(payload, spec.ReadAtField)}
+	if strings.TrimSpace(spec.VersionField) == "" {
+		return out
+	}
+	if strings.TrimSpace(spec.VersionSourceField) == "" {
+		out.Source, out.Version = VersionFromOrigin, field(payload, spec.VersionField)
+		return out
+	}
+	source := field(payload, spec.VersionSourceField)
+	paired := source != "" && (strings.TrimSpace(spec.VersionReadAtField) == "" ||
+		(out.ReadAt != "" && field(payload, spec.VersionReadAtField) == out.ReadAt))
+	if !paired {
+		if out.Retired {
+			return out
+		}
+		return Stamp{}
+	}
+	out.Source, out.Version = source, field(payload, spec.VersionField)
+	return out
+}
+
+// WriteStamp is how the guard reads a write.
+func WriteStamp(spec DomainSpec, w MirrorWrite) Stamp {
+	out := Stamp{Held: true, Retired: w.Retire, Version: strings.TrimSpace(w.Version), ReadAt: field(w.Payload, spec.ReadAtField)}
+	if strings.TrimSpace(spec.VersionSourceField) == "" {
+		out.Source = VersionFromOrigin
+	} else {
+		out.Source = field(w.Payload, spec.VersionSourceField)
+	}
+	return out
+}
+
+// Refuses is the guard: whether a write must not replace the row MemQL holds.
+// The runtime's applier and a connector's own sweep both ask it.
+//
+// WHETHER A RECORD EXISTS is judged by when the origin was read, never by
+// the record's version -- a record's updatedAt does not move when it is
+// deleted, and a read that wrongly found it gone must not outrank every
+// later read that finds it. When either side is a tombstone and the row's
+// read time is known:
+//   - a live write over a tombstone applies only when the origin was read
+//     for it AFTER the tombstone's time;
+//   - a tombstone over a live row applies only when its time is AFTER the
+//     time the origin was last read for that row;
+//   - a tombstone over a tombstone: the later time wins, and an earlier or
+//     equal one writes nothing, since it changes nothing.
+//
+// WHICH OF TWO LIVE STATES IS NEWER is the origin's version, when both sides
+// carry one. Versions of different kinds are never compared: a stored read
+// time does not refuse a write carrying the origin's version (it is no
+// evidence of being newer by the origin's clock). A write carrying only a
+// read time is ordered by when it was read, against the row's read time,
+// whatever the row's version: that is the only evidence it carries.
+func Refuses(stored, incoming Stamp) bool {
+	if !stored.Held {
+		return false
+	}
+	if (stored.Retired || incoming.Retired) && stored.ReadAt != "" {
+		return !readAfter(incoming.ReadAt, stored.ReadAt)
+	}
+	switch {
+	case stored.Source == "":
+		return false
+	case stored.Source == VersionFromOrigin && incoming.Source == VersionFromOrigin:
+		return Stale(incoming.Version, stored.Version)
+	case incoming.Source == VersionFromOrigin:
+		return false
+	case incoming.ReadAt == "" || stored.ReadAt == "":
+		// Two versions of the connector's own clock with no read time to
+		// order them by: compared as the versions they are.
+		return Stale(incoming.Version, stored.Version)
+	default:
+		return readAfter(stored.ReadAt, incoming.ReadAt)
+	}
+}
+
+// readAfter reports whether read time a is strictly after b; an unknown or
+// unreadable a is after nothing.
+func readAfter(a, b string) bool {
+	ta, aok := VersionTime(a)
+	tb, bok := VersionTime(b)
+	return aok && bok && ta.After(tb)
+}
+
+func field(payload map[string]any, name string) string {
+	if payload == nil || strings.TrimSpace(name) == "" {
 		return ""
 	}
-	// A row whose connector says where its versions come from, written
-	// before it said so. Its version is a clock of MemQL's -- for Shopify,
-	// the time an object was read or a bulk line streamed -- and is later
-	// than the origin's own for the same state, so compared against the
-	// origin's it would refuse every honest write. The marker is a field the
-	// connector adds to every write, not a property of the values (an
-	// updatedAt equal to syncedAt): an origin version can equal the read
-	// time to the second, and a tombstone's two stamps are one instant.
-	if source := strings.TrimSpace(spec.VersionSourceField); source != "" && strings.TrimSpace(stringOf(payload[source])) == "" {
-		return ""
-	}
-	return strings.TrimSpace(stringOf(payload[field]))
+	return strings.TrimSpace(stringOf(payload[name]))
 }
 
 // Stale reports whether a write carrying incoming is older than a row holding
@@ -118,3 +212,13 @@ func stringOf(v any) string {
 		return fmt.Sprint(x)
 	}
 }
+
+// readTimeLayout writes every read time to the nanosecond, with every digit:
+// two reads in one second stay ordered, and no read time written this way is
+// ever spelled the way an earlier build spelled one (whole seconds), which is
+// what lets a marker be paired with the write that set it (StoredStamp).
+const readTimeLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
+// ReadTime is how a connector writes the time the origin was read for a
+// write, on this engine's clock.
+func ReadTime(t time.Time) string { return t.UTC().Format(readTimeLayout) }

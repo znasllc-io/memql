@@ -327,50 +327,151 @@ func (f *fakeAdmin) serveDownload(w http.ResponseWriter, r *http.Request) {
 var versionFields = []string{"updatedAt", "createdAt"}
 
 // answerSelected is a reply as the origin would send it: a version field the
-// documents do not select is not in it. A scripted reply that carries one is
-// told to `unselected`, once per field, because a fake that answers what was
-// never asked for is how the mirror stamped its own clock for months with a
-// green suite: every generated document left updatedAt out, and every fake
-// handed it back anyway. The check is a document line that is the field and
-// nothing else, which is how the generator writes a top-level selection.
+// documents do not select AT THAT OBJECT'S PATH is not in it. A scripted reply
+// that carries one is told to `unselected`, once per field, because a fake
+// that answers what was never asked for is how the mirror stamped its own
+// clock for months with a green suite: every generated document left
+// updatedAt out, and every fake handed it back anyway.
+//
+// The path is the reply's keys from the root (an array adds nothing), read
+// against the document's selection sets (selectionSets). A bulk line carries
+// no path: a parent line (no __parentId) is checked against the sets of the
+// documents' top-level nodes, a child line against any nested set. That is
+// coarser than a fetch's check -- a child line is answered a version any
+// child of the export selects -- and TestEveryDocumentSelectsItsTypesVersionField
+// in cmd/shopifyschema is the guard that each type's own set selects its own.
 func answerSelected(reply any, documents []string, unselected func(field string)) any {
-	selected := map[string]bool{}
-	for _, field := range versionFields {
-		for _, document := range documents {
-			for _, line := range strings.Split(document, "\n") {
-				if strings.TrimSpace(line) == field {
-					selected[field] = true
-				}
+	sets := map[string]map[string]bool{}
+	for _, document := range documents {
+		for path, fields := range selectionSets(document) {
+			if sets[path] == nil {
+				sets[path] = map[string]bool{}
+			}
+			for f := range fields {
+				sets[path][f] = true
 			}
 		}
 	}
 	told := map[string]bool{}
-	var strip func(v any) any
-	strip = func(v any) any {
+	tell := func(field string) {
+		if !told[field] {
+			told[field] = true
+			unselected(field)
+		}
+	}
+	var strip func(v any, path string, selected func(path, field string) bool) any
+	strip = func(v any, path string, selected func(path, field string) bool) any {
 		switch x := v.(type) {
 		case map[string]any:
+			if x == nil {
+				return nil
+			}
 			out := make(map[string]any, len(x))
 			for k, item := range x {
-				if slices.Contains(versionFields, k) && !selected[k] {
-					if !told[k] {
-						told[k] = true
-						unselected(k)
-					}
+				if slices.Contains(versionFields, k) && !selected(path, k) {
+					tell(k)
 					continue
 				}
-				out[k] = strip(item)
+				out[k] = strip(item, path+"/"+k, selected)
 			}
 			return out
 		case []any:
 			out := make([]any, len(x))
 			for i, item := range x {
-				out[i] = strip(item)
+				out[i] = strip(item, path, selected)
 			}
 			return out
 		}
 		return v
 	}
-	return strip(reply)
+	exact := func(path, field string) bool { return sets[path][field] }
+	if line, ok := reply.(map[string]any); ok && isBulkLine(documents) {
+		_, child := line["__parentId"]
+		return strip(line, "", func(path, field string) bool {
+			if path != "" {
+				return false
+			}
+			for set, fields := range sets {
+				depth := strings.Count(set, "/")
+				if fields[field] && strings.HasSuffix(set, "/edges/node") && (depth == 3) != child {
+					return true
+				}
+				if fields[field] && child && depth > 3 {
+					return true
+				}
+			}
+			return false
+		})
+	}
+	return strip(reply, "", exact)
+}
+
+// isBulkLine reports whether the documents are bulk queries: their root
+// connection is read through edges, never pageInfo.
+func isBulkLine(documents []string) bool {
+	for _, d := range documents {
+		if !strings.Contains(d, "edges {") || strings.Contains(d, "pageInfo") {
+			return false
+		}
+	}
+	return len(documents) > 0
+}
+
+// selectionSets reads a document the generator emitted -- one field per line,
+// a set opened by a line ending in "{" and closed by a lone "}" -- into the
+// direct fields of each selection set, keyed by the path of field names from
+// the operation's root ("/node", "/orders/nodes", "/orders/edges/node"). An
+// inline fragment ("... on Order {") adds nothing to the path. A field with
+// its set on the same line is a field of its parent; its own set is not read.
+func selectionSets(document string) map[string]map[string]bool {
+	sets := map[string]map[string]bool{}
+	var stack []string // "" for an operation or a fragment
+	path := func() string {
+		var b strings.Builder
+		for _, name := range stack {
+			if name != "" {
+				b.WriteString("/" + name)
+			}
+		}
+		return b.String()
+	}
+	add := func(field string) {
+		key := path()
+		if sets[key] == nil {
+			sets[key] = map[string]bool{}
+		}
+		sets[key][field] = true
+	}
+	for _, raw := range strings.Split(document, "\n") {
+		line := strings.TrimSpace(raw)
+		switch {
+		case line == "" || strings.HasPrefix(line, "#"):
+		case line == "}":
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		case strings.HasSuffix(line, "{"):
+			opening := strings.TrimSpace(strings.TrimSuffix(line, "{"))
+			switch {
+			case len(stack) == 0, strings.HasPrefix(opening, "..."):
+				stack = append(stack, "")
+			default:
+				name := opening
+				if k := strings.IndexAny(name, "( "); k > 0 {
+					name = name[:k]
+				}
+				add(name)
+				stack = append(stack, name)
+			}
+		default:
+			name := line
+			if k := strings.IndexAny(name, "( {"); k > 0 {
+				name = name[:k]
+			}
+			add(name)
+		}
+	}
+	return sets
 }
 
 // failOnce answers the NEXT request for op with errs and no data, and the

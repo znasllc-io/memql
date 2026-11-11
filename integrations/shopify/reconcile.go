@@ -313,6 +313,8 @@ func (c *Connector) reconcileByUpdatedAt(ctx context.Context, store Store, spec 
 		if filter != "" {
 			vars["query"] = filter
 		}
+		// When this page was read: the read time every row on it carries.
+		readAt := c.now()
 		nodes, next, hasNext, err := c.listPage(ctx, store, spec, vars)
 		if err != nil {
 			return report, err
@@ -328,7 +330,7 @@ func (c *Connector) reconcileByUpdatedAt(ctx context.Context, store Store, spec 
 			if err := c.completeChildren(ctx, store, spec, obj); err != nil {
 				return report, err
 			}
-			writes := mapObject(spec, store.ID, obj, "", c.now())
+			writes := mapObject(spec, store.ID, obj, "", readAt)
 			healed, _ := c.heal(ctx, writes)
 			if healed > 0 {
 				report.Drifted++
@@ -381,15 +383,11 @@ func (c *Connector) relist(ctx context.Context, store Store, spec *generated.Typ
 	if spec.ListQuery == "" || spec.ListOp == "" {
 		return report, nil
 	}
-	// When the listing began: the version of every tombstone it writes. A
-	// row a delivery wrote after this moment is not in the listing and not
-	// gone, and its version is later, so heal refuses the tombstone. A second
-	// earlier, because versions are kept to the second and a tie applies: a
-	// row created in the second the listing began would otherwise tie with
-	// its tombstone and be retired. The cost is the other way and is the one
-	// a relist already prefers -- a row last changed in that second and gone
-	// since is kept until the next pass.
-	begun := c.now().Add(-time.Second)
+	// When the listing began: the read time of every row it writes and every
+	// tombstone, on this engine's clock. A row a delivery read after this
+	// moment is not in the listing and not gone, and was read after it, so
+	// heal refuses the tombstone (memqlsync.Refuses).
+	begun := c.now()
 	seen := map[string]bool{}
 	after := ""
 	complete := false
@@ -414,7 +412,7 @@ func (c *Connector) relist(ctx context.Context, store Store, spec *generated.Typ
 			if err := c.completeChildren(ctx, store, spec, obj); err != nil {
 				return report, err
 			}
-			healed, _ := c.heal(ctx, mapObject(spec, store.ID, obj, "", c.now()))
+			healed, _ := c.heal(ctx, mapObject(spec, store.ID, obj, "", begun))
 			if healed > 0 {
 				report.Drifted++
 				report.Healed++

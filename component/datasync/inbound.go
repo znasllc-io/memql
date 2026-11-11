@@ -45,12 +45,14 @@ import (
 //     answer rather than a bug.
 //
 // A connector may also name DomainSpec.VersionSourceField, the payload
-// field it writes on every row to say where the version came from. A stored
-// row without it was written before the connector said, and holds no version
-// (memqlsync.StoredVersion): the Shopify connector stamped such rows with the
+// field it writes on every row to say where the version came from, and
+// ReadAtField, when the origin was read for it. A stored row without a
+// marker written by the same write as its read time holds no version
+// (memqlsync.StoredStamp): the Shopify connector stamped such rows with the
 // time it read them, a clock that would refuse every honest origin version.
-// The rule and the comparison live in the contract, so a connector's own
-// sweep (which heals without the applier) calls the same functions.
+// Whether a record exists is judged by the read times, never the version
+// (memqlsync.Refuses). The rule lives in the contract, so a connector's own
+// sweep (which heals without the applier) asks the same function.
 //
 // A write that loses the comparison is RECORDED as stale and skipped,
 // never applied. Recorded rather than dropped because a mirror that
@@ -76,9 +78,10 @@ type MirrorWriter interface {
 	// WriteMirror applies one write under the connector's actor and
 	// returns the version now stored for that row.
 	WriteMirror(ctx context.Context, connector string, w memqlsync.MirrorWrite) error
-	// StoredVersion returns the version MemQL currently holds for a row,
-	// and whether the row exists at all.
-	StoredVersion(ctx context.Context, spec memqlsync.DomainSpec, rowID string) (string, bool, error)
+	// StoredRow returns the payload MemQL currently holds for a row, and
+	// whether the row exists at all. The guard reads it through
+	// memqlsync.StoredStamp.
+	StoredRow(ctx context.Context, spec memqlsync.DomainSpec, rowID string) (map[string]any, bool, error)
 }
 
 // NewApplier builds the shared write path.
@@ -124,27 +127,25 @@ func (a *Applier) Apply(
 	return out, nil
 }
 
-// isStale reports whether this write is older than what MemQL holds, by the
-// contract's one comparison (memqlsync.Stale), which a connector's own sweep
-// calls too.
+// isStale reports whether this write must not replace what MemQL holds, by
+// the contract's one rule (memqlsync.Refuses), which a connector's own sweep
+// asks too: whether a record exists is judged by when the origin was read for
+// each side, and which of two live states is newer by the origin's version.
 //
-// A row MemQL does not have is never stale: a first delivery has nothing
+// A row MemQL does not have is never refused: a first delivery has nothing
 // to be older than, and refusing it would leave the mirror permanently
-// empty. Same for a write carrying no version -- a connector that cannot
-// say when a change happened gets last-write-wins, which is what it had
-// before the guard existed -- and for a row holding none (StoredVersion).
+// empty. Nor is a write over a row that holds no version, or one carrying
+// none -- a connector that cannot say when a change happened gets
+// last-write-wins, which is what it had before the guard existed.
 func (a *Applier) isStale(ctx context.Context, spec memqlsync.DomainSpec, w memqlsync.MirrorWrite) (bool, error) {
-	if strings.TrimSpace(w.Version) == "" {
-		return false, nil
-	}
-	stored, exists, err := a.writer.StoredVersion(ctx, spec, w.RowId)
+	stored, exists, err := a.writer.StoredRow(ctx, spec, w.RowId)
 	if err != nil {
 		return false, err
 	}
 	if !exists {
 		return false, nil
 	}
-	return memqlsync.Stale(w.Version, stored), nil
+	return memqlsync.Refuses(memqlsync.StoredStamp(spec, stored), memqlsync.WriteStamp(spec, w)), nil
 }
 
 // Dispatcher routes a staged inbound request to its connector.

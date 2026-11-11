@@ -127,12 +127,28 @@ func newMirrorRig(t *testing.T) *mirrorRig {
 	for _, spec := range h.conn.Domains() {
 		specs[spec.Concept] = spec
 	}
-	return &mirrorRig{
+	r := &mirrorRig{
 		testHarness: h,
 		mirror:      m,
 		applier:     datasync.NewApplier(datasync.NewStore(anyEngine{m}), datasync.NewEngineMirrorWriter(anyEngine{m})),
 		specs:       specs,
 	}
+	// The connector's clock moves a millisecond each time it is read, from
+	// whatever the test last set r.now to: two reads are never the same
+	// instant, as they are not in production.
+	var mu stdsync.Mutex
+	var base time.Time
+	ticks := 0
+	h.conn.now = func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		if !r.now.Equal(base) {
+			base, ticks = r.now, 0
+		}
+		ticks++
+		return base.Add(time.Duration(ticks) * time.Millisecond)
+	}
+	return r
 }
 
 // apply writes as the runtime does, behind its guard.
@@ -154,6 +170,8 @@ func request(topic, gid, webhookID string, triggered time.Time) memqlsync.Inboun
 		Source:    "shopify-" + testStoreID,
 		Topic:     topic,
 		Body:      body,
+		// Staged two seconds after the origin's event; a retry keeps it.
+		ReceivedAt: triggered.UTC().Add(2 * time.Second),
 		Headers: map[string]string{
 			"x-shopify-topic":        topic,
 			"x-shopify-shop-domain":  "acme-widgets.myshopify.com",
@@ -192,6 +210,13 @@ func (r *mirrorRig) row(concept, gid string) map[string]any {
 	r.mirror.mu.Lock()
 	defer r.mirror.mu.Unlock()
 	return r.mirror.rows[generated.ConceptID(concept)+"|"+MirrorRowID(testStoreID, gid)]
+}
+
+// held is a live order the mirror holds, written under the rule: its version
+// the origin's, read at `read`.
+func (r *mirrorRig) held(concept, gid, updatedAt string, read time.Time) {
+	r.put(concept, gid, map[string]any{"name": "held", "updatedAt": updatedAt, "versionSource": "origin",
+		"syncedAt": memqlsync.ReadTime(read), "versionReadAt": memqlsync.ReadTime(read), "deleted": false})
 }
 
 // put writes a row straight into the mirror, as an earlier writer left it.
@@ -361,7 +386,7 @@ func TestAChildWithNoVersionOfItsOwnTakesItsParents(t *testing.T) {
 	t.Run("bulk, resumed between the order and its line", func(t *testing.T) {
 		r := newMirrorRig(t)
 		url := r.admin.serveJSONL("/download/resumed.jsonl", bulkLines(orderLines(origin, 1)...))
-		cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: url, Line: 1, Rule: originVersionRule}
+		cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: url, Line: 1, Rule: originVersionRule, At: exportStartedAt}
 		page, err := r.conn.BackfillStore(context.Background(), r.store(t), generated.ConceptID("order"), cur.encode())
 		if err != nil {
 			t.Fatal(err)
@@ -561,6 +586,17 @@ func TestTheFakeAdminRefusesAVersionTheDocumentDidNotSelect(t *testing.T) {
 		t.Errorf("a selected updatedAt: told %v, answered %v", told, shop)
 	}
 
+	// Selected for a nested object only: the parent's is still unselected.
+	told = nil
+	resp, err = h.conn.adminCall(ctx, h.store(t), "query Probe {\n  shop {\n    id\n    owner {\n      updatedAt\n    }\n  }\n}", "Probe", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ = resp.DataMap()
+	if shop, _ := data["shop"].(map[string]any); len(told) != 1 || shop["updatedAt"] != nil {
+		t.Errorf("an updatedAt selected only for a nested object: told %v, answered %v", told, shop)
+	}
+
 	told = nil
 	h.admin.mu.Lock()
 	h.admin.bulkDocuments = append(h.admin.bulkDocuments, "query ShopifyBulkProbe {\n  things {\n    edges {\n      node {\n        id\n      }\n    }\n  }\n}")
@@ -576,4 +612,221 @@ func TestTheFakeAdminRefusesAVersionTheDocumentDidNotSelect(t *testing.T) {
 	if len(told) != 1 || line["updatedAt"] != nil {
 		t.Errorf("a bulk line carrying an unselected updatedAt: told %v, served %v", told, line)
 	}
+}
+
+// ---- fix round 1: a record's existence is judged by when the origin was read ----
+
+// Only a clean answer is a deletion: `node: null` and no error at all. Every
+// other way a fetch can come back without the object -- the origin refusing
+// the node itself (how Shopify refuses protected customer data on
+// node(id:)), a denial left after the prune limit, a reply with no data or
+// no node, an error that is not a denial -- retires nothing, and is a
+// refusal or a failure the retry lane and the store's reasons already know.
+func TestEveryAnswerOfAFetchIsADeletionOnlyWhenClean(t *testing.T) {
+	protected := GraphQLError{
+		Message:    "This app is not approved to access the Order object. See https://shopify.dev/docs/apps/launch/protected-customer-data for more details.",
+		Extensions: map[string]any{"code": "ACCESS_DENIED"},
+		Path:       []any{"node"},
+	}
+	cases := []struct {
+		name      string
+		reply     any
+		errs      []GraphQLError
+		retired   bool
+		refused   bool // not granted, and never tried again
+		retryable bool
+	}{
+		{name: "clean: node null, no error", reply: map[string]any{"node": nil}, retired: true},
+		{name: "the node refused (protected data)", reply: map[string]any{"node": nil}, errs: []GraphQLError{protected}, refused: true},
+		{name: "a denied field still nulling the node after the prune limit", reply: map[string]any{"node": nil}, errs: []GraphQLError{denied("name", "node", "name")}, refused: true},
+		{name: "data null, no error", reply: nil, retryable: true},
+		{name: "no node in the data, no error", reply: map[string]any{}, retryable: true},
+		{name: "an error that is not a denial", reply: map[string]any{"node": nil},
+			errs: []GraphQLError{{Message: "Internal error", Extensions: map[string]any{"code": "INTERNAL_SERVER_ERROR"}}}, retryable: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newMirrorRig(t)
+			r.now = at("10:00:00")
+			r.held("order", "gid://shopify/Order/1", "2026-08-23T09:00:00Z", at("09:30:00"))
+			r.admin.reply("ShopifyFetchOrder", tc.reply)
+			if tc.errs != nil {
+				r.admin.fail("ShopifyFetchOrder", tc.errs...)
+			}
+			writes, err := r.conn.Apply(context.Background(), request("orders/updated", "gid://shopify/Order/1", "wh-1", at("09:59:00")))
+			if err == nil {
+				r.apply(t, writes)
+			}
+			retired := r.row("order", "gid://shopify/Order/1")["deleted"] == true
+			if retired != tc.retired {
+				t.Fatalf("retired = %t (err %v), want %t", retired, err, tc.retired)
+			}
+			switch {
+			case tc.refused && !(memqlsync.IsNotGranted(err) && memqlsync.IsPermanent(err)):
+				t.Errorf("err = %v, want a refusal (not granted, not retried)", err)
+			case tc.retryable && (err == nil || memqlsync.IsPermanent(err)):
+				t.Errorf("err = %v, want a failure the retry lane tries again", err)
+			case tc.retired && err != nil:
+				t.Errorf("err = %v on a clean answer", err)
+			}
+		})
+	}
+}
+
+// A create delivery can arrive before its record is readable. An empty fetch
+// for a record the mirror does not hold has nothing to retire, so it writes
+// nothing; the record arrives with the next sweep that lists it.
+func TestAnEmptyFetchForARecordNotHeldWritesNothing(t *testing.T) {
+	r := newMirrorRig(t)
+	r.now = at("10:00:00")
+	r.orderFetches(nil)
+	writes, err := r.conn.Apply(context.Background(), request("orders/create", "gid://shopify/Order/1", "wh-create", at("10:00:00")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.apply(t, writes)
+	if row := r.row("order", "gid://shopify/Order/1"); row != nil {
+		t.Fatalf("an empty fetch for a record the mirror never held wrote %v", row)
+	}
+	r.now = at("10:10:00")
+	r.admin.reply("ShopifyListOrder", listPageReply("orders", false, "", map[string]any{"id": "gid://shopify/Order/1", "name": "#1001", "updatedAt": "2026-08-23T10:00:00Z"}))
+	if _, err := r.conn.reconcileByUpdatedAt(context.Background(), r.store(t), generated.Types["order"], at("09:00:00")); err != nil {
+		t.Fatal(err)
+	}
+	if row := r.row("order", "gid://shopify/Order/1"); row == nil || row["deleted"] == true {
+		t.Errorf("the sweep did not write the record: %v", row)
+	}
+}
+
+// A clean empty fetch at F can still be wrong (a record briefly unreadable).
+// The tombstone it writes is a statement about F, so the next read of the
+// origin after F that finds the record puts it back -- although its updatedAt
+// has not moved, and is older than F.
+func TestARecordWronglySeenAsGoneComesBackOnTheNextRead(t *testing.T) {
+	for _, path := range []string{"sweep", "delivery"} {
+		t.Run(path, func(t *testing.T) {
+			r := newMirrorRig(t)
+			r.now = at("09:30:00")
+			r.held("order", "gid://shopify/Order/1", "2026-08-23T09:00:00Z", at("09:30:00"))
+			r.now = at("10:00:00")
+			r.orderFetches(nil)
+			r.deliver(t, request("orders/updated", "gid://shopify/Order/1", "wh-f", at("09:59:00")))
+			if r.row("order", "gid://shopify/Order/1")["deleted"] != true {
+				t.Fatal("the clean empty fetch did not retire the held order, so this test proves nothing")
+			}
+			r.now = at("10:05:00")
+			switch path {
+			case "sweep":
+				r.admin.reply("ShopifyListOrder", listPageReply("orders", false, "", map[string]any{"id": "gid://shopify/Order/1", "name": "#1001", "updatedAt": "2026-08-23T09:00:00Z"}))
+				if _, err := r.conn.reconcileByUpdatedAt(context.Background(), r.store(t), generated.Types["order"], at("08:00:00")); err != nil {
+					t.Fatal(err)
+				}
+			case "delivery":
+				r.orderFetches(orderNode("2026-08-23T09:00:00Z", 1))
+				r.deliver(t, request("orders/updated", "gid://shopify/Order/1", "wh-back", at("10:04:00")))
+			}
+			if row := r.row("order", "gid://shopify/Order/1"); row["deleted"] == true {
+				t.Errorf("a %s that read the order after the empty fetch left it retired", path)
+			}
+		})
+	}
+}
+
+// A bulk line is a statement about the moment its export was started. One
+// started before a tombstone's time does not bring the record back -- even
+// when its updatedAt is the very second of the tombstone -- whether the
+// tombstone came from a delete topic or from a clean empty fetch.
+func TestABulkLineExportedBeforeATombstoneDoesNotBringTheRecordBack(t *testing.T) {
+	for _, kind := range []string{"delete topic", "empty fetch"} {
+		t.Run(kind, func(t *testing.T) {
+			r := newMirrorRig(t)
+			r.now = at("09:30:00")
+			r.held("order", "gid://shopify/Order/1", "2026-08-23T09:00:00Z", at("09:30:00"))
+			r.now = at("10:00:30")
+			cursor := r.exportStarted(t, "order")
+			// Updated and deleted inside one second, 10:05:00.
+			r.now = at("10:05:00")
+			switch kind {
+			case "delete topic":
+				r.deliver(t, request("orders/delete", "gid://shopify/Order/1", "wh-del", at("10:04:58")))
+			case "empty fetch":
+				r.orderFetches(nil)
+				r.deliver(t, request("orders/updated", "gid://shopify/Order/1", "wh-upd", at("10:04:58")))
+			}
+			r.now = at("10:10:00")
+			r.exportStreamed(t, "order", cursor, orderLines("2026-08-23T10:05:00Z", 1)...)
+			if r.row("order", "gid://shopify/Order/1")["deleted"] != true {
+				t.Error("a line from an export started before the tombstone brought the order back")
+			}
+		})
+	}
+}
+
+// One started after the tombstone's time read the origin after it, and the
+// record in it is there: it comes back, though its updatedAt is older.
+func TestABulkLineExportedAfterATombstoneBringsTheRecordBack(t *testing.T) {
+	r := newMirrorRig(t)
+	r.now = at("09:30:00")
+	r.held("order", "gid://shopify/Order/1", "2026-08-23T09:00:00Z", at("09:30:00"))
+	r.now = at("10:00:00")
+	r.orderFetches(nil)
+	r.deliver(t, request("orders/updated", "gid://shopify/Order/1", "wh-f", at("09:59:00")))
+	r.now = at("10:30:00")
+	cursor := r.exportStarted(t, "order")
+	r.now = at("10:40:00")
+	r.exportStreamed(t, "order", cursor, orderLines("2026-08-23T09:00:00Z", 1)...)
+	if r.row("order", "gid://shopify/Order/1")["deleted"] == true {
+		t.Error("a line from an export started after the tombstone left the order retired")
+	}
+}
+
+// A version that is a read time and one that is the origin's are never
+// compared. A reverse fulfilment order publishes no version and its return is
+// versioned by createdAt, which never moves, so it hands nothing down: read
+// directly by its own topic it holds a read time, and a later read of it
+// under its return is applied. A bulk line whose parent line was not seen
+// holds a read time, and the parent's delivery is applied over it.
+func TestVersionsOfDifferentKindsAreNeverCompared(t *testing.T) {
+	t.Run("a reverse fulfilment order, then its return", func(t *testing.T) {
+		r := newMirrorRig(t)
+		const rfo = "gid://shopify/ReverseFulfillmentOrder/1"
+		r.now = at("10:00:00")
+		r.admin.reply("ShopifyFetchReverseFulfillmentOrder", map[string]any{"node": map[string]any{"__typename": "ReverseFulfillmentOrder", "id": rfo, "status": "OPEN"}})
+		r.deliver(t, request("reverse_fulfillment_orders/dispose", rfo, "wh-rfo", at("10:00:00")))
+		r.now = at("10:05:00")
+		r.admin.reply("ShopifyFetchShopifyReturn", map[string]any{"node": map[string]any{
+			"__typename": "Return", "id": "gid://shopify/Return/1", "createdAt": "2026-08-20T00:00:00Z", "order": map[string]any{"id": "gid://shopify/Order/1"},
+			"reverseFulfillmentOrders": map[string]any{"pageInfo": map[string]any{"hasNextPage": false, "endCursor": ""},
+				"nodes": []any{map[string]any{"id": rfo, "status": "CLOSED"}}},
+		}})
+		res := r.deliver(t, request("returns/update", "gid://shopify/Return/1", "wh-ret", at("10:05:00")))
+		if row := r.row("reverseFulfillmentOrder", rfo); stringAt(row, "status") != "CLOSED" {
+			t.Errorf("the reverse fulfilment order holds %v (stale %d), want the later read's CLOSED", row["status"], res.Stale)
+		}
+	})
+	t.Run("a bulk line without its parent, then the parent's delivery", func(t *testing.T) {
+		r := newMirrorRig(t)
+		r.now = at("10:00:00")
+		// The batch resumes at a line whose parent line is not the last one
+		// before it: the line is read with no version of its parent's.
+		url := r.admin.serveJSONL("/download/orphan.jsonl", bulkLines(
+			map[string]any{"id": "gid://shopify/Order/2", "name": "#1002", "updatedAt": "2026-08-23T09:00:00Z"},
+			map[string]any{"id": "gid://shopify/LineItem/1", "name": "Tee", "quantity": 1, "__parentId": "gid://shopify/Order/1"},
+		))
+		cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: url, Line: 1, Rule: originVersionRule, At: memqlsync.ReadTime(at("09:59:00"))}
+		page, err := r.conn.BackfillStore(context.Background(), r.store(t), generated.ConceptID("order"), cur.encode())
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.apply(t, page.Writes)
+		if line := r.row("orderLineItem", "gid://shopify/LineItem/1"); stringAt(line, "versionSource") == memqlsync.VersionFromOrigin {
+			t.Fatalf("the line with no parent seen holds an origin version, so this test proves nothing: %v", line)
+		}
+		r.now = at("10:05:00")
+		r.orderFetches(orderNode("2026-08-23T09:00:00Z", 3))
+		r.deliver(t, request("orders/updated", "gid://shopify/Order/1", "wh-parent", at("10:05:00")))
+		if line := r.row("orderLineItem", "gid://shopify/LineItem/1"); line["quantity"] != float64(3) {
+			t.Errorf("the line holds quantity %v, want its order's delivery's 3", line["quantity"])
+		}
+	})
 }
