@@ -564,9 +564,15 @@ func (i *Integration) writeGrant(ctx context.Context, slug string, g componentAu
 // pair a role already holds appends a version of one row instead of producing a
 // second row saying the same thing -- and so retiring a grant can find the row
 // it is retiring.
+//
+// An app grant's resource carries a colon and a part a slash
+// ("app:deployables/reviews"), and a short id may not carry a colon; both
+// become "-", as dsl/rbac/seeds.memql spells the predefined roles' rows.
 func grantRowId(slug string, g componentAuth.VerbResource) string {
-	return "cap-" + slug + "-" + g.Verb + "-" + g.Resource
+	return "cap-" + slug + "-" + g.Verb + "-" + grantRowIdResource.Replace(g.Resource)
 }
+
+var grantRowIdResource = strings.NewReplacer(":", "-", "/", "-")
 
 // ---------------------------------------------------------------------
 // the audit line
