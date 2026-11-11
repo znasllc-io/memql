@@ -13,6 +13,23 @@ query ShopifyFetchReverseFulfillmentOrder($id: ID!) {
       status
       thirdPartyConfirmation { status }
       reverseDeliveries(first: 25) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          deliverable { __typename }
+          reverseFulfillmentOrder { id }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageReverseFulfillmentOrderReverseDeliveries($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on ReverseFulfillmentOrder {
+      reverseDeliveries(first: 25, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           deliverable { __typename }

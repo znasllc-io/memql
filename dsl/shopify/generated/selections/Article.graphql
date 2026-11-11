@@ -25,6 +25,7 @@ query ShopifyFetchArticle($id: ID!) {
       templateSuffix
       title
       comments(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           article { id }
@@ -64,6 +65,31 @@ query ShopifyListArticle($first: Int!, $after: String, $query: String) {
       templateSuffix
       title
       comments(first: 50) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          article { id }
+          author { email name }
+          body
+          bodyHtml
+          ip
+          isPublished
+          publishedAt
+          createdAt
+          status
+          userAgent
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageArticleComments($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Article {
+      comments(first: 50, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           article { id }

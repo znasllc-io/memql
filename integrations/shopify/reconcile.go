@@ -325,6 +325,9 @@ func (c *Connector) reconcileByUpdatedAt(ctx context.Context, store Store, spec 
 		}
 		for _, obj := range nodes {
 			report.Checked++
+			if err := c.completeChildren(ctx, store, spec, obj); err != nil {
+				return report, err
+			}
 			writes := mapObject(spec, store.ID, obj, "", c.now())
 			healed, _ := c.heal(ctx, writes)
 			if healed > 0 {
@@ -376,6 +379,9 @@ func (c *Connector) relist(ctx context.Context, store Store, spec *generated.Typ
 			report.Checked++
 			if gid, ok := obj["id"].(string); ok {
 				seen[gid] = true
+			}
+			if err := c.completeChildren(ctx, store, spec, obj); err != nil {
+				return report, err
 			}
 			healed, _ := c.heal(ctx, mapObject(spec, store.ID, obj, "", c.now()))
 			if healed > 0 {

@@ -27,6 +27,7 @@ query ShopifyFetchCompany($id: ID!) {
       createdAt
       totalSpent { amount currencyCode }
       locations(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
@@ -52,6 +53,7 @@ query ShopifyFetchCompany($id: ID!) {
         }
       }
       contacts(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           company { id }
@@ -90,6 +92,7 @@ query ShopifyListCompany($first: Int!, $after: String, $query: String) {
       createdAt
       totalSpent { amount currencyCode }
       locations(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
@@ -115,6 +118,62 @@ query ShopifyListCompany($first: Int!, $after: String, $query: String) {
         }
       }
       contacts(first: 50) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          company { id }
+          customer { id }
+          isMainContact
+          lifetimeDuration
+          locale
+          createdAt
+          title
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageCompanyLocations($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Company {
+      locations(first: 50, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
+          buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
+          catalogsCount { count precision }
+          catalogs(first: 25) { nodes { id } }
+          company { id }
+          currency
+          defaultCursor
+          externalId
+          hasTimelineComment
+          locale
+          metafields(first: 50) { nodes { namespace key type value jsonValue } }
+          name
+          note
+          ordersCount { count precision }
+          phone
+          shippingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
+          createdAt
+          storeCreditAccounts(first: 25) { nodes { id } }
+          taxSettings { taxExempt taxExemptions taxRegistrationId }
+          totalSpent { amount currencyCode }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageCompanyContacts($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Company {
+      contacts(first: 50, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           company { id }

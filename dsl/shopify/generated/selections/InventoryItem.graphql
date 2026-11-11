@@ -25,6 +25,7 @@ query ShopifyFetchInventoryItem($id: ID!) {
       unitCost { amount currencyCode }
       variants(first: 25) { nodes { id } }
       inventoryLevels(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           canDeactivate
@@ -60,6 +61,27 @@ query ShopifyListInventoryItem($first: Int!, $after: String, $query: String) {
       unitCost { amount currencyCode }
       variants(first: 25) { nodes { id } }
       inventoryLevels(first: 100) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          canDeactivate
+          deactivationAlert
+          isActive
+          item { id }
+          location { id }
+          createdAt
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageInventoryItemInventoryLevels($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on InventoryItem {
+      inventoryLevels(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           canDeactivate

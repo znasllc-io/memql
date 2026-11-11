@@ -42,6 +42,7 @@ query ShopifyFetchCustomer($id: ID!) {
       taxSettings { taxId }
       verifiedEmail
       paymentMethods(first: 25) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           customer { id }
@@ -51,6 +52,7 @@ query ShopifyFetchCustomer($id: ID!) {
         }
       }
       storeCreditAccounts(first: 25) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           balance { amount currencyCode }
@@ -99,6 +101,7 @@ query ShopifyListCustomer($first: Int!, $after: String, $query: String) {
       taxSettings { taxId }
       verifiedEmail
       paymentMethods(first: 25) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           customer { id }
@@ -108,6 +111,41 @@ query ShopifyListCustomer($first: Int!, $after: String, $query: String) {
         }
       }
       storeCreditAccounts(first: 25) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          balance { amount currencyCode }
+          owner { __typename }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageCustomerPaymentMethods($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Customer {
+      paymentMethods(first: 25, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          customer { id }
+          instrument { __typename ... on BankAccount { accountHolderType accountType bankName lastDigits } ... on CustomerCreditCard { brand expiresSoon expiryMonth expiryYear firstDigits isRevocable lastDigits maskedNumber name source virtualLastDigits } ... on CustomerPaypalBillingAgreement { inactive isRevocable paypalAccountEmail } ... on CustomerShopPayAgreement { expiresSoon expiryMonth expiryYear inactive isRevocable lastDigits maskedNumber name } }
+          revokedAt
+          revokedReason
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageCustomerStoreCreditAccounts($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Customer {
+      storeCreditAccounts(first: 25, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           balance { amount currencyCode }

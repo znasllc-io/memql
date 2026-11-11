@@ -291,6 +291,11 @@ func (c *Connector) fetchAndMap(ctx context.Context, store Store, spec *generate
 		// id is in the selection; a missing one is a malformed response.
 		return nil, fmt.Errorf("shopify: %s response carried no id", spec.GraphQLType)
 	}
+	// Before the object is mapped, so the later pages' children are
+	// mapped with the rest: under this parent, on this store's partition.
+	if err := c.completeChildren(ctx, store, spec, obj); err != nil {
+		return nil, err
+	}
 	return mapObject(spec, store.ID, obj, "", c.now()), nil
 }
 

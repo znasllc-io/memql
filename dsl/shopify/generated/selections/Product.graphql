@@ -55,6 +55,7 @@ query ShopifyFetchProduct($id: ID!) {
       variantsCount { count precision }
       vendor
       variants(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           availableForSale
@@ -142,6 +143,49 @@ query ShopifyListProduct($first: Int!, $after: String, $query: String) {
       variantsCount { count precision }
       vendor
       variants(first: 100) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          availableForSale
+          availablePublicationsCount { count precision }
+          barcode
+          compareAtPrice
+          defaultCursor
+          deliveryProfile { id }
+          displayName
+          inventoryItem { id }
+          inventoryPolicy
+          inventoryQuantity
+          legacyResourceId
+          metafields(first: 50) { nodes { namespace key type value jsonValue } }
+          position
+          price
+          product { id }
+          requiresComponents
+          resourcePublicationsCount { count precision }
+          selectedOptions { name optionValue { hasVariants id linkedMetafieldValue name } value }
+          sellableOnlineQuantity
+          sellingPlanGroupsCount { count precision }
+          sellingPlanGroups(first: 25) { nodes { id } }
+          showUnitPrice
+          sku
+          createdAt
+          taxable
+          title
+          unitPrice { amount currencyCode }
+          unitPriceMeasurement { measuredType quantityUnit quantityValue referenceUnit referenceValue }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageProductVariants($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Product {
+      variants(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           availableForSale

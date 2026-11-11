@@ -198,6 +198,10 @@ type ChildSpec struct {
 	// Relay connection: the apply path reads it directly instead of
 	// through "nodes" / "edges".
 	List bool
+	// PageOp names the operation in the parent's FetchDocument that reads
+	// one further page of this connection, by the parent's id and an
+	// "after" cursor. Empty for a plain list, which is never paged.
+	PageOp string
 }
 
 // TypeSpec is everything the connector knows about one mirrored domain.
@@ -257,8 +261,9 @@ type TypeSpec struct {
 
 	Fields []FieldSpec
 
-	// FetchDocument holds both generated operations: ShopifyFetch<Type>
-	// (by GID, or the singleton) and ShopifyList<Type> (paged, filterable).
+	// FetchDocument holds the generated operations: ShopifyFetch<Type>
+	// (by GID, or the singleton), ShopifyList<Type> (paged, filterable)
+	// and one ShopifyPage<Type><Connection> per paged child connection.
 	FetchDocument string
 	FetchOp       string
 	ListOp        string
@@ -354,7 +359,7 @@ func emitTypeSpec(p *TypePlan, doc, bulkDoc string, bulkOps []string) string {
 	if len(p.Children) > 0 {
 		b.WriteString("\t\tChildren: []ChildSpec{\n")
 		for _, ch := range p.Children {
-			fmt.Fprintf(&b, "\t\t\t{Connection: %q, Concept: %q, GraphQLType: %q, List: %t},\n", ch.Connection, ch.Concept, ch.Type, ch.List)
+			fmt.Fprintf(&b, "\t\t\t{Connection: %q, Concept: %q, GraphQLType: %q, List: %t, PageOp: %q},\n", ch.Connection, ch.Concept, ch.Type, ch.List, pageOpName(p, ch))
 		}
 		b.WriteString("\t\t},\n")
 	}

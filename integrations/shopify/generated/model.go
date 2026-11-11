@@ -63,6 +63,10 @@ type ChildSpec struct {
 	// Relay connection: the apply path reads it directly instead of
 	// through "nodes" / "edges".
 	List bool
+	// PageOp names the operation in the parent's FetchDocument that reads
+	// one further page of this connection, by the parent's id and an
+	// "after" cursor. Empty for a plain list, which is never paged.
+	PageOp string
 }
 
 // TypeSpec is everything the connector knows about one mirrored domain.
@@ -122,8 +126,9 @@ type TypeSpec struct {
 
 	Fields []FieldSpec
 
-	// FetchDocument holds both generated operations: ShopifyFetch<Type>
-	// (by GID, or the singleton) and ShopifyList<Type> (paged, filterable).
+	// FetchDocument holds the generated operations: ShopifyFetch<Type>
+	// (by GID, or the singleton), ShopifyList<Type> (paged, filterable)
+	// and one ShopifyPage<Type><Connection> per paged child connection.
 	FetchDocument string
 	FetchOp       string
 	ListOp        string
@@ -451,7 +456,7 @@ query ShopifyBulkAbandonedCheckout($query: String) {
 		ParentGidPath:    "blog.id",
 		VersionField:     "updatedAt",
 		Children: []ChildSpec{
-			{Connection: "comments", Concept: "articleComment", GraphQLType: "Comment", List: false},
+			{Connection: "comments", Concept: "articleComment", GraphQLType: "Comment", List: false, PageOp: "ShopifyPageArticleComments"},
 		},
 		Fields: []FieldSpec{
 			{Name: "author", GraphQL: "author", Kind: "object", DSLType: "object", Extract: "author"},
@@ -499,6 +504,7 @@ query ShopifyFetchArticle($id: ID!) {
       templateSuffix
       title
       comments(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           article { id }
@@ -538,6 +544,31 @@ query ShopifyListArticle($first: Int!, $after: String, $query: String) {
       templateSuffix
       title
       comments(first: 50) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          article { id }
+          author { email name }
+          body
+          bodyHtml
+          ip
+          isPublished
+          publishedAt
+          createdAt
+          status
+          userAgent
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageArticleComments($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Article {
+      comments(first: 50, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           article { id }
@@ -652,7 +683,7 @@ query ShopifyListArticleComment($first: Int!, $after: String, $query: String) {
 		Scopes:         []string{"read_content"},
 		VersionField:   "updatedAt",
 		Children: []ChildSpec{
-			{Connection: "articles", Concept: "article", GraphQLType: "Article", List: false},
+			{Connection: "articles", Concept: "article", GraphQLType: "Article", List: false, PageOp: "ShopifyPageBlogArticles"},
 		},
 		Fields: []FieldSpec{
 			{Name: "articlesCount", GraphQL: "articlesCount", Kind: "object", DSLType: "object", Extract: "articlesCount"},
@@ -688,6 +719,7 @@ query ShopifyFetchBlog($id: ID!) {
       templateSuffix
       title
       articles(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           author { name }
@@ -726,6 +758,36 @@ query ShopifyListBlog($first: Int!, $after: String, $query: String) {
       templateSuffix
       title
       articles(first: 50) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          author { name }
+          blog { id }
+          body
+          commentsCount { count precision }
+          defaultCursor
+          handle
+          image { altText height id thumbhash url width }
+          isPublished
+          metafields(first: 50) { nodes { namespace key type value jsonValue } }
+          publishedAt
+          createdAt
+          summary
+          tags
+          templateSuffix
+          title
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageBlogArticles($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Blog {
+      articles(first: 50, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           author { name }
@@ -1137,8 +1199,8 @@ query ShopifyBulkCollection($query: String) {
 		Scopes:         []string{"read_customers"},
 		VersionField:   "updatedAt",
 		Children: []ChildSpec{
-			{Connection: "locations", Concept: "companyLocation", GraphQLType: "CompanyLocation", List: false},
-			{Connection: "contacts", Concept: "companyContact", GraphQLType: "CompanyContact", List: false},
+			{Connection: "locations", Concept: "companyLocation", GraphQLType: "CompanyLocation", List: false, PageOp: "ShopifyPageCompanyLocations"},
+			{Connection: "contacts", Concept: "companyContact", GraphQLType: "CompanyContact", List: false, PageOp: "ShopifyPageCompanyContacts"},
 		},
 		Fields: []FieldSpec{
 			{Name: "contactsCount", GraphQL: "contactsCount", Kind: "object", DSLType: "object", Extract: "contactsCount"},
@@ -1190,6 +1252,7 @@ query ShopifyFetchCompany($id: ID!) {
       createdAt
       totalSpent { amount currencyCode }
       locations(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
@@ -1215,6 +1278,7 @@ query ShopifyFetchCompany($id: ID!) {
         }
       }
       contacts(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           company { id }
@@ -1253,6 +1317,7 @@ query ShopifyListCompany($first: Int!, $after: String, $query: String) {
       createdAt
       totalSpent { amount currencyCode }
       locations(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
@@ -1278,6 +1343,62 @@ query ShopifyListCompany($first: Int!, $after: String, $query: String) {
         }
       }
       contacts(first: 50) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          company { id }
+          customer { id }
+          isMainContact
+          lifetimeDuration
+          locale
+          createdAt
+          title
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageCompanyLocations($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Company {
+      locations(first: 50, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
+          buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
+          catalogsCount { count precision }
+          catalogs(first: 25) { nodes { id } }
+          company { id }
+          currency
+          defaultCursor
+          externalId
+          hasTimelineComment
+          locale
+          metafields(first: 50) { nodes { namespace key type value jsonValue } }
+          name
+          note
+          ordersCount { count precision }
+          phone
+          shippingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
+          createdAt
+          storeCreditAccounts(first: 25) { nodes { id } }
+          taxSettings { taxExempt taxExemptions taxRegistrationId }
+          totalSpent { amount currencyCode }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageCompanyContacts($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Company {
+      contacts(first: 50, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           company { id }
@@ -1576,8 +1697,8 @@ query ShopifyBulkCompanyLocation($query: String) {
 		Scopes:         []string{"read_customers"},
 		VersionField:   "updatedAt",
 		Children: []ChildSpec{
-			{Connection: "paymentMethods", Concept: "customerPaymentMethod", GraphQLType: "CustomerPaymentMethod", List: false},
-			{Connection: "storeCreditAccounts", Concept: "storeCreditAccount", GraphQLType: "StoreCreditAccount", List: false},
+			{Connection: "paymentMethods", Concept: "customerPaymentMethod", GraphQLType: "CustomerPaymentMethod", List: false, PageOp: "ShopifyPageCustomerPaymentMethods"},
+			{Connection: "storeCreditAccounts", Concept: "storeCreditAccount", GraphQLType: "StoreCreditAccount", List: false, PageOp: "ShopifyPageCustomerStoreCreditAccounts"},
 		},
 		Fields: []FieldSpec{
 			{Name: "amountSpent", GraphQL: "amountSpent", Kind: "object", DSLType: "object", Extract: "amountSpent"},
@@ -1659,6 +1780,7 @@ query ShopifyFetchCustomer($id: ID!) {
       taxSettings { taxId }
       verifiedEmail
       paymentMethods(first: 25) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           customer { id }
@@ -1668,6 +1790,7 @@ query ShopifyFetchCustomer($id: ID!) {
         }
       }
       storeCreditAccounts(first: 25) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           balance { amount currencyCode }
@@ -1716,6 +1839,7 @@ query ShopifyListCustomer($first: Int!, $after: String, $query: String) {
       taxSettings { taxId }
       verifiedEmail
       paymentMethods(first: 25) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           customer { id }
@@ -1725,6 +1849,41 @@ query ShopifyListCustomer($first: Int!, $after: String, $query: String) {
         }
       }
       storeCreditAccounts(first: 25) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          balance { amount currencyCode }
+          owner { __typename }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageCustomerPaymentMethods($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Customer {
+      paymentMethods(first: 25, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          customer { id }
+          instrument { __typename ... on BankAccount { accountHolderType accountType bankName lastDigits } ... on CustomerCreditCard { brand expiresSoon expiryMonth expiryYear firstDigits isRevocable lastDigits maskedNumber name source virtualLastDigits } ... on CustomerPaypalBillingAgreement { inactive isRevocable paypalAccountEmail } ... on CustomerShopPayAgreement { expiresSoon expiryMonth expiryYear inactive isRevocable lastDigits maskedNumber name } }
+          revokedAt
+          revokedReason
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageCustomerStoreCreditAccounts($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Customer {
+      storeCreditAccounts(first: 25, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           balance { amount currencyCode }
@@ -2742,7 +2901,7 @@ query ShopifyBulkGiftCard($query: String) {
 		Scopes:         []string{"read_inventory"},
 		VersionField:   "updatedAt",
 		Children: []ChildSpec{
-			{Connection: "inventoryLevels", Concept: "inventoryLevel", GraphQLType: "InventoryLevel", List: false},
+			{Connection: "inventoryLevels", Concept: "inventoryLevel", GraphQLType: "InventoryLevel", List: false, PageOp: "ShopifyPageInventoryItemInventoryLevels"},
 		},
 		Fields: []FieldSpec{
 			{Name: "countryCodeOfOrigin", GraphQL: "countryCodeOfOrigin", Kind: "scalar", DSLType: "string", Extract: "countryCodeOfOrigin"},
@@ -2790,6 +2949,7 @@ query ShopifyFetchInventoryItem($id: ID!) {
       unitCost { amount currencyCode }
       variants(first: 25) { nodes { id } }
       inventoryLevels(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           canDeactivate
@@ -2825,6 +2985,27 @@ query ShopifyListInventoryItem($first: Int!, $after: String, $query: String) {
       unitCost { amount currencyCode }
       variants(first: 25) { nodes { id } }
       inventoryLevels(first: 100) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          canDeactivate
+          deactivationAlert
+          isActive
+          item { id }
+          location { id }
+          createdAt
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageInventoryItemInventoryLevels($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on InventoryItem {
+      inventoryLevels(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           canDeactivate
@@ -3315,7 +3496,7 @@ query ShopifyBulkLocation($query: String) {
 		Scopes:         []string{"read_markets"},
 		VersionField:   "",
 		Children: []ChildSpec{
-			{Connection: "webPresences", Concept: "marketWebPresence", GraphQLType: "MarketWebPresence", List: false},
+			{Connection: "webPresences", Concept: "marketWebPresence", GraphQLType: "MarketWebPresence", List: false, PageOp: "ShopifyPageMarketWebPresences"},
 		},
 		Fields: []FieldSpec{
 			{Name: "catalogsCount", GraphQL: "catalogsCount", Kind: "object", DSLType: "object", Extract: "catalogsCount"},
@@ -3355,6 +3536,7 @@ query ShopifyFetchMarket($id: ID!) {
       type
       status
       webPresences(first: 25) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           alternateLocales { locale marketWebPresences { id } name primary published }
@@ -3385,6 +3567,26 @@ query ShopifyListMarket($first: Int!, $after: String, $query: String) {
       type
       status
       webPresences(first: 25) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          alternateLocales { locale marketWebPresences { id } name primary published }
+          defaultLocale { locale marketWebPresences { id } name primary published }
+          domain { host id localization { alternateLocales country defaultLocale } marketWebPresence { id } sslEnabled url }
+          rootUrls { locale url }
+          subfolderSuffix
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageMarketWebPresences($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Market {
+      webPresences(first: 25, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           alternateLocales { locale marketWebPresences { id } name primary published }
@@ -4004,11 +4206,11 @@ query ShopifyListOnlineStoreTheme($first: Int!, $after: String) {
 		Scopes:         []string{"read_orders", "read_all_orders"},
 		VersionField:   "updatedAt",
 		Children: []ChildSpec{
-			{Connection: "lineItems", Concept: "orderLineItem", GraphQLType: "LineItem", List: false},
-			{Connection: "transactions", Concept: "orderTransaction", GraphQLType: "OrderTransaction", List: true},
-			{Connection: "refunds", Concept: "refund", GraphQLType: "Refund", List: true},
-			{Connection: "fulfillments", Concept: "fulfillment", GraphQLType: "Fulfillment", List: true},
-			{Connection: "returns", Concept: "shopifyReturn", GraphQLType: "Return", List: false},
+			{Connection: "lineItems", Concept: "orderLineItem", GraphQLType: "LineItem", List: false, PageOp: "ShopifyPageOrderLineItems"},
+			{Connection: "transactions", Concept: "orderTransaction", GraphQLType: "OrderTransaction", List: true, PageOp: ""},
+			{Connection: "refunds", Concept: "refund", GraphQLType: "Refund", List: true, PageOp: ""},
+			{Connection: "fulfillments", Concept: "fulfillment", GraphQLType: "Fulfillment", List: true, PageOp: ""},
+			{Connection: "returns", Concept: "shopifyReturn", GraphQLType: "Return", List: false, PageOp: "ShopifyPageOrderReturns"},
 		},
 		Fields: []FieldSpec{
 			{Name: "additionalFees", GraphQL: "additionalFees", Kind: "objectList", DSLType: "[]object", Extract: "additionalFees"},
@@ -4258,6 +4460,7 @@ query ShopifyFetchOrder($id: ID!) {
       transactionsCount { count precision }
       unpaid
       lineItems(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           contract { id }
@@ -4365,6 +4568,7 @@ query ShopifyFetchOrder($id: ID!) {
         trackingInfo { company number url }
       }
       returns(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           closedAt
@@ -4507,6 +4711,7 @@ query ShopifyListOrder($first: Int!, $after: String, $query: String) {
       transactionsCount { count precision }
       unpaid
       lineItems(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           contract { id }
@@ -4614,6 +4819,83 @@ query ShopifyListOrder($first: Int!, $after: String, $query: String) {
         trackingInfo { company number url }
       }
       returns(first: 50) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          closedAt
+          decline { note reason }
+          name
+          order { id }
+          refunds(first: 25) { nodes { id } }
+          requestApprovedAt
+          returnShippingFees { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } id }
+          createdAt
+          staffMember { id }
+          status
+          totalQuantity
+          transactions(first: 25) { nodes { id } }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageOrderLineItems($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Order {
+      lineItems(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          contract { id }
+          currentQuantity
+          customAttributes { key value }
+          discountAllocations { allocatedAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } discountApplication { __typename allocationMethod index targetSelection targetType } }
+          discountedTotalSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          discountedUnitPriceAfterAllDiscountsSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          discountedUnitPriceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          duties { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxLines { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title } }
+          image { altText height id thumbhash url width }
+          isGiftCard
+          lineItemGroup { customAttributes { key value } id productId quantity title variantId variantSku }
+          merchantEditable
+          name
+          nonFulfillableQuantity
+          originalTotalSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          originalUnitPriceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          priceAfterAllDiscountsBeforeTaxesSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          product { id }
+          quantity
+          refundableQuantity
+          requiresShipping
+          restockable
+          sellingPlan { name sellingPlanId }
+          sku
+          staffMember { id }
+          taxLines { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title }
+          taxable
+          title
+          totalDiscountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          unfulfilledDiscountedTotalSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          unfulfilledOriginalTotalSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          unfulfilledQuantity
+          variant { id }
+          variantTitle
+          vendor
+          weight { unit value }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageOrderReturns($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Order {
+      returns(first: 50, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           closedAt
@@ -5260,8 +5542,8 @@ query ShopifyFetchPaymentTermsTemplate($id: ID!) {
 		Scopes:         []string{"read_products"},
 		VersionField:   "",
 		Children: []ChildSpec{
-			{Connection: "prices", Concept: "priceListPrice", GraphQLType: "PriceListPrice", List: false},
-			{Connection: "quantityRules", Concept: "quantityRule", GraphQLType: "QuantityRule", List: false},
+			{Connection: "prices", Concept: "priceListPrice", GraphQLType: "PriceListPrice", List: false, PageOp: "ShopifyPagePriceListPrices"},
+			{Connection: "quantityRules", Concept: "quantityRule", GraphQLType: "QuantityRule", List: false, PageOp: "ShopifyPagePriceListQuantityRules"},
 		},
 		Fields: []FieldSpec{
 			{Name: "catalogGid", GraphQL: "catalog", Kind: "gid", DSLType: "string", Extract: "catalog.id"},
@@ -5289,6 +5571,7 @@ query ShopifyFetchPriceList($id: ID!) {
       name
       parent { adjustment { type value } settings { compareAtMode } }
       prices(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           compareAtPrice { amount currencyCode }
           originType
@@ -5297,6 +5580,7 @@ query ShopifyFetchPriceList($id: ID!) {
         }
       }
       quantityRules(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           increment
           isDefault
@@ -5321,6 +5605,7 @@ query ShopifyListPriceList($first: Int!, $after: String) {
       name
       parent { adjustment { type value } settings { compareAtMode } }
       prices(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           compareAtPrice { amount currencyCode }
           originType
@@ -5329,6 +5614,43 @@ query ShopifyListPriceList($first: Int!, $after: String) {
         }
       }
       quantityRules(first: 100) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          increment
+          isDefault
+          maximum
+          minimum
+          originType
+          productVariant { id }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPagePriceListPrices($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on PriceList {
+      prices(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          compareAtPrice { amount currencyCode }
+          originType
+          price { amount currencyCode }
+          variant { id }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPagePriceListQuantityRules($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on PriceList {
+      quantityRules(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           increment
           isDefault
@@ -5448,7 +5770,7 @@ query ShopifyFetchPriceListPrice($id: ID!) {
 		Scopes:         []string{"read_products"},
 		VersionField:   "updatedAt",
 		Children: []ChildSpec{
-			{Connection: "variants", Concept: "productVariant", GraphQLType: "ProductVariant", List: false},
+			{Connection: "variants", Concept: "productVariant", GraphQLType: "ProductVariant", List: false, PageOp: "ShopifyPageProductVariants"},
 		},
 		Fields: []FieldSpec{
 			{Name: "availablePublicationsCount", GraphQL: "availablePublicationsCount", Kind: "object", DSLType: "object", Extract: "availablePublicationsCount"},
@@ -5556,6 +5878,7 @@ query ShopifyFetchProduct($id: ID!) {
       variantsCount { count precision }
       vendor
       variants(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           availableForSale
@@ -5643,6 +5966,49 @@ query ShopifyListProduct($first: Int!, $after: String, $query: String) {
       variantsCount { count precision }
       vendor
       variants(first: 100) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          availableForSale
+          availablePublicationsCount { count precision }
+          barcode
+          compareAtPrice
+          defaultCursor
+          deliveryProfile { id }
+          displayName
+          inventoryItem { id }
+          inventoryPolicy
+          inventoryQuantity
+          legacyResourceId
+          metafields(first: 50) { nodes { namespace key type value jsonValue } }
+          position
+          price
+          product { id }
+          requiresComponents
+          resourcePublicationsCount { count precision }
+          selectedOptions { name optionValue { hasVariants id linkedMetafieldValue name } value }
+          sellableOnlineQuantity
+          sellingPlanGroupsCount { count precision }
+          sellingPlanGroups(first: 25) { nodes { id } }
+          showUnitPrice
+          sku
+          createdAt
+          taxable
+          title
+          unitPrice { amount currencyCode }
+          unitPriceMeasurement { measuredType quantityUnit quantityValue referenceUnit referenceValue }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageProductVariants($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Product {
+      variants(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           availableForSale
@@ -6228,7 +6594,7 @@ query ShopifyFetchReverseDelivery($id: ID!) {
 		ParentGidPath:    "",
 		VersionField:     "",
 		Children: []ChildSpec{
-			{Connection: "reverseDeliveries", Concept: "reverseDelivery", GraphQLType: "ReverseDelivery", List: false},
+			{Connection: "reverseDeliveries", Concept: "reverseDelivery", GraphQLType: "ReverseDelivery", List: false, PageOp: "ShopifyPageReverseFulfillmentOrderReverseDeliveries"},
 		},
 		Fields: []FieldSpec{
 			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id"},
@@ -6251,6 +6617,23 @@ query ShopifyFetchReverseFulfillmentOrder($id: ID!) {
       status
       thirdPartyConfirmation { status }
       reverseDeliveries(first: 25) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          deliverable { __typename }
+          reverseFulfillmentOrder { id }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageReverseFulfillmentOrderReverseDeliveries($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on ReverseFulfillmentOrder {
+      reverseDeliveries(first: 25, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           deliverable { __typename }
@@ -6395,7 +6778,7 @@ query ShopifyFetchSellingPlan($id: ID!) {
 		Scopes:         []string{"read_products"},
 		VersionField:   "createdAt",
 		Children: []ChildSpec{
-			{Connection: "sellingPlans", Concept: "sellingPlan", GraphQLType: "SellingPlan", List: false},
+			{Connection: "sellingPlans", Concept: "sellingPlan", GraphQLType: "SellingPlan", List: false, PageOp: "ShopifyPageSellingPlanGroupSellingPlans"},
 		},
 		Fields: []FieldSpec{
 			{Name: "appId", GraphQL: "appId", Kind: "scalar", DSLType: "string", Extract: "appId"},
@@ -6437,6 +6820,7 @@ query ShopifyFetchSellingPlanGroup($id: ID!) {
       createdAt
       summary
       sellingPlans(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           billingPolicy { __typename ... on SellingPlanFixedBillingPolicy { remainingBalanceChargeExactTime remainingBalanceChargeTimeAfterCheckout remainingBalanceChargeTrigger } ... on SellingPlanRecurringBillingPolicy { createdAt interval intervalCount maxCycles minCycles } }
@@ -6474,6 +6858,32 @@ query ShopifyListSellingPlanGroup($first: Int!, $after: String, $query: String) 
       createdAt
       summary
       sellingPlans(first: 100) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          billingPolicy { __typename ... on SellingPlanFixedBillingPolicy { remainingBalanceChargeExactTime remainingBalanceChargeTimeAfterCheckout remainingBalanceChargeTrigger } ... on SellingPlanRecurringBillingPolicy { createdAt interval intervalCount maxCycles minCycles } }
+          category
+          deliveryPolicy { __typename ... on SellingPlanFixedDeliveryPolicy { cutoff fulfillmentExactTime fulfillmentTrigger intent preAnchorBehavior } ... on SellingPlanRecurringDeliveryPolicy { createdAt cutoff intent interval intervalCount preAnchorBehavior } }
+          description
+          inventoryPolicy { reserve }
+          metafields(first: 50) { nodes { namespace key type value jsonValue } }
+          name
+          options
+          position
+          pricingPolicies { __typename ... on SellingPlanFixedPricingPolicy { adjustmentType createdAt } ... on SellingPlanRecurringPricingPolicy { adjustmentType afterCycle createdAt } }
+          createdAt
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageSellingPlanGroupSellingPlans($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on SellingPlanGroup {
+      sellingPlans(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           billingPolicy { __typename ... on SellingPlanFixedBillingPolicy { remainingBalanceChargeExactTime remainingBalanceChargeTimeAfterCheckout remainingBalanceChargeTrigger } ... on SellingPlanRecurringBillingPolicy { createdAt interval intervalCount maxCycles minCycles } }
@@ -6956,7 +7366,7 @@ query ShopifyFetchShopifyPaymentsPayout($id: ID!) {
 		ParentGidPath:    "order.id",
 		VersionField:     "createdAt",
 		Children: []ChildSpec{
-			{Connection: "reverseFulfillmentOrders", Concept: "reverseFulfillmentOrder", GraphQLType: "ReverseFulfillmentOrder", List: false},
+			{Connection: "reverseFulfillmentOrders", Concept: "reverseFulfillmentOrder", GraphQLType: "ReverseFulfillmentOrder", List: false, PageOp: "ShopifyPageShopifyReturnReverseFulfillmentOrders"},
 		},
 		Fields: []FieldSpec{
 			{Name: "closedAt", GraphQL: "closedAt", Kind: "scalar", DSLType: "string", Extract: "closedAt"},
@@ -6997,6 +7407,24 @@ query ShopifyFetchShopifyReturn($id: ID!) {
       totalQuantity
       transactions(first: 25) { nodes { id } }
       reverseFulfillmentOrders(first: 25) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          order { id }
+          status
+          thirdPartyConfirmation { status }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageShopifyReturnReverseFulfillmentOrders($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Return {
+      reverseFulfillmentOrders(first: 25, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           order { id }

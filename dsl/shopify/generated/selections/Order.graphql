@@ -126,6 +126,7 @@ query ShopifyFetchOrder($id: ID!) {
       transactionsCount { count precision }
       unpaid
       lineItems(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           contract { id }
@@ -233,6 +234,7 @@ query ShopifyFetchOrder($id: ID!) {
         trackingInfo { company number url }
       }
       returns(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           closedAt
@@ -375,6 +377,7 @@ query ShopifyListOrder($first: Int!, $after: String, $query: String) {
       transactionsCount { count precision }
       unpaid
       lineItems(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           contract { id }
@@ -482,6 +485,83 @@ query ShopifyListOrder($first: Int!, $after: String, $query: String) {
         trackingInfo { company number url }
       }
       returns(first: 50) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          closedAt
+          decline { note reason }
+          name
+          order { id }
+          refunds(first: 25) { nodes { id } }
+          requestApprovedAt
+          returnShippingFees { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } id }
+          createdAt
+          staffMember { id }
+          status
+          totalQuantity
+          transactions(first: 25) { nodes { id } }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageOrderLineItems($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Order {
+      lineItems(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          contract { id }
+          currentQuantity
+          customAttributes { key value }
+          discountAllocations { allocatedAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } discountApplication { __typename allocationMethod index targetSelection targetType } }
+          discountedTotalSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          discountedUnitPriceAfterAllDiscountsSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          discountedUnitPriceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          duties { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxLines { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title } }
+          image { altText height id thumbhash url width }
+          isGiftCard
+          lineItemGroup { customAttributes { key value } id productId quantity title variantId variantSku }
+          merchantEditable
+          name
+          nonFulfillableQuantity
+          originalTotalSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          originalUnitPriceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          priceAfterAllDiscountsBeforeTaxesSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          product { id }
+          quantity
+          refundableQuantity
+          requiresShipping
+          restockable
+          sellingPlan { name sellingPlanId }
+          sku
+          staffMember { id }
+          taxLines { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title }
+          taxable
+          title
+          totalDiscountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          unfulfilledDiscountedTotalSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          unfulfilledOriginalTotalSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          unfulfilledQuantity
+          variant { id }
+          variantTitle
+          vendor
+          weight { unit value }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageOrderReturns($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Order {
+      returns(first: 50, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           closedAt
