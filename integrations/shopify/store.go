@@ -86,6 +86,13 @@ func (s Store) Ingests() bool {
 	return s.Status == StatusConfigured || s.Status == StatusBackfilling || s.Status == StatusLive
 }
 
+// Managed reports whether the store was connected through the shared app:
+// its Admin access is an offline grant the connector refreshes, sealed under
+// the store's _OFFLINE_GRANT secret, rather than a token of its own app.
+func (s Store) Managed() bool {
+	return strings.HasSuffix(s.AdminTokenRef, "_OFFLINE_GRANT")
+}
+
 // ProtectedLevelAtLeast reports whether the store's approval reaches a level.
 // The ShopifyQL pass-through needs Level 2, and refusing on this side gives a
 // reason a Shopify 403 does not.

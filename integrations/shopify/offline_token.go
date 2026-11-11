@@ -77,7 +77,7 @@ func (c *Connector) exchangeOffline(ctx context.Context, shop, clientID, clientS
 }
 
 func (c *Connector) adminToken(ctx context.Context, store Store) (string, error) {
-	if !strings.HasSuffix(store.AdminTokenRef, "_OFFLINE_GRANT") {
+	if !store.Managed() {
 		return c.stores.AdminToken(ctx, store)
 	}
 	// No cached token pair: another replica may have refreshed since this

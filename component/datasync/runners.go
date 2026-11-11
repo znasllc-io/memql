@@ -235,7 +235,7 @@ func (r *Runner) Reconcile(ctx context.Context, connectorName, conceptID string)
 			// lastError, which is for things that went wrong.
 			out.Skipped = true
 			return out, nil
-		case memqlsync.IsNotGranted(reconcileErr):
+		case memqlsync.IsNotGranted(reconcileErr), memqlsync.IsNotRequested(reconcileErr):
 			// The origin never granted this deployment the domain (an
 			// access scope the connection was made without). Skipped like
 			// a connector that does not reconcile -- and unlike it,
@@ -246,6 +246,10 @@ func (r *Runner) Reconcile(ctx context.Context, connectorName, conceptID string)
 			// timeline, and 22 domains restating the same reason every
 			// ten minutes is a table nobody asked for. The attempt stamp
 			// is what holds the domain to its cadence between writes.
+			//
+			// A domain outside the store's connection (not requested) is
+			// held the same way: it is a standing fact, recorded once and
+			// restated no more often, and it is not a failure.
 			out.Skipped = true
 			msg := truncateError(reconcileErr.Error())
 			if st.LastError != msg || r.now().UTC().Sub(st.LastAttemptAt) >= notGrantedRecheck {

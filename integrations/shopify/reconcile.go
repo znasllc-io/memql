@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -68,16 +69,25 @@ func (c *Connector) Reconcile(ctx context.Context, conceptID string, since time.
 	var report memqlsync.ReconcileReport
 	var swept int
 	var missingScopes []string
-	var refused error
+	var refused, notRequested error
 	for _, store := range stores {
 		if !store.Ingests() {
+			continue
+		}
+		if !domainInConnection(store, spec) {
+			// The store's connection never asks for any scope this domain
+			// reads under. Nothing to grant and nothing to ask: the domain
+			// is not requested.
+			notRequested = memqlsync.NotRequested(ConnectorName)
 			continue
 		}
 		if missing := scopesMissingFor(store, spec); len(missing) > 0 {
 			// The store was connected without any scope this domain reads
 			// under. Asking would get ACCESS_DENIED, as it did once per
 			// tick for 22 domains on one store; the answer is known here.
-			missingScopes = append(missingScopes, missing...)
+			// Named are the scopes the connection asks for, which are the
+			// ones a person can approve.
+			missingScopes = append(missingScopes, askedOf(store, spec.Scopes)...)
 			continue
 		}
 		one, err := c.reconcileStore(ctx, store, spec, since)
@@ -85,7 +95,11 @@ func (c *Connector) Reconcile(ctx context.Context, conceptID string, since time.
 			// The origin said what the recorded grant could not: this
 			// store does not have the domain. The other stores still get
 			// their sweep.
-			refused = err
+			if refusalIsFixable(store, err.Error()) {
+				refused = err
+			} else {
+				notRequested = memqlsync.NotRequested(ConnectorName)
+			}
 			continue
 		}
 		if err != nil {
@@ -97,14 +111,73 @@ func (c *Connector) Reconcile(ctx context.Context, conceptID string, since time.
 		report.Healed += one.Healed
 	}
 	if swept == 0 {
+		// Something a person can fix is said before what nobody asked for.
 		if len(missingScopes) > 0 {
 			return report, memqlsync.NotGranted(ConnectorName, uniqueSorted(missingScopes)...)
 		}
 		if refused != nil {
 			return report, refused
 		}
+		if notRequested != nil {
+			return report, notRequested
+		}
 	}
 	return report, nil
+}
+
+// domainInConnection reports whether the store's own connection asks for any
+// scope the domain reads under (a write scope asked reaches its read). A
+// domain that names no scope is the origin's to answer, and inside.
+func domainInConnection(store Store, spec *generated.TypeSpec) bool {
+	if spec == nil || len(spec.Scopes) == 0 {
+		return true
+	}
+	return len(askedOf(store, spec.Scopes)) > 0
+}
+
+// askedOf is the scopes among `scopes` that the store's connection asks for.
+func askedOf(store Store, scopes []string) []string {
+	asked := grantIncludes(connectionScopes(store))
+	var out []string
+	for _, s := range scopes {
+		if asked[s] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// refusalIsFixable sorts Shopify's refusal of a domain's root. Two are
+// something a person can fix and stay not granted: the app has not declared
+// the protected customer data the domain carries, or the refusal names a
+// scope the connection asks for and the grant lacks. Every other root refusal
+// -- a scope the connection never asks for, a feature the store's plan does
+// not have -- is outside the connection.
+func refusalIsFixable(store Store, message string) bool {
+	if protectedDataRefusal(message) {
+		return true
+	}
+	scope := requiredScopeOf(message)
+	return scope != "" && grantIncludes(connectionScopes(store))[scope]
+}
+
+// requiredScopeRE reads the scope in Shopify's "Required access: `<scope>`
+// access scope" sentence.
+var requiredScopeRE = regexp.MustCompile("Required access: `([a-z_]+)` access scope")
+
+// requiredScopeOf is the scope a Shopify refusal names, or "".
+func requiredScopeOf(message string) string {
+	if m := requiredScopeRE.FindStringSubmatch(message); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// protectedDataRefusal reports whether a refusal is Shopify's protected
+// customer data gate: the app has not declared, or been approved for, the
+// customer data an object carries.
+func protectedDataRefusal(message string) bool {
+	return strings.Contains(message, "is not approved to access") || strings.Contains(message, "protected-customer-data")
 }
 
 // scopesMissingFor is the domain's scopes the store holds NONE of.

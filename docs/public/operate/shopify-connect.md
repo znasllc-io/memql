@@ -96,7 +96,8 @@ expected deliverables are tracked in
 The shared storefront flow requests `unauthenticated_read_product_listings`,
 `unauthenticated_read_checkouts`, `unauthenticated_write_checkouts`,
 `unauthenticated_read_customers`, `write_products`, `read_inventory`,
-`read_locations`, and `read_orders`. Register those scopes on the app.
+`read_locations`, `read_orders`, `read_customers`, `write_customers`,
+`read_discounts`, and `read_returns`. Register those scopes on the app.
 It asks for `write_products` rather than `read_products` because product-content
 delivery writes product metafields; `write_products` includes the catalog reads.
 Only a missing Storefront scope refuses a connection, so a grant without

@@ -40,3 +40,19 @@ func NotGranted(connector string, missingScopes ...string) error {
 // IsNotGranted reports whether a failure is a standing refusal by the
 // origin rather than something a retry could change.
 func IsNotGranted(err error) bool { return errors.Is(err, ErrNotGranted) }
+
+// ErrNotRequested marks a domain outside the store's own connection: the
+// connection never asked the origin for it, so the origin's refusal is not
+// something to grant. A shared app's connection asks for a fixed set, and a
+// domain outside that set is neither a failure nor a missing scope -- it is
+// recorded like a not-granted domain and never shown as one.
+var ErrNotRequested = errors.New("connector: not requested")
+
+// NotRequested says a connector's connection does not ask for a domain.
+func NotRequested(connector string) error {
+	return fmt.Errorf("%w: %s's connection does not ask for this domain", ErrNotRequested, connector)
+}
+
+// IsNotRequested reports whether a refusal is of a domain the connection
+// never asked for. It is never IsNotGranted.
+func IsNotRequested(err error) bool { return errors.Is(err, ErrNotRequested) }

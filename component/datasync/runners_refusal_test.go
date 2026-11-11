@@ -189,3 +189,43 @@ func TestASweepAfterARefusalStillNarrowsOnTheLastSweepThatRan(t *testing.T) {
 		t.Fatalf("since = %v, want the last sweep that ran (%v)", c.reconcileSince, ranAt)
 	}
 }
+
+func TestANotRequestedDomainIsRecordedOnceAndIsNotAFailure(t *testing.T) {
+	engine := newFakeEngine()
+	c := mirrorConnector()
+	c.reconcileErr = memqlsync.NotRequested("shopify")
+	r := testRunner(engine, newFakeWriter(), c)
+
+	res, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept)
+	if err != nil {
+		t.Fatalf("a domain outside the store's connection surfaced as a sweep failure: %v", err)
+	}
+	if !res.Skipped {
+		t.Fatal("not marked skipped: the sweep would count it as swept")
+	}
+	writes := engine.callsContaining("mutation upsertSyncState")
+	if len(writes) != 1 {
+		t.Fatalf("health writes = %d, want exactly 1 -- the row must say why the domain is idle", len(writes))
+	}
+	if !strings.Contains(writes[0], "not requested") {
+		t.Errorf("the health row does not carry the not-requested text: %s", writes[0])
+	}
+	if strings.Contains(writes[0], "lastReconcileAt") {
+		t.Errorf("a skipped domain must not claim a finished sweep: %s", writes[0])
+	}
+
+	engine.seed(`query syncStateFor`, []map[string]any{{
+		"id":            SyncStateID(testMirrorConcept, "shopify", "inbound"),
+		"conceptId":     testMirrorConcept,
+		"connector":     "shopify",
+		"direction":     "inbound",
+		"lastError":     c.reconcileErr.Error(),
+		"lastAttemptAt": testNow.Add(-time.Minute).Format(time.RFC3339),
+	}})
+	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept); err != nil {
+		t.Fatal(err)
+	}
+	if n := engine.countContaining("mutation upsertSyncState"); n != 1 {
+		t.Errorf("an unchanged not-requested answer was written again inside notGrantedRecheck (%d writes)", n)
+	}
+}

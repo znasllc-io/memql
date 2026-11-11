@@ -340,6 +340,9 @@ func (i *Integration) handleStoreHealth(ctx context.Context, args map[string]any
 				"lastError":   mapString(st, "lastError"),
 			})
 		}
+		// The scopes and domains are measured against what this store's own
+		// connection asks for: a scope or domain outside it was never
+		// requested, and is neither missing nor not granted.
 		entry := map[string]any{
 			"storeId":            store.ID,
 			"domain":             store.Domain,
@@ -348,9 +351,10 @@ func (i *Integration) handleStoreHealth(ctx context.Context, args map[string]any
 			"mirrorApiVersion":   generated.APIVersion,
 			"protectedDataLevel": store.ProtectedDataLevel,
 			"scopesGranted":      toAny(store.ScopesGranted),
-			"scopesNeeded":       toAny(generated.Scopes),
-			"scopesMissing":      toAny(missingScopes(store.ScopesGranted)),
+			"scopesNeeded":       toAny(connectionScopes(store)),
+			"scopesMissing":      toAny(scopesNotApproved(store)),
 			"domainsNotGranted":  toAny(domainsNotGranted(store)),
+			"domainsOutside":     toAny(domainsOutside(store)),
 			"fieldsDenied":       fieldsDeniedAny(c.FieldsDenied(store.ID)),
 			"health":             store.Health,
 			"driftLast":          drift,
@@ -421,6 +425,11 @@ func phaseOf(st map[string]any) string {
 			// idle until the grant widens, and the reason is on the row.
 			return "not granted"
 		}
+		if strings.HasPrefix(lastErr, memqlsync.ErrNotRequested.Error()) {
+			// Outside the store's connection: never asked for, and
+			// nothing to grant.
+			return "not requested"
+		}
 		return "error"
 	}
 	switch mapString(st, "backfillStatus") {
@@ -432,19 +441,35 @@ func phaseOf(st map[string]any) string {
 	return "idle"
 }
 
-// domainsNotGranted names the mirrored domains the store's grant reaches
-// none of the scopes for -- the ones the sweep skips rather than asks about
-// (scopesMissingFor). What an operator would unlock by widening the grant.
+// domainsNotGranted names the mirrored domains inside the store's
+// connection whose grant reaches none of the scopes for -- the ones the sweep
+// skips rather than asks about (scopesMissingFor). What an operator would
+// unlock by approving what the connection asks for.
 func domainsNotGranted(store Store) []string {
+	return sweptDomains(func(spec *generated.TypeSpec) bool {
+		return domainInConnection(store, spec) && len(scopesMissingFor(store, spec)) > 0
+	})
+}
+
+// domainsOutside names the swept domains the store's connection does not
+// ask for: never requested, and not an error.
+func domainsOutside(store Store) []string {
+	return sweptDomains(func(spec *generated.TypeSpec) bool {
+		return !domainInConnection(store, spec)
+	})
+}
+
+// sweptDomains is the concept ids, in apply order, of the domains the sweep
+// considers on its own and `keep` accepts. A child materialised with its
+// parent, or a singleton, is never swept on its own and never listed.
+func sweptDomains(keep func(*generated.TypeSpec) bool) []string {
 	var out []string
 	for _, concept := range generated.ApplyOrder {
 		spec := generated.Types[concept]
 		if spec == nil || spec.Reconcile == generated.ReconcileNone {
-			// A child materialised with its parent, or a singleton: the
-			// sweep never considers it on its own.
 			continue
 		}
-		if len(scopesMissingFor(store, spec)) > 0 {
+		if keep(spec) {
 			out = append(out, generated.ConceptID(concept))
 		}
 	}
@@ -457,26 +482,6 @@ func fieldsDeniedAny(in map[string][]string) map[string]any {
 		out[concept] = toAny(fields)
 	}
 	return out
-}
-
-// missingScopes is the allowlist's needs minus what the store granted.
-//
-// Reported rather than enforced: a missing scope makes Shopify return null
-// for the fields it covers, so the mirror is quietly incomplete rather than
-// broken. Naming the gap is the difference between "the customer has no
-// phone number" and "we were never allowed to see it".
-func missingScopes(granted []string) []string {
-	if len(granted) == 0 {
-		return nil
-	}
-	have := grantIncludes(granted)
-	var missing []string
-	for _, s := range generated.Scopes {
-		if !have[s] {
-			missing = append(missing, s)
-		}
-	}
-	return missing
 }
 
 // resolveStoreArg resolves the store a capability call names, defaulting to
