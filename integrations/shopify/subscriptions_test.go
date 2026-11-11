@@ -29,7 +29,7 @@ func subscription(id, topic, url, version string, fields []string) map[string]an
 	return map[string]any{
 		"id": id, "topic": topic, "includeFields": include,
 		"apiVersion": map[string]any{"handle": version},
-		"endpoint":   map[string]any{"__typename": "WebhookHttpEndpoint", "callbackUrl": url},
+		"uri":        url,
 	}
 }
 
@@ -65,11 +65,22 @@ func TestEnsureSubscriptionsCreatesEveryMissingTopic(t *testing.T) {
 		t.Fatal("no create ran")
 	}
 	sub, _ := create.Variables["sub"].(map[string]any)
-	if sub["callbackUrl"] != testCallback {
-		t.Errorf("callbackUrl = %v", sub["callbackUrl"])
+	if sub["uri"] != testCallback {
+		t.Errorf("uri = %v, want the store's delivery address", sub["uri"])
 	}
-	if sub["apiVersion"] != generated.APIVersion {
-		t.Errorf("apiVersion = %v, want the pinned %s", sub["apiVersion"], generated.APIVersion)
+	// THE INPUT HOLDS ONLY WHAT SHOPIFY'S WebhookSubscriptionInput DEFINES.
+	// One key it does not define refuses the whole call ("Field `apiVersion`
+	// is not defined by type `WebhookSubscriptionInput`"), and that is how a
+	// production store went without a single subscription: every one of its
+	// 66 creations was refused, and the mirror moved only when a sweep ran.
+	// The version events are serialized at is the app's, set in its
+	// configuration at Shopify, and cannot be asked for here.
+	for key := range sub {
+		switch key {
+		case "uri", "format", "includeFields":
+		default:
+			t.Errorf("the subscription input carries %q, which WebhookSubscriptionInput does not define or has deprecated", key)
+		}
 	}
 	// includeFields is trimmed to identity plus a change timestamp: the
 	// payload is a SIGNAL and the object is fetched. A full payload would be
@@ -90,7 +101,6 @@ func TestEnsureSubscriptionsUpdatesAStaleOne(t *testing.T) {
 		sub  map[string]any
 	}{
 		{"wrong url", subscription("gid://shopify/WebhookSubscription/1", "ORDERS_UPDATED", "https://old.example/inbound/x", generated.APIVersion, includeFields)},
-		{"stale api version", subscription("gid://shopify/WebhookSubscription/1", "ORDERS_UPDATED", testCallback, "2024-01", includeFields)},
 		{"changed includeFields", subscription("gid://shopify/WebhookSubscription/1", "ORDERS_UPDATED", testCallback, generated.APIVersion, []string{"id"})},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -107,6 +117,47 @@ func TestEnsureSubscriptionsUpdatesAStaleOne(t *testing.T) {
 				t.Fatalf("updated = %v", report.Updated)
 			}
 		})
+	}
+}
+
+// The version a subscription's events are serialized at is inherited from the
+// app that created it: Shopify takes it from the app's configuration and an
+// update cannot change it. So a subscription at another version is not
+// rewritten -- the daily pass would rewrite it every day and change nothing --
+// and the version is REPORTED, because the fix is in the app's settings.
+func TestAWebhookVersionTheAppDeliversAtIsReportedNotRewritten(t *testing.T) {
+	h := newHarness(t)
+	h.admin.reply("ShopifyWebhookSubscriptions", webhookList(
+		subscription("gid://shopify/WebhookSubscription/1", "ORDERS_UPDATED", testCallback, "2024-01", includeFields)))
+	h.admin.reply("ShopifyWebhookCreate", map[string]any{"webhookSubscriptionCreate": map[string]any{"userErrors": []any{}}})
+
+	report, err := h.conn.EnsureSubscriptionsForStore(context.Background(), h.store(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range h.admin.seen() {
+		if r.Operation == "ShopifyWebhookUpdate" {
+			t.Fatal("a subscription was rewritten for its version, which an update cannot change")
+		}
+	}
+	if report.DeliveredAtVersion != "2024-01" {
+		t.Errorf("DeliveredAtVersion = %q, want the version Shopify reports, 2024-01", report.DeliveredAtVersion)
+	}
+}
+
+// A store whose subscriptions are at the pinned version reports no other.
+func TestAWebhookVersionThatMatchesThePinIsNotReported(t *testing.T) {
+	h := newHarness(t)
+	h.admin.reply("ShopifyWebhookSubscriptions", webhookList(
+		subscription("gid://shopify/WebhookSubscription/1", "ORDERS_UPDATED", testCallback, generated.APIVersion, includeFields)))
+	h.admin.reply("ShopifyWebhookCreate", map[string]any{"webhookSubscriptionCreate": map[string]any{"userErrors": []any{}}})
+
+	report, err := h.conn.EnsureSubscriptionsForStore(context.Background(), h.store(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.DeliveredAtVersion != "" {
+		t.Errorf("DeliveredAtVersion = %q, want none when Shopify delivers at the pin", report.DeliveredAtVersion)
 	}
 }
 
@@ -187,6 +238,27 @@ func TestEnsureSubscriptionsRecordsHealthOnTheStore(t *testing.T) {
 	}
 	if !strings.Contains(calls[0], "subscriptions") {
 		t.Errorf("health write carries no subscription report:\n%s", calls[0])
+	}
+}
+
+// The version Shopify delivers at goes onto the store's health with the rest
+// of the pass: it is the one part of a subscription nothing here can change,
+// so an operator has to be able to read it.
+func TestTheDeliveredVersionIsRecordedOnTheStoresHealth(t *testing.T) {
+	h := newHarness(t)
+	h.admin.reply("ShopifyWebhookSubscriptions", webhookList(
+		subscription("gid://shopify/WebhookSubscription/1", "ORDERS_UPDATED", testCallback, "2024-01", includeFields)))
+	h.admin.reply("ShopifyWebhookCreate", map[string]any{"webhookSubscriptionCreate": map[string]any{"userErrors": []any{}}})
+
+	if err := h.conn.EnsureSubscriptions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	calls := h.engine.callsTo("recordStoreHealth")
+	if len(calls) != 1 {
+		t.Fatalf("recordStoreHealth ran %d times", len(calls))
+	}
+	if !strings.Contains(calls[0], "deliveredAtVersion") || !strings.Contains(calls[0], "2024-01") {
+		t.Errorf("health write does not say which version Shopify delivers at:\n%s", calls[0])
 	}
 }
 

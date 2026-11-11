@@ -41,10 +41,7 @@ const webhookListQuery = `query ShopifyWebhookSubscriptions($first: Int!, $after
       topic
       includeFields
       apiVersion { handle }
-      endpoint {
-        __typename
-        ... on WebhookHttpEndpoint { callbackUrl }
-      }
+      uri
     }
   }
 }`
@@ -93,8 +90,12 @@ type SubscriptionReport struct {
 	// NotGranted is the generated topics this store's grant cannot hold, so
 	// they were not asked for. A standing fact about the connection, like a
 	// domain's `not granted` phase, rather than a failure.
-	NotGranted []string  `json:"notGranted,omitempty"`
-	At         time.Time `json:"at"`
+	NotGranted []string `json:"notGranted,omitempty"`
+	// DeliveredAtVersion is the API version Shopify serializes this store's
+	// events at, when it is not the pinned one. Empty when it is the pin, or
+	// when the store holds no subscription of ours to read it from.
+	DeliveredAtVersion string    `json:"deliveredAtVersion,omitempty"`
+	At                 time.Time `json:"at"`
 }
 
 // EnsureSubscriptions implements sync.Connector: brings every configured
@@ -155,6 +156,13 @@ func (c *Connector) EnsureSubscriptionsForStore(ctx context.Context, store Store
 	byTopic := map[string]Subscription{}
 	for _, sub := range existing {
 		byTopic[sub.Topic] = sub
+		// Every subscription of ours carries the app's version, so the first
+		// that is not the pin says what Shopify delivers at. Reported rather
+		// than rewritten: an update cannot change it, and the place that can
+		// is the app's configuration at Shopify.
+		if report.DeliveredAtVersion == "" && sub.APIVersion != "" && sub.APIVersion != version {
+			report.DeliveredAtVersion = sub.APIVersion
+		}
 	}
 
 	topics := make([]string, 0, len(desired))
@@ -172,7 +180,7 @@ func (c *Connector) EnsureSubscriptionsForStore(ctx context.Context, store Store
 				continue
 			}
 			report.Created = append(report.Created, topic)
-		case sub.CallbackURL != callback || sub.APIVersion != version || !sameFields(sub.IncludeFields, includeFields):
+		case sub.CallbackURL != callback || !sameFields(sub.IncludeFields, includeFields):
 			if err := c.updateSubscription(ctx, store, sub.ID, callback); err != nil {
 				report.Failed = append(report.Failed, topic+": "+err.Error())
 				continue
@@ -224,10 +232,7 @@ func (c *Connector) listSubscriptions(ctx context.Context, store Store) ([]Subsc
 					APIVersion    struct {
 						Handle string `json:"handle"`
 					} `json:"apiVersion"`
-					Endpoint struct {
-						Typename    string `json:"__typename"`
-						CallbackURL string `json:"callbackUrl"`
-					} `json:"endpoint"`
+					URI string `json:"uri"`
 				} `json:"nodes"`
 			} `json:"webhookSubscriptions"`
 		}
@@ -238,7 +243,7 @@ func (c *Connector) listSubscriptions(ctx context.Context, store Store) ([]Subsc
 			out = append(out, Subscription{
 				ID:            n.ID,
 				Topic:         n.Topic,
-				CallbackURL:   n.Endpoint.CallbackURL,
+				CallbackURL:   n.URI,
 				APIVersion:    n.APIVersion.Handle,
 				IncludeFields: n.IncludeFields,
 			})
@@ -283,12 +288,19 @@ func (c *Connector) deleteSubscription(ctx context.Context, store Store, id stri
 	return userErrorsFrom(resp, "webhookSubscriptionDelete")
 }
 
+// subscriptionInput is the WebhookSubscriptionInput of a create or an update.
+//
+// ONLY FIELDS THE TYPE DEFINES. Shopify refuses the whole call for one it does
+// not ("Field `apiVersion` is not defined by type `WebhookSubscriptionInput`"),
+// and a refused creation is a store that is never told about a change. The
+// version events are serialized at is not asked for here because it cannot be:
+// a subscription inherits it from the app, whose configuration at Shopify names
+// it. `uri` is the destination; `callbackUrl` is its deprecated spelling.
 func subscriptionInput(callback string) map[string]any {
 	return map[string]any{
-		"callbackUrl":   callback,
+		"uri":           callback,
 		"format":        "JSON",
 		"includeFields": includeFields,
-		"apiVersion":    generated.APIVersion,
 	}
 }
 
@@ -368,6 +380,10 @@ func (c *Connector) recordSubscriptionHealth(ctx context.Context, store Store, r
 		"failed":     toAny(report.Failed),
 		"notGranted": toAny(report.NotGranted),
 		"at":         report.At.Format(time.RFC3339),
+	}
+	if report.DeliveredAtVersion != "" {
+		subscriptions := health["subscriptions"].(map[string]any)
+		subscriptions["deliveredAtVersion"] = report.DeliveredAtVersion
 	}
 	call := renderCall("recordStoreHealth", map[string]any{
 		"storeId":                store.ID,

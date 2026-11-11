@@ -287,12 +287,21 @@ merchant.
 
 **Subscriptions.** On boot and daily at 03:15, the connector registers every
 mirrored topic the store's grant covers, for every ingesting store: HTTPS
-delivery to `https://api.<your-domain>/inbound/shopify-<storeId>`, at the
-pinned API version, with `includeFields` trimmed to `id`,
-`admin_graphql_api_id` and `updated_at`. It updates subscriptions whose URL,
-version or fields have drifted, and removes its own that the allowlist or the
-grant no longer wants. Another app's subscriptions are not visible to this app
-and are never touched.
+delivery to `https://api.<your-domain>/inbound/shopify-<storeId>`, with
+`includeFields` trimmed to `id`, `admin_graphql_api_id` and `updated_at`. It
+updates subscriptions whose URL or fields have drifted, and removes its own
+that the allowlist or the grant no longer wants. Another app's subscriptions
+are not visible to this app and are never touched.
+
+**The version events are serialized at is the app's, not the subscription's.**
+Shopify takes it from the app's configuration (its Webhooks API version) and a
+subscription inherits it; a create or an update cannot name it, and Shopify
+refuses the whole call if one tries. Set it to the pinned version in the app's
+configuration at Shopify. When the two differ, the store's health carries the
+version Shopify delivers at as `subscriptions.deliveredAtVersion`. The payload
+is only a signal, since the object is fetched at the pinned version, so a
+difference loses nothing by itself; a topic the app's version does not have
+fails its creation and is listed under `subscriptions.failed`.
 
 A topic is outside the grant when the store holds none of the scopes its
 domain reads under -- the rule reconciliation uses to skip a domain. A store
@@ -555,11 +564,12 @@ regeneration, never a configuration change:
 3. Review the diff: new fields, removed fields, changed enums, renamed
    types. This is the whole point of the exercise.
 4. `make sdk-gen && make arch-model`.
-5. Update every store row's `apiVersion` and let the daily reconcile
-   re-register every subscription at the new version. A store pinned to a
-   version the mirror was not generated from is **refused** rather than
-   attempted: it would return fields the concepts do not declare and omit
-   fields they require.
+5. Update every store row's `apiVersion`, and set the app's Webhooks API
+   version at Shopify to the new one: subscriptions inherit it from the app,
+   and the daily reconcile cannot change it. A store pinned to a version the
+   mirror was not generated from is **refused** rather than attempted: it
+   would return fields the concepts do not declare and omit fields they
+   require.
 
 `cmd/shopifyschema/shopify_schema_drift_test.go` fails the build when the
 checked-in tree and the generator disagree, which is what makes step 1 the
@@ -717,8 +727,10 @@ a real one. It is the end-to-end proof, in the order things can break:
    live store it stands in for.
 3. **Subscriptions.** Run `shopifyEnsureSubscriptions()`. The store's health
    should show `created` equal to the desired count and `failed` empty.
-   Cross-check in the Shopify admin that the subscriptions point at
-   `https://api.<domain>/inbound/shopify-<storeId>` at the pinned version.
+   Cross-check that the subscriptions point at
+   `https://api.<domain>/inbound/shopify-<storeId>`, and that the health shows
+   no `deliveredAtVersion`, which would mean the app's Webhooks API version
+   at Shopify is not the pinned one.
 4. **Backfill.** Run
    `datasyncStartBackfill(connector: "shopify", conceptId: "v1:shopify:product")`
    to completion, then `v1:shopify:order`. Confirm the row counts match the
