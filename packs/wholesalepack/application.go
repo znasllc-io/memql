@@ -3,12 +3,14 @@ package wholesalepack
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // application.go -- THE APPLICATION, ITS STATES AND ITS TRANSITIONS (epic
@@ -228,9 +230,15 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 	// 2026-09-21, D4). It was derived by the engine until this seam
 	// existed, which left the new row's id known to nobody -- and a client
 	// extension has to relate its own row to THIS application. It travels
-	// DOWN from the handler into both constructs rather than back out of
-	// this one, so `confirm` below still answers a receipt and still
-	// carries no row id.
+	// DOWN from the handler into both constructs. The receipt names it back,
+	// which tells the caller nothing it did not send.
+	//
+	// ANY CALLER WHO REACHES THIS BUILTIN CAN NAME IT. The shopper handler
+	// stamps it after the declared fields, but the builtin's object args
+	// profile admits it from any signed-in caller too -- and the write runs
+	// at internal origin, which the row gate does not owner-check. So the
+	// id is established ABSENT before the write, and the write is fenced on
+	// "row absent", or one caller could write over another's application.
 	applicationID := trimmed(args["submissionId"])
 	if applicationID == "" {
 		return nil, fmt.Errorf("wholesale: submissionId is required; it is minted per " +
@@ -244,7 +252,15 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 		return nil, fmt.Errorf("wholesale: an application is written as the site owner, and " +
 			"this call carries no actor")
 	}
-	if err := p.write(ctx, "createApplicationRow", map[string]any{
+	taken, err := p.applicationIDTaken(ctx, applicationID)
+	if err != nil {
+		return nil, err
+	}
+	if taken {
+		return p.existingSubmission(ctx, applicationID)
+	}
+	fenced := memql.ContextWithRowVersionFence(ctx, applicationConcept, applicationID, time.Time{})
+	if err := p.write(fenced, "createApplicationRow", map[string]any{
 		"applicationId":  applicationID,
 		"ownerUserId":    owner,
 		"storeId":        storeID,
@@ -253,11 +269,52 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 		"applicantName":  name,
 		"applicantEmail": email,
 	}); err != nil {
+		// THE FENCE'S LOSER: another write landed at this id between the
+		// check above and this one. Answered exactly as a taken id is.
+		if errors.Is(err, memql.ErrRowVersionChanged) {
+			return p.existingSubmission(ctx, applicationID)
+		}
 		return nil, err
 	}
 	return confirm("wholesale:application:accepted", map[string]any{
-		"storeId":     storeID,
-		"companyName": company,
+		"applicationId": applicationID,
+		"storeId":       storeID,
+		"companyName":   company,
+	})
+}
+
+// applicationConcept is the application's concept id, for its row fence.
+const applicationConcept = "v1:wholesale:application"
+
+// idCheckActor is the system actor that asks whether an application id is
+// taken. It sees every row, and answers only yes or no.
+const idCheckActor = "wholesale-id-check"
+
+// applicationIDTaken reports whether any application exists at id, whoever
+// owns it.
+func (p *Provider) applicationIDTaken(ctx context.Context, applicationID string) (bool, error) {
+	rows, err := p.rowsFor(auth.ContextWithSystemActor(ctx, idCheckActor), "applicationById",
+		map[string]string{"applicationId": applicationID})
+	if err != nil {
+		return false, err
+	}
+	return len(rows) > 0, nil
+}
+
+// existingSubmission answers a submission at an id that is already taken.
+//
+// A REPEAT IS THE SAME POST AGAIN, so the caller who can read the row is
+// answered its id and nothing is written. A caller who cannot read it is
+// told only that the id is taken: nothing about whose it is or what it says.
+func (p *Provider) existingSubmission(ctx context.Context, applicationID string) ([]memorynodes.MemoryNode, error) {
+	rows, err := p.rowsFor(ctx, "applicationById", map[string]string{"applicationId": applicationID})
+	if err != nil || len(rows) == 0 {
+		return nil, fmt.Errorf("wholesale: application id %q is already taken", applicationID)
+	}
+	return confirm("wholesale:application:accepted", map[string]any{
+		"applicationId": applicationID,
+		"storeId":       trimmed(rows[0]["storeId"]),
+		"existing":      true,
 	})
 }
 
@@ -353,7 +410,16 @@ func (p *Provider) applicationState(ctx context.Context, args map[string]any, _ 
 }
 
 // setWholesaleSettings writes one store's settings row.
+//
+// THE CLUSTER'S OPERATORS AND TRUSTED SERVER CODE ONLY, refused before
+// anything is read. The write runs at internal origin, which the row gate
+// does not owner-check, so the tier on the settings row protects nothing
+// here: without this check any caller who reaches the builtin could open,
+// close or re-route any store's program at its derived id.
 func (p *Provider) setWholesaleSettings(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := mayConfigureStores(ctx); err != nil {
+		return nil, err
+	}
 	storeID := trimmed(args["storeId"])
 	if storeID == "" {
 		return nil, fmt.Errorf("wholesale: storeId is required; settings are per store")
@@ -372,8 +438,13 @@ func (p *Provider) setWholesaleSettings(ctx context.Context, args map[string]any
 			return nil, err
 		}
 	}
+	owner, err := p.settingsOwner(ctx, storeID)
+	if err != nil {
+		return nil, err
+	}
 	if err := p.write(ctx, "setWholesaleSettingsRow", map[string]any{
 		"settingsId":         SettingsRowID(storeID),
+		"ownerUserId":        owner,
 		"storeId":            storeID,
 		"applicationsOpen":   open,
 		"entitlementAdapter": adapter,
@@ -386,6 +457,80 @@ func (p *Provider) setWholesaleSettings(ctx context.Context, args map[string]any
 		"applicationsOpen":   open,
 		"entitlementAdapter": adapter,
 	})
+}
+
+// mayConfigureStores admits internal origin or a cluster operator.
+func mayConfigureStores(ctx context.Context) error {
+	if auth.OriginFromContext(ctx).IsInternal() {
+		return nil
+	}
+	if ac, ok := auth.AccessFromContext(ctx); ok && auth.IsClusterOperator(ac.Role) {
+		return nil
+	}
+	return fmt.Errorf("wholesale: a store's wholesale settings are set by the cluster's operators")
+}
+
+// storeLookupActor is the system actor that resolves whose a store's
+// settings are: it reads the existing row and the sites bound to the store.
+const storeLookupActor = "wholesale-store-lookup"
+
+// settingsOwner is who owns a store's settings row after this write.
+//
+// THE EXISTING OWNER IS KEPT. Otherwise the operator who changed a setting
+// would become the row's owner, and the merchant's own reads -- the shopper
+// path's applicationsOpen among them -- would stop seeing it.
+//
+// A NEW ROW IS THE STORE'S MERCHANT'S: the one owner of the deployables whose
+// serving or preview binding names the store (sitesBoundToStore). Two owners
+// are refused rather than chosen between. With no bound site, trusted server
+// code acting as a real person names that person; an operator's call is
+// refused, because the operator is not the merchant and a row they owned
+// would be readable by nobody on the store's side.
+func (p *Provider) settingsOwner(ctx context.Context, storeID string) (string, error) {
+	sys := auth.ContextWithSystemActor(ctx, storeLookupActor)
+	existing, err := p.settingsRow(sys, storeID)
+	if err != nil {
+		return "", err
+	}
+	if existing != nil {
+		if owner := trimmed(existing["ownerUserId"]); owner != "" {
+			return owner, nil
+		}
+	}
+	if p.reader == nil {
+		return "", fmt.Errorf("wholesale: the pack has no reader; this capability cannot run")
+	}
+	bare := storeID
+	if i := strings.LastIndex(bare, ":"); i >= 0 {
+		bare = bare[i+1:]
+	}
+	sites, err := p.reader.RowsWithList(sys, "sitesBoundToStore", map[string]string{},
+		"storeIds", []string{storeID, bare, "v1:shopify:store:" + bare})
+	if err != nil {
+		return "", err
+	}
+	owners := map[string]bool{}
+	for _, site := range sites {
+		if owner := trimmed(site["ownerUserId"]); owner != "" {
+			owners[owner] = true
+		}
+	}
+	switch len(owners) {
+	case 1:
+		for owner := range owners {
+			return owner, nil
+		}
+	case 0:
+		if auth.OriginFromContext(ctx).IsInternal() {
+			if ac, ok := auth.AccessFromContext(ctx); ok && !ac.Synthetic && strings.TrimSpace(ac.UserId) != "" {
+				return strings.TrimSpace(ac.UserId), nil
+			}
+		}
+		return "", fmt.Errorf("wholesale: no deployable owned by a person is bound to store %q, so "+
+			"there is no merchant to own its wholesale settings; bind the store to its storefront first", storeID)
+	}
+	return "", fmt.Errorf("wholesale: the deployables bound to store %q belong to more than one "+
+		"owner, so whose wholesale settings these are cannot be told from the store alone", storeID)
 }
 
 // --------------------------------------------------------------------------

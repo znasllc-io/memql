@@ -8,6 +8,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // application_test.go -- the transitions and their invariants, exercised as
@@ -26,7 +27,8 @@ type fixtureReader struct {
 	ents      map[string][]map[string]any // applicationId -> rows
 	stores    map[string][]map[string]any // storeId -> rows
 	asked     []string
-	readAs    []string // the actor each read ran as, in order
+	readAs    []string         // the actor each read ran as, in order
+	sites     []map[string]any // sitesBoundToStore's answer
 }
 
 func (f *fixtureReader) Rows(ctx context.Context, query string, args map[string]string) ([]map[string]any, error) {
@@ -47,9 +49,13 @@ func (f *fixtureReader) Rows(ctx context.Context, query string, args map[string]
 	return nil, nil
 }
 
-func (f *fixtureReader) RowsWithList(_ context.Context, query string, _ map[string]string,
+func (f *fixtureReader) RowsWithList(ctx context.Context, query string, _ map[string]string,
 	_ string, _ []string) ([]map[string]any, error) {
 	f.asked = append(f.asked, query)
+	f.readAs = append(f.readAs, actorOf(ctx))
+	if query == "sitesBoundToStore" {
+		return f.sites, nil
+	}
 	return nil, nil
 }
 
@@ -69,14 +75,15 @@ type fakeWriter struct {
 type writeCall struct {
 	mutation string
 	args     map[string]any
-	actor    string // the user the write ran as
+	actor    string          // the user the write ran as
+	ctx      context.Context // the context it ran under, for its fences
 }
 
 func (f *fakeWriter) Write(ctx context.Context, mutation string, args map[string]any) error {
 	if f.err != nil {
 		return f.err
 	}
-	f.writes = append(f.writes, writeCall{mutation: mutation, args: args, actor: actorOf(ctx)})
+	f.writes = append(f.writes, writeCall{mutation: mutation, args: args, actor: actorOf(ctx), ctx: ctx})
 	return nil
 }
 
@@ -464,7 +471,7 @@ func TestSettingsAreOneRowPerStore(t *testing.T) {
 		store string
 		open  bool
 	}{{"store-live", true}, {"store-live", false}, {"store-dev", true}} {
-		if _, err := p.setWholesaleSettings(context.Background(),
+		if _, err := p.setWholesaleSettings(internalAsMerchant(),
 			map[string]any{"storeId": tc.store, "applicationsOpen": tc.open}, 0); err != nil {
 			t.Fatal(err)
 		}
@@ -495,7 +502,7 @@ func TestSettingsAreOneRowPerStore(t *testing.T) {
 func TestUnknownAdapterIsRefusedWhenSettingsAreWritten(t *testing.T) {
 	registerShippedAdapters()
 	p := &Provider{reader: &fixtureReader{}, writer: &fakeWriter{}}
-	_, err := p.setWholesaleSettings(context.Background(), map[string]any{
+	_, err := p.setWholesaleSettings(internalAsMerchant(), map[string]any{
 		"storeId": "store-live", "applicationsOpen": true,
 		"entitlementAdapter": "shopifyB2b", // wrong case; a plausible typo
 	}, 0)
@@ -505,7 +512,7 @@ func TestUnknownAdapterIsRefusedWhenSettingsAreWritten(t *testing.T) {
 	if !strings.Contains(err.Error(), AdapterShopifyB2B) {
 		t.Fatalf("the refusal must list what is registered, got: %v", err)
 	}
-	if _, err := p.setWholesaleSettings(context.Background(), map[string]any{
+	if _, err := p.setWholesaleSettings(internalAsMerchant(), map[string]any{
 		"storeId": "store-live", "applicationsOpen": true,
 		"entitlementAdapter": AdapterShopifyB2B,
 	}, 0); err != nil {
@@ -563,5 +570,138 @@ func TestASubmissionWithNoSubmissionIdIsRefused(t *testing.T) {
 	}
 	if writer.count("createApplicationRow") != 0 {
 		t.Fatal("a row was written for a submission carrying no id")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Who may write: the writer's stamp escapes the row gate
+// ---------------------------------------------------------------------------
+
+// operatorCtx is a cluster operator's own signed-in authority.
+func operatorCtx(userID string) context.Context {
+	return auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: userID, Role: auth.RoleAdmin})
+}
+
+// SETTINGS ARE SET BY THE CLUSTER'S OPERATORS OR TRUSTED SERVER CODE. Anyone
+// else -- the store's own merchant included -- is refused before anything is
+// read, because the write at internal origin is not owner-checked.
+func TestSettingsAreSetByAnOperatorOrInternalOriginOnly(t *testing.T) {
+	writer := &fakeWriter{}
+	p := &Provider{reader: refusingReader{t: t}, writer: writer}
+	_, err := p.setWholesaleSettings(auth.ContextWithUserActor(context.Background(), "merchant-1"),
+		map[string]any{"storeId": "store-live", "applicationsOpen": true}, 0)
+	if err == nil {
+		t.Fatal("a merchant who is not an operator set a store's wholesale settings")
+	}
+	if !strings.Contains(err.Error(), "cluster's operators") {
+		t.Fatalf("the refusal must say who sets them, got: %v", err)
+	}
+	if len(writer.writes) != 0 {
+		t.Fatalf("a refused call wrote: %+v", writer.writes)
+	}
+
+	existing := &fixtureReader{settings: map[string][]map[string]any{
+		"store-live": {{"storeId": "store-live", "ownerUserId": "merchant-1", "applicationsOpen": true}},
+	}}
+	for name, ctx := range map[string]context.Context{
+		"an operator":   operatorCtx("operator-1"),
+		"internal code": internalAsMerchant(),
+	} {
+		w := &fakeWriter{}
+		p := &Provider{reader: existing, writer: w}
+		if _, err := p.setWholesaleSettings(ctx,
+			map[string]any{"storeId": "store-live", "applicationsOpen": false}, 0); err != nil {
+			t.Fatalf("%s was refused: %v", name, err)
+		}
+		// THE EXISTING OWNER IS KEPT, never moved to whoever wrote.
+		if got := w.only(t, "setWholesaleSettingsRow")["ownerUserId"]; got != "merchant-1" {
+			t.Fatalf("%s's write moved the settings to %v; the existing owner merchant-1 stays", name, got)
+		}
+	}
+}
+
+// A NEW STORE'S SETTINGS ARE OWNED BY THE STORE'S MERCHANT -- the owner of
+// the deployables bound to it -- so the merchant's own reads (the shopper
+// path's applicationsOpen among them) see them. A store whose bound sites
+// name no owner, or more than one, is refused rather than guessed at.
+func TestANewStoresSettingsAreOwnedByItsSitesOwner(t *testing.T) {
+	site := func(owner string) map[string]any {
+		return map[string]any{"ownerUserId": owner, "binding": map[string]any{"storeId": "store-live"}}
+	}
+	for _, tc := range []struct {
+		name   string
+		sites  []map[string]any
+		ctx    context.Context
+		owner  string
+		refuse bool
+	}{
+		{"one owner", []map[string]any{site("merchant-1"), site("merchant-1")}, operatorCtx("operator-1"), "merchant-1", false},
+		{"two owners", []map[string]any{site("merchant-1"), site("merchant-2")}, operatorCtx("operator-1"), "", true},
+		{"no site", nil, operatorCtx("operator-1"), "", true},
+		{"internal code, no site", nil, internalAsMerchant(), "merchant-1", false},
+	} {
+		w := &fakeWriter{}
+		p := &Provider{reader: &fixtureReader{sites: tc.sites}, writer: w}
+		_, err := p.setWholesaleSettings(tc.ctx, map[string]any{"storeId": "store-live", "applicationsOpen": true}, 0)
+		if tc.refuse {
+			if err == nil {
+				t.Fatalf("%s: a new settings row was written with no single merchant to own it: %+v", tc.name, w.writes)
+			}
+			if len(w.writes) != 0 {
+				t.Fatalf("%s: a refused call wrote", tc.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if got := w.only(t, "setWholesaleSettingsRow")["ownerUserId"]; got != tc.owner {
+			t.Fatalf("%s: ownerUserId = %v, want %s", tc.name, got, tc.owner)
+		}
+	}
+}
+
+// A REPEATED SUBMISSION ANSWERS ITS ID AND WRITES NOTHING. The id is the
+// one the bff minted for one POST, so seeing it again is the same POST.
+func TestARepeatedSubmissionAnswersItsIdAndWritesNothing(t *testing.T) {
+	writer := &fakeWriter{}
+	p := &Provider{writer: writer, reader: &fixtureReader{
+		settings: map[string][]map[string]any{
+			"store-live": {{"storeId": "store-live", "applicationsOpen": true}},
+		},
+		apps: map[string][]map[string]any{
+			"sub-abc": {{"id": "sub-abc", "storeId": "store-live", "ownerUserId": "site-owner-1"}},
+		},
+	}}
+	got := decodedBy(t)(p.submitApplication(asShopperPath(), map[string]any{
+		"submissionId": "sub-abc", "storeId": "store-live", "companyName": "Acme",
+		"applicantName": "Sam", "applicantEmail": "sam@example.com",
+	}, 0))
+	if got["applicationId"] != "sub-abc" {
+		t.Fatalf("a repeated submission answered %v, want its id sub-abc", got)
+	}
+	if writer.count("createApplicationRow") != 0 {
+		t.Fatal("a repeated submission wrote a second version")
+	}
+}
+
+// A NEW APPLICATION IS WRITTEN FENCED ON "ROW ABSENT", so two submissions at
+// one id at once cannot both land.
+func TestANewApplicationIsFencedOnRowAbsent(t *testing.T) {
+	writer := &fakeWriter{}
+	p := &Provider{writer: writer, reader: &fixtureReader{
+		settings: map[string][]map[string]any{
+			"store-live": {{"storeId": "store-live", "applicationsOpen": true}},
+		},
+	}}
+	if _, err := p.submitApplication(asShopperPath(), map[string]any{
+		"submissionId": "sub-new", "storeId": "store-live", "companyName": "Acme",
+		"applicantName": "Sam", "applicantEmail": "sam@example.com",
+	}, 0); err != nil {
+		t.Fatalf("submitApplication: %v", err)
+	}
+	writer.only(t, "createApplicationRow")
+	if !memql.HasRowVersionFence(writer.writes[0].ctx, "v1:wholesale:application", "sub-new") {
+		t.Fatal("the new application was written with no row-absent fence")
 	}
 }

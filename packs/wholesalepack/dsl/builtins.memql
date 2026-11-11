@@ -47,7 +47,7 @@ builtin wholesaleApplicationState {
 
 @executor("integration.wholesale.setWholesaleSettings")
 @args(profile="object")
-@description("Write one store's wholesale settings. DATA, NOT SOURCE -- a client opens or closes applications, changes what the storefront says and switches entitlement adapter without a deploy or a .memql edit. One row per store at a derived id, so a merchant can take applications on their live store while they are closed on the development store a candidate is being exercised against. An UNKNOWN adapter name is refused HERE rather than at approval time, so a merchant who typed it wrong learns now.")
+@description("Write one store's wholesale settings. THE CLUSTER'S OPERATORS (or trusted server code) ONLY: every other caller, the store's own merchant included, is refused before anything is read. An existing row keeps its owner; a new one is owned by the one owner of the deployables bound to the store, and is refused when that owner cannot be told. DATA, NOT SOURCE -- a client opens or closes applications, changes what the storefront says and switches entitlement adapter without a deploy or a .memql edit. One row per store at a derived id, so a merchant can take applications on their live store while they are closed on the development store a candidate is being exercised against. An UNKNOWN adapter name is refused HERE rather than at approval time, so a merchant who typed it wrong learns now.")
 builtin wholesaleSetSettings {
   storeId             string!  @description("The store these settings govern.")
   applicationsOpen    bool!  @description("Whether the shopper form accepts posts for this store.")

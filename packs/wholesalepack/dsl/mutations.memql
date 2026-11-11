@@ -23,8 +23,21 @@
 // engineWriter, which stamps internal origin for that one call. A client
 // calling one directly would write around the check that makes the write
 // legal -- a decision appended past the legality fold, an entitlement
-// nobody approved -- so the engine refuses it. The caller's actor still
-// runs the mutation, so the row gate still decides whether it may write.
+// nobody approved -- so the engine refuses it.
+//
+// THE STAMP ESCAPES THE ROW GATE: a write at internal origin is not
+// owner-checked, so the @rowAuthz tiers below do not protect these rows from
+// the builtins. Each builtin authorizes its caller itself before it writes:
+//
+//   - wholesaleSubmitApplication: the store's applicationsOpen gate, then
+//     the id established absent (read as the system) and the write fenced
+//     on "row absent", so no application is ever written over;
+//   - wholesaleRecordDecision: the application read under the CALLER, so a
+//     caller who cannot read it cannot decide it, then the legality fold;
+//   - wholesaleSetSettings: internal origin or a cluster operator only,
+//     and an existing row keeps its owner;
+//   - wholesaleProvisionEntitlement / wholesaleRevokeEntitlement: internal
+//     origin only (the store's automation), then the decision log.
 //
 // # ownerUserId is an ARGUMENT, accepted
 //
@@ -99,21 +112,23 @@ mutation applicationDecision appendApplicationDecision {
 /// Write one store's settings. NAMES ITS ID, derived from the store, so
 /// there is exactly one row per store and a second write is a new VERSION
 /// of it rather than a second row a read would have to choose between.
+/// ownerUserId is the store's merchant, which the builtin resolves: an
+/// existing row keeps its owner, so an operator's change never takes it.
 @serverOnly
 @actor
 mutation wholesaleSettings setWholesaleSettingsRow {
   args {
     settingsId          string!
+    ownerUserId         string!
     storeId             string!
     applicationsOpen    bool!
     entitlementAdapter  string
     introText           string   @maxLength(2000)
   }
   insert {
-    accept { storeId, applicationsOpen, entitlementAdapter, introText }
+    accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText }
     stamp {
       id: args.settingsId
-      ownerUserId: actor.userId
     }
   }
 }

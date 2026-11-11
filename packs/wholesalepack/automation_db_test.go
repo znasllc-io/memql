@@ -13,11 +13,12 @@ package wholesalepack_test
 // reachable, and MEMQL_REQUIRE_DB=1 turns that skip into a failure.
 
 import (
+	"bytes"
 	"context"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -74,6 +75,31 @@ func (a *recordingAdapter) callsFor(applicationID string) []string {
 	return out
 }
 
+// lockedBuffer is a log sink the scheduler's goroutines write to safely.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+// lines is every logged line that mentions want.
+func (b *lockedBuffer) lines(want string) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []string
+	for _, l := range strings.Split(b.buf.String(), "\n") {
+		if strings.Contains(l, want) {
+			out = append(out, l)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
 var (
 	fakeAdapterOnce sync.Once
 	fakeAdapter     = &recordingAdapter{}
@@ -98,12 +124,20 @@ func automatedWholesaleEngine(t *testing.T) *memql.MemQLEngine {
 	eng.SetEventBus(bus)
 	steps := automationSteps.NewRegistry()
 	eng.SetLogicRunner(automations.NewLogicRunner(eng, steps, eng.Logger))
+	// THE SCHEDULER'S LOG IS KEPT and printed with a failure, so a grant
+	// automation that failed says why beside the assertion that noticed.
+	schedLog := &lockedBuffer{}
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("automation scheduler log (fixture lines):\n%s", schedLog.lines("contoso"))
+		}
+	})
 	sched, err := automations.NewScheduler(automations.SchedulerOptions{
 		Loader:       automations.NewLoader(automations.LoaderOptions{Registry: memoryNodes.DefaultRegistry()}),
 		Engine:       eng,
 		EventBus:     bus,
 		StepRegistry: steps,
-		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:       slog.New(slog.NewTextHandler(schedLog, nil)),
 	})
 	if err != nil {
 		t.Fatalf("NewScheduler: %v", err)
@@ -175,10 +209,15 @@ func TestADirectClientCallToAppendApplicationDecisionIsRefused(t *testing.T) {
 	appID := submit(t, eng, ctx, storeLive, "Direct Caller", "buyer@direct.example")
 
 	client := auth.ContextWithClientOrigin(ctx)
-	if _, err := eng.Execute(client, `appendApplicationDecision(applicationId: `+wsQuote(appID)+
-		`, note: "around the builtin", storeId: `+wsQuote(storeLive)+`, transition: "approve")`); err == nil {
+	_, err := eng.Execute(client, `appendApplicationDecision(applicationId: `+wsQuote(appID)+
+		`, note: "around the builtin", storeId: `+wsQuote(storeLive)+`, transition: "approve")`)
+	if err == nil {
 		t.Fatal("a client-origin call to appendApplicationDecision was accepted; it must be " +
 			"refused, because the decision is the builtin's to judge")
+	}
+	// THE SERVER-ONLY REFUSAL, not a parse error or a missing argument.
+	if !strings.Contains(err.Error(), `"appendApplicationDecision" is server-only and cannot be called by a client`) {
+		t.Fatalf("the direct call was refused, but not as server-only: %v", err)
 	}
 	if rows := wsRows(t, eng, ctx,
 		`query decisionsForApplication(applicationId: `+wsQuote(appID)+`)`); len(rows) != 0 {

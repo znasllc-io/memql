@@ -182,9 +182,12 @@ func wsExec(t *testing.T, eng *memql.MemQLEngine, ctx context.Context, call stri
 	}
 }
 
+// openApplications sets a store's settings as trusted server code acting as
+// ctx's actor: wholesaleSetSettings admits internal origin or an operator, and
+// a new settings row is owned by that actor, the store's merchant.
 func openApplications(t *testing.T, eng *memql.MemQLEngine, ctx context.Context, storeID, adapter string) {
 	t.Helper()
-	wsExec(t, eng, ctx, `builtin wholesaleSetSettings(applicationsOpen: true, `+
+	wsExec(t, eng, auth.ContextWithInternalOrigin(ctx), `builtin wholesaleSetSettings(applicationsOpen: true, `+
 		`entitlementAdapter: `+wsQuote(adapter)+`, storeId: `+wsQuote(storeID)+`)`)
 }
 

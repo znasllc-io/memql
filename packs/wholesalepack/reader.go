@@ -129,8 +129,23 @@ func trimmed(v any) string { return strings.TrimSpace(asString(v)) }
 // THE MUTATIONS ARE @serverOnly. Each is reached only from the builtin that
 // judges it, so a client calling one directly -- a decision appended around
 // the legality fold -- is refused by the engine. engineWriter stamps internal
-// origin for exactly its one call; the caller's actor still runs it, so the
-// row gate still decides whether this caller may write this row.
+// origin for exactly its one call.
+//
+// THE STAMP ESCAPES THE ROW GATE. A write at internal origin is not
+// owner-checked (component/memql/rowauthz_write_guard.go), so a row's tier
+// does not protect it from this writer: whoever reaches a builtin that
+// writes could otherwise write over any row at an id they can name. So each
+// builtin authorizes its caller ITSELF, before it calls this:
+//
+//   - wholesaleSubmitApplication: the store's applicationsOpen gate, then
+//     the id established absent (read as the system) and the write fenced
+//     on "row absent", so no application is ever written over;
+//   - wholesaleRecordDecision: the application read under the CALLER, so a
+//     caller who cannot read it cannot decide it, then the legality fold;
+//   - wholesaleSetSettings: internal origin or a cluster operator only,
+//     and an existing row keeps its owner;
+//   - wholesaleProvisionEntitlement / wholesaleRevokeEntitlement: internal
+//     origin only (the store's automation), then the decision log.
 //
 // SEPARATE FROM Caller BECAUSE THE CALL FORMS DIFFER AND THE DIFFERENCE IS
 // EASY TO LOSE: a mutation is `name(args)`, a builtin is `builtin
