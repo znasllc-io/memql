@@ -84,8 +84,7 @@ audit's, W ids to section 4. G ids are new here.
 
 **On N5.** Verified by reading: neither the DSL nor the handler checks origin or
 capability. Not verified: whether an engine-wide rule refuses a client call to an
-`@sdk` builtin. U4's live test settles it (section 11). The fix is a proposed
-addition (section 16), because it is outside the W list.
+`@sdk` builtin. U4's live test settles it (section 11). The fix is X22, built in U3.
 
 **On N1 and G6.** Both come from reading the code. Each gets a failing test before
 its fix, and is dropped from this record if the test passes.
@@ -172,6 +171,8 @@ Each is marked so the owner can spot it.
 | X19 | Accounts are backfilled by an operator-run builtin, run once at rollout and safe to run again, not at boot. | A boot pass would run on every node at once; an operator run is one pass with a report. |
 | X20 | The address an acceptance records is the leftmost `X-Forwarded-For` entry the edge saw, stamped by the edge into a header the bff trusts, and recorded as "the address the request came from, as the edge saw it". | G5. It is spoofable by the sender, which the record says; it is evidence, not identity. |
 | X21 | The staff-facing word for `revoked` is Removed, and for the email kind `revoked` it is "Removed". Stored values keep the transition's word. | W3 and W7 say removed; the enum says revoke; neither is renamed. |
+| X22 | The four Shopify wholesale builtins (`shopifyTagWholesaleCustomer`, `shopifyUntagWholesaleCustomer`, `shopifyProvisionWholesale`, `shopifyRevokeWholesale`) refuse a call without internal origin, and the pack's `engineCaller` stamps internal origin inline on its one Execute, after the pack's own checks. Built in U3, proved by U4's step 7. | N5. A builtin that changes what a person pays must not be reachable by any signed-in caller; "the pack already checks" only holds while the pack is the only caller. Decided at review of this record, 2026-11-11. |
+| X23 | The staff are told when access did not land: the client wires a staff notice on an entitlement version that is `pending` or `failed`, using the notice kind X18 names. It is one email on a failure, never a retry. | X18 leaves the retry to a person, so the person has to hear about it without opening every application. Decided at review of this record, 2026-11-11. |
 
 ## 5. Data
 
@@ -701,7 +702,7 @@ client's grant and revoke automations wired.
 | --- | --- | --- | --- | --- | --- |
 | U1 Automation-safe provisioning (N1, X1 to X3, G1 to G3) | Provision and revoke require internal origin, read as system actor `wholesale-provision`, write as the application's merchant. Every pack mutation `@serverOnly`; the writer stamps internal origin inline on its one Execute; allowlist entry. Entitlement and decision writes carry `ownerUserId` from the application. | `packs/wholesalepack/{entitlement,application,reader}.go`, `dsl/{mutations,builtins}.memql`, `call_origin_conformance_test.go` | `engineWriter.Write(ctx, mutation, args)` as reviews'; `const provisionActor = "wholesale-provision"` | none | A unit test with a client-origin context is refused before any read; a database test runs the client's grant automation on an approve decision and finds a `granted` row owned by the merchant; a direct client call to `appendApplicationDecision` is refused. |
 | U2 Visible failures (N3) | `applyEntitlement` writes `failed` with `errorCode` for no settings, no route, plan ceiling; `pending` with `shopify_error` for a transient error; `scope_missing` when Shopify answers with an access-denied for customers. Revoke rules of X17. | `packs/wholesalepack/entitlement.go`, `adapter_customer_tag.go`, `dsl/concepts.memql` | `errorCodeOf(err) string` | U1 | Unit tests per code; an approval on a store with no route leaves a `failed` row naming `no_route`. |
-| U3 Customer find-or-create and scopes (E4, W10, W13) | `TagWholesaleCustomer` finds by email, else creates (email, split name, no marketing consent), then tags; a duplicate-email refusal from `customerCreate` re-reads and continues; returns whether it created. Untag of a missing customer succeeds. `write_customers` joins `ConnectScopes`. The guide's `failed` claim is corrected. | `integrations/shopify/{wholesale,wholesale_calls,wholesale_capabilities,connect}.go`, `dsl/shopify/overlay/builtins.memql`, `packs/wholesalepack/adapter_customer_tag.go`, `docs/public/build/consuming-the-wholesale-pack.md` | `TagWholesaleCustomer(ctx, store, email, name, tag) (gid string, created bool, err error)` | mirror branch landed | Unit tests with a fake Admin transport: missing customer created once; second run creates nothing and adds no second tag. |
+| U3 Customer find-or-create, scopes and the origin refusal (E4, W10, W13, X22) | The four Shopify wholesale builtins refuse a call without internal origin and the pack's `engineCaller` stamps it (X22). `TagWholesaleCustomer` finds by email, else creates (email, split name, no marketing consent), then tags; a duplicate-email refusal from `customerCreate` re-reads and continues; returns whether it created. Untag of a missing customer succeeds. `write_customers` joins `ConnectScopes`. The guide's `failed` claim is corrected. | `integrations/shopify/{wholesale,wholesale_calls,wholesale_capabilities,connect}.go`, `dsl/shopify/overlay/builtins.memql`, `packs/wholesalepack/adapter_customer_tag.go`, `docs/public/build/consuming-the-wholesale-pack.md` | `TagWholesaleCustomer(ctx, store, email, name, tag) (gid string, created bool, err error)` | mirror branch landed | Unit tests with a fake Admin transport: missing customer created once; second run creates nothing and adds no second tag; a client-origin call to each of the four builtins is refused before any Admin call. |
 | U4 Live test (E7) | `integrations/shopify/wholesale_live_test.go`, skipped without development-store credentials: create a missing customer, tag, untag, re-tag, re-provision with no change, report a grant without `write_customers`, and call `shopifyTagWholesaleCustomer` as a signed-in non-owner to settle N5. A pack e2e that runs a client automation on an approve decision against the same store. | `integrations/shopify/wholesale_live_test.go`, `packs/wholesalepack/live_e2e_test.go` | the mirror plan's live harness where it exists | U1, U3 | Passes against a development store; the default suite skips cleanly. |
 | U5 Account stamping and backfill (W8 data half) | `accountId` on the four existing concepts; reserved names; `ShopperSite.AccountID`; handler stamps it into the pack's and the extension's arguments; `AcceptsAccount`; `wholesaleBackfillAccounts`. | `component/memql/{shopper_surface,shopper_extension}.go`, `component/server/shopper_handler.go`, `app/transport_shopper_surface.go`, `packs/wholesalepack/*` | section 5.6 | U1 | A database test: a form post on a site of organization A writes both rows with A; an extension without an `accountId` argument still writes; the backfill ties a pre-version row, its decisions and its entitlement, and reports a row with no resolvable site. |
 | U6 The part and the gated builtins (W8 access half, N2, X4, X5) | The part, its seeds, the organization gate cases; `applicationDecision`'s new tier; the read builtins, `wholesaleRetryAccess`, `wholesaleUpdateSettings`, `wholesaleStoreSettings`, `wholesaleBuyers`, `wholesaleDecisionLog`, `wholesaleExportStore`; operator refusal on decisions. | `component/auth/rbac_model.go`, `dsl/rbac/seeds.memql`, `component/memql/organization_action_capabilities.go`, `packs/wholesalepack/{reads,settings,export}.go` (new), `dsl/*.memql`, `clients/os/src/apps/deployables/parts.ts` | section 5.4 | U5 | A database test: a person in organization A holding the part lists and approves A's application and is refused on B's; a cluster operator reads and cannot decide; the site owner reads the moderator's decision. `TestTheDeployablesPartsAreDeclaredOnTheirConstructs` gains the part. |
@@ -818,7 +819,8 @@ Named here so the engine side is complete; the client builds it.
   and the staff copy; on a reject, `wholesaleSendBuyerEmail(kind: rejected)` and the
   copy; on a revoke, `wholesaleRevokeEntitlement` (N4),
   `wholesaleSendBuyerEmail(kind: revoked)` and the copy; on a granted entitlement,
-  `wholesaleSendBuyerEmail(kind: approved)`.
+  `wholesaleSendBuyerEmail(kind: approved)`; on an entitlement version that is
+  `pending` or `failed`, `wholesaleNotifyStaff(event: accessNotGranted)` (X23).
 - Remove the desk email at submission once the acceptance notice is wired.
 - Add `accountId` (stamped) and `account="accountId"` to its extension concept and
   mutation, so its staff read its own fields.
@@ -831,7 +833,7 @@ Named here so the engine side is complete; the client builds it.
 | Risk | Test or step that settles it |
 | --- | --- |
 | N1 is not the runtime failure the code suggests | U1's first database test |
-| N5: any signed-in caller can tag any email | U4 step 7; fix in section 16 |
+| N5: any signed-in caller can tag any email | Closed by X22 in U3; U4 step 7 proves the refusal |
 | G6: deferred order and row sends are not replayable | U7's first database test |
 | Changing `applicationDecision`'s row tier on stored rows (X5) | A database test with a decision written by the old mutation, read before and after the backfill |
 | Making the mutations `@serverOnly` breaks a caller that wrote them directly (an import, `twoclients_test.go`) | The full pack suite in U1; any import path moves to a builtin |
@@ -876,17 +878,12 @@ Named here so the engine side is complete; the client builds it.
 
 ## 17. Proposed additions (not decided)
 
-- **Close N5.** Make `shopifyTagWholesaleCustomer`, `shopifyUntagWholesaleCustomer`,
-  `shopifyProvisionWholesale` and `shopifyRevokeWholesale` refuse a call without
-  internal origin, and have the pack's `engineCaller` stamp internal origin inline on
-  its one Execute, after the pack's own checks. Reasoning: if U4 step 7 succeeds, any
-  signed-in caller can give any email trade prices on any connected store, which no
-  decision in this record intends; the stated reason for no gate (the pack already
-  checks) only holds if the pack is the only caller.
-- **Wire `accessNotGranted`.** The client sends a staff notice when an entitlement
-  version is `pending` or `failed`, so a grant that did not land is seen without
-  anyone opening the application (X18).
-- **A lock per application for decisions**, closing the window in section 12.
+- **A lock per application for decisions**, closing the window in section 12 (two
+  decisions at once both pass the fold). Left for a later change, as in reviews.
+
+Two additions proposed in the draft of this record were decided at its review and
+are now X22 (the Shopify wholesale builtins refuse a call without internal origin)
+and X23 (a staff notice when access did not land).
 
 ## 18. Not in this version
 
