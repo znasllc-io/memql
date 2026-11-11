@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
@@ -406,8 +407,14 @@ func (p *Provider) stateOf(ctx context.Context, applicationID string) (string, e
 // ABSENT IS CLOSED. A store whose merchant has never touched the setting
 // has not asked for applications, and a missing row must not open a public
 // write endpoint that collects somebody's business contact details.
+//
+// READ AS THE PLATFORM, for this one gate. The settings row is stamped with
+// whoever flipped the switch (a developer, a second owner), while the shopper
+// surface calls this as the BORROWED site owner, who cannot read their row:
+// applications opened by anybody but the site owner refused every applicant.
+// Only the store's applicationsOpen answer leaves this function.
 func (p *Provider) applicationsOpen(ctx context.Context, storeID string) (bool, error) {
-	settings, err := p.settingsRow(ctx, storeID)
+	settings, err := p.settingsRow(auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(ctx, "wholesale-applications-gate")), storeID)
 	if err != nil {
 		return false, err
 	}

@@ -241,6 +241,8 @@ write, against your own concept, from your own route. See
 Submissions are refused when this store's `applicationsOpen` is false, and
 **absent settings are closed**: a merchant who has never touched their wholesale
 settings has not asked the internet for their customers' business details.
+The switch holds whoever flipped it: the form reads the store's gate itself, not
+as the site owner, so applications a developer or a second owner opened are open.
 
 ## 5. There is no public read of an application
 
