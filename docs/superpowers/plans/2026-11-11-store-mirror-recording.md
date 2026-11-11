@@ -601,6 +601,51 @@ func TestAFullRelistTombstonesWhatTheOriginNoLongerHas(t *testing.T)
 - [ ] **Step 4:** Run the package whole in the database lane. Expected: PASS.
 - [ ] **Step 5: Commit** `shopify: the connector's own reads of the mirror answer the rows it wrote`.
 
+### Task 13b: A failed backfill can be started again, and an expired download starts itself again
+
+Added at the documentation task's second round (2026-11-11). A backfill whose download link has expired fails, and nothing a person can press starts it again: "Backfill now" continues from the stored cursor, which still holds the expired link, and the only restart from nothing refuses every call that is not internal. A pause that outlasts the link during a backfill reaches this state, and so does any backfill left stopped for a week.
+
+**Files:**
+- Modify: `integrations/shopify/backfill.go`, `component/datasync/runners.go`, `component/datasync/capabilities.go`, the DSL file that declares `datasyncStartBackfill`, `clients/os/src/apps/cluster/origins/OriginsSection.tsx`, `clients/os/src/apps/cluster/origins/rows.ts`, `clients/os/test/cluster/harness.tsx`, then the generated files `make sdk-gen` names
+- Test: `integrations/shopify/backfill_test.go` (or the file that holds the bulk tests), `component/datasync/runners_test.go`, the datasync database-lane test file, `clients/os/test/cluster/origins.test.tsx`
+
+**Interfaces:**
+- Produces, in the Shopify connector: `Restarts int` on `backfillCursor` (`json:"r,omitempty"`); `const maxDownloadRestarts = 2`; `type bulkDownloadGone struct{ Status int }` (an error) returned by `streamBulk` when the download answers 400, 403, 404 or 410.
+- Produces, in `component/datasync`: `func (r *Runner) StartBackfillFromTheStart(ctx context.Context, connectorName, conceptID, partition string) (BackfillResult, error)`; `datasyncStartBackfill` gains `restart boolean`.
+- Produces, in `rows.ts`: `backfillFailed: boolean` on `OriginRow` (the row's backfill status is `failed`).
+
+Decisions:
+- A download the origin refuses as gone (400, 403, 404, 410) does not fail the backfill: the connector drops the operation and its link from the cursor, counts the restart, logs a warning that names the store, the concept and the status, and starts that operation again on the next page. After two restarts of one backfill the third refusal fails it with the error as today. Any other failure of the download (a 5xx, a 429, a broken connection) is handled as today.
+- `datasyncStartBackfill(restart: true)` starts a backfill again from nothing: it resets the row to `queued` with an empty cursor, through the same fenced write a queue uses, and then runs it as `StartBackfill` does. It is refused for a backfill that is `running` ("datasync: this backfill is running; it can be started again once it has stopped"), and it keeps `datasyncStartBackfill`'s existing gate: whoever may press "Backfill now" today may do this, and nobody else.
+- On Cluster > Data, "Backfill now" on a row whose backfill is `failed` sends `restart: true`; on any other row it sends none, as today. The label does not change.
+- `datasyncQueueBackfill` stays internal only.
+
+- [ ] **Step 1: Write the failing tests**
+
+```go
+// integrations/shopify
+func TestADownloadTheOriginNoLongerKeepsStartsTheOperationAgain(t *testing.T) // 403 on the link: the next cursor has no operation and no link, Restarts 1, no error
+func TestAThirdGoneDownloadFailsTheBackfill(t *testing.T)                     // Restarts 2 and another 403: the error, with the status
+func TestAServerErrorOnTheDownloadIsNotARestart(t *testing.T)                 // 503: the error as today, Restarts unchanged
+// component/datasync
+func TestStartingFromTheStartClearsAFailedBackfillsCursor(t *testing.T)
+func TestStartingFromTheStartIsRefusedWhileTheBackfillRuns(t *testing.T)
+func TestAnOrdinaryStartStillContinuesFromTheCursor(t *testing.T)
+// database lane
+func TestAFailedBackfillStartedAgainRunsFromNothingToItsEnd(t *testing.T)
+```
+
+```ts
+// origins.test.tsx
+it("starts a failed backfill again from the start")
+it("continues any other backfill from where it stopped")
+```
+
+- [ ] **Step 2:** Run `MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN="$MIRROR_DSN" go test -p 1 -count=1 ./integrations/shopify/ ./component/datasync/ -run 'NoLongerKeeps|ThirdGoneDownload|ServerErrorOnTheDownload|FromTheStart|OrdinaryStartStill|StartedAgainRunsFromNothing'` and, in `clients/os`, `npx vitest run test/cluster/origins.test.tsx`. Expected: FAIL.
+- [ ] **Step 3:** Implement, then `make sdk-gen`.
+- [ ] **Step 4:** Run the same commands, both Go packages whole in the database lane, `npm run typecheck` and `npx vitest run test/cluster`, and the generated-file gates. Expected: PASS.
+- [ ] **Step 5: Commit** `datasync: a failed backfill can be started again from the start, and an expired download starts itself again`.
+
 ### Task 14: Documentation
 
 **Files:**
