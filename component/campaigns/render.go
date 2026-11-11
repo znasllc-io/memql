@@ -142,6 +142,11 @@ const UnsubscribePath = "/unsubscribe"
 // grows a five-argument function into an eight-argument one whose call sites
 // nobody can read.
 type RenderOptions struct {
+	// Order marks a message an ORDER entitles (send_order.go), such as a review
+	// request: its buyer is on no list, so the footer says they bought from the
+	// sender rather than that they subscribed (footerReason).
+	Order bool
+
 	// ReplyTo is the resolved Reply-To for this send: the campaign's own
 	// value, else the sending identity's default (memql#4821). Empty falls
 	// back to the campaign row's field, which is what a caller passing a
@@ -574,8 +579,8 @@ func renderMessage(c Campaign, t Template, r Recipient, opts RenderOptions) (ema
 
 	text := subst.Replace(t.TextBody)
 	if !textCarriesTag(t.TextBody, mergeTagPrefix+tagUnsubscribeURL+mergeTagSuffix) {
-		text += fmt.Sprintf("\r\n\r\n--\r\nYou are receiving this because you subscribed to %s.\r\nUnsubscribe: %s\r\n",
-			footerSender(opts), opts.Links.Unsubscribe)
+		text += fmt.Sprintf("\r\n\r\n--\r\nYou are receiving this because %s %s.\r\nUnsubscribe: %s\r\n",
+			footerReason(opts), footerSender(opts), opts.Links.Unsubscribe)
 	}
 
 	msg := email.Message{
@@ -634,6 +639,15 @@ func renderMessage(c Campaign, t Template, r Recipient, opts RenderOptions) (ema
 // subject, which is what a single send's synthetic campaign was named after.
 // Whitespace is collapsed so a name with a line break in it stays one line in a
 // plain-text footer.
+// footerReason is why the footer says the person gets this: an order's buyer
+// bought from the sender; everyone else subscribed to it.
+func footerReason(opts RenderOptions) string {
+	if opts.Order {
+		return "you bought from"
+	}
+	return "you subscribed to"
+}
+
 func footerSender(opts RenderOptions) string {
 	for _, name := range []string{opts.SenderName, opts.AccountName} {
 		if name = strings.Join(strings.Fields(name), " "); name != "" {
@@ -724,7 +738,7 @@ func completeHTML(body string, opts RenderOptions) (string, error) {
 		// scheme, none of which html.EscapeString knows to do. Hand-escaping
 		// into an attribute means re-deriving per call site which of those
 		// applies; this asks the standard library instead (memql#3348).
-		footer, err := footerTemplate(footerSender(opts), opts.Links.Unsubscribe)
+		footer, err := footerTemplate(footerReason(opts), footerSender(opts), opts.Links.Unsubscribe)
 		if err != nil {
 			// Unreachable with a fixed template and string inputs; refusing to
 			// send beats mailing a body with no unsubscribe footer, which is the
@@ -768,7 +782,7 @@ const (
 // (BenchmarkCheckShown), against the round trip to the provider, so there is
 // nothing worth caching per revision.
 func checkShown(body string, plan htmlPlan, opts RenderOptions) error {
-	footer, err := footerTemplate(footerSender(opts), probeUnsubscribeURL)
+	footer, err := footerTemplate(footerReason(opts), footerSender(opts), probeUnsubscribeURL)
 	if err != nil {
 		return err
 	}
@@ -1214,15 +1228,16 @@ func htmlEscape(s string) string {
 // which context it landed in.
 var unsubscribeFooter = texttemplate.Must(texttemplate.New("unsubscribeFooter").Parse(
 	`<hr><p style="font-size:12px;color:#666">You are receiving this because ` +
-		`you subscribed to {{.Sender}}. <a href="{{.URL}}">Unsubscribe</a>.</p>`))
+		`{{.Reason}} {{.Sender}}. <a href="{{.URL}}">Unsubscribe</a>.</p>`))
 
 // footerTemplate renders the RFC 8058 footer appended to every HTML body.
-func footerTemplate(sender, url string) (string, error) {
+func footerTemplate(reason, sender, url string) (string, error) {
 	var b strings.Builder
 	if err := unsubscribeFooter.Execute(&b, struct {
+		Reason string
 		Sender string
 		URL    string
-	}{Sender: sender, URL: url}); err != nil {
+	}{Reason: reason, Sender: sender, URL: url}); err != nil {
 		return "", fmt.Errorf("campaigns: rendering unsubscribe footer: %w", err)
 	}
 	return b.String(), nil
