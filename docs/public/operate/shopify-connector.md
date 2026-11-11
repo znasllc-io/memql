@@ -475,9 +475,21 @@ domain per store at a time, so a store runs one backfill at a time, and it
 leaves a paused domain alone. While any of them is queued or running, the
 store's Store page reads "Starting".
 
-A backfill can still be started by hand: "Backfill now" on a domain in
-**Cluster → Data**, or
-`datasyncStartBackfill(connector: "shopify", conceptId: "v1:shopify:order", partitionKey: "<storeId>")`.
+**When an export fails.** A history download is an export Shopify prepares,
+and its link lasts a week. When the link has expired or the file is gone, the
+backfill starts that export again by itself, from its first line. An export
+Shopify reports as failed, cancelled or expired is started again the same way.
+Both count toward one limit: **two restarts per backfill**. The next failure
+after that leaves the backfill failed, and the Store page says "The last check
+of orders failed" (naming the domain), with the reason beneath it.
+
+A backfill can also be started by hand: "Backfill now" on that store's domain
+in [Cluster > Data](#cluster--data). On a domain whose backfill failed it
+starts again from the start; on any other it carries on from where it
+stopped. It is refused while that backfill is running. The same call is
+`datasyncStartBackfill(connector: "shopify", conceptId: "v1:shopify:order", partitionKey: "<storeId>")`,
+with `restart: true` to start from the start. While a restarted backfill
+runs, the Store page reads "Starting".
 
 **Where a store's orders begin.** Without `read_all_orders`, Shopify lists
 only a store's last 60 days of orders. When a connect or the boot pass queues
@@ -505,6 +517,34 @@ webhook id, fetches the object by GID with the generated selection set, and
 returns the rows; the runtime applies them under the version guard, so a
 write whose `updatedAt` is older than the stored row's is recorded as *stale*
 and dropped.
+
+**Changes are kept in order.** Every record the mirror writes carries a
+version in `updatedAt`, and `versionSource` says where it came from:
+
+- `origin` -- Shopify's own last-changed time for the record. A child that
+  has none of its own, such as an order's line, carries its parent's.
+- `read` -- for a kind Shopify publishes no version for, the time MemQL read
+  it. For those kinds "older" means "read earlier": the last read wins.
+
+A write older than the record held is refused on every path -- a delivery,
+the periodic check, a full re-list and a history download alike -- so an
+older snapshot that arrives late cannot replace a newer change, nor bring
+back a record deleted since. A deletion carries a version too: a delete
+topic's own event time, the time a fetch found the record gone, or a second
+before the re-list that missed it began.
+
+**After upgrading to this version**, each store's domains are read once more
+from the start, because a history read under the earlier version may have put
+an older snapshot over a newer change. At boot, every domain of a store being
+recorded whose backfill completed under the earlier version is queued again,
+and a backfill still running reads its domain once more when it reaches its
+end. Each store reads "Starting" while this runs, then "Recording" again. The
+first periodic check that reads a record written under the earlier version
+rewrites it once, to add its `versionSource`, so `driftLast` can read high for
+that one pass. It happens
+once: a backfill completed under this version is never queued again for it. A
+store that is paused at that boot is read again at the first boot after it is
+resumed.
 
 **A failed delivery is tried again.** A delivery the connector could not work
 -- the Admin API did not answer, the write failed -- gets **four tries at
@@ -535,14 +575,17 @@ A full re-list that hits its page cap tombstones **nothing**. Tombstoning is
 an argument from absence, and the argument is only valid if the walk was
 complete.
 
-So a record is marked deleted only by a complete full re-list that no longer
-lists it, never from a partial listing such as an `updated_at:>` page. Some
-kinds are never marked deleted by a re-list at all, because their listing is
-not the whole set: fulfillment orders (open ones only), abandoned checkouts
-and payments (recent order data only, without `read_all_orders`), and selling
-plan groups, marketing activities and marketing events (possibly only those
-this app created). A deletion reaches those through a delete topic, or not at
-all.
+So a record is marked deleted three ways: by a delete topic; by a delivery
+whose fetch finds the record gone; and by a complete full re-list that no
+longer lists it -- never from a partial listing such as an `updated_at:>`
+page. A record written after the re-list began is not marked deleted by it.
+When the mirror holds more of a domain than one pass reads back, its oldest
+records are kept that pass. Some kinds are never marked deleted by a re-list
+at all, because their listing is not the whole set: fulfillment orders (open
+ones only), abandoned checkouts and payments (recent order data only, without
+`read_all_orders`), and selling plan groups, marketing activities and
+marketing events (possibly only those this app created). A deletion reaches
+those through a delete topic, or not at all.
 
 ---
 
@@ -900,14 +943,16 @@ on is the whole store.
 ### Cluster > Data
 
 MemQL OS → Cluster → **Data** (the page is headed "Data origins") shows every
-concept a connector carries, with its sync state. For Shopify:
+concept a connector carries, with its sync state. The section is drawn for those
+holding `app:cluster/origins`. For Shopify:
 
 - **Rows are grouped by store.** Each store is its own group, headed by the
   store's id; connectors that keep no stores apart share one group at the
   top. Each row is one domain of that store, with its lag, drift, outbox
   depth, dead letters and last error.
 - **"Backfill now", "Pause" and "Resume" act on that one store's domain** --
-  never on every store. They are not drawn until the connector health has
+  never on every store. "Backfill now" starts a failed backfill again from the
+  start, and carries any other on from where it stopped. They are not drawn until the connector health has
   been read, and read to its end: while it is first read, when it could not be
   read, and when it stopped short -- the page then says "The connector health
   was not read to its end, so this list is incomplete." -- no act is drawn.
@@ -926,18 +971,22 @@ concept a connector carries, with its sync state. For Shopify:
 
 ### What the numbers mean
 
-- **driftLast / driftTotal** -- rows a reconciliation pass wrote that live
+- **driftLast** -- rows the domain's last reconciliation pass wrote that live
   delivery should have carried. A pass compares each row it maps with the
   stored one and writes only those that differ, setting aside its own
-  `syncedAt` stamp and, for a type Shopify publishes no version for, the fetch
+  `syncedAt` stamp and, for a type Shopify publishes no version for, the read
   time that stands in for `updatedAt`; so zero is the healthy reading and a
   row's `syncedAt` is when it last changed here, not when a pass last looked.
   A steady non-zero number means deliveries are being lost; look at the
-  subscription list and the store's health next.
-- **staleWrites** -- writes refused because the stored row was newer. Ones
-  and twos are normal (Shopify redelivers). A climbing number means something
-  is replaying old deliveries.
-- **tombstoned** -- rows the origin no longer has.
+  subscription list and the store's health next. (There is no `driftTotal`:
+  nothing counts a running total.)
+- **lagSeconds** -- for the domain's last applied delivery, the seconds from
+  the record's version to when MemQL applied it. For a record with Shopify's
+  own version that is how far behind Shopify the mirror was; for a kind
+  Shopify publishes no version for, the version is the read time, so it reads
+  about zero. Cluster > Data shows it as "Lag".
+- **outboxDepth** -- the pending and failed outbox entries waiting to be
+  pushed to the store.
 - **phase** -- `idle`, `backfilling` (a backfill queued or running),
   `paused`, `error`; `not granted` for a domain the store's connection asks
   for and its grant does not reach (a standing fact about the connection, not
@@ -1036,13 +1085,9 @@ While a store is paused:
 - After "Resume", a late check is counted from the resume, so the store does
   not read as failing because it was paused.
 - A backfill under way is held where it is and carries on after "Resume".
-  The one exception: a pause that begins while a domain's history is already
-  being downloaded, and lasts longer than the week Shopify keeps that download,
-  leaves the backfill failed on resume. The Store page then says the store
-  needs attention, with "The last check of orders failed" (naming the domain)
-  and the download's refusal beneath it. "Backfill now" on Cluster > Data
-  carries on from the same expired download and fails the same way, so today
-  no screen restarts that backfill from the start.
+  If the pause outlasted the week Shopify keeps a download, the backfill
+  starts that export again by itself (see "When an export fails" in
+  [Step 4](#step-4----what-happens-next)).
 
 This is the whole store. Pausing one domain of one store is "Pause" on that
 domain in **Cluster → Data**.
