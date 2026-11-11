@@ -307,12 +307,12 @@ authorization tiers.
 | pause or resume recording a store (`shopifyStoreSetRecording`, which the Store page's "Pause recording" and "Resume" call) | the store's owner, cluster owner |
 | attach a store to a storefront, or change which one it fronts (`updateSiteStoreBinding`) | developer, cluster owner: the store part, a store they can read, and a storefront they can write |
 
-`shopifyStoreSetRecording` moves a store only between `live` and `paused`,
-and writes that through `setStoreStatus` as the deployment, so the row's own
-gate is not widened. It refuses a store that is not connected -- uninstalled,
-its data removed, or in any status but those two -- with "shopify: a store
-that is not connected cannot be paused or resumed", and asking for the state
-the store is already in writes nothing.
+`shopifyStoreSetRecording` pauses a store that is being recorded -- whatever
+its status says, `configured`, `backfilling` or `live` -- and resumes a paused
+one to `live`. It writes through `setStoreStatus` as the deployment, so the
+row's own gate is not widened, and records each pause and each resume in the
+audit log (`shopify_store_paused`, `shopify_store_resumed`) under the person
+who did it. Details are in [Pausing a store](#pausing-a-store).
 
 **Who may call the store's builtins.** Each one that names a store asks who is
 calling before it reads anything but the store row, and before it asks
@@ -1007,13 +1007,23 @@ while it is recording, starting or needs attention, and **"Resume"** while it
 is paused -- never both. A store that is not connected has neither; its act
 is the reconnect its notice offers. The page draws them for the store's owner
 and for a cluster owner, and both call `shopifyStoreSetRecording(storeId,
-recording)`. It refuses anybody else before anything but the store row is
-read, refuses a store that is not connected ("shopify: a store that is not
-connected cannot be paused or resumed"), and writes nothing when the store
-is already in the state asked for; otherwise it sets the store's status to
-`paused`, or back to `live`, through `setStoreStatus` written as the
-deployment. The store row's own gate is unchanged: `setStoreStatus` called
-directly is still a cluster owner's act (see
+recording)`:
+
+- **Pause** works on any store that is being recorded, and pauses it.
+- **Resume** works on a paused store, and starts recording it again.
+- **Asking for the state the store is already in** -- pausing a paused store,
+  resuming one that is being recorded -- changes nothing and is not recorded.
+- **A store that is not connected** -- uninstalled, its data removed by
+  Shopify, or in error -- is refused with "shopify: a store that is not
+  connected cannot be paused or resumed", and nothing is written.
+- **Anybody but the store's owner or a cluster owner** is refused before
+  anything but the store row is read.
+- **Every pause and every resume is recorded in the audit log**, as
+  `shopify_store_paused` or `shopify_store_resumed`, naming the person who did
+  it, the store, and the status before and after.
+
+The write runs as the deployment, so `setStoreStatus` called directly is still
+a cluster owner's act (see
 [Who may read and change a store row](#who-may-read-and-change-a-store-row)).
 The builtin changes the status only: the next verdict reads the store as
 resumed from that moment (`resumedAt`), and the next watch pass records it.
@@ -1025,6 +1035,14 @@ While a store is paused:
 - Its state is Paused. It carries no reasons, and its owner is not emailed.
 - After "Resume", a late check is counted from the resume, so the store does
   not read as failing because it was paused.
+- A backfill under way is held where it is and carries on after "Resume".
+  The one exception: a pause that begins while a domain's history is already
+  being downloaded, and lasts longer than the week Shopify keeps that download,
+  leaves the backfill failed on resume. The Store page then says the store
+  needs attention, with "The last check of orders failed" (naming the domain)
+  and the download's refusal beneath it. "Backfill now" on Cluster > Data
+  carries on from the same expired download and fails the same way, so today
+  no screen restarts that backfill from the start.
 
 This is the whole store. Pausing one domain of one store is "Pause" on that
 domain in **Cluster → Data**.

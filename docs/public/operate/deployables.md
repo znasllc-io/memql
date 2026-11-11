@@ -784,7 +784,9 @@ has three parts:
 
 The bar carries "Pause recording" or "Resume" for the store the page leads
 with, for the store's owner and a cluster owner; both call
-`shopifyStoreSetRecording`, which refuses a store that is not connected. The
+`shopifyStoreSetRecording`. Pause works on any store that is being recorded,
+Resume on a paused one; each is recorded in the audit log under the person who
+did it, and a store that is not connected is refused. The
 engine serves a store's state and reasons only to its owner, a cluster owner,
 or a caller who may read store rows. Every state, reason, act and
 email is in [the Shopify connector](shopify-connector.md#operating-it).
