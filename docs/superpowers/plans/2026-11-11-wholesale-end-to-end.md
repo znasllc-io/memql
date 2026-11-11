@@ -259,7 +259,7 @@ func TestADecisionWrittenBeforeThisVersionIsReadableByTheMerchantAfterTheBackfil
   - `wholesaleDecisionLog`: `{rows: [{applicationId, companyName, transition, decidedBy, decidedByName, note, createdAt}], next}`.
   - `wholesaleBuyers`: `{rows: [{applicationId, companyName, applicantEmail, accessState, errorCode, grantedAt, shopifyCustomerId}], next}`, every application whose state is `approved`; `accessState` is the entitlement's state or `none`.
   - `wholesaleExportStore`: `{fileName: "wholesale-<slug(storeId)>-<YYYYMMDD>.json", json}`, the JSON holding `applications` (each with its `details`), `decisions`, `entitlements`, `settings`. Tasks 12 to 14 add their rows. It never carries a token hash.
-- Produces, in Go: `type ActsInput struct { Stage, AccessState string; EntitlementExists, Operator bool }` and `func ActsFor(in ActsInput) []string`, with acts `reject`, `approve`, `remove`, `retryAccess`: operator none; `waitingForTerms` `[reject]`; `readyToReview` `[reject, approve]`; `approved` `[remove]` plus `retryAccess` when the access is not `granted`; `revoked` `[retryAccess]` only when an entitlement exists and is not `revoked`; `rejected` none. Task 14 adds `resendTerms` and `resendApproved`.
+- Produces, in Go: `type ActsInput struct { Stage, AccessState string; EntitlementExists, Operator bool }` and `func ActsFor(in ActsInput) []string`, with acts `reject`, `approve`, `remove`, `retryAccess`: an operator is offered `retryAccess` under the two conditions below and nothing else (X26: a retry is not a decision); `waitingForTerms` `[reject]`; `readyToReview` `[reject, approve]`; `approved` `[remove]` plus `retryAccess` when the access is not `granted`; `revoked` `[retryAccess]` only when an entitlement exists and is not `revoked`; `rejected` none. Task 14 adds `resendTerms` and `resendApproved`.
 
 Decisions:
 - `details.state`: `none` for `source: staff` or when no extension is declared; `unreadable` when the caller's read finds no row but a system read does; `shown` otherwise. Names of people (`decidedByName`, `addedByName`) are read through `userByIdSystem` inline under internal origin, as reviews' `canModerate` does, only after the gate admitted the caller.
@@ -277,7 +277,7 @@ func TestTheListSearchesCompanyApplicantAndEmail(t *testing.T)
 func TestTheListCarriesTheExtensionsTwoDisplayFacts(t *testing.T)
 func TestTheListReadsPastTheFirstPageAndStopsAtAThousand(t *testing.T)       // 1020 applications: truncated true
 func TestActsFollowTheStageAndTheAccess(t *testing.T)                          // the table above, row by row
-func TestAnOperatorIsOfferedNoAct(t *testing.T)
+func TestAnOperatorIsOfferedOnlyRetryAccess(t *testing.T)
 func TestAStaffAddedApplicationHasNoFurtherDetails(t *testing.T)
 func TestAnExtensionRowTheCallerCannotReadIsUnreadable(t *testing.T)
 func TestTheExportCarriesNoTokenHash(t *testing.T)
@@ -288,7 +288,7 @@ func TestAPersonHoldingThePartListsAndOpensTheirOrganizationsApplications(t *tes
 func TestAClusterOperatorReadsTheListTheApplicationAndTheDecisionLog(t *testing.T)
 ```
 
-- [ ] **Step 2:** Run `MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN="$WHOLESALE_DSN" go test -p 1 -count=1 ./component/memql/ ./packs/wholesalepack/ -run 'PlainWords|TheList|ActsFollow|OfferedNoAct|NoFurtherDetails|IsUnreadable|NoTokenHash|GatedBuiltin|NotBoundToTheStore|ListsAndOpens|ReadsTheListTheApplication'`. Expected: FAIL.
+- [ ] **Step 2:** Run `MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN="$WHOLESALE_DSN" go test -p 1 -count=1 ./component/memql/ ./packs/wholesalepack/ -run 'PlainWords|TheList|ActsFollow|OfferedOnlyRetry|NoFurtherDetails|IsUnreadable|NoTokenHash|GatedBuiltin|NotBoundToTheStore|ListsAndOpens|ReadsTheListTheApplication'`. Expected: FAIL.
 - [ ] **Step 3:** Implement, extend the allowlist reason, then run the generated-file gates and the targets they name.
 - [ ] **Step 4:** Run the same command, `./packs/wholesalepack/` whole, `MEMQL_DATABASE_DSN="$WHOLESALE_DSN" go test -count=1 -run TestOnlyAllowlistedPackagesStampInternalOrigin .` and the generated-file gates. Expected: PASS.
 - [ ] **Step 5: Commit** `wholesale: the store's people read its applications, buyers and decisions through gated builtins`.
@@ -364,6 +364,7 @@ it("shows a failed read as a Notice with Try again")
 - Produces, in the pack: `engineCaller.Call` stamps `auth.ContextWithInternalOrigin` inline on its one `Execute`, after the pack's own checks; the customer-tag adapter passes `buyerName: g.BuyerName` and fills `Outcome.CustomerID` and `CustomerCreated` from the reply.
 
 Decisions:
+- One company for one application, whichever form of its id came first: the pack hands every adapter the canonical application id (Task 5), and `ProvisionWholesaleAccount` looks for the company under both `wholesaleExternalIDPrefix + <canonical id>` and `wholesaleExternalIDPrefix + <bare id>` before it creates one, so a store first provisioned under the bare form is found and nothing is created twice. A new company is created under the id it was given.
 - Create: email, the name split by the existing `splitName`, and no marketing consent. A `customerCreate` user error saying the email is taken re-reads by email and continues (two grants at once). Other `customerCreate` user errors refuse with code `customer_refused`. An Admin answer of access denied on the customer read or create refuses with code `scope_missing`. `WholesaleCeilingError` refuses with code `plan_ceiling`.
 - The guide, the builtin description and the comment say that a buyer with no customer gets one created and tagged, and that a refusal is `failed` with its code while an outage is `pending`, retried from the OS.
 
@@ -377,12 +378,13 @@ func TestUntaggingAnAddressWithNoCustomerSucceeds(t *testing.T)
 func TestACustomerAccessDeniedIsScopeMissing(t *testing.T)                    // reply status refused, code scope_missing
 func TestEachWholesaleBuiltinRefusesACallWithoutInternalOrigin(t *testing.T)  // all four; zero Admin calls
 func TestTheCustomAppPathAsksForWriteCustomers(t *testing.T)
+func TestACompanyMadeUnderEitherFormOfTheApplicationIdIsFoundAgain(t *testing.T)   // a company at the bare form, then at the canonical form: a provision handed the canonical id creates no second company in either case
 // packs/wholesalepack
 func TestTheCallerStampsInternalOriginOnItsOneCall(t *testing.T)
 func TestTheTagAdapterPassesTheBuyersName(t *testing.T)
 ```
 
-- [ ] **Step 2:** Run `MEMQL_DATABASE_DSN="$WHOLESALE_DSN" go test -count=1 ./integrations/shopify/ ./packs/wholesalepack/ -run 'MissingCustomer|SecondTag|DuplicateEmail|NoCustomerSucceeds|AccessDeniedIsScope|EachWholesaleBuiltin|WriteCustomers|CallerStamps|BuyersName'`. Expected: FAIL.
+- [ ] **Step 2:** Run `MEMQL_DATABASE_DSN="$WHOLESALE_DSN" go test -count=1 ./integrations/shopify/ ./packs/wholesalepack/ -run 'MissingCustomer|SecondTag|DuplicateEmail|NoCustomerSucceeds|AccessDeniedIsScope|EachWholesaleBuiltin|WriteCustomers|EitherFormOfTheApplicationId|CallerStamps|BuyersName'`. Expected: FAIL.
 - [ ] **Step 3:** Implement, edit the three texts and the guide's two rows, extend the allowlist reason (the caller's stamp), then `make sdk-gen`.
 - [ ] **Step 4:** Run the same command, both packages whole, `MEMQL_DATABASE_DSN="$WHOLESALE_DSN" go test -count=1 -run 'TestDocs|TestRetiredVocabulary|TestPluginMeansPackVocabulary|TestOnlyAllowlistedPackagesStampInternalOrigin' .` and the generated-file gates. Expected: PASS.
 - [ ] **Step 5: Commit** `shopify: the wholesale tag creates a missing customer, and only the pack may tag`.
