@@ -9361,6 +9361,70 @@ func ShopifyStoreHealthBuild(args ShopifyStoreHealthArgs) string {
 	return b.String()
 }
 
+// ShopifyStoreRegisterEvents -- Register again: run the store's subscription pass now and record it on the store's health, as the daily pass does. For the store's owner or a cluster owner; anyone else is refused before Shopify is asked.
+type ShopifyStoreRegisterEventsArgs struct {
+	// The store whose subscriptions are registered again.
+	StoreId string
+}
+
+// ShopifyStoreRegisterEvents calls the engine builtin shopifyStoreRegisterEvents.
+func (qc *QueryClient) ShopifyStoreRegisterEvents(ctx context.Context, args ShopifyStoreRegisterEventsArgs) (*Result, error) {
+	call := ShopifyStoreRegisterEventsBuild(args)
+	return qc.executeNamed(ctx, "shopifyStoreRegisterEvents", call)
+}
+
+func ShopifyStoreRegisterEventsBuild(args ShopifyStoreRegisterEventsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyStoreRegisterEvents(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyStoreRetryDeliveries -- Try again: put the store's deliveries that used their four tries back in line, through datasyncRequeueInbound for the source shopify-<store>. For the store's owner or a cluster owner; anyone else is refused before anything is read.
+type ShopifyStoreRetryDeliveriesArgs struct {
+	// The store whose given-up deliveries are tried again.
+	StoreId string
+}
+
+// ShopifyStoreRetryDeliveries calls the engine builtin shopifyStoreRetryDeliveries.
+func (qc *QueryClient) ShopifyStoreRetryDeliveries(ctx context.Context, args ShopifyStoreRetryDeliveriesArgs) (*Result, error) {
+	call := ShopifyStoreRetryDeliveriesBuild(args)
+	return qc.executeNamed(ctx, "shopifyStoreRetryDeliveries", call)
+}
+
+func ShopifyStoreRetryDeliveriesBuild(args ShopifyStoreRetryDeliveriesArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyStoreRetryDeliveries(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyStoreVerdict -- One store's verdict (U6): whether it is being recorded, and when it is not, why and the one act that fixes each reason. Computed in the engine from the store row, its sync state and its given-up deliveries, so a screen draws it without a copy of the rules.
+// `state` is recording, starting, paused, needs attention or not connected, and `since` when it began. Each reason has a `code` (data_not_declared, approval_outdated, grant_lost, events_not_registered, check_failing, changes_not_recorded), one `sentence` for a person, and an `act` with its `actLabel` and `actUrl` (or none). `outside` and `withheld` are plain words. `may.act` says whether the caller may take the acts. For the store's owner, a cluster owner, or a caller who may read stores; anyone else is refused before the store's state is read.
+type ShopifyStoreVerdictArgs struct {
+	// The store.
+	StoreId string
+}
+
+// ShopifyStoreVerdict calls the engine builtin shopifyStoreVerdict.
+func (qc *QueryClient) ShopifyStoreVerdict(ctx context.Context, args ShopifyStoreVerdictArgs) (*Result, error) {
+	call := ShopifyStoreVerdictBuild(args)
+	return qc.executeNamed(ctx, "shopifyStoreVerdict", call)
+}
+
+func ShopifyStoreVerdictBuild(args ShopifyStoreVerdictArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyStoreVerdict(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ShopifyStorefrontTokenSet -- Use a pasted Storefront API token for a storefront's store, or clear the one it has (design 12.5, D8).
 // Reserved to a cluster owner (memql#5638), who may change the token served under every site bound to the store. A token is checked with one Storefront request before it is sealed; an empty token clears the reference so the next Connect mints one, and is refused while a live storefront is bound to the store.
 type ShopifyStorefrontTokenSetArgs struct {

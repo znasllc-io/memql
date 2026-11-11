@@ -111,19 +111,33 @@ func (c *Connector) EnsureSubscriptions(ctx context.Context) error {
 		if !store.Ingests() {
 			continue
 		}
-		report, err := c.EnsureSubscriptionsForStore(ctx, store)
-		if err != nil {
+		if _, err := c.subscriptionPass(ctx, store); err != nil {
 			failures = append(failures, store.ID+": "+err.Error())
-			continue
-		}
-		if err := c.recordSubscriptionHealth(ctx, store, report); err != nil {
-			c.logger.Warn("shopify: could not record subscription health", "store", store.ID, "error", err)
 		}
 	}
 	if len(failures) > 0 {
 		return fmt.Errorf("shopify: subscription reconcile failed for %d store(s): %s", len(failures), strings.Join(failures, "; "))
 	}
 	return nil
+}
+
+// subscriptionPass reconciles one store's subscriptions and records the pass
+// on its health, and returns the error of a pass that could not read the
+// store's subscriptions at all. That pass is recorded too, as a failure: a
+// read that failed and a pass nobody recorded look the same on the store's
+// health otherwise, and the verdict reads it (events_not_registered). The
+// daily pass and Register again run through here; the connect's pass
+// (registerConnectWebhooks) records the same failure in the same words.
+func (c *Connector) subscriptionPass(ctx context.Context, store Store) (SubscriptionReport, error) {
+	report, err := c.EnsureSubscriptionsForStore(ctx, store)
+	if err != nil {
+		c.logger.Warn("shopify: could not read the store's webhook subscriptions", "store", store.ID)
+		report.Failed = append(report.Failed, subscriptionsUnreadable)
+	}
+	if recErr := c.recordSubscriptionHealth(ctx, store, report); recErr != nil {
+		c.logger.Warn("shopify: could not record subscription health", "store", store.ID, "error", recErr.Error())
+	}
+	return report, err
 }
 
 // EnsureSubscriptionsForStore reconciles one store.

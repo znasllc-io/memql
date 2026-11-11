@@ -7180,6 +7180,73 @@ QueryClient.prototype.shopifyStoreHealth = function (this: QueryClient, args: Sh
   return this.executeNamed("shopifyStoreHealth", buildShopifyStoreHealth(args), opts);
 };
 
+/** Register again: run the store's subscription pass now and record it on the store's health, as the daily pass does. For the store's owner or a cluster owner; anyone else is refused before Shopify is asked. */
+export interface ShopifyStoreRegisterEventsArgs {
+  /** The store whose subscriptions are registered again. */
+  storeId: string;
+}
+
+export function buildShopifyStoreRegisterEvents(args: ShopifyStoreRegisterEventsArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  return "builtin shopifyStoreRegisterEvents(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStoreRegisterEvents(args: ShopifyStoreRegisterEventsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStoreRegisterEvents = function (this: QueryClient, args: ShopifyStoreRegisterEventsArgs = {} as ShopifyStoreRegisterEventsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStoreRegisterEvents", buildShopifyStoreRegisterEvents(args), opts);
+};
+
+/** Try again: put the store's deliveries that used their four tries back in line, through datasyncRequeueInbound for the source shopify-<store>. For the store's owner or a cluster owner; anyone else is refused before anything is read. */
+export interface ShopifyStoreRetryDeliveriesArgs {
+  /** The store whose given-up deliveries are tried again. */
+  storeId: string;
+}
+
+export function buildShopifyStoreRetryDeliveries(args: ShopifyStoreRetryDeliveriesArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  return "builtin shopifyStoreRetryDeliveries(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStoreRetryDeliveries(args: ShopifyStoreRetryDeliveriesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStoreRetryDeliveries = function (this: QueryClient, args: ShopifyStoreRetryDeliveriesArgs = {} as ShopifyStoreRetryDeliveriesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStoreRetryDeliveries", buildShopifyStoreRetryDeliveries(args), opts);
+};
+
+/** One store's verdict (U6): whether it is being recorded, and when it is not, why and the one act that fixes each reason. Computed in the engine from the store row, its sync state and its given-up deliveries, so a screen draws it without a copy of the rules.
+`state` is recording, starting, paused, needs attention or not connected, and `since` when it began. Each reason has a `code` (data_not_declared, approval_outdated, grant_lost, events_not_registered, check_failing, changes_not_recorded), one `sentence` for a person, and an `act` with its `actLabel` and `actUrl` (or none). `outside` and `withheld` are plain words. `may.act` says whether the caller may take the acts. For the store's owner, a cluster owner, or a caller who may read stores; anyone else is refused before the store's state is read. */
+export interface ShopifyStoreVerdictArgs {
+  /** The store. */
+  storeId: string;
+}
+
+export function buildShopifyStoreVerdict(args: ShopifyStoreVerdictArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  return "builtin shopifyStoreVerdict(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStoreVerdict(args: ShopifyStoreVerdictArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStoreVerdict = function (this: QueryClient, args: ShopifyStoreVerdictArgs = {} as ShopifyStoreVerdictArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStoreVerdict", buildShopifyStoreVerdict(args), opts);
+};
+
 /** Use a pasted Storefront API token for a storefront's store, or clear the one it has (design 12.5, D8).
 Reserved to a cluster owner (memql#5638), who may change the token served under every site bound to the store. A token is checked with one Storefront request before it is sealed; an empty token clears the reference so the next Connect mints one, and is refused while a live storefront is bound to the store. */
 export interface ShopifyStorefrontTokenSetArgs {

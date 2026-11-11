@@ -35,6 +35,46 @@ builtin shopifyStoreHealth {
   storeId  string
 }
 
+/// One store's verdict (U6): whether it is being recorded, and when it is not, why and the one act
+/// that fixes each reason. Computed in the engine from the store row, its sync state and its
+/// given-up deliveries, so a screen draws it without a copy of the rules.
+///
+/// `state` is recording, starting, paused, needs attention or not connected, and `since` when it
+/// began. Each reason has a `code` (data_not_declared, approval_outdated, grant_lost,
+/// events_not_registered, check_failing, changes_not_recorded), one `sentence` for a person, and an
+/// `act` with its `actLabel` and `actUrl` (or none). `outside` and `withheld` are plain words.
+/// `may.act` says whether the caller may take the acts. For the store's owner, a cluster owner, or a
+/// caller who may read stores; anyone else is refused before the store's state is read.
+@sdk
+@executor("integration.shopify.storeVerdict")
+@requiresCapability("execute", "app:deployables/store")
+@description("One store's verdict: state (recording, starting, paused, needs attention, not connected) and since; reasons, each {code, domain, sentence, detail, count, act, actLabel, actUrl}; recorded, each {kind, lastChangeAt, lastCheckedAt}; outside and withheld in plain words; ordersFrom; alert {state, reason}; may {act}. For the store's owner, a cluster owner, or a caller who may read stores.")
+builtin shopifyStoreVerdict {
+  storeId  string!  @description("The store.")
+}
+
+/// Register again: run the store's subscription pass now and record it on the store's health, as
+/// the daily pass does. For the store's owner or a cluster owner; anyone else is refused before
+/// Shopify is asked.
+@sdk
+@executor("integration.shopify.storeRegisterEvents")
+@requiresCapability("execute", "app:deployables/store")
+@description("Register again: reconcile one store's webhook subscriptions now and record the pass on its health. Returns {status, storeId, desired, existing, created, failed}; status is registered or failed. For the store's owner or a cluster owner.")
+builtin shopifyStoreRegisterEvents {
+  storeId  string!  @description("The store whose subscriptions are registered again.")
+}
+
+/// Try again: put the store's deliveries that used their four tries back in line, through
+/// datasyncRequeueInbound for the source shopify-<store>. For the store's owner or a cluster owner;
+/// anyone else is refused before anything is read.
+@sdk
+@executor("integration.shopify.storeRetryDeliveries")
+@requiresCapability("execute", "app:deployables/store")
+@description("Try again: put one store's given-up deliveries back in line, so the retry pass tries each again within a minute. Returns {status, storeId, source}. For the store's owner or a cluster owner.")
+builtin shopifyStoreRetryDeliveries {
+  storeId  string!  @description("The store whose given-up deliveries are tried again.")
+}
+
 @sdk
 @executor("integration.shopify.commerceSold")
 @description("What sold in a window, grouped by product or by variant, read entirely from the mirror -- no Admin API call and no cost points. Reports units and orders per line, and reports truncated=true when the walk hit its page cap rather than returning a smaller number and letting the caller believe it.")
