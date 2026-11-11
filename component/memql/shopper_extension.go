@@ -87,6 +87,13 @@ type ShopperExtension struct {
 	Fields []ShopperField
 	// Description is what the module inventory and the pack guide show.
 	Description string
+	// AcceptsAccount is true when the extension's mutation declares an
+	// accountId argument, and only then is the site's organization stamped
+	// into its arguments. An extension that declares none is handed none
+	// and still writes, so a client mutation written before organizations
+	// reached the shopper path keeps working unchanged. Set by the loader;
+	// accountId is never offered to a shopper either way.
+	AcceptsAccount bool
 }
 
 // shopperExtensions is keyed by the EXTENDED route, not by the declaring

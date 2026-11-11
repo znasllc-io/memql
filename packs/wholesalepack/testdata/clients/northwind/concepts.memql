@@ -15,15 +15,16 @@
 
 use wholesale.concepts.{ application }
 
-@version("1.0.0")
+@version("1.1.0")
 @description("Northwind's own field on a wholesale application: the federal tax identifier a US distributor is required to collect. Northwind's, not the pack's -- the next client will not collect one.")
 @displayCard(primary="ein", secondary="applicationId")
-@rowAuthz(owner="ownerUserId", clusterOwner)
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept northwindTaxDetail {
   ownerUserId    string!  @description("The merchant this detail belongs to.")
   applicationId  string!  @description("The v1:wholesale:application this is about.")
   storeId        string!  @description("The store, copied from the application it relates to (design D9).")
   ein            string!  @description("The applicant's federal Employer Identification Number, as they typed it. Unverified.")
+  accountId      string   @description("The organization of the site the application arrived on, handed to this mutation by the shopper handler because it declares the argument. The people of that organization read this row as they read the application.")
 
   @relationship(type="references", field="applicationId", target=application, direction="outgoing")
 }

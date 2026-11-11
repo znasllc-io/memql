@@ -130,3 +130,32 @@ func TestAnExtensionOfferingOnlyStampedFieldsIsRefused(t *testing.T) {
 		t.Fatal("an extension declaring no fields of its own was accepted")
 	}
 }
+
+// AN EXTENSION IS HANDED THE ACCOUNT ONLY WHEN IT ASKS FOR IT, by declaring an
+// accountId argument; it is never offered to a shopper either way. An
+// extension that declares none is handed none, so a client mutation written
+// before organizations reached the shopper path still writes.
+func TestAnExtensionWithAnAccountIdArgumentAcceptsTheAccount(t *testing.T) {
+	without, err := shopperExtensionFromFunction(extensionMutation())
+	if err != nil {
+		t.Fatalf("a valid extension mutation was refused: %v", err)
+	}
+	if without.AcceptsAccount {
+		t.Fatal("an extension declaring no accountId argument accepts the account")
+	}
+
+	fn := extensionMutation()
+	fn.ArgsSchema.Fields = append(fn.ArgsSchema.Fields, &FunctionArgsField{Name: "accountId", Type: "string", Optional: true})
+	with, err := shopperExtensionFromFunction(fn)
+	if err != nil {
+		t.Fatalf("an extension declaring accountId was refused: %v", err)
+	}
+	if !with.AcceptsAccount {
+		t.Fatal("an extension declaring an accountId argument does not accept the account")
+	}
+	for _, f := range with.Fields {
+		if f.Name == "accountId" {
+			t.Fatal("accountId is offered to a shopper; it is stamped from the site")
+		}
+	}
+}

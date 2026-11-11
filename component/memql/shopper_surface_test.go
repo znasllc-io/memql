@@ -180,3 +180,23 @@ func TestAFieldWithNoBoundStillHasOne(t *testing.T) {
 		t.Fatal("a declared bound must be honoured")
 	}
 }
+
+// accountId IS STAMPED FROM THE SITE'S ORGANIZATION, never posted. A form that
+// could declare it could tie a row to an organization the site is not in, and
+// the row tier would then admit that organization's people to it.
+func TestAccountIdIsAReservedShopperName(t *testing.T) {
+	t.Cleanup(ResetShopperSurfaceForTest)
+	f := validForm()
+	f.Fields = []ShopperField{{Name: "accountId"}}
+	expectPanic(t, "stamped server-side", func() { RegisterShopperForm(f) })
+
+	found := false
+	for _, name := range ReservedShopperFieldNames() {
+		if name == ShopperAccountIDArg {
+			found = true
+		}
+	}
+	if !found || ShopperAccountIDArg != "accountId" {
+		t.Fatalf("accountId is not among the reserved shopper names: %v", ReservedShopperFieldNames())
+	}
+}

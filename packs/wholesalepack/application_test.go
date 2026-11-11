@@ -45,6 +45,12 @@ func (f *fixtureReader) Rows(ctx context.Context, query string, args map[string]
 		return f.ents[args["applicationId"]], nil
 	case "storePlanById":
 		return f.stores[args["storeId"]], nil
+	case "siteById":
+		for _, site := range f.sites {
+			if bareID(trimmed(site["id"])) == bareID(args["siteId"]) {
+				return []map[string]any{site}, nil
+			}
+		}
 	}
 	return nil, nil
 }
@@ -703,5 +709,104 @@ func TestANewApplicationIsFencedOnRowAbsent(t *testing.T) {
 	writer.only(t, "createApplicationRow")
 	if !memql.HasRowVersionFence(writer.writes[0].ctx, "v1:wholesale:application", "sub-new") {
 		t.Fatal("the new application was written with no row-absent fence")
+	}
+}
+
+// A DECISION AND AN ENTITLEMENT COPY THE APPLICATION'S ORGANIZATION, never the
+// caller's, so the people who may read the application read what was decided
+// about it and what was granted.
+func TestADecisionAndAnEntitlementCopyTheApplicationsAccount(t *testing.T) {
+	registerShippedAdapters()
+	writer := &fakeWriter{}
+	reader := approvedFixture()
+	reader.apps["app-1"][0]["accountId"] = "acct-north"
+	p := &Provider{writer: writer, reader: reader, caller: &fakeCaller{}}
+
+	reader.decisions["app-1"] = nil // submitted, so approve is legal
+	if _, err := p.recordDecision(auth.ContextWithUserActor(context.Background(), "staff-1"), map[string]any{
+		"applicationId": "app-1", "transition": TransitionApprove,
+		"principalKind": PrincipalClient, "decidedBy": "staff-1",
+		"accountId": "acct-somebody-elses",
+	}, 0); err != nil {
+		t.Fatalf("recordDecision: %v", err)
+	}
+	if got := writer.only(t, "appendApplicationDecision")["accountId"]; got != "acct-north" {
+		t.Fatalf("the decision's accountId = %v, want the application's acct-north", got)
+	}
+
+	reader.decisions["app-1"] = []map[string]any{{"transition": TransitionApprove}}
+	if _, err := p.provisionEntitlement(internalAsMerchant(), map[string]any{"applicationId": "app-1"}, 0); err != nil {
+		t.Fatalf("provisionEntitlement: %v", err)
+	}
+	if got := writer.only(t, "writeEntitlementRow")["accountId"]; got != "acct-north" {
+		t.Fatalf("the entitlement's accountId = %v, want the application's acct-north", got)
+	}
+}
+
+// A SUBMITTED ACCOUNT MUST BE THE SITE'S. The shopper handler stamps it from
+// the site, but any signed-in caller who reaches the builtin can name one, and
+// an application tied to an organization is readable by its people.
+func TestASubmittedAccountMustBeTheSites(t *testing.T) {
+	reader := &fixtureReader{
+		settings: map[string][]map[string]any{"store-live": {{"storeId": "store-live", "applicationsOpen": true}}},
+		sites:    []map[string]any{{"id": "v1:platform:site:site-1", "accountId": "v1:accounts:account:acct-north"}},
+	}
+	submitAs := func(siteID, account string) (*fakeWriter, error) {
+		writer := &fakeWriter{}
+		p := &Provider{writer: writer, reader: reader}
+		_, err := p.submitApplication(asShopperPath(), map[string]any{
+			"storeId": "store-live", "siteId": siteID, "accountId": account, "submissionId": "sub-" + siteID + account,
+			"companyName": "Acme", "applicantName": "Sam", "applicantEmail": "sam@example.com",
+		}, 0)
+		return writer, err
+	}
+	for name, c := range map[string][2]string{
+		"another organization": {"site-1", "acct-south"},
+		"no site":              {"", "acct-north"},
+		"an unknown site":      {"site-9", "acct-north"},
+	} {
+		writer, err := submitAs(c[0], c[1])
+		if err == nil || len(writer.writes) != 0 {
+			t.Fatalf("%s: an account that is not the site's was written (err %v, writes %d)", name, err, len(writer.writes))
+		}
+	}
+	writer, err := submitAs("site-1", "acct-north")
+	if err != nil {
+		t.Fatalf("the site's own organization was refused: %v", err)
+	}
+	if got := writer.only(t, "createApplicationRow"); got["accountId"] != "acct-north" || got["source"] != SourceStorefront {
+		t.Fatalf("the application was written with accountId %v and source %v", got["accountId"], got["source"])
+	}
+}
+
+// THE BACKFILL'S ACCOUNT IS THE APPLICATION'S SITE'S, or, with no siteId, the
+// one site serving its store -- and when it cannot be told, the reason is one
+// of three sentences the operator acts on.
+func TestTheAccountOfAnApplicationIsItsSites(t *testing.T) {
+	north := map[string]any{"id": "v1:platform:site:site-n", "accountId": "acct-north",
+		"binding": map[string]any{"storeId": "v1:shopify:store:store-1"}}
+	south := map[string]any{"id": "site-s", "accountId": "acct-south",
+		"previewBinding": map[string]any{"storeId": "store-1"}}
+	bare := map[string]any{"id": "site-b", "binding": map[string]any{"storeId": "store-2"}}
+	for name, c := range map[string]struct {
+		app             map[string]any
+		sites           []map[string]any
+		account, reason string
+	}{
+		"its own site":                 {map[string]any{"storeId": "store-1", "siteId": "site-s"}, []map[string]any{north, south}, "acct-south", ""},
+		"the one site serving it":      {map[string]any{"storeId": "store-1"}, []map[string]any{north}, "acct-north", ""},
+		"a preview binding serves too": {map[string]any{"storeId": "store-1"}, []map[string]any{south}, "acct-south", ""},
+		"no site":                      {map[string]any{"storeId": "store-9"}, []map[string]any{north}, "", UntiedNoSite},
+		"two sites":                    {map[string]any{"storeId": "store-1"}, []map[string]any{north, south}, "", UntiedTwoSites},
+		"a site with no organization":  {map[string]any{"storeId": "store-2"}, []map[string]any{bare}, "", UntiedNoAccount},
+	} {
+		account, reason := accountForApplication(c.app, c.sites)
+		if account != c.account || reason != c.reason {
+			t.Errorf("%s: (%q, %q), want (%q, %q)", name, account, reason, c.account, c.reason)
+		}
+	}
+	if UntiedNoSite != "no site serves this store" || UntiedTwoSites != "two sites serve this store" ||
+		UntiedNoAccount != "its site has no organization" {
+		t.Fatal("an untied reason drifted from its sentence")
 	}
 }

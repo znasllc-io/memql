@@ -77,6 +77,7 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema: map[string]string{
 				"storeId":        "string (required) - stamped from the binding the post arrived through",
 				"siteId":         "string (optional) - provenance",
+				"accountId":      "string (optional) - stamped from the site's organization; must be the site's",
 				"companyName":    "string (required) - the business applying",
 				"applicantName":  "string (required) - the person applying",
 				"applicantEmail": "string (required) - unverified; how a decision reaches them",
@@ -133,6 +134,16 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 			Handler: p.revokeEntitlement,
 			ArgsSchema: map[string]string{
 				"applicationId": "string (required) - the revoked application",
+			},
+		},
+		{
+			Name: "backfillAccounts",
+			Description: "Tie every row written before organizations reached this pack to the " +
+				"organization of its site. Cluster operators and internal origin only; a row " +
+				"already tied is counted and never rewritten.",
+			Handler: p.backfillAccounts,
+			ArgsSchema: map[string]string{
+				"storeId": "string (optional) - only this store's rows",
 			},
 		},
 	}

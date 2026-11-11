@@ -75,7 +75,8 @@ func shopperExtensionFromFunction(fn *Function) (ShopperExtension, error) {
 
 	// D7: the field list is the args block MINUS the stamped names. The
 	// stamped ones are DECLARED -- the body reads args.storeId to write it
-	// -- and simply never offered to a shopper.
+	// -- and simply never offered to a shopper. Declaring accountId is also
+	// how the mutation asks to be handed the site's organization.
 	if fn.ArgsSchema != nil {
 		for _, f := range fn.ArgsSchema.Fields {
 			if f == nil {
@@ -84,6 +85,9 @@ func shopperExtensionFromFunction(fn *Function) (ShopperExtension, error) {
 			name := strings.TrimSpace(f.Name)
 			if name == "" {
 				continue
+			}
+			if name == ShopperAccountIDArg {
+				ext.AcceptsAccount = true
 			}
 			if _, stamped := reservedShopperFieldNames[name]; stamped {
 				continue

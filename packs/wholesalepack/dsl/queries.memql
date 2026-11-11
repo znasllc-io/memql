@@ -109,3 +109,17 @@ query store storePlanById {
   filter  row => row.id == args.storeId
   shape   wholesaleStorePlan
 }
+
+@description("THE BACKFILL'S WALK (U5, X19): every application of one store, or of the cluster when no store is named, read WITHOUT THE ACCOUNT ARM -- tied or not, whoever owns it -- oldest version first, one window at a time from the createdAt named by after (inclusive; the walk skips what it has seen). It answers the tied ones too, on purpose: a run that stopped after tying an application and before its decisions is finished by the next, and a second run counts what the first tied rather than finding nothing. SERVER ONLY, read as the system by wholesaleBackfillAccounts once it has admitted an operator; no client reads it.")
+@serverOnly
+@actor
+query application applicationsWithoutAccount {
+  args {
+    storeId  string
+    after    string
+  }
+  filter  row => (args.storeId == nil || row.storeId == args.storeId) && (args.after == nil || row.createdAt >= args.after)
+  sort    "row.createdAt", "asc"
+  paginate 200
+  shape   applicationFull
+}

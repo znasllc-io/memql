@@ -77,6 +77,13 @@ const (
 // PrincipalClient is the only expressible decidedBy kind.
 const PrincipalClient = "client"
 
+// How an application arrived: a shopper's form post, or a person of the store
+// adding it. An application that names neither arrived on the storefront.
+const (
+	SourceStorefront = "storefront"
+	SourceStaff      = "staff"
+)
+
 // Transitions is the closed set, in the order a reader meets them.
 var Transitions = []string{TransitionApprove, TransitionReject, TransitionRevoke}
 
@@ -252,6 +259,15 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 		return nil, fmt.Errorf("wholesale: an application is written as the site owner, and " +
 			"this call carries no actor")
 	}
+	// THE ACCOUNT MUST BE THE SITE'S. The shopper handler stamps it from the
+	// site, but any signed-in caller who reaches this builtin can name one, and
+	// an application tied to an organization is readable by its people.
+	account := trimmed(args["accountId"])
+	if account != "" {
+		if err := p.accountIsTheSites(ctx, trimmed(args["siteId"]), account); err != nil {
+			return nil, err
+		}
+	}
 	taken, err := p.applicationIDTaken(ctx, applicationID)
 	if err != nil {
 		return nil, err
@@ -260,6 +276,10 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 		return p.existingSubmission(ctx, applicationID)
 	}
 	fenced := memql.ContextWithRowVersionFence(ctx, applicationConcept, applicationID, time.Time{})
+	// accountId IS THE SITE'S ORGANIZATION, stamped by the shopper handler
+	// from the site the post arrived on, and empty for a site with none --
+	// which is a legitimate state: the application is then written untied and
+	// stays its owner's, as before.
 	if err := p.write(fenced, "createApplicationRow", map[string]any{
 		"applicationId":  applicationID,
 		"ownerUserId":    owner,
@@ -268,6 +288,8 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 		"companyName":    company,
 		"applicantName":  name,
 		"applicantEmail": email,
+		"accountId":      account,
+		"source":         SourceStorefront,
 	}); err != nil {
 		// THE FENCE'S LOSER: another write landed at this id between the
 		// check above and this one. Answered exactly as a taken id is.
@@ -281,6 +303,25 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 		"storeId":       storeID,
 		"companyName":   company,
 	})
+}
+
+// accountIsTheSites refuses an accountId that is not the organization of the
+// named site, read as the system.
+func (p *Provider) accountIsTheSites(ctx context.Context, siteID, account string) error {
+	refused := fmt.Errorf("wholesale: accountId is stamped from the organization of the site an "+
+		"application arrives on, and %q is not that site's", account)
+	if siteID == "" {
+		return refused
+	}
+	rows, err := p.rowsFor(auth.ContextWithSystemActor(ctx, storeLookupActor), "siteById",
+		map[string]string{"siteId": siteID})
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 || bareID(trimmed(rows[0]["accountId"])) != bareID(account) {
+		return refused
+	}
+	return nil
 }
 
 // applicationConcept is the application's concept id, for its row fence.
@@ -364,9 +405,12 @@ func (p *Provider) recordDecision(ctx context.Context, args map[string]any, _ in
 	// the same thing from the other side.
 	// ownerUserId IS THE APPLICATION'S MERCHANT, copied off it like storeId,
 	// so the decision says whose trade desk it belongs to whoever decided.
+	// accountId IS THE APPLICATION'S ORGANIZATION, copied off it, so the
+	// people who read the application read what was decided about it.
 	if err := p.write(ctx, "appendApplicationDecision", map[string]any{
 		"applicationId": applicationID,
 		"ownerUserId":   trimmed(app["ownerUserId"]),
+		"accountId":     trimmed(app["accountId"]),
 		"storeId":       storeID,
 		"transition":    transition,
 		"note":          asString(args["note"]),
@@ -438,17 +482,21 @@ func (p *Provider) setWholesaleSettings(ctx context.Context, args map[string]any
 			return nil, err
 		}
 	}
-	owner, err := p.settingsOwner(ctx, storeID)
+	place, err := p.settingsOwner(ctx, storeID)
 	if err != nil {
 		return nil, err
 	}
 	if err := p.write(ctx, "setWholesaleSettingsRow", map[string]any{
 		"settingsId":         SettingsRowID(storeID),
-		"ownerUserId":        owner,
+		"ownerUserId":        place.owner,
 		"storeId":            storeID,
 		"applicationsOpen":   open,
 		"entitlementAdapter": adapter,
 		"introText":          asString(args["introText"]),
+		// EVERY FIELD EXPLICIT: the row's organization and site are kept,
+		// or, for a new row, taken from the one site bound to the store.
+		"accountId": place.accountID,
+		"siteId":    place.siteID,
 	}); err != nil {
 		return nil, err
 	}
@@ -474,7 +522,17 @@ func mayConfigureStores(ctx context.Context) error {
 // settings are: it reads the existing row and the sites bound to the store.
 const storeLookupActor = "wholesale-store-lookup"
 
+// settingsPlace is whose a store's settings row is after a write: its owner,
+// and the organization and site it is tied to.
+type settingsPlace struct {
+	owner, accountID, siteID string
+}
+
 // settingsOwner is who owns a store's settings row after this write.
+//
+// AND WHAT IT IS TIED TO: an existing row keeps its organization and site
+// (empty on a row from before this version, until the backfill ties it); a
+// new row takes them from the store's site when exactly one is bound to it.
 //
 // THE EXISTING OWNER IS KEPT. Otherwise the operator who changed a setting
 // would become the row's owner, and the merchant's own reads -- the shopper
@@ -486,28 +544,21 @@ const storeLookupActor = "wholesale-store-lookup"
 // code acting as a real person names that person; an operator's call is
 // refused, because the operator is not the merchant and a row they owned
 // would be readable by nobody on the store's side.
-func (p *Provider) settingsOwner(ctx context.Context, storeID string) (string, error) {
+func (p *Provider) settingsOwner(ctx context.Context, storeID string) (settingsPlace, error) {
 	sys := auth.ContextWithSystemActor(ctx, storeLookupActor)
 	existing, err := p.settingsRow(sys, storeID)
 	if err != nil {
-		return "", err
+		return settingsPlace{}, err
 	}
 	if existing != nil {
 		if owner := trimmed(existing["ownerUserId"]); owner != "" {
-			return owner, nil
+			return settingsPlace{owner: owner, accountID: trimmed(existing["accountId"]),
+				siteID: trimmed(existing["siteId"])}, nil
 		}
 	}
-	if p.reader == nil {
-		return "", fmt.Errorf("wholesale: the pack has no reader; this capability cannot run")
-	}
-	bare := storeID
-	if i := strings.LastIndex(bare, ":"); i >= 0 {
-		bare = bare[i+1:]
-	}
-	sites, err := p.reader.RowsWithList(sys, "sitesBoundToStore", map[string]string{},
-		"storeIds", []string{storeID, bare, "v1:shopify:store:" + bare})
+	sites, err := p.sitesForStore(sys, storeID)
 	if err != nil {
-		return "", err
+		return settingsPlace{}, err
 	}
 	owners := map[string]bool{}
 	for _, site := range sites {
@@ -517,20 +568,45 @@ func (p *Provider) settingsOwner(ctx context.Context, storeID string) (string, e
 	}
 	switch len(owners) {
 	case 1:
+		place := settingsPlace{}
 		for owner := range owners {
-			return owner, nil
+			place.owner = owner
 		}
+		if len(sites) == 1 {
+			place.accountID = trimmed(sites[0]["accountId"])
+			place.siteID = bareID(trimmed(sites[0]["id"]))
+		}
+		return place, nil
 	case 0:
 		if auth.OriginFromContext(ctx).IsInternal() {
 			if ac, ok := auth.AccessFromContext(ctx); ok && !ac.Synthetic && strings.TrimSpace(ac.UserId) != "" {
-				return strings.TrimSpace(ac.UserId), nil
+				return settingsPlace{owner: strings.TrimSpace(ac.UserId)}, nil
 			}
 		}
-		return "", fmt.Errorf("wholesale: no deployable owned by a person is bound to store %q, so "+
+		return settingsPlace{}, fmt.Errorf("wholesale: no deployable owned by a person is bound to store %q, so "+
 			"there is no merchant to own its wholesale settings; bind the store to its storefront first", storeID)
 	}
-	return "", fmt.Errorf("wholesale: the deployables bound to store %q belong to more than one "+
+	return settingsPlace{}, fmt.Errorf("wholesale: the deployables bound to store %q belong to more than one "+
 		"owner, so whose wholesale settings these are cannot be told from the store alone", storeID)
+}
+
+// sitesForStore reads every site whose serving or preview binding names the
+// store, in any of the forms a store id is stored in.
+func (p *Provider) sitesForStore(ctx context.Context, storeID string) ([]map[string]any, error) {
+	if p.reader == nil {
+		return nil, fmt.Errorf("wholesale: the pack has no reader; this capability cannot run")
+	}
+	bare := bareID(storeID)
+	return p.reader.RowsWithList(ctx, "sitesBoundToStore", map[string]string{},
+		"storeIds", []string{storeID, bare, "v1:shopify:store:" + bare})
+}
+
+// bareID is an id without its concept prefix: the part after the last colon.
+func bareID(id string) string {
+	if i := strings.LastIndex(id, ":"); i >= 0 {
+		return id[i+1:]
+	}
+	return id
 }
 
 // --------------------------------------------------------------------------

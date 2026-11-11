@@ -137,15 +137,19 @@ func trimmed(v any) string { return strings.TrimSpace(asString(v)) }
 // writes could otherwise write over any row at an id they can name. So each
 // builtin authorizes its caller ITSELF, before it calls this:
 //
-//   - wholesaleSubmitApplication: the store's applicationsOpen gate, then
-//     the id established absent (read as the system) and the write fenced
-//     on "row absent", so no application is ever written over;
+//   - wholesaleSubmitApplication: the store's applicationsOpen gate, an
+//     accountId refused unless it is the named site's, then the id
+//     established absent (read as the system) and the write fenced on "row
+//     absent", so no application is ever written over;
 //   - wholesaleRecordDecision: the application read under the CALLER, so a
 //     caller who cannot read it cannot decide it, then the legality fold;
 //   - wholesaleSetSettings: internal origin or a cluster operator only,
 //     and an existing row keeps its owner;
 //   - wholesaleProvisionEntitlement / wholesaleRevokeEntitlement: internal
 //     origin only (the store's automation), then the decision log.
+//   - wholesaleBackfillAccounts: internal origin or a cluster operator
+//     only, refusing everyone else before it reads; a row already tied is
+//     never rewritten.
 //
 // SEPARATE FROM Caller BECAUSE THE CALL FORMS DIFFER AND THE DIFFERENCE IS
 // EASY TO LOSE: a mutation is `name(args)`, a builtin is `builtin

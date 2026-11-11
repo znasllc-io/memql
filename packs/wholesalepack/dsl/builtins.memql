@@ -25,6 +25,7 @@ builtin wholesaleSubmitApplication {
   applicantName   string!  @description("The person applying. Data, never an identity.")
   applicantEmail  string!  @description("Unverified. How a decision reaches them, and how an adapter finds the Shopify customer to entitle.")
   siteId          string  @description("The deployable the post arrived on. Provenance; the row is scoped by storeId.")
+  accountId       string  @description("Stamped server-side from the organization of the site the post arrived on, and refused unless it is that site's. Empty for a site with no organization.")
 }
 
 @executor("integration.wholesale.recordDecision")
@@ -67,4 +68,11 @@ builtin wholesaleProvisionEntitlement {
 @description("Take an entitlement back. CALLED BY THE STORE'S AUTOMATION: it refuses any call without internal origin before it reads anything, reads as the deployment, and takes the entitlement back and records it as the application's merchant -- through the adapter that GRANTED it rather than whatever the settings name today -- a merchant who switches adapters must still be able to undo what the old one gave. Requires a revoke decision to have been recorded first, so the pack's state and its history agree.")
 builtin wholesaleRevokeEntitlement {
   applicationId  string!  @description("The revoked application whose entitlement to take back.")
+}
+
+@executor("integration.wholesale.backfillAccounts")
+@args(profile="object")
+@description("TIE EVERY ROW WRITTEN BEFORE ORGANIZATIONS REACHED THIS PACK to the organization of its site (U5, X19). THE CLUSTER'S OPERATORS (or trusted server code) ONLY, refused before anything is read: its writes run at internal origin, which the row gate does not owner-check. It reads as the system and writes each row as the application's merchant. An application's organization is its siteId site's; with no siteId, the one site whose serving or preview binding is the application's store. It ties the application, then its decisions (naming their merchant, changing no decision field), its entitlement and the store's settings. A row already tied is counted and never rewritten, so it is safe to run again. Answers {tied, alreadyTied, untied: [{id, reason}]}, where a reason is \"no site serves this store\", \"two sites serve this store\" or \"its site has no organization\": the operator fixes the site and runs it again.")
+builtin wholesaleBackfillAccounts {
+  storeId  string  @description("Only this store's rows. Empty: every store's.")
 }

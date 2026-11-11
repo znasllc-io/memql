@@ -59,6 +59,9 @@ shape application applicationFull {
   companyName
   applicantName
   applicantEmail
+  accountId
+  source
+  addedBy
   row.createdAt
 }
 
@@ -73,6 +76,7 @@ shape applicationDecision applicationDecisionFull {
   decidedBy
   principalKind
   note
+  accountId
   row.createdAt
 }
 
@@ -91,6 +95,7 @@ shape entitlement entitlementFull {
   errorCode
   shopifyCustomerId
   customerCreated
+  accountId
   row.createdAt
 }
 
@@ -103,5 +108,7 @@ shape wholesaleSettings wholesaleSettingsFull {
   applicationsOpen
   entitlementAdapter
   introText
+  accountId
+  siteId
   row.createdAt
 }

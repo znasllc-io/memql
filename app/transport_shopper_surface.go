@@ -87,6 +87,10 @@ func (s *shopperSiteReader) ShopperSite(ctx context.Context, siteID, ownerUserID
 	}
 	out.StoreID = bindingStoreID(row["binding"])
 	out.PreviewStoreID = bindingStoreID(row["previewBinding"])
+	// THE SITE'S ORGANIZATION, or "" for a site with none. The handler
+	// stamps it into the rows a shopper writes.
+	out.AccountID, _ = row["accountId"].(string)
+	out.AccountID = strings.TrimSpace(out.AccountID)
 	return out, nil
 }
 

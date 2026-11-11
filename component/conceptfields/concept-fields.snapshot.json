@@ -8653,11 +8653,14 @@
       "concept": "v1:wholesale:application",
       "file": "packs/wholesalepack/dsl/concepts.memql",
       "fields": [
+        "accountId",
+        "addedBy",
         "applicantEmail",
         "applicantName",
         "companyName",
         "ownerUserId",
         "siteId",
+        "source",
         "storeId"
       ],
       "required": [
@@ -8666,12 +8669,19 @@
         "companyName",
         "ownerUserId",
         "storeId"
-      ]
+      ],
+      "enums": {
+        "source": [
+          "staff",
+          "storefront"
+        ]
+      }
     },
     {
       "concept": "v1:wholesale:applicationDecision",
       "file": "packs/wholesalepack/dsl/concepts.memql",
       "fields": [
+        "accountId",
         "applicationId",
         "decidedBy",
         "note",
@@ -8702,6 +8712,7 @@
       "concept": "v1:wholesale:entitlement",
       "file": "packs/wholesalepack/dsl/concepts.memql",
       "fields": [
+        "accountId",
         "adapter",
         "applicationId",
         "buyerEmail",
@@ -8735,10 +8746,12 @@
       "concept": "v1:wholesale:wholesaleSettings",
       "file": "packs/wholesalepack/dsl/concepts.memql",
       "fields": [
+        "accountId",
         "applicationsOpen",
         "entitlementAdapter",
         "introText",
         "ownerUserId",
+        "siteId",
         "storeId"
       ],
       "required": [

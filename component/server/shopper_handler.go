@@ -116,7 +116,7 @@ type ShopperSiteReader interface {
 
 // ShopperSite is the projection this handler decides on.
 //
-// FOUR FIELDS, and the omissions are the point. There is no bundleRef, no
+// FIVE FIELDS, and the omissions are the point. There is no bundleRef, no
 // settings and no title here: a handler that cannot see them cannot leak
 // them into a public response by accident.
 type ShopperSite struct {
@@ -124,6 +124,11 @@ type ShopperSite struct {
 	ShopperForms   bool
 	StoreID        string
 	PreviewStoreID string
+	// AccountID is the organization the site belongs to, stamped into the
+	// rows a shopper writes so the people of that organization may read
+	// them. Empty for a site with no organization, which is a legitimate
+	// state: the rows are then written with none, as before.
+	AccountID string
 }
 
 // ShopperHandler serves a pack's declared forms and reads.
@@ -301,6 +306,7 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 	args["storeId"] = stamp.storeID
 	args["siteId"] = site.ID
 	args[memql.ShopperSubmissionIDArg] = submissionID
+	args[memql.ShopperAccountIDArg] = site.AccountID
 
 	call, err := dslCall(memql.ShopperCallPrefix(form.Kind)+form.Construct, args)
 	if err != nil {
@@ -373,6 +379,11 @@ func (h *ShopperHandler) runExtension(ctx context.Context, ext *memql.ShopperExt
 	extArgs["storeId"] = stamp.storeID
 	extArgs["siteId"] = site.ID
 	extArgs[memql.ShopperSubmissionIDArg] = submissionID
+	// THE ORGANIZATION ONLY WHEN THE MUTATION ASKS FOR IT. One that declares
+	// no accountId argument is handed none and still writes.
+	if ext.AcceptsAccount {
+		extArgs[memql.ShopperAccountIDArg] = site.AccountID
+	}
 
 	call, err := dslCall(ext.Construct, extArgs)
 	if err != nil {

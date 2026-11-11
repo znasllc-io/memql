@@ -67,10 +67,10 @@
 // lets a client lay its own process over the pack: there is no process
 // here to disagree with.
 
-@version("1.0.0")
+@version("1.1.0")
 @description("A wholesale application: somebody asking one store for trade terms. Its STATES are submitted, approved, rejected and revoked, and they are DERIVED from the append-only decision log rather than stored here -- v1:wholesale:applicationDecision carries each transition and the wholesaleApplicationState builtin folds them. There is deliberately no mutable state field: an application whose state was overwritten would lose why it was refused the moment somebody approved it, which is the one thing a trade desk needs to look back at.")
 @displayCard(primary="companyName", secondary="applicantEmail", tertiary="storeId")
-@rowAuthz(owner="ownerUserId", clusterOwner)
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept application {
   ownerUserId    string!   @description("v1:identity:user.id of the MERCHANT this application belongs to -- the owner of the deployable it was submitted through, NOT the applicant. A shopper is nobody to MemQL: they have no user row, no session and no actor (epic memql#5532, issue memql#5550), so the applicant is applicantName and applicantEmail below and nothing else. On the shopper path this stamps from actor.userId under the site owner's BORROWED authority; on the authenticated path it is the calling user, which is what an operator or an importing job writes as.")
   storeId        string!   @description("The v1:shopify:store this application was made against (design D9). Stamped server-side from the binding the write arrived through -- the serving binding, or the PREVIEW binding when the submission was made while exercising a candidate version -- and never accepted from a form: component/memql/shopper_surface.go refuses a declared field with this name, and the bff stamps it after the declared fields so a form-supplied copy cannot win. Every storefront read filters on it.")
@@ -78,6 +78,9 @@ concept application {
   companyName    string!   @description("The business applying. PART OF THE MINIMUM: a wholesale application with no business is a consumer signup, and the native-B2B adapter has nothing to name the company it creates. Data, never verified.")
   applicantName  string!   @description("The person applying, as they typed it. DATA, never an identity: nothing authenticates it and no read is scoped by it.")
   applicantEmail string!   @description("The applicant's email, unverified. DATA, never an identity. It is how a decision reaches them and how an entitlement adapter finds the Shopify customer to entitle, and it is why the public-facing reads of this pack project nothing at all -- an application is somebody's business contact details and there is no storefront read that returns one.")
+  accountId      string    @description("The v1:accounts:account organization of the site this application arrived on, stamped server-side from that site and never accepted from a form (it is a reserved shopper name). The tier's account arm: the people of that organization read the application without owning it. Empty on a row written before this version, until wholesaleBackfillAccounts ties it, and on a row from a site with no organization -- both stay their owner's and the operators', as before.")
+  source         enum("storefront", "staff")  @description("How the application arrived: storefront for a shopper's form post, staff for one a person of the store added. Absent reads as storefront, which is what every row written before this field was.")
+  addedBy        string    @description("v1:identity:user.id of the person who added it, for source staff. Empty for a storefront application.")
 }
 
 @version("1.1.0")
@@ -90,6 +93,7 @@ concept applicationDecision {
   transition    enum("approve", "reject", "revoke")!  @description("The act, not the resulting state. approve and reject are legal from submitted; revoke is legal only from approved. The Go capability folds the decision log to find the current state and refuses an illegal transition by name -- a cross-row read no mutation body can make.")
   decidedBy     string!  @description("v1:identity:user.id of the Client principal that authored this decision. Provider operators are refused on the write path.")
   ownerUserId   string   @description("The application's merchant, copied off it.")
+  accountId     string   @description("The application's organization, copied off it, never supplied. Empty for a decision on an untied application.")
   principalKind enum("client")!  @description("The only expressible principal kind is client. provider is inexpressible -- the enum does not contain it.")
   note          string   @description("Optional client-visible reason. THE ONE FREE-TEXT FIELD IN THE PACK, and it earns its place: append-only storage is only worth having if the reason a decision was made is still there after the next one.")
 }
@@ -97,7 +101,7 @@ concept applicationDecision {
 @version("1.1.0")
 @description("What this pack granted, to whom, against which store, and through which adapter. STATE THE PACK OWNS, never inferred from Shopify: a company that exists over there says nothing about whether THIS pack granted it, and reading entitlement back out of somebody else's system would make an operator's own record of what they granted depend on an API call that can fail. ONE ROW PER APPLICATION at the derived id wholesale:entitlement:<applicationId>, so a re-provision is a new VERSION of one logical row rather than a second row a read would have to choose between -- and 'revoked when' is that version's own createdAt.")
 @displayCard(primary="state", secondary="buyerEmail", tertiary="adapter")
-@rowAuthz(owner="ownerUserId", clusterOwner)
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept entitlement {
   ownerUserId   string!  @description("v1:identity:user.id of the merchant who granted this. Same owner as the application it came from.")
   applicationId string!  @description("v1:wholesale:application.id this entitlement was granted against. One entitlement per application.")
@@ -110,16 +114,19 @@ concept entitlement {
   errorCode         string  @description("Why nothing was granted, as a code a screen can show and offer a retry for: no_settings, no_route, scope_missing, plan_ceiling, customer_refused or shopify_error. Empty on a success; every write passes it, so a version never inherits the attempt before it.")
   shopifyCustomerId string  @description("The Shopify customer GID the grant landed on, when the integration reported one.")
   customerCreated   bool    @description("True when the grant had to create the Shopify customer rather than find it.")
+  accountId         string  @description("The application's organization, copied off it, so the people who read the application read what was granted. Empty for an untied application.")
 }
 
-@version("1.0.0")
+@version("1.1.0")
 @description("Runtime wholesale settings for one store. Held as DATA in the manner of v1:reviews:reviewSettings, so a client opens or closes applications, changes what the storefront says and switches entitlement adapter without a deploy or a .memql edit.")
 @displayCard(primary="applicationsOpen", secondary="entitlementAdapter", tertiary="storeId")
-@rowAuthz(owner="ownerUserId", clusterOwner)
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept wholesaleSettings {
   ownerUserId        string!  @description("v1:identity:user.id of the Client that owns this storefront's wholesale settings.")
   storeId            string!  @description("The store these settings govern (design D9). ONE ROW PER STORE, at the derived id wholesale:settings:<storeId>, because a merchant with a live store and a development store must be able to take applications on one while they are closed on the other -- which is the whole of what previewing a storefront means.")
   applicationsOpen   bool!    @description("When false the shopper write path refuses a new application for this store. Flipped at runtime. ABSENT SETTINGS ARE CLOSED, which is the fail-closed reading: a merchant who has never touched this has not asked the internet for their customers' business details.")
   entitlementAdapter string   @description("The named adapter approval provisions through -- shopifyB2B or customerTag as this pack ships. EMPTY MEANS NONE CONFIGURED, and provisioning then refuses by name rather than silently doing nothing: a merchant who approves an application and sees no wholesale prices appear is owed the reason.")
   introText          string   @description("Optional client-authored copy the storefront shows above its application form. Data, not source. It is the only presentation this pack carries, and it carries it for the same reason reviewSettings.criteriaText does: the alternative is a client editing the pack to change a sentence.")
+  accountId          string   @description("The organization of the store's site, so its people read the store's settings. Empty on a row written before this version, until wholesaleBackfillAccounts ties it.")
+  siteId             string   @description("The v1:platform:site these settings were made for, which the organization gate judges an act on them against. Empty on a row written before this version, until the backfill.")
 }

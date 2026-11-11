@@ -118,6 +118,17 @@ const (
 	// in its args block and uses it as the row id it creates, which is what
 	// gives a client extension something to relate to.
 	ShopperSubmissionIDArg = "submissionId"
+
+	// ShopperAccountIDArg is the argument name the bff stamps the
+	// organization of the site the request arrived on into: always into the
+	// pack's construct, and into a client extension's mutation when that
+	// mutation declares it (ShopperExtension.AcceptsAccount).
+	//
+	// RESERVED, like the store: a form that could supply its own would tie a
+	// row to an organization the site is not in, and a row tier with an
+	// account arm would then admit that organization's people to it. Empty
+	// for a site with no organization, which is a legitimate state.
+	ShopperAccountIDArg = "accountId"
 )
 
 // shopperFieldDefaultMaxLength bounds a declared field that names no bound
@@ -158,6 +169,7 @@ const (
 var reservedShopperFieldNames = map[string]string{
 	"storeId":     "stamped from the binding the request arrived through (design D9)",
 	"siteId":      "stamped from the site the request arrived on",
+	"accountId":   "stamped from the organization of the site the request arrived on",
 	"ownerUserId": "stamped from the site owner, whose authority the write borrows",
 	"id":          "the row id, derived server-side",
 	"concept":     "a row intrinsic",

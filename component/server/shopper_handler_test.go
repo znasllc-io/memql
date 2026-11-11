@@ -385,3 +385,41 @@ func assertRedirect(t *testing.T, rec *httptest.ResponseRecorder, path, reason s
 		t.Fatalf("Location = %q, want reason=%s", loc, reason)
 	}
 }
+
+// THE SITE'S ORGANIZATION IS STAMPED INTO THE PACK'S ARGUMENTS, the way its
+// store and its id are, so every row a shopper writes carries the organization
+// whose people may read it.
+func TestTheHandlerStampsTheSitesAccountIntoThePacksArguments(t *testing.T) {
+	h, exec, sites := shopperFixture(t)
+	sites.site.AccountID = "acct-north"
+
+	rec := shopperPost(h, "/forms/reviews/review", "productHandle=boot&body=nice", goodStamp())
+
+	if len(exec.calls) != 1 {
+		t.Fatalf("executed %v, want one call", exec.calls)
+	}
+	if !strings.Contains(exec.calls[0], `accountId: "acct-north"`) {
+		t.Fatalf("the site's organization was not stamped into the pack's construct: %q", exec.calls[0])
+	}
+	assertRedirect(t, rec, "/reviews/thanks", "")
+}
+
+// A POSTED accountId LOSES TO THE SITE'S. It is not a declared field, so it is
+// dropped; and the stamp is written after the declared fields, so it could not
+// win even if it got that far.
+func TestAFormCannotSupplyItsOwnAccountId(t *testing.T) {
+	h, exec, sites := shopperFixture(t)
+	sites.site.AccountID = "acct-north"
+
+	shopperPost(h, "/forms/reviews/review", "productHandle=boot&body=nice&accountId=acct-other", goodStamp())
+
+	if len(exec.calls) != 1 {
+		t.Fatalf("executed %v, want one call", exec.calls)
+	}
+	if strings.Contains(exec.calls[0], "acct-other") {
+		t.Fatalf("a form-supplied accountId reached the construct: %q", exec.calls[0])
+	}
+	if !strings.Contains(exec.calls[0], `accountId: "acct-north"`) {
+		t.Fatalf("the site's organization was not stamped: %q", exec.calls[0])
+	}
+}

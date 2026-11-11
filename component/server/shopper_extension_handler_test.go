@@ -165,3 +165,63 @@ func TestAnUnextendedFormRunsOneConstruct(t *testing.T) {
 	}
 	assertRedirect(t, rec, "/reviews/thanks", "")
 }
+
+// extendReviewsWithAccount is extendReviews for an extension whose mutation
+// declares an accountId argument.
+func extendReviewsWithAccount(t *testing.T) {
+	t.Helper()
+	err := memql.RegisterShopperExtension(memql.ShopperExtension{
+		Domain: "fylo", Pack: "reviews", Form: "review",
+		Construct:      "recordFyloReviewDetail",
+		Fields:         []memql.ShopperField{{Name: "address", Required: true, MaxLength: 200}},
+		AcceptsAccount: true,
+	})
+	if err != nil {
+		t.Fatalf("setup: the extension was refused: %v", err)
+	}
+}
+
+// AN EXTENSION THAT ASKS FOR THE ACCOUNT IS HANDED THE SITE'S, so the client's
+// own row is readable by the same organization as the pack's.
+func TestTheHandlerStampsTheAccountIntoAnExtensionThatAcceptsIt(t *testing.T) {
+	h, exec, sites := shopperFixture(t)
+	sites.site.AccountID = "acct-north"
+	extendReviewsWithAccount(t)
+
+	rec := shopperPost(h, "/forms/reviews/review",
+		"productHandle=boot&body=nice&address=12+Main+St&accountId=acct-other", goodStamp())
+
+	if len(exec.calls) != 2 {
+		t.Fatalf("Execute was called %d times, want 2: %v", len(exec.calls), exec.calls)
+	}
+	if !strings.Contains(exec.calls[1], `accountId: "acct-north"`) {
+		t.Fatalf("the extension was not handed the site's organization: %s", exec.calls[1])
+	}
+	if strings.Contains(exec.calls[1], "acct-other") {
+		t.Fatalf("a form-supplied accountId reached the extension: %s", exec.calls[1])
+	}
+	assertRedirect(t, rec, "/reviews/thanks", "")
+}
+
+// AN EXTENSION THAT DECLARES NO accountId IS HANDED NONE and still writes: a
+// client mutation written before organizations reached the shopper path keeps
+// working unchanged.
+func TestAnExtensionWithoutAnAccountArgumentIsNotHandedOne(t *testing.T) {
+	h, exec, sites := shopperFixture(t)
+	sites.site.AccountID = "acct-north"
+	extendReviews(t)
+
+	rec := shopperPost(h, "/forms/reviews/review",
+		"productHandle=boot&body=nice&address=12+Main+St", goodStamp())
+
+	if len(exec.calls) != 2 {
+		t.Fatalf("Execute was called %d times, want 2: %v", len(exec.calls), exec.calls)
+	}
+	if strings.Contains(exec.calls[1], "accountId") {
+		t.Fatalf("an extension that declares no accountId was handed one: %s", exec.calls[1])
+	}
+	if !strings.Contains(exec.calls[0], `accountId: "acct-north"`) {
+		t.Fatalf("the pack's construct lost its account: %s", exec.calls[0])
+	}
+	assertRedirect(t, rec, "/reviews/thanks", "")
+}

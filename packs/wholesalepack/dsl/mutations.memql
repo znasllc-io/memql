@@ -29,15 +29,19 @@
 // owner-checked, so the @rowAuthz tiers below do not protect these rows from
 // the builtins. Each builtin authorizes its caller itself before it writes:
 //
-//   - wholesaleSubmitApplication: the store's applicationsOpen gate, then
-//     the id established absent (read as the system) and the write fenced
-//     on "row absent", so no application is ever written over;
+//   - wholesaleSubmitApplication: the store's applicationsOpen gate, an
+//     accountId refused unless it is the named site's, then the id
+//     established absent (read as the system) and the write fenced on "row
+//     absent", so no application is ever written over;
 //   - wholesaleRecordDecision: the application read under the CALLER, so a
 //     caller who cannot read it cannot decide it, then the legality fold;
 //   - wholesaleSetSettings: internal origin or a cluster operator only,
 //     and an existing row keeps its owner;
 //   - wholesaleProvisionEntitlement / wholesaleRevokeEntitlement: internal
 //     origin only (the store's automation), then the decision log.
+//   - wholesaleBackfillAccounts: internal origin or a cluster operator
+//     only, refusing everyone else before it reads; a row already tied is
+//     never rewritten.
 //
 // # ownerUserId is an ARGUMENT, accepted
 //
@@ -56,7 +60,8 @@ use wholesale.concepts.{ application, applicationDecision, entitlement, wholesal
 /// refuses outright, and a shopper who could choose a row id could
 /// overwrite another applicant's. The engine derives one.
 /// ownerUserId is the site owner whose authority the shopper handler
-/// borrowed, which is the calling actor.
+/// borrowed, which is the calling actor. accountId is the site's
+/// organization, stamped by the handler; source says how it arrived.
 @serverOnly
 @actor
 mutation application createApplicationRow {
@@ -68,9 +73,12 @@ mutation application createApplicationRow {
     companyName     string!  @maxLength(200)
     applicantName   string!  @maxLength(120)
     applicantEmail  string!  @maxLength(320)
+    accountId       string
+    source          string   @enum("storefront", "staff")
+    addedBy         string
   }
   insert {
-    accept { ownerUserId, storeId, siteId, companyName, applicantName, applicantEmail }
+    accept { ownerUserId, storeId, siteId, companyName, applicantName, applicantEmail, accountId, source, addedBy }
     stamp {
       id: args.applicationId
     }
@@ -99,9 +107,10 @@ mutation applicationDecision appendApplicationDecision {
     storeId        string!
     transition     string!  @enum("approve", "reject", "revoke")
     note           string   @maxLength(2000)
+    accountId      string
   }
   insert {
-    accept { applicationId, ownerUserId, storeId, transition, note }
+    accept { applicationId, ownerUserId, storeId, transition, note, accountId }
     stamp {
       decidedBy: actor.userId
       principalKind: "client"
@@ -124,9 +133,11 @@ mutation wholesaleSettings setWholesaleSettingsRow {
     applicationsOpen    bool!
     entitlementAdapter  string
     introText           string   @maxLength(2000)
+    accountId           string
+    siteId              string
   }
   insert {
-    accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText }
+    accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText, accountId, siteId }
     stamp {
       id: args.settingsId
     }
@@ -155,11 +166,127 @@ mutation entitlement writeEntitlementRow {
     errorCode          string
     shopifyCustomerId  string
     customerCreated    bool
+    accountId          string
   }
   insert {
-    accept { ownerUserId, applicationId, storeId, buyerEmail, adapter, state, reference, error, errorCode, shopifyCustomerId, customerCreated }
+    accept { ownerUserId, applicationId, storeId, buyerEmail, adapter, state, reference, error, errorCode, shopifyCustomerId, customerCreated, accountId }
     stamp {
       id: args.entitlementId
+    }
+  }
+}
+
+// # The backfill (U5, X19)
+//
+// Rows written before organizations reached this pack carry no accountId, so
+// the tiers' account arm admits nobody to them. wholesaleBackfillAccounts
+// ties each one, and these are its writes: ONE PER CONCEPT, each at the row's
+// OWN id with every field the row held plus the ones it lacked. The engine
+// merges a write at an existing id into the row's current version, so a field
+// named here with the value it already held changes nothing; what the write
+// adds is the tie. The builtin admits internal origin or a cluster operator
+// and nobody else, before it reads, because these writes run at internal
+// origin and the row gate does not owner-check them.
+
+/// Tie one application to its site's organization. source and addedBy are
+/// not here: no row written before this version holds either, and a field
+/// the write omits keeps its value.
+@serverOnly
+@actor
+mutation application backfillApplicationRow {
+  args {
+    applicationId   string!
+    ownerUserId     string!
+    storeId         string!
+    siteId          string
+    companyName     string!
+    applicantName   string!
+    applicantEmail  string!
+    accountId       string!
+  }
+  insert {
+    accept { ownerUserId, storeId, siteId, companyName, applicantName, applicantEmail, accountId }
+    stamp {
+      id: args.applicationId
+    }
+  }
+}
+
+/// Tie one decision to its application's organization and name its merchant.
+///
+/// decidedBy AND principalKind ARE ARGUMENTS HERE, and stamp nothing from the
+/// actor (X5): this rewrites a decision somebody else made, and stamping the
+/// actor would attribute it to whoever ran the backfill. The builtin passes
+/// the values the row already held, so the backfill changes no decision
+/// field. It runs as the application's merchant.
+@serverOnly
+@actor
+mutation applicationDecision backfillDecisionRow {
+  args {
+    decisionId     string!
+    applicationId  string!
+    ownerUserId    string!
+    storeId        string!
+    transition     string!  @enum("approve", "reject", "revoke")
+    decidedBy      string!
+    principalKind  string!  @enum("client")
+    note           string
+    accountId      string!
+  }
+  insert {
+    accept { applicationId, ownerUserId, storeId, transition, decidedBy, principalKind, note, accountId }
+    stamp {
+      id: args.decisionId
+    }
+  }
+}
+
+/// Tie one entitlement to its application's organization, with every field
+/// the row held, the empty and false ones included.
+@serverOnly
+@actor
+mutation entitlement backfillEntitlementRow {
+  args {
+    entitlementId      string!
+    ownerUserId        string!
+    applicationId      string!
+    storeId            string!
+    buyerEmail         string!
+    adapter            string!
+    state              string!  @enum("pending", "granted", "failed", "revoked")
+    reference          string
+    error              string
+    errorCode          string
+    shopifyCustomerId  string
+    customerCreated    bool
+    accountId          string!
+  }
+  insert {
+    accept { ownerUserId, applicationId, storeId, buyerEmail, adapter, state, reference, error, errorCode, shopifyCustomerId, customerCreated, accountId }
+    stamp {
+      id: args.entitlementId
+    }
+  }
+}
+
+/// Tie one store's settings to its site's organization and name the site.
+@serverOnly
+@actor
+mutation wholesaleSettings backfillSettingsRow {
+  args {
+    settingsId          string!
+    ownerUserId         string!
+    storeId             string!
+    applicationsOpen    bool!
+    entitlementAdapter  string
+    introText           string
+    accountId           string!
+    siteId              string
+  }
+  insert {
+    accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText, accountId, siteId }
+    stamp {
+      id: args.settingsId
     }
   }
 }

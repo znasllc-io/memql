@@ -313,8 +313,9 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 		BuyerEmail:    trimmed(app["applicantEmail"]),
 	}
 	owner := trimmed(app["ownerUserId"])
+	account := trimmed(app["accountId"])
 	write := func(adapterName, state string, res Outcome, code, text string) ([]memorynodes.MemoryNode, error) {
-		return p.writeEntitlement(merchant, applicationID, storeID, owner, grant,
+		return p.writeEntitlement(merchant, applicationID, storeID, owner, account, grant,
 			adapterName, state, res, code, text)
 	}
 
@@ -576,8 +577,9 @@ func (p *Provider) entitlementRow(ctx context.Context, applicationID string) (ma
 // builtin's returned nodes are the expression's value and are never
 // persisted. ownerUserId is the application's merchant, passed explicitly
 // and written as that merchant: a row owned by anybody else is invisible to
-// the merchant who granted it.
-func (p *Provider) writeEntitlement(ctx context.Context, applicationID, storeID, ownerUserID string, g Grant,
+// the merchant who granted it. accountId is the application's organization,
+// copied off it, so the people who read the application read what was granted.
+func (p *Provider) writeEntitlement(ctx context.Context, applicationID, storeID, ownerUserID, accountID string, g Grant,
 	adapterName, state string, result Outcome, errCode, errText string) ([]memorynodes.MemoryNode, error) {
 	reference := result.Reference
 	if reference == "" {
@@ -589,6 +591,7 @@ func (p *Provider) writeEntitlement(ctx context.Context, applicationID, storeID,
 	if err := p.write(ctx, "writeEntitlementRow", map[string]any{
 		"entitlementId": EntitlementRowID(applicationID),
 		"ownerUserId":   ownerUserID,
+		"accountId":     accountID,
 		"applicationId": applicationID,
 		"storeId":       storeID,
 		"buyerEmail":    g.BuyerEmail,
