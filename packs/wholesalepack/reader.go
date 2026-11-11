@@ -244,6 +244,27 @@ func slugOf(raw string) string {
 	return b.String()
 }
 
+// userIDPrefix is the canonical form's prefix for a person's id.
+const userIDPrefix = "v1:identity:user:"
+
+// userRef is a person's id in the form the read predicate matches.
+//
+// THE ROW TIER'S READ ARM COMPARES ownerUserId WITH actor.userId AS WRITTEN
+// (the filter canonicalizes @relationship fields only), and a real actor's
+// userId is canonical: the identity resolver admits only a v1:identity:user:
+// subject and keeps it whole (component/auth/identity_resolver.go), and the
+// owner the shopper handler borrows is the site row's stored owner, which the
+// engine keeps canonical. So every owner this pack copies from another row --
+// a site's, an application's, a settings row's -- is written in that form,
+// whatever form the source row used, or its merchant could not read it.
+func userRef(id string) string {
+	bare := bareID(strings.TrimSpace(id))
+	if bare == "" {
+		return ""
+	}
+	return userIDPrefix + bare
+}
+
 // write runs one of the pack's own mutations through the seam.
 func (p *Provider) write(ctx context.Context, mutation string, args map[string]any) error {
 	if p.writer == nil {

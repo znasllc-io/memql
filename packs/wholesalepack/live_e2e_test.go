@@ -160,8 +160,22 @@ func liveWholesaleEngine(t *testing.T, disabled ...string) *memql.MemQLEngine {
 
 // asSiteOwner is the borrowed authority the bff applies on the shopper path:
 // the SITE OWNER'S actor, exactly as auth.ContextWithUserActor builds it.
+//
+// IN THE FORM A REAL ACTOR CARRIES: a signed-in person's actor.userId is the
+// canonical v1:identity:user:<id> (component/auth/identity_resolver.go), and
+// the owner the edge stamps is the site row's stored, canonical owner. The
+// read predicate compares ownerUserId with actor.userId as written, so a test
+// actor in any other form would read rows no real one does.
 func asSiteOwner(userID string) context.Context {
-	return auth.ContextWithUserActor(context.Background(), userID)
+	return auth.ContextWithUserActor(context.Background(), userRef(userID))
+}
+
+// userRef is a person's id in canonical form.
+func userRef(userID string) string {
+	if strings.HasPrefix(userID, "v1:identity:user:") {
+		return userID
+	}
+	return "v1:identity:user:" + userID
 }
 
 func wsQuote(s string) string { return `"` + s + `"` }
@@ -251,7 +265,7 @@ func TestLiveE2E_TheApplicationLifecycle(t *testing.T) {
 	}
 
 	// ---- PROOF 6: ownerUserId is the MERCHANT --------------------------
-	if got, _ := live[0]["ownerUserId"].(string); got != merchant {
+	if got, _ := live[0]["ownerUserId"].(string); got != userRef(merchant) {
 		t.Fatalf("ownerUserId = %q, want the site owner %q -- the applicant is "+
 			"applicantName and applicantEmail, never an identity", got, merchant)
 	}

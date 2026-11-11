@@ -3,8 +3,10 @@ package wholesalepack
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -29,6 +31,7 @@ type fixtureReader struct {
 	asked     []string
 	readAs    []string         // the actor each read ran as, in order
 	sites     []map[string]any // sitesBoundToStore's answer
+	walk      []map[string]any // applicationsForBackfill's answer, whatever the cursor
 }
 
 func (f *fixtureReader) Rows(ctx context.Context, query string, args map[string]string) ([]map[string]any, error) {
@@ -45,6 +48,8 @@ func (f *fixtureReader) Rows(ctx context.Context, query string, args map[string]
 		return f.ents[args["applicationId"]], nil
 	case "storePlanById":
 		return f.stores[args["storeId"]], nil
+	case "applicationsForBackfill":
+		return f.walk, nil
 	case "siteById":
 		for _, site := range f.sites {
 			if bareID(trimmed(site["id"])) == bareID(args["siteId"]) {
@@ -62,6 +67,9 @@ func (f *fixtureReader) RowsWithList(ctx context.Context, query string, _ map[st
 	if query == "sitesBoundToStore" {
 		return f.sites, nil
 	}
+	if query == "applicationsForBackfill" {
+		return f.walk, nil
+	}
 	return nil, nil
 }
 
@@ -76,6 +84,8 @@ func (f *fixtureReader) RowsWithList(ctx context.Context, query string, _ map[st
 type fakeWriter struct {
 	writes []writeCall
 	err    error
+	// refuse fails one write rather than all of them.
+	refuse func(mutation string, args map[string]any) error
 }
 
 type writeCall struct {
@@ -88,6 +98,11 @@ type writeCall struct {
 func (f *fakeWriter) Write(ctx context.Context, mutation string, args map[string]any) error {
 	if f.err != nil {
 		return f.err
+	}
+	if f.refuse != nil {
+		if err := f.refuse(mutation, args); err != nil {
+			return err
+		}
 	}
 	f.writes = append(f.writes, writeCall{mutation: mutation, args: args, actor: actorOf(ctx), ctx: ctx})
 	return nil
@@ -353,7 +368,7 @@ func TestADecisionRecordsTheApplicationsMerchant(t *testing.T) {
 		t.Fatalf("recordDecision: %v", err)
 	}
 	wrote := writer.only(t, "appendApplicationDecision")
-	if wrote["ownerUserId"] != "merchant-1" {
+	if wrote["ownerUserId"] != "v1:identity:user:merchant-1" {
 		t.Fatalf("ownerUserId = %v, want the application's merchant merchant-1", wrote["ownerUserId"])
 	}
 }
@@ -620,7 +635,7 @@ func TestSettingsAreSetByAnOperatorOrInternalOriginOnly(t *testing.T) {
 			t.Fatalf("%s was refused: %v", name, err)
 		}
 		// THE EXISTING OWNER IS KEPT, never moved to whoever wrote.
-		if got := w.only(t, "setWholesaleSettingsRow")["ownerUserId"]; got != "merchant-1" {
+		if got := w.only(t, "setWholesaleSettingsRow")["ownerUserId"]; got != "v1:identity:user:merchant-1" {
 			t.Fatalf("%s's write moved the settings to %v; the existing owner merchant-1 stays", name, got)
 		}
 	}
@@ -641,10 +656,10 @@ func TestANewStoresSettingsAreOwnedByItsSitesOwner(t *testing.T) {
 		owner  string
 		refuse bool
 	}{
-		{"one owner", []map[string]any{site("merchant-1"), site("merchant-1")}, operatorCtx("operator-1"), "merchant-1", false},
+		{"one owner", []map[string]any{site("merchant-1"), site("v1:identity:user:merchant-1")}, operatorCtx("operator-1"), "v1:identity:user:merchant-1", false},
 		{"two owners", []map[string]any{site("merchant-1"), site("merchant-2")}, operatorCtx("operator-1"), "", true},
 		{"no site", nil, operatorCtx("operator-1"), "", true},
-		{"internal code, no site", nil, internalAsMerchant(), "merchant-1", false},
+		{"internal code, no site", nil, internalAsMerchant(), "v1:identity:user:merchant-1", false},
 	} {
 		w := &fakeWriter{}
 		p := &Provider{reader: &fixtureReader{sites: tc.sites}, writer: w}
@@ -743,36 +758,51 @@ func TestADecisionAndAnEntitlementCopyTheApplicationsAccount(t *testing.T) {
 	}
 }
 
-// A SUBMITTED ACCOUNT MUST BE THE SITE'S. The shopper handler stamps it from
-// the site, but any signed-in caller who reaches the builtin can name one, and
-// an application tied to an organization is readable by its people.
+// A DIRECT SUBMISSION MAY CARRY AN ACCOUNT ONLY FROM THE SITE'S OWN OWNER, ON
+// A STORE THAT SITE SERVES. Any signed-in caller who reaches the builtin can
+// name an accountId, and an application tied to an organization is readable by
+// its people; the shopper handler stamps exactly the site, its store, its
+// account and its owner, so the shopper path passes.
 func TestASubmittedAccountMustBeTheSites(t *testing.T) {
+	served := func(store string) map[string]any { return map[string]any{"storeId": store} }
 	reader := &fixtureReader{
-		settings: map[string][]map[string]any{"store-live": {{"storeId": "store-live", "applicationsOpen": true}}},
-		sites:    []map[string]any{{"id": "v1:platform:site:site-1", "accountId": "v1:accounts:account:acct-north"}},
+		settings: map[string][]map[string]any{
+			"store-live": {{"storeId": "store-live", "applicationsOpen": true}},
+			"store-b":    {{"storeId": "store-b", "applicationsOpen": true}},
+		},
+		sites: []map[string]any{
+			{"id": "v1:platform:site:site-1", "ownerUserId": "v1:identity:user:site-owner-1",
+				"accountId": "v1:accounts:account:acct-north", "binding": served("store-live")},
+			{"id": "site-b", "ownerUserId": "v1:identity:user:owner-b",
+				"accountId": "acct-b", "binding": served("store-b")},
+			{"id": "site-x", "ownerUserId": "site-owner-1",
+				"accountId": "acct-north", "binding": served("store-other")},
+		},
 	}
-	submitAs := func(siteID, account string) (*fakeWriter, error) {
+	submitAs := func(store, siteID, account string) (*fakeWriter, error) {
 		writer := &fakeWriter{}
 		p := &Provider{writer: writer, reader: reader}
 		_, err := p.submitApplication(asShopperPath(), map[string]any{
-			"storeId": "store-live", "siteId": siteID, "accountId": account, "submissionId": "sub-" + siteID + account,
+			"storeId": store, "siteId": siteID, "accountId": account, "submissionId": "sub-" + store + siteID + account,
 			"companyName": "Acme", "applicantName": "Sam", "applicantEmail": "sam@example.com",
 		}, 0)
 		return writer, err
 	}
-	for name, c := range map[string][2]string{
-		"another organization": {"site-1", "acct-south"},
-		"no site":              {"", "acct-north"},
-		"an unknown site":      {"site-9", "acct-north"},
+	for name, c := range map[string][3]string{
+		"another organization": {"store-live", "site-1", "acct-south"},
+		"no site":              {"store-live", "", "acct-north"},
+		"an unknown site":      {"store-live", "site-9", "acct-north"},
+		"B's own site and account, not B's owner": {"store-b", "site-b", "acct-b"},
+		"a site that does not serve the store":    {"store-live", "site-x", "acct-north"},
 	} {
-		writer, err := submitAs(c[0], c[1])
+		writer, err := submitAs(c[0], c[1], c[2])
 		if err == nil || len(writer.writes) != 0 {
-			t.Fatalf("%s: an account that is not the site's was written (err %v, writes %d)", name, err, len(writer.writes))
+			t.Fatalf("%s: the account was written (err %v, writes %d)", name, err, len(writer.writes))
 		}
 	}
-	writer, err := submitAs("site-1", "acct-north")
+	writer, err := submitAs("store-live", "site-1", "acct-north")
 	if err != nil {
-		t.Fatalf("the site's own organization was refused: %v", err)
+		t.Fatalf("the shopper path's own site, store, account and owner were refused: %v", err)
 	}
 	if got := writer.only(t, "createApplicationRow"); got["accountId"] != "acct-north" || got["source"] != SourceStorefront {
 		t.Fatalf("the application was written with accountId %v and source %v", got["accountId"], got["source"])
@@ -799,14 +829,118 @@ func TestTheAccountOfAnApplicationIsItsSites(t *testing.T) {
 		"no site":                      {map[string]any{"storeId": "store-9"}, []map[string]any{north}, "", UntiedNoSite},
 		"two sites":                    {map[string]any{"storeId": "store-1"}, []map[string]any{north, south}, "", UntiedTwoSites},
 		"a site with no organization":  {map[string]any{"storeId": "store-2"}, []map[string]any{bare}, "", UntiedNoAccount},
+		"its own site serves another":  {map[string]any{"storeId": "store-2", "siteId": "site-n"}, []map[string]any{north, bare}, "", UntiedForeignSite},
 	} {
 		account, reason := accountForApplication(c.app, c.sites)
 		if account != c.account || reason != c.reason {
 			t.Errorf("%s: (%q, %q), want (%q, %q)", name, account, reason, c.account, c.reason)
 		}
 	}
-	if UntiedNoSite != "no site serves this store" || UntiedTwoSites != "two sites serve this store" ||
+	if UntiedForeignSite != "its site does not serve this store" || UntiedNoSite != "no site serves this store" || UntiedTwoSites != "two sites serve this store" ||
 		UntiedNoAccount != "its site has no organization" {
 		t.Fatal("an untied reason drifted from its sentence")
+	}
+}
+
+// A COPIED OWNER IS STORED IN THE FORM THE READ PREDICATE MATCHES: the read
+// compares ownerUserId with actor.userId as written, and a real actor's userId
+// is the canonical v1:identity:user:<id>. The decision's and the entitlement's
+// owner from the application, and a new settings row's from its site, are
+// stored that way whatever form the source row used.
+func TestACopiedOwnerIsStoredInTheFormTheReadPredicateMatches(t *testing.T) {
+	registerShippedAdapters()
+	writer := &fakeWriter{}
+	reader := approvedFixture() // its application is owned by the bare "merchant-1"
+	p := &Provider{writer: writer, reader: reader, caller: &fakeCaller{}}
+	reader.decisions["app-1"] = nil
+	if _, err := p.recordDecision(auth.ContextWithUserActor(context.Background(), "staff-1"), map[string]any{
+		"applicationId": "app-1", "transition": TransitionApprove, "principalKind": PrincipalClient, "decidedBy": "staff-1",
+	}, 0); err != nil {
+		t.Fatalf("recordDecision: %v", err)
+	}
+	reader.decisions["app-1"] = []map[string]any{{"transition": TransitionApprove}}
+	if _, err := p.provisionEntitlement(internalAsMerchant(), map[string]any{"applicationId": "app-1"}, 0); err != nil {
+		t.Fatalf("provisionEntitlement: %v", err)
+	}
+	for _, m := range []string{"appendApplicationDecision", "writeEntitlementRow"} {
+		if got := writer.only(t, m)["ownerUserId"]; got != "v1:identity:user:merchant-1" {
+			t.Fatalf("%s's ownerUserId = %v, want v1:identity:user:merchant-1", m, got)
+		}
+	}
+
+	settingsWriter := &fakeWriter{}
+	sp := &Provider{writer: settingsWriter, reader: &fixtureReader{
+		sites: []map[string]any{{"id": "site-1", "ownerUserId": "merchant-2", "binding": map[string]any{"storeId": "store-new"}}},
+	}}
+	if _, err := sp.setWholesaleSettings(operatorCtx("operator-1"), map[string]any{
+		"storeId": "store-new", "applicationsOpen": true,
+	}, 0); err != nil {
+		t.Fatalf("setWholesaleSettings: %v", err)
+	}
+	if got := settingsWriter.only(t, "setWholesaleSettingsRow")["ownerUserId"]; got != "v1:identity:user:merchant-2" {
+		t.Fatalf("the new settings' ownerUserId = %v, want v1:identity:user:merchant-2", got)
+	}
+}
+
+// backfillFixture is one store served by one site of organization north.
+func backfillFixture(walk ...map[string]any) *fixtureReader {
+	return &fixtureReader{
+		walk:  walk,
+		sites: []map[string]any{{"id": "site-1", "accountId": "acct-north", "binding": map[string]any{"storeId": "store-1"}}},
+	}
+}
+
+func backfillReport(t *testing.T, p *Provider) map[string]any {
+	t.Helper()
+	return decodedBy(t)(p.backfillAccounts(operatorCtx("operator-1"), map[string]any{"storeId": "store-1"}, 0))
+}
+
+// ONE BAD ROW NEVER ABORTS THE RUN. An application with no owner, and one whose
+// write fails, are reported with why; the next is tied; the counts come back.
+func TestOneBadRowNeverAbortsTheBackfill(t *testing.T) {
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	app := func(id, owner string, i int) map[string]any {
+		return map[string]any{"id": id, "ownerUserId": owner, "storeId": "store-1", "companyName": "C",
+			"applicantName": "N", "applicantEmail": "e@example.com", "createdAt": at.Add(time.Duration(i) * time.Second)}
+	}
+	writer := &fakeWriter{refuse: func(mutation string, args map[string]any) error {
+		if args["applicationId"] == "app-broken" {
+			return errors.New("the write was refused")
+		}
+		return nil
+	}}
+	p := &Provider{writer: writer, reader: backfillFixture(
+		app("app-ownerless", "", 0), app("app-broken", "merchant-1", 1), app("app-good", "merchant-1", 2))}
+	report := backfillReport(t, p)
+	if report["tied"] != float64(1) {
+		t.Fatalf("report = %+v, want the good application tied", report)
+	}
+	untied, _ := report["untied"].([]any)
+	if len(untied) != 2 {
+		t.Fatalf("report = %+v, want the ownerless and the broken application reported", report)
+	}
+	reasons := map[string]string{}
+	for _, u := range untied {
+		m, _ := u.(map[string]any)
+		reasons[asString(m["id"])] = asString(m["reason"])
+	}
+	if reasons["app-ownerless"] != UntiedNoOwner || !strings.Contains(reasons["app-broken"], "the write was refused") {
+		t.Fatalf("untied reasons = %v", reasons)
+	}
+}
+
+// A FULL WINDOW WHOSE ROWS ALL SHARE ONE CREATION TIME cannot be walked past by
+// a createdAt cursor, and the backfill says so rather than stopping quietly.
+func TestTheBackfillWalkRefusesAWindowThatSharesOneCreationTime(t *testing.T) {
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var walk []map[string]any
+	for _, id := range []string{"app-a", "app-b", "app-c"} {
+		walk = append(walk, map[string]any{"id": id, "ownerUserId": "merchant-1", "storeId": "store-1",
+			"accountId": "acct-north", "createdAt": at})
+	}
+	p := &Provider{writer: &fakeWriter{}, reader: backfillFixture(walk...), backfillWindow: 2}
+	_, err := p.backfillAccounts(operatorCtx("operator-1"), map[string]any{"storeId": "store-1"}, 0)
+	if err == nil || !strings.Contains(err.Error(), "one creation time") {
+		t.Fatalf("a window sharing one creation time was walked or refused for another reason: %v", err)
 	}
 }

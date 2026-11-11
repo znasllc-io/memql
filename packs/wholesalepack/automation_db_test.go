@@ -183,7 +183,7 @@ func TestAClientGrantAutomationProvisionsAnApprovedApplication(t *testing.T) {
 			"merchant; the client's automation did not provision it (adapter calls: %v)",
 			fakeAdapter.callsFor(appID))
 	}
-	if got, _ := ent["ownerUserId"].(string); got != merchant {
+	if got, _ := ent["ownerUserId"].(string); got != userRef(merchant) {
 		t.Fatalf("the entitlement's ownerUserId = %q, want the application's merchant %q -- "+
 			"a row written as the automation's system actor is owned by nobody", got, merchant)
 	}
@@ -191,7 +191,7 @@ func TestAClientGrantAutomationProvisionsAnApprovedApplication(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("the adapter was called %d times for one approval, want 1: %v", len(calls), calls)
 	}
-	if calls[0] != merchant {
+	if calls[0] != userRef(merchant) {
 		t.Fatalf("the adapter ran as %q, want the application's merchant %q", calls[0], merchant)
 	}
 }

@@ -110,15 +110,15 @@ query store storePlanById {
   shape   wholesaleStorePlan
 }
 
-@description("THE BACKFILL'S WALK (U5, X19): every application of one store, or of the cluster when no store is named, read WITHOUT THE ACCOUNT ARM -- tied or not, whoever owns it -- oldest version first, one window at a time from the createdAt named by after (inclusive; the walk skips what it has seen). It answers the tied ones too, on purpose: a run that stopped after tying an application and before its decisions is finished by the next, and a second run counts what the first tied rather than finding nothing. SERVER ONLY, read as the system by wholesaleBackfillAccounts once it has admitted an operator; no client reads it.")
+@description("THE BACKFILL'S WALK (U5, X19): every application of the named store (in any form its id is stored in), or of the cluster when none is named, TIED OR NOT, whoever owns it -- oldest version first, one window at a time from the createdAt named by after (inclusive; the walk skips what it has seen). It answers the tied ones on purpose: a run that stopped after tying an application and before its decisions is finished by the next, and a second run counts what the first tied rather than finding nothing. SERVER ONLY, read as the system by wholesaleBackfillAccounts once it has admitted an operator; no client reads it.")
 @serverOnly
 @actor
-query application applicationsWithoutAccount {
+query application applicationsForBackfill {
   args {
-    storeId  string
-    after    string
+    storeIds  array
+    after     string
   }
-  filter  row => (args.storeId == nil || row.storeId == args.storeId) && (args.after == nil || row.createdAt >= args.after)
+  filter  row => (args.storeIds == nil || row.storeId in args.storeIds) && (args.after == nil || row.createdAt >= args.after)
   sort    "row.createdAt", "asc"
   paginate 200
   shape   applicationFull

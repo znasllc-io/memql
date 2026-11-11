@@ -9,12 +9,16 @@ use wholesale.builtins.{ wholesaleProvisionEntitlement }
 
 /// When the owner approves, entitle the buyer. That is Northwind's entire
 /// approval process: one person's decision, acted on immediately.
+// FIRST VERSION ONLY. The engine publishes node.created for every version of
+// a row, and a later version -- wholesaleBackfillAccounts tying the row to its
+// organization, say -- must not grant or open anything again.
 @trigger(event="node.created", concept="v1:wholesale:applicationDecision")
-@filter(row => row.transition == "approve")
+@filter(row => row.transition == "approve" && args.firstVersion == true)
 automation northwindGrantOnApproval {
   args {
     applicationId  any
     transition     any
+    firstVersion   bool
   }
   granted := builtin wholesaleProvisionEntitlement(applicationId: args.applicationId)
 }

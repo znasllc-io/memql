@@ -9,11 +9,16 @@ use wholesale.builtins.{ wholesaleProvisionEntitlement }
 
 /// A new application opens a review and puts it in front of a rep. Contoso
 /// entitles nobody at this point -- the chain has not decided yet.
+// FIRST VERSION ONLY. The engine publishes node.created for every version of
+// a row, and a later version -- wholesaleBackfillAccounts tying the row to its
+// organization, say -- must not grant or open anything again.
 @trigger(event="node.created", concept="v1:wholesale:application")
+@filter(row => args.firstVersion == true)
 automation contosoOpenReviewOnApplication {
   args {
-    id       any
-    storeId  any
+    id            any
+    storeId       any
+    firstVersion  bool
   }
   opened := mutation openContosoReview(
     reviewId: args.id,
@@ -26,11 +31,12 @@ automation contosoOpenReviewOnApplication {
 /// buyer. The trigger and the builtin are the pack's; the threshold, the
 /// ordering and the rep are Contoso's.
 @trigger(event="node.created", concept="v1:wholesale:applicationDecision")
-@filter(row => row.transition == "approve")
+@filter(row => row.transition == "approve" && args.firstVersion == true)
 automation contosoGrantAfterChain {
   args {
     applicationId  any
     transition     any
+    firstVersion   bool
   }
   granted := builtin wholesaleProvisionEntitlement(applicationId: args.applicationId)
 }

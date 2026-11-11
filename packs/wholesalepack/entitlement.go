@@ -312,7 +312,7 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 		BuyerName:     trimmed(app["applicantName"]),
 		BuyerEmail:    trimmed(app["applicantEmail"]),
 	}
-	owner := trimmed(app["ownerUserId"])
+	owner := userRef(trimmed(app["ownerUserId"]))
 	account := trimmed(app["accountId"])
 	write := func(adapterName, state string, res Outcome, code, text string) ([]memorynodes.MemoryNode, error) {
 		return p.writeEntitlement(merchant, applicationID, storeID, owner, account, grant,

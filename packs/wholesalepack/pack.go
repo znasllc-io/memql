@@ -63,6 +63,10 @@ type Provider struct {
 	reader rowReader
 	writer rowWriter
 	caller Caller
+	// backfillWindow is how many applications the backfill takes from each
+	// page of its walk; zero is the query's own window. A test seam, so a
+	// walk over more than one window needs no more than a handful of rows.
+	backfillWindow int
 }
 
 func (p *Provider) IntegrationName() string { return integrationName }

@@ -264,7 +264,7 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 	// an application tied to an organization is readable by its people.
 	account := trimmed(args["accountId"])
 	if account != "" {
-		if err := p.accountIsTheSites(ctx, trimmed(args["siteId"]), account); err != nil {
+		if err := p.accountIsTheSites(ctx, trimmed(args["siteId"]), storeID, owner, account); err != nil {
 			return nil, err
 		}
 	}
@@ -305,11 +305,14 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 	})
 }
 
-// accountIsTheSites refuses an accountId that is not the organization of the
-// named site, read as the system.
-func (p *Provider) accountIsTheSites(ctx context.Context, siteID, account string) error {
-	refused := fmt.Errorf("wholesale: accountId is stamped from the organization of the site an "+
-		"application arrives on, and %q is not that site's", account)
+// accountIsTheSites refuses an accountId unless the named site, read as the
+// system, is of that organization, serves the named store, and is owned by
+// the caller. The shopper handler stamps exactly these -- the site, its store,
+// its organization -- and borrows its owner, so the shopper path passes; a
+// direct call naming somebody else's site does not.
+func (p *Provider) accountIsTheSites(ctx context.Context, siteID, storeID, caller, account string) error {
+	refused := fmt.Errorf("wholesale: an application carries an accountId only when it arrives on "+
+		"that organization's site, from the site's owner, for a store the site serves; %q is not", account)
 	if siteID == "" {
 		return refused
 	}
@@ -318,7 +321,12 @@ func (p *Provider) accountIsTheSites(ctx context.Context, siteID, account string
 	if err != nil {
 		return err
 	}
-	if len(rows) == 0 || bareID(trimmed(rows[0]["accountId"])) != bareID(account) {
+	if len(rows) == 0 {
+		return refused
+	}
+	site := rows[0]
+	if bareID(trimmed(site["accountId"])) != bareID(account) || !servesStore(site, bareID(storeID)) ||
+		userRef(trimmed(site["ownerUserId"])) != userRef(caller) {
 		return refused
 	}
 	return nil
@@ -409,7 +417,7 @@ func (p *Provider) recordDecision(ctx context.Context, args map[string]any, _ in
 	// people who read the application read what was decided about it.
 	if err := p.write(ctx, "appendApplicationDecision", map[string]any{
 		"applicationId": applicationID,
-		"ownerUserId":   trimmed(app["ownerUserId"]),
+		"ownerUserId":   userRef(trimmed(app["ownerUserId"])),
 		"accountId":     trimmed(app["accountId"]),
 		"storeId":       storeID,
 		"transition":    transition,
@@ -552,7 +560,7 @@ func (p *Provider) settingsOwner(ctx context.Context, storeID string) (settingsP
 	}
 	if existing != nil {
 		if owner := trimmed(existing["ownerUserId"]); owner != "" {
-			return settingsPlace{owner: owner, accountID: trimmed(existing["accountId"]),
+			return settingsPlace{owner: userRef(owner), accountID: trimmed(existing["accountId"]),
 				siteID: trimmed(existing["siteId"])}, nil
 		}
 	}
@@ -562,7 +570,7 @@ func (p *Provider) settingsOwner(ctx context.Context, storeID string) (settingsP
 	}
 	owners := map[string]bool{}
 	for _, site := range sites {
-		if owner := trimmed(site["ownerUserId"]); owner != "" {
+		if owner := userRef(trimmed(site["ownerUserId"])); owner != "" {
 			owners[owner] = true
 		}
 	}
@@ -580,7 +588,7 @@ func (p *Provider) settingsOwner(ctx context.Context, storeID string) (settingsP
 	case 0:
 		if auth.OriginFromContext(ctx).IsInternal() {
 			if ac, ok := auth.AccessFromContext(ctx); ok && !ac.Synthetic && strings.TrimSpace(ac.UserId) != "" {
-				return settingsPlace{owner: strings.TrimSpace(ac.UserId)}, nil
+				return settingsPlace{owner: userRef(ac.UserId)}, nil
 			}
 		}
 		return settingsPlace{}, fmt.Errorf("wholesale: no deployable owned by a person is bound to store %q, so "+

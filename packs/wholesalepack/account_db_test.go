@@ -28,6 +28,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
@@ -220,13 +221,20 @@ func TestASubmissionOnASiteWithNoOrganizationIsWrittenWithNone(t *testing.T) {
 // settings exactly as this pack wrote them before this version: no accountId
 // anywhere, and the decision without its merchant.
 type oldRows struct {
-	merchant, store, site, appID, decisionID string
+	merchant, owner, store, site, appID, decisionID string
 }
 
+// seedOldRows writes them owned by the merchant in canonical form, as a real
+// actor wrote them.
 func seedOldRows(t *testing.T, eng *memql.MemQLEngine, merchant, store, site string) oldRows {
+	return seedOldRowsOwnedAs(t, eng, merchant, userRef(merchant), store, site)
+}
+
+// seedOldRowsOwnedAs writes them owned by owner, in whatever form it is given.
+func seedOldRowsOwnedAs(t *testing.T, eng *memql.MemQLEngine, merchant, owner, store, site string) oldRows {
 	t.Helper()
 	n := strconv.FormatInt(time.Now().UnixNano(), 36)
-	r := oldRows{merchant: merchant, store: store, site: site, appID: "old-app-" + n, decisionID: "old-dec-" + n}
+	r := oldRows{merchant: merchant, owner: owner, store: store, site: site, appID: "old-app-" + n, decisionID: "old-dec-" + n}
 	insert := func(concept, rowID string, payload map[string]any) {
 		raw, _ := json.Marshal(payload)
 		if _, err := eng.Execute(seedCtx(), `insert(`+langparser.QuoteString(concept)+`, id=`+
@@ -234,7 +242,7 @@ func seedOldRows(t *testing.T, eng *memql.MemQLEngine, merchant, store, site str
 			t.Fatalf("seed old %s: %v", concept, err)
 		}
 	}
-	app := map[string]any{"ownerUserId": merchant, "storeId": store, "companyName": "Old Trading",
+	app := map[string]any{"ownerUserId": r.owner, "storeId": store, "companyName": "Old Trading",
 		"applicantName": "Pat Old", "applicantEmail": "pat@old.example.com"}
 	if site != "" {
 		app["siteId"] = site
@@ -244,10 +252,10 @@ func seedOldRows(t *testing.T, eng *memql.MemQLEngine, merchant, store, site str
 		"storeId": store, "transition": "approve", "decidedBy": "user-old-decider-" + n,
 		"principalKind": "client", "note": "known to us"})
 	insert("v1:wholesale:entitlement", wholesalepack.EntitlementRowID(r.appID), map[string]any{
-		"ownerUserId": merchant, "applicationId": r.appID, "storeId": store, "buyerEmail": "pat@old.example.com",
+		"ownerUserId": r.owner, "applicationId": r.appID, "storeId": store, "buyerEmail": "pat@old.example.com",
 		"adapter": wholesalepack.AdapterCustomerTag, "state": "granted", "reference": "wholesale"})
 	insert("v1:wholesale:wholesaleSettings", wholesalepack.SettingsRowID(store), map[string]any{
-		"ownerUserId": merchant, "storeId": store, "applicationsOpen": true,
+		"ownerUserId": r.owner, "storeId": store, "applicationsOpen": true,
 		"entitlementAdapter": wholesalepack.AdapterCustomerTag, "introText": "Apply here."})
 	return r
 }
@@ -334,7 +342,7 @@ func TestTheBackfillTiesAnOldApplicationItsDecisionsAndItsEntitlement(t *testing
 			t.Fatalf("the decision's %s changed from %v to %v", f, beforeDecision[f], decision[f])
 		}
 	}
-	if decision["ownerUserId"] != merchant {
+	if decision["ownerUserId"] != userRef(merchant) {
 		t.Fatalf("the decision's ownerUserId = %v, want the application's merchant", decision["ownerUserId"])
 	}
 	for f, pair := range map[string][2]map[string]any{
@@ -434,4 +442,184 @@ func TestTheBackfillRefusesACallerWhoIsNotAClusterOperator(t *testing.T) {
 func asString(v any) string {
 	s, _ := v.(string)
 	return s
+}
+
+// signedIn is a person signed in as themselves: the actor the identity
+// resolver builds, whose userId is the canonical v1:identity:user:<id>.
+func signedIn(userID string) context.Context {
+	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: userRef(userID), Role: auth.RoleWriter})
+	return auth.ContextWithToken(ctx, &auth.TokenInfo{Subject: userRef(userID)})
+}
+
+// tiedStore seeds an organization and a site of it bound to a fresh store.
+func tiedStore(t *testing.T, eng *memql.MemQLEngine, label string) (merchant, store, site, account string) {
+	t.Helper()
+	merchant, store, _ = wholesaleScope()
+	n := strconv.FormatInt(time.Now().UnixNano(), 36)
+	account, site = "acct-"+label+"-"+n, "site-"+label+"-"+n
+	seedOrganization(t, eng, account)
+	seedSiteIn(t, eng, site, merchant, store, account)
+	return merchant, store, site, account
+}
+
+// contosoReviewVersions counts the stored versions of the review contoso's
+// automation opens for an application.
+func contosoReviewVersions(t *testing.T, appID string) int {
+	t.Helper()
+	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()))), pgdialect.New())
+	defer db.Close()
+	var n int
+	if err := db.NewRaw(`SELECT count(*) FROM "MemoryNodes" WHERE concept = 'v1:contoso:contosoReview' AND id LIKE ?`,
+		"%"+appID).Scan(context.Background(), &n); err != nil {
+		t.Fatalf("count contoso reviews: %v", err)
+	}
+	return n
+}
+
+// A BACKFILL SETS OFF NOTHING. Its writes are new versions of rows a client
+// triggers on, so a client automation that is not limited to a row's first
+// version would re-provision every approved application and re-open every
+// review. The fixture clients carry the first-version filter a client copies,
+// and with it the run calls the adapter no more and touches no review.
+func TestABackfillSetsOffNoClientAutomation(t *testing.T) {
+	eng := automatedWholesaleEngine(t)
+	merchant, store, _, _ := tiedStore(t, eng, "quiet")
+	ctx := asSiteOwner(merchant)
+	openApplications(t, eng, ctx, store, automationFakeAdapter)
+	appID := submit(t, eng, ctx, store, "Quiet Trading", "buyer@quiet.example.com")
+	decide(t, eng, ctx, appID, wholesalepack.TransitionApprove, merchant, "approved")
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) && (len(fakeAdapter.callsFor(appID)) < 1 || contosoReviewVersions(t, appID) < 1) {
+		time.Sleep(100 * time.Millisecond)
+	}
+	if calls := len(fakeAdapter.callsFor(appID)); calls != 1 || contosoReviewVersions(t, appID) != 1 {
+		t.Fatalf("before the backfill: %d adapter calls and %d review versions, want 1 and 1",
+			calls, contosoReviewVersions(t, appID))
+	}
+
+	report := answerOf(t, eng, asOperator("operator-"+merchant), `builtin wholesaleBackfillAccounts(storeId: `+quote(store)+`)`)
+	if countOf(report["tied"]) < 3 {
+		t.Fatalf("the backfill tied %v rows, want the application, its decision and its entitlement", report["tied"])
+	}
+	// The automations run on the bus's goroutines; give them every chance.
+	time.Sleep(3 * time.Second)
+	if calls := fakeAdapter.callsFor(appID); len(calls) != 1 {
+		t.Fatalf("the backfill re-provisioned the application: %d adapter calls, want 1", len(calls))
+	}
+	if n := contosoReviewVersions(t, appID); n != 1 {
+		t.Fatalf("the backfill re-opened the client's review: %d versions, want 1", n)
+	}
+}
+
+// A BACKFILL WRITE IS FENCED ON THE VERSION IT READ. A provision or a settings
+// change that lands between the backfill's read and its write survives, and
+// the row still ends tied.
+func TestABackfillWriteThatLosesItsFenceKeepsTheConcurrentWrite(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	merchant, store, site, account := tiedStore(t, eng, "fence")
+	r := seedOldRows(t, eng, merchant, store, site)
+	writer := auth.ContextWithInternalOrigin(asSiteOwner(merchant))
+	fired := map[string]bool{}
+	before := func(_ context.Context, mutation string, _ map[string]any) {
+		if fired[mutation] {
+			return
+		}
+		fired[mutation] = true
+		switch mutation {
+		case "backfillEntitlementRow":
+			wsExec(t, eng, writer, `writeEntitlementRow(entitlementId: `+quote(wholesalepack.EntitlementRowID(r.appID))+
+				`, ownerUserId: `+quote(userRef(merchant))+`, applicationId: `+quote(r.appID)+`, storeId: `+quote(store)+
+				`, buyerEmail: "pat@old.example.com", adapter: "customerTag", state: "granted", reference: "concurrent-ref"`+
+				`, error: "", errorCode: "", shopifyCustomerId: "", customerCreated: false, accountId: "")`)
+		case "backfillSettingsRow":
+			wsExec(t, eng, writer, `setWholesaleSettingsRow(settingsId: `+quote(wholesalepack.SettingsRowID(store))+
+				`, ownerUserId: `+quote(userRef(merchant))+`, storeId: `+quote(store)+`, applicationsOpen: true`+
+				`, entitlementAdapter: "customerTag", introText: "Concurrent text.", accountId: "", siteId: "")`)
+		}
+	}
+	if _, err := wholesalepack.BackfillForTest(asOperator("operator-"+merchant), eng,
+		map[string]any{"storeId": store}, 0, before); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	if !fired["backfillEntitlementRow"] || !fired["backfillSettingsRow"] {
+		t.Fatalf("the concurrent writes did not run: %v", fired)
+	}
+	_, ent, settings := readOld(t, eng, asSiteOwner(merchant), r)
+	if ent["reference"] != "concurrent-ref" || bareID(asString(ent["accountId"])) != account {
+		t.Fatalf("the entitlement = %+v, want the concurrent reference kept and the row tied to %s", ent, account)
+	}
+	if settings["introText"] != "Concurrent text." || bareID(asString(settings["accountId"])) != account {
+		t.Fatalf("the settings = %+v, want the concurrent text kept and the row tied to %s", settings, account)
+	}
+}
+
+// THE WALK READS PAST ITS FIRST WINDOW: with a window of two, five old
+// applications are all tied.
+func TestTheBackfillWalksPastItsFirstWindow(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	merchant, store, site, account := tiedStore(t, eng, "walk")
+	var apps []string
+	for i := 0; i < 5; i++ {
+		id := "walk-app-" + strconv.Itoa(i) + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+		raw, _ := json.Marshal(map[string]any{"ownerUserId": userRef(merchant), "storeId": store, "siteId": site,
+			"companyName": "Walk " + strconv.Itoa(i), "applicantName": "Pat", "applicantEmail": "pat@walk.example.com"})
+		wsExec(t, eng, seedCtx(), `insert("v1:wholesale:application", id=`+quote(id)+`, payload=`+string(raw)+`)`)
+		apps = append(apps, id)
+	}
+	report, err := wholesalepack.BackfillForTest(asOperator("operator-"+merchant), eng, map[string]any{"storeId": store}, 2, nil)
+	if err != nil {
+		t.Fatalf("a walk over more than one window failed: %v", err)
+	}
+	if countOf(report["tied"]) != 5 {
+		t.Fatalf("report = %+v, want all five applications tied", report)
+	}
+	for _, id := range apps {
+		rows := wsRows(t, eng, asSiteOwner(merchant), `query applicationById(applicationId: `+quote(id)+`)`)
+		if len(rows) != 1 || bareID(asString(rows[0]["accountId"])) != account {
+			t.Fatalf("application %s was not tied: %+v", id, rows)
+		}
+	}
+}
+
+// A STORE-SCOPED RUN NAMED BY THE STORE'S CANONICAL ID finds its rows, as a run
+// named by the bare id does.
+func TestAStoreScopedRunNamedByItsCanonicalIdTiesItsRows(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	merchant, store, site, _ := tiedStore(t, eng, "canon")
+	seedOldRows(t, eng, merchant, store, site)
+	report := answerOf(t, eng, asOperator("operator-"+merchant),
+		`builtin wholesaleBackfillAccounts(storeId: `+quote("v1:shopify:store:"+store)+`)`)
+	if countOf(report["tied"]) != 4 {
+		t.Fatalf("report = %+v, want the store's four rows tied", report)
+	}
+}
+
+// AN OPERATOR SETS A STORE UP, AND ITS MERCHANT, SIGNED IN AS THEMSELVES, READS
+// THE SETTINGS: the owner taken from the site is stored in the form the read
+// predicate compares with a real actor's userId.
+func TestAMerchantSignedInReadsTheSettingsAnOperatorSetUp(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	merchant, store, _, _ := tiedStore(t, eng, "setup")
+	wsExec(t, eng, asOperator("operator-"+merchant), `builtin wholesaleSetSettings(applicationsOpen: true, `+
+		`entitlementAdapter: "customerTag", storeId: `+quote(store)+`)`)
+	rows := wsRows(t, eng, signedIn(merchant), `query wholesaleSettingsForStore(storeId: `+quote(store)+`)`)
+	if len(rows) != 1 || rows[0]["ownerUserId"] != userRef(merchant) {
+		t.Fatalf("the merchant, signed in, reads %+v; want their store's settings, owned in canonical form", rows)
+	}
+}
+
+// AN OLD ROW WHOSE OWNER WAS STORED BARE is stored, once tied, in the form its
+// merchant's signed-in actor carries, so the merchant reads it.
+func TestABackfillStoresABareOwnerInTheFormItsMerchantReads(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	merchant, store, site, _ := tiedStore(t, eng, "bare")
+	r := seedOldRowsOwnedAs(t, eng, merchant, merchant, store, site)
+	backfill(t, eng, r)
+	app, ent, settings := readOld(t, eng, signedIn(merchant), r)
+	for name, row := range map[string]map[string]any{"application": app, "entitlement": ent, "settings": settings} {
+		if row["ownerUserId"] != userRef(merchant) {
+			t.Fatalf("the %s's owner = %v, want %s", name, row["ownerUserId"], userRef(merchant))
+		}
+	}
 }

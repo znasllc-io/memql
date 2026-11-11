@@ -90,7 +90,7 @@ func TestLiveE2E_OnlyAnOperatorOrInternalOriginSetsSettings(t *testing.T) {
 	}
 	row := settingsOf(t, eng, asSiteOwner(merchant), storeLive)
 	if row["applicationsOpen"] != true || row["entitlementAdapter"] != wholesalepack.AdapterCustomerTag ||
-		row["ownerUserId"] != merchant {
+		row["ownerUserId"] != userRef(merchant) {
 		t.Fatalf("the settings changed under refused calls: %+v", row)
 	}
 
@@ -101,7 +101,7 @@ func TestLiveE2E_OnlyAnOperatorOrInternalOriginSetsSettings(t *testing.T) {
 	if row["applicationsOpen"] != false {
 		t.Fatalf("the operator's change did not land: %+v", row)
 	}
-	if row["ownerUserId"] != merchant {
+	if row["ownerUserId"] != userRef(merchant) {
 		t.Fatalf("an operator's write moved the settings to %v; the store's merchant %q must keep them",
 			row["ownerUserId"], merchant)
 	}

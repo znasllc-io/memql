@@ -13,7 +13,9 @@ mutation contosoReview openContosoReview {
   insert {
     accept { applicationId, storeId, assignedRepId, chainId }
     stamp {
-      id: args.reviewId
+      // SHORT, because the automation passes the application's canonical
+      // node id, and a row id may not carry another concept's prefix.
+      id: shortId(args.reviewId)
       ownerUserId: actor.userId
     }
   }

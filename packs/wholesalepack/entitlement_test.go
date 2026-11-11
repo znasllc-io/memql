@@ -605,7 +605,7 @@ func TestProvisionReadsAsTheSystemAndWritesAsTheMerchant(t *testing.T) {
 	if writer.writes[0].actor != "merchant-1" {
 		t.Fatalf("the entitlement was written as %q, want the merchant merchant-1", writer.writes[0].actor)
 	}
-	if out["ownerUserId"] != "merchant-1" {
+	if out["ownerUserId"] != "v1:identity:user:merchant-1" {
 		t.Fatalf("the entitlement's ownerUserId = %v, want the application's merchant", out["ownerUserId"])
 	}
 

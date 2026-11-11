@@ -183,20 +183,28 @@ func TestAFieldWithNoBoundStillHasOne(t *testing.T) {
 
 // accountId IS STAMPED FROM THE SITE'S ORGANIZATION, never posted. A form that
 // could declare it could tie a row to an organization the site is not in, and
-// the row tier would then admit that organization's people to it.
+// the row tier would then admit that organization's people to it. It is refused
+// as a declared form field and as an extension's field, exactly as storeId is,
+// and the guide lists it among the stamped names.
 func TestAccountIdIsAReservedShopperName(t *testing.T) {
 	t.Cleanup(ResetShopperSurfaceForTest)
+	t.Cleanup(ResetShopperExtensions)
 	f := validForm()
 	f.Fields = []ShopperField{{Name: "accountId"}}
 	expectPanic(t, "stamped server-side", func() { RegisterShopperForm(f) })
 
-	found := false
-	for _, name := range ReservedShopperFieldNames() {
-		if name == ShopperAccountIDArg {
-			found = true
-		}
+	RegisterShopperForm(validForm())
+	err := RegisterShopperExtension(ShopperExtension{Domain: "fylo", Pack: "reviews", Form: "review",
+		Construct: "recordFyloReviewDetail", Fields: []ShopperField{{Name: "accountId"}}})
+	if err == nil || !strings.Contains(err.Error(), "stamped server-side") {
+		t.Fatalf("an extension declaring accountId as a field was not refused as stamped: %v", err)
 	}
-	if !found || ShopperAccountIDArg != "accountId" {
+
+	listed := false
+	for _, name := range ReservedShopperFieldNames() {
+		listed = listed || name == "accountId"
+	}
+	if !listed {
 		t.Fatalf("accountId is not among the reserved shopper names: %v", ReservedShopperFieldNames())
 	}
 }
