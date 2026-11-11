@@ -3,6 +3,7 @@ package shopify
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 )
 
 // watch_test.go -- the watch over every store's verdict, and the two emails.
@@ -119,10 +121,10 @@ func TestTheSameEpisodeIsNeverMailedTwice(t *testing.T) {
 			t.Errorf("at %s the episode already mailed was mailed again", at)
 		}
 	}
-	// A new episode -- the state changed, so since moved -- is a new alert.
+	// A move to not connected is the same episode: no second alert.
 	gone := verdictIn(VerdictNotConnected, watchNow.Add(-40*time.Minute))
-	if !planWatch(recordedAs(v, mailedFor(since)), gone, defaultStoreAlertWait, watchNow).Alert {
-		t.Error("a new episode, 40 minutes old, was not alerted because an older one was")
+	if planWatch(recordedAs(v, mailedFor(since)), gone, defaultStoreAlertWait, watchNow).Alert {
+		t.Error("a move from needs attention to not connected was alerted as a new episode")
 	}
 }
 
@@ -319,9 +321,11 @@ func TestAnAlertTheOutboxRefusedIsNamedOnTheVerdict(t *testing.T) {
 	since := watchNow.Add(-2 * time.Hour)
 	v := verdictIn(VerdictNeedsAttention, since)
 	h := watchHarness(t, "user-1", recordedAs(v, mailedFor(since)))
+	// The outbound worker's own refusal (component/outbound/worker.go).
+	refusal := fmt.Errorf("target %q not in email allowlist", "owner@example.com").Error()
 	h.engine.setRows("outboundRequestById", []map[string]any{{
 		"id": alertRequestID(testStoreID, verdictStamp(since)), "status": "failed",
-		"lastError": "email target is not on the deployment's allowlist",
+		"target": "owner@example.com", "lastError": refusal,
 	}})
 	if err := h.conn.watchStoreVerdict(context.Background(), h.store(t), v, defaultStoreAlertWait); err != nil {
 		t.Fatal(err)
@@ -334,9 +338,36 @@ func TestAnAlertTheOutboxRefusedIsNamedOnTheVerdict(t *testing.T) {
 	if len(writes) != 1 {
 		t.Fatalf("recordStoreHealth ran %d times, want 1", len(writes))
 	}
-	want := `"alert": {"reason": "email target is not on the deployment's allowlist", "state": "failed"}`
+	want := `"alert": {"reason": "target \"the owner's address\" not in email allowlist", "state": "failed"}`
 	if !strings.Contains(writes[0], want) {
 		t.Errorf("the outbox's refusal is not on the verdict:\n%s\nwant %s", writes[0], want)
+	}
+	if strings.Contains(writes[0], "@") {
+		t.Errorf("an address reached the store row:\n%s", writes[0])
+	}
+
+	// The row's target in another case than the text, and a reason that
+	// names no address at all.
+	for target, lastError := range map[string]string{
+		"Owner@Example.com": refusal,
+		"owner@example.com": "medium disabled by deployment config (MEMQL_OUTBOUND_EMAIL_ALLOWLIST empty)",
+	} {
+		hc := watchHarness(t, "user-1", recordedAs(v, mailedFor(since)))
+		hc.engine.setRows("outboundRequestById", []map[string]any{{"id": "x", "status": "failed", "target": target, "lastError": lastError}})
+		if err := hc.conn.watchStoreVerdict(context.Background(), hc.store(t), v, defaultStoreAlertWait); err != nil {
+			t.Fatal(err)
+		}
+		w := hc.engine.callsTo("recordStoreHealth")
+		if len(w) != 1 || strings.Contains(w[0], "@") {
+			t.Errorf("target %s, %q: writes = %v; want one, with no address", target, lastError, w)
+			continue
+		}
+		if !strings.Contains(lastError, "@") && !strings.Contains(w[0], `"reason": "`+lastError+`"`) {
+			t.Errorf("a reason with no address was changed: %s", w[0])
+		}
+		if strings.Contains(lastError, "@") && !strings.Contains(w[0], "not in email allowlist") {
+			t.Errorf("the scrubbed reason no longer says the allowlist refused it: %s", w[0])
+		}
 	}
 	if len(h.engine.callsTo("stageServerOutboundRequest")) != 0 {
 		t.Error("a refused alert was staged again")
@@ -362,6 +393,30 @@ func TestAnAlertTheOutboxRefusedIsNamedOnTheVerdict(t *testing.T) {
 	}
 }
 
+func TestAStagedAlertWhoseRowIsGoneIsFailed(t *testing.T) {
+	since := watchNow.Add(-2 * time.Hour)
+	v := verdictIn(VerdictNeedsAttention, since)
+	h := watchHarness(t, "user-1", recordedAs(v, mailedFor(since)))
+	h.engine.setRows("outboundRequestById", nil)
+	if err := h.conn.watchStoreVerdict(context.Background(), h.store(t), v, defaultStoreAlertWait); err != nil {
+		t.Fatal(err)
+	}
+	want := `"alert": {"reason": "The outbox holds no record of this email.", "state": "failed"}`
+	if w := h.engine.callsTo("recordStoreHealth"); len(w) != 1 || !strings.Contains(w[0], want) {
+		t.Errorf("writes = %v, want %s", w, want)
+	}
+
+	// A read that failed decides nothing.
+	he := watchHarness(t, "user-1", recordedAs(v, mailedFor(since)))
+	he.engine.fail["outboundRequestById"] = errString("unreadable")
+	if err := he.conn.watchStoreVerdict(context.Background(), he.store(t), v, defaultStoreAlertWait); err == nil {
+		t.Error("a failed read-back was not reported")
+	}
+	if w := he.engine.callsTo("recordStoreHealth"); len(w) != 0 {
+		t.Errorf("a failed read-back changed the verdict: %v", w)
+	}
+}
+
 func TestAStoreWithNoOwnerSaysNobodyWasTold(t *testing.T) {
 	since := watchNow.Add(-time.Hour)
 	v := verdictIn(VerdictNeedsAttention, since)
@@ -371,6 +426,9 @@ func TestAStoreWithNoOwnerSaysNobodyWasTold(t *testing.T) {
 			h.engine.setRows("userByIdSystem", []map[string]any{{"id": "v1:identity:user:user-1", "role": "writer", "active": true, "primaryEmail": ""}})
 		},
 		"no such person": func(h *testHarness) { h.engine.setRows("userByIdSystem", nil) },
+		"deactivated": func(h *testHarness) {
+			h.engine.setRows("userByIdSystem", []map[string]any{{"id": "v1:identity:user:user-1", "role": "writer", "active": false, "primaryEmail": "owner@example.com"}})
+		},
 	} {
 		owner := "user-1"
 		if name == "no owner" {
@@ -398,7 +456,8 @@ func TestAStoreWithNoOwnerSaysNobodyWasTold(t *testing.T) {
 func TestTheAlertCarriesNoOrderAndNoCustomer(t *testing.T) {
 	since := time.Date(2026, 11, 11, 10, 15, 0, 0, time.UTC)
 	v := verdictIn(VerdictNeedsAttention, since)
-	subject, body := alertEmail(v, "https://os.example.test")
+	v.Reasons = append(v.Reasons, VerdictReason{Code: ReasonCheckFailing, Sentence: "The last check of orders failed", Detail: "HTTP 500."})
+	subject, body := alertEmail(v, verdictStamp(since), "https://os.example.test")
 	if subject != "acme-widgets.myshopify.com is not being recorded" {
 		t.Errorf("subject = %q", subject)
 	}
@@ -406,12 +465,16 @@ func TestTheAlertCarriesNoOrderAndNoCustomer(t *testing.T) {
 		"\n" +
 		"Shopify is not sending every change.\n" +
 		"3 changes could not be recorded.\n" +
+		"The last check of orders failed.\n" +
 		"\n" +
 		"Open the storefront's Store page in MemQL OS to see what fixes it: https://os.example.test/\n" +
 		"\n" +
 		"This email carries no order and nothing about a customer."
 	if body != wantBody {
 		t.Errorf("body =\n%s\nwant\n%s", body, wantBody)
+	}
+	if v.Reasons[2].Sentence != "The last check of orders failed" {
+		t.Error("the verdict's own sentence was changed")
 	}
 	if strings.Contains(body, "orders/create: refused") {
 		t.Error("the body carries a reason's detail; only its sentence travels")
@@ -514,6 +577,7 @@ func TestAnUnchangedVerdictIsNotWrittenAgain(t *testing.T) {
 		"mailedFor":    func(r map[string]any) { r["mailedFor"] = verdictStamp(since) },
 		"recoveredFor": func(r map[string]any) { r["recoveredFor"] = verdictStamp(since) },
 		"alert":        func(r map[string]any) { r["alert"] = map[string]any{"state": AlertSent, "reason": ""} },
+		"episode":      func(r map[string]any) { r["episode"] = watchNow.Format(time.RFC3339) },
 	} {
 		if !verdictRecordChanged(recordedAs(v, edit), recordOf(v, nil)) {
 			t.Errorf("a different %s does not count as changed", name)
@@ -542,7 +606,7 @@ func TestAnUnchangedVerdictIsNotWrittenAgain(t *testing.T) {
 	}
 	for _, want := range []string{
 		`"ordersFrom": "2026-09-12"`, `"state": "needs attention"`, `"reasons": ["events_not_registered", "changes_not_recorded"]`,
-		`"since": "2026-11-11T11:50:00Z"`, `"resumedAt": ""`, `"mailedFor": ""`, `"recoveredFor": ""`,
+		`"since": "2026-11-11T11:50:00Z"`, `"episode": "2026-11-11T11:50:00Z"`, `"resumedAt": ""`, `"mailedFor": ""`, `"recoveredFor": ""`,
 		`"alert": {"reason": "", "state": "none"}`,
 	} {
 		if !strings.Contains(w[0], want) {
@@ -674,16 +738,236 @@ func TestAStagingFailureDoesNotLogTheOwnersAddress(t *testing.T) {
 	since := watchNow.Add(-time.Hour)
 	v := verdictIn(VerdictNeedsAttention, since)
 	h := watchHarness(t, "user-1", recordedAs(v))
-	h.engine.fail["stageServerOutboundRequest"] = errString(`refused: stageServerOutboundRequest(target: "owner@example.com")`)
-	err := h.conn.watchStoreVerdict(context.Background(), h.store(t), v, defaultStoreAlertWait)
-	if err == nil {
-		t.Fatal("a failed staging was not reported")
-	}
-	if strings.Contains(err.Error(), "owner@example.com") {
-		t.Errorf("the error carries the owner's address: %v", err)
+	for _, text := range []string{
+		`refused: stageServerOutboundRequest(target: "owner@example.com")`,
+		`refused near 'OWNER@EXAMPLE.COM', at <owner@example.com>.`,
+	} {
+		h.engine.fail["stageServerOutboundRequest"] = errString(text)
+		err := h.conn.watchStoreVerdict(context.Background(), h.store(t), v, defaultStoreAlertWait)
+		if err == nil {
+			t.Fatal("a failed staging was not reported")
+		}
+		if strings.Contains(err.Error(), "@") {
+			t.Errorf("the error carries an address: %v", err)
+		}
 	}
 	// The episode stays unmailed, so the next pass tries again.
 	if w := h.engine.callsTo("recordStoreHealth"); len(w) != 0 {
 		t.Errorf("a verdict that only failed to mail was rewritten: %v", w)
+	}
+}
+
+// passAt runs planWatch as one pass at now over what the last pass recorded,
+// and applies a staged alert or recovery as the executor would.
+func passAt(t *testing.T, previous map[string]any, state string, since, now time.Time) (watchPlan, map[string]any) {
+	t.Helper()
+	plan := planWatch(previous, verdictIn(state, since), defaultStoreAlertWait, now)
+	rec := plan.Record
+	if plan.Alert {
+		rec.alertStaged(rec.Episode)
+	}
+	if plan.Recover != "" {
+		rec.recovered(plan.Recover)
+	}
+	return plan, rec.payload()
+}
+
+func TestAMoveBetweenTheTwoStatesIsOneEpisode(t *testing.T) {
+	start := watchNow
+	rec := recordedAs(verdictIn(VerdictNeedsAttention, start))
+	plan, rec := passAt(t, rec, VerdictNeedsAttention, start, start.Add(35*time.Minute))
+	if !plan.Alert || plan.Record.Episode != verdictStamp(start) {
+		t.Fatalf("35 minutes in: %+v, want one alert for the episode begun at %s", plan, verdictStamp(start))
+	}
+	moved := start.Add(40 * time.Minute)
+	for _, at := range []time.Time{moved, moved.Add(time.Hour), moved.Add(24 * time.Hour)} {
+		plan, rec = passAt(t, rec, VerdictNotConnected, moved, at)
+		if plan.Alert {
+			t.Fatalf("at %s, not connected after needs attention: a second alert", at)
+		}
+		if plan.Record.Episode != verdictStamp(start) || plan.Record.Since != verdictStamp(moved) {
+			t.Fatalf("episode %q since %q, want the episode kept and since moved", plan.Record.Episode, plan.Record.Since)
+		}
+	}
+	back := moved.Add(25 * time.Hour)
+	plan, _ = passAt(t, rec, VerdictRecording, back, back)
+	if plan.Recover != verdictStamp(start) {
+		t.Fatalf("recover = %q, want the episode begun at %s", plan.Recover, verdictStamp(start))
+	}
+	if _, body := recoveryEmail(watchDomain, plan.Recover, back); !strings.Contains(body, "from "+start.Format(time.RFC1123)+" to") {
+		t.Errorf("the recovery does not count from the first state's start: %s", body)
+	}
+	if plan.Record.Episode != "" {
+		t.Errorf("a recording store carries episode %q", plan.Record.Episode)
+	}
+}
+
+func TestAPauseOrAStartBreaksTheEpisode(t *testing.T) {
+	for _, between := range []string{VerdictPaused, VerdictStarting} {
+		start := watchNow
+		rec := recordedAs(verdictIn(VerdictNeedsAttention, start))
+		_, rec = passAt(t, rec, VerdictNeedsAttention, start, start.Add(35*time.Minute))
+		_, rec = passAt(t, rec, between, start.Add(40*time.Minute), start.Add(40*time.Minute))
+		again := start.Add(50 * time.Minute)
+		plan, rec := passAt(t, rec, VerdictNeedsAttention, again, again)
+		if plan.Record.Episode != verdictStamp(again) {
+			t.Fatalf("%s: episode %q, want a new one begun at %s", between, plan.Record.Episode, verdictStamp(again))
+		}
+		if plan, _ = passAt(t, rec, VerdictNeedsAttention, again, again.Add(29*time.Minute)); plan.Alert {
+			t.Errorf("%s: the new episode was alerted before its wait", between)
+		}
+		if plan, _ = passAt(t, rec, VerdictNeedsAttention, again, again.Add(30*time.Minute)); !plan.Alert {
+			t.Errorf("%s: the new episode was not alerted after its wait", between)
+		}
+	}
+}
+
+func TestTheWaitCountsFromTheEpisodesStart(t *testing.T) {
+	start := watchNow
+	rec := recordedAs(verdictIn(VerdictNeedsAttention, start))
+	moved := start.Add(25 * time.Minute)
+	plan, rec := passAt(t, rec, VerdictNotConnected, moved, moved)
+	if plan.Alert {
+		t.Fatal("alerted 25 minutes in")
+	}
+	if plan, _ = passAt(t, rec, VerdictNotConnected, moved, start.Add(29*time.Minute)); plan.Alert {
+		t.Error("alerted 29 minutes into the episode")
+	}
+	plan, _ = passAt(t, rec, VerdictNotConnected, moved, start.Add(30*time.Minute))
+	if !plan.Alert {
+		t.Fatal("not alerted 30 minutes after the episode began, 5 after the move")
+	}
+	if id := alertRequestID(testStoreID, plan.Record.Episode); id != "shopify-store-alert-acme-20261111T120000Z" {
+		t.Errorf("request id = %s, want it stamped with the episode's start", id)
+	}
+	if _, body := alertEmail(verdictIn(VerdictNotConnected, moved), plan.Record.Episode, ""); !strings.Contains(body, "since "+start.Format(time.RFC1123)+".") {
+		t.Errorf("the alert does not say since the episode began: %s", body)
+	}
+}
+
+func TestARecordWithoutAnEpisodeReadsItsSince(t *testing.T) {
+	start := watchNow.Add(-time.Hour)
+	old := recordedAs(verdictIn(VerdictNeedsAttention, start), func(r map[string]any) { delete(r, "episode") })
+	plan := planWatch(old, verdictIn(VerdictNotConnected, watchNow), defaultStoreAlertWait, watchNow)
+	if plan.Record.Episode != verdictStamp(start) || !plan.Alert {
+		t.Errorf("episode %q alert %t, want the old record's since %s and an alert", plan.Record.Episode, plan.Alert, verdictStamp(start))
+	}
+}
+
+func TestANewEpisodeStartsWithNoAlert(t *testing.T) {
+	start := watchNow
+	failed := recordedAs(verdictIn(VerdictNeedsAttention, start), func(r map[string]any) {
+		r["alert"] = map[string]any{"state": AlertFailed, "reason": noOwnerToTell}
+	})
+	_, paused := passAt(t, failed, VerdictPaused, start.Add(time.Hour), start.Add(time.Hour))
+	if a := paused["alert"].(map[string]any); a["state"] != AlertFailed {
+		t.Fatalf("a pause cleared the recorded alert: %v", a)
+	}
+	again := start.Add(2 * time.Hour)
+	plan := planWatch(paused, verdictIn(VerdictNeedsAttention, again), defaultStoreAlertWait, again)
+	if plan.Record.AlertState != AlertNone || plan.Record.AlertReason != "" {
+		t.Errorf("the new episode's first pass reads alert %q %q, want none", plan.Record.AlertState, plan.Record.AlertReason)
+	}
+
+	// The reply serves the alert only while the store is not recorded.
+	sent := func(state string) Store {
+		return Store{Health: map[string]any{"verdict": map[string]any{"state": state, "alert": map[string]any{"state": AlertSent, "reason": ""}}}}
+	}
+	for state, want := range map[string]string{VerdictRecording: AlertNone, VerdictPaused: AlertNone, VerdictStarting: AlertNone, VerdictNeedsAttention: AlertSent, VerdictNotConnected: AlertSent} {
+		if got := recordedAlert(sent(state))["state"]; got != want {
+			t.Errorf("%s: the reply's alert = %v, want %s", state, got, want)
+		}
+	}
+}
+
+func TestAnInactiveAlertWaitIsNotRead(t *testing.T) {
+	h := newHarness(t)
+	h.engine.setRows(namedRowsQuery(conceptGlobalVariable, storeAlertWaitVariable), []map[string]any{{
+		"id": variableRowID(storeAlertWaitVariable), "name": storeAlertWaitVariable, "value": "5", "active": false,
+	}})
+	if got := h.conn.storeAlertWait(context.Background()); got != 30*time.Minute {
+		t.Errorf("an inactive wait of 5 read as %s, want the default 30m", got)
+	}
+}
+
+// watchedEngine keeps what a pass records: a recordStoreHealth write
+// replaces the store row's health, so the next pass reads it. It answers
+// every sync-state read with a domain swept a minute ago, so a store with no
+// other reason records.
+type watchedEngine struct {
+	*fakeEngine
+	h      *testHarness
+	row    map[string]any
+	states map[string]string
+}
+
+func (e *watchedEngine) Execute(ctx context.Context, q string) (*memql.ExecuteResult, error) {
+	switch callName(q) {
+	case "syncStateById":
+		var id string
+		_ = json.Unmarshal([]byte(strings.TrimSuffix(strings.TrimPrefix(q, "syncStateById(stateId: "), ")")), &id)
+		if concept, ok := e.states[id]; ok {
+			at := e.h.now.Add(-time.Minute).Format(time.RFC3339)
+			return resultWithRows([]map[string]any{{"conceptId": concept, "partitionKey": testStoreID, "backfillStatus": "complete", "lastReconcileAt": at, "lastAttemptAt": at}}), nil
+		}
+	case "recordStoreHealth":
+		body := strings.TrimPrefix(q, "recordStoreHealth(health: ")
+		body = body[:strings.LastIndex(body, ", storeId: ")]
+		var health map[string]any
+		if err := json.Unmarshal([]byte(body), &health); err != nil {
+			return nil, fmt.Errorf("the harness could not read the health it was sent: %w", err)
+		}
+		e.fakeEngine.mu.Lock()
+		e.row["health"] = health
+		e.fakeEngine.mu.Unlock()
+	}
+	return e.fakeEngine.Execute(ctx, q)
+}
+
+func TestTheWatchKeepsOneEpisodeAcrossPasses(t *testing.T) {
+	h := watchHarness(t, "user-1", nil)
+	row := h.engine.rows["stores"][0]
+	unreadable := map[string]any{"desired": 1, "existing": 0, "created": []any{}, "removed": []any{}, "failed": []any{subscriptionsUnreadable}}
+	row["health"].(map[string]any)["subscriptions"] = unreadable
+	engine := &watchedEngine{fakeEngine: h.engine, h: h, row: row, states: map[string]string{}}
+	for _, concept := range verdictDomains(h.store(t)) {
+		engine.states[memqlsync.StateID(concept, ConnectorName, string(memqlsync.DirectionInbound), testStoreID)] = concept
+	}
+	h.conn.engine = engine
+	h.conn.stores.engine = engine
+
+	start := watchNow
+	pass := func(at time.Time) {
+		t.Helper()
+		h.now = at
+		if err := h.conn.WatchStores(context.Background()); err != nil {
+			t.Fatalf("pass at %s: %v", at, err)
+		}
+	}
+	staged := func() []string { return h.engine.callsTo("stageServerOutboundRequest") }
+
+	pass(start)
+	pass(start.Add(35 * time.Minute))
+	if got := staged(); len(got) != 1 || !strings.Contains(got[0], "shopify-store-alert-acme-20261111T120000Z") {
+		t.Fatalf("35 minutes of needs attention staged %v, want one alert", got)
+	}
+
+	// Disconnected: the same episode.
+	row["uninstalledAt"] = start.Add(40 * time.Minute).Format(time.RFC3339)
+	pass(start.Add(40 * time.Minute))
+	pass(start.Add(3 * time.Hour))
+	if got := staged(); len(got) != 1 {
+		t.Fatalf("not connected after needs attention staged %d emails, want still the one alert", len(got))
+	}
+
+	// Recording again: one recovery, from the first state's start.
+	delete(row, "uninstalledAt")
+	delete(row["health"].(map[string]any), "subscriptions")
+	pass(start.Add(4 * time.Hour))
+	pass(start.Add(4*time.Hour + 5*time.Minute))
+	got := staged()
+	if len(got) != 2 || !strings.Contains(got[1], "shopify-store-recovered-acme-20261111T120000Z") ||
+		!strings.Contains(got[1], "from "+start.Format(time.RFC1123)+" to") {
+		t.Fatalf("staged %v, want one recovery counted from %s", got, start.Format(time.RFC1123))
 	}
 }

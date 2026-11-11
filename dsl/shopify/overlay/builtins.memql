@@ -78,9 +78,9 @@ builtin shopifyStoreRetryDeliveries {
 }
 
 /// The store watch: one pass computes every store's verdict, records it on the store's health as
-/// `verdict` {state, reasons, since, resumedAt, mailedFor, recoveredFor, alert {state, reason}}, and
-/// stages one email to the store's owner when the store has needed attention or been disconnected for
-/// the alert wait, and one when it is recording again. Driven by the watchShopifyStores automation, so
+/// `verdict` {state, reasons, since, episode, resumedAt, mailedFor, recoveredFor, alert {state, reason}},
+/// and stages one email to the store's owner when an episode -- needs attention and not connected, in
+/// any order, unbroken -- has lasted the alert wait, and one when the store is recording again. Driven by the watchShopifyStores automation, so
 /// it carries no @sdk and refuses a call without internal origin in its handler.
 @executor("integration.shopify.watchStores")
 @description("One pass of the store watch: compute every store's verdict, record it on the store's health, and email the store's owner once when it has needed attention or been disconnected for the alert wait and once when it is recording again. Only the engine reaches it: a call without internal origin is refused.")
