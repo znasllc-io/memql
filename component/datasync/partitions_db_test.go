@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 )
 
 // partitions_db_test.go -- partitioned health rows through a real engine.
@@ -155,5 +157,80 @@ func TestSyncStatesReadsPastTheFirstPage(t *testing.T) {
 	}
 	if len(seen) != n {
 		t.Fatalf("SyncStates read %d distinct partitions (%d rows), want %d -- it stopped at the first page", len(seen), len(states), n)
+	}
+}
+
+// A queued backfill is carried to complete by the continuing pass, through a
+// real engine: the queue lands, syncStatesBackfilling lists the row while it
+// is queued or running and only at its current version, and drops it once it
+// is complete although every earlier version of it was running.
+func TestAQueuedBackfillRunsToCompleteAgainstARealEngine(t *testing.T) {
+	eng, db := healthEngine(t)
+	if eng == nil {
+		return
+	}
+	store := NewStore(engineSeam{eng})
+	ctx := OperatorContext(context.Background())
+	connector := fmt.Sprintf("dbtest-continue-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(),
+			`DELETE FROM "MemoryNodes" WHERE concept = 'v1:platform:syncState' AND payload->>'connector' = $1`, connector)
+	})
+
+	c := mirrorConnector(
+		memqlsync.BackfillPage{NextCursor: "c-1"},
+		memqlsync.BackfillPage{NextCursor: "c-2"},
+		memqlsync.BackfillPage{Done: true},
+	)
+	c.name = connector
+	r := NewRunner(store, NewApplier(store, newFakeWriter()), discardLogger())
+	r.lookup = func(name string) (memqlsync.Connector, bool) { return c, name == connector }
+	r.bound = func() []string { return []string{connector} }
+	r.maxPages = 1
+
+	backfilling := func() []map[string]any {
+		t.Helper()
+		rows, err := store.rows(ctx, call("query", "syncStatesBackfilling", arg{"connector", connector}))
+		if err != nil {
+			t.Fatalf("syncStatesBackfilling: %v", err)
+		}
+		return rows
+	}
+
+	if err := r.QueueBackfill(ctx, connector, testMirrorConcept, ""); err != nil {
+		t.Fatalf("QueueBackfill: %v", err)
+	}
+	if rows := backfilling(); len(rows) != 1 || stringField(rows[0], "backfillStatus") != "queued" {
+		t.Fatalf("syncStatesBackfilling after the queue = %v, want the one queued row", rows)
+	}
+
+	var total ContinueResult
+	for i := 0; i < 3; i++ {
+		res, err := r.ContinueBackfills(ctx)
+		if err != nil {
+			t.Fatalf("ContinueBackfills %d: %v", i+1, err)
+		}
+		total.Started += res.Started
+		total.Advanced += res.Advanced
+		total.Completed += res.Completed
+		if i == 1 {
+			rows := backfilling()
+			if len(rows) != 1 || stringField(rows[0], "backfillStatus") != "running" || stringField(rows[0], "backfillCursor") != "c-2" {
+				t.Fatalf("syncStatesBackfilling mid-way = %v, want one row, running at its current cursor", rows)
+			}
+		}
+	}
+	if total != (ContinueResult{Started: 1, Advanced: 1, Completed: 1}) {
+		t.Errorf("three calls = %+v, want started, advanced, completed", total)
+	}
+	st, err := store.SyncStateFor(ctx, testMirrorConcept, connector, "inbound", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.BackfillStatus != "complete" {
+		t.Fatalf("status = %q after three calls, want complete", st.BackfillStatus)
+	}
+	if rows := backfilling(); len(rows) != 0 {
+		t.Fatalf("syncStatesBackfilling still lists a complete row: %v -- a list returning an older version would continue it forever", rows)
 	}
 }

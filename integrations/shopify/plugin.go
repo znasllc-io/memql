@@ -7,6 +7,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/memql"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
+	"github.com/znasllc-io/memql/integrations/shopify/generated"
 )
 
 // plugin.go -- registration.
@@ -63,8 +64,9 @@ func init() {
 }
 
 // Bootstrap runs the connector's start-up work: seed the first store from
-// the environment if there is one and no store exists, then bring every
-// store's subscriptions in line.
+// the environment if there is one and no store exists, bring every store's
+// subscriptions in line, then queue the backfills of the domains no backfill
+// ever reached.
 //
 // Called from the node's boot sequence rather than from the plug-in
 // factory, because both steps talk to the network and to the database,
@@ -88,5 +90,46 @@ func Bootstrap(ctx context.Context, i *Integration, logger *slog.Logger) {
 		// the runtime's daily pass, and refusing to start would turn a
 		// Shopify outage into a MemQL one.
 		logger.Warn("shopify: subscription reconcile at boot failed", "error", err)
+	}
+	c.queueUnstartedBackfills(ctx)
+}
+
+// queueUnstartedBackfills is how a store connected before backfills were
+// queued gets its past: for each store that ingests, every bulk domain of its
+// connection that has no sync-state row of that store's own is queued for
+// the continuing pass.
+//
+// A domain that has its row is left alone, whatever the row says -- complete,
+// refused, paused -- so a second boot and a second node queue nothing more.
+// Each domain's row is read BY ID (memqlsync.StateID), as store health reads
+// it, never by walking syncStatesAll: those rows are the append-only history.
+func (c *Connector) queueUnstartedBackfills(ctx context.Context) {
+	stores, err := c.stores.Stores(ctx)
+	if err != nil {
+		c.logger.Warn("shopify: could not list the stores at boot; their backfills are queued at the next", "error", err.Error())
+		return
+	}
+	for _, store := range stores {
+		if !store.Ingests() {
+			continue
+		}
+		for _, concept := range generated.ApplyOrder {
+			spec := generated.Types[concept]
+			if !bulkDomain(spec) || !domainInConnection(store, spec) {
+				continue
+			}
+			stateID := memqlsync.StateID(generated.ConceptID(concept), ConnectorName, string(memqlsync.DirectionInbound), store.ID)
+			res, err := c.engine.Execute(operatorContext(ctx), renderCall("syncStateById", map[string]any{"stateId": stateID}))
+			if err != nil {
+				c.logger.Warn("shopify: could not read a domain's sync state at boot; it is not queued", "store", store.ID, "concept", concept, "error", err.Error())
+				continue
+			}
+			if rows := memql.MaterializeRows(res); len(rows) > 0 && mapString(rows[0], "conceptId") != "" {
+				continue
+			}
+			if err := c.queueBackfill(ctx, store.ID, concept); err != nil {
+				c.logger.Warn("shopify: could not queue a backfill at boot", "store", store.ID, "concept", concept, "error", err.Error())
+			}
+		}
 	}
 }

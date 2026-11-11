@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/integrations/shopify/generated"
 )
 
@@ -365,13 +366,10 @@ func sameFields(a, b []string) bool {
 	return true
 }
 
-// recordSubscriptionHealth folds a reconcile report into the store's health.
+// recordSubscriptionHealth folds a reconcile report into the store's health,
+// as its `subscriptions` key.
 func (c *Connector) recordSubscriptionHealth(ctx context.Context, store Store, report SubscriptionReport) error {
-	health := map[string]any{}
-	for k, v := range store.Health {
-		health[k] = v
-	}
-	health["subscriptions"] = map[string]any{
+	subscriptions := map[string]any{
 		"desired":    report.Desired,
 		"existing":   report.Existing,
 		"created":    toAny(report.Created),
@@ -382,15 +380,40 @@ func (c *Connector) recordSubscriptionHealth(ctx context.Context, store Store, r
 		"at":         report.At.Format(time.RFC3339),
 	}
 	if report.DeliveredAtVersion != "" {
-		subscriptions := health["subscriptions"].(map[string]any)
 		subscriptions["deliveredAtVersion"] = report.DeliveredAtVersion
 	}
-	call := renderCall("recordStoreHealth", map[string]any{
-		"storeId":                store.ID,
-		"health":                 health,
-		"subscriptionsCheckedAt": report.At.Format(time.RFC3339),
-	})
-	if _, err := c.engine.Execute(operatorContext(ctx), call); err != nil {
+	return c.recordStoreHealthKey(ctx, store.ID, "subscriptions", subscriptions,
+		map[string]any{"subscriptionsCheckedAt": report.At.Format(time.RFC3339)})
+}
+
+// recordStoreHealthKey writes ONE key of a store's health: it re-reads the
+// store row fresh and writes the health back with that key replaced, and
+// every other key as the row holds it. extra carries the mutation's other
+// arguments.
+//
+// recordStoreHealth replaces the whole object, and each writer used to send
+// the health of the copy of the store it held. The connect's webhook pass
+// holds the store as it was before the connect, so whatever another writer
+// added meanwhile -- the ordersFrom stamp, a verdict -- was erased by the
+// next pass. Every writer of a health key goes through here instead. The read
+// and the write are still two statements, so two writers of the same moment
+// can race; what no longer happens is a writer erasing a key it never read.
+func (c *Connector) recordStoreHealthKey(ctx context.Context, storeID, key string, value any, extra map[string]any) error {
+	opCtx := operatorContext(ctx)
+	store, _, err := c.storeByID(memql.ContextWithFreshRead(opCtx), storeID)
+	if err != nil {
+		return err
+	}
+	health := map[string]any{}
+	for k, v := range store.Health {
+		health[k] = v
+	}
+	health[key] = value
+	args := map[string]any{"storeId": storeID, "health": health}
+	for k, v := range extra {
+		args[k] = v
+	}
+	if _, err := c.engine.Execute(opCtx, renderCall("recordStoreHealth", args)); err != nil {
 		return err
 	}
 	c.stores.Invalidate()

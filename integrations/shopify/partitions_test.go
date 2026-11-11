@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"regexp"
 	"slices"
 	"strings"
@@ -289,4 +290,157 @@ func TestStoreHealthShowsEachStoreItsOwnDomains(t *testing.T) {
 	if drift[secondStoreID] != 1 {
 		t.Errorf("store B's drift = %d, want its own 1", drift[secondStoreID])
 	}
+}
+
+// ---- a store connected before this version gets its past (U3) ----
+
+// stateRowsEngine answers syncStateById by the id it names, so a test can say
+// which of a store's domains already has its row; every other call is the
+// harness's.
+type stateRowsEngine struct {
+	*fakeEngine
+	byID map[string]map[string]any
+}
+
+var stateIDArgRE = regexp.MustCompile(`stateId: "([^"]*)"`)
+
+func (e *stateRowsEngine) Execute(ctx context.Context, q string) (*memql.ExecuteResult, error) {
+	res, err := e.fakeEngine.Execute(ctx, q)
+	if err != nil || callName(q) != "syncStateById" {
+		return res, err
+	}
+	m := stateIDArgRE.FindStringSubmatch(q)
+	if m == nil || e.byID[m[1]] == nil {
+		return resultWithRows(nil), nil
+	}
+	return resultWithRows([]map[string]any{e.byID[m[1]]}), nil
+}
+
+// bootHarness is the harness with one managed store that ingests, one that is
+// paused, and health rows answered by id from rows.
+func bootHarness(t *testing.T, rows map[string]map[string]any) *testHarness {
+	t.Helper()
+	h := newHarness(t)
+	scopes := []any{}
+	for _, s := range managedConnectScopes() {
+		scopes = append(scopes, s)
+	}
+	h.engine.setRows("stores", []map[string]any{
+		storeRow(testStoreID, "acme-widgets.myshopify.com", StatusLive, map[string]any{"adminTokenRef": "ACME_OFFLINE_GRANT", "scopesGranted": scopes}),
+		storeRow(secondStoreID, secondStoreID, StatusPaused, map[string]any{"adminTokenRef": "B_OFFLINE_GRANT", "scopesGranted": scopes}),
+	})
+	h.conn.stores.Invalidate()
+	h.conn.engine = &stateRowsEngine{fakeEngine: h.engine, byID: rows}
+	return h
+}
+
+var bootQueuedRE = regexp.MustCompile(`conceptId: "v1:shopify:(\w+)", connector: "shopify", partitionKey: "([^"]*)"`)
+
+// bootQueued is the domains queued, as store/concept.
+func bootQueued(t *testing.T, h *testHarness) []string {
+	t.Helper()
+	var out []string
+	for _, q := range h.engine.callsTo("datasyncQueueBackfill") {
+		m := bootQueuedRE.FindStringSubmatch(q)
+		if m == nil || !strings.HasPrefix(q, "builtin ") {
+			t.Fatalf("a queue is not the builtin naming a concept, the connector and a store: %s", q)
+		}
+		out = append(out, m[2]+"/"+m[1])
+	}
+	return out
+}
+
+func TestAStoreConnectedBeforeThisVersionHasItsBackfillsQueuedAtBoot(t *testing.T) {
+	h := bootHarness(t, nil)
+	Bootstrap(context.Background(), NewIntegration(h.conn), nil)
+
+	var want []string
+	for _, concept := range commerceBulkDomains {
+		want = append(want, testStoreID+"/"+concept)
+	}
+	if got := bootQueued(t, h); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("queued at boot %v,\nwant every bulk domain of the ingesting store's connection %v", got, want)
+	}
+}
+
+func TestBootQueuesNothingForADomainThatHasItsRow(t *testing.T) {
+	has := func(concept string) (string, map[string]any) {
+		id := memqlsync.StateID(generated.ConceptID(concept), ConnectorName, string(memqlsync.DirectionInbound), testStoreID)
+		return id, map[string]any{"id": id, "conceptId": generated.ConceptID(concept), "connector": ConnectorName, "partitionKey": testStoreID, "backfillStatus": "complete"}
+	}
+	rows := map[string]map[string]any{}
+	for _, concept := range []string{"order", "customer"} {
+		id, row := has(concept)
+		rows[id] = row
+	}
+	h := bootHarness(t, rows)
+	Bootstrap(context.Background(), NewIntegration(h.conn), nil)
+
+	got := bootQueued(t, h)
+	for _, concept := range []string{"order", "customer"} {
+		if slices.Contains(got, testStoreID+"/"+concept) {
+			t.Errorf("boot queued %s, which has its row", concept)
+		}
+	}
+	if len(got) != len(commerceBulkDomains)-2 {
+		t.Errorf("boot queued %d domains, want the %d without a row: %v", len(got), len(commerceBulkDomains)-2, got)
+	}
+
+	// Every domain with its row: a second boot, or a second node, queues nothing.
+	all := map[string]map[string]any{}
+	for _, concept := range commerceBulkDomains {
+		id, row := has(concept)
+		all[id] = row
+	}
+	h = bootHarness(t, all)
+	Bootstrap(context.Background(), NewIntegration(h.conn), nil)
+	if got := bootQueued(t, h); len(got) != 0 {
+		t.Errorf("a boot with every row in place queued %v", got)
+	}
+}
+
+// A bulk backfill Shopify refuses is the origin's standing answer, as a sweep
+// of the same domain is: not requested when the scope it names is outside the
+// connection, not granted when a person could grant it. Inventory shipments
+// and transfers are inside the connection by their generated scope and
+// refused all the same.
+func TestABulkBackfillShopifyRefusesIsAStandingAnswer(t *testing.T) {
+	t.Run("outside the connection", func(t *testing.T) {
+		h := newHarness(t)
+		h.admin.userError("ShopifyBulkRun", "bulkOperationRunQuery",
+			"Access denied for inventoryShipments field. Required access: `read_inventory_shipments` access scope.")
+		_, err := h.conn.BackfillPartition(context.Background(), testStoreID, generated.ConceptID("inventoryShipment"), "")
+		if !memqlsync.IsNotRequested(err) {
+			t.Fatalf("err = %v, want not requested", err)
+		}
+	})
+	t.Run("a scope the connection asks for", func(t *testing.T) {
+		h := newHarness(t)
+		h.admin.graphQLError("ShopifyBulkRun", "ACCESS_DENIED",
+			"Access denied for customers field. Required access: `read_customers` access scope.")
+		_, err := h.conn.BackfillPartition(context.Background(), testStoreID, generated.ConceptID("customer"), "")
+		if !memqlsync.IsNotGranted(err) {
+			t.Fatalf("err = %v, want not granted", err)
+		}
+	})
+	t.Run("a grant that reaches none of the domain's scopes", func(t *testing.T) {
+		h := newHarness(t)
+		h.engine.setRows("stores", []map[string]any{storeRow(testStoreID, "acme-widgets.myshopify.com", StatusLive, map[string]any{"scopesGranted": []any{"read_products"}})})
+		h.conn.stores.Invalidate()
+		_, err := h.conn.BackfillPartition(context.Background(), testStoreID, generated.ConceptID("customer"), "")
+		if !memqlsync.IsNotGranted(err) || !strings.Contains(err.Error(), "read_customers") {
+			t.Fatalf("err = %v, want not granted naming read_customers", err)
+		}
+		if n := h.admin.countOp("ShopifyBulkRun"); n != 0 {
+			t.Errorf("Shopify was asked %d times for a domain the grant cannot reach", n)
+		}
+	})
+	t.Run("a real failure", func(t *testing.T) {
+		h := newHarness(t)
+		h.admin.httpStatus("ShopifyBulkRun", http.StatusBadGateway)
+		_, err := h.conn.BackfillPartition(context.Background(), testStoreID, generated.ConceptID("customer"), "")
+		if err == nil || memqlsync.IsNotGranted(err) || memqlsync.IsNotRequested(err) {
+			t.Fatalf("err = %v, want a failure that is not a standing answer", err)
+		}
+	})
 }

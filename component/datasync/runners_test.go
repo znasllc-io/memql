@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 )
 
@@ -638,5 +639,391 @@ func TestTheCadenceStillRunsFromWhenTheSweepEnded(t *testing.T) {
 	r.now = func() time.Time { return end.Add(interval) }
 	if !r.ReconcileDue(context.Background(), "shopify", c.domains[0], "") {
 		t.Error("not due an interval after the sweep ended")
+	}
+}
+
+// ---- a backfill that starts and continues by itself ----
+
+// stateRunner is a runner over a state-keeping engine and one bound
+// connector, without the process-global registry.
+func stateRunner(engine *stateEngine, c memqlsync.Connector) *Runner {
+	store := NewStore(engine)
+	r := NewRunner(store, NewApplier(store, newFakeWriter()), discardLogger())
+	r.lookup = func(name string) (memqlsync.Connector, bool) {
+		if name == c.Name() {
+			return c, true
+		}
+		return nil, false
+	}
+	r.bound = func() []string { return []string{c.Name()} }
+	r.now = func() time.Time { return testNow }
+	return r
+}
+
+// continueOnce runs one continuing pass and fails the test on an error.
+func continueOnce(t *testing.T, r *Runner) ContinueResult {
+	t.Helper()
+	res, err := r.ContinueBackfills(context.Background())
+	if err != nil {
+		t.Fatalf("ContinueBackfills: %v", err)
+	}
+	return res
+}
+
+// keptState is the health row the state engine holds for one domain.
+func keptState(t *testing.T, engine *stateEngine, concept, partition string) SyncState {
+	t.Helper()
+	row := engine.row(SyncStateID(concept, "shopify", "inbound", partition))
+	if row == nil {
+		t.Fatalf("no health row for %s partition %q", concept, partition)
+	}
+	return syncStateFromRow(row)
+}
+
+// writeKept writes one health row straight onto the state engine.
+func writeKept(t *testing.T, engine *stateEngine, st SyncState) {
+	t.Helper()
+	st.Connector, st.Direction = "shopify", "inbound"
+	if st.ConceptID == "" {
+		st.ConceptID = testMirrorConcept
+	}
+	if err := NewStore(engine).WriteSyncState(OperatorContext(context.Background()), st); err != nil {
+		t.Fatal(err)
+	}
+}
+
+const secondMirrorConcept = "v1:shopify:customer"
+
+func TestAQueuedBackfillIsStartedByTheContinuingPass(t *testing.T) {
+	engine := newStateEngine()
+	c := mirrorConnector(memqlsync.BackfillPage{NextCursor: "c-1"}, memqlsync.BackfillPage{Done: true})
+	r := stateRunner(engine, c)
+
+	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatalf("QueueBackfill: %v", err)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "queued" || st.BackfillCursor != "" {
+		t.Fatalf("queued row = %+v, want queued with an empty cursor", st)
+	}
+	if len(c.backfillSeen) != 0 {
+		t.Fatal("queueing ran the backfill: queueing only records that one is wanted")
+	}
+
+	res := continueOnce(t, r)
+	if res.Started != 1 || res.Completed != 1 || res.Advanced != 0 {
+		t.Errorf("result = %+v, want started 1 and completed 1", res)
+	}
+	if len(c.backfillSeen) != 2 {
+		t.Errorf("the connector was asked %d times, want both pages", len(c.backfillSeen))
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "complete" {
+		t.Errorf("status = %q, want complete", st.BackfillStatus)
+	}
+}
+
+func TestABackfillThatUsedItsPageBudgetIsContinuedToComplete(t *testing.T) {
+	engine := newStateEngine()
+	c := mirrorConnector(
+		memqlsync.BackfillPage{NextCursor: "c-1"},
+		memqlsync.BackfillPage{NextCursor: "c-2"},
+		memqlsync.BackfillPage{NextCursor: "c-3"},
+		memqlsync.BackfillPage{NextCursor: "c-4"},
+		memqlsync.BackfillPage{Done: true},
+	)
+	r := stateRunner(engine, c)
+	r.maxPages = 2
+	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []struct {
+		res    ContinueResult
+		status string
+		cursor string
+	}{
+		{ContinueResult{Started: 1}, "running", "c-2"},
+		{ContinueResult{Advanced: 1}, "running", "c-4"},
+		{ContinueResult{Completed: 1}, "complete", ""},
+	}
+	for i, w := range want {
+		res := continueOnce(t, r)
+		st := keptState(t, engine, testMirrorConcept, "")
+		if res != w.res || st.BackfillStatus != w.status || st.BackfillCursor != w.cursor {
+			t.Fatalf("call %d: result %+v, row %s at %q; want %+v, %s at %q", i+1, res, st.BackfillStatus, st.BackfillCursor, w.res, w.status, w.cursor)
+		}
+	}
+	if got := strings.Join(c.backfillSeen, ","); got != ",c-1,c-2,c-3,c-4" {
+		t.Errorf("cursors asked for = %q, want each page once from where the last call stopped", got)
+	}
+	if res := continueOnce(t, r); res != (ContinueResult{}) || len(c.backfillSeen) != 5 {
+		t.Errorf("a complete backfill was continued again: %+v, %d asks", res, len(c.backfillSeen))
+	}
+}
+
+func TestOneStoreRunsOneBackfillAtATime(t *testing.T) {
+	engine := newStateEngine()
+	p := newFakePartitioned("a")
+	p.domains = append(p.domains, memqlsync.DomainSpec{Concept: secondMirrorConcept, Direction: memqlsync.DirectionInbound})
+	p.partPages["a"] = []memqlsync.BackfillPage{{NextCursor: "a-1"}, {Done: true}}
+	r := stateRunner(engine, p)
+	r.maxPages = 1
+	for _, concept := range []string{testMirrorConcept, secondMirrorConcept} {
+		if err := r.QueueBackfill(context.Background(), "shopify", concept, "a"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if res := continueOnce(t, r); res != (ContinueResult{Started: 1}) {
+		t.Errorf("first call = %+v, want one domain started", res)
+	}
+	if res := continueOnce(t, r); res != (ContinueResult{Completed: 1}) {
+		t.Errorf("second call = %+v, want the running domain completed and nothing else started", res)
+	}
+	if st := keptState(t, engine, secondMirrorConcept, "a"); st.BackfillStatus != "queued" {
+		t.Fatalf("the second domain is %q after the first completed in the same call; it waits for the next", st.BackfillStatus)
+	}
+	if res := continueOnce(t, r); res != (ContinueResult{Started: 1, Completed: 1}) {
+		t.Errorf("third call = %+v, want the second domain started and completed", res)
+	}
+	want := "a/" + testMirrorConcept + ",a/" + testMirrorConcept + ",a/" + secondMirrorConcept
+	if got := strings.Join(p.partBackfills, ","); got != want {
+		t.Errorf("backfill steps = %s, want %s: the second domain may not start while the first runs", got, want)
+	}
+}
+
+func TestAPollThatMadeNoProgressYieldsUntilTheNextTick(t *testing.T) {
+	engine := newStateEngine()
+	// Three answers of an operation still running: no writes, and the cursor
+	// it was given back.
+	c := mirrorConnector(
+		memqlsync.BackfillPage{NextCursor: "op-1"},
+		memqlsync.BackfillPage{NextCursor: "op-1"},
+		memqlsync.BackfillPage{NextCursor: "op-1"},
+	)
+	r := stateRunner(engine, c)
+	writeKept(t, engine, SyncState{BackfillStatus: "running", BackfillCursor: "op-1"})
+
+	res := continueOnce(t, r)
+	if len(c.backfillSeen) != 1 {
+		t.Fatalf("the connector was asked %d times in one tick, want once: a poll that made no progress waits for the next tick", len(c.backfillSeen))
+	}
+	if res != (ContinueResult{}) {
+		t.Errorf("result = %+v, want nothing: a poll is not progress", res)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "running" || st.BackfillCursor != "op-1" {
+		t.Errorf("row = %s at %q, want still running at op-1", st.BackfillStatus, st.BackfillCursor)
+	}
+}
+
+func TestAPausedDomainIsNotStarted(t *testing.T) {
+	engine := newStateEngine()
+	c := mirrorConnector(memqlsync.BackfillPage{Done: true})
+	r := stateRunner(engine, c)
+	writeKept(t, engine, SyncState{BackfillStatus: "queued", Paused: true})
+
+	if res := continueOnce(t, r); res != (ContinueResult{}) {
+		t.Errorf("result = %+v, want nothing for a paused domain", res)
+	}
+	if len(c.backfillSeen) != 0 {
+		t.Error("a paused domain's backfill was started")
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "queued" || !st.Paused {
+		t.Errorf("row = %+v, want left queued and paused", st)
+	}
+}
+
+func TestQueueingLeavesARunningBackfillAlone(t *testing.T) {
+	engine := newStateEngine()
+	r := stateRunner(engine, mirrorConnector())
+	writeKept(t, engine, SyncState{BackfillStatus: "running", BackfillCursor: "c-7"})
+	writes := engine.countContaining("mutation upsertSyncState")
+
+	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "running" || st.BackfillCursor != "c-7" {
+		t.Errorf("row = %s at %q, want the running backfill left at its cursor", st.BackfillStatus, st.BackfillCursor)
+	}
+	if n := engine.countContaining("mutation upsertSyncState"); n != writes {
+		t.Errorf("queueing a running backfill wrote its row %d times", n-writes)
+	}
+
+	// A complete one is queued again, from the start.
+	writeKept(t, engine, SyncState{BackfillStatus: "complete", BackfillCursor: "c-9"})
+	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "queued" || st.BackfillCursor != "" {
+		t.Errorf("row = %s at %q, want a complete backfill queued again with an empty cursor", st.BackfillStatus, st.BackfillCursor)
+	}
+}
+
+func TestQueueingFollowsThePartitionRule(t *testing.T) {
+	engine := newStateEngine()
+	p := newFakePartitioned("a", "b")
+	r := stateRunner(engine, p)
+	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, part := range []string{"a", "b"} {
+		if st := keptState(t, engine, testMirrorConcept, part); st.BackfillStatus != "queued" {
+			t.Errorf("partition %s = %q, want queued: no partition queues every one", part, st.BackfillStatus)
+		}
+	}
+	if engine.row(SyncStateID(testMirrorConcept, "shopify", "inbound", "")) != nil {
+		t.Error("the shared row of a partitioned connector was queued")
+	}
+
+	engine = newStateEngine()
+	r = stateRunner(engine, mirrorConnector())
+	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, "a"); err == nil || !strings.Contains(err.Error(), "has no partitions") {
+		t.Errorf("a partition queued on a connector without partitions: %v", err)
+	}
+	if n := engine.countContaining("mutation "); n != 0 {
+		t.Errorf("a refused queue wrote %d rows", n)
+	}
+}
+
+func TestTheFirstCleanSweepOfARefusedDomainQueuesItsBackfill(t *testing.T) {
+	for name, tc := range map[string]struct {
+		lastError, status string
+		want              string
+	}{
+		"not granted":   {memqlsync.NotGranted("shopify", "read_customers").Error(), "none", "queued"},
+		"not requested": {memqlsync.NotRequested("shopify").Error(), "none", "queued"},
+		"no refusal":    {"", "complete", "complete"},
+		"a failure":     {"shopify admin: HTTP 502", "complete", "complete"},
+		"running":       {memqlsync.NotGranted("shopify", "read_customers").Error(), "running", "running"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			engine := newStateEngine()
+			c := mirrorConnector()
+			c.reconcileReport = memqlsync.ReconcileReport{Checked: 3}
+			r := stateRunner(engine, c)
+			writeKept(t, engine, SyncState{BackfillStatus: tc.status, BackfillCursor: "c-3", LastError: tc.lastError})
+
+			if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+				t.Fatal(err)
+			}
+			st := keptState(t, engine, testMirrorConcept, "")
+			if st.BackfillStatus != tc.want || st.LastError != "" {
+				t.Errorf("after a clean sweep: %s, lastError %q; want %s and the reason cleared", st.BackfillStatus, st.LastError, tc.want)
+			}
+			if tc.want == "queued" && st.BackfillCursor != "" {
+				t.Errorf("queued at cursor %q, want from the start", st.BackfillCursor)
+			}
+		})
+	}
+}
+
+func TestARefusedQueuedBackfillIsAStandingAnswerNotAFailure(t *testing.T) {
+	for name, refusal := range map[string]error{
+		"not requested": memqlsync.NotRequested("shopify"),
+		"not granted":   memqlsync.NotGranted("shopify", "read_customers"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			engine := newStateEngine()
+			p := newFakePartitioned("a")
+			p.partErrs["a"] = refusal
+			r := stateRunner(engine, p)
+			if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, "a"); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := r.ContinueBackfills(context.Background()); err != nil {
+				t.Fatalf("a refused backfill failed the pass: %v", err)
+			}
+			st := keptState(t, engine, testMirrorConcept, "a")
+			if st.BackfillStatus != "none" || st.LastError != refusal.Error() || st.LastAttemptAt.IsZero() {
+				t.Fatalf("row = %s, lastError %q, attempt %v; want none with the reason and the attempt recorded", st.BackfillStatus, st.LastError, st.LastAttemptAt)
+			}
+			continueOnce(t, r)
+			if len(p.partBackfills) != 1 {
+				t.Errorf("the refused backfill was tried %d times, want once: a standing answer is not retried on every tick", len(p.partBackfills))
+			}
+		})
+	}
+
+	engine := newStateEngine()
+	p := newFakePartitioned("a")
+	p.partErrs["a"] = errors.New("shopify admin: HTTP 502")
+	r := stateRunner(engine, p)
+	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.ContinueBackfills(context.Background()); err == nil {
+		t.Error("a real failure was not reported by the pass")
+	}
+	if st := keptState(t, engine, testMirrorConcept, "a"); st.BackfillStatus != "failed" {
+		t.Errorf("a real failure is %q, want failed", st.BackfillStatus)
+	}
+}
+
+func TestAnUnpartitionedRowOfAPartitionedConnectorIsNotContinued(t *testing.T) {
+	engine := newStateEngine()
+	p := newFakePartitioned("a")
+	r := stateRunner(engine, p)
+	writeKept(t, engine, SyncState{BackfillStatus: "queued"})
+	shared := SyncStateID(testMirrorConcept, "shopify", "inbound", "")
+	before := engine.countContaining(`stateId: "` + shared + `"`)
+
+	if res := continueOnce(t, r); res != (ContinueResult{}) {
+		t.Errorf("result = %+v, want nothing", res)
+	}
+	if len(p.backfillSeen) != 0 || len(p.partBackfills) != 0 {
+		t.Errorf("the shared row was continued: shared %d, partitions %v", len(p.backfillSeen), p.partBackfills)
+	}
+	if n := engine.countContaining(`stateId: "`+shared+`"`) - before; n != 0 {
+		t.Errorf("the shared row was read or written %d times", n)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "queued" {
+		t.Errorf("the shared row became %q", st.BackfillStatus)
+	}
+}
+
+func TestAContinuingPassStopsWhenItsContextIsDone(t *testing.T) {
+	engine := newStateEngine()
+	p := newFakePartitioned("a", "b")
+	r := stateRunner(engine, p)
+	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := r.ContinueBackfills(ctx); !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want the context's", err)
+	}
+	if len(p.partBackfills) != 0 {
+		t.Errorf("a cancelled pass still ran %v", p.partBackfills)
+	}
+}
+
+func TestQueueAndContinueRefuseACallWithoutInternalOrigin(t *testing.T) {
+	engine := newStateEngine()
+	c := mirrorConnector()
+	i := &Integration{runner: stateRunner(engine, c), logger: discardLogger()}
+	args := map[string]any{"connector": "shopify", "conceptId": testMirrorConcept}
+
+	for name, handler := range map[string]func(context.Context, map[string]any, int) ([]memorynodes.MemoryNode, error){
+		"queueBackfill":     i.handleQueueBackfill,
+		"continueBackfills": i.handleContinueBackfills,
+	} {
+		if _, err := handler(context.Background(), args, 0); err == nil || !strings.Contains(err.Error(), "refuses a client-origin call") {
+			t.Errorf("%s answered a client call: %v", name, err)
+		}
+	}
+	if n := len(engine.callsContaining("")); n != 0 {
+		t.Fatalf("a refused call reached the engine %d times", n)
+	}
+
+	internal := auth.ContextWithInternalOrigin(context.Background())
+	if _, err := i.handleQueueBackfill(internal, args, 0); err != nil {
+		t.Fatalf("queueBackfill under internal origin: %v", err)
+	}
+	if _, err := i.handleContinueBackfills(internal, nil, 0); err != nil {
+		t.Fatalf("continueBackfills under internal origin: %v", err)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "complete" {
+		t.Errorf("the engine's own calls left the row %q, want complete", st.BackfillStatus)
 	}
 }

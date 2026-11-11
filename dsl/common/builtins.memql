@@ -691,11 +691,12 @@ builtin providerFederationSet {
 
 // ---- The sync runtime (epic memql#4378) ----
 //
-// Four builtins over component/datasync. The first two are driven by the
-// automations in dsl/platform/automations.memql; the last two are what an
-// operator's Data origins page calls.
+// The builtins over component/datasync. The first four are driven by the
+// engine (the automations in dsl/platform/automations.memql, and a connector
+// queueing a backfill); the rest are what an operator's Data origins page
+// calls.
 //
-// THE FIRST TWO CARRY NO @sdk AND THAT KEEPS NOTHING OUT. @sdk has no engine
+// THE ENGINE'S CARRY NO @sdk AND THAT KEEPS NOTHING OUT. @sdk has no engine
 // effect, a builtin takes no @serverOnly, and any signed-in client's query can
 // name a builtin, so each refuses a call without internal origin in its
 // HANDLER. datasyncDispatchInbound is also handed the staged row's id and
@@ -712,6 +713,24 @@ builtin datasyncDispatchInbound {
 @executor("integration.datasync.reconcileDomains")
 @description("Sweep every mirrored domain whose own DomainSpec interval says it is due, healing drift through the same version-guarded apply path inbound uses. Skips paused domains and connectors that do not implement Reconcile.")
 builtin datasyncReconcileDomains { }
+
+// The two below are driven by the engine as well, so they carry no @sdk and
+// refuse a call without internal origin in their handler. A connector queues a
+// backfill through the first, under its own operator identity, when a store is
+// connected, its grant widens, or a boot finds a store whose past was never
+// read; the continueQueuedBackfills automation drives the second.
+
+@executor("integration.datasync.queueBackfill")
+@description("Queue one domain's backfill: write backfillStatus queued and an empty cursor on its v1:platform:syncState row, and run nothing -- the continuing pass starts it. A running backfill is left as it is; a complete one is queued again from the start. Only the engine reaches it: a call without internal origin is refused before anything is read.")
+builtin datasyncQueueBackfill {
+  connector     string!
+  conceptId     string!
+  partitionKey  string  @description("One partition of a partitioned connector (one store). Absent queues every partition the connector names; a partition named on a connector without partitions is refused.")
+}
+
+@executor("integration.datasync.continueBackfills")
+@description("Continue every queued or running backfill. For each partition of each bound connector it advances at most one domain by one page budget -- the one running, else the first queued -- so one store runs one backfill at a time. Leaves paused domains alone; a domain the origin refuses is recorded with the reason and leaves the queue. Only the engine reaches it: a call without internal origin is refused.")
+builtin datasyncContinueBackfills { }
 
 @sdk
 @executor("integration.datasync.startBackfill")

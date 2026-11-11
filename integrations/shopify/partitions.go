@@ -2,11 +2,14 @@ package shopify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
+	"github.com/znasllc-io/memql/integrations/shopify/generated"
 )
 
 // partitions.go -- each store is a partition of the mirror.
@@ -44,12 +47,52 @@ func (c *Connector) Partitions(ctx context.Context) ([]string, error) {
 
 // BackfillPartition advances one store's backfill of one domain by one step,
 // from that store's own cursor.
+//
+// A domain Shopify will not export for this store is answered the way the
+// sweep answers it (sweepStore), so the runtime records a standing answer
+// rather than a failure it would retry: outside the store's connection, not
+// requested; inside it with none of its scopes granted, not granted, without
+// asking Shopify; refused by Shopify all the same, not granted when the
+// refusal is one a person can fix and not requested otherwise.
 func (c *Connector) BackfillPartition(ctx context.Context, partition, conceptName, cursor string) (memqlsync.BackfillPage, error) {
 	store, err := c.ingestingStore(ctx, partition)
 	if err != nil {
 		return memqlsync.BackfillPage{}, err
 	}
-	return c.BackfillStore(ctx, store, conceptName, cursor)
+	if spec := generated.Types[generated.ConceptFromID(conceptName)]; bulkDomain(spec) {
+		if !domainInConnection(store, spec) {
+			return memqlsync.BackfillPage{}, memqlsync.NotRequested(ConnectorName)
+		}
+		if missing := scopesMissingFor(store, spec); len(missing) > 0 {
+			return memqlsync.BackfillPage{}, memqlsync.NotGranted(ConnectorName, uniqueSorted(askedOf(store, spec.Scopes))...)
+		}
+	}
+	page, err := c.BackfillStore(ctx, store, conceptName, cursor)
+	return page, backfillRefusal(store, err)
+}
+
+// backfillRefusal classifies Shopify's refusal of a bulk export. Shopify
+// refuses a selection the grant does not reach either as an ACCESS_DENIED
+// error or as a userError of bulkOperationRunQuery; both say "Access denied"
+// and name the scope. Any other error is returned as it is.
+func backfillRefusal(store Store, err error) error {
+	if err == nil || memqlsync.IsNotGranted(err) || memqlsync.IsNotRequested(err) {
+		return err
+	}
+	var ae *AdminError
+	var ue *UserError
+	denied := errors.As(err, &ae) && ae.DeniedOnly()
+	if !denied && errors.As(err, &ue) {
+		msg := strings.ToLower(ue.Error())
+		denied = strings.Contains(msg, "access denied") || protectedDataRefusal(ue.Error())
+	}
+	if !denied {
+		return err
+	}
+	if refusalIsFixable(store, err.Error()) {
+		return fmt.Errorf("%w: %v", memqlsync.ErrNotGranted, err)
+	}
+	return memqlsync.NotRequested(ConnectorName)
 }
 
 // ReconcilePartition sweeps one store's domain from that store's own

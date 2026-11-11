@@ -4,7 +4,7 @@
 // files cover the other construct kinds.
 
 
-use common.builtins.{ datasyncDispatchInbound, datasyncReconcileDomains }
+use common.builtins.{ datasyncDispatchInbound, datasyncReconcileDomains, datasyncContinueBackfills }
 
 // ---- The sync runtime's automations (epic memql#4378) ----
 //
@@ -35,6 +35,15 @@ automation dispatchInboundToConnector {
 @trigger(schedule="0 */10 * * * *")
 automation reconcileMirroredDomains {
   sweep := builtin datasyncReconcileDomains()
+}
+
+/// Carry every queued or running backfill on by one page budget. Every 5 minutes: a backfill is
+/// queued by a connect, a wider grant or a boot, and one store's past arriving within minutes of
+/// connecting is the point. Each tick takes at most one domain per store, so a store runs one
+/// backfill at a time, and a poll of an export the origin is still preparing waits for the next.
+@trigger(schedule="0 */5 * * * *")
+automation continueQueuedBackfills {
+  continued := builtin datasyncContinueBackfills()
 }
 
 // ---- Custom domains (epic memql#4805) ----

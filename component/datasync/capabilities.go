@@ -15,20 +15,26 @@ import (
 
 // capabilities.go -- the DSL-callable surface of the sync runtime.
 //
-// Four capabilities, and the split between them is the split between the
-// two ways work arrives:
+// The split between the capabilities is the split between the ways work
+// arrives (the outbox's retry and discard are an operator's answers to a dead
+// letter, below):
 //
 //	dispatchInbound  EVENT-DRIVEN. An automation on
 //	                 v1:platform:inboundRequest.created offers every
 //	                 staged delivery to the connector its source names.
 //	reconcileDomains SCHEDULED. A cron automation sweeps whichever
 //	                 domains their own DomainSpec says are due.
-//	startBackfill    OPERATOR-DRIVEN. Nothing schedules a backfill; it is
-//	                 something a person decides to do to a domain.
+//	startBackfill    OPERATOR-DRIVEN. A person running one domain's
+//	                 backfill now.
+//	queueBackfill    ENGINE-DRIVEN. A connector asking for a backfill --
+//	                 at connect, at boot -- without running it.
+//	continueBackfills SCHEDULED. A cron automation carries every queued
+//	                 or running backfill on by one page budget per tick.
 //	setSyncPaused    OPERATOR-DRIVEN, and the switch that stops the
-//	                 other three for one domain.
+//	                 others for one domain.
 //
-// The first two are no-ops on a node whose build has no connector bound,
+// The scheduled and event-driven ones are no-ops on a node whose build has no
+// connector bound,
 // which is most of them: the automations load everywhere because every
 // binary loads every concept, and a node that cannot serve a connector
 // simply has nothing to offer it.
@@ -88,6 +94,21 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"conceptId":    "string - canonical id of the concept to backfill",
 				"partitionKey": "string (optional) - one partition of a partitioned connector; absent backfills every partition it names",
 			},
+		},
+		{
+			Name:        "queueBackfill",
+			Description: "Queue one domain's backfill: write `queued` and an empty cursor, and run nothing; the continuing pass starts it. A running backfill is left as it is. Refuses a call without internal origin.",
+			Handler:     i.handleQueueBackfill,
+			ArgsSchema: map[string]string{
+				"connector":    "string - connector name",
+				"conceptId":    "string - canonical id of the concept to backfill",
+				"partitionKey": "string (optional) - one partition of a partitioned connector; absent queues every partition it names",
+			},
+		},
+		{
+			Name:        "continueBackfills",
+			Description: "Continue every queued or running backfill: for each partition of each bound connector, advance the one domain that is running, else start the first queued, by one page budget. Leaves paused domains alone. Refuses a call without internal origin.",
+			Handler:     i.handleContinueBackfills,
 		},
 		{
 			Name:        "retryOutboxEntry",
@@ -264,6 +285,41 @@ func (i *Integration) handleStartBackfill(ctx context.Context, args map[string]a
 		return nil, err
 	}
 	return resultNode("backfill", fmt.Sprintf("pages=%d applied=%d stale=%d done=%t", res.Pages, res.Applied, res.Stale, res.Done))
+}
+
+// handleQueueBackfill is how something other than an operator asks for a
+// backfill: a connector at connect or at boot, through the builtin under its
+// own operator identity. It only records the wish; handleContinueBackfills,
+// on its schedule, does the work. Internal origin only, so a client cannot
+// queue a domain's backfill over and over to have the origin re-read.
+func (i *Integration) handleQueueBackfill(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireInternalOrigin(ctx, "queueBackfill"); err != nil {
+		return nil, err
+	}
+	connector := strings.TrimSpace(argString(args, "connector"))
+	conceptID := strings.TrimSpace(argString(args, "conceptId"))
+	partition := strings.TrimSpace(argString(args, "partitionKey"))
+	if connector == "" || conceptID == "" {
+		return nil, fmt.Errorf("datasync: queueBackfill needs both connector and conceptId")
+	}
+	if err := i.runner.QueueBackfill(ctx, connector, conceptID, partition); err != nil {
+		return nil, err
+	}
+	return resultNode("queued", fmt.Sprintf("%s/%s%s", connector, conceptID, partitionSuffix(partition)))
+}
+
+// handleContinueBackfills is the scheduled continuing pass. One partition's
+// failure is logged and recorded on its row while the others still run, so
+// the pass answers what it did rather than the first thing that went wrong.
+func (i *Integration) handleContinueBackfills(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireInternalOrigin(ctx, "continueBackfills"); err != nil {
+		return nil, err
+	}
+	res, err := i.runner.ContinueBackfills(ctx)
+	if err != nil {
+		i.logger.Warn("datasync: a continuing pass finished with failures; each is on its domain's row", "error", err)
+	}
+	return resultNode("continued", fmt.Sprintf("started=%d advanced=%d completed=%d", res.Started, res.Advanced, res.Completed))
 }
 
 // handleRetryOutboxEntry and handleDiscardOutboxEntry are the

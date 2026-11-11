@@ -2,7 +2,10 @@ package datasync
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -205,6 +208,9 @@ type fakePartitioned struct {
 	partPages   map[string][]memqlsync.BackfillPage
 	partCursors map[string][]string
 	partOrder   []string
+	// partBackfills is every backfill step asked for, as partition/concept,
+	// in order.
+	partBackfills []string
 }
 
 func newFakePartitioned(partitions ...string) *fakePartitioned {
@@ -225,10 +231,11 @@ func (p *fakePartitioned) Partitions(context.Context) ([]string, error) {
 	return p.partitions, p.partitionsErr
 }
 
-func (p *fakePartitioned) BackfillPartition(_ context.Context, partition, _ string, cursor string) (memqlsync.BackfillPage, error) {
+func (p *fakePartitioned) BackfillPartition(_ context.Context, partition, concept string, cursor string) (memqlsync.BackfillPage, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.partCursors[partition] = append(p.partCursors[partition], cursor)
+	p.partBackfills = append(p.partBackfills, partition+"/"+concept)
 	if err := p.partErrs[partition]; err != nil {
 		return memqlsync.BackfillPage{}, err
 	}
@@ -246,6 +253,96 @@ func (p *fakePartitioned) ReconcilePartition(_ context.Context, partition, _ str
 	p.partSince[partition] = append(p.partSince[partition], since)
 	p.partOrder = append(p.partOrder, partition)
 	return p.partReports[partition], p.partErrs[partition]
+}
+
+// stateEngine is a fakeEngine that KEEPS the health rows: an upsertSyncState
+// or a setSyncPaused lands on its row, and syncStateById answers the row as
+// last written. A pass that continues a backfill over several calls reads
+// back what the call before it wrote, which the seeded fake cannot show.
+// Every call is still recorded by the fakeEngine it wraps.
+type stateEngine struct {
+	*fakeEngine
+	stateMu sync.Mutex
+	states  map[string]map[string]any
+}
+
+func newStateEngine() *stateEngine {
+	return &stateEngine{fakeEngine: newFakeEngine(), states: map[string]map[string]any{}}
+}
+
+func (s *stateEngine) Execute(ctx context.Context, q string) (any, error) {
+	res, err := s.fakeEngine.Execute(ctx, q)
+	if err != nil {
+		return res, err
+	}
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	args := renderedArgs(q)
+	switch {
+	case strings.HasPrefix(q, "mutation upsertSyncState("):
+		id, _ := args["stateId"].(string)
+		row := s.states[id]
+		if row == nil {
+			row = map[string]any{"id": id}
+		}
+		for k, v := range args {
+			if k != "stateId" {
+				row[k] = v
+			}
+		}
+		s.states[id] = row
+	case strings.HasPrefix(q, "mutation setSyncPaused("):
+		id, _ := args["stateId"].(string)
+		if row := s.states[id]; row != nil {
+			row["paused"] = args["paused"]
+		}
+	case strings.HasPrefix(q, "query syncStateById("):
+		id, _ := args["stateId"].(string)
+		if row := s.states[id]; row != nil {
+			copied := map[string]any{}
+			for k, v := range row {
+				copied[k] = v
+			}
+			return []map[string]any{copied}, nil
+		}
+		return []map[string]any{}, nil
+	}
+	return res, nil
+}
+
+// row is one kept health row, or nil.
+func (s *stateEngine) row(id string) map[string]any {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return s.states[id]
+}
+
+// renderedArgRE reads one `name: value` of a rendered call: a JSON-quoted
+// string (call quotes through the parser's quoter), an integer or a boolean.
+var renderedArgRE = regexp.MustCompile(`(\w+): ("(?:[^"\\]|\\.)*"|-?\d+|true|false)`)
+
+// renderedArgs decodes the arguments of a call rendered by call().
+func renderedArgs(q string) map[string]any {
+	out := map[string]any{}
+	open := strings.IndexByte(q, '(')
+	if open < 0 {
+		return out
+	}
+	for _, m := range renderedArgRE.FindAllStringSubmatch(q[open:], -1) {
+		switch raw := m[2]; {
+		case strings.HasPrefix(raw, `"`):
+			var s string
+			if err := json.Unmarshal([]byte(raw), &s); err == nil {
+				out[m[1]] = s
+			}
+		case raw == "true" || raw == "false":
+			out[m[1]] = raw == "true"
+		default:
+			n, _ := strconv.Atoi(raw)
+			out[m[1]] = n
+		}
+	}
+	return out
 }
 
 // fakeWriter records mirror writes and answers stored versions from a

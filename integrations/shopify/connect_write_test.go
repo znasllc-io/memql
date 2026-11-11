@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -621,5 +622,196 @@ func TestAReconnectOfAConnectedStoreClearsNothing(t *testing.T) {
 	}
 	if n := len(h.engine.callsNamed("markStoreReconnected")); n != 0 {
 		t.Errorf("markStoreReconnected ran %d times for a connected store", n)
+	}
+}
+
+// ---- a connect queues the store's backfills (U3) ----
+
+// commerceBulkDomains is every bulk domain inside the commerce set's
+// connection, in apply order. Blog reads under read_content, which the
+// commerce set does not ask for.
+var commerceBulkDomains = []string{
+	"abandonedCheckout", "collection", "company", "companyLocation", "customer", "discountNode", "order",
+	"inventoryItem", "inventoryShipment", "inventoryTransfer", "location", "priceList", "product",
+	"productVariant", "sellingPlanGroup", "tenderTransaction",
+}
+
+// olderManagedScopes is the list a managed connection asked for before the
+// commerce set: no customers, no discounts, no returns.
+func olderManagedScopes() []any {
+	out := []any{}
+	for _, s := range append(append([]string(nil), StorefrontScopes...), "write_products", "read_inventory", "read_locations", "read_orders") {
+		out = append(out, s)
+	}
+	return out
+}
+
+func commerceScopesAny() []any {
+	out := []any{}
+	for _, s := range managedConnectScopes() {
+		out = append(out, s)
+	}
+	return out
+}
+
+var queuedConceptRE = regexp.MustCompile(`conceptId: "v1:shopify:(\w+)"`)
+
+// queued is the domains a connect queued, in order. Every queue names the
+// store's own partition and the shopify connector, and runs as the deployment.
+func (h *writeHarness) queued(t *testing.T) []string {
+	t.Helper()
+	var out []string
+	for _, c := range h.engine.callsNamed("datasyncQueueBackfill") {
+		if !strings.HasPrefix(c.query, "builtin ") || !strings.Contains(c.query, `partitionKey: "`+connectStoreID+`"`) || !strings.Contains(c.query, `connector: "shopify"`) {
+			t.Errorf("a queue does not name the builtin, the store and the connector: %s", c.query)
+		}
+		if c.role != auth.RoleOwner || !c.internal || c.userId == connectDev {
+			t.Errorf("a queue ran as %+v, want operatorContext", c)
+		}
+		m := queuedConceptRE.FindStringSubmatch(c.query)
+		if m == nil {
+			t.Fatalf("a queue names no mirrored concept: %s", c.query)
+		}
+		out = append(out, m[1])
+	}
+	return out
+}
+
+// managedConnect runs the writes of a managed connection (the commerce set),
+// with step 15 held back, and returns the held-back jobs.
+func (h *writeHarness) managedConnect(t *testing.T, scopes []string) []func() {
+	t.Helper()
+	var deferred []func()
+	h.integ.connector.background = func(f func()) { deferred = append(deferred, f) }
+	grant := h.grant()
+	grant.Scopes, grant.OfflineGrant = scopes, `{"accessToken":"`+callbackAdminToken+`"}`
+	got, _ := h.integ.connector.writeConnect(context.Background(), callbackState(managedCredentialSource), grant)
+	if got != connectResultConnected && got != connectResultReconnected {
+		t.Fatalf("result = %q, want the connection kept", got)
+	}
+	return deferred
+}
+
+// managedRow is a store Connect connected through the shared app before.
+func managedRow(fields map[string]any) map[string]any {
+	row := map[string]any{"adminTokenRef": storeSecretName(connectStoreID, "OFFLINE_GRANT")}
+	for k, v := range fields {
+		row[k] = v
+	}
+	return row
+}
+
+func TestAFirstConnectQueuesEveryBulkDomainOfTheConnection(t *testing.T) {
+	h := newWriteHarness(t)
+	deferred := h.managedConnect(t, managedConnectScopes())
+
+	got := h.queued(t)
+	if strings.Join(got, ",") != strings.Join(commerceBulkDomains, ",") {
+		t.Fatalf("queued %v,\nwant every bulk domain of the connection in apply order %v", got, commerceBulkDomains)
+	}
+	if slices.Contains(got, "blog") {
+		t.Error("blog was queued: the commerce set does not ask for read_content")
+	}
+	if first, created := h.statementIndex("datasyncQueueBackfill"), h.statementIndex("createStore"); first < created {
+		t.Errorf("a backfill was queued (%d) before the store row was written (%d)", first, created)
+	}
+	if len(deferred) != 1 || h.admin.countOp("ShopifyWebhookSubscriptions") != 0 {
+		t.Errorf("the queue did not run before the webhook pass was handed off (%d jobs)", len(deferred))
+	}
+}
+
+func TestAConnectThatFailsBeforeTheRowIsSavedQueuesNothing(t *testing.T) {
+	h := newWriteHarness(t)
+	h.engine.fail["createStore"] = errors.New("the database went away")
+	h.integ.connector.background = func(func()) {}
+	grant := h.grant()
+	grant.Scopes, grant.OfflineGrant = managedConnectScopes(), `{"accessToken":"`+callbackAdminToken+`"}`
+	if got, _ := h.integ.connector.writeConnect(context.Background(), callbackState(managedCredentialSource), grant); got != connectReasonExchangeFailed {
+		t.Fatalf("result = %q", got)
+	}
+	if n := len(h.engine.callsNamed("datasyncQueueBackfill")); n != 0 {
+		t.Errorf("a connect whose row was never saved queued %d backfills", n)
+	}
+}
+
+func TestAWiderGrantQueuesOnlyWhatItUnlocked(t *testing.T) {
+	h := reconnectHarness(t, managedRow(map[string]any{"scopesGranted": olderManagedScopes()}))
+	h.managedConnect(t, managedConnectScopes())
+
+	want := []string{"company", "companyLocation", "customer", "discountNode"}
+	if got := h.queued(t); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("queued %v, want only what the wider grant reaches and the old one did not: %v", got, want)
+	}
+
+	// The same grant again unlocks nothing.
+	h = reconnectHarness(t, managedRow(map[string]any{"scopesGranted": commerceScopesAny()}))
+	h.managedConnect(t, managedConnectScopes())
+	if got := h.queued(t); len(got) != 0 {
+		t.Errorf("a reconnect with the same grant queued %v", got)
+	}
+}
+
+func TestAReconnectAfterAnUninstallQueuesEverything(t *testing.T) {
+	for name, fields := range map[string]map[string]any{
+		"uninstalled":    {"uninstalledAt": "2026-09-01T00:00:00Z"},
+		"purged":         {"redactedAt": "2026-09-01T00:00:00Z"},
+		"no Admin token": {"adminTokenRef": ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fields["scopesGranted"] = commerceScopesAny()
+			h := reconnectHarness(t, managedRow(fields))
+			h.managedConnect(t, managedConnectScopes())
+			if got := h.queued(t); strings.Join(got, ",") != strings.Join(commerceBulkDomains, ",") {
+				t.Fatalf("queued %v, want every bulk domain of the connection %v", got, commerceBulkDomains)
+			}
+		})
+	}
+}
+
+func TestOrdersFromIsStampedOnceSixtyDaysBack(t *testing.T) {
+	ordersFrom := func(h *writeHarness) []string {
+		var out []string
+		for _, c := range h.engine.callsNamed("recordStoreHealth") {
+			if strings.Contains(c.query, `"ordersFrom"`) {
+				if c.role != auth.RoleOwner || !c.internal {
+					t.Errorf("the stamp ran as %+v, want operatorContext", c)
+				}
+				out = append(out, c.query)
+			}
+		}
+		return out
+	}
+
+	// A first connect without read_all_orders: the store's orders begin
+	// sixty days before the connect, and the health says from when.
+	h := newWriteHarness(t)
+	h.managedConnect(t, managedConnectScopes())
+	stamps := ordersFrom(h)
+	if len(stamps) != 1 || !strings.Contains(stamps[0], `"ordersFrom": "2026-07-25"`) || !strings.Contains(stamps[0], `storeId: "`+connectStoreID+`"`) {
+		t.Fatalf("ordersFrom stamps = %v, want one, 2026-07-25, sixty days before the connect on 2026-09-23", stamps)
+	}
+	if h.statementIndex("recordStoreHealth") < h.statementIndex("datasyncQueueBackfill", "v1:shopify:order") {
+		t.Error("ordersFrom was stamped before the order backfill was queued")
+	}
+
+	// A second connect that queues the orders again does not move it.
+	h = reconnectHarness(t, managedRow(map[string]any{
+		"uninstalledAt": "2026-09-01T00:00:00Z", "scopesGranted": commerceScopesAny(),
+		"health": map[string]any{"ordersFrom": "2026-07-25"},
+	}))
+	h.integ.connector.now = func() time.Time { return time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC) }
+	h.managedConnect(t, managedConnectScopes())
+	if !slices.Contains(h.queued(t), "order") {
+		t.Fatal("the reconnect did not queue the orders, so it proves nothing")
+	}
+	if got := ordersFrom(h); len(got) != 0 {
+		t.Errorf("a second connect moved ordersFrom: %v", got)
+	}
+
+	// A grant that holds read_all_orders reads every order: nothing to stamp.
+	h = newWriteHarness(t)
+	h.managedConnect(t, append(managedConnectScopes(), "read_all_orders"))
+	if got := ordersFrom(h); len(got) != 0 {
+		t.Errorf("a grant with read_all_orders was stamped: %v", got)
 	}
 }
