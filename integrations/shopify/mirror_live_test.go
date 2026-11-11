@@ -20,6 +20,15 @@ import (
 
 // mirror_live_test.go -- the mirror against a real development store.
 //
+// REQUIREMENT: the store must be a Shopify partner DEVELOPMENT store reserved
+// for this test. The tests create, edit, refund and cancel paid orders on a
+// real variant, and the updated_at sweep reads EVERY order changed since the
+// test's own was made, so pointed at a merchant's store this file would
+// consume order numbers, move inventory, notify staff and read the
+// merchant's orders. Every test therefore asks shop.plan.partnerDevelopment
+// before its first mutation and fails, having created nothing, unless the
+// store says it is a development store (liveRequireDevelopmentStore).
+//
 // Every other test in this package talks to the fake Admin in
 // harness_test.go, which checks the connector's half of each conversation.
 // These check the other half: that Shopify, at the pinned Admin API version,
@@ -32,16 +41,27 @@ import (
 // first pair every test skips, naming the variable; the two-store test also
 // skips without the second pair. No CI lane sets them.
 //
+//	MEMQL_TEST_SHOPIFY_STORE_DOMAIN    <shop>.myshopify.com of a development store
+//	MEMQL_TEST_SHOPIFY_ADMIN_TOKEN     an Admin API token of an app installed on it
+//	MEMQL_TEST_SHOPIFY_STORE_DOMAIN_2  a SECOND development store (two-store test)
+//	MEMQL_TEST_SHOPIFY_ADMIN_TOKEN_2   its token
+//
+//	MEMQL_DATABASE_DSN=... MEMQL_TEST_SHOPIFY_STORE_DOMAIN=... MEMQL_TEST_SHOPIFY_ADMIN_TOKEN=... \
+//	  go test -count=1 -timeout 30m ./integrations/shopify/ -run 'TestLive' -v
+//
+// -timeout 30m is part of the command: five tests of up to four minutes each
+// exceed go test's ten-minute default, and a timeout panic skips t.Cleanup,
+// which is what removes the orders.
+//
 // What a run does in the store, and only to what it made itself: a draft
 // order completed as paid, tagged memql-live-test with the run's time in its
 // note and an invented buyer at example.com; for the change test an edit, a
-// refund of one unit and a cancellation. Cleanup cancels what is still open,
-// deletes the order, the completed draft and the invented customer, and logs
-// whatever Shopify would not delete, so a leftover is recognisable by its tag.
-// The only read that is not of the test's own order is the updated_at sweep,
-// which lists the orders changed since the test's order was created and
-// asserts only on that order's rows; on a store reserved for the test those
-// are the same thing.
+// refund of one unit and a cancellation. Cleanup cancels what is still open
+// (restocking), deletes the order, the completed draft and the invented
+// customer, and logs whatever Shopify would not delete, so a leftover is
+// recognisable by its tag. The refund is NO_RESTOCK, so a run of the change
+// test is expected to leave the variant one unit lower; the other tests
+// should leave it where it was.
 //
 // The setup calls go through the connector's own Admin client (adminCall), so
 // they are paced against the same cost bucket as the mirror's reads.
@@ -51,6 +71,20 @@ import (
 // write_draft_orders and write_orders. A refusal for any of these is reported
 // as that, from the Admin API's own ACCESS_DENIED, and never as a failure of
 // the mirror.
+//
+// NOT VALIDATED against the recorded schema (cmd/shopifyschema/testdata),
+// which holds no Mutation type and no input fields: every mutation here --
+// draftOrderCreate, draftOrderComplete, orderEditBegin, orderEditSetQuantity,
+// orderEditCommit, refundCreate, orderCancel, orderDelete, draftOrderDelete,
+// customerDelete -- and their inputs. Two are uncertain at the pinned version:
+//   - orderCancel's `refund: Boolean`: later versions prefer
+//     `refundMethod: { originalPaymentMethodsRefund: false }`; if the first
+//     live run refuses `refund`, send that instead.
+//   - the id the order-edit mutations take after orderEditBegin: the
+//     calculated order's id here; newer versions answer an orderEditSession
+//     too, and if Shopify refuses the calculated order's id, select
+//     `orderEditSession { id }` in liveOrderEditBeginDoc and pass that.
+// The queries were validated field by field.
 
 const (
 	envLiveDomain  = "MEMQL_TEST_SHOPIFY_STORE_DOMAIN"
@@ -79,11 +113,15 @@ var liveSetupScopes = []string{"write_draft_orders", "write_orders"}
 
 type liveCredentials struct {
 	domain, token string
+	// domainVar names the variable the domain came from, for messages.
+	domainVar string
 }
 
 // liveEnv reads one store's pair, skipping when either half is unset. The
 // domain is checked here with the connector's own guard, so a malformed value
-// fails before any request; neither value is ever printed.
+// fails before any request. The token is never printed; the domain is not
+// printed by this file, but a transport error from the client names the
+// endpoint, shop host included.
 func liveEnv(t *testing.T, domainVar, tokenVar string) liveCredentials {
 	t.Helper()
 	domain := strings.TrimSpace(os.Getenv(domainVar))
@@ -97,7 +135,7 @@ func liveEnv(t *testing.T, domainVar, tokenVar string) liveCredentials {
 	if _, err := NormalizeShopDomain(domain); err != nil {
 		t.Fatalf("%s is not a bare <shop>.myshopify.com host; no request was sent", domainVar)
 	}
-	return liveCredentials{domain: domain, token: token}
+	return liveCredentials{domain: domain, token: token, domainVar: domainVar}
 }
 
 // liveHarness is newHarness with the real Admin endpoint: the same registry,
@@ -110,6 +148,10 @@ type liveHarness struct {
 	conn   *Connector
 	ctx    context.Context
 	ids    []string
+	vars   map[string]string
+	// developmentChecked holds the stores this test has confirmed are
+	// development stores; each store is asked for itself.
+	developmentChecked map[string]bool
 }
 
 func newLiveHarness(t *testing.T, stores ...liveCredentials) *liveHarness {
@@ -118,11 +160,13 @@ func newLiveHarness(t *testing.T, stores ...liveCredentials) *liveHarness {
 	tokens := map[string]string{}
 	rows := make([]map[string]any, 0, len(stores))
 	ids := make([]string, 0, len(stores))
+	vars := map[string]string{}
 	for i, s := range stores {
 		id := fmt.Sprintf("live%d", i+1)
 		ref := storeSecretName(id, suffixAdminToken)
 		tokens[ref] = s.token
 		ids = append(ids, id)
+		vars[id] = s.domainVar
 		rows = append(rows, map[string]any{
 			"id":                 id,
 			"domain":             s.domain,
@@ -148,7 +192,7 @@ func newLiveHarness(t *testing.T, stores ...liveCredentials) *liveHarness {
 
 	ctx, cancel := context.WithTimeout(context.Background(), liveTestTimeout)
 	t.Cleanup(cancel)
-	return &liveHarness{engine: engine, conn: conn, ctx: ctx, ids: ids}
+	return &liveHarness{engine: engine, conn: conn, ctx: ctx, ids: ids, vars: vars, developmentChecked: map[string]bool{}}
 }
 
 func (h *liveHarness) store(t *testing.T, i int) Store {
@@ -157,6 +201,7 @@ func (h *liveHarness) store(t *testing.T, i int) Store {
 	if !ok {
 		t.Fatalf("the live store %s did not resolve", h.ids[i])
 	}
+	h.liveRequireDevelopmentStore(t, s)
 	return s
 }
 
@@ -283,6 +328,12 @@ const liveAccessScopesDoc = `query LiveTestAccessScopes {
   }
 }`
 
+const liveShopPlanDoc = `query LiveTestShopPlan {
+  shop {
+    plan { partnerDevelopment }
+  }
+}`
+
 const liveFirstVariantDoc = `query LiveTestFirstVariant {
   productVariants(first: 1) {
     nodes { id }
@@ -372,7 +423,7 @@ const liveRefundCreateIdempotentDoc = `mutation LiveTestRefundCreate($input: Ref
 }`
 
 const liveOrderCancelDoc = `mutation LiveTestOrderCancel($orderId: ID!) {
-  orderCancel(orderId: $orderId, reason: OTHER, refund: false, restock: false, notifyCustomer: false, staffNote: "memql-live-test") {
+  orderCancel(orderId: $orderId, reason: OTHER, refund: false, restock: true, notifyCustomer: false, staffNote: "memql-live-test") {
     job { id }
     orderCancelUserErrors { field message code }
   }
@@ -408,6 +459,31 @@ const liveCustomerDeleteDoc = `mutation LiveTestCustomerDelete($input: CustomerD
 }`
 
 // --- setup and cleanup --------------------------------------------------
+
+// liveRequireDevelopmentStore fails the test unless the store says it is a
+// partner development store. It runs when a test first resolves a store,
+// before any mutation and before any sweep, once per store per test.
+func (h *liveHarness) liveRequireDevelopmentStore(t *testing.T, store Store) {
+	t.Helper()
+	if h.developmentChecked[store.ID] {
+		return
+	}
+	name := h.vars[store.ID]
+	data, err := h.liveCall(h.ctx, store, liveShopPlanDoc, "LiveTestShopPlan", nil)
+	if err != nil {
+		t.Fatalf("could not read whether the store named by %s is a development store, so nothing was created: %v", name, err)
+	}
+	shop, _ := data["shop"].(map[string]any)
+	plan, _ := shop["plan"].(map[string]any)
+	dev, ok := plan["partnerDevelopment"].(bool)
+	if !ok {
+		t.Fatalf("could not read whether the store named by %s is a development store (shop.plan.partnerDevelopment was absent), so nothing was created", name)
+	}
+	if !dev {
+		t.Fatalf("the store named by %s is not a partner development store (shop.plan.partnerDevelopment is false); this test runs only against a development store reserved for it, and nothing was created", name)
+	}
+	h.developmentChecked[store.ID] = true
+}
 
 // liveOrder is what one test made, and the only thing it may touch.
 type liveOrder struct {
@@ -546,6 +622,8 @@ func (h *liveHarness) remove(t *testing.T, o *liveOrder) {
 			if at, _ := order["cancelledAt"].(string); at != "" {
 				o.cancelled = true
 			}
+		} else {
+			left("the invented buyer "+o.email+" may be (its customer could not be looked up)", err)
 		}
 		if !o.cancelled {
 			if err := h.cancel(ctx, o); err != nil {
@@ -586,9 +664,9 @@ func (h *liveHarness) deliver(store Store, topic, gid string) ([]memqlsync.Mirro
 	})
 }
 
-// await retries a read that follows a write, a bounded number of times, and
+// liveAwait retries a read that follows a write, a bounded number of times, and
 // fails saying what it waited for and what it last saw.
-func await(t *testing.T, ctx context.Context, what string, try func() (seen string, done bool)) {
+func liveAwait(t *testing.T, ctx context.Context, what string, try func() (seen string, done bool)) {
 	t.Helper()
 	seen := ""
 	for i := 0; i < livePollTries; i++ {
@@ -608,7 +686,7 @@ func await(t *testing.T, ctx context.Context, what string, try func() (seen stri
 func (h *liveHarness) deliverUntil(t *testing.T, store Store, topic, gid, what string, ok func([]memqlsync.MirrorWrite) (string, bool)) []memqlsync.MirrorWrite {
 	t.Helper()
 	var writes []memqlsync.MirrorWrite
-	await(t, h.ctx, what+" after "+topic, func() (string, bool) {
+	liveAwait(t, h.ctx, what+" after "+topic, func() (string, bool) {
 		var err error
 		writes, err = h.deliver(store, topic, gid)
 		if err != nil {
@@ -628,7 +706,7 @@ func (h *liveHarness) requireNothingDenied(t *testing.T, store Store) {
 	}
 }
 
-func payloadsOf(writes []memqlsync.MirrorWrite, concept string) []map[string]any {
+func livePayloadsOf(writes []memqlsync.MirrorWrite, concept string) []map[string]any {
 	var out []map[string]any
 	for _, w := range writes {
 		if w.Concept == generated.ConceptID(concept) {
@@ -638,8 +716,8 @@ func payloadsOf(writes []memqlsync.MirrorWrite, concept string) []map[string]any
 	return out
 }
 
-func orderPayload(writes []memqlsync.MirrorWrite, gid string) map[string]any {
-	for _, p := range payloadsOf(writes, "order") {
+func liveOrderPayload(writes []memqlsync.MirrorWrite, gid string) map[string]any {
+	for _, p := range livePayloadsOf(writes, "order") {
 		if p["gid"] == gid {
 			return p
 		}
@@ -647,9 +725,9 @@ func orderPayload(writes []memqlsync.MirrorWrite, gid string) map[string]any {
 	return nil
 }
 
-func childrenOf(writes []memqlsync.MirrorWrite, concept, parentGID string) []map[string]any {
+func liveChildrenOf(writes []memqlsync.MirrorWrite, concept, parentGID string) []map[string]any {
 	var out []map[string]any
-	for _, p := range payloadsOf(writes, concept) {
+	for _, p := range livePayloadsOf(writes, concept) {
 		if p["parentGid"] == parentGID {
 			out = append(out, p)
 		}
@@ -657,8 +735,8 @@ func childrenOf(writes []memqlsync.MirrorWrite, concept, parentGID string) []map
 	return out
 }
 
-// requirePartition fails on any write that is not on the store's partition.
-func requirePartition(t *testing.T, writes []memqlsync.MirrorWrite, storeID string) {
+// liveRequirePartition fails on any write that is not on the store's partition.
+func liveRequirePartition(t *testing.T, writes []memqlsync.MirrorWrite, storeID string) {
 	t.Helper()
 	for _, w := range writes {
 		if w.Partition != storeID || w.Payload["storeId"] != storeID {
@@ -700,10 +778,10 @@ func (h *liveHarness) sweptInserts(t *testing.T, store Store, since time.Time, c
 	if err != nil {
 		t.Fatalf("the updated_at sweep of orders: %s", liveRefusal(err))
 	}
-	return report, insertedPayloads(t, h.engine.calls()[mark:], concept)
+	return report, liveInsertedPayloads(t, h.engine.calls()[mark:], concept)
 }
 
-func insertedPayloads(t *testing.T, calls []string, concept string) []map[string]any {
+func liveInsertedPayloads(t *testing.T, calls []string, concept string) []map[string]any {
 	t.Helper()
 	prefix := "insert(" + langparser.QuoteString(generated.ConceptID(concept)) + ","
 	var out []map[string]any
@@ -724,7 +802,7 @@ func insertedPayloads(t *testing.T, calls []string, concept string) []map[string
 	return out
 }
 
-func withGID(payloads []map[string]any, gid string) map[string]any {
+func liveWithGID(payloads []map[string]any, gid string) map[string]any {
 	for _, p := range payloads {
 		if p["gid"] == gid {
 			return p
@@ -733,16 +811,16 @@ func withGID(payloads []map[string]any, gid string) map[string]any {
 	return nil
 }
 
-// orderMirrored is the condition for a created order: the row, its lines,
+// liveOrderMirrored is the condition for a created order: the row, its lines,
 // its payment and its buyer.
-func orderMirrored(o *liveOrder) func([]memqlsync.MirrorWrite) (string, bool) {
+func liveOrderMirrored(o *liveOrder) func([]memqlsync.MirrorWrite) (string, bool) {
 	return func(writes []memqlsync.MirrorWrite) (string, bool) {
-		p := orderPayload(writes, o.orderGID)
+		p := liveOrderPayload(writes, o.orderGID)
 		if p == nil {
 			return fmt.Sprintf("%d writes, none for the order", len(writes)), false
 		}
-		lines := childrenOf(writes, "orderLineItem", o.orderGID)
-		txns := childrenOf(writes, "orderTransaction", o.orderGID)
+		lines := liveChildrenOf(writes, "orderLineItem", o.orderGID)
+		txns := liveChildrenOf(writes, "orderTransaction", o.orderGID)
 		seen := fmt.Sprintf("financial status %q, %d lines, %d transactions, email set %t, customer %q",
 			p["displayFinancialStatus"], len(lines), len(txns), p["email"] == o.email, p["customerGid"])
 		// The buyer is the invented email; a customer row is linked when
@@ -787,26 +865,26 @@ func TestLiveACreatedOrderIsMirroredWithLinesPaymentAndBuyer(t *testing.T) {
 	o := h.createPaidOrder(t, store)
 	h.probe(t, o)
 
-	writes := h.deliverUntil(t, store, "orders/create", o.orderGID, "the order paid with its lines, payment and buyer", orderMirrored(o))
+	writes := h.deliverUntil(t, store, "orders/create", o.orderGID, "the order paid with its lines, payment and buyer", liveOrderMirrored(o))
 	h.requireNothingDenied(t, store)
-	requirePartition(t, writes, store.ID)
+	liveRequirePartition(t, writes, store.ID)
 
-	p := orderPayload(writes, o.orderGID)
+	p := liveOrderPayload(writes, o.orderGID)
 	if !slices.Contains(liveTags(p), liveTag) {
 		t.Errorf("order tags = %v, want %s among them", liveTags(p), liveTag)
 	}
-	lines := childrenOf(writes, "orderLineItem", o.orderGID)
+	lines := liveChildrenOf(writes, "orderLineItem", o.orderGID)
 	if len(lines) != 1 || liveString(lines[0], "quantity") != "2" || liveString(lines[0], "variantGid") == "" {
 		t.Errorf("lines = %v, want one line of 2 units of a variant", lines)
 	}
 	sale := false
-	for _, tx := range childrenOf(writes, "orderTransaction", o.orderGID) {
+	for _, tx := range liveChildrenOf(writes, "orderTransaction", o.orderGID) {
 		if tx["kind"] == "SALE" && tx["status"] == "SUCCESS" {
 			sale = true
 		}
 	}
 	if !sale {
-		t.Errorf("no successful SALE transaction among %v", childrenOf(writes, "orderTransaction", o.orderGID))
+		t.Errorf("no successful SALE transaction among %v", liveChildrenOf(writes, "orderTransaction", o.orderGID))
 	}
 }
 
@@ -819,9 +897,9 @@ func TestLiveAnEditARefundAndACancellationFollow(t *testing.T) {
 	store := h.store(t, 0)
 	o := h.createPaidOrder(t, store)
 	h.probe(t, o)
-	created := h.deliverUntil(t, store, "orders/create", o.orderGID, "the order paid with its lines, payment and buyer", orderMirrored(o))
+	created := h.deliverUntil(t, store, "orders/create", o.orderGID, "the order paid with its lines, payment and buyer", liveOrderMirrored(o))
 	h.requireNothingDenied(t, store)
-	createdAt := liveString(orderPayload(created, o.orderGID), "sourceCreatedAt")
+	createdAt := liveString(liveOrderPayload(created, o.orderGID), "sourceCreatedAt")
 
 	// The edit: the one line from 2 units to 3.
 	begun := h.mutate(t, store, liveOrderEditBeginDoc, "LiveTestOrderEditBegin", "orderEditBegin", map[string]any{"id": o.orderGID})
@@ -839,16 +917,16 @@ func TestLiveAnEditARefundAndACancellationFollow(t *testing.T) {
 
 	edited := h.deliverUntil(t, store, "orders/edited", o.orderGID, "the edit (edited, the line at 3 units)",
 		func(writes []memqlsync.MirrorWrite) (string, bool) {
-			p := orderPayload(writes, o.orderGID)
-			lines := childrenOf(writes, "orderLineItem", o.orderGID)
+			p := liveOrderPayload(writes, o.orderGID)
+			lines := liveChildrenOf(writes, "orderLineItem", o.orderGID)
 			if p == nil || len(lines) == 0 {
 				return "no order row or no lines", false
 			}
 			qty := liveString(lines[0], "currentQuantity")
 			return fmt.Sprintf("edited %v, %d lines, first at %s", p["edited"], len(lines), qty), p["edited"] == true && qty == "3"
 		})
-	requirePartition(t, edited, store.ID)
-	lineGID := liveString(childrenOf(edited, "orderLineItem", o.orderGID)[0], "gid")
+	liveRequirePartition(t, edited, store.ID)
+	lineGID := liveString(liveChildrenOf(edited, "orderLineItem", o.orderGID)[0], "gid")
 
 	// The refund: one unit of the line, with the money Shopify suggests.
 	refundLines := []any{map[string]any{"lineItemId": lineGID, "quantity": 1, "restockType": "NO_RESTOCK"}}
@@ -889,17 +967,17 @@ func TestLiveAnEditARefundAndACancellationFollow(t *testing.T) {
 	}
 	refunded := h.deliverUntil(t, store, "orders/updated", o.orderGID, "the refund row under the order",
 		func(writes []memqlsync.MirrorWrite) (string, bool) {
-			refunds := childrenOf(writes, "refund", o.orderGID)
+			refunds := liveChildrenOf(writes, "refund", o.orderGID)
 			return fmt.Sprintf("%d refund rows", len(refunds)), len(refunds) == 1
 		})
-	requirePartition(t, refunded, store.ID)
+	liveRequirePartition(t, refunded, store.ID)
 	if len(transactions) > 0 {
-		p := orderPayload(refunded, o.orderGID)
+		p := liveOrderPayload(refunded, o.orderGID)
 		if amt := liveString(p, "totalRefundedSet", "shopMoney", "amount"); amt == "" || amt == "0.0" || amt == "0" {
 			t.Errorf("totalRefundedSet = %v after a refund with money, want it above zero", p["totalRefundedSet"])
 		}
 		found := false
-		for _, tx := range childrenOf(refunded, "orderTransaction", o.orderGID) {
+		for _, tx := range liveChildrenOf(refunded, "orderTransaction", o.orderGID) {
 			if tx["kind"] == "REFUND" {
 				found = true
 			}
@@ -915,11 +993,11 @@ func TestLiveAnEditARefundAndACancellationFollow(t *testing.T) {
 	}
 	cancelled := h.deliverUntil(t, store, "orders/cancelled", o.orderGID, "cancelledAt on the order",
 		func(writes []memqlsync.MirrorWrite) (string, bool) {
-			p := orderPayload(writes, o.orderGID)
+			p := liveOrderPayload(writes, o.orderGID)
 			at := liveString(p, "cancelledAt")
 			return fmt.Sprintf("cancelledAt %q, cancelReason %v", at, p["cancelReason"]), at != ""
 		})
-	requirePartition(t, cancelled, store.ID)
+	liveRequirePartition(t, cancelled, store.ID)
 
 	// The sweep finds the same last state: cancelled, edited, refunded.
 	since, err := time.Parse(time.RFC3339, createdAt)
@@ -927,18 +1005,23 @@ func TestLiveAnEditARefundAndACancellationFollow(t *testing.T) {
 		t.Fatalf("the mirrored sourceCreatedAt %q is not RFC 3339: %v", createdAt, err)
 	}
 	since = since.Add(-time.Second)
-	await(t, h.ctx, "the updated_at sweep to write the cancelled order", func() (string, bool) {
+	mismatch := ""
+	liveAwait(t, h.ctx, "the updated_at sweep to write the cancelled order", func() (string, bool) {
 		report, payloads := h.sweptInserts(t, store, since, "order")
-		p := withGID(payloads, o.orderGID)
+		p := liveWithGID(payloads, o.orderGID)
 		if p == nil {
 			return fmt.Sprintf("checked %d, our order not among %d order inserts", report.Checked, len(payloads)), false
 		}
+		mismatch = ""
 		if p["storeId"] != store.ID {
-			t.Errorf("the swept order carries storeId %v, want %s", p["storeId"], store.ID)
+			mismatch = fmt.Sprintf("the swept order carries storeId %v, want %s", p["storeId"], store.ID)
 		}
 		return fmt.Sprintf("cancelledAt %v, edited %v", p["cancelledAt"], p["edited"]),
 			liveString(p, "cancelledAt") != "" && p["edited"] == true
 	})
+	if mismatch != "" {
+		t.Error(mismatch)
+	}
 }
 
 // TestLiveAnOrdersFulfilmentsAreReadUnderTheCommerceSet answers the
@@ -961,9 +1044,9 @@ func TestLiveAnOrdersFulfilmentsAreReadUnderTheCommerceSet(t *testing.T) {
 	}
 	o := h.createPaidOrder(t, store)
 	writes := h.deliverUntil(t, store, "orders/create", o.orderGID, "the order row", func(writes []memqlsync.MirrorWrite) (string, bool) {
-		return fmt.Sprintf("%d writes", len(writes)), orderPayload(writes, o.orderGID) != nil
+		return fmt.Sprintf("%d writes", len(writes)), liveOrderPayload(writes, o.orderGID) != nil
 	})
-	p := orderPayload(writes, o.orderGID)
+	p := liveOrderPayload(writes, o.orderGID)
 	denied := h.conn.FieldsDenied(store.ID)[generated.ConceptID("order")]
 	for _, field := range []string{"fulfillments", "fulfillmentOrders", "fulfillmentsCount"} {
 		if slices.Contains(denied, field) {
@@ -973,7 +1056,7 @@ func TestLiveAnOrdersFulfilmentsAreReadUnderTheCommerceSet(t *testing.T) {
 		t.Logf("FINDING: under the commerce set Shopify answered Order.%s", field)
 	}
 	t.Logf("FINDING: the unfulfilled order mirrored %d fulfilment rows and fulfillmentOrdersGids %v, fulfillmentsCount %v",
-		len(childrenOf(writes, "fulfillment", o.orderGID)), p["fulfillmentOrdersGids"], p["fulfillmentsCount"])
+		len(liveChildrenOf(writes, "fulfillment", o.orderGID)), p["fulfillmentOrdersGids"], p["fulfillmentsCount"])
 }
 
 // TestLiveASecondStoreKeepsItsOwnState runs the same paths against two
@@ -1004,8 +1087,8 @@ func TestLiveASecondStoreKeepsItsOwnState(t *testing.T) {
 		orders[i] = h.createPaidOrder(t, store)
 		h.probe(t, orders[i])
 		created[i] = h.deliverUntil(t, store, "orders/create", orders[i].orderGID,
-			"store "+store.ID+"'s order paid with its lines, payment and buyer", orderMirrored(orders[i]))
-		requirePartition(t, created[i], store.ID)
+			"store "+store.ID+"'s order paid with its lines, payment and buyer", liveOrderMirrored(orders[i]))
+		liveRequirePartition(t, created[i], store.ID)
 	}
 	for _, w := range created[0] {
 		for _, x := range created[1] {
@@ -1025,13 +1108,14 @@ func TestLiveASecondStoreKeepsItsOwnState(t *testing.T) {
 
 	// The second store's sweep, through the runtime's partitioned entry,
 	// writes the second store's order and nothing of the first's.
-	createdAt := liveString(orderPayload(created[1], orders[1].orderGID), "sourceCreatedAt")
+	createdAt := liveString(liveOrderPayload(created[1], orders[1].orderGID), "sourceCreatedAt")
 	since, err := time.Parse(time.RFC3339, createdAt)
 	if err != nil {
 		t.Fatalf("the mirrored sourceCreatedAt %q is not RFC 3339: %v", createdAt, err)
 	}
 	since = since.Add(-time.Second)
-	await(t, h.ctx, "the second store's sweep to write its order", func() (string, bool) {
+	mismatch := ""
+	liveAwait(t, h.ctx, "the second store's sweep to write its order", func() (string, bool) {
 		mark := len(h.engine.calls())
 		ctx, cancel := context.WithTimeout(h.ctx, 2*liveCallTimeout)
 		report, err := h.conn.ReconcilePartition(ctx, stores[1].ID, generated.ConceptID("order"), since)
@@ -1039,15 +1123,18 @@ func TestLiveASecondStoreKeepsItsOwnState(t *testing.T) {
 		if err != nil {
 			return liveRefusal(err), false
 		}
-		payloads := insertedPayloads(t, h.engine.calls()[mark:], "order")
+		payloads := liveInsertedPayloads(t, h.engine.calls()[mark:], "order")
 		for _, p := range payloads {
 			if p["storeId"] != stores[1].ID {
-				t.Errorf("the second store's sweep wrote an order with storeId %v", p["storeId"])
+				mismatch = fmt.Sprintf("the second store's sweep wrote an order with storeId %v", p["storeId"])
 			}
 			if p["gid"] == orders[0].orderGID {
-				t.Error("the second store's sweep wrote the first store's order")
+				mismatch = "the second store's sweep wrote the first store's order"
 			}
 		}
-		return fmt.Sprintf("checked %d, %d order inserts", report.Checked, len(payloads)), withGID(payloads, orders[1].orderGID) != nil
+		return fmt.Sprintf("checked %d, %d order inserts", report.Checked, len(payloads)), liveWithGID(payloads, orders[1].orderGID) != nil
 	})
+	if mismatch != "" {
+		t.Error(mismatch)
+	}
 }
