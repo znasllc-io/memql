@@ -332,6 +332,9 @@ func (d *Dispatcher) connectorFor(ctx context.Context, source string) (memqlsync
 // many times it was tried before this one.
 func (d *Dispatcher) dispatchTo(ctx context.Context, connector memqlsync.Connector, req memqlsync.InboundRequest, prior int) (DispatchResult, error) {
 	out := DispatchResult{Handled: true}
+	// The connector is told which try this is: one that must hear an answer
+	// twice before acting on it reads it here.
+	req.Attempts = prior
 	source := strings.TrimSpace(req.Source)
 
 	specs := domainSpecsByConcept(connector)

@@ -174,6 +174,11 @@ type InboundRequest struct {
 	// ReceivedAt is when the delivery was staged -- the fallback
 	// version for an origin that stamps nothing of its own (D6).
 	ReceivedAt time.Time
+	// Attempts is how many times the runtime tried this delivery before
+	// this try: 0 on the first, 1 on the retry lane's first retry. A
+	// connector that needs a second answer before it acts on one -- a record
+	// the origin answers nothing for -- reads it here.
+	Attempts int
 }
 
 // MirrorWrite is one row Apply wants written into a mirror. The runtime
@@ -197,6 +202,12 @@ type MirrorWrite struct {
 	// it already had; it never invents one, which is why this is a flag
 	// on a write rather than a separate delete verb.
 	Retire bool
+	// Announced marks a retirement the origin announced -- a delete event --
+	// rather than one MemQL concluded from reading the origin. Its time is
+	// the event's receipt on one node, compared against reads made on
+	// others, and the guard allows for the difference
+	// (AnnouncedRetireAllowance).
+	Announced bool
 	// Partition names the tenant this row belongs to, for a connector
 	// that implements Partitioned; empty for one that does not. The
 	// runtime records the delivery's health on that tenant's own row.

@@ -19,6 +19,11 @@ func TestTheGuardJudgesExistenceByReadTimeAndOrderByVersion(t *testing.T) {
 	gone := func(readAt string) Stamp {
 		return Stamp{Held: true, Retired: true, Source: VersionFromRead, Version: "2026-08-23T23:59:59Z", ReadAt: readAt}
 	}
+	announced := func(readAt string) Stamp {
+		st := gone(readAt)
+		st.Announced = true
+		return st
+	}
 	cases := []struct {
 		name          string
 		stored, write Stamp
@@ -35,6 +40,13 @@ func TestTheGuardJudgesExistenceByReadTimeAndOrderByVersion(t *testing.T) {
 		{"a read-time write read before the row's read", live(VersionFromOrigin, "2026-08-20T00:00:00Z", read("12:00:00")), live(VersionFromRead, "2026-08-23T11:00:00Z", read("11:00:00")), true},
 		{"a read-time write read after the row's read", live(VersionFromOrigin, "2026-08-24T00:00:00Z", read("12:00:00")), live(VersionFromRead, "2026-08-23T13:00:00Z", read("13:00:00")), false},
 		{"a row that holds no version", Stamp{}, live(VersionFromOrigin, "2026-08-20T00:00:00Z", read("09:00:00")), false},
+		{"an announced deletion, the row read inside the allowance", live(VersionFromOrigin, "2026-08-23T09:00:00Z", read("10:00:59")), announced(read("10:00:00")), false},
+		{"an announced deletion, the row read past the allowance", live(VersionFromOrigin, "2026-08-23T09:00:00Z", read("10:01:01")), announced(read("10:00:00")), true},
+		{"the same version, read earlier", live(VersionFromOrigin, "2026-08-23T09:00:00Z", read("10:00:00")), live(VersionFromOrigin, "2026-08-23T09:00:00Z", read("09:59:00")), true},
+		{"the same version, read later", live(VersionFromOrigin, "2026-08-23T09:00:00Z", read("10:00:00")), live(VersionFromOrigin, "2026-08-23T09:00:00Z", read("10:01:00")), false},
+		{"a row from before the rule, an older tombstone", Stamp{Held: true, ReadAt: read("10:00:00")}, gone(read("09:59:00")), true},
+		{"a row from before the rule, a newer tombstone", Stamp{Held: true, ReadAt: read("10:00:00")}, gone(read("10:01:00")), false},
+		{"a row from before the rule, any live write", Stamp{Held: true, ReadAt: read("10:00:00")}, live(VersionFromOrigin, "2026-08-20T00:00:00Z", read("09:00:00")), false},
 	}
 	for _, tc := range cases {
 		if got := Refuses(tc.stored, tc.write); got != tc.refuses {
@@ -52,8 +64,8 @@ func TestAMarkerCountsOnlyBesideItsOwnReadTime(t *testing.T) {
 		t.Errorf("a paired marker reads %+v, want the origin's version", st)
 	}
 	rewritten := map[string]any{"updatedAt": "2026-08-23T12:00:00Z", "versionSource": "origin", "syncedAt": "2026-08-23T12:00:00Z", "versionReadAt": at}
-	if st := StoredStamp(spec, rewritten); st.Held {
-		t.Errorf("a marker beside another write's read time reads %+v, want no version held", st)
+	if st := StoredStamp(spec, rewritten); st.Source != "" || st.Version != "" || st.ReadAt != "2026-08-23T12:00:00Z" {
+		t.Errorf("a marker beside another write's read time reads %+v, want no version held and its read time kept", st)
 	}
 	retired := map[string]any{"deleted": true, "syncedAt": "2026-08-23T12:00:00Z"}
 	if st := StoredStamp(spec, retired); !st.Held || !st.Retired || st.ReadAt != "2026-08-23T12:00:00Z" {

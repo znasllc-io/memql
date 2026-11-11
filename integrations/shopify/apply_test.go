@@ -179,7 +179,11 @@ func TestAFetchThatFindsNothingTombstones(t *testing.T) {
 	rowID := MirrorRowID(testStoreID, "gid://shopify/Product/1")
 	h.engine.setRows(`concept==v1:shopify:product && id=="`+rowID+`"`, []map[string]any{{"id": rowID, "gid": "gid://shopify/Product/1"}})
 
-	writes, err := h.conn.Apply(context.Background(), delivery("products/update", "gid://shopify/Product/1"))
+	// On the retry: a first empty answer is asked again before it is
+	// believed (TestAnUnannouncedDeletionIsConfirmedBeforeItIsBelieved).
+	req := delivery("products/update", "gid://shopify/Product/1")
+	req.Attempts = 1
+	writes, err := h.conn.Apply(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}

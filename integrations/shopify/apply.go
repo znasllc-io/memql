@@ -182,11 +182,14 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 	}
 
 	if route.Action == generated.ActionDelete {
-		// Its time is when the delivery was RECEIVED (staged), on this
-		// engine's clock: a moment by which the record was gone, kept by a
-		// retry, and ordered against when the origin was last read for the
-		// row (memqlsync.Refuses).
-		return []memqlsync.MirrorWrite{tombstone(spec.Concept, store.ID, gid, receivedAt(req, c.now()))}, nil
+		// The origin's announcement: it retires at once. Its time is when
+		// the delivery was RECEIVED (staged), on the receiving node's clock:
+		// a moment by which the record was gone, kept by a retry. The guard
+		// allows for that clock against the fetching node's
+		// (memqlsync.AnnouncedRetireAllowance).
+		w := tombstone(spec.Concept, store.ID, gid, announcedAt(req, c.now()))
+		w.Announced = true
+		return []memqlsync.MirrorWrite{w}, nil
 	}
 
 	writes, gone, readAt, err := c.fetchAndMap(ctx, store, spec, gid)
@@ -213,6 +216,17 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 		}
 		if !held {
 			return nil, nil
+		}
+		if req.Attempts == 0 {
+			// A deletion the origin did not announce is confirmed before it
+			// is believed. On a domain swept by updated_at, a record wrongly
+			// retired by one empty answer has no scheduled read that brings
+			// it back (the sweep's filter skips it until it changes). So the
+			// first empty answer fails as worth another try, the retry lane
+			// fetches again after its first wait, and only a later try that
+			// still finds nothing retires the record, at that fetch's time.
+			c.forgetDelivery(req, gid)
+			return nil, fmt.Errorf("shopify: the origin answered nothing for a record the mirror holds (%s); it is asked again before the record is retired", gid)
 		}
 		return []memqlsync.MirrorWrite{tombstone(spec.Concept, store.ID, gid, readAt)}, nil
 	}
@@ -389,6 +403,19 @@ func deliveredGID(body []byte, graphqlType string) string {
 		return "gid://shopify/" + graphqlType + "/" + id
 	}
 	return ""
+}
+
+// announcedAt is a delete topic's tombstone time: the delivery's receipt.
+// A receipt an earlier build staged at whole seconds (the receiver now stages
+// it to the nanosecond) counts as the END of its second: it may have been
+// received any time in it, and a read inside that second before the receipt
+// must not outrank the delete.
+func announcedAt(req memqlsync.InboundRequest, fallback time.Time) time.Time {
+	at := receivedAt(req, fallback)
+	if !req.ReceivedAt.IsZero() && at.Nanosecond() == 0 {
+		at = at.Add(time.Second - time.Nanosecond)
+	}
+	return at
 }
 
 // receivedAt is when a delivery was received (staged), on this engine's

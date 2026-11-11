@@ -187,7 +187,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			`contentType: %s, headersJson: %s, dedupeKey: %s, signatureVerified: %t, verifiedBy: %s, receivedAt: %s)`,
 		memqlString(requestID), memqlString(name), memqlString(string(body)),
 		memqlString(r.Header.Get("Content-Type")), memqlString(headers), memqlString(dedupeKey), verified,
-		memqlString(src.verifiedBy), memqlString(received.Format(time.RFC3339)))
+		memqlString(src.verifiedBy), memqlString(received.Format(time.RFC3339Nano)))
 
 	if _, err := h.engine.Execute(systemActorContext(r.Context()), mutation); err != nil {
 		// The delivery was valid; we simply could not record it. 503 is the

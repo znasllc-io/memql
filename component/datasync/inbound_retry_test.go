@@ -608,3 +608,19 @@ func TestARowWhoseOwnerCannotBeToldIsLeftForTheNextPass(t *testing.T) {
 		t.Fatalf("writes = %v, want the fenced claim and the outcome", w)
 	}
 }
+
+// THE CONNECTOR IS TOLD WHICH TRY THIS IS. A connector that must hear an
+// answer twice before it acts on it -- a record the origin answers nothing
+// for -- reads the try count from the request it is handed: the staged row's
+// attempts, 0 on the first try.
+func TestTheConnectorIsToldWhichTryThisIs(t *testing.T) {
+	for _, prior := range []int{0, 1, 3} {
+		engine := newFakeEngine()
+		c := &fakeConnector{name: "shopify"}
+		d := retryDispatcher(engine, newFakeWriter(), c)
+		_, _ = d.DispatchStaged(context.Background(), stagedFailure("req-1", prior))
+		if len(c.applied) != 1 || c.applied[0].Attempts != prior {
+			t.Errorf("after %d tries the connector was handed %+v, want Attempts %d", prior, c.applied, prior)
+		}
+	}
+}

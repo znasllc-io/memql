@@ -543,7 +543,7 @@ func TestARetriedDeleteStillRetiresTheRecord(t *testing.T) {
 		// retry fetches nothing.
 		r.now = at("10:03:00")
 		r.orderFetches(nil)
-		r.deliver(t, request("orders/updated", "gid://shopify/Order/1", "wh-a", at("10:00:00")))
+		r.deliver(t, retried(request("orders/updated", "gid://shopify/Order/1", "wh-a", at("10:00:00"))))
 		if row := r.row("order", "gid://shopify/Order/1"); row["deleted"] != true {
 			t.Errorf("an update whose fetch found nothing left the deleted order live: updatedAt %v", row["updatedAt"])
 		}
@@ -616,7 +616,9 @@ func TestTheFakeAdminRefusesAVersionTheDocumentDidNotSelect(t *testing.T) {
 
 // ---- fix round 1: a record's existence is judged by when the origin was read ----
 
-// Only a clean answer is a deletion: `node: null` and no error at all. Every
+// Only a clean answer is a deletion: `node: null` and no error at all, here
+// on the delivery's retry (a first clean answer is asked again,
+// TestAnUnannouncedDeletionIsConfirmedBeforeItIsBelieved). Every
 // other way a fetch can come back without the object -- the origin refusing
 // the node itself (how Shopify refuses protected customer data on
 // node(id:)), a denial left after the prune limit, a reply with no data or
@@ -653,7 +655,7 @@ func TestEveryAnswerOfAFetchIsADeletionOnlyWhenClean(t *testing.T) {
 			if tc.errs != nil {
 				r.admin.fail("ShopifyFetchOrder", tc.errs...)
 			}
-			writes, err := r.conn.Apply(context.Background(), request("orders/updated", "gid://shopify/Order/1", "wh-1", at("09:59:00")))
+			writes, err := r.conn.Apply(context.Background(), retried(request("orders/updated", "gid://shopify/Order/1", "wh-1", at("09:59:00"))))
 			if err == nil {
 				r.apply(t, writes)
 			}
@@ -710,7 +712,7 @@ func TestARecordWronglySeenAsGoneComesBackOnTheNextRead(t *testing.T) {
 			r.held("order", "gid://shopify/Order/1", "2026-08-23T09:00:00Z", at("09:30:00"))
 			r.now = at("10:00:00")
 			r.orderFetches(nil)
-			r.deliver(t, request("orders/updated", "gid://shopify/Order/1", "wh-f", at("09:59:00")))
+			r.deliver(t, retried(request("orders/updated", "gid://shopify/Order/1", "wh-f", at("09:59:00"))))
 			if r.row("order", "gid://shopify/Order/1")["deleted"] != true {
 				t.Fatal("the clean empty fetch did not retire the held order, so this test proves nothing")
 			}
@@ -751,7 +753,7 @@ func TestABulkLineExportedBeforeATombstoneDoesNotBringTheRecordBack(t *testing.T
 				r.deliver(t, request("orders/delete", "gid://shopify/Order/1", "wh-del", at("10:04:58")))
 			case "empty fetch":
 				r.orderFetches(nil)
-				r.deliver(t, request("orders/updated", "gid://shopify/Order/1", "wh-upd", at("10:04:58")))
+				r.deliver(t, retried(request("orders/updated", "gid://shopify/Order/1", "wh-upd", at("10:04:58"))))
 			}
 			r.now = at("10:10:00")
 			r.exportStreamed(t, "order", cursor, orderLines("2026-08-23T10:05:00Z", 1)...)
@@ -770,7 +772,7 @@ func TestABulkLineExportedAfterATombstoneBringsTheRecordBack(t *testing.T) {
 	r.held("order", "gid://shopify/Order/1", "2026-08-23T09:00:00Z", at("09:30:00"))
 	r.now = at("10:00:00")
 	r.orderFetches(nil)
-	r.deliver(t, request("orders/updated", "gid://shopify/Order/1", "wh-f", at("09:59:00")))
+	r.deliver(t, retried(request("orders/updated", "gid://shopify/Order/1", "wh-f", at("09:59:00"))))
 	r.now = at("10:30:00")
 	cursor := r.exportStarted(t, "order")
 	r.now = at("10:40:00")
@@ -829,4 +831,157 @@ func TestVersionsOfDifferentKindsAreNeverCompared(t *testing.T) {
 			t.Errorf("the line holds quantity %v, want its order's delivery's 3", line["quantity"])
 		}
 	})
+}
+
+// ---- fix round 2 ----
+
+// retried is a delivery on the retry lane's first retry.
+func retried(req memqlsync.InboundRequest) memqlsync.InboundRequest {
+	req.Attempts = 1
+	return req
+}
+
+// heldReadAt is a live order the mirror holds, read at an exact instant.
+func (r *mirrorRig) heldReadAt(gid, updatedAt string, read time.Time) {
+	r.held("order", gid, updatedAt, read)
+}
+
+// A DELETION THE ORIGIN DID NOT ANNOUNCE IS CONFIRMED BEFORE IT IS BELIEVED.
+// One clean empty answer on an update topic retires nothing: on a domain swept
+// by updated_at, a record wrongly retired by it has no scheduled read that
+// brings it back. The delivery fails as worth another try, and the retry that
+// still finds nothing retires the record; one that finds it writes it. A
+// delete topic is the origin's announcement and retires at once.
+func TestAnUnannouncedDeletionIsConfirmedBeforeItIsBelieved(t *testing.T) {
+	const gid = "gid://shopify/Order/1"
+	setup := func(t *testing.T) *mirrorRig {
+		r := newMirrorRig(t)
+		r.now = at("10:00:00")
+		r.held("order", gid, "2026-08-23T09:00:00Z", at("09:30:00"))
+		return r
+	}
+	t.Run("the first try", func(t *testing.T) {
+		r := setup(t)
+		r.orderFetches(nil)
+		writes, err := r.conn.Apply(context.Background(), request("orders/updated", gid, "wh-1", at("09:59:00")))
+		if err == nil || memqlsync.IsPermanent(err) || memqlsync.IsNotGranted(err) {
+			t.Fatalf("err = %v (writes %v), want a failure worth another try", err, writes)
+		}
+		if !strings.Contains(err.Error(), "asked again before the record is retired") {
+			t.Errorf("err = %v, want the plain reason", err)
+		}
+		if r.row("order", gid)["deleted"] == true {
+			t.Error("one clean empty answer retired the held record")
+		}
+	})
+	t.Run("the retry, still nothing", func(t *testing.T) {
+		r := setup(t)
+		r.orderFetches(nil)
+		r.now = at("10:01:00")
+		r.deliver(t, retried(request("orders/updated", gid, "wh-1", at("09:59:00"))))
+		if r.row("order", gid)["deleted"] != true {
+			t.Error("the retry's clean empty answer did not retire the record")
+		}
+	})
+	t.Run("the retry finds the record", func(t *testing.T) {
+		r := setup(t)
+		r.orderFetches(orderNode("2026-08-23T10:00:30Z", 2))
+		r.now = at("10:01:00")
+		r.deliver(t, retried(request("orders/updated", gid, "wh-1", at("09:59:00"))))
+		if row := r.row("order", gid); row["deleted"] == true || stringAt(row, "updatedAt") != "2026-08-23T10:00:30Z" {
+			t.Errorf("the retry that found the record left %v", row)
+		}
+	})
+	t.Run("a delete topic", func(t *testing.T) {
+		r := setup(t)
+		r.deliver(t, request("orders/delete", gid, "wh-del", at("09:59:58")))
+		if r.row("order", gid)["deleted"] != true {
+			t.Error("a delete topic did not retire the record on its first try")
+		}
+	})
+}
+
+// A DELETE TOPIC'S TOMBSTONE allows for the clocks of two nodes: its receipt
+// is taken on the node that received the webhook, the row's read on the node
+// that fetched. It is refused only by a read made more than
+// AnnouncedRetireAllowance after its receipt. A receipt an earlier build
+// staged at whole seconds counts as the end of its second.
+func TestTheDeleteTopicsTombstoneAllowsForClocksApart(t *testing.T) {
+	const gid = "gid://shopify/Order/1"
+	sub := func(clock string) time.Time { return at(clock[:8]).Add(mustDuration(clock[8:])) }
+	cases := []struct {
+		name          string
+		read, receipt time.Time
+		retired       bool
+	}{
+		{"a read inside the receipt's second, before it", sub("10:00:00+300ms"), sub("10:00:00+700ms"), true},
+		{"a whole-second receipt from the earlier build, read later in that second", sub("10:00:00+300ms"), at("10:00:00"), true},
+		{"a receipt two seconds before the read", at("10:00:02"), at("10:00:00"), true},
+		{"a row read ninety seconds after the receipt", at("10:01:30"), at("10:00:00"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newMirrorRig(t)
+			r.now = at("10:02:00")
+			r.held("order", gid, "2026-08-23T09:00:00Z", tc.read)
+			req := request("orders/delete", gid, "wh-del", at("09:59:00"))
+			req.ReceivedAt = tc.receipt
+			r.deliver(t, req)
+			if retired := r.row("order", gid)["deleted"] == true; retired != tc.retired {
+				t.Errorf("retired = %t, want %t", retired, tc.retired)
+			}
+		})
+	}
+}
+
+func mustDuration(s string) time.Duration {
+	if s == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(strings.TrimPrefix(s, "+"))
+	if err != nil {
+		panic(err)
+	}
+	return d
+}
+
+// BETWEEN TWO LIVE WRITES OF THE SAME ORIGIN VERSION THE LATER READ WINS. A
+// bulk line from an export started before a delivery read the same state
+// would move the row's read time back, and a tombstone must be after the
+// row's last read.
+func TestEqualVersionsTheLaterReadWins(t *testing.T) {
+	r := newMirrorRig(t)
+	const gid = "gid://shopify/Order/1"
+	r.now = at("10:05:00")
+	r.held("order", gid, "2026-08-23T10:00:00Z", at("10:05:00"))
+	before := stringAt(r.row("order", gid), "syncedAt")
+	w := mapObject(generated.Types["order"], testStoreID, map[string]any{"id": gid, "name": "#1001", "updatedAt": "2026-08-23T10:00:00Z"}, "", at("10:01:00"))
+	res := r.apply(t, w[:1])
+	if res.Stale != 1 || stringAt(r.row("order", gid), "syncedAt") != before {
+		t.Errorf("stale %d, syncedAt %v (was %s): an equal version read earlier must be refused", res.Stale, r.row("order", gid)["syncedAt"], before)
+	}
+}
+
+// A LIVE ROW FROM BEFORE THE RULE refuses no live write, but keeps its
+// syncedAt as its read time against a tombstone: one older than it is
+// refused, a newer one retires it.
+func TestARowFromBeforeTheRuleKeepsItsReadTimeForATombstone(t *testing.T) {
+	const gid = "gid://shopify/Order/1"
+	for _, tc := range []struct {
+		name    string
+		at      time.Time
+		retired bool
+	}{
+		{"a tombstone older than its sync time", at("09:59:00"), false},
+		{"a newer one", at("10:01:00"), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newMirrorRig(t)
+			r.put("order", gid, map[string]any{"name": "#1001", "updatedAt": "2026-08-23T10:00:00Z", "syncedAt": "2026-08-23T10:00:00Z", "deleted": false})
+			r.apply(t, []memqlsync.MirrorWrite{tombstone("order", testStoreID, gid, tc.at)})
+			if retired := r.row("order", gid)["deleted"] == true; retired != tc.retired {
+				t.Errorf("retired = %t, want %t", retired, tc.retired)
+			}
+		})
+	}
 }

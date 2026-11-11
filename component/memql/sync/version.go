@@ -43,7 +43,24 @@ type Stamp struct {
 	Version string
 	// ReadAt is when the origin was read for it (ReadTime), "" when unknown.
 	ReadAt string
+	// Announced is a write's retirement the origin announced
+	// (MirrorWrite.Announced).
+	Announced bool
 }
+
+// AnnouncedRetireAllowance is how much later than an announced deletion's
+// receipt a read must be to refuse it (Refuses).
+//
+// The receipt is taken on the node that received the origin's delete event,
+// and the row's last read on the node that fetched it; their clocks may
+// differ by seconds, and a read just after the delete can carry a time just
+// before its receipt. Nothing reads a deleted record alive, so a row read
+// within the allowance after the receipt was read before the deletion, and
+// the delete stands. The allowance cannot keep a live record retired: a
+// record the origin still has is read alive again later, outside it. It is
+// for an announced deletion only: a relist's tombstone and an empty fetch's
+// are times this engine read the origin, compared with its own reads.
+const AnnouncedRetireAllowance = 60 * time.Second
 
 // StoredStamp is how the guard reads a stored row, and the ONE place a row
 // written under the connector's rule is told from one written before it.
@@ -52,9 +69,10 @@ type Stamp struct {
 // before the field existed. One that names it counts the marker only when it
 // was written by the same write as the row's read time (VersionReadAtField
 // equal to ReadAtField): an unmarked row, or one whose marker an earlier
-// build's write left behind, holds no version. Such a LIVE row orders nothing
-// and is not Held; such a TOMBSTONE still records when the record was found
-// gone, by its read time, so an older snapshot does not bring it back.
+// build's write left behind, holds no version, and refuses no live write. Its
+// read time still stands for the existence comparisons: a tombstone older
+// than a live row's read does not retire it, and a live write read before a
+// tombstone's time does not bring the record back.
 func StoredStamp(spec DomainSpec, payload map[string]any) Stamp {
 	if payload == nil {
 		return Stamp{}
@@ -71,10 +89,9 @@ func StoredStamp(spec DomainSpec, payload map[string]any) Stamp {
 	paired := source != "" && (strings.TrimSpace(spec.VersionReadAtField) == "" ||
 		(out.ReadAt != "" && field(payload, spec.VersionReadAtField) == out.ReadAt))
 	if !paired {
-		if out.Retired {
-			return out
-		}
-		return Stamp{}
+		// No version; its read time still stands for the existence
+		// comparisons, so a tombstone older than it does not retire it.
+		return out
 	}
 	out.Source, out.Version = source, field(payload, spec.VersionField)
 	return out
@@ -82,7 +99,7 @@ func StoredStamp(spec DomainSpec, payload map[string]any) Stamp {
 
 // WriteStamp is how the guard reads a write.
 func WriteStamp(spec DomainSpec, w MirrorWrite) Stamp {
-	out := Stamp{Held: true, Retired: w.Retire, Version: strings.TrimSpace(w.Version), ReadAt: field(w.Payload, spec.ReadAtField)}
+	out := Stamp{Held: true, Retired: w.Retire, Announced: w.Retire && w.Announced, Version: strings.TrimSpace(w.Version), ReadAt: field(w.Payload, spec.ReadAtField)}
 	if strings.TrimSpace(spec.VersionSourceField) == "" {
 		out.Source = VersionFromOrigin
 	} else {
@@ -102,12 +119,15 @@ func WriteStamp(spec DomainSpec, w MirrorWrite) Stamp {
 //   - a live write over a tombstone applies only when the origin was read
 //     for it AFTER the tombstone's time;
 //   - a tombstone over a live row applies only when its time is AFTER the
-//     time the origin was last read for that row;
+//     time the origin was last read for that row -- or, for a deletion the
+//     origin announced, unless the row was read more than
+//     AnnouncedRetireAllowance after the announcement's receipt;
 //   - a tombstone over a tombstone: the later time wins, and an earlier or
 //     equal one writes nothing, since it changes nothing.
 //
 // WHICH OF TWO LIVE STATES IS NEWER is the origin's version, when both sides
-// carry one. Versions of different kinds are never compared: a stored read
+// carry one; with the same version, the later read wins, so a row's read
+// time never moves back. Versions of different kinds are never compared: a stored read
 // time does not refuse a write carrying the origin's version (it is no
 // evidence of being newer by the origin's clock). A write carrying only a
 // read time is ordered by when it was read, against the row's read time,
@@ -117,12 +137,20 @@ func Refuses(stored, incoming Stamp) bool {
 		return false
 	}
 	if (stored.Retired || incoming.Retired) && stored.ReadAt != "" {
+		if incoming.Announced && !stored.Retired {
+			return readAfterBy(stored.ReadAt, incoming.ReadAt, AnnouncedRetireAllowance)
+		}
 		return !readAfter(incoming.ReadAt, stored.ReadAt)
 	}
 	switch {
 	case stored.Source == "":
 		return false
 	case stored.Source == VersionFromOrigin && incoming.Source == VersionFromOrigin:
+		if CompareVersions(incoming.Version, stored.Version) == 0 && incoming.Version != "" {
+			// The same state: the later read stands, so the row's read time
+			// never moves back.
+			return readAfter(stored.ReadAt, incoming.ReadAt)
+		}
 		return Stale(incoming.Version, stored.Version)
 	case incoming.Source == VersionFromOrigin:
 		return false
@@ -137,10 +165,13 @@ func Refuses(stored, incoming Stamp) bool {
 
 // readAfter reports whether read time a is strictly after b; an unknown or
 // unreadable a is after nothing.
-func readAfter(a, b string) bool {
+func readAfter(a, b string) bool { return readAfterBy(a, b, 0) }
+
+// readAfterBy reports whether read time a is more than `by` after b.
+func readAfterBy(a, b string, by time.Duration) bool {
 	ta, aok := VersionTime(a)
 	tb, bok := VersionTime(b)
-	return aok && bok && ta.After(tb)
+	return aok && bok && ta.After(tb.Add(by))
 }
 
 func field(payload map[string]any, name string) string {
