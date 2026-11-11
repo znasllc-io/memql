@@ -485,7 +485,7 @@ Added at the review of Tasks 13 and 14 (2026-11-11). Two findings share one caus
 - Produces, in `useStore.ts`: `setRecording(storeId: string, recording: boolean)` on `StoreWrites`; the Store page's "Pause recording" and "Resume" call it, and no longer the client mutation `setStoreStatus`.
 
 Decisions:
-- `shopifyStoreSetRecording` is for the store's owner or a cluster owner (`storeForCaller` with `mayActOnStore`, the refusal `actRefusal`). It moves a store only between `live` and `paused`: a store in any other status is refused with "shopify: a store that is not connected cannot be paused or resumed", before any write. It writes through the existing `setStoreStatus` as the operator. Asking for the state the store is already in is not an error and writes nothing. The store row's own gate is not widened.
+- `shopifyStoreSetRecording` is for the store's owner or a cluster owner (`storeForCaller` with `mayActOnStore`, the refusal `actRefusal`). A store that is being recorded can be paused whatever its status word (decided at this task's review: a store connected through Connect Shopify stays `configured`, so "only between `live` and `paused`" refused nearly every real store): pause moves every status the store ingests under (`configured`, `backfilling`, `live`) to `paused`, and resume moves `paused` to `live`. `error`, an uninstalled store and a purged one are refused with "shopify: a store that is not connected cannot be paused or resumed", before any write. It writes through the existing `setStoreStatus` as the operator, and with the change it writes an audit event naming the caller as its actor, as `markReconnected` does. Asking for the state the store is already in is not an error and writes nothing, and no audit event. The store row's own gate is not widened.
 - `shopifyql`: the store's owner or a cluster owner, through `mirrorStoreForCaller`, before any call to Shopify.
 - `storefrontProbe`: the store's owner, a cluster owner, or a caller who may read stores, before any call to Shopify.
 - `shopifyStoreHealth`: answers only the stores the caller may read: every store for a cluster owner or a caller who may read stores; a store's owner their own; anybody else an empty list, never a refusal that names a store.
@@ -500,7 +500,7 @@ Decisions:
 ```go
 // caller_gate_test.go
 func TestSetRecordingIsForTheStoresOwnerOrAClusterOwner(t *testing.T)        // a non-owner is refused before any write
-func TestSetRecordingMovesOnlyBetweenLiveAndPaused(t *testing.T)             // uninstalled, purged: refused, nothing written
+func TestSetRecordingPausesWhatIsRecordedAndResumesWhatIsPaused(t *testing.T) // configured, backfilling, live pause; error, uninstalled, purged: refused, nothing written
 func TestSetRecordingToTheSameStateWritesNothing(t *testing.T)
 func TestShopifyqlRefusesANonOwnerBeforeItCallsShopify(t *testing.T)         // zero Admin calls
 func TestTheStorefrontProbeRefusesACallerWhoMayNotReadTheStore(t *testing.T) // zero Storefront calls
