@@ -324,3 +324,38 @@ func TestTheDecisionReceiptNamesTheDeciderTheRowHolds(t *testing.T) {
 		t.Fatalf("the receipt names %v, the row %+v", got["decidedBy"], rows)
 	}
 }
+
+// A SET-UP THAT A STAFF SAVE OVERTAKES IS REFUSED, and the staff change stays.
+func TestASetUpOvertakenByAStaffSaveIsRefused(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	merchant, store, site, account := tiedStore(t, eng, "fence-setup")
+	group := "acct-" + account
+	grantGroup(t, eng, group, "read", "app:deployables")
+	grantGroup(t, eng, group, "execute", "app:deployables/wholesale")
+	staff := "user-staff-fence-setup-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	seedPersonIn(t, eng, staff, staff, "writer", true, group, account, "added")
+	operator := asOperator("operator-" + merchant)
+	wsExec(t, eng, operator, `builtin wholesaleSetSettings(siteId: `+quote(site)+`, storeId: `+quote(store)+
+		`, applicationsOpen: true, entitlementAdapter: "customerTag")`)
+	fired := false
+	_, err := wholesalepack.SetSettingsForTest(operator, eng,
+		map[string]any{"siteId": site, "storeId": store, "applicationsOpen": false},
+		func(context.Context, string, map[string]any) {
+			if fired {
+				return
+			}
+			fired = true
+			wsExec(t, eng, signedIn(staff), `builtin wholesaleUpdateSettings(siteId: `+quote(site)+`, storeId: `+quote(store)+
+				`, introText: "the staff change")`)
+		})
+	if !fired {
+		t.Fatal("the staff save did not run")
+	}
+	if err == nil || !strings.Contains(err.Error(), wholesalepack.ChangedWhileEditingSentence) {
+		t.Fatalf("the overtaken set-up answered %v", err)
+	}
+	row := settingsOf(t, eng, operator, store)
+	if row["introText"] != "the staff change" || row["applicationsOpen"] != true {
+		t.Fatalf("the settings read %+v, want the staff change kept and the set-up not applied", row)
+	}
+}

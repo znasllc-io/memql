@@ -62,13 +62,15 @@ func (a *recordingAdapter) Revoke(context.Context, wholesalepack.Caller, wholesa
 	return wholesalepack.Outcome{}, nil
 }
 
-// callsFor is the actors every Provision for one application ran as.
+// callsFor is the actors every Provision for one application ran as. An
+// adapter is handed the canonical application id (ruling 28), whichever form
+// the application is named by here.
 func (a *recordingAdapter) callsFor(applicationID string) []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	var out []string
 	for i, app := range a.apps {
-		if app == applicationID {
+		if app == "v1:wholesale:application:"+bareID(applicationID) {
 			out = append(out, a.actors[i])
 		}
 	}

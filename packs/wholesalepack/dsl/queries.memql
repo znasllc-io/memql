@@ -42,7 +42,7 @@ query application applicationsForStore {
   shape   applicationFull
 }
 
-@description("Every decision recorded against one application, newest first. Append-only, so this IS the history -- there is no undo-by-overwrite to reconstruct, and the reason an application was refused is still here after it was approved.")
+@description("Every decision recorded against one application, newest first. Append-only, so this IS the history -- there is no undo-by-overwrite to reconstruct, and the reason an application was refused is still here after it was approved. A decision row holds the CANONICAL application id (v1:wholesale:application:<id>) and this query matches the id as written, so ask it with the canonical id.")
 @actor
 query applicationDecision decisionsForApplication {
   args {
@@ -65,7 +65,7 @@ query applicationDecision decisionsForApplications {
   shape   applicationDecisionFull
 }
 
-@description("The entitlement granted against one application. One row per application at a derived id, so this answers at most one -- newest version first, which is the current state.")
+@description("The entitlement granted against one application. One row per application at a derived id, so this answers at most one -- newest version first, which is the current state. An entitlement row holds the CANONICAL application id (v1:wholesale:application:<id>) and this query matches the id as written, so ask it with the canonical id.")
 @actor
 query entitlement entitlementForApplication {
   args {

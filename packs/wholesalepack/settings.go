@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -112,7 +113,11 @@ func (p *Provider) setWholesaleSettings(ctx context.Context, args map[string]any
 	if err != nil {
 		return nil, err
 	}
-	if err := p.write(ctx, "setWholesaleSettingsRow", map[string]any{
+	// FENCED ON WHAT IT READ: an existing row on its version, an absent row on
+	// "absent". A staff save that lands between the read and this write is not
+	// overwritten; the set-up is refused and the operator reloads.
+	fenced := memql.ContextWithRowVersionFence(ctx, settingsConcept, SettingsRowID(storeID), place.version)
+	if err := p.write(fenced, "setWholesaleSettingsRow", map[string]any{
 		"settingsId":         SettingsRowID(storeID),
 		"ownerUserId":        place.owner,
 		"storeId":            storeID,
@@ -126,6 +131,9 @@ func (p *Provider) setWholesaleSettings(ctx context.Context, args map[string]any
 		"siteId":     place.siteID,
 		"staffEmail": place.staffEmail,
 	}); err != nil {
+		if errors.Is(err, memql.ErrRowVersionChanged) {
+			return nil, errors.New(ChangedWhileEditingSentence)
+		}
 		return nil, err
 	}
 	// THE RECEIPT SAYS WHOSE STORE IT NOW IS, so the operator who set it up
@@ -168,6 +176,9 @@ type settingsPlace struct {
 	owner, accountID, siteID string
 	// staffEmail is the address the row already holds, written back whole.
 	staffEmail string
+	// version is the createdAt of the row read, zero when there was none: the
+	// write is fenced on it.
+	version time.Time
 }
 
 // settingsOwner is who owns a store's settings row after this write.
@@ -208,7 +219,12 @@ func (p *Provider) settingsOwner(ctx context.Context, storeID, siteID string) (s
 	if existing != nil {
 		if owner := trimmed(existing["ownerUserId"]); owner != "" {
 			place := settingsPlace{owner: userRef(owner), accountID: trimmed(existing["accountId"]),
-				siteID: trimmed(existing["siteId"]), staffEmail: trimmed(existing["staffEmail"])}
+				siteID: trimmed(existing["siteId"]), staffEmail: trimmed(existing["staffEmail"]),
+				version: rowTime(existing["createdAt"])}
+			if place.version.IsZero() {
+				return settingsPlace{}, fmt.Errorf("wholesale: store %q's settings carry no version to save against; "+
+					"reload and try again", storeID)
+			}
 			if named != nil {
 				place.accountID, place.siteID = trimmed(named["accountId"]), bareID(trimmed(named["id"]))
 			}

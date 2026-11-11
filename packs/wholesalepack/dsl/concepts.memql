@@ -99,7 +99,7 @@ concept applicationDecision {
 }
 
 @version("1.1.0")
-@description("What this pack granted, to whom, against which store, and through which adapter. STATE THE PACK OWNS, never inferred from Shopify: a company that exists over there says nothing about whether THIS pack granted it, and reading entitlement back out of somebody else's system would make an operator's own record of what they granted depend on an API call that can fail. ONE ROW PER APPLICATION at the derived id wholesale:entitlement:<applicationId>, so a re-provision is a new VERSION of one logical row rather than a second row a read would have to choose between -- and 'revoked when' is that version's own createdAt.")
+@description("What this pack granted, to whom, against which store, and through which adapter. STATE THE PACK OWNS, never inferred from Shopify: a company that exists over there says nothing about whether THIS pack granted it, and reading entitlement back out of somebody else's system would make an operator's own record of what they granted depend on an API call that can fail. ONE ROW PER APPLICATION at the derived id wholesale-entitlement-<the application's bare id, as a slug> (EntitlementRowID), the same whichever form of the application id the caller named -- and a row written at another id before that rule keeps being written at its own -- so a re-provision is a new VERSION of one logical row rather than a second row a read would have to choose between -- and 'revoked when' is that version's own createdAt.")
 @displayCard(primary="state", secondary="buyerEmail", tertiary="adapter")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept entitlement {

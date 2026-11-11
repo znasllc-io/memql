@@ -363,9 +363,12 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 
 	grant := Grant{
 		StoreID: storeID,
-		// The application's own short id, whichever form the caller named it
-		// by, so an adapter is told one id for one application.
-		ApplicationID: bareID(applicationID),
+		// THE CANONICAL ID, whichever form the caller named the application
+		// by (ruling 28): the B2B route makes it the company's idempotency
+		// key, so an adapter handed two forms would make two companies. The
+		// canonical form is the one the pack's queries and events hand a
+		// client, so it is the form the first provision normally used.
+		ApplicationID: applicationRef(applicationID),
 		CompanyName:   trimmed(app["companyName"]),
 		BuyerName:     trimmed(app["applicantName"]),
 		BuyerEmail:    trimmed(app["applicantEmail"]),

@@ -66,3 +66,19 @@ func UpdateSettingsForTest(ctx context.Context, eng memql.IntegrationEngineAcces
 	}
 	return nodes[0].Payload, nil
 }
+
+// SetSettingsForTest runs wholesaleSetSettings over eng with a hook run before
+// its write.
+func SetSettingsForTest(ctx context.Context, eng memql.IntegrationEngineAccess, args map[string]any,
+	before func(ctx context.Context, mutation string, args map[string]any)) ([]byte, error) {
+	p := &Provider{
+		engine: eng,
+		reader: &engineRowReader{engine: eng},
+		writer: hookedWriter{inner: &engineWriter{engine: eng}, before: before},
+	}
+	nodes, err := p.setWholesaleSettings(ctx, args, 0)
+	if err != nil || len(nodes) == 0 {
+		return nil, err
+	}
+	return nodes[0].Payload, nil
+}

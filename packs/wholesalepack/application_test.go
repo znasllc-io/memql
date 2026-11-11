@@ -581,7 +581,7 @@ func TestTheSettingsOwnerIsReadAtTheIdTheWriteGoesTo(t *testing.T) {
 	writer := &fakeWriter{}
 	p := &Provider{writer: writer, reader: &fixtureReader{
 		settings: map[string][]map[string]any{"store.live": {{"id": SettingsRowID("store-live"), "storeId": "store.live",
-			"ownerUserId": "merchant-1", "applicationsOpen": true, "accountId": "acct-north", "siteId": "site-1"}}},
+			"ownerUserId": "merchant-1", "applicationsOpen": true, "accountId": "acct-north", "siteId": "site-1", "createdAt": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}}},
 		sites: []map[string]any{{"id": "site-9", "ownerUserId": "merchant-9", "binding": map[string]any{"storeId": "store-live"}}},
 	}}
 	if _, err := p.setWholesaleSettings(operatorCtx("operator-1"), map[string]any{"storeId": "store-live",
@@ -969,7 +969,7 @@ func TestSettingsAreSetByAnOperatorOrInternalOriginOnly(t *testing.T) {
 	}
 
 	existing := &fixtureReader{settings: map[string][]map[string]any{
-		"store-live": {{"storeId": "store-live", "ownerUserId": "merchant-1", "applicationsOpen": true}},
+		"store-live": {{"storeId": "store-live", "ownerUserId": "merchant-1", "applicationsOpen": true, "createdAt": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}},
 	}}
 	for name, ctx := range map[string]context.Context{
 		"an operator":   operatorCtx("operator-1"),
@@ -1443,7 +1443,7 @@ func TestAnUpdateIsFencedAndClearsTheStaffAddress(t *testing.T) {
 func TestASetUpKeepsTheStaffAddress(t *testing.T) {
 	writer := &fakeWriter{}
 	p := &Provider{writer: writer, reader: &fixtureReader{settings: map[string][]map[string]any{"store-live": {{
-		"storeId": "store-live", "ownerUserId": "merchant-1", "applicationsOpen": true, "staffEmail": "desk@example.com"}}}}}
+		"storeId": "store-live", "ownerUserId": "merchant-1", "applicationsOpen": true, "staffEmail": "desk@example.com", "createdAt": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}}}}}
 	if _, err := p.setWholesaleSettings(operatorCtx("operator-1"), map[string]any{"storeId": "store-live", "applicationsOpen": false}, 0); err != nil {
 		t.Fatalf("setWholesaleSettings: %v", err)
 	}
@@ -1475,5 +1475,118 @@ func TestASiteOfAnotherOrganizationIsRefusedOnTheStoresSettings(t *testing.T) {
 	}
 	if len(writer.writes) != 0 {
 		t.Fatalf("a refused call wrote: %+v", writer.writes)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fix round 2
+// ---------------------------------------------------------------------------
+
+// grantRecorder is an adapter that records the Grant it is handed.
+type grantRecorder struct{ ids *[]string }
+
+const grantRecorderName = "grantRecorderForTest"
+
+var recordedGrantIDs []string
+
+func (grantRecorder) Name() string           { return grantRecorderName }
+func (grantRecorder) Available(string) error { return nil }
+func (r grantRecorder) Provision(_ context.Context, _ Caller, g Grant) (Outcome, error) {
+	*r.ids = append(*r.ids, "provision "+g.ApplicationID)
+	return Outcome{Reference: "ref-1"}, nil
+}
+func (r grantRecorder) Revoke(_ context.Context, _ Caller, g Grant) (Outcome, error) {
+	*r.ids = append(*r.ids, "revoke "+g.ApplicationID)
+	return Outcome{Reference: "ref-1"}, nil
+}
+
+// bothForms answers the application at its bare and its canonical id, as the
+// engine's applicationById does.
+func bothForms(fx *fixtureReader) *fixtureReader {
+	fx.apps["v1:wholesale:application:app-1"] = fx.apps["app-1"]
+	return fx
+}
+
+// AN ADAPTER IS HANDED THE CANONICAL APPLICATION ID, whatever form the caller
+// named it by (ruling 28): the B2B route makes it the company's idempotency key,
+// so two forms would be two companies.
+func TestTheAdapterIsHandedTheCanonicalApplicationId(t *testing.T) {
+	registerShippedAdapters()
+	if _, err := AdapterByName(grantRecorderName); err != nil {
+		RegisterAdapter(grantRecorder{ids: &recordedGrantIDs})
+	}
+	const canon = "v1:wholesale:application:app-1"
+	// The B2B route's own call.
+	for _, asked := range []string{"app-1", canon} {
+		fx := bothForms(approvedFixture())
+		fx.settings["store-live"][0]["entitlementAdapter"] = AdapterShopifyB2B
+		caller := &fakeCaller{}
+		p := &Provider{reader: fx, writer: &fakeWriter{}, caller: caller}
+		if _, err := p.provisionEntitlement(internalAsMerchant(), map[string]any{"applicationId": asked}, 0); err != nil {
+			t.Fatalf("provision asked %q: %v", asked, err)
+		}
+		if len(caller.args) != 1 || caller.args[0]["applicationId"] != canon {
+			t.Fatalf("provision asked %q handed shopifyProvisionWholesale %v, want %s", asked, caller.args, canon)
+		}
+	}
+	// Every Grant, provision and revoke.
+	for _, asked := range []string{"app-1", canon} {
+		recordedGrantIDs = nil
+		fx := bothForms(approvedFixture())
+		fx.settings["store-live"][0]["entitlementAdapter"] = grantRecorderName
+		p := &Provider{reader: fx, writer: &fakeWriter{}, caller: &fakeCaller{}}
+		if _, err := p.provisionEntitlement(internalAsMerchant(), map[string]any{"applicationId": asked}, 0); err != nil {
+			t.Fatalf("provision: %v", err)
+		}
+		fx.decisions["app-1"] = []map[string]any{{"transition": TransitionRevoke}}
+		fx.ents["app-1"] = []map[string]any{{"applicationId": canon, "storeId": "store-live", "adapter": grantRecorderName,
+			"state": EntitlementGranted, "reference": "ref-1"}}
+		if _, err := p.revokeEntitlement(internalAsMerchant(), map[string]any{"applicationId": asked}, 0); err != nil {
+			t.Fatalf("revoke: %v", err)
+		}
+		if len(recordedGrantIDs) != 2 || recordedGrantIDs[0] != "provision "+canon || recordedGrantIDs[1] != "revoke "+canon {
+			t.Fatalf("asked %q, the adapter was handed %v, want the canonical id both times", asked, recordedGrantIDs)
+		}
+	}
+	// A retry over a granted row hands the B2B route the id the first provision did.
+	fx := bothForms(approvedFixture())
+	fx.settings["store-live"][0]["entitlementAdapter"] = AdapterShopifyB2B
+	caller := &fakeCaller{}
+	p := &Provider{reader: fx, writer: &fakeWriter{}, caller: caller}
+	if _, err := p.provisionEntitlement(internalAsMerchant(), map[string]any{"applicationId": canon}, 0); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	fx.ents["app-1"] = []map[string]any{{"applicationId": canon, "storeId": "store-live", "adapter": AdapterShopifyB2B,
+		"state": EntitlementGranted, "reference": "gid://shopify/Company/1"}}
+	if _, err := p.retryAccess(staffCtx("staff-1"), map[string]any{"applicationId": "app-1"}, 0); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if len(caller.args) != 2 || caller.args[1]["applicationId"] != caller.args[0]["applicationId"] {
+		t.Fatalf("the retry handed the route %v, the first provision %v", caller.args[len(caller.args)-1], caller.args[0])
+	}
+}
+
+// A SET-UP IS FENCED ON WHAT IT READ: an existing row on its version, an absent
+// row on absent; one that loses the fence is refused with the update's sentence.
+func TestASetUpIsFencedOnWhatItRead(t *testing.T) {
+	writer := &fakeWriter{}
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	reader := &fixtureReader{settings: map[string][]map[string]any{"store-live": {{"storeId": "store-live",
+		"ownerUserId": "merchant-1", "applicationsOpen": true, "createdAt": at}}},
+		sites: []map[string]any{{"id": "site-n", "ownerUserId": "merchant-2", "binding": map[string]any{"storeId": "store-new"}}}}
+	p := &Provider{reader: reader, writer: writer}
+	for _, store := range []string{"store-live", "store-new"} {
+		writer.writes = nil
+		if _, err := p.setWholesaleSettings(operatorCtx("operator-1"), map[string]any{"storeId": store, "applicationsOpen": false}, 0); err != nil {
+			t.Fatalf("%s: %v", store, err)
+		}
+		if !memql.HasRowVersionFence(writer.writes[0].ctx, "v1:wholesale:wholesaleSettings", SettingsRowID(store)) {
+			t.Fatalf("the set-up of %s was not fenced on what it read", store)
+		}
+	}
+	lost := &Provider{reader: reader, writer: &fakeWriter{err: memql.ErrRowVersionChanged}}
+	if _, err := lost.setWholesaleSettings(operatorCtx("operator-1"), map[string]any{"storeId": "store-live", "applicationsOpen": true}, 0); err == nil ||
+		err.Error() != ChangedWhileEditingSentence {
+		t.Fatalf("a set-up that lost its fence: %v", err)
 	}
 }
