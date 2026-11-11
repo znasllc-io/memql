@@ -212,7 +212,10 @@ func (s *Store) MarkDead(ctx context.Context, entryID, lastError string) error {
 // Each field reads as the automation used to hand it over: as stored, untrimmed
 // (the body is what the signature covered), an absent one as "".
 func (s *Store) StagedInboundRequest(ctx context.Context, requestID string) (StagedRequest, bool, error) {
-	rows, err := s.rows(ctx, call("query", "inboundRequestById", arg{"requestId", requestID}))
+	// Read FRESH. The event path's status guard (handleDispatchInbound) is
+	// only as good as this read: a cached `received` version on another node
+	// would dispatch a row the retry pass has claimed.
+	rows, err := s.rows(memql.ContextWithFreshRead(ctx), call("query", "inboundRequestById", arg{"requestId", requestID}))
 	if err != nil || len(rows) == 0 {
 		return StagedRequest{}, false, err
 	}
@@ -248,7 +251,8 @@ func stagedFromRows(rows []map[string]any) []StagedRequest {
 const inboundRequestConcept = "v1:platform:inboundRequest"
 
 // InboundRequestsDueForRetry reads ONE page of the failed deliveries whose
-// next try has come by asOf, oldest first, bodies included. Read fresh: a
+// next try has come by asOf, least recently written first (the sort is the
+// latest version's time, which every claim and stamp moves), bodies included. Read fresh: a
 // cached page could hand back rows another pass has already claimed.
 func (s *Store) InboundRequestsDueForRetry(ctx context.Context, asOf time.Time) ([]StagedRequest, error) {
 	rows, err := s.rows(memql.ContextWithFreshRead(ctx), call("query", "inboundRequestsDueForRetry",
@@ -276,6 +280,25 @@ func (s *Store) ClaimInboundRetry(ctx context.Context, staged StagedRequest, unt
 		return false, nil
 	}
 	return err == nil, err
+}
+
+// ParkUnservedInbound takes a due delivery whose source no connector serves out
+// of the retries with one write: still failed, no next time, a lastError
+// saying why, and the try count left as it was -- nothing was tried. Fenced on
+// the version the due read returned, so it cannot overwrite a claim or an
+// outcome another writer made since; a loss is not an error, because whoever
+// won has written the row.
+func (s *Store) ParkUnservedInbound(ctx context.Context, staged StagedRequest) error {
+	fenced := memql.ContextWithRowVersionFence(ctx, inboundRequestConcept, staged.RequestId, staged.Version)
+	_, err := s.exec(fenced, call("mutation", "updateInboundRequestStatus",
+		arg{"requestId", staged.RequestId},
+		arg{"status", "failed"},
+		arg{"lastError", truncateError(fmt.Sprintf("no connector on this node serves source %q, so the delivery is not tried again", strings.TrimSpace(staged.Source)))},
+		arg{"nextAttemptAt", ""}))
+	if errors.Is(err, memql.ErrRowVersionChanged) {
+		return nil
+	}
+	return err
 }
 
 // InboundRequestsGivenUp reads one page of one source's given-up deliveries,

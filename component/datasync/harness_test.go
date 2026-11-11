@@ -32,6 +32,9 @@ type fakeEngine struct {
 	// origin. Several of the runtime's writes are @serverOnly and the
 	// rendered text is identical with or without the stamp.
 	internal []bool
+	// fresh records, per call, whether its context asked for a fresh read
+	// (memql.ContextWithFreshRead), past the result cache.
+	fresh []bool
 	// rows answers a read whose rendered call STARTS WITH the key, so a
 	// test seeds `query outboxPending` without restating its arguments.
 	rows map[string][]map[string]any
@@ -48,6 +51,7 @@ func (f *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, q)
 	f.internal = append(f.internal, auth.OriginFromContext(ctx).IsInternal())
+	f.fresh = append(f.fresh, memql.FreshReadFromContext(ctx))
 	for needle, err := range f.failOn {
 		if strings.Contains(q, needle) {
 			return nil, err
@@ -92,6 +96,20 @@ func (f *fakeEngine) internalContaining(needle string) []bool {
 	for i, c := range f.calls {
 		if strings.Contains(c, needle) {
 			out = append(out, f.internal[i])
+		}
+	}
+	return out
+}
+
+// freshContaining reports, for every recorded call carrying the substring,
+// whether that call's context asked for a fresh read.
+func (f *fakeEngine) freshContaining(needle string) []bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []bool
+	for i, c := range f.calls {
+		if strings.Contains(c, needle) {
+			out = append(out, f.fresh[i])
 		}
 	}
 	return out

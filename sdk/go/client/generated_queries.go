@@ -4876,7 +4876,7 @@ func InboundRequestsByStatusBuild(args InboundRequestsByStatusArgs) string {
 	return b.String()
 }
 
-// InboundRequestsDueForRetry -- The failed deliveries whose next try has come, oldest first: what the datasync retry pass (retryFailedInboundDeliveries) works each minute. A row with no nextAttemptAt -- refused for a reason no retry changes -- and a row at four tries are never answered. One bounded page; the next minute's pass takes the rest. The full shape, because a retry needs the body.
+// InboundRequestsDueForRetry -- The failed deliveries whose next try has come, least recently written first (the sort is the latest version's creation time, which every claim and stamp moves): what the datasync retry pass (retryFailedInboundDeliveries) works each minute. A row with no nextAttemptAt -- refused for a reason no retry changes -- and a row at four tries are never answered. One bounded page; the next minute's pass takes the rest. The full shape, because a retry needs the body.
 // Read through the failed-delivery lookup (memory_nodes_inbound_failed_lookup_idx), which the `status == "failed"` conjunct engages: the read enumerates the deliveries that ever failed, never the inbox.
 //
 // Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["inboundRequestsDueForRetry"] in generated_concepts.go).
@@ -4899,7 +4899,7 @@ func InboundRequestsDueForRetryBuild(args InboundRequestsDueForRetryArgs) string
 	return b.String()
 }
 
-// InboundRequestsGivenUp -- The failed deliveries that used their four tries, newest first, of one source when one is named: what an operator puts back in line with datasyncRequeueInbound. Without the body. Read through the failed-delivery lookup, as inboundRequestsDueForRetry is.
+// InboundRequestsGivenUp -- The failed deliveries that used their four tries, most recently written first, of one source when one is named: what an operator puts back in line with datasyncRequeueInbound. Without the body. Read through the failed-delivery lookup, as inboundRequestsDueForRetry is.
 //
 // Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["inboundRequestsGivenUp"] in generated_concepts.go).
 type InboundRequestsGivenUpArgs struct {

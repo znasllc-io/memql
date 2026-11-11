@@ -37,7 +37,7 @@
 {"id":"automation:composeRecipeOutputName","kind":"automation","label":"composeRecipeOutputName","attrs":{"origin":"compose/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:conflictDetection","kind":"automation","label":"conflictDetection","attrs":{"filter":"row => row.naturalKeyValue != nil","origin":"data/automations.memql","publishes":"data.conflicts.detected","stratum":"0","trigger":"graph.node.created.v1:data:record","triggerConcept":"v1:data:record","triggerKind":"node.created"}},
 {"id":"automation:consolidateMemory","kind":"automation","label":"consolidateMemory","attrs":{"origin":"memory/automations.memql","schedule":"0 45 2 * * *","stratum":"0"}},
-{"id":"automation:continueQueuedBackfills","kind":"automation","label":"continueQueuedBackfills","attrs":{"origin":"platform/automations.memql","schedule":"0 */5 * * * *","stratum":"0"}},
+{"id":"automation:continueQueuedBackfills","kind":"automation","label":"continueQueuedBackfills","attrs":{"mode":"single","origin":"platform/automations.memql","schedule":"0 */5 * * * *","stratum":"0"}},
 {"id":"automation:customDomainReconcileWorkflow","kind":"automation","label":"customDomainReconcileWorkflow","attrs":{"origin":"platform/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:defaultWorkSpine","kind":"automation","label":"defaultWorkSpine","attrs":{"origin":"planner/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:demoteProcedures","kind":"automation","label":"demoteProcedures","attrs":{"origin":"procedure/automations.memql","schedule":"0 */15 * * * *","stratum":"0"}},

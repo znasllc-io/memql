@@ -41,7 +41,9 @@ automation reconcileMirroredDomains {
 /// queued by a connect, a wider grant or a boot, and one store's past arriving within minutes of
 /// connecting is the point. Each tick takes at most one domain per store, so a store runs one
 /// backfill at a time, and a poll of an export the origin is still preparing waits for the next.
+/// single: a pass that outlasts five minutes is not overlapped by the next one in this process.
 @trigger(schedule="0 */5 * * * *")
+@mode(single)
 automation continueQueuedBackfills {
   continued := builtin datasyncContinueBackfills()
 }
