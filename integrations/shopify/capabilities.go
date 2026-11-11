@@ -534,8 +534,12 @@ func (c *Connector) mirroredProduct(ctx context.Context, store Store, gid, handl
 	if spec == nil {
 		return nil, false, fmt.Errorf("shopify: the product concept is not in this build")
 	}
+	// operatorContext, not connectorContext: the generated mirror reads
+	// filter on actor.isClusterOwner, which a connector actor never is, so
+	// under its own identity the connector read none of the rows it wrote
+	// (F10). TestTheConnectorReadsBackTheMirrorRowsItWrote holds it.
 	if gid != "" {
-		res, err := c.engine.Execute(connectorContext(ctx), renderCall(spec.ByGidFn, map[string]any{"storeId": store.ID, "gid": gid}))
+		res, err := c.engine.Execute(operatorContext(ctx), renderCall(spec.ByGidFn, map[string]any{"storeId": store.ID, "gid": gid}))
 		if err != nil {
 			return nil, false, err
 		}
@@ -545,7 +549,7 @@ func (c *Connector) mirroredProduct(ctx context.Context, store Store, gid, handl
 		}
 		return rows[0], true, nil
 	}
-	res, err := c.engine.Execute(connectorContext(ctx), renderCall(spec.ForStoreFn, map[string]any{"storeId": store.ID}))
+	res, err := c.engine.Execute(operatorContext(ctx), renderCall(spec.ForStoreFn, map[string]any{"storeId": store.ID}))
 	if err != nil {
 		return nil, false, err
 	}

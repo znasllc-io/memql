@@ -421,7 +421,11 @@ func (c *Connector) relist(ctx context.Context, store Store, spec *generated.Typ
 // the ones the origin walk did not produce.
 func (c *Connector) liveRowsAbsentFrom(ctx context.Context, store Store, spec *generated.TypeSpec, seen map[string]bool) ([]string, error) {
 	var absent []string
-	res, err := c.engine.Execute(connectorContext(ctx), renderCall(spec.ForStoreFn, map[string]any{"storeId": store.ID}))
+	// operatorContext, not connectorContext: the generated mirror reads
+	// filter on actor.isClusterOwner, which a connector actor never is, so
+	// under its own identity the connector read none of the rows it wrote
+	// (F10). TestTheConnectorReadsBackTheMirrorRowsItWrote holds it.
+	res, err := c.engine.Execute(operatorContext(ctx), renderCall(spec.ForStoreFn, map[string]any{"storeId": store.ID}))
 	if err != nil {
 		return nil, fmt.Errorf("shopify: list mirrored %s: %w", spec.Concept, err)
 	}
