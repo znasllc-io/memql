@@ -113,6 +113,22 @@ exactly as above.
 > own idea of an approval chain would be one you had to work around, and a
 > client that wants no chain at all would be carrying it for nothing.
 
+### The emails and notices run on the first version
+
+The pack has ten sends and notices for your automations to call: the four
+applicant emails (`wholesaleSendTermsEmail`, and `wholesaleSendBuyerEmail` for
+`approved`, `rejected` and `revoked`) and the six staff notices of
+`wholesaleNotifyStaff`. For three of them -- the approval email and the
+`accessNotGranted` and `accessNotRemoved` notices -- the pack itself refuses to
+mail for an access row written before it sent email. The other seven -- the
+terms email, the rejection and removal emails, and the `readyToReview`,
+`approved`, `rejected` and `revoked` notices -- are sent whenever they are
+called for an application in the right state. The engine publishes
+`node.created` for every version of a row, and the pack writes new versions of
+old rows (`wholesaleBackfillAccounts`), so an automation that calls any of
+those seven triggers on the application, acceptance or decision row and filters
+on `args.firstVersion == true`, as the pack's own test clients do.
+
 ### Recording a decision
 
 ```
