@@ -364,10 +364,9 @@ func answerVerdict(i *Integration, reply map[string]any) {
 // database is shared, and a store another package's test left behind --
 // one whose verdict cannot be read, whose walk fails -- would otherwise be
 // walked by every run here and fail this package's tests. statsEngine sets
-// onlyStoresForTests to its has; the production code reads that variable only
-// when testing.Testing() is true, so no binary but a test binary is narrowed
-// by it (rollup.go). The tests of this package run one at a time, so the set
-// is the running test's stores.
+// onlyStoresForTests to its has. Only a test file sets that variable, which
+// TestNoProductionCodeSetsOnlyStoresForTests holds (rollup.go). The tests of
+// this package run one at a time, so the set is the running test's stores.
 var seededStores = &storeSet{ids: map[string]bool{}}
 
 type storeSet struct {

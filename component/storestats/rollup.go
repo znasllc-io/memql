@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"testing"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -90,12 +89,12 @@ const storesRead = "paginate(query storeStatisticsStores(), %d)"
 // (walkContext), for the same reason: test/dslconformance sees the call.
 const shopRead = "query storeStatisticsShop(storeId: %s)"
 
-// onlyStoresForTests narrows the stores a run lists, in a test binary and
-// nowhere else: this package's harness sets it to the stores its tests seeded,
-// so a store another package's test left in the shared database is not walked
-// by every run here (harness_db_test.go, seededStores). listStores reads it
-// only when testing.Testing() is true, which it is in no binary but the one
-// `go test` builds, so production code setting it would narrow nothing.
+// onlyStoresForTests is nil outside tests. When a test sets it, a run lists
+// only the stores it admits: this package's harness sets it to the stores its
+// tests seeded, so a store another package's test left in the shared database
+// is not walked by every run here (harness_db_test.go, seededStores).
+// TestNoProductionCodeSetsOnlyStoresForTests holds that only a test file sets
+// it.
 var onlyStoresForTests func(id string) bool
 
 // maxStorePages bounds the stores read: a cursor that never ends is an error,
@@ -262,7 +261,7 @@ func listStores(ctx context.Context, engine Engine) ([]map[string]any, error) {
 			if id == "" {
 				continue
 			}
-			if testing.Testing() && onlyStoresForTests != nil && !onlyStoresForTests(id) {
+			if onlyStoresForTests != nil && !onlyStoresForTests(id) {
 				continue
 			}
 			row["id"] = id
