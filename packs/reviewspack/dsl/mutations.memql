@@ -20,8 +20,9 @@
 // reached only from that builtin, which stamps internal origin for the one
 // call, never by a client -- a decision written around reviewsDecide would
 // skip what makes it a decision, above all that the cluster's own operators
-// never record one. The CALLER'S own actor still runs them, so the row gate
-// still decides whether this caller may write this row.
+// never record one. The caller's actor still runs them, but the stamp skips
+// the row gate: who may write is decided by the builtin's own check, made
+// before the stamp, and by nothing after it.
 
 /// Append one moderation decision. Reached only from reviewsDecide, which
 /// names the decider from the caller, copies the store, organization and

@@ -20,7 +20,8 @@ import "github.com/znasllc-io/memql/component/memql"
 // concept is @serverWritten, and the handler runs a construct under the site
 // owner's borrowed authority WITHOUT internal origin, so a mutation a form
 // named could write nothing. reviewsSubmitFromLink checks the link and then
-// writes through writer.go, whose one inline stamp is the only way in.
+// writes through writer.go, whose one inline stamp is the only way a client's
+// request reaches these rows (the engine's own writers are named there).
 //
 // # Two routes, and the asymmetry between them is the point
 //

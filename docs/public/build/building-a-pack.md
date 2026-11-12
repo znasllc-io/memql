@@ -361,11 +361,20 @@ judged against other rows first -- the reviews form finds the buyer's link by
 its token and refuses a closed one by name -- the construct is the pack's own
 Go (`Kind: memql.ShopperReadKindBuiltin`). It makes its checks under the
 borrowed authority and then writes through its own `@serverOnly` mutation with
-internal origin stamped for that one call. The reviews pack declares every
-concept `@serverWritten`, so that writer is the only way any of its rows is
-written: the public `insert()` never consults a mutation's `@serverOnly`, and
-without the annotation a signed-in person the row tier admits could write the
-rows around the checks.
+internal origin stamped for that one call. Internal origin skips the row
+gate, so the builtin's own check, made before the stamp, is the only check
+the write gets; that is why the stamp goes on the one call and nowhere else.
+
+**What `@serverWritten` guarantees, and its limit.** A concept that declares
+it refuses every write that does not carry internal origin, the public
+`insert()` included, which never consults a mutation's `@serverOnly`. So no
+client -- signed in or not, whatever the row tier would admit -- writes its
+rows except through the pack's own Go. The reviews pack declares it on every
+concept. It does not stop the engine's own trusted writers, which run with
+internal origin: a step of an automation in the loaded DSL tree, a DSL seed,
+the identity integration's ownership transfer (a cluster owner's act), and
+anything a pack's own Go writes, the reviews erasure's direct SQL among them.
+An automation a client package attaches to a pack's concept is one of these.
 
 **The owner header is self-checking.** The bff re-reads the site row *under*
 the named user, and `v1:platform:site` is composite-owner tier, so a user who

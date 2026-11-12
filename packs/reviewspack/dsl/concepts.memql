@@ -18,15 +18,21 @@
 // and is refused as a form field, which is the half of D9 that cannot be
 // expressed in a schema.
 //
-// EVERY ROW HERE IS WRITTEN BY THE PACK, AND ONLY BY THE PACK. Every concept
-// below is @serverWritten: the engine refuses any write of it without internal
-// origin, the public insert() included, which never consults a mutation's
-// @serverOnly. The pack's own writer (writer.go's engineWriter) is the one
-// place that stamps internal origin, inline on its one call, after the builtin
-// in front of it has judged the caller. Without this the store's own people
-// could write a decision that publishes, a link carrying a token they chose,
-// a review in a buyer's name or settings naming another address around every
-// check the builtins make (server_written_db_test.go).
+// NO CLIENT WRITES A ROW HERE EXCEPT THROUGH THE PACK. Every concept below is
+// @serverWritten: the engine refuses any write of it without internal origin,
+// the public insert() included, which never consults a mutation's
+// @serverOnly. The pack's own writer (writer.go's engineWriter) stamps
+// internal origin, inline on its one call, after the builtin in front of it
+// has judged the caller -- and that judgement is the only gate, because the
+// stamp skips the row gate. Without this the store's own people could write a
+// decision that publishes, a link carrying a token they chose, a review in a
+// buyer's name or settings naming another address around every check the
+// builtins make (server_written_db_test.go).
+//
+// The engine's own code still writes these rows, and the annotation does not
+// change that: a step of an automation in the loaded DSL tree and a DSL seed
+// (both at internal origin), the identity integration's ownership transfer
+// (a cluster owner's act), and the pack's erasure by direct SQL.
 //
 // STOREFRONT PACK CONVENTION: concepts, mutations, tools, builtins and
 // queries -- NO automations and NO logic. A client's process attaches from
