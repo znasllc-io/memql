@@ -69,4 +69,12 @@ classes: |
   # deadlines.
   db      shopify   integrations/shopify 600s    serial    1
   db      datasync  component/datasync  300s     serial    1
+  # The wholesale pack's suite boots a real engine for most cases (documents,
+  # private links, acceptances, the organization gate, adding and removing a
+  # buyer). Side by side with main on a laptop, with this lane's flags, it went
+  # from 6s to between 79s and 107s: 13 to 18 times. From the 16s the bounded
+  # AKS runner recorded for it (shard-timings.tsv), expect 210s to 290s, past
+  # the default class's 180s. Its own class at about twice that; keep every
+  # test and its operation deadlines.
+  db      wholesale packs/wholesalepack 600s     serial    1
   db      default   -                   180s     -         2
