@@ -1163,6 +1163,24 @@ func ArtifactPaths() []string {
 	return append(pathsWithBase("/artifacts"), pathsWithBase("/artifacts/")...)
 }
 
+// AccountExportPaths returns the path GET /accounts/exports/{id}/content mounts
+// under, served by AccountExportHandler on the bff (account export design,
+// section G; owner-approved HTTP exception 2026-11-12). HTTP because a finished
+// export is one file a browser must save as it arrives, larger than any stream
+// message carries.
+//
+// AUTHENTICATED, so it is in none of the three aggregates, and the front door
+// routes it through cmd/frontdoorpaths' includedPathFuncs, as ArtifactPaths.
+// It is meant to be externally reachable: the handler admits only a person's
+// own session holding `execute app:accounts/export` and answers 404 to
+// everything else.
+//
+// One spelling, the subtree: the only route under it is GET, so there is no
+// bare collection path to lose to a ServeMux redirect.
+func AccountExportPaths() []string {
+	return pathsWithBase("/accounts/exports/")
+}
+
 func normalizeOrigins(origins []string) []string {
 	if len(origins) == 0 {
 		return []string{"*"}

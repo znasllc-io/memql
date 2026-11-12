@@ -127,7 +127,7 @@ var grpcSurface = map[string]bool{"/": true}
 // bff-http, keyed by function name so the exhaustiveness gate can compare
 // against a scan of package server.
 //
-// The three aggregates carry the unauthenticated surface. The five that follow
+// The three aggregates carry the unauthenticated surface. The declarations that follow
 // are the per-route declarations no aggregate picks up, each mounted by a
 // bff-tagged build:
 //
@@ -143,12 +143,20 @@ var grpcSurface = map[string]bool{"/": true}
 //	                        entries, /artifacts and /artifacts/, because the
 //	                        upload's own path has no trailing slash and traefik's
 //	                        PathPrefix(`/artifacts/`) would not match it.
+//	AccountExportPaths      GET /accounts/exports/{id}/content, the account
+//	                        export download (owner-approved 2026-11-12, account
+//	                        export design section G), mounted on the bff only.
+//	                        Authenticated, so in no aggregate, and meant to be
+//	                        externally reachable: the handler admits a person's
+//	                        own session holding `execute app:accounts/export`
+//	                        and answers 404 to everything else.
 var includedPathFuncs = map[string]func() []string{
 	"PublicPaths":            server.PublicPaths,
 	"HandlerAuthorizedPaths": server.HandlerAuthorizedPaths,
 	"SelfAuthenticatedPaths": server.SelfAuthenticatedPaths,
 	"MemqlWebsocketPaths":    server.MemqlWebsocketPaths,
 	"ArtifactPaths":          server.ArtifactPaths,
+	"AccountExportPaths":     server.AccountExportPaths,
 }
 
 // declaration pairs a reason with the function the reason is about, so the two

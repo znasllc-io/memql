@@ -77,8 +77,12 @@ func (h *Handler) serveAPI(w http.ResponseWriter, r *http.Request, site *Site) {
 	// silently died.
 	// Library downloads cross this connection as well as the BFF's. A fixed
 	// 15-second response deadline truncates large files even while bytes flow.
+	// A finished account export is the same kind of answer, so its download
+	// gets the same treatment, on its one exact shape.
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/_memql/"), "/")
-	if r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "artifacts" && parts[1] != "" && parts[2] == "content" {
+	libraryDownload := len(parts) == 3 && parts[0] == "artifacts" && parts[1] != "" && parts[2] == "content"
+	exportDownload := isAccountExportDownloadPath(strings.TrimPrefix(r.URL.Path, "/_memql"))
+	if r.Method == http.MethodGet && (libraryDownload || exportDownload) {
 		writer, request, finish, err := httpstream.Download(w, r)
 		if err != nil {
 			http.Error(w, "download unavailable", http.StatusServiceUnavailable)
@@ -199,6 +203,21 @@ func isBffRootPath(rest string) bool {
 	return false
 }
 
+// isAccountExportDownloadPath reports whether a marker-stripped path is exactly
+// "/accounts/exports/{id}/content", the bff's account export download
+// (server.AccountExportPaths(), account export design section G), which the
+// bff serves at its own root.
+//
+// AN EXACT SHAPE, NOT A MEMBER OF bffRootPrefixes. Only this one route lives at
+// the bff's root under "/accounts"; a prefix would also strip the marker from
+// every other "/_memql/accounts..." path and change where it lands. One id
+// segment, then the literal "content", and nothing wider.
+func isAccountExportDownloadPath(rest string) bool {
+	parts := strings.Split(strings.TrimPrefix(rest, "/"), "/")
+	return len(parts) == 4 && parts[0] == "accounts" && parts[1] == "exports" &&
+		parts[2] != "" && parts[3] == "content"
+}
+
 // upstreamPath maps the edge's same-origin marker onto the bff's real path
 // space.
 //
@@ -228,7 +247,7 @@ func isBffRootPath(rest string) bool {
 // always carried -- that one is the whole multiplexed API.
 func upstreamPath(in string) string {
 	rest := strings.TrimPrefix(in, "/_memql")
-	if isBffRootPath(rest) {
+	if isBffRootPath(rest) || isAccountExportDownloadPath(rest) {
 		return rest
 	}
 	return "/memql" + rest

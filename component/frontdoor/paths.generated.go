@@ -21,6 +21,7 @@ var BFFHTTPPaths = []string{
 	"/.well-known/jwks.json",
 	"/automations/resume",
 	"/email/events/azure",
+	"/accounts/exports/",
 	"/email/preferences",
 	"/auth/callback",
 	"/auth/exchange",
