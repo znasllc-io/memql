@@ -324,6 +324,16 @@ export interface FakeSeed {
     removeError?: string;
     /** What `wholesaleExportStore` answers: `{fileName, json}`. */
     exportFile?: Row;
+    /** Fails every export with this server message, until removed. */
+    exportError?: string;
+    /**
+     * A lost answer, for the QA scenes: the add or the publish loses its reply,
+     * after it landed or before it left, and the wizard's re-read of the store
+     * then answers, never answers (`hold`), or fails.
+     */
+    lose?: { write: "add" | "publish"; landed: boolean; check: "answer" | "hold" | "fail" };
+    /** Set once an answer was lost: the re-reads after it follow `lose.check`. */
+    lost?: boolean;
   };
   /** v1:platform:package rows `packagesAll` answers with. */
   packages?: Row[];
@@ -667,6 +677,10 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call.startsWith("builtin wholesaleList(")) {
         if (seed.wholesale?.listError !== undefined) throw new Error(seed.wholesale.listError);
         const args = parseCall(call).args;
+        if (seed.wholesale?.lost && args.stage === "all") {
+          if (seed.wholesale.lose?.check === "hold") return new Promise<never>(() => {});
+          if (seed.wholesale.lose?.check === "fail") throw new Error("wholesale: the store could not be read just now");
+        }
         const stage = String(args.stage ?? "readyToReview");
         const held = seed.wholesale?.list?.[stage] ?? { rows: [], counts: {}, next: "", truncated: false };
         const query = String(args.search ?? "").toLowerCase();
@@ -717,6 +731,10 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call.startsWith("builtin wholesaleDocuments(")) {
         if (seed.wholesale?.documentsError !== undefined) throw new Error(seed.wholesale.documentsError);
         const versionId = String(parseCall(call).args.versionId ?? "");
+        if (seed.wholesale?.lost && versionId === "") {
+          if (seed.wholesale.lose?.check === "hold") return new Promise<never>(() => {});
+          if (seed.wholesale.lose?.check === "fail") throw new Error("wholesale: the documents could not be read just now");
+        }
         if (versionId !== "") {
           const version = seed.wholesale?.versions?.[versionId];
           if (version === undefined) throw new Error(`wholesale: there is no document version "${versionId}" of this store`);
@@ -727,6 +745,16 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       }
       if (call.startsWith("builtin wholesaleAddBuyer(")) {
         if (seed.wholesale?.addError !== undefined) throw new Error(seed.wholesale.addError);
+        if (seed.wholesale?.lose?.write === "add") {
+          const args = parseCall(call).args;
+          const held = seed.wholesale;
+          if (held.lose!.landed) {
+            const row = { applicationId: held.addedId ?? "wholesale-staff-new", companyName: String(args.companyName ?? ""), applicantName: String(args.applicantName ?? ""), applicantEmail: String(args.applicantEmail ?? ""), stage: "waitingForTerms", primary: "", secondary: "", createdAt: new Date().toISOString() };
+            held.list = { ...held.list, all: { rows: [row], counts: {}, next: "", truncated: false } as unknown as Row };
+          }
+          held.lost = true;
+          throw droppedSocket();
+        }
         return builtinReply("wholesaleAddBuyer", [{ applicationId: seed.wholesale?.addedId ?? "wholesale-staff-new" } as unknown as Row]);
       }
       if (call.startsWith("builtin wholesaleRemoveBuyer(")) {
@@ -741,9 +769,22 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       }
       if (call.startsWith("builtin wholesalePublishDocument(")) {
         if (seed.wholesale?.publishError !== undefined) throw new Error(seed.wholesale.publishError);
+        if (seed.wholesale?.lose?.write === "publish") {
+          const args = parseCall(call).args;
+          const held = seed.wholesale;
+          if (held.lose!.landed) {
+            const kinds = ((held.documents as unknown as { kinds?: Record<string, unknown>[] })?.kinds ?? []).map((k) => (k.kind === args.kind
+              ? { ...k, current: { id: "doc-new", label: String(args.label ?? ""), body: String(args.body ?? ""), publishedAt: new Date().toISOString(), publishedBy: "", publishedByName: "", sha256: "0".repeat(64) } }
+              : k));
+            held.documents = { kinds } as unknown as Row;
+          }
+          held.lost = true;
+          throw droppedSocket();
+        }
         return builtinReply("wholesalePublishDocument", [{ documentVersionId: "doc-new", sha256: "0".repeat(64) } as unknown as Row]);
       }
       if (call.startsWith("builtin wholesaleExportStore(")) {
+        if (seed.wholesale?.exportError !== undefined) throw new Error(seed.wholesale.exportError);
         return builtinReply("wholesaleExportStore", [seed.wholesale?.exportFile ?? ({ fileName: "wholesale-store-live-20261111.json", json: "{\"applications\":[]}" } as unknown as Row)]);
       }
 

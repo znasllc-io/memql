@@ -9,5 +9,5 @@ export function AddButton({ label, className = "", ...props }: Omit<ButtonHTMLAt
 
 /** The same header affordance for creation that continues in another page. */
 export function AddLink({ label, className = "", style, ...props }: Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "children" | "aria-label" | "title"> & { label: string }) {
-  return <a {...props} className={`os-icon-button os-reading-action os-add-button ${className}`} aria-label={label} title={label} style={{ minWidth: 36, minHeight: 36, ...style }}><Plus size={16} aria-hidden /></a>;
+  return <a {...props} className={`os-icon-button os-reading-action os-add-button ${className}`} aria-label={label} title={label} style={{ minWidth: "var(--os-icon-button-size)", minHeight: "var(--os-icon-button-size)", ...style }}><Plus size={16} aria-hidden /></a>;
 }

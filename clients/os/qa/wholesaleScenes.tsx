@@ -20,10 +20,28 @@ import { seededAccessFor } from "../test/seededAccess";
 //   view=wholesale-not-set-up-operator     the same store, as a cluster operator reads it
 //   view=wholesale-buyers                  the buyers, one on and one not on yet
 //   view=wholesale-buyers-empty            a store with no buyers yet
-//   view=wholesale-add-buyer               adding a buyer by hand, filled in
-//   view=wholesale-add-buyer-refused       the same, refused: the address already applied
+//   view=wholesale-add-buyer               the Add buyer wizard, its Company answered
+//   view=wholesale-add-buyer-name          its second step, the Buyer's name answered
+//   view=wholesale-add-buyer-email         its last step, Add and send the terms on the floor
+//   view=wholesale-add-buyer-refused       the same, refused on the Email step: the address already applied
+//   view=wholesale-add-buyer-no-email      the last step where the engine says no terms email would be sent
+//   view=wholesale-add-buyer-no-terms      the last step on a store that requires no terms
 //   view=wholesale-documents               the three documents, the price sheet not published
-//   view=wholesale-publish                 a new version loaded from a file, with its preview
+//   view=wholesale-publish                 the Publish wizard's Label step
+//   view=wholesale-publish-text            its Text step, a file loaded
+//   view=wholesale-publish-preview         its Preview step, Publish on the floor
+//   view=wholesale-publish-refused         the same, the engine's refusal on the Preview step
+//   view=wholesale-add-buyer-checking      Add buyer after a lost answer, while the store is read again
+//   view=wholesale-add-buyer-there         ... the buyer is there (Done)
+//   view=wholesale-add-buyer-absent        ... the buyer is not there (the act again)
+//   view=wholesale-add-buyer-unread        ... the store could not be read (Check again)
+//   view=wholesale-publish-checking        Publish after a lost answer, while the documents are read again
+//   view=wholesale-publish-there           ... the version is there (Done)
+//   view=wholesale-publish-absent          ... the version is not there (Publish again)
+//   view=wholesale-publish-unread          ... the documents could not be read (Check again)
+//   view=wholesale-documents-no-fingerprint an earlier version the engine recorded no fingerprint for
+//   view=wholesale-emails                  an application's emails in every state, its resends in the section
+//   view=wholesale-records-refused         the settings after a refused export, said in Records
 //   view=wholesale-version                 an earlier version, read-only
 //   view=wholesale-accepted                an approved application: its terms accepted and its emails
 //   view=wholesale-waiting                 one waiting for terms: its link, an email not sent, Resend
@@ -87,13 +105,18 @@ const SET_UP = {
   staffEmail: "orders@kestrel-trade.example.com", staffEmailAdmitted: false, termsRequired: true, linkLifetimeDays: 30,
   acceptanceText: "I have read and accept the Wholesale Terms and Conditions and the MAP Policy shown above.",
   senderIdentityId: "", termsTemplateId: "tpl-invite", approvedTemplateId: "tpl-welcome", rejectedTemplateId: "", revokedTemplateId: "",
+  sender: { ready: true, fromName: "Example Cycles Trade", address: "trade@example.com", reason: "" },
+  emailsWouldSend: {
+    terms: { wouldSend: true, reason: "" }, approved: { wouldSend: true, reason: "" },
+    rejected: { wouldSend: false, reason: "no rejected email template is chosen" }, revoked: { wouldSend: false, reason: "no revoked email template is chosen" },
+  },
   templates: [{ id: "tpl-invite", name: "Trade terms invitation" }, { id: "tpl-welcome", name: "Trade welcome" }, { id: "tpl-closing", name: "Trade account closed" }],
   documents: { terms: { label: "Trade terms 2026", sha256: TERMS_SHA }, map: { label: "MAP policy 2026", sha256: MAP_SHA }, priceSheet: null },
-  adapters: ["customerTag", "shopifyB2B"], may: { setUp: false, update: true, setSender: false },
+  adapters: ["customerTag", "shopifyB2B"], may: { setUp: false, update: true, setSender: false, publish: true, export: true },
 };
 
 /** The Markdown `file:document` loads into the publish page. */
-export const QA_DOCUMENT = "# Trade terms\n\nThese terms apply to every order placed at trade prices.\n\n## Payment\n\n- Net **30** days from the invoice date.\n- Orders under the minimum are charged at retail.\n\n## Shipping\n\nOrders ship within *two working days*. See [the shipping page](https://www.example.com/shipping).\n";
+export const QA_DOCUMENT = "# Trade terms\n\nThese terms apply to every order placed at trade prices.\n\n## Payment\n\n- Net **30** days from the invoice date.\n- Orders under the minimum are charged at retail.\n\n## Shipping\n\nOrders ship within *two working days*. See [the shipping page](https://www.example.com/shipping).\n\n---\n\n## Returns\n\nUnopened stock may be returned within 60 days.\n";
 
 const DOCUMENTS = {
   kinds: [
@@ -124,12 +147,13 @@ const VERSIONS = {
 
 const BUYERS = {
   rows: [
-    { applicationId: id("cedar"), companyName: "Cedar Spoke Studio", applicantEmail: "riley@cedarspoke.example.com", accessState: "failed", errorCode: "plan_ceiling", grantedAt: "", shopifyCustomerId: "" },
+    { applicationId: id("cedar"), companyName: "Cedar Spoke Studio", applicantEmail: "riley@cedarspoke.example.com", accessState: "failed", errorCode: "plan_ceiling", error: "The store's plan has reached its catalog limit.", grantedAt: "", shopifyCustomerId: "" },
     { applicationId: id("larkspur"), companyName: "Larkspur Mountain Bike Outfitters and Repair Collective", applicantEmail: "accounts.payable@larkspur-mountain-outfitters.example.com", accessState: "granted", errorCode: "", grantedAt: ago(12), shopifyCustomerId: "" },
-    { applicationId: id("finch"), companyName: "Finch Road Bikes", applicantEmail: "finch@finchroad.example.com", accessState: "none", errorCode: "", grantedAt: "", shopifyCustomerId: "" },
+    { applicationId: id("finch"), companyName: "Finch Road Bikes", applicantEmail: "finch@finchroad.example.com", accessState: "none", errorCode: "", error: "", grantedAt: "", shopifyCustomerId: "" },
   ],
   next: "",
   truncated: false,
+  operator: false,
 };
 
 const ACCEPTED = {
@@ -137,16 +161,18 @@ const ACCEPTED = {
   clientAddress: "203.0.113.7", userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
 };
 
-function seed(over: { operator?: boolean; settings?: Record<string, unknown>; buyers?: Record<string, unknown>; addError?: string; notSetUp?: boolean } = {}): FakeSeed {
+type Lose = NonNullable<NonNullable<FakeSeed["wholesale"]>["lose"]>;
+
+function seed(over: { operator?: boolean; settings?: Record<string, unknown>; buyers?: Record<string, unknown>; documents?: Record<string, unknown>; addError?: string; publishError?: string; exportError?: string; lose?: Lose; notSetUp?: boolean } = {}): FakeSeed {
   const operator = over.operator === true;
   const staffActs = (acts: string[]) => (operator ? acts.filter((a) => a === "retryAccess") : acts);
   return {
     sites: [SITE],
     wholesale: {
       list: {
-        readyToReview: { rows: READY, counts: COUNTS, next: "", truncated: false } as unknown as Row,
-        approved: { rows: APPROVED, counts: COUNTS, next: "", truncated: false } as unknown as Row,
-        revoked: { rows: REMOVED, counts: COUNTS, next: "", truncated: false } as unknown as Row,
+        readyToReview: { rows: READY, counts: COUNTS, next: "", truncated: false, operator } as unknown as Row,
+        approved: { rows: APPROVED, counts: COUNTS, next: "", truncated: false, operator } as unknown as Row,
+        revoked: { rows: REMOVED, counts: COUNTS, next: "", truncated: false, operator } as unknown as Row,
       },
       get: {
         ...Object.fromEntries(READY.map((r) => [r.applicationId, detail(r, { operator, acts: staffActs(["reject", "approve"]) })])),
@@ -167,10 +193,13 @@ function seed(over: { operator?: boolean; settings?: Record<string, unknown>; bu
         }),
       },
       settings: (over.settings ?? SET_UP) as unknown as Row,
-      buyers: (over.buyers ?? BUYERS) as unknown as Row,
-      documents: DOCUMENTS as unknown as Row,
+      buyers: (over.buyers ?? { ...BUYERS, operator }) as unknown as Row,
+      documents: (over.documents ?? DOCUMENTS) as unknown as Row,
       versions: VERSIONS as unknown as Record<string, Row>,
       ...(over.addError !== undefined ? { addError: over.addError } : {}),
+      ...(over.publishError !== undefined ? { publishError: over.publishError } : {}),
+      ...(over.exportError !== undefined ? { exportError: over.exportError } : {}),
+      ...(over.lose !== undefined ? { lose: over.lose, addedId: id("harbor-added") } : {}),
       ...(over.notSetUp ? { buyersError: NOT_SET_UP_SENTENCE, documentsError: NOT_SET_UP_SENTENCE, listError: NOT_SET_UP_SENTENCE } : {}),
     },
   };
@@ -218,7 +247,40 @@ function termsSeed(): FakeSeed {
   return base;
 }
 
-const NOT_SET_UP = (setUp: boolean) => ({ exists: false, applicationsOpen: false, entitlementAdapter: "", introText: "", staffEmail: "", adapters: ["customerTag", "shopifyB2B"], templates: [], may: { setUp, update: false, setSender: setUp } });
+/** One application whose emails stand in every state the page words, with its resends offered. */
+function emailsSeed(): FakeSeed {
+  const base = termsSeed();
+  const held = base.wholesale!;
+  const lane = (providerStatus: string, days: number) => ({ status: "sent", skipReason: "", providerStatus, sentAt: ago(days) });
+  held.get = {
+    ...held.get,
+    [APPROVED[0]!.applicationId]: detail(APPROVED[0]!, {
+      state: "approved", stage: "approved",
+      entitlement: { state: "granted", errorCode: "", error: "" },
+      acceptance: { ...ACCEPTED, clientAddress: "", userAgent: "" },
+      termsLink: { expiresAt: ago(-11), expired: false },
+      decisions: [{ transition: "approve", decidedBy: "v1:identity:user:u-carol", decidedByName: "Carol Reyes", note: "", createdAt: ago(18) }],
+      emails: [
+        { kind: "approved", attempt: 4, state: "deferred", reason: "The email service is waiting to send this email.", sentAt: "", requestedBy: "v1:identity:user:u-me", delivery: { status: "pending", skipReason: "", providerStatus: "", sentAt: "" } },
+        { kind: "approved", attempt: 3, state: "held", reason: "The sender chosen for this store is turned off.", sentAt: "", requestedBy: "v1:identity:user:u-me", delivery: null },
+        { kind: "approved", attempt: 2, state: "uncertain", reason: "The email service did not say whether it accepted this email; it may have been delivered, so it is not sent again automatically.", sentAt: "", requestedBy: "", delivery: null },
+        { kind: "approved", attempt: 1, state: "failed", reason: "The email service recorded this email as failed.", sentAt: "", requestedBy: "", delivery: null },
+        { kind: "terms", attempt: 8, state: "sent", reason: "", sentAt: ago(19), requestedBy: "", delivery: lane("failed", 19) },
+        { kind: "terms", attempt: 7, state: "sent", reason: "", sentAt: ago(20), requestedBy: "", delivery: lane("filtered-spam", 20) },
+        { kind: "terms", attempt: 6, state: "sent", reason: "", sentAt: ago(21), requestedBy: "", delivery: lane("quarantined", 21) },
+        { kind: "terms", attempt: 5, state: "sent", reason: "", sentAt: ago(22), requestedBy: "", delivery: lane("suppressed", 22) },
+        { kind: "terms", attempt: 4, state: "sent", reason: "", sentAt: ago(23), requestedBy: "", delivery: lane("bounced", 23) },
+        { kind: "terms", attempt: 3, state: "sent", reason: "", sentAt: ago(24), requestedBy: "", delivery: lane("expanded", 24) },
+        { kind: "terms", attempt: 2, state: "sent", reason: "", sentAt: ago(25), requestedBy: "", delivery: lane("delivered", 25) },
+        { kind: "terms", attempt: 1, state: "sent", reason: "", sentAt: ago(26), requestedBy: "", delivery: null },
+      ],
+      acts: ["remove", "resendApproved"],
+    }),
+  };
+  return base;
+}
+
+const NOT_SET_UP = (setUp: boolean) => ({ exists: false, applicationsOpen: false, entitlementAdapter: "", introText: "", staffEmail: "", adapters: ["customerTag", "shopifyB2B"], templates: [], may: { setUp, update: false, setSender: setUp, publish: false, export: false } });
 
 /** One of the store's own people: a member of its organization holding the wholesale part. */
 const staff = (el: JSX.Element) => withSession(el, {
@@ -237,10 +299,28 @@ export const WHOLESALE_CLICKS: Record<string, string> = {
   "wholesale-not-set-up-operator": "Settings",
   "wholesale-buyers": "Buyers",
   "wholesale-buyers-empty": "Buyers",
-  "wholesale-add-buyer": "Buyers|Add buyer|fill:Company=Harbor Wheelworks and Touring Bicycle Cooperative|fill:Name=Sam Okafor|fill:Email=sam.okafor@harbor-wheelworks.example.com",
-  "wholesale-add-buyer-refused": "Buyers|Add buyer|fill:Company=Kestrel Cycles|fill:Name=Avery Stone|fill:Email=avery@kestrel.example.com|Add and send the terms",
+  "wholesale-add-buyer": "Buyers|Add buyer|fill:Company=Harbor Wheelworks and Touring Bicycle Cooperative",
+  "wholesale-add-buyer-name": "Buyers|Add buyer|fill:Company=Harbor Wheelworks and Touring Bicycle Cooperative|Continue|fill:Name=Sam Okafor",
+  "wholesale-add-buyer-email": "Buyers|Add buyer|fill:Company=Harbor Wheelworks and Touring Bicycle Cooperative|Continue|fill:Name=Sam Okafor|Continue|fill:Email=sam.okafor@harbor-wheelworks.example.com",
+  "wholesale-add-buyer-refused": "Buyers|Add buyer|fill:Company=Kestrel Cycles|Continue|fill:Name=Avery Stone|Continue|fill:Email=avery@kestrel.example.com|Add and send the terms",
+  "wholesale-add-buyer-no-email": "Buyers|Add buyer|fill:Company=Harbor Wheelworks and Touring Bicycle Cooperative|Continue|fill:Name=Sam Okafor|Continue|fill:Email=sam.okafor@harbor-wheelworks.example.com",
+  "wholesale-add-buyer-no-terms": "Buyers|Add buyer|fill:Company=Harbor Wheelworks and Touring Bicycle Cooperative|Continue|fill:Name=Sam Okafor|Continue|fill:Email=sam.okafor@harbor-wheelworks.example.com",
   "wholesale-documents": "Documents",
-  "wholesale-publish": "Documents|Publish a new version|fill:Label=Trade terms 2027|file:document",
+  "wholesale-publish": "Documents|Publish a new version of the wholesale terms|fill:Label=Trade terms 2027",
+  "wholesale-publish-text": "Documents|Publish a new version of the wholesale terms|fill:Label=Trade terms 2027|Continue|file:document",
+  "wholesale-publish-preview": "Documents|Publish a new version of the wholesale terms|fill:Label=Trade terms 2027|Continue|file:document|Continue",
+  "wholesale-publish-refused": "Documents|Publish a new version of the wholesale terms|fill:Label=Trade terms 2027 for every account that buys at trade prices, with the spring shipping schedule and the new return window|Continue|fill:Text=# Trade terms\n\nThese terms apply to every order placed at trade prices.\n\n## Payment\n\nNet **30** days from the invoice date.|Continue|Publish",
+  "wholesale-emails": "Refine applications|Approved|Open Cedar Spoke Studio",
+  "wholesale-add-buyer-checking": "Buyers|Add buyer|fill:Company=Harbor Wheelworks and Touring Bicycle Cooperative|Continue|fill:Name=Sam Okafor|Continue|fill:Email=sam.okafor@harbor-wheelworks.example.com|Add and send the terms",
+  "wholesale-add-buyer-there": "Buyers|Add buyer|fill:Company=Harbor Wheelworks and Touring Bicycle Cooperative|Continue|fill:Name=Sam Okafor|Continue|fill:Email=sam.okafor@harbor-wheelworks.example.com|Add and send the terms",
+  "wholesale-add-buyer-absent": "Buyers|Add buyer|fill:Company=Harbor Wheelworks and Touring Bicycle Cooperative|Continue|fill:Name=Sam Okafor|Continue|fill:Email=sam.okafor@harbor-wheelworks.example.com|Add and send the terms",
+  "wholesale-add-buyer-unread": "Buyers|Add buyer|fill:Company=Harbor Wheelworks and Touring Bicycle Cooperative|Continue|fill:Name=Sam Okafor|Continue|fill:Email=sam.okafor@harbor-wheelworks.example.com|Add and send the terms",
+  "wholesale-publish-checking": "Documents|Publish a new version of the wholesale terms|fill:Label=Trade terms 2027|Continue|fill:Text=# Trade terms\n\nThese terms apply to every order placed at trade prices.\n\n## Payment\n\nNet **30** days from the invoice date.|Continue|Publish",
+  "wholesale-publish-there": "Documents|Publish a new version of the wholesale terms|fill:Label=Trade terms 2027|Continue|fill:Text=# Trade terms\n\nThese terms apply to every order placed at trade prices.\n\n## Payment\n\nNet **30** days from the invoice date.|Continue|Publish",
+  "wholesale-publish-absent": "Documents|Publish a new version of the wholesale terms|fill:Label=Trade terms 2027|Continue|fill:Text=# Trade terms\n\nThese terms apply to every order placed at trade prices.\n\n## Payment\n\nNet **30** days from the invoice date.|Continue|Publish",
+  "wholesale-publish-unread": "Documents|Publish a new version of the wholesale terms|fill:Label=Trade terms 2027|Continue|fill:Text=# Trade terms\n\nThese terms apply to every order placed at trade prices.\n\n## Payment\n\nNet **30** days from the invoice date.|Continue|Publish",
+  "wholesale-documents-no-fingerprint": "Documents",
+  "wholesale-records-refused": "Settings|Download every record",
   "wholesale-version": "Documents|Open Trade terms 2025, with the spring shipping schedule and returns window",
   "wholesale-accepted": "Refine applications|Approved|Open Cedar Spoke Studio",
   "wholesale-waiting": "Refine applications|Waiting for terms|Open Wren Cycle Works",
@@ -279,9 +359,27 @@ export function wholesaleScenes(WindowBody: Frame) {
     "wholesale-buyers": { seed: seed(), wrap: staff, render: page },
     "wholesale-buyers-empty": { seed: seed({ buyers: { rows: [], next: "", truncated: false } }), wrap: staff, render: page },
     "wholesale-add-buyer": { seed: seed(), wrap: staff, render: page },
+    "wholesale-add-buyer-name": { seed: seed(), wrap: staff, render: page },
+    "wholesale-add-buyer-email": { seed: seed(), wrap: staff, render: page },
     "wholesale-add-buyer-refused": { seed: seed({ addError: "wholesale: This address already has an application on this store." }), wrap: staff, render: page },
+    "wholesale-add-buyer-no-email": { seed: seed({ settings: { ...SET_UP, emailsWouldSend: { ...SET_UP.emailsWouldSend, terms: { wouldSend: false, reason: "no sender is chosen for this store's emails; the cluster's operators choose it" } } } }), wrap: staff, render: page },
+    "wholesale-add-buyer-no-terms": { seed: seed({ settings: { ...SET_UP, termsRequired: false, emailsWouldSend: { ...SET_UP.emailsWouldSend, terms: { wouldSend: false, reason: "terms are not required on this store" } } } }), wrap: staff, render: page },
     "wholesale-documents": { seed: seed(), wrap: staff, render: page },
     "wholesale-publish": { seed: seed(), wrap: staff, render: page },
+    "wholesale-publish-text": { seed: seed(), wrap: staff, render: page },
+    "wholesale-publish-preview": { seed: seed(), wrap: staff, render: page },
+    "wholesale-publish-refused": { seed: seed({ publishError: "wholesale: a label is 1 to 120 characters; this one is 121" }), wrap: staff, render: page },
+    "wholesale-emails": { seed: emailsSeed(), wrap: staff, render: page },
+    "wholesale-add-buyer-checking": { seed: seed({ lose: { write: "add", landed: true, check: "hold" } }), wrap: staff, render: page },
+    "wholesale-add-buyer-there": { seed: seed({ lose: { write: "add", landed: true, check: "answer" } }), wrap: staff, render: page },
+    "wholesale-add-buyer-absent": { seed: seed({ lose: { write: "add", landed: false, check: "answer" } }), wrap: staff, render: page },
+    "wholesale-add-buyer-unread": { seed: seed({ lose: { write: "add", landed: true, check: "fail" } }), wrap: staff, render: page },
+    "wholesale-publish-checking": { seed: seed({ lose: { write: "publish", landed: true, check: "hold" } }), wrap: staff, render: page },
+    "wholesale-publish-there": { seed: seed({ lose: { write: "publish", landed: true, check: "answer" } }), wrap: staff, render: page },
+    "wholesale-publish-absent": { seed: seed({ lose: { write: "publish", landed: false, check: "answer" } }), wrap: staff, render: page },
+    "wholesale-publish-unread": { seed: seed({ lose: { write: "publish", landed: true, check: "fail" } }), wrap: staff, render: page },
+    "wholesale-documents-no-fingerprint": { seed: seed({ documents: { kinds: DOCUMENTS.kinds.map((k) => (k.kind === "terms" ? { ...k, history: k.history.map((v) => (v.id === "doc-terms-1" ? { ...v, sha256: "" } : v)) } : k)) } }), wrap: staff, render: page },
+    "wholesale-records-refused": { seed: seed({ exportError: "wholesale: The export could not be read just now." }), wrap: staff, render: page },
     "wholesale-version": { seed: seed(), wrap: staff, render: page },
     "wholesale-accepted": { seed: termsSeed(), wrap: staff, render: page },
     "wholesale-waiting": { seed: termsSeed(), wrap: staff, render: page },

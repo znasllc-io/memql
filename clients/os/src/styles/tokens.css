@@ -55,6 +55,8 @@
    * --os-text-base. Not a theme value: packs carry colour and wallpaper only,
    * so the discipline holds under every theme. */
   --os-control-h: 30px;
+  /* An icon button's least width and height (kit IconButton, AddButton, AddLink). */
+  --os-icon-button-size: 36px;
 
   --os-duration-fast: 140ms;
   --os-duration-med: 260ms;

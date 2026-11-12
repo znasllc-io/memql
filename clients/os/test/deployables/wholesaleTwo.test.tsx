@@ -17,7 +17,7 @@ vi.mock("../../src/live/connection", () => ({
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { dayWords } from "../../src/apps/deployables/wholesale/model";
-import { click, fakeConnection, siteRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
+import { click, droppedSocket, fakeConnection, loseTheReply, siteRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
 
 // THE WHOLESALE SECTION, COMPLETE: the buyers, the documents and their
 // versions, the whole of the settings, and on one application its terms and
@@ -72,10 +72,15 @@ const SETTINGS = {
   staffEmail: "", staffEmailAdmitted: false, termsRequired: true, linkLifetimeDays: 30,
   acceptanceText: "I have read and accept the Wholesale Terms and Conditions and the MAP Policy shown above.",
   senderIdentityId: "", termsTemplateId: "", approvedTemplateId: "", rejectedTemplateId: "", revokedTemplateId: "",
+  sender: { ready: true, fromName: "Example Cycles", address: "trade@example.com", reason: "" },
+  emailsWouldSend: {
+    terms: { wouldSend: true, reason: "" }, approved: { wouldSend: true, reason: "" },
+    rejected: { wouldSend: true, reason: "" }, revoked: { wouldSend: true, reason: "" },
+  },
   templates: [{ id: "tpl-invite", name: "Trade terms invitation" }, { id: "tpl-welcome", name: "Trade welcome" }],
   documents: { terms: { label: "Trade terms 2026", sha256: TERMS_SHA }, map: { label: "MAP policy 2026", sha256: MAP_SHA }, priceSheet: null },
   adapters: ["customerTag", "shopifyB2B"],
-  may: { setUp: false, update: true, setSender: false },
+  may: { setUp: false, update: true, setSender: false, publish: true, export: true },
 };
 
 const DOCUMENTS = {
@@ -146,6 +151,46 @@ async function openApplication(company: string) {
   await screen.findByRole("heading", { name: company });
 }
 
+/**
+ * A write whose answer is lost -- after it landed (`landed`), or before it
+ * left -- and then the page's re-read of the store, held open until the test
+ * releases it. Each released read answers as `checks` says, in turn: the
+ * store's own answer, another dropped connection, or a refusal to read.
+ */
+function loseTheAnswerThenHold(connection: FakeConnection, write: string, check: (name: string, call: string) => boolean,
+  opts: { landed: boolean; land?: () => void; checks: ("answer" | "drop" | "fail")[] }) {
+  const real = connection.query.executeNamed.bind(connection.query);
+  let lost = false;
+  const waiting: (() => void)[] = [];
+  connection.query.executeNamed = (async (name: string, call: string, o?: object) => {
+    if (name === write) {
+      if (opts.landed) {
+        await real(name, call, o);
+        opts.land?.();
+      }
+      lost = true;
+      throw droppedSocket();
+    }
+    if (lost && check(name, call)) {
+      await new Promise<void>((resolve) => waiting.push(resolve));
+      const next = opts.checks.shift() ?? "answer";
+      if (next === "drop") throw droppedSocket();
+      if (next === "fail") throw new Error("wholesale: the store could not be read just now");
+    }
+    return real(name, call, o);
+  }) as typeof connection.query.executeNamed;
+  return {
+    held: () => waiting.length,
+    release: async () => { await act(async () => { waiting.shift()?.(); }); },
+  };
+}
+
+/** Moves a wizard on, once its floor has been read. */
+async function next(act = "Continue") {
+  await readTheBar();
+  await click(within(bar()).getByRole("button", { name: act }));
+}
+
 async function fill(label: string, value: string) {
   const field = screen.getByLabelText(label) as HTMLInputElement | HTMLTextAreaElement;
   await act(async () => {
@@ -187,7 +232,7 @@ describe("the buyers", () => {
   const BUYERS = {
     rows: [
       { applicationId: CEDAR_ID, companyName: "Cedar Spoke Studio", applicantEmail: "riley@cedarspoke.example.com", accessState: "granted", errorCode: "", grantedAt: "2026-11-03T10:00:00Z", shopifyCustomerId: "" },
-      { applicationId: MAPLE_ID, companyName: "Maple Street Bicycles", applicantEmail: "casey@maplestreet.example.com", accessState: "failed", errorCode: "plan_ceiling", grantedAt: "", shopifyCustomerId: "" },
+      { applicationId: MAPLE_ID, companyName: "Maple Street Bicycles", applicantEmail: "casey@maplestreet.example.com", accessState: "failed", errorCode: "plan_ceiling", error: "The catalog count is at its ceiling.", grantedAt: "", shopifyCustomerId: "" },
     ],
     next: "",
     truncated: false,
@@ -204,7 +249,8 @@ describe("the buyers", () => {
     expect(within(cedar).getByText("riley@cedarspoke.example.com")).toBeTruthy();
     expect(within(cedar).getByText(`Trade prices on since ${dayWords("2026-11-03T10:00:00Z")}`)).toBeTruthy();
     const maple = within(list).getByRole("button", { name: "Open Maple Street Bicycles" });
-    expect(within(maple).getByText("Not on yet: the store's plan allows no more catalogs.")).toBeTruthy();
+    // The engine's own sentence, its first letter lowered after the colon; nothing of the page's own.
+    expect(within(maple).getByText("Not on yet: the catalog count is at its ceiling.")).toBeTruthy();
     expect(list.querySelector(".os-chip, .os-badge, .os-record-status")).toBeNull();
     await click(cedar);
     await screen.findByRole("heading", { name: "Cedar Spoke Studio" });
@@ -220,10 +266,19 @@ describe("the buyers", () => {
     await openTab("Buyers");
     await screen.findByText("No buyers yet.");
     await click(screen.getByRole("button", { name: "Add buyer" }));
-    await screen.findByRole("heading", { name: "Add buyer" });
-    expect(screen.getByText("They will be emailed the terms. They can buy at trade prices once they accept and someone approves.")).toBeTruthy();
+    // THE KIT'S WIZARD: one question a step, the forward act on the floor.
+    const wizard = await screen.findByRole("region", { name: "Add buyer" });
+    expect(wizard.closest(".os-wizard")).toBeTruthy();
+    expect(within(wizard).getByText("They will be emailed the terms. They can buy at trade prices once they accept and someone approves.")).toBeTruthy();
+    const steps = [...screen.getByRole("list", { name: "Adding a buyer" }).querySelectorAll(":scope > li .os-rail-label")].map((l) => l.textContent);
+    expect(steps).toEqual(["Company", "Buyer", "Email"]);
+    // Nothing to move on with until the question is answered.
+    expect(barButtons()).toEqual(["Cancel"]);
     await fill("Company", "Lark Cycles");
+    await next();
     await fill("Name", "Robin Vale");
+    await next();
+    expect((screen.getByLabelText("Email") as HTMLInputElement).type).toBe("email");
     await fill("Email", "robin@lark.example.com");
     await readTheBar();
     expect(barButtons()).toEqual(["Cancel", "Add and send the terms"]);
@@ -237,22 +292,190 @@ describe("the buyers", () => {
     await waitFor(() => expect(bar().textContent).toContain("Waiting for terms"));
   });
 
+  it("says what adding does from what the engine answers of the terms email", async () => {
+    const reason = "The engine's reason the terms email is not sent.";
+    const cases: [Record<string, unknown>, string, string][] = [
+      [{ termsRequired: true, emailsWouldSend: { ...SETTINGS.emailsWouldSend, terms: { wouldSend: false, reason } } },
+        `${reason} Nothing is sent to them yet. They can buy at trade prices once they accept the terms and someone approves.`, "Add buyer"],
+      [{ termsRequired: false, emailsWouldSend: { ...SETTINGS.emailsWouldSend, terms: { wouldSend: false, reason: "terms are not required" } } },
+        "They can buy at trade prices once someone approves.", "Add buyer"],
+    ];
+    for (const [over, lead, act] of cases) {
+      await openWholesale(seedWith({ settings: { ...SETTINGS, ...over } as unknown as Row }));
+      await openTab("Buyers");
+      await click(await screen.findByRole("button", { name: "Add buyer" }));
+      const wizard = await screen.findByRole("region", { name: "Add buyer" });
+      expect(within(wizard).getByText(lead)).toBeTruthy();
+      expect(within(wizard).queryByText(/emailed the terms/)).toBeNull();
+      await fill("Company", "Lark Cycles");
+      await next();
+      await fill("Name", "Robin Vale");
+      await next();
+      await fill("Email", "robin@lark.example.com");
+      await readTheBar();
+      expect(barButtons()).toEqual(["Cancel", act]);
+      cleanup();
+    }
+  });
+
   it("shows the engine's refusal for an address that already applied", async () => {
     await openWholesale(seedWith({ addError: "wholesale: This address already has an application on this store." }));
     await openTab("Buyers");
     await click(await screen.findByRole("button", { name: "Add buyer" }));
     await fill("Company", "Kestrel Cycles");
+    await next();
     await fill("Name", "Avery Stone");
+    await next();
     await fill("Email", "avery@kestrel.example.com");
-    await readTheBar();
-    await click(within(bar()).getByRole("button", { name: "Add and send the terms" }));
+    await next("Add and send the terms");
     const sentence = await screen.findByText("This address already has an application on this store.");
     expect(sentence.closest(".os-notice")).toBeTruthy();
-    // What was typed stays, on the same page.
-    expect(screen.getByRole("heading", { name: "Add buyer" })).toBeTruthy();
-    expect((screen.getByLabelText("Company") as HTMLInputElement).value).toBe("Kestrel Cycles");
-    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Avery Stone");
+    // On the Email step, beside the answer it refuses; every answer kept.
+    expect(sentence.closest(".os-wizard-body")?.querySelector("#wholesale-buyer-email")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Add buyer" })).toBeTruthy();
     expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("avery@kestrel.example.com");
+    const rail = screen.getByRole("list", { name: "Adding a buyer" });
+    await click(within(rail).getByRole("button", { name: /^Company/ }));
+    expect((screen.getByLabelText("Company") as HTMLInputElement).value).toBe("Kestrel Cycles");
+    await click(within(rail).getByRole("button", { name: /^Buyer/ }));
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Avery Stone");
+  });
+
+  it("draws no Add buyer for a person the engine answers is an operator, nor on a store not set up", async () => {
+    await openWholesale(seedWith({ buyers: { rows: [], next: "", truncated: false, operator: true } as unknown as Row }));
+    await openTab("Buyers");
+    await screen.findByText("No buyers yet.");
+    expect(screen.queryByRole("button", { name: "Add buyer" })).toBeNull();
+    cleanup();
+
+    await openWholesale(seedWith({ settings: { ...SETTINGS, exists: false, may: { setUp: false, update: false, setSender: false, publish: false, export: false } } as unknown as Row }));
+    await openTab("Buyers");
+    await screen.findByText("No buyers yet.");
+    expect(screen.queryByRole("button", { name: "Add buyer" })).toBeNull();
+  });
+
+  it("reads the operator from the list's answer, not from the session", async () => {
+    await openWholesale(seedWith({ list: { readyToReview: { rows: [KESTREL], counts: { readyToReview: 1 }, next: "", truncated: false, operator: true } as unknown as Row } }));
+    expect(await screen.findByText("You can read this store's applications. Its own people decide them.")).toBeTruthy();
+  });
+
+  it("after a lost answer, reads the store again and says the buyer is there, offering no second add", async () => {
+    const lark = detail("Lark Cycles", LARK_ID, { stage: "waitingForTerms", acts: ["reject"] });
+    const held = { rows: [{ ...KESTREL, applicationId: LARK_ID, companyName: "Lark Cycles", applicantEmail: "robin@lark.example.com", stage: "waitingForTerms" }], counts: {}, next: "", truncated: false };
+    const connection = await openWholesale(seedWith({ addedId: LARK_ID, get: { [LARK_ID]: lark }, list: { readyToReview: { rows: [], counts: {}, next: "", truncated: false } as unknown as Row, all: held as unknown as Row } }));
+    loseTheReply(connection, "wholesaleAddBuyer");
+    await openTab("Buyers");
+    await click(await screen.findByRole("button", { name: "Add buyer" }));
+    await fill("Company", "Lark Cycles");
+    await next();
+    await fill("Name", "Robin Vale");
+    await next();
+    await fill("Email", "Robin@lark.example.com");
+    await next("Add and send the terms");
+    await waitFor(() => expect(connection.callsNamed("wholesaleList").some((c) => c.includes('stage: "all"') && c.includes('search: "Robin@lark.example.com"'))).toBe(true));
+    expect(await screen.findByText(/The buyer is there/)).toBeTruthy();
+    await readTheBar();
+    expect(barButtons()).toEqual(["Done"]);
+    await click(within(bar()).getByRole("button", { name: "Done" }));
+    await screen.findByRole("heading", { name: "Lark Cycles" });
+    expect(connection.callsNamed("wholesaleAddBuyer")).toHaveLength(1);
+  });
+
+  it("after a lost answer, says the buyer is not there and offers the add again", async () => {
+    const connection = await openWholesale(seedWith({ list: { readyToReview: { rows: [], counts: {}, next: "", truncated: false } as unknown as Row, all: { rows: [], counts: {}, next: "", truncated: false } as unknown as Row } }));
+    // The write never landed here: the store holds nothing for the address.
+    const real = connection.query.executeNamed;
+    connection.query.executeNamed = (async (name: string, call: string, opts?: object) => {
+      if (name === "wholesaleAddBuyer") throw Object.assign(new Error("stream closed"), { reason: "transport" });
+      return real(name, call, opts);
+    }) as typeof connection.query.executeNamed;
+    await openTab("Buyers");
+    await click(await screen.findByRole("button", { name: "Add buyer" }));
+    await fill("Company", "Lark Cycles");
+    await next();
+    await fill("Name", "Robin Vale");
+    await next();
+    await fill("Email", "robin@lark.example.com");
+    await next("Add and send the terms");
+    expect(await screen.findByText(/The buyer is not there/)).toBeTruthy();
+    await readTheBar();
+    expect(barButtons()).toEqual(["Cancel", "Add and send the terms"]);
+  });
+  describe("a lost answer on Add buyer", () => {
+    const empty = { rows: [], counts: {}, next: "", truncated: false };
+    const isCheck = (name: string, call: string) => name === "wholesaleList" && call.includes('stage: "all"');
+
+    async function answerAndAdd() {
+      await openTab("Buyers");
+      await click(await screen.findByRole("button", { name: "Add buyer" }));
+      await fill("Company", "Lark Cycles");
+      await next();
+      await fill("Name", "Robin Vale");
+      await next();
+      await fill("Email", "robin@lark.example.com");
+      await next("Add and send the terms");
+    }
+
+    it("draws no forward act while the store is read again, then says the buyer is there", async () => {
+      const lark = detail("Lark Cycles", LARK_ID, { stage: "waitingForTerms", acts: ["reject"] });
+      const seed = seedWith({ addedId: LARK_ID, get: { [LARK_ID]: lark }, list: { readyToReview: empty as unknown as Row, all: empty as unknown as Row } });
+      const connection = await openWholesale(seed);
+      const check = loseTheAnswerThenHold(connection, "wholesaleAddBuyer", isCheck, {
+        landed: true,
+        land: () => { seed.wholesale!.list!.all = { ...empty, rows: [{ ...KESTREL, applicationId: LARK_ID, companyName: "Lark Cycles", applicantEmail: "robin@lark.example.com", stage: "waitingForTerms" }] } as unknown as Row; },
+        checks: ["answer"],
+      });
+      await answerAndAdd();
+      await waitFor(() => expect(check.held()).toBe(1));
+      // FROM THE LOST ANSWER UNTIL THE CHECK ENDS, there is nothing to press but the way out.
+      expect(screen.queryByRole("button", { name: "Add and send the terms" })).toBeNull();
+      expect(barButtons()).toEqual(["Cancel"]);
+      expect(bar().getAttribute("data-tone")).toBe("busy");
+      await check.release();
+      expect(await screen.findByText(/The buyer is there/)).toBeTruthy();
+      await readTheBar();
+      expect(barButtons()).toEqual(["Done"]);
+      expect(screen.queryByRole("button", { name: "Add and send the terms" })).toBeNull();
+      expect(connection.callsNamed("wholesaleAddBuyer")).toHaveLength(1);
+    });
+
+    it("says the buyer is not there and offers the add again, every answer kept", async () => {
+      const connection = await openWholesale(seedWith({ list: { readyToReview: empty as unknown as Row, all: empty as unknown as Row } }));
+      const check = loseTheAnswerThenHold(connection, "wholesaleAddBuyer", isCheck, { landed: false, checks: ["answer"] });
+      await answerAndAdd();
+      await waitFor(() => expect(check.held()).toBe(1));
+      expect(screen.queryByRole("button", { name: "Add and send the terms" })).toBeNull();
+      await check.release();
+      expect(await screen.findByText(/The buyer is not there/)).toBeTruthy();
+      await readTheBar();
+      expect(barButtons()).toEqual(["Cancel", "Add and send the terms"]);
+      expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("robin@lark.example.com");
+    });
+
+    it("offers only Check again when the store cannot be read, and stays there when the connection drops again", async () => {
+      const connection = await openWholesale(seedWith({ list: { readyToReview: empty as unknown as Row, all: empty as unknown as Row } }));
+      const check = loseTheAnswerThenHold(connection, "wholesaleAddBuyer", isCheck, { landed: false, checks: ["fail", "drop"] });
+      await answerAndAdd();
+      await waitFor(() => expect(check.held()).toBe(1));
+      await check.release();
+      expect(await screen.findByText(/could not be read/)).toBeTruthy();
+      await readTheBar();
+      expect(barButtons()).toEqual(["Cancel", "Check again"]);
+      // The bar does not say ready beside a page that does not know.
+      expect(bar().textContent).toContain("Could not read the store");
+      expect(bar().textContent).not.toMatch(/Ready to/);
+      expect(screen.queryByRole("button", { name: "Add and send the terms" })).toBeNull();
+      await click(within(bar()).getByRole("button", { name: "Check again" }));
+      await waitFor(() => expect(check.held()).toBe(1));
+      expect(screen.queryByRole("button", { name: "Add and send the terms" })).toBeNull();
+      await check.release();
+      await readTheBar();
+      await waitFor(() => expect(barButtons()).toEqual(["Cancel", "Check again"]));
+      expect(screen.getByText(/could not be read/)).toBeTruthy();
+      expect(bar().textContent).toContain("Could not read the store");
+      expect(screen.queryByRole("button", { name: "Add and send the terms" })).toBeNull();
+      expect(connection.callsNamed("wholesaleAddBuyer")).toHaveLength(0);
+    });
   });
 });
 
@@ -267,20 +490,36 @@ describe("the documents", () => {
     // Eight characters on screen; the whole of it is never a line of its own.
     expect(within(terms).queryByText(TERMS_SHA)).toBeNull();
     expect(within(terms).getAllByText("Dana Lee").length).toBeGreaterThan(0);
-    expect(within(terms).getByRole("button", { name: "Publish a new version" })).toBeTruthy();
+    // Each kind's control names its kind.
+    expect(within(terms).getByRole("button", { name: "Publish a new version of the wholesale terms" })).toBeTruthy();
+    // The earlier versions say what they are, on screen.
+    expect(within(terms).getByRole("heading", { name: "Earlier versions" })).toBeTruthy();
     const map = region("MAP policy");
     expect(within(map).getByText("a1b2c3d4")).toBeTruthy();
+    expect(within(map).getByRole("button", { name: "Publish a new version of the MAP policy" })).toBeTruthy();
+    expect(within(map).queryByRole("heading", { name: "Earlier versions" })).toBeNull();
     const sheet = region("Price sheet");
-    expect(within(sheet).getByText("Not published. Applications cannot open while terms are required.")).toBeTruthy();
-    expect(within(sheet).getByRole("button", { name: "Publish a new version" })).toBeTruthy();
+    expect(within(sheet).getByText("Not published. Applications cannot open while terms are required. An approved buyer's price sheet link will not open until it is.")).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Publish a new version of the price sheet" })).toBeTruthy();
     expect(document.querySelector(".os-chip, .os-badge")).toBeNull();
   });
+
+  /** Opens the publish wizard of one kind, from its section's own control. */
+  async function openPublish(section: string, control: string) {
+    await click(within(await screen.findByRole("region", { name: section })).getByRole("button", { name: control }));
+    return screen.findByRole("region", { name: control });
+  }
 
   it("loads a document from a file and publishes it", async () => {
     const connection = await openWholesale();
     await openTab("Documents");
-    await click(within(await screen.findByRole("region", { name: "MAP policy" })).getByRole("button", { name: "Publish a new version" }));
-    await screen.findByRole("heading", { name: "Publish a new version" });
+    const wizard = await openPublish("MAP policy", "Publish a new version of the MAP policy");
+    expect(wizard.closest(".os-wizard")).toBeTruthy();
+    const steps = [...screen.getByRole("list", { name: "Publishing a version" }).querySelectorAll(":scope > li .os-rail-label")].map((l) => l.textContent);
+    expect(steps).toEqual(["Label", "Text", "Preview"]);
+    expect(barButtons()).toEqual(["Cancel"]);
+    await fill("Label", "MAP policy 2027");
+    await next();
     expect(screen.getByRole("button", { name: "Load from a file" })).toBeTruthy();
 
     // A file the engine would refuse is refused here, in the engine's words, and nothing is loaded.
@@ -292,11 +531,12 @@ describe("the documents", () => {
     await chooseFile(new File([text], "map-policy.md", { type: "text/markdown" }));
     await waitFor(() => expect((screen.getByLabelText("Text") as HTMLTextAreaElement).value).toBe(text));
     expect(screen.queryByText("a document's body is 1 to 204800 bytes; this one is 204801")).toBeNull();
-    // The preview draws the text as elements, never as HTML set from it.
-    const preview = region("Preview");
+    // THE PREVIEW IS ITS OWN STEP, drawn when it is shown, never on a keystroke.
+    expect(document.querySelector(".os-wholesale-document")).toBeNull();
+    await next();
+    const preview = document.querySelector(".os-wholesale-document") as HTMLElement;
     expect(within(preview).getByRole("heading", { name: "MAP policy" })).toBeTruthy();
     expect(within(preview).getByText("MAP").tagName).toBe("STRONG");
-    await fill("Label", "MAP policy 2027");
     // Nothing leaves the browser until Publish.
     expect(connection.callsNamed("wholesalePublishDocument")).toHaveLength(0);
     await readTheBar();
@@ -313,6 +553,183 @@ describe("the documents", () => {
     // Back on the documents, read again.
     await waitFor(() => expect(tab("Documents").getAttribute("aria-current")).toBe("page"));
     await waitFor(() => expect(connection.callsNamed("wholesaleDocuments").length).toBeGreaterThan(reads));
+  });
+
+  it("refuses a file that is neither .md nor .txt, in a sentence a screen reader hears", async () => {
+    await openWholesale();
+    await openTab("Documents");
+    await openPublish("Price sheet", "Publish a new version of the price sheet");
+    await fill("Label", "Price sheet 2027");
+    await next();
+    await chooseFile(new File(["%PDF-1.7"], "prices.pdf", { type: "application/pdf" }));
+    const refusal = await screen.findByRole("alert");
+    expect(refusal.textContent).toContain("Choose a .md or .txt file.");
+    expect((screen.getByLabelText("Text") as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("asks before a file replaces text already typed, and loads into an empty field without asking", async () => {
+    await openWholesale();
+    await openTab("Documents");
+    await openPublish("MAP policy", "Publish a new version of the MAP policy");
+    await fill("Label", "MAP policy 2027");
+    await next();
+    await fill("Text", "Typed by hand.");
+    await chooseFile(new File(["# From the file"], "map.md", { type: "text/markdown" }));
+    const ask = await screen.findByText("Replace the text typed here with map.md?");
+    expect((screen.getByLabelText("Text") as HTMLTextAreaElement).value).toBe("Typed by hand.");
+    await readTheBar();
+    await click(within(ask.closest(".os-notice") as HTMLElement).getByRole("button", { name: "Keep what is typed" }));
+    expect((screen.getByLabelText("Text") as HTMLTextAreaElement).value).toBe("Typed by hand.");
+    await chooseFile(new File(["# From the file"], "map.md", { type: "text/markdown" }));
+    const again = await screen.findByText("Replace the text typed here with map.md?");
+    await readTheBar();
+    await click(within(again.closest(".os-notice") as HTMLElement).getByRole("button", { name: "Replace it" }));
+    await waitFor(() => expect((screen.getByLabelText("Text") as HTMLTextAreaElement).value).toBe("# From the file"));
+    cleanup();
+
+    await openWholesale();
+    await openTab("Documents");
+    await openPublish("MAP policy", "Publish a new version of the MAP policy");
+    await fill("Label", "MAP policy 2027");
+    await next();
+    await chooseFile(new File(["# From the file"], "map.md", { type: "text/markdown" }));
+    await waitFor(() => expect((screen.getByLabelText("Text") as HTMLTextAreaElement).value).toBe("# From the file"));
+    expect(screen.queryByText(/Replace the text typed here/)).toBeNull();
+  });
+
+  it("draws raw HTML, a javascript: link and an image inert in the preview", async () => {
+    const fetched = vi.spyOn(globalThis, "fetch");
+    await openWholesale();
+    await openTab("Documents");
+    await openPublish("MAP policy", "Publish a new version of the MAP policy");
+    await fill("Label", "MAP policy 2027");
+    await next();
+    await fill("Text", '<img src="https://img.example.com/x.png" onerror="window.__ran=1"><script>window.__ran=2</script>\n\n[a link](javascript:window.__ran=3)\n\n![a picture](https://img.example.com/y.png)');
+    await next();
+    const preview = document.querySelector(".os-wholesale-document") as HTMLElement;
+    expect(preview.querySelector("img, script, iframe")).toBeNull();
+    const link = within(preview).getByText("a link").closest("a") as HTMLAnchorElement;
+    expect(link.getAttribute("href") ?? "").not.toContain("javascript");
+    expect(within(preview).getByText("a picture").tagName).toBe("SPAN");
+    expect((window as unknown as { __ran?: number }).__ran).toBeUndefined();
+    expect(fetched.mock.calls.some(([url]) => String(url).includes("img.example.com"))).toBe(false);
+  });
+
+  it("draws no Publish a new version for a person the engine answers may not publish", async () => {
+    await openWholesale(seedWith({ settings: { ...SETTINGS, may: { ...SETTINGS.may, update: true, publish: false } } as unknown as Row }));
+    await openTab("Documents");
+    await screen.findByRole("region", { name: "Wholesale terms" });
+    expect(screen.queryByRole("button", { name: /^Publish a new version/ })).toBeNull();
+  });
+
+  it("after a lost answer, reads the documents again and says whether the version is there", async () => {
+    const published = { ...DOCUMENTS, kinds: DOCUMENTS.kinds.map((k) => (k.kind === "map" ? { ...k, current: { ...k.current!, id: "doc-map-2", label: "MAP policy 2027", body: "No advertised price below MAP, from 2027." } } : k)) };
+    const seed = seedWith();
+    const connection = await openWholesale(seed);
+    // The write lands, and its answer is lost on the way back.
+    const real = connection.query.executeNamed.bind(connection.query);
+    connection.query.executeNamed = (async (name: string, call: string, opts?: object) => {
+      if (name === "wholesalePublishDocument") {
+        await real(name, call, opts);
+        seed.wholesale!.documents = published as unknown as Row;
+        throw Object.assign(new Error("stream closed"), { reason: "transport" });
+      }
+      return real(name, call, opts);
+    }) as typeof connection.query.executeNamed;
+    await openTab("Documents");
+    await openPublish("MAP policy", "Publish a new version of the MAP policy");
+    await fill("Label", "MAP policy 2027");
+    await next();
+    await fill("Text", "No advertised price below MAP, from 2027.");
+    await next();
+    await next("Publish");
+    expect(await screen.findByText(/The version is there/)).toBeTruthy();
+    await readTheBar();
+    expect(barButtons()).toEqual(["Done"]);
+    expect(connection.callsNamed("wholesalePublishDocument")).toHaveLength(1);
+  });
+
+  describe("a lost answer on Publish", () => {
+    const isCheck = (name: string, call: string) => name === "wholesaleDocuments" && !call.includes("versionId");
+    const BODY = "No advertised price below MAP, from 2027.";
+
+    async function answerAndPublish() {
+      await openTab("Documents");
+      await openPublish("MAP policy", "Publish a new version of the MAP policy");
+      await fill("Label", "MAP policy 2027");
+      await next();
+      await fill("Text", BODY);
+      await next();
+      await next("Publish");
+    }
+
+    it("draws no forward act while the documents are read again, then says the version is there", async () => {
+      const seed = seedWith();
+      const connection = await openWholesale(seed);
+      const published = { ...DOCUMENTS, kinds: DOCUMENTS.kinds.map((k) => (k.kind === "map" ? { ...k, current: { ...k.current!, id: "doc-map-2", label: "MAP policy 2027", body: BODY } } : k)) };
+      const check = loseTheAnswerThenHold(connection, "wholesalePublishDocument", isCheck, {
+        landed: true, land: () => { seed.wholesale!.documents = published as unknown as Row; }, checks: ["answer"],
+      });
+      await answerAndPublish();
+      await waitFor(() => expect(check.held()).toBe(1));
+      // A press here would write a second version: there is none to press.
+      expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
+      expect(barButtons()).toEqual(["Cancel"]);
+      expect(bar().getAttribute("data-tone")).toBe("busy");
+      await check.release();
+      expect(await screen.findByText(/The version is there/)).toBeTruthy();
+      await readTheBar();
+      expect(barButtons()).toEqual(["Done"]);
+      expect(connection.callsNamed("wholesalePublishDocument")).toHaveLength(1);
+    });
+
+    it("says the version is not there when the request never left, and offers Publish again", async () => {
+      const connection = await openWholesale();
+      const check = loseTheAnswerThenHold(connection, "wholesalePublishDocument", isCheck, { landed: false, checks: ["answer"] });
+      await answerAndPublish();
+      await waitFor(() => expect(check.held()).toBe(1));
+      expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
+      await check.release();
+      expect(await screen.findByText(/The version is not there/)).toBeTruthy();
+      await readTheBar();
+      expect(barButtons()).toEqual(["Cancel", "Publish"]);
+      expect(connection.callsNamed("wholesalePublishDocument")).toHaveLength(0);
+    });
+
+    it("offers only Check again when the documents cannot be read, and stays there when the connection drops again", async () => {
+      const connection = await openWholesale();
+      const check = loseTheAnswerThenHold(connection, "wholesalePublishDocument", isCheck, { landed: true, checks: ["fail", "drop"] });
+      await answerAndPublish();
+      await waitFor(() => expect(check.held()).toBe(1));
+      await check.release();
+      expect(await screen.findByText(/could not be read/)).toBeTruthy();
+      await readTheBar();
+      expect(barButtons()).toEqual(["Cancel", "Check again"]);
+      // The bar does not say ready beside a page that does not know.
+      expect(bar().textContent).toContain("Could not read the documents");
+      expect(bar().textContent).not.toMatch(/Ready to/);
+      expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
+      await click(within(bar()).getByRole("button", { name: "Check again" }));
+      await waitFor(() => expect(check.held()).toBe(1));
+      expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
+      await check.release();
+      await readTheBar();
+      await waitFor(() => expect(barButtons()).toEqual(["Cancel", "Check again"]));
+      expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
+      expect(connection.callsNamed("wholesalePublishDocument")).toHaveLength(1);
+      expect(bar().textContent).toContain("Could not read the documents");
+    });
+  });
+
+  it("draws an earlier version's missing fingerprint as the dash with its reason", async () => {
+      const kinds = DOCUMENTS.kinds.map((k) => (k.kind === "terms" ? { ...k, history: k.history.map((v) => (v.id === "doc-terms-1" ? { ...v, sha256: "" } : v)) } : k));
+      await openWholesale(seedWith({ documents: { kinds } as unknown as Row }));
+      await openTab("Documents");
+      const earlier = within(await screen.findByRole("region", { name: "Wholesale terms" })).getByRole("list", { name: "Earlier versions" });
+      const absent = earlier.querySelector(".os-figure-absent") as HTMLElement;
+      expect(absent).toBeTruthy();
+      expect(absent.getAttribute("title")).toBe("Not recorded");
+      expect(within(earlier).getByText("Not recorded")).toBeTruthy();
   });
 
   it("opens an earlier version read-only", async () => {
@@ -414,6 +831,52 @@ describe("the settings, complete", () => {
   });
 });
 
+describe("the settings, fix round 1", () => {
+  async function openSettings(seed: FakeSeed = seedWith()): Promise<FakeConnection> {
+    const connection = await openWholesale(seed);
+    await openTab("Settings");
+    await waitFor(() => settingRow("Terms required"));
+    return connection;
+  }
+
+  it("says a refused export in Records, beside its act, and Try again exports again", async () => {
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => "blob:wholesale-export");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const saved: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { saved.push(this.download); });
+    const seed = seedWith({ exportError: "wholesale: The export is refused for a reason of the engine's." });
+    const connection = await openSettings(seed);
+    await click(screen.getByRole("button", { name: "Download every record" }));
+    const records = region("Records");
+    const sentence = await within(records).findByText("The export is refused for a reason of the engine's.");
+    expect(sentence.closest(".os-notice")).toBeTruthy();
+    // Not at the top of the page, and no Reload of the settings.
+    expect(screen.queryByRole("button", { name: "Reload" })).toBeNull();
+    const reads = connection.callsNamed("wholesaleStoreSettings").length;
+    delete seed.wholesale!.exportError;
+    await readTheBar();
+    await click(within(records).getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(connection.callsNamed("wholesaleExportStore")).toHaveLength(2));
+    await waitFor(() => expect(saved).toEqual(["wholesale-store-live-20261111.json"]));
+    expect(within(records).queryByText("The export is refused for a reason of the engine's.")).toBeNull();
+    expect(connection.callsNamed("wholesaleStoreSettings").length).toBe(reads);
+  });
+
+  it("draws Download every record only for a person the engine answers may export", async () => {
+    await openSettings(seedWith({ settings: { ...SETTINGS, may: { ...SETTINGS.may, export: false } } as unknown as Row }));
+    expect(screen.queryByRole("button", { name: "Download every record" })).toBeNull();
+  });
+
+  it("says who the emails are sent as, or the engine's sentence when no sender resolves", async () => {
+    await openSettings();
+    expect(within(region("Emails")).getByText("Sent as Example Cycles <trade@example.com>")).toBeTruthy();
+    cleanup();
+    await openSettings(seedWith({ settings: { ...SETTINGS, sender: { ready: false, fromName: "", address: "", reason: "The engine's sentence on the sender." } } as unknown as Row }));
+    expect(within(region("Emails")).getByText("The engine's sentence on the sender.")).toBeTruthy();
+    expect(within(region("Emails")).queryByText(/^Sent as/)).toBeNull();
+  });
+});
+
 describe("the applications, completed", () => {
   it("offers Waiting for terms under Refine", async () => {
     const connection = await openWholesale();
@@ -469,41 +932,53 @@ describe("one application, completed", () => {
   });
 
   it("shows each email's delivery, and why one was not sent", async () => {
+    const sent = "2026-11-04T08:00:00Z";
+    const day = dayWords(sent);
+    const lane = (providerStatus: string) => ({ status: "sent", skipReason: "", providerStatus, sentAt: sent });
     await openKestrel({
       state: "approved", stage: "approved", acts: ["remove"],
       entitlement: { state: "granted", errorCode: "", error: "" },
       emails: [
-        { kind: "approved", attempt: 1, state: "skipped", reason: "“Trade welcome” is not a published transactional template.", sentAt: "", requestedBy: "", delivery: null },
-        { kind: "terms", attempt: 2, state: "sent", reason: "", sentAt: "2026-11-04T08:00:00Z", requestedBy: "v1:identity:user:u-dana", delivery: { status: "sent", skipReason: "", providerStatus: "delivered", sentAt: "2026-11-04T08:00:01Z" } },
-        { kind: "terms", attempt: 1, state: "sent", reason: "", sentAt: "2026-11-02T08:00:00Z", requestedBy: "", delivery: { status: "sent", skipReason: "", providerStatus: "bounced", sentAt: "2026-11-02T08:00:01Z" } },
+        { kind: "approved", attempt: 4, state: "deferred", reason: "", sentAt: "", requestedBy: "", delivery: { status: "pending", skipReason: "", providerStatus: "", sentAt: "" } },
+        { kind: "approved", attempt: 3, state: "held", reason: "The lane's sentence for a held send.", sentAt: "", requestedBy: "", delivery: null },
+        { kind: "approved", attempt: 2, state: "uncertain", reason: "The engine's sentence for an uncertain hand-over.", sentAt: "", requestedBy: "", delivery: null },
+        { kind: "approved", attempt: 1, state: "failed", reason: "The engine's sentence for a failed send.", sentAt: "", requestedBy: "", delivery: null },
+        { kind: "terms", attempt: 8, state: "sent", reason: "", sentAt: sent, requestedBy: "", delivery: lane("failed") },
+        { kind: "terms", attempt: 7, state: "sent", reason: "", sentAt: sent, requestedBy: "", delivery: lane("filtered-spam") },
+        { kind: "terms", attempt: 6, state: "sent", reason: "", sentAt: sent, requestedBy: "", delivery: lane("quarantined") },
+        { kind: "terms", attempt: 5, state: "sent", reason: "", sentAt: sent, requestedBy: "", delivery: lane("suppressed") },
+        { kind: "terms", attempt: 4, state: "sent", reason: "", sentAt: sent, requestedBy: "", delivery: lane("bounced") },
+        { kind: "terms", attempt: 3, state: "sent", reason: "", sentAt: sent, requestedBy: "", delivery: lane("expanded") },
+        { kind: "terms", attempt: 2, state: "sent", reason: "", sentAt: sent, requestedBy: "", delivery: lane("delivered") },
+        { kind: "terms", attempt: 1, state: "sent", reason: "", sentAt: sent, requestedBy: "", delivery: null },
       ],
     });
     const emails = region("Emails");
-    // One line per kind: the newest attempt.
-    expect(within(emails).getByText("Terms email")).toBeTruthy();
-    expect(within(emails).getByText("Delivered")).toBeTruthy();
-    expect(within(emails).queryByText("Bounced: the address does not accept mail")).toBeNull();
-    expect(within(emails).getByText("Approval email")).toBeTruthy();
-    expect(within(emails).getByText("Not sent: “Trade welcome” is not a published transactional template.")).toBeTruthy();
-    cleanup();
-
-    await openKestrel({
-      state: "rejected", stage: "rejected", acts: [],
-      emails: [
-        { kind: "rejected", attempt: 1, state: "sent", reason: "", sentAt: "2026-11-06T08:00:00Z", requestedBy: "", delivery: null },
-        { kind: "terms", attempt: 1, state: "sent", reason: "", sentAt: "2026-11-02T08:00:00Z", requestedBy: "", delivery: { status: "sent", skipReason: "", providerStatus: "bounced", sentAt: "2026-11-02T08:00:01Z" } },
-      ],
-    });
-    const rejected = region("Emails");
-    expect(within(rejected).getByText(`Sent on ${dayWords("2026-11-06T08:00:00Z")}`)).toBeTruthy();
-    expect(within(rejected).getByText("Bounced: the address does not accept mail")).toBeTruthy();
+    // ONE LINE PER ATTEMPT, each kind's newest first.
+    const lines = [...emails.querySelectorAll(".os-fact dd")].map((dd) => dd.textContent);
+    expect(lines).toEqual([
+      `Sent on ${day}; the provider could not deliver it`,
+      `Sent on ${day}; the recipient's mail system filtered it as spam`,
+      `Sent on ${day}; the recipient's mail system quarantined it`,
+      "Not delivered: the provider no longer sends to this address",
+      "Bounced: the address does not accept mail",
+      `Sent on ${day}; passed on to a mailing list`,
+      `Sent on ${day}; delivered`,
+      `Sent on ${day}`,
+      "On its way",
+      "Not sent: The lane's sentence for a held send.",
+      "The engine's sentence for an uncertain hand-over.",
+      "Not sent: The engine's sentence for a failed send.",
+    ]);
   });
 
-  it("draws Resend terms email while an application waits for terms", async () => {
+  it("draws Resend terms email while an application waits for terms, in the Emails section", async () => {
     const connection = await openKestrel({ stage: "waitingForTerms", acts: ["reject", "resendTerms"] });
-    expect(barButtons()).toEqual(["Reject", "Resend terms email"]);
+    // The bar's acts are the decision; a resend is never its button.
+    expect(barButtons()).toEqual(["Reject"]);
+    const resend = within(region("Emails")).getByRole("button", { name: "Resend terms email" });
     await readTheBar();
-    await click(within(bar()).getByRole("button", { name: "Resend terms email" }));
+    await click(resend);
     await waitFor(() => expect(connection.callsNamed("wholesaleResendEmail")).toHaveLength(1));
     expect(connection.callsNamed("wholesaleResendEmail")[0]).toBe(`builtin wholesaleResendEmail(applicationId: "${KESTREL_ID}", kind: "terms")`);
     await waitFor(() => expect(connection.callsNamed("wholesaleGet").length).toBeGreaterThan(1));
@@ -513,16 +988,57 @@ describe("one application, completed", () => {
     const granted = { state: "approved", stage: "approved", entitlement: { state: "granted", errorCode: "", error: "" } };
     await openKestrel({ ...granted, acts: ["remove"] });
     expect(barButtons()).toEqual(["Remove"]);
+    expect(screen.queryByRole("button", { name: "Resend approval email" })).toBeNull();
     cleanup();
 
     const connection = await openKestrel({ ...granted, acts: ["remove", "resendApproved"] }, { resendError: "wholesale: no approved email template is chosen" });
-    expect(barButtons()).toEqual(["Remove", "Resend approval email"]);
+    expect(barButtons()).toEqual(["Remove"]);
+    const emails = region("Emails");
     await readTheBar();
-    await click(within(bar()).getByRole("button", { name: "Resend approval email" }));
+    await click(within(emails).getByRole("button", { name: "Resend approval email" }));
     await waitFor(() => expect(connection.callsNamed("wholesaleResendEmail")).toHaveLength(1));
     expect(connection.callsNamed("wholesaleResendEmail")[0]).toContain('kind: "approved"');
-    // The engine's refusal, in its own words.
-    expect(await screen.findByText("no approved email template is chosen")).toBeTruthy();
+    // The engine's refusal, in its own words, where the act was taken.
+    expect(await within(region("Emails")).findByText("no approved email template is chosen")).toBeTruthy();
+  });
+
+  it("draws Resend rejection email and Resend removal email exactly when the engine offers them", async () => {
+    const connection = await openKestrel({ state: "rejected", stage: "rejected", acts: ["resendRejected"] });
+    expect(barButtons()).toEqual([]);
+    await readTheBar();
+    await click(within(region("Emails")).getByRole("button", { name: "Resend rejection email" }));
+    await waitFor(() => expect(connection.callsNamed("wholesaleResendEmail")).toHaveLength(1));
+    expect(connection.callsNamed("wholesaleResendEmail")[0]).toContain('kind: "rejected"');
+    cleanup();
+
+    const removed = await openKestrel({ state: "revoked", stage: "revoked", acts: ["retryAccess", "resendRevoked"] });
+    expect(barButtons()).toEqual(["Retry access"]);
+    await readTheBar();
+    await click(within(region("Emails")).getByRole("button", { name: "Resend removal email" }));
+    await waitFor(() => expect(removed.callsNamed("wholesaleResendEmail")).toHaveLength(1));
+    expect(removed.callsNamed("wholesaleResendEmail")[0]).toContain('kind: "revoked"');
+    cleanup();
+
+    await openKestrel({ state: "rejected", stage: "rejected", acts: [] });
+    expect(screen.queryByRole("button", { name: "Resend rejection email" })).toBeNull();
+  });
+
+  it("names the terms facts plainly, and says why a fact is empty", async () => {
+    await openKestrel({
+      acceptance: { signedName: "Avery Stone", acceptedAt: "2026-11-05T09:30:00Z", termsLabel: "Trade terms 2026", termsSha256: "", mapLabel: "MAP policy 2026", mapSha256: MAP_SHA, clientAddress: "", userAgent: "" },
+      termsLink: { expiresAt: "2026-12-01T00:00:00Z", expired: false },
+    });
+    const terms = region("Terms");
+    const labels = [...terms.querySelectorAll(".os-fact dt")].map((dt) => dt.textContent);
+    expect(labels).toEqual(["Wholesale terms", "MAP policy", "IP address", "Browser"]);
+    const value = (label: string) => [...terms.querySelectorAll(".os-fact")].find((f) => f.querySelector("dt")?.textContent === label)!.querySelector("dd") as HTMLElement;
+    for (const label of ["IP address", "Browser"]) {
+      expect(value(label).textContent).toContain("Not recorded");
+      expect(value(label).textContent).not.toBe("--");
+    }
+    // An empty fingerprint is the dash with its reason, beside the label.
+    expect(value("Wholesale terms").textContent).toContain("Trade terms 2026");
+    expect(value("Wholesale terms").textContent).toContain("Not recorded");
   });
 
   it("renders the client's own fields labelled in plain words", async () => {

@@ -30,7 +30,7 @@ export function refineStages(termsRequired: boolean): readonly WholesaleFilter[]
 }
 
 /** The engine's acts this page has a name for (wholesalepack ActsFor). */
-type KnownAct = "reject" | "approve" | "remove" | "retryAccess" | "resendTerms" | "resendApproved";
+type KnownAct = "reject" | "approve" | "remove" | "retryAccess" | "resendTerms" | "resendApproved" | "resendRejected" | "resendRevoked";
 
 const ACT_LABEL: Readonly<Record<KnownAct, string>> = {
   reject: "Reject",
@@ -39,7 +39,25 @@ const ACT_LABEL: Readonly<Record<KnownAct, string>> = {
   retryAccess: "Retry access",
   resendTerms: "Resend terms email",
   resendApproved: "Resend approval email",
+  resendRejected: "Resend rejection email",
+  resendRevoked: "Resend removal email",
 };
+
+/** The engine's resend acts, and the email kind each sends again. */
+const RESEND_ACTS: Readonly<Record<string, EmailKind>> = {
+  resendTerms: "terms",
+  resendApproved: "approved",
+  resendRejected: "rejected",
+  resendRevoked: "revoked",
+};
+
+/** The email kind a resend act sends again, or null for an act that is not a resend. */
+export function resendKind(act: string): EmailKind | null {
+  return Object.prototype.hasOwnProperty.call(RESEND_ACTS, act) ? RESEND_ACTS[act]! : null;
+}
+
+/** The four kinds of email the pack sends an applicant. */
+export type EmailKind = "terms" | "approved" | "rejected" | "revoked";
 
 /**
  * The store gate's refusal of a store that is not set up
@@ -87,9 +105,11 @@ export function accessSentence(errorCode: string, error: string): string {
       return "The store has not allowed MemQL to change customers. Its owner approves the new permissions from the store's admin.";
     case "plan_ceiling":
       return "The store's plan allows no more catalogs.";
+    // SHOPIFY'S OWN WORDS, as the engine recorded them: a refusal and a
+    // failure read alike here, and the page names no cause the engine did not.
     case "customer_refused":
     case "shopify_error":
-      return `Shopify refused: ${error}`;
+      return error;
     default:
       return error;
   }
@@ -167,6 +187,8 @@ export interface WholesalePage {
   next: string;
   /** The store has more applications than one read covers; its oldest are left out. */
   truncated: boolean;
+  /** The engine's answer: the caller is one of the cluster's operators, who read and decide nothing. */
+  operator: boolean;
 }
 
 export interface WholesaleDecision {
@@ -198,7 +220,7 @@ export interface WholesaleAcceptance {
 export interface WholesaleEmail {
   kind: string;
   attempt: number;
-  /** sent, skipped, failed or pending: what the lane answered when it was sent. */
+  /** sent, skipped, held, uncertain, failed or deferred: as the lane says it stands. */
   state: string;
   /** The engine's sentence for a send that did not go. */
   reason: string;
@@ -255,17 +277,33 @@ export const EMAIL_TEMPLATES: readonly (readonly [keyof WholesaleSettingsChanges
   ["revokedTemplateId", "Removal email"],
 ];
 
+/** Whether an email of one kind would be sent now, and the engine's sentence why not. */
+export interface EmailWouldSend {
+  wouldSend: boolean;
+  reason: string;
+}
+
+/** The store's sender as a person reads it, or the engine's sentence why there is none. */
+export interface WholesaleSender {
+  ready: boolean;
+  fromName: string;
+  address: string;
+  reason: string;
+}
+
 export interface WholesaleSettings extends WholesaleSettingsChanges {
   /** False until the cluster's operators set the store up. */
   exists: boolean;
   /** Whether the cluster's outbound allowlist admits the stored staff address. */
   staffEmailAdmitted: boolean;
   senderIdentityId: string;
+  sender: WholesaleSender;
+  emailsWouldSend: Record<EmailKind, EmailWouldSend>;
   /** The published transactional templates this person may choose. */
   templates: { id: string; name: string }[];
   /** The routes this engine has. */
   adapters: string[];
-  may: { setUp: boolean; update: boolean; setSender: boolean };
+  may: { setUp: boolean; update: boolean; setSender: boolean; publish: boolean; export: boolean };
 }
 
 const asRow = (value: unknown): Row | null => (value && typeof value === "object" && !Array.isArray(value) ? (value as Row) : null);
@@ -330,6 +368,7 @@ export function wholesalePageFrom(row: Row | null): WholesalePage {
     counts,
     next: rowString(row, "next"),
     truncated: flag(row, "truncated"),
+    operator: flag(row, "operator"),
   };
 }
 
@@ -399,6 +438,13 @@ export function wholesaleApplicationFrom(row: Row | null): WholesaleApplication 
 /** wholesaleStoreSettings' answer. */
 export function wholesaleSettingsFrom(row: Row | null): WholesaleSettings {
   const may = object(row, "may");
+  const sender = object(row, "sender");
+  const would = object(row, "emailsWouldSend");
+  // A KIND THE ENGINE DID NOT ANSWER IS NOT SENT: nothing here says it would be.
+  const wouldSend = (kind: EmailKind): EmailWouldSend => {
+    const k = object(would, kind);
+    return { wouldSend: flag(k, "wouldSend"), reason: rowString(k, "reason") };
+  };
   return {
     exists: flag(row, "exists"),
     applicationsOpen: flag(row, "applicationsOpen"),
@@ -409,13 +455,15 @@ export function wholesaleSettingsFrom(row: Row | null): WholesaleSettings {
     linkLifetimeDays: whole(row, "linkLifetimeDays"),
     acceptanceText: rowString(row, "acceptanceText"),
     senderIdentityId: rowString(row, "senderIdentityId"),
+    sender: { ready: flag(sender, "ready"), fromName: rowString(sender, "fromName"), address: rowString(sender, "address"), reason: rowString(sender, "reason") },
+    emailsWouldSend: { terms: wouldSend("terms"), approved: wouldSend("approved"), rejected: wouldSend("rejected"), revoked: wouldSend("revoked") },
     termsTemplateId: rowString(row, "termsTemplateId"),
     approvedTemplateId: rowString(row, "approvedTemplateId"),
     rejectedTemplateId: rowString(row, "rejectedTemplateId"),
     revokedTemplateId: rowString(row, "revokedTemplateId"),
     templates: list(row, "templates").map((t) => ({ id: rowString(t, "id"), name: rowString(t, "name") || rowString(t, "id") })).filter((t) => t.id !== ""),
     adapters: strings(row, "adapters"),
-    may: { setUp: flag(may, "setUp"), update: flag(may, "update"), setSender: flag(may, "setSender") },
+    may: { setUp: flag(may, "setUp"), update: flag(may, "update"), setSender: flag(may, "setSender"), publish: flag(may, "publish"), export: flag(may, "export") },
   };
 }
 
@@ -424,7 +472,7 @@ export function accessWords(entitlement: WholesaleEntitlement | null): string {
   if (entitlement === null) return "Not granted yet";
   if (entitlement.state === "granted") return "Trade prices on";
   if (entitlement.state === "revoked") return "Trade prices off";
-  if (entitlement.errorCode !== "") return accessSentence(entitlement.errorCode, entitlement.error);
+  if (entitlement.errorCode !== "") return accessSentence(entitlement.errorCode, entitlement.error) || "Not granted yet";
   return "Not granted yet";
 }
 
@@ -443,6 +491,8 @@ export interface WholesaleBuyer {
   /** The entitlement's state, or none when nothing was granted. */
   accessState: string;
   errorCode: string;
+  /** The engine's sentence for why access is not on; "" when it gave none. */
+  error: string;
   grantedAt: string;
 }
 
@@ -450,6 +500,8 @@ export interface WholesaleBuyersPage {
   rows: WholesaleBuyer[];
   next: string;
   truncated: boolean;
+  /** The engine's answer: the caller is one of the cluster's operators, who add no buyer. */
+  operator: boolean;
 }
 
 /** wholesaleBuyers' answer. */
@@ -461,18 +513,19 @@ export function wholesaleBuyersFrom(row: Row | null): WholesaleBuyersPage {
       applicantEmail: rowString(r, "applicantEmail"),
       accessState: rowString(r, "accessState"),
       errorCode: rowString(r, "errorCode"),
+      error: rowString(r, "error"),
       grantedAt: rowString(r, "grantedAt"),
     })).filter((r) => r.id !== ""),
     next: rowString(row, "next"),
     truncated: flag(row, "truncated"),
+    operator: flag(row, "operator"),
   };
 }
 
 /**
  * A buyer's access in words, on their row: on since the day it was granted,
- * or not on yet and why, the error code's sentence after the colon. The list
- * carries the code and not Shopify's own words, so a refusal by Shopify is
- * said without them; the buyer's page says them.
+ * or not on yet and why -- THE ENGINE'S OWN SENTENCE after the colon (the
+ * entitlement's, as the buyer's page shows it), and with none, nothing more.
  */
 export function buyerAccessWords(buyer: WholesaleBuyer): string {
   if (buyer.accessState === "granted") {
@@ -480,9 +533,7 @@ export function buyerAccessWords(buyer: WholesaleBuyer): string {
     return since ? `Trade prices on since ${since}` : "Trade prices on";
   }
   if (buyer.accessState === "revoked") return "Trade prices off";
-  if (buyer.errorCode === "customer_refused" || buyer.errorCode === "shopify_error") return "Not on yet: Shopify refused.";
-  if (buyer.errorCode !== "") return `Not on yet: ${afterColon(accessSentence(buyer.errorCode, ""))}`;
-  return "Not on yet";
+  return buyer.error.trim() !== "" ? `Not on yet: ${afterColon(buyer.error.trim())}` : "Not on yet";
 }
 
 // ---------------------------------------------------------------------------
@@ -498,6 +549,22 @@ export const DOCUMENT_KINDS: readonly (readonly [DocumentKind, string])[] = [
 ];
 
 export const documentKindWords = (kind: string): string => DOCUMENT_KINDS.find(([k]) => k === kind)?.[1] ?? kind;
+
+/** Each kind as a sentence names it. */
+const DOCUMENT_SUBJECTS: Readonly<Record<DocumentKind, string>> = {
+  terms: "the wholesale terms",
+  map: "the MAP policy",
+  priceSheet: "the price sheet",
+};
+
+/**
+ * The words of publishing a version of one kind: the control's own name, which
+ * the wizard it opens is titled by, and the kind as a sentence names it.
+ */
+export function publishWords(kind: DocumentKind): { title: string; subject: string } {
+  const subject = DOCUMENT_SUBJECTS[kind];
+  return { title: `Publish a new version of ${subject}`, subject };
+}
 
 /**
  * The largest body a version may hold, in bytes (wholesalepack
@@ -573,32 +640,105 @@ export function termsWords(acceptance: WholesaleAcceptance | null, link: { expir
   return `Not accepted yet. The link expires on ${dayWords(link.expiresAt)}.`;
 }
 
-const EMAIL_KINDS: readonly (readonly [string, string])[] = [
+const EMAIL_KINDS: readonly (readonly [EmailKind, string])[] = [
   ["terms", "Terms email"],
   ["approved", "Approval email"],
   ["rejected", "Rejection email"],
   ["revoked", "Removal email"],
 ];
 
-/** Each kind's newest attempt, in the order an applicant meets them. */
-export function latestEmails(emails: readonly WholesaleEmail[]): { kind: string; name: string; email: WholesaleEmail }[] {
-  return EMAIL_KINDS.flatMap(([kind, name]) => {
-    const newest = emails.filter((e) => e.kind === kind).reduce<WholesaleEmail | null>((a, e) => (a === null || e.attempt > a.attempt ? e : a), null);
-    return newest === null ? [] : [{ kind, name, email: newest }];
-  });
+/** An email kind as Settings and the Emails section name it. */
+export const emailKindWords = (kind: string): string => EMAIL_KINDS.find(([k]) => k === kind)?.[1] ?? kind;
+
+/**
+ * Every attempt the engine recorded, one line each: the kinds in the order an
+ * applicant meets them, each kind's newest attempt first. A send the pack
+ * declined was never recorded, so it is never an attempt here.
+ */
+export function emailLines(emails: readonly WholesaleEmail[]): { kind: string; name: string; email: WholesaleEmail }[] {
+  return EMAIL_KINDS.flatMap(([kind, name]) =>
+    emails.filter((e) => e.kind === kind).sort((a, b) => b.attempt - a.attempt).map((email) => ({ kind, name, email })),
+  );
 }
 
 /**
- * An email's line: what the provider said of its delivery when it said
- * something, else when it was sent, and for one that did not go, the engine's
- * reason after "Not sent".
+ * One attempt's line, in the ruled words (ruling 78), from the attempt's
+ * state and the lane's provider report -- the seven statuses the row lane
+ * really records (campaigns stats.go), and nothing guessed for any other:
+ *   on its way (pending, deferred, sending)   "On its way", and the engine's sentence
+ *   uncertain                                 the engine's sentence alone ("Not confirmed" with none)
+ *   failed, held, skipped                     "Not sent: " and the engine's sentence
+ *   sent, no report yet                       "Sent on <day>"
+ *   delivered                                 "Sent on <day>; delivered"
+ *   expanded                                  "Sent on <day>; passed on to a mailing list"
+ *   bounced                                   "Bounced: the address does not accept mail"
+ *   suppressed                                "Not delivered: the provider no longer sends to this address"
+ *   quarantined                               "Sent on <day>; the recipient's mail system quarantined it"
+ *   filtered-spam                             "Sent on <day>; the recipient's mail system filtered it as spam"
+ *   failed                                    "Sent on <day>; the provider could not deliver it"
+ * The day is the lane's hand-over, the one time the engine answers, so it is
+ * always said as the day it was sent, never as the day it arrived.
  */
 export function emailWords(email: WholesaleEmail): string {
-  const d = email.delivery;
-  if (d !== null && d.status === "skipped") return d.skipReason ? `Not sent: ${d.skipReason}` : "Not sent";
-  if (email.state !== "sent") return email.reason ? `Not sent: ${email.reason}` : "Not sent";
-  if (d?.providerStatus === "delivered") return "Delivered";
-  if (d?.providerStatus === "bounced") return "Bounced: the address does not accept mail";
-  const at = dayWords(d?.sentAt || email.sentAt);
-  return at ? `Sent on ${at}` : "Sent";
+  const reason = email.reason.trim();
+  if (email.state === "deferred" || email.state === "pending" || email.state === "sending") return reason ? `On its way: ${reason}` : "On its way";
+  // THE ENGINE'S SENTENCE FOR AN UNCERTAIN HAND-OVER says it may have been
+  // delivered: "Not sent" before it would contradict it.
+  // Until a reply carries one, an uncertain attempt is "Not confirmed" and nothing more.
+  if (email.state === "uncertain") return reason || "Not confirmed";
+  if (email.state !== "sent") return reason ? `Not sent: ${reason}` : "Not sent";
+  const day = dayWords(email.delivery?.sentAt || email.sentAt);
+  const sent = day ? `Sent on ${day}` : "Sent";
+  switch (email.delivery?.providerStatus ?? "") {
+    case "delivered":
+      return `${sent}; delivered`;
+    case "expanded":
+      return `${sent}; passed on to a mailing list`;
+    case "bounced":
+      return "Bounced: the address does not accept mail";
+    case "suppressed":
+      return "Not delivered: the provider no longer sends to this address";
+    case "quarantined":
+      return `${sent}; the recipient's mail system quarantined it`;
+    case "filtered-spam":
+      return `${sent}; the recipient's mail system filtered it as spam`;
+    case "failed":
+      return `${sent}; the provider could not deliver it`;
+    default:
+      return sent;
+  }
+}
+
+/** A sentence of the engine's as the start of one of the page's: a capital first, a stop last. */
+const asSentence = (said: string): string => {
+  const text = said.trim();
+  if (text === "") return "";
+  const capital = text.charAt(0).toUpperCase() + text.slice(1);
+  return /[.!?]$/.test(capital) ? capital : `${capital}.`;
+};
+
+/**
+ * What adding a buyer will do, and the act that does it, FROM THE ENGINE'S
+ * ANSWER: whether the store requires its terms, and whether the terms email
+ * would be sent now (`emailsWouldSend.terms`) -- with the engine's sentence
+ * when it would not.
+ */
+export function addBuyerWords(settings: WholesaleSettings): { lead: string; act: string } {
+  if (!settings.termsRequired) return { lead: "They can buy at trade prices once someone approves.", act: "Add buyer" };
+  const terms = settings.emailsWouldSend.terms;
+  if (terms.wouldSend) {
+    return { lead: "They will be emailed the terms. They can buy at trade prices once they accept and someone approves.", act: "Add and send the terms" };
+  }
+  const why = asSentence(terms.reason);
+  return {
+    lead: `${why ? `${why} ` : ""}Nothing is sent to them yet. They can buy at trade prices once they accept the terms and someone approves.`,
+    act: "Add buyer",
+  };
+}
+
+/** "Sent as" the engine's sender line, or the engine's sentence when none can be resolved. */
+export function senderWords(sender: WholesaleSender): string {
+  if (!sender.ready) return sender.reason;
+  const name = sender.fromName.trim(), address = sender.address.trim();
+  return `Sent as ${name && address ? `${name} <${address}>` : name || address}`;
 }
