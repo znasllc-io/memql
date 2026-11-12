@@ -119,7 +119,10 @@ func ContextWithPersistedOwner(ctx context.Context, ownerUserId string, grant ma
 	if err := ValidateRoleTestContext(bound); err != nil {
 		return nil, err
 	}
-	return bound, nil
+	// Every context this function hands back carries the mark, whatever grant
+	// it was restored from: the assertion alone cannot tell it from a person's
+	// own forwarded session.
+	return context.WithValue(bound, restoredWorkKey{}, true), nil
 }
 
 // QueryRunnerFunc adapts an engine's shaped result without introducing a
@@ -128,4 +131,19 @@ type QueryRunnerFunc func(context.Context, string) (any, error)
 
 func (f QueryRunnerFunc) ExecuteShaped(ctx context.Context, query string) (any, error) {
 	return f(ctx, query)
+}
+
+// restoredWorkKey marks a context ContextWithPersistedOwner rebuilt: work carried
+// on later for a person, under an assertion that looks like their own. Local to
+// this node and never sent; the assertion and what is signed are unchanged.
+type restoredWorkKey struct{}
+
+// restoredWork reports whether ctx was rebuilt from a persisted owner, so a gate
+// that needs the person themselves (RequirePersonSession) can refuse it.
+func restoredWork(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	marked, _ := ctx.Value(restoredWorkKey{}).(bool)
+	return marked
 }

@@ -67,11 +67,25 @@ func refusePersonSession(why string) error {
 // assertion alone. So when an assertion is on the context it must be a user
 // principal of class `user`, and a present but zero assertion -- what a refused
 // binding leaves behind so an older one cannot be used -- is refused. The same
-// reading covers work restored from a persisted owner (ContextWithPersistedOwner),
-// which binds an assertion of the recorded class, and a restoration with no
-// recorded grant is refused by its stand-in role: it is work for a person, not
-// the person. A person's own direct stream carries a `user` assertion too, so
-// this refuses nothing a sign-in opened.
+// person's own direct stream carries a `user` assertion too, so this refuses
+// nothing a sign-in opened.
+//
+// RESTORED WORK IS REFUSED BY ITS MARK. ContextWithPersistedOwner rebuilds a
+// context for work carried on later on a person's behalf, and its assertion of a
+// recorded `user` grant is indistinguishable from the person's own forwarded
+// session, so that function marks what it returns (restoredWork) and a marked
+// context is refused whatever its grant.
+//
+// WHAT THE MARK DOES NOT COVER. It is local to the node that restored the work
+// and is never sent, so a restored context forwarded to another node arrives as
+// a plain `user` assertion, which this gate cannot tell from a person's own
+// forwarded session. The mesh receivers (the AI and worker forwards, the run
+// relay) do not bind the run either, so the run check does not stand in on the
+// receiving node. It stands in on the restoring node: a goal's run restores its
+// owner and then binds the run (app/work_execution_context.go), so a step that
+// reached one of these acts there is refused by the run check as well as by the
+// mark. The acts this gates are answered on the node a person's stream reached,
+// which is what keeps a forwarded restoration from reaching them.
 //
 // INTERNAL ORIGIN IS NOT CONSULTED. Server code stamps it beneath a person's own
 // request to open one row-tier write; the person is still the one asking, so the
@@ -98,8 +112,8 @@ func RequirePersonSession(ctx context.Context) (string, error) {
 		return "", refusePersonSession("sign-in is turned off on this cluster")
 	case !hasClaims:
 		return "", refusePersonSession("this call carries no sign-in")
-	case ac.RoleStandIn:
-		return "", refusePersonSession("this call is work restored for a person, not the person")
+	case ac.RoleStandIn || restoredWork(ctx):
+		return "", refusePersonSession("work continued on a person's behalf is not that person's session")
 	}
 	if sub, _ := claims["sub"].(string); sub != id || id != strings.TrimSpace(id) {
 		return "", refusePersonSession("this call acts on somebody's behalf")

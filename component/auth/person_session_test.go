@@ -194,3 +194,35 @@ func TestRequirePersonSessionComparesIdsExactly(t *testing.T) {
 		}
 	}
 }
+
+// Work restored from a persisted owner is carried on for a person later, not
+// opened by them, so it is refused whatever class its recorded grant names.
+// A person's own sessions, direct and forwarded, still pass beside it.
+func TestRequirePersonSessionRefusesRestoredWork(t *testing.T) {
+	resolver := NewIdentityResolver(QueryRunnerFunc(func(context.Context, string) (any, error) {
+		return map[string]any{"role": string(RoleOwner)}, nil
+	}), nil)
+	restored, err := ContextWithPersistedOwner(context.Background(), sessionPerson,
+		map[string]any{"roleCeiling": string(RoleOwner), "credentialClass": ForwardedClassUser}, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !restoredWork(restored) {
+		t.Fatal("ContextWithPersistedOwner did not mark its context")
+	}
+	_, err = RequirePersonSession(restored)
+	if err == nil || !strings.Contains(err.Error(), "work continued") {
+		t.Fatalf("restored work with a user grant: err=%v", err)
+	}
+	for name, ctx := range map[string]context.Context{
+		"direct":    session("", nil),
+		"forwarded": forwardedSession(t, ForwardedClassUser, sessionPerson, "", time.Time{}),
+	} {
+		if restoredWork(ctx) {
+			t.Errorf("%s: marked as restored work", name)
+		}
+		if id, err := RequirePersonSession(ctx); err != nil || id != sessionPerson {
+			t.Errorf("%s: id=%q err=%v", name, id, err)
+		}
+	}
+}
