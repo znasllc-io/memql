@@ -668,11 +668,13 @@ func TestTheWriterStampsInternalOriginOnItsOneCall(t *testing.T) {
 type replyingEngine struct {
 	memql.IntegrationEngineAccess
 	origins []auth.CallOrigin
+	packs   []string
 	calls   []string
 }
 
 func (e *replyingEngine) Execute(ctx context.Context, q string) (*memql.ExecuteResult, error) {
 	e.origins = append(e.origins, auth.OriginFromContext(ctx))
+	e.packs = append(e.packs, auth.PackCallerFromContext(ctx))
 	e.calls = append(e.calls, q)
 	return memql.NewResultWithOutput(map[string]any{"status": "ok"}), nil
 }
@@ -697,6 +699,83 @@ func TestTheCallerStampsInternalOriginOnItsOneCall(t *testing.T) {
 	}
 	if auth.OriginFromContext(ctx).IsInternal() {
 		t.Fatal("the stamp leaked into the caller's own context")
+	}
+	// RULING 57: internal origin alone is any package's automation; the
+	// Shopify wholesale builtins admit the call that also names this pack.
+	if eng.packs[0] != "wholesale" {
+		t.Fatalf("the builtin ran marked as pack %q, want wholesale", eng.packs[0])
+	}
+	if auth.PackCallerFromContext(ctx) != "" {
+		t.Fatal("the pack's mark leaked into the caller's own context")
+	}
+}
+
+// RULING 58: A REVOKE ACTS ON THE CUSTOMER THE GRANT RECORDED. The address is
+// sent too, for a reference that names no customer.
+func TestTheTagAdapterRevokesTheCustomerTheReferenceNames(t *testing.T) {
+	caller := &fakeCaller{}
+	if _, err := NewCustomerTagAdapter("").Revoke(context.Background(), caller, Grant{
+		StoreID: "store-live", BuyerEmail: "ada@example.com",
+		Reference: "customer=gid://shopify/Customer/5;tag=example-trade",
+	}); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	got := caller.args[0]
+	if got["customerId"] != "gid://shopify/Customer/5" || got["tag"] != "example-trade" || got["buyerEmail"] != "ada@example.com" {
+		t.Fatalf("the adapter sent %v, want the recorded customer and tag", got)
+	}
+	caller = &fakeCaller{}
+	if _, err := NewCustomerTagAdapter("").Revoke(context.Background(), caller, Grant{
+		StoreID: "store-live", BuyerEmail: "ada@example.com",
+	}); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if id, _ := caller.args[0]["customerId"].(string); id != "" {
+		t.Fatalf("a reference naming no customer sent customerId %q", id)
+	}
+}
+
+func TestARevokeOfAGrantedTagRowSendsItsCustomerAndReadsRevoked(t *testing.T) {
+	registerShippedAdapters()
+	reader := revokedFixture([]map[string]any{{
+		"applicationId": "app-1", "storeId": "store-live", "adapter": AdapterCustomerTag,
+		"state": EntitlementGranted, "reference": "customer=gid://shopify/Customer/1;tag=memql-wholesale",
+	}})
+	caller := &fakeCaller{}
+	writer := &fakeWriter{}
+	p := &Provider{reader: reader, caller: caller, writer: writer}
+	if _, err := p.revokeEntitlement(internalAsMerchant(), map[string]any{"applicationId": "app-1"}, 0); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if len(caller.args) != 1 || caller.args[0]["customerId"] != "gid://shopify/Customer/1" {
+		t.Fatalf("the untag sent %v, want the recorded customer", caller.args)
+	}
+	if out := writer.only(t, "writeEntitlementRow"); out["state"] != EntitlementRevoked {
+		t.Fatalf("state = %v, want revoked", out["state"])
+	}
+}
+
+// A B2B REVOKE WITH NO REFERENCE IS shopify_error, not customer_refused: the
+// store refused no customer, and a grant that failed partway may have left a
+// catalog behind, so the reason still sends the merchant to the admin.
+func TestAB2BRevokeWithNoReferenceIsAShopifyError(t *testing.T) {
+	registerShippedAdapters()
+	reader := revokedFixture([]map[string]any{{
+		"applicationId": "app-1", "storeId": "store-live", "adapter": AdapterShopifyB2B,
+		"state": EntitlementFailed, "reference": "",
+	}})
+	caller := &fakeCaller{}
+	writer := &fakeWriter{}
+	p := &Provider{reader: reader, caller: caller, writer: writer}
+	if _, err := p.revokeEntitlement(internalAsMerchant(), map[string]any{"applicationId": "app-1"}, 0); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	out := writer.only(t, "writeEntitlementRow")
+	if out["state"] != EntitlementFailed || out["errorCode"] != ErrorShopifyError {
+		t.Fatalf("state/errorCode = %v/%v, want failed/shopify_error", out["state"], out["errorCode"])
+	}
+	if !strings.Contains(asString(out["error"]), "Shopify admin") || len(caller.calls) != 0 {
+		t.Fatalf("error %v, calls %v", out["error"], caller.calls)
 	}
 }
 

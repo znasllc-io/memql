@@ -106,10 +106,18 @@ func (fc *fakeCustomers) tagsOf(id string) []string {
 	return nil
 }
 
-// pack is the wholesale pack's own call: internal origin, as engineCaller
-// stamps it, acting as the application's merchant.
+// pack is the wholesale pack's own call as engineCaller makes it: internal
+// origin and the pack's mark, acting as the application's merchant.
 func pack() context.Context {
-	return auth.ContextWithInternalOrigin(auth.ContextWithUserActor(context.Background(), "user-1"))
+	return auth.ContextWithPackCaller(auth.ContextWithInternalOrigin(
+		auth.ContextWithUserActor(context.Background(), "user-1")), "wholesale")
+}
+
+// automationStep is a registered automation's step, of any package on the
+// instance: internal origin, which the automation executor stamps, and no
+// pack's mark, which nothing in DSL can set.
+func automationStep() context.Context {
+	return auth.ContextWithInternalOrigin(actorCtx("system:automation", auth.RoleReader))
 }
 
 func tagArgs(email, name string) map[string]any {
@@ -333,6 +341,12 @@ func TestEachWholesaleBuiltinRefusesACallWithoutInternalOrigin(t *testing.T) {
 			"the store's owner": actorCtx("user-1", auth.RoleWriter),
 			"a cluster owner":   actorCtx("user-9", auth.RoleOwner),
 			"a developer":       actorCtx("user-2", auth.RoleDeveloper),
+			// RULING 57: internal origin alone is any package's automation.
+			"an automation's step":           automationStep(),
+			"internal origin, no actor":      auth.ContextWithInternalOrigin(context.Background()),
+			"the pack's mark, client origin": auth.ContextWithPackCaller(auth.ContextWithClientOrigin(actorCtx("user-1", auth.RoleOwner)), "wholesale"),
+			"the pack's mark, no origin":     auth.ContextWithPackCaller(context.Background(), "wholesale"),
+			"another pack's mark, internal":  auth.ContextWithPackCaller(auth.ContextWithInternalOrigin(context.Background()), "reviews"),
 		} {
 			h := newHarness(t)
 			withStoreRow(h, nil)
@@ -451,5 +465,91 @@ func TestANewCompanyIsMadeUnderTheIdItWasGiven(t *testing.T) {
 	want := []string{`external_id:"memql-wholesale:v1:wholesale:application:app-1"`, `external_id:"memql-wholesale:app-1"`}
 	if !slices.Equal(searched, want) {
 		t.Fatalf("searched %v, want %v", searched, want)
+	}
+}
+
+// RULING 58: A REVOKE ACTS ON THE CUSTOMER THE GRANT RECORDED.
+
+func untagArgs(customerID, email string) map[string]any {
+	return map[string]any{"storeId": testStoreID, "customerId": customerID, "buyerEmail": email}
+}
+
+// customerByIdOn answers the by-id read from the same customer list.
+func (fc *fakeCustomers) byIdOn(h *testHarness) {
+	h.admin.replyWith("ShopifyCustomerById", func(vars map[string]any) any {
+		fc.mu.Lock()
+		defer fc.mu.Unlock()
+		id, _ := vars["id"].(string)
+		for _, c := range fc.list {
+			if c.id == id {
+				return map[string]any{"customer": map[string]any{"id": c.id, "tags": append([]string{}, c.tags...)}}
+			}
+		}
+		return map[string]any{"customer": nil}
+	})
+}
+
+func TestARevokeAfterTheBuyerChangedTheirAddressUntagsTheRecordedCustomer(t *testing.T) {
+	h := newHarness(t)
+	fc := customersOn(h)
+	fc.byIdOn(h)
+	i := NewIntegration(h.conn)
+	granted := invoke(t, pack(), i.handleTagWholesaleCustomer, tagArgs("ada@example.com", "Ada Example"))
+	id := granted["customerId"].(string)
+	fc.mu.Lock()
+	fc.list[0].email = "ada.new@example.com"
+	fc.mu.Unlock()
+
+	out := invoke(t, pack(), i.handleUntagWholesaleCustomer, untagArgs(id, "ada@example.com"))
+	if out["status"] != "ok" {
+		t.Fatalf("reply = %v", out)
+	}
+	if slices.Contains(fc.tagsOf(id), WholesaleTagDefault) {
+		t.Fatal("the recorded customer still carries the tag after a revoke that reported success")
+	}
+}
+
+func TestARevokeUntagsTheRecordedCustomerAmongTwoWithOneAddress(t *testing.T) {
+	h := newHarness(t)
+	fc := customersOn(h,
+		fakeCustomer{id: "gid://shopify/Customer/1", email: "ada@example.com"},
+		fakeCustomer{id: "gid://shopify/Customer/2", email: "ada@example.com", tags: []string{WholesaleTagDefault}})
+	fc.byIdOn(h)
+	invoke(t, pack(), NewIntegration(h.conn).handleUntagWholesaleCustomer, untagArgs("gid://shopify/Customer/2", "ada@example.com"))
+	if slices.Contains(fc.tagsOf("gid://shopify/Customer/2"), WholesaleTagDefault) {
+		t.Fatal("the tag is still on the customer the reference names")
+	}
+	if h.admin.countOp("ShopifyCustomerByEmail") != 0 {
+		t.Fatal("a reference naming a customer was revoked by address")
+	}
+}
+
+func TestARevokeByAddressRemovesTheTagFromEveryCustomerHoldingIt(t *testing.T) {
+	h := newHarness(t)
+	fc := customersOn(h,
+		fakeCustomer{id: "gid://shopify/Customer/1", email: "ada@example.com", tags: []string{WholesaleTagDefault}},
+		fakeCustomer{id: "gid://shopify/Customer/2", email: "ada@example.com", tags: []string{WholesaleTagDefault}},
+		fakeCustomer{id: "gid://shopify/Customer/3", email: "ada@example.com"})
+	invoke(t, pack(), NewIntegration(h.conn).handleUntagWholesaleCustomer, untagArgs("", "ada@example.com"))
+	for _, id := range []string{"gid://shopify/Customer/1", "gid://shopify/Customer/2"} {
+		if slices.Contains(fc.tagsOf(id), WholesaleTagDefault) {
+			t.Errorf("%s still carries the tag", id)
+		}
+	}
+	if got := h.admin.countOp("ShopifyTagsRemove"); got != 2 {
+		t.Fatalf("tagsRemove sent %d times, want 2 (only to the customers carrying the tag)", got)
+	}
+}
+
+func TestARevokeOfACustomerSinceDeletedSucceeds(t *testing.T) {
+	h := newHarness(t)
+	fc := customersOn(h)
+	fc.byIdOn(h)
+	out := invoke(t, pack(), NewIntegration(h.conn).handleUntagWholesaleCustomer, untagArgs("gid://shopify/Customer/404", "ada@example.com"))
+	if out["status"] != "ok" {
+		t.Fatalf("reply = %v, want ok: a customer that no longer exists carries no tag", out)
+	}
+	if ops := h.admin.seenOps(); !slices.Equal(ops, []string{"ShopifyCustomerById"}) {
+		t.Fatalf("Shopify was asked %v; only the by-id read may be sent", ops)
 	}
 }

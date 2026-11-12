@@ -100,8 +100,13 @@ func (a *shopifyB2BAdapter) Revoke(ctx context.Context, call Caller, g Grant) (O
 		// A REFUSAL, not a retry. There is no reference to undo and there
 		// never will be one, so recording this as pending would have the
 		// pack try again for ever against nothing.
+		// shopify_error, SET EXPLICITLY: the store refused no customer, so
+		// the default customer_refused would tell the merchant the wrong
+		// thing. A grant that failed partway may have left a catalog, which
+		// is why the reason sends them to the Shopify admin.
 		return Outcome{}, &AdapterRefusal{
 			Adapter: AdapterShopifyB2B,
+			Code:    ErrorShopifyError,
 			Reason: "this entitlement carries no Shopify reference, so there is nothing to " +
 				"draft. Revoke the catalog in the Shopify admin; the decision is already recorded here",
 		}

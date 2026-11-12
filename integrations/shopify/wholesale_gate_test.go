@@ -72,13 +72,12 @@ func TestTheWholesaleBuiltinsRefuseACallerWhoIsNotThePack(t *testing.T) {
 }
 
 func TestTheWholesaleBuiltinsAdmitThePacksCallAndRefuseTheStoresOwnerAndAClusterOwner(t *testing.T) {
-	// The pack's own call: internal origin, whoever its actor is -- an
-	// automation's is a reader.
-	automation := auth.ContextWithInternalOrigin(actorCtx("system:automation", auth.RoleReader))
+	// The pack's own call: internal origin and the pack's mark, whoever its
+	// actor is.
 	for n := range wholesaleBuiltins(&Integration{}) {
 		for name, who := range map[string]context.Context{
-			"internal origin":             auth.ContextWithInternalOrigin(context.Background()),
-			"an automation's reader step": automation,
+			"the pack's call":           pack(),
+			"the pack's call, no actor": auth.ContextWithPackCaller(auth.ContextWithInternalOrigin(context.Background()), "wholesale"),
 		} {
 			h := newHarness(t)
 			withStoreRow(h, map[string]any{"plan": "Shopify Plus"})
@@ -93,10 +92,15 @@ func TestTheWholesaleBuiltinsAdmitThePacksCallAndRefuseTheStoresOwnerAndACluster
 				t.Errorf("%s: %s was admitted and Shopify was never asked (err %v)", b.builtin, name, err)
 			}
 		}
-		// The interim rule admitted these two; the pack's rule does not.
+		// The interim rule admitted these three; the pack's rule does not. An
+		// automation's step carries internal origin, but the executor stamps
+		// that on every step of every package's automation, so it would let
+		// one client's package grant wholesale prices in another client's
+		// store (ruling 57): only the pack's mark admits a call.
 		for name, who := range map[string]context.Context{
-			"the store's owner": actorCtx("user-1", auth.RoleWriter),
-			"a cluster owner":   actorCtx("user-9", auth.RoleOwner),
+			"the store's owner":           actorCtx("user-1", auth.RoleWriter),
+			"a cluster owner":             actorCtx("user-9", auth.RoleOwner),
+			"an automation's reader step": automationStep(),
 		} {
 			h := newHarness(t)
 			withStoreRow(h, map[string]any{"plan": "Shopify Plus"})
@@ -118,7 +122,7 @@ func TestOnlyThePacksCallIsToldAWholesaleStoreDoesNotExist(t *testing.T) {
 	for n := range wholesaleBuiltins(&Integration{}) {
 		h := newHarness(t)
 		b := wholesaleBuiltins(NewIntegration(h.conn))[n]
-		_, err := b.handle(auth.ContextWithInternalOrigin(context.Background()), onStore(b.args, "no-such-store"), 0)
+		_, err := b.handle(pack(), onStore(b.args, "no-such-store"), 0)
 		if want := `shopify: store "no-such-store" is not configured`; err == nil || err.Error() != want {
 			t.Errorf("%s: err = %v, want %q", b.builtin, err, want)
 		}
@@ -134,6 +138,7 @@ func TestOnlyThePacksCallIsToldAWholesaleStoreDoesNotExist(t *testing.T) {
 func TestTheWholesaleBuiltinsSayWhoMayCallThem(t *testing.T) {
 	said := func(text string) bool {
 		return strings.Contains(text, "the wholesale pack") && strings.Contains(text, "internal origin") &&
+			strings.Contains(text, "automation") &&
 			!strings.Contains(text, "the store's owner") && !strings.Contains(text, "a cluster owner")
 	}
 	executors := map[string]string{}

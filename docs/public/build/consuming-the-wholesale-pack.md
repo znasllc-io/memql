@@ -206,8 +206,8 @@ carry them end to end.
 | Row state | What happened | What to do |
 |---|---|---|
 | `granted` | The adapter reported success | Nothing |
-| `pending` | The push failed transiently — an outage, not a refusal | Press Retry access on the application in the OS (`wholesaleRetryAccess`) |
-| `failed` | The adapter **refused**, and the row names the code: `plan_ceiling` (a catalog ceiling), `customer_refused` (the store refused to create the buyer's customer), `scope_missing` (the store's grant does not reach its customers). A buyer with no customer is not a refusal: the customer-tag route creates one and tags it | Fix the cause; retrying alone will not help |
+| `pending` | The push has not landed and may yet: `shopify_error` when the store, Shopify or the connector failed in a way that can pass (an outage, a timeout, an answer nobody could read), or `no_route` when a revoke must go through an adapter this engine no longer has | Press Retry access on the application in the OS (`wholesaleRetryAccess`) |
+| `failed` | Nothing was pushed, or the adapter **refused**, and the row names why: `no_settings` (the store has no wholesale settings), `no_route` (its settings name no adapter, or one this engine does not have), `plan_ceiling` (a catalog ceiling, or a plan the B2B adapter cannot read), `customer_refused` (the store refused to create the buyer's customer), `scope_missing` (the store refused access to its customers: the permissions are not approved, or the app is not approved for protected customer data), `shopify_error` (the connector is not configured, or a B2B revoke has no reference to act on). A buyer with no customer is not a refusal: the customer-tag route creates one and tags it | Fix the cause; retrying alone will not help |
 | `revoked` | A revoke decision was recorded and acted on | Nothing |
 
 **A failed push never un-approves an application.** An approval is a decision

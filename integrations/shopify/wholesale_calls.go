@@ -64,9 +64,21 @@ func customerEmail(email string) string {
 // TWO CUSTOMERS FOR ONE ADDRESS: the one the origin lists first, with matches
 // saying how many there were, so the reply can say so without failing.
 func (c *Connector) customerByEmail(ctx context.Context, store Store, email string) (wholesaleCustomer, error) {
+	all, err := c.customersByEmail(ctx, store, email)
+	if err != nil || len(all) == 0 {
+		return wholesaleCustomer{}, err
+	}
+	first := all[0]
+	first.matches = len(all)
+	return first, nil
+}
+
+// customersByEmail is every customer holding the address, in the order the
+// origin lists them.
+func (c *Connector) customersByEmail(ctx context.Context, store Store, email string) ([]wholesaleCustomer, error) {
 	clean := customerEmail(email)
 	if clean == "" {
-		return wholesaleCustomer{}, fmt.Errorf("shopify: a buyer email is required to find a customer")
+		return nil, fmt.Errorf("shopify: a buyer email is required to find a customer")
 	}
 	resp, err := c.adminCall(ctx, store, customerSearchQuery, "ShopifyCustomerByEmail",
 		// QUOTED AS A LITERAL rather than interpolated into the query
@@ -75,7 +87,7 @@ func (c *Connector) customerByEmail(ctx context.Context, store Store, email stri
 		// otherwise change what is being asked.
 		map[string]any{"query": "email:" + strconv.Quote(clean)})
 	if err != nil {
-		return wholesaleCustomer{}, customerScopeRefusal(store, err)
+		return nil, customerScopeRefusal(store, err)
 	}
 	var decoded struct {
 		Customers struct {
@@ -84,12 +96,22 @@ func (c *Connector) customerByEmail(ctx context.Context, store Store, email stri
 				Email string   `json:"email"`
 				Tags  []string `json:"tags"`
 			} `json:"nodes"`
+			PageInfo struct {
+				HasNextPage bool `json:"hasNextPage"`
+			} `json:"pageInfo"`
 		} `json:"customers"`
 	}
 	if err := resp.DecodeInto(&decoded); err != nil {
-		return wholesaleCustomer{}, err
+		return nil, err
 	}
-	var found wholesaleCustomer
+	if decoded.Customers.PageInfo.HasNextPage {
+		// MORE THAN ONE PAGE OF CANDIDATES: an error, never a guess. The
+		// entitlement stays pending and is retried, and no customer is tagged
+		// or untagged on a partial answer that might have missed the right one.
+		return nil, fmt.Errorf("shopify: the customer search on %s answered more than %d candidates for the buyer's address; nothing was changed",
+			store.Domain, customerSearchPage)
+	}
+	var found []wholesaleCustomer
 	for _, node := range decoded.Customers.Nodes {
 		// EXACT MATCH REQUIRED. Shopify's email: search is a prefix and
 		// token search, so "email:\"sam@example.com\"" can answer with
@@ -99,18 +121,46 @@ func (c *Connector) customerByEmail(ctx context.Context, store Store, email stri
 		if customerEmail(node.Email) != clean {
 			continue
 		}
-		if found.matches == 0 {
-			found.id, found.tags = node.ID, node.Tags
-		}
-		found.matches++
+		found = append(found, wholesaleCustomer{id: node.ID, tags: node.Tags})
 	}
 	return found, nil
 }
 
+// customerSearchPage is how many candidates the email read asks for. Past it,
+// the read is an error (customersByEmail), never a guess.
+const customerSearchPage = 50
+
 const customerSearchQuery = `query ShopifyCustomerByEmail($query: String!) {
-  customers(first: 10, query: $query) {
+  customers(first: 50, query: $query) {
     nodes { id email tags }
+    pageInfo { hasNextPage }
   }
+}`
+
+// customerByID reads the customer a grant recorded, or answers one with no id
+// when it no longer exists.
+func (c *Connector) customerByID(ctx context.Context, store Store, gid string) (wholesaleCustomer, error) {
+	resp, err := c.adminCall(ctx, store, customerByIDQuery, "ShopifyCustomerById", map[string]any{"id": gid})
+	if err != nil {
+		return wholesaleCustomer{}, customerScopeRefusal(store, err)
+	}
+	var decoded struct {
+		Customer *struct {
+			ID   string   `json:"id"`
+			Tags []string `json:"tags"`
+		} `json:"customer"`
+	}
+	if err := resp.DecodeInto(&decoded); err != nil {
+		return wholesaleCustomer{}, err
+	}
+	if decoded.Customer == nil {
+		return wholesaleCustomer{}, nil
+	}
+	return wholesaleCustomer{id: decoded.Customer.ID, tags: decoded.Customer.Tags, matches: 1}, nil
+}
+
+const customerByIDQuery = `query ShopifyCustomerById($id: ID!) {
+  customer(id: $id) { id tags }
 }`
 
 // findOrCreateCustomer is the buyer's customer: the one the store has for the
@@ -213,9 +263,10 @@ func customerScopeRefusal(store Store, err error) error {
 	var ae *AdminError
 	if errors.As(err, &ae) && ae.DeniedOnly() {
 		return &wholesaleRefusal{code: RefusalScopeMissing, reason: fmt.Sprintf(
-			"shopify: the grant of %s does not reach its customers (read_customers and write_customers), "+
-				"so the buyer's customer cannot be found, created or tagged; approve the scopes on the "+
-				"store's connection, then retry access", store.Domain)}
+			"shopify: %s refused access to its customers, so the buyer's customer cannot be found, created or "+
+				"tagged: either the store has not approved the customer permissions (read_customers and "+
+				"write_customers) on its connection, or the app has not been approved for protected customer "+
+				"data; fix whichever it is, then retry access", store.Domain)}
 	}
 	return err
 }

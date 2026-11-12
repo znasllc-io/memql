@@ -305,10 +305,12 @@ func (c *Connector) companyForApplication(ctx context.Context, store Store, appl
 func (c *Connector) RevokeWholesaleAccount(ctx context.Context, store Store,
 	refs WholesaleAccountRefs) error {
 	if strings.TrimSpace(refs.CatalogGID) == "" {
-		// NOTHING WAS GRANTED, SO NOTHING IS DRAFTED. A first grant that
-		// failed still names its adapter with an empty reference, and a later
-		// revoke reaches here with no catalog: a clean success that sends
-		// nothing to Shopify.
+		// NO CATALOG IS NAMED, SO NONE IS DRAFTED, and nothing is sent. That
+		// does not prove nothing was granted: a B2B grant that failed partway
+		// can leave an active catalog the reference does not name, because the
+		// handler keeps no refs from a failed provision. The pack's B2B adapter
+		// therefore refuses a revoke with no reference before it gets here, and
+		// tells the merchant to draft the catalog in the Shopify admin.
 		return nil
 	}
 	resp, err := c.adminCall(ctx, store, catalogDraftMutation, "ShopifyCatalogDraft",
@@ -366,28 +368,50 @@ func (c *Connector) tagWholesaleCustomer(ctx context.Context, store Store,
 	return res, nil
 }
 
-// UntagWholesaleCustomer is the plan-independent revoke.
+// UntagWholesaleCustomer is the plan-independent revoke, ON THE CUSTOMER THE
+// GRANT RECORDED (ruling 58).
 //
-// NIL WHEN THERE IS NOTHING TO REMOVE (X17): an address with no customer, or a
-// customer without the tag -- a first grant that failed is revoked this way --
-// carries no tag, and nothing is sent but the read.
+// customerGID is the customer the entitlement's reference names, read by id:
+// a buyer who changed their address in the store's admin, or an address two
+// customers hold, still has the tag taken off the customer that got it. A
+// customer that no longer exists or no longer carries the tag is a clean
+// success -- there is nothing left to revoke.
+//
+// THE ADDRESS ONLY WHEN THE REFERENCE NAMES NO CUSTOMER (a first grant that
+// failed, X17): the tag comes off every customer holding the address that
+// carries it, and an address nobody holds sends nothing but the read.
 func (c *Connector) UntagWholesaleCustomer(ctx context.Context, store Store,
-	email, tag string) error {
-	customer, err := c.customerByEmail(ctx, store, email)
-	if err != nil {
-		return err
-	}
+	customerGID, email, tag string) error {
 	tag = normaliseTag(tag)
-	// REMOVED ONLY IF PRESENT.
-	if customer.id == "" || !customer.hasTag(tag) {
-		return nil
+	var holders []wholesaleCustomer
+	if id := strings.TrimSpace(customerGID); id != "" {
+		customer, err := c.customerByID(ctx, store, id)
+		if err != nil {
+			return err
+		}
+		holders = []wholesaleCustomer{customer}
+	} else {
+		all, err := c.customersByEmail(ctx, store, email)
+		if err != nil {
+			return err
+		}
+		holders = all
 	}
-	resp, err := c.adminCall(ctx, store, tagsRemoveMutation, "ShopifyTagsRemove",
-		map[string]any{"id": customer.id, "tags": []string{tag}})
-	if err != nil {
-		return customerScopeRefusal(store, err)
+	for _, customer := range holders {
+		// REMOVED ONLY IF PRESENT.
+		if customer.id == "" || !customer.hasTag(tag) {
+			continue
+		}
+		resp, err := c.adminCall(ctx, store, tagsRemoveMutation, "ShopifyTagsRemove",
+			map[string]any{"id": customer.id, "tags": []string{tag}})
+		if err != nil {
+			return customerScopeRefusal(store, err)
+		}
+		if ueErr := userErrorsFrom(resp, "tagsRemove"); ueErr != nil {
+			return ueErr
+		}
 	}
-	return userErrorsFrom(resp, "tagsRemove")
+	return nil
 }
 
 // normaliseTag bounds what this connector will write as a tag.

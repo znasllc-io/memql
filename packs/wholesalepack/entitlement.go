@@ -736,10 +736,11 @@ func isAdapterRefusal(err error) bool {
 }
 
 // engineCaller is the production Caller: it renders a construct call and
-// runs it through the engine under the caller's own actor, AT INTERNAL ORIGIN.
+// runs it through the engine under the caller's own actor, AT INTERNAL ORIGIN
+// AND MARKED AS THIS PACK'S CALL (auth.ContextWithPackCaller).
 //
 // The Shopify wholesale builtins admit the pack's call alone (internal
-// origin), so a person's act -- an approval reaching the automation, a staff
+// origin and the pack's mark), so a person's act -- an approval reaching the automation, a staff
 // member pressing Retry access -- reaches them only through here. The stamp
 // comes AFTER the pack's own checks, which are the authority: every path to a
 // Call has decided who the caller is and what they may do first
@@ -763,8 +764,12 @@ func (e *engineCaller) Call(ctx context.Context, construct string, args map[stri
 	if e == nil || e.engine == nil {
 		return nil, fmt.Errorf("wholesale: the pack has no engine handle, so %q cannot be called", construct)
 	}
-	// INLINE, so the internal stamp dies with this one builtin call.
-	result, err := e.engine.Execute(auth.ContextWithInternalOrigin(ctx), renderBuiltinCall(construct, args))
+	// INLINE, so the internal stamp and the pack's mark die with this one
+	// builtin call. The mark names this pack (ruling 57): the Shopify
+	// wholesale builtins admit internal origin only beside it, because the
+	// automation executor stamps internal origin on every package's steps.
+	result, err := e.engine.Execute(auth.ContextWithPackCaller(auth.ContextWithInternalOrigin(ctx), integrationName),
+		renderBuiltinCall(construct, args))
 	if err != nil {
 		return nil, fmt.Errorf("wholesale: %s: %w", construct, err)
 	}
