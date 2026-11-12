@@ -72,10 +72,15 @@ CREATE UNIQUE INDEX account_exports_one_active_idx ON account_exports (account_i
 CREATE INDEX account_exports_work_idx ON account_exports (state, requested_at)
  WHERE state IN ('queued', 'running');
 
--- WHAT WAS MOVED. One row per root the governed act moved or placed. A move
--- writes the account on a stored version in place and appends no version, so
--- this table and the audit trail are the only record that it happened.
+-- WHAT WAS MOVED. One row per root the governed act moved or placed, and one
+-- per list row a person re-tagged. A move writes the account on a stored
+-- version in place and appends no version, so this table and the audit trail
+-- are the only record that it happened. Lines are never deleted: the job reads
+-- a row's latest line for as long as the row exists.
 -- from_account is empty for a row that was placed (it had no account).
+-- followers is the number of rows the organization rules tie to a placed root
+-- that were placed with it in the same call. The rows the job carries later
+-- are not counted anywhere.
 CREATE TABLE account_row_moves (
  id bigserial PRIMARY KEY,
  concept text NOT NULL,
@@ -105,12 +110,21 @@ CREATE INDEX account_row_moves_row_idx ON account_row_moves (concept, row_id, mo
 --
 --  parent_concept, parent_id   the row whose account changed.
 --  from_account, to_account    the account it left and the one it went to.
+--  created_at                  when the record was written, inside the
+--                              transaction that changed the row.
+--  seen_at                     when the job first read the record, which it can
+--                              only do once that transaction has committed.
+--                              A record carries the rows that existed before
+--                              this moment, and none until it is set: a row
+--                              written while the change was still uncommitted
+--                              was filed by the account the parent had left.
 --  done_at                     set when every kind that can hang off the row
---                              has finished a full pass begun after created_at.
---  cursor_concept, cursor_id, followed, next_at   not used.
+--                              has finished a full pass that could see the
+--                              record.
 --
 -- An export waits while a record that names its account is not settled.
--- Settled records are deleted ninety days later.
+-- Records are never deleted: a record is a fact the job may need for as long
+-- as the row exists.
 CREATE TABLE account_follow_tasks (
  id bigserial PRIMARY KEY,
  parent_concept text NOT NULL,
@@ -118,19 +132,14 @@ CREATE TABLE account_follow_tasks (
  from_account text NOT NULL DEFAULT '',
  to_account text NOT NULL,
  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
- cursor_concept text NOT NULL DEFAULT '',
- cursor_id text NOT NULL DEFAULT '',
- followed bigint NOT NULL DEFAULT 0,
- next_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ seen_at timestamptz,
  done_at timestamptz
 );
--- Records not settled: the count an export's readiness reads, and the job's
--- settling.
+-- Records not settled: the count an export's readiness reads, the job's
+-- settling, and the records it has not seen yet.
 CREATE INDEX account_follow_tasks_pending_idx ON account_follow_tasks (parent_concept, created_at) WHERE done_at IS NULL;
 -- The job reads a batch of parents' records by concept and id.
 CREATE INDEX account_follow_tasks_parent_idx ON account_follow_tasks (parent_concept, parent_id);
--- The job deletes settled records by age.
-CREATE INDEX account_follow_tasks_done_idx ON account_follow_tasks (done_at) WHERE done_at IS NOT NULL;
 
 -- A CONFLICT RECORDS ITS CANDIDATES. The accounts a row the job will not guess
 -- at could belong to, so "does a conflict name this account" is a lookup and
