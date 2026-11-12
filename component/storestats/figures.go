@@ -339,8 +339,8 @@ func (p periodSums) side(wholesale bool) sums {
 // order in another currency blanks the store-currency Refunds, Net sales and
 // Total sales, and Units sold, until its detail is read; a refund with a full
 // page of lines blanks Units sold here and, in readProducts, the two product
-// lists, productCount and refundsWithoutItem, and none of the money figures
-// figures answers. The null rules:
+// lists, productCount and refundsWithoutItem, and none of the money figures.
+// The null rules:
 //   - with no currency, no money figure;
 //   - with a counted refund whose detail is not read, no Refunds, Net sales,
 //     Total sales or Units sold (D22);
