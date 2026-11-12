@@ -164,8 +164,9 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 			// changed, but a domain swept by its last-changed time cannot see
 			// a deletion, so a record deleted during a pause would stay in the
 			// mirror for good. The runtime holds the delivery instead
-			// (memqlsync.ErrRecordingPaused) and resumeStore puts it back in
-			// line.
+			// (memqlsync.ErrRecordingPaused). When the store records again,
+			// resumeStore puts one page of what is held back in line and the
+			// watch returns the rest on its passes (returnHeld).
 			return nil, memqlsync.RecordingPaused(ConnectorName, store.ID)
 		}
 		// Not connected -- Shopify reported the app uninstalled, the store's

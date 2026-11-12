@@ -506,7 +506,7 @@ func (i *Integration) handleContinueBackfills(ctx context.Context, _ map[string]
 	}
 	res, err := i.runner.ContinueBackfills(ctx)
 	if err != nil {
-		i.logger.Warn("datasync: a continuing pass finished with failures; each is on its domain's row", "error", err)
+		i.logger.Warn("datasync: a continuing pass finished with failures; a domain's own failure is on its row, a write that could not be recorded or a cancelled pass on none", "error", err)
 	}
 	return resultNode("continued", fmt.Sprintf("started=%d advanced=%d completed=%d", res.Started, res.Advanced, res.Completed))
 }

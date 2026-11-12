@@ -385,7 +385,7 @@ func (c *Connector) startBulkOperation(ctx context.Context, store Store, spec *g
 		if ue.Code == bulkOperationInProgress {
 			// Another export of this shop is running -- another domain's,
 			// one a paused domain left behind, or one started elsewhere.
-			// Busy, not failed: the runtime asks again on its next tick.
+			// Busy, not failed: the runtime asks again on its next round.
 			return bulkOperation{}, memqlsync.Busy(ConnectorName, ue.Message)
 		}
 	}
@@ -668,10 +668,10 @@ func decodeJSONObject(raw string) (map[string]any, error) {
 // onBulkOperationFinish handles the bulk_operations/finish topic: Shopify
 // telling us an export we started is ready.
 //
-// It does not do the work. It clears the domain's WAIT so the next runner
-// tick picks it up immediately instead of on the poll interval -- which is
-// the difference between a backfill that finishes in minutes and one that
-// finishes on the hour.
+// It does not do the work, and it does not hurry it: it logs the notice and
+// marks the operation in bulkReadySet, which nothing reads. The backfill's
+// next step asks the origin for the operation's status as every step does
+// (BackfillStore), finds it complete and reads its file.
 func (c *Connector) onBulkOperationFinish(ctx context.Context, store Store, req memqlsync.InboundRequest) error {
 	obj, err := decodeJSONObject(string(req.Body))
 	if err != nil {
@@ -686,9 +686,9 @@ func (c *Connector) onBulkOperationFinish(ctx context.Context, store Store, req 
 	return nil
 }
 
-// bulkReadySet records which operations Shopify has said are finished, so a
-// runner can skip the status poll for them. Process-local and advisory: a
-// missed notification costs one poll, never a stuck backfill.
+// bulkReadySet records which operations Shopify has said are finished.
+// Process-local, and read by nothing: no step skips its status poll for a
+// marked operation, so a missed notification costs nothing at all.
 type bulkReadySet struct {
 	applied *applied
 }

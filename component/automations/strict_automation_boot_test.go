@@ -284,8 +284,8 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // deliveries, engagement and consent events into the email statistics facts
 // (2026-11-08). One added, none removed; measured by the strict loader.
 // 203 -> 204: continueQueuedBackfills, the five-minute pass that carries every
-// queued or running backfill on by one page budget (2026-11-11). One added,
-// none removed; measured by the strict loader.
+// queued or running backfill on, in rounds, for four minutes (2026-11-11). One
+// added, none removed; measured by the strict loader.
 // 204 -> 205: retryFailedInboundDeliveries, the one-minute pass that tries
 // again the failed inbound deliveries whose next try has come (2026-11-11).
 // One added, none removed; measured by the strict loader.

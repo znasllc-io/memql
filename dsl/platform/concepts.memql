@@ -889,11 +889,11 @@ concept syncState {
   lastInboundAt    datetime @description("When the last inbound delivery for this domain was applied.")
   lagSeconds       int      @description("Seconds between the origin's version of the last applied write and when MemQL applied it. A mirror's staleness, in the only unit an operator can act on.")
   lastReconcileAt  datetime @description("When the last reconciliation sweep started, less two minutes. The updated_at watermark the next sweep narrows on, so only a sweep that RAN moves it; the schedule runs from lastAttemptAt, when the sweep ended.")
-  lastAttemptAt    datetime @description("When a sweep last ran, was refused, or found the domain not granted. What the cadence is measured from when the last attempt did not finish, so a standing refusal waits its interval without moving the watermark.")
+  lastAttemptAt    datetime @description("When a sweep last ran, was refused, failed in a way that waits its cadence (rows the mirror could not write), or found the domain not granted. What the cadence is measured from when the last attempt did not finish, so a standing refusal waits its interval without moving the watermark.")
   driftCount       int      @description("Rows the last sweep found disagreeing with the origin. Zero after a clean sweep; non-zero is the number worth investigating even after healing, because repeated drift is a webhook that is not arriving.")
   outboxDepth      int      @description("Pending + failed entries for this (concept, connector). The number that says whether the drain is keeping up.")
   deadLetterCount  int      @description("Entries that exhausted their attempts and are waiting for an operator. Never decreases on its own.")
-  paused           bool     @description("Operator pause switch. Stops the backfill and reconciliation runners and the drain for this domain, without unregistering the connector or changing any declaration.")
+  paused           bool     @description("Operator pause switch. Stops the backfill and the periodic check (reconciliation) of this domain, without unregistering the connector or changing any declaration. It does not hold changes waiting to be pushed to the origin: the outbound drain does not read it.")
   lastError        string   @description("Truncated error from the last failure on this domain, whichever runner produced it.")
 }
 

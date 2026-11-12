@@ -139,7 +139,8 @@ type Connector struct {
 	// applied is the process-local short-circuit for redelivered
 	// webhooks. See apply.go.
 	applied *applied
-	// bulkReady records which bulk operations Shopify has said are done.
+	// bulkReady records which bulk operations Shopify has said are done;
+	// nothing reads it (bulkReadySet).
 	bulkReady *bulkReadySet
 	// definitions remembers which metafield definitions have been
 	// created, per store.

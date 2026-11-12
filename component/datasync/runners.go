@@ -340,10 +340,13 @@ func (r *Runner) backfillFrom(ctx context.Context, connector memqlsync.Connector
 	// made with a revoked token would write `failed`, which nothing retries.
 	//
 	// A write that names only what the row already holds is not made: the row
-	// is checked all the same, on a fresh read. An invocation that only polls
-	// an export the origin is still preparing -- which a continuing pass does
-	// every few seconds -- would otherwise add two versions of the row to its
-	// history for every poll.
+	// is checked all the same, on a fresh read. It would add no version: the
+	// engine declines a health-row write whose merged payload is the stored one
+	// (component/memql/unchanged_operational_write.go). What the skip saves is
+	// the write itself -- a mutation, its transaction and the engine's read of
+	// the prior row inside it -- twice for every poll of an invocation that
+	// only polls an export the origin is still preparing, which a continuing
+	// pass does every few seconds.
 	connCtx := auth.ContextWithConnectorActor(ctx, connectorName)
 	cursor := st.BackfillCursor
 	priorStatus := st.BackfillStatus
