@@ -132,6 +132,8 @@ concept entitlement {
   shopifyCustomerId string  @description("The Shopify customer GID the grant landed on, when the integration reported one.")
   customerCreated   bool    @description("True when the grant had to create the Shopify customer rather than find it.")
   accountId         string  @description("The application's organization, copied off it, so the people who read the application read what was granted. Empty for an untied application.")
+  direction         enum("grant", "revoke")  @description("Which way the attempt that wrote this version went: grant for a provision (the automation's, or Retry access on an approved application), revoke for a removal (the automation's, or Retry access on a revoked one). Written by the pack on every version it writes, and carried forward unchanged by wholesaleBackfillAccounts, which never invents one. A row written before this field has none: its state, and the application's, tell the two apart where they can (wholesaleNotifyStaff).")
+  attempt           int     @description("How many attempts, grant and removal together, have written this row: 1 for the first, and one more for each later provision, removal or retry. A version that is not an attempt -- the backfill's tie -- carries it forward unchanged, so the store's people are told once per attempt that did not land, never once per version. Absent on a row written before this field.")
 }
 
 @version("1.1.0")
@@ -152,6 +154,11 @@ concept wholesaleSettings {
   termsRequired      bool     @description("Whether an applicant must accept the store's published terms before the application is reviewed. ABSENT IS FALSE. It cannot be on while applications are open unless the terms, the MAP policy and the price sheet each have a published version (v1:wholesale:documentVersion).")
   linkLifetimeDays   int      @description("How many days a link the store sends an applicant stays usable: 1 to 365. Absent or zero reads as 30.")
   acceptanceText     string   @description("The sentence an applicant accepts the terms with. Empty reads as the pack's default: I have read and accept the Wholesale Terms and Conditions and the MAP Policy shown above.")
+  senderIdentityId   string   @description("The v1:campaigns:senderIdentity the applicant's emails go out from, an identity of the store's organization. Chosen by the cluster's operators alone. Empty sends from the organization's configured sender.")
+  termsTemplateId    string   @description("The published transactional v1:campaigns:template of the store's organization that carries the terms link to an applicant. Empty means no terms email is sent.")
+  approvedTemplateId string   @description("The published transactional template that tells an approved buyer their trade prices are on, with the price-sheet link. Empty means none is sent.")
+  rejectedTemplateId string   @description("The published transactional template that tells an applicant their application was rejected. Empty means none is sent.")
+  revokedTemplateId  string   @description("The published transactional template that tells a buyer they were removed. Empty means none is sent.")
 }
 
 @version("1.0.0")
@@ -213,4 +220,25 @@ concept acceptance {
   clientAddress   string     @description("The address the storefront's edge saw the post come from, at most 64 bytes. Empty when the acceptance did not arrive through the storefront.")
   userAgent       string     @description("The browser's User-Agent as the post carried it, at most 512 bytes. Empty when the acceptance did not arrive through the storefront.")
   linkIssuedAt    datetime   @description("When the link the applicant accepted through was made.")
+}
+
+@version("1.0.0")
+@description("One email the pack sent, or tried to send, to one applicant: its kind (terms, approved, rejected or revoked), which attempt of that kind it was (1 for the store's automation's send, one more for each resend), the request id the transactional row lane received it under, and what came of it: sent, skipped (with the sentence why: the lane's hold, its skip or the row's withdrawal), failed (with the lane's words) or pending (deferred by the send-rate limit, and replayed by the lane). ONE ROW PER APPLICATION, KIND AND ATTEMPT at the derived id wholesale-email-<kind>-<the application's bare id, as a slug>-<attempt> (EmailSendRowID). It never carries the address, the message's fields or a link's token: the lane mints the link when it hands the message over, and keeps no copy. Written by the pack as the application's merchant, never by a client.")
+@displayCard(primary="kind", secondary="state", tertiary="applicationId")
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
+concept emailSend {
+  ownerUserId    string!  @description("v1:identity:user.id of the application's merchant, copied off the application in canonical form.")
+  storeId        string   @description("The store the application belongs to (design D9), copied off it.")
+  accountId      string   @description("The application's organization, copied off it, so the store's people read what was sent.")
+  applicationId  string!  @description("v1:wholesale:application.id the email is about, in canonical form.")
+  kind           enum("terms", "approved", "rejected", "revoked")!  @description("Which email: the terms link, the approval with the price-sheet link, the rejection, or the removal.")
+  attempt        int!     @description("1 for the send the store's automation asks for; each resend is the highest attempt recorded plus one.")
+  requestId      string!  @description("The request id the transactional row lane received this email under (LaneRequestID): wholesale-<kind>-<the application's bare id, as a slug>-<attempt>. The lane sends once per request id.")
+  templateId     string   @description("The v1:campaigns:template the email was sent with.")
+  state          enum("sent", "skipped", "failed", "pending")!  @description("What came of the send: sent, skipped (reason says why; nothing will be sent for this attempt), failed (reason carries the lane's words; asking again tries the same attempt again) or pending (the send-rate limit deferred it; the lane sends it when it can).")
+  reason         string   @description("Why the email was skipped or failed, in a sentence the store's people read. Never an address and never a token.")
+  sentAt         datetime @description("When the lane answered that it handed the email over, by the engine's clock. Empty unless state is sent.")
+  requestedBy    string   @description("v1:identity:user.id of the person who asked for a resend. Empty for the store's automation's send.")
 }

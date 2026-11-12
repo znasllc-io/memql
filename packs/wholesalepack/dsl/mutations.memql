@@ -78,7 +78,7 @@
 // system actor is owned by nobody.
 
 use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings, documentVersion }
-use wholesale.concepts.{ privateLink, acceptance }
+use wholesale.concepts.{ privateLink, acceptance, emailSend }
 
 /// Write one application. IT NAMES NO ROW ID: on the shopper path the
 /// caller is a member of the public, `id` is a name the shopper surface
@@ -164,9 +164,14 @@ mutation wholesaleSettings setWholesaleSettingsRow {
     termsRequired       bool
     linkLifetimeDays    int
     acceptanceText      string   @maxLength(2000)
+    senderIdentityId    string
+    termsTemplateId     string
+    approvedTemplateId  string
+    rejectedTemplateId  string
+    revokedTemplateId   string
   }
   insert {
-    accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText, accountId, siteId, staffEmail, termsRequired, linkLifetimeDays, acceptanceText }
+    accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText, accountId, siteId, staffEmail, termsRequired, linkLifetimeDays, acceptanceText, senderIdentityId, termsTemplateId, approvedTemplateId, rejectedTemplateId, revokedTemplateId }
     stamp {
       id: args.settingsId
     }
@@ -194,9 +199,14 @@ mutation wholesaleSettings putWholesaleSettingsRow {
     termsRequired       bool
     linkLifetimeDays    int
     acceptanceText      string   @maxLength(2000)
+    senderIdentityId    string
+    termsTemplateId     string
+    approvedTemplateId  string
+    rejectedTemplateId  string
+    revokedTemplateId   string
   }
   insert {
-    accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText, staffEmail, accountId, siteId, termsRequired, linkLifetimeDays, acceptanceText }
+    accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText, staffEmail, accountId, siteId, termsRequired, linkLifetimeDays, acceptanceText, senderIdentityId, termsTemplateId, approvedTemplateId, rejectedTemplateId, revokedTemplateId }
     stamp {
       id: args.settingsId
     }
@@ -252,9 +262,11 @@ mutation entitlement writeEntitlementRow {
     shopifyCustomerId  string
     customerCreated    bool
     accountId          string
+    direction          string   @enum("grant", "revoke")
+    attempt            int
   }
   insert {
-    accept { ownerUserId, applicationId, storeId, buyerEmail, adapter, state, reference, error, errorCode, shopifyCustomerId, customerCreated, accountId }
+    accept { ownerUserId, applicationId, storeId, buyerEmail, adapter, state, reference, error, errorCode, shopifyCustomerId, customerCreated, accountId, direction, attempt }
     stamp {
       id: args.entitlementId
     }
@@ -345,9 +357,11 @@ mutation entitlement backfillEntitlementRow {
     shopifyCustomerId  string
     customerCreated    bool
     accountId          string!
+    direction          string   @enum("grant", "revoke")
+    attempt            int
   }
   insert {
-    accept { ownerUserId, applicationId, storeId, buyerEmail, adapter, state, reference, error, errorCode, shopifyCustomerId, customerCreated, accountId }
+    accept { ownerUserId, applicationId, storeId, buyerEmail, adapter, state, reference, error, errorCode, shopifyCustomerId, customerCreated, accountId, direction, attempt }
     stamp {
       id: args.entitlementId
     }
@@ -438,6 +452,43 @@ mutation acceptance putAcceptanceRow {
     accept { ownerUserId, storeId, accountId, applicationId, applicantEmail, signedName, acceptedAt, termsVersionId, termsSha256, mapVersionId, mapSha256, statement, clientAddress, userAgent, linkIssuedAt }
     stamp {
       id: args.acceptanceId
+    }
+  }
+}
+
+// # The applicant's emails (U9)
+
+/// Write one email's record WHOLE at its derived id (EmailSendRowID): every
+/// field passed, the empty ones included, because a write at an existing id
+/// merges into the current version. The send builtins write it once the lane
+/// has answered, fenced on the version they read before they called it, so of
+/// two nodes sending at once the second answers the first's row. EVERY
+/// ARGUMENT IS ACCEPTED AND NOTHING IS STAMPED: the pack names the merchant, the
+/// organization, the person who asked and the clock, and writes as the
+/// application's merchant. It never carries an address, a field of the message
+/// or a link's token.
+@serverOnly
+@actor
+mutation emailSend putEmailSendRow {
+  args {
+    emailSendId    string!
+    ownerUserId    string!
+    storeId        string
+    accountId      string
+    applicationId  string!
+    kind           string!  @enum("terms", "approved", "rejected", "revoked")
+    attempt        int!
+    requestId      string!
+    templateId     string
+    state          string!  @enum("sent", "skipped", "failed", "pending")
+    reason         string   @maxLength(2000)
+    sentAt         datetime
+    requestedBy    string
+  }
+  insert {
+    accept { ownerUserId, storeId, accountId, applicationId, kind, attempt, requestId, templateId, state, reason, sentAt, requestedBy }
+    stamp {
+      id: args.emailSendId
     }
   }
 }

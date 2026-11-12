@@ -382,7 +382,7 @@ func (r *backfillRun) tieEntitlement(merchant context.Context, appID, account st
 		func() (map[string]any, error) { return r.p.entitlementRow(r.sys, appID) },
 		func(row map[string]any) (string, map[string]any) {
 			created, _ := row["customerCreated"].(bool)
-			return "backfillEntitlementRow", map[string]any{
+			args := map[string]any{
 				"entitlementId":     entID,
 				"ownerUserId":       userRef(trimmed(row["ownerUserId"])),
 				"applicationId":     trimmed(row["applicationId"]),
@@ -396,6 +396,16 @@ func (r *backfillRun) tieEntitlement(merchant context.Context, appID, account st
 				"shopifyCustomerId": trimmed(row["shopifyCustomerId"]),
 				"customerCreated":   created,
 			}
+			// A TIE IS NOT AN ATTEMPT: the direction and the attempt the row holds
+			// are carried forward as they are, and a row that holds none is left
+			// holding none -- never given one the backfill would have to invent.
+			if d := trimmed(row["direction"]); d != "" {
+				args["direction"] = d
+			}
+			if n := attemptOf(row); n > 0 {
+				args["attempt"] = n
+			}
+			return "backfillEntitlementRow", args
 		})
 	return err
 }

@@ -14,6 +14,7 @@ import (
 
 	"embed"
 
+	"github.com/znasllc-io/memql/component/campaigns"
 	"github.com/znasllc-io/memql/component/memql"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
@@ -81,6 +82,11 @@ type Provider struct {
 	// page of its walk; zero is the query's own window. A test seam, so a
 	// walk over more than one window needs no more than a handful of rows.
 	backfillWindow int
+	// lane is the transactional row lane the applicant's emails go through.
+	lane rowLane
+	// osBase is the OS's address a staff notice links to; nil reads it from the
+	// cluster's domain. A test seam.
+	osBase func() string
 }
 
 func (p *Provider) IntegrationName() string { return integrationName }
@@ -175,6 +181,11 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 				"termsRequired":      "bool (optional) - whether an applicant must accept the published terms",
 				"linkLifetimeDays":   "int (optional) - how many days a link to an applicant stays usable, 1 to 365",
 				"acceptanceText":     "string (optional) - the sentence an applicant accepts with; empty for the default",
+				"senderIdentityId":   "string (optional) - the sender the applicant's emails go out from; the cluster's operators alone",
+				"termsTemplateId":    "string (optional) - the terms email's template, one the settings list, or empty",
+				"approvedTemplateId": "string (optional) - the approval email's template, or empty",
+				"rejectedTemplateId": "string (optional) - the rejection email's template, or empty",
+				"revokedTemplateId":  "string (optional) - the removal email's template, or empty",
 			},
 		},
 		{
@@ -340,6 +351,49 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name: "sendTermsEmail",
+			Description: "The store's automation sends an applicant the terms email with their private terms link, " +
+				"once, through the transactional row lane. Internal origin only; a send that does not go out is " +
+				"recorded on the email's row, not returned.",
+			Handler: p.sendTermsEmail,
+			ArgsSchema: map[string]string{
+				"applicationId": "string (required) - the application whose applicant is sent the terms link",
+			},
+		},
+		{
+			Name: "sendBuyerEmail",
+			Description: "The store's automation sends an applicant the approval (once access is granted), rejection or " +
+				"removal email, once, through the transactional row lane. Internal origin only.",
+			Handler: p.sendBuyerEmail,
+			ArgsSchema: map[string]string{
+				"applicationId": "string (required) - the application whose applicant is told",
+				"kind":          "string (required) - approved, rejected or revoked",
+			},
+		},
+		{
+			Name: "resendEmail",
+			Description: "A person of the store sends the terms email or the approval email again, as a new attempt " +
+				"with a new link. Refuses the cluster's operators.",
+			Handler: p.resendEmail,
+			ArgsSchema: map[string]string{
+				"applicationId": "string (required) - the application whose applicant is sent the email again",
+				"kind":          "string (required) - terms or approved",
+			},
+		},
+		{
+			Name: "notifyStaff",
+			Description: "The store's automation tells the store's people, at the store's staff address, about one " +
+				"application: ready to review, a decision, or access that did not land. Internal origin only; once per event.",
+			Handler: p.notifyStaff,
+			ArgsSchema: map[string]string{
+				"applicationId": "string (required) - the application the notice is about",
+				"event":         "string (required) - readyToReview, approved, rejected, revoked, accessNotGranted or accessNotRemoved",
+				"subject":       "string (optional) - the subject, with placeholders; empty for the event's own",
+				"body":          "string (optional) - the text, with placeholders; empty for the event's own",
+				"decisionId":    "string (optional) - the decision a decision notice is about",
+			},
+		},
+		{
 			Name: "backfillAccounts",
 			Description: "Tie every row written before organizations reached this pack to the " +
 				"organization of its site. Cluster operators and internal origin only; a row " +
@@ -357,13 +411,22 @@ func NewProvider(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
 	// The engine shows a client's own fields back through ShopperExtensionRow;
 	// a handle without it shows none.
 	extensions, _ := pctx.Engine.(extensionReader)
-	return &Provider{
+	caller := &engineCaller{engine: pctx.Engine}
+	p := &Provider{
 		engine:     pctx.Engine,
 		reader:     &engineRowReader{engine: pctx.Engine},
 		writer:     &engineWriter{engine: pctx.Engine},
-		caller:     &engineCaller{engine: pctx.Engine},
+		caller:     caller,
 		extensions: extensions,
-	}, nil
+		lane:       &engineLane{caller: caller},
+	}
+	// THE APPLICANT'S ADDRESS IS ANSWERED BY GO, never named by a call: the row
+	// lane asks this resolver for an application's applicant, and only when it
+	// is about to hand the message over. Registered HERE, at provider build, so
+	// a cluster where the pack is disabled -- whose factory is skipped --
+	// registers nothing.
+	campaigns.RegisterRowAddress(campaigns.RowAddress{Concept: applicationConcept, Resolve: p.resolveRowMessage})
+	return p, nil
 }
 
 // Register wires the pack into the engine registries.

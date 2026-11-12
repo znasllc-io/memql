@@ -494,7 +494,8 @@ func TestUpdateSettingsMergesAndRefusesAStoreWithNoSettings(t *testing.T) {
 	want := map[string]any{"settingsId": SettingsRowID("store-live"), "ownerUserId": "v1:identity:user:merchant-1",
 		"storeId": "store-live", "applicationsOpen": true, "entitlementAdapter": AdapterCustomerTag,
 		"introText": "Apply here.", "staffEmail": "desk@example.com", "accountId": "acct-north", "siteId": "site-1",
-		"termsRequired": false, "linkLifetimeDays": 0, "acceptanceText": ""}
+		"termsRequired": false, "linkLifetimeDays": 0, "acceptanceText": "",
+		"senderIdentityId": "", "termsTemplateId": "", "approvedTemplateId": "", "rejectedTemplateId": "", "revokedTemplateId": ""}
 	wrote := writer.only(t, "putWholesaleSettingsRow")
 	for k, v := range want {
 		if wrote[k] != v {

@@ -19,7 +19,7 @@
 // reach is declared per route.
 
 use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings, documentVersion }
-use wholesale.concepts.{ privateLink, acceptance }
+use wholesale.concepts.{ privateLink, acceptance, emailSend }
 use shopify.overlay.concepts.{ store }
 
 // THE PACK'S ONE CROSS-DOMAIN READ, AND IT IS DELIBERATELY THREE FIELDS.
@@ -97,6 +97,8 @@ shape entitlement entitlementFull {
   shopifyCustomerId
   customerCreated
   accountId
+  direction
+  attempt
   row.createdAt
 }
 
@@ -115,6 +117,11 @@ shape wholesaleSettings wholesaleSettingsFull {
   termsRequired
   linkLifetimeDays
   acceptanceText
+  senderIdentityId
+  termsTemplateId
+  approvedTemplateId
+  rejectedTemplateId
+  revokedTemplateId
   row.createdAt
 }
 
@@ -201,5 +208,24 @@ shape acceptance acceptanceFull {
   clientAddress
   userAgent
   linkIssuedAt
+  row.createdAt
+}
+
+@description("An email's record, whole: which email, which attempt, the lane's request id and what came of it. It carries no address, no field of the message and no token, because the row holds none.")
+@row
+shape emailSend emailSendFull {
+  row.id
+  ownerUserId
+  storeId
+  accountId
+  applicationId
+  kind
+  attempt
+  requestId
+  templateId
+  state
+  reason
+  sentAt
+  requestedBy
   row.createdAt
 }

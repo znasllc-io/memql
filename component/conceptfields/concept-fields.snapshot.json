@@ -9057,14 +9057,56 @@
       }
     },
     {
+      "concept": "v1:wholesale:emailSend",
+      "file": "packs/wholesalepack/dsl/concepts.memql",
+      "fields": [
+        "accountId",
+        "applicationId",
+        "attempt",
+        "kind",
+        "ownerUserId",
+        "reason",
+        "requestId",
+        "requestedBy",
+        "sentAt",
+        "state",
+        "storeId",
+        "templateId"
+      ],
+      "required": [
+        "applicationId",
+        "attempt",
+        "kind",
+        "ownerUserId",
+        "requestId",
+        "state"
+      ],
+      "enums": {
+        "kind": [
+          "approved",
+          "rejected",
+          "revoked",
+          "terms"
+        ],
+        "state": [
+          "failed",
+          "pending",
+          "sent",
+          "skipped"
+        ]
+      }
+    },
+    {
       "concept": "v1:wholesale:entitlement",
       "file": "packs/wholesalepack/dsl/concepts.memql",
       "fields": [
         "accountId",
         "adapter",
         "applicationId",
+        "attempt",
         "buyerEmail",
         "customerCreated",
+        "direction",
         "error",
         "errorCode",
         "ownerUserId",
@@ -9082,6 +9124,10 @@
         "storeId"
       ],
       "enums": {
+        "direction": [
+          "grant",
+          "revoke"
+        ],
         "state": [
           "failed",
           "granted",
@@ -9127,14 +9173,19 @@
         "acceptanceText",
         "accountId",
         "applicationsOpen",
+        "approvedTemplateId",
         "entitlementAdapter",
         "introText",
         "linkLifetimeDays",
         "ownerUserId",
+        "rejectedTemplateId",
+        "revokedTemplateId",
+        "senderIdentityId",
         "siteId",
         "staffEmail",
         "storeId",
-        "termsRequired"
+        "termsRequired",
+        "termsTemplateId"
       ],
       "required": [
         "applicationsOpen",

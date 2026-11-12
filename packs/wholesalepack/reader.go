@@ -313,6 +313,27 @@ func renderLiteral(v any) string {
 			return "true"
 		}
 		return "false"
+	// The list and object cases are a deliberate copy of
+	// packs/reviewspack/writer.go's renderLiteral (a pack may not import another).
+	case []string:
+		parts := make([]string, 0, len(t))
+		for _, s := range t {
+			parts = append(parts, langparser.QuoteString(s))
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	case map[string]any:
+		// An object literal, keys in a stable order, every key and value
+		// through the engine's own escaping.
+		keys := make([]string, 0, len(t))
+		for k := range t {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			parts = append(parts, langparser.QuoteString(k)+": "+renderLiteral(t[k]))
+		}
+		return "{" + strings.Join(parts, ", ") + "}"
 	default:
 		return langparser.QuoteString(asString(v))
 	}

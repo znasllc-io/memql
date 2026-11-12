@@ -19,6 +19,8 @@ use wholesale.shapes.{ applicationFull, applicationDecisionFull, entitlementFull
 use wholesale.shapes.{ wholesaleStorePlan }
 use wholesale.concepts.{ privateLink, acceptance }
 use wholesale.shapes.{ privateLinkPublic, acceptanceFull }
+use wholesale.concepts.{ emailSend }
+use wholesale.shapes.{ emailSendFull }
 use shopify.overlay.concepts.{ store }
 
 @description("One application by id. The read a decision resolves its subject through, so a caller who cannot read an application cannot record a decision against it either -- which is the same narrowing reviewspack's moderation path carries, and for the same reason: a decision naming an application nobody can read would be a row scoped to no store.")
@@ -268,4 +270,27 @@ query acceptance acceptancesForApplicationIds {
   sort    "row.createdAt", "desc"
   paginate 200
   shape   acceptanceFull
+}
+
+@description("Every email the pack sent, or tried to send, to one application's applicant, newest first: one row per kind and attempt at a derived id, so this answers each attempt's current record. An email's row holds the CANONICAL application id and this query matches it as written, so a reader asks both forms.")
+@actor
+query emailSend emailSendsForApplication {
+  args {
+    applicationId  string!
+  }
+  filter  row => row.applicationId == args.applicationId
+  sort    "row.createdAt", "desc"
+  shape   emailSendFull
+}
+
+@description("The emails of a list of applications, newest first, paged to its end by the caller: the export's batch read. Matched as written, so the list names every form of each application id.")
+@actor
+query emailSend emailSendsForApplicationIds {
+  args {
+    applicationIds  []string!
+  }
+  filter  row => row.applicationId in args.applicationIds
+  sort    "row.createdAt", "desc"
+  paginate 200
+  shape   emailSendFull
 }

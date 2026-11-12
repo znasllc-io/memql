@@ -52,6 +52,8 @@ func payloadsFor(s accessStore) map[string]map[string]any {
 		"v1:wholesale:acceptance": {"ownerUserId": s.owner, "storeId": s.store, "accountId": s.account, "applicationId": app,
 			"applicantEmail": "forged@example.com", "signedName": "Forged Name", "acceptedAt": now,
 			"termsVersionId": "forged", "termsSha256": zeros, "mapVersionId": "forged", "mapSha256": zeros, "statement": "forged"},
+		"v1:wholesale:emailSend": {"ownerUserId": s.owner, "storeId": s.store, "accountId": s.account, "applicationId": app,
+			"kind": "approved", "attempt": 1, "requestId": "wholesale-approved-forged-1", "state": "sent", "sentAt": now},
 	}
 }
 

@@ -72,6 +72,10 @@ const (
 	ActApprove     = "approve"
 	ActRemove      = "remove"
 	ActRetryAccess = "retryAccess"
+	// ActResendTerms sends the terms email again (wholesaleResendEmail).
+	ActResendTerms = "resendTerms"
+	// ActResendApproved sends the approval email again.
+	ActResendApproved = "resendApproved"
 )
 
 // extensionReader is the engine's read of a client's own fields on a row of
@@ -84,6 +88,12 @@ type extensionReader interface {
 type ActsInput struct {
 	Stage, AccessState          string
 	EntitlementExists, Operator bool
+	// TermsRequired and TermsTemplateChosen are the store's: whether it requires
+	// its terms, and whether it chose a template for the terms email.
+	TermsRequired, TermsTemplateChosen bool
+	// ApprovedEmailSent is whether the store's automation has sent the approval
+	// email (an approved emailSend row exists).
+	ApprovedEmailSent bool
 }
 
 // ActsFor is the acts open on one application.
@@ -94,6 +104,12 @@ type ActsInput struct {
 // whose entitlement is still not revoked. A cluster operator decides nothing
 // (X4) and is offered the retry under the same two conditions and nothing else
 // (ruling 30): a retry is not a decision (X26).
+//
+// A person of the store also sends an email again (U9): the terms email on an
+// application waiting for its terms, while the store requires them and chose a
+// template for it, after reject; the approval email to a buyer whose access is
+// granted once the store's automation has sent it, after remove. An operator
+// sends none.
 func ActsFor(in ActsInput) []string {
 	retry := (in.Stage == StateApproved && in.AccessState != EntitlementGranted) ||
 		(in.Stage == StateRevoked && in.EntitlementExists && in.AccessState != EntitlementRevoked)
@@ -107,12 +123,17 @@ func ActsFor(in ActsInput) []string {
 	switch in.Stage {
 	case StageWaitingForTerms:
 		acts = append(acts, ActReject)
+		if in.TermsRequired && in.TermsTemplateChosen {
+			acts = append(acts, ActResendTerms)
+		}
 	case StageReadyToReview:
 		acts = append(acts, ActReject, ActApprove)
 	case StateApproved:
 		acts = append(acts, ActRemove)
 		if retry {
 			acts = append(acts, ActRetryAccess)
+		} else if in.AccessState == EntitlementGranted && in.ApprovedEmailSent {
+			acts = append(acts, ActResendApproved)
 		}
 	case StateRevoked:
 		if retry {
@@ -308,7 +329,15 @@ func (p *Provider) get(ctx context.Context, args map[string]any, _ int) ([]memor
 	state := FoldState(log)
 	// THE ACCEPTANCE AND THE TERMS LINK, read as the deployment: what the stage
 	// waits for, and what the store's people see of it.
-	termsRequired, err := p.termsRequiredAt(sys, trimmed(app["storeId"]))
+	settingsRow, err := p.settingsRowAt(sys, trimmed(app["storeId"]))
+	if err != nil {
+		return nil, err
+	}
+	settings := EffectiveSettings(settingsRow)
+	termsRequired := settings.TermsRequired
+	// THE EMAILS SENT, and what the lane says of each: read once the caller was
+	// admitted and read the application above.
+	sends, err := p.emailSendsOf(sys, applicationID)
 	if err != nil {
 		return nil, err
 	}
@@ -377,8 +406,11 @@ func (p *Provider) get(ctx context.Context, args map[string]any, _ int) ([]memor
 		"entitlement": entitlement,
 		"acceptance":  acceptanceShown,
 		"termsLink":   termsLink,
+		"emails":      p.emailsView(ctx, app, sends),
 		"operator":    operator,
-		"acts":        ActsFor(ActsInput{Stage: stage, AccessState: access, EntitlementExists: ent != nil, Operator: operator}),
+		"acts": ActsFor(ActsInput{Stage: stage, AccessState: access, EntitlementExists: ent != nil, Operator: operator,
+			TermsRequired: termsRequired, TermsTemplateChosen: settings.TermsTemplateID != "",
+			ApprovedEmailSent: highestAttempt(sends, EmailApproved) > 0}),
 	})
 }
 

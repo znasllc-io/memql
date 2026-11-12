@@ -11,6 +11,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/outbound"
 )
 
 // settings.go -- ONE STORE'S WHOLESALE SETTINGS: who sets a store up, who
@@ -167,6 +168,53 @@ type Settings struct {
 	LinkLifetimeDays int
 	// AcceptanceText is the row's, or DefaultAcceptanceText when it is blank.
 	AcceptanceText string
+	// SenderIdentityID is the sender the applicant's emails go out from; empty
+	// is the organization's configured sender. The cluster's operators choose it.
+	SenderIdentityID string
+	// The template of each of the applicant's emails; empty sends none.
+	TermsTemplateID, ApprovedTemplateID, RejectedTemplateID, RevokedTemplateID string
+}
+
+// heldEmail is what a settings row holds of the five email settings: what a
+// write of the whole row passes back.
+type heldEmail struct {
+	senderIdentityID, termsTemplateID, approvedTemplateID, rejectedTemplateID, revokedTemplateID string
+}
+
+// emailHeld reads the five email settings a row holds, nil reading as none.
+func emailHeld(row map[string]any) heldEmail {
+	return heldEmail{
+		senderIdentityID:   trimmed(row["senderIdentityId"]),
+		termsTemplateID:    trimmed(row["termsTemplateId"]),
+		approvedTemplateID: trimmed(row["approvedTemplateId"]),
+		rejectedTemplateID: trimmed(row["rejectedTemplateId"]),
+		revokedTemplateID:  trimmed(row["revokedTemplateId"]),
+	}
+}
+
+// args is the five settings as a settings mutation's arguments.
+func (h heldEmail) args(into map[string]any) map[string]any {
+	into["senderIdentityId"] = h.senderIdentityID
+	into["termsTemplateId"] = h.termsTemplateID
+	into["approvedTemplateId"] = h.approvedTemplateID
+	into["rejectedTemplateId"] = h.rejectedTemplateID
+	into["revokedTemplateId"] = h.revokedTemplateID
+	return into
+}
+
+// TemplateFor is the template the store chose for an email of kind, or "".
+func (s Settings) TemplateFor(kind string) string {
+	switch kind {
+	case EmailTerms:
+		return s.TermsTemplateID
+	case EmailApproved:
+		return s.ApprovedTemplateID
+	case EmailRejected:
+		return s.RejectedTemplateID
+	case EmailRevoked:
+		return s.RevokedTemplateID
+	}
+	return ""
 }
 
 // heldTerms is what a settings row itself holds of the three terms settings,
@@ -203,7 +251,13 @@ func EffectiveSettings(row map[string]any) Settings {
 	if strings.TrimSpace(text) == "" {
 		text = DefaultAcceptanceText
 	}
+	email := emailHeld(row)
 	return Settings{
+		SenderIdentityID:   email.senderIdentityID,
+		TermsTemplateID:    email.termsTemplateID,
+		ApprovedTemplateID: email.approvedTemplateID,
+		RejectedTemplateID: email.rejectedTemplateID,
+		RevokedTemplateID:  email.revokedTemplateID,
 		Exists:             true,
 		ApplicationsOpen:   open,
 		EntitlementAdapter: route,
@@ -281,6 +335,13 @@ func (p *Provider) setWholesaleSettings(ctx context.Context, args map[string]any
 		"termsRequired":    place.terms.termsRequired,
 		"linkLifetimeDays": place.terms.linkLifetimeDays,
 		"acceptanceText":   place.terms.acceptanceText,
+		// And the email settings the row held, none on a new row: the templates
+		// are the store's people's to choose, and the sender the operators'.
+		"senderIdentityId":   place.email.senderIdentityID,
+		"termsTemplateId":    place.email.termsTemplateID,
+		"approvedTemplateId": place.email.approvedTemplateID,
+		"rejectedTemplateId": place.email.rejectedTemplateID,
+		"revokedTemplateId":  place.email.revokedTemplateID,
 	}); err != nil {
 		if errors.Is(err, memql.ErrRowVersionChanged) {
 			return nil, errors.New(ChangedWhileEditingSentence)
@@ -329,6 +390,8 @@ type settingsPlace struct {
 	staffEmail string
 	// terms is the terms settings the row already holds, written back whole.
 	terms heldTerms
+	// email is the email settings the row already holds, written back whole.
+	email heldEmail
 	// version is the createdAt of the row read, zero when there was none: the
 	// write is fenced on it.
 	version time.Time
@@ -373,8 +436,10 @@ func (p *Provider) settingsOwner(ctx context.Context, storeID, siteID string) (s
 	}
 	if existing != nil {
 		place.rowID, place.storeID = settingsRowIDOf(existing, storeID), trimmed(existing["storeId"])
-		// The terms settings are the row's, whoever it is found to belong to.
+		// The terms and email settings are the row's, whoever it is found to
+		// belong to.
 		place.terms = termsHeld(existing)
+		place.email = emailHeld(existing)
 	}
 	if place.rowID == "" {
 		place.rowID = newSettingsRowID(storeID)
@@ -513,15 +578,33 @@ func (p *Provider) storeSettings(ctx context.Context, args map[string]any, _ int
 	if err != nil {
 		return nil, err
 	}
+	// THE TEMPLATES ARE READ UNDER THE CALLER, on purpose: they are the Email
+	// app's, so a person the organization has not granted it is offered none
+	// and can choose only none.
+	templates, err := p.emailTemplates(ctx, s.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	choices := make([]map[string]any, 0, len(templates))
+	for _, t := range templates {
+		choices = append(choices, map[string]any{"id": t.id, "name": t.name})
+	}
 	return confirm("wholesale:settings:store", map[string]any{
 		"exists":             s.Exists,
 		"applicationsOpen":   s.ApplicationsOpen,
 		"entitlementAdapter": s.EntitlementAdapter,
 		"introText":          s.IntroText,
 		"staffEmail":         s.StaffEmail,
+		"staffEmailAdmitted": s.StaffEmail != "" && outbound.EmailAdmitted(s.StaffEmail),
 		"termsRequired":      s.TermsRequired,
 		"linkLifetimeDays":   s.LinkLifetimeDays,
 		"acceptanceText":     s.AcceptanceText,
+		"senderIdentityId":   s.SenderIdentityID,
+		"termsTemplateId":    s.TermsTemplateID,
+		"approvedTemplateId": s.ApprovedTemplateID,
+		"rejectedTemplateId": s.RejectedTemplateID,
+		"revokedTemplateId":  s.RevokedTemplateID,
+		"templates":          choices,
 		"documents":          documents,
 		"adapters":           AdapterNames(),
 		"may": map[string]any{
@@ -530,6 +613,8 @@ func (p *Provider) storeSettings(ctx context.Context, args map[string]any, _ int
 			"update": s.Exists,
 			// A store is set up by the cluster's operators alone.
 			"setUp": !s.Exists && isClusterOperator(ctx),
+			// And its sender is chosen by them alone.
+			"setSender": isClusterOperator(ctx),
 		},
 	})
 }
@@ -550,12 +635,19 @@ func notSetUpSettings(ctx context.Context) ([]memorynodes.MemoryNode, error) {
 		"entitlementAdapter": "",
 		"introText":          "",
 		"staffEmail":         "",
+		"staffEmailAdmitted": false,
 		"termsRequired":      false,
 		"linkLifetimeDays":   s.LinkLifetimeDays,
 		"acceptanceText":     s.AcceptanceText,
+		"senderIdentityId":   "",
+		"termsTemplateId":    "",
+		"approvedTemplateId": "",
+		"rejectedTemplateId": "",
+		"revokedTemplateId":  "",
+		"templates":          []map[string]any{},
 		"documents":          documents,
 		"adapters":           AdapterNames(),
-		"may":                map[string]any{"update": false, "setUp": isClusterOperator(ctx)},
+		"may":                map[string]any{"update": false, "setUp": isClusterOperator(ctx), "setSender": false},
 	})
 }
 
@@ -636,6 +728,10 @@ func (p *Provider) updateSettings(ctx context.Context, args map[string]any, _ in
 		}
 		terms.acceptanceText = text
 	}
+	email, err := p.mergeEmailSettings(ctx, args, row)
+	if err != nil {
+		return nil, err
+	}
 	// THE TERMS RULE, ON THE MERGED RESULT: a store that would take
 	// applications while requiring terms it has not published is refused.
 	if err := p.termsRuleRefusal(ctx, storeID, next.ApplicationsOpen, terms.termsRequired); err != nil {
@@ -658,7 +754,7 @@ func (p *Provider) updateSettings(ctx context.Context, args map[string]any, _ in
 	fenced := memql.ContextWithRowVersionFence(ctx, settingsConcept, rowID, read)
 	// EVERY FIELD, the empty and false ones included: a write at an existing id
 	// merges into the row's current version, and this one means the whole row.
-	if err := p.write(fenced, "putWholesaleSettingsRow", map[string]any{
+	if err := p.write(fenced, "putWholesaleSettingsRow", email.args(map[string]any{
 		"settingsId":         rowID,
 		"ownerUserId":        owner,
 		"storeId":            rowStore,
@@ -671,7 +767,7 @@ func (p *Provider) updateSettings(ctx context.Context, args map[string]any, _ in
 		"termsRequired":      terms.termsRequired,
 		"linkLifetimeDays":   terms.linkLifetimeDays,
 		"acceptanceText":     terms.acceptanceText,
-	}); err != nil {
+	})); err != nil {
 		if errors.Is(err, memql.ErrRowVersionChanged) {
 			return nil, errors.New(ChangedWhileEditingSentence)
 		}

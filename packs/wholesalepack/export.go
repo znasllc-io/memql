@@ -66,6 +66,12 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 	if err != nil {
 		return nil, err
 	}
+	// AND EVERY EMAIL SENT, each attempt's record: what the store told whom and
+	// when is part of the record. The rows hold no address and no token.
+	sends, err := p.rowsForApplications(sys, "emailSendsForApplicationIds", ids)
+	if err != nil {
+		return nil, err
+	}
 	termsRequired, err := p.termsRequiredAt(sys, storeID)
 	if err != nil {
 		return nil, err
@@ -74,6 +80,7 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 	decisions := []map[string]any{}
 	entitlements := []map[string]any{}
 	acceptances := []map[string]any{}
+	emailSends := []map[string]any{}
 	for _, app := range apps {
 		id := trimmed(app["id"])
 		if id == "" {
@@ -106,6 +113,11 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 			row["applicationId"] = id
 			acceptances = append(acceptances, row)
 		}
+		for _, send := range sends[bareID(id)] {
+			row := withoutTokenHash(send)
+			row["applicationId"] = id
+			emailSends = append(emailSends, row)
+		}
 	}
 	settings, err := p.settingsRowAt(sys, storeID)
 	if err != nil {
@@ -135,6 +147,7 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 		"decisions":    decisions,
 		"entitlements": entitlements,
 		"acceptances":  acceptances,
+		"emailSends":   emailSends,
 		"settings":     settingsOut,
 		// Kind by kind (terms, map, priceSheet), each newest first.
 		"documentVersions":      documentVersions,

@@ -147,6 +147,23 @@ const (
 	ErrorShopifyError    = "shopify_error"
 )
 
+// The two directions an entitlement version's attempt went, matching the
+// concept's enum: a provision is a grant, a removal a revoke.
+const (
+	DirectionGrant  = "grant"
+	DirectionRevoke = "revoke"
+)
+
+// attemptOf is an entitlement row's attempt, 0 for a row written before the
+// field.
+func attemptOf(row map[string]any) int {
+	n, _ := intArg(row["attempt"])
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
 // The four entitlement states, matching the concept's enum.
 const (
 	EntitlementPending = "pending"
@@ -387,9 +404,21 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 			rowID = id
 		}
 	}
+	// EVERY VERSION THIS WRITES IS AN ATTEMPT, and says which way it went and
+	// which attempt it is: the staff notice of an attempt that did not land is
+	// keyed by the attempt, so a retry that fails again tells the store's people
+	// again and nothing else does (wholesaleNotifyStaff).
+	direction := DirectionGrant
+	if revoking {
+		direction = DirectionRevoke
+	}
+	attempt := 1
+	if prior != nil {
+		attempt = attemptOf(prior) + 1
+	}
 	write := func(adapterName, state string, res Outcome, code, text string) ([]memorynodes.MemoryNode, error) {
 		return p.writeEntitlement(merchant, rowID, applicationRef(applicationID), storeID, owner, account, grant,
-			adapterName, state, res, code, text)
+			adapterName, state, res, code, text, direction, attempt)
 	}
 	var priorAdapter, priorRef, priorCustomerID string
 	var priorCreated bool
@@ -655,7 +684,7 @@ func (p *Provider) entitlementRow(ctx context.Context, applicationID string) (ma
 // rowID is the row's id (EntitlementRowID, or a prior row's own); applicationID
 // is written in canonical form, as a decision's is.
 func (p *Provider) writeEntitlement(ctx context.Context, rowID, applicationID, storeID, ownerUserID, accountID string, g Grant,
-	adapterName, state string, result Outcome, errCode, errText string) ([]memorynodes.MemoryNode, error) {
+	adapterName, state string, result Outcome, errCode, errText, direction string, attempt int) ([]memorynodes.MemoryNode, error) {
 	reference := result.Reference
 	if reference == "" {
 		// KEEP THE PRIOR REFERENCE ON A FAILURE. An adapter that errored
@@ -680,6 +709,8 @@ func (p *Provider) writeEntitlement(ctx context.Context, rowID, applicationID, s
 		// would carry the attempt before it.
 		"shopifyCustomerId": result.CustomerID,
 		"customerCreated":   result.CustomerCreated,
+		"direction":         direction,
+		"attempt":           attempt,
 	}); err != nil {
 		return nil, err
 	}
@@ -778,6 +809,26 @@ func (e *engineCaller) Call(ctx context.Context, construct string, args map[stri
 		return nil, fmt.Errorf("wholesale: %s answered no rows", construct)
 	}
 	return rows[0], nil
+}
+
+// CallRows runs one named BUILTIN that answers a row per thing asked -- the
+// row lane's status read, one row per request id -- and answers every row.
+//
+// ONE INLINE STAMP OF INTERNAL ORIGIN, on its one Execute: the lane's status
+// read is a trusted job's and refuses a call without it. It carries NO pack
+// mark -- that is Call's alone, for the Shopify wholesale builtins -- because
+// the status read does not ask for one. Its one caller (emailsView) has been
+// admitted by the organization gate and has read the application under the
+// caller's own actor first.
+func (e *engineCaller) CallRows(ctx context.Context, construct string, args map[string]any) ([]map[string]any, error) {
+	if e == nil || e.engine == nil {
+		return nil, fmt.Errorf("wholesale: the pack has no engine handle, so %q cannot be called", construct)
+	}
+	result, err := e.engine.Execute(auth.ContextWithInternalOrigin(ctx), renderBuiltinCall(construct, args))
+	if err != nil {
+		return nil, fmt.Errorf("wholesale: %s: %w", construct, err)
+	}
+	return memql.MaterializeRows(result), nil
 }
 
 // renderBuiltinCall writes the invocation an adapter's construct becomes.

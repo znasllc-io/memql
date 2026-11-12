@@ -97,17 +97,17 @@ func TestEveryGatedBuiltinDeclaresTheWholesalePartAndItsTarget(t *testing.T) {
 			t.Errorf("%s does not require %q, the argument the organization gate resolves its target from", name, target[1])
 		}
 	}
-	// THE REACHABLE POSITIVE: the thirteen this pack declares today must be
+	// THE REACHABLE POSITIVE: the fourteen this pack declares today must be
 	// found, or a walk that found nothing would pass for the wrong reason.
 	for _, name := range []string{"wholesaleRecordDecision", "wholesaleRetryAccess", "wholesaleStoreSettings", "wholesaleUpdateSettings",
 		"wholesaleList", "wholesaleGet", "wholesaleDecisionLog", "wholesaleBuyers", "wholesaleExportStore",
-		"wholesaleDocuments", "wholesalePublishDocument", "wholesaleAddBuyer", "wholesaleRemoveBuyer"} {
+		"wholesaleDocuments", "wholesalePublishDocument", "wholesaleAddBuyer", "wholesaleRemoveBuyer", "wholesaleResendEmail"} {
 		if _, ok := builtins[name]; !ok {
 			t.Errorf("%s is not declared", name)
 		}
 	}
-	if declared < 13 {
-		t.Errorf("found %d gated builtins in the tree, want at least 13", declared)
+	if declared < 14 {
+		t.Errorf("found %d gated builtins in the tree, want at least 14", declared)
 	}
 	// A BUILTIN CARRYING THE PART THAT THE TABLE DOES NOT NAME would be judged
 	// against the caller's global capability alone.
@@ -118,9 +118,10 @@ func TestEveryGatedBuiltinDeclaresTheWholesalePartAndItsTarget(t *testing.T) {
 	}
 	// The shopper's builtin carries no part, and neither do the automation's and
 	// the operators': a shopper holds no capability, an automation arrives with
-	// internal origin, and setting a store up is the operators' alone.
+	// internal origin (the provisioning, the emails and the staff notices), and
+	// setting a store up is the operators' alone.
 	for _, name := range []string{"wholesaleSubmitApplication", "wholesaleProvisionEntitlement", "wholesaleRevokeEntitlement",
-		"wholesaleSetSettings", "wholesaleBackfillAccounts"} {
+		"wholesaleSetSettings", "wholesaleBackfillAccounts", "wholesaleSendTermsEmail", "wholesaleSendBuyerEmail", "wholesaleNotifyStaff"} {
 		if b, ok := builtins[name]; !ok || declaresWholesalePart(b) {
 			t.Errorf("%s must be declared, and carry no part", name)
 		}
