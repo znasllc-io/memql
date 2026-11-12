@@ -1064,6 +1064,10 @@ func (s *enginePromoteRehydrateStore) LoadConstructsForBundle(ctx context.Contex
 // rehydratePromotedNow is the engine-bound invocation used at boot: it wires the
 // engine's recompileAndPromoteRow into the store-driven walk.
 func (e *MemQLEngine) rehydratePromotedNow(ctx context.Context, store promoteRehydrateStore) (RehydrateResult, error) {
+	// A concept whose `parent=` names a stored concept the walk has not reached
+	// yet promotes that parent from the store first (see
+	// promoteConceptIntoLiveRegistry), so a sound pair loads in either order.
+	ctx = withBelongsToParentSource(ctx, e.storeBelongsToParentSource(store))
 	result, err := rehydratePromotedConstructsWithStore(ctx, store,
 		withRehydratePromote(e.recompileAndPromoteRow),
 		withRehydrateStage(e.recompileAndStageRow))
@@ -1076,12 +1080,6 @@ func (e *MemQLEngine) rehydratePromotedNow(ctx context.Context, store promoteReh
 	// once every spec is loaded (memql#5366). A construct they refuse is
 	// quarantined and taken back out.
 	for _, refused := range e.checkRehydratedPushdown() {
-		result.Rehydrated--
-		result.Failed = append(result.Failed, refused)
-	}
-	// The same for the @belongsTo cross-concept checks: a child concept can be
-	// stored, and so walked, before the parent its `via` follows.
-	for _, refused := range e.checkRehydratedBelongsTo() {
 		result.Rehydrated--
 		result.Failed = append(result.Failed, refused)
 	}

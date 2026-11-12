@@ -121,6 +121,12 @@ const authoringPromotePattern = "authoring.promote.#"
 // so the propagation path and the restart path share one re-registration code
 // path. Idempotent + core-first.
 func (e *MemQLEngine) rehydratePromotedBundleNow(ctx context.Context, store promoteRehydrateStore, owner, bundleId string) (RehydrateResult, error) {
+	// A propagated child can arrive before its parent's broadcast. The
+	// originating node stored the parent first, so the store holds it: a
+	// concept whose `parent=` is not registered here promotes it from the
+	// store before it is judged (promoteConceptIntoLiveRegistry), and one whose
+	// parent the store does not hold is refused before it is registered.
+	ctx = withBelongsToParentSource(ctx, e.storeBelongsToParentSource(store))
 	res, err := rehydratePromotedBundleWithStore(ctx, store, owner, bundleId,
 		withRehydratePromote(e.recompileAndPromoteRow),
 		withRehydrateStage(e.recompileAndStageRow))

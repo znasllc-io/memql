@@ -156,6 +156,21 @@ func (e *MemQLEngine) promoteConceptIntoLiveRegistry(ctx context.Context, gate *
 		}
 	}
 
+	// A REPLAY (boot re-hydration, cross-node propagation) reaches stored
+	// promotes in the order the store and the broadcasts return them, so a
+	// child can arrive before the parent its `parent=` names. The originating
+	// node stored that parent before it could promote the child, so the store
+	// holds it: promote it from there first, then judge the child against a
+	// registry that holds what the store holds. A parent the store does not
+	// hold leaves the child to be refused below, before it is registered.
+	if gate != nil && gate.replay && built.BelongsTo != nil {
+		if parent := strings.TrimSpace(built.BelongsTo.Parent); parent != "" {
+			if _, err := registry.Get(parent); err != nil {
+				loadBelongsToParentFromStore(ctx, parent)
+			}
+		}
+	}
+
 	// The candidate set: every concept currently registered, with this one
 	// added (or replacing its prior promotion). All() hands back a copy of the
 	// map, so building the candidate set touches nothing live.
@@ -192,17 +207,13 @@ func (e *MemQLEngine) promoteConceptIntoLiveRegistry(ctx context.Context, gate *
 	// author's, so the live set's problems are subtracted. Refused with the
 	// load's own code and words.
 	//
-	// A REPLAY skips it. Boot re-hydration walks the stored bundles in the
-	// order the store returns them, so a child reached before its parent would
-	// be judged against a registry the parent is not in yet
-	// (belongs_to_parent_unknown) and quarantined: a sound pair would load or
-	// not by storage order. The boot walk judges every stored concept once
-	// they are all in (checkRehydratedBelongsTo); a cross-node propagation
-	// replays a promote its origin already judged.
-	if gate == nil || !gate.replay {
-		if err := newBelongsToProblem(current, list); err != nil {
-			return fmt.Errorf("authoring: promote concept %q: %w", c.Name, err)
-		}
+	// It runs on EVERY promote, a replay included, so nothing unsound is ever
+	// registered, not even for the length of a walk. A replay's
+	// arrival-order problem -- a child reached before the parent its `via`
+	// names -- is answered above, before the candidate set is built, by
+	// promoting that parent from the store first (loadBelongsToParentFromStore).
+	if err := newBelongsToProblem(current, list); err != nil {
+		return fmt.Errorf("authoring: promote concept %q: %w", c.Name, err)
 	}
 
 	registry.MergeAll(map[string]*memoryNodes.Concept{id: built})
@@ -256,46 +267,65 @@ func newBelongsToProblem(current, candidates []*memoryNodes.Concept) error {
 	return nil
 }
 
-// checkRehydratedBelongsTo runs the load's cross-concept @belongsTo checks over
-// the whole registry once the boot walk has put every stored concept back, the
-// way checkRehydratedPushdown runs the predicate checks: the walk skipped them
-// per promote (see promoteConceptIntoLiveRegistry) because a child can be
-// reached before its parent. A PROMOTED concept a problem is filed under is
-// taken back out of the registry and quarantined, then the checks run again,
-// since removing a parent leaves its children with nothing to follow. A
-// problem filed under a core concept is the load's to report, not this walk's,
-// and is left alone. It returns the quarantined constructs, as kind:name.
-func (e *MemQLEngine) checkRehydratedBelongsTo() []string {
-	if e == nil {
-		return nil
+// belongsToParentSource promotes, from the durable store, the stored concept
+// whose canonical id is the one named, and reports whether it did. A replay
+// walk puts one on its context (withBelongsToParentSource); a fresh promote
+// carries none, because its parent must already be registered.
+type belongsToParentSource func(ctx context.Context, conceptId string) bool
+
+type belongsToParentSourceKey struct{}
+
+func withBelongsToParentSource(ctx context.Context, src belongsToParentSource) context.Context {
+	return context.WithValue(ctx, belongsToParentSourceKey{}, src)
+}
+
+// loadBelongsToParentFromStore asks the walk's source for the parent, if the
+// walk put one on ctx.
+func loadBelongsToParentFromStore(ctx context.Context, conceptId string) {
+	if src, ok := ctx.Value(belongsToParentSourceKey{}).(belongsToParentSource); ok && src != nil {
+		src(ctx, conceptId)
 	}
-	registry, ok := e.concepts.(*memoryNodes.MemoryRegistry)
-	if !ok {
-		return nil
-	}
-	var quarantined []string
-	for {
-		removed := false
-		for _, p := range belongsToProblems(registry.List()) {
-			key := "concept:" + p.concept
-			if _, promoted := e.promotedAuthored.Load(key); !promoted {
+}
+
+// storeBelongsToParentSource is the source a replay walk over store uses: it
+// finds the active stored concept row whose compiled id is conceptId and
+// promotes it the way the walk would (recompileAndPromoteRow), so the row is
+// quarantined with its id and owner if it is refused on its own account.
+//
+// It is per walk, and it remembers what it has been asked, so a `via` cycle
+// among stored concepts cannot recurse: the second request for an id already
+// being loaded answers false, and the cycle is then refused by the check it
+// would have been refused by anyway.
+func (e *MemQLEngine) storeBelongsToParentSource(store promoteRehydrateStore) belongsToParentSource {
+	asked := map[string]bool{}
+	return func(ctx context.Context, conceptId string) bool {
+		if asked[conceptId] {
+			return false
+		}
+		asked[conceptId] = true
+		bundles, err := store.LoadPromotedBundles(ctx)
+		if err != nil {
+			return false
+		}
+		for _, bundle := range bundles {
+			rows, err := store.LoadConstructsForBundle(ctx, bundle.OwnerUserId, bundle.Id)
+			if err != nil {
 				continue
 			}
-			if err := e.removeConceptFromLiveRegistry(registry, p.concept); err != nil {
-				// Something else still references it; leaving it registered
-				// is the safe outcome, and the problem is reported either way.
-				e.quarantineRehydratedConstruct(AuthoringConstructRow{Kind: "concept", Name: p.concept}, fmt.Errorf("%w (and it could not be removed: %v)", p.err, err))
-				quarantined = append(quarantined, "concept:"+p.concept)
-				e.promotedAuthored.Delete(key)
-				continue
+			for _, row := range rows {
+				if row.Kind != "concept" || isRetiredConstructStatus(row.Status) || isStagedConstructStatus(row.Status) {
+					continue
+				}
+				built, err := compileAuthoredConcept(SandboxConstruct{Name: row.Name, Kind: row.Kind, Source: row.Source, Origin: row.Origin})
+				if err != nil || built == nil || built.Name != conceptId {
+					continue
+				}
+				if row.OwnerUserId == "" {
+					row.OwnerUserId = bundle.OwnerUserId
+				}
+				return e.recompileAndPromoteRow(ctx, row) == nil
 			}
-			e.promotedAuthored.Delete(key)
-			e.quarantineRehydratedConstruct(AuthoringConstructRow{Kind: "concept", Name: p.concept}, p.err)
-			quarantined = append(quarantined, "concept:"+p.concept)
-			removed = true
 		}
-		if !removed {
-			return quarantined
-		}
+		return false
 	}
 }

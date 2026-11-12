@@ -988,10 +988,9 @@ func TestPromoteConcept_RefusesAnUnsoundBelongsToChain(t *testing.T) {
 
 // A promoted concept whose @belongsTo(account, via=..., parent=...) names
 // another PROMOTED concept re-hydrates at boot in whichever order the walk
-// reaches the two. The walk goes bundle by bundle, and a child reached first
-// would otherwise be judged against a registry its parent is not in yet
-// (belongs_to_parent_unknown) and quarantined, so a sound pair would load or
-// not depending on the order its bundles were stored in.
+// reaches the two. The walk goes bundle by bundle; a child reached first
+// promotes its parent from the store before it is judged, so a sound pair
+// does not load or fail by the order its bundles were stored in.
 func TestRehydratePromotedConcepts_ASoundParentAndChildLoadInEitherOrder(t *testing.T) {
 	const parentSrc = "@version(\"1.0.0\")\n@belongsTo(account)\nconcept trainedLedger {\n  accountId  string\n  title      string\n}"
 	const childSrc = "@version(\"1.0.0\")\n@belongsTo(account, via=\"ledgerId\", parent=\"v1:trainingns:trainedLedger\")\n" +
@@ -1036,10 +1035,10 @@ func TestRehydratePromotedConcepts_ASoundParentAndChildLoadInEitherOrder(t *test
 	}
 }
 
-// The deferred check still refuses: a stored child whose parent is not among
-// the stored concepts is quarantined once the walk is done, with the load's
-// code, and taken back out of the registry.
-func TestRehydratePromotedConcepts_AChildWithNoParentIsQuarantinedAfterTheWalk(t *testing.T) {
+// The check still refuses: a stored child whose parent is not among the
+// stored concepts is refused before it is registered, with the load's code,
+// and its quarantine names the row and its owner.
+func TestRehydratePromotedConcepts_AChildWithNoParentIsQuarantined(t *testing.T) {
 	const childSrc = "@version(\"1.0.0\")\n@belongsTo(account, via=\"ledgerId\", parent=\"v1:trainingns:trainedMissing\")\n" +
 		"concept trainedOrphan {\n  accountId  string\n  ledgerId   string\n}"
 	row := AuthoringConstructRow{Id: "v1:authoring:construct:orphan", Kind: "concept", Name: "trainedOrphan",
@@ -1057,10 +1056,78 @@ func TestRehydratePromotedConcepts_AChildWithNoParentIsQuarantinedAfterTheWalk(t
 	if res.Rehydrated != 0 || len(res.Failed) != 1 {
 		t.Fatalf("re-hydrate result = %+v, want the orphan refused", res)
 	}
-	if len(e.loadReport.Quarantined) != 1 || e.loadReport.Quarantined[0].Code != langparser.CodeBelongsToParentUnknown {
-		t.Fatalf("quarantine = %+v, want one %s", e.loadReport.Quarantined, langparser.CodeBelongsToParentUnknown)
+	q := e.loadReport.Quarantined
+	if len(q) != 1 || q[0].Code != langparser.CodeBelongsToParentUnknown || q[0].Id != row.Id || q[0].Owner != row.OwnerUserId {
+		t.Fatalf("quarantine = %+v, want one %s naming the row and its owner", q, langparser.CodeBelongsToParentUnknown)
 	}
 	if _, err := e.concepts.Get("v1:trainingns:trainedOrphan"); err == nil {
 		t.Fatal("the refused child is still in the registry")
+	}
+}
+
+// A promote that arrives from another node is judged on the receiving node
+// before its concept is registered, like any other. The originating node stored
+// the parent before it could promote the child, so a child whose broadcast
+// arrives before its parent's is admitted together with the parent the store
+// holds; one whose parent the store does not hold is not admitted at all.
+func TestPropagatedConcepts_AChildArrivingBeforeItsParentAdmitsBoth(t *testing.T) {
+	const parentSrc = "@version(\"1.0.0\")\n@belongsTo(account)\nconcept trainedBook {\n  accountId  string\n  title      string\n}"
+	const childSrc = "@version(\"1.0.0\")\n@belongsTo(account, via=\"bookId\", parent=\"v1:trainingns:trainedBook\")\n" +
+		"concept trainedPage {\n  accountId  string\n  bookId     string\n}"
+	parentRow := AuthoringConstructRow{Id: "v1:authoring:construct:book", Kind: "concept", Name: "trainedBook",
+		BundleId: "authoring:bundle:book", OwnerUserId: "owner-1", Source: parentSrc, Origin: "trainingns/concepts.memql", Status: "active"}
+	childRow := AuthoringConstructRow{Id: "v1:authoring:construct:page", Kind: "concept", Name: "trainedPage",
+		BundleId: "authoring:bundle:page", OwnerUserId: "owner-1", Source: childSrc, Origin: "trainingns/concepts.memql", Status: "active"}
+	e := promoteConceptEngine(t)
+	e.loadReport = newLoadReport()
+	store := &fakeRehydrateStore{
+		bundles: []AuthoringBundleRow{
+			{Id: parentRow.BundleId, OwnerUserId: "owner-1", Status: BundleActive},
+			{Id: childRow.BundleId, OwnerUserId: "owner-1", Status: BundleActive},
+		},
+		constructs: map[string][]AuthoringConstructRow{parentRow.BundleId: {parentRow}, childRow.BundleId: {childRow}},
+	}
+	// The child's broadcast is the first to arrive.
+	res, err := e.rehydratePromotedBundleNow(context.Background(), store, "owner-1", childRow.BundleId)
+	if err != nil {
+		t.Fatalf("propagate child: %v", err)
+	}
+	if len(res.Failed) != 0 || len(e.loadReport.Quarantined) != 0 {
+		t.Fatalf("the child was refused: %+v %+v", res, e.loadReport.Quarantined)
+	}
+	for _, id := range []string{"v1:trainingns:trainedBook", "v1:trainingns:trainedPage"} {
+		if _, err := e.concepts.Get(id); err != nil {
+			t.Errorf("%s is not admitted: %v", id, err)
+		}
+	}
+	// The parent's own broadcast, arriving later, is an idempotent replay.
+	if _, err := e.rehydratePromotedBundleNow(context.Background(), store, "owner-1", parentRow.BundleId); err != nil {
+		t.Fatalf("propagate parent: %v", err)
+	}
+	if len(e.loadReport.Quarantined) != 0 {
+		t.Fatalf("the late parent broadcast quarantined something: %+v", e.loadReport.Quarantined)
+	}
+}
+
+func TestPropagatedConcepts_AChildWhoseParentIsNotStoredIsNotAdmitted(t *testing.T) {
+	const childSrc = "@version(\"1.0.0\")\n@belongsTo(account, via=\"bookId\", parent=\"v1:trainingns:trainedNowhere\")\n" +
+		"concept trainedStray {\n  accountId  string\n  bookId     string\n}"
+	row := AuthoringConstructRow{Id: "v1:authoring:construct:stray", Kind: "concept", Name: "trainedStray",
+		BundleId: "authoring:bundle:stray", OwnerUserId: "owner-1", Source: childSrc, Origin: "trainingns/concepts.memql", Status: "active"}
+	e := promoteConceptEngine(t)
+	e.loadReport = newLoadReport()
+	store := &fakeRehydrateStore{
+		bundles:    []AuthoringBundleRow{{Id: row.BundleId, OwnerUserId: "owner-1", Status: BundleActive}},
+		constructs: map[string][]AuthoringConstructRow{row.BundleId: {row}},
+	}
+	if _, err := e.rehydratePromotedBundleNow(context.Background(), store, "owner-1", row.BundleId); err != nil {
+		t.Fatalf("propagate: %v", err)
+	}
+	if _, err := e.concepts.Get("v1:trainingns:trainedStray"); err == nil {
+		t.Fatal("a child whose parent the store does not hold was admitted")
+	}
+	q := e.loadReport.Quarantined
+	if len(q) != 1 || q[0].Code != langparser.CodeBelongsToParentUnknown || q[0].Id != row.Id || q[0].Owner != "owner-1" {
+		t.Fatalf("quarantine = %+v, want one %s naming the row and its owner", q, langparser.CodeBelongsToParentUnknown)
 	}
 }
