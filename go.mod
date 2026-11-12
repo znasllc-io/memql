@@ -5,6 +5,7 @@ go 1.26.8
 toolchain go1.27.4
 
 require (
+	filippo.io/age v1.3.2
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.8.2
 	github.com/a-h/templ v0.3.1070
 	github.com/google/go-containerregistry v0.22.1
@@ -31,6 +32,7 @@ require (
 )
 
 require (
+	filippo.io/hpke v0.4.0 // indirect
 	github.com/oschwald/maxminddb-golang/v2 v2.1.1 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 )
