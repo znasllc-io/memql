@@ -74,6 +74,12 @@ import (
 //     difference is a mismatch, written again from the row: the fold's guard
 //     admits an equal version.
 //
+// A row rewritten in place between a page's read and its transaction -- an
+// erasure landing then -- is compared by the content the page read. That is
+// safe: it writes only when the stored fact already differs from what was
+// read, so it never undoes the walk's work, and the next pass, which reads
+// the rewritten row, repairs the fact from it.
+//
 // Content and not only version, because an erasure rewrites a row in place:
 // one pass after it, an erased order is retail and a scrubbed custom item's
 // fact holds the marker for its title. Every order page re-derives its
@@ -137,8 +143,9 @@ var errPassMoved = errors.New("storestats: another check moved this pass on")
 
 // CheckReport says what one run of the check did: counts and the ids of the
 // stores whose pass ended. Compared, Mismatched and Repaired are this run's
-// own work (a row an overlap reads again is compared again); Disagreeing is
-// the sum over the passes that ended in this run.
+// own work. Compared counts comparisons, not rows: a row an overlap reads
+// again is compared, and counted, again. Disagreeing is the sum over the
+// passes that ended in this run.
 type CheckReport struct {
 	Stores      int      `json:"stores"`
 	Compared    int      `json:"compared"`
@@ -522,7 +529,8 @@ func (i *Integration) checkSource(ctx context.Context, db *bun.DB, storeID strin
 		if !page.CaughtUp.IsZero() {
 			to = cursorDone
 		}
-		p := checkedPage{source: s.source, started: pass.started, from: expect, to: to, width: seconds(page.Width), facts: facts}
+		p := checkedPage{source: s.source, started: pass.started, from: expect, to: to, width: seconds(page.Width), facts: facts,
+			wholesaleEnabled: wholesale.Enabled, wholesaleDigest: heldDigest(wholesale)}
 		var res checkResult
 		if err := writeTx(ctx, db, storeID, generation, func(ctx context.Context, tx bun.Tx) error {
 			var err error
@@ -574,6 +582,10 @@ type checkedPage struct {
 	from, to string    // the source's cursor before the page and after it
 	width    int64     // the source's window, in seconds, after it
 	facts    pageFacts
+	// The granted set the page's orders were judged with: whether the store
+	// is enabled in it and its digest (see "Who is wholesale, for the check").
+	wholesaleEnabled bool
+	wholesaleDigest  string
 }
 
 // checkResult is what one page of a pass did.
@@ -632,11 +644,19 @@ func checkPage(ctx context.Context, tx bun.Tx, storeID string, p checkedPage) (c
 		if err != nil {
 			return checkResult{}, err
 		}
+		judges, err := checkJudgesWholesale(ctx, tx, storeID, p)
+		if err != nil {
+			return checkResult{}, err
+		}
 		for _, o := range p.facts.orders {
 			s, held := stored[o.fact.OrderGID]
 			var version *time.Time
 			if held {
 				version = &s.OrderVersion
+				if !judges {
+					// The side the walk and the pass wrote stands.
+					o.wholesale = s.Wholesale
+				}
 			}
 			switch againstFact(micro(o.fact.Version), version, cut) {
 			case rowNewerThanFact:
@@ -772,6 +792,42 @@ func checkPage(ctx context.Context, tx bun.Tx, storeID string, p checkedPage) (c
 		return checkResult{}, fmt.Errorf("move the check on: %w", err)
 	}
 	return res, nil
+}
+
+// WHO IS WHOLESALE, FOR THE CHECK (ruling 45). The check reads the granted
+// sets once a run, and a run lasts up to half an hour: a buyer granted
+// meanwhile has had their orders written wholesale by the walk and the
+// wholesale pass with the fresh set, and the store's row already keeps that
+// set's digest, so no pass would start again after a check that judged with
+// its older set. So the check judges an order's wholesale side only when the
+// set it holds is the one the store's row keeps -- the store enabled in both,
+// the same digest, and no wholesale pass under way -- read in the page's own
+// transaction. Otherwise it compares and writes everything else of an order
+// and leaves the side as it stands: not a mismatch, and written back as the
+// stored fact holds it. An order with no fact at all takes the check's own
+// judgement, there being no side to leave; the next run's check, holding the
+// set the store keeps, judges it again.
+
+// heldDigest is the digest of the granted set a check holds, as the wholesale
+// pass computes the one it keeps (wholesale.go, wholesalePass).
+func heldDigest(st wholesaleState) string {
+	if st.Digest != "" {
+		return st.Digest
+	}
+	return grantedDigest(st.Granted)
+}
+
+// checkJudgesWholesale says, inside tx, whether the page's orders may have
+// their wholesale side compared and written. See "Who is wholesale, for the
+// check".
+func checkJudgesWholesale(ctx context.Context, tx bun.Tx, storeID string, p checkedPage) (bool, error) {
+	var enabled bool
+	var digest, cursor string
+	if err := tx.NewSelect().Table("store_sales_store").Column("wholesale_enabled", "wholesale_digest", "wholesale_cursor").
+		Where("store_id = ?", storeID).Scan(ctx, &enabled, &digest, &cursor); err != nil {
+		return false, fmt.Errorf("read the store's wholesale state: %w", err)
+	}
+	return p.wholesaleEnabled && enabled && cursor == "" && p.wholesaleDigest == digest, nil
 }
 
 // ---- the stored facts, as the rules would make them ----

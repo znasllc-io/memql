@@ -1097,3 +1097,65 @@ func TestAnEngineSystemActorIsRefusedTheRebuildAndTheCheckState(t *testing.T) {
 			k.generation, before.generation, k.rebuildingSince.Valid, k.purging)
 	}
 }
+
+// THE CHECK NEVER UNDOES THE WHOLESALE PASS (ruling 45). A buyer granted after
+// the check read the granted sets and before the store's turn: the walk and
+// the pass have written their order wholesale with the fresh set, and the
+// check, holding the older set, whose digest is not the one the store's row
+// keeps, leaves the order's wholesale side as it stands -- not a mismatch, not
+// written -- through its pass and through a later run that holds the fresh
+// set. With the digests equal an order on the wrong side is still repaired.
+func TestACheckWithAStalerGrantedSetLeavesTheWholesaleSide(t *testing.T) {
+	i, id := runStore(t)
+	fresh := map[string]bool{"buyer-1@example.test": true}
+	i.wholesaleFor = func(context.Context, []string) (map[string]wholesaleState, error) {
+		return map[string]wholesaleState{id: {Enabled: true, Granted: fresh, Digest: grantedDigest(fresh)}}, nil
+	}
+	mirrorThreeLines(t, id)
+	rewriteInPlace(t, orderConcept, id, theOrder, map[string]any{"email": "buyer-1@example.test"})
+	settle(t, i, id)
+	want(t, "the granted buyer's order", orderFactsOf(t, id)[theOrder], "wholesale", "true")
+
+	stale := wholesaleState{Enabled: true, Granted: map[string]bool{}, Digest: grantedDigest(map[string]bool{})}
+	row := checkThrough(t, i, id, stale)
+	want(t, "the order judged by a staler set", orderFactsOf(t, id)[theOrder], "wholesale", "true")
+	wantCounts(t, "a staler granted set", row, 0, 0)
+
+	// A wholesale pass that begins between the check's read of the store and
+	// its page's transaction: the pass, not the check, judges. The order is
+	// set on the wrong side by hand, and the check leaves it there.
+	exec(t, `UPDATE store_sales_order_fact SET wholesale = false WHERE store_id = ? AND order_gid = ?`, id, theOrder)
+	inner := i.engine
+	began := false
+	i.engine = &hookEngine{inner: inner, after: func(q string) {
+		if !began && strings.Contains(q, "storeStatisticsOrdersChanged") {
+			began = true
+			exec(t, `UPDATE store_sales_store SET wholesale_cursor = '2026-11-01T00:00:00Z' WHERE store_id = ?`, id)
+		}
+	}}
+	fresher := wholesaleState{Enabled: true, Granted: fresh, Digest: grantedDigest(fresh)}
+	if _, err := checkStore(checkCtx(t), i, id, time.Now().Add(checkAhead+30*time.Second), checkPagesPerRun, fresher, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !began {
+		t.Fatal("the pass never began under the check")
+	}
+	want(t, "the order while a wholesale pass is under way", orderFactsOf(t, id)[theOrder], "wholesale", "false")
+	if r, _ := checkRowOf(t, id); r.Mismatched != 0 {
+		t.Errorf("a wholesale side left to the pass counted %d mismatches", r.Mismatched)
+	}
+	i.engine = inner
+	exec(t, `UPDATE store_sales_store SET wholesale_cursor = '' WHERE store_id = ?`, id)
+	exec(t, `UPDATE store_sales_check SET pass_started_at = NULL WHERE store_id = ?`, id)
+
+	// The digests equal: the order on the wrong side is repaired, by a run of
+	// the check that reads the fresh set.
+	ahead := time.Now().Add(checkAhead + time.Minute)
+	i.now = func() time.Time { return ahead }
+	if _, err := i.handleCheck(auth.ContextWithInternalOrigin(checkCtx(t)), nil, 0); err != nil {
+		t.Fatal(err)
+	}
+	want(t, "the order with the digests equal", orderFactsOf(t, id)[theOrder], "wholesale", "true")
+	row, _ = checkRowOf(t, id)
+	wantCounts(t, "the order on the wrong side, the digests equal", row, 1, 1)
+}
