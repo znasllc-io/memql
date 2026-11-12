@@ -407,6 +407,7 @@ func verdictPayload(v Verdict) map[string]any {
 		reasons = append(reasons, map[string]any{
 			"code": r.Code, "domain": r.Domain, "sentence": r.Sentence, "detail": r.Detail, "count": r.Count,
 			"atLeast": r.AtLeast, "act": r.Act, "actLabel": r.ActLabel, "actUrl": r.ActURL,
+			"concerns": r.Concerns, "concepts": toAny(r.Concepts),
 		})
 	}
 	recorded := make([]any, 0, len(v.Recorded))

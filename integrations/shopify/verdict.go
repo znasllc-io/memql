@@ -3,6 +3,7 @@ package shopify
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -66,13 +67,152 @@ const protectedDataURL = "https://shopify.dev/docs/apps/launch/protected-custome
 // known. The connect's pass and the daily pass both record it.
 const subscriptionsUnreadable = "subscriptions: the store's webhook subscriptions could not be read"
 
+// What a reason stands in the way of. Every reason carries exactly one; an
+// empty Concerns is never written, so "not said" cannot pass for "nothing".
+const (
+	ConcernsWholeStore  = "wholeStore"  // nothing of the store is being recorded as it should be
+	ConcernsConcepts    = "concepts"    // the concepts named in Concepts, and the children read with them
+	ConcernsNoRecording = "noRecording" // not about recording at all
+)
+
+// reasonConcerns is THE classification: every Reason* code with the kinds a
+// reason of it may carry. Two codes take one of two kinds by what the mirror
+// found: approval_outdated concerns the concepts the mirror refuses under the
+// grant, or nothing recorded when the scopes not approved only widen what is
+// read (approvalConcerns); changes_not_recorded concerns the domains of the
+// deliveries it counted, or the whole store when its count is a floor or a
+// delivery it read routes to no domain (changesNotRecorded).
+// TestEveryReasonCodeIsClassified reads the package's Reason* constants from
+// its source and fails on one this table does not name, and on an entry no
+// constant declares.
+var reasonConcerns = map[string][]string{
+	ReasonDataNotDeclared:       {ConcernsConcepts},
+	ReasonApprovalOutdated:      {ConcernsConcepts, ConcernsNoRecording},
+	ReasonGrantLost:             {ConcernsWholeStore},
+	ReasonEventsNotRegistered:   {ConcernsWholeStore},
+	ReasonCheckFailing:          {ConcernsConcepts},
+	ReasonChangesNotRecorded:    {ConcernsConcepts, ConcernsWholeStore},
+	ReasonPrivacyRequestFailing: {ConcernsNoRecording},
+}
+
 // VerdictReason is one reason a store needs attention: a code, one sentence
-// for a person, and at most one act.
+// for a person, at most one act, and what it stands in the way of.
 type VerdictReason struct {
 	Code, Domain, Sentence, Detail string
 	Count                          int
 	AtLeast                        bool
 	Act, ActLabel, ActURL          string // Act: "", "approve", "reconnect", "register", "retry", "declare"
+	// Concerns is one of the Concerns* constants, among the kinds
+	// reasonConcerns allows its code.
+	Concerns string
+	// Concepts is the generated concept names ("order") the reason stands in
+	// the way of, sorted: set only with ConcernsConcepts, and never empty then.
+	Concepts []string
+}
+
+// StandsInTheWayOf reports whether the reason keeps any of these generated
+// concepts (names, or ids) from being recorded. A concept is compared through
+// the domains it is read with up to the one whose sweep records it
+// (recordedThrough, the chain sweptParentOf walks), so a reason about orders
+// stands in the way of their lines and refunds, and one about the returns read
+// with orders does not stand in the way of the orders. A reason whose Concerns
+// is not one of the three answers true: what is not classified is treated as
+// standing in the way, never as clear. So does a reason whose code
+// reasonConcerns does not name or does not allow that kind, and one that
+// concerns concepts and names none.
+func (r VerdictReason) StandsInTheWayOf(concepts []string) bool {
+	if !slices.Contains(reasonConcerns[r.Code], r.Concerns) {
+		return true
+	}
+	switch r.Concerns {
+	case ConcernsNoRecording:
+		return false
+	case ConcernsConcepts:
+		if len(r.Concepts) == 0 {
+			return true
+		}
+		named := map[string]bool{}
+		for _, c := range r.Concepts {
+			named[generated.ConceptFromID(strings.TrimSpace(c))] = true
+		}
+		for _, c := range concepts {
+			for _, held := range recordedThrough(c) {
+				if named[held] {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return true
+}
+
+// recordedThrough is a concept, given by name or id, and each concept it is
+// read with on the way up to the domain whose sweep records it: the chain
+// sweptParentOf walks. A reason naming any of them holds the concept. A reason
+// naming only a child read with a parent holds neither the parent nor its
+// other children: an approval that lacks read_returns refuses the returns
+// read with orders, and the orders, their lines and their refunds are still
+// read.
+func recordedThrough(concept string) []string {
+	concept = generated.ConceptFromID(strings.TrimSpace(concept))
+	out := []string{concept}
+	for seen := 0; seen < len(generated.ApplyOrder); seen++ {
+		spec := generated.Types[concept]
+		if spec == nil || spec.Reconcile != generated.ReconcileNone || spec.Parent == "" {
+			break
+		}
+		concept = spec.Parent
+		out = append(out, concept)
+	}
+	return out
+}
+
+// VerdictReasonFromPayload reads one element of the verdict builtin's
+// `reasons` back into the fields StandsInTheWayOf reads (code, concerns,
+// concepts). For a reader of the builtin's answer in another package.
+func VerdictReasonFromPayload(m map[string]any) VerdictReason {
+	r := VerdictReason{Code: mapString(m, "code"), Concerns: mapString(m, "concerns")}
+	switch concepts := m["concepts"].(type) {
+	case []string:
+		r.Concepts = append([]string(nil), concepts...)
+	case []any:
+		for _, c := range concepts {
+			if s, ok := c.(string); ok {
+				r.Concepts = append(r.Concepts, s)
+			}
+		}
+	}
+	return r
+}
+
+// conceptNames is concept ids, or names, as sorted generated concept names.
+func conceptNames(concepts []string) []string {
+	out := make([]string, 0, len(concepts))
+	for _, c := range concepts {
+		out = append(out, generated.ConceptFromID(strings.TrimSpace(c)))
+	}
+	return uniqueSorted(out)
+}
+
+// approvalConcerns is what an outdated approval stands in the way of: the
+// concepts of the store's connection the mirror itself refuses under the
+// grant, because the grant holds none of their scopes (scopesMissingFor, the
+// same rule the sweep, the subscriptions and the shop's refresh refuse by).
+// None means the scopes not approved only widen what is read -- as
+// read_all_orders widens orders past sixty days -- and everything the
+// connection reads is still read: nothing recorded is held.
+func approvalConcerns(store Store) (string, []string) {
+	var refused []string
+	for concept, spec := range generated.Types {
+		if domainInConnection(store, spec) && len(scopesMissingFor(store, spec)) > 0 {
+			refused = append(refused, concept)
+		}
+	}
+	if len(refused) == 0 {
+		return ConcernsNoRecording, nil
+	}
+	return ConcernsConcepts, uniqueSorted(refused)
 }
 
 // RecordedKind is one line of "What is recorded": when the last change of the
@@ -259,10 +399,11 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from, fromNeverC
 	// never a reason, whatever else holds below.
 	inside := insideDomains(store, rows)
 
-	var undeclared []string
+	var undeclared, undeclaredConcepts []string
 	for _, concept := range inside {
 		if undeclaredData(rows[concept]) {
 			undeclared = append(undeclared, plainDomain(concept))
+			undeclaredConcepts = append(undeclaredConcepts, concept)
 		}
 	}
 	if len(undeclared) > 0 {
@@ -271,6 +412,7 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from, fromNeverC
 			Domain:   joinWords(undeclared),
 			Sentence: "Shopify refuses " + joinWords(undeclared) + " for this app, because the app has not declared the customer data it uses.",
 			Act:      ActDeclare, ActLabel: "Declare the customer data", ActURL: protectedDataURL,
+			Concerns: ConcernsConcepts, Concepts: conceptNames(undeclaredConcepts),
 		})
 	}
 
@@ -288,6 +430,7 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from, fromNeverC
 			Sentence: "This store's own app does not allow everything MemQL records.",
 			Detail:   strings.Join(missing, ", "),
 		}
+		reason.Concerns, reason.Concepts = approvalConcerns(store)
 		if store.Managed() {
 			reason.Sentence = "This store approved an older list of permissions."
 			reason.Act, reason.ActLabel = ActApprove, "Open MemQL OS from the store's Shopify admin and approve"
@@ -301,6 +444,7 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from, fromNeverC
 			out = append(out, VerdictReason{
 				Code: ReasonGrantLost, Sentence: "MemQL can no longer reach this store.", Detail: lastError,
 				Act: ActReconnect, ActLabel: "Reconnect in Settings",
+				Concerns: ConcernsWholeStore,
 			})
 			break
 		}
@@ -310,6 +454,7 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from, fromNeverC
 		out = append(out, VerdictReason{
 			Code: ReasonEventsNotRegistered, Sentence: "Shopify is not sending every change.", Detail: detail,
 			Act: ActRegister, ActLabel: "Register again",
+			Concerns: ConcernsWholeStore,
 		})
 	}
 
@@ -323,7 +468,7 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from, fromNeverC
 		}
 	}
 
-	if n := changesNotRecorded(in.GivenUp, inside, rows); n > 0 {
+	if n, concepts, unrouted := changesNotRecorded(in.GivenUp, inside, rows); n > 0 {
 		sentence := fmt.Sprintf("%d changes could not be recorded.", n)
 		if n == 1 {
 			sentence = "1 change could not be recorded."
@@ -332,10 +477,17 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from, fromNeverC
 			// The read ran out of budget: at least this many.
 			sentence = "At least " + sentence
 		}
-		out = append(out, VerdictReason{
+		reason := VerdictReason{
 			Code: ReasonChangesNotRecorded, Sentence: sentence, Count: n, AtLeast: in.GivenUpFloor,
 			Act: ActRetry, ActLabel: "Try again",
-		})
+			Concerns: ConcernsConcepts, Concepts: conceptNames(concepts),
+		}
+		if in.GivenUpFloor || unrouted {
+			// The deliveries not read, or one whose domain is not known, may
+			// be of any domain.
+			reason.Concerns, reason.Concepts = ConcernsWholeStore, nil
+		}
+		out = append(out, reason)
 	}
 	return out
 }
@@ -436,7 +588,10 @@ func checkFailing(concept string, row map[string]any, interval time.Duration, fr
 		return VerdictReason{}, false
 	}
 	word := plainDomain(concept)
-	r := VerdictReason{Code: ReasonCheckFailing, Domain: word, Sentence: "The last check of " + word + " failed"}
+	r := VerdictReason{
+		Code: ReasonCheckFailing, Domain: word, Sentence: "The last check of " + word + " failed",
+		Concerns: ConcernsConcepts, Concepts: conceptNames([]string{concept}),
+	}
 	if undeclaredData(row) {
 		// data_not_declared, with its act.
 		return VerdictReason{}, false
@@ -484,15 +639,22 @@ func checkFailing(concept string, row map[string]any, interval time.Duration, fr
 // its parent, the parent's, since the parent's sweep is what records it. One older than that sweep
 // is not counted: the sweep read what it named. One whose topic routes to no
 // domain asked about is not counted either.
-func changesNotRecorded(givenUp []map[string]any, inside []string, rows map[string]map[string]any) int {
+//
+// It also answers the domains it counted, by concept id, and whether it read
+// a delivery whose topic routes to no domain at all (an unreadable header, a
+// topic the generated model does not route): such a delivery is not counted,
+// and what it would have changed is not known. A delivery routed to a domain
+// outside the connection is neither counted nor unrouted.
+func changesNotRecorded(givenUp []map[string]any, inside []string, rows map[string]map[string]any) (n int, concepts []string, unrouted bool) {
 	asked := map[string]bool{}
 	for _, concept := range inside {
 		asked[concept] = true
 	}
-	n := 0
+	counted := map[string]bool{}
 	for _, delivery := range givenUp {
 		route, ok := generated.Topics[generated.TopicHeaderToEnum(topicHeaderOf(delivery))]
-		if !ok {
+		if !ok || generated.Types[route.Concept] == nil {
+			unrouted = true
 			continue
 		}
 		concept := generated.ConceptID(sweptParentOf(route.Concept))
@@ -503,9 +665,13 @@ func changesNotRecorded(givenUp []map[string]any, inside []string, rows map[stri
 		clean := rowTime(rows[concept], "lastReconcileAt")
 		if clean.IsZero() || received.IsZero() || received.After(clean) {
 			n++
+			if !counted[concept] {
+				counted[concept] = true
+				concepts = append(concepts, concept)
+			}
 		}
 	}
-	return n
+	return n, concepts, unrouted
 }
 
 // sweptParentOf is the domain whose sweep records a concept: the concept
