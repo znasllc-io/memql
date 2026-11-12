@@ -209,6 +209,59 @@ func (l *engineLane) RowSender(ctx context.Context, accountID, senderIdentityID 
 	return rows[0], nil
 }
 
+// emailBlocker is the one sentence why the store's email of kind would not be
+// sent now, for an application in the right state, or "" when it would --
+// THE CHECKS EVERY SEND MAKES OF THE STORE, in order, before the lane is asked:
+//
+//   - the terms email needs the store to require its terms;
+//   - a template must be chosen for the kind;
+//   - the lane must resolve a sender (campaignRowSender, as a send resolves it).
+//
+// declines says whether a send declines on it -- recording nothing, so the
+// same call once the store is ready sends. Terms not required, no template and
+// NO SENDER CHOSEN decline. A sender that IS chosen and that the lane will not
+// send as (turned off, gone, another organization's) is answered with the
+// lane's sentence but does not decline: the lane holds the send, the row says
+// held, and a person sends it again once it is fixed. A sender read that fails
+// declines nothing either: the lane decides at the send.
+//
+// What it cannot know without sending: whether the chosen template is still a
+// published transactional template. The pack reads the store's templates only
+// under the caller (the Email app's own read), so a template it cannot see may
+// be unpublished or merely hidden from the caller; the lane's hold is what
+// finds an unpublished one.
+func (p *Provider) emailBlocker(ctx context.Context, s Settings, kind string) (string, bool) {
+	if kind == EmailTerms && !s.TermsRequired {
+		return ReasonTermsNotRequired, true
+	}
+	if s.TemplateFor(kind) == "" {
+		return noTemplateReason(kind), true
+	}
+	sender := p.senderView(ctx, s)
+	if ready, _ := sender["ready"].(bool); ready {
+		return "", false
+	}
+	if asString(sender["reason"]) == SenderUnreadableSentence {
+		return SenderUnreadableSentence, false
+	}
+	if s.SenderIdentityID == "" {
+		return NoSenderChosenReason, true
+	}
+	return asString(sender["reason"]), false
+}
+
+// emailsWouldSend is, for each of the four kinds, whether an email of it would
+// be sent now for an application in the right state, and the one sentence why
+// not (emailBlocker).
+func (p *Provider) emailsWouldSend(ctx context.Context, s Settings) map[string]any {
+	out := map[string]any{}
+	for _, kind := range EmailKinds {
+		reason, _ := p.emailBlocker(ctx, s, kind)
+		out[kind] = map[string]any{"wouldSend": reason == "", "reason": reason}
+	}
+	return out
+}
+
 // senderView is the store's sender as a person reads it: the name and address
 // its emails go out as, resolved by the lane as a send resolves it (the chosen
 // identity, or what a send with none chosen goes out as), or why there is none,
@@ -244,13 +297,10 @@ func (p *Provider) sendTermsEmail(ctx context.Context, args map[string]any, _ in
 	if err != nil {
 		return nil, err
 	}
-	if !settings.TermsRequired {
-		return declined(app, EmailTerms, ReasonTermsNotRequired)
+	if reason, declines := p.emailBlocker(ctx, settings, EmailTerms); declines {
+		return declined(app, EmailTerms, reason)
 	}
 	template := settings.TermsTemplateID
-	if template == "" {
-		return declined(app, EmailTerms, noTemplateReason(EmailTerms))
-	}
 	waiting, err := p.waitingForTerms(sys, app)
 	if err != nil {
 		return nil, err
@@ -316,11 +366,10 @@ func (p *Provider) sendBuyerEmail(ctx context.Context, args map[string]any, _ in
 			return declined(app, kind, notInStateReason(StateRevoked))
 		}
 	}
-	template := settings.TemplateFor(kind)
-	if template == "" {
-		return declined(app, kind, noTemplateReason(kind))
+	if reason, declines := p.emailBlocker(ctx, settings, kind); declines {
+		return declined(app, kind, reason)
 	}
-	return p.sendEmail(ctx, sys, app, kind, 1, template, settings.SenderIdentityID, "")
+	return p.sendEmail(ctx, sys, app, kind, 1, settings.TemplateFor(kind), settings.SenderIdentityID, "")
 }
 
 // resendEmail answers wholesaleResendEmail: a person of the store sends one of
@@ -357,6 +406,11 @@ func (p *Provider) resendEmail(ctx context.Context, args map[string]any, _ int) 
 		return nil, err
 	}
 	settings := EffectiveSettings(settingsRow)
+	// THE STORE'S OWN READINESS FIRST, the checks a send makes (emailBlocker):
+	// an email the store's automation would decline is not sent again either.
+	if reason, declines := p.emailBlocker(ctx, settings, kind); declines {
+		return nil, errors.New("wholesale: " + reason)
+	}
 	sends, err := p.emailSendsOf(sys, trimmed(app["id"]))
 	if err != nil {
 		return nil, err
@@ -413,11 +467,7 @@ func (p *Provider) resendEmail(ctx context.Context, args map[string]any, _ int) 
 				"attempt did not reach the email service", emailNouns[kind], strings.ToLower(staffWords[want]))
 		}
 	}
-	template := settings.TemplateFor(kind)
-	if template == "" {
-		return nil, fmt.Errorf("wholesale: %s on this store", noTemplateReason(kind))
-	}
-	return p.sendEmail(ctx, sys, app, kind, highestAttempt(sends, kind)+1, template, settings.SenderIdentityID, userRef(requester))
+	return p.sendEmail(ctx, sys, app, kind, highestAttempt(sends, kind)+1, settings.TemplateFor(kind), settings.SenderIdentityID, userRef(requester))
 }
 
 // resenderOf is the person a resend is recorded for: the calling user, never
@@ -1048,6 +1098,10 @@ func (p *Provider) emailTemplates(ctx context.Context, account string) ([]emailT
 	}
 	return out, nil
 }
+
+// NoSenderChosenReason declines every email of a store whose sender the lane
+// cannot resolve because none is chosen.
+const NoSenderChosenReason = "no sender is chosen for this store's emails; the cluster's operators choose it"
 
 // SenderUnreadableSentence is the store's sender when the email service could
 // not be asked which one its emails go out as.

@@ -605,6 +605,7 @@ func (p *Provider) storeSettings(ctx context.Context, args map[string]any, _ int
 		"acceptanceText":     s.AcceptanceText,
 		"senderIdentityId":   s.SenderIdentityID,
 		"sender":             p.senderView(ctx, s),
+		"emailsWouldSend":    p.emailsWouldSend(ctx, s),
 		"termsTemplateId":    s.TermsTemplateID,
 		"approvedTemplateId": s.ApprovedTemplateID,
 		"rejectedTemplateId": s.RejectedTemplateID,
@@ -626,6 +627,18 @@ func (p *Provider) storeSettings(ctx context.Context, args map[string]any, _ int
 			"export":  exportAllowed,
 		},
 	})
+}
+
+// NotSetUpEmailsSentence is why a store that is not set up sends no email.
+const NotSetUpEmailsSentence = "The store is not set up, so it sends no email."
+
+// notSetUpEmails is emailsWouldSend for a store that is not set up.
+func notSetUpEmails() map[string]any {
+	out := map[string]any{}
+	for _, kind := range EmailKinds {
+		out[kind] = map[string]any{"wouldSend": false, "reason": NotSetUpEmailsSentence}
+	}
+	return out
 }
 
 // NotSetUpSenderSentence is the sender of a store that is not set up.
@@ -653,6 +666,7 @@ func notSetUpSettings(ctx context.Context) ([]memorynodes.MemoryNode, error) {
 		"acceptanceText":     s.AcceptanceText,
 		"senderIdentityId":   "",
 		"sender":             map[string]any{"ready": false, "fromName": "", "address": "", "reason": NotSetUpSenderSentence},
+		"emailsWouldSend":    notSetUpEmails(),
 		"termsTemplateId":    "",
 		"approvedTemplateId": "",
 		"rejectedTemplateId": "",

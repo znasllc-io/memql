@@ -565,4 +565,21 @@ func TestTheSettingsAnswerTheSenderAndWhatTheCallerMayPublishAndExport(t *testin
 	if sender["ready"] != false || sender["address"] != "" || strings.TrimSpace(asString(sender["reason"])) == "" {
 		t.Fatalf("no sender chosen reads %v", sender)
 	}
+	// AND EVERY EMAIL SAYS IT WOULD NOT BE SENT, with the sentence a send declines with.
+	would, _ := answerOf(t, eng, signedIn(s.staff), settings)["emailsWouldSend"].(map[string]any)
+	approved, _ := would[wholesalepack.EmailApproved].(map[string]any)
+	if approved["wouldSend"] != false || approved["reason"] != wholesalepack.NoSenderChosenReason {
+		t.Fatalf("with no sender chosen the approval email reads %v", approved)
+	}
+	if _, err := eng.Execute(signedIn(s.staff), `builtin wholesaleRecordDecision(applicationId: `+quote(s.appID)+
+		`, transition: "reject", note: "not a trade buyer")`); err != nil {
+		t.Fatalf("reject: %v", err)
+	}
+	if got := automationCall(t, eng, s.sendCall("wholesaleSendBuyerEmail", "rejected")); got["state"] != wholesalepack.SendSkipped ||
+		got["recorded"] != false || got["reason"] != wholesalepack.NoSenderChosenReason || len(s.mail.messages()) != 0 {
+		t.Fatalf("a rejection with no sender chosen answered %v after %d messages", got, len(s.mail.messages()))
+	}
+	if n := versionCount(t, "v1:wholesale:emailSend", wholesalepack.EmailSendRowID(wholesalepack.EmailRejected, s.appID, 1)); n != 0 {
+		t.Fatalf("%d email rows written for a store with no sender", n)
+	}
 }

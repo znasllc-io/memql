@@ -110,6 +110,10 @@ func (l *fakeLane) RowSender(_ context.Context, accountID, senderID string) (map
 	if l.senderErr != nil {
 		return nil, l.senderErr
 	}
+	if l.senders == nil {
+		// A WORLD THAT SCRIPTS NO SENDER sends as the store's one.
+		return map[string]any{"ready": true, "fromName": "Kestrel Trade", "address": "trade@example.com", "reason": ""}, nil
+	}
 	if answer, ok := l.senders[senderID]; ok {
 		return answer, nil
 	}
@@ -1180,6 +1184,102 @@ func TestMayPublishAndMayExportAgreeWithTheBuiltins(t *testing.T) {
 		_, exportErr := p.exportStore(ctx, store, 0)
 		if may["publish"] != (publishErr == nil) || may["export"] != (exportErr == nil) {
 			t.Fatalf("%s: may %v, publish %v, export %v", who, may, publishErr, exportErr)
+		}
+	}
+}
+
+// A STORE WITH NO SENDER CHOSEN DECLINES EVERY EMAIL BEFORE THE LANE IS ASKED,
+// as a kind with no template chosen does: each of the four kinds, sent by the
+// automation or again by a person, is declined with the sentence that says no
+// sender is chosen and who chooses it; nothing reaches the lane, and no row is
+// written.
+func TestNoSenderChosenDeclinesEveryEmailBeforeTheLane(t *testing.T) {
+	for _, kind := range EmailKinds {
+		t.Run(kind, func(t *testing.T) {
+			w := newEmailWorld()
+			p := w.provider()
+			w.lane.senders = map[string]map[string]any{} // the lane resolves no sender for an empty one
+			switch kind {
+			case EmailApproved:
+				w.approveAndGrant(EntitlementGranted)
+			case EmailRejected:
+				w.decide(TransitionReject)
+			case EmailRevoked:
+				w.approveAndGrant(EntitlementGranted)
+				w.decide(TransitionRevoke)
+			}
+			var got map[string]any
+			if kind == EmailTerms {
+				got = w.sendTerms(t, p)
+			} else {
+				got = w.sendBuyer(t, p, kind)
+			}
+			if got["state"] != SendSkipped || got["recorded"] != false || got["reason"] != NoSenderChosenReason {
+				t.Fatalf("the automatic %s email answered %v", kind, got)
+			}
+			if _, err := w.resend(t, p, kind); err == nil || err.Error() != "wholesale: "+NoSenderChosenReason {
+				t.Fatalf("the %s resend answered %v", kind, err)
+			}
+			if len(w.lane.calls) != 0 || len(w.sends) != 0 {
+				t.Fatalf("%d lane calls and %d rows for a store with no sender", len(w.lane.calls), len(w.sends))
+			}
+		})
+	}
+}
+
+// THE SETTINGS SAY WHETHER EACH EMAIL WOULD BE SENT NOW, for an application in
+// the right state, and when not the one sentence why -- the same checks a send
+// makes. The terms email in every combination of its three conditions, and one
+// case of each other kind.
+func TestTheSettingsSayWhetherEachEmailWouldBeSent(t *testing.T) {
+	readiness := func(t *testing.T, w *emailWorld, p *Provider) map[string]any {
+		t.Helper()
+		nodes, err := p.storeSettings(staffCtx(emailStaff), map[string]any{"siteId": linkSite, "storeId": linkStore}, 0)
+		got, _ := reply(t, nodes, err)["emailsWouldSend"].(map[string]any)
+		return got
+	}
+	for _, required := range []bool{true, false} {
+		for _, template := range []bool{true, false} {
+			for _, sender := range []bool{true, false} {
+				w := newEmailWorld()
+				p := w.provider()
+				w.settings["termsRequired"] = required
+				if !template {
+					w.settings["termsTemplateId"] = ""
+				}
+				if !sender {
+					w.lane.senders = map[string]map[string]any{}
+				}
+				want := ""
+				switch {
+				case !required:
+					want = ReasonTermsNotRequired
+				case !template:
+					want = noTemplateReason(EmailTerms)
+				case !sender:
+					want = NoSenderChosenReason
+				}
+				terms, _ := readiness(t, w, p)[EmailTerms].(map[string]any)
+				if terms["wouldSend"] != (want == "") || terms["reason"] != want {
+					t.Errorf("terms required %v, template %v, sender %v: %v, want reason %q", required, template, sender, terms, want)
+				}
+				// AND IT IS WHAT THE SEND ITSELF DECLINES WITH.
+				if want != "" {
+					if got := w.sendTerms(t, p); got["reason"] != want || len(w.lane.calls) != 0 {
+						t.Errorf("the send declined with %v after %d lane calls, the settings said %q", got["reason"], len(w.lane.calls), want)
+					}
+				}
+			}
+		}
+	}
+	w := newEmailWorld()
+	p := w.provider()
+	w.settings["rejectedTemplateId"] = ""
+	got := readiness(t, w, p)
+	for kind, want := range map[string]string{EmailApproved: "", EmailRejected: noTemplateReason(EmailRejected), EmailRevoked: ""} {
+		k, _ := got[kind].(map[string]any)
+		if k["wouldSend"] != (want == "") || k["reason"] != want {
+			t.Errorf("%s: %v, want reason %q", kind, k, want)
 		}
 	}
 }
