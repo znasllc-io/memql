@@ -2,11 +2,9 @@ package shopify
 
 import (
 	"context"
-	"log/slog"
 	"strings"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/datasync"
 	"github.com/znasllc-io/memql/component/memql"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 	"github.com/znasllc-io/memql/integrations/shopify/generated"
@@ -20,6 +18,10 @@ import (
 // watermark past rows the mirror never took; the verdict then dropped a
 // given-up delivery of that domain because it "has a clean sweep", and the
 // store read Recording with an order missing.
+//
+// What the runtime's runner does with the sweep's error -- the watermark
+// holds -- is its half, and is tested with it in the root module
+// (component/datasync/shopify_sweep_test.go).
 
 // unwritable fails every mirror write of the rows it names, as an engine that
 // refuses one record does, and lets every other call through.
@@ -119,44 +121,4 @@ func TestARelistInWhichAWriteFailedIsNotAnsweredClean(t *testing.T) {
 			t.Fatal("the refused tombstone was written")
 		}
 	})
-}
-
-// THE WATERMARK HOLDS. Through the runtime's own runner: the sweep's failure
-// is recorded as the domain's error, and its lastReconcileAt -- what the next
-// sweep reads from -- is not moved.
-func TestASweepInWhichAWriteFailedLeavesTheWatermarkWhereItWas(t *testing.T) {
-	r := newMirrorRig(t)
-	r.now = at("10:10:00")
-	r.granted("read_orders")
-	r.admin.reply("ShopifyListOrder", listPageReply("orders", false, "",
-		map[string]any{"id": "gid://shopify/Order/1", "name": "#1001", "updatedAt": "2026-08-23T10:00:00Z"}))
-	r.refuses("gid://shopify/Order/1")
-	memqlsync.UnbindForTest(ConnectorName)
-	if err := memqlsync.Bind(r.conn); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { memqlsync.UnbindForTest(ConnectorName) })
-
-	state := datasync.NewStore(anyEngine{r.mirror})
-	runner := datasync.NewRunner(state, datasync.NewApplier(state, datasync.NewEngineMirrorWriter(anyEngine{r.mirror})), slog.New(slog.DiscardHandler))
-	if _, err := runner.Reconcile(context.Background(), ConnectorName, generated.ConceptID("order"), testStoreID); err == nil {
-		t.Fatal("the runner recorded a sweep whose write failed as clean")
-	}
-	var wrote []string
-	for _, q := range r.engine.calls() {
-		if strings.HasPrefix(q, "mutation upsertSyncState(") || strings.HasPrefix(q, "mutation patchSyncState(") {
-			wrote = append(wrote, q)
-		}
-	}
-	if len(wrote) == 0 {
-		t.Fatal("the failed sweep recorded nothing on the domain's row")
-	}
-	for _, q := range wrote {
-		if strings.Contains(q, "lastReconcileAt") {
-			t.Errorf("the watermark moved for a sweep whose write failed:\n%s", q)
-		}
-	}
-	if last := wrote[len(wrote)-1]; !strings.Contains(last, "could not be written") {
-		t.Errorf("the domain's row does not carry the failure:\n%s", last)
-	}
 }

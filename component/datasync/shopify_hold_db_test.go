@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	stdsync "sync"
 	"sync/atomic"
@@ -88,12 +89,20 @@ type holdRig struct {
 	origin  *scriptedOrigin
 	runtime *countingSeam
 	d       *Dispatcher
+	runner  *Runner
 	state   *Store
+	// boot is the connector's integration, for the node's boot sequence
+	// (shopify.Bootstrap).
+	boot    *shopify.Integration
 	storeID string
 	source  string
 	owner   string
 	at      time.Time
 	staged  int
+	// clock is what time the connector says it read the origin at: the wall
+	// clock, unless a test that decides something by the order of two reads
+	// sets it.
+	clock func() time.Time
 }
 
 // holdSeedCtx is server code acting as a cluster owner: how a test writes the
@@ -142,8 +151,10 @@ func newHoldRig(t *testing.T) *holdRig {
 	logger := slog.New(slog.DiscardHandler)
 	r.list = &storeList{scopedStoreEngine: scopedStoreEngine{IntegrationEngineAccess: eng, stores: map[string]bool{r.storeID: true}}}
 	r.stores = shopify.NewStoreRegistry(r.list, func(context.Context, string) (string, error) { return "shpat_test", nil })
-	r.conn = shopify.NewConnector(eng, logger, r.stores, shopify.NewAdminClient())
-	if err := eng.RegisterIntegration(shopify.NewIntegration(r.conn)); err != nil {
+	r.clock = time.Now
+	r.conn = shopify.NewConnector(eng, logger, r.stores, shopify.NewAdminClient()).WithClock(func() time.Time { return r.clock() })
+	r.boot = shopify.NewIntegration(r.conn)
+	if err := eng.RegisterIntegration(r.boot); err != nil {
 		t.Fatalf("register the connector: %v", err)
 	}
 	// The sync runtime, as every node registers it: a resume reaches its
@@ -158,7 +169,9 @@ func newHoldRig(t *testing.T) *holdRig {
 	}
 	t.Cleanup(func() { memqlsync.UnbindForTest(shopify.ConnectorName) })
 	r.state = NewStore(engineSeam{eng})
-	r.d = NewDispatcher(r.state, NewApplier(r.state, NewEngineMirrorWriter(engineSeam{eng})))
+	applier := NewApplier(r.state, NewEngineMirrorWriter(engineSeam{eng}))
+	r.d = NewDispatcher(r.state, applier)
+	r.runner = NewRunner(r.state, applier, logger)
 	return r
 }
 
@@ -366,6 +379,64 @@ func (r *holdRig) record(gid string) map[string]any {
 	return out
 }
 
+// title is a product's title in the mirror, "" for one it does not hold.
+func (r *holdRig) title(gid string) string {
+	title, _ := r.record(gid)["title"].(string)
+	return title
+}
+
+// syncState is one domain's health row of the store.
+func (r *holdRig) syncState(concept string) SyncState {
+	r.t.Helper()
+	st, err := r.state.SyncStateFor(r.freshCtx(), generated.ConceptID(concept), shopify.ConnectorName, string(memqlsync.DirectionInbound), r.storeID)
+	if err != nil {
+		r.t.Fatalf("read %s's sync state: %v", concept, err)
+	}
+	return st
+}
+
+// backfill is one domain's backfill status on the store's own row, or "no
+// row".
+func (r *holdRig) backfill(concept string) string {
+	r.t.Helper()
+	st := r.syncState(concept)
+	if !st.Stored {
+		return "no row"
+	}
+	return st.BackfillStatus
+}
+
+// backfillToItsEnd runs one domain's backfill through the runtime's runner
+// until its row reads complete: the export is asynchronous, so the first step
+// only starts it.
+func (r *holdRig) backfillToItsEnd(concept string) {
+	r.t.Helper()
+	for i := 0; i < 5 && r.backfill(concept) != "complete"; i++ {
+		if _, err := r.runner.StartBackfill(context.Background(), shopify.ConnectorName, generated.ConceptID(concept), r.storeID); err != nil {
+			r.t.Fatalf("backfill %s: %v", concept, err)
+		}
+	}
+	if st := r.syncState(concept); st.BackfillStatus != "complete" {
+		r.t.Fatalf("%s did not complete: %+v", concept, st)
+	}
+}
+
+// reasons is the store's verdict as the Store page is answered it: its state,
+// then the code of each reason.
+func (r *holdRig) reasons() []string {
+	r.t.Helper()
+	r.stores.Invalidate()
+	reply := r.builtin(holdSeedCtx(), call("builtin", "shopifyStoreVerdict", arg{"storeId", r.storeID}))
+	out := []string{stringField(reply, "state")}
+	list, _ := reply["reasons"].([]any)
+	for _, item := range list {
+		if reason, ok := item.(map[string]any); ok {
+			out = append(out, stringField(reason, "code"))
+		}
+	}
+	return out
+}
+
 // recordedVerdict is the verdict the watch last recorded on the store.
 func (r *holdRig) recordedVerdict() map[string]any {
 	v, _ := r.store().Health["verdict"].(map[string]any)
@@ -514,4 +585,236 @@ func TestAPassOverAStoreWithNothingHeldIsOneReadAndNoWrite(t *testing.T) {
 		}
 	}
 	t.Logf("one return of nothing, against the real engine: %s (mean of %d)", (time.Since(start) / calls).Round(10*time.Microsecond), calls)
+}
+
+// ---- moved from the connector's package (it needed the runtime) ----
+
+// productNode is a product as the origin answers a fetch of it.
+func productNode(gid, title, updatedAt string) map[string]any {
+	return map[string]any{"node": map[string]any{"__typename": "Product", "id": gid, "title": title, "updatedAt": updatedAt}}
+}
+
+func containsReason(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
+// A DELIVERY THAT ARRIVES DURING A PAUSE IS HELD, AND WORKED WHEN THE STORE
+// RESUMES. A delete notice and an update notice arrive while the store is
+// paused: each is held with the pause as its reason and no try counted, the
+// origin is not asked, and the mirror is untouched. Resume through the Store
+// page's act puts both back in line and queues the backfill the store never
+// started; the retry pass then retires the deleted record and writes the
+// updated one. The watch's next pass and a second Resume move nothing twice.
+func TestADeliveryThatArrivesDuringAPauseIsHeldAndWorkedOnResume(t *testing.T) {
+	r := newHoldRig(t)
+	if r == nil {
+		return
+	}
+	const gone, changed = "gid://shopify/Product/7001", "gid://shopify/Product/7002"
+	r.records(gone, "Deleted during the pause")
+	r.records(changed, "Before the pause")
+	// The products were read whole before the pause, by an export that held
+	// nothing more; the customers were never reached.
+	r.origin.reply("ShopifyBulkRun", originStartedOperation("gid://shopify/BulkOperation/"+r.storeID))
+	r.origin.reply("ShopifyBulkStatus", map[string]any{"node": map[string]any{"id": "gid://shopify/BulkOperation/" + r.storeID, "status": "COMPLETED", "url": nil}})
+	r.backfillToItsEnd("product")
+
+	if reply := r.setRecording(false); reply["status"] != shopify.StatusPaused {
+		t.Fatalf("Pause recording answered %v", reply)
+	}
+	if got := r.store().Status; got != shopify.StatusPaused {
+		t.Fatalf("after Pause recording the store reads %q", got)
+	}
+	r.origin.reply("ShopifyFetchProduct", productNode(changed, "Changed during the pause", time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)))
+	asked := len(r.origin.seen())
+	deleted := r.stage("deleted", "products/delete", gone)
+	updated := r.stage("updated", "products/update", changed)
+	for _, id := range []string{deleted, updated} {
+		if res := r.dispatch(id); !res.Held {
+			t.Fatalf("delivery %s of a paused store: %+v, want it held", id, res)
+		}
+		if !r.held(id, 0) {
+			t.Fatalf("delivery %s is %v, want held: failed, the pause as its reason, no next time and no try counted", id, r.delivery(id))
+		}
+	}
+	if row := r.record(gone); row["deleted"] == true {
+		t.Fatal("a delete notice of a paused store retired the record")
+	}
+	if got := r.title(changed); got != "Before the pause" {
+		t.Fatalf("an update notice of a paused store wrote %q", got)
+	}
+	if n := len(r.origin.seen()) - asked; n != 0 {
+		t.Fatalf("the origin was asked %d times for a paused store", n)
+	}
+	if got := r.reasons(); len(got) != 1 || got[0] != shopify.VerdictPaused {
+		t.Fatalf("the verdict of the paused store is %v, want paused and no reason", got)
+	}
+
+	if reply := r.setRecording(true); reply["status"] != shopify.StatusLive {
+		t.Fatalf("Resume answered %v", reply)
+	}
+	for _, id := range []string{deleted, updated} {
+		if !r.backInLine(id) {
+			t.Fatalf("after Resume delivery %s is %v, want back in line: failed, due, no tries counted", id, r.delivery(id))
+		}
+	}
+	if got := r.backfill("customer"); got != "queued" {
+		t.Errorf("the customers, never backfilled before the pause, read %q after Resume, want queued", got)
+	}
+	if got := r.backfill("product"); got != "complete" {
+		t.Errorf("the products, read whole before the pause, read %q after Resume, want them left complete", got)
+	}
+	if got := r.reasons(); containsReason(got, shopify.ReasonChangesNotRecorded) {
+		t.Errorf("after Resume the verdict counts the returned deliveries as changes that could not be recorded: %v", got)
+	}
+
+	// The watch notices the same resume on its next pass, and the act may be
+	// repeated: neither moves a delivery that is already back in line.
+	before := r.versions(deleted) + r.versions(updated)
+	r.watch()
+	if reply := r.setRecording(true); reply["status"] != shopify.StatusLive {
+		t.Fatalf("a second Resume answered %v", reply)
+	}
+	if after := r.versions(deleted) + r.versions(updated); after != before {
+		t.Fatalf("the watch's pass and a second Resume wrote the deliveries %d more times", after-before)
+	}
+	if got := r.backfill("customer"); got != "queued" {
+		t.Errorf("the watch's pass and a second Resume left the customers %q", got)
+	}
+
+	fetched := r.origin.countOp("ShopifyFetchProduct")
+	r.retryPass()
+	for _, id := range []string{deleted, updated} {
+		if row := r.delivery(id); stringField(row, "status") != "processed" || intField(row, "attempts") != 1 {
+			t.Fatalf("after the retry pass delivery %s is %v, want processed at its one counted try", id, row)
+		}
+	}
+	if row := r.record(gone); row["deleted"] != true {
+		t.Errorf("the record deleted during the pause is still live after Resume: %v", row)
+	}
+	if row := r.record(changed); row["title"] != "Changed during the pause" || row["deleted"] == true {
+		t.Errorf("the record changed during the pause is %v after Resume", row)
+	}
+	if n := r.origin.countOp("ShopifyFetchProduct") - fetched; n != 1 {
+		t.Errorf("the changed record was fetched %d times, want once: nothing was dispatched twice", n)
+	}
+}
+
+// A RESUME NOBODY ACTED cannot run the act: the status was written directly.
+// The watch recorded the store as paused, so the pass that sees it recording
+// again records the resume, and returns what was held; a pass after that
+// writes nothing more.
+func TestAStoreResumedByARawStatusChangeGetsItsHeldDeliveriesAtTheNextWatchPass(t *testing.T) {
+	r := newHoldRig(t)
+	if r == nil {
+		return
+	}
+	const gone = "gid://shopify/Product/7101"
+	r.records(gone, "Deleted during the pause")
+
+	r.setStatus(shopify.StatusPaused)
+	r.watch()
+	if v := r.recordedVerdict(); stringField(v, "state") != shopify.VerdictPaused {
+		t.Fatalf("the watch recorded %v, want paused", v)
+	}
+	deleted := r.stage("deleted", "products/delete", gone)
+	if res := r.dispatch(deleted); !res.Held || !r.held(deleted, 0) {
+		t.Fatalf("the delivery is %v (%+v), want held", r.delivery(deleted), res)
+	}
+
+	r.setStatus(shopify.StatusLive)
+	// Nothing has returned it yet, and it is not a reason either way.
+	if !r.held(deleted, 0) {
+		t.Fatalf("a raw status change moved the delivery: %v", r.delivery(deleted))
+	}
+	if got := r.reasons(); containsReason(got, shopify.ReasonChangesNotRecorded) {
+		t.Fatalf("a held delivery of a resumed store is counted as a change that could not be recorded: %v", got)
+	}
+
+	r.watch()
+	if !r.backInLine(deleted) {
+		t.Fatalf("after the watch pass the delivery is %v, want back in line", r.delivery(deleted))
+	}
+	recorded := r.recordedVerdict()
+	if stringField(recorded, "state") == shopify.VerdictPaused || stringField(recorded, "resumedAt") == "" {
+		t.Fatalf("the watch recorded %v, want the resume", recorded)
+	}
+	r.retryPass()
+	if row := r.record(gone); row["deleted"] != true {
+		t.Errorf("the record deleted during the pause is still live: %v", row)
+	}
+
+	written := r.versions(deleted)
+	r.watch()
+	if got := r.versions(deleted); got != written {
+		t.Errorf("a pass after the resume was recorded wrote the delivery %d more times", got-written)
+	}
+}
+
+// A HELD DELIVERY IS NEVER "A CHANGE THAT COULD NOT BE RECORDED". The verdict
+// counts the deliveries that used their four tries, and a hold does not count
+// a try: a delivery three tries in when its store is paused is held at three,
+// so neither the paused store nor the resumed one shows a reason for it.
+func TestAHeldDeliveryIsNotAChangeThatCouldNotBeRecorded(t *testing.T) {
+	r := newHoldRig(t)
+	if r == nil {
+		return
+	}
+	const flaky = "gid://shopify/Product/7201"
+	r.records(flaky, "Unreachable three times")
+	r.origin.httpStatus("ShopifyFetchProduct", http.StatusServiceUnavailable)
+	id := r.stage("flaky", "products/update", flaky)
+	for try := 1; try <= 3; try++ {
+		r.dispatch(id)
+		if got := intField(r.delivery(id), "attempts"); got != try {
+			t.Fatalf("after try %d the delivery counts %d tries: %v", try, got, r.delivery(id))
+		}
+	}
+	r.setStatus(shopify.StatusPaused)
+	if res := r.dispatch(id); !res.Held || !r.held(id, 3) {
+		t.Fatalf("on its fourth dispatch, with the store paused, the delivery is %v (%+v); want held with its three tries as they were", r.delivery(id), res)
+	}
+	if got := r.reasons(); len(got) != 1 || got[0] != shopify.VerdictPaused {
+		t.Fatalf("paused: the verdict is %v, want paused and no reason", got)
+	}
+	r.setStatus(shopify.StatusLive)
+	if got := r.reasons(); containsReason(got, shopify.ReasonChangesNotRecorded) {
+		t.Fatalf("resumed: the verdict is %v; a held delivery is counted as a change that could not be recorded", got)
+	}
+}
+
+// A STORE THAT IS NOT CONNECTED IS NOT WAITING FOR A RESUME. A delivery of a
+// store Shopify reported uninstalled is worked as before: nothing is asked,
+// nothing is written, and the delivery is processed.
+func TestAnUninstalledStoresDeliveryIsProcessedWithNothingWritten(t *testing.T) {
+	r := newHoldRig(t)
+	if r == nil {
+		return
+	}
+	const gid = "gid://shopify/Product/7301"
+	r.records(gid, "Still here")
+	if _, err := r.eng.Execute(holdSeedCtx(), call("mutation", "markStoreUninstalled",
+		arg{"storeId", r.storeID}, arg{"uninstalledAt", r.at.Add(-time.Hour).Format(time.RFC3339)})); err != nil {
+		t.Fatalf("mark the store uninstalled: %v", err)
+	}
+	r.stores.Invalidate()
+	asked := len(r.origin.seen())
+	id := r.stage("after-uninstall", "products/delete", gid)
+	if res := r.dispatch(id); res.Held || !res.Handled {
+		t.Fatalf("the delivery of an uninstalled store: %+v, want handled and not held", res)
+	}
+	if row := r.delivery(id); stringField(row, "status") != "processed" || stringField(row, "nextAttemptAt") != "" {
+		t.Fatalf("the delivery is %v, want processed", row)
+	}
+	if row := r.record(gid); row["deleted"] == true {
+		t.Errorf("a delivery of an uninstalled store retired the record: %v", row)
+	}
+	if n := len(r.origin.seen()) - asked; n != 0 {
+		t.Errorf("the origin was asked %d times for an uninstalled store", n)
+	}
 }

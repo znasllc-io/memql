@@ -142,25 +142,8 @@ func TestADeliveryOfAStoreThatIsFoundIsWorked(t *testing.T) {
 	}
 }
 
-// THROUGH THE RUNTIME: an app-level delivery whose store could not be told is
-// stamped failed with a next try, never processed.
-func TestAnUnreadableStoreListLeavesAPrivacyRequestDueAgain(t *testing.T) {
-	r := newMirrorRig(t)
-	r.engine.setRows(namedRowsQuery(conceptGlobalVariable, managedClientID), []map[string]any{{"value": "managed-app"}})
-	r.engine.setRows(namedRowsQuery(conceptGlobalSecret, managedClientSecret), []map[string]any{{"encryptedValue": "sealed-test"}})
-	r.conn.stores.secrets = func(_ context.Context, name string) (string, error) {
-		if name == managedClientSecret {
-			return "managed-secret", nil
-		}
-		return "", fmt.Errorf("missing secret")
-	}
-	l := r.lane(t)
-	r.engine.fail["stores"] = errString("the store list could not be read")
-	req := redactRequest("acme-widgets.myshopify.com")
-	req.ReceivedAt = at("10:00:00")
-
-	got, err := l.try(t, req, stamped{})
-	if err == nil || got.status != "failed" || !got.due() || got.attempts != 1 {
-		t.Fatalf("the privacy request was left %+v (err %v), want failed and due again", got, err)
-	}
-}
+// Through the runtime -- an app-level delivery whose store could not be told
+// is stamped failed with a next try, never processed -- is
+// TestAnUnreadableStoreListLeavesAPrivacyRequestDueAgain in the root module
+// (component/datasync/shopify_empty_answer_test.go), with the dispatcher it
+// needs.

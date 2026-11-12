@@ -139,8 +139,13 @@ func (o *scriptedOrigin) serveGraphQL(r *http.Request) (*http.Response, error) {
 	}
 
 	if status != 0 && status != http.StatusOK {
+		// The origin says when to come back: at once. The connector's client
+		// is production's, and without this it would wait out its own
+		// backoff, a second and more, on every retry of a scripted failure.
 		raw, _ := json.Marshal(map[string]any{"errors": errs})
-		return originAnswer(r, status, string(raw)), nil
+		resp := originAnswer(r, status, string(raw))
+		resp.Header.Set("Retry-After", "0.001")
+		return resp, nil
 	}
 	envelope := map[string]any{
 		"extensions": map[string]any{"cost": map[string]any{

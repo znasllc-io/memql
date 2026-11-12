@@ -27,6 +27,60 @@ func clientCall(userID string, role auth.Role) context.Context {
 	return auth.ContextWithClientOrigin(actorCtx(userID, role))
 }
 
+// syncRuntimeStandIn answers the two builtins of the sync runtime a resume
+// reaches -- the return of held deliveries and the queue of a backfill -- and
+// keeps who asked and for what.
+//
+// A STAND-IN, because this module does not import the runtime
+// (scripts/ci/module-boundaries.sh), and an engine built in a test registers
+// none. It is enough for what this file is about: who may pause and resume a
+// store, and as whom the connector then calls the runtime. The same act
+// against the real runtime -- the held deliveries actually returned, the
+// backfills actually queued -- is in the root module
+// (component/datasync/shopify_hold_db_test.go).
+type syncRuntimeStandIn struct {
+	mu    stdsync.Mutex
+	calls []standInCall
+}
+
+type standInCall struct {
+	capability string
+	args       map[string]any
+	internal   bool
+	userID     string
+}
+
+func (s *syncRuntimeStandIn) IntegrationName() string { return "datasync" }
+
+func (s *syncRuntimeStandIn) Capabilities() []memql.IntegrationCapability {
+	answer := func(name string) memql.IntegrationCapability {
+		return memql.IntegrationCapability{Name: name, Description: "a stand-in for the sync runtime's " + name,
+			Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+				call := standInCall{capability: name, args: args, internal: auth.OriginFromContext(ctx).IsInternal()}
+				if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
+					call.userID = ac.UserId
+				}
+				s.mu.Lock()
+				s.calls = append(s.calls, call)
+				s.mu.Unlock()
+				return resultNode("datasync", map[string]any{"outcome": name})
+			}}
+	}
+	return []memql.IntegrationCapability{answer("returnHeldInbound"), answer("queueBackfill")}
+}
+
+func (s *syncRuntimeStandIn) callsTo(capability string) []standInCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []standInCall
+	for _, c := range s.calls {
+		if c.capability == capability {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 func TestAStoresOwnerWhoIsNotAClusterOwnerPausesAndResumesIt(t *testing.T) {
 	eng, db := authorityEngine(t)
 	if eng == nil {
@@ -69,10 +123,13 @@ func TestAStoresOwnerWhoIsNotAClusterOwnerPausesAndResumesIt(t *testing.T) {
 	if err := eng.RegisterIntegration(NewIntegration(c)); err != nil {
 		t.Fatal(err)
 	}
-	// The sync runtime, as on a node: a resume returns the store's held
-	// deliveries and queues its unstarted backfills through its builtins.
-	syncRuntimeOn(t, eng, c)
-	cleanStoreRows(t, db, storeID)
+	// A resume returns the store's held deliveries and queues its unstarted
+	// backfills through the sync runtime's builtins: answered here by a
+	// stand-in, which keeps who asked.
+	runtime := &syncRuntimeStandIn{}
+	if err := eng.RegisterIntegration(runtime); err != nil {
+		t.Fatalf("register the stand-in for the sync runtime: %v", err)
+	}
 	ctx := context.Background()
 	status := func() string {
 		t.Helper()
@@ -146,6 +203,23 @@ func TestAStoresOwnerWhoIsNotAClusterOwnerPausesAndResumesIt(t *testing.T) {
 	}
 	if got := audits(); len(got) != 2 || got[1] != [2]string{"shopify_store_resumed", owner} {
 		t.Fatalf("after the resume the audit trail reads %v, want a resume by %s", got, owner)
+	}
+	// What the resume asked of the runtime it asked AS THE OPERATOR, not as
+	// the person: the runtime's builtins admit a cluster owner or the engine
+	// itself, and the store's owner is neither. One page of held deliveries,
+	// of this store's own source.
+	returns := runtime.callsTo("returnHeldInbound")
+	if len(returns) != 1 {
+		t.Fatalf("the resume asked for the store's held deliveries %d times, want once: %+v", len(returns), returns)
+	}
+	if got := returns[0]; !got.internal || !auth.IsSystemActorId(got.userID) ||
+		fmt.Sprint(got.args["source"]) != storeInboundSource(storeID) || fmt.Sprint(got.args["limit"]) != fmt.Sprint(resumeReturnsAtMost) {
+		t.Errorf("the return was asked as %q (internal %t) with %v; want the operator, this store's source and one page", got.userID, got.internal, got.args)
+	}
+	if queued := runtime.callsTo("queueBackfill"); len(queued) == 0 {
+		t.Error("the resume queued none of the backfills the store never started")
+	} else if !queued[0].internal || !auth.IsSystemActorId(queued[0].userID) {
+		t.Errorf("a backfill was queued as %q (internal %t), want the operator", queued[0].userID, queued[0].internal)
 	}
 
 	// The next verdict says when the store left paused, and the next watch

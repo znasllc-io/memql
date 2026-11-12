@@ -192,6 +192,24 @@ func (c *Connector) WithDatabase(db func() *sql.DB) *Connector {
 	return c
 }
 
+// WithClock replaces the connector's clock: the time it says it read the
+// origin at, which every mirror write carries.
+//
+// A TEST'S OPTION. Production never calls it; NewConnector's clock is
+// time.Now. It exists for the tests that compose the connector with the sync
+// runtime, which live in the root module (component/datasync) because this
+// module cannot import the runtime, and so cannot reach an unexported field.
+// Those tests decide a race by the order of two reads of the origin -- a
+// delivery against a bulk export started before it -- and have to say when
+// each was made. It changes nothing a caller could not already do to data: it
+// only says what time it is.
+func (c *Connector) WithClock(now func() time.Time) *Connector {
+	if now != nil {
+		c.now = now
+	}
+	return c
+}
+
 // Stores exposes the registry, for the seed and the capability surface.
 func (c *Connector) Stores() *StoreRegistry { return c.stores }
 
