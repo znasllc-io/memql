@@ -209,8 +209,12 @@ Then:
    Shopify asks.
 3. **The rest is automatic.** The approval returns through the connect
    callback, which records the new grant and queues the backfill of each
-   domain the new grant unlocked. The store reads "Starting" while those run,
-   then "Recording".
+   domain the new grant unlocked. Every kind Shopify had refused that the new
+   grant covers is tried again at once: a kind read by a backfill has it
+   queued, and any other has its refusal cleared and is read at the next
+   periodic check. The store reads "Starting" while those run, then
+   "Recording". A kind Shopify refuses again reads refused again from its
+   next check.
 
 ---
 
@@ -335,6 +339,7 @@ they own several.
 | `shopifyEnsureSubscriptions`, `shopifyRunComplianceJobs` | their scheduled automations, or a cluster owner running them by hand |
 | `shopifyStoreAlertWaitSet` | cluster owner |
 | `shopifyProvisionWholesale`, `shopifyRevokeWholesale`, `shopifyTagWholesaleCustomer`, `shopifyUntagWholesaleCustomer`, `shopifyWholesaleCatalogHeadroom` (the wholesale pack's calls) | the store's owner, cluster owner, or a step of a registered automation; anybody else is refused with "shopify: <builtin> is for the store's owner or a cluster owner" before Shopify is asked. A wholesale application approved by somebody who is neither keeps its entitlement `pending`, with that sentence as its error. |
+| `datasyncRetryRefused` (a connect's fresh try of each kind Shopify refused) | the engine itself; any other call is refused with "datasync: retryRefused is driven by the engine's own automations and refuses a client-origin call" |
 | `datasyncStartBackfill`, `datasyncSetSyncPaused`, `datasyncRequeueInbound`, `datasyncRetryOutboxEntry`, `datasyncDiscardOutboxEntry` (the acts of [Cluster > Data](#cluster--data)), and `datasyncReturnHeldInbound` | cluster owner, or the engine itself; anybody else is refused with "datasync: <name> is for a cluster owner" |
 
 `shopifyStoreRetryDeliveries` -- the Store page's "Try again" -- puts the
@@ -1104,7 +1109,8 @@ These are limits of this connector, as it is built today.
 - **A refusal approval cannot change.** When Shopify refuses a kind for a
   reason no approval changes while naming a permission the connection asks
   for, the store keeps reading Needs attention: the detail names the kind, and
-  an approval that does not clear it within a pass is the sign.
+  the sign is that the reason clears at an approval and comes back at the
+  kind's next check.
 - **A record the mirror cannot write** holds its kind's check back: the kind
   reads "The last check of ... failed" and the store Needs attention until the
   record can be written.
