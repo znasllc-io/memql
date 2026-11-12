@@ -130,6 +130,8 @@ type AdminError struct {
 	// variant it asked for, minus the publication counts. The caller
 	// decides whether the partial answer is usable.
 	Data json.RawMessage
+	// Cost remains useful when GraphQL refused only part of a document.
+	QueryCost, RequestedCost float64
 }
 
 func (e *AdminError) Error() string {
@@ -466,7 +468,8 @@ func (c *AdminClient) once(ctx context.Context, store Store, token, document, op
 		}
 	}
 	if len(envelope.Errors) > 0 {
-		return nil, &AdminError{StatusCode: resp.StatusCode, Errors: envelope.Errors, Data: envelope.Data}
+		return nil, &AdminError{StatusCode: resp.StatusCode, Errors: envelope.Errors, Data: envelope.Data,
+			QueryCost: envelope.Extensions.Cost.ActualQueryCost, RequestedCost: envelope.Extensions.Cost.RequestedQueryCost}
 	}
 	return &AdminResponse{
 		Data:          envelope.Data,

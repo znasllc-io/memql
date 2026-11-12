@@ -2,6 +2,7 @@ package shopify
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -59,6 +60,19 @@ func TestTheResponseSaysWhatTheQueryCost(t *testing.T) {
 	}
 	if resp.RequestedCost != 12 || resp.QueryCost != 10 {
 		t.Errorf("requested %v, actual %v; want the fake's 12 and 10", resp.RequestedCost, resp.QueryCost)
+	}
+}
+
+func TestADeniedFieldKeepsTheCompleteDocumentsQueryCost(t *testing.T) {
+	h := newHarness(t)
+	h.admin.denyField("Probe", "fulfillmentOrders", map[string]any{"node": nil})
+	_, err := h.conn.adminCall(context.Background(), h.store(t), "query Probe { node { fulfillmentOrders { id } } }", "Probe", nil)
+	var denied *AdminError
+	if !errors.As(err, &denied) || !denied.DeniedOnly() {
+		t.Fatalf("wanted a denied-field response, got %v", err)
+	}
+	if denied.RequestedCost != 12 || denied.QueryCost != 10 {
+		t.Fatalf("partial denial discarded the full document's cost: requested %v, actual %v", denied.RequestedCost, denied.QueryCost)
 	}
 }
 

@@ -970,14 +970,15 @@ func (h *liveHarness) refundAmount(t *testing.T, o *liveOrder, amount string) {
 	}}})
 }
 
-// fetchOrder reads the order with the mirror's own generated fetch document,
-// and returns Shopify's answer with its cost.
+// fetchOrder reads through the mirror's grant-aware generated fetch. Every
+// statistics field must remain available; the small optional order surface
+// below is outside the commerce grant and the statistics projection.
 func (h *liveHarness) fetchOrder(t *testing.T, o *liveOrder) (*AdminResponse, map[string]any) {
 	t.Helper()
 	spec := generated.Types["order"]
 	ctx, cancel := context.WithTimeout(h.ctx, liveCallTimeout)
 	defer cancel()
-	resp, err := h.conn.adminCall(ctx, o.store, spec.FetchDocument, spec.FetchOp, map[string]any{"id": o.orderGID})
+	resp, err := h.conn.callWithGrant(ctx, o.store, spec, spec.FetchOp, map[string]any{"id": o.orderGID})
 	if err != nil {
 		t.Fatalf("%s: %s", spec.FetchOp, liveRefusal(err))
 	}
@@ -985,7 +986,47 @@ func (h *liveHarness) fetchOrder(t *testing.T, o *liveOrder) (*AdminResponse, ma
 	if err != nil {
 		t.Fatalf("%s answered data that is not an object: %v", spec.FetchOp, err)
 	}
+	h.requireStatisticsFields(t, o.store)
 	return resp, data
+}
+
+var statisticsOptionalOrderFields = []string{"contract", "fulfillmentOrders", "paymentTerms", "staffMember", "user", "vaultedPaymentMethods"}
+
+func (h *liveHarness) requireStatisticsFields(t *testing.T, store Store) {
+	t.Helper()
+	for concept, fields := range h.conn.FieldsDenied(store.ID) {
+		for _, field := range fields {
+			if concept != generated.ConceptID("order") || !slices.Contains(statisticsOptionalOrderFields, field) {
+				t.Fatalf("the statistics projection is not fully granted: %s.%s", concept, field)
+			}
+		}
+		t.Logf("outside the statistics projection, the commerce grant omits %s: %v", concept, fields)
+	}
+}
+
+// completeOrderCost always sends the unmodified generated document. A
+// field-level denial may still carry the cost of that complete document;
+// pruning it before measurement would understate the single-query ceiling.
+func (h *liveHarness) completeOrderCost(t *testing.T, o *liveOrder) (requested, actual float64) {
+	t.Helper()
+	spec := generated.Types["order"]
+	ctx, cancel := context.WithTimeout(h.ctx, liveCallTimeout)
+	defer cancel()
+	resp, err := h.conn.adminCall(ctx, o.store, spec.FetchDocument, spec.FetchOp, map[string]any{"id": o.orderGID})
+	if err == nil {
+		return resp.RequestedCost, resp.QueryCost
+	}
+	var denied *AdminError
+	if !errors.As(err, &denied) || !denied.DeniedOnly() || denied.DeniesNode() || len(denied.DeniedFields()) == 0 {
+		t.Fatalf("the complete order document could not be measured: %s", liveRefusal(err))
+	}
+	for _, field := range denied.DeniedFields() {
+		if !slices.Contains(statisticsOptionalOrderFields, field) {
+			t.Fatalf("the complete document was refused at a statistics field: %s", field)
+		}
+	}
+	t.Logf("the complete document's cost includes optional field denials: %v", denied.DeniedFields())
+	return denied.RequestedCost, denied.QueryCost
 }
 
 // liveRefundWith delivers orders/updated until the mirror writes a refund
@@ -1031,14 +1072,19 @@ func liveList(p map[string]any, key string) []map[string]any {
 // liveAmountRE is an amount as plain decimal text: no exponent, no grouping.
 var liveAmountRE = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?$`)
 
-// liveAmounts is every "amount" inside a value, by its path.
+// liveAmounts is every scalar "amount" inside a value, by its path. Some
+// fields named amount are MoneyBag objects, whose nested amounts are visited.
 func liveAmounts(v any, path string, into map[string]any) {
 	switch x := v.(type) {
 	case map[string]any:
 		for k, item := range x {
 			if k == "amount" {
-				into[path+"."+k] = item
-				continue
+				switch item.(type) {
+				case map[string]any, []any:
+				default:
+					into[path+"."+k] = item
+					continue
+				}
 			}
 			liveAmounts(item, path+"."+k, into)
 		}
@@ -1348,14 +1394,16 @@ func TestLiveTheOrderFetchStaysUnderTheQueryCostCeiling(t *testing.T) {
 	created := h.deliverUntil(t, store, "orders/create", o.orderGID, "the order paid with its lines, payment and buyer", liveOrderMirrored(o))
 	h.refundUnits(t, o, liveFirstLine(t, created, o), 1)
 
-	resp, _ := h.fetchOrder(t, o)
-	t.Logf("MEASURED: %s requested %.0f points and was charged %.0f", generated.Types["order"].FetchOp, resp.RequestedCost, resp.QueryCost)
-	if resp.RequestedCost <= 0 {
+	requested, actual := h.completeOrderCost(t, o)
+	t.Logf("MEASURED: complete %s requested %.0f points and was charged %.0f", generated.Types["order"].FetchOp, requested, actual)
+	if requested <= 0 {
 		t.Fatal("Shopify answered no requested cost for the order fetch, so the ceiling was not measured")
 	}
-	if resp.RequestedCost > 1000 {
-		t.Errorf("the order fetch requests %.0f points, over Shopify's single-query ceiling of 1,000: every order fetch would be refused", resp.RequestedCost)
+	if requested > 1000 {
+		t.Errorf("the order fetch requests %.0f points, over Shopify's single-query ceiling of 1,000: every order fetch would be refused", requested)
 	}
+	h.liveRefundWith(t, o, "with one refunded line", func(r map[string]any) bool { return len(liveList(r, "refundLineItems")) == 1 })
+	h.requireStatisticsFields(t, store)
 }
 
 // TestLiveARefundIsMirroredWithItsLinesAndItsShipping holds the refund the
@@ -1375,7 +1423,7 @@ func TestLiveARefundIsMirroredWithItsLinesAndItsShipping(t *testing.T) {
 	refund := h.liveRefundWith(t, o, "with one refunded line", func(r map[string]any) bool {
 		return len(liveList(r, "refundLineItems")) == 1
 	})
-	h.requireNothingDenied(t, store)
+	h.requireStatisticsFields(t, store)
 	line := liveList(refund, "refundLineItems")[0]
 	if got := liveString(line, "quantity"); got != "1" {
 		t.Errorf("the refunded line's quantity = %s, want 1", got)
@@ -1511,5 +1559,16 @@ func TestLiveShopifyWritesAmountsAsPlainDecimals(t *testing.T) {
 	}
 	if refundAmounts == 0 {
 		t.Error("the fetched order carried no amount of its refund")
+	}
+}
+
+func TestTheLiveAmountWalkReadsMoneyBagsNamedAmount(t *testing.T) {
+	found := map[string]any{}
+	liveAmounts(map[string]any{"amount": map[string]any{
+		"shopMoney":        map[string]any{"amount": "0.0", "currencyCode": "USD"},
+		"presentmentMoney": map[string]any{"amount": "0.00", "currencyCode": "USD"},
+	}}, "", found)
+	if len(found) != 2 || found[".amount.shopMoney.amount"] != "0.0" || found[".amount.presentmentMoney.amount"] != "0.00" {
+		t.Fatalf("money bag was treated as a scalar amount: %v", found)
 	}
 }
