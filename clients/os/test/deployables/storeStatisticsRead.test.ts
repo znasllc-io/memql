@@ -44,6 +44,12 @@ describe("the store statistics read", () => {
     expect(parseStoreStatistics(storeStatisticsRow({ storeId: "store-example", periodZone: null }), "7d").periodZone).toBeNull();
   });
 
+  it("keeps a product list the engine did not send apart from an empty one", () => {
+    const s = parseStoreStatistics(storeStatisticsRow({ storeId: "store-example", productsBySales: null, productsByUnits: [] }), "7d");
+    expect(s.productsBySales).toBeNull();
+    expect(s.productsByUnits).toEqual([]);
+  });
+
   it("reads a store with no row yet as its period and nothing else", () => {
     const s = parseStoreStatistics(storeStatisticsRow({
       storeId: "store-example", storeName: null, storeDomain: null, currency: null, timezone: null, development: null, taxesIncluded: null,

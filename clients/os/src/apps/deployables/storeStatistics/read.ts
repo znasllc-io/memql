@@ -119,8 +119,9 @@ export interface StoreStatistics {
   /** The figures that are a floor ("or more"), by key. */
   floors: Readonly<Record<string, boolean>>;
   series: StorePoint[];
-  productsBySales: StoreProduct[];
-  productsByUnits: StoreProduct[];
+  /** Null when the engine sent none: the list is not known, which is not an empty list. */
+  productsBySales: StoreProduct[] | null;
+  productsByUnits: StoreProduct[] | null;
   productCount: number | null;
   refundsWithoutItem: number | null;
   incompleteOrders: number | null;
@@ -191,8 +192,9 @@ function pointsFrom(raw: unknown): StorePoint[] {
   });
 }
 
-function productsFrom(raw: unknown): StoreProduct[] {
-  return list(raw).flatMap((entry) => {
+function productsFrom(raw: unknown): StoreProduct[] | null {
+  if (!Array.isArray(raw)) return null;
+  return raw.flatMap((entry) => {
     const product = object(entry);
     if (product === null) return [];
     return [{ key: text(product["key"]), title: text(product["title"]), value: figure(product["value"]) }];
