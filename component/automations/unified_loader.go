@@ -286,6 +286,26 @@ func (l *Loader) LoadFromTree(tree fs.FS) ([]*Automation, error) {
 		return out, fmt.Errorf("walk unified DSL tree: %w", err)
 	}
 
+	// A NAME BELONGS TO ONE AUTOMATION. Every registry an automation is found
+	// in -- the scheduler's, a call by name, a sub-automation step, a resume --
+	// is keyed by the bare name, so an engine automation's name is the
+	// engine's. An automation from any other layer of the tree that carries
+	// one is left out here, whatever order the two were read in, and said so.
+	// Not a load problem: a package staged before its analysis refused such a
+	// name must not stop a node from starting. The package analysis is where
+	// it is refused (component/packages, dsl_automation_name_taken).
+	out, leftOut := engineNamesWin(out)
+	for _, a := range leftOut {
+		if l.logger != nil {
+			l.logger.Error("unified automation loader: automation left out: its name is one of the engine's own automations",
+				"component", ComponentName,
+				"automation", a.Name,
+				"path", a.Origin,
+				"source", a.Source.String(),
+				"effect", "the engine's automation of this name runs and this one does not; rename it in the DSL that declares it")
+		}
+	}
+
 	// The static loop check (memql#5381) over every automation the walk
 	// loaded. Uncovered cycles join the strict load problem list.
 	if l.functions != nil {
