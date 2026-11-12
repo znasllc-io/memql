@@ -4,11 +4,10 @@ package automations
 // code, made on the OBJECTS the type checker resolves and not on names.
 //
 // TestTheMaintenanceListIsNeverAskedWithANameAlone holds that the maintenance
-// list is asked with an origin that is true. A name cannot hold that: any
-// package may declare a function called like the origin helper, any scope may
-// declare an identifier called like a constant, and a function bound to a
-// value is called under whatever the value is named. So each production
-// package that names one of the asks is type-checked from source, and:
+// list is asked with an origin that is true. A spelling cannot hold that: what
+// a name refers to depends on the package and the scope it is written in. So
+// each production package that names one of the asks is type-checked from
+// source, and:
 //
 //   - an ask is a call whose callee RESOLVES to component/auth's own
 //     MaintenanceActor, IsMaintenanceAutomation or AutomationActor;

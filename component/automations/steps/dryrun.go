@@ -123,9 +123,9 @@ func runBundleDryRun(ctx context.Context, engine *memql.MemQLEngine, req memql.D
 	if byName {
 		// BY NAME: the loader's own copy, resolved as every run by name
 		// resolves it (Loader.LoadByName). Nothing is compiled from the
-		// request, so there is no source whose name could stand in for the
-		// automation the tree holds. A name the tree does not hold is a
-		// refusal of the request, not a report of a run.
+		// request: what runs is the automation the tree holds, with the
+		// origin the loader recorded for it. A name the tree does not hold is
+		// a refusal of the request, not a report of a run.
 		loaded, err := loadForDryRunByName(loader, req.AutomationName)
 		if err != nil {
 			return memql.BundleDryRunReport{}, err

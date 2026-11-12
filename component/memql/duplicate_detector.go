@@ -212,8 +212,8 @@ func DetectDuplicateConstructs(files []baseloader.RawFile) []DuplicateConstruct 
 // `<namespace>.<name>`, and automations are not one of them: the scheduler, a
 // call by name, a sub-automation step and a resume all find an automation by
 // its bare name across the whole tree. So two domains declaring one automation
-// name collide even though their namespaces differ, and the later one read
-// would be what the name reaches.
+// name collide even though their namespaces differ: a name belongs to one
+// automation.
 type AutomationNameConflict struct {
 	// Name is the automation's name.
 	Name string

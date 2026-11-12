@@ -51,9 +51,9 @@ func TestAnalyzePackageDSLAcceptsAnAutomationWithItsOwnName(t *testing.T) {
 	}
 }
 
-// Two domains that are not the engine's collide as well: whichever is read
-// later is what the name reaches. Another installed domain's file is not named
-// in the conflict -- it may be another package's.
+// Two domains that are not the engine's collide as well: a name belongs to one
+// automation. Another installed domain's file is not named in the conflict --
+// it may be another package's.
 func TestAnalyzePackageDSLReportsANameAnotherDomainDeclares(t *testing.T) {
 	installed := withLanguageLine(fstest.MapFS{"automations.memql": automationFile("zzInstalledSweep")})
 	memqldsl.RegisterTree("zzinstalled", installed)

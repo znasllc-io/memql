@@ -133,10 +133,9 @@ func TestABuiltinWithNoRequirementIsNotGated(t *testing.T) {
 	}
 }
 
-// TestABuiltinNameNoConstructHoldsIsRefused. A name the gate cannot resolve to
-// a construct has no requirements the gate can read, so it is refused rather
-// than admitted: a gate that admits what it cannot resolve admits whatever a
-// name it does not know dispatches to.
+// TestABuiltinNameNoConstructHoldsIsRefused. Requirements belong to a
+// construct. A name the gate cannot resolve to one has no requirements the
+// gate can read, so the call is refused and its executor does not run.
 func TestABuiltinNameNoConstructHoldsIsRefused(t *testing.T) {
 	installDeployPartFake(t)
 	e, _ := installBuiltinGateProbe(t)

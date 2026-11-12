@@ -214,8 +214,7 @@ func TestADryRunOfASuppliedTextIsNotTheEnginesRun(t *testing.T) {
 	if !ok {
 		t.Fatalf("the tree holds no text for %s", dryRunSweep)
 	}
-	// A body of the caller's own under the listed name: the read the sweep
-	// makes, with cutoffs that admit every open pull.
+	// A body of the caller's own under the same name, making the sweep's read.
 	own := "use worker.queries.{ openModelPulls }\nuse worker.mutations.{ finishModelPull }\n\n" +
 		"@trigger(schedule=\"0 */2 * * * *\")\n" +
 		"automation " + dryRunSweep + " {\n" +
