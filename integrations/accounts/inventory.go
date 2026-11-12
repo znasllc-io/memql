@@ -211,16 +211,40 @@ const inventoryFilesSQL = `SELECT COALESCE(sum((f.payload->>'size')::numeric), 0
 // staged-data: MUST-NOT-GATE -- deciding whether the id names an account at all; a staged account is still one, and refusing it as unknown would hide rows that are already its.
 const accountExistsSQL = `SELECT EXISTS (SELECT 1 FROM "MemoryNodes" WHERE concept = $1 AND id IN ($2, $3))`
 
-// accountTotalsSQL counts the distinct rows per (bare account, concept) over
-// every row that names an account. Grouped by the BARE id so a row whose
-// versions spell the account both ways counts once.
+// accountTotalsSQL counts the rows per (bare account, concept) by the rule
+// memql.AccountCensus reads with (component/memql/account_rows.go): a row
+// counts once, under the account its NEWEST version names, across the row
+// table and the observation store, so a row moved from one account to another
+// counts only under the second. Candidates are every row with a version naming
+// any account, found through idx_memorynodes_account (whose predicate is
+// repeated so the planner can match it), plus the observations naming one;
+// each is then decided by its newest version, the observation winning a
+// createdAt tie as in the reader. Grouped by the BARE id, so a row whose
+// newest version spells the account canonically counts under the same account
+// as one spelled bare. The newest version is a LATERAL join so it is read once
+// per row; as a scalar subquery the planner evaluated it once per reference.
+// This reads every account's rows at once, which is why
+// it runs under totalsDeadline and the status answers without it when slow.
 //
 // staged-data: MUST-NOT-GATE -- an inventory of what every account holds; a staged concept's rows are the account's all the same.
-const accountTotalsSQL = `SELECT CASE WHEN (payload->>'accountId') LIKE 'v1:accounts:account:%'
-            THEN substr(payload->>'accountId', 21) ELSE payload->>'accountId' END AS account,
-       concept, count(DISTINCT id)
-  FROM "MemoryNodes"
- WHERE ` + accountIdPresentSQL + `
+const accountTotalsSQL = `SELECT CASE WHEN newest.account LIKE 'v1:accounts:account:%'
+            THEN substr(newest.account, 21) ELSE newest.account END AS account,
+       c.concept, count(*)
+  FROM (
+    SELECT concept, id FROM "MemoryNodes" WHERE ` + accountIdPresentSQL + `
+    UNION
+    SELECT concept, id FROM memory_liveness WHERE ` + accountIdPresentSQL + `
+  ) c
+  CROSS JOIN LATERAL (
+    SELECT v.account FROM (
+      SELECT n.payload->>'accountId' AS account, n."createdAt", 0 AS observed
+        FROM "MemoryNodes" n WHERE n.concept = c.concept AND n.id = c.id
+      UNION ALL
+      SELECT l.payload->>'accountId', l."createdAt", 1
+        FROM memory_liveness l WHERE l.concept = c.concept AND l.id = c.id
+    ) v ORDER BY v."createdAt" DESC, v.observed DESC LIMIT 1
+  ) newest
+ WHERE COALESCE(newest.account, '') <> ''
  GROUP BY 1, 2`
 
 const switchSQL = `SELECT enabled FROM account_stamping_storage LIMIT 1`

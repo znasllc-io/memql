@@ -148,6 +148,20 @@ const accountRowIDsSQL = `SELECT c.id FROM (
 
 // AccountRowIDs is the ids of `concept` whose NEWEST version names `account`,
 // ascending, after afterID.
+//
+// Cost. A page is not independent of the pages before it. The account index
+// keys on (account, concept) and holds no id, so `id > afterID` is a filter
+// applied after each candidate's heap fetch, and every page re-reads and
+// re-sorts all the remaining candidates of the kind before deciding the first
+// `limit` of them. A walk over N rows in pages of P therefore costs about
+// N*N/(2*P) candidate fetches, against N for one pass. A caller walking a whole
+// kind (the export) should ask for large pages: for a kind of a few million
+// rows, pages of 100,000 ids. At 3 million rows that is 30 pages and about 45
+// million fetches, some fifteen passes over the account's index entries, while
+// a page's ids stay a few megabytes in memory; halving the page doubles the
+// fetches. Read the versions of a page in smaller batches through
+// AccountRowVersions; the id page and the version batch need not be the same
+// size.
 func AccountRowIDs(ctx context.Context, q AccountQuerier, account, concept, afterID string, limit int) ([]string, error) {
 	bare, err := BareAccountID(account)
 	if err != nil {

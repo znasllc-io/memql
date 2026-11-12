@@ -284,9 +284,10 @@ func TestAccountAssignmentStatusReportsProgressTotalsAndOpenConflicts(t *testing
 			"passStartedAt": at(started)},
 		{"kind": "progress", "concept": "v1:testb:task", "assigned": float64(5), "kept": float64(1), "shared": float64(0), "conflicts": float64(2),
 			"passStartedAt": at(started), "passFinishedAt": at(finished), "verifiedThrough": at(finished)},
-		// acme: notes 3 + task 1 + files 4; globex: note 1 + files 2. The
-		// cluster-wide and undeclared concepts add nothing.
-		{"kind": "account", "accountId": "acme", "rows": float64(8)},
+		// acme: notes 3 + task 1 + files 3; globex: note 1 + files 2 (f4
+		// moved to globex counts once, under globex). The cluster-wide and
+		// undeclared concepts add nothing.
+		{"kind": "account", "accountId": "acme", "rows": float64(7)},
 		{"kind": "account", "accountId": "globex", "rows": float64(3)},
 		// Unresolved only, newest first.
 		{"kind": "conflict", "concept": "v1:testa:note", "rowId": "v1:testa:note:n7", "conflict": "several_accounts", "detail": "acme and globex", "foundAt": at(finished)},
@@ -304,6 +305,39 @@ func TestAccountAssignmentStatusReportsProgressTotalsAndOpenConflicts(t *testing
 	for _, p := range got {
 		require.NotEqual(t, "account", p["kind"], "a timed-out total reached the answer: %v", p)
 	}
+}
+
+func TestAccountAssignmentStatusTotalsCountARowUnderItsNewestAccount(t *testing.T) {
+	db := openTempDB(t)
+	seedTwoAccounts(t, db)
+	ctx := context.Background()
+	_, err := db.DB.ExecContext(ctx, `INSERT INTO account_stamping_storage (enabled) VALUES (true)`)
+	require.NoError(t, err)
+	// t5's older version names acme and its newest globex (canonically): it
+	// counts once, under globex. So does f4 in the seed.
+	version(t, db, "v1:testb:task", "v1:testb:task:t5", 1, map[string]any{"accountId": "acme"})
+	version(t, db, "v1:testb:task", "v1:testb:task:t5", 2, map[string]any{"accountId": globexCanonical})
+	// r1's versioned row names acme; its newer observation names globex.
+	version(t, db, runConcept, runConcept+":r1", 1, map[string]any{"accountId": "acme"})
+	versionIn(t, db, "memory_liveness", runConcept, runConcept+":r1", 2, map[string]any{"accountId": "globex"})
+	// r2's versioned row names no account; its observation names acme.
+	version(t, db, runConcept, runConcept+":r2", 1, map[string]any{"state": "running"})
+	versionIn(t, db, "memory_liveness", runConcept, runConcept+":r2", 2, map[string]any{"accountId": "acme"})
+
+	nodes, err := New(func() *bun.DB { return db }, fixtureLister, false, nil).handleAssignmentStatus(ctx, nil, 0)
+	require.NoError(t, err)
+	var accounts []map[string]any
+	for _, p := range payloads(t, nodes) {
+		if p["kind"] == "account" {
+			accounts = append(accounts, p)
+		}
+	}
+	// acme: notes n1-n3, task t1, files f1-f3, run r2 -- 8.
+	// globex: note g1, files f4 and f5, task t5, run r1 -- 5.
+	require.Equal(t, []map[string]any{
+		{"kind": "account", "accountId": "acme", "rows": float64(8)},
+		{"kind": "account", "accountId": "globex", "rows": float64(5)},
+	}, accounts)
 }
 
 func TestAccountAssignmentStatusShowsNoTotalsBeforeTheSwitch(t *testing.T) {
