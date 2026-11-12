@@ -112,3 +112,28 @@ func TestDrainExactMailboxPolicyPrecedesEmailTransport(t *testing.T) {
 		})
 	}
 }
+
+// EmailAdmitted is the configured allowlist through the worker's own rule, read
+// when it is asked: what a settings screen shows beside a store's staff address.
+func TestEmailAdmittedReadsTheConfiguredAllowlist(t *testing.T) {
+	t.Setenv("MEMQL_OUTBOUND_EMAIL_ALLOWLIST", "desk@example.com, ops.example.org")
+	for target, want := range map[string]bool{
+		"desk@example.com":         true,
+		" Desk@Example.COM ":       true,
+		"other@example.com":        false,
+		"any@ops.example.org":      true,
+		"any@sub.ops.example.org":  true,
+		"Name <desk@example.com>":  false,
+		"":                         false,
+		"one@two@ops.example.org":  false,
+		"any@ops.example.org.evil": false,
+	} {
+		if got := EmailAdmitted(target); got != want {
+			t.Errorf("EmailAdmitted(%q) = %v, want %v", target, got, want)
+		}
+	}
+	t.Setenv("MEMQL_OUTBOUND_EMAIL_ALLOWLIST", "")
+	if EmailAdmitted("desk@example.com") {
+		t.Fatal("an empty allowlist admits nothing")
+	}
+}

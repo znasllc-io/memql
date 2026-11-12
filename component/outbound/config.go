@@ -153,6 +153,15 @@ func splitAllowlist(raw string, lower bool) []string {
 	return out
 }
 
+// EmailAdmitted reports whether this node's configured email allowlist
+// (MEMQL_OUTBOUND_EMAIL_ALLOWLIST, read now) admits target, by the rule the
+// worker delivers by (emailAllowed). A screen that names an address the
+// outbox will mail asks it, so a person learns before the first notice that
+// the cluster would refuse to send it. An empty allowlist admits nothing.
+func EmailAdmitted(target string) bool {
+	return emailAllowed(strings.TrimSpace(target), LoadConfig().EmailAllowlist)
+}
+
 // emailAllowed accepts a single bare mailbox. Entries containing @ name
 // exactly one address, ignoring ASCII case, without alias or subdomain
 // expansion. Domain entries retain suffix matching: example.com also
