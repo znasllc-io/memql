@@ -12,8 +12,9 @@ package memql
 // is one row in the database, turned on once for the cluster. The write path
 // cannot ask the database before every write, so each node keeps a copy in an
 // atomic flag, and the runner here is the only thing that sets it: every five
-// seconds it runs the handshake, and once the switch is on it sets the flag and
-// runs one batch of the assignment job.
+// seconds it runs the handshake, and once the switch is on it sets the flag,
+// runs one batch of the assignment job, then works the follow tasks that carry
+// rows after a parent whose account changed (account_follow.go).
 //
 // # Which node holds the flag, and which node needs it
 //
@@ -123,6 +124,8 @@ type AccountOwnershipRunner struct {
 	// to be counted.
 	interval time.Duration
 	assign   func(context.Context) error
+	// follow is the engine's runAccountFollowBatch, the same kind of seam.
+	follow func(context.Context) error
 }
 
 // NewAccountOwnershipRunner builds the runner for one node. provider and nodeID
@@ -158,6 +161,7 @@ func NewAccountOwnershipRunner(e *MemQLEngine, provider func() *bun.DB, nodeID f
 		allowActivation: activate == nil || *activate,
 		interval:        accountOwnershipInterval,
 		assign:          e.runAccountAssignmentBatch,
+		follow:          e.runAccountFollowBatch,
 	}
 	if err := r.ConfigureLifecycle(component.WithRunHook(r.run)); err != nil {
 		return nil, err
@@ -219,17 +223,25 @@ func (r *AccountOwnershipRunner) pass(ctx context.Context, now time.Time, step f
 	return time.Time{}
 }
 
-// tick is one pass: the handshake, the flag, then one batch.
+// tick is one pass: the handshake, the flag, one assignment batch, then one
+// call of the follow tasks (account_follow.go).
 //
 // The flag is set before the batch runs, never after: a node that assigned
 // existing rows while its own writes still went out unstamped would be making
-// the rows of its next pass.
+// the rows of its next pass. The follow tasks run behind the same switch,
+// because a task carries a recorded account and none is recorded before it;
+// and after the assignment, in the same tick's deadline, so a tick whose
+// assignment failed backs off before doing more. Both are bounded by their own
+// call budgets, well inside accountOwnershipDeadline.
 func (r *AccountOwnershipRunner) tick(ctx context.Context) error {
 	acts, err := r.readSwitch(ctx)
 	if err != nil || !acts {
 		return err
 	}
-	return r.assign(ctx)
+	if err := r.assign(ctx); err != nil {
+		return err
+	}
+	return r.follow(ctx)
 }
 
 // readSwitch runs the handshake and sets this node's flag once the switch is

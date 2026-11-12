@@ -35,3 +35,16 @@ func AccountAssignmentRows(outcome string, n int) {
 func AccountAssignmentRowsValue(outcome string) float64 {
 	return counterValue(accountAssignmentRows.WithLabelValues(outcome))
 }
+
+var accountFollowTasks = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: namespace,
+	Name:      "account_follow_tasks",
+	Help: "Follow tasks not done (component/memql/account_follow.go): rows whose account changed and whose followers -- the rows whose via field names them, " +
+		"in the account they left -- have not all been carried to the new one yet. Set by each node's account ownership runner after its follow batch; " +
+		"an account export waits while a task names its account, so a value that stays above zero is an export that cannot start.",
+})
+
+// SetAccountFollowTasks records the follow tasks not done.
+func SetAccountFollowTasks(n int64) {
+	accountFollowTasks.Set(float64(n))
+}

@@ -502,40 +502,76 @@ func TestAccountStampSharedConcept(t *testing.T) {
 	require.Equal(t, f.acme, f.accountOf(conceptSkill, authored))
 }
 
-// TestAccountStampFollowsTheList: the five concepts that still carry `accountIds`
-// derive the single field from it on every write (refinement R12).
-func TestAccountStampFollowsTheList(t *testing.T) {
+// listOf is the row's stored accountIds, as strings.
+func (f *stampFixture) listOf(concept, id string) []string {
+	f.t.Helper()
+	out := []string{}
+	if list, ok := f.stored(concept, id)["accountIds"].([]any); ok {
+		for _, v := range list {
+			s, _ := v.(string)
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// followTasksFor counts the follow tasks recorded for a row.
+func (f *stampFixture) followTasksFor(id string) int {
+	f.t.Helper()
+	var n int
+	require.NoError(f.t, f.db.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM account_follow_tasks WHERE parent_id = ?`, id).Scan(&n))
+	return n
+}
+
+// TestAccountStampListHoldsOneAccount: the five concepts that still carry
+// `accountIds` hold at most one account in it once recording is on (design
+// record docs/superpowers/specs/2026-11-12-account-export-design.md, section I,
+// "The account lists"). One entry files the row there; an empty list keeps the
+// row's account and shares it with nobody.
+func TestAccountStampListHoldsOneAccount(t *testing.T) {
 	f := newStampFixture(t, "stamp-list")
 	a, b, c := "a-"+f.suffix, "b-"+f.suffix, "c-"+f.suffix
-	tagged := func() map[string]any {
+	tagged := func(accounts ...string) map[string]any {
 		p := goalPayload()
-		p["accountIds"] = []string{b, a}
+		p["accountIds"] = accounts
 		return p
 	}
 
-	inA := f.mustInsert(f.trusted(a), conceptGoal, f.id("goal"), tagged())
-	require.Equal(t, a, f.accountOf(conceptGoal, inA), "the call's account, when it is one of the tags")
+	inA := f.mustInsert(f.trusted(c), conceptGoal, f.id("goal"), tagged(a))
+	require.Equal(t, a, f.accountOf(conceptGoal, inA), "one entry files the row there")
+	require.Equal(t, []string{a}, f.listOf(conceptGoal, inA))
 
-	elsewhere := f.mustInsert(f.trusted(c), conceptGoal, f.id("goal"), tagged())
-	require.Equal(t, b, f.accountOf(conceptGoal, elsewhere), "the first tag, when the call's account is none of them")
+	_, err := f.insert(f.trusted(a), conceptGoal, f.id("goal"), tagged(b, a))
+	require.ErrorContains(t, err, "account_list_single", "a list of two accounts was stored")
 
-	f.mustInsert(f.trusted(c), conceptGoal, BareShortId(elsewhere), map[string]any{"accountIds": []string{c}})
-	require.Equal(t, c, f.accountOf(conceptGoal, elsewhere), "a changed list re-derives the account")
+	f.mustInsert(f.trusted(c), conceptGoal, BareShortId(inA), map[string]any{"accountIds": []string{c}})
+	require.Equal(t, c, f.accountOf(conceptGoal, inA), "a re-tag files the row in the account it names")
+	require.Equal(t, []string{c}, f.listOf(conceptGoal, inA))
+	require.Equal(t, 1, f.followTasksFor(inA), "a re-tag records a follow task, so the row's runs follow it")
 
-	f.mustInsert(f.trusted(a), conceptGoal, BareShortId(elsewhere), map[string]any{"status": "active"})
-	require.Equal(t, c, f.accountOf(conceptGoal, elsewhere), "an update that leaves the list alone keeps the account")
+	f.mustInsert(f.trusted(a), conceptGoal, BareShortId(inA), map[string]any{"status": "active"})
+	require.Equal(t, c, f.accountOf(conceptGoal, inA), "an update that leaves the list alone keeps the account")
+	require.Equal(t, []string{c}, f.listOf(conceptGoal, inA))
 
-	// A write that restates the list it found is not a change to it: the row was
-	// recorded in a, and a whole-row write from c's call leaves it there.
-	restated := tagged()
-	f.mustInsert(f.trusted(c), conceptGoal, BareShortId(inA), restated)
-	require.Equal(t, a, f.accountOf(conceptGoal, inA), "restating the same list moved the row to another account")
+	f.mustInsert(f.trusted(a), conceptGoal, BareShortId(inA), map[string]any{"accountIds": []string{}})
+	require.Equal(t, c, f.accountOf(conceptGoal, inA), "an emptied list keeps the account: the row is private to its owner")
+	require.Equal(t, []string{}, f.listOf(conceptGoal, inA))
+	require.Equal(t, 1, f.followTasksFor(inA), "nothing changed account, and nothing more was recorded")
+
+	t.Run("a stored list naming another account is trimmed on the next write", func(t *testing.T) {
+		legacy := conceptGoal + ":" + f.id("goal")
+		seedRawRow(t, context.Background(), f.db, conceptGoal, legacy, time.Now().Add(-time.Hour), "stamp-test",
+			map[string]any{"statement": "legacy", "origin": "user", "status": "open", "accountId": a, "accountIds": []string{b, a}})
+		f.mustInsert(f.trusted(a), conceptGoal, BareShortId(legacy), map[string]any{"status": "active"})
+		require.Equal(t, a, f.accountOf(conceptGoal, legacy))
+		require.Equal(t, []string{a}, f.listOf(conceptGoal, legacy))
+	})
 }
 
 // TestAccountStampListIsHeldToThePersonsAccounts: the list is the caller's own
-// input on every surface, so for a person's write the recorded account is
-// chosen among the tags that person may write to. A tag naming an account they
-// do not belong to files nothing there (account_stamp.go, pickPlaceableAccount).
+// input on every surface, so a person may name only an account they may write
+// to (account_stamp.go, the list).
 func TestAccountStampListIsHeldToThePersonsAccounts(t *testing.T) {
 	f := newStampFixture(t, "stamp-list-person")
 	member := f.person(f.member, auth.RoleWriter)
@@ -545,29 +581,60 @@ func TestAccountStampListIsHeldToThePersonsAccounts(t *testing.T) {
 		return p
 	}
 
-	t.Run("a tag the person belongs to is used, wherever it sits in the list", func(t *testing.T) {
-		goal := f.mustInsert(member, conceptGoal, f.id("goal"), tagged(f.beta, f.acme))
+	t.Run("an account the person belongs to files the row there", func(t *testing.T) {
+		goal := f.mustInsert(member, conceptGoal, f.id("goal"), tagged(f.acme))
 		require.Equal(t, f.acme, f.accountOf(conceptGoal, goal))
 	})
 
-	t.Run("a tag the person does not belong to files nothing there", func(t *testing.T) {
-		goal := f.mustInsert(member, conceptGoal, f.id("goal"), tagged(f.beta))
-		require.Equal(t, f.acme, f.accountOf(conceptGoal, goal),
-			"the row is recorded under the person's own account, not the account they tagged")
+	t.Run("an account the person does not belong to is refused", func(t *testing.T) {
+		_, err := f.insert(member, conceptGoal, f.id("goal"), tagged(f.beta))
+		require.ErrorContains(t, err, "organization_forbidden")
 	})
 
 	t.Run("retagging cannot move a row to an account the person does not belong to", func(t *testing.T) {
 		goal := f.mustInsert(member, conceptGoal, f.id("goal"), tagged(f.acme))
+		_, err := f.insert(member, conceptGoal, BareShortId(goal), map[string]any{"accountIds": []string{f.beta}})
+		require.ErrorContains(t, err, "organization_forbidden")
 		require.Equal(t, f.acme, f.accountOf(conceptGoal, goal))
-		f.mustInsert(member, conceptGoal, BareShortId(goal), map[string]any{"accountIds": []string{f.beta}})
-		require.Equal(t, f.acme, f.accountOf(conceptGoal, goal))
+		require.Equal(t, []string{f.acme}, f.listOf(conceptGoal, goal))
 	})
 
-	t.Run("a cluster operator may tag any account", func(t *testing.T) {
+	t.Run("a cluster operator may name any account", func(t *testing.T) {
 		operator := f.person("stamp-list-operator-"+f.suffix, auth.RoleOwner)
 		goal := f.mustInsert(operator, conceptGoal, f.id("goal"), tagged(f.beta))
 		require.Equal(t, f.beta, f.accountOf(conceptGoal, goal))
 	})
+}
+
+// TestAccountStampListUnchangedWhileTheSwitchIsOff: before recording is on the
+// list behaves as it did, a list of several accounts included.
+func TestAccountStampListUnchangedWhileTheSwitchIsOff(t *testing.T) {
+	f := newStampFixture(t, "stamp-list-off")
+	f.off()
+	p := goalPayload()
+	p["accountIds"] = []string{f.beta, f.acme}
+	goal := f.mustInsert(f.person(f.member, auth.RoleWriter), conceptGoal, f.id("goal"), p)
+	require.Equal(t, []string{f.beta, f.acme}, f.listOf(conceptGoal, goal))
+	_, has := f.stored(conceptGoal, goal)["accountId"]
+	require.False(t, has)
+	require.Zero(t, f.followTasksFor(goal))
+}
+
+// TestAccountStampStatedChangeRecordsAFollowTask: a `stated` kind's own
+// mutation that changes the row's account records a follow task, as the move
+// and a re-tag do.
+func TestAccountStampStatedChangeRecordsAFollowTask(t *testing.T) {
+	f := newStampFixture(t, "stamp-stated-follow")
+	for _, account := range []string{f.acme, f.beta} {
+		seedRawRow(t, context.Background(), f.db, conceptAccountsAccount, conceptAccountsAccount+":"+account,
+			time.Now().Add(-2*time.Hour), "stamp-test", map[string]any{"name": account, "status": "active"})
+	}
+	audience := conceptAudience + ":" + f.id("audience")
+	seedRawRow(t, context.Background(), f.db, conceptAudience, audience, time.Now().Add(-time.Hour), "stamp-test",
+		map[string]any{"name": "a", "ownerUserId": f.member, "accountId": conceptAccountsAccount + ":" + f.acme})
+	f.mustInsert(f.trusted(""), conceptAudience, BareShortId(audience), map[string]any{"accountId": conceptAccountsAccount + ":" + f.beta})
+	require.Equal(t, f.beta, f.accountOf(conceptAudience, audience), "fixture: the audience changed account")
+	require.Equal(t, 1, f.followTasksFor(audience))
 }
 
 // TestAccountStampReinsertKeepsTheAccount: a write that re-inserts a whole row

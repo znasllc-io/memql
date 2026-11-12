@@ -281,7 +281,7 @@ func (lk *assignmentLookups) judge(meta *memorynodes.Concept, row assignmentRow)
 	}
 
 	// Rule 2. The choice is made among the tags the row's owner may place a row
-	// in, as the stamp makes it for a person's own write (pickPlaceableAccount):
+	// in, as the stamp holds a person's own write to them (stampAccountList):
 	// a tag naming an account the owner does not belong to files nothing there.
 	// When none of the tags qualifies, the list decides nothing and the row goes
 	// on to the rules below.

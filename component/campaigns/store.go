@@ -100,15 +100,15 @@ type SendJob struct {
 	CampaignID          string
 	CampaignOwnerUserID string
 
-	// CampaignAccountID is the client the campaign is FOR, copied off the
-	// same campaign row CampaignOwnerUserID came from (epic memql#5165,
-	// section J).
-	//
-	// Carried on the JOB rather than read per hit because the tracking path
-	// cannot read the campaign row at all: that row is owner-tier, and
-	// establishing the owner is the very thing being asked. Without this
-	// field every tracked pixel fetch would cost a second query.
-	CampaignAccountID string
+	// AccountID is the account the job records, `accountId`: the engine
+	// stamps it from the campaign the job follows (`@belongsTo(account,
+	// via="campaignId")`), so it is the campaign's account. A job written
+	// before the engine recorded accounts, or on a node that holds the switch,
+	// names none; read it through AccountOr, which falls back to the
+	// campaign's own account (design record
+	// docs/superpowers/specs/2026-11-12-account-export-design.md, section J).
+	// The job's old copy, campaignAccountId, is written and read by nothing.
+	AccountID string
 
 	AudienceID     string
 	TemplateID     string
@@ -812,9 +812,6 @@ func (s *Store) EnqueueSend(ctx context.Context, job SendJob) error {
 			return err
 		}
 		args = append(args, arg{"templateSnapshot", snapshot})
-	}
-	if job.CampaignAccountID != "" {
-		args = append(args, arg{"campaignAccountId", job.CampaignAccountID})
 	}
 	if job.Status != "" {
 		args = append(args, arg{"status", job.Status})
@@ -1557,6 +1554,15 @@ func firstWords(q string) string {
 	return q
 }
 
+// AccountOr is the job's account, or the campaign's when the job records none
+// (SendJob.AccountID).
+func (j SendJob) AccountOr(campaignAccount string) string {
+	if j.AccountID != "" {
+		return j.AccountID
+	}
+	return bare(campaignAccount)
+}
+
 func sendJobFromRow(r map[string]any) SendJob {
 	return SendJob{
 		CreatedAt:           templateTime(r["createdAt"]),
@@ -1564,7 +1570,7 @@ func sendJobFromRow(r map[string]any) SendJob {
 		ID:                  bare(str(r, "id")),
 		CampaignID:          bare(str(r, "campaignId")),
 		CampaignOwnerUserID: bare(str(r, "campaignOwnerUserId")),
-		CampaignAccountID:   bare(str(r, "campaignAccountId")),
+		AccountID:           bare(str(r, "accountId")),
 		AudienceID:          bare(str(r, "audienceId")),
 		TemplateID:          bare(str(r, "templateId")),
 		Status:              str(r, "status"),

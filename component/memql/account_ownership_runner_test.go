@@ -117,10 +117,17 @@ func TestAccountOwnershipRunnerTurnsStampingOnOnceEveryNodeAdvertisesAndNeverOff
 	a, b := &MemQLEngine{}, &MemQLEngine{}
 	runnerA := newTestAccountOwnershipRunner(t, a, f.db, "a", "true")
 	runnerB := newTestAccountOwnershipRunner(t, b, f.other, "b", "true")
-	// What the flag said when each of a's batches started.
+	// What the flag said when each of a's batches started, and the order the
+	// tick ran the assignment and the follow tasks in.
 	var batches []bool
+	var steps []string
 	runnerA.assign = func(context.Context) error {
 		batches = append(batches, a.AccountStampingEnabled())
+		steps = append(steps, "assign")
+		return nil
+	}
+	runnerA.follow = func(context.Context) error {
+		steps = append(steps, "follow")
 		return nil
 	}
 
@@ -137,6 +144,7 @@ func TestAccountOwnershipRunnerTurnsStampingOnOnceEveryNodeAdvertisesAndNeverOff
 	require.NoError(t, runnerA.tick(f.ctx))
 	require.True(t, a.AccountStampingEnabled())
 	require.Equal(t, []bool{true}, batches, "the batch must start with the flag already on")
+	require.Equal(t, []string{"assign", "follow"}, steps, "a tick behind the switch works the follow tasks after its assignment batch")
 
 	// A fleet that no longer looks ready.
 	_, err := f.db.ExecContext(f.ctx, `DELETE FROM account_stamping_readers`)
@@ -149,8 +157,10 @@ func TestAccountOwnershipRunnerTurnsStampingOnOnceEveryNodeAdvertisesAndNeverOff
 	// A batch that fails is reported, so the loop backs off, and changes nothing.
 	failed := errors.New("batch failed")
 	runnerA.assign = func(context.Context) error { return failed }
+	steps = nil
 	require.ErrorIs(t, runnerA.tick(f.ctx), failed)
 	require.True(t, a.AccountStampingEnabled())
+	require.Empty(t, steps, "the follow tasks ran after an assignment batch that failed")
 
 	// The switch itself going away, as the down migration takes it.
 	applyLivenessMigration(t, f.ctx, f.db, "20261112100000_account_ownership.down.sql")

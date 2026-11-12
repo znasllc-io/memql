@@ -21,10 +21,14 @@ package memql
 //     concept's own writers name its account, so a guess here would contradict
 //     them, and a cluster-wide concept has no account at all.
 //   - Only the NEWEST version of a row, in place, plus its copy in
-//     memory_liveness when it has one. Older versions keep the bytes they were
-//     written with. Rewriting every version would roughly double the touched
-//     chunks until they are vacuumed (R10), and no reader takes an account off
-//     an old version: a read takes a row at its newest.
+//     memory_liveness when it has one. Older versions keep the account they
+//     were written with. Rewriting every version would roughly double the
+//     touched chunks until they are vacuumed (R10), and no reader takes an
+//     account off an old version: a read takes a row at its newest. The one
+//     exception is the list of accounts on the five kinds that carry one: on a
+//     row that has an account, every version's list is held to that account
+//     (trimAccountLists, account_assignment_write.go), because every version
+//     travels with the row and none may carry another account's id.
 //   - It is raw SQL on the node table, so no version is appended, no event is
 //     published and no automation runs. A row's assignment is not news.
 //
@@ -81,7 +85,9 @@ package memql
 //     full pass as on a later one. Every open transaction counts, one that has
 //     not written yet included, except the account export's snapshot, which
 //     names itself (AccountExportApplicationName) and writes nothing. If the
-//     view cannot be read the batch fails and nothing advances.
+//     view cannot be read the batch fails and nothing advances. A pass that
+//     finishes with its horizon more than assignmentHorizonWarnAge before its
+//     start logs one WARN naming the oldest open session (logHorizonHeldBack).
 //   - A later pass is a FULL pass again when a full pass was REQUESTED after the
 //     last one began (RequestAccountFullPass, account_assignment_api.go: the
 //     export asks for one of a kind with rows waiting, instead of waiting a day),
@@ -176,6 +182,11 @@ const (
 // runner's tests drive tick synchronously rather than starting the runner
 // (checked when the variable was introduced).
 var assignmentLateCommitSlack = time.Minute
+
+// assignmentHorizonWarnAge is how far behind its pass's start a horizon may be
+// before the finishing batch logs the session holding it (logHorizonHeldBack).
+// A variable only so a test need not hold a transaction open that long.
+var assignmentHorizonWarnAge = 10 * time.Minute
 
 // AccountExportApplicationName is the application_name the account export
 // sets on its snapshot session, so the assignment's late-commit horizon does
@@ -519,6 +530,9 @@ func (e *MemQLEngine) assignOneBatch(ctx context.Context, db *bun.DB, candidates
 		if err := advanceAssignmentProgress(ctx, tx, p, now, finished, nextID, nextAt, counts); err != nil {
 			return err
 		}
+		if finished {
+			e.logHorizonHeldBack(ctx, tx, p)
+		}
 		result = assignmentBatchResult{concept: p.concept, examined: len(ids), changed: changed, counts: counts}
 		return nil
 	})
@@ -700,6 +714,34 @@ func oldestOpenWriteStart(ctx context.Context, tx bun.Tx) (sql.NullTime, error) 
 		return oldest, fmt.Errorf("account assignment: reading the open transactions: %w", err)
 	}
 	return oldest, nil
+}
+
+// logHorizonHeldBack logs one WARN when the pass that just finished had its
+// horizon more than assignmentHorizonWarnAge before its start: some session has
+// held a transaction open that long, every later pass of every concept re-reads
+// everything written since it began, and an operator wants to know which
+// session. It names the session that is oldest NOW (the one that held the
+// horizon may have finished since), at most one line per pass, and no metric.
+// A failure to read the view is not the batch's failure; it is only logged.
+func (e *MemQLEngine) logHorizonHeldBack(ctx context.Context, tx bun.Tx, p assignmentProgress) {
+	if !p.passHorizon.Valid || p.passStartedAt.Time.Sub(p.passHorizon.Time) <= assignmentHorizonWarnAge || e.Logger == nil {
+		return
+	}
+	var pid sql.NullInt64
+	var app sql.NullString
+	var started sql.NullTime
+	err := tx.QueryRowContext(ctx, `SELECT pid, application_name, xact_start FROM pg_stat_activity
+		WHERE usename = current_user AND datname = current_database() AND pid <> pg_backend_pid()
+		  AND application_name <> ? AND xact_start IS NOT NULL
+		ORDER BY xact_start LIMIT 1`, AccountExportApplicationName).Scan(&pid, &app, &started)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		e.Logger.Warn("account assignment: a transaction held the pass's horizon back, and the session could not be read",
+			"concept", p.concept, "horizon", p.passHorizon.Time, "passStarted", p.passStartedAt.Time, "error", err)
+		return
+	}
+	e.Logger.Warn("account assignment: a long-open transaction is holding the late-commit horizon back; every later pass re-reads what was written since it began",
+		"concept", p.concept, "horizon", p.passHorizon.Time, "passStarted", p.passStartedAt.Time,
+		"pid", pid.Int64, "application_name", app.String, "xactStart", started.Time)
 }
 
 // advanceAssignmentProgress writes the cursor, the pass's horizon and the

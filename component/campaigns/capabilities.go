@@ -240,13 +240,9 @@ func (w *Worker) handleStartSend(ctx context.Context, args map[string]any, _ int
 	if err := w.store.EnqueueSend(w.systemActorContext(ctx), SendJob{
 		CampaignID:          campaign.ID,
 		CampaignOwnerUserID: campaign.OwnerUserID,
-		// The client tie, copied off the same campaign row the owner came
-		// from (epic memql#5165, section J), so the tracking path can stamp
-		// an engagement event without a second read.
-		CampaignAccountID: campaign.AccountID,
-		AudienceID:        campaign.AudienceID,
-		TemplateID:        campaign.TemplateID,
-		TemplateSnapshot:  &snapshot,
+		AudienceID:          campaign.AudienceID,
+		TemplateID:          campaign.TemplateID,
+		TemplateSnapshot:    &snapshot,
 	}); err != nil {
 		return nil, fmt.Errorf("campaigns.startSend: %w", err)
 	}
@@ -335,7 +331,6 @@ func (w *Worker) handleScheduleSend(ctx context.Context, args map[string]any, _ 
 	if err := w.store.EnqueueSend(w.systemActorContext(ctx), SendJob{
 		CampaignID:          campaign.ID,
 		CampaignOwnerUserID: campaign.OwnerUserID,
-		CampaignAccountID:   campaign.AccountID,
 		AudienceID:          campaign.AudienceID,
 		TemplateID:          campaign.TemplateID,
 		TemplateSnapshot:    &snapshot,

@@ -26,15 +26,15 @@ package memql
 // # Where the account comes from, in order
 //
 //  1. THE ROW'S OWN LIST, for the five concepts that still carry `accountIds`
-//     (design D9). While the list exists it is what a person edits, so the
-//     single field follows it: on a create, on a row with no account yet, and
-//     on a write that CHANGES the list. This is the one way a recorded account
-//     changes, chosen deliberately and only while the list exists (refinement
-//     R12). A write that restates the list it found keeps the stored account.
-//     For a person's own write the choice is made among the tags that person
-//     may write to (pickPlaceableAccount); a tag naming an account they do not
-//     belong to files nothing there, and with no tag left the list decides
-//     nothing.
+//     (design D9). The list holds at most one account (stampAccountList; the
+//     account export's design record, section I): one entry files the row in
+//     that account, on a create, on a row with no account yet, and on a write
+//     that CHANGES the list, which is a re-tag and records a follow task; an
+//     empty list leaves the row private to its owner and decides nothing. A
+//     list of several is refused, and so is a person naming an account they may
+//     not write to. Whatever the write did, the stored list is left empty or
+//     exactly the row's own account (normalizeAccountList). A write that
+//     restates the list it found keeps the stored account.
 //  2. A VALUE ON THE PAYLOAD. Kept. It is the stored account the read-merge
 //     carried, or an explicit choice.
 //  3. THE STORED ACCOUNT, when the payload names none: a write that replaces
@@ -76,14 +76,13 @@ package memql
 //
 // # What it narrows without refusing
 //
-// Two things a person supplies decide an account without naming one, and each
-// is held to the accounts that person may write to, quietly: the row is
-// recorded under their own account instead of being refused, because both
-// writes were legal before this file existed. The list of tags, on every
-// surface, because a template passes the caller's tags straight through
-// (pickPlaceableAccount). And the parent, on the raw surface only, because a
-// template that takes a parent id is an author's decision about who may attach
-// a row to what, and the raw literal has no author (source 4).
+// The parent decides an account without naming one, and on the raw surface it
+// is held to the accounts the person may write to, quietly: the row is recorded
+// under their own account instead of being refused, because such a write was
+// legal before this file existed, and a template that takes a parent id is an
+// author's decision about who may attach a row to what, while the raw literal
+// has no author (source 4). The list is not narrowed quietly any more: a person
+// naming an account they may not write to in it is refused (source 1).
 //
 // # The switch
 //
@@ -122,6 +121,9 @@ const (
 	// the code the organization rules already use for the same thing.
 	codeAccountChangeRefused = "account_change_refused"
 	codeAccountMismatch      = "account_mismatch"
+	// codeAccountListSingle refuses a list of more than one account (design
+	// record docs/superpowers/specs/2026-11-12-account-export-design.md, I).
+	codeAccountListSingle = "account_list_single"
 )
 
 // accountDelta is what the caller's delta said about the account, captured
@@ -147,7 +149,22 @@ func captureAccountDelta(payload map[string]any) accountDelta {
 //
 // prior is the row as stored before this write, nil on a create. payload is the
 // merged row about to be validated and stored, and is mutated in place.
+//
+// On a concept that carries the list, once recording is on, the stored list is
+// left empty or exactly the row's own account, whatever the write did
+// (normalizeAccountList).
 func (e *MemQLEngine) stampAccount(ctx context.Context, conceptMeta *memorynodes.Concept, payload, prior map[string]any, delta accountDelta, fromTemplate bool) error {
+	if err := e.stampAccountField(ctx, conceptMeta, payload, prior, delta, fromTemplate); err != nil {
+		return err
+	}
+	if e != nil && conceptMeta != nil && payload != nil && conceptMeta.BelongsTo.EngineManaged() &&
+		e.AccountStampingEnabled() && conceptDeclaresField(conceptMeta, accountListField) {
+		normalizeAccountList(payload)
+	}
+	return nil
+}
+
+func (e *MemQLEngine) stampAccountField(ctx context.Context, conceptMeta *memorynodes.Concept, payload, prior map[string]any, delta accountDelta, fromTemplate bool) error {
 	if e == nil || conceptMeta == nil || payload == nil {
 		return nil
 	}
@@ -222,23 +239,11 @@ func (e *MemQLEngine) stampAccount(ctx context.Context, conceptMeta *memorynodes
 
 	// 1. The list decides, where the concept still carries one: on a create,
 	// on a row that has no account yet, and when this write CHANGES the list.
-	// A write that restates the list it found (a whole-row re-insert does)
-	// changes nothing about who the row is for, so it falls through and the
-	// stored account is kept; re-deriving there would move the row whenever
-	// the call's account differed from the first writer's.
+	// A list holds at most one account (stampAccountList).
 	if conceptDeclaresField(conceptMeta, accountListField) {
-		if listed := accountList(payload[accountListField]); len(listed) > 0 {
-			changed := delta.namedList && (prior == nil || !sameAccountList(listed, accountList(prior[accountListField])))
-			if changed || bareAccount(payload[accountField]) == "" && stored == "" {
-				if picked := e.pickPlaceableAccount(ctx, listed); picked != "" {
-					payload[accountField] = picked
-					return nil
-				}
-				// None of the tags is an account this caller may place a row in.
-				// The list then decides nothing, and the row falls through to the
-				// sources below: the account it already records, its parent's, or
-				// the caller's own on a create.
-			}
+		decided, err := e.stampAccountList(ctx, conceptMeta, payload, prior, delta, stored)
+		if err != nil || decided {
+			return err
 		}
 	}
 
@@ -452,43 +457,87 @@ func sameAccountList(a, b []string) bool {
 	return true
 }
 
-// pickPlaceableAccount chooses, among the accounts a row is tagged with, the one
-// the row is recorded under, or "" when none of them is the caller's to use.
+// stampAccountList is source 1 (design record
+// docs/superpowers/specs/2026-11-12-account-export-design.md, section I, "The
+// account lists"). Once recording is on a list holds at most ONE account: empty
+// means the row is private to its owner, one entry that it is shared with that
+// account's members, and the row is filed in the account it names. So:
 //
-// THE LIST IS THE CALLER'S OWN INPUT ON EVERY SURFACE. A mutation template for
-// one of these concepts passes the caller's `accountIds` straight through, so
-// "a template names it, the author decided" does not hold for the list the way
-// it does for an explicit `accountId`: the person chose the tags, not the
-// author. Recorded as it came, a tag would let a person file a row under an
-// account they do not belong to, and that account's inventory and export would
-// then carry a row its people never made. So for a person's own write the
-// choice is made among the tags the person may write to, by the same question
-// an explicit account is held to (callerMayWriteAccount): a cluster operator
-// may use any, anybody else only an account they belong to.
+//   - a write naming more than one account in the list is refused
+//     (account_list_single), on every surface: a list of several would file
+//     the row in one account and share it into others, which is the leak the
+//     export exists to rule out;
+//   - one naming an account a person may not write to is refused
+//     (organization_forbidden), where until this piece such a tag was stored
+//     and the row was quietly filed under the person's own account. Server
+//     writes (internal origin, or an actor that is not a person) name it for
+//     the system and are not held, as the list never held them before;
+//   - one naming an account the caller may write to files the row there. When
+//     that changes the row's account it is a re-tag, and executeWrite records
+//     the follow task that carries the row's followers;
+//   - an empty list decides nothing: the row keeps the account the sources
+//     below give it.
 //
-// What the list itself may contain is not this function's: tagging is older
-// than the recorded account, and the tags still decide who the row is shared
-// with exactly as before. Only the recorded account is held here.
+// A write that restates the list it found (a whole-row re-insert does) is not a
+// re-tag: it falls through and the stored account is kept, as before.
 //
-// Server-side writes are not narrowed: internal origin, and an actor that is
-// not a person (a run acting as the cluster, a connector, a sweep), write for
-// the system, and the call's account already says where they act.
-func (e *MemQLEngine) pickPlaceableAccount(ctx context.Context, listed []string) string {
-	call := e.CallAccount(ctx)
-	ac, _ := auth.AccessFromContext(ctx)
-	if auth.OriginFromContext(ctx).IsInternal() || !actorIsAPerson(ac) {
-		return pickListedAccount(listed, call)
+// decided reports that the list chose the account and the sources below are
+// not asked.
+func (e *MemQLEngine) stampAccountList(ctx context.Context, conceptMeta *memorynodes.Concept, payload, prior map[string]any,
+	delta accountDelta, stored string) (bool, error) {
+	listed := distinctAccounts(accountList(payload[accountListField]))
+	if delta.namedList && len(listed) > 1 {
+		return false, fmt.Errorf("%s: a %s row is shared with at most one account, and this write names %d. "+
+			"Name one, or none to keep the row private to its owner",
+			codeAccountListSingle, conceptMeta.Name, len(listed))
 	}
-	placeable := make([]string, 0, len(listed))
-	for _, account := range listed {
-		if e.callerMayWriteAccount(ctx, account) {
-			placeable = append(placeable, account)
+	if len(listed) != 1 {
+		return false, nil
+	}
+	changed := delta.namedList && (prior == nil || !sameAccountList(listed, distinctAccounts(accountList(prior[accountListField]))))
+	if !changed && (bareAccount(payload[accountField]) != "" || stored != "") {
+		return false, nil
+	}
+	named := listed[0]
+	ac, _ := auth.AccessFromContext(ctx)
+	if delta.namedList && !auth.OriginFromContext(ctx).IsInternal() && actorIsAPerson(ac) && !e.callerMayWriteAccount(ctx, named) {
+		return false, fmt.Errorf("organization_forbidden: you are not a member of the account this %s row is shared with",
+			conceptMeta.Name)
+	}
+	payload[accountField] = named
+	return true, nil
+}
+
+// normalizeAccountList leaves the row's list empty or exactly its own account:
+// the account when the list names it, otherwise nothing (the same rule the
+// assignment applies to stored rows, trimAccountLists). A payload with no list
+// is left without one.
+func normalizeAccountList(payload map[string]any) {
+	raw, has := payload[accountListField]
+	if !has || raw == nil {
+		return
+	}
+	own := bareAccount(payload[accountField])
+	for _, account := range accountList(raw) {
+		if own != "" && account == own {
+			payload[accountListField] = []any{own}
+			return
 		}
 	}
-	if len(placeable) == 0 {
-		return ""
+	payload[accountListField] = []any{}
+}
+
+// distinctAccounts drops repeats, keeping the first of each.
+func distinctAccounts(list []string) []string {
+	seen := make(map[string]bool, len(list))
+	out := make([]string, 0, len(list))
+	for _, account := range list {
+		if !seen[account] {
+			seen[account] = true
+			out = append(out, account)
+		}
 	}
-	return pickListedAccount(placeable, call)
+	return out
 }
 
 // pickListedAccount chooses the one account of a row tagged for several: the

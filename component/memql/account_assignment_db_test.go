@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -745,6 +746,103 @@ func TestAccountAssignmentHorizonCountsEveryOpenTransactionButTheExport(t *testi
 		require.True(t, verified.After(opened), "the export's snapshot held the cursor back: verified %v, snapshot opened %v", verified, opened)
 		require.NoError(t, snapshot.Rollback())
 	})
+}
+
+// A pass whose horizon was held far behind its start logs one WARN naming the
+// session holding it, so an operator can find a stalled writer. The age is set
+// to zero so the test need not hold a transaction open for ten minutes.
+func TestAccountAssignmentWarnsOfAHorizonHeldBack(t *testing.T) {
+	engine, db, _ := readMergeTestEngine(t)
+	ctx := context.Background()
+	const todo = "v1:todos:todo"
+	var logs strings.Builder
+	engine.Logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	savedAge := assignmentHorizonWarnAge
+	assignmentHorizonWarnAge = 0
+	t.Cleanup(func() { assignmentHorizonWarnAge = savedAge })
+	_, order, err := assignmentConcepts()
+	require.NoError(t, err)
+	require.NoError(t, ensureAssignmentProgressRows(ctx, db, order))
+
+	conn, err := db.Conn(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	_, err = conn.ExecContext(ctx, `SELECT set_config('application_name', 'stalled-writer-test', false)`)
+	require.NoError(t, err)
+	tx, err := conn.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	var pid int
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&pid))
+	time.Sleep(20 * time.Millisecond)
+
+	makeDue(t, db, todo)
+	runOnePassOf(t, engine, db, todo)
+	require.Equal(t, 1, strings.Count(logs.String(), "level=WARN"), "one WARN per pass:\n%s", logs.String())
+	require.Contains(t, logs.String(), "stalled-writer-test")
+	require.Contains(t, logs.String(), fmt.Sprintf("pid=%d", pid))
+}
+
+// listsOf is every version's accountIds of one row, oldest first.
+func listsOf(t *testing.T, db *bun.DB, id string) []string {
+	t.Helper()
+	rows, err := db.QueryContext(context.Background(), `SELECT COALESCE(payload->'accountIds', 'null'::jsonb)::text FROM "MemoryNodes"
+		WHERE id = ? ORDER BY "createdAt"`, id)
+	require.NoError(t, err)
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var v string
+		require.NoError(t, rows.Scan(&v))
+		out = append(out, v)
+	}
+	return out
+}
+
+// Once recording is on the job leaves a stored list empty or exactly the row's
+// own account, on the newest version and on every older one, so no version
+// carries another account's id through the list (design record
+// docs/superpowers/specs/2026-11-12-account-export-design.md, section I, "The
+// account lists").
+func TestAccountAssignmentTrimsAccountLists(t *testing.T) {
+	engine, db, _ := readMergeTestEngine(t)
+	ctx := context.Background()
+	s := uniqueSuffix(t.Name())
+	const goal = "v1:work:goal"
+	a, b, c := "la-"+s, "lb-"+s, "lc-"+s
+	older, newer := time.Now().Add(-2*time.Hour), time.Now().Add(-time.Hour)
+	version := func(id string, at time.Time, payload map[string]any) {
+		seedRawRow(t, ctx, db, goal, id, at, "assignment-test", payload)
+	}
+	// In a, and its list names a among others: a stays, the others go.
+	kept := goal + ":kept-" + s
+	version(kept, older, map[string]any{"title": "k", "accountIds": []string{a, c}})
+	version(kept, newer, map[string]any{"title": "k", "accountId": a, "accountIds": []string{b, a}})
+	// In a, and its list names only others: the list empties.
+	elsewhere := goal + ":elsewhere-" + s
+	version(elsewhere, older, map[string]any{"title": "e", "accountIds": []string{b, c}})
+	version(elsewhere, newer, map[string]any{"title": "e", "accountId": a, "accountIds": []string{b}})
+	// No account yet: the job assigns it from its list, and trims to it.
+	assigned := goal + ":assigned-" + s
+	version(assigned, older, map[string]any{"title": "a", "accountIds": []string{b, c}})
+	version(assigned, newer, map[string]any{"title": "a", "accountIds": []string{b}})
+	// Already as the rule leaves it: nothing is rewritten.
+	settled := goal + ":settled-" + s
+	version(settled, newer, map[string]any{"title": "s", "accountId": a, "accountIds": []string{a}})
+	settledBefore := snapshotPayloads(t, db, []string{settled})
+
+	_, order, err := assignmentConcepts()
+	require.NoError(t, err)
+	require.NoError(t, ensureAssignmentProgressRows(ctx, db, order))
+	require.NoError(t, RequestAccountFullPass(ctx, db, []string{goal}))
+	runOnePassOf(t, engine, db, goal)
+
+	require.Equal(t, a, newestPayload(t, db, kept)["accountId"])
+	require.Equal(t, []string{`["` + a + `"]`, `["` + a + `"]`}, listsOf(t, db, kept))
+	require.Equal(t, []string{`[]`, `[]`}, listsOf(t, db, elsewhere))
+	require.Equal(t, b, newestPayload(t, db, assigned)["accountId"])
+	require.Equal(t, []string{`["` + b + `"]`, `["` + b + `"]`}, listsOf(t, db, assigned))
+	require.Equal(t, settledBefore, snapshotPayloads(t, db, []string{settled}))
 }
 
 // A full pass asked for is the next pass of that concept, whatever its last

@@ -96,7 +96,7 @@ func TestAzureFeedbackCampaignAttributionAcrossReplicas(t *testing.T) {
 	if err := n.store.SetCampaignStatus(n.owner, "startCampaign", campaign); err != nil {
 		t.Fatal(err)
 	}
-	if err := n.store.EnqueueSend(n.system, SendJob{CampaignID: campaign, CampaignOwnerUserID: n.user, CampaignAccountID: n.org, AudienceID: n.audience, TemplateID: n.suffix + "-tpl", Status: "running"}); err != nil {
+	if err := n.store.EnqueueSend(n.system, SendJob{CampaignID: campaign, CampaignOwnerUserID: n.user, AudienceID: n.audience, TemplateID: n.suffix + "-tpl", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
 	five, zero := 5, 0
