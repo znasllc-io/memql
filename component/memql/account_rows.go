@@ -225,9 +225,14 @@ func AccountRowIDs(ctx context.Context, q AccountQuerier, account, concept, afte
 // (the liveness trigger stores one only after a prior version, and pruning
 // removes it with the history), so latest misses no row.
 //
-// The cost: anyNamed reads the (id, createdAt) of every version of the kind
-// past $2 that names an account, whatever the limit, through the index; no
-// payload is fetched. The limit bounds what latest walks and what is returned.
+// The cost of a page is about the size of the kind, not of the page: anyNamed
+// reads the (id, createdAt) of every version of the kind past $2 that names an
+// account, whatever the limit (the account index's entries for the kind, and
+// one heap fetch of narrow columns per named version), and that set is sorted
+// once to be merged with latest. No payload is fetched. The limit bounds what
+// latest walks and what is returned. The statement must run under
+// unplacedPlans: left to itself the planner rescans anyNamed for every row
+// latest walks.
 //
 // staged-data: MUST-NOT-GATE -- which rows are in no account; a staged concept's rows count the same, and the caller's capability is the wall.
 const unplacedRowIDsSQL = `WITH anyNamed AS MATERIALIZED (
@@ -263,7 +268,7 @@ func UnplacedRowIDs(ctx context.Context, q AccountQuerier, concept, afterID stri
 	}
 	read := func(q AccountQuerier) ([]string, error) {
 		var ids []string
-		err := withIndexPlans(ctx, q, func() error {
+		err := unplacedPlans(ctx, q, func() error {
 			var err error
 			ids, err = scanIDs(ctx, q, unplacedRowIDsSQL, concept, afterID, limit)
 			return err
@@ -688,6 +693,31 @@ var (
 	accountRowCountsFewSQL   = `SELECT d.concept, count(*), sum(d.versions)::bigint FROM (` + accountDecisionSQL(true) + `) d GROUP BY d.concept`
 	accountRowCountsManySQL  = `SELECT d.concept, count(*), sum(d.versions)::bigint FROM (` + accountDecisionSQL(false) + `) d GROUP BY d.concept`
 )
+
+// unplacedPlans runs read under the settings the rows-in-no-account statement
+// needs: withIndexPlans', and nested loops turned off. Under its LIMIT the
+// planner joins the rows it walks to the materialized set of rows naming an
+// account with a nested loop, expecting to stop early, and rescans the set for
+// every row it walks: the product of the two, which on a kind of 300,000 rows
+// did not finish in minutes. With nested loops off the set is sorted or hashed
+// once and merged (0.65 s a page on the same kind). Transaction-local, as
+// withIndexPlans' settings are, and put back afterwards.
+func unplacedPlans(ctx context.Context, q AccountQuerier, read func() error) error {
+	return withIndexPlans(ctx, q, func() error {
+		var loops, ignore string
+		if err := queryOne(ctx, q, `SELECT current_setting('enable_nestloop')`, nil, &loops); err != nil {
+			return err
+		}
+		if err := queryOne(ctx, q, `SELECT set_config('enable_nestloop', 'off', true)`, nil, &ignore); err != nil {
+			return err
+		}
+		readErr := read()
+		if err := queryOne(ctx, q, `SELECT set_config('enable_nestloop', $1, true)`, []any{loops}, &ignore); err != nil && readErr == nil {
+			readErr = err
+		}
+		return readErr
+	})
+}
 
 // withIndexPlans runs read with sequential and bitmap scans turned off for its
 // statements, then puts both settings back. A sequential scan of a kind that

@@ -61,8 +61,9 @@ package memql
 // a child written before the fold that the raw surface filed under its
 // writer's own account (they may not write to the parent's), where that account
 // is the one the parent left, is carried with the parent, as a child written
-// before the change would have been. The fold runs at the start of every call
-// of the job, so the window is about one call long.
+// before the change would have been. The window lasts until the job's next
+// fold: about one call while the job runs, and as long as the job was stopped
+// or its fold kept failing otherwise.
 //
 // # What a change asks of the job
 //
@@ -269,6 +270,12 @@ func (c *accountChange) apply(ctx context.Context, store memorynodes.Store, id s
 	return EnqueueAccountFollow(ctx, bs.db, AccountRowRef{Concept: c.concept, ID: id}, c.from, c.to)
 }
 
+// accountChangeSeenBatch bounds how many records one fold marks seen, so the
+// statement stays short after the job was stopped for a while. The rest are
+// marked by the next calls; a record not yet marked is still counted as
+// unsettled, so the bound changes no rule.
+const accountChangeSeenBatch = 5000
+
 // foldAccountChangeRequests turns the change records not settled into requests
 // for full passes of their follower kinds (file header, What a change asks of
 // the job). One short transaction of the job's own:
@@ -280,7 +287,7 @@ func (c *accountChange) apply(ctx context.Context, store memorynodes.Store, id s
 //     version is older than seen_at, so the record carries it (file header,
 //     Seen). Records are taken in id order with SKIP LOCKED, so two replicas
 //     folding at once never wait on each other; one another replica is marking
-//     is marked by that one.
+//     is marked by that one. At most accountChangeSeenBatch a call.
 //   - Then each follower kind's full_pass_requested_at is raised to the newest
 //     seen_at among the records it follows, so a request is never older than a
 //     record it has to read past, and a record already covered by a finished
@@ -293,7 +300,8 @@ func foldAccountChangeRequests(ctx context.Context, db *bun.DB, managed map[stri
 	return db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE account_follow_tasks SET seen_at = clock_timestamp()
 			 WHERE id IN (SELECT id FROM account_follow_tasks
-			               WHERE done_at IS NULL AND seen_at IS NULL ORDER BY id FOR UPDATE SKIP LOCKED)`); err != nil {
+			               WHERE done_at IS NULL AND seen_at IS NULL ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED)`,
+			accountChangeSeenBatch); err != nil {
 			return fmt.Errorf("account follow: marking the records seen: %w", err)
 		}
 		rows, err := tx.QueryContext(ctx, `SELECT parent_concept, max(seen_at) FROM account_follow_tasks
@@ -348,8 +356,8 @@ func foldAccountChangeRequests(ctx context.Context, db *bun.DB, managed map[stri
 // settleAccountChangeRecords marks settled every SEEN record whose row's
 // follower kinds have each finished a full pass whose safe point is after the
 // record's seen_at (file header, Settled). A record not seen yet is never
-// settled: no pass has carried anything by it. The job calls it when a full pass finishes, in that
-// batch's transaction.
+// settled: no pass has carried anything by it. The job calls it when a full
+// pass finishes, in that batch's transaction.
 //
 // It reads the kinds with records outstanding through the table's partial index
 // on records not settled, and each kind's progress rows by name: no read of the

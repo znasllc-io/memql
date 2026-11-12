@@ -259,6 +259,92 @@ func TestUnplacedRowIDsReadTheAccountThroughTheIndexOnly(t *testing.T) {
 	}
 }
 
+// The list of rows in no account joins the rows it walks to the set of rows
+// naming an account. Under its LIMIT the planner would rescan that set for
+// every row walked, which on a kind of twenty thousand rows already takes many
+// seconds; the reader turns nested loops off for this statement, and the set
+// is read once. The kind here is large enough for the planner to choose the
+// rescan when left to itself.
+func TestUnplacedRowIDsReadTheNamedSetOnce(t *testing.T) {
+	db, _, _ := accountPlanFixture(t, "unplaced rows join plan")
+	const concept = "v1:todos:list"
+	ctx := context.Background()
+	for _, stmt := range []string{
+		`INSERT INTO "MemoryNodes" (id,concept,"createdAt","createdBy",schema,payload)
+         SELECT '` + concept + `:r'||lpad(r::text,6,'0'),'` + concept + `',
+           TIMESTAMPTZ '2026-10-01T00:00:00Z'+r*interval '1 second','fixture','{}',jsonb_build_object('accountId','acme')
+         FROM generate_series(1,20000) r`,
+		`VACUUM ANALYZE "MemoryNodes"`,
+	} {
+		_, err := db.ExecContext(ctx, stmt)
+		require.NoError(t, err)
+	}
+
+	bounded, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	ids, err := UnplacedRowIDs(bounded, db.DB, concept, "", 50)
+	require.NoError(t, err, "a page of a kind of 20,000 rows did not answer in ten seconds")
+	require.Empty(t, ids, "fixture: every row names an account")
+
+	raw := explainUnplacedAsTheReaderRuns(t, db, "'"+concept+"'", "''", "50")
+	requireScannedOnce(t, raw, "anynamed", "unplaced rows of a kind of 20,000")
+}
+
+// explainUnplacedAsTheReaderRuns is the plan of the rows-in-no-account
+// statement inside a transaction with the settings UnplacedRowIDs runs it
+// under (unplacedPlans).
+func explainUnplacedAsTheReaderRuns(t *testing.T, db *bun.DB, args ...string) []byte {
+	t.Helper()
+	ctx := context.Background()
+	pairs := make([]string, 0, 2*len(args))
+	for n := len(args); n >= 1; n-- {
+		pairs = append(pairs, fmt.Sprintf("$%d", n), args[n-1])
+	}
+	query := strings.NewReplacer(pairs...).Replace(unplacedRowIDsSQL)
+	var raw []byte
+	tx, err := db.DB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	require.NoError(t, unplacedPlans(ctx, tx, func() error {
+		return tx.QueryRowContext(ctx, `EXPLAIN (ANALYZE,FORMAT JSON) `+query).Scan(&raw)
+	}))
+	require.NoError(t, tx.Rollback())
+	return raw
+}
+
+// requireScannedOnce fails when the plan reads the named common table
+// expression more than once. Under a LIMIT the planner joins the rows it walks
+// to a materialized set with a nested loop and rescans the set for each of
+// them, which costs the product of the two; the reader turns that off, and the
+// set is then hashed or merged once.
+func requireScannedOnce(t *testing.T, raw []byte, cte, label string) {
+	t.Helper()
+	var plans []map[string]any
+	require.NoError(t, json.Unmarshal(raw, &plans))
+	found := 0
+	var inspect func(plan map[string]any)
+	inspect = func(plan map[string]any) {
+		if node, _ := plan["Node Type"].(string); node == "CTE Scan" {
+			if name, _ := plan["CTE Name"].(string); name == cte {
+				found++
+				loops, _ := plan["Actual Loops"].(float64)
+				require.LessOrEqual(t, loops, float64(1), "%s: %s is scanned %v times, once for every row walked: %s", label, cte, loops, raw)
+			}
+		}
+		children, _ := plan["Plans"].([]any)
+		for _, c := range children {
+			if child, ok := c.(map[string]any); ok {
+				inspect(child)
+			}
+		}
+	}
+	for _, p := range plans {
+		if root, ok := p["Plan"].(map[string]any); ok {
+			inspect(root)
+		}
+	}
+	require.Positive(t, found, "%s: the plan has no scan of %s, so this check looked at nothing: %s", label, cte, raw)
+}
+
 // requireNoChunkSeqScan fails when the plan reads a chunk of the row table by a
 // sequential scan.
 func requireNoChunkSeqScan(t *testing.T, raw []byte, label string) {

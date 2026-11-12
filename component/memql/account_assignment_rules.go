@@ -35,8 +35,9 @@ package memql
 //     move), and whose own latest ledger line, a person's explicit change, did
 //     not put it in X after the record was written (their choice is kept; the
 //     job's own carry records protect nothing; loadParentChanges). The row gets
-//     a change record of its own, so its followers follow it. A row attached to P from a third account is
-//     untouched unless P left that account after the row existed.
+//     a change record of its own, so its followers follow it. A row attached
+//     to P from a third account is untouched unless P left that account after
+//     the row existed.
 //
 // Both are judged on every row a pass reads, full or incremental, so a stale
 // append, being a new version, is repaired by the next incremental pass. The
