@@ -68,7 +68,9 @@ describe("the reviews pack's answers", () => {
     expect(none.may.edit).toBe(false);
     expect(none.viewer.moderates).toBe(true);
     const defaults = reviewSettingsFrom({ exists: true, settings: {} });
-    expect(defaults.values).toMatchObject({ linkLifetimeDays: 14, requestDelayDays: 14, publicDisplay: false, requestsEnabled: false });
+    expect(defaults.values).toMatchObject({ linkLifetimeDays: 14, requestDelayDays: 14, requestDelayMinutes: 0, publicDisplay: false, requestsEnabled: false });
+    // A test's wait in minutes (Jesús, 2026-11-12): the minutes add to the days.
+    expect(reviewSettingsFrom({ exists: true, settings: { requestDelayDays: 0, requestDelayMinutes: 5 } }).values).toMatchObject({ requestDelayDays: 0, requestDelayMinutes: 5 });
   });
 });
 

@@ -87,6 +87,8 @@ export interface ReviewSettingsValues {
   publicDisplay: boolean;
   linkLifetimeDays: number;
   requestDelayDays: number;
+  /** Minutes added to the days: a test's wait, set with the Days / Minutes switch. */
+  requestDelayMinutes: number;
   requestsEnabled: boolean;
   requestTemplateId: string;
   /** The sending identity requests leave as; named only by the cluster's operators. */
@@ -231,6 +233,7 @@ export function reviewSettingsFrom(row: Row | null): ReviewSettings {
       publicDisplay: flag(s, "publicDisplay"),
       linkLifetimeDays: whole(s, "linkLifetimeDays") || 14,
       requestDelayDays: s !== null && s["requestDelayDays"] !== undefined ? whole(s, "requestDelayDays") : 14,
+      requestDelayMinutes: s !== null && s["requestDelayMinutes"] !== undefined ? whole(s, "requestDelayMinutes") : 0,
       requestsEnabled: flag(s, "requestsEnabled"),
       requestTemplateId: rowString(s, "requestTemplateId"),
       requestSenderIdentityId: rowString(s, "requestSenderIdentityId"),

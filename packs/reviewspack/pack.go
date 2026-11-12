@@ -150,6 +150,7 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 				"publicDisplay":         "bool (optional)",
 				"linkLifetimeDays":      "integer (optional) - 1 to 365",
 				"requestDelayDays":      "integer (optional) - 0 to 365",
+				"requestDelayMinutes":   "integer (optional) - 0 to 525600, added to the days",
 				"requestsEnabled":       "bool (optional)",
 				"requestTemplateId":     "string (optional)",
 				"notifyEmail":           "string (optional)",

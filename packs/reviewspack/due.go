@@ -13,10 +13,12 @@ import (
 
 // due.go -- THE DAILY ASK (reviewsSendDueRequests).
 //
-// Once a day the store's own automation runs this. For every store whose
-// requests are on, with a reviewed request template and its organization set,
-// every paid order processed the store's delay ago (14 days unless it said
-// otherwise) earns one link per paid product -- EligibleLines decides which
+// The store's own automation runs this on a schedule it chooses (Fylo's runs
+// every minute since 2026-11-12, so the delay in its settings is the one dial).
+// For every store whose requests are on, with a reviewed request template and
+// its organization set, every paid order processed the store's delay ago (14
+// days unless it said otherwise; days and minutes added, RequestDelay) earns
+// one link per paid product -- EligibleLines decides which
 // -- and each is mailed to that order's buyer through the order mail route
 // (campaignSendOrderMessage), which reads the address off the order itself,
 // checks the store's suppression list and adds the one-click unsubscribe.
@@ -102,7 +104,7 @@ func (p *Provider) sendDueRequests(ctx context.Context, args map[string]any, _ i
 			continue
 		}
 		tally["stores"]++
-		to := now.Add(-time.Duration(eff.RequestDelayDays) * 24 * time.Hour)
+		to := now.Add(-eff.RequestDelay())
 		from := to.Add(-dueCatchUpDays * 24 * time.Hour)
 		orders, err := p.rowsFor(sys, "reviewDueOrders", map[string]string{
 			"storeId": storeID, "from": from.Format(time.RFC3339), "to": to.Format(time.RFC3339)})

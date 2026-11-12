@@ -5604,6 +5604,7 @@
         "publicDisplay",
         "removalApproverUserId",
         "requestDelayDays",
+        "requestDelayMinutes",
         "requestSenderIdentityId",
         "requestTemplateId",
         "requestsEnabled",

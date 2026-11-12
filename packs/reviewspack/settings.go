@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -36,17 +37,27 @@ const DefaultRequestDelayDays = 14
 
 // Settings is one store's effective settings.
 type Settings struct {
-	PublicDisplay     bool
-	LinkLifetimeDays  int
-	RequestDelayDays  int
-	RequestsEnabled   bool
-	RequestTemplateID string
+	PublicDisplay    bool
+	LinkLifetimeDays int
+	RequestDelayDays int
+	// RequestDelayMinutes is added to the days (TestTheDelayCanBeMinutes): a
+	// tester asks a buyer minutes after the order with the Days / Minutes switch
+	// Email > Automations' waits have, then turns it back (Jesús, 2026-11-12).
+	RequestDelayMinutes int
+	RequestsEnabled     bool
+	RequestTemplateID   string
 	// RequestSenderIdentityID is the sending identity the request email leaves
 	// as: the store organization's own, or the installation's standing in for
 	// an organization with no mailbox of its own. An operator's choice.
 	RequestSenderIdentityID string
 	NotifyEmail             string
 	RemovalApproverUserID   string
+}
+
+// RequestDelay is how long after an order its request goes out: the days and
+// the minutes added together.
+func (s Settings) RequestDelay() time.Duration {
+	return time.Duration(s.RequestDelayDays)*24*time.Hour + time.Duration(s.RequestDelayMinutes)*time.Minute
 }
 
 // EffectiveSettings reads a settings row with every default applied.
@@ -67,6 +78,11 @@ func EffectiveSettings(row map[string]any) Settings {
 			s.RequestDelayDays = n
 		}
 	}
+	if v, set := row["requestDelayMinutes"]; set && v != nil {
+		if n := asInt(v); n >= 0 {
+			s.RequestDelayMinutes = n
+		}
+	}
 	s.RequestTemplateID = strings.TrimSpace(asString(row["requestTemplateId"]))
 	s.RequestSenderIdentityID = strings.TrimSpace(asString(row["requestSenderIdentityId"]))
 	s.NotifyEmail = strings.TrimSpace(asString(row["notifyEmail"]))
@@ -85,6 +101,9 @@ var settingFields = map[string]func(v any) (any, error){
 	},
 	"requestDelayDays": func(v any) (any, error) {
 		return intSetting(v, 0, 365, "the request goes out 0 to 365 days after the order")
+	},
+	"requestDelayMinutes": func(v any) (any, error) {
+		return intSetting(v, 0, 365*24*60, "the request goes out 0 to 525600 minutes after the order, added to the days")
 	},
 	"requestTemplateId":       stringSetting(200),
 	"requestSenderIdentityId": stringSetting(200),
@@ -288,14 +307,14 @@ func (p *Provider) writeSettings(ctx context.Context, storeID string, changes ma
 // mutation declares them. Row intrinsics (id, createdAt) are not among them.
 var settingsRowFields = []string{
 	"ownerUserId", "accountId", "publicDisplay", "criteriaText", "linkLifetimeDays", "requestDelayDays",
-	"requestsEnabled", "requestTemplateId", "notifyEmail", "removalApproverUserId", "requestSenderIdentityId",
+	"requestDelayMinutes", "requestsEnabled", "requestTemplateId", "notifyEmail", "removalApproverUserId", "requestSenderIdentityId",
 }
 
 // normalizeSetting turns a value read off a row into the type the write
 // mutation declares: a whole number may come back as a float.
 func normalizeSetting(field string, v any) any {
 	switch field {
-	case "linkLifetimeDays", "requestDelayDays":
+	case "linkLifetimeDays", "requestDelayDays", "requestDelayMinutes":
 		return asInt(v)
 	case "publicDisplay", "requestsEnabled":
 		b, _ := v.(bool)

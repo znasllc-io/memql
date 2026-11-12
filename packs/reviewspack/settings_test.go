@@ -90,11 +90,25 @@ func TestUpdateSettingsMergesTheFieldsItIsGiven(t *testing.T) {
 	}
 }
 
+// A tester's minutes are kept beside the days (TestTheDelayCanBeMinutes).
+func TestTheDelayMinutesAreSaved(t *testing.T) {
+	out, err := writeSettings(t, moderatorCtx("mod-1"), existingSettings(),
+		map[string]any{"siteId": "site-1", "storeId": "store-live", "requestDelayDays": 0, "requestDelayMinutes": 5}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out["requestDelayDays"] != 0 || out["requestDelayMinutes"] != 5 {
+		t.Fatalf("out = %v, want 0 days and 5 minutes", out)
+	}
+}
+
 func TestUpdateSettingsRefusesValuesOutOfRange(t *testing.T) {
 	bad := []map[string]any{
 		{"storeId": "store-live", "linkLifetimeDays": 0},
 		{"storeId": "store-live", "linkLifetimeDays": 400},
 		{"storeId": "store-live", "requestDelayDays": -1},
+		{"storeId": "store-live", "requestDelayMinutes": -1},
+		{"storeId": "store-live", "requestDelayMinutes": 525601},
 		{"storeId": "store-live", "notifyEmail": "not an address"},
 		{"storeId": "store-live", "unknownSetting": true},
 		{"siteId": "site-1", "linkLifetimeDays": 10},
@@ -481,6 +495,12 @@ func TestEffectiveSettingsDefaults(t *testing.T) {
 	s := EffectiveSettings(nil)
 	if s.LinkLifetimeDays != 14 || s.RequestDelayDays != 14 || s.RequestsEnabled || s.PublicDisplay {
 		t.Fatalf("defaults = %+v, want 14-day links, requests 14 days after the order, requests off, display off", s)
+	}
+	if s.RequestDelayMinutes != 0 {
+		t.Fatalf("default minutes = %d, want none", s.RequestDelayMinutes)
+	}
+	if got := EffectiveSettings(map[string]any{"requestDelayDays": 0, "requestDelayMinutes": 5}); got.RequestDelayDays != 0 || got.RequestDelayMinutes != 5 {
+		t.Fatalf("0 days and 5 minutes read as %+v", got)
 	}
 	s = EffectiveSettings(map[string]any{"linkLifetimeDays": 7, "requestsEnabled": true})
 	if s.LinkLifetimeDays != 7 || !s.RequestsEnabled {

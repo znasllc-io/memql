@@ -119,6 +119,7 @@ concept reviewSettings {
   accountId      string   @description("The store's organization, so its people read and change these settings.")
   linkLifetimeDays  int   @description("How many days a buyer's review link stays open. Absent means 14.")
   requestDelayDays  int   @description("How many days after an order its review request goes out. Absent means 14.")
+  requestDelayMinutes int @description("How many minutes, added to the days, after an order its review request goes out: a test sets 0 days and a few minutes with the same Days / Minutes switch an email automation's wait has. Absent means 0.")
   requestsEnabled   bool  @description("Whether this store's review requests go out at all. Absent means off.")
   requestTemplateId string  @description("The v1:campaigns:template.id the review request email is rendered from: the store's own wording.")
   requestSenderIdentityId string  @description("The v1:campaigns:senderIdentity.id the review request leaves as: the store organization's own, or the installation's standing in for an organization with no mailbox of its own. Named only by the cluster's operators.")

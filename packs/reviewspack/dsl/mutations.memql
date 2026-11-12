@@ -161,6 +161,7 @@ mutation reviewSettings putReviewSettings {
     criteriaText           string   @maxLength(4000)
     linkLifetimeDays       int      @minimum(1) @maximum(365)
     requestDelayDays       int      @minimum(0) @maximum(365)
+    requestDelayMinutes    int      @minimum(0) @maximum(525600)
     requestsEnabled        bool
     requestTemplateId      string   @maxLength(200)
     notifyEmail            string   @maxLength(320)
@@ -168,7 +169,7 @@ mutation reviewSettings putReviewSettings {
     requestSenderIdentityId string  @maxLength(200)
   }
   insert {
-    accept { ownerUserId, storeId, accountId, publicDisplay, criteriaText, linkLifetimeDays, requestDelayDays, requestsEnabled, requestTemplateId, notifyEmail, removalApproverUserId, requestSenderIdentityId }
+    accept { ownerUserId, storeId, accountId, publicDisplay, criteriaText, linkLifetimeDays, requestDelayDays, requestDelayMinutes, requestsEnabled, requestTemplateId, notifyEmail, removalApproverUserId, requestSenderIdentityId }
     stamp {
       id: args.settingsId
     }

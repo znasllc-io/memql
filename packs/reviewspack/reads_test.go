@@ -297,7 +297,7 @@ func readSettings(t *testing.T, ctx context.Context, r *readsReader) map[string]
 func TestTheSettingsReadAnswersWhatIsInForce(t *testing.T) {
 	none := readSettings(t, moderatorCtx("mod-1"), &readsReader{})
 	s, _ := none["settings"].(map[string]any)
-	if none["exists"] != false || asInt(s["linkLifetimeDays"]) != 14 || asInt(s["requestDelayDays"]) != 14 ||
+	if none["exists"] != false || asInt(s["linkLifetimeDays"]) != 14 || asInt(s["requestDelayDays"]) != 14 || asInt(s["requestDelayMinutes"]) != 0 ||
 		s["requestsEnabled"] != false || s["publicDisplay"] != false {
 		t.Fatalf("no row = %v, want the defaults", none)
 	}
@@ -309,11 +309,11 @@ func TestTheSettingsReadAnswersWhatIsInForce(t *testing.T) {
 		t.Fatalf("an operator's may = %v, want both", may)
 	}
 
-	row := map[string]any{"storeId": "store-live", "linkLifetimeDays": 30, "requestsEnabled": true,
+	row := map[string]any{"storeId": "store-live", "linkLifetimeDays": 30, "requestsEnabled": true, "requestDelayMinutes": 5,
 		"notifyEmail": "support@example.com", "removalApproverUserId": "owner-1", "requestTemplateId": "tmpl-ask"}
 	set := readSettings(t, moderatorCtx("mod-1"), &readsReader{settings: row})
 	s, _ = set["settings"].(map[string]any)
-	if set["exists"] != true || asInt(s["linkLifetimeDays"]) != 30 || asInt(s["requestDelayDays"]) != 14 ||
+	if set["exists"] != true || asInt(s["linkLifetimeDays"]) != 30 || asInt(s["requestDelayDays"]) != 14 || asInt(s["requestDelayMinutes"]) != 5 ||
 		s["notifyEmail"] != "support@example.com" || s["removalApproverUserId"] != "owner-1" || s["requestTemplateId"] != "tmpl-ask" {
 		t.Fatalf("a row = %v, want its values over the defaults", set)
 	}

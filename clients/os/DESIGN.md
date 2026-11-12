@@ -337,6 +337,13 @@ arrow opens Activity and a row opens that entry's details.
   Keep its consequences and confirmation beside the action, preserve the shared
   confirmation hold and restore focus on cancel. Lifecycle actions that belong
   in an `ActionBar` continue to follow rule 12.
+- **A length of time a tester shortens.** A wait someone turns from days to
+  minutes to walk a flow end to end (Email > Automations' wait steps, Reviews >
+  Settings' wait before asking) is a number with a Days / Minutes `ChoiceRow`
+  labelled "Wait unit", from `kit/durationUnit.ts`, so the two never drift.
+  Switching to Minutes keeps the length of time (5 days reads 7,200);
+  switching to Days rounds to whole days; a length saved in minutes opens in
+  Minutes. Someone who may not change it sees the unit as text, not the switch.
 - **Quiet copying.** Offer copy where it helps: on values someone may need to
   paste elsewhere and would rather not retype, such as names, addresses,
   identifiers, versions, specifications, measured figures, labels and exact

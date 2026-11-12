@@ -63,6 +63,7 @@ builtin reviewsUpdateSettings {
   publicDisplay          bool     @description("Show published reviews on the storefront.")
   linkLifetimeDays       integer  @description("Days a buyer's review link stays open, 1 to 365.")
   requestDelayDays       integer  @description("Days after an order its review request goes out, 0 to 365.")
+  requestDelayMinutes    integer  @description("Minutes after an order, added to the days, its review request goes out, 0 to 525600. A test sets 0 days and a few minutes.")
   requestsEnabled        bool     @description("Send review requests.")
   requestTemplateId      string   @description("The template the request email is rendered from.")
   requestSenderIdentityId string  @description("The sending identity the request email leaves as; the installation's own may stand in for an organization with none. Operators only.")

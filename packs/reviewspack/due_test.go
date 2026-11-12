@@ -314,3 +314,30 @@ func TestARequestCarriesItsLinksPartsAndTheChosenSender(t *testing.T) {
 		t.Fatalf("reviewUrl = %q, want the same token", url)
 	}
 }
+
+// A DELAY CAN BE MINUTES (Jesús, 2026-11-12), the way an email automation's
+// wait can be: a tester asks a buyer minutes after the order and turns it back
+// to days with the same switch. The delay is the days and the minutes added.
+func TestTheDelayCanBeMinutes(t *testing.T) {
+	cases := []struct {
+		days, minutes any
+		want          time.Duration
+	}{
+		{0, 5, 5 * time.Minute},
+		{1, 30, 24*time.Hour + 30*time.Minute},
+		{14, nil, 14 * 24 * time.Hour},
+	}
+	for _, c := range cases {
+		r, _, _, p := dueFixture()
+		r.settings[0]["requestDelayDays"] = c.days
+		if c.minutes != nil {
+			r.settings[0]["requestDelayMinutes"] = c.minutes
+		}
+		if _, err := p.sendDueRequests(fromAutomation(), map[string]any{}, 0); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := r.asked["reviewDueOrders"]["to"], dueNow.Add(-c.want).Format(time.RFC3339); got != want {
+			t.Errorf("%v days and %v minutes: orders asked up to %s, want %s", c.days, c.minutes, got, want)
+		}
+	}
+}

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { ArrowDown, ArrowUp, Clock, Mail, Trash2 } from "lucide-react";
 import { ChoiceRow, Field, Input, Select } from "../../../kit";
 import { useWide } from "../../../kit/useWide";
+import { DURATION_UNITS, durationIn, type DurationUnit } from "../../../kit/durationUnit";
 import { isOperatorOrganization } from "../organizations";
 import type { SenderIdentityRow, TemplateRow } from "../rows";
 import type { Issue } from "./issues";
@@ -77,7 +78,7 @@ export function Flow({ trigger, triggerDetail, steps, accountId, templates, send
   </div>;
 }
 
-type WaitUnit = "days" | "minutes";
+type WaitUnit = DurationUnit;
 /**
  * A wait's length, in days or in minutes (owner's direction, 2026-11-10):
  * testers turn a "5 days" step into "5 minutes" to walk an automation end to
@@ -113,12 +114,12 @@ function WaitFields({ step, patch }: { step: FlowStep; patch: (value: Partial<Fl
     if (next === unit) return;
     setUnit(next);
     if (next === "minutes") { setText(String(total)); return; }
-    const days = Math.max(1, Math.round(total / 1440));
+    const days = durationIn(total, "days", 1);
     setText(String(days));
     write({ days, hours: 0, minutes: 0 });
   }
   return <>
     <Field label="Wait"><Input id="email-flow-wait" label="Wait" value={text} onChange={change} /></Field>
-    <Field label="Unit"><ChoiceRow label="Wait unit" value={unit} onChange={v => switchTo(v as WaitUnit)} options={[{ value: "days", label: "Days" }, { value: "minutes", label: "Minutes" }]} /></Field>
+    <Field label="Unit"><ChoiceRow label="Wait unit" value={unit} onChange={v => switchTo(v as WaitUnit)} options={DURATION_UNITS} /></Field>
   </>;
 }

@@ -272,6 +272,7 @@ func (p *Provider) readSettings(ctx context.Context, args map[string]any, _ int)
 			"publicDisplay":           eff.PublicDisplay,
 			"linkLifetimeDays":        eff.LinkLifetimeDays,
 			"requestDelayDays":        eff.RequestDelayDays,
+			"requestDelayMinutes":     eff.RequestDelayMinutes,
 			"requestsEnabled":         eff.RequestsEnabled,
 			"requestTemplateId":       eff.RequestTemplateID,
 			"requestSenderIdentityId": eff.RequestSenderIdentityID,

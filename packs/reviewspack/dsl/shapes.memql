@@ -95,6 +95,7 @@ shape reviewSettings reviewSettingsFull {
   accountId
   linkLifetimeDays
   requestDelayDays
+  requestDelayMinutes
   requestsEnabled
   requestTemplateId
   requestSenderIdentityId
