@@ -177,6 +177,8 @@ export function PublishDocumentPage({ scope, kind, writes, trail, back, onPublis
   const word = publishing ? "Publishing"
     : checking ? "Reading the documents"
     : settled === "there" ? "Published"
+    // A page that does not know what the documents hold is not ready for anything.
+    : settled === "unread" ? "Could not read the documents"
     : step === "label" ? "Name the version"
     : step === "text" ? (answered.text ? "Text ready" : "Enter the text")
     : "Ready to publish";

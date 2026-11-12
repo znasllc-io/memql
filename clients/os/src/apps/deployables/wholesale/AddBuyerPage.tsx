@@ -139,6 +139,8 @@ export function AddBuyerPage({ scope, settings, writes, trail, back, onAdded }: 
   const word = adding ? "Adding the buyer"
     : checking ? "Reading the store"
     : settled?.found === "there" ? "Added"
+    // A page that does not know what the store holds is not ready for anything.
+    : settled?.found === "unread" ? "Could not read the store"
     : step === "company" ? "Enter the company"
     : step === "buyer" ? "Enter their name"
     : answered.email ? "Ready to add" : "Enter their address";

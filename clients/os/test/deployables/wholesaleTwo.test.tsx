@@ -461,6 +461,9 @@ describe("the buyers", () => {
       expect(await screen.findByText(/could not be read/)).toBeTruthy();
       await readTheBar();
       expect(barButtons()).toEqual(["Cancel", "Check again"]);
+      // The bar does not say ready beside a page that does not know.
+      expect(bar().textContent).toContain("Could not read the store");
+      expect(bar().textContent).not.toMatch(/Ready to/);
       expect(screen.queryByRole("button", { name: "Add and send the terms" })).toBeNull();
       await click(within(bar()).getByRole("button", { name: "Check again" }));
       await waitFor(() => expect(check.held()).toBe(1));
@@ -469,6 +472,7 @@ describe("the buyers", () => {
       await readTheBar();
       await waitFor(() => expect(barButtons()).toEqual(["Cancel", "Check again"]));
       expect(screen.getByText(/could not be read/)).toBeTruthy();
+      expect(bar().textContent).toContain("Could not read the store");
       expect(screen.queryByRole("button", { name: "Add and send the terms" })).toBeNull();
       expect(connection.callsNamed("wholesaleAddBuyer")).toHaveLength(0);
     });
@@ -701,6 +705,9 @@ describe("the documents", () => {
       expect(await screen.findByText(/could not be read/)).toBeTruthy();
       await readTheBar();
       expect(barButtons()).toEqual(["Cancel", "Check again"]);
+      // The bar does not say ready beside a page that does not know.
+      expect(bar().textContent).toContain("Could not read the documents");
+      expect(bar().textContent).not.toMatch(/Ready to/);
       expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
       await click(within(bar()).getByRole("button", { name: "Check again" }));
       await waitFor(() => expect(check.held()).toBe(1));
@@ -710,6 +717,7 @@ describe("the documents", () => {
       await waitFor(() => expect(barButtons()).toEqual(["Cancel", "Check again"]));
       expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
       expect(connection.callsNamed("wholesalePublishDocument")).toHaveLength(1);
+      expect(bar().textContent).toContain("Could not read the documents");
     });
   });
 
