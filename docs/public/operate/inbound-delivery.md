@@ -371,10 +371,20 @@ body, or `timestamp + "." + body` where the source configures a timestamp
 header. So a redelivery lands on the **same row**, and the staging mutation
 preserves your handling state rather than resetting it to `received`.
 
-**The row collapses. The event does not.** Staging a redelivery is still a
-write, and a write still publishes `node.created`, so an automation triggering
-on that event **fires again**. What this gives you is at-least-once delivery
-with a stable idempotency key -- not exactly-once processing.
+**The row collapses. The event may not.** The staging mutation keeps what the
+row already holds of the delivery: its body, the receiver's own stamps (the
+headers, the time of receipt, the verifier) and your handling state. A
+redelivery that brings nothing else new leaves the row as it is: nothing is
+written and nothing is published. One that differs in a field the mutation does
+refresh (the content type, the sender's own key, whether the signature was
+verified) is a new version of the row, and a new version publishes
+`node.created`, so an automation triggering on that event **can fire again**.
+What this gives you is at-least-once delivery with a stable idempotency key --
+not exactly-once processing.
+
+The body is among the kept fields for a reason beyond saving a write. A privacy
+erasure blanks the body of a delivery that has been processed, and a redelivery
+of the same payload must not write it back.
 
 That distinction is the contract, so write your automation to be idempotent
 against it. The row id is the key to be idempotent *with*: branch on `status`

@@ -94,14 +94,21 @@ func TestCreateOnly_ReStageDoesNotResetWorkerOwnedStatus(t *testing.T) {
 }
 
 // TestCreateOnly_InboundReStageKeepsTheProductsHandlingState (memql#5426):
-// stageInboundRequest's @createOnly names status alone. It used to name
-// processedAt and lastError too -- two fields its insert never writes, which
-// the read-merge keeps on a re-stage with or without the annotation, so the
-// load now refuses naming them (write_annotation_unwritten_field). This is the
-// real-Postgres proof that dropping them changed nothing: a redelivery of the
-// same event re-stages onto the same row and keeps the product's whole
-// handling state -- status, processedAt and lastError -- while its accepted
-// fields refresh.
+// stageInboundRequest's @createOnly names the fields its insert writes that a
+// later write of the same delivery must not replace: the status, the
+// receiver's own stamps, and the body. It used to name processedAt and
+// lastError too -- two fields its insert never writes, which the read-merge
+// keeps on a re-stage with or without the annotation, so the load now refuses
+// naming them (write_annotation_unwritten_field). This is the real-Postgres
+// proof that dropping them changed nothing: a redelivery of the same event
+// re-stages onto the same row and keeps the product's whole handling state --
+// status, processedAt and lastError -- while the accepted fields that are not
+// create-only refresh.
+//
+// THE BODY IS ONE OF THE KEPT ONES. A receiver names a delivery by its signed
+// payload, so the same row carries the same body by definition, and the one
+// row where a later write would differ is one whose body a privacy erasure
+// blanked: writing it back would restore what was erased.
 func TestCreateOnly_InboundReStageKeepsTheProductsHandlingState(t *testing.T) {
 	eng, db, ctx := sharedReadMergeEngine(t)
 	// stageInboundRequest is @serverOnly (memql#5707): the receiver stages
@@ -110,20 +117,20 @@ func TestCreateOnly_InboundReStageKeepsTheProductsHandlingState(t *testing.T) {
 
 	const conceptName = "v1:platform:inboundRequest"
 	reqId := "in5426-" + uniqueSuffix("restage")
-	stage := func(body string) string {
+	stage := func(body, contentType string) string {
 		return runMutation(t, ctx, eng, "stageInboundRequest", map[string]any{
 			"requestId":         reqId,
 			"source":            "acme",
 			"medium":            "webhook",
 			"body":              body,
-			"contentType":       "application/json",
+			"contentType":       contentType,
 			"dedupeKey":         "in5426:" + reqId,
 			"signatureVerified": true,
 			"receivedAt":        "2026-01-02T03:04:05Z",
 		})
 	}
 
-	canonicalId := stage(`{"a":1}`)
+	canonicalId := stage(`{"a":1}`, "application/json")
 	require.Equal(t, "received", latestPayload(t, ctx, db, conceptName, canonicalId)["status"], "a fresh stage is received")
 
 	// The product works the row and records how it went.
@@ -134,12 +141,15 @@ func TestCreateOnly_InboundReStageKeepsTheProductsHandlingState(t *testing.T) {
 		"processedAt": "2026-01-02T04:00:00Z",
 	})
 
-	// The sender redelivers the same event.
-	stage(`{"a":1,"redelivered":true}`)
+	// The sender redelivers the same event. No receiver would hand this row a
+	// different body (the row is named by the payload); it is given one here to
+	// show which of the accepted fields a later write replaces.
+	stage(`{"a":1,"redelivered":true}`, "application/json; charset=utf-8")
 
 	row := latestPayload(t, ctx, db, conceptName, canonicalId)
 	require.Equal(t, "failed", row["status"], "@createOnly keeps the product's status")
 	require.Equal(t, "downstream refused", row["lastError"], "the read-merge keeps a field the insert never writes")
 	require.Equal(t, "2026-01-02T04:00:00Z", row["processedAt"], "the read-merge keeps a field the insert never writes")
-	require.Equal(t, `{"a":1,"redelivered":true}`, row["body"], "the accepted fields refresh")
+	require.Equal(t, `{"a":1}`, row["body"], "@createOnly keeps the body the delivery was staged with")
+	require.Equal(t, "application/json; charset=utf-8", row["contentType"], "the accepted fields that are not create-only refresh")
 }
