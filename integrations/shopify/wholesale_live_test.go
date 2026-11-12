@@ -1,6 +1,7 @@
 package shopify
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -39,14 +40,18 @@ import (
 //
 // WHAT A RUN TOUCHES, and only what it made itself: each test invents its own
 // buyer address, wholesale-live-<random>@example.com, which no other customer
-// can hold, records the customer id Shopify answered for it, and deletes
-// exactly that id in a t.Cleanup that runs when the test fails too, logging
-// what it deleted. A customer the route created whose id the test never heard
-// (a grant that failed after its create) is found again by the run's own
-// address, which only this run can have used, and deleted the same way. A
-// cleanup that cannot delete says which id is left, in a line that begins
-// "LEFT IN THE STORE". The company test creates two companies of its own,
-// with a location each, and deletes them the same way.
+// can hold. The transport the connector sends through keeps the id every
+// customerCreate and companyCreate of the test ANSWERED, whether or not the
+// test body ever heard it (a grant whose tag write failed after its create
+// answers the handler an error with no id), and one t.Cleanup, registered
+// before anything is created, deletes exactly those ids, logging each. A create
+// whose answer was lost (a timeout after the origin committed, a body that
+// could not be read) is looked for again by the test's own address or the
+// company's own external id, with the same bounded wait the tests use for the
+// search to catch up, and deleted by id; when it is still not found the
+// cleanup says so in a line that begins "LEFT IN THE STORE, perhaps". A delete
+// that fails says which id is left, in a line that begins "LEFT IN THE STORE".
+// Nothing is left silently.
 //
 // The variables (shopifylive's pair, and this file's own):
 //
@@ -83,12 +88,31 @@ const liveBuyerName = "Sam Rivers"
 // --- counting the Admin calls ---------------------------------------------
 
 // liveAdminCounter is a transport that records the operation name of every
-// Admin call the connector sends, and nothing else: no header, no variable.
+// Admin call the connector sends, and, for the two creates, what the origin
+// answered: the id it created, or that the answer was lost. No header is kept,
+// and no variable but a create's address or external id.
 type liveAdminCounter struct {
-	next http.RoundTripper
-	mu   stdsync.Mutex
-	ops  []string
+	next    http.RoundTripper
+	mu      stdsync.Mutex
+	ops     []string
+	creates []liveCreate
 }
+
+// liveCreate is one create the transport saw: of a customer or a company,
+// keyed by the address or external id it was sent for, with the id the origin
+// answered, or lost when the answer could not be read.
+type liveCreate struct {
+	company bool
+	key     string
+	id      string
+	lost    bool
+}
+
+// The two creates whose answers the transport reads.
+const (
+	liveCustomerCreateOp = "ShopifyCustomerCreate"
+	liveCompanyCreateOp  = "ShopifyCompanyCreate"
+)
 
 // countAdminCalls puts a counter in front of the connector's Admin transport.
 func countAdminCalls(conn *Connector) *liveAdminCounter {
@@ -103,24 +127,114 @@ func countAdminCalls(conn *Connector) *liveAdminCounter {
 
 func (c *liveAdminCounter) RoundTrip(req *http.Request) (*http.Response, error) {
 	op := "(unreadable)"
+	var doc struct {
+		OperationName string `json:"operationName"`
+		Variables     struct {
+			Input struct {
+				Email   string `json:"email"`
+				Company struct {
+					ExternalID string `json:"externalId"`
+				} `json:"company"`
+			} `json:"input"`
+		} `json:"variables"`
+	}
 	if req.Body != nil {
 		body, err := io.ReadAll(req.Body)
 		_ = req.Body.Close()
 		if err != nil {
 			return nil, err
 		}
-		var doc struct {
-			OperationName string `json:"operationName"`
-		}
 		if json.Unmarshal(body, &doc) == nil && doc.OperationName != "" {
 			op = doc.OperationName
 		}
-		req.Body = io.NopCloser(strings.NewReader(string(body)))
+		req.Body = io.NopCloser(bytes.NewReader(body))
 	}
 	c.mu.Lock()
 	c.ops = append(c.ops, op)
 	c.mu.Unlock()
+	switch op {
+	case liveCustomerCreateOp:
+		return c.readCreate(req, liveCreate{key: doc.Variables.Input.Email})
+	case liveCompanyCreateOp:
+		return c.readCreate(req, liveCreate{company: true, key: doc.Variables.Input.Company.ExternalID})
+	}
 	return c.next.RoundTrip(req)
+}
+
+// readCreate sends a create and keeps what the origin answered. A create the
+// origin refused (userErrors, a GraphQL refusal with no data, a 4xx) created
+// nothing and is not kept; a create whose answer cannot be read -- no
+// response, a body that cannot be read, a 5xx, a body that is not the
+// document's answer -- may have been committed, and is kept as lost.
+func (c *liveAdminCounter) readCreate(req *http.Request, create liveCreate) (*http.Response, error) {
+	keep := func(cr liveCreate) {
+		c.mu.Lock()
+		c.creates = append(c.creates, cr)
+		c.mu.Unlock()
+	}
+	resp, err := c.next.RoundTrip(req)
+	if err != nil {
+		create.lost = true
+		keep(create)
+		return nil, err
+	}
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil {
+		create.lost = true
+		keep(create)
+		return nil, err
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	if resp.StatusCode >= 500 {
+		create.lost = true
+		keep(create)
+		return resp, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return resp, nil
+	}
+	var answer struct {
+		Data map[string]struct {
+			Customer *struct {
+				ID string `json:"id"`
+			} `json:"customer"`
+			Company *struct {
+				ID string `json:"id"`
+			} `json:"company"`
+		} `json:"data"`
+		Errors []any `json:"errors"`
+	}
+	if json.Unmarshal(body, &answer) != nil {
+		create.lost = true
+		keep(create)
+		return resp, nil
+	}
+	field := "customerCreate"
+	if create.company {
+		field = "companyCreate"
+	}
+	payload, answered := answer.Data[field]
+	switch {
+	case !create.company && payload.Customer != nil && payload.Customer.ID != "":
+		create.id = payload.Customer.ID
+		keep(create)
+	case create.company && payload.Company != nil && payload.Company.ID != "":
+		create.id = payload.Company.ID
+		keep(create)
+	case !answered && len(answer.Errors) == 0:
+		// A 200 that is neither the answer nor a refusal.
+		create.lost = true
+		keep(create)
+	}
+	return resp, nil
+}
+
+// created is every create the transport saw.
+func (c *liveAdminCounter) created() []liveCreate {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]liveCreate{}, c.creates...)
 }
 
 // mark is where the calls stand now.
@@ -161,6 +275,16 @@ type liveWholesale struct {
 	store Store
 	// customerScopesChecked is set once the token is known to reach customers.
 	customerScopesChecked bool
+	// buyers is every buyer the test invented; the ids their replies named are
+	// deleted beside the ones the transport saw created.
+	buyers []*liveBuyer
+	// logf is where the cleanup says what it deleted and what it left
+	// (t.Logf); the cleanup's own tests read it.
+	logf func(format string, args ...any)
+	// findTries and findWait bound the cleanup's search for a create whose
+	// answer was lost: the tests' own wait for the search to catch up.
+	findTries int
+	findWait  time.Duration
 }
 
 func newLiveWholesale(t *testing.T, stores ...liveCredentials) *liveWholesale {
@@ -173,11 +297,16 @@ func newLiveWholesale(t *testing.T, stores ...liveCredentials) *liveWholesale {
 // counter's own proof that it counts.
 func newLiveWholesaleOn(t *testing.T, h *liveHarness) *liveWholesale {
 	t.Helper()
-	w := &liveWholesale{h: h, calls: countAdminCalls(h.conn), integ: NewIntegration(h.conn)}
+	w := &liveWholesale{h: h, calls: countAdminCalls(h.conn), integ: NewIntegration(h.conn),
+		logf: t.Logf, findTries: livePollTries, findWait: livePollWait}
 	w.store = h.store(t, 0)
 	if w.calls.countSince(0, shopifylive.ShopPlanOperation) == 0 {
 		t.Fatal("the Admin call counter did not see the development-store check, so it would count nothing")
 	}
+	// ONE CLEANUP, registered after the store is known to be a development
+	// store and before anything is created, so it runs last of the test's own
+	// and removes whatever the test made, heard or not.
+	t.Cleanup(w.removeCreated)
 	return w
 }
 
@@ -240,13 +369,13 @@ func (b *liveBuyer) recorded() []string {
 	return append([]string{}, b.ids...)
 }
 
-// newBuyer invents the test's buyer, registers its removal, and holds the
-// precondition that nobody on the store has the address yet.
+// newBuyer invents the test's buyer, hands it to the harness's cleanup, and
+// holds the precondition that nobody on the store has the address yet.
 func (w *liveWholesale) newBuyer(t *testing.T) *liveBuyer {
 	t.Helper()
 	w.requireCustomerScopes(t)
 	b := &liveBuyer{email: "wholesale-live-" + liveRandom(t) + "@example.com"}
-	t.Cleanup(func() { w.removeBuyer(t, b) })
+	w.buyers = append(w.buyers, b)
 	if holders := w.holders(t, b); len(holders) != 0 {
 		for _, c := range holders {
 			// Not this run's: never recorded, never deleted.
@@ -384,33 +513,122 @@ func (w *liveWholesale) revokeOK(t *testing.T, b *liveBuyer, id string) {
 	}
 }
 
-// removeBuyer deletes every customer the run made for its address, on a fresh
-// context so a test that ran out of time still cleans up.
-func (w *liveWholesale) removeBuyer(t *testing.T, b *liveBuyer) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+// removeCreated deletes what the test made, on a fresh context so a test that
+// ran out of time still cleans up: every customer and company a create
+// answered, by id, and every create whose answer was lost, looked for again by
+// its own address or external id.
+func (w *liveWholesale) removeCreated() {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	ids := b.recorded()
-	if len(ids) == 0 {
-		// The route may have created a customer and failed before answering
-		// its id. The address is the run's own, so whatever holds it is too.
-		all, err := w.h.conn.customersByEmail(ctx, w.store, b.email)
-		if err != nil {
-			t.Logf("LEFT IN THE STORE, perhaps: a customer holding %s could not be looked up, so none was deleted; if one exists it is this run's, delete it in the Shopify admin: %s",
-				b.email, liveRefusal(err))
-			return
-		}
-		for _, c := range all {
-			ids = append(ids, c.id)
+	deleted := map[string]bool{}
+	var customers, companies []string
+	var lost []liveCreate
+	for _, cr := range w.calls.created() {
+		switch {
+		case cr.lost:
+			lost = append(lost, cr)
+		case cr.company:
+			companies = append(companies, cr.id)
+		default:
+			customers = append(customers, cr.id)
 		}
 	}
-	for _, id := range ids {
-		if _, err := w.h.tryMutate(ctx, w.store, liveCustomerDeleteDoc, "LiveTestCustomerDelete", "customerDelete",
-			map[string]any{"input": map[string]any{"id": id}}); err != nil {
-			t.Logf("LEFT IN THE STORE: customer %s (the invented buyer %s); delete it in the Shopify admin: %v", id, b.email, err)
+	for _, b := range w.buyers {
+		customers = append(customers, b.recorded()...)
+	}
+	for _, id := range customers {
+		w.deleteCustomer(ctx, id, deleted)
+	}
+	for _, id := range companies {
+		w.deleteCompany(ctx, id, deleted)
+	}
+	for _, cr := range lost {
+		what := "a customer for " + cr.key
+		find := func() ([]string, error) {
+			all, err := w.h.conn.customersByEmail(ctx, w.store, cr.key)
+			ids := make([]string, 0, len(all))
+			for _, c := range all {
+				ids = append(ids, c.id)
+			}
+			return ids, err
+		}
+		if cr.company {
+			what = "a company with the external id " + cr.key
+			find = func() ([]string, error) {
+				company, _, err := w.h.conn.companyByExternalID(ctx, w.store, cr.key)
+				if company == "" {
+					return nil, err
+				}
+				return []string{company}, err
+			}
+		}
+		ids, err := w.findLost(ctx, find)
+		if len(ids) == 0 {
+			reason := fmt.Sprintf("the search found none within %s", time.Duration(w.findTries)*w.findWait)
+			if err != nil {
+				reason = "the search failed: " + liveRefusal(err)
+			}
+			w.logf("LEFT IN THE STORE, perhaps: %s; its create was sent and its answer was lost, and %s; look for it in the Shopify admin and delete it", what, reason)
 			continue
 		}
-		t.Logf("deleted customer %s, the invented buyer %s", id, b.email)
+		for _, id := range ids {
+			if cr.company {
+				w.deleteCompany(ctx, id, deleted)
+			} else {
+				w.deleteCustomer(ctx, id, deleted)
+			}
+		}
 	}
+}
+
+// findLost asks find until it answers an id, as long as the tests wait for the
+// search to catch up after a create.
+func (w *liveWholesale) findLost(ctx context.Context, find func() ([]string, error)) ([]string, error) {
+	var err error
+	for try := 0; try < w.findTries; try++ {
+		var ids []string
+		if ids, err = find(); len(ids) > 0 {
+			return ids, nil
+		}
+		if sleepErr := sleepCtx(ctx, w.findWait); sleepErr != nil {
+			break
+		}
+	}
+	return nil, err
+}
+
+func (w *liveWholesale) deleteCustomer(ctx context.Context, id string, deleted map[string]bool) {
+	if id == "" || deleted[id] {
+		return
+	}
+	deleted[id] = true
+	payload, err := w.h.tryMutate(ctx, w.store, liveCustomerDeleteDoc, "LiveTestCustomerDelete", "customerDelete",
+		map[string]any{"input": map[string]any{"id": id}})
+	if err == nil && payload["deletedCustomerId"] != id {
+		err = fmt.Errorf("customerDelete answered deletedCustomerId %v", payload["deletedCustomerId"])
+	}
+	if err != nil {
+		w.logf("LEFT IN THE STORE: customer %s, which this test created, was not confirmed deleted; delete it in the Shopify admin: %v", id, err)
+		return
+	}
+	w.logf("deleted customer %s, which this test created", id)
+}
+
+func (w *liveWholesale) deleteCompany(ctx context.Context, id string, deleted map[string]bool) {
+	if id == "" || deleted[id] {
+		return
+	}
+	deleted[id] = true
+	payload, err := w.h.tryMutate(ctx, w.store, liveCompanyDeleteDoc, "LiveTestCompanyDelete", "companyDelete",
+		map[string]any{"id": id})
+	if err == nil && payload["deletedCompanyId"] != id {
+		err = fmt.Errorf("companyDelete answered deletedCompanyId %v", payload["deletedCompanyId"])
+	}
+	if err != nil {
+		w.logf("LEFT IN THE STORE: company %s and its location, which this test created, were not confirmed deleted; delete it in the Shopify admin: %v", id, err)
+		return
+	}
+	w.logf("deleted company %s and its location, which this test created", id)
 }
 
 // --- the tests ----------------------------------------------------------------
@@ -439,8 +657,12 @@ func TestLiveAGrantWithoutWriteCustomersAnswersScopeMissing(t *testing.T) {
 	if n := w.calls.countSince(mark, "ShopifyTagsAdd"); n != 0 {
 		t.Fatalf("a refused grant sent %d tagsAdd", n)
 	}
-	if holders := w.holders(t, b); len(holders) != 0 {
-		t.Fatalf("a refused grant left %d customers holding the invented address", len(holders))
+	// The transport saw every create of the test, and none answered a
+	// customer (the search would not show one this soon after).
+	for _, cr := range w.calls.created() {
+		if !cr.company {
+			t.Fatalf("a refused grant's customerCreate answered %+v; the cleanup deletes it", cr)
+		}
 	}
 }
 
@@ -567,12 +789,10 @@ func TestLiveASignedInNonOwnerCannotTagACustomerDirectly(t *testing.T) {
 		t.Fatalf("register the Shopify integration: %v", err)
 	}
 	// An address the test never means to create. A call that got through
-	// would create it, which the zero count below catches; the cleanup then
-	// deletes whatever holds the address, which can only be this run's.
-	b := &liveBuyer{email: "wholesale-live-" + liveRandom(t) + "@example.com"}
-	t.Cleanup(func() { w.removeBuyer(t, b) })
+	// would create it, which the zero count below catches; the harness's
+	// cleanup then deletes what the transport saw created.
 	call := "builtin " + renderCall("shopifyTagWholesaleCustomer", map[string]any{
-		"storeId": w.store.ID, "buyerEmail": b.email, "buyerName": liveBuyerName,
+		"storeId": w.store.ID, "buyerEmail": "wholesale-live-" + liveRandom(t) + "@example.com", "buyerName": liveBuyerName,
 	})
 	want := "shopify: shopifyTagWholesaleCustomer is called by the wholesale pack, never by a client"
 	for _, caller := range []struct {
@@ -677,7 +897,10 @@ const liveCompanyDeleteDoc = `mutation LiveTestCompanyDelete($id: ID!) {
 }`
 
 // createLiveCompany creates one company of the test's own, with its location,
-// stamped with externalID, and registers its removal.
+// stamped with externalID. Its removal is the harness's cleanup, registered
+// before this create was sent: the transport keeps the id the create answered,
+// or that its answer was lost, and the cleanup deletes the one or looks for the
+// other by externalID.
 func (w *liveWholesale) createLiveCompany(t *testing.T, applicationID, externalID, suffix string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(w.h.ctx, liveCallTimeout)
@@ -686,18 +909,6 @@ func (w *liveWholesale) createLiveCompany(t *testing.T, applicationID, externalI
 		ApplicationID: applicationID,
 		CompanyName:   "Wholesale live test " + suffix,
 	}, externalID)
-	if company != "" {
-		t.Cleanup(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-			defer cancel()
-			if _, err := w.h.tryMutate(ctx, w.store, liveCompanyDeleteDoc, "LiveTestCompanyDelete", "companyDelete",
-				map[string]any{"id": company}); err != nil {
-				t.Logf("LEFT IN THE STORE: company %s (external id %s) and its location; delete it in the Shopify admin: %v", company, externalID, err)
-				return
-			}
-			t.Logf("deleted company %s (external id %s) and its location", company, externalID)
-		})
-	}
 	if err != nil {
 		t.Fatalf("create the company stamped %s: %s", externalID, liveRefusal(err))
 	}

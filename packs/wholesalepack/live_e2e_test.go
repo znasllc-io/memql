@@ -676,10 +676,13 @@ func (p tagRouteOnly) Capabilities() []memql.IntegrationCapability {
 	return out
 }
 
+// Adapted from integrations/shopify/wholesale_calls.go's customerSearchQuery,
+// selecting defaultEmailAddress where that one selects the deprecated email.
 const liveTagCustomersDoc = `query WholesaleLiveCustomers($query: String!) {
-  customers(first: 5, query: $query) { nodes { id email } }
+  customers(first: 5, query: $query) { nodes { id defaultEmailAddress { emailAddress } } }
 }`
 
+// Copied from integrations/shopify/wholesale_live_test.go's liveCustomerDoc.
 const liveTagCustomerDoc = `query WholesaleLiveCustomer($id: ID!) {
   customer(id: $id) {
     id
@@ -688,6 +691,7 @@ const liveTagCustomerDoc = `query WholesaleLiveCustomer($id: ID!) {
   }
 }`
 
+// Copied from integrations/shopify/mirror_live_test.go's liveCustomerDeleteDoc.
 const liveTagCustomerDeleteDoc = `mutation WholesaleLiveCustomerDelete($input: CustomerDeleteInput!) {
   customerDelete(input: $input) {
     deletedCustomerId
@@ -724,7 +728,8 @@ func (s liveShop) holders(ctx context.Context, email string) ([]string, error) {
 	var out []string
 	for _, n := range nodes {
 		m, _ := n.(map[string]any)
-		if got, _ := m["email"].(string); strings.EqualFold(got, email) {
+		address, _ := m["defaultEmailAddress"].(map[string]any)
+		if got, _ := address["emailAddress"].(string); strings.EqualFold(got, email) {
 			if gid, _ := m["id"].(string); gid != "" {
 				out = append(out, gid)
 			}
@@ -733,22 +738,42 @@ func (s liveShop) holders(ctx context.Context, email string) ([]string, error) {
 	return out, nil
 }
 
-// remove deletes the customers the run made for its address: the id the
-// entitlement recorded, or, when it recorded none, whatever holds the run's
-// own address, which only this run can have used.
+// liveFindTries and liveFindWait bound the search for a customer whose id the
+// test never heard: as long as the connector's live tests wait for the
+// customer search to catch up after a create (mirror_live_test.go's
+// livePollTries and livePollWait).
+const (
+	liveFindTries = 6
+	liveFindWait  = 2500 * time.Millisecond
+)
+
+// remove deletes the customer the run made for its address: the id the
+// entitlement recorded, or, when it recorded none (an entitlement that failed
+// after its create), whatever the search finds for the run's own address,
+// which only this run can have used, waiting as long as the search takes to
+// catch up. When it finds nothing it says so in a line a person can act on.
 func (s liveShop) remove(t *testing.T, email string, recorded func() string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	ids := []string{}
 	if id := recorded(); id != "" {
 		ids = append(ids, id)
 	} else {
-		found, err := s.holders(ctx, email)
-		if err != nil {
-			t.Logf("LEFT IN THE STORE, perhaps: a customer holding %s could not be looked up, so none was deleted; if one exists it is this run's, delete it in the Shopify admin: %v", email, err)
+		var err error
+		for try := 0; try < liveFindTries && len(ids) == 0; try++ {
+			if try > 0 {
+				time.Sleep(liveFindWait)
+			}
+			ids, err = s.holders(ctx, email)
+		}
+		if len(ids) == 0 {
+			reason := fmt.Sprintf("the search found none within %s", liveFindTries*liveFindWait)
+			if err != nil {
+				reason = fmt.Sprintf("the search failed: %v", err)
+			}
+			t.Logf("LEFT IN THE STORE, perhaps: a customer for %s; the entitlement recorded no customer id, and %s; look for it in the Shopify admin and delete it", email, reason)
 			return
 		}
-		ids = found
 	}
 	for _, id := range ids {
 		data, err := s.ask(ctx, liveTagCustomerDeleteDoc, "WholesaleLiveCustomerDelete", map[string]any{"input": map[string]any{"id": id}})
@@ -756,10 +781,12 @@ func (s liveShop) remove(t *testing.T, email string, recorded func() string) {
 			payload, _ := data["customerDelete"].(map[string]any)
 			if errs, _ := payload["userErrors"].([]any); len(errs) > 0 {
 				err = fmt.Errorf("customerDelete refused: %v", errs)
+			} else if payload["deletedCustomerId"] != id {
+				err = fmt.Errorf("customerDelete answered deletedCustomerId %v", payload["deletedCustomerId"])
 			}
 		}
 		if err != nil {
-			t.Logf("LEFT IN THE STORE: customer %s (the invented buyer %s); delete it in the Shopify admin: %v", id, email, err)
+			t.Logf("LEFT IN THE STORE: customer %s (the invented buyer %s) was not confirmed deleted; delete it in the Shopify admin: %v", id, email, err)
 			continue
 		}
 		t.Logf("deleted customer %s, the invented buyer %s", id, email)
@@ -780,6 +807,33 @@ func TestLiveE2E_AClientGrantAutomationTagsTheBuyerOnADevelopmentStore(t *testin
 	// BEFORE ANYTHING IS WRITTEN, to the store or to the database.
 	shopifylive.RequireDevelopmentStore(t, shopifylive.EnvStoreDomain, func(document, operation string) (map[string]any, error) {
 		return live.ask(ctx, document, operation, nil)
+	})
+
+	// THE RUN'S OWN BUYER, removed by the id the grant records. REGISTERED
+	// BEFORE THE ENGINE IS BUILT: cleanups run last in, first out, so this one
+	// runs after the scheduler is stopped, and no retry of the grant can
+	// create the customer after it has looked. It looks only once the address
+	// is known to be held by nobody (armed), so it never touches a customer
+	// the run did not make.
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		t.Fatalf("no randomness for the run's own address: %v", err)
+	}
+	email := "wholesale-live-" + hex.EncodeToString(suffix) + "@example.com"
+	var recordedMu sync.Mutex
+	recorded, armed := "", false
+	t.Cleanup(func() {
+		recordedMu.Lock()
+		ready := armed
+		recordedMu.Unlock()
+		if !ready {
+			return
+		}
+		live.remove(t, email, func() string {
+			recordedMu.Lock()
+			defer recordedMu.Unlock()
+			return recorded
+		})
 	})
 
 	eng := automatedWholesaleEngine(t)
@@ -811,24 +865,12 @@ func TestLiveE2E_AClientGrantAutomationTagsTheBuyerOnADevelopmentStore(t *testin
 		t.Fatalf("register the Shopify tag route: %v", err)
 	}
 
-	// THE RUN'S OWN BUYER, removed by the id the grant records.
-	suffix := make([]byte, 6)
-	if _, err := rand.Read(suffix); err != nil {
-		t.Fatalf("no randomness for the run's own address: %v", err)
-	}
-	email := "wholesale-live-" + hex.EncodeToString(suffix) + "@example.com"
-	var recordedMu sync.Mutex
-	recorded := ""
-	t.Cleanup(func() {
-		live.remove(t, email, func() string {
-			recordedMu.Lock()
-			defer recordedMu.Unlock()
-			return recorded
-		})
-	})
 	if held, err := live.holders(ctx, email); err != nil || len(held) != 0 {
 		t.Fatalf("the invented address %s must be held by nobody before the test (held by %v, %v); nothing was created", email, held, err)
 	}
+	recordedMu.Lock()
+	armed = true
+	recordedMu.Unlock()
 
 	appID := submit(t, eng, owner, storeID, "Live Tag Trading", email)
 	decide(t, eng, asDecider(t, eng, merchant), appID, wholesalepack.TransitionApprove, merchant, "approved on a development store")
