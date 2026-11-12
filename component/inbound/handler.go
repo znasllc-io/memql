@@ -6,10 +6,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -48,9 +51,13 @@ type Handler struct {
 	registered RegisteredSource
 	// largeBodies holds one token for each request holding a body over the
 	// receiver's default cap, and largeBodyWait is how long such a request
-	// waits for a free one before it is answered 503. See readBody.
-	largeBodies   chan struct{}
-	largeBodyWait time.Duration
+	// waits for a free one before it is answered 503. largeBodyGrace,
+	// largeBodyRate (bytes per second) and largeBodyHold pace the read a turn
+	// covers. See readBody and pacedBody.
+	largeBodies                   chan struct{}
+	largeBodyWait                 time.Duration
+	largeBodyGrace, largeBodyHold time.Duration
+	largeBodyRate                 float64
 }
 
 // RegisteredSource resolves one source name to its policy, or (_, false) when
@@ -83,7 +90,8 @@ func NewHandler(cfg Config, engine Engine, logger *slog.Logger) *Handler {
 		logger = slog.New(slog.DiscardHandler)
 	}
 	return &Handler{cfg: cfg, engine: engine, logger: logger, now: time.Now,
-		largeBodies: make(chan struct{}, largeBodyReads), largeBodyWait: defaultLargeBodyWait}
+		largeBodies: make(chan struct{}, largeBodyReads), largeBodyWait: defaultLargeBodyWait,
+		largeBodyGrace: defaultLargeBodyGrace, largeBodyRate: defaultLargeBodyRate, largeBodyHold: defaultLargeBodyHold}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +120,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, release, err := h.readBody(r, src)
+	// A source that signs is refused without its signature header BEFORE its
+	// body is read. Such a request cannot pass verify whatever its body says,
+	// so reading it -- and, for a body over the default cap, giving it one of
+	// the few large-body turns -- would only let an unsigned crowd spend them.
+	// The same 401 verify answers for an absent signature.
+	if src.Scheme != SchemeNone && strings.TrimSpace(r.Header.Get(src.SignatureHeader)) == "" {
+		h.logger.Warn("inbound receiver: request refused", "source", name,
+			"error", "the signature header "+src.SignatureHeader+" is absent")
+		http.Error(w, "signature verification failed", http.StatusUnauthorized)
+		return
+	}
+
+	body, release, err := h.readBody(w, r, src)
 	switch {
 	case err == errBodyTooLarge:
 		// LOGGED, because nothing else says it. The 413 goes back to the
@@ -137,6 +157,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("inbound receiver: request refused, too many large bodies being read",
 			"source", name, "declaredLength", r.ContentLength, "turns", cap(h.largeBodies))
 		http.Error(w, "receiver busy, try again", http.StatusServiceUnavailable)
+		return
+	case err == errBodyTooSlow:
+		// The read a turn covers was cut for falling behind its pace (see
+		// pacedBody), and the turn is free again. Logged for the same reason
+		// as the two above: the sender is the only other party that knows.
+		h.logger.Warn("inbound receiver: request refused, body arrived too slowly",
+			"source", name, "declaredLength", r.ContentLength,
+			"minBytesPerSecond", int64(h.largeBodyRate), "grace", h.largeBodyGrace, "hold", h.largeBodyHold)
+		http.Error(w, "request body arrived too slowly", http.StatusRequestTimeout)
 		return
 	case err != nil:
 		http.Error(w, "could not read request body", http.StatusBadRequest)
@@ -361,6 +390,7 @@ func (h *Handler) resolveSource(ctx context.Context, name string) (SourceConfig,
 var (
 	errBodyTooLarge    = fmt.Errorf("body exceeds the configured cap")
 	errLargeBodiesBusy = fmt.Errorf("every turn for a body over the default cap is taken")
+	errBodyTooSlow     = fmt.Errorf("a body holding a large-body turn fell behind its pace")
 )
 
 const (
@@ -374,6 +404,19 @@ const (
 	// because a sender times its delivery out on its own (GitHub after ten
 	// seconds) and an answer it can see beats a connection it gives up on.
 	defaultLargeBodyWait = 3 * time.Second
+
+	// The pace a read holding a turn must keep (pacedBody). Without one, the
+	// cheap way to starve every large delivery is to hold both turns with
+	// bodies that trickle a byte at a time for as long as the server lets a
+	// request read. With it, a turn is held only by bytes that keep arriving
+	// -- at least defaultLargeBodyRate per second once defaultLargeBodyGrace has
+	// passed, and the whole body within defaultLargeBodyHold -- so holding the
+	// turns costs real, sustained bandwidth. Ten seconds is also when GitHub
+	// gives up on a delivery itself, and a real one arrives far faster than
+	// 1 MiB/s.
+	defaultLargeBodyGrace = time.Second
+	defaultLargeBodyRate  = 1 << 20
+	defaultLargeBodyHold  = 10 * time.Second
 )
 
 // bodyLimit is the cap a request to src is read under: the source's own when
@@ -400,27 +443,93 @@ func (h *Handler) bodyLimit(src SourceConfig) int64 {
 // cannot get a turn within largeBodyWait is refused with errLargeBodiesBusy. A
 // request declaring no more than the default never waits, so a crowd of large
 // requests cannot hold up ordinary deliveries.
-func (h *Handler) readBody(r *http.Request, src SourceConfig) ([]byte, func(), error) {
+//
+// The read a turn covers is PACED (pacedBody): a body that stops arriving loses
+// the turn with errBodyTooSlow. That needs the connection's read deadline, so it
+// is in force wherever the ResponseWriter offers one -- every real server -- and
+// absent only where it cannot be (a test's recorder), where the server's own
+// ReadTimeout remains the bound it always was.
+func (h *Handler) readBody(w http.ResponseWriter, r *http.Request, src SourceConfig) ([]byte, func(), error) {
 	release := func() {}
 	limit := h.bodyLimit(src)
 	if r.ContentLength > limit {
 		return nil, release, errBodyTooLarge
 	}
+	var from io.Reader = r.Body
+	var paced *pacedBody
 	if def := int64(h.cfg.MaxBodyBytes); limit > def && (r.ContentLength < 0 || r.ContentLength > def) {
 		if !h.takeLargeBodyTurn(r.Context()) {
 			return nil, release, errLargeBodiesBusy
 		}
 		release = func() { <-h.largeBodies }
+		rc := http.NewResponseController(w)
+		start := time.Now()
+		if rc.SetReadDeadline(start.Add(h.largeBodyGrace)) == nil {
+			paced = &pacedBody{body: r.Body, rc: rc, start: start,
+				grace: h.largeBodyGrace, hold: h.largeBodyHold, rate: h.largeBodyRate}
+			from = paced
+		}
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
+	body, err := io.ReadAll(io.LimitReader(from, limit+1))
 	if err == nil && int64(len(body)) > limit {
 		err = errBodyTooLarge
 	}
 	if err != nil {
 		release()
+		// The deadline that cut a slow read is LEFT as it is. Answering, the
+		// server tries to drain what is left of an unread body before it writes
+		// the response; an expired deadline is what makes that drain fail at
+		// once, so the answer goes out and the connection closes instead of
+		// waiting on the trickle that just lost its turn.
+		if isTimeout(err) {
+			err = errBodyTooSlow
+		}
 		return nil, func() {}, err
 	}
+	if paced != nil {
+		// The body is in, so the pace is lifted. Left set, it could cut the
+		// server's background read on this connection -- and that read failing
+		// cancels the request's context -- while the row is being staged.
+		_ = paced.rc.SetReadDeadline(time.Time{})
+	}
 	return body, release, nil
+}
+
+// pacedBody keeps a body holding a large-body turn arriving. Before each read it
+// moves the connection's read deadline to the latest instant at which the bytes
+// read so far still meet rate once grace has passed -- start + grace + n/rate --
+// and never past start + hold. A sender that keeps up never meets the deadline;
+// one that trickles meets it within a moment of the grace, and the read fails
+// with a timeout that readBody turns into errBodyTooSlow.
+type pacedBody struct {
+	body        io.Reader
+	rc          *http.ResponseController
+	start       time.Time
+	grace, hold time.Duration
+	rate        float64
+	n           int64
+}
+
+func (p *pacedBody) Read(b []byte) (int, error) {
+	due := p.start.Add(p.grace + time.Duration(float64(p.n)/p.rate*float64(time.Second)))
+	if last := p.start.Add(p.hold); due.After(last) {
+		due = last
+	}
+	if err := p.rc.SetReadDeadline(due); err != nil {
+		return 0, err
+	}
+	n, err := p.body.Read(b)
+	p.n += int64(n)
+	return n, err
+}
+
+// isTimeout reports a read cut by a deadline.
+func isTimeout(err error) bool {
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return true
+	}
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 // takeLargeBodyTurn waits up to largeBodyWait for a turn, or until the request

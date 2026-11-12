@@ -652,7 +652,7 @@ variables:
     scope: node
     optional: true
     default: "262144"
-    description: "Maximum inbound request body the receiver reads for a source with no cap of its own (MEMQL_INBOUND_SOURCE_<NAME>_MAX_BODY_BYTES; the github source defaults to GitHub's 25 MiB payload cap). Larger requests are refused with 413, logged as a warning naming the source, the cap and the setting, and no row is staged. Bounds what an unauthenticated caller can make the node allocate before the signature check runs; a body over it is held in one of two turns per node."
+    description: "Maximum inbound request body the receiver reads for a source with no cap of its own (MEMQL_INBOUND_SOURCE_<NAME>_MAX_BODY_BYTES; the github source defaults to GitHub's 25 MiB payload cap). Larger requests are refused with 413, logged as a warning naming the source, the cap and the setting, and no row is staged. Bounds what an unauthenticated caller can make the node allocate before the signature check runs; a body over it is held in one of two turns per node, must keep arriving at 1 MiB/s after its first second and whole within 10 s (else 408), and a request without its source's signature header is refused 401 before its body is read."
 
   - name: MEMQL_INBOUND_TIMESTAMP_TOLERANCE_SECONDS
     component: inbound

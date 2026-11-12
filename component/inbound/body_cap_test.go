@@ -94,6 +94,9 @@ func TestADeclaredLengthOverTheCapIsRefusedBeforeTheBodyIsRead(t *testing.T) {
 	body := &countingReader{r: strings.NewReader(strings.Repeat("x", 2048))}
 	r := httptest.NewRequest(http.MethodPost, "/inbound/acme", body)
 	r.ContentLength = 2048
+	// Signed, or the request is refused for its missing signature first: the
+	// length is the question here.
+	r.Header.Set("X-Sig", "00")
 	rec := httptest.NewRecorder()
 	testHandler(t, eng, hexSource()).ServeHTTP(rec, r)
 

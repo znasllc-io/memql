@@ -56,7 +56,7 @@ the source `big-corp` reads `MEMQL_INBOUND_SOURCE_BIG_CORP_*`:
 | `..._TIMESTAMP_HEADER` | no | turns on the replay window |
 | `..._DEDUPE_HEADER` | no | the sender's own idempotency key |
 | `..._FORWARD_HEADERS` | no | comma-separated allowlist of non-secret delivery headers to stage on the row as `headersJson` (lowercase keys). `Authorization`, `Cookie` and the signature header are never staged, whatever the list says. The body HMAC does not sign these values: they are routing metadata, not proof of who sent the request |
-| `..._MAX_BODY_BYTES` | no | this source's own body cap, in place of `MEMQL_INBOUND_MAX_BODY_BYTES`, for a sender whose real deliveries outgrow the default. A GitHub push of a long branch is far over 256 KiB, so the `github` source defaults to GitHub's own 25 MiB cap. A body over the receiver's default is held in one of two turns per node, so a raised cap does not let an unauthenticated caller exhaust the node's memory; a request that finds both turns taken is answered `503` |
+| `..._MAX_BODY_BYTES` | no | this source's own body cap, in place of `MEMQL_INBOUND_MAX_BODY_BYTES`, for a sender whose real deliveries outgrow the default. A GitHub push of a long branch is far over 256 KiB, so the `github` source defaults to GitHub's own 25 MiB cap. A body over the receiver's default is held in one of two turns per node, so a raised cap does not let an unauthenticated caller exhaust the node's memory; a request that finds both turns taken is answered `503`. A body holding a turn must keep arriving -- at least 1 MiB/s after its first second, and all of it within 10 seconds -- or it is answered `408`, so a sender trickling bytes cannot sit on a turn. A request without its source's signature header never gets a turn: it is refused `401` before its body is read |
 | `..._ELEMENT_SEPARATOR` | no | the header is a `k=v` list; this is what separates the entries |
 | `..._SIGNATURE_ELEMENT` | with a separator | which element carries the digest |
 | `..._TIMESTAMP_ELEMENT` | no | which element carries the timestamp |
@@ -412,6 +412,7 @@ signed payload, so it separates them and cannot be forged.
 | `404` | source unlisted, misconfigured, receiver disabled, a nested path, or an env pin on a name a connector claims |
 | `401` | signature absent, malformed, mismatched, or outside the replay window |
 | `413` | body over the cap (the source's own, else the receiver's); logged as a warning naming the source, the cap and the setting that raises it |
+| `408` | a body over the receiver's default cap arrived too slowly (under 1 MiB/s after its first second, or not whole within 10 seconds); logged |
 | `400` | body is not valid UTF-8, body contains a NUL byte, or the dedupe header is malformed |
 | `503` | verified, but staging failed; or a body over the receiver's default cap found both large-body turns taken -- **the sender should retry** |
 

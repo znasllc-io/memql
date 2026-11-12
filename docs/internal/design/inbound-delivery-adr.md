@@ -161,6 +161,7 @@ product codes against is: branch on `status` before doing work.
 | `405` | not a POST | stop |
 | `401` | signature absent, malformed, mismatched, or outside the replay window | stop |
 | `413` | body over the source's cap (`MEMQL_INBOUND_SOURCE_<NAME>_MAX_BODY_BYTES`, else `MEMQL_INBOUND_MAX_BODY_BYTES`); logged as a warning | stop |
+| `408` | a body over the default cap fell behind its pace (1 MiB/s after one second, whole within ten); logged | retry |
 | `400` | body is not valid UTF-8, or the dedupe header is malformed | stop |
 | `503` | verified, but the row could not be staged; or a body over the default cap found every large-body turn taken | **retry** |
 
