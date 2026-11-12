@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/ast"
+	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
@@ -53,7 +54,8 @@ const fixturePath = "testdata/fixture-store/orders.json"
 // holds it; the order writes it with capitals and spaces.
 const fixtureGranted = "orders@corner-cycles.example.test"
 
-// fixtureStoreCase is one of the twenty cases the record names: the orders
+// fixtureStoreCase is one of the twenty cases the record names, or of the
+// three the review added: the orders
 // that make it, by name, and what in the file makes it that case.
 type fixtureStoreCase struct {
 	name   string
@@ -156,6 +158,21 @@ func fixtureCases() []fixtureStoreCase {
 			return o["taxesIncluded"] == true && anyRefund(o, func(f map[string]any) bool { return len(shippingLines(f)) > 0 })
 		}),
 		one("deleted-order", func(o map[string]any) bool { return len(lines(o)) > 0 }),
+		// The three the review added: duties, the date that places an order,
+		// and an order that does not count older than every one that does.
+		one("duties-with-a-partial-duties-refund", func(o map[string]any) bool {
+			charged := textAt(o, "originalTotalDutiesSet", "shopMoney", "amount")
+			return charged != "" && charged != "0.00" && anyRefund(o, func(f map[string]any) bool {
+				duties := objectsAt(f, "duties")
+				return len(duties) == 1 && textAt(duties[0], "amountSet", "shopMoney", "amount") != charged
+			})
+		}),
+		one("processed-after-it-was-created", func(o map[string]any) bool {
+			madrid := mustZone("Europe/Madrid")
+			return instantAt(o, "processedAt").In(madrid).Format(time.DateOnly) != instantAt(o, "createdAt").In(madrid).Format(time.DateOnly)
+		}),
+		{name: "cancelled-before-the-first-counted-order", orders: []string{"cancelled-before-the-first-counted-order"},
+			holds: func(os []map[string]any) bool { return os[0]["cancelledAt"] != nil }},
 	}
 }
 
@@ -507,12 +524,27 @@ func differences(where string, got map[string]any, want map[string]string, in st
 	return out
 }
 
-func productsText(v any) []string {
-	var out []string
-	for _, p := range objectsAt(map[string]any{"l": v}, "l") {
-		out = append(out, fmt.Sprintf("%s %q %s", answerText(p["key"]), answerText(p["title"]), answerText(p["value"])))
+// listText is a list of the answer as one text: "null" when the answer
+// gives null, "[]" when it gives an empty list, each row by row otherwise, so
+// a list measured and empty is never taken for one not measured.
+func listText(v any, row func(m map[string]any) string) string {
+	if v == nil {
+		return "null"
 	}
-	return out
+	list, ok := v.([]any)
+	if !ok {
+		return fmt.Sprintf("not a list: %v", v)
+	}
+	var rows []string
+	for _, x := range list {
+		m, _ := x.(map[string]any)
+		rows = append(rows, row(m))
+	}
+	return "[" + strings.Join(rows, "; ") + "]"
+}
+
+func productText(p map[string]any) string {
+	return fmt.Sprintf("%s %q %s", answerText(p["key"]), answerText(p["title"]), answerText(p["value"]))
 }
 
 func (s fixtureStore) ask(t *testing.T, period string) map[string]any {
@@ -527,14 +559,33 @@ func (s fixtureStore) ask(t *testing.T, period string) map[string]any {
 // the figure, both values and the orders and refunds that fall in it.
 func TestTheFiguresEqualAnIndependentCalculationToTheCent(t *testing.T) {
 	s := newFixtureStore(t)
-	now := fixtureClock(s.zone)
-	atNow(t, now)
 	history := historyFrom(t, s.nodes, s.zone)
 	granted := []string{fixtureGranted}
 	stamp := func(at time.Time) string { return at.In(s.zone).Format(time.RFC3339) }
 
-	for _, p := range fixturePeriods(now) {
+	// Every period at the fixture's clock, and the 24 hours of a quiet day
+	// after it, which hold no order and no refund: its lists are measured and
+	// empty, never null.
+	type asked struct {
+		now time.Time
+		fixturePeriod
+	}
+	var periods []asked
+	for _, p := range fixturePeriods(fixtureClock(s.zone)) {
+		periods = append(periods, asked{fixtureClock(s.zone), p})
+	}
+	quiet := fixtureClock(s.zone).AddDate(0, 0, 2)
+	periods = append(periods, asked{quiet, fixturePeriods(quiet)[0]})
+	if periods[len(periods)-1].name != "24h" {
+		t.Fatal("the quiet day's period is not the 24 hours")
+	}
+
+	for _, p := range periods {
+		atNow(t, p.now)
 		got := s.ask(t, p.name)
+		if p.now.Equal(quiet) {
+			p.name = "24h on a quiet day"
+		}
 		want := referenceFigures(s.fixture, s.zone, "EUR", false, granted, p.start, p.end, p.bucket)
 		in := "orders: " + strings.Join(want.Orders, ", ") + "; refunds: " + strings.Join(want.Refunds, ", ")
 		var diffs []string
@@ -601,8 +652,8 @@ func TestTheFiguresEqualAnIndependentCalculationToTheCent(t *testing.T) {
 		for _, r := range want.ProductsByUnits {
 			byUnits = append(byUnits, r.String())
 		}
-		note("productsBySales", strings.Join(productsText(got["productsBySales"]), "; "), strings.Join(bySales, "; "))
-		note("productsByUnits", strings.Join(productsText(got["productsByUnits"]), "; "), strings.Join(byUnits, "; "))
+		note("productsBySales", listText(got["productsBySales"], productText), "["+strings.Join(bySales, "; ")+"]")
+		note("productsByUnits", listText(got["productsByUnits"], productText), "["+strings.Join(byUnits, "; ")+"]")
 		note("productCount", answerText(got["productCount"]), want.ProductCount)
 		note("refundsWithoutItem", answerText(got["refundsWithoutItem"]), want.RefundsWithoutItem)
 
@@ -612,14 +663,13 @@ func TestTheFiguresEqualAnIndependentCalculationToTheCent(t *testing.T) {
 			split, _ := valueAt(got, "wholesale", side).(map[string]any)
 			diffs = append(diffs, differences(p.name+" wholesale."+side, split, want.Wholesale[side], in)...)
 		}
-		var others, wantOthers []string
-		for _, c := range objectsAt(got, "otherCurrencies") {
-			others = append(others, answerText(c["currency"])+" "+answerText(c["orders"]))
-		}
+		var wantOthers []string
 		for _, c := range want.OtherCurrencies {
 			wantOthers = append(wantOthers, c.Currency+" "+c.Orders)
 		}
-		note("otherCurrencies", strings.Join(others, "; "), strings.Join(wantOthers, "; "))
+		note("otherCurrencies", listText(got["otherCurrencies"], func(c map[string]any) string {
+			return answerText(c["currency"]) + " " + answerText(c["orders"])
+		}), "["+strings.Join(wantOthers, "; ")+"]")
 
 		for _, d := range diffs {
 			t.Error(d)
@@ -651,14 +701,15 @@ func TestTheShortWrittenDiscountIsSharedInCentsByBoth(t *testing.T) {
 	}
 }
 
-// THE FIXTURE HOLDS EVERY CASE THE RECORD NAMES: twenty cases, each found by
+// THE FIXTURE HOLDS EVERY CASE THE RECORD NAMES: twenty cases and the three
+// the review added, each found by
 // its orders' names in the file and holding what makes it that case; and
 // every key the file holds is a field the mirror's order documents select.
 func TestTheFixtureHoldsEveryCaseTheRecordNames(t *testing.T) {
 	nodes := fixtureNodes(t, readFixture(t))
 	cases := fixtureCases()
-	if len(cases) != 20 {
-		t.Fatalf("%d cases, want the twenty the record names", len(cases))
+	if len(cases) != 23 {
+		t.Fatalf("%d cases, want the twenty the record names and the three the review added", len(cases))
 	}
 	named := map[string]bool{}
 	for _, c := range cases {
@@ -756,40 +807,47 @@ func TestTheFixturesRefundsHoldOnlyTheFieldsTheMirrorKeeps(t *testing.T) {
 }
 
 // THE REFERENCE SHARES NO CODE WITH THE COMPONENT: reference_calc_test.go
-// imports the standard library only, and every name it uses that it does not
-// declare itself is a Go builtin or the name of a package it imports. A
-// builtin's name another file of the package declares again would be that
-// file's, so none may be.
+// imports the standard library only, and it type-checks ALONE, as a package of
+// its one file: every name it uses is declared in it, a Go builtin, or a
+// package it imports. A name of the component's anywhere -- a call, a type, a
+// map or array key in a composite literal -- is undefined there. A builtin's
+// name another file of the package declares again would be that file's in the
+// real package, so none may be used.
 func TestTheReferenceSharesNoCodeWithTheComponent(t *testing.T) {
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "reference_calc_test.go", nil, 0)
+	others := packageNames(t, "reference_calc_test.go")
+	source, err := os.ReadFile("reference_calc_test.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	imported := map[string]bool{}
-	for _, spec := range file.Imports {
-		path, _ := strconv.Unquote(spec.Path.Value)
-		if first, _, _ := strings.Cut(path, "/"); strings.Contains(first, ".") {
-			t.Errorf("the calculator imports %s, which is not the standard library", path)
-		}
-		name := path[strings.LastIndex(path, "/")+1:]
-		if spec.Name != nil {
-			name = spec.Name.Name
-		}
-		if name == "_" || name == "." {
-			t.Errorf("the calculator imports %s as %s", path, name)
-		}
-		imported[name] = true
+	for _, problem := range sharedCode(t, string(source), others) {
+		t.Errorf("the calculator: %s", problem)
 	}
 
-	// Every top-level name of the package's other files.
-	others := map[string]bool{}
+	// The check can still say otherwise: a component's name as a map key and
+	// as an array index key, which the parser alone leaves unseen, a call of a
+	// test helper, and an import of the component's money.
+	for _, planted := range []string{
+		"package storestats\n\nvar _ = map[int]string{topRows: \"rows\"}\n",
+		"package storestats\n\nvar _ = [30]string{topRows: \"rows\"}\n",
+		"package storestats\n\nvar _ = ptr(1)\n",
+		"package storestats\n\nimport \"github.com/znasllc-io/memql/core/money\"\n\nvar _ money.Amount\n",
+	} {
+		if len(sharedCode(t, planted, others)) == 0 {
+			t.Errorf("the check passes a source that uses the component's code:\n%s", planted)
+		}
+	}
+}
+
+// packageNames is every top-level name the package's files but skip declare.
+func packageNames(t *testing.T, skip string) map[string]bool {
+	t.Helper()
+	names := map[string]bool{}
 	paths, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, path := range paths {
-		if path == "reference_calc_test.go" {
+		if path == skip {
 			continue
 		}
 		f, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
@@ -800,40 +858,57 @@ func TestTheReferenceSharesNoCodeWithTheComponent(t *testing.T) {
 			switch d := d.(type) {
 			case *ast.FuncDecl:
 				if d.Recv == nil {
-					others[d.Name.Name] = true
+					names[d.Name.Name] = true
 				}
 			case *ast.GenDecl:
-				for _, s := range d.Specs {
-					switch s := s.(type) {
+				for _, spec := range d.Specs {
+					switch spec := spec.(type) {
 					case *ast.TypeSpec:
-						others[s.Name.Name] = true
+						names[spec.Name.Name] = true
 					case *ast.ValueSpec:
-						for _, n := range s.Names {
-							others[n.Name] = true
+						for _, n := range spec.Names {
+							names[n.Name] = true
 						}
 					}
 				}
 			}
 		}
 	}
+	return names
+}
 
-	// The parser resolves every name the file declares; what it leaves
-	// unresolved is a builtin, an imported package, or another file's.
-	seen := map[string]bool{}
-	for _, id := range file.Unresolved {
-		if seen[id.Name] {
-			continue
+// sharedCode is every way source reaches past itself and the standard
+// library: an import that is not the standard library's, anything the type
+// checker finds undefined when the file is its own package, and a builtin
+// another file of the package declares again.
+func sharedCode(t *testing.T, source string, others map[string]bool) []string {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "calculator.go", source, 0)
+	if err != nil {
+		return []string{"does not parse: " + err.Error()}
+	}
+	var problems []string
+	for _, spec := range file.Imports {
+		path, _ := strconv.Unquote(spec.Path.Value)
+		if first, _, _ := strings.Cut(path, "/"); strings.Contains(first, ".") {
+			problems = append(problems, "imports "+path+", which is not the standard library")
 		}
-		seen[id.Name] = true
-		switch {
-		case imported[id.Name]:
-		case types.Universe.Lookup(id.Name) != nil && !others[id.Name]:
-		default:
-			t.Errorf("the calculator uses %s at %s, which it does not declare and which is neither a builtin nor an imported package",
-				id.Name, fset.Position(id.Pos()))
+		if spec.Name != nil && (spec.Name.Name == "_" || spec.Name.Name == ".") {
+			problems = append(problems, "imports "+path+" as "+spec.Name.Name)
 		}
 	}
-	if len(seen) == 0 {
-		t.Fatal("the calculator uses no name it does not declare: this test reads nothing")
+	info := &types.Info{Uses: map[*ast.Ident]types.Object{}}
+	conf := types.Config{
+		Importer: importer.ForCompiler(fset, "source", nil),
+		Error:    func(err error) { problems = append(problems, err.Error()) },
 	}
+	_, _ = conf.Check("storestats", fset, []*ast.File{file}, info)
+	for id, obj := range info.Uses {
+		if obj.Parent() == types.Universe && others[id.Name] {
+			problems = append(problems, fmt.Sprintf("uses %s at %s, a builtin another file of the package declares again",
+				id.Name, fset.Position(id.Pos())))
+		}
+	}
+	return problems
 }

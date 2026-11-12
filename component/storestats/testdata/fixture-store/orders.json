@@ -4899,6 +4899,292 @@
      ]
     },
     "refunds": []
+   },
+   {
+    "id": "gid://shopify/Order/3023",
+    "updatedAt": "2025-11-10T10:00:00Z",
+    "name": "duties-with-a-partial-duties-refund",
+    "email": "buyer-60@example.test",
+    "customer": {
+     "id": "gid://shopify/Customer/9060"
+    },
+    "currencyCode": "EUR",
+    "processedAt": "2025-11-06T12:00:00+01:00",
+    "createdAt": "2025-11-06T12:00:00+01:00",
+    "cancelledAt": null,
+    "test": false,
+    "taxesIncluded": false,
+    "edited": false,
+    "discountCodes": [],
+    "subtotalLineItemsQuantity": 1,
+    "totalShippingPriceSet": {
+     "shopMoney": {
+      "amount": "0.00",
+      "currencyCode": "EUR"
+     },
+     "presentmentMoney": {
+      "amount": "0.00",
+      "currencyCode": "EUR"
+     }
+    },
+    "totalTaxSet": {
+     "shopMoney": {
+      "amount": "9.45",
+      "currencyCode": "EUR"
+     },
+     "presentmentMoney": {
+      "amount": "9.45",
+      "currencyCode": "EUR"
+     }
+    },
+    "originalTotalDutiesSet": {
+     "shopMoney": {
+      "amount": "12.00",
+      "currencyCode": "EUR"
+     },
+     "presentmentMoney": {
+      "amount": "12.00",
+      "currencyCode": "EUR"
+     }
+    },
+    "lineItems": {
+     "pageInfo": {
+      "hasNextPage": false,
+      "endCursor": null
+     },
+     "nodes": [
+      {
+       "id": "gid://shopify/LineItem/4148",
+       "title": "Helmet",
+       "quantity": 1,
+       "currentQuantity": 0,
+       "isGiftCard": false,
+       "product": {
+        "id": "gid://shopify/Product/504"
+       },
+       "originalUnitPriceSet": {
+        "shopMoney": {
+         "amount": "45.00",
+         "currencyCode": "EUR"
+        },
+        "presentmentMoney": {
+         "amount": "45.00",
+         "currencyCode": "EUR"
+        }
+       },
+       "discountAllocations": []
+      }
+     ]
+    },
+    "refunds": [
+     {
+      "id": "gid://shopify/Refund/5012",
+      "updatedAt": "2025-11-09T18:00:00+01:00",
+      "processedAt": "2025-11-09T18:00:00+01:00",
+      "createdAt": "2025-11-09T18:00:00+01:00",
+      "order": {
+       "id": "gid://shopify/Order/3023"
+      },
+      "totalRefundedSet": {
+       "shopMoney": {
+        "amount": "58.45",
+        "currencyCode": "EUR"
+       },
+       "presentmentMoney": {
+        "amount": "58.45",
+        "currencyCode": "EUR"
+       }
+      },
+      "duties": [
+       {
+        "amountSet": {
+         "shopMoney": {
+          "amount": "4.00",
+          "currencyCode": "EUR"
+         },
+         "presentmentMoney": {
+          "amount": "4.00",
+          "currencyCode": "EUR"
+         }
+        }
+       }
+      ],
+      "refundLineItems": {
+       "nodes": [
+        {
+         "lineItem": {
+          "id": "gid://shopify/LineItem/4148"
+         },
+         "quantity": 1,
+         "subtotalSet": {
+          "shopMoney": {
+           "amount": "45.00",
+           "currencyCode": "EUR"
+          },
+          "presentmentMoney": {
+           "amount": "45.00",
+           "currencyCode": "EUR"
+          }
+         },
+         "totalTaxSet": {
+          "shopMoney": {
+           "amount": "9.45",
+           "currencyCode": "EUR"
+          },
+          "presentmentMoney": {
+           "amount": "9.45",
+           "currencyCode": "EUR"
+          }
+         }
+        }
+       ]
+      },
+      "refundShippingLines": {
+       "nodes": []
+      },
+      "orderAdjustments": {
+       "nodes": []
+      }
+     }
+    ]
+   },
+   {
+    "id": "gid://shopify/Order/3024",
+    "updatedAt": "2025-11-10T10:00:00Z",
+    "name": "processed-after-it-was-created",
+    "email": "buyer-50@example.test",
+    "customer": {
+     "id": "gid://shopify/Customer/9050"
+    },
+    "currencyCode": "EUR",
+    "processedAt": "2025-11-04T09:00:00+01:00",
+    "createdAt": "2025-11-02T23:30:00+01:00",
+    "cancelledAt": null,
+    "test": false,
+    "taxesIncluded": false,
+    "edited": false,
+    "discountCodes": [],
+    "subtotalLineItemsQuantity": 1,
+    "totalShippingPriceSet": {
+     "shopMoney": {
+      "amount": "0.00",
+      "currencyCode": "EUR"
+     },
+     "presentmentMoney": {
+      "amount": "0.00",
+      "currencyCode": "EUR"
+     }
+    },
+    "totalTaxSet": {
+     "shopMoney": {
+      "amount": "6.93",
+      "currencyCode": "EUR"
+     },
+     "presentmentMoney": {
+      "amount": "6.93",
+      "currencyCode": "EUR"
+     }
+    },
+    "originalTotalDutiesSet": null,
+    "lineItems": {
+     "pageInfo": {
+      "hasNextPage": false,
+      "endCursor": null
+     },
+     "nodes": [
+      {
+       "id": "gid://shopify/LineItem/4149",
+       "title": "Lock",
+       "quantity": 1,
+       "currentQuantity": 1,
+       "isGiftCard": false,
+       "product": {
+        "id": "gid://shopify/Product/506"
+       },
+       "originalUnitPriceSet": {
+        "shopMoney": {
+         "amount": "33.00",
+         "currencyCode": "EUR"
+        },
+        "presentmentMoney": {
+         "amount": "33.00",
+         "currencyCode": "EUR"
+        }
+       },
+       "discountAllocations": []
+      }
+     ]
+    },
+    "refunds": []
+   },
+   {
+    "id": "gid://shopify/Order/3025",
+    "updatedAt": "2025-11-10T10:00:00Z",
+    "name": "cancelled-before-the-first-counted-order",
+    "email": "buyer-70@example.test",
+    "customer": {
+     "id": "gid://shopify/Customer/9070"
+    },
+    "currencyCode": "EUR",
+    "processedAt": "2025-02-20T10:00:00+01:00",
+    "createdAt": "2025-02-20T10:00:00+01:00",
+    "cancelledAt": "2025-02-21T10:00:00+01:00",
+    "test": false,
+    "taxesIncluded": false,
+    "edited": false,
+    "discountCodes": [],
+    "subtotalLineItemsQuantity": 1,
+    "totalShippingPriceSet": {
+     "shopMoney": {
+      "amount": "0.00",
+      "currencyCode": "EUR"
+     },
+     "presentmentMoney": {
+      "amount": "0.00",
+      "currencyCode": "EUR"
+     }
+    },
+    "totalTaxSet": {
+     "shopMoney": {
+      "amount": "3.78",
+      "currencyCode": "EUR"
+     },
+     "presentmentMoney": {
+      "amount": "3.78",
+      "currencyCode": "EUR"
+     }
+    },
+    "originalTotalDutiesSet": null,
+    "lineItems": {
+     "pageInfo": {
+      "hasNextPage": false,
+      "endCursor": null
+     },
+     "nodes": [
+      {
+       "id": "gid://shopify/LineItem/4150",
+       "title": "Pump",
+       "quantity": 1,
+       "currentQuantity": 0,
+       "isGiftCard": false,
+       "product": {
+        "id": "gid://shopify/Product/508"
+       },
+       "originalUnitPriceSet": {
+        "shopMoney": {
+         "amount": "18.00",
+         "currencyCode": "EUR"
+        },
+        "presentmentMoney": {
+         "amount": "18.00",
+         "currencyCode": "EUR"
+        }
+       },
+       "discountAllocations": []
+      }
+     ]
+    },
+    "refunds": []
    }
   ]
  }
