@@ -1309,19 +1309,20 @@ func TestTheOneInternalOriginStampIsWalkContext(t *testing.T) {
 	}
 }
 
-// THE HARNESS'S STORE LIMIT IS A TEST'S ALONE. onlyStoresForTests narrows the
-// stores a run lists; no file of the package that is not a test assigns it,
-// and production code imports no testing. Not a database test.
+// THE TESTS' SEAMS ARE A TEST'S ALONE. onlyStoresForTests narrows the stores
+// a run lists and clockForTests is the budgets' clock; no file of the package
+// that is not a test assigns either, and production code imports no testing.
+// Not a database test.
 func TestNoProductionCodeSetsOnlyStoresForTests(t *testing.T) {
 	src := packageSource(t)
-	var limit types.Object
+	seams := map[types.Object]bool{}
 	for id, obj := range src.info.Defs {
-		if id.Name == "onlyStoresForTests" && obj != nil {
-			limit = obj
+		if (id.Name == "onlyStoresForTests" || id.Name == "clockForTests") && obj != nil {
+			seams[obj] = true
 		}
 	}
-	if limit == nil {
-		t.Fatal("no onlyStoresForTests in the package; this check is not looking at it")
+	if len(seams) != 2 {
+		t.Fatalf("found %d of the two test seams in the package; this check is not looking at them", len(seams))
 	}
 	for _, f := range src.files {
 		for _, imp := range f.Imports {
@@ -1335,8 +1336,8 @@ func TestNoProductionCodeSetsOnlyStoresForTests(t *testing.T) {
 				return true
 			}
 			for _, l := range as.Lhs {
-				if id, ok := ast.Unparen(l).(*ast.Ident); ok && src.info.Uses[id] == limit {
-					t.Errorf("%s: production code sets onlyStoresForTests", src.fset.Position(id.Pos()))
+				if id, ok := ast.Unparen(l).(*ast.Ident); ok && seams[src.info.Uses[id]] {
+					t.Errorf("%s: production code sets %s", src.fset.Position(id.Pos()), id.Name)
 				}
 			}
 			return true

@@ -425,7 +425,7 @@ func walkSource(ctx context.Context, engine Engine, query, storeID string, floor
 		// every one.
 		cursor := ""
 		for {
-			if counted >= budget {
+			if counted >= budget || turnSpent(ctx) {
 				return w, time.Time{}, nil
 			}
 			if reads >= maxReadsPerRun {
