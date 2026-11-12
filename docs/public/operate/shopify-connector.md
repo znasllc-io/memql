@@ -759,9 +759,10 @@ whole value, never as the start of a longer one, and only in the fields that
 say whose a row is:
 
 - **Her own customer record is emptied**: every field but its structure (the
-  store, the id, when the row changed and was read, whether it is deleted). Free text reads
-  `[redacted]`, a list is empty, and anything else -- an address, a count, a
-  date -- loses its value, so a typed read answers null.
+  store, the account the row belongs to, the id, when the row changed and was
+  read, whether it is deleted). Free text reads `[redacted]`, a list is empty,
+  and anything else -- an address, a count, a date -- loses its value, so a
+  typed read answers null.
 - **The rows that are hers**: her orders (an order whose newest version names
   her as its customer or its buyer, and the orders the request names), her
   abandoned checkouts and draft orders, her own company contact record, her
