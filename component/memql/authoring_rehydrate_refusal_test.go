@@ -126,6 +126,7 @@ func TestNarrowingRulesAreTheLanguagesNarrowings(t *testing.T) {
 		"pattern_invalid":              true,
 		"args_undeclared":              true,
 		"body_call_unknown":            true,
+		"belongs_to_undeclared":        true,
 		"signature_concept_unresolved": false,
 		CodeConceptUnparsed:            false,
 		"lower_unknown_field":          false,
@@ -134,6 +135,45 @@ func TestNarrowingRulesAreTheLanguagesNarrowings(t *testing.T) {
 	} {
 		if got := narrowsTheLanguage(code); got != want {
 			t.Errorf("narrowsTheLanguage(%q) = %v, want %v", code, got, want)
+		}
+	}
+}
+
+// A stored concept with no @belongsTo -- promoted before promotion required
+// one -- is refused at re-hydration with belongs_to_undeclared, and the report
+// names the row, its owner and the forms to write, as every rule that narrowed
+// the language does, rather than the bare promote error.
+func TestRehydrationNamesAStoredConceptThatDeclaresNoBelongsTo(t *testing.T) {
+	eng := promoteConceptEngine(t)
+	eng.loadReport = newLoadReport()
+	row := AuthoringConstructRow{
+		Id:          "v1:authoring:construct:undeclared1",
+		Kind:        "concept",
+		Name:        "storedUndeclared",
+		BundleId:    "authoring:bundle:undeclared1",
+		OwnerUserId: "u-owner",
+		Source:      "@version(\"1.0.0\")\nconcept storedUndeclared {\n  label  string\n}\n",
+		Origin:      "trainingns/concepts.memql",
+		Status:      "active",
+	}
+	err := eng.recompileAndPromoteRow(context.Background(), row)
+	var refusal *RehydrationRefusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("want a *RehydrationRefusal, got %v", err)
+	}
+	if refusal.RuleCode() != "belongs_to_undeclared" {
+		t.Errorf("code = %q, want belongs_to_undeclared", refusal.RuleCode())
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		`authored concept "storedUndeclared" (row v1:authoring:construct:undeclared1, bundle authoring:bundle:undeclared1, owner u-owner)`,
+		"declares no @belongsTo",
+		"@belongsTo(account)",
+		"@belongsTo(cluster)",
+		"promote the bundle again, or demote the construct",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the report does not say %q:\n%s", want, msg)
 		}
 	}
 }

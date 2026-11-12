@@ -832,7 +832,16 @@ func (e *MemQLEngine) recompileAndPromoteRow(ctx context.Context, row AuthoringC
 	// could only ever disagree with it, and a peer that refuses what the origin
 	// accepted is a split registry, which is the exact failure the broadcast
 	// exists to prevent.
-	return e.promoteAuthoredConstructWithGate(ctx, conceptPromoteReplay(), c)
+	promoteErr := e.promoteAuthoredConstructWithGate(ctx, conceptPromoteReplay(), c)
+	// A stored concept with no @belongsTo compiles but is refused at the
+	// promote step, since promotion requires a declaration. It is a rule that
+	// narrowed the language, so its quarantine names the row, owner and remedy
+	// (explainRehydrationFailure) like a compile refusal does. Every other
+	// promote error is returned as it always was.
+	if baseloader.RuleCode(promoteErr) == languageParser.CodeBelongsToUndeclared {
+		return explainRehydrationFailure(row, promoteErr)
+	}
+	return promoteErr
 }
 
 // quarantineRehydratedConstruct records a durable-bundle re-hydration
@@ -1067,6 +1076,12 @@ func (e *MemQLEngine) rehydratePromotedNow(ctx context.Context, store promoteReh
 	// once every spec is loaded (memql#5366). A construct they refuse is
 	// quarantined and taken back out.
 	for _, refused := range e.checkRehydratedPushdown() {
+		result.Rehydrated--
+		result.Failed = append(result.Failed, refused)
+	}
+	// The same for the @belongsTo cross-concept checks: a child concept can be
+	// stored, and so walked, before the parent its `via` follows.
+	for _, refused := range e.checkRehydratedBelongsTo() {
 		result.Rehydrated--
 		result.Failed = append(result.Failed, refused)
 	}

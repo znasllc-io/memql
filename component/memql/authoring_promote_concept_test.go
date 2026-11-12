@@ -985,3 +985,82 @@ func TestPromoteConcept_RefusesAnUnsoundBelongsToChain(t *testing.T) {
 		t.Error("the refused concept reached the live registry")
 	}
 }
+
+// A promoted concept whose @belongsTo(account, via=..., parent=...) names
+// another PROMOTED concept re-hydrates at boot in whichever order the walk
+// reaches the two. The walk goes bundle by bundle, and a child reached first
+// would otherwise be judged against a registry its parent is not in yet
+// (belongs_to_parent_unknown) and quarantined, so a sound pair would load or
+// not depending on the order its bundles were stored in.
+func TestRehydratePromotedConcepts_ASoundParentAndChildLoadInEitherOrder(t *testing.T) {
+	const parentSrc = "@version(\"1.0.0\")\n@belongsTo(account)\nconcept trainedLedger {\n  accountId  string\n  title      string\n}"
+	const childSrc = "@version(\"1.0.0\")\n@belongsTo(account, via=\"ledgerId\", parent=\"v1:trainingns:trainedLedger\")\n" +
+		"concept trainedEntry {\n  accountId  string\n  ledgerId   string\n}"
+	parentRow := AuthoringConstructRow{Id: "v1:authoring:construct:ledger", Kind: "concept", Name: "trainedLedger",
+		BundleId: "authoring:bundle:ledger", OwnerUserId: "owner-1", Source: parentSrc, Origin: "trainingns/concepts.memql", Status: "active"}
+	childRow := AuthoringConstructRow{Id: "v1:authoring:construct:entry", Kind: "concept", Name: "trainedEntry",
+		BundleId: "authoring:bundle:entry", OwnerUserId: "owner-1", Source: childSrc, Origin: "trainingns/concepts.memql", Status: "active"}
+	bundle := func(r AuthoringConstructRow) AuthoringBundleRow {
+		return AuthoringBundleRow{Id: r.BundleId, OwnerUserId: r.OwnerUserId, Status: BundleActive}
+	}
+	for name, order := range map[string][]AuthoringConstructRow{
+		"parent first": {parentRow, childRow},
+		"child first":  {childRow, parentRow},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := promoteConceptEngine(t)
+			e.loadReport = newLoadReport()
+			store := &fakeRehydrateStore{
+				bundles: []AuthoringBundleRow{bundle(order[0]), bundle(order[1])},
+				constructs: map[string][]AuthoringConstructRow{
+					order[0].BundleId: {order[0]},
+					order[1].BundleId: {order[1]},
+				},
+			}
+			res, err := e.rehydratePromotedNow(context.Background(), store)
+			if err != nil {
+				t.Fatalf("re-hydrate: %v", err)
+			}
+			if res.Rehydrated != 2 || len(res.Failed) != 0 {
+				t.Fatalf("re-hydrate result = %+v, want both concepts back; quarantined: %+v", res, e.loadReport.Quarantined)
+			}
+			if len(e.loadReport.Quarantined) != 0 {
+				t.Fatalf("a sound pair left a quarantine entry: %+v", e.loadReport.Quarantined)
+			}
+			for _, id := range []string{"v1:trainingns:trainedLedger", "v1:trainingns:trainedEntry"} {
+				if _, err := e.concepts.Get(id); err != nil {
+					t.Errorf("%s is not in the registry after re-hydration: %v", id, err)
+				}
+			}
+		})
+	}
+}
+
+// The deferred check still refuses: a stored child whose parent is not among
+// the stored concepts is quarantined once the walk is done, with the load's
+// code, and taken back out of the registry.
+func TestRehydratePromotedConcepts_AChildWithNoParentIsQuarantinedAfterTheWalk(t *testing.T) {
+	const childSrc = "@version(\"1.0.0\")\n@belongsTo(account, via=\"ledgerId\", parent=\"v1:trainingns:trainedMissing\")\n" +
+		"concept trainedOrphan {\n  accountId  string\n  ledgerId   string\n}"
+	row := AuthoringConstructRow{Id: "v1:authoring:construct:orphan", Kind: "concept", Name: "trainedOrphan",
+		BundleId: "authoring:bundle:orphan", OwnerUserId: "owner-1", Source: childSrc, Origin: "trainingns/concepts.memql", Status: "active"}
+	e := promoteConceptEngine(t)
+	e.loadReport = newLoadReport()
+	store := &fakeRehydrateStore{
+		bundles:    []AuthoringBundleRow{{Id: row.BundleId, OwnerUserId: row.OwnerUserId, Status: BundleActive}},
+		constructs: map[string][]AuthoringConstructRow{row.BundleId: {row}},
+	}
+	res, err := e.rehydratePromotedNow(context.Background(), store)
+	if err != nil {
+		t.Fatalf("re-hydrate: %v", err)
+	}
+	if res.Rehydrated != 0 || len(res.Failed) != 1 {
+		t.Fatalf("re-hydrate result = %+v, want the orphan refused", res)
+	}
+	if len(e.loadReport.Quarantined) != 1 || e.loadReport.Quarantined[0].Code != langparser.CodeBelongsToParentUnknown {
+		t.Fatalf("quarantine = %+v, want one %s", e.loadReport.Quarantined, langparser.CodeBelongsToParentUnknown)
+	}
+	if _, err := e.concepts.Get("v1:trainingns:trainedOrphan"); err == nil {
+		t.Fatal("the refused child is still in the registry")
+	}
+}

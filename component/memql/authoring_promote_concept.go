@@ -191,8 +191,18 @@ func (e *MemQLEngine) promoteConceptIntoLiveRegistry(ctx context.Context, gate *
 	// already had would refuse every promote for a fault that is not the
 	// author's, so the live set's problems are subtracted. Refused with the
 	// load's own code and words.
-	if err := newBelongsToProblem(current, list); err != nil {
-		return fmt.Errorf("authoring: promote concept %q: %w", c.Name, err)
+	//
+	// A REPLAY skips it. Boot re-hydration walks the stored bundles in the
+	// order the store returns them, so a child reached before its parent would
+	// be judged against a registry the parent is not in yet
+	// (belongs_to_parent_unknown) and quarantined: a sound pair would load or
+	// not by storage order. The boot walk judges every stored concept once
+	// they are all in (checkRehydratedBelongsTo); a cross-node propagation
+	// replays a promote its origin already judged.
+	if gate == nil || !gate.replay {
+		if err := newBelongsToProblem(current, list); err != nil {
+			return fmt.Errorf("authoring: promote concept %q: %w", c.Name, err)
+		}
 	}
 
 	registry.MergeAll(map[string]*memoryNodes.Concept{id: built})
@@ -244,4 +254,48 @@ func newBelongsToProblem(current, candidates []*memoryNodes.Concept) error {
 		}
 	}
 	return nil
+}
+
+// checkRehydratedBelongsTo runs the load's cross-concept @belongsTo checks over
+// the whole registry once the boot walk has put every stored concept back, the
+// way checkRehydratedPushdown runs the predicate checks: the walk skipped them
+// per promote (see promoteConceptIntoLiveRegistry) because a child can be
+// reached before its parent. A PROMOTED concept a problem is filed under is
+// taken back out of the registry and quarantined, then the checks run again,
+// since removing a parent leaves its children with nothing to follow. A
+// problem filed under a core concept is the load's to report, not this walk's,
+// and is left alone. It returns the quarantined constructs, as kind:name.
+func (e *MemQLEngine) checkRehydratedBelongsTo() []string {
+	if e == nil {
+		return nil
+	}
+	registry, ok := e.concepts.(*memoryNodes.MemoryRegistry)
+	if !ok {
+		return nil
+	}
+	var quarantined []string
+	for {
+		removed := false
+		for _, p := range belongsToProblems(registry.List()) {
+			key := "concept:" + p.concept
+			if _, promoted := e.promotedAuthored.Load(key); !promoted {
+				continue
+			}
+			if err := e.removeConceptFromLiveRegistry(registry, p.concept); err != nil {
+				// Something else still references it; leaving it registered
+				// is the safe outcome, and the problem is reported either way.
+				e.quarantineRehydratedConstruct(AuthoringConstructRow{Kind: "concept", Name: p.concept}, fmt.Errorf("%w (and it could not be removed: %v)", p.err, err))
+				quarantined = append(quarantined, "concept:"+p.concept)
+				e.promotedAuthored.Delete(key)
+				continue
+			}
+			e.promotedAuthored.Delete(key)
+			e.quarantineRehydratedConstruct(AuthoringConstructRow{Kind: "concept", Name: p.concept}, p.err)
+			quarantined = append(quarantined, "concept:"+p.concept)
+			removed = true
+		}
+		if !removed {
+			return quarantined
+		}
+	}
 }

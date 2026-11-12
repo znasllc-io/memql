@@ -160,6 +160,10 @@ var narrowingRules = func() map[string]bool {
 		CodeWriteAnnotationFieldType,
 		CodeWriteAnnotationUnwrittenField,
 		ruleToolHandlerArgUndeclared,
+		// A concept with no @belongsTo: promotion requires one since the
+		// account-export piece, so a concept promoted before it is refused at
+		// re-hydration, and its refusal names the forms to write.
+		languageParser.CodeBelongsToUndeclared,
 	} {
 		out[code] = true
 	}

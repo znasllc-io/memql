@@ -12,6 +12,7 @@ package main
 // cannot import this tool; this test is where the two meet.
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -22,22 +23,42 @@ import (
 
 func TestEveryDeprecatedFormNamesARewriteThisToolHas(t *testing.T) {
 	for _, f := range deprecation.Forms() {
-		if !f.Rewrites() {
-			// A form no rewrite can fix -- a concept with no @belongsTo, whose
-			// declaration only its author can choose -- names the linter that
-			// finds each use instead, and its warning says so.
-			continue
-		}
-		name, ok := strings.CutPrefix(f.Migrator, "memqlmigrate --rewrite=")
-		if !ok {
-			t.Errorf("form %s: Migrator %q is not a `memqlmigrate --rewrite=<name>` invocation, so an author "+
-				"reading the warning has no command to run", f.Rule, f.Migrator)
-			continue
-		}
-		if _, err := resolveRewrites(langparser.Edition, []string{name}); err != nil {
-			t.Errorf("form %s names `%s`, which this tool does not hold: %v", f.Rule, f.Migrator, err)
+		if problem := migratorProblem(f); problem != "" {
+			t.Error(problem)
 		}
 	}
+	// The listed linter exists, so the exemption names a tool an author can run.
+	for rule, tool := range lintNamedForms {
+		if _, err := os.Stat("../" + tool + "/main.go"); err != nil {
+			t.Errorf("form %s names `%s`, and cmd/%s is not in this repository: %v", rule, tool, tool, err)
+		}
+	}
+}
+
+// lintNamedForms is every form whose fix no rewrite can make, by rule, with the
+// one tool its Migrator names instead: a concept with no @belongsTo, whose
+// declaration only its author can choose, and which the linter names by file
+// and line. Exempt by rule AND tool, so a mistyped or invented Migrator still
+// fails, and a new form with no rewrite is added here on purpose.
+var lintNamedForms = map[string]string{
+	deprecation.ConceptBelongsToUndeclared: "memqllint",
+}
+
+// migratorProblem says what is wrong with a form's Migrator, or "" when it is
+// a rewrite this tool holds or the listed tool of a listed form.
+func migratorProblem(f deprecation.Form) string {
+	if tool, listed := lintNamedForms[f.Rule]; listed && f.Migrator == tool {
+		return ""
+	}
+	name, ok := strings.CutPrefix(f.Migrator, "memqlmigrate --rewrite=")
+	if !ok {
+		return fmt.Sprintf("form %s: Migrator %q is not a `memqlmigrate --rewrite=<name>` invocation, so an author "+
+			"reading the warning has no command to run", f.Rule, f.Migrator)
+	}
+	if _, err := resolveRewrites(langparser.Edition, []string{name}); err != nil {
+		return fmt.Sprintf("form %s names `%s`, which this tool does not hold: %v", f.Rule, f.Migrator, err)
+	}
+	return ""
 }
 
 // The rewrite a form names must actually write the form's replacement. A
@@ -166,5 +187,31 @@ tool mixedTool {
 	// Only the two it had to leave still spell the form.
 	if uses := langparser.ScanDeprecatedUses(string(got)); len(uses) != 2 {
 		t.Errorf("want exactly the 2 left uses still spelled, got %+v", uses)
+	}
+}
+
+// The exemption is one form, by rule AND linter, and nothing else: a Migrator
+// that is mistyped, invented, or the linter's name under another rule still
+// fails the gate, so a new form with no rewrite has to be added to
+// lintNamedForms on purpose.
+func TestOnlyTheListedFormIsExemptFromNamingARewrite(t *testing.T) {
+	cases := []struct {
+		name string
+		form deprecation.Form
+		ok   bool
+	}{
+		{"the listed form", deprecation.Form{Rule: deprecation.ConceptBelongsToUndeclared, Migrator: "memqllint"}, true},
+		{"the listed form with another tool", deprecation.Form{Rule: deprecation.ConceptBelongsToUndeclared, Migrator: "memqllint --fix"}, false},
+		{"the linter under another rule", deprecation.Form{Rule: "deprecated_invented", Migrator: "memqllint"}, false},
+		{"a mistyped rewrite", deprecation.Form{Rule: deprecation.ArrayType, Migrator: "memqlmigrate --rewrite slice-syntax"}, false},
+		{"an invented rewrite", deprecation.Form{Rule: deprecation.ArrayType, Migrator: "memqlmigrate --rewrite=no-such-rewrite"}, false},
+		{"a real rewrite", deprecation.Form{Rule: deprecation.ArrayType, Migrator: "memqlmigrate --rewrite=slice-syntax"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if problem := migratorProblem(tc.form); (problem == "") != tc.ok {
+				t.Fatalf("migratorProblem(%+v) = %q, want ok=%v", tc.form, problem, tc.ok)
+			}
+		})
 	}
 }

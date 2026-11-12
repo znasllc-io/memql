@@ -648,8 +648,9 @@ concept fieldTypes {
 //                       "." or ".." segment, a {...} naming neither id nor a
 //                       top-level string field, a carried place with no
 //                       placeholder or another field, a place under
-//                       `exports`, a tree under a one-segment place. Emits `x-bytes`, read
-//                       back by Concept.BytesFields() (Places, Admits).
+//                       `exports`, a tree under a one-segment place. Emits
+//                       `x-bytes`, read back by Concept.BytesFields()
+//                       (Places, Admits).
 //   @secretName         The field holds the NAME of a secret, never its value.
 //                       An account export lists each name as a connection to
 //                       set up again; the value never travels. Emits
@@ -1202,8 +1203,9 @@ concept nativeExample {
 // names each such concept by file and line; a node that mounts a bundle holding
 // one logs it at every load. Deprecated in 0.32.0: from 0.34 a release refuses
 // it (belongs_to_undeclared), an account export refuses to run while one is
-// loaded, and a concept promoted at runtime is refused without one. Declare `cluster` deliberately rather than leaving
-// the annotation off -- only one of the two says somebody decided.
+// loaded, and a concept promoted at runtime is refused without one. Declare
+// `cluster` deliberately rather than leaving the annotation off -- only one of
+// the two says somebody decided.
 
 @description("Each row belongs to one account; the engine fills accountId in.")
 @belongsTo(account)
