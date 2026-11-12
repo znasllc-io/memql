@@ -221,6 +221,17 @@ func TestASweepRefusesOnlyFromAGrantItHasJustRead(t *testing.T) {
 	if h.admin.countOp("ShopifyListBlog") != before {
 		t.Error("the origin was asked about a domain the fresh grant cannot reach")
 	}
+	h.engine.mu.Lock()
+	defer h.engine.mu.Unlock()
+	if len(h.engine.freshReads["storeById"]) == 0 {
+		t.Fatal("no store read recorded")
+	}
+	for _, fresh := range h.engine.freshReads["storeById"] {
+		if !fresh {
+			t.Error("the grant was read without bypassing the result cache")
+		}
+	}
+
 }
 
 func TestABackfillRefusesOnlyFromAGrantItHasJustRead(t *testing.T) {

@@ -1116,7 +1116,7 @@ func (r *Runner) RetryRefused(ctx context.Context, connectorName, conceptID, par
 			if backfills {
 				out.Action = "queued"
 				if cur.BackfillStatus == "running" {
-					return SyncPatch{"lastError": ""}, true
+					return SyncPatch{"lastError": "", "lastAttemptAt": ""}, true
 				}
 				return queuePatch(cur), true
 			}

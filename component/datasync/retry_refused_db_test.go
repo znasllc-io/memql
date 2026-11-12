@@ -388,3 +388,19 @@ func TestARefusalARealSweepWroteIsDueAtTheNextPassOnceRetried(t *testing.T) {
 		t.Errorf("a refusal a real sweep wrote is not due at the next pass once retried: %+v", g.read(testMirrorConcept))
 	}
 }
+
+func TestRetryRefusedWhileBackfillRunsClearsItsAttempt(t *testing.T) {
+	g := newRetryRig(t)
+	if g == nil {
+		return
+	}
+	before := g.write(retryBulkConcept, SyncState{BackfillStatus: "running", BackfillCursor: "page-9", LastError: notGrantedText, LastAttemptAt: g.now.Add(-5 * time.Minute), LastReconcileAt: g.now.Add(-time.Hour)})
+	outcome, detail := g.retry(retryBulkConcept)
+	after := g.read(retryBulkConcept)
+	if outcome != "retried" || detail != "queued" || after.LastError != "" || !after.LastAttemptAt.IsZero() {
+		t.Fatalf("retry %s/%s left refusal state: %+v", outcome, detail, after)
+	}
+	if after.BackfillStatus != before.BackfillStatus || after.BackfillCursor != before.BackfillCursor || !after.LastReconcileAt.Equal(before.LastReconcileAt) {
+		t.Fatalf("retry restarted the running backfill: before %+v, after %+v", before, after)
+	}
+}
