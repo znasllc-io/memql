@@ -66,8 +66,8 @@ import (
 //     past the clock, and its last page is caught up at the clock that page
 //     was asked by. That page also moves Through to the call's bound (see
 //     "Where a read leaves the walk"), and Width back to defaultWindow. So a
-//     quiet store's next run reads twice the overlap and the time since, not
-//     the weeks since its newest row. The walk ends there.
+//     quiet store's next run reads the overlap and the time since, not the
+//     weeks since its newest row. The walk ends there.
 //   - Otherwise the window is past, and read as of its end (asOf, the form the
 //     email walk's walkQuery writes), so the engine collapses only the versions
 //     written up to it. Its last page sets Through to until and doubles Width
@@ -133,39 +133,64 @@ import (
 // IS INCLUSIVE: a newest row exactly the overlap before the asking time counts
 // -- or, when no page does, the first empty page, or else the last page of a
 // read that reached the clock. Call its asking time T. After the call the walk
-// never stands later than T less the overlap (nor earlier than where the call
-// began). A call none of whose pages qualifies -- a backlog read stopped by
-// its budget, its read limit or a timeout -- stands where it otherwise would:
-// at its newest row.
+// never stands later than T (nor earlier than where the call began). A call
+// none of whose pages qualifies -- a backlog read stopped by its budget, its
+// read limit or a timeout -- stands where it otherwise would: at its newest
+// row.
 //
 // Why that is enough. A row this read missed belongs to the range some page j
-// covered and was not yet visible when page j was asked; by the overlap's
-// assumption it was written after page j's asking time less the overlap; and
-// it is at or before page j's newest row; so page j's newest row is within the
-// overlap of its asking time. Hence no row can be missed behind a page that
-// does not reach the overlap, and every row missed behind a page that does was
-// written after that page's asking time less the overlap, which is at or after
-// T less the overlap; since is inclusive. (An empty page of a past window, and
-// a past window's last page, hide nothing: the window ends more than the
-// overlap before the clock its pages were asked by. The last page of a read to
-// the clock may hide rows past its newest one, so it counts.)
+// covered and was not yet visible when page j was asked; it is at or before
+// page j's newest row, and by the overlap's assumption it was written after
+// page j's asking time less the overlap; so page j's newest row is within the
+// overlap of its asking time, and page j is T's page or a later one. The walk
+// stands no later than T, and the next read asks from where the walk stands
+// less the overlap, inclusive: from T less the overlap or earlier, which is at
+// or before the row, so it reads the row. Hence no row can be missed behind a
+// page that does not reach the overlap, and none behind one that does is out
+// of the next read's reach. (An empty page of a past window, and a past
+// window's last page, hide nothing: the window ends more than the overlap
+// before the clock its pages were asked by. The last page of a read to the
+// clock may hide rows past its newest one, so it counts.)
 //
 // What it costs. A backlog's pages are older than the overlap at their own
-// asking time, so they do not pull the bound back to the call's start, and a
-// store whose rows arrive at any rate below its read rate still reaches the
-// clock (TestAStoreWhoseReadsTakeLongerThanTheOverlapStillCatchesUp). A bound
-// taken at the call's first page instead re-reads everything a call read, and
-// a store whose rows arrive at half its read rate or more never catches up.
+// asking time, so they do not pull the bound back to the call's start. But a
+// read's pages from T on are read again by the next run, which starts the
+// overlap before T, and that re-read is what limits how fast a store's rows
+// may arrive. For a run every 60 seconds and rows arriving steadily, measured
+// on the scripted engine over 60 runs (TestTheCatchUpTableHoldsAsTheCommentStatesIt):
+//
+//   - Pages of 8 s, near the statement timeout: at a quarter and at four
+//     tenths of the read rate every run ends caught up. At half of it the
+//     walk does not report caught up, but its lag stays bounded, about four
+//     minutes, inside the overlap. At nine tenths the lag grows every run.
+//   - Pages of 30 s: at a quarter, at half and at six tenths every run ends
+//     caught up; at nine tenths the lag grows every run.
+//   - Pages of six minutes: at a quarter and at half every run ends caught
+//     up; at nine tenths the walk is caught up in some runs and its lag stays
+//     bounded, under an hour.
+//
+// Where the lag grows, it is the page budget: a run reads at most
+// maxPagesPerRun counted pages, against the rows arriving and the re-read
+// after T. Every run still moves Through forward and hands on every row it
+// stands past, nothing is lost, and the run reports the source behind. Rates
+// the table does not cover are not claimed here. The read rate is a page's
+// rows over the time a page takes, so with pages of walkPageSize rows read in
+// well under a second these rates are far above any one store's.
 //
 // # Bounded work
 //
 // Every read counts against maxReadsPerRun; a page counts against the caller's
 // budget when it holds a row written after where the walk stood when the call
-// began, so a page of rows the walk has read before -- the overlap, re-read --
-// is not paid for twice and a run always gets past it. Both are checked before
-// every page, never only between windows. A run that reaches either stops
-// behind, and next says where: the next run carries on from there. A cursor the
-// engine hands back unchanged is an error, never a loop.
+// began. So the overlap behind where the walk stands, re-read, is not paid for
+// twice, and a run always gets past it. Rows past where the walk stands that
+// the last run read already -- those after the bound page's asking time, see
+// "Where a read leaves the walk" -- are paid for again: the walk keeps only
+// Through and Width per source, so nothing says how far past Through the last
+// run read, and counting them is the honest measure of the run's work. Both
+// are checked before every page, never only between windows. A run that
+// reaches either stops behind, and next says where: the next run carries on
+// from there. A cursor the engine hands back unchanged is an error, never a
+// loop.
 //
 // A page that outlasts a read halves Width, down to minWindow, and ends the
 // source for the run with no error: the halved width is in next and the caller
@@ -190,8 +215,9 @@ import (
 //
 // Every read is made under walkContext (rollup.go): internal origin, fresh and
 // roots-only. The statements are written out by name in rollup.go, beside the
-// stamp, so test/dslconformance sees each call and its stamp in one file. Never as a journaled automation step, for the same reason as the
-// errors: the work journal keeps what a step answers, rows included.
+// stamp, so test/dslconformance sees each call and its stamp in one file.
+// Never as a journaled automation step, for the same reason as the errors: the
+// work journal keeps what a step answers, rows included.
 
 const (
 	sourceOrder  = "order"
@@ -342,9 +368,9 @@ func keepFloor(ctx context.Context, tx bun.Tx, storeID string, floor time.Time) 
 
 // walkBound is the latest the walk may stand after a call, from the asking
 // times of the pages that bound it so far (see "Where a read leaves the
-// walk"): the first page that reached the overlap, else the first empty page,
-// else the last page of a read to the clock, less the overlap, and never before
-// where the call began. bounded is false while no page has set one.
+// walk"): the asking time of the first page that reached the overlap, else of
+// the first empty page, else of the last page of a read to the clock, and
+// never before where the call began. bounded is false while no page has set one.
 func walkBound(reachedAt, emptyAt, lastAt, began time.Time) (bound time.Time, bounded bool) {
 	t := reachedAt
 	if t.IsZero() {
@@ -356,7 +382,7 @@ func walkBound(reachedAt, emptyAt, lastAt, began time.Time) (bound time.Time, bo
 	if t.IsZero() {
 		return time.Time{}, false
 	}
-	bound = t.Add(-watermarkOverlap)
+	bound = t
 	if began.After(bound) {
 		bound = began
 	}
