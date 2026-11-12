@@ -277,8 +277,8 @@ func TestTheDeclaredShopperSurfaceIsExactlyThreeRoutes(t *testing.T) {
 	if memql.ShopperReadFor(Domain, "published").Private {
 		t.Fatal("the published read is the same for everyone and must stay cacheable")
 	}
-	// NOTHING ELSE. createReview, setReviewDisplay, the moderation
-	// capability and the merchant's own lists stay unreachable.
+	// NOTHING ELSE. The pack's builtins, its mutations (and the names of the
+	// ones removed) and the merchant's own lists stay unreachable.
 	for _, name := range []string{"createReview", "setReviewDisplay", "recordModerationAction",
 		"reviewsForStore", "moderationActionsForStore", "reviewsDecide", "reviewsList", "reviewsIssueRequest",
 		"putReview", "putReviewRequest", "appendReviewDecision", "submitReview"} {

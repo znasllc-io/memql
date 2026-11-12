@@ -30,17 +30,18 @@ func TestLiveE2E_TheAdminPanelReadsOneReviewTheLogAndTheSettings(t *testing.T) {
 	site := "site-reviews-reads-" + n
 	account := "acct-reviews-reads-" + n
 	handle := "boot-" + n
+	declareShopperSurface(t)
+	// The removal approver is one of the store's organization's people, and
+	// the site's owner a person the site is read under.
+	seedStorePerson(t, eng, account, merchant)
 	seedSiteIn(t, eng, site, merchant, store, account)
 	grantReviewsPart(t, eng, merchant)
-	// The removal approver is one of the store's organization's people.
-	seedStorePerson(t, eng, account, merchant)
 
-	call := `submitReview(body: "Warm all winter", productHandle: ` + quote(handle) +
-		`, rating: 4, siteId: "site-reviews-e2e", storeId: ` + quote(store) +
-		`, submissionId: ` + quote("sub-reads-"+n) + `)`
-	if _, err := eng.Execute(asMerchant(merchant), call); err != nil {
-		t.Fatalf("submitReview: %v", err)
-	}
+	// From here the merchant is who a deployed cluster says they are: the
+	// canonical id their token carries, which is also the site's stored owner.
+	merchant = siteOwnerOf(t, site)
+
+	reviewThroughLink(t, eng, site, store, merchant, "request-reads-"+n, handle, "Warm all winter")
 	// Set up by an operator, naming the merchant as the owner who approves removals.
 	if _, err := eng.Execute(asPerson(merchant, auth.RoleOwner),
 		`builtin reviewsUpdateSettings(storeId: `+quote(store)+`, siteId: `+quote(site)+`, linkLifetimeDays: 21, removalApproverUserId: `+quote(merchant)+`)`); err != nil {

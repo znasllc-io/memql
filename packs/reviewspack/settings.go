@@ -329,24 +329,35 @@ func (p *Provider) requireSiteForStore(ctx context.Context, siteID, storeID stri
 func (p *Provider) siteForStore(ctx context.Context, siteID, storeID string) (map[string]any, error) {
 	siteID = strings.TrimSpace(siteID)
 	if siteID == "" {
-		return nil, fmt.Errorf("reviews: siteId is required: the act is judged against the organization of the store's site")
+		return nil, fmt.Errorf("%w: siteId is required: the act is judged against the organization of the store's site", errSiteNotAdmitted)
 	}
-	site := p.siteRow(ctx, siteID)
+	// A FAILED READ IS NOT AN ANSWER about the site: it is returned as the
+	// fault it is, never as "no such site".
+	site, err := p.siteRowErr(ctx, siteID)
+	if err != nil {
+		return nil, err
+	}
 	if site == nil {
-		return nil, fmt.Errorf("reviews: site %q is not readable by this caller", siteID)
+		return nil, fmt.Errorf("%w: site %q is not readable by this caller", errSiteNotAdmitted, siteID)
 	}
 	if !siteServesStore(site, storeID) {
-		return nil, fmt.Errorf("reviews: site %q is not bound to store %q", siteID, storeID)
+		return nil, fmt.Errorf("%w: site %q is not bound to store %q", errSiteNotAdmitted, siteID, storeID)
 	}
 	settings, err := p.settingsFor(ctx, storeID)
 	if err != nil {
 		return nil, err
 	}
 	if want := bareAccount(asString(settings["accountId"])); want != "" && bareAccount(asString(site["accountId"])) != want {
-		return nil, fmt.Errorf("reviews: site %q belongs to another organization than store %q's reviews", siteID, storeID)
+		return nil, fmt.Errorf("%w: site %q belongs to another organization than store %q's reviews", errSiteNotAdmitted, siteID, storeID)
 	}
 	return site, nil
 }
+
+// errSiteNotAdmitted is in every refusal siteForStore makes -- no site named,
+// none readable, one of another store or organization -- and in none of its
+// faults, so a caller can tell a site that is not the store's own from a read
+// that failed.
+var errSiteNotAdmitted = errors.New("reviews: the site is not the store's own")
 
 // bareAccount is an organization id without its concept prefix: one may be
 // written either way.

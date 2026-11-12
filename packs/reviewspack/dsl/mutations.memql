@@ -7,116 +7,22 @@
 // operators cannot moderate" is unchanged and is enforced where it always
 // was: the Go capability refuses a non-client principal.
 //
-// TWO WRITE PATHS AND THEY ARE DIFFERENT MUTATIONS. createReview is the
-// authenticated one -- an operator, an importer, a test -- and it names the
-// row id it is creating. submitReview is the SHOPPER one, reached only
-// through a declared shopper form, and it names no id because the shopper
-// cannot be trusted with one and the form registry refuses a field called
-// `id` outright.
-
-/// Create a review as an authenticated MemQL user. The operator and import
-/// path: the caller names the row id, and ownerUserId is the caller.
-@actor
-mutation review createReview {
-  args {
-    reviewId            string!
-    storeId             string!
-    productHandle       string!
-    productId           string
-    title               string
-    body                string!
-    rating              int
-    authorName          string
-    authorEmail         string
-    imageAttachmentIds  []string
-  }
-  insert {
-    accept { storeId, productHandle, productId, title, body, rating, authorName, authorEmail, imageAttachmentIds }
-    stamp {
-      id: args.reviewId
-      ownerUserId: actor.userId
-    }
-  }
-}
-
-/// Create a review submitted by a SHOPPER through a declared shopper form
-/// (epic memql#5532, issues memql#5550 and memql#5551).
-///
-/// IT NAMES NO ROW ID, deliberately. The caller is a member of the public
-/// posting a plain HTML form, and `id` is one of the names
-/// component/memql/shopper_surface.go refuses as a form field -- a shopper
-/// who could choose a row id could overwrite another shopper's review. The
-/// engine derives one, exactly as createSpawnEvent and setGlobalSecret rely
-/// on it to.
-///
-/// storeId AND siteId ARRIVE STAMPED, not submitted. The bff applies them
-/// after the declared fields precisely so a form-supplied copy cannot win,
-/// and the edge resolved storeId from the binding in effect -- the preview
-/// binding when the submission was made while exercising a candidate.
-///
-/// ownerUserId IS THE MERCHANT. It stamps from actor.userId, and on this
-/// path the actor is the SITE OWNER under borrowed authority. The shopper
-/// is authorName and authorEmail: data on the row, never an identity.
-@actor
-mutation review submitReview {
-  args {
-    submissionId   string!
-    storeId        string!
-    siteId         string
-    productHandle  string!  @maxLength(200)
-    body           string!  @maxLength(4000)
-    title          string   @maxLength(200)
-    rating         int      @minimum(1) @maximum(5)
-    authorName     string   @maxLength(120)
-    authorEmail    string   @maxLength(320)
-  }
-  insert {
-    accept { storeId, siteId, productHandle, title, body, rating, authorName, authorEmail }
-    stamp {
-      id: args.submissionId
-      ownerUserId: actor.userId
-    }
-  }
-}
-
-/// Create or flip the public display toggle for one store. Data, not
-/// source -- no rebuild. The id is derived from the store so there is
-/// exactly one row per store: a merchant must be able to show reviews on
-/// their live storefront while they are still hidden on the development
-/// store a candidate is being exercised against.
-///
-/// @serverOnly: A CLIENT CHANGES SETTINGS ONLY THROUGH THE BUILTINS. This
-/// writes a whole settings version from four fields, so a client call
-/// would clear the store's other settings and skip the rules that guard
-/// them -- a store's settings are created by the cluster's operators, and
-/// the owner who approves removals is named only by the current owner or
-/// an operator. reviewsUpdateSettings and reviewsSetPublicDisplay merge
-/// the row and judge the change (settings.go).
-@serverOnly
-@actor
-mutation reviewSettings setReviewDisplay {
-  args {
-    settingsId     string!
-    storeId        string!
-    publicDisplay  bool!
-    criteriaText   string
-  }
-  insert {
-    accept { storeId, publicDisplay, criteriaText }
-    stamp {
-      id: args.settingsId
-      ownerUserId: actor.userId
-    }
-  }
-}
+// EVERY WRITE IS THE PACK'S. Every reviews concept is @serverWritten, so no
+// mutation here is a client's: each is @serverOnly and reached only from the
+// builtin that judges it. A buyer's review arrives through the shopper form,
+// whose construct is the pack's own Go (reviewsSubmitFromLink), never a
+// mutation a form names. The authenticated createReview, the older shopper
+// mutation submitReview and setReviewDisplay are gone: nothing in the product
+// called them, and each was a way to write a row around the pack.
 
 // THE WRITES THE BUILTINS JUDGE (writer.go). A builtin computes and does not
 // write, so each judging builtin runs one of these. They are @serverOnly:
 // reached only from that builtin, which stamps internal origin for the one
 // call, never by a client -- a decision written around reviewsDecide would
 // skip what makes it a decision, above all that the cluster's own operators
-// never record one. The CALLER'S own actor still runs them, so the row gate
-// still decides whether this caller may write this row.
+// never record one. The caller's actor still runs them, but the stamp skips
+// the row gate: who may write is decided by the builtin's own check, made
+// before the stamp, and by nothing after it.
 
 /// Append one moderation decision. Reached only from reviewsDecide, which
 /// names the decider from the caller, copies the store, organization and
