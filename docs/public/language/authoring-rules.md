@@ -3448,6 +3448,15 @@ The S5 uniqueness gate (memql#2360) narrowed to match: the same name in two
 namespaces is legal; the same name twice in **one** namespace is still the
 silent last-wins overwrite it always was, and is still refused.
 
+**An automation is not one of these kinds.** It is not held in a registry
+keyed by namespace: the scheduler, a call by name, a sub-automation step and a
+resume all find an automation by its bare name across the whole tree, so an
+automation's name belongs to one automation. The package analysis refuses a
+package automation whose name another domain's automation already holds
+(`dsl_automation_name_taken`, see [packages](../operate/packages.md)), and a
+node that finds one holding the name of an engine automation leaves the
+package's out and keeps starting.
+
 ---
 
 ### A core reference to a runtime-declared name is the late-binding seam (memql#4882)
