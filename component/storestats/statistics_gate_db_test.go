@@ -383,9 +383,10 @@ func TestThePeriodIsCutInTheStoresZone(t *testing.T) {
 		if entry["at"] != want {
 			t.Errorf("series[%d].at = %v, want %s", i, entry["at"], want)
 		}
+		// A recording store that sold nothing: every day measured, and zero.
 		for _, k := range []string{"totalSales", "netSales", "orders", "grossSales", "discounts", "refunds", "unitsSold"} {
-			if v, present := entry[k]; !present || v != nil {
-				t.Errorf("series[%d].%s = %v (present %v), want null", i, k, v, present)
+			if v, present := entry[k]; !present || js(v) != js(measuredZeros[k]) {
+				t.Errorf("series[%d].%s = %v (present %v), want %v", i, k, v, present, js(measuredZeros[k]))
 			}
 		}
 		if len(entry) != 8 {
@@ -613,9 +614,11 @@ func TestAStartingStoresFiguresAreNullAndEveryKeyIsThere(t *testing.T) {
 			t.Errorf("%s = %v, want null", k, got[k])
 		}
 	}
+	// Lists not measured are null, never empty: an empty list says the store
+	// sold nothing.
 	for _, k := range []string{"productsBySales", "productsByUnits", "otherCurrencies"} {
-		if list, ok := got[k].([]any); !ok || len(list) != 0 {
-			t.Errorf("%s = %v, want an empty list", k, got[k])
+		if v, present := got[k]; !present || v != nil {
+			t.Errorf("%s = %v (present %v), want null", k, v, present)
 		}
 	}
 	if floors, ok := got["floors"].(map[string]any); !ok || len(floors) != 0 {
