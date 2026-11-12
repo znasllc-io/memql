@@ -956,6 +956,24 @@ func TestAFailedStageCarriesNothingOfTheNotice(t *testing.T) {
 	}
 }
 
+// A COMPANY NAME WITH A LINE BREAK MAKES A ONE-LINE SUBJECT: the email
+// integration refuses a subject with a line break, so a value filled into the
+// subject is made one line; the body keeps its lines.
+func TestAValueFilledIntoASubjectIsOneLine(t *testing.T) {
+	w := newEmailWorld()
+	w.settings["termsRequired"] = false
+	w.apps[0]["companyName"] = "Kestrel\r\nCycles\tTrade\x00Co"
+	p := w.provider()
+	w.notify(t, p, map[string]any{"event": StaffEventReadyToReview, "body": "{{companyName}}\n\nend"})
+	row := w.staged[StaffRequestID(StaffEventReadyToReview, linkApp, "")]
+	if got := asString(row["subject"]); got != "A wholesale application is ready to review: Kestrel Cycles Trade Co" {
+		t.Fatalf("the subject is %q", got)
+	}
+	if got := asString(row["body"]); got != "Kestrel\r\nCycles\tTrade\x00Co\n\nend" {
+		t.Fatalf("the body is %q, want its lines kept", got)
+	}
+}
+
 func TestAReDeliveredStaffEventStagesNothingNew(t *testing.T) {
 	w := newEmailWorld()
 	w.settings["termsRequired"] = false

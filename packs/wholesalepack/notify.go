@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -131,6 +132,19 @@ func fillPlaceholders(text string, values map[string]string) string {
 	return strings.NewReplacer(pairs...).Replace(text)
 }
 
+// oneLine is a subject as one line: every line break and other control
+// character becomes a space, and runs of spaces one. A company name the
+// applicant typed with a line break would otherwise make the email integration
+// refuse the subject, and the notice would never be delivered.
+func oneLine(text string) string {
+	return strings.Join(strings.Fields(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, text)), " ")
+}
+
 // notifyStaff answers wholesaleNotifyStaff.
 func (p *Provider) notifyStaff(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	// FOR THE STORE'S OWN AUTOMATION ONLY. A client that could call this could
@@ -236,7 +250,7 @@ func (p *Provider) notifyStaff(ctx context.Context, args map[string]any, _ int) 
 		"requestId":   requestID,
 		"medium":      "email",
 		"target":      target,
-		"subject":     strings.TrimSpace(fillPlaceholders(subject, values)),
+		"subject":     oneLine(fillPlaceholders(subject, values)),
 		"body":        fillPlaceholders(body, values),
 		"dedupeKey":   requestID,
 		"requestedBy": staffRequestedBy,
