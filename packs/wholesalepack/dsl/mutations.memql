@@ -480,7 +480,7 @@ mutation emailSend putEmailSendRow {
     attempt        int!
     requestId      string!
     templateId     string
-    state          string!  @enum("sent", "skipped", "failed", "pending")
+    state          string!  @enum("sent", "skipped", "held", "uncertain", "failed", "deferred")
     reason         string   @maxLength(2000)
     sentAt         datetime
     requestedBy    string

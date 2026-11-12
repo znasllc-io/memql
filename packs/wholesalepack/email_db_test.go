@@ -317,16 +317,36 @@ func TestAPriceSheetLinkStopsOpeningOnceTheBuyerIsRemoved(t *testing.T) {
 		t.Fatalf("after the removal the price-sheet link answered %d %s", code, body)
 	}
 	// THE REMOVAL EMAIL'S TEMPLATE IS UNPUBLISHED MEANWHILE: the lane holds it,
-	// and the row says what to fix; nothing is sent.
+	// the row says what to fix, the automation is answered that it was not sent,
+	// and nothing is sent.
 	s.putTemplate(t, eng, wholesalepack.EmailRevoked, "Your trade account", "No longer.", "draft")
-	held := automationCall(t, eng, s.sendCall("wholesaleSendBuyerEmail", "revoked"))
-	if held["state"] != wholesalepack.SendSkipped || !strings.Contains(asString(held["reason"]), "is not a published transactional template") ||
+	_, err := eng.Execute(auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(context.Background(), "automation-runner")),
+		s.sendCall("wholesaleSendBuyerEmail", "revoked"))
+	if err == nil || !strings.Contains(err.Error(), "the removal email was not sent") || !strings.Contains(err.Error(), "is not a published transactional template") ||
 		len(s.mail.messages()) != 1 {
-		t.Fatalf("a held removal email answered %v after %d messages", held, len(s.mail.messages()))
+		t.Fatalf("a held removal email answered %v after %d messages", err, len(s.mail.messages()))
 	}
 	row := latestPayload(t, "v1:wholesale:emailSend", wholesalepack.EmailSendRowID("revoked", s.appID, 1))
-	if row["state"] != wholesalepack.SendSkipped || row["reason"] != held["reason"] {
+	if row["state"] != wholesalepack.SendHeld || !strings.Contains(asString(row["reason"]), "is not a published transactional template") {
 		t.Fatalf("the held email's row is %v", row)
+	}
+	application := answerOf(t, eng, signedIn(s.staff), `builtin wholesaleGet(applicationId: `+quote(s.appID)+`)`)
+	if acts, _ := json.Marshal(application["acts"]); !strings.Contains(string(acts), `"resendRevoked"`) {
+		t.Fatalf("a held removal email offers acts %s", acts)
+	}
+	// PUBLISHED AGAIN, a person of the store sends it once, as attempt two.
+	s.putTemplate(t, eng, wholesalepack.EmailRevoked, "Your trade account", "No longer.", "ready")
+	resent := answerOf(t, eng, signedIn(s.staff), `builtin wholesaleResendEmail(applicationId: `+quote(s.appID)+`, kind: "revoked")`)
+	if resent["state"] != wholesalepack.SendSent || resent["attempt"] != float64(2) || len(s.mail.messages()) != 2 ||
+		s.mail.messages()[1].To != "sam@mail-sheet.example.com" {
+		t.Fatalf("the resent removal email answered %v after %d messages", resent, len(s.mail.messages()))
+	}
+	if _, err := eng.Execute(signedIn(s.staff), `builtin wholesaleResendEmail(applicationId: `+quote(s.appID)+`, kind: "revoked")`); err == nil ||
+		len(s.mail.messages()) != 2 {
+		t.Fatalf("a second resend of a sent removal email answered %v after %d messages", err, len(s.mail.messages()))
+	}
+	if lines := s.logs.lines("sam@"); lines != "" {
+		t.Fatalf("a log line carries the applicant's address:\n%s", lines)
 	}
 }
 

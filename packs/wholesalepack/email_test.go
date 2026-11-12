@@ -2,6 +2,7 @@ package wholesalepack
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -57,6 +58,10 @@ func (l *fakeLane) SendRowMessage(ctx context.Context, args map[string]any) (map
 		return out, nil
 	}
 	switch l.outcome {
+	case "hold":
+		return nil, fmt.Errorf("wholesale: campaignSendRowMessage: %w", testHold{"Publish “Wholesale removal” to send this email."})
+	case "uncertain":
+		return nil, fmt.Errorf("wholesale: campaignSendRowMessage: %w", testUncertain{errors.New("campaigns.sendToRecipient: the connection to the provider closed")})
 	case "defer":
 		return map[string]any{"sent": false, "skipped": false, "deferred": true,
 			"reason": "The send-rate limit is reached; this email will be retried shortly."}, nil
@@ -91,6 +96,34 @@ func (l *fakeLane) RowMessageStatus(_ context.Context, accountID string, request
 		}
 	}
 	return out, nil
+}
+
+// testHold and testUncertain stand in for the row lane's own hold and uncertain
+// hand-over, whose types are the campaigns package's: the lane's readers are
+// pointed at them for the length of a test (useTestLaneReaders).
+type testHold struct{ reason string }
+
+func (h testHold) Error() string { return h.reason }
+
+type testUncertain struct{ error }
+
+func (u testUncertain) Unwrap() error { return u.error }
+
+func useTestLaneReaders(t *testing.T) {
+	t.Helper()
+	held, uncertain := laneHeldReason, laneUncertain
+	laneHeldReason = func(err error) (string, bool) {
+		var h testHold
+		if errors.As(err, &h) {
+			return h.reason, true
+		}
+		return held(err)
+	}
+	laneUncertain = func(err error) bool {
+		var u testUncertain
+		return errors.As(err, &u) || uncertain(err)
+	}
+	t.Cleanup(func() { laneHeldReason, laneUncertain = held, uncertain })
 }
 
 // emailWorld is linkWorld plus the email rows, the outbox, the site and the
@@ -487,37 +520,40 @@ func TestASecondAutomaticTermsSendMintsNoNewLink(t *testing.T) {
 }
 
 // THE SEND BUILTIN MINTS NOTHING ITSELF: a lane that defers asks no resolver,
-// so no link is written, and the attempt is pending -- answered as it stands
-// by a second call, which calls no lane.
+// so no link is written, and the attempt is deferred -- answered as not sent
+// yet, from its row, by a second call, which calls no lane.
 func TestTheSendBuiltinMintsNothingItself(t *testing.T) {
 	w := newEmailWorld()
 	p := w.provider()
 	w.lane.outcome = "defer"
-	got := w.sendTerms(t, p)
-	if got["state"] != SendPending || !strings.Contains(asString(got["reason"]), "send-rate limit") {
-		t.Fatalf("a deferral answered %v", got)
+	_, err := p.sendTermsEmail(automation(), map[string]any{"applicationId": linkApp}, 0)
+	if err == nil || !strings.Contains(err.Error(), "send-rate limit") {
+		t.Fatalf("a deferral answered %v", err)
+	}
+	if row := w.sends[EmailSendRowID(EmailTerms, linkApp, 1)]; row["state"] != SendDeferred {
+		t.Fatalf("the deferred attempt's row is %v", row)
 	}
 	if w.count("putPrivateLinkRow") != 0 || w.lane.resolved != 0 {
 		t.Fatalf("a deferred send minted %d links and asked the resolver %d times", w.count("putPrivateLinkRow"), w.lane.resolved)
 	}
 	w.lane.outcome = ""
-	if again := w.sendTerms(t, p); again["state"] != SendPending || len(w.lane.calls) != 1 {
-		t.Fatalf("the pending attempt answered %v after %d lane calls", again, len(w.lane.calls))
+	if _, err := p.sendTermsEmail(automation(), map[string]any{"applicationId": linkApp}, 0); err == nil || len(w.lane.calls) != 1 {
+		t.Fatalf("the deferred attempt answered %v after %d lane calls", err, len(w.lane.calls))
 	}
 }
 
-// A FAILURE IS A ROW, NOT AN ERROR, and the next call tries the same attempt
-// again under the same request id.
+// A FAILURE IS RECORDED AND ANSWERED AS NOT SENT, and the next call tries the
+// same attempt again under the same request id.
 func TestALaneFailureIsRecordedAndTriedAgain(t *testing.T) {
 	w := newEmailWorld()
 	p := w.provider()
 	w.lane.outcome = "fail"
-	got := w.sendTerms(t, p)
-	if got["state"] != SendFailed || got["reason"] != "campaigns.sendRowMessage: the template must belong to the row's organization" {
-		t.Fatalf("a failure answered %v", got)
+	_, err := p.sendTermsEmail(automation(), map[string]any{"applicationId": linkApp}, 0)
+	if err == nil || err.Error() != "wholesale: the terms email was not sent; the application's emails say why" {
+		t.Fatalf("a failure answered %v", err)
 	}
 	row := w.sends[EmailSendRowID(EmailTerms, linkApp, 1)]
-	if row == nil || row["state"] != SendFailed || row["reason"] != got["reason"] {
+	if row == nil || row["state"] != SendFailed || row["reason"] != "campaigns.sendRowMessage: the template must belong to the row's organization" {
 		t.Fatalf("the failure's row is %v", row)
 	}
 	w.lane.outcome = ""
@@ -552,6 +588,192 @@ func TestTwoNodesAtOnceWriteOneRecordAndSendOnce(t *testing.T) {
 	}
 	if w.versions[rowID] != 1 {
 		t.Fatalf("the row has %d versions, want the other node's one", w.versions[rowID])
+	}
+}
+
+// decide records one more decision of transition on the application.
+func (w *emailWorld) decide(transition string) {
+	w.decisions = append(w.decisions, map[string]any{"id": "dec-" + transition, "applicationId": applicationConcept + ":" + linkApp,
+		"transition": transition, "decidedBy": emailStaff, "accountId": "acct-links", "createdAt": w.next()})
+}
+
+// application is wholesaleGet's answer for the store's person.
+func (w *emailWorld) application(t *testing.T, p *Provider) map[string]any {
+	t.Helper()
+	nodes, err := p.get(staffCtx(emailStaff), map[string]any{"applicationId": linkApp}, 0)
+	return reply(t, nodes, err)
+}
+
+// resend is a person of the store sending kind again.
+func (w *emailWorld) resend(t *testing.T, p *Provider, kind string) (map[string]any, error) {
+	t.Helper()
+	nodes, err := p.resendEmail(staffCtx(emailStaff), map[string]any{"applicationId": linkApp, "kind": kind}, 0)
+	if err != nil {
+		return nil, err
+	}
+	return decodeOne(t, nodes, nil), nil
+}
+
+// emailShown is the application's email of kind and attempt as its page shows it.
+func emailShown(t *testing.T, application map[string]any, kind string, attempt int) map[string]any {
+	t.Helper()
+	emails, _ := application["emails"].([]any)
+	for _, e := range emails {
+		m, _ := e.(map[string]any)
+		if m["kind"] == kind && m["attempt"] == float64(attempt) {
+			return m
+		}
+	}
+	t.Fatalf("the application shows no %s email attempt %d: %v", kind, attempt, application["emails"])
+	return nil
+}
+
+// A HELD EMAIL IS NOT SENT AND NOT THE END, for a rejection and a removal: the
+// row says held with the lane's own sentence, the automation is answered that
+// it was not sent, the page offers to send it again, and once the template is
+// published the person's resend sends it once -- after which a rejection or
+// removal that was sent is never sent again.
+func TestAHeldRejectionOrRemovalIsSentOnceByAPersonOnceTheTemplateIsPublished(t *testing.T) {
+	useTestLaneReaders(t)
+	for _, c := range []struct {
+		kind, transition, act string
+	}{
+		{EmailRejected, TransitionReject, ActResendRejected},
+		{EmailRevoked, TransitionRevoke, ActResendRevoked},
+	} {
+		t.Run(c.kind, func(t *testing.T) {
+			w := newEmailWorld()
+			p := w.provider()
+			if c.kind == EmailRevoked {
+				w.approveAndGrant(EntitlementGranted)
+			}
+			w.decide(c.transition)
+			w.lane.outcome = "hold"
+			_, err := p.sendBuyerEmail(automation(), map[string]any{"applicationId": linkApp, "kind": c.kind}, 0)
+			if err == nil || !strings.Contains(err.Error(), "Publish “Wholesale removal” to send this email.") || !strings.Contains(err.Error(), "not sent") {
+				t.Fatalf("a held %s email answered %v; want it answered as not sent, with the lane's sentence", c.kind, err)
+			}
+			row := w.sends[EmailSendRowID(c.kind, linkApp, 1)]
+			if row["state"] != SendHeld || row["reason"] != "Publish “Wholesale removal” to send this email." {
+				t.Fatalf("the held email's row is %v", row)
+			}
+			if acts := fmt.Sprint(w.application(t, p)["acts"]); !strings.Contains(acts, c.act) {
+				t.Fatalf("acts = %s, want %s", acts, c.act)
+			}
+			// THE AUTOMATIC PATH IS UNCHANGED: the same call again is answered from the
+			// row, and asks nothing of the lane.
+			if _, err := p.sendBuyerEmail(automation(), map[string]any{"applicationId": linkApp, "kind": c.kind}, 0); err == nil || len(w.lane.calls) != 1 {
+				t.Fatalf("a re-delivered event for the held email answered %v after %d lane calls", err, len(w.lane.calls))
+			}
+			w.lane.outcome = "" // the template is published
+			got, err := w.resend(t, p, c.kind)
+			if err != nil || got["state"] != SendSent || got["attempt"] != float64(2) || got["requestedBy"] != emailStaff || len(w.lane.sent) != 1 {
+				t.Fatalf("the resend answered %v, %v after %d sent", got, err, len(w.lane.sent))
+			}
+			if acts := fmt.Sprint(w.application(t, p)["acts"]); strings.Contains(acts, c.act) {
+				t.Fatalf("acts = %s after the email was sent", acts)
+			}
+			if _, err := w.resend(t, p, c.kind); err == nil || len(w.lane.calls) != 2 {
+				t.Fatalf("a second resend of a sent %s email answered %v after %d lane calls", c.kind, err, len(w.lane.calls))
+			}
+		})
+	}
+}
+
+// A REJECTION THAT WAS SENT OFFERS NO RESEND, and one asked for is refused
+// without calling the lane.
+func TestASentRejectionOffersNoResend(t *testing.T) {
+	w := newEmailWorld()
+	p := w.provider()
+	w.decide(TransitionReject)
+	if got := w.sendBuyer(t, p, EmailRejected); got["state"] != SendSent {
+		t.Fatalf("the rejection answered %v", got)
+	}
+	if acts := fmt.Sprint(w.application(t, p)["acts"]); acts != "[]" {
+		t.Fatalf("acts = %s", acts)
+	}
+	if _, err := w.resend(t, p, EmailRejected); err == nil || len(w.lane.calls) != 1 {
+		t.Fatalf("a resend of a sent rejection answered %v after %d lane calls", err, len(w.lane.calls))
+	}
+	// A rejection the automation never sent (no template then) is not sent by a
+	// resend either: no attempt of it did not reach the provider.
+	w2 := newEmailWorld()
+	p2 := w2.provider()
+	w2.decide(TransitionReject)
+	if _, err := w2.resend(t, p2, EmailRejected); err == nil || len(w2.lane.calls) != 0 {
+		t.Fatalf("a resend of a rejection never attempted answered %v", err)
+	}
+}
+
+// AN UNCERTAIN APPROVAL IS RECORDED UNCERTAIN, answered as not sent, and the
+// page offers to send it again; a DEFERRED one is recorded deferred, and a
+// resend while it is on its way is refused with a sentence that says so.
+func TestAnUncertainApprovalOffersAResendAndADeferredOneRefusesIt(t *testing.T) {
+	useTestLaneReaders(t)
+	w := newEmailWorld()
+	p := w.provider()
+	w.approveAndGrant(EntitlementGranted)
+	w.lane.outcome = "uncertain"
+	_, err := p.sendBuyerEmail(automation(), map[string]any{"applicationId": linkApp, "kind": EmailApproved}, 0)
+	if err == nil {
+		t.Fatal("an uncertain hand-over was answered as a success")
+	}
+	if strings.Contains(err.Error(), "connection to the provider") {
+		t.Fatalf("the answer carries the transport's own words: %v", err)
+	}
+	if row := w.sends[EmailSendRowID(EmailApproved, linkApp, 1)]; row["state"] != SendUncertain {
+		t.Fatalf("the uncertain email's row is %v", row)
+	}
+	if acts := fmt.Sprint(w.application(t, p)["acts"]); acts != "[remove resendApproved]" {
+		t.Fatalf("acts = %s", acts)
+	}
+	w.lane.outcome = "defer"
+	if _, err := w.resend(t, p, EmailApproved); err == nil || !strings.Contains(err.Error(), "send-rate limit") {
+		t.Fatalf("a deferred resend answered %v; want it answered as not sent, with the lane's sentence", err)
+	}
+	if row := w.sends[EmailSendRowID(EmailApproved, linkApp, 2)]; row["state"] != SendDeferred {
+		t.Fatalf("the deferred email's row is %v", row)
+	}
+	calls := len(w.lane.calls)
+	w.lane.outcome = ""
+	_, err = w.resend(t, p, EmailApproved)
+	if err == nil || !strings.Contains(err.Error(), "waiting") || len(w.lane.calls) != calls {
+		t.Fatalf("a resend while the last attempt is deferred answered %v after %d lane calls, want a refusal and none", err, len(w.lane.calls)-calls)
+	}
+}
+
+// A DEFERRED EMAIL THE LANE LATER SENT READS SENT, with the lane's time, on the
+// application's page and in the export; one the lane records as failed reads
+// failed. The lane's status is the truth, read when asked.
+func TestADeferredEmailTheLaneSentReadsSentOnThePageAndInTheExport(t *testing.T) {
+	w := newEmailWorld()
+	p := w.provider()
+	w.decide(TransitionReject)
+	w.lane.outcome = "defer"
+	if _, err := p.sendBuyerEmail(automation(), map[string]any{"applicationId": linkApp, "kind": EmailRejected}, 0); err == nil {
+		t.Fatal("a deferral was answered as a success")
+	}
+	sentAt := w.clock.Add(90 * time.Second).UTC().Format(time.RFC3339Nano)
+	w.lane.statuses = []map[string]any{{"requestId": LaneRequestID(EmailRejected, linkApp, 1), "status": "sent", "sentAt": sentAt}}
+	e := emailShown(t, w.application(t, p), EmailRejected, 1)
+	if e["state"] != SendSent || e["sentAt"] != sentAt || e["reason"] != "" {
+		t.Fatalf("the replayed email shows %v, want sent at the lane's time", e)
+	}
+	nodes, err := p.exportStore(staffCtx(emailStaff), map[string]any{"siteId": linkSite, "storeId": linkStore}, 0)
+	doc := asString(reply(t, nodes, err)["json"])
+	var exported struct {
+		EmailSends []map[string]any `json:"emailSends"`
+	}
+	if err := json.Unmarshal([]byte(doc), &exported); err != nil || len(exported.EmailSends) != 1 {
+		t.Fatalf("the export's emails: %v %v", err, exported.EmailSends)
+	}
+	if got := exported.EmailSends[0]; got["state"] != SendSent || got["sentAt"] != sentAt {
+		t.Fatalf("the export shows the replayed email as %v", got)
+	}
+	w.lane.statuses[0]["status"] = "failed"
+	w.lane.statuses[0]["sentAt"] = ""
+	if e := emailShown(t, w.application(t, p), EmailRejected, 1); e["state"] != SendFailed || strings.Contains(asString(e["reason"]), "send-rate limit") {
+		t.Fatalf("an email the lane failed shows %v", e)
 	}
 }
 
@@ -740,6 +962,18 @@ func TestActsOfferTheResendsOnlyWhenTheyAreDue(t *testing.T) {
 		{ActsInput{Stage: StateApproved, AccessState: EntitlementPending, EntitlementExists: true, ApprovedEmailSent: true}, "[remove retryAccess]"},
 		{ActsInput{Stage: StateApproved, AccessState: EntitlementGranted, EntitlementExists: true, ApprovedEmailSent: true, Operator: true}, "[]"},
 		{ActsInput{Stage: StageWaitingForTerms, TermsRequired: true, TermsTemplateChosen: true, Operator: true}, "[]"},
+		{ActsInput{Stage: StateRejected, LatestRejectedEmail: SendHeld}, "[resendRejected]"},
+		{ActsInput{Stage: StateRejected, LatestRejectedEmail: SendUncertain}, "[resendRejected]"},
+		{ActsInput{Stage: StateRejected, LatestRejectedEmail: SendFailed}, "[resendRejected]"},
+		{ActsInput{Stage: StateRejected, LatestRejectedEmail: SendSent}, "[]"},
+		{ActsInput{Stage: StateRejected, LatestRejectedEmail: SendDeferred}, "[]"},
+		{ActsInput{Stage: StateRejected, LatestRejectedEmail: SendSkipped}, "[]"},
+		{ActsInput{Stage: StateRejected}, "[]"},
+		{ActsInput{Stage: StateRejected, LatestRejectedEmail: SendHeld, Operator: true}, "[]"},
+		{ActsInput{Stage: StateRevoked, AccessState: EntitlementRevoked, EntitlementExists: true, LatestRevokedEmail: SendHeld}, "[resendRevoked]"},
+		{ActsInput{Stage: StateRevoked, AccessState: EntitlementPending, EntitlementExists: true, LatestRevokedEmail: SendFailed}, "[retryAccess resendRevoked]"},
+		{ActsInput{Stage: StateRevoked, AccessState: EntitlementRevoked, EntitlementExists: true, LatestRevokedEmail: SendSent}, "[]"},
+		{ActsInput{Stage: StateApproved, AccessState: EntitlementGranted, EntitlementExists: true, LatestRejectedEmail: SendHeld}, "[remove]"},
 	} {
 		if got := fmt.Sprint(ActsFor(c.in)); got != c.want {
 			t.Errorf("ActsFor(%+v) = %s, want %s", c.in, got, c.want)

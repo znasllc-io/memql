@@ -45,13 +45,35 @@ import (
 // other is answered the first's receipt. The row is then written fenced on the
 // version read, so the second writer answers the first's row.
 //
-// # A failure is a row, not an error
+// # What happened is a row, in the lane's words
 //
-// What the lane answered is recorded on the email's row -- sent, skipped with
-// the lane's sentence, pending, or failed with the lane's words -- and the
-// builtin answers the row rather than returning an error, because the store's
-// people read why an email did not go out from that row (wholesaleGet's
-// emails). Only a caller who may not send is refused.
+// What the lane answered is recorded on the email's row: sent; skipped with the
+// lane's sentence (the row withdrew it, or the address is suppressed); held
+// with the lane's sentence (configuration the store can fix, such as an
+// unpublished template: nothing was attempted); uncertain (the hand-over had no
+// answer, and the provider may have the message); failed with the lane's words;
+// or deferred (the send-rate limit: the lane replays it). Only sent and skipped
+// are answered as the row; every other outcome is recorded and then answered as
+// an error that says the email was not sent, so no caller reads it as success.
+//
+// # The lane's status is the truth
+//
+// The row records what the lane answered at the time; the lane's own record of
+// the delivery may say more since (a deferral it replayed and sent, a send the
+// provider refused). The application's page, the export, the acts and the
+// resend read each attempt through the lane's status read, and where the lane
+// has recorded a delivery its status is what is shown (effectiveSend).
+//
+// # Sent again by a person
+//
+// The automatic path is one attempt per attempt number, never retried by
+// itself: a held, uncertain or deferred attempt is answered from its row, and
+// only a failed one is tried again under the same request id. A person of the
+// store sends an email again as a new attempt (wholesaleResendEmail): the terms
+// and approval emails as before, and a rejection or removal only while the
+// application is still rejected or removed and its last attempt did not reach
+// the provider (held, uncertain or failed) -- one that was sent is never sent
+// twice. Nothing is sent again while the last attempt is on its way.
 
 // The applicant's four emails, matching the emailSend concept's kind enum.
 const (
@@ -66,21 +88,51 @@ var EmailKinds = []string{EmailTerms, EmailApproved, EmailRejected, EmailRevoked
 
 // What came of one send, matching the emailSend concept's state enum.
 const (
-	SendSent    = "sent"
-	SendSkipped = "skipped"
-	SendFailed  = "failed"
-	SendPending = "pending"
+	SendSent      = "sent"
+	SendSkipped   = "skipped"
+	SendHeld      = "held"
+	SendUncertain = "uncertain"
+	SendFailed    = "failed"
+	SendDeferred  = "deferred"
+	// sendPendingRecorded is the first build's word for a deferral or an
+	// uncertain answer, which the concept still accepts for rows it wrote. It is
+	// never written now, and read as deferred (recordedState).
+	sendPendingRecorded = "pending"
+)
+
+// recordedState is a row's state as this build reads it.
+func recordedState(row map[string]any) string {
+	if state := trimmed(row["state"]); state != sendPendingRecorded {
+		return state
+	}
+	return SendDeferred
+}
+
+// The row lane's readings of its own errors. Seams, so the pack's tests can
+// stand in for the lane's unexported hold and uncertain types.
+var (
+	laneHeldReason = campaigns.HeldReason
+	laneUncertain  = campaigns.UncertainSend
 )
 
 // The sentences a send that the builtin itself declines answers. Nothing is
 // recorded for these: the attempt stays open, so the same call made once the
 // store is ready (a template chosen, the access granted) sends.
 const (
-	ReasonTermsNotRequired  = "terms are not required on this store"
-	ReasonNotWaiting        = "the application is not waiting for terms"
-	ReasonAccessNotGranted  = "access is not granted yet"
-	ReasonNoOrganization    = "the application belongs to no organization, so no email can be sent for it"
-	reasonUnreadableAnswer  = "the row lane answered nothing this pack can read"
+	ReasonTermsNotRequired = "terms are not required on this store"
+	ReasonNotWaiting       = "the application is not waiting for terms"
+	ReasonAccessNotGranted = "access is not granted yet"
+	ReasonNoOrganization   = "the application belongs to no organization, so no email can be sent for it"
+	reasonUnreadableAnswer = "the row lane answered nothing this pack can read"
+	// reasonUncertainHandOver is an uncertain hand-over's sentence; the lane's
+	// own error carries the transport's words, which are not for a person.
+	reasonUncertainHandOver = "The email service did not say whether it accepted this email, so it is not sent again automatically."
+	// reasonLaneFailed is a delivery the lane recorded as failed after the row
+	// said otherwise; the lane's status read does not carry its words.
+	reasonLaneFailed = "The email service recorded this email as failed."
+	// reasonLaneWaiting is a delivery the lane holds to send later, when the
+	// row carries no sentence of its own for it.
+	reasonLaneWaiting       = "The email service is waiting to send this email."
 	withdrawnTerms          = "the application is no longer waiting for terms"
 	withdrawnAccess         = "access is not granted"
 	withdrawnGone           = "the application no longer exists"
@@ -210,8 +262,8 @@ func (p *Provider) sendBuyerEmail(ctx context.Context, args map[string]any, _ in
 	return p.sendEmail(ctx, sys, app, kind, 1, template, settings.SenderIdentityID, "")
 }
 
-// resendEmail answers wholesaleResendEmail: a person of the store sends the
-// terms or the approval email again, as a new attempt.
+// resendEmail answers wholesaleResendEmail: a person of the store sends one of
+// the four emails again, as a new attempt.
 //
 // THE ORGANIZATION GATE ADMITTED THE CALLER (the part, in the application's
 // organization). Before anything is read the caller must be a signed-in person
@@ -223,8 +275,8 @@ func (p *Provider) resendEmail(ctx context.Context, args map[string]any, _ int) 
 		return nil, err
 	}
 	kind := trimmed(args["kind"])
-	if kind != EmailTerms && kind != EmailApproved {
-		return nil, fmt.Errorf("wholesale: only the terms email and the approval email are sent again; %q is not one of them", kind)
+	if _, known := emailNouns[kind]; !known {
+		return nil, fmt.Errorf("wholesale: %q is not one of the applicant's emails; it is terms, approved, rejected or revoked", kind)
 	}
 	applicationID := trimmed(args["applicationId"])
 	if applicationID == "" {
@@ -248,6 +300,22 @@ func (p *Provider) resendEmail(ctx context.Context, args map[string]any, _ int) 
 	if err != nil {
 		return nil, err
 	}
+	// WHAT THE LANE SAYS OF THE LAST ATTEMPT. For a rejection or removal the
+	// answer decides whether anything is sent, so a status that cannot be read
+	// refuses the resend; for the other two it only says whether the last attempt
+	// is still on its way, and the row's own record answers when it cannot.
+	latest := latestSend(sends, kind)
+	if latest != nil {
+		deliveries, err := p.laneDeliveries(ctx, app, []string{trimmed(latest["requestId"])})
+		if err != nil && (kind == EmailRejected || kind == EmailRevoked) {
+			return nil, fmt.Errorf("wholesale: the email service's record of the last %s could not be read, so it is not "+
+				"sent again now", emailNouns[kind])
+		}
+		latest = effectiveSend(latest, deliveries[trimmed(latest["requestId"])])
+		if trimmed(latest["state"]) == SendDeferred {
+			return nil, fmt.Errorf("wholesale: the last %s is waiting to be sent by the email service, so it is not sent again", emailNouns[kind])
+		}
+	}
 	switch kind {
 	case EmailTerms:
 		waiting, err := p.waitingForTerms(sys, app)
@@ -269,6 +337,19 @@ func (p *Provider) resendEmail(ctx context.Context, args map[string]any, _ int) 
 		if !granted || !hasAttempt(sends, EmailApproved, 1) {
 			return nil, errors.New("wholesale: the approval email is sent again only to a buyer whose access is granted, " +
 				"once the store's automation has sent it")
+		}
+	case EmailRejected, EmailRevoked:
+		want := StateRejected
+		if kind == EmailRevoked {
+			want = StateRevoked
+		}
+		state, err := p.stateOf(sys, trimmed(app["id"]))
+		if err != nil {
+			return nil, err
+		}
+		if state != want || latest == nil || !notReachedProvider(trimmed(latest["state"])) {
+			return nil, fmt.Errorf("wholesale: the %s is sent again only while the application is %s and its last "+
+				"attempt did not reach the email service", emailNouns[kind], strings.ToLower(staffWords[want]))
 		}
 	}
 	template := settings.TemplateFor(kind)
@@ -353,8 +434,8 @@ func (p *Provider) sendEmail(ctx, sys context.Context, app map[string]any, kind 
 	if err != nil {
 		return nil, err
 	}
-	if prior != nil && settledSend(trimmed(prior["state"])) {
-		return answerSend(prior)
+	if prior != nil && settledSend(recordedState(prior)) {
+		return p.answerRecorded(ctx, app, prior)
 	}
 	merchant, err := p.asMerchant(ctx, app)
 	if err != nil {
@@ -416,7 +497,7 @@ func (p *Provider) sendEmail(ctx, sys context.Context, app map[string]any, kind 
 		if current == nil {
 			return nil, fmt.Errorf("wholesale: the email's record changed while it was sent and cannot be read")
 		}
-		return answerSend(current)
+		return p.answerRecorded(ctx, app, current)
 	}
 	written := map[string]any{"id": emailSendConcept + ":" + rowID}
 	for k, v := range row {
@@ -424,25 +505,82 @@ func (p *Provider) sendEmail(ctx, sys context.Context, app map[string]any, kind 
 			written[k] = v
 		}
 	}
-	return answerSend(written)
+	return answerOutcome(written)
 }
 
-// settledSend reports whether an attempt in state is final: it went out, it
-// will not, or the lane holds it to send later. Only a failed attempt is tried
-// again.
+// settledSend reports whether the automatic path is done with an attempt in
+// state: it went out, it will not, the lane holds it, the provider may have it,
+// or the lane will replay it. Only a failed attempt is tried again under its
+// request id; any other is sent again only by a person, as a new attempt.
 func settledSend(state string) bool {
-	return state == SendSent || state == SendSkipped || state == SendPending
+	switch state {
+	case SendSent, SendSkipped, SendHeld, SendUncertain, SendDeferred:
+		return true
+	}
+	return false
+}
+
+// notReachedProvider reports whether an attempt in state did not reach the
+// provider, so a rejection or removal may be sent again: held, uncertain or
+// failed.
+func notReachedProvider(state string) bool {
+	return state == SendHeld || state == SendUncertain || state == SendFailed
+}
+
+// emailNouns is each kind as a sentence names it.
+var emailNouns = map[string]string{
+	EmailTerms:    "terms email",
+	EmailApproved: "approval email",
+	EmailRejected: "rejection email",
+	EmailRevoked:  "removal email",
+}
+
+// answerRecorded answers an attempt already recorded, as the lane now says it
+// stands: a row the lane has a delivery for is read through it (effectiveSend).
+func (p *Provider) answerRecorded(ctx context.Context, app, row map[string]any) ([]memorynodes.MemoryNode, error) {
+	if state := recordedState(row); state != SendSent && state != SendSkipped {
+		id := trimmed(row["requestId"])
+		if deliveries, err := p.laneDeliveries(ctx, app, []string{id}); err == nil {
+			row = effectiveSend(row, deliveries[id])
+		}
+	}
+	return answerOutcome(row)
+}
+
+// answerOutcome answers one attempt: sent and skipped as the row, every other
+// state as an error that says the email was not sent and why, in words that
+// carry nothing of the applicant and none of the transport's.
+func answerOutcome(row map[string]any) ([]memorynodes.MemoryNode, error) {
+	noun := emailNouns[trimmed(row["kind"])]
+	reason := strings.TrimSpace(asString(row["reason"]))
+	switch recordedState(row) {
+	case SendSent, SendSkipped:
+		return answerSend(row)
+	case SendHeld:
+		return nil, fmt.Errorf("wholesale: the %s was not sent: %s", noun, reason)
+	case SendDeferred:
+		if reason == "" {
+			reason = reasonLaneWaiting
+		}
+		return nil, fmt.Errorf("wholesale: the %s is not sent yet: %s", noun, reason)
+	case SendUncertain:
+		return nil, fmt.Errorf("wholesale: the email service did not say whether it accepted the %s, so it is not "+
+			"sent again automatically", noun)
+	}
+	return nil, fmt.Errorf("wholesale: the %s was not sent; the application's emails say why", noun)
 }
 
 // laneOutcome reads what the row lane answered as an emailSend state and its
-// sentence. A hold -- configuration the store can fix, such as an unpublished
-// template -- and a skip are skipped with the lane's sentence; a deferral, or
-// an attempt whose outcome the provider has not reported yet, is pending; any
-// other error is failed with the lane's words.
+// sentence: a hold is held, and a skip skipped, each with the lane's sentence;
+// an uncertain hand-over is uncertain; a deferral deferred; any other error is
+// failed with the lane's words.
 func laneOutcome(reply map[string]any, err error) (string, string) {
 	if err != nil {
-		if reason, held := campaigns.HeldReason(err); held {
-			return SendSkipped, reason
+		if reason, held := laneHeldReason(err); held {
+			return SendHeld, reason
+		}
+		if laneUncertain(err) {
+			return SendUncertain, reasonUncertainHandOver
 		}
 		return SendFailed, laneWords(err)
 	}
@@ -451,10 +589,106 @@ func laneOutcome(reply map[string]any, err error) (string, string) {
 		return SendSent, ""
 	case reply["skipped"] == true:
 		return SendSkipped, trimmed(reply["reason"])
-	case reply["deferred"] == true, reply["uncertain"] == true:
-		return SendPending, trimmed(reply["reason"])
+	case reply["uncertain"] == true:
+		return SendUncertain, trimmed(reply["reason"])
+	case reply["deferred"] == true:
+		return SendDeferred, trimmed(reply["reason"])
 	}
 	return SendFailed, reasonUnreadableAnswer
+}
+
+// effectiveSend is one attempt's row as the lane now says it stands. Where the
+// lane has recorded a delivery for the attempt's request id, its status is the
+// state (sent with the lane's time, failed, skipped with the lane's sentence,
+// pending as deferred), and the row's own sentence is kept only when the row
+// already said the same; a row the lane has recorded nothing for (a hold, an
+// attempt the lane never reached) is answered as it stands.
+func effectiveSend(row, delivery map[string]any) map[string]any {
+	state, reason, sentAt := recordedState(row), asString(row["reason"]), timeText(row["sentAt"])
+	switch trimmed(delivery["status"]) {
+	case "sent":
+		state, reason = SendSent, ""
+		if at := timeText(delivery["sentAt"]); at != "" {
+			sentAt = at
+		}
+	case "failed":
+		if state != SendFailed {
+			reason = reasonLaneFailed
+		}
+		state, sentAt = SendFailed, ""
+	case "skipped":
+		state, reason, sentAt = SendSkipped, asString(delivery["skipReason"]), ""
+	case "pending":
+		if state != SendDeferred {
+			reason = reasonLaneWaiting
+		}
+		state, sentAt = SendDeferred, ""
+	}
+	out := copyMap(row)
+	out["state"], out["reason"], out["sentAt"] = state, reason, sentAt
+	return out
+}
+
+// copyMap is a shallow copy of m.
+func copyMap(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// latestSend is the highest attempt of kind recorded, or nil.
+func latestSend(sends []map[string]any, kind string) map[string]any {
+	var latest map[string]any
+	high := 0
+	for _, row := range sends {
+		if trimmed(row["kind"]) != kind {
+			continue
+		}
+		if n, _ := intArg(row["attempt"]); latest == nil || n > high {
+			latest, high = row, n
+		}
+	}
+	return latest
+}
+
+// laneDeliveries is the lane's record of each request id's delivery, for the
+// application's organization, keyed by request id: only ids the lane has
+// recorded a delivery for are present. The read is made a hundred ids at a time.
+func (p *Provider) laneDeliveries(ctx context.Context, app map[string]any, requestIDs []string) (map[string]map[string]any, error) {
+	out := map[string]map[string]any{}
+	account := bareID(trimmed(app["accountId"]))
+	var ids []string
+	for _, id := range requestIDs {
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 || account == "" {
+		return out, nil
+	}
+	if p.lane == nil {
+		return out, fmt.Errorf("wholesale: the pack has no row lane, so no delivery can be read")
+	}
+	for start := 0; start < len(ids); start += maxLaneStatusRequestIDs {
+		end := min(start+maxLaneStatusRequestIDs, len(ids))
+		status, err := p.lane.RowMessageStatus(ctx, account, ids[start:end])
+		if err != nil {
+			return out, err
+		}
+		for _, s := range status {
+			if trimmed(s["status"]) != "" {
+				out[trimmed(s["requestId"])] = map[string]any{
+					"status":         trimmed(s["status"]),
+					"skipReason":     asString(s["skipReason"]),
+					"providerStatus": trimmed(s["providerStatus"]),
+					"sentAt":         timeText(s["sentAt"]),
+				}
+			}
+		}
+	}
+	return out, nil
 }
 
 // laneWords is the lane's error as the store's people read it: without the
@@ -663,46 +897,34 @@ func (p *Provider) storefrontOf(sys context.Context, app map[string]any, setting
 }
 
 // emailsView is an application's emails as wholesaleGet shows them, newest
-// first, each with the lane's own record of its delivery.
+// first, each as the lane says it stands (effectiveSend) with the lane's own
+// record of its delivery.
 //
 // THE DELIVERY IS READ AFTER THE GATE: wholesaleGet's caller was admitted by
 // the organization gate and read the application under their own actor before
 // this runs, and the status read names only the application's organization.
-// A status that cannot be read leaves each delivery null and says so in one
-// line for the operator, naming the application and nothing of the applicant.
+// A status that cannot be read leaves each delivery null and each email as its
+// row recorded it, and says so in one line for the operator, naming the
+// application and nothing of the applicant.
 func (p *Provider) emailsView(ctx context.Context, app map[string]any, sends []map[string]any) []map[string]any {
-	deliveries := map[string]map[string]any{}
-	account := bareID(trimmed(app["accountId"]))
-	var ids []string
+	ids := make([]string, 0, len(sends))
 	for _, row := range sends {
-		if id := trimmed(row["requestId"]); id != "" && len(ids) < maxLaneStatusRequestIDs {
-			ids = append(ids, id)
-		}
+		ids = append(ids, trimmed(row["requestId"]))
 	}
-	if len(ids) > 0 && account != "" && p.lane != nil {
-		status, err := p.lane.RowMessageStatus(ctx, account, ids)
-		if err != nil {
-			p.log().Warn("wholesale: the row lane's record of an application's emails could not be read",
-				"component", "wholesale", "applicationId", trimmed(app["id"]), "error", err)
-		}
-		for _, s := range status {
-			if trimmed(s["status"]) != "" {
-				deliveries[trimmed(s["requestId"])] = map[string]any{
-					"status":         trimmed(s["status"]),
-					"skipReason":     asString(s["skipReason"]),
-					"providerStatus": trimmed(s["providerStatus"]),
-					"sentAt":         timeText(s["sentAt"]),
-				}
-			}
-		}
+	deliveries, err := p.laneDeliveries(ctx, app, ids)
+	if err != nil {
+		p.log().Warn("wholesale: the row lane's record of an application's emails could not be read",
+			"component", "wholesale", "applicationId", trimmed(app["id"]), "error", err)
 	}
 	out := make([]map[string]any, 0, len(sends))
 	for _, row := range sends {
 		attempt, _ := intArg(row["attempt"])
 		var delivery any
-		if d, ok := deliveries[trimmed(row["requestId"])]; ok {
+		d, ok := deliveries[trimmed(row["requestId"])]
+		if ok {
 			delivery = d
 		}
+		row = effectiveSend(row, d)
 		out = append(out, map[string]any{
 			"kind":        trimmed(row["kind"]),
 			"attempt":     attempt,
