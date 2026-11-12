@@ -200,6 +200,7 @@ type writtenWorld struct {
 	owner                      string // the site's stored owner, which the edge stamps
 	account                    string
 	moderator, outsider        string // canonical ids, as a signed-in actor carries them
+	bystander                  string // canonical: of the organization, not admitted to moderate
 	handle, token              string
 	requestID, reviewID        string // bare
 	reviewRowID, decisionRowID string // canonical
@@ -226,6 +227,9 @@ func newWrittenWorld(t *testing.T, label string) *writtenWorld {
 	own := "group-reviews-" + label + "-own-" + n
 	seedGroup(t, eng, own, "custom", w.account)
 	seedPersonIn(t, eng, w.merchant, "Morgan Merchant", string(auth.RoleWriter), true, own, w.account, "added")
+	bystander := "user-reviews-" + label + "-bystander-" + n
+	seedPersonIn(t, eng, bystander, "Bea Bystander", string(auth.RoleWriter), true, own, w.account, "added")
+	w.bystander = "v1:identity:user:" + bystander
 	seedSiteIn(t, eng, w.site, w.merchant, w.store, w.account)
 	w.owner = siteOwnerOf(t, w.site)
 	moderator, outsider := "user-reviews-"+label+"-moderator-"+n, "user-reviews-"+label+"-outsider-"+n
@@ -424,6 +428,10 @@ func TestARefusedPlantChangesNothingThePackShows(t *testing.T) {
 	}
 }
 
+// removedMutations are the pack's mutations this task removed: no product
+// path called them.
+var removedMutations = map[string]bool{"createReview": true, "submitReview": true, "setReviewDisplay": true}
+
 // NO MUTATION OF THE PACK IS CALLABLE BY NAME by any caller with arguments of
 // their choosing, and none writes the row it names. createReview, submitReview
 // and setReviewDisplay are removed (no product path called them) and stay in
@@ -464,11 +472,15 @@ func TestNoReviewsMutationIsCallableByName(t *testing.T) {
 	for _, c := range calls {
 		for _, caller := range w.callers() {
 			before := versionsOf(t, c.concept, c.id)
-			_, err := w.eng.Execute(caller.ctx, c.call)
-			if err == nil {
-				t.Errorf("OPEN: %s by the %s was accepted", c.mutation, caller.name)
-			} else {
-				t.Logf("refused: %s by the %s: %v", c.mutation, caller.name, err)
+			// THE REFUSAL IS THE RIGHT ONE: a removed mutation is not there
+			// at all, a closed one is server-only. An argument error would
+			// also be an error, and would say nothing about either.
+			want := `function "` + c.mutation + `" is server-only`
+			if removedMutations[c.mutation] {
+				want = `function "` + c.mutation + `" not found`
+			}
+			if _, err := w.eng.Execute(caller.ctx, c.call); err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("%s by the %s answered %v, want %q", c.mutation, caller.name, err, want)
 			}
 			if after := versionsOf(t, c.concept, c.id); after != before {
 				t.Errorf("WROTE: %s by the %s wrote %d version(s) of %s", c.mutation, caller.name, after-before, c.id)
@@ -574,3 +586,84 @@ func TestASettingsSaveThroughTheBuiltinStillWrites(t *testing.T) {
 
 // bareAccount is an organization id without its canonical prefix.
 func bareAccount(id string) string { return strings.TrimPrefix(id, "v1:accounts:account:") }
+
+// storeRows is how many versions of this store's reviews rows are stored, and
+// how many outbound emails name its product: everything a reviews builtin can
+// write for it.
+func (w *writtenWorld) storeRows(t *testing.T) (reviews, outbound int) {
+	t.Helper()
+	if err := liveDB.DB.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM "MemoryNodes" WHERE concept LIKE 'v1:reviews:%' AND payload->>'storeId' = $1`,
+		w.store).Scan(&reviews); err != nil {
+		t.Fatalf("count the store's rows: %v", err)
+	}
+	if err := liveDB.DB.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM "MemoryNodes" WHERE concept = 'v1:platform:outboundRequest' AND payload::text LIKE $1`,
+		"%"+w.handle+"%").Scan(&outbound); err != nil {
+		t.Fatalf("count the store's outbound email: %v", err)
+	}
+	return reviews, outbound
+}
+
+// EACH BUILTIN THAT WRITES CHECKS ITS CALLER BEFORE IT STAMPS INTERNAL ORIGIN,
+// and that check is the only gate on the write: internal origin skips the row
+// gate (component/memql/rowauthz_write_guard.go). So each caller a builtin's
+// own check refuses is refused, and nothing of the store is written.
+func TestEachWritingBuiltinRefusesBeforeItWritesAndWritesNothing(t *testing.T) {
+	w := newWrittenWorld(t, "srvw-gate")
+	operator := asPerson("user-reviews-srvw-gate-operator-"+w.n, auth.RoleOwner)
+	outsider, bystander, moderator := w.as(w.outsider), w.as(w.bystander), w.as(w.moderator)
+	review, store, site := quote(w.reviewRowID), quote(w.store), quote(w.site)
+	expired := w.token + "-expired"
+	putRequest(t, w.eng, w.owner, w.store, w.requestID+"-expired", w.handle+"-x", expired, time.Now().Add(-time.Hour))
+	// The part's organization gate (the builtin's @requiresCapability) and the
+	// builtin's own refusals, each named by what it says.
+	const gate = "capability_not_held"
+	cases := []struct {
+		name string
+		ctx  context.Context
+		call string
+		want string
+	}{
+		{"reviewsDecide by a person of another organization", outsider,
+			`builtin reviewsDecide(reviewId: ` + review + `, action: "publish", revision: 1)`, gate},
+		{"reviewsDecide by a person not admitted to moderate", bystander,
+			`builtin reviewsDecide(reviewId: ` + review + `, action: "publish", revision: 1)`, gate},
+		{"reviewsDecide by a cluster operator", operator,
+			`builtin reviewsDecide(reviewId: ` + review + `, action: "publish", revision: 1)`, "do not moderate them"},
+		{"reviewsUpdateSettings by a person of another organization", outsider,
+			`builtin reviewsUpdateSettings(storeId: ` + store + `, siteId: ` + site + `, notifyEmail: "planted@example.com")`, gate},
+		{"reviewsUpdateSettings by a person not admitted to moderate", bystander,
+			`builtin reviewsUpdateSettings(storeId: ` + store + `, siteId: ` + site + `, notifyEmail: "planted@example.com")`, gate},
+		{"reviewsSetPublicDisplay by a person of another organization", outsider,
+			`builtin reviewsSetPublicDisplay(storeId: ` + store + `, siteId: ` + site + `, publicDisplay: false)`, gate},
+		{"reviewsSetPublicDisplay by a person not admitted to moderate", bystander,
+			`builtin reviewsSetPublicDisplay(storeId: ` + store + `, siteId: ` + site + `, publicDisplay: false)`, gate},
+		{"reviewsIssueRequest by a moderator, who is no operator", moderator,
+			`builtin reviewsIssueRequest(storeId: ` + store + `, orderGid: "gid://shopify/Order/1", productHandle: ` +
+				quote(w.handle) + `, siteId: ` + site + `)`, "only the cluster's operators issue"},
+		{"reviewsEraseReviewer by a moderator who is not the store's named owner", moderator,
+			`builtin reviewsEraseReviewer(reviewId: ` + review + `)`, "only the store's owner can erase"},
+		{"reviewsEraseReviewer by a person of another organization", outsider,
+			`builtin reviewsEraseReviewer(reviewId: ` + review + `)`, gate},
+		{"reviewsNotifyModerator without internal origin", moderator,
+			`builtin reviewsNotifyModerator(reviewId: ` + review + `)`, "not by a client"},
+		{"reviewsSendDueRequests without internal origin", w.as(w.owner),
+			`builtin reviewsSendDueRequests(storeId: ` + store + `)`, "not by a client"},
+		{"reviewsSubmitFromLink with a token that is no link", asMerchant(w.owner),
+			`builtin reviewsSubmitFromLink(requestToken: "no-such-token", productHandle: ` + quote(w.handle) +
+				`, body: "x", storeId: ` + store + `)`, "link_invalid"},
+		{"reviewsSubmitFromLink with an expired link", asMerchant(w.owner),
+			`builtin reviewsSubmitFromLink(requestToken: ` + quote(expired) + `, productHandle: ` + quote(w.handle+"-x") +
+				`, body: "x", storeId: ` + store + `)`, "link_expired"},
+	}
+	for _, c := range cases {
+		reviews, outbound := w.storeRows(t)
+		if _, err := w.eng.Execute(c.ctx, c.call); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s answered %v, want %q", c.name, err, c.want)
+		}
+		if r, o := w.storeRows(t); r != reviews || o != outbound {
+			t.Errorf("%s wrote %d reviews row version(s) and %d outbound email(s)", c.name, r-reviews, o-outbound)
+		}
+	}
+}
