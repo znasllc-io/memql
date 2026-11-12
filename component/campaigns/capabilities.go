@@ -219,6 +219,15 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name:        "rowSender",
+			Description: "The sender a row lane message for one organization would go out as: {ready, fromName, address, reason}, resolved as the send resolves it. Trusted jobs only (internal origin).",
+			Handler:     w.handleRowSender,
+			ArgsSchema: map[string]string{
+				"accountId":        "string (required) - the organization the messages are sent for",
+				"senderIdentityId": "string (optional) - the identity chosen; empty is resolved as a send with none named is",
+			},
+		},
+		{
 			Name:          "rowMessageStatus",
 			Description:   "The outcome of row lane messages, one row per request id: {requestId, status, skipReason, providerStatus, sentAt}. Trusted jobs only (internal origin).",
 			Handler:       w.handleRowMessageStatus,

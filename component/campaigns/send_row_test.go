@@ -455,3 +455,42 @@ func TestHeldReasonReadsAHoldThroughAWrapAndNothingElse(t *testing.T) {
 		t.Fatal("no error is not a hold")
 	}
 }
+
+// THE ROW LANE'S SENDER, AS A ROW SEND RESOLVES IT: the chosen identity of the
+// organization, with its name and address; another organization's, one turned
+// off and one that does not exist each refused with the sentence the send
+// would give; none chosen, for an organization that is not the installation,
+// refused as the send refuses it. A client's call is refused before reading.
+func TestTheRowSenderIsResolvedAsARowSendResolvesIt(t *testing.T) {
+	engine := rowSendEngine()
+	other := senderIdentityRow("si-other", "news@other.example.test", "Other", "active")
+	other["accountId"] = "v1:accounts:account:acct-x"
+	off := senderIdentityRow("si-off", "old@store.example.test", "Old", "disabled")
+	off["accountId"] = "v1:accounts:account:acct-1"
+	engine.senderIdentities["si-other"], engine.senderIdentities["si-off"] = other, off
+	w := rowWorker(t, engine, &recordingSender{})
+	ask := func(sender string) map[string]any {
+		t.Helper()
+		nodes, err := w.handleRowSender(fromTrustedJob(), map[string]any{"accountId": "acct-1", "senderIdentityId": sender}, 0)
+		if err != nil {
+			t.Fatalf("rowSender(%q): %v", sender, err)
+		}
+		return decodeResult(t, nodes)
+	}
+	if got := ask("si-store"); got["ready"] != true || got["address"] != "hello@store.example.test" || got["fromName"] != "The Store" || got["reason"] != "" {
+		t.Fatalf("the chosen sender answered %v", got)
+	}
+	for sender, want := range map[string]string{
+		"si-other": "campaign and sending identity must belong to the same organization",
+		"si-off":   "The sender old@store.example.test is turned off. Turn it on to send this email.",
+		"si-none":  "The sender of this email no longer exists. Choose another sender to send it.",
+		"":         "choose a sending identity belonging to this organization",
+	} {
+		if got := ask(sender); got["ready"] != false || got["reason"] != want || got["address"] != "" {
+			t.Fatalf("sender %q answered %v, want refused with %q", sender, got, want)
+		}
+	}
+	if _, err := w.handleRowSender(context.Background(), map[string]any{"accountId": "acct-1"}, 0); err == nil {
+		t.Fatal("a client's call was answered")
+	}
+}

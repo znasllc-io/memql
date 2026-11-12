@@ -338,6 +338,37 @@ func resolverFailure(err error) string {
 	return "failed"
 }
 
+// handleRowSender answers campaignRowSender: the sender a row send for the
+// organization would go out as, resolved exactly as sendRow resolves it
+// (resolveSendIdentityFor, with no installation fallback), read under the
+// system actor -- {ready, fromName, address, reason}. Ready answers the
+// identity's name and address; otherwise reason is the sentence the send would
+// refuse or hold with, and fromName and address are empty. With no identity
+// named, an organization that is not the installation is refused, as a send is.
+// It sends nothing and checks no transport: a send still decides when it is
+// made.
+func (w *Worker) handleRowSender(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, errors.New("campaigns.rowSender: read by a trusted job, never by a client")
+	}
+	account := memql.BareShortId(strings.TrimSpace(argString(args, "accountId")))
+	if account == "" {
+		return nil, errors.New("campaigns.rowSender: accountId is required: a sender is one organization's")
+	}
+	campaign := Campaign{AccountID: account, SenderIdentityID: memql.BareShortId(strings.TrimSpace(argString(args, "senderIdentityId")))}
+	identity, refusal := w.resolveSendIdentityFor(memql.ContextWithFreshRead(w.systemActorContext(ctx)), campaign, false)
+	answer := map[string]any{"accountId": account, "ready": true, "fromName": identity.SendAs.FromName,
+		"address": identity.SendAs.Address, "reason": ""}
+	if refusal.refused() {
+		reason := refusal.Held
+		if reason == "" {
+			reason = refusal.Reason
+		}
+		answer = map[string]any{"accountId": account, "ready": false, "fromName": "", "address": "", "reason": reason}
+	}
+	return resultNode("campaignRowSender", answer)
+}
+
 // handleRowMessageStatus answers campaignRowMessageStatus: one row per request
 // id, {requestId, status, skipReason, providerStatus, sentAt}, read under the
 // system actor for the one organization the call names, and nothing else of the

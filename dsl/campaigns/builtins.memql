@@ -226,6 +226,13 @@ builtin campaignSendRowMessage {
   senderIdentityId  string   @description("An identity in the organization. Omit to resolve its configured sender.")
 }
 
+@description("The sender a row lane message for one organization would go out as, resolved exactly as the send resolves it: {accountId, ready, fromName, address, reason}. ready answers the chosen identity's name and address; otherwise reason is the sentence the send would refuse or hold with (another organization's identity, one turned off, one that does not exist, or none named for an organization that is not the installation's), and fromName and address are empty. It sends nothing and checks no transport. TRUSTED JOBS ONLY: a call without internal origin is refused before anything is read.")
+@executor("integration.campaigns.rowSender")
+builtin campaignRowSender {
+  accountId         string!  @description("The organization the messages are sent for.")
+  senderIdentityId  string   @description("The sending identity chosen; empty is resolved as a send that names none.")
+}
+
 @description("The outcome of the row lane's messages, one row per request id: {requestId, status, skipReason, providerStatus, sentAt}, read under the system actor for the one organization named, and nothing else of the delivery. TRUSTED JOBS ONLY: a call without internal origin is refused before anything is read.")
 @executor("integration.campaigns.rowMessageStatus")
 builtin campaignRowMessageStatus {
