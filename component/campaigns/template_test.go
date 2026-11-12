@@ -2353,19 +2353,26 @@ func TestSaveTemplateRefusesAPurposeOutsideTheTwo(t *testing.T) {
 	}
 }
 
-// withoutListLinks takes the unsubscribe and preferences links out of a built-in
-// layout's footer: the email a transactional template is.
-func withoutListLinks(t *testing.T, doc map[string]any) map[string]any {
+// withoutEngineLinks takes the engine's four links out of a built-in layout:
+// the unsubscribe, preferences and view-in-browser links out of its footer,
+// and a confirm button pointed at an ordinary address. It is the email a
+// transactional template is.
+func withoutEngineLinks(t *testing.T, doc map[string]any) map[string]any {
 	t.Helper()
 	setBlock(t, doc, "footer", func(b map[string]any) {
 		kept := []any{}
 		for _, item := range b["links"].([]any) {
-			if href := item.(map[string]any)["href"]; href != emaildoc.TagUnsubscribeURL && href != emaildoc.TagPreferencesURL {
+			switch item.(map[string]any)["href"] {
+			case emaildoc.TagUnsubscribeURL, emaildoc.TagPreferencesURL, emaildoc.TagViewURL:
+			default:
 				kept = append(kept, item)
 			}
 		}
 		b["links"] = kept
 	})
+	if confirm := findBlockIn(doc, "confirm"); confirm != nil && confirm["href"] == emaildoc.TagConfirmURL {
+		setBlock(t, doc, "confirm", func(b map[string]any) { b["href"] = "https://acme.test/status" })
+	}
 	return doc
 }
 
@@ -2380,7 +2387,7 @@ func TestATransactionalTemplateIsPublishableWithNoUnsubscribeLinkAndNotWithOne(t
 
 	tw := newTemplateWorld(t)
 	tw.engine.stateful = true
-	doc := withoutListLinks(t, readyConfirmation(t))
+	doc := withoutEngineLinks(t, readyConfirmation(t))
 	saved := tw.saved(saveTemplateArgs(doc, transactional))
 	if len(saved.Issues) != 0 {
 		t.Fatalf("a transactional layout with no unsubscribe link: issues %+v", saved.Issues)
@@ -2395,11 +2402,11 @@ func TestATransactionalTemplateIsPublishableWithNoUnsubscribeLinkAndNotWithOne(t
 	}
 
 	marketing := newTemplateWorld(t)
-	if saved := marketing.saved(saveTemplateArgs(withoutListLinks(t, readyConfirmation(t)))); !saved.hasIssue(emaildoc.IssueUnsubscribeMissing, "") {
+	if saved := marketing.saved(saveTemplateArgs(withoutEngineLinks(t, readyConfirmation(t)))); !saved.hasIssue(emaildoc.IssueUnsubscribeMissing, "") {
 		t.Fatalf("a marketing layout with no unsubscribe link: issues %+v", saved.Issues)
 	}
 
-	preferences := withoutListLinks(t, readyConfirmation(t))
+	preferences := withoutEngineLinks(t, readyConfirmation(t))
 	setBlock(t, preferences, "footer", func(b map[string]any) {
 		b["links"] = append(b["links"].([]any), map[string]any{"label": "Settings", "href": emaildoc.TagPreferencesURL})
 	})
@@ -2422,9 +2429,63 @@ func TestATransactionalTemplateIsPublishableWithNoUnsubscribeLinkAndNotWithOne(t
 	}
 }
 
+// A transactional template has no web copy and nothing to confirm (ruling 45):
+// a view-in-browser or confirmation link in a layout or in custom HTML is a
+// blocking issue with its own sentence, and the template cannot be published.
+// One with neither is publishable, and a marketing template with either is
+// judged as before.
+func TestATransactionalTemplateWithAViewOrConfirmLinkIsNotPublishable(t *testing.T) {
+	transactional := func(a map[string]any) { a["purpose"] = "transactional" }
+	for _, link := range []struct {
+		tag, code, sentence string
+	}{
+		{emaildoc.TagViewURL, "view_link_present", "A message about one person's own request has no web copy. Remove the view-in-browser link."},
+		{emaildoc.TagConfirmURL, "confirm_link_present", "A message about one person's own request has nothing to confirm. Remove the confirmation link."},
+	} {
+		layout := withoutEngineLinks(t, readyConfirmation(t))
+		setBlock(t, layout, "footer", func(b map[string]any) {
+			b["links"] = append(b["links"].([]any), map[string]any{"label": "Open", "href": link.tag})
+		})
+		for name, content := range map[string]any{
+			"a layout":    layout,
+			"custom HTML": map[string]any{"subject": "Your application", "textBody": "We have it.", "htmlBody": `<p>We have it. <a href="` + link.tag + `">Open</a></p>`},
+		} {
+			tw := newTemplateWorld(t)
+			tw.engine.stateful = true
+			saved := tw.saved(saveTemplateArgs(content, transactional))
+			if !saved.hasIssue(link.code, "") {
+				t.Errorf("%s with %s: issues %+v", name, link.tag, saved.Issues)
+				continue
+			}
+			for _, issue := range saved.Issues {
+				if issue.Code == link.code && issue.Message != link.sentence {
+					t.Errorf("%s with %s: sentence %q", name, link.tag, issue.Message)
+				}
+			}
+			if _, err := tw.save(saveTemplateArgs(content, transactional, revised(saved.Revision, "publish"))); err == nil || !strings.Contains(err.Error(), link.sentence) {
+				t.Errorf("%s with %s: publishing err = %v", name, link.tag, err)
+			}
+			marketing := newTemplateWorld(t).saved(saveTemplateArgs(content))
+			if marketing.hasIssue("view_link_present", "") || marketing.hasIssue("confirm_link_present", "") {
+				t.Errorf("%s with %s, marketing: issues %+v", name, link.tag, marketing.Issues)
+			}
+		}
+	}
+	tw := newTemplateWorld(t)
+	tw.engine.stateful = true
+	saved := tw.saved(saveTemplateArgs(withoutEngineLinks(t, readyConfirmation(t)), transactional))
+	if len(saved.Issues) != 0 {
+		t.Fatalf("a transactional layout with none of the links: issues %+v", saved.Issues)
+	}
+	// The built-in Confirmation as it is, marketing: neither new issue.
+	if marketing := newTemplateWorld(t).saved(saveTemplateArgs(readyConfirmation(t))); len(marketing.Issues) != 0 {
+		t.Fatalf("a marketing Confirmation with its view and confirm links: issues %+v", marketing.Issues)
+	}
+}
+
 // The preview the OS shows judges the purpose as the save does.
 func TestAnEmailPreviewReportsTheIssuesTheSaveDoes(t *testing.T) {
-	for _, content := range []map[string]any{withoutListLinks(t, readyConfirmation(t)), readyConfirmation(t)} {
+	for _, content := range []map[string]any{withoutEngineLinks(t, readyConfirmation(t)), readyConfirmation(t)} {
 		for _, purpose := range []string{"", "transactional"} {
 			tw := newTemplateWorld(t)
 			saved := tw.saved(saveTemplateArgs(content, func(a map[string]any) { a["purpose"] = purpose }))

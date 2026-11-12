@@ -224,7 +224,7 @@ type Template struct {
 
 	// Preheader is the hidden line an inbox shows after the subject. It is
 	// already written into HTMLBody; it is kept here so a send can judge every
-	// part the person sees (carriesListLink). Never written into a send job's
+	// part the person sees (transactionalLinkFaults). Never written into a send job's
 	// copy of the template.
 	Preheader string `json:"-"`
 

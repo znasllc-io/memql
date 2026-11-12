@@ -184,33 +184,41 @@ type RenderOptions struct {
 	// Transactional renders a message about one person's own request (the row
 	// lane, send_row.go): it has no unsubscribe, so Links.Unsubscribe is not
 	// required, no List-Unsubscribe pair is set and no footer is appended. A
-	// template that still carries {{unsubscribeUrl}} or {{preferencesUrl}} (one
-	// published before the save-time check existed) is refused rather than sent
-	// with an empty link. Only the row lane sets it, and the author's test send
+	// template that still carries {{unsubscribeUrl}}, {{preferencesUrl}},
+	// {{viewUrl}} or {{confirmUrl}} (one published before the save-time check
+	// existed) is refused rather than sent with an empty link. Only the row lane sets it, and the author's test send
 	// of a transactional template, which is tested as the lane sends it;
 	// RequireUnsubscribe is not consulted on either path.
 	Transactional bool
 }
 
 // errListLinkInTransactional refuses a transactional template that still
-// carries the unsubscribe or preferences tag. The sentence is the save-time
-// check's (emaildoc.UnsubscribePresentMessage).
+// carries the unsubscribe or preferences tag and no other engine link. The
+// sentence is the save-time check's (emaildoc.UnsubscribePresentMessage);
+// transactionalLinkFault is the refusal for any of the engine's links.
 const errListLinkInTransactional = templateFault(emaildoc.UnsubscribePresentMessage)
 
-// listLinkTag is {{unsubscribeUrl}} or {{preferencesUrl}}, spaces inside the
-// braces allowed. A copy of emaildoc's listLinkTag, which judges the same
-// question at save time; this one judges what a send is about to carry.
-var listLinkTag = regexp.MustCompile(`\{\{\s*(unsubscribeUrl|preferencesUrl)\s*\}\}`)
-
-// carriesListLink says whether the template's subject, preheader or either body
-// carries the unsubscribe or preferences tag.
-func carriesListLink(t Template) bool {
-	for _, part := range []string{t.Subject, t.Preheader, t.TextBody, t.HTMLBody} {
-		if listLinkTag.MatchString(part) {
-			return true
-		}
+// transactionalLinkFaults are the sentences of the engine links the template's
+// subject, preheader or either body carries that a transactional message
+// cannot: the save-time check's (emaildoc.TransactionalLinkIssues), one per
+// kind, in its order. None is a template the row lane may send.
+func transactionalLinkFaults(t Template) []string {
+	var out []string
+	for _, issue := range emaildoc.TransactionalLinkIssues(t.Subject, t.Preheader, t.TextBody, t.HTMLBody) {
+		out = append(out, issue.Message)
 	}
-	return false
+	return out
+}
+
+// transactionalLinkFault refuses a transactional template that still carries
+// an engine link (one published before the save-time check), saying each kind
+// it carries; nil when it carries none.
+func transactionalLinkFault(t Template) error {
+	faults := transactionalLinkFaults(t)
+	if len(faults) == 0 {
+		return nil
+	}
+	return templateFault(strings.Join(faults, " "))
 }
 
 // mergeTagPrefix and mergeTagSuffix delimit a merge tag. Named because the
@@ -600,8 +608,8 @@ func renderMessage(c Campaign, t Template, r Recipient, opts RenderOptions) (ema
 		return email.Message{}, err
 	}
 	if opts.Transactional {
-		if carriesListLink(t) {
-			return email.Message{}, errListLinkInTransactional
+		if err := transactionalLinkFault(t); err != nil {
+			return email.Message{}, err
 		}
 		return renderTransactional(c, t, r, opts)
 	}

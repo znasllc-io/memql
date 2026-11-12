@@ -443,13 +443,18 @@ func TestATestSendOfATransactionalTemplateCarriesNoUnsubscribe(t *testing.T) {
 		}
 	})
 
-	t.Run("transactional with a list link", func(t *testing.T) {
-		for _, tag := range []string{"{{unsubscribeUrl}}", "{{ preferencesUrl }}"} {
+	t.Run("transactional with an engine link", func(t *testing.T) {
+		for tag, sentence := range map[string]string{
+			"{{unsubscribeUrl}}":   emaildoc.UnsubscribePresentMessage,
+			"{{ preferencesUrl }}": emaildoc.UnsubscribePresentMessage,
+			"{{viewUrl}}":          "A message about one person's own request has no web copy. Remove the view-in-browser link.",
+			"{{ confirmUrl }}":     "A message about one person's own request has nothing to confirm. Remove the confirmation link.",
+		} {
 			sender, _, err := send(t, func(e *fakeEngine, _ *Worker) {
 				e.template["purpose"] = "transactional"
-				e.template["textBody"] = "Hi. Leave: " + tag
+				e.template["textBody"] = "Hi. Open: " + tag
 			})
-			want := "“Application received” cannot be sent. " + emaildoc.UnsubscribePresentMessage
+			want := "“Application received” cannot be sent. " + sentence
 			if err == nil || err.Error() != want {
 				t.Errorf("%s: err = %v, want the lane's sentence %q", tag, err, want)
 			}
@@ -468,6 +473,9 @@ func TestATestSendOfATransactionalTemplateCarriesNoUnsubscribe(t *testing.T) {
 			})
 			if err != nil {
 				t.Fatalf("%q: testSend: %v", purpose, err)
+			}
+			if sender.count() != 1 {
+				t.Fatalf("%q: expected one message, got %d", purpose, sender.count())
 			}
 			msg := sender.sent[0]
 			if !strings.Contains(msg.TextBody, "Unsubscribe: https://example.test"+UnsubscribePath+"?token="+inertUnsubscribeToken) ||

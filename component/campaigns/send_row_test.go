@@ -249,6 +249,52 @@ func TestATransactionalTemplateThatStillCarriesAnUnsubscribeTagIsHeld(t *testing
 	}
 }
 
+// A transactional template published before ruling 45 may carry a
+// view-in-browser or confirmation link, which the lane would send with an
+// empty address. It is held with the template's name and the link's sentence,
+// before the resolver is asked; one carrying several of the engine's links is
+// told each.
+func TestATransactionalTemplateThatStillCarriesAViewOrConfirmLinkIsHeld(t *testing.T) {
+	const (
+		view    = "A message about one person's own request has no web copy. Remove the view-in-browser link."
+		confirm = "A message about one person's own request has nothing to confirm. Remove the confirmation link."
+		list    = "A message about one person's own request carries no unsubscribe link. Remove it."
+	)
+	for _, c := range []struct{ tags, want string }{
+		{"{{viewUrl}}", view},
+		{"{{ confirmUrl }}", confirm},
+		{"{{confirmUrl}} {{unsubscribeUrl}} {{viewUrl}}", list + " " + view + " " + confirm},
+	} {
+		for _, part := range []string{"subject", "preheader", "textBody", "htmlBody"} {
+			engine := rowSendEngine()
+			engine.template[part] = str(engine.template, part) + " " + c.tags
+			sender := &recordingSender{}
+			w := rowWorker(t, engine, sender)
+			resolver := answering("applicant@example.com", "acct-1", map[string]string{"companyName": "Acme Widgets"})
+			registerTestRowAddress(t, testRowConcept, resolver.resolve)
+
+			_, err := w.handleSendRowMessage(fromTrustedJob(), rowArgs(), 0)
+			var held sendHeld
+			if !errors.As(err, &held) || held.reason != "“Application received” cannot be sent. "+c.want {
+				t.Fatalf("%s with %s: %v", part, c.tags, err)
+			}
+			if resolver.count() != 0 || sender.count() != 0 {
+				t.Fatalf("%s with %s: the resolver was asked %d times, %d sent", part, c.tags, resolver.count(), sender.count())
+			}
+			if strings.Contains(err.Error(), "applicant@example.com") || strings.Contains(err.Error(), "Acme Widgets") {
+				t.Fatalf("%s with %s: the refusal carries the row's words: %v", part, c.tags, err)
+			}
+		}
+	}
+	// The send render refuses either tag itself, whoever calls it, in the same words.
+	for tag, want := range map[string]string{"{{viewUrl}}": view, "{{confirmUrl}}": confirm} {
+		tmpl := Template{Subject: "Hello", HTMLBody: `<p><a href="` + tag + `">Open</a></p>`}
+		if _, err := renderMessage(Campaign{}, tmpl, Recipient{Email: "applicant@example.com"}, RenderOptions{Transactional: true}); err == nil || err.Error() != want {
+			t.Fatalf("render with %s: %v", tag, err)
+		}
+	}
+}
+
 // The send render refuses the tag itself, whoever calls it.
 func TestTheTransactionalRenderRefusesAnUnsubscribeTag(t *testing.T) {
 	tmpl := Template{Subject: "Hello", TextBody: "Manage: {{preferencesUrl}}"}

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
-	"github.com/znasllc-io/memql/component/compose/emaildoc"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -172,11 +171,16 @@ func templateNamed(t Template) string {
 	return "“" + name + "”"
 }
 
-// listLinkHeld is why a transactional template that still carries the
-// unsubscribe or preferences tag is not sent: the row lane holds it, and the
-// author's test send of it says the same.
-func listLinkHeld(t Template) string {
-	return templateNamed(t) + " cannot be sent. " + emaildoc.UnsubscribePresentMessage
+// linkHeld is why a transactional template that still carries an engine link
+// is not sent, or "" when it carries none: the row lane holds it, and the
+// author's test send of it says the same. It names the template and says each
+// kind of link it carries, in the save-time check's words.
+func linkHeld(t Template) string {
+	faults := transactionalLinkFaults(t)
+	if len(faults) == 0 {
+		return ""
+	}
+	return templateNamed(t) + " cannot be sent. " + strings.Join(faults, " ")
 }
 
 // sendRow is sendToRecipient for a row send, from the point its template is
@@ -193,8 +197,8 @@ func (w *Worker) sendRow(ctx context.Context, args map[string]any, receipt *sing
 		return nil, fmt.Errorf("campaigns.sendRowMessage: %q is not a concept registered for the row lane", row.Concept)
 	}
 	account := bare(row.AccountID)
-	if carriesListLink(tmpl) {
-		return nil, sendHeld{reason: listLinkHeld(tmpl)}
+	if held := linkHeld(tmpl); held != "" {
+		return nil, sendHeld{reason: held}
 	}
 	if account == "" || !sameOrganization(tmpl.AccountID, account) {
 		return nil, errors.New("campaigns.sendRowMessage: the template must belong to the row's organization")

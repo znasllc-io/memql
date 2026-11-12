@@ -113,12 +113,12 @@ func (w *Worker) handleTestSend(ctx context.Context, args map[string]any, _ int)
 	}
 	// A transactional template is tested as the row lane sends it (send_row.go):
 	// it carries no unsubscribe, so whether one is configured is not its
-	// question, and one that still carries the unsubscribe or preferences tag is
-	// held there, so it is not sent here either: the author reads the lane's
-	// sentence.
+	// question, and one that still carries an engine link (unsubscribe,
+	// preferences, view or confirm) is held there, so it is not sent here
+	// either: the author reads the lane's sentence.
 	transactional := tmpl.Transactional()
-	if transactional && carriesListLink(tmpl) {
-		return nil, errors.New(listLinkHeld(tmpl))
+	if held := linkHeld(tmpl); transactional && held != "" {
+		return nil, errors.New(held)
 	}
 	if reason := w.cfg.RequireUnsubscribe(); reason != "" && !transactional {
 		// The same precondition a real send has. A test message is a real
