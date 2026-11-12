@@ -58,7 +58,7 @@ export function AccountSettingsTab({
   doors,
   canReadDoors,
 }: AccountSettingsTabProps) {
-  const { config } = useSession();
+  const { config, access } = useSession();
   const archived = accountIsArchived(account);
   const self = accountIsSelf(account);
   return (
@@ -73,6 +73,7 @@ export function AccountSettingsTab({
         account={account}
         update={update}
         clusterDomain={config.domain}
+        profileEditable={profileIsWritable(account, access?.userId ?? "", access?.role ?? "")}
         doors={doors}
         canReadDoors={canReadDoors}
       />
@@ -118,31 +119,39 @@ function sameDraft(a: ProfileDraft, b: ProfileDraft): boolean {
     && a.primaryContactEmail === b.primaryContactEmail && a.notes === b.notes;
 }
 
+/**
+ * WHOSE ROW IS THIS, and can this viewer write it.
+ *
+ * Presentation only, as ever: the engine's write guard is the authority and
+ * refuses the same write whatever this renders. What this decides is whether
+ * somebody is offered a form that CANNOT SAVE -- which under rank-visible
+ * reads is a real possibility, because a row you may not write is now a row
+ * you can see (epic memql#4832, D2).
+ *
+ *  - the viewer's OWN row            writable
+ *  - CLUSTER-OWNED (empty owner)     writable by a cluster OWNER only
+ *  - anyone else's                   read-only
+ *
+ * The cluster-owned case is the `self` account. An empty owner is not
+ * "nobody's, so everybody's": `sameRowAuthzOwner` refuses an empty owner
+ * outright, so the clusterOwner branch is the only one that admits the
+ * write, and that branch is `Role == RoleOwner` exactly -- one role, not a
+ * rung, which is why this is not a rank floor.
+ *
+ * Shared with the domain rail, whose first stop points at this form only for
+ * a viewer who is offered it.
+ */
+function profileIsWritable(account: AccountRow, viewerUserId: string, viewerRole: string): boolean {
+  const ownerUserId = account.ownerUserId.trim();
+  if (ownerUserId === "") return viewerRole === "owner";
+  return viewerUserId !== "" && ownerUserId === viewerUserId;
+}
+
 function ProfileSettings({ account, update }: { account: AccountRow; update: UpdateAccountState }) {
   const { access } = useSession();
   const actorRole = access?.role ?? "";
 
-  // WHOSE ROW IS THIS, and can this viewer write it.
-  //
-  // Presentation only, as ever: the engine's write guard is the authority and
-  // refuses the same write whatever this renders. What this decides is whether
-  // somebody is offered a form that CANNOT SAVE -- which under rank-visible
-  // reads is a real possibility, because a row you may not write is now a row
-  // you can see (epic memql#4832, D2).
-  //
-  //  - the viewer's OWN row            writable
-  //  - CLUSTER-OWNED (empty owner)     writable by a cluster OWNER only
-  //  - anyone else's                   read-only
-  //
-  // The cluster-owned case is the `self` account. An empty owner is not
-  // "nobody's, so everybody's": `sameRowAuthzOwner` refuses an empty owner
-  // outright, so the clusterOwner branch is the only one that admits the
-  // write, and that branch is `Role == RoleOwner` exactly -- one role, not a
-  // rung, which is why this is not a rank floor.
-  const ownerUserId = account.ownerUserId.trim();
-  const viewerOwnsIt = ownerUserId !== "" && ownerUserId === (access?.userId ?? "\u0000");
-  const clusterOwned = ownerUserId === "";
-  const readOnly = clusterOwned ? actorRole !== "owner" : !viewerOwnsIt;
+  const readOnly = !profileIsWritable(account, access?.userId ?? "", actorRole);
 
   const [draft, setDraft] = useState(() => toDraft(account));
   const baseline = useRef(toDraft(account));
@@ -170,7 +179,7 @@ function ProfileSettings({ account, update }: { account: AccountRow; update: Upd
   if (readOnly) {
     return (
       <DetailsSection title="Profile">
-        {clusterOwned ? (
+        {account.ownerUserId.trim() === "" ? (
           <PeerRowReadOnly actorRole={actorRole} ownerName="This cluster" ownerRole="owner" />
         ) : (
           <PeerRowReadOnly actorRole={actorRole} />

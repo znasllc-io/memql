@@ -48,7 +48,7 @@ function useScriptedFeed(script: Script) {
       });
     });
   });
-  return { feed: { hasMore: loaded < script.pages, loadingMore, loadMoreError, loadMore }, loaded };
+  return { feed: { hasMore: loaded < script.pages, loadingMore, loadMoreError, loadMore, progress: loaded }, loaded };
 }
 
 let pending: (() => void)[] = [];
@@ -185,5 +185,75 @@ describe("NextPage", () => {
     // The loading rows are the record skeleton, whose pulse the shared
     // stylesheet stops for a reader who asked for less movement.
     expect(INDEX_CSS).toMatch(/@media \(prefers-reduced-motion: reduce\) \{ \.os-skeleton-block \{ animation: none; \} \}/);
+  });
+});
+
+// A feed the test sets by hand, for the two cases a scripted feed cannot
+// reach: a load that settles having made no progress, and a feed that stops
+// offering more after a failure without a page ever arriving.
+interface Manual {
+  hasMore: boolean;
+  loadMoreError: string;
+  progress: number;
+}
+
+let setManual: (next: Manual) => void = () => {};
+let manualLoads = 0;
+
+function ManualList({ initial }: { initial: Manual }) {
+  const [state, set] = useState(initial);
+  setManual = set;
+  const feed = {
+    hasMore: state.hasMore,
+    loadingMore: false,
+    loadMoreError: state.loadMoreError,
+    progress: state.progress,
+    loadMore: async () => { manualLoads += 1; },
+  };
+  return <NextPage feed={feed} />;
+}
+
+describe("NextPage, guarded on progress", () => {
+  function setupManual(initial: Manual) {
+    manualLoads = 0;
+    const view = render(<ManualList initial={initial} />);
+    return () => view.container.querySelector(".os-next-page-sentinel") as HTMLElement | null;
+  }
+
+  it("does not ask again at once after a load that brought nothing, while the sentinel stays in view", async () => {
+    const sentinel = setupManual({ hasMore: true, loadMoreError: "", progress: 0 });
+    await act(async () => intersect(sentinel()!));
+    expect(manualLoads).toBe(1);
+
+    // The re-armed observer reports the sentinel still in view, which a real
+    // browser does the moment it starts watching. Nothing changed, so it is
+    // not a request: asking now would ask again and again.
+    await act(async () => intersect(sentinel()!));
+    await act(async () => intersect(sentinel()!));
+    expect(manualLoads).toBe(1);
+
+    // Leaving the view and coming back is a request.
+    await act(async () => intersect(sentinel()!, false));
+    await act(async () => intersect(sentinel()!));
+    expect(manualLoads).toBe(2);
+  });
+
+  it("asks again at once once the feed has moved on", async () => {
+    const sentinel = setupManual({ hasMore: true, loadMoreError: "", progress: 0 });
+    await act(async () => intersect(sentinel()!));
+    expect(manualLoads).toBe(1);
+    await act(async () => setManual({ hasMore: true, loadMoreError: "", progress: 1 }));
+    await act(async () => intersect(sentinel()!));
+    expect(manualLoads).toBe(2);
+  });
+
+  it("does not state the end after a failed load that brought no page", async () => {
+    const sentinel = setupManual({ hasMore: true, loadMoreError: "", progress: 0 });
+    await act(async () => intersect(sentinel()!));
+    await act(async () => setManual({ hasMore: true, loadMoreError: "the cursor expired", progress: 0 }));
+    expect(screen.getByText("the cursor expired")).toBeTruthy();
+    // The feed gives up on more without a page having arrived.
+    await act(async () => setManual({ hasMore: false, loadMoreError: "", progress: 0 }));
+    expect(screen.queryByText("End of list")).toBeNull();
   });
 });

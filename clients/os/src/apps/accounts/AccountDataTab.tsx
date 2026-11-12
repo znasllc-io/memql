@@ -1,7 +1,10 @@
 import { Details } from "../../kit";
 import { ExistingDataSection, InventorySection } from "./AccountInventory";
+import type { InventoryArea, InventoryConcept } from "./inventory";
+import type { OpenConflict, UnplacedKind } from "./moves";
 import { accountIsSelf, type AccountRow } from "./rows";
-import { useAccountAssignmentStatus, useAccountInventory } from "./useAccounts";
+import { UnplacedSection } from "./UnplacedSection";
+import { useAccountAssignmentStatus, useAccountInventory, useAccountUnplaced } from "./useAccounts";
 
 // THE DATA TAB: what the account holds (design record
 // 2026-11-12-account-export, section K), from the inventory builtin.
@@ -10,24 +13,54 @@ import { useAccountAssignmentStatus, useAccountInventory } from "./useAccounts";
 // decides that: for anyone else there is no Data tab at all (DESIGN.md rule
 // 12, absent rather than disabled), so this component assumes the part is
 // held and asks for both reads unconditionally.
+//
+// MOVING IS A SECOND PART, `execute app:accounts/move`, and the page decides
+// that too: `move` is given only to a holder. Without it the inventory is
+// counts and nothing opens, and the primary account's page has no rows
+// awaiting a decision or in no account -- not even the read.
+
+/** What a holder of the move part can do from this tab. */
+export interface AccountDataMoves {
+  /** A kind's line in the inventory opens its rows. */
+  onOpenKind: (concept: InventoryConcept, area: InventoryArea) => void;
+  /** A kind with rows in no account opens them. */
+  onOpenUnplaced: (kind: UnplacedKind) => void;
+  /** A conflict's Place opens the wizard. */
+  onPlace: (conflict: OpenConflict) => void;
+  /** A conflict was left out. */
+  onChanged: () => void;
+}
 
 export interface AccountDataTabProps {
   account: AccountRow;
   /** The accounts the app already holds, to name an account by. */
   accounts: readonly AccountRow[];
+  /** Present only for a holder of `execute app:accounts/move`. */
+  moves?: AccountDataMoves;
+  /** Bumped after a move or a decision: every read here is taken again. */
+  revision?: number;
 }
 
-export function AccountDataTab({ account, accounts }: AccountDataTabProps) {
+export function AccountDataTab({ account, accounts, moves, revision = 0 }: AccountDataTabProps) {
   const self = accountIsSelf(account);
-  const inventory = useAccountInventory(account.id, true);
-  const assignment = useAccountAssignmentStatus(self);
+  const inventory = useAccountInventory(account.id, true, revision);
+  const assignment = useAccountAssignmentStatus(self, revision);
+  const unplaced = useAccountUnplaced(self && moves !== undefined, revision);
   return (
     <Details>
-      <InventorySection reading={inventory} />
+      <InventorySection reading={inventory} onOpenKind={moves?.onOpenKind} />
       {/* EXISTING DATA, ON THE PRIMARY ACCOUNT ONLY. Assigning rows written
           before accounts were recorded is the cluster's work, not any one
           client's, and the primary account is the cluster's own page. */}
-      {self ? <ExistingDataSection reading={assignment} accounts={accounts} /> : null}
+      {self ? <ExistingDataSection reading={assignment} accounts={accounts} showConflicts={moves === undefined} /> : null}
+      {self && moves !== undefined ? (
+        <UnplacedSection
+          reading={unplaced}
+          onPlace={moves.onPlace}
+          onOpenKind={moves.onOpenUnplaced}
+          onLeftOut={moves.onChanged}
+        />
+      ) : null}
     </Details>
   );
 }

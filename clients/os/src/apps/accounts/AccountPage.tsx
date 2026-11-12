@@ -7,7 +7,10 @@ import { useSession } from "../../chrome/access";
 import { useLiveView } from "../../live/liveView";
 import { holds } from "../../system/roles";
 import type { ArchiveAccountState, UpdateAccountState } from "./actions";
-import { AccountDataTab } from "./AccountDataTab";
+import { AccountDataTab, type AccountDataMoves } from "./AccountDataTab";
+import { AccountRows } from "./AccountRows";
+import { MoveRowsWizard, rowsSubject } from "./MoveRowsWizard";
+import { kindName, type RowRef } from "./moves";
 import { AccountDetailsTab } from "./AccountDetailsTab";
 import { AccountPeopleTab } from "./AccountPeopleTab";
 import { AccountSettingsTab } from "./AccountSettingsTab";
@@ -50,6 +53,27 @@ const TAB_ORDER: readonly AccountTab[] = ["details", "people", "data", "settings
 // and a fresh `[]` on every read is an infinite render loop.
 const EMPTY_DOORS: FrontDoorRow[] = [];
 
+/** A kind's rows, opened from the Data tab as a page under the trail. */
+interface KindPage {
+  /** Empty for the rows in no account. */
+  accountId: string;
+  concept: string;
+  kind: string;
+  /** The crumb between Data and the kind: an area, or "In no account". */
+  area: string;
+}
+
+/** The move wizard, and where it returns to. */
+interface MovePage {
+  rows: readonly RowRef[];
+  fromAccountId: string;
+  candidates: readonly string[];
+  title: string;
+  subject: string;
+  /** Opened from a kind's rows, or from the Data tab itself (a conflict's Place). */
+  from: "rows" | "data";
+}
+
 export interface AccountPageProps {
   account: AccountRow;
   /** The accounts the app already holds, to name an account by. */
@@ -87,6 +111,7 @@ export function AccountPage({
   // of band, and a grant written in this browser bumps it.
   const { access, accessEpoch } = useSession();
   const canInventory = useMemo(() => holds("execute", "app:accounts/inventory"), [accessEpoch]);
+  const canMove = useMemo(() => holds("execute", "app:accounts/move"), [accessEpoch]);
   const offered = TAB_ORDER.filter((t) => t !== "data" || canInventory);
   const current: AccountTab = tab !== undefined && offered.includes(tab) ? tab : offered[0]!;
 
@@ -129,6 +154,62 @@ export function AccountPage({
   const name = accountName(account);
   const first = offered[0]!;
 
+  // A KIND'S ROWS AND THE MOVE WIZARD TAKE THE PAGE'S PLACE (DESIGN.md rule
+  // 11), and the tabs behind them stay mounted and hidden: Back lands on the
+  // Data tab with its reads and its position as they were, and a move's
+  // wizard returns to the rows with their choice intact. Only a holder of
+  // `execute app:accounts/move` ever opens either.
+  const [kindPage, setKindPage] = useState<KindPage | null>(null);
+  const [movePage, setMovePage] = useState<MovePage | null>(null);
+  // Bumped when a move returns or a conflict is left out: every read behind
+  // the wizard is taken again, in the background.
+  const [revision, setRevision] = useState(0);
+  const changed = () => setRevision((n) => n + 1);
+
+  const toData = () => {
+    setKindPage(null);
+    setMovePage(null);
+    onTab("data");
+  };
+  const toFirst = () => {
+    setKindPage(null);
+    setMovePage(null);
+    onTab(first);
+  };
+  const toAccounts = () => {
+    setKindPage(null);
+    setMovePage(null);
+    onBack();
+  };
+  const accountCrumbs = [
+    { label: "Accounts", onSelect: toAccounts },
+    { label: name, onSelect: toFirst },
+  ];
+
+  const moves: AccountDataMoves | undefined = canMove
+    ? {
+        onOpenKind: (concept, area) =>
+          setKindPage({ accountId: account.id, concept: concept.concept, kind: concept.name, area: area.label }),
+        onOpenUnplaced: (k) => setKindPage({ accountId: "", concept: k.concept, kind: k.name, area: "In no account" }),
+        onPlace: (c) =>
+          setMovePage({
+            rows: [{ concept: c.concept, id: c.rowId }],
+            fromAccountId: "",
+            candidates: c.candidates,
+            title: "Place in an account",
+            subject: `${c.rowId}, a row of ${kindName(c.concept)}`,
+            from: "data",
+          }),
+        onChanged: changed,
+      }
+    : undefined;
+
+  const kindCrumbs = kindPage === null ? [] : [
+    ...accountCrumbs,
+    { label: "Data", onSelect: toData },
+    { label: kindPage.area, onSelect: toData },
+  ];
+
   function render(t: AccountTab): ReactNode {
     switch (t) {
       case "details":
@@ -136,7 +217,7 @@ export function AccountPage({
       case "people":
         return <AccountPeopleTab account={account} onOpenGroup={onOpenGroup} />;
       case "data":
-        return <AccountDataTab account={account} accounts={accounts} />;
+        return <AccountDataTab account={account} accounts={accounts} moves={moves} revision={revision} />;
       case "settings":
         return (
           <AccountSettingsTab
@@ -152,31 +233,76 @@ export function AccountPage({
     }
   }
 
+  const covered = (kindPage !== null || movePage !== null) && canMove;
+  const closeMove = () => setMovePage(null);
   return (
-    <div ref={scrollRoot} className="os-app-stack os-account-page">
-      <Head
-        navigationKey={`account:${account.id}:${current}`}
-        title={name}
-        breadcrumbs={[
-          { label: "Accounts", onSelect: onBack },
-          // The account's own crumb leads to its first tab, and is plain there:
-          // a crumb to the page already showing goes nowhere.
-          { label: name, onSelect: current === first ? undefined : () => onTab(first) },
-          { label: TAB_NAMES[current] },
-        ]}
-        back={{ label: "Accounts", onSelect: onBack }}
-      />
-      <LocalTabs
-        label="Account views"
-        value={current}
-        onChange={onTab}
-        options={offered.map((t) => [t, TAB_NAMES[t]] as const)}
-      />
-      {mounted.map((t) => (
-        <section key={t} className="os-account-tab" aria-label={TAB_NAMES[t]} hidden={t !== current}>
-          {render(t)}
-        </section>
-      ))}
-    </div>
+    <>
+      <div ref={scrollRoot} className="os-app-stack os-account-page" hidden={covered}>
+        <Head
+          navigationKey={`account:${account.id}:${current}`}
+          title={name}
+          breadcrumbs={[
+            { label: "Accounts", onSelect: onBack },
+            // The account's own crumb leads to its first tab, and is plain there:
+            // a crumb to the page already showing goes nowhere.
+            { label: name, onSelect: current === first ? undefined : () => onTab(first) },
+            { label: TAB_NAMES[current] },
+          ]}
+          back={{ label: "Accounts", onSelect: onBack }}
+        />
+        <LocalTabs
+          label="Account views"
+          value={current}
+          onChange={onTab}
+          options={offered.map((t) => [t, TAB_NAMES[t]] as const)}
+        />
+        {mounted.map((t) => (
+          <section key={t} className="os-account-tab" aria-label={TAB_NAMES[t]} hidden={t !== current}>
+            {render(t)}
+          </section>
+        ))}
+      </div>
+      {kindPage !== null && canMove ? (
+        <div hidden={movePage !== null}>
+          <AccountRows
+            key={`${kindPage.accountId} ${kindPage.concept}`}
+            accountId={kindPage.accountId}
+            concept={kindPage.concept}
+            kind={kindPage.kind}
+            breadcrumbs={[...kindCrumbs, { label: kindPage.kind }]}
+            onBack={toData}
+            onMove={(rows) =>
+              setMovePage({
+                rows,
+                fromAccountId: kindPage.accountId,
+                candidates: [],
+                title: "Move rows",
+                subject: rowsSubject(rows),
+                from: "rows",
+              })
+            }
+            revision={revision}
+          />
+        </div>
+      ) : null}
+      {movePage !== null && canMove ? (
+        <MoveRowsWizard
+          rows={movePage.rows}
+          fromAccountId={movePage.fromAccountId}
+          accounts={accounts}
+          candidates={movePage.candidates}
+          title={movePage.title}
+          subject={movePage.subject}
+          breadcrumbs={
+            movePage.from === "rows" && kindPage !== null
+              ? [...kindCrumbs, { label: kindPage.kind, onSelect: closeMove }, { label: movePage.title }]
+              : [...accountCrumbs, { label: "Data", onSelect: closeMove }, { label: movePage.title }]
+          }
+          back={{ label: movePage.from === "rows" && kindPage !== null ? kindPage.kind : "Data", onSelect: closeMove }}
+          onMoved={changed}
+          onClose={closeMove}
+        />
+      ) : null}
+    </>
   );
 }

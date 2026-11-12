@@ -26,6 +26,8 @@ import {
   rowsPhrase,
   type AssignmentStatus,
   type Inventory,
+  type InventoryArea,
+  type InventoryConcept,
 } from "./inventory";
 import { accountNameFrom, type AccountRow } from "./rows";
 
@@ -45,11 +47,19 @@ import { accountNameFrom, type AccountRow } from "./rows";
 /**
  * The inventory, one line per area.
  *
- * AN AREA OPENS IN PLACE to list its concepts. Opening goes no further than
- * that: the area is a count, and the app that owns its rows is where somebody
- * works with them.
+ * AN AREA OPENS IN PLACE to list its kinds. For a holder of `execute
+ * app:accounts/move` (`onOpenKind` given) a kind's line opens its rows as a
+ * page under the trail, where they can be moved; for anybody else the kind is
+ * a count and nothing more, and its line is not a control at all (rule 12:
+ * absent, never disabled).
  */
-export function InventorySection({ reading }: { reading: Reading<Inventory> }) {
+export function InventorySection({
+  reading,
+  onOpenKind,
+}: {
+  reading: Reading<Inventory>;
+  onOpenKind?: (concept: InventoryConcept, area: InventoryArea) => void;
+}) {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const toggle = (key: string) =>
     setOpen((held) => {
@@ -91,7 +101,21 @@ export function InventorySection({ reading }: { reading: Reading<Inventory> }) {
               <RecordRow name={area.label} open={isOpen} onOpen={() => toggle(area.key)} label={`${area.label}, ${summary}`}>
                 <span className="os-caption">{summary}</span>
               </RecordRow>
-              {isOpen ? (
+              {isOpen && onOpenKind !== undefined ? (
+                <RecordList as="ul" label={`Kinds in ${area.label}`} density="compact">
+                  {area.concepts.map((concept) => (
+                    <li key={concept.concept}>
+                      <RecordRow
+                        name={concept.name}
+                        onOpen={() => onOpenKind(concept, area)}
+                        label={`${concept.name}, ${rowsPhrase(concept.rows)}`}
+                      >
+                        <span className="os-caption">{rowsPhrase(concept.rows)}</span>
+                      </RecordRow>
+                    </li>
+                  ))}
+                </RecordList>
+              ) : isOpen ? (
                 <Facts>
                   {area.concepts.map((concept) => (
                     <Fact
@@ -141,10 +165,17 @@ export function InventorySection({ reading }: { reading: Reading<Inventory> }) {
 export function ExistingDataSection({
   reading,
   accounts,
+  showConflicts = true,
 }: {
   reading: Reading<AssignmentStatus>;
   /** The accounts the page already holds, to name an account by. */
   accounts: readonly AccountRow[];
+  /**
+   * Whether to list the rows that need a decision here. Off for a holder of
+   * `execute app:accounts/move`, whose "Awaiting a decision" lists them with
+   * the acts that resolve them: said once (rule 7).
+   */
+  showConflicts?: boolean;
 }) {
   let body;
   if (reading.state === "failed") {
@@ -164,7 +195,7 @@ export function ExistingDataSection({
     body = (
       <>
         <AssignmentState status={reading.value} accounts={accounts} />
-        <Conflicts status={reading.value} />
+        {showConflicts ? <Conflicts status={reading.value} /> : null}
         <div className="os-account-ledger-head">
           {reading.at === null ? <span /> : <Caption>Read at {reading.at.toLocaleTimeString()}.</Caption>}
           <Button onClick={reading.reread}>Re-read</Button>

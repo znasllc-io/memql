@@ -87,3 +87,20 @@ describe("the self account's archive panel", () => {
     expect(screen.getByRole("button", { name: "Archive this client" })).toBeTruthy();
   });
 });
+
+describe("the domain rail's empty first stop", () => {
+  // The sentence pointed at a form some viewers are not offered: it has to be
+  // true for the viewer who can edit the profile and for the one who cannot.
+  it("points at the profile form for a viewer who has it", () => {
+    detail(accountRow({ id: "acme", domain: "", ownerUserId: "v1:identity:user:me" }), "admin");
+    expect(profileForm()).toBeTruthy();
+    expect(screen.getByText(/Add one to the profile above/)).toBeTruthy();
+  });
+
+  it("does not point at a form a read-only viewer is not offered", () => {
+    detail(accountRow({ id: "acme", domain: "", ownerUserId: "v1:identity:user:ada" }), "developer");
+    expect(profileForm()).toBeNull();
+    expect(screen.getByText(/No domain recorded/)).toBeTruthy();
+    expect(screen.queryByText(/Add one to the profile above/)).toBeNull();
+  });
+});

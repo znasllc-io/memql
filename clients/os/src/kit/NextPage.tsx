@@ -10,6 +10,13 @@ export interface PagedFeed {
   loadingMore: boolean;
   loadMoreError: string;
   loadMore: () => Promise<void>;
+  /**
+   * A value that changes when a page lands: the row count, or the cursor.
+   * Optional, so a feed `LoadMore` takes still fits. With it, a sentinel
+   * still in view after a page arrived asks again at once; without it, every
+   * settled load waits for the sentinel to leave the view and come back.
+   */
+  progress?: unknown;
 }
 
 /**
@@ -44,15 +51,26 @@ export function NextPage({ feed, label = "Loading more", rows = 3 }: {
   // length of a request; without this the sentinel would stay unwatched.
   const [asking, setAsking] = useState(false);
   const [grew, setGrew] = useState(false);
+  // Counts loads asked for. The observer is rebuilt on every one: a load that
+  // settles inside the same render batch it started in never shows `asking`,
+  // so `armed` alone would not change and the sentinel would go unwatched.
+  const [asked, setAsked] = useState(0);
+  // What `progress` read when the last load was asked for, and whether that
+  // load has settled. Null before the first load.
+  const mark = useRef<{ progress: unknown } | null>(null);
+  const [settled, setSettled] = useState(false);
   const feedRef = useRef(feed);
   feedRef.current = feed;
 
   const load = useRef(() => {
+    mark.current = { progress: feedRef.current.progress };
+    setSettled(false);
     setAsking(true);
+    setAsked((n) => n + 1);
     const settle = () => {
       if (!mounted.current) return;
       setAsking(false);
-      setGrew(true);
+      setSettled(true);
     };
     // A feed reports its own failure on `loadMoreError`; a rejection is
     // settled the same way rather than left unhandled.
@@ -60,29 +78,49 @@ export function NextPage({ feed, label = "Loading more", rows = 3 }: {
   }).current;
 
   const busy = asking || feed.loadingMore;
-  const armed = feed.hasMore && !busy && feed.loadMoreError === "";
+  const failed = feed.loadMoreError !== "";
+  const armed = feed.hasMore && !busy && !failed;
+  const moved = mark.current !== null && feed.progress !== undefined && !Object.is(feed.progress, mark.current.progress);
+  // STALLED: the last load settled, without a failure, and the feed shows no
+  // sign that anything arrived. A browser's observer reports a target's state
+  // the moment it starts watching, so a sentinel still in view would ask again
+  // at once, and again, in a tight loop. A stalled list asks only once the
+  // sentinel has left the view and come back, or once the feed moves on.
+  const stalled = settled && !busy && !failed && !moved;
+
+  // THE END IS EARNED BY A PAGE. A settled load counts as growth only when it
+  // did not fail and, where the feed says, something actually arrived. A feed
+  // that stops offering more after a failure has not grown.
+  useEffect(() => {
+    if (settled && !busy && !failed && (moved || feed.progress === undefined)) setGrew(true);
+  }, [settled, busy, failed, moved, feed.progress]);
 
   // A NEW OBSERVER EVERY TIME IT RE-ARMS. An observer reports a target's
   // state when it starts watching, so a sentinel still in view after a short
   // page asks again at once, rather than waiting for a scroll that may never
-  // come on a tall window.
+  // come on a tall window -- unless the list is stalled, above.
   useEffect(() => {
     if (!armed) return;
     const target = sentinel.current;
     if (target === null || typeof IntersectionObserver === "undefined") return;
+    let left = !stalled;
     const observer = new IntersectionObserver((entries) => {
-      if (!entries.some((entry) => entry.isIntersecting)) return;
+      if (!entries.some((entry) => entry.isIntersecting)) {
+        left = true;
+        return;
+      }
+      if (!left) return;
       observer.disconnect();
       load();
     }, { rootMargin: "0px 0px 240px 0px" });
     observer.observe(target);
     return () => observer.disconnect();
-  }, [armed, load]);
+  }, [armed, stalled, asked, load]);
 
   let body = null;
   if (busy) {
     body = <RecordListSkeleton label={label} rows={rows} />;
-  } else if (feed.loadMoreError !== "") {
+  } else if (failed) {
     body = (
       <Notice tone="error" sentence="The next page was not read." next="The rows above are unchanged." detail={feed.loadMoreError}>
         <Button onClick={load}>Try again</Button>

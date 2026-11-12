@@ -1,9 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getRowByConceptAndId, renderMemQLValue, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useReading, type Reading } from "../../cluster/reading";
 import { useOsConnection } from "../../live/connection";
 import { assignmentStatusFromRows, inventoryFromRows, type AssignmentStatus, type Inventory } from "./inventory";
+import {
+  accountConflictLeaveOutCall,
+  accountRowsCall,
+  accountRowsMoveCall,
+  kindRowsFromRows,
+  movePlanFromRows,
+  unplacedFromRows,
+  type KindRow,
+  type MovePlan,
+  type OpenConflict,
+  type RowRef,
+  type Unplaced,
+} from "./moves";
+import type { PagedFeed } from "../../kit/NextPage";
 import { useLiveCollection, usePagedCollection } from "../../live/useLiveCollection";
 import { ACCOUNT_CONCEPT, accountFromRow, type AccountRow } from "./rows";
 
@@ -147,7 +161,7 @@ export function useAccountGuests(accountId: string): Rollup & { reload: () => vo
  * non-holder asks nothing: the builtin would refuse them, and the page draws
  * no inventory for them at all.
  */
-export function useAccountInventory(accountId: string, enabled: boolean): Reading<Inventory> {
+export function useAccountInventory(accountId: string, enabled: boolean, revision: number = 0): Reading<Inventory> {
   const connection = useOsConnection();
   const query = connection?.query ?? null;
   const read = useMemo(() => {
@@ -161,14 +175,15 @@ export function useAccountInventory(accountId: string, enabled: boolean): Readin
       return inventoryFromRows(result.rows());
     };
   }, [enabled, query, accountId]);
-  return useReading<Inventory>(`accounts:inventory:${accountId}:${enabled}`, read);
+  // `revision` is a move this page made: counted again, in the background.
+  return useReading<Inventory>(`accounts:inventory:${accountId}:${enabled}`, read, revision);
 }
 
 /**
  * How far the assignment of existing rows has got, cluster-wide, read on
  * demand. Drawn on the primary account's page only.
  */
-export function useAccountAssignmentStatus(enabled: boolean): Reading<AssignmentStatus> {
+export function useAccountAssignmentStatus(enabled: boolean, revision: number = 0): Reading<AssignmentStatus> {
   const connection = useOsConnection();
   const query = connection?.query ?? null;
   const read = useMemo(() => {
@@ -182,7 +197,152 @@ export function useAccountAssignmentStatus(enabled: boolean): Reading<Assignment
       return assignmentStatusFromRows(result.rows());
     };
   }, [enabled, query]);
-  return useReading<AssignmentStatus>(`accounts:assignmentStatus:${enabled}`, read);
+  return useReading<AssignmentStatus>(`accounts:assignmentStatus:${enabled}`, read, revision);
+}
+
+// ---------------------------------------------------------------------------
+// The rows of a kind, and moving them (design record 2026-11-12-account-export,
+// section I). All four calls carry `execute app:accounts/move`; the page asks
+// none of them for anybody who does not hold it.
+// ---------------------------------------------------------------------------
+
+/**
+ * The rows awaiting a decision and the kinds with rows in no account, from one
+ * call, read on demand. Drawn on the primary account's page only.
+ */
+export function useAccountUnplaced(enabled: boolean, revision: number = 0): Reading<Unplaced> {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  const read = useMemo(() => {
+    if (!enabled || query === null) return null;
+    return async (signal: AbortSignal) => {
+      const result = await query.executeNamed("accountUnplaced", "builtin accountUnplaced()", { signal });
+      return unplacedFromRows(result.rows());
+    };
+  }, [enabled, query]);
+  return useReading<Unplaced>(`accounts:unplaced:${enabled}`, read, revision);
+}
+
+/** One kind's rows in one account, page by page: the feed `NextPage` takes, and what it pages. */
+export interface KindRowsFeed extends PagedFeed {
+  state: "unread" | "reading" | "read" | "failed";
+  rows: KindRow[];
+  /** The first page's refusal, in the engine's words. */
+  error: string;
+  reread: () => void;
+}
+
+/**
+ * A kind's rows, read on demand, the next page when asked.
+ *
+ * NOT LIVE, like the inventory it opens from: `accountRows` reads rows by the
+ * account recorded on them, which no event carries. `revision` is a move this
+ * page made; it reads the first page again and keeps what is on screen until
+ * the answer lands. A new question (`search`) starts from nothing.
+ *
+ * `accountId` empty is the rows in no account.
+ */
+export function useKindRows(accountId: string, concept: string, search: string, revision: number): KindRowsFeed {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  const key = `${accountId}\u001f${concept}\u001f${search}`;
+  const [state, setState] = useState<{
+    key: string;
+    state: KindRowsFeed["state"];
+    rows: KindRow[];
+    cursor: string;
+    error: string;
+    loadingMore: boolean;
+    loadMoreError: string;
+  }>({ key, state: "unread", rows: [], cursor: "", error: "", loadingMore: false, loadMoreError: "" });
+  const [attempt, setAttempt] = useState(0);
+  // Which question a page answers: a page that lands after the question moved
+  // on is dropped rather than appended to another question's rows.
+  const generation = useRef(0);
+  const current = useRef(state);
+  current.current = state;
+
+  useEffect(() => {
+    if (query === null || concept === "") return;
+    const controller = new AbortController();
+    const mine = ++generation.current;
+    setState((held) => held.key === key
+      ? { ...held, state: held.rows.length > 0 ? held.state : "reading", error: "" }
+      : { key, state: "reading", rows: [], cursor: "", error: "", loadingMore: false, loadMoreError: "" });
+    query
+      .executeNamed("accountRows", accountRowsCall({ accountId, concept, after: "", search }), { signal: controller.signal })
+      .then((result) => {
+        if (controller.signal.aborted || mine !== generation.current) return;
+        const page = kindRowsFromRows(result.rows());
+        setState({ key, state: "read", rows: page.rows, cursor: page.nextCursor, error: "", loadingMore: false, loadMoreError: "" });
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted || mine !== generation.current) return;
+        setState((held) => ({ ...held, key, state: "failed", error: err instanceof Error ? err.message : String(err) }));
+      });
+    return () => controller.abort();
+  }, [query, accountId, concept, search, key, revision, attempt]);
+
+  const loadMore = useCallback(async () => {
+    const held = current.current;
+    if (query === null || held.cursor === "" || held.loadingMore || held.state !== "read") return;
+    const mine = generation.current;
+    setState((s) => ({ ...s, loadingMore: true, loadMoreError: "" }));
+    try {
+      const result = await query.executeNamed("accountRows", accountRowsCall({ accountId, concept, after: held.cursor, search }));
+      if (mine !== generation.current) return;
+      const page = kindRowsFromRows(result.rows());
+      setState((s) => {
+        const seen = new Set(s.rows.map((r) => r.id));
+        return { ...s, rows: [...s.rows, ...page.rows.filter((r) => !seen.has(r.id))], cursor: page.nextCursor, loadingMore: false };
+      });
+    } catch (err: unknown) {
+      if (mine !== generation.current) return;
+      setState((s) => ({ ...s, loadingMore: false, loadMoreError: err instanceof Error ? err.message : String(err) }));
+    }
+  }, [query, accountId, concept, search]);
+
+  const reread = useCallback(() => setAttempt((n) => n + 1), []);
+  const shown = state.key === key ? state : { ...state, state: "reading" as const, rows: [], cursor: "" };
+  return {
+    state: query === null ? "unread" : shown.state,
+    rows: shown.rows,
+    error: shown.error,
+    reread,
+    hasMore: shown.state === "read" && shown.cursor !== "",
+    loadingMore: shown.loadingMore,
+    loadMoreError: shown.loadMoreError,
+    loadMore,
+    // What NextPage watches to tell a page that arrived from one that did not.
+    progress: `${shown.rows.length}\u001f${shown.cursor}`,
+  };
+}
+
+/** The writes of a move, and leaving a conflict out. Null with no connection. */
+export interface MoveCalls {
+  /** What would move, writing nothing. */
+  preview: (rows: readonly RowRef[], toAccountId: string) => Promise<MovePlan>;
+  move: (rows: readonly RowRef[], toAccountId: string) => Promise<MovePlan>;
+  leaveOut: (conflict: Pick<OpenConflict, "concept" | "rowId" | "conflict">) => Promise<void>;
+}
+
+export function useMoveCalls(): MoveCalls | null {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  return useMemo(() => {
+    if (query === null) return null;
+    const run = async (rows: readonly RowRef[], toAccountId: string, preview: boolean) => {
+      const result = await query.executeNamed("accountRowsMove", accountRowsMoveCall(rows, toAccountId, preview));
+      return movePlanFromRows(result.rows());
+    };
+    return {
+      preview: (rows, to) => run(rows, to, true),
+      move: (rows, to) => run(rows, to, false),
+      leaveOut: async (conflict) => {
+        await query.executeNamed("accountConflictLeaveOut", accountConflictLeaveOutCall(conflict));
+      },
+    };
+  }, [query]);
 }
 
 /**

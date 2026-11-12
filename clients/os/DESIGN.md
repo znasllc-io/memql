@@ -471,7 +471,11 @@ and does not ask again on its own: scrolling past a refusal is not a request to
 be refused again. The end is said once, "End of list", and only after the list
 grew; a list that fitted on its first page has no end to announce. `NextPage`
 takes the feed `LoadMore` takes, so a list moves from one to the other by
-changing one line.
+changing one line. A feed that also says how far it has got (`progress`, its
+row count or cursor) is asked again at once when a page arrived and the end is
+still in view; after a page that brought nothing, or from a feed that does not
+say, the end has to leave the view and come back first, so a list never asks
+in a loop.
 
 ### Loading is the shape of the content, never a message
 

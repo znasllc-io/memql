@@ -2,7 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { betweenTheClicks, readTheBar, useFakeDate } from "../readTheBar";
-import { installSeededAccess } from "../seededAccess";
+import { installSeededAccess, seededAccessWithout } from "../seededAccess";
+import { setEffectiveCapabilities } from "../../src/system/roles";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -621,7 +622,10 @@ describe("existing data", () => {
     expect(within(panel).queryByRole("alert")).toBeNull();
   });
 
-  it("lists the rows that need a decision", async () => {
+  it("lists the rows that need a decision, to somebody who cannot move them", async () => {
+    // A holder of `execute app:accounts/move` finds them under "Awaiting a
+    // decision" with the acts that resolve them (test/accounts/moves.test.tsx).
+    setEffectiveCapabilities(seededAccessWithout("owner", "app:accounts/move"));
     const { panel } = await openPrimary([
       { kind: "switch", enabled: true, held: false },
       progress("v1:library:artifact", 4, true),

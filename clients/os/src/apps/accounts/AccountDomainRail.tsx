@@ -35,6 +35,7 @@ export function AccountDomainRail({
   account,
   update,
   clusterDomain,
+  profileEditable,
   doors,
   canReadDoors,
 }: {
@@ -42,6 +43,8 @@ export function AccountDomainRail({
   update: UpdateAccountState;
   /** This cluster's own domain, for the CNAME target the three names point at. */
   clusterDomain: string;
+  /** Whether this viewer is offered the profile form above, where a domain is recorded. */
+  profileEditable: boolean;
   /** Every front door this caller may read, live (epic memql#5168). */
   doors: FrontDoorRow[];
   /**
@@ -61,9 +64,13 @@ export function AccountDomainRail({
   if (account.domain.trim() === "" && !self) {
     return (
       <DetailsSection title="Domain" label="This client's domain">
+        {/* THE SENTENCE POINTS AT THE FORM ONLY FOR A VIEWER WHO HAS IT. A
+            read-only viewer is shown the profile without its fields, and
+            "add one above" would send them to a control that is not there. */}
         <p className="os-caption">
-          No domain recorded. Add one to the profile above; proving it is what lets this
-          client's people reach their work by arriving on it.
+          {profileEditable
+            ? "No domain recorded. Add one to the profile above; proving it is what lets this client's people reach their work by arriving on it."
+            : "No domain recorded. Proving one is what lets this client's people reach their work by arriving on it; it is added on the profile by whoever may edit it."}
         </p>
       </DetailsSection>
     );

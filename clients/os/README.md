@@ -1556,6 +1556,21 @@ rules rather than repetitions of the five before it.
   tab it was opened from and another account opens on Details; visited tabs
   stay mounted, hidden, so a draft survives a look elsewhere.
 
+- **MOVING ROWS IS A SECOND PART, `execute app:accounts/move`** (design
+  record 2026-11-12-account-export, sections I and K). For a holder, a kind's
+  line in the inventory opens its rows (`accountRows`, loaded on scroll, with
+  `Refine` for search) as a page under the trail, `Accounts > <name> > Data >
+  <area> > <kind>`; the tabs stay mounted and hidden behind it, so Back lands
+  on Data where it was read. Choosing rows brings one bar with one act, Move to
+  account, which opens the wizard "Move rows" (`accountRowsMove`, previewed on
+  Review, then for real; followers follow in the background and are not
+  waited for). A row that follows its parent is a plain line, not a choice. On
+  the primary account, "Awaiting a decision" (Place, the same wizard with the
+  conflict's candidates first; Leave out, asked in place) and "In no account"
+  come from one call, `accountUnplaced`, and replace Existing data's own list
+  of those rows. Without the part, the inventory stays counts, nothing opens
+  and none of these reads is asked.
+
 - **A REFUSAL IS NOT A ZERO.** `invitationsForAccount` carries
   `@requiresRank("developer")`, so below that floor the engine refuses the read.
   The band renders "Not yours to read" plus the server's own sentence, and
