@@ -340,27 +340,6 @@ func SettingsRowID(storeID string) string {
 	return "settings-" + slugOf(storeID)
 }
 
-// storeOfReview reads the store a review belongs to, under the caller's own
-// actor.
-func (p *Provider) storeOfReview(ctx context.Context, reviewID string) (string, error) {
-	rows, err := p.rowsFor(ctx, "reviewById", map[string]string{"reviewId": reviewID})
-	if err != nil {
-		return "", fmt.Errorf("reviews: resolving the review being moderated: %w", err)
-	}
-	if len(rows) == 0 {
-		// REFUSED, not defaulted. A decision against a review nobody can
-		// read is a row scoped to no store, which every storefront read
-		// would then miss -- so it would hide nothing while looking like it
-		// had.
-		return "", fmt.Errorf("reviews: review %q is not readable by this caller, so it cannot be moderated", reviewID)
-	}
-	storeID := strings.TrimSpace(asString(rows[0]["storeId"]))
-	if storeID == "" {
-		return "", fmt.Errorf("reviews: review %q carries no storeId", reviewID)
-	}
-	return storeID, nil
-}
-
 // ExportedFile is one image in an export. Bytes are required.
 type ExportedFile struct {
 	Name  string `json:"name"`
