@@ -58,6 +58,8 @@ func (l *fakeLane) SendRowMessage(ctx context.Context, args map[string]any) (map
 		return out, nil
 	}
 	switch l.outcome {
+	case "busy":
+		return nil, fmt.Errorf("wholesale: campaignSendRowMessage: %w: the wait for the lock was over", memql.ErrWriteGateBusy)
 	case "hold":
 		return nil, fmt.Errorf("wholesale: campaignSendRowMessage: %w", testHold{"Publish “Wholesale removal” to send this email."})
 	case "uncertain":
@@ -561,6 +563,26 @@ func TestALaneFailureIsRecordedAndTriedAgain(t *testing.T) {
 	if again["state"] != SendSent || again["attempt"] != float64(1) || len(w.lane.calls) != 2 ||
 		w.lane.calls[1]["requestId"] != w.lane.calls[0]["requestId"] {
 		t.Fatalf("the retry answered %v after %d calls", again, len(w.lane.calls))
+	}
+}
+
+// A BUSY RECEIPT LOCK IS NOT A FAILURE: the node that finds the lane's lock
+// held (another node is sending this email) records nothing, so it cannot win
+// the fence against the node that sent, and answers that another send holds it.
+func TestABusyReceiptLockRecordsNothing(t *testing.T) {
+	w := newEmailWorld()
+	p := w.provider()
+	w.lane.outcome = "busy"
+	_, err := p.sendTermsEmail(automation(), map[string]any{"applicationId": linkApp}, 0)
+	if err == nil || !strings.Contains(err.Error(), "another send of the terms email") {
+		t.Fatalf("a busy lock answered %v", err)
+	}
+	if len(w.sends) != 0 || w.count("putEmailSendRow") != 0 {
+		t.Fatalf("a busy lock wrote %d email rows: %v", w.count("putEmailSendRow"), w.sends)
+	}
+	w.lane.outcome = ""
+	if got := w.sendTerms(t, p); got["state"] != SendSent || got["attempt"] != float64(1) {
+		t.Fatalf("the same call once the lock was free answered %v", got)
 	}
 }
 

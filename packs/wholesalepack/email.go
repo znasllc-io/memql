@@ -458,6 +458,16 @@ func (p *Provider) sendEmail(ctx, sys context.Context, app map[string]any, kind 
 			laneArgs["senderIdentityId"] = senderID
 		}
 		reply, sendErr := p.lane.SendRowMessage(merchant, laneArgs)
+		// A BUSY RECEIPT LOCK IS NOT AN OUTCOME: another send of this email holds
+		// it (or the wait for it ran out), and nothing was attempted here. Nothing
+		// is recorded, so this node cannot win the row's fence against the node
+		// that is sending; the lane's receipt makes the same call, made again, send
+		// at most once.
+		if memql.IsWriteGateBusy(sendErr) {
+			return nil, fmt.Errorf("wholesale: another send of the %s holds the email service's lock for it, or the "+
+				"wait for that lock ran out; nothing was recorded, and the same call made again sends it at most once",
+				emailNouns[kind])
+		}
 		state, reason = laneOutcome(reply, sendErr)
 		if state == SendSent {
 			sentAt = p.clock().UTC().Format(time.RFC3339Nano)
