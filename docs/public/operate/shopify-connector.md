@@ -210,11 +210,13 @@ Then:
 3. **The rest is automatic.** The approval returns through the connect
    callback, which records the new grant and queues the backfill of each
    domain the new grant unlocked. Every kind Shopify had refused that the new
-   grant covers is tried again at once: a kind read by a backfill has it
-   queued, and any other has its refusal cleared and is read at the next
-   periodic check. The store reads "Starting" while those run, then
-   "Recording". A kind Shopify refuses again reads refused again from its
-   next check.
+   grant covers is tried again at once. A kind read by a backfill has it
+   queued, and the store reads "Starting" while it runs. Any other kind has
+   its refusal cleared and is read at the next pass of the periodic check,
+   every ten minutes; until then its lateness is measured from the approval,
+   so it is not reported as a failed check. Then the store reads
+   "Recording". A kind Shopify refuses again reads refused again from that
+   check, or from that backfill.
 
 ---
 

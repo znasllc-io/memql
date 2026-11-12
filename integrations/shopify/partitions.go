@@ -63,8 +63,17 @@ func (c *Connector) BackfillPartition(ctx context.Context, partition, conceptNam
 		if !domainInConnection(store, spec) {
 			return memqlsync.BackfillPage{}, memqlsync.NotRequested(ConnectorName)
 		}
-		if missing := scopesMissingFor(store, spec); len(missing) > 0 {
-			return memqlsync.BackfillPage{}, memqlsync.NotGranted(ConnectorName, uniqueSorted(askedOf(store, spec.Scopes))...)
+		if len(scopesMissingFor(store, spec)) > 0 {
+			// Refused from the grant read fresh, never the cached one alone
+			// (freshGrant).
+			fresh, err := c.freshGrant(ctx, store, spec)
+			if err != nil {
+				return memqlsync.BackfillPage{}, err
+			}
+			if len(scopesMissingFor(fresh, spec)) > 0 {
+				return memqlsync.BackfillPage{}, memqlsync.NotGranted(ConnectorName, uniqueSorted(askedOf(fresh, spec.Scopes))...)
+			}
+			store = fresh
 		}
 	}
 	page, err := c.BackfillStore(ctx, store, conceptName, cursor)

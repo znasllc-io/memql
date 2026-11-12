@@ -134,20 +134,49 @@ func reconcileSpec(conceptID string) (*generated.TypeSpec, error) {
 //     asking would get ACCESS_DENIED, as it did once per tick for 22 domains
 //     on one store, so the origin is not asked. The scopes the connection
 //     asks for -- the ones a person can approve -- come back as missing.
+//     Decided on the grant read fresh (freshGrant), never on the cached one
+//     alone: a fresh grant that holds the domain is swept as in step 3.
 //  3. The sweep itself. The origin's root refusal stays not granted when a
 //     person can fix it, and is not requested otherwise.
 func (c *Connector) sweepStore(ctx context.Context, store Store, spec *generated.TypeSpec, since time.Time) (memqlsync.ReconcileReport, []string, error) {
 	if !domainInConnection(store, spec) {
 		return memqlsync.ReconcileReport{}, nil, memqlsync.NotRequested(ConnectorName)
 	}
-	if missing := scopesMissingFor(store, spec); len(missing) > 0 {
-		return memqlsync.ReconcileReport{}, askedOf(store, spec.Scopes), nil
+	if len(scopesMissingFor(store, spec)) > 0 {
+		fresh, err := c.freshGrant(ctx, store, spec)
+		if err != nil {
+			return memqlsync.ReconcileReport{}, nil, err
+		}
+		if len(scopesMissingFor(fresh, spec)) > 0 {
+			return memqlsync.ReconcileReport{}, askedOf(fresh, spec.Scopes), nil
+		}
+		store = fresh
 	}
 	report, err := c.reconcileStore(ctx, store, spec, since)
 	if memqlsync.IsNotGranted(err) && !refusalIsFixable(store, err.Error()) {
 		return report, nil, memqlsync.NotRequested(ConnectorName)
 	}
 	return report, nil, err
+}
+
+// freshGrant is the store with its grant read fresh from its row, past the
+// store registry's cache, for a refusal about to be answered from the recorded
+// grant alone. The registry keeps a store for thirty seconds on each node and
+// a connect clears only its own node's: a pass elsewhere could otherwise write
+// "not granted" from the grant the connect has just replaced, right after the
+// sync runtime cleared that refusal (datasyncRetryRefused). Only the grant is
+// taken from the fresh row. A store the read no longer finds keeps the cached
+// grant; a read that fails answers busy, so nothing is recorded and the domain
+// is asked again at the next tick.
+func (c *Connector) freshGrant(ctx context.Context, store Store, spec *generated.TypeSpec) (Store, error) {
+	row, found, err := c.storeByID(memql.ContextWithFreshRead(operatorContext(ctx)), store.ID)
+	if err != nil {
+		return store, memqlsync.Busy(ConnectorName, "the store's grant could not be read again before refusing "+spec.Concept)
+	}
+	if found {
+		store.ScopesGranted = row.ScopesGranted
+	}
+	return store, nil
 }
 
 // domainInConnection reports whether the store's own connection asks for any

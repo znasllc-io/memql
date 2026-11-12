@@ -155,6 +155,8 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 			return connectReasonExchangeFailed, keptResult
 		}
 	}
+	// The grant is on the row from here: the moment stampGrantRecorded keeps.
+	grantAt := c.now().UTC()
 	// 12a. The store's recording starts here when the connect starts it
 	// afresh: the clock a late check is measured from. A connect that only
 	// widens the grant keeps it. Through its own server-only write, so no
@@ -195,6 +197,7 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 		written.Domain = state.ShopDomain
 	}
 	c.queueConnectBackfills(ctx, prior, found, written)
+	c.stampGrantRecorded(ctx, storeID, grantAt)
 	c.retryRefusedDomains(ctx, written)
 
 	// 12d. The store as its status now stands, for the shop read in step 15's
@@ -618,6 +621,18 @@ func (c *Connector) attachStore(ctx, opCtx context.Context, state *componentIden
 		return false
 	}
 	return true
+}
+
+// stampGrantRecorded records on the store's health when this connect recorded
+// its grant (grantRecordedKey), before the refused domains are retried: a
+// domain the runtime retried has no attempt on record while it waits for its
+// check, and the verdict measures its lateness from this moment. A failure is
+// logged; the verdict then judges such a domain by its last clean sweep, as it
+// did before the key existed.
+func (c *Connector) stampGrantRecorded(ctx context.Context, storeID string, at time.Time) {
+	if err := c.recordStoreHealthKey(ctx, storeID, grantRecordedKey, at.UTC().Format(time.RFC3339), nil); err != nil {
+		c.logger.Warn("shopify: Connect could not record when the store's grant was recorded", "store", storeID, "error", err.Error())
+	}
 }
 
 // retryRefusedDomains is step 12c's second half (ledger ruling 17): every
