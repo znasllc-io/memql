@@ -421,3 +421,23 @@ func TestAWithdrawalAnsweredAsAPointerIsAWithdrawal(t *testing.T) {
 		t.Fatalf("result = %+v", got)
 	}
 }
+
+// A HOLD IS READ BY ITS SENTENCE outside this package, through a wrap, and
+// nothing else is a hold: what a pack records as skipped rather than failed.
+func TestHeldReasonReadsAHoldThroughAWrapAndNothingElse(t *testing.T) {
+	engine := rowSendEngine()
+	engine.template["status"] = "draft"
+	w := rowWorker(t, engine, &recordingSender{})
+	registerTestRowAddress(t, testRowConcept, answering("applicant@example.com", "acct-1", nil).resolve)
+	_, err := w.handleSendRowMessage(fromTrustedJob(), rowArgs(), 0)
+	reason, held := HeldReason(fmt.Errorf("a caller's wrap: %w", err))
+	if !held || !strings.Contains(reason, "is not a published transactional template") {
+		t.Fatalf("HeldReason(%v) = %q, %v", err, reason, held)
+	}
+	if _, held := HeldReason(errResolverDidNotAnswer); held {
+		t.Fatal("a resolver failure is not a hold")
+	}
+	if _, held := HeldReason(nil); held {
+		t.Fatal("no error is not a hold")
+	}
+}

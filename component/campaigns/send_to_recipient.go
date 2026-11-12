@@ -95,6 +95,18 @@ type sendHeld struct{ reason string }
 
 func (h sendHeld) Error() string { return h.reason }
 
+// HeldReason reports whether err is a held send (sendHeld) and answers its
+// sentence. A pack that records what the row lane answered reads a hold
+// through here -- the type is this package's own -- so it can tell the store's
+// people "publish the template" apart from a send that failed.
+func HeldReason(err error) (string, bool) {
+	var held sendHeld
+	if errors.As(err, &held) {
+		return held.reason, true
+	}
+	return "", false
+}
+
 // templateHeld is the hold of a send whose template is not published. It names the
 // template, by its name or else its subject, or calls it "this template".
 func templateHeld(t Template) error {
