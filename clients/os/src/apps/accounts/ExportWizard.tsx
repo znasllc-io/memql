@@ -108,6 +108,8 @@ function elapsed(fromIso: string, now: number): string {
 
 type Question = "" | "unprotect" | "cancelDraft" | "cancelRun";
 
+const SHOWN_ONCE = "Its passphrase was shown once, when the export was prepared, and is not shown again.";
+
 export function ExportWizard({ accountId, accountName, inventory, existing, breadcrumbs, back, onChanged, onClose }: ExportWizardProps) {
   const calls = useExportCalls();
   const auth = useAuthSource();
@@ -119,7 +121,16 @@ export function ExportWizard({ accountId, accountName, inventory, existing, brea
   const [passphrase, setPassphrase] = useState("");
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState<"" | "prepare" | "start" | "cancel" | "download">("");
-  const [refusal, setRefusal] = useState<{ sentence: string; detail: string } | null>(null);
+  // The act a refusal answered decides what the floor offers next.
+  const [refusal, setRefusal] = useState<{ act: "prepare" | "start" | "cancel" | "download"; sentence: string; detail: string } | null>(null);
+  // THE DRAFT WENT BEFORE IT WAS STARTED. The engine removes a prepared export
+  // after fifteen minutes and then refuses Start with `export_draft_expired`:
+  // its passphrase is void, so Try again could never work. The way on is a new
+  // export with a new passphrase, and the way out is always there.
+  const [expired, setExpired] = useState(false);
+  // A wizard opened on an export that already existed. Its passphrase, if it
+  // had one, was shown when it was prepared and is never shown again.
+  const reopened = existing !== undefined;
   const now = useNow(1_000).getTime();
 
   // Leaving the wizard in any way drops whatever it held.
@@ -167,7 +178,7 @@ export function ExportWizard({ accountId, accountName, inventory, existing, brea
       if (protect) setPassphrase(answer.passphrase);
       return answer.export;
     } catch (err: unknown) {
-      setRefusal(refusalOf(err));
+      setRefusal({ act: "prepare", ...refusalOf(err) });
       return null;
     } finally {
       setBusy("");
@@ -187,10 +198,28 @@ export function ExportWizard({ accountId, accountName, inventory, existing, brea
       onChanged(started);
       setStep("export");
     } catch (err: unknown) {
-      setRefusal(refusalOf(err));
+      const r = refusalOf(err);
+      if (r.code === "export_draft_expired") {
+        // Only this code: any other refusal keeps the engine's words and Try again.
+        setPassphrase("");
+        setSaved(false);
+        setExpired(true);
+      } else {
+        setRefusal({ act: "start", ...r });
+      }
     } finally {
       setBusy("");
     }
+  }
+
+  /** A new export, from Protection, with a new passphrase. */
+  function prepareAgain() {
+    setExpired(false);
+    setRefusal(null);
+    setSaved(false);
+    setPassphrase("");
+    setX(null);
+    setStep("protection");
   }
 
   async function cancel() {
@@ -205,7 +234,10 @@ export function ExportWizard({ accountId, accountName, inventory, existing, brea
       onChanged(cancelled);
       setStep("export");
     } catch (err: unknown) {
-      setRefusal(refusalOf(err));
+      // The question is withdrawn and the refusal said; the step's own way
+      // out stays, so a refused cancel is never a dead end.
+      setQuestion("");
+      setRefusal({ act: "cancel", ...refusalOf(err) });
     } finally {
       setBusy("");
     }
@@ -218,7 +250,7 @@ export function ExportWizard({ accountId, accountName, inventory, existing, brea
     try {
       await downloadAccountExport(x, () => auth.bearer());
     } catch (err: unknown) {
-      setRefusal({ sentence: "The file was not downloaded.", detail: err instanceof Error ? err.message : String(err) });
+      setRefusal({ act: "download", sentence: "The file was not downloaded.", detail: refusalOf(err).detail });
     } finally {
       setBusy("");
     }
@@ -261,10 +293,27 @@ export function ExportWizard({ accountId, accountName, inventory, existing, brea
           <CopyValue value={passphrase} label="passphrase" displayValue={<span className="os-mono">{passphrase}</span>} />
         </Notice>
         <Check checked={saved} onChange={setSaved}>I have saved it</Check>
+        <Caption>Start the export within fifteen minutes: a prepared export that is not started is removed then.</Caption>
       </div>
     ),
-    export: x === null ? null : <RunFacts x={x} />,
-    download: x === null ? null : <DownloadFacts x={x} />,
+    export: x === null ? null : (
+      <div className="os-app-stack">
+        <RunFacts x={x} />
+        {reopened && x.protected ? <Caption>{SHOWN_ONCE}</Caption> : null}
+        {reopened && x.protected && x.state === "draft" ? (
+          <>
+            <Caption>Start it only if the passphrase was saved then; without it the file cannot be opened. Otherwise cancel it and prepare a new export.</Caption>
+            <Check checked={saved} onChange={setSaved}>I have saved the passphrase</Check>
+          </>
+        ) : null}
+      </div>
+    ),
+    download: x === null ? null : (
+      <div className="os-app-stack">
+        <DownloadFacts x={x} />
+        {reopened && x.protected ? <Caption>{SHOWN_ONCE}</Caption> : null}
+      </div>
+    ),
   };
 
   const reached = (id: StepId): boolean => {
@@ -314,6 +363,9 @@ export function ExportWizard({ accountId, accountName, inventory, existing, brea
       { label: question === "cancelRun" ? "Keep it running" : "Keep it", text: true, onAct: () => setQuestion("") },
       { label: "Cancel export", tone: "primary", busy: busy === "cancel", onAct: () => void cancel() },
     );
+  } else if (expired) {
+    status = { word: "Not started in time" };
+    acts.push({ label: "Leave", text: true, onAct: close }, { label: "Prepare again", tone: "primary", onAct: prepareAgain });
   } else if (busy === "prepare") {
     status = { word: "Preparing the export", tone: "busy" };
   } else if (busy === "start") {
@@ -331,8 +383,10 @@ export function ExportWizard({ accountId, accountName, inventory, existing, brea
     }
   } else if (step === "passphrase") {
     status = saved ? { word: "Ready to start" } : { word: "Save the passphrase", detail: "Start export comes once it is saved." };
+    // A refused cancel adds the way out the held Back cannot be.
+    if (refusal?.act === "cancel") acts.push({ label: "Leave", text: true, onAct: close });
     acts.push({ label: "Cancel", text: true, onAct: () => setQuestion("cancelDraft") });
-    if (saved && x !== null) acts.push({ label: refusal ? "Try again" : "Start export", tone: "primary", onAct: () => void start(x) });
+    if (saved && x !== null) acts.push({ label: refusal?.act === "start" ? "Try again" : "Start export", tone: "primary", onAct: () => void start(x) });
   } else if (step === "export" && x !== null) {
     const stopped = x.state === "failed" || x.state === "cancelled";
     if (stopped) {
@@ -340,9 +394,11 @@ export function ExportWizard({ accountId, accountName, inventory, existing, brea
       acts.push({ label: "Done", tone: "primary", onAct: close });
     } else if (x.state === "draft") {
       status = { word: "Prepared, not started", detail: "A prepared export is removed after fifteen minutes unless it is started." };
-      acts.push({ label: "Cancel", text: true, onAct: () => setQuestion("cancelDraft") });
-      if (!x.protected) acts.push({ label: "Start export", tone: "primary", onAct: () => void start(x) });
-      else acts.push({ label: "Leave", tone: "primary", onAct: close });
+      // A protected draft starts only once the person says they saved its
+      // passphrase when it was shown; an unprotected one starts directly.
+      const startable = !x.protected || saved;
+      acts.push({ label: "Leave", text: true, onAct: close }, { label: "Cancel", text: true, onAct: () => setQuestion("cancelDraft") });
+      if (startable) acts.push({ label: refusal?.act === "start" ? "Try again" : "Start export", tone: "primary", onAct: () => void start(x) });
     } else {
       const measure = [exportProgress(x), elapsed(x.startedAt || x.requestedAt, now)].filter((s) => s !== "").join(" · ");
       status = { word: exportStateWord(x), tone: "busy", meta: measure };
@@ -369,6 +425,13 @@ export function ExportWizard({ accountId, accountName, inventory, existing, brea
   const notices = (
     <>
       {failure}
+      {expired ? (
+        <Notice
+          tone="warn"
+          sentence="The prepared export was removed because it was not started in time."
+          next="Its passphrase is void. Prepare again for a new export with a new passphrase."
+        />
+      ) : null}
       {refusal === null ? null : <Notice tone="error" sentence={refusal.sentence} detail={refusal.detail || undefined} />}
     </>
   );

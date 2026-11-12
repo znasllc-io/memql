@@ -34,6 +34,7 @@ import {
   exportSize,
   exportStateWord,
   failureSentence,
+  refusalOf,
   type ExportReadiness,
   type ExportRow,
 } from "./exports";
@@ -195,7 +196,7 @@ function ExportLine({ x, onOpen, onChanged }: { x: ExportRow; onOpen: () => void
     try {
       await downloadAccountExport(x, () => auth.bearer());
     } catch (err: unknown) {
-      setError({ sentence: "The file was not downloaded.", detail: err instanceof Error ? err.message : String(err) });
+      setError({ sentence: "The file was not downloaded.", detail: refusalOf(err).detail });
     } finally {
       setBusy(false);
     }
@@ -209,18 +210,20 @@ function ExportLine({ x, onOpen, onChanged }: { x: ExportRow; onOpen: () => void
       onChanged(await calls.remove(x.id));
       setAsking(false);
     } catch (err: unknown) {
-      setError({ sentence: "The export was not removed.", detail: err instanceof Error ? err.message : String(err) });
+      setError({ sentence: "The export was not removed.", detail: refusalOf(err).detail });
     } finally {
       setBusy(false);
     }
   }
 
   const facts: string[] = [];
-  if (removed) facts.push(`Removed by ${x.removedBy || "someone"}, ${formatMoment(x.removedAt)}`);
+  // NAMES, NEVER IDS: a fact the answer cannot name a person for is left out
+  // rather than printed as an id.
+  if (removed) facts.push(x.removedByName !== "" ? `Removed by ${x.removedByName}, ${formatMoment(x.removedAt)}` : `Removed, ${formatMoment(x.removedAt)}`);
   else if (active && x.state !== "draft") facts.push(exportProgress(x));
   if (!removed && exportSize(x) !== "") facts.push(exportSize(x));
   if (x.protected) facts.push("Protected");
-  if (x.requestedBy !== "") facts.push(`Started by ${x.requestedBy}`);
+  if (x.requestedByName !== "") facts.push(`Started by ${x.requestedByName}`);
 
   return (
     <>

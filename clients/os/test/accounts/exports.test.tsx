@@ -75,11 +75,11 @@ const NOT_READY = [
 
 function exportRow(id: string, over: Record<string, unknown> = {}) {
   return {
-    kind: "export", id, accountId: "a1", accountName: "Acme Consulting", requestedBy: "dana@acme.com",
+    kind: "export", id, accountId: "a1", accountName: "Acme Consulting", requestedBy: "u-dana", requestedByName: "Dana Reyes",
     requestedAt: "2026-11-12T09:00:00Z", state: "complete", phase: "", protected: true, attempt: 1,
     startedAt: "2026-11-12T09:00:05Z", finishedAt: "2026-11-12T09:03:00Z", kindsTotal: 2, kindsDone: 2,
     rowsWritten: 5, versionsWritten: 5, bytesTotal: 2048, bytesDone: 2048, fileName: "acme-2026-11-12.memql-account",
-    sizeBytes: 4096, sha256: "c0ffee", report: null, failureCode: "", failureDetail: "", removedAt: "", removedBy: "", ...over,
+    sizeBytes: 4096, sha256: "c0ffee", report: null, failureCode: "", failureDetail: "", removedAt: "", removedBy: "", removedByName: "", ...over,
   };
 }
 
@@ -193,7 +193,9 @@ describe("the Export tab", () => {
     expect(within(items[1]!).getByText("Complete")).toBeTruthy();
     expect(within(items[1]!).getByText("4.0 KiB")).toBeTruthy();
     expect(within(items[1]!).queryByText("Protected")).toBeNull();
-    expect(within(items[1]!).getByText("Started by dana@acme.com")).toBeTruthy();
+    expect(within(items[1]!).getByText("Started by Dana Reyes")).toBeTruthy();
+    // The person's id is never printed.
+    expect(within(list).queryByText(/u-dana/)).toBeNull();
     expect(within(tab).getByRole("button", { name: "Export this account" })).toBeTruthy();
   });
 
@@ -211,10 +213,21 @@ describe("the Export tab", () => {
     expect(callsTo(conn, "accountExports")[1]).toBe('builtin accountExports(accountId: "a1", limit: 20, after: "c2")');
   });
 
-  it("shows a removed export with who removed it and when, and offers no Download", async () => {
-    const conn = connection({ accountExports: () => [exportRow("x1", { removedAt: "2026-11-12T11:00:00Z", removedBy: "lee@acme.com" }), { kind: "page", nextCursor: "" }] });
+  it("leaves out who started or removed an export when the answer carries no name, and never prints the id", async () => {
+    const conn = connection({ accountExports: () => [
+      exportRow("x1", { requestedByName: "", removedAt: "2026-11-12T11:00:00Z", removedBy: "u-lee", removedByName: "" }),
+      { kind: "page", nextCursor: "" },
+    ] });
     const tab = await openExport(conn);
-    expect(await within(tab).findByText(/^Removed by lee@acme\.com, /)).toBeTruthy();
+    expect(await within(tab).findByText(/^Removed, /)).toBeTruthy();
+    expect(within(tab).queryByText(/Started by/)).toBeNull();
+    expect(within(tab).queryByText(/u-lee|u-dana|someone/)).toBeNull();
+  });
+
+  it("shows a removed export with who removed it and when, and offers no Download", async () => {
+    const conn = connection({ accountExports: () => [exportRow("x1", { removedAt: "2026-11-12T11:00:00Z", removedBy: "u-lee", removedByName: "Lee Park" }), { kind: "page", nextCursor: "" }] });
+    const tab = await openExport(conn);
+    expect(await within(tab).findByText(/^Removed by Lee Park, /)).toBeTruthy();
     expect(within(tab).getByText("Removed")).toBeTruthy();
     expect(within(tab).queryByRole("button", { name: /^Download/ })).toBeNull();
   });
@@ -269,7 +282,7 @@ describe("the Export tab", () => {
     it("is removed after asking in place", async () => {
       const conn = connection({
         accountExports: () => [exportRow("x1"), { kind: "page", nextCursor: "" }],
-        accountExportRemove: () => [exportRow("x1", { removedAt: "2026-11-12T11:00:00Z", removedBy: "owner@example.com" })],
+        accountExportRemove: () => [exportRow("x1", { removedAt: "2026-11-12T11:00:00Z", removedBy: "u-me", removedByName: "Sam Owner" })],
       });
       const tab = await openExport(conn);
       fireEvent.click(await within(tab).findByRole("button", { name: "Remove this export" }));
@@ -280,7 +293,46 @@ describe("the Export tab", () => {
       readTheBarNow();
       fireEvent.click(within(ask).getByRole("button", { name: "Remove" }));
       await waitFor(() => expect(callsTo(conn, "accountExportRemove")).toEqual(['builtin accountExportRemove(exportId: "x1")']));
-      expect(await within(tab).findByText(/^Removed by owner@example\.com, /)).toBeTruthy();
+      expect(await within(tab).findByText(/^Removed by Sam Owner, /)).toBeTruthy();
+    });
+
+    it("says a refused remove in words, never its code", async () => {
+      const conn = connection({
+        accountExports: () => [exportRow("x1"), { kind: "page", nextCursor: "" }],
+        accountExportRemove: () => new Error("export_in_progress: export x1 is being downloaded"),
+      });
+      const tab = await openExport(conn);
+      fireEvent.click(await within(tab).findByRole("button", { name: "Remove this export" }));
+      readTheBarNow();
+      fireEvent.click(within(tab).getByRole("button", { name: "Remove" }));
+      expect(await within(tab).findByText("export x1 is being downloaded")).toBeTruthy();
+      expect(within(tab).getByText("The export was not removed.")).toBeTruthy();
+      expect(within(tab).queryByText(/export_in_progress/)).toBeNull();
+    });
+
+    it("says a refused download in words, and downloads when tried again", async () => {
+      let refuse = true;
+      const fetchSpy = vi.fn(async () => refuse ? new Response("not found", { status: 404 }) : new Response(new Blob(["bytes"]), { status: 200 }));
+      vi.stubGlobal("fetch", fetchSpy);
+      Object.assign(URL, { createObjectURL: vi.fn(() => "blob:x"), revokeObjectURL: vi.fn() });
+      const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+      try {
+        const conn = connection({ accountExports: () => [exportRow("x1"), { kind: "page", nextCursor: "" }] });
+        const tab = await openExport(conn);
+        const download = await within(tab).findByRole("button", { name: /^Download the export of / });
+        fireEvent.click(download);
+        expect(await within(tab).findByText("The file was not downloaded.")).toBeTruthy();
+        expect(within(tab).getByText("not found")).toBeTruthy();
+        expect(click).not.toHaveBeenCalled();
+        refuse = false;
+        fireEvent.click(within(tab).getByRole("button", { name: /^Download the export of / }));
+        await waitFor(() => expect(click).toHaveBeenCalled());
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+        await waitFor(() => expect(within(tab).queryByText("The file was not downloaded.")).toBeNull());
+      } finally {
+        click.mockRestore();
+        vi.unstubAllGlobals();
+      }
     });
   });
 });
@@ -437,5 +489,133 @@ describe("Export this account", () => {
     pressInBar("Leave");
     expect(await screen.findByRole("region", { name: "Export" })).toBeTruthy();
     expect(callsTo(conn, "accountExportCancel")).toHaveLength(0);
+  });
+
+  const DRAFT = () => [{ ...exportRow("x9", { state: "draft", sizeBytes: 0, fileName: "" }), passphrase: PASSPHRASE }];
+
+  async function toPassphrase(conn: Conn) {
+    await openWizard(conn);
+    pressInBar("Continue");
+    pressInBar("Continue");
+    await waitFor(() => expect(screen.getByText(PASSPHRASE)).toBeTruthy());
+  }
+
+  it("says the export must be started within fifteen minutes", async () => {
+    await toPassphrase(connection({ accountExportPrepare: DRAFT }));
+    expect(screen.getByText(/within fifteen minutes/)).toBeTruthy();
+  });
+
+  it("says a draft removed for not being started in time, voids its passphrase, and prepares again", async () => {
+    let prepared = 0;
+    const conn = connection({
+      accountExportPrepare: () => {
+        prepared += 1;
+        return [{ ...exportRow(`x${prepared}`, { state: "draft", sizeBytes: 0, fileName: "" }), passphrase: prepared === 1 ? PASSPHRASE : "NEWPA-SSPHR-ASEAB-CDEFG-HJK23" }];
+      },
+      accountExportStart: () => new Error("export_draft_expired: export x1 was removed after fifteen minutes"),
+    });
+    await toPassphrase(conn);
+    fireEvent.click(screen.getByRole("checkbox", { name: "I have saved it" }));
+    pressInBar("Start export");
+    expect(await screen.findByText("The prepared export was removed because it was not started in time.")).toBeTruthy();
+    expect(screen.getByText(/Its passphrase is void/)).toBeTruthy();
+    // The void passphrase is gone, and no Try again is offered for it.
+    expect(screen.queryByText(PASSPHRASE)).toBeNull();
+    expect(within(bar()!).queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(within(bar()!).getByRole("button", { name: "Leave" })).toBeTruthy();
+    expect(screen.queryByText(/export_draft_expired/)).toBeNull();
+    pressInBar("Prepare again");
+    expect((screen.getByRole("switch", { name: /Protect the file/ }) as HTMLInputElement).checked).toBe(true);
+    pressInBar("Continue");
+    await waitFor(() => expect(screen.getByText("NEWPA-SSPHR-ASEAB-CDEFG-HJK23")).toBeTruthy());
+    expect(callsTo(conn, "accountExportPrepare")).toHaveLength(2);
+  });
+
+  it("can always be left once the draft has expired", async () => {
+    const conn = connection({
+      accountExportPrepare: DRAFT,
+      accountExportStart: () => new Error("export_draft_expired: gone"),
+    });
+    await toPassphrase(conn);
+    fireEvent.click(screen.getByRole("checkbox", { name: "I have saved it" }));
+    pressInBar("Start export");
+    await screen.findByText("The prepared export was removed because it was not started in time.");
+    pressInBar("Leave");
+    expect(await screen.findByRole("region", { name: "Export" })).toBeTruthy();
+  });
+
+  it("keeps any other refusal of Start in the engine's words, with Try again", async () => {
+    let refuse = true;
+    const conn = connection({
+      accountExportPrepare: DRAFT,
+      accountExportStart: () => refuse ? new Error("the export runner is not available on this cluster") : [exportRow("x9", { state: "queued", sizeBytes: 0 })],
+      accountExportStatus: () => [exportRow("x9", { state: "running", phase: "checking", sizeBytes: 0 })],
+    });
+    await toPassphrase(conn);
+    fireEvent.click(screen.getByRole("checkbox", { name: "I have saved it" }));
+    pressInBar("Start export");
+    expect(await screen.findByText("the export runner is not available on this cluster")).toBeTruthy();
+    expect(screen.getByText(PASSPHRASE)).toBeTruthy();
+    expect(screen.queryByText("The prepared export was removed because it was not started in time.")).toBeNull();
+    refuse = false;
+    pressInBar("Try again");
+    await waitFor(() => expect(within(bar()!).getByText("Running")).toBeTruthy());
+  });
+
+  async function reopen(row: Record<string, unknown>, handlers: Partial<Record<Name, Handler>> = {}) {
+    const conn = connection({ accountExports: () => [row, { kind: "page", nextCursor: "" }], accountExportStatus: () => [row], ...handlers });
+    const tab = await openExport(conn);
+    fireEvent.click(await within(tab).findByRole("button", { name: new RegExp(exportStateWordFor(row)) }));
+    await screen.findByRole("heading", { name: "Export this account" });
+    return conn;
+  }
+  const exportStateWordFor = (row: Record<string, unknown>) => ({ draft: "Prepared", queued: "Waiting to start", running: "Running" } as Record<string, string>)[String(row["state"])]!;
+  const SHOWN_ONCE = "Its passphrase was shown once, when the export was prepared, and is not shown again.";
+
+  it("reopens a protected draft: says its passphrase is not shown again, and starts only once it is said to be saved", async () => {
+    const conn = await reopen(exportRow("x5", { state: "draft", sizeBytes: 0 }), {
+      accountExportStart: () => [exportRow("x5", { state: "queued", sizeBytes: 0 })],
+    });
+    expect(screen.getByText(SHOWN_ONCE)).toBeTruthy();
+    expect(within(bar()!).queryByRole("button", { name: "Start export" })).toBeNull();
+    expect(within(bar()!).getByRole("button", { name: "Cancel" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: "I have saved the passphrase" }));
+    pressInBar("Start export");
+    await waitFor(() => expect(callsTo(conn, "accountExportStart")).toEqual(['builtin accountExportStart(exportId: "x5")']));
+  });
+
+  it("reopens an unprotected draft with Start offered directly", async () => {
+    await reopen(exportRow("x5", { state: "draft", protected: false, sizeBytes: 0 }));
+    expect(screen.queryByText(SHOWN_ONCE)).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: "I have saved the passphrase" })).toBeNull();
+    expect(within(bar()!).getByRole("button", { name: "Start export" })).toBeTruthy();
+  });
+
+  it("reopens a protected running export and says its passphrase is not shown again", async () => {
+    await reopen(exportRow("x6", { state: "running", phase: "rows", sizeBytes: 0 }));
+    expect(screen.getByText(SHOWN_ONCE)).toBeTruthy();
+    await waitFor(() => expect(within(bar()!).getByText("Running")).toBeTruthy());
+  });
+
+  it("reopens a queued export at its stage, and says its passphrase is not shown again", async () => {
+    await reopen(exportRow("x7", { state: "queued", phase: "", sizeBytes: 0 }));
+    expect(screen.getByText(SHOWN_ONCE)).toBeTruthy();
+    await waitFor(() => expect(within(bar()!).getByText("Waiting to start")).toBeTruthy());
+    expect(within(bar()!).getByRole("button", { name: "Leave" })).toBeTruthy();
+  });
+
+  it("keeps a refused cancel in words, leaves the run as it was, and can still be left", async () => {
+    const running = exportRow("x2", { state: "running", phase: "checking", sizeBytes: 0 });
+    const conn = await reopen(running, { accountExportCancel: () => new Error("export_failed: the run has already finished") });
+    await waitFor(() => expect(within(bar()!).getByText("Running")).toBeTruthy());
+    pressInBar("Cancel");
+    pressInBar("Cancel export");
+    expect(await screen.findByText("the run has already finished")).toBeTruthy();
+    expect(screen.queryByText(/export_failed:/)).toBeNull();
+    expect(callsTo(conn, "accountExportCancel")).toHaveLength(1);
+    // The question is withdrawn; the way out stands.
+    expect(within(bar()!).queryByRole("button", { name: "Cancel export" })).toBeNull();
+    pressInBar("Leave");
+    expect(await screen.findByRole("region", { name: "Export" })).toBeTruthy();
   });
 });

@@ -26,6 +26,8 @@ export interface ExportRow {
   accountId: string;
   accountName: string;
   requestedBy: string;
+  /** The person's name, when the answer carries it. Their id is never shown. */
+  requestedByName: string;
   requestedAt: string;
   state: string;
   phase: string;
@@ -48,6 +50,7 @@ export interface ExportRow {
   failureDetail: string;
   removedAt: string;
   removedBy: string;
+  removedByName: string;
 }
 
 /** What the report says that a person should know before they rely on the file. */
@@ -142,6 +145,7 @@ export function exportFromRow(raw: Row): ExportRow {
     accountId: text(row["accountId"]),
     accountName: text(row["accountName"]),
     requestedBy: text(row["requestedBy"]),
+    requestedByName: text(row["requestedByName"]),
     requestedAt: text(row["requestedAt"]),
     state: text(row["state"]),
     phase: text(row["phase"]),
@@ -163,6 +167,7 @@ export function exportFromRow(raw: Row): ExportRow {
     failureDetail: text(row["failureDetail"]),
     removedAt: text(row["removedAt"]),
     removedBy: text(row["removedBy"]),
+    removedByName: text(row["removedByName"]),
   };
 }
 
@@ -354,22 +359,27 @@ export function failureSentence(code: string): string {
  * the engine's detail. A message with no code is the engine's words as they
  * are.
  */
-export function refusalOf(err: unknown): { sentence: string; detail: string } {
+export function refusalOf(err: unknown): { code: string; sentence: string; detail: string } {
   const message = err instanceof Error ? err.message : String(err);
   const match = /^\s*([a-z][a-z0-9_]*)\s*[:\-]\s*([\s\S]*)$/.exec(message);
   const code = match?.[1] ?? "";
   const rest = (match?.[2] ?? "").trim();
+  // The code is for the caller to decide by; it is never drawn.
   switch (code) {
     case "export_not_ready":
-      return { sentence: "This account is not ready to export.", detail: rest };
+      return { code, sentence: "This account is not ready to export.", detail: rest };
     case "export_in_progress":
-      return { sentence: "Another export of this account is already prepared or running.", detail: rest };
+      return { code, sentence: "Another export of this account is already prepared or running.", detail: rest };
     case "person_session_required":
-      return { sentence: "Only a person signed in to this cluster can export an account.", detail: rest };
+      return { code, sentence: "Only a person signed in to this cluster can export an account.", detail: rest };
+    case "export_draft_expired":
+      return { code, sentence: "The prepared export was removed because it was not started in time.", detail: rest };
     default:
       // No code of ours: the whole message is the engine's words, unless it
       // is a code we do not know, which is never shown as itself.
-      return match && /_/.test(code) ? { sentence: "The cluster refused.", detail: rest } : { sentence: "The cluster refused.", detail: message };
+      return match && /_/.test(code)
+        ? { code, sentence: "The cluster refused.", detail: rest }
+        : { code: "", sentence: "The cluster refused.", detail: message };
   }
 }
 
