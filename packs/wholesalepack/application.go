@@ -336,7 +336,8 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 
 // applicationContactOf is an application's company, applicant and email, each
 // trimmed, held to the application form's own rules (applicationFields): every
-// one is required, and none is longer than the form admits. The shopper's post
+// one is required, none is longer than the form admits, and one that declares a
+// format meets it (the address is an address, memql.IsEmailAddress). The shopper's post
 // and a person of the store adding a buyer meet the same rules here.
 func applicationContactOf(args map[string]any) (company, name, email string, err error) {
 	values := map[string]string{}
@@ -350,9 +351,20 @@ func applicationContactOf(args map[string]any) (company, name, email string, err
 			return "", "", "", fmt.Errorf("wholesale: %s is at most %d bytes; this one is %d",
 				f.Name, f.EffectiveMaxLength(), len(v))
 		}
+		if v != "" && !f.MatchesFormat(v) {
+			return "", "", "", fmt.Errorf("wholesale: %s is not %s", f.Name, formatNoun(f.Format))
+		}
 		values[f.Name] = v
 	}
 	return values["companyName"], values["applicantName"], values["applicantEmail"], nil
+}
+
+// formatNoun names what a value of a shopper format is, for a refusal.
+func formatNoun(format string) string {
+	if format == memql.ShopperFormatEmail {
+		return "an email address"
+	}
+	return "in the format " + format
 }
 
 // errNotAccepting is a shopper's refusal by a store that takes no application

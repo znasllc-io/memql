@@ -91,9 +91,9 @@ func applicationFields() []memql.ShopperField {
 			Description: "The person applying. Data, never an identity.",
 		},
 		{
-			Name: "applicantEmail", Required: true, MaxLength: 320,
+			Name: "applicantEmail", Required: true, MaxLength: 320, Format: memql.ShopperFormatEmail,
 			Description: "How a decision reaches them, and how an entitlement adapter " +
-				"finds the Shopify customer to entitle. Unverified.",
+				"finds the Shopify customer to entitle. Shaped like an address; otherwise unverified.",
 		},
 	}
 }

@@ -110,12 +110,13 @@ func TestAnAddedBuyerIsASubmittedApplicationOwnedByTheMerchantAndTiedToTheOrgani
 	// THE SHOPPER'S RULES: the three fields are required and bounded as the form bounds them.
 	before := storeApplicationCount(t, eng, s)
 	for name, call := range map[string]string{
-		"an empty company":       addBuyerCall(s.site, s.store, "   ", "Ada Example", "ada2@kestrel.example.com"),
-		"a company too long":     addBuyerCall(s.site, s.store, strings.Repeat("k", 201), "Ada Example", "ada3@kestrel.example.com"),
-		"a name too long":        addBuyerCall(s.site, s.store, "Kestrel Cycles", strings.Repeat("a", 121), "ada4@kestrel.example.com"),
-		"an email too long":      addBuyerCall(s.site, s.store, "Kestrel Cycles", "Ada Example", strings.Repeat("a", 309)+"@example.com"),
-		"an empty email":         addBuyerCall(s.site, s.store, "Kestrel Cycles", "Ada Example", " "),
-		"another store the site": addBuyerCall(s.site, s.store+"-elsewhere", "Kestrel Cycles", "Ada Example", "ada5@kestrel.example.com"),
+		"an empty company":                addBuyerCall(s.site, s.store, "   ", "Ada Example", "ada2@kestrel.example.com"),
+		"a company too long":              addBuyerCall(s.site, s.store, strings.Repeat("k", 201), "Ada Example", "ada3@kestrel.example.com"),
+		"a name too long":                 addBuyerCall(s.site, s.store, "Kestrel Cycles", strings.Repeat("a", 121), "ada4@kestrel.example.com"),
+		"an email too long":               addBuyerCall(s.site, s.store, "Kestrel Cycles", "Ada Example", strings.Repeat("a", 309)+"@example.com"),
+		"an empty email":                  addBuyerCall(s.site, s.store, "Kestrel Cycles", "Ada Example", " "),
+		"not an address":                  addBuyerCall(s.site, s.store, "Kestrel Cycles", "Ada Example", "not an address"),
+		"a store the site does not serve": addBuyerCall(s.site, s.store+"-elsewhere", "Kestrel Cycles", "Ada Example", "ada5@kestrel.example.com"),
 	} {
 		if _, err := eng.Execute(signedIn(s.staff), call); err == nil {
 			t.Errorf("%s was accepted", name)
@@ -382,5 +383,87 @@ func TestAHolderInAnotherOrganizationCannotAddOrRemoveABuyer(t *testing.T) {
 	}
 	if rows := decisionsOf(t, eng, signedIn(a.staff), a.appID); len(rows) != 1 {
 		t.Fatalf("a refused removal left %d decisions on A's buyer", len(rows))
+	}
+}
+
+// A STAFF ADD OF SOMETHING THAT IS NOT AN ADDRESS is refused by name, as the
+// shopper's form refuses it, and nothing is written.
+func TestAddingABuyerRefusesSomethingThatIsNotAnAddress(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	s := newAccessStore(t, eng, "add-notaddress")
+	before := storeApplicationCount(t, eng, s)
+	for _, email := range []string{"not an address", "kestrel.example.com", "a@b@example.com", "@example.com", "ada@"} {
+		_, err := eng.Execute(signedIn(s.staff), addBuyerCall(s.site, s.store, "Kestrel Cycles", "Ada Example", email))
+		if err == nil || !strings.Contains(err.Error(), "applicantEmail") {
+			t.Errorf("adding %q: %v, want a refusal naming applicantEmail", email, err)
+		}
+	}
+	if after := storeApplicationCount(t, eng, s); after != before {
+		t.Fatalf("refused adds wrote %d applications", after-before)
+	}
+}
+
+// unsetStore is an organization whose person holds the wholesale part, and a
+// site of it bound to a store whose wholesale program nobody has set up: no
+// settings row and no application.
+func unsetStore(t *testing.T, eng *memql.MemQLEngine, label string) accessStore {
+	t.Helper()
+	merchant, store, _ := wholesaleScope()
+	n := strconv.FormatInt(time.Now().UnixNano(), 36)
+	s := accessStore{merchant: merchant + "-" + label, store: store + "-" + label,
+		account: "acct-" + label + "-" + n, site: "site-" + label + "-" + n, staff: "user-staff-" + label + "-" + n}
+	group := seedOrganization(t, eng, s.account)
+	grantGroup(t, eng, group, "read", "app:deployables")
+	grantGroup(t, eng, group, "execute", "app:deployables/wholesale")
+	seedPersonIn(t, eng, s.staff, s.staff, "writer", true, group, s.account, "added")
+	own := "group-own-" + label + "-" + n
+	seedGroup(t, eng, own, "custom", s.account)
+	seedPersonIn(t, eng, s.merchant, s.merchant, "writer", true, own, s.account, "added")
+	seedSiteIn(t, eng, s.site, s.merchant, s.store, s.account)
+	s.owner = siteOwnerOf(t, eng, s.site)
+	return s
+}
+
+// unsetApplications is how many applications exist on a store, whoever owns
+// them, under either spelling of its id.
+func unsetApplications(t *testing.T, eng *memql.MemQLEngine, store string) int {
+	t.Helper()
+	n := 0
+	for _, form := range []string{store, "v1:shopify:store:" + store} {
+		n += len(wsRows(t, eng, seedCtx(), `query applicationsForStore(storeId: `+quote(form)+`)`))
+	}
+	return n
+}
+
+// A STORE NOBODY HAS SET UP TAKES NO BUYER: the add is refused with the
+// sentence wholesaleUpdateSettings answers, and nothing is written.
+func TestAddingABuyerToAStoreThatIsNotSetUpIsRefused(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	s := unsetStore(t, eng, "add-unset")
+	_, err := eng.Execute(signedIn(s.staff), addBuyerCall(s.site, s.store, "Kestrel Cycles", "Ada Example", "ada@kestrel.example.com"))
+	if err == nil || !strings.Contains(err.Error(), wholesalepack.NotSetUpSentence) {
+		t.Fatalf("an add on a store with no settings: %v, want %q", err, wholesalepack.NotSetUpSentence)
+	}
+	if n := unsetApplications(t, eng, s.store); n != 0 {
+		t.Fatalf("the refused add wrote %d applications", n)
+	}
+}
+
+// ANOTHER ORGANIZATION'S HOLDER, THROUGH THEIR OWN SITE BOUND TO A STORE NOT SET
+// UP, adds nobody: with no settings row there is no organization to check the
+// site against, and the refusal is the store's not being set up.
+func TestAHolderInAnotherOrganizationCannotAddABuyerToAStoreNotSetUp(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	a, b := unsetStore(t, eng, "unset-a"), unsetStore(t, eng, "unset-b")
+	bound := "site-unset-b-on-a-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	seedSiteIn(t, eng, bound, b.merchant, a.store, b.account)
+	for _, store := range []string{a.store, "v1:shopify:store:" + a.store} {
+		_, err := eng.Execute(signedIn(b.staff), addBuyerCall(bound, store, "Kestrel Cycles", "Ada Example", "ada@kestrel.example.com"))
+		if err == nil || !strings.Contains(err.Error(), wholesalepack.NotSetUpSentence) {
+			t.Errorf("store named %q: B's person adding through B's site on A's store not set up: %v", store, err)
+		}
+	}
+	if n := unsetApplications(t, eng, a.store); n != 0 {
+		t.Fatalf("refused adds wrote %d applications on A's store", n)
 	}
 }

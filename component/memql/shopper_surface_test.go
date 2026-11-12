@@ -309,6 +309,41 @@ func TestShopperEvidenceRidesTheContext(t *testing.T) {
 	}
 }
 
+// THE email FORMAT ACCEPTS ONE ADDRESS (ruling 54): after trimming, exactly one
+// @ with something on each side, no whitespace, at most 320 bytes -- and nothing
+// more is judged.
+func TestTheEmailFormatAcceptsOneAddress(t *testing.T) {
+	f := ShopperField{Name: "applicantEmail", Format: ShopperFormatEmail}
+	for value, want := range map[string]bool{
+		"a@b.co":                     true,
+		"first.last+tag@example.com": true,
+		"  a@b.co ":                  true,
+		strings.Repeat("a", 308) + "@example.com": true,
+		strings.Repeat("a", 309) + "@example.com": false,
+		"":                false,
+		"not an address":  false,
+		"example.com":     false,
+		"a@b@example.com": false,
+		"a b@example.com": false,
+		"a@exam\tple.com": false,
+		"a@exam\nple.com": false,
+		"@example.com":    false,
+		"a@":              false,
+		"@":               false,
+	} {
+		if got := f.MatchesFormat(value); got != want {
+			t.Errorf("MatchesFormat(%q) = %v, want %v", value, got, want)
+		}
+		if got := IsEmailAddress(value); got != want {
+			t.Errorf("IsEmailAddress(%q) = %v, want %v", value, got, want)
+		}
+	}
+	t.Cleanup(ResetShopperSurfaceForTest)
+	form := validForm()
+	form.Fields = []ShopperField{{Name: "email", Required: true, MaxLength: 320, Format: ShopperFormatEmail}}
+	RegisterShopperForm(form)
+}
+
 // A FIELD'S FORMAT IS A NAMED RULE (ruling 53): sha256 accepts exactly 64
 // hexadecimal characters of either case and nothing else, an unknown format is
 // refused at registration, and a format does not combine with Numeric or Enum.

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode"
 )
 
 // shopper_surface.go -- THE WHOLE OF WHAT A SHOPPER CAN REACH (epic
@@ -219,7 +220,8 @@ type ShopperField struct {
 	Numeric bool
 	// Format, when set, is a named rule the value must meet, checked by the
 	// handler before the construct runs and refused as the surface's own
-	// invalid. ShopperFormatSHA256 is the one there is.
+	// invalid. ShopperFormatSHA256 and ShopperFormatEmail are the ones there
+	// are.
 	Format string
 	// Description is what the pack guide and the module inventory show.
 	Description string
@@ -228,6 +230,29 @@ type ShopperField struct {
 // ShopperFormatSHA256 accepts exactly 64 hexadecimal characters, of either
 // case: a SHA-256 fingerprint as hex.
 const ShopperFormatSHA256 = "sha256"
+
+// ShopperFormatEmail accepts one email address, judged by IsEmailAddress.
+const ShopperFormatEmail = "email"
+
+// maxEmailAddress is the longest address IsEmailAddress accepts, in bytes.
+const maxEmailAddress = 320
+
+// IsEmailAddress reports whether value, trimmed, is one email address: at most
+// 320 bytes, exactly one @ with something on each side, and no whitespace.
+// Nothing more is judged -- no DNS, no list of domains: the rule is that a value
+// is shaped like an address, so a link or a customer lookup is never sent to
+// text that is not one.
+func IsEmailAddress(value string) bool {
+	v := strings.TrimSpace(value)
+	if v == "" || len(v) > maxEmailAddress || strings.Count(v, "@") != 1 {
+		return false
+	}
+	if strings.IndexFunc(v, unicode.IsSpace) >= 0 {
+		return false
+	}
+	at := strings.IndexByte(v, '@')
+	return at > 0 && at < len(v)-1
+}
 
 // MatchesFormat reports whether value meets the field's Format; a field with
 // none accepts every value.
@@ -246,6 +271,8 @@ func (f ShopperField) MatchesFormat(value string) bool {
 			}
 		}
 		return true
+	case ShopperFormatEmail:
+		return IsEmailAddress(value)
 	}
 	return false
 }
@@ -499,9 +526,9 @@ func validateShopperRoute(pack, name, construct string, fields []ShopperField) e
 		if f.MaxLength < 0 {
 			return fmt.Errorf("%s/%s declares a negative MaxLength on %q", pack, name, fname)
 		}
-		if f.Format != "" && f.Format != ShopperFormatSHA256 {
-			return fmt.Errorf("%s/%s declares %q with the format %q; the one format there is is %q",
-				pack, name, fname, f.Format, ShopperFormatSHA256)
+		if f.Format != "" && f.Format != ShopperFormatSHA256 && f.Format != ShopperFormatEmail {
+			return fmt.Errorf("%s/%s declares %q with the format %q; the formats there are are %q and %q",
+				pack, name, fname, f.Format, ShopperFormatSHA256, ShopperFormatEmail)
 		}
 		if f.Format != "" && (f.Numeric || len(f.Enum) > 0) {
 			return fmt.Errorf("%s/%s declares %q with a format and Numeric or an Enum; a format is a rule "+

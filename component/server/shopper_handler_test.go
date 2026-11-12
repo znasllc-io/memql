@@ -571,3 +571,36 @@ func TestAnEvidenceAddressThatIsNotAnAddressIsEmpty(t *testing.T) {
 		t.Fatalf("the evidence carries %+v", exec.evidence)
 	}
 }
+
+// THE HANDLER REFUSES AN ADDRESS THAT IS NOT ONE BEFORE THE CONSTRUCT RUNS
+// (ruling 54): a field declaring the email format is judged by the declaration,
+// and the refusal is the surface's own invalid.
+func TestTheHandlerRefusesAMalformedAddressBeforeTheConstructRuns(t *testing.T) {
+	fixture := func() (*ShopperHandler, *shopperRecordingExecutor) {
+		t.Cleanup(memql.ResetShopperSurfaceForTest)
+		memql.ResetShopperSurfaceForTest()
+		memql.RegisterShopperForm(memql.ShopperForm{
+			Pack: "wholesale", Name: "application", Construct: "wholesaleSubmitApplication", Kind: memql.ShopperReadKindBuiltin,
+			Fields: []memql.ShopperField{
+				{Name: "companyName", Required: true, MaxLength: 200},
+				{Name: "applicantEmail", Required: true, MaxLength: 320, Format: memql.ShopperFormatEmail},
+			},
+			RedirectOK: "/wholesale/thank-you", RedirectError: "/wholesale/problem",
+		})
+		exec := &shopperRecordingExecutor{}
+		sites := &shopperFakeSites{owner: "user-merchant", site: &ShopperSite{ID: "site1", ShopperForms: true, StoreID: "store-live"}}
+		return NewShopperHandler(exec, sites, nil), exec
+	}
+	for _, email := range []string{"not+an+address", "a%40b%40example.com", "a+b%40example.com", "%40example.com", "a%40"} {
+		h, exec := fixture()
+		rec := shopperPost(h, "/forms/wholesale/application", "companyName=Kestrel+Cycles&applicantEmail="+email, goodStamp())
+		if loc := rec.Header().Get("Location"); loc != "/wholesale/problem?reason=invalid" || len(exec.calls) != 0 {
+			t.Errorf("%s: redirected to %q after %d calls", email, loc, len(exec.calls))
+		}
+	}
+	h, exec := fixture()
+	rec := shopperPost(h, "/forms/wholesale/application", "companyName=Kestrel+Cycles&applicantEmail=+ada%40kestrel.example.com+", goodStamp())
+	if loc := rec.Header().Get("Location"); loc != "/wholesale/thank-you" || len(exec.calls) != 1 {
+		t.Fatalf("a good address redirected to %q after %d calls", loc, len(exec.calls))
+	}
+}
