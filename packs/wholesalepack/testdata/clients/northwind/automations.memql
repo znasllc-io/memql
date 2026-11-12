@@ -24,13 +24,14 @@ automation northwindGrantOnApproval {
 }
 
 // NORTHWIND'S EMAILS AND NOTICES: the pack's ten sends, wired as a client
-// wires them. Seven of them -- the terms email, the rejection and removal
-// emails, and the readyToReview and three decision notices -- run on the FIRST
-// VERSION of the row only: the engine publishes node.created for every version,
-// and the pack writes new versions of old rows (wholesaleBackfillAccounts),
-// which must mail nobody. The other three run on every entitlement version,
-// because a retry's version that lands is not a first version; the pack itself
-// refuses them for an access row written before it sent email.
+// wires them, ONE AUTOMATION FOR EACH. Seven of them -- the terms email, the
+// rejection and removal emails, and the readyToReview and three decision
+// notices -- run on the FIRST VERSION of the row only, each under a filter of
+// its own: the engine publishes node.created for every version, and the pack
+// writes new versions of old rows (wholesaleBackfillAccounts), which must mail
+// nobody. The other three run on every entitlement version, because a retry's
+// version that lands is not a first version; the pack itself refuses them for
+// an access row written before it sent email.
 
 /// A new application is sent the store's terms (the pack sends nothing for a
 /// store that requires none).
@@ -69,31 +70,53 @@ automation northwindToldOnApproval {
   told := builtin wholesaleNotifyStaff(applicationId: args.applicationId, event: "approved", decisionId: args.id)
 }
 
-/// A rejection mails the applicant and tells the store's people.
+/// A rejection mails the applicant.
 @trigger(event="node.created", concept="v1:wholesale:applicationDecision")
 @filter(row => row.transition == "reject" && args.firstVersion == true)
 automation northwindMailedOnRejection {
   args {
-    id             any
     applicationId  any
     transition     any
     firstVersion   bool
   }
   sent := builtin wholesaleSendBuyerEmail(applicationId: args.applicationId, kind: "rejected")
-  told := builtin wholesaleNotifyStaff(applicationId: args.applicationId, event: "rejected", decisionId: args.id)
 }
 
-/// A removal mails the buyer and tells the store's people.
+/// A rejection is told to the store's people.
 @trigger(event="node.created", concept="v1:wholesale:applicationDecision")
-@filter(row => row.transition == "revoke" && args.firstVersion == true)
-automation northwindMailedOnRemoval {
+@filter(row => row.transition == "reject" && args.firstVersion == true)
+automation northwindToldOnRejection {
   args {
     id             any
     applicationId  any
     transition     any
     firstVersion   bool
   }
+  told := builtin wholesaleNotifyStaff(applicationId: args.applicationId, event: "rejected", decisionId: args.id)
+}
+
+/// A removal mails the buyer.
+@trigger(event="node.created", concept="v1:wholesale:applicationDecision")
+@filter(row => row.transition == "revoke" && args.firstVersion == true)
+automation northwindMailedOnRemoval {
+  args {
+    applicationId  any
+    transition     any
+    firstVersion   bool
+  }
   sent := builtin wholesaleSendBuyerEmail(applicationId: args.applicationId, kind: "revoked")
+}
+
+/// A removal is told to the store's people.
+@trigger(event="node.created", concept="v1:wholesale:applicationDecision")
+@filter(row => row.transition == "revoke" && args.firstVersion == true)
+automation northwindToldOnRemoval {
+  args {
+    id             any
+    applicationId  any
+    transition     any
+    firstVersion   bool
+  }
   told := builtin wholesaleNotifyStaff(applicationId: args.applicationId, event: "revoked", decisionId: args.id)
 }
 
