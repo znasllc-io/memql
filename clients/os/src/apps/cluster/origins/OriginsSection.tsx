@@ -439,6 +439,9 @@ function GivenUpBand({ mayAct }: { mayAct: boolean }) {
         reading.reread();
       } catch (err: unknown) {
         setRefusal(err instanceof Error ? err.message : String(err));
+        // The requeue works in pages and can fail after some deliveries went
+        // back in line: the list is read again so it shows them.
+        reading.reread();
       } finally {
         running.current = false;
         setBusy("");
@@ -454,8 +457,10 @@ function GivenUpBand({ mayAct }: { mayAct: boolean }) {
       {reading.state === "failed" ? (
         <Notice tone="error" sentence="The list could not be read." detail={reading.error} />
       ) : null}
+      {/* NOT "NOTHING CHANGED": a requeue that fails part-way has put some
+          deliveries back in line. */}
       {refusal === "" ? null : (
-        <Notice tone="error" sentence="The cluster refused, and nothing changed." detail={refusal} />
+        <Notice tone="error" sentence="The cluster did not finish this." next="The list is read again, so each line shows where it stands now." detail={refusal} />
       )}
       {reading.state === "reading" && reading.value === null ? (
         <RecordListSkeleton label="Loading the changes that could not be recorded" />

@@ -672,8 +672,15 @@ describe("data origins, by store", () => {
     await screen.findByText("v1:shopify:order");
     const section = screen.getByRole("region", { name: "Changes that could not be recorded" });
     await click(within(section).getByRole("button", { name: "Check" }));
+    const reads = connection.query.inboundRequestsGivenUp.mock.calls.length;
     await click(await within(section).findByRole("button", { name: "Try again" }));
     expect(within(section).getByText("datasync: requeue refused: not a cluster owner")).toBeTruthy();
+    // A requeue works in pages and can fail after some went back in line: the
+    // notice does not claim nothing changed, and the list is read again.
+    const notice = within(section).getByText("The cluster did not finish this.").closest(".os-notice") as HTMLElement;
+    expect(within(notice).getByText("The list is read again, so each line shows where it stands now.")).toBeTruthy();
+    expect(screen.queryByText("The cluster refused, and nothing changed.")).toBeNull();
+    await vi.waitFor(() => expect(connection.query.inboundRequestsGivenUp.mock.calls.length).toBeGreaterThan(reads));
   });
 });
 
