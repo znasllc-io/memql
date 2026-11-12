@@ -68,9 +68,11 @@ func renderErasureGolden() string {
 	var b strings.Builder
 	b.WriteString(erasureGoldenHeader())
 	reach := erasureReach()
+	conceptOf := map[string]string{}
 	concepts := make([]string, 0, len(generated.Types))
-	for concept := range generated.Types {
+	for concept, spec := range generated.Types {
 		concepts = append(concepts, concept)
+		conceptOf[spec.GraphQLType] = concept
 	}
 	sort.Strings(concepts)
 	for _, concept := range concepts {
@@ -80,29 +82,28 @@ func renderErasureGolden() string {
 		switch {
 		case len(r.Links) > 0:
 			fmt.Fprintf(&b, "  reach: %s\n", strings.Join(r.Links, "; "))
-		case len(r.Lists) > 0:
-			fmt.Fprintf(&b, "  reach: only through a list of references (%s): the customer's gid is taken out of the list and nothing else in the row changes\n", strings.Join(r.Lists, ", "))
+		case len(r.TakenOut) > 0:
+			fmt.Fprintf(&b, "  reach: not in scope; an entry that names the customer is taken out of %s and nothing else in the row changes\n", strings.Join(r.TakenOut, ", "))
 		default:
 			b.WriteString("  reach: not reachable\n")
 		}
-		if len(r.Links) > 0 && len(r.Lists) > 0 {
-			fmt.Fprintf(&b, "  a row that is not in scope and lists the customer among its references (%s) has the gid taken out of the list\n", strings.Join(r.Lists, ", "))
+		if len(r.Links) > 0 && len(r.TakenOut) > 0 {
+			fmt.Fprintf(&b, "  a row that is not in scope has an entry that names the customer taken out of %s\n", strings.Join(r.TakenOut, ", "))
 		}
 		if concept == erasedConcept {
-			b.WriteString("  own: the erased customer's own row, which keeps nothing but its structural fields\n")
-			b.WriteString("  other: a row of another customer that a link brought into scope\n")
+			b.WriteString("  every customer row in scope is the person's own (the erased customer's, or an earlier record merged into it) and keeps nothing but its structural fields\n")
 		}
 		for _, f := range spec.Fields {
-			fmt.Fprintf(&b, "  %-40s %-11s %-34s ", f.Name, f.Kind, f.AdminType)
-			if concept == erasedConcept {
-				fmt.Fprintf(&b, "own: %s | other: %s\n", describeErasure(erasureDecisionFor(concept, f, true)), describeErasure(erasureDecisionFor(concept, f, false)))
-			} else {
-				b.WriteString(describeErasure(erasureDecisionFor(concept, f, false)) + "\n")
+			d := erasureDecisionFor(concept, f, false)
+			fmt.Fprintf(&b, "  %-40s %-11s %-34s %s", f.Name, f.Kind, f.AdminType, describeErasure(d))
+			if note := describeLink(concept, f, conceptOf, reach); note != "" {
+				b.WriteString("; " + note)
 			}
+			b.WriteString("\n")
 			// What a kept object or list holds is part of what is kept, so
 			// it is part of what is reviewed: a field Shopify adds INSIDE it
 			// shows here. Money is one fixed shape and is not repeated.
-			if d := erasureDecisionFor(concept, f, false); d.ByList != "" && f.AdminType != "MoneyV2" && f.AdminType != "MoneyBag" {
+			if d.ByList != "" && f.AdminType != "MoneyV2" && f.AdminType != "MoneyBag" {
 				if sel := selectionOf(spec, f); sel != "" {
 					fmt.Fprintf(&b, "      holds %s\n", sel)
 				}
@@ -110,6 +111,39 @@ func renderErasureGolden() string {
 		}
 	}
 	return b.String()
+}
+
+// describeLink says, of a gid field and of an object that can keep a
+// customer's gid, what it means for the reach: every one of them is decided,
+// and the golden shows the decision beside the field.
+func describeLink(concept string, f generated.FieldSpec, conceptOf map[string]string, reach map[string]conceptReach) string {
+	switch f.Kind {
+	case generated.KindGid:
+		named := conceptOf[f.AdminType]
+		if not, ok := erasureNotALink[concept][f.Name]; ok {
+			note := "NOT A LINK: " + not.Why
+			if not.FromADeletedRow != "" {
+				note += "; A LINK FROM A DELETED ROW: " + not.FromADeletedRow
+			}
+			return note
+		}
+		if len(reach[named].Links) > 0 {
+			return "a link: a row that names an in-scope " + named + " here is in scope"
+		}
+		return "a link that reaches nothing: no erasure reaches a " + named
+	case generated.KindObject, generated.KindObjectList:
+		if why, ok := erasureCustomerInside[concept][f.Name]; ok {
+			return "THE CUSTOMER'S GID INSIDE IT BRINGS THE ROW INTO SCOPE: " + why
+		}
+		if why, ok := erasureCustomerTakenOut[concept][f.Name]; ok {
+			return "AN ENTRY THAT NAMES THE CUSTOMER IS TAKEN OUT, AND THE ROW IS LEFT: " + why
+		}
+	case generated.KindRefs:
+		if f.AdminType == generated.Types[erasedConcept].GraphQLType {
+			return "the customer's gid is taken out of the list in a row that is not in scope"
+		}
+	}
+	return ""
 }
 
 func erasureGoldenHeader() string {
@@ -139,16 +173,26 @@ func erasureGoldenHeader() string {
 		"# rewrites it, and its diff is the review.\n" +
 		"#\n" +
 		"# REACH. The scope starts at the customer's row and the orders the request names, and grows to a fixed\n" +
-		"# point by three links and no other:\n" +
+		"# point by these links and no other:\n" +
 		"#   child of X              the row hangs from an in-scope row of X by the model's parent link\n" +
-		"#   gid field F naming X    the row holds an in-scope row's gid as the whole value of its gid field F\n" +
+		"#   gid field F naming X    the row holds an in-scope row of X's gid as the whole value of its gid field F.\n" +
+		"#                           Every gid field is such a link unless its line below says NOT A LINK. One of\n" +
+		"#                           them is a link \"from a deleted row only\": it is followed from a row whose\n" +
+		"#                           newest version is a tombstone, and from no other\n" +
 		"#   the customer inside object F\n" +
-		"#                           the row holds the customer's gid inside its object or list of objects F. The fields\n" +
-		"#                           named are those whose selection keeps a customer's gid; the match itself is by value,\n" +
-		"#                           in every object and list of objects of every row of the store\n" +
-		"# A list of references is not a link. A row that is not in scope and lists the customer among its\n" +
-		"# references has the gid taken out of that list, and nothing else in it changes. The data request exports\n" +
-		"# exactly the rows in scope.\n" +
+		"#                           the row holds an in-scope customer's gid as an id inside its object F, and F\n" +
+		"#                           is one of the few objects that say who a row is for. Her gid inside any other\n" +
+		"#                           object, or as a free value anywhere (a custom attribute, a note, a message in\n" +
+		"#                           that same object), is not a link: nothing is matched by value\n" +
+		"# A list of references is not a link, and neither is an object that only refers to the customer (a\n" +
+		"# metaobject's fields): in a row that is not in scope the entry that names her is taken out -- an entry\n" +
+		"# that holds her gid as a whole value anywhere inside it -- and nothing else in the row changes. A row is\n" +
+		"# in scope when any of its versions holds a link. The data request exports exactly the rows in scope.\n" +
+		"#\n" +
+		"# TWO THINGS AN ERASURE DOES NOT REACH, accepted in writing:\n" +
+		"#   - a row that carries the person only by an email address, with no customer on it: a guest's\n" +
+		"#     abandoned checkout\n" +
+		"#   - the buyer's message inside a gift card another person holds: the card is its holder's\n" +
 		"#\n" +
 		"# FIELDS. Every version of a row in scope is rewritten. The structural fields are never touched:\n" +
 		"#   " + strings.Join(erasureStructuralFields, ", ") + "\n" +
@@ -156,12 +200,16 @@ func erasureGoldenHeader() string {
 		"#   kept by kind            a gid, a list of references, an enum, or a scalar whose Admin type is one of:\n" +
 		wrapComment("#                           ", kept) +
 		"#   kept by the list        on the keep-list of erasure_fields.go, with the reason it describes the sale\n" +
-		"#   scrubbed                everything else: a string becomes \"" + RedactionMarker + "\", a list becomes [], and the key of\n" +
-		"#                           any other type is removed, so a typed read answers null and the mirror can write the row again\n" +
+		"#   scrubbed                everything else: a string of free text becomes \"" + RedactionMarker + "\", a list becomes [], and\n" +
+		"#                           the key of anything else is removed (an object, a number, a boolean, an enum, and a\n" +
+		"#                           string that is a date, a number or a reference), so a typed read answers null, a reader\n" +
+		"#                           of dates never meets the marker, and the mirror can write the row again\n" +
+		"#   scrubbed although kept by kind\n" +
+		"#                           the person's own, on a row that is not her customer row; each says why\n" +
 		"#   kept by the list; scrubbed on a custom item\n" +
 		"#                           the one decision that looks at a row's values: a line item (" + erasureCustomItem.Concept + ") with no\n" +
-		"#                           " + erasureCustomItem.Reference + " is a custom item, whose titles are what a person typed. It is decided\n" +
-		"#                           version by version\n" +
+		"#                           " + erasureCustomItem.Reference + " is a custom item, whose titles and SKU are what a person typed. It is\n" +
+		"#                           decided version by version\n" +
 		"# The scalar Admin types the model holds that are not kept by kind:\n" +
 		wrapComment("#   ", scrubbed) +
 		"# The columns are the field, its kind, its Admin type and the decision. A kept object or list is followed by\n" +
@@ -194,6 +242,8 @@ func wrapComment(prefix string, items []string) string {
 
 func describeErasure(d erasureDecision) string {
 	switch {
+	case d.AlthoughKept != "":
+		return "scrubbed although kept by kind (" + d.AlthoughKept + "): " + describeScrub(d.Fate)
 	case d.OnCustomItem != "":
 		return "kept by the list: " + d.ByList + "; scrubbed on a custom item (a line with no " + erasureCustomItem.Reference + "): " + describeScrub(d.OnCustomItem)
 	case d.ByKind != "":
@@ -286,9 +336,17 @@ func TestAScrubbedFieldIsLeftWithAValueItsTypeAccepts(t *testing.T) {
 		f    generated.FieldSpec
 		want erasureFate
 	}{
-		{"a string", generated.FieldSpec{Kind: generated.KindScalar, DSLType: "string", AdminType: "String"}, fateMarked},
-		{"a date, carried as a string", generated.FieldSpec{Kind: generated.KindScalar, DSLType: "string", AdminType: "DateTime"}, fateMarked},
-		{"a reference, carried as a string", generated.FieldSpec{Kind: generated.KindGid, DSLType: "string", AdminType: "Order"}, fateMarked},
+		{"a string of free text", generated.FieldSpec{Kind: generated.KindScalar, DSLType: "string", AdminType: "String"}, fateMarked},
+		{"a URL", generated.FieldSpec{Kind: generated.KindScalar, DSLType: "string", AdminType: "URL"}, fateMarked},
+		{"an enum too long to be one, carried as a string", generated.FieldSpec{Kind: generated.KindScalar, DSLType: "string", AdminType: "CurrencyCode"}, fateMarked},
+		// A string that is not free text loses its key: a reader comparing
+		// dates, or following a reference, must never meet the marker.
+		{"a date-time, carried as a string", generated.FieldSpec{Kind: generated.KindScalar, DSLType: "string", AdminType: "DateTime"}, fateRemoved},
+		{"a date, carried as a string", generated.FieldSpec{Kind: generated.KindScalar, DSLType: "string", AdminType: "Date"}, fateRemoved},
+		{"a number the API writes as a string", generated.FieldSpec{Kind: generated.KindScalar, DSLType: "string", AdminType: "UnsignedInt64"}, fateRemoved},
+		{"a decimal the API writes as a string", generated.FieldSpec{Kind: generated.KindScalar, DSLType: "string", AdminType: "Decimal"}, fateRemoved},
+		{"an ID", generated.FieldSpec{Kind: generated.KindScalar, DSLType: "string", AdminType: "ID"}, fateRemoved},
+		{"a reference, carried as a string", generated.FieldSpec{Kind: generated.KindGid, DSLType: "string", AdminType: "Order"}, fateRemoved},
 		{"a list of strings", generated.FieldSpec{Kind: generated.KindScalarList, DSLType: "[]string", AdminType: "String"}, fateEmptied},
 		{"a list of objects", generated.FieldSpec{Kind: generated.KindObjectList, DSLType: "[]object", AdminType: "Attribute"}, fateEmptied},
 		{"a list of references", generated.FieldSpec{Kind: generated.KindRefs, DSLType: "[]string", AdminType: "Order"}, fateEmptied},
@@ -334,6 +392,18 @@ func TestTheCustomersOwnRowKeepsNothing(t *testing.T) {
 	plan := erasurePlanFor(spec, true)
 	if strings.Join(plan.Keep, ",") != strings.Join(erasureStructuralFields, ",") {
 		t.Errorf("the own row's plan keeps %v, want the structural fields and nothing else", plan.Keep)
+	}
+	// Only free text takes the marker. A date, a count the API writes as a
+	// string and a reference lose their keys.
+	if got := strings.Join(sortedStrings(plan.Mark), ","); got != "displayName,firstName,lastName,lifetimeDuration,locale,multipassIdentifier,note" {
+		t.Errorf("the own row's plan marks %s, want the free-text strings and no date, count or reference", got)
+	}
+	// A customer's row comes into scope as the erased customer's own, or as
+	// an earlier record of the same person that was merged into it. Either is
+	// the person's, so there is one plan for the concept and not two.
+	other := erasurePlanFor(spec, false)
+	if strings.Join(other.Keep, ",") != strings.Join(plan.Keep, ",") || strings.Join(other.Mark, ",") != strings.Join(plan.Mark, ",") || strings.Join(other.Empty, ",") != strings.Join(plan.Empty, ",") {
+		t.Errorf("a customer's row that is not the erased one's own is planned %+v, want it scrubbed as the own row is: %+v", other, plan)
 	}
 	for _, name := range []string{"defaultEmailAddress", "defaultPhoneNumber", "image", "tags", "metafields", "note", "firstName", "lastName", "displayName", "numberOfOrders", "amountSpent", "verifiedEmail"} {
 		f, ok := fieldNamed(spec, name)
@@ -427,8 +497,156 @@ func TestAnErasureKeepsTheSaleAndLosesThePerson(t *testing.T) {
 	}
 }
 
-// The reach, by the three links of ruling 83 and no other.
-func TestTheReachOfAnErasureIsTheThreeLinks(t *testing.T) {
+// reviewedGidLinks is every gid field of the model that IS a link: a row that
+// holds an in-scope row's gid in it is in scope. A gid field is one of these
+// or is on the not-a-link list of erasure_fields.go, and a field a
+// regeneration adds is on neither: the test below fails until a person puts
+// it on one. Most name a row no erasure reaches (a product, a location) and
+// so reach nothing; they are decided all the same, because what an erasure
+// reaches can change under them.
+var reviewedGidLinks = []string{
+	"abandonedCheckout.customerGid", "article.blogGid", "articleComment.articleGid", "catalog.priceListGid",
+	"catalog.publicationGid", "companyContact.customerGid", "customerPaymentMethod.customerGid",
+	"draftOrder.customerGid", "draftOrder.orderGid", "fulfillment.locationGid", "fulfillment.orderGid",
+	"fulfillmentOrder.orderGid", "giftCard.customerGid", "inventoryLevel.itemGid",
+	"inventoryLevel.locationGid", "marketingActivity.marketingEventGid", "metaobject.createdByStaffGid",
+	"metaobject.definitionGid", "metaobjectDefinition.createdByStaffGid", "order.customerGid",
+	"order.merchantBusinessEntityGid", "order.publicationGid", "order.retailLocationGid",
+	"order.staffMemberGid", "orderLineItem.productGid", "orderLineItem.staffMemberGid",
+	"orderLineItem.variantGid", "orderTransaction.locationGid", "orderTransaction.orderGid",
+	"orderTransaction.parentTransactionGid", "orderTransaction.userGid", "priceList.catalogGid",
+	"priceListPrice.variantGid", "productVariant.deliveryProfileGid", "productVariant.inventoryItemGid",
+	"productVariant.productGid", "publication.catalogGid", "quantityRule.productVariantGid",
+	"refund.orderGid", "refund.sourceReturnGid", "refund.staffMemberGid",
+	"reverseDelivery.reverseFulfillmentOrderGid", "reverseFulfillmentOrder.orderGid", "shop.accountOwnerGid",
+	"shopifyPaymentsDispute.orderGid", "shopifyPaymentsPayout.businessEntityGid", "shopifyReturn.orderGid",
+	"shopifyReturn.staffMemberGid", "subscriptionContract.customerGid",
+	"subscriptionContract.customerPaymentMethodGid", "subscriptionContract.originOrderGid",
+	"tenderTransaction.orderGid", "tenderTransaction.userGid",
+}
+
+// Every gid field of the model is a link or is said not to be one (ruling
+// 91). With every gid field a link, a customer whose row named the erased
+// customer's order as its last order was scrubbed, and exported to her.
+func TestEveryGidFieldIsALinkOrIsSaidNotToBe(t *testing.T) {
+	reviewed := map[string]bool{}
+	for _, field := range reviewedGidLinks {
+		if reviewed[field] {
+			t.Errorf("%s is listed twice among the reviewed links", field)
+		}
+		reviewed[field] = true
+	}
+	inModel := map[string]bool{}
+	for concept, spec := range generated.Types {
+		for _, f := range spec.Fields {
+			if f.Kind != generated.KindGid {
+				continue
+			}
+			name := concept + "." + f.Name
+			inModel[name] = true
+			not, isNot := erasureNotALink[concept][f.Name]
+			switch {
+			case isNot && reviewed[name]:
+				t.Errorf("%s is both a reviewed link and on the not-a-link list", name)
+			case isNot && strings.TrimSpace(not.Why) == "":
+				t.Errorf("%s is on the not-a-link list without the reason", name)
+			case !isNot && !reviewed[name]:
+				t.Errorf("%s is a gid field nobody has decided: put it on reviewedGidLinks (a row that names an in-scope %s is in scope) or on erasureNotALink with the reason", name, f.AdminType)
+			}
+		}
+	}
+	for name := range reviewed {
+		if !inModel[name] {
+			t.Errorf("the reviewed links name %s, which is not a gid field of the model", name)
+		}
+	}
+	for concept, fields := range erasureNotALink {
+		for field := range fields {
+			if !inModel[concept+"."+field] {
+				t.Errorf("the not-a-link list names %s.%s, which is not a gid field of the model", concept, field)
+			}
+		}
+	}
+	// The list, exactly: a change to it is a change to whose rows an erasure
+	// takes.
+	var not []string
+	for concept, fields := range erasureNotALink {
+		for field, entry := range fields {
+			name := concept + "." + field
+			if entry.FromADeletedRow != "" {
+				name += " (a link from a deleted row)"
+			}
+			not = append(not, name)
+		}
+	}
+	want := []string{
+		"company.mainContactGid", "companyContact.companyGid", "companyLocation.companyGid",
+		"customer.lastOrderGid (a link from a deleted row)", "giftCard.lineItemGid", "giftCard.orderGid", "orderLineItem.contractGid",
+	}
+	if got := sortedStrings(not); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("the not-a-link list is\n  %s\nwant\n  %s", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
+	}
+}
+
+// The customer's gid inside an object is a link only in the fields a reviewed
+// list names, never by value anywhere: an order with a custom attribute whose
+// value was the erased customer's gid was scrubbed with its transaction, and
+// exported to her. Every object the generated model says can keep a
+// customer's gid is on one of two lists: the row is about that person, or the
+// entry that names her is taken out and the row is left.
+func TestEveryObjectThatCanHoldACustomerIsDecided(t *testing.T) {
+	customerType := generated.Types[erasedConcept].GraphQLType
+	inModel := map[string]bool{}
+	for concept, spec := range generated.Types {
+		for _, f := range spec.Fields {
+			holds := false
+			for _, inside := range f.GidsInside {
+				holds = holds || inside == customerType
+			}
+			if !holds {
+				continue
+			}
+			name := concept + "." + f.Name
+			inModel[name] = true
+			link, isLink := erasureCustomerInside[concept][f.Name]
+			out, isOut := erasureCustomerTakenOut[concept][f.Name]
+			switch {
+			case isLink && isOut:
+				t.Errorf("%s is on both object lists", name)
+			case !isLink && !isOut:
+				t.Errorf("%s can keep a customer's gid and nobody has decided what that means: put it on erasureCustomerInside (the row is about her) or on erasureCustomerTakenOut (the entry goes, the row stays), with the reason", name)
+			case strings.TrimSpace(link+out) == "":
+				t.Errorf("%s is decided without the reason", name)
+			}
+		}
+	}
+	var links, outs []string
+	for concept, fields := range erasureCustomerInside {
+		for field := range fields {
+			links = append(links, concept+"."+field)
+			if !inModel[concept+"."+field] {
+				t.Errorf("erasureCustomerInside names %s.%s, which the model does not say can keep a customer's gid", concept, field)
+			}
+		}
+	}
+	for concept, fields := range erasureCustomerTakenOut {
+		for field := range fields {
+			outs = append(outs, concept+"."+field)
+			if !inModel[concept+"."+field] {
+				t.Errorf("erasureCustomerTakenOut names %s.%s, which the model does not say can keep a customer's gid", concept, field)
+			}
+		}
+	}
+	if got := strings.Join(sortedStrings(links), ","); got != "draftOrder.purchasingEntity,giftCard.recipientAttributes,order.purchasingEntity" {
+		t.Errorf("the objects that make a row hers are %s", got)
+	}
+	if got := strings.Join(sortedStrings(outs), ","); got != "metaobject.fields,metaobject.thumbnailField" {
+		t.Errorf("the objects an entry is taken out of are %s", got)
+	}
+}
+
+// The reach, by the links of ruling 91 and no other.
+func TestTheReachOfAnErasureIsItsLinks(t *testing.T) {
 	reach := erasureReach()
 	has := func(concept, way string) bool {
 		for _, w := range reach[concept].Links {
@@ -456,18 +674,71 @@ func TestTheReachOfAnErasureIsTheThreeLinks(t *testing.T) {
 			t.Errorf("%s is not reached as %q; it is reached as %v", concept, way, reach[concept].Links)
 		}
 	}
-	// A list of references is not a link: an order's gid in a company's list
-	// of its orders does not bring the company in.
-	if has("company", "gid field ordersGids naming order") {
-		t.Error("a company is reached through its list of orders, and a list of references is not a link")
+	// No path from a customer reaches a company, a company's location, or
+	// another person's customer row.
+	for _, concept := range []string{"company", "companyLocation"} {
+		if r := reach[concept]; len(r.Links) != 0 {
+			t.Errorf("an erasure reaches %s: %v", concept, r.Links)
+		}
+	}
+	if got := strings.Join(reach["companyContact"].Links, "; "); got != "gid field customerGid naming customer" {
+		t.Errorf("a company's contact is reached as %q, want only as the erased person's own contact row", got)
+	}
+	if got := strings.Join(reach["customer"].Links, "; "); got != "the customer's row; gid field lastOrderGid naming order, from a deleted row only" {
+		t.Errorf("a customer's row is reached as %q, want only as the erased customer's own and as an earlier record merged into it", got)
+	}
+	if got := strings.Join(reach["giftCard"].Links, "; "); got != "gid field customerGid naming customer; the customer inside object recipientAttributes" {
+		t.Errorf("a gift card is reached as %q, want only as its holder's or its recipient's", got)
+	}
+	if got := strings.Join(reach["orderLineItem"].Links, "; "); got != "child of order" {
+		t.Errorf("a line item is reached as %q, want only as a line of its order", got)
+	}
+	// An entry that names her is taken out of a metaobject, and the
+	// metaobject is not hers.
+	if r := reach["metaobject"]; len(r.Links) != 0 || strings.Join(r.TakenOut, ",") != "fields,thumbnailField" {
+		t.Errorf("a metaobject is reached as %+v, want no link and an entry taken out of fields and thumbnailField", r)
 	}
 	for _, concept := range []string{"product", "productVariant", "collection", "location", "shop", "staffMember", "inventoryItem", "discountNode"} {
-		if r := reach[concept]; len(r.Links) != 0 || len(r.Lists) != 0 {
+		if r := reach[concept]; len(r.Links) != 0 || len(r.TakenOut) != 0 {
 			t.Errorf("an erasure reaches %s: %+v", concept, r)
 		}
 	}
-	if len(generated.Types) != 65 {
-		t.Logf("the model now has %d concepts; the golden lists each of them", len(generated.Types))
+	reachable := 0
+	for _, r := range reach {
+		if len(r.Links) > 0 {
+			reachable++
+		}
+	}
+	if reachable != 19 {
+		t.Errorf("an erasure reaches %d concepts, want 19: the customer, the order and its tree, and the rows of either", reachable)
+	}
+}
+
+// The reach is told once. The scope's statements and the golden are both made
+// from erasureLinksOf, so what the golden says an erasure can reach is what
+// the scope looks for.
+func TestTheLinksAreEnumeratedOnce(t *testing.T) {
+	order := erasureLinksOf(generated.Types["order"])
+	var got []string
+	for _, l := range order {
+		got = append(got, l.Kind+" "+l.Field+" -> "+l.Names)
+	}
+	if strings.Join(got, "; ") != "gid customerGid -> customer; object purchasingEntity -> customer" {
+		t.Errorf("an order's links are %q: a reference to staff, a location or a publication names a row no erasure reaches and is left out", strings.Join(got, "; "))
+	}
+	customer := erasureLinksOf(generated.Types["customer"])
+	if len(customer) != 1 || customer[0].Field != "lastOrderGid" || !customer[0].FromADeletedRow || customer[0].Names != "order" {
+		t.Errorf("a customer's links are %+v, want its last order, from a deleted row only", customer)
+	}
+	if links := erasureLinksOf(generated.Types["company"]); len(links) != 0 {
+		t.Errorf("a company has links: %+v", links)
+	}
+	if links := erasureLinksOf(generated.Types["companyLocation"]); len(links) != 0 {
+		t.Errorf("a company's location has links: %+v", links)
+	}
+	line := erasureLinksOf(generated.Types["orderLineItem"])
+	if len(line) != 1 || line[0].Kind != "parent" || line[0].Names != "order" {
+		t.Errorf("a line item's links are %+v, want its order and nothing else", line)
 	}
 }
 
@@ -488,12 +759,12 @@ func TestACustomLineItemLosesTheTitlesAProductsLineKeeps(t *testing.T) {
 			}
 		}
 	}
-	if got := strings.Join(sortedSet(conditional), ","); got != "name,title,variantTitle" {
-		t.Errorf("the titles scrubbed on a custom item are %q, want name, title and variantTitle", got)
+	if got := strings.Join(sortedSet(conditional), ","); got != "name,sku,title,variantTitle" {
+		t.Errorf("the fields scrubbed on a custom item are %q, want the three titles and the SKU, which somebody typed too", got)
 	}
 	plan := erasurePlanFor(spec, false)
-	if plan.CustomItemReference != "productGid" || strings.Join(sortedStrings(plan.MarkOnCustomItem), ",") != "name,title,variantTitle" {
-		t.Errorf("the line item's plan marks %v on a row with no %q, want the three titles on a row with no productGid", plan.MarkOnCustomItem, plan.CustomItemReference)
+	if plan.CustomItemReference != "productGid" || strings.Join(sortedStrings(plan.MarkOnCustomItem), ",") != "name,sku,title,variantTitle" {
+		t.Errorf("the line item's plan marks %v on a row with no %q, want the three titles and the SKU on a row with no productGid", plan.MarkOnCustomItem, plan.CustomItemReference)
 	}
 	for _, kept := range plan.MarkOnCustomItem {
 		for _, k := range plan.Keep {
@@ -535,7 +806,10 @@ func TestTheExportedReadOfThePolicy(t *testing.T) {
 		{"orderLineItem", "title", "kept, scrubbed on a custom item"},
 		{"orderLineItem", "variantTitle", "kept, scrubbed on a custom item"},
 		{"orderLineItem", "name", "kept, scrubbed on a custom item"},
-		{"orderLineItem", "sku", "kept by the list"},
+		{"orderLineItem", "sku", "kept, scrubbed on a custom item"},
+		// Her consent, as a boolean on the order: scrubbed although its kind
+		// would keep it.
+		{"order", "customerAcceptsMarketing", "scrubbed"},
 		{"orderLineItem", "quantity", "kept by kind"},
 		{"order", "updatedAt", "kept as structure"},
 		{"order", "gid", "kept as structure"},
@@ -589,5 +863,43 @@ func TestEveryFieldOfTheModelCarriesItsAdminType(t *testing.T) {
 				t.Errorf("%s.%s is a %s and says it keeps gids inside: only an object or a list of objects can", concept, f.Name, f.Kind)
 			}
 		}
+	}
+}
+
+// A short list of fields is scrubbed although their kind would keep them: a
+// boolean or a date that is the person's own, on a row that is not her
+// customer row. Each says why, and each is a field its kind would keep.
+func TestSomeFieldsAreScrubbedAlthoughTheirKindWouldKeepThem(t *testing.T) {
+	var listed []string
+	for concept, fields := range erasureScrubbedAlthoughKept {
+		spec := generated.Types[concept]
+		if spec == nil {
+			t.Errorf("the list names the concept %q, which the model does not have", concept)
+			continue
+		}
+		for field, why := range fields {
+			listed = append(listed, concept+"."+field)
+			f, ok := fieldNamed(spec, field)
+			if !ok {
+				t.Errorf("the list names %s.%s, which the model does not have", concept, field)
+				continue
+			}
+			if strings.TrimSpace(why) == "" {
+				t.Errorf("%s.%s is scrubbed although kept by kind, and nothing says why", concept, field)
+			}
+			if _, byKind := erasureKeptByKind(f); !byKind {
+				t.Errorf("%s.%s is on the list and its kind does not keep it: the entry does nothing", concept, field)
+			}
+			if d := erasureDecisionFor(concept, f, false); d.Fate == fateKept || d.AlthoughKept != why {
+				t.Errorf("%s.%s is decided %+v, want scrubbed for the reason on the list", concept, field, d)
+			}
+		}
+	}
+	if got := strings.Join(sortedStrings(listed), ","); got != "order.customerAcceptsMarketing" {
+		t.Errorf("the fields scrubbed although their kind would keep them are %s", got)
+	}
+	f, _ := fieldNamed(generated.Types["order"], "customerAcceptsMarketing")
+	if got := erasureDecisionFor("order", f, false).Fate; got != fateRemoved {
+		t.Errorf("her consent on an order is %q, want its key removed", got)
 	}
 }

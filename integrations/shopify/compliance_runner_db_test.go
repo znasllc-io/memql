@@ -34,8 +34,8 @@ type runnerFixture struct {
 	*erasureFixture
 	admin *fakeAdmin
 	at    time.Time
-	// broken is the connector without a database handle: every erasure it
-	// runs fails before it reads a row.
+	// broken is the connector without a session to run its statements on:
+	// every erasure it runs fails before it reads a row.
 	broken *Connector
 }
 
@@ -89,7 +89,7 @@ func newRunnerFixture(t *testing.T) *runnerFixture {
 		conn.now = func() time.Time { return r.at }
 		return conn
 	}
-	f.conn = build().WithDatabase(func() *sql.DB { return f.db })
+	f.conn = build().WithDatabase(func() *sql.DB { return f.db }).WithMaintenanceSession(privacySessionOf(f.db))
 	r.broken = build()
 	clean := func() {
 		ctx := context.Background()
@@ -817,9 +817,15 @@ func TestAJobsLastErrorSaysWhatFailedAndNotForWhom(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			h := redactionHarness(t, db, testStoreID, map[string]map[string]any{"order": {"backfillStatus": "running", "backfillCursor": "c-1"}})
 			tc.arrange(h)
-			h.engine.setRows("complianceJobsDue", []map[string]any{{
+			job := map[string]any{
 				"id": "shpcj-names-nobody", "storeId": testStoreID, "topic": tc.topic, "customerGid": customer,
 				"status": "pending", "dueAt": h.now.Add(-time.Hour).Format(time.RFC3339),
+			}
+			h.engine.setRows("complianceJobsDue", []map[string]any{job})
+			// The runner reads the job and its store again when it takes it.
+			h.engine.setRows("complianceJobById", []map[string]any{job})
+			h.engine.setRows("storeById", []map[string]any{{
+				"id": testStoreID, "domain": "acme-widgets.myshopify.com", "adminTokenRef": "ACME_ADMIN", "status": StatusLive, "ownerUserId": "user-1",
 			}})
 
 			ran, err := h.conn.RunDueComplianceJobs(context.Background())

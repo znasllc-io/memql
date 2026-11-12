@@ -171,4 +171,11 @@ concept complianceJob {
   /// which is how such a job is found and made again.
   scrubbedAt   datetime
   completedAt  datetime
+  /// When a request for this job was last recorded on its row: the first
+  /// delivery, or a later one for the same erasure (a customer who asks
+  /// again, a shop uninstalled a second time). A request that finds its job
+  /// done opens it again for both passes; one that finds it waiting or
+  /// failed adds its orders and leaves dueAt where it is. Empty on a job
+  /// queued before the field existed.
+  requestedAt  datetime
 }

@@ -353,6 +353,19 @@ query complianceJob complianceJobsDue {
   shape     complianceJobFull
 }
 
+/// One privacy job by its row id, with the row's version. What the connector
+/// reads before it writes a job's row: a request that lands on a job, and the
+/// runner when it takes one.
+@unbounded("a privacy job by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+query complianceJob complianceJobById {
+  args {
+    jobId  string!
+  }
+  filter  row => row.id == args.jobId && actor.isClusterOwner == true
+  shape   complianceJobStored
+}
+
 /// A store's privacy jobs that are failed and were due before a given time,
 /// oldest due first. The store's verdict reads its first page to say that a
 /// privacy request for the store could not be completed, how many, and since

@@ -1680,6 +1680,14 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// let a caller schedule a purge of a merchant's whole mirror;
 		// `done` is a claim that a legal obligation was met.
 		//
+		// reopenComplianceJob / extendComplianceJob record a SECOND
+		// request on the job of the first: one opens a done erasure again
+		// for both passes, the other adds the request's orders to a job
+		// that is waiting. Both are the connector reacting to a verified
+		// webhook. A client-callable reopen would take back a `done` and
+		// schedule a purge again; a client-callable extend would name
+		// another person's orders into somebody's erasure.
+		//
 		// setProductContentStatus records what the far end did with a
 		// pushed row: `live` is a claim about Shopify's acceptance, and
 		// only the drain worker that made the call can make it.
@@ -1690,6 +1698,8 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// value is that its prices were locked into a real one.
 		{Path: "shopify/overlay/mutations.memql", Name: "queueComplianceJob"}:  true,
 		{Path: "shopify/overlay/mutations.memql", Name: "recordComplianceJob"}: true,
+		{Path: "shopify/overlay/mutations.memql", Name: "reopenComplianceJob"}: true,
+		{Path: "shopify/overlay/mutations.memql", Name: "extendComplianceJob"}: true,
 		{Path: "commerce/mutations.memql", Name: "setProductContentStatus"}:    true,
 		{Path: "commerce/mutations.memql", Name: "markQuoteAccepted"}:          true,
 		// memql#5638, a store's uninstall and its reinstall. Each row is a

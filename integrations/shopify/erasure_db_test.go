@@ -68,7 +68,7 @@ func newErasureFixture(t *testing.T) *erasureFixture {
 	f := &erasureFixture{
 		t: t, eng: eng, db: db, store: fmt.Sprintf("dbtest-era-%08x", h.Sum32()),
 		conn: NewConnector(eng, nil, NewStoreRegistry(eng, eng.ResolveSystemSecret), NewAdminClient()).
-			WithDatabase(func() *sql.DB { return db }),
+			WithDatabase(func() *sql.DB { return db }).WithMaintenanceSession(privacySessionOf(db)),
 	}
 	clean := func() {
 		_, _ = db.ExecContext(context.Background(),
@@ -224,7 +224,7 @@ func bikeOrder(n, customer, updatedAt string) map[string]any {
 		"id": gid, "updatedAt": updatedAt, "createdAt": "2026-09-01T08:00:00Z", "processedAt": "2026-09-01T08:00:05Z",
 		"name": "#" + n, "email": adaEmail, "phone": adaPhone, "clientIp": "203.0.113.7",
 		"note":         "leave with the neighbour at number 4",
-		"currencyCode": "EUR", "displayFinancialStatus": "PAID", "taxExempt": false,
+		"currencyCode": "EUR", "displayFinancialStatus": "PAID", "taxExempt": false, "customerAcceptsMarketing": true,
 		"currentSubtotalLineItemsQuantity": 1,
 		"billingAddress":                   adaAddress(),
 		"shippingAddress":                  adaAddress(),
@@ -246,7 +246,7 @@ func bikeOrder(n, customer, updatedAt string) map[string]any {
 			// A custom line: no product, and a title somebody typed.
 			map[string]any{
 				"id": "gid://shopify/LineItem/" + n + "02", "title": "Engraving: Ada", "variantTitle": "for Ada",
-				"name": "Engraving: Ada - for Ada", "quantity": 2,
+				"name": "Engraving: Ada - for Ada", "sku": "ENGRAVE-ADA", "quantity": 2,
 				"originalUnitPriceSet": euros("20.00"),
 			},
 		}},
@@ -318,7 +318,15 @@ func TestAnErasedCustomersRowKeepsNothingButItsStructure(t *testing.T) {
 				t.Errorf("version %d keeps %s = %v; an object, a number, a boolean or an enum of her own row has its key removed", i, gone, value)
 			}
 		}
-		for _, marked := range []string{"firstName", "lastName", "displayName", "note", "numberOfOrders", "legacyResourceId", "lastOrderGid", "sourceCreatedAt"} {
+		// A string that is not free text loses its key too: a count the API
+		// writes as a string, a date, a reference. A reader comparing dates
+		// must never meet the marker.
+		for _, gone := range []string{"numberOfOrders", "legacyResourceId", "lastOrderGid", "sourceCreatedAt"} {
+			if value, present := v[gone]; present {
+				t.Errorf("version %d keeps %s = %v; a date, a number or a reference of her own row has its key removed", i, gone, value)
+			}
+		}
+		for _, marked := range []string{"firstName", "lastName", "displayName", "note"} {
 			if v[marked] != RedactionMarker {
 				t.Errorf("version %d: %s = %v, want %q", i, marked, v[marked], RedactionMarker)
 			}
@@ -395,6 +403,9 @@ func TestAnErasedCustomersOrderKeepsTheSaleAndLosesThePerson(t *testing.T) {
 	if total, _ := json.Marshal(o["totalPriceSet"]); !strings.Contains(string(total), `"1299.00"`) {
 		t.Errorf("the order lost its total: %s", total)
 	}
+	if _, present := o["customerAcceptsMarketing"]; present {
+		t.Errorf("the order keeps her consent to marketing: %v", o["customerAcceptsMarketing"])
+	}
 	if o["currencyCode"] != "EUR" || o["name"] != "#5201" || o["displayFinancialStatus"] != "PAID" || o["processedAt"] != "2026-09-01T08:00:05Z" || o["customerGid"] != customer {
 		t.Errorf("the order lost a fact of the sale: currency %v, number %v, status %v, processed %v, customer %v",
 			o["currencyCode"], o["name"], o["displayFinancialStatus"], o["processedAt"], o["customerGid"])
@@ -425,8 +436,8 @@ func TestAnErasedCustomersOrderKeepsTheSaleAndLosesThePerson(t *testing.T) {
 	// (ruling 89): the three titles go, and the sale's figures stay.
 	const customLine = "gid://shopify/LineItem/520102"
 	custom := f.newest("orderLineItem", customLine)
-	if custom["title"] != RedactionMarker || custom["variantTitle"] != RedactionMarker || custom["name"] != RedactionMarker {
-		t.Errorf("the custom line keeps a title: %v, %v, %v", custom["title"], custom["variantTitle"], custom["name"])
+	if custom["title"] != RedactionMarker || custom["variantTitle"] != RedactionMarker || custom["name"] != RedactionMarker || custom["sku"] != RedactionMarker {
+		t.Errorf("the custom line keeps a title or its SKU: %v, %v, %v, %v", custom["title"], custom["variantTitle"], custom["name"], custom["sku"])
 	}
 	if price, _ := json.Marshal(custom["originalUnitPriceSet"]); fmt.Sprint(custom["quantity"]) != "2" || !strings.Contains(string(price), `"20.00"`) {
 		t.Errorf("the custom line lost its quantity or price: %v", custom)
@@ -811,8 +822,9 @@ func TestTheScopeOfAnErasureGrowsByItsThreeLinksAndNoOther(t *testing.T) {
 		"purchasingEntity": map[string]any{"__typename": "Customer", "id": customer},
 		"totalPriceSet":    euros("15.00"),
 	}, seen)
-	// ... and inside a list of objects: a metaobject one of whose fields
-	// refers to her.
+	// NOT a link either: an object that only REFERS to her. A metaobject one
+	// of whose fields names her is the merchant's; the entry goes and the
+	// object stays.
 	const testimonial = "gid://shopify/Metaobject/8251"
 	f.write("metaobject", map[string]any{
 		"id": testimonial, "updatedAt": "2026-10-01T10:00:00Z", "displayName": "A rider's word, by Ada", "handle": "a-riders-word", "type": "testimonial",
@@ -820,15 +832,19 @@ func TestTheScopeOfAnErasureGrowsByItsThreeLinksAndNoOther(t *testing.T) {
 			map[string]any{"key": "stars", "value": "5"},
 			map[string]any{"key": "rider", "value": customer, "reference": map[string]any{"__typename": "Customer", "id": customer}},
 		},
+		"thumbnailField": map[string]any{"key": "rider", "value": customer, "reference": map[string]any{"__typename": "Customer", "id": customer}},
 	}, seen)
-	// 3. NOT a link: a list of references. A row that lists the customer
-	// among its references loses the gid from the list and nothing else; a
-	// row that lists her ORDER is left alone.
-	const club, clubOfOrders = "gid://shopify/Company/8301", "gid://shopify/Company/8302"
-	f.write("company", map[string]any{
-		"id": club, "updatedAt": "2026-10-01T10:00:00Z", "name": "Example Cycling Club", "note": "rides on Sundays",
-		"orders": map[string]any{"nodes": []any{map[string]any{"id": customer}, map[string]any{"id": eraOrderGID("1")}}},
+	// A metaobject that names somebody else is nobody's business here.
+	const another = "gid://shopify/Metaobject/8252"
+	f.write("metaobject", map[string]any{
+		"id": another, "updatedAt": "2026-10-01T10:00:00Z", "displayName": "A rider's word, by Bob", "handle": "another-riders-word", "type": "testimonial",
+		"fields":         []any{map[string]any{"key": "rider", "value": eraCustomerGID("8209"), "reference": map[string]any{"__typename": "Customer", "id": eraCustomerGID("8209")}}},
+		"thumbnailField": map[string]any{"key": "rider", "value": eraCustomerGID("8209")},
 	}, seen)
+	anotherBefore := f.allTexts()["metaobject "+another]
+	// 3. NOT a link: a list of references. A row that lists her ORDER among
+	// its references is left alone.
+	const clubOfOrders = "gid://shopify/Company/8302"
 	f.write("company", map[string]any{
 		"id": clubOfOrders, "updatedAt": "2026-10-01T10:00:00Z", "name": "Example Touring Club",
 		"orders": map[string]any{"nodes": []any{map[string]any{"id": order}}},
@@ -861,15 +877,19 @@ func TestTheScopeOfAnErasureGrowsByItsThreeLinksAndNoOther(t *testing.T) {
 	if d := f.newest("draftOrder", draft); d["email"] != RedactionMarker || d["purchasingEntity"] != nil || d["name"] != "#D8201" {
 		t.Errorf("the draft order that names her inside an object is %v", d)
 	}
-	if m := f.newest("metaobject", testimonial); m["displayName"] != RedactionMarker || fmt.Sprint(m["fields"]) != "[]" {
-		t.Errorf("the metaobject that names her inside a list of objects is %v", m)
+	m := f.newest("metaobject", testimonial)
+	if fields, _ := json.Marshal(m["fields"]); m["displayName"] != "A rider's word, by Ada" || m["handle"] != "a-riders-word" ||
+		string(fields) != `[{"key": "stars", "value": "5"}]` && string(fields) != `[{"key":"stars","value":"5"}]` {
+		t.Errorf("the metaobject that refers to her is %v, want the entry that names her taken out and nothing else changed", m)
 	}
-	c := f.newest("company", club)
-	if list, _ := json.Marshal(c["ordersGids"]); c["name"] != "Example Cycling Club" || c["note"] != "rides on Sundays" || string(list) != `["`+eraOrderGID("1")+`"]` {
-		t.Errorf("the company that lists her among its references is %v, want her gid out of the list and nothing else changed", c)
+	if value, present := m["thumbnailField"]; present {
+		t.Errorf("the metaobject still shows her as its thumbnail: %v", value)
 	}
 	if res.Unlisted != 1 {
-		t.Errorf("the erasure says it took her gid out of %d row version(s), want 1", res.Unlisted)
+		t.Errorf("the erasure says it took her out of %d row version(s), want the metaobject's one", res.Unlisted)
+	}
+	if after := f.allTexts()["metaobject "+another]; after != anotherBefore || anotherBefore == "" {
+		t.Errorf("a metaobject that names another customer was changed:\n  before: %s\n  after:  %s", anotherBefore, after)
 	}
 	now := f.allTexts()
 	for key, before := range untouched {
@@ -879,11 +899,12 @@ func TestTheScopeOfAnErasureGrowsByItsThreeLinksAndNoOther(t *testing.T) {
 	}
 }
 
-// Ruling 83 as written: a row that holds an in-scope row's gid in a gid field
-// is in scope, whatever the two rows are. A company names its main contact in
-// one, so the erasure of a customer who IS a company's main contact reaches
-// the company, and from it the company's other contacts and its locations.
-func TestTheErasureOfACompanysMainContactReachesTheCompany(t *testing.T) {
+// A company is not scrubbed because one of its contacts was (ruling 91). The
+// company names its main contact, and its contacts and locations name the
+// company; none of those is a link. The erased person's own contact row is
+// hers and is scrubbed. The company, her colleagues and the company's
+// locations are untouched byte for byte.
+func TestTheErasureOfACompanysMainContactLeavesTheCompany(t *testing.T) {
 	f := newErasureFixture(t)
 	if f == nil {
 		return
@@ -900,23 +921,236 @@ func TestTheErasureOfACompanysMainContactReachesTheCompany(t *testing.T) {
 			map[string]any{"id": location, "updatedAt": "2026-10-01T10:00:00Z", "name": "The clubhouse", "company": map[string]any{"id": company}},
 		}},
 	}, seen)
-	if got := f.newest("companyContact", colleague); got["title"] != "Treasurer" {
-		t.Fatalf("the fixture's second contact is %v", got)
+	before := f.allTexts()
+	for _, key := range []string{"company " + company, "companyContact " + colleague, "companyLocation " + location} {
+		if before[key] == "" {
+			t.Fatalf("the fixture holds no row %s", key)
+		}
 	}
 
 	f.erase(customer)
 
-	if got := f.newest("companyContact", hers); got["title"] != RedactionMarker {
-		t.Errorf("her own contact row keeps %v", got["title"])
+	if got := f.newest("companyContact", hers); got["title"] != RedactionMarker || got["customerGid"] != customer {
+		t.Errorf("her own contact row is %v, want it scrubbed", got)
 	}
-	if got := f.newest("company", company); got["name"] != RedactionMarker {
-		t.Errorf("the company whose main contact she is keeps its name %v; by ruling 83 it is in scope", got["name"])
+	after := f.allTexts()
+	for _, key := range []string{"company " + company, "companyContact " + colleague, "companyLocation " + location} {
+		if after[key] != before[key] {
+			t.Errorf("%s was changed by the erasure of the company's main contact:\n  before: %s\n  after:  %s", key, before[key], after[key])
+		}
 	}
-	if got := f.newest("companyContact", colleague); got["title"] != RedactionMarker {
-		t.Errorf("the company's other contact keeps %v; by ruling 83 it hangs from a row in scope", got["title"])
+}
+
+// What the erasure of A must never reach: another person's rows (ruling 91).
+// With every gid field a link, customer B, whose row once named A's order as
+// his last order, was scrubbed with her and exported to her; with her gid
+// matched by value anywhere, an order of customer C that carried it in a
+// custom attribute was scrubbed with its transaction, and exported to her.
+// One person's data handed to another is the worst thing this code can do.
+func TestAnErasureNeverReachesAnotherPersonsRows(t *testing.T) {
+	f := newErasureFixture(t)
+	if f == nil {
+		return
 	}
-	if got := f.newest("companyLocation", location); got["name"] != RedactionMarker {
-		t.Errorf("the company's location keeps %v; by ruling 83 it hangs from a row in scope", got["name"])
+	a, orderA := eraCustomerGID("9001"), eraOrderGID("59001")
+	b := eraCustomerGID("9002")
+	c, orderC := eraCustomerGID("9003"), eraOrderGID("59003")
+	f.write("customer", adaCustomer("9001", "2026-10-01T10:00:00Z"), seen)
+	f.write("order", bikeOrder("59001", a, "2026-10-01T10:00:00Z"), seen)
+
+	sample := func(n, first, updatedAt string) map[string]any {
+		row := adaCustomer(n, updatedAt)
+		row["firstName"], row["lastName"], row["displayName"] = first, "Sample", first+" Sample"
+		row["defaultEmailAddress"] = map[string]any{"emailAddress": strings.ToLower(first) + "@example.com"}
+		row["lastOrder"], row["orders"] = nil, nil
+		return row
+	}
+	// B: a live customer whose row named A's order as his last order (the
+	// order was once his and was moved to her), and no longer does.
+	bob := sample("9002", "Bob", "2026-10-01T10:00:00Z")
+	bob["lastOrder"] = map[string]any{"id": orderA}
+	f.write("customer", bob, seen)
+	f.write("customer", sample("9002", "Bob", "2026-10-05T10:00:00Z"), seen.Add(96*time.Hour))
+	// C: her order carries A's gid as the VALUE of a custom attribute.
+	f.write("customer", sample("9003", "Cara", "2026-10-01T10:00:00Z"), seen)
+	carasOrder := bikeOrder("59003", c, "2026-10-01T10:00:00Z")
+	carasOrder["email"] = "cara@example.com"
+	carasOrder["customAttributes"] = []any{map[string]any{"key": "referred_by", "value": a}}
+	f.write("order", carasOrder, seen)
+	// A gift card A bought (on her order, on her line) that C holds.
+	const card = "gid://shopify/GiftCard/9004"
+	f.write("giftCard", map[string]any{
+		"id": card, "updatedAt": "2026-10-01T10:00:00Z", "note": "a present for Cara, from Ada", "lastCharacters": "c4r4",
+		"customer": map[string]any{"id": c}, "order": map[string]any{"id": orderA}, "lineItem": map[string]any{"id": childGID("LineItem", "59001")},
+		"recipientAttributes": map[string]any{"message": "ride well", "recipient": map[string]any{"id": c}},
+		"balance":             map[string]any{"amount": "50.00", "currencyCode": "EUR"},
+	}, seen)
+
+	theirs := []string{
+		"customer " + b, "customer " + c, "order " + orderC, "orderLineItem " + childGID("LineItem", "59003"),
+		"orderTransaction " + childGID("OrderTransaction", "59003"), "fulfillment " + childGID("Fulfillment", "59003"),
+		"refund " + childGID("Refund", "59003"), "giftCard " + card,
+	}
+	before := f.allTexts()
+	for _, key := range theirs {
+		if before[key] == "" {
+			t.Fatalf("the fixture holds no row %s", key)
+		}
+	}
+
+	// Her export holds nothing of theirs.
+	export, err := f.conn.ExportCustomerData(context.Background(), Store{ID: f.store, Domain: "bicycles.example.com"}, a, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := export["rows"].(map[string]any)
+	raw, _ := json.Marshal(rows)
+	for _, whose := range []string{"bob@example.com", "cara@example.com", "Bob Sample", "Cara Sample", "ride well", b, orderC, card} {
+		if strings.Contains(string(raw), whose) {
+			t.Errorf("A's export holds %q, which is another person's", whose)
+		}
+	}
+	if !strings.Contains(string(raw), adaEmail) || !strings.Contains(string(raw), orderA) {
+		t.Fatalf("A's export does not hold her own rows: %s", raw)
+	}
+
+	f.erase(a)
+
+	after := f.allTexts()
+	for _, key := range theirs {
+		if after[key] != before[key] {
+			t.Errorf("%s is another person's and was changed by A's erasure:\n  before: %s\n  after:  %s", key, before[key], after[key])
+		}
+	}
+	// And A's own were erased.
+	f.holdsNoWordOf("customer", a, adaWords)
+	f.holdsNoWordOf("order", orderA, adaWords)
+}
+
+// The customer's gid inside an object makes the row hers only where the object
+// says who the row is FOR, and only as an id: an order's purchasing entity, a
+// gift card's recipient. A value that happens to spell her gid, in the same
+// object, does not: a message is words.
+func TestTheCustomerInsideAnObjectIsALinkOnlyAsTheOneTheRowIsFor(t *testing.T) {
+	f := newErasureFixture(t)
+	if f == nil {
+		return
+	}
+	a, c := eraCustomerGID("9301"), eraCustomerGID("9303")
+	f.write("customer", adaCustomer("9301", "2026-10-01T10:00:00Z"), seen)
+	// An order with no customer on it, bought by her as its purchasing entity.
+	bought := bikeOrder("59301", "", "2026-10-01T10:00:00Z")
+	bought["customer"] = nil
+	bought["purchasingEntity"] = map[string]any{"__typename": "Customer", "id": a}
+	f.write("order", bought, seen)
+	// A gift card sent to her, which no customer field names her on.
+	const sentToHer, namesHerInWords = "gid://shopify/GiftCard/9305", "gid://shopify/GiftCard/9306"
+	f.write("giftCard", map[string]any{
+		"id": sentToHer, "updatedAt": "2026-10-01T10:00:00Z", "note": "for Ada", "lastCharacters": "ad4a",
+		"recipientAttributes": map[string]any{"message": "happy birthday, Ada", "preferredName": "Ada", "recipient": map[string]any{"id": a}},
+		"balance":             map[string]any{"amount": "50.00", "currencyCode": "EUR"},
+	}, seen)
+	// A gift card that is Cara's, whose message is the erased customer's gid
+	// and nothing else: a free value, in the very object a link is read from.
+	f.write("giftCard", map[string]any{
+		"id": namesHerInWords, "updatedAt": "2026-10-01T10:00:00Z", "note": "for Cara", "lastCharacters": "c4r4",
+		"customer":            map[string]any{"id": c},
+		"recipientAttributes": map[string]any{"message": a, "preferredName": "Cara", "recipient": map[string]any{"id": c}},
+		"balance":             map[string]any{"amount": "25.00", "currencyCode": "EUR"},
+	}, seen)
+	before := f.allTexts()["giftCard "+namesHerInWords]
+	if !strings.Contains(before, `"message": "`+a+`"`) {
+		t.Fatalf("the fixture's card does not carry her gid as its message: %s", before)
+	}
+
+	f.erase(a)
+
+	f.holdsNoWordOf("order", eraOrderGID("59301"), adaWords)
+	if o := f.newest("order", eraOrderGID("59301")); o["currencyCode"] != "EUR" {
+		t.Errorf("the order she bought as its purchasing entity lost the facts of the sale: %v", o)
+	}
+	f.holdsNoWordOf("giftCard", sentToHer, []string{"Ada", "happy birthday"})
+	if card := f.newest("giftCard", sentToHer); card["note"] != RedactionMarker {
+		t.Errorf("the card sent to her is %v, want it scrubbed", card)
+	}
+	if after := f.allTexts()["giftCard "+namesHerInWords]; after != before {
+		t.Errorf("a card that is another person's, whose message spells the erased customer's gid, was changed:\n  before: %s\n  after:  %s", before, after)
+	}
+}
+
+// A customer merged into the erased one is the same person's earlier record:
+// the origin deleted it and moved its orders to her. Its row is a tombstone
+// whose last order is in scope, and that is the one case in which a
+// customer's last order is a link. A LIVE customer who names the same order
+// is another person (the test above).
+func TestACustomerMergedIntoTheErasedOneIsErasedWithHer(t *testing.T) {
+	f := newErasureFixture(t)
+	if f == nil {
+		return
+	}
+	a, order := eraCustomerGID("9101"), eraOrderGID("59101")
+	earlier := eraCustomerGID("9102")
+	f.write("customer", adaCustomer("9101", "2026-10-01T10:00:00Z"), seen)
+	f.write("order", bikeOrder("59101", a, "2026-10-01T10:00:00Z"), seen)
+	// Her earlier record: its last order is the order that is hers now, and
+	// the origin deleted it when the two were merged.
+	old := adaCustomer("9102", "2026-09-01T10:00:00Z")
+	old["lastOrder"] = map[string]any{"id": order}
+	old["orders"] = nil
+	f.write("customer", old, seen.Add(-24*time.Hour))
+	if err := f.conn.writeMirror(context.Background(), tombstone("customer", f.store, earlier, seen.Add(time.Hour))); err != nil {
+		t.Fatalf("retire the merged customer: %v", err)
+	}
+	if v := f.newest("customer", earlier); v["deleted"] != true || v["lastOrderGid"] != order || !strings.Contains(fmt.Sprint(v["defaultEmailAddress"]), adaEmail) {
+		t.Fatalf("the fixture's merged customer is %v, want a tombstone that still holds her and names the order", v)
+	}
+
+	f.erase(a)
+
+	f.holdsNoWordOf("customer", earlier, adaWords)
+	for i, v := range f.versions("customer", earlier) {
+		if _, present := v["defaultEmailAddress"]; present {
+			t.Errorf("version %d of the merged record keeps her address", i)
+		}
+		if _, present := v["numberOfOrders"]; present {
+			t.Errorf("version %d of the merged record keeps her count of orders: it is the person's own row and keeps nothing", i)
+		}
+	}
+	if v := f.newest("customer", earlier); v["deleted"] != true || v["gid"] != earlier {
+		t.Errorf("the merged record lost its structure: %v", v)
+	}
+}
+
+// The same gid in another store is another store's row. A row's id is made of
+// its store and its gid, and every statement of the scope names the store.
+func TestAnErasureIsOfOneStore(t *testing.T) {
+	f := newErasureFixture(t)
+	if f == nil {
+		return
+	}
+	other := &erasureFixture{t: t, eng: f.eng, db: f.db, conn: f.conn, store: f.store + "-b"}
+	clean := func() {
+		_, _ = f.db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept LIKE 'v1:shopify:%' AND payload->>'storeId' = $1`, other.store)
+	}
+	clean()
+	t.Cleanup(clean)
+	customer := eraCustomerGID("9201")
+	for _, fx := range []*erasureFixture{f, other} {
+		fx.write("customer", adaCustomer("9201", "2026-10-01T10:00:00Z"), seen)
+		fx.write("order", bikeOrder("59201", customer, "2026-10-01T10:00:00Z"), seen)
+	}
+	before := other.allTexts()
+	if len(before) < 2 {
+		t.Fatalf("the other store's fixture holds %d rows", len(before))
+	}
+
+	f.erase(customer, eraOrderGID("59201"))
+
+	f.holdsNoWordOf("customer", customer, adaWords)
+	for key, text := range other.allTexts() {
+		if text != before[key] {
+			t.Errorf("%s of the other store was changed by this store's erasure", key)
+		}
 	}
 }
 

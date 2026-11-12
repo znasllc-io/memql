@@ -3,11 +3,14 @@ package shopify
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/memql"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 )
 
@@ -108,26 +111,31 @@ func TestTheExportIsFiledUnderTheStoreOwner(t *testing.T) {
 	}
 }
 
-// A scrubbed string is marked rather than emptied, so a reader can tell
-// "redacted" from "never had one". What is kept and what is lost is the
-// policy's (erasure_fields_test.go and its golden).
-func TestAScrubbedStringIsMarked(t *testing.T) {
-	if RedactionMarker == "" {
-		t.Error("a scrubbed field must be marked, so a reader can tell redacted from never-had-one")
-	}
-}
-
-func TestRedactionAndPurgeRefuseWithoutADatabase(t *testing.T) {
+// With no maintenance session there is nothing to run a statement on, and
+// each of the three says so rather than run on another pool. (That a scrubbed
+// string is marked, and what else is kept and lost, is the policy's:
+// erasure_fields_test.go, its golden, and erasure_db_test.go against the
+// table.)
+func TestRedactionPurgeAndExportRefuseWithoutASession(t *testing.T) {
 	h := newHarness(t)
-	if _, err := h.conn.RedactCustomer(context.Background(), testStoreID, "gid://shopify/Customer/1", nil); err == nil {
-		t.Error("redaction ran with no database handle")
-	}
-	if _, err := h.conn.PurgeStore(context.Background(), h.store(t)); err == nil {
-		t.Error("the purge ran with no database handle")
-	}
-	// The export reads the rows the erasure would scrub, from the same table.
-	if _, err := h.conn.ExportCustomerData(context.Background(), h.store(t), "gid://shopify/Customer/1", nil); err == nil {
-		t.Error("the export ran with no database handle")
+	for what, run := range map[string]func() error{
+		"the redaction": func() error {
+			_, err := h.conn.RedactCustomer(context.Background(), testStoreID, "gid://shopify/Customer/1", nil)
+			return err
+		},
+		"the purge": func() error {
+			_, err := h.conn.PurgeStore(context.Background(), h.store(t))
+			return err
+		},
+		// The export reads the rows the erasure would scrub, from the same table.
+		"the export": func() error {
+			_, err := h.conn.ExportCustomerData(context.Background(), h.store(t), "gid://shopify/Customer/1", nil)
+			return err
+		},
+	} {
+		if err := run(); err == nil || !strings.Contains(err.Error(), "maintenance session") {
+			t.Errorf("%s with no session answered %v, want it refused for want of the maintenance session", what, err)
+		}
 	}
 }
 
@@ -311,4 +319,153 @@ func TestAFailedRunLeavesASentenceAndNeverItsCause(t *testing.T) {
 	if err := failedJob(failScrub, cause); !strings.Contains(err.Error(), "refused: insert") {
 		t.Errorf("the failure's own text lost its cause: %v", err)
 	}
+}
+
+// A request names a customer and its orders by ids of one form, and one that
+// does not is refused at the door: the staged delivery's row says why, and no
+// job is queued that no run could complete. Shopify sends numbers; a gid is
+// accepted too.
+func TestAPrivacyRequestWithAnIdThatIsNotAnIdIsRefused(t *testing.T) {
+	store := Store{ID: testStoreID, Domain: "acme-widgets.myshopify.com"}
+	at := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
+	redact := func(customer, orders any) (ComplianceJob, error) {
+		body := map[string]any{"shop_domain": store.Domain, "customer": map[string]any{"id": customer}}
+		if orders != nil {
+			body["orders_to_redact"] = orders
+		}
+		return parseComplianceJob(TopicRedact, store, complianceDelivery(TopicRedact, body), at)
+	}
+	for name, id := range map[string]any{
+		"a number":           991,
+		"a number as a word": "991",
+		"a gid":              "gid://shopify/Customer/991",
+	} {
+		job, err := redact(id, []any{299938, "gid://shopify/Order/280263"})
+		if err != nil || job.CustomerGID != "gid://shopify/Customer/991" || strings.Join(job.OrderGIDs, ",") != "gid://shopify/Order/299938,gid://shopify/Order/280263" {
+			t.Errorf("%s: parsed %q with orders %v, %v", name, job.CustomerGID, job.OrderGIDs, err)
+		}
+	}
+	for name, id := range map[string]any{
+		"nothing":                     "",
+		"a word":                      "ada",
+		"a pattern":                   "99%",
+		"a number and more":           "991 OR 1=1",
+		"another type's gid":          "gid://shopify/Order/991",
+		"a gid with a path":           "gid://shopify/Customer/991/extra",
+		"a quote":                     `99"1`,
+		"a gid of a customer by name": "gid://shopify/Customer/ada",
+	} {
+		if job, err := redact(id, []any{}); err == nil {
+			t.Errorf("a customer named by %s (%v) was accepted as %q", name, id, job.CustomerGID)
+		}
+	}
+	for name, order := range map[string]any{
+		"a word":             "first",
+		"a pattern":          "2999_8",
+		"another type's gid": "gid://shopify/Customer/299938",
+		"an empty word":      "",
+	} {
+		if job, err := redact(991, []any{299938, order}); err == nil {
+			t.Errorf("an order named by %s (%v) was accepted as %v", name, order, job.OrderGIDs)
+		}
+	}
+	// A data request's orders are held to the same form.
+	body := map[string]any{"shop_domain": store.Domain, "customer": map[string]any{"id": 991}, "data_request": map[string]any{"id": 42}, "orders_requested": []any{"x"}}
+	if _, err := parseComplianceJob(TopicDataRequest, store, complianceDelivery(TopicDataRequest, body), at); err == nil {
+		t.Error("a data request naming an order by a word was accepted")
+	}
+}
+
+// likeEscape makes a value match itself, and only itself, in a LIKE pattern.
+// A gid reaches a statement only in its one form (the scope refuses any
+// other), so this is the second line; it is held all the same, because the
+// first line is somebody else's to keep.
+func TestAValueInALikePatternMatchesOnlyItself(t *testing.T) {
+	for value, want := range map[string]string{
+		"gid://shopify/Customer/123": "gid://shopify/Customer/123",
+		"1_3":                        `1\_3`,
+		"1%3":                        `1\%3`,
+		`1\3`:                        `1\\3`,
+		`%_\`:                        `\%\_\\`,
+		"[redacted]":                 "[redacted]",
+	} {
+		if got := likeEscape(value); got != want {
+			t.Errorf("likeEscape(%q) = %q, want %q", value, got, want)
+		}
+	}
+}
+
+// The scope refuses a customer or an order whose id is not in its one form,
+// whoever calls it: its statements name rows by these ids and match them as
+// text.
+func TestTheScopeRefusesAnIdThatIsNotAnId(t *testing.T) {
+	for _, customer := range []string{"", "gid://shopify/Customer/", "gid://shopify/Customer/1%", `gid://shopify/Customer/1"2`, "gid://shopify/Order/1", "1"} {
+		if _, err := erasureScopeOf(context.Background(), nil, testStoreID, customer, nil); err == nil {
+			t.Errorf("the scope took %q for a customer", customer)
+		}
+	}
+	for _, order := range []string{"", "gid://shopify/Order/x", "gid://shopify/Customer/1", "gid://shopify/Order/1_"} {
+		if _, err := erasureScopeOf(context.Background(), nil, testStoreID, "gid://shopify/Customer/1", []string{order}); err == nil {
+			t.Errorf("the scope took %q for an order", order)
+		}
+	}
+	if _, err := erasureScopeOf(context.Background(), nil, "", "gid://shopify/Customer/1", nil); err == nil {
+		t.Error("the scope ran with no store id")
+	}
+}
+
+// The plug-in hands the connector the engine's maintenance session. Nothing
+// else does, and without it every privacy job of a node fails for want of a
+// session: the jobs do not fall back to the request pool. The factory is
+// reached only through the engine's registry, so its source is read, as
+// app/maintenance_session_wiring_test.go reads the app's half.
+func TestThePlugInHandsTheConnectorTheMaintenanceSession(t *testing.T) {
+	src, err := os.ReadFile("plugin.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "connector.WithMaintenanceSession(pctx.OpenMaintenanceSession)") {
+		t.Error("plugin.go no longer hands the connector PluginContext.OpenMaintenanceSession: every privacy job would fail for want of a session to run its statements on")
+	}
+}
+
+// The class of an error is a word about its kind, for the log, and never its
+// text: the text can quote a statement, an address, a whole export.
+func TestTheClassOfAnErrorIsNeverItsText(t *testing.T) {
+	const secret = "ada@example.com"
+	plain := errString("refused: insert for " + secret)
+	for name, tc := range map[string]struct {
+		err  error
+		want string
+	}{
+		"nothing":                         {nil, "none"},
+		"a failure with no cause":         {failedJob(failNoCustomer, nil), "none"},
+		"a deadline":                      {failedJob(failScrub, fmt.Errorf("scrub of %s: %w", secret, context.DeadlineExceeded)), "deadline exceeded"},
+		"a cancellation":                  {fmt.Errorf("for %s: %w", secret, context.Canceled), "canceled"},
+		"a row another writer changed":    {failedJob(failUnknown, fmt.Errorf("job of %s: %w", secret, memql.ErrRowVersionChanged)), "row version changed"},
+		"the origin's refusal":            {failedJob(failReach, &AdminError{StatusCode: 503, Body: secret}), "origin HTTP 503"},
+		"the database's refusal":          {failedJob(failScrub, fmt.Errorf("update for %s: %w", secret, sqlStateError{code: "57014", text: secret})), "database SQLSTATE 57014"},
+		"an error of no known kind":       {failedJob(failExportWrite, fmt.Errorf("file the export of %s: %w", secret, plain)), "shopify.errString"},
+		"the first of several, of a kind": {failedJob(failRestart, errors.Join(fmt.Errorf("order of %s: %w", secret, plain), plain)), "shopify.errString"},
+	} {
+		got := errorClass(tc.err)
+		if got != tc.want {
+			t.Errorf("%s: class %q, want %q", name, got, tc.want)
+		}
+		if strings.Contains(got, secret) || strings.Contains(got, "refused") {
+			t.Errorf("%s: the class carries the error's text: %q", name, got)
+		}
+	}
+}
+
+// sqlStateError is an error as the database driver answers one: its SQLSTATE
+// under the field 'C', and a message that can quote the statement.
+type sqlStateError struct{ code, text string }
+
+func (e sqlStateError) Error() string { return "ERROR: " + e.text + " (SQLSTATE=" + e.code + ")" }
+func (e sqlStateError) Field(k byte) string {
+	if k == 'C' {
+		return e.code
+	}
+	return e.text
 }

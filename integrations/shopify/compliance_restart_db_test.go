@@ -31,7 +31,7 @@ import (
 func redactionHarness(t *testing.T, db *sql.DB, storeID string, rows map[string]map[string]any) *testHarness {
 	t.Helper()
 	h := newHarness(t)
-	h.conn.WithDatabase(func() *sql.DB { return db })
+	h.conn.WithDatabase(func() *sql.DB { return db }).WithMaintenanceSession(privacySessionOf(db))
 	byID := map[string]map[string]any{}
 	for concept, fields := range rows {
 		id := memqlsync.StateID(generated.ConceptID(concept), ConnectorName, string(memqlsync.DirectionInbound), storeID)
@@ -188,7 +188,9 @@ func TestARedactionWithNothingRunningQueuesNothing(t *testing.T) {
 }
 
 // A restart that cannot be queued fails the job with the reason: the scrub
-// ran, and an export begun before it may still be applied.
+// ran, and an export begun before it may still be applied. The pass is not
+// audited as an erasure that ran: it is run again whole, and the trail says
+// "redacted" once, for the pass that did all of it.
 func TestARedactionWhoseRestartFailsIsNotRecordedDone(t *testing.T) {
 	db := openTestDB(t, "customers/redact whose restart fails")
 	if db == nil {
@@ -206,8 +208,8 @@ func TestARedactionWhoseRestartFailsIsNotRecordedDone(t *testing.T) {
 	if got := lastErrorOf(err); got != "the erasure ran, but a backfill in flight could not be started again" {
 		t.Errorf("the job's lastError would be %q", got)
 	}
-	if audits := h.engine.callsTo("createAuditEvent"); len(audits) != 1 || !strings.Contains(audits[0], "shopify_customer_redacted") {
-		t.Errorf("audits = %v, want the redaction that did run recorded", audits)
+	if audits := h.engine.callsTo("createAuditEvent"); len(audits) != 0 {
+		t.Errorf("audits = %v, want none: a pass that failed is not audited as an erasure that ran", audits)
 	}
 }
 

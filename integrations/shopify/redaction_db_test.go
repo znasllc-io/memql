@@ -133,7 +133,7 @@ func TestRedactCustomerScrubsEveryVersionAndKeepsTheCommercialFacts(t *testing.T
 	}
 
 	h := newHarness(t)
-	h.conn.WithDatabase(func() *sql.DB { return db })
+	h.conn.WithDatabase(func() *sql.DB { return db }).WithMaintenanceSession(privacySessionOf(db))
 	if _, err := h.conn.RedactCustomer(context.Background(), redactTestStore, customerGID, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestRedactionInventsNoFields(t *testing.T) {
 
 	before := payloadsFor(t, db, rowID)
 	h := newHarness(t)
-	h.conn.WithDatabase(func() *sql.DB { return db })
+	h.conn.WithDatabase(func() *sql.DB { return db }).WithMaintenanceSession(privacySessionOf(db))
 	if _, err := h.conn.RedactCustomer(context.Background(), redactTestStore, customerGID, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -217,8 +217,8 @@ func TestRedactionLeavesAnotherCustomersRowsAlone(t *testing.T) {
 	seedVersionedOrder(t, db, rowID, "gid://shopify/Customer/9993")
 
 	h := newHarness(t)
-	h.conn.WithDatabase(func() *sql.DB { return db })
-	if _, err := h.conn.RedactCustomer(context.Background(), redactTestStore, "gid://shopify/Customer/OTHER", nil); err != nil {
+	h.conn.WithDatabase(func() *sql.DB { return db }).WithMaintenanceSession(privacySessionOf(db))
+	if _, err := h.conn.RedactCustomer(context.Background(), redactTestStore, "gid://shopify/Customer/777000999", nil); err != nil {
 		t.Fatal(err)
 	}
 	for i, payload := range payloadsFor(t, db, rowID) {
@@ -258,7 +258,7 @@ func TestPurgeStoreRemovesEveryVersionAndItsSyncState(t *testing.T) {
 	})
 
 	h := newHarness(t)
-	h.conn.WithDatabase(func() *sql.DB { return db })
+	h.conn.WithDatabase(func() *sql.DB { return db }).WithMaintenanceSession(privacySessionOf(db))
 	removed, err := h.conn.PurgeStore(ctx, Store{ID: redactTestStore, Domain: "acme.myshopify.com"})
 	if err != nil {
 		t.Fatal(err)
@@ -317,7 +317,7 @@ func TestAPurgedStoreHasNoSyncStateRowsLeftPartitionedOnesIncluded(t *testing.T)
 	seed(other, "store-b")
 
 	h := newHarness(t)
-	h.conn.WithDatabase(func() *sql.DB { return db })
+	h.conn.WithDatabase(func() *sql.DB { return db }).WithMaintenanceSession(privacySessionOf(db))
 	if _, err := h.conn.PurgeStore(ctx, Store{ID: redactTestStore, Domain: "acme.myshopify.com"}); err != nil {
 		t.Fatal(err)
 	}

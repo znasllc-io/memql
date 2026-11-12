@@ -17,6 +17,7 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	languageparser "github.com/znasllc-io/memql/component/language/parser"
@@ -191,12 +192,16 @@ func TestARedactionWhileABackfillIsMidStreamIsNotUndoneByTheOldExport(t *testing
 	http.DefaultTransport = origin
 	t.Cleanup(func() { http.DefaultTransport = f.shopify })
 
-	// The connector as production builds it, with the database handle the
-	// privacy jobs need, over the engine above.
+	// The connector as production builds it, over the engine above, with the
+	// session the privacy jobs run their statements on: the engine's
+	// maintenance session, opened as a node opens it.
 	logger := slog.New(slog.DiscardHandler)
 	runtime := &Integration{runner: f.runner, logger: logger}
 	conn := shopify.NewConnector(redactionEngine{IntegrationEngineAccess: f.eng, runtime: runtime, store: store}, logger, f.stores, shopify.NewAdminClient()).
-		WithDatabase(func() *sql.DB { return raw })
+		WithDatabase(func() *sql.DB { return raw }).
+		WithMaintenanceSession(func(ctx context.Context) (*sql.Conn, func(), error) {
+			return database.OpenMaintenanceSessionDSN(ctx, dbtest.DSN())
+		})
 	f.runner.lookup = func(name string) (memqlsync.Connector, bool) { return conn, name == conn.Name() }
 	f.runner.bound = func() []string { return []string{shopify.ConnectorName} }
 	clock := &passClock{at: time.Now()}

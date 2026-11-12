@@ -50,6 +50,12 @@ func init() {
 				return db.DB
 			})
 		}
+		// The privacy jobs run their statements on the engine's maintenance
+		// session and on nothing else (compliance.go, privacySession). A node
+		// that offers none leaves it unset, and a job then fails saying so.
+		if pctx.OpenMaintenanceSession != nil {
+			connector.WithMaintenanceSession(pctx.OpenMaintenanceSession)
+		}
 		// A bind failure is LOGGED, not returned. The only ways it can
 		// fail are a name nothing declared (impossible here -- the init
 		// above it declares one) and a second bind under one name, which

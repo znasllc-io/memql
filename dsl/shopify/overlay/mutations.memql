@@ -208,12 +208,15 @@ mutation store markStoreConnected {
 /// nobody -- and a client-callable version would let a caller queue a
 /// purge of a merchant's whole mirror.
 ///
-/// @createOnly on the lifecycle fields makes a redelivery idempotent: the
-/// id is derived from (store, topic, subject), so Shopify re-sending the
-/// same request lands on the same row without resetting a status the
-/// runner has already moved.
+/// It CREATES the job and changes nothing of one that exists: every field
+/// that says where a job stands, when it is due and which orders it names is
+/// @createOnly. The id is derived from (store, topic, subject), so a second
+/// request lands on the first one's row, and what it does there depends on
+/// how the row stands: the connector reads it and calls reopenComplianceJob
+/// or extendComplianceJob. Called blind on an existing row, this neither
+/// moves a hold nor drops an order.
 @serverOnly
-@createOnly("status", "outcome", "lastError")
+@createOnly("status", "outcome", "lastError", "dueAt", "orderGids", "requestedAt")
 mutation complianceJob queueComplianceJob {
   args {
     jobId        string!
@@ -224,8 +227,10 @@ mutation complianceJob queueComplianceJob {
     shopDomain   string
     orderGids    []string
     dueAt        datetime!
+    requestedAt  datetime
   }
   insert {
+    accept { requestedAt }
     stamp {
       id:          args.jobId
       storeId:     args.storeId
@@ -238,6 +243,65 @@ mutation complianceJob queueComplianceJob {
       status:      "pending"
       outcome:     ""
       lastError:   ""
+    }
+  }
+}
+
+/// Open a privacy job that is done again, for both passes of its erasure.
+///
+/// A second request for the same erasure -- a customer who asks again, a shop
+/// uninstalled a second time -- lands on the row of the first, which is done.
+/// It is made due again: waiting, with no first pass recorded, after the hold
+/// of the new request (dueAt), naming the orders of both requests. The runner
+/// also calls it, without a dueAt, when a request reached a job while its last
+/// pass ran: the job is not done, and both passes are made again.
+///
+/// Server-only, and actor.userId scoping is not the fix: the caller is the
+/// connector reacting to a verified webhook, or its hourly runner, and
+/// neither has a user at all. `done` is a claim that a legal obligation was
+/// met; taking it back, and with it scheduling a shop's purge again, is for
+/// the code that heard Shopify ask again, never for a caller.
+@serverOnly
+mutation complianceJob reopenComplianceJob {
+  args {
+    jobId        string!
+    dueAt        datetime
+    orderGids    []string
+    requestedAt  datetime
+    outcome      string
+  }
+  update {
+    accept { dueAt, orderGids, requestedAt, outcome }
+    stamp {
+      id:          args.jobId
+      status:      "pending"
+      scrubbedAt:  ""
+      lastError:   ""
+    }
+  }
+}
+
+/// Record a further request on a privacy job that is waiting or failed: the
+/// orders it names join the job's, and when it was requested is kept. dueAt
+/// is NOT an argument: a redelivery must not push an erasure back, least of
+/// all one waiting for its second pass.
+///
+/// Server-only, and actor.userId scoping is not the fix: the caller is the
+/// connector reacting to a verified webhook, so actor.userId names nobody,
+/// and a job's row belongs to a store and a legal obligation, not to a
+/// person. A client-callable version would let a caller name another
+/// person's orders into somebody's erasure.
+@serverOnly
+mutation complianceJob extendComplianceJob {
+  args {
+    jobId        string!
+    orderGids    []string!
+    requestedAt  datetime!
+  }
+  update {
+    accept { orderGids, requestedAt }
+    stamp {
+      id:  args.jobId
     }
   }
 }

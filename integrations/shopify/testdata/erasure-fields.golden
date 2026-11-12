@@ -6,16 +6,26 @@
 # rewrites it, and its diff is the review.
 #
 # REACH. The scope starts at the customer's row and the orders the request names, and grows to a fixed
-# point by three links and no other:
+# point by these links and no other:
 #   child of X              the row hangs from an in-scope row of X by the model's parent link
-#   gid field F naming X    the row holds an in-scope row's gid as the whole value of its gid field F
+#   gid field F naming X    the row holds an in-scope row of X's gid as the whole value of its gid field F.
+#                           Every gid field is such a link unless its line below says NOT A LINK. One of
+#                           them is a link "from a deleted row only": it is followed from a row whose
+#                           newest version is a tombstone, and from no other
 #   the customer inside object F
-#                           the row holds the customer's gid inside its object or list of objects F. The fields
-#                           named are those whose selection keeps a customer's gid; the match itself is by value,
-#                           in every object and list of objects of every row of the store
-# A list of references is not a link. A row that is not in scope and lists the customer among its
-# references has the gid taken out of that list, and nothing else in it changes. The data request exports
-# exactly the rows in scope.
+#                           the row holds an in-scope customer's gid as an id inside its object F, and F
+#                           is one of the few objects that say who a row is for. Her gid inside any other
+#                           object, or as a free value anywhere (a custom attribute, a note, a message in
+#                           that same object), is not a link: nothing is matched by value
+# A list of references is not a link, and neither is an object that only refers to the customer (a
+# metaobject's fields): in a row that is not in scope the entry that names her is taken out -- an entry
+# that holds her gid as a whole value anywhere inside it -- and nothing else in the row changes. A row is
+# in scope when any of its versions holds a link. The data request exports exactly the rows in scope.
+#
+# TWO THINGS AN ERASURE DOES NOT REACH, accepted in writing:
+#   - a row that carries the person only by an email address, with no customer on it: a guest's
+#     abandoned checkout
+#   - the buyer's message inside a gift card another person holds: the card is its holder's
 #
 # FIELDS. Every version of a row in scope is rewritten. The structural fields are never touched:
 #   storeId, gid, updatedAt, versionSource, syncedAt, versionReadAt, deleted, parentGid
@@ -26,12 +36,16 @@
 #                           Int (an integer), Money (a money amount),
 #                           UnsignedInt64 (an unsigned 64-bit number)
 #   kept by the list        on the keep-list of erasure_fields.go, with the reason it describes the sale
-#   scrubbed                everything else: a string becomes "[redacted]", a list becomes [], and the key of
-#                           any other type is removed, so a typed read answers null and the mirror can write the row again
+#   scrubbed                everything else: a string of free text becomes "[redacted]", a list becomes [], and
+#                           the key of anything else is removed (an object, a number, a boolean, an enum, and a
+#                           string that is a date, a number or a reference), so a typed read answers null, a reader
+#                           of dates never meets the marker, and the mirror can write the row again
+#   scrubbed although kept by kind
+#                           the person's own, on a row that is not her customer row; each says why
 #   kept by the list; scrubbed on a custom item
 #                           the one decision that looks at a row's values: a line item (orderLineItem) with no
-#                           productGid is a custom item, whose titles are what a person typed. It is decided
-#                           version by version
+#                           productGid is a custom item, whose titles and SKU are what a person typed. It is
+#                           decided version by version
 # The scalar Admin types the model holds that are not kept by kind:
 #   CountryCode, CurrencyCode, HTML, JSON, LanguageCode, OrderTransactionErrorCode,
 #   ShopifyPaymentsTransactionType, String, URL
@@ -44,7 +58,7 @@ concept abandonedCheckout (AbandonedCheckout)
   billingAddress                           object      MailingAddress                     scrubbed: the key is removed
   completedAt                              scalar      DateTime                           kept by kind: a date-time
   customAttributes                         objectList  Attribute                          scrubbed: becomes []
-  customerGid                              gid         Customer                           kept by kind: a reference to another row
+  customerGid                              gid         Customer                           kept by kind: a reference to another row; a link: a row that names an in-scope customer here is in scope
   defaultCursor                            scalar      String                             scrubbed: becomes "[redacted]"
   discountCodes                            scalarList  String                             kept by the list: the discount codes used on the sale
   name                                     scalar      String                             kept by the list: the checkout's number
@@ -64,7 +78,7 @@ concept abandonedCheckout (AbandonedCheckout)
 concept article (Article)
   reach: not reachable
   author                                   object      ArticleAuthor                      scrubbed: the key is removed
-  blogGid                                  gid         Blog                               kept by kind: a reference to another row
+  blogGid                                  gid         Blog                               kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a blog
   body                                     scalar      HTML                               scrubbed: becomes "[redacted]"
   commentsCount                            object      Count                              scrubbed: the key is removed
   defaultCursor                            scalar      String                             scrubbed: becomes "[redacted]"
@@ -81,7 +95,7 @@ concept article (Article)
 
 concept articleComment (Comment)
   reach: not reachable
-  articleGid                               gid         Article                            kept by kind: a reference to another row
+  articleGid                               gid         Article                            kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a article
   author                                   object      CommentAuthor                      scrubbed: the key is removed
   body                                     scalar      String                             scrubbed: becomes "[redacted]"
   bodyHtml                                 scalar      HTML                               scrubbed: becomes "[redacted]"
@@ -117,8 +131,8 @@ concept businessEntity (BusinessEntity)
 concept catalog (Catalog)
   reach: not reachable
   operations                               objectList  ResourceOperation                  scrubbed: becomes []
-  priceListGid                             gid         PriceList                          kept by kind: a reference to another row
-  publicationGid                           gid         Publication                        kept by kind: a reference to another row
+  priceListGid                             gid         PriceList                          kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a priceList
+  publicationGid                           gid         Publication                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a publication
   status                                   enum        CatalogStatus                      kept by kind: an enum
   title                                    scalar      String                             scrubbed: becomes "[redacted]"
 
@@ -159,7 +173,7 @@ concept collection (Collection)
   title                                    scalar      String                             scrubbed: becomes "[redacted]"
 
 concept company (Company)
-  reach: gid field mainContactGid naming companyContact
+  reach: not reachable
   contactsCount                            object      Count                              scrubbed: the key is removed
   customerSince                            scalar      DateTime                           kept by kind: a date-time
   defaultCursor                            scalar      String                             scrubbed: becomes "[redacted]"
@@ -169,7 +183,7 @@ concept company (Company)
   hasTimelineComment                       scalar      Boolean                            kept by kind: a boolean
   lifetimeDuration                         scalar      String                             scrubbed: becomes "[redacted]"
   locationsCount                           object      Count                              scrubbed: the key is removed
-  mainContactGid                           gid         CompanyContact                     kept by kind: a reference to another row
+  mainContactGid                           gid         CompanyContact                     kept by kind: a reference to another row; NOT A LINK: the company points at one of its contacts; a company is not scrubbed because one contact was
   metafields                               metafields  Metafield                          scrubbed: the key is removed
   name                                     scalar      String                             scrubbed: becomes "[redacted]"
   note                                     scalar      String                             scrubbed: becomes "[redacted]"
@@ -179,9 +193,9 @@ concept company (Company)
   totalSpent                               object      MoneyV2                            scrubbed: the key is removed
 
 concept companyContact (CompanyContact)
-  reach: gid field customerGid naming customer; child of company; gid field companyGid naming company
-  companyGid                               gid         Company                            kept by kind: a reference to another row
-  customerGid                              gid         Customer                           kept by kind: a reference to another row
+  reach: gid field customerGid naming customer
+  companyGid                               gid         Company                            kept by kind: a reference to another row; NOT A LINK: it names the company the contact belongs to; followed, it would reach every colleague
+  customerGid                              gid         Customer                           kept by kind: a reference to another row; a link: a row that names an in-scope customer here is in scope
   isMainContact                            scalar      Boolean                            kept by kind: a boolean
   lifetimeDuration                         scalar      String                             scrubbed: becomes "[redacted]"
   locale                                   scalar      String                             scrubbed: becomes "[redacted]"
@@ -189,12 +203,12 @@ concept companyContact (CompanyContact)
   title                                    scalar      String                             scrubbed: becomes "[redacted]"
 
 concept companyLocation (CompanyLocation)
-  reach: child of company; gid field companyGid naming company
+  reach: not reachable
   billingAddress                           object      CompanyAddress                     scrubbed: the key is removed
   buyerExperienceConfiguration             object      BuyerExperienceConfiguration       scrubbed: the key is removed
   catalogsCount                            object      Count                              scrubbed: the key is removed
   catalogsGids                             refs        Catalog                            kept by kind: a list of references to other rows
-  companyGid                               gid         Company                            kept by kind: a reference to another row
+  companyGid                               gid         Company                            kept by kind: a reference to another row; NOT A LINK: it names the company the location belongs to; followed, it would reach the company's addresses
   currency                                 scalar      CurrencyCode                       scrubbed: becomes "[redacted]"
   defaultCursor                            scalar      String                             scrubbed: becomes "[redacted]"
   externalId                               scalar      String                             scrubbed: becomes "[redacted]"
@@ -212,45 +226,44 @@ concept companyLocation (CompanyLocation)
   totalSpent                               object      MoneyV2                            scrubbed: the key is removed
 
 concept customer (Customer)
-  reach: the customer's row; gid field lastOrderGid naming order
-  own: the erased customer's own row, which keeps nothing but its structural fields
-  other: a row of another customer that a link brought into scope
-  amountSpent                              object      MoneyV2                            own: scrubbed: the key is removed | other: scrubbed: the key is removed
-  canDelete                                scalar      Boolean                            own: scrubbed: the key is removed | other: kept by kind: a boolean
-  companyContactProfilesGids               refs        CompanyContact                     own: scrubbed: becomes [] | other: kept by kind: a list of references to other rows
-  dataSaleOptOut                           scalar      Boolean                            own: scrubbed: the key is removed | other: kept by kind: a boolean
-  defaultAddress                           object      MailingAddress                     own: scrubbed: the key is removed | other: scrubbed: the key is removed
-  defaultEmailAddress                      object      CustomerEmailAddress               own: scrubbed: the key is removed | other: scrubbed: the key is removed
-  defaultPhoneNumber                       object      CustomerPhoneNumber                own: scrubbed: the key is removed | other: scrubbed: the key is removed
-  displayName                              scalar      String                             own: scrubbed: becomes "[redacted]" | other: scrubbed: becomes "[redacted]"
-  firstName                                scalar      String                             own: scrubbed: becomes "[redacted]" | other: scrubbed: becomes "[redacted]"
-  identityProviderSubjects                 objectList  IdentityProviderSubject            own: scrubbed: becomes [] | other: scrubbed: becomes []
-  image                                    object      Image                              own: scrubbed: the key is removed | other: scrubbed: the key is removed
-  lastName                                 scalar      String                             own: scrubbed: becomes "[redacted]" | other: scrubbed: becomes "[redacted]"
-  lastOrderGid                             gid         Order                              own: scrubbed: becomes "[redacted]" | other: kept by kind: a reference to another row
-  legacyResourceId                         scalar      UnsignedInt64                      own: scrubbed: becomes "[redacted]" | other: kept by kind: an unsigned 64-bit number
-  lifetimeDuration                         scalar      String                             own: scrubbed: becomes "[redacted]" | other: scrubbed: becomes "[redacted]"
-  locale                                   scalar      String                             own: scrubbed: becomes "[redacted]" | other: scrubbed: becomes "[redacted]"
-  mergeable                                object      CustomerMergeable                  own: scrubbed: the key is removed | other: scrubbed: the key is removed
-  metafields                               metafields  Metafield                          own: scrubbed: the key is removed | other: scrubbed: the key is removed
-  multipassIdentifier                      scalar      String                             own: scrubbed: becomes "[redacted]" | other: scrubbed: becomes "[redacted]"
-  note                                     scalar      String                             own: scrubbed: becomes "[redacted]" | other: scrubbed: becomes "[redacted]"
-  numberOfOrders                           scalar      UnsignedInt64                      own: scrubbed: becomes "[redacted]" | other: kept by kind: an unsigned 64-bit number
-  ordersGids                               refs        Order                              own: scrubbed: becomes [] | other: kept by kind: a list of references to other rows
-  productSubscriberStatus                  enum        CustomerProductSubscriberStatus    own: scrubbed: the key is removed | other: kept by kind: an enum
-  sourceCreatedAt                          scalar      DateTime                           own: scrubbed: becomes "[redacted]" | other: kept by kind: a date-time
-  state                                    enum        CustomerState                      own: scrubbed: the key is removed | other: kept by kind: an enum
-  statistics                               object      CustomerStatistics                 own: scrubbed: the key is removed | other: scrubbed: the key is removed
-  subscriptionContractsGids                refs        SubscriptionContract               own: scrubbed: becomes [] | other: kept by kind: a list of references to other rows
-  tags                                     scalarList  String                             own: scrubbed: becomes [] | other: scrubbed: becomes []
-  taxExempt                                scalar      Boolean                            own: scrubbed: the key is removed | other: kept by kind: a boolean
-  taxExemptions                            scalarList  TaxExemption                       own: scrubbed: becomes [] | other: scrubbed: becomes []
-  taxSettings                              object      TaxSettings                        own: scrubbed: the key is removed | other: scrubbed: the key is removed
-  verifiedEmail                            scalar      Boolean                            own: scrubbed: the key is removed | other: kept by kind: a boolean
+  reach: the customer's row; gid field lastOrderGid naming order, from a deleted row only
+  every customer row in scope is the person's own (the erased customer's, or an earlier record merged into it) and keeps nothing but its structural fields
+  amountSpent                              object      MoneyV2                            scrubbed: the key is removed
+  canDelete                                scalar      Boolean                            scrubbed: the key is removed
+  companyContactProfilesGids               refs        CompanyContact                     scrubbed: becomes []
+  dataSaleOptOut                           scalar      Boolean                            scrubbed: the key is removed
+  defaultAddress                           object      MailingAddress                     scrubbed: the key is removed
+  defaultEmailAddress                      object      CustomerEmailAddress               scrubbed: the key is removed
+  defaultPhoneNumber                       object      CustomerPhoneNumber                scrubbed: the key is removed
+  displayName                              scalar      String                             scrubbed: becomes "[redacted]"
+  firstName                                scalar      String                             scrubbed: becomes "[redacted]"
+  identityProviderSubjects                 objectList  IdentityProviderSubject            scrubbed: becomes []
+  image                                    object      Image                              scrubbed: the key is removed
+  lastName                                 scalar      String                             scrubbed: becomes "[redacted]"
+  lastOrderGid                             gid         Order                              scrubbed: the key is removed; NOT A LINK: another person's row can name an order that has since moved to the erased customer; a live customer row is another person; A LINK FROM A DELETED ROW: a deleted customer whose last order is in scope was merged into the erased one: the same person's earlier record
+  legacyResourceId                         scalar      UnsignedInt64                      scrubbed: the key is removed
+  lifetimeDuration                         scalar      String                             scrubbed: becomes "[redacted]"
+  locale                                   scalar      String                             scrubbed: becomes "[redacted]"
+  mergeable                                object      CustomerMergeable                  scrubbed: the key is removed
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+  multipassIdentifier                      scalar      String                             scrubbed: becomes "[redacted]"
+  note                                     scalar      String                             scrubbed: becomes "[redacted]"
+  numberOfOrders                           scalar      UnsignedInt64                      scrubbed: the key is removed
+  ordersGids                               refs        Order                              scrubbed: becomes []
+  productSubscriberStatus                  enum        CustomerProductSubscriberStatus    scrubbed: the key is removed
+  sourceCreatedAt                          scalar      DateTime                           scrubbed: the key is removed
+  state                                    enum        CustomerState                      scrubbed: the key is removed
+  statistics                               object      CustomerStatistics                 scrubbed: the key is removed
+  subscriptionContractsGids                refs        SubscriptionContract               scrubbed: becomes []
+  tags                                     scalarList  String                             scrubbed: becomes []
+  taxExempt                                scalar      Boolean                            scrubbed: the key is removed
+  taxExemptions                            scalarList  TaxExemption                       scrubbed: becomes []
+  taxSettings                              object      TaxSettings                        scrubbed: the key is removed
+  verifiedEmail                            scalar      Boolean                            scrubbed: the key is removed
 
 concept customerPaymentMethod (CustomerPaymentMethod)
   reach: child of customer; gid field customerGid naming customer
-  customerGid                              gid         Customer                           kept by kind: a reference to another row
+  customerGid                              gid         Customer                           kept by kind: a reference to another row; a link: a row that names an in-scope customer here is in scope
   instrument                               object      CustomerPaymentInstrument          scrubbed: the key is removed
   revokedAt                                scalar      DateTime                           kept by kind: a date-time
   revokedReason                            enum        CustomerPaymentMethodRevocationReason kept by kind: an enum
@@ -293,7 +306,7 @@ concept discountNode (DiscountNode)
   metafields                               metafields  Metafield                          scrubbed: the key is removed
 
 concept draftOrder (DraftOrder)
-  reach: the customer inside object purchasingEntity; gid field customerGid naming customer; gid field orderGid naming order
+  reach: gid field customerGid naming customer; gid field orderGid naming order; the customer inside object purchasingEntity
   acceptAutomaticDiscounts                 scalar      Boolean                            kept by kind: a boolean
   allVariantPricesOverridden               scalar      Boolean                            kept by kind: a boolean
   allowDiscountCodesInCheckout             scalar      Boolean                            kept by kind: a boolean
@@ -306,7 +319,7 @@ concept draftOrder (DraftOrder)
   completedAt                              scalar      DateTime                           kept by kind: a date-time
   currencyCode                             scalar      CurrencyCode                       kept by the list: the currency of the sale
   customAttributes                         objectList  Attribute                          scrubbed: becomes []
-  customerGid                              gid         Customer                           kept by kind: a reference to another row
+  customerGid                              gid         Customer                           kept by kind: a reference to another row; a link: a row that names an in-scope customer here is in scope
   defaultCursor                            scalar      String                             scrubbed: becomes "[redacted]"
   deposit                                  object      DepositConfiguration               scrubbed: the key is removed
   discountCodes                            scalarList  String                             kept by the list: the discount codes used on the sale
@@ -320,14 +333,14 @@ concept draftOrder (DraftOrder)
   metafields                               metafields  Metafield                          scrubbed: the key is removed
   name                                     scalar      String                             kept by the list: the draft order's number
   note2                                    scalar      String                             scrubbed: becomes "[redacted]"
-  orderGid                                 gid         Order                              kept by kind: a reference to another row
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
   paymentTerms                             object      PaymentTerms                       scrubbed: the key is removed
   phone                                    scalar      String                             scrubbed: becomes "[redacted]"
   platformDiscounts                        objectList  DraftOrderPlatformDiscount         kept by the list: the discounts the platform applied: titles, codes and amounts
       holds { allocations { id quantity reductionAmount { amount currencyCode } reductionAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } automaticDiscount bxgyDiscount code discountClasses discountNode { id } id presentationLevel shortSummary summary title totalAmount { amount currencyCode } totalAmountPriceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } }
   poNumber                                 scalar      String                             scrubbed: becomes "[redacted]"
   presentmentCurrencyCode                  scalar      CurrencyCode                       kept by the list: the currency of the sale
-  purchasingEntity                         object      PurchasingEntity                   scrubbed: the key is removed
+  purchasingEntity                         object      PurchasingEntity                   scrubbed: the key is removed; THE CUSTOMER'S GID INSIDE IT BRINGS THE ROW INTO SCOPE: who the draft is for: the draft is that buyer's
   ready                                    scalar      Boolean                            kept by kind: a boolean
   reserveInventoryUntil                    scalar      DateTime                           kept by kind: a date-time
   shippingAddress                          object      MailingAddress                     scrubbed: the key is removed
@@ -359,9 +372,9 @@ concept fulfillment (Fulfillment)
   fulfillmentOrdersGids                    refs        FulfillmentOrder                   kept by kind: a list of references to other rows
   inTransitAt                              scalar      DateTime                           kept by kind: a date-time
   legacyResourceId                         scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
-  locationGid                              gid         Location                           kept by kind: a reference to another row
+  locationGid                              gid         Location                           kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a location
   name                                     scalar      String                             kept by the list: the fulfilment's number, made from the order's
-  orderGid                                 gid         Order                              kept by kind: a reference to another row
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
   originAddress                            object      FulfillmentOriginAddress           scrubbed: the key is removed
   requiresShipping                         scalar      Boolean                            kept by kind: a boolean
   service                                  object      FulfillmentService                 scrubbed: the key is removed
@@ -381,7 +394,7 @@ concept fulfillmentOrder (FulfillmentOrder)
   fulfillmentHolds                         objectList  FulfillmentHold                    scrubbed: becomes []
   fulfillmentsGids                         refs        Fulfillment                        kept by kind: a list of references to other rows
   internationalDuties                      object      FulfillmentOrderInternationalDuties scrubbed: the key is removed
-  orderGid                                 gid         Order                              kept by kind: a reference to another row
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
   orderId                                  scalar      ID                                 kept by kind: an ID
   orderName                                scalar      String                             kept by the list: the order's number
   orderProcessedAt                         scalar      DateTime                           kept by kind: a date-time
@@ -392,21 +405,21 @@ concept fulfillmentOrder (FulfillmentOrder)
   supportedActions                         objectList  FulfillmentOrderSupportedAction    scrubbed: becomes []
 
 concept giftCard (GiftCard)
-  reach: the customer inside object recipientAttributes; gid field customerGid naming customer; gid field orderGid naming order; gid field lineItemGid naming orderLineItem
+  reach: gid field customerGid naming customer; the customer inside object recipientAttributes
   balance                                  object      MoneyV2                            scrubbed: the key is removed
   crossCurrencyRedemptionStrategy          enum        GiftCardCrossCurrencyRedemptionStrategy kept by kind: an enum
-  customerGid                              gid         Customer                           kept by kind: a reference to another row
+  customerGid                              gid         Customer                           kept by kind: a reference to another row; a link: a row that names an in-scope customer here is in scope
   deactivatedAt                            scalar      DateTime                           kept by kind: a date-time
   enabled                                  scalar      Boolean                            kept by kind: a boolean
   expiresOn                                scalar      Date                               kept by kind: a date
   initialValue                             object      MoneyV2                            kept by the list: an amount of the sale: the value the card was sold with
   isRedeemable                             scalar      Boolean                            kept by kind: a boolean
   lastCharacters                           scalar      String                             scrubbed: becomes "[redacted]"
-  lineItemGid                              gid         LineItem                           kept by kind: a reference to another row
+  lineItemGid                              gid         LineItem                           kept by kind: a reference to another row; NOT A LINK: the card is its holder's, not its buyer's; the line it was bought on is the buyer's
   maskedCode                               scalar      String                             scrubbed: becomes "[redacted]"
   note                                     scalar      String                             scrubbed: becomes "[redacted]"
-  orderGid                                 gid         Order                              kept by kind: a reference to another row
-  recipientAttributes                      object      GiftCardRecipient                  scrubbed: the key is removed
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; NOT A LINK: the card is its holder's, not its buyer's; the buyer's message inside a card somebody else holds stays
+  recipientAttributes                      object      GiftCardRecipient                  scrubbed: the key is removed; THE CUSTOMER'S GID INSIDE IT BRINGS THE ROW INTO SCOPE: who the card is sent to, with the message to her: the card is the recipient's
   sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
   templateSuffix                           scalar      String                             scrubbed: becomes "[redacted]"
 
@@ -433,8 +446,8 @@ concept inventoryLevel (InventoryLevel)
   canDeactivate                            scalar      Boolean                            kept by kind: a boolean
   deactivationAlert                        scalar      String                             scrubbed: becomes "[redacted]"
   isActive                                 scalar      Boolean                            kept by kind: a boolean
-  itemGid                                  gid         InventoryItem                      kept by kind: a reference to another row
-  locationGid                              gid         Location                           kept by kind: a reference to another row
+  itemGid                                  gid         InventoryItem                      kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a inventoryItem
+  locationGid                              gid         Location                           kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a location
   sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
 
 concept inventoryShipment (InventoryShipment)
@@ -525,7 +538,7 @@ concept marketingActivity (MarketingActivity)
   inMainWorkflowVersion                    scalar      Boolean                            kept by kind: a boolean
   isExternal                               scalar      Boolean                            kept by kind: a boolean
   marketingChannelType                     enum        MarketingChannel                   kept by kind: an enum
-  marketingEventGid                        gid         MarketingEvent                     kept by kind: a reference to another row
+  marketingEventGid                        gid         MarketingEvent                     kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a marketingEvent
   parentActivityId                         scalar      ID                                 kept by kind: an ID
   parentRemoteId                           scalar      String                             scrubbed: becomes "[redacted]"
   sourceAndMedium                          scalar      String                             scrubbed: becomes "[redacted]"
@@ -586,18 +599,18 @@ concept metafieldDefinition (MetafieldDefinition)
   validations                              objectList  MetafieldDefinitionValidation      scrubbed: becomes []
 
 concept metaobject (Metaobject)
-  reach: the customer inside object fields; the customer inside object thumbnailField
+  reach: not in scope; an entry that names the customer is taken out of fields, thumbnailField and nothing else in the row changes
   capabilities                             object      MetaobjectCapabilityData           scrubbed: the key is removed
   createdByApp                             object      App                                scrubbed: the key is removed
-  createdByStaffGid                        gid         StaffMember                        kept by kind: a reference to another row
-  definitionGid                            gid         MetaobjectDefinition               kept by kind: a reference to another row
+  createdByStaffGid                        gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember
+  definitionGid                            gid         MetaobjectDefinition               kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a metaobjectDefinition
   displayName                              scalar      String                             scrubbed: becomes "[redacted]"
-  fields                                   objectList  MetaobjectField                    scrubbed: becomes []
+  fields                                   objectList  MetaobjectField                    scrubbed: becomes []; AN ENTRY THAT NAMES THE CUSTOMER IS TAKEN OUT, AND THE ROW IS LEFT: a merchant's own object with a field that refers to her: the object is the merchant's, the reference goes
   handle                                   scalar      String                             scrubbed: becomes "[redacted]"
   sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
   sourceCreatedBy                          object      App                                scrubbed: the key is removed
   sourceType                               scalar      String                             scrubbed: becomes "[redacted]"
-  thumbnailField                           object      MetaobjectField                    scrubbed: the key is removed
+  thumbnailField                           object      MetaobjectField                    scrubbed: the key is removed; AN ENTRY THAT NAMES THE CUSTOMER IS TAKEN OUT, AND THE ROW IS LEFT: the one field a metaobject shows for itself; when it refers to her it goes, and the object stays
   values                                   scalar      JSON                               scrubbed: the key is removed
 
 concept metaobjectDefinition (MetaobjectDefinition)
@@ -605,7 +618,7 @@ concept metaobjectDefinition (MetaobjectDefinition)
   access                                   object      MetaobjectAccess                   scrubbed: the key is removed
   capabilities                             object      MetaobjectCapabilities             scrubbed: the key is removed
   createdByApp                             object      App                                scrubbed: the key is removed
-  createdByStaffGid                        gid         StaffMember                        kept by kind: a reference to another row
+  createdByStaffGid                        gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember
   description                              scalar      String                             scrubbed: becomes "[redacted]"
   displayNameKey                           scalar      String                             scrubbed: becomes "[redacted]"
   fieldDefinitions                         objectList  MetaobjectFieldDefinition          scrubbed: becomes []
@@ -627,7 +640,7 @@ concept onlineStoreTheme (OnlineStoreTheme)
   themeStoreId                             scalar      Int                                kept by kind: an integer
 
 concept order (Order)
-  reach: an order the request names; the customer inside object purchasingEntity; gid field customerGid naming customer
+  reach: an order the request names; gid field customerGid naming customer; the customer inside object purchasingEntity
   additionalFees                           objectList  AdditionalFee                      kept by the list: fees charged on the order: names, amounts and tax lines
       holds { id name price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxLines { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title } }
   agreementsGids                           refs        SalesAgreement                     kept by kind: a list of references to other rows
@@ -664,8 +677,8 @@ concept order (Order)
   currentTotalTaxSet                       object      MoneyBag                           kept by the list: an amount of the sale
   currentTotalWeight                       scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
   customAttributes                         objectList  Attribute                          scrubbed: becomes []
-  customerAcceptsMarketing                 scalar      Boolean                            kept by kind: a boolean
-  customerGid                              gid         Customer                           kept by kind: a reference to another row
+  customerAcceptsMarketing                 scalar      Boolean                            scrubbed although kept by kind (the person's consent to marketing, as the order recorded it): the key is removed
+  customerGid                              gid         Customer                           kept by kind: a reference to another row; a link: a row that names an in-scope customer here is in scope
   customerJourneySummary                   object      CustomerJourneySummary             scrubbed: the key is removed
   customerLocale                           scalar      String                             scrubbed: becomes "[redacted]"
   discountApplications                     objectList  DiscountApplication                kept by the list: how each discount was applied to the order, and its value
@@ -686,7 +699,7 @@ concept order (Order)
   fullyPaid                                scalar      Boolean                            kept by kind: a boolean
   hasTimelineComment                       scalar      Boolean                            kept by kind: a boolean
   legacyResourceId                         scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
-  merchantBusinessEntityGid                gid         BusinessEntity                     kept by kind: a reference to another row
+  merchantBusinessEntityGid                gid         BusinessEntity                     kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a businessEntity
   merchantEditable                         scalar      Boolean                            kept by kind: a boolean
   merchantEditableErrors                   scalarList  String                             scrubbed: becomes []
   merchantOfRecordApp                      object      OrderApp                           scrubbed: the key is removed
@@ -706,14 +719,14 @@ concept order (Order)
   presentmentCurrencyCode                  scalar      CurrencyCode                       kept by the list: the currency of the sale
   processedAt                              scalar      DateTime                           kept by kind: a date-time
   productNetwork                           scalar      Boolean                            kept by kind: a boolean
-  publicationGid                           gid         Publication                        kept by kind: a reference to another row
-  purchasingEntity                         object      PurchasingEntity                   scrubbed: the key is removed
+  publicationGid                           gid         Publication                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a publication
+  purchasingEntity                         object      PurchasingEntity                   scrubbed: the key is removed; THE CUSTOMER'S GID INSIDE IT BRINGS THE ROW INTO SCOPE: who bought: the order is the buyer's, as its customer field says of it
   refundDiscrepancySet                     object      MoneyBag                           kept by the list: an amount of the sale
   refundable                               scalar      Boolean                            kept by kind: a boolean
   registeredSourceUrl                      scalar      URL                                scrubbed: becomes "[redacted]"
   requiresShipping                         scalar      Boolean                            kept by kind: a boolean
   restockable                              scalar      Boolean                            kept by kind: a boolean
-  retailLocationGid                        gid         Location                           kept by kind: a reference to another row
+  retailLocationGid                        gid         Location                           kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a location
   returnStatus                             enum        OrderReturnStatus                  kept by kind: an enum
   risk                                     object      OrderRiskSummary                   scrubbed: the key is removed
   shippingAddress                          object      MailingAddress                     scrubbed: the key is removed
@@ -723,7 +736,7 @@ concept order (Order)
   sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
   sourceIdentifier                         scalar      String                             scrubbed: becomes "[redacted]"
   sourceName                               scalar      String                             scrubbed: becomes "[redacted]"
-  staffMemberGid                           gid         StaffMember                        kept by kind: a reference to another row
+  staffMemberGid                           gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember
   statusPageUrl                            scalar      URL                                scrubbed: becomes "[redacted]"
   subtotalLineItemsQuantity                scalar      Int                                kept by kind: an integer
   subtotalPriceSet                         object      MoneyBag                           kept by the list: an amount of the sale
@@ -751,8 +764,8 @@ concept order (Order)
   unpaid                                   scalar      Boolean                            kept by kind: a boolean
 
 concept orderLineItem (LineItem)
-  reach: child of order; gid field contractGid naming subscriptionContract
-  contractGid                              gid         SubscriptionContract               kept by kind: a reference to another row
+  reach: child of order
+  contractGid                              gid         SubscriptionContract               kept by kind: a reference to another row; NOT A LINK: a line belongs to its order and is reached with it; the subscription it bills is not what makes it hers
   currentQuantity                          scalar      Int                                kept by kind: an integer
   customAttributes                         objectList  Attribute                          scrubbed: becomes []
   discountAllocations                      objectList  DiscountAllocation                 kept by the list: the amount each discount took off the line
@@ -771,14 +784,14 @@ concept orderLineItem (LineItem)
   originalTotalSet                         object      MoneyBag                           kept by the list: an amount of the sale
   originalUnitPriceSet                     object      MoneyBag                           kept by the list: an amount of the sale
   priceAfterAllDiscountsBeforeTaxesSet     object      MoneyBag                           kept by the list: an amount of the sale
-  productGid                               gid         Product                            kept by kind: a reference to another row
+  productGid                               gid         Product                            kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a product
   quantity                                 scalar      Int                                kept by kind: an integer
   refundableQuantity                       scalar      Int                                kept by kind: an integer
   requiresShipping                         scalar      Boolean                            kept by kind: a boolean
   restockable                              scalar      Boolean                            kept by kind: a boolean
   sellingPlan                              object      LineItemSellingPlan                scrubbed: the key is removed
-  sku                                      scalar      String                             kept by the list: the variant's SKU
-  staffMemberGid                           gid         StaffMember                        kept by kind: a reference to another row
+  sku                                      scalar      String                             kept by the list: the variant's SKU; scrubbed on a custom item (a line with no productGid): becomes "[redacted]"
+  staffMemberGid                           gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember
   taxLines                                 objectList  TaxLine                            kept by the list: tax lines: titles, rates and amounts
       holds { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title }
   taxable                                  scalar      Boolean                            kept by kind: a boolean
@@ -787,7 +800,7 @@ concept orderLineItem (LineItem)
   unfulfilledDiscountedTotalSet            object      MoneyBag                           kept by the list: an amount of the sale
   unfulfilledOriginalTotalSet              object      MoneyBag                           kept by the list: an amount of the sale
   unfulfilledQuantity                      scalar      Int                                kept by kind: an integer
-  variantGid                               gid         ProductVariant                     kept by kind: a reference to another row
+  variantGid                               gid         ProductVariant                     kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a productVariant
   variantTitle                             scalar      String                             kept by the list: the variant's title; scrubbed on a custom item (a line with no productGid): becomes "[redacted]"
   vendor                                   scalar      String                             scrubbed: becomes "[redacted]"
   weight                                   object      Weight                             scrubbed: the key is removed
@@ -807,13 +820,13 @@ concept orderTransaction (OrderTransaction)
   formattedGateway                         scalar      String                             kept by the list: the payment gateway's name
   gateway                                  scalar      String                             kept by the list: the payment gateway's name
   kind                                     enum        OrderTransactionKind               kept by kind: an enum
-  locationGid                              gid         Location                           kept by kind: a reference to another row
+  locationGid                              gid         Location                           kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a location
   manualPaymentGateway                     scalar      Boolean                            kept by kind: a boolean
   manuallyCapturable                       scalar      Boolean                            kept by kind: a boolean
   maximumRefundableV2                      object      MoneyV2                            kept by the list: an amount of the sale
   multiCapturable                          scalar      Boolean                            kept by kind: a boolean
-  orderGid                                 gid         Order                              kept by kind: a reference to another row
-  parentTransactionGid                     gid         OrderTransaction                   kept by kind: a reference to another row
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
+  parentTransactionGid                     gid         OrderTransaction                   kept by kind: a reference to another row; a link: a row that names an in-scope orderTransaction here is in scope
   paymentDetails                           object      PaymentDetails                     scrubbed: the key is removed
   paymentIcon                              object      Image                              scrubbed: the key is removed
   paymentId                                scalar      String                             scrubbed: becomes "[redacted]"
@@ -826,7 +839,7 @@ concept orderTransaction (OrderTransaction)
   status                                   enum        OrderTransactionStatus             kept by kind: an enum
   test                                     scalar      Boolean                            kept by kind: a boolean
   totalUnsettledSet                        object      MoneyBag                           kept by the list: an amount of the sale
-  userGid                                  gid         StaffMember                        kept by kind: a reference to another row
+  userGid                                  gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember
 
 concept page (Page)
   reach: not reachable
@@ -851,7 +864,7 @@ concept paymentTermsTemplate (PaymentTermsTemplate)
 
 concept priceList (PriceList)
   reach: not reachable
-  catalogGid                               gid         Catalog                            kept by kind: a reference to another row
+  catalogGid                               gid         Catalog                            kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a catalog
   currency                                 scalar      CurrencyCode                       scrubbed: becomes "[redacted]"
   fixedPricesCount                         scalar      Int                                kept by kind: an integer
   name                                     scalar      String                             scrubbed: becomes "[redacted]"
@@ -862,7 +875,7 @@ concept priceListPrice (PriceListPrice)
   compareAtPrice                           object      MoneyV2                            scrubbed: the key is removed
   originType                               enum        PriceListPriceOriginType           kept by kind: an enum
   price                                    object      MoneyV2                            scrubbed: the key is removed
-  variantGid                               gid         ProductVariant                     kept by kind: a reference to another row
+  variantGid                               gid         ProductVariant                     kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a productVariant
 
 concept product (Product)
   reach: not reachable
@@ -926,16 +939,16 @@ concept productVariant (ProductVariant)
   barcode                                  scalar      String                             scrubbed: becomes "[redacted]"
   compareAtPrice                           scalar      Money                              kept by kind: a money amount
   defaultCursor                            scalar      String                             scrubbed: becomes "[redacted]"
-  deliveryProfileGid                       gid         DeliveryProfile                    kept by kind: a reference to another row
+  deliveryProfileGid                       gid         DeliveryProfile                    kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a deliveryProfile
   displayName                              scalar      String                             scrubbed: becomes "[redacted]"
-  inventoryItemGid                         gid         InventoryItem                      kept by kind: a reference to another row
+  inventoryItemGid                         gid         InventoryItem                      kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a inventoryItem
   inventoryPolicy                          enum        ProductVariantInventoryPolicy      kept by kind: an enum
   inventoryQuantity                        scalar      Int                                kept by kind: an integer
   legacyResourceId                         scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
   metafields                               metafields  Metafield                          scrubbed: the key is removed
   position                                 scalar      Int                                kept by kind: an integer
   price                                    scalar      Money                              kept by kind: a money amount
-  productGid                               gid         Product                            kept by kind: a reference to another row
+  productGid                               gid         Product                            kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a product
   requiresComponents                       scalar      Boolean                            kept by kind: a boolean
   resourcePublicationsCount                object      Count                              scrubbed: the key is removed
   selectedOptions                          objectList  SelectedOption                     scrubbed: becomes []
@@ -953,7 +966,7 @@ concept productVariant (ProductVariant)
 concept publication (Publication)
   reach: not reachable
   autoPublish                              scalar      Boolean                            kept by kind: a boolean
-  catalogGid                               gid         Catalog                            kept by kind: a reference to another row
+  catalogGid                               gid         Catalog                            kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a catalog
   includedProductsCount                    object      Count                              scrubbed: the key is removed
   operation                                object      PublicationOperation               scrubbed: the key is removed
   supportsFuturePublishing                 scalar      Boolean                            kept by kind: a boolean
@@ -965,7 +978,7 @@ concept quantityRule (QuantityRule)
   maximum                                  scalar      Int                                kept by kind: an integer
   minimum                                  scalar      Int                                kept by kind: an integer
   originType                               enum        QuantityRuleOriginType             kept by kind: an enum
-  productVariantGid                        gid         ProductVariant                     kept by kind: a reference to another row
+  productVariantGid                        gid         ProductVariant                     kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a productVariant
 
 concept refund (Refund)
   reach: child of order; gid field orderGid naming order; gid field sourceReturnGid naming shopifyReturn
@@ -973,21 +986,21 @@ concept refund (Refund)
       holds { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } originalDuty { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
   legacyResourceId                         scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
   note                                     scalar      String                             scrubbed: becomes "[redacted]"
-  orderGid                                 gid         Order                              kept by kind: a reference to another row
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
   processedAt                              scalar      DateTime                           kept by kind: a date-time
   sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
-  sourceReturnGid                          gid         Return                             kept by kind: a reference to another row
-  staffMemberGid                           gid         StaffMember                        kept by kind: a reference to another row
+  sourceReturnGid                          gid         Return                             kept by kind: a reference to another row; a link: a row that names an in-scope shopifyReturn here is in scope
+  staffMemberGid                           gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember
   totalRefundedSet                         object      MoneyBag                           kept by the list: an amount of the sale
 
 concept reverseDelivery (ReverseDelivery)
   reach: child of reverseFulfillmentOrder; gid field reverseFulfillmentOrderGid naming reverseFulfillmentOrder
   deliverable                              object      ReverseDeliveryDeliverable         scrubbed: the key is removed
-  reverseFulfillmentOrderGid               gid         ReverseFulfillmentOrder            kept by kind: a reference to another row
+  reverseFulfillmentOrderGid               gid         ReverseFulfillmentOrder            kept by kind: a reference to another row; a link: a row that names an in-scope reverseFulfillmentOrder here is in scope
 
 concept reverseFulfillmentOrder (ReverseFulfillmentOrder)
-  reach: gid field orderGid naming order; child of shopifyReturn
-  orderGid                                 gid         Order                              kept by kind: a reference to another row
+  reach: child of shopifyReturn; gid field orderGid naming order
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
   status                                   enum        ReverseFulfillmentOrderStatus      kept by kind: an enum
   thirdPartyConfirmation                   object      ReverseFulfillmentOrderThirdPartyConfirmation scrubbed: the key is removed
 
@@ -1029,7 +1042,7 @@ concept sellingPlanGroup (SellingPlanGroup)
 
 concept shop (Shop)
   reach: not reachable
-  accountOwnerGid                          gid         StaffMember                        kept by kind: a reference to another row
+  accountOwnerGid                          gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember
   alerts                                   objectList  ShopAlert                          scrubbed: becomes []
   allProductCategoriesList                 objectList  TaxonomyCategory                   scrubbed: becomes []
   checkoutApiSupported                     scalar      Boolean                            kept by kind: a boolean
@@ -1117,14 +1130,14 @@ concept shopifyPaymentsDispute (ShopifyPaymentsDispute)
   finalizedOn                              scalar      DateTime                           kept by kind: a date-time
   initiatedAt                              scalar      DateTime                           kept by kind: a date-time
   legacyResourceId                         scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
-  orderGid                                 gid         Order                              kept by kind: a reference to another row
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
   reasonDetails                            object      ShopifyPaymentsDisputeReasonDetails scrubbed: the key is removed
   sourceType                               enum        DisputeType                        kept by kind: an enum
   status                                   enum        DisputeStatus                      kept by kind: an enum
 
 concept shopifyPaymentsPayout (ShopifyPaymentsPayout)
   reach: not reachable
-  businessEntityGid                        gid         BusinessEntity                     kept by kind: a reference to another row
+  businessEntityGid                        gid         BusinessEntity                     kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a businessEntity
   externalTraceId                          scalar      String                             scrubbed: becomes "[redacted]"
   issuedAt                                 scalar      DateTime                           kept by kind: a date-time
   legacyResourceId                         scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
@@ -1138,13 +1151,13 @@ concept shopifyReturn (Return)
   closedAt                                 scalar      DateTime                           kept by kind: a date-time
   decline                                  object      ReturnDecline                      scrubbed: the key is removed
   name                                     scalar      String                             kept by the list: the return's number, made from the order's
-  orderGid                                 gid         Order                              kept by kind: a reference to another row
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
   refundsGids                              refs        Refund                             kept by kind: a list of references to other rows
   requestApprovedAt                        scalar      DateTime                           kept by kind: a date-time
   returnShippingFees                       objectList  ReturnShippingFee                  kept by the list: amounts of the sale: the return's shipping fees
       holds { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } id }
   sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
-  staffMemberGid                           gid         StaffMember                        kept by kind: a reference to another row
+  staffMemberGid                           gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember
   status                                   enum        ReturnStatus                       kept by kind: an enum
   totalQuantity                            scalar      Int                                kept by kind: an integer
   transactionsGids                         refs        OrderTransaction                   kept by kind: a list of references to other rows
@@ -1177,8 +1190,8 @@ concept subscriptionContract (SubscriptionContract)
   billingPolicy                            object      SubscriptionBillingPolicy          scrubbed: the key is removed
   currencyCode                             scalar      CurrencyCode                       kept by the list: the currency of the sale
   customAttributes                         objectList  Attribute                          scrubbed: becomes []
-  customerGid                              gid         Customer                           kept by kind: a reference to another row
-  customerPaymentMethodGid                 gid         CustomerPaymentMethod              kept by kind: a reference to another row
+  customerGid                              gid         Customer                           kept by kind: a reference to another row; a link: a row that names an in-scope customer here is in scope
+  customerPaymentMethodGid                 gid         CustomerPaymentMethod              kept by kind: a reference to another row; a link: a row that names an in-scope customerPaymentMethod here is in scope
   deliveryMethod                           object      SubscriptionDeliveryMethod         scrubbed: the key is removed
   deliveryPolicy                           object      SubscriptionDeliveryPolicy         scrubbed: the key is removed
   deliveryPrice                            object      MoneyV2                            kept by the list: an amount of the sale: the delivery price of the subscription
@@ -1187,7 +1200,7 @@ concept subscriptionContract (SubscriptionContract)
   linesCount                               object      Count                              scrubbed: the key is removed
   nextBillingDate                          scalar      DateTime                           kept by kind: a date-time
   note                                     scalar      String                             scrubbed: becomes "[redacted]"
-  originOrderGid                           gid         Order                              kept by kind: a reference to another row
+  originOrderGid                           gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
   revisionId                               scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
   sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
   status                                   enum        SubscriptionContractSubscriptionStatus kept by kind: an enum
@@ -1195,13 +1208,13 @@ concept subscriptionContract (SubscriptionContract)
 concept tenderTransaction (TenderTransaction)
   reach: gid field orderGid naming order
   amount                                   object      MoneyV2                            kept by the list: an amount of the sale
-  orderGid                                 gid         Order                              kept by kind: a reference to another row
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
   paymentMethod                            scalar      String                             kept by the list: the name of the payment method, as a gateway's
   processedAt                              scalar      DateTime                           kept by kind: a date-time
   remoteReference                          scalar      String                             scrubbed: becomes "[redacted]"
   test                                     scalar      Boolean                            kept by kind: a boolean
   transactionDetails                       object      TenderTransactionDetails           scrubbed: the key is removed
-  userGid                                  gid         StaffMember                        kept by kind: a reference to another row
+  userGid                                  gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember
 
 concept urlRedirect (UrlRedirect)
   reach: not reachable

@@ -130,11 +130,16 @@ type Connector struct {
 	admin  *AdminClient
 	now    func() time.Time
 
-	// db is the raw handle the two compliance jobs need. Everything else
-	// goes through the engine; redaction and purge cannot, because
-	// "every version of every row" is exactly what an append-only model
-	// will not let you touch.
+	// db is the raw handle of the request pool, which Connect takes its
+	// lock on (connect_gate.go). The privacy jobs do not use it: their
+	// statements outlast the pool's limits, and run on maintain.
 	db func() *sql.DB
+	// maintain opens the engine's maintenance session, which the privacy
+	// jobs run their statements on (compliance.go, privacySession).
+	// Everything else goes through the engine; redaction and purge cannot,
+	// because "every version of every row" is exactly what an append-only
+	// model will not let you touch.
+	maintain func(context.Context) (*sql.Conn, func(), error)
 
 	// applied is the process-local short-circuit for redelivered
 	// webhooks. See apply.go.
@@ -187,7 +192,8 @@ func NewConnector(engine memql.IntegrationEngineAccess, logger *slog.Logger, sto
 	}
 }
 
-// WithDatabase attaches the raw handle the compliance jobs need.
+// WithDatabase attaches the request pool's raw handle, which Connect takes
+// its lock on. The privacy jobs run on WithMaintenanceSession's session.
 func (c *Connector) WithDatabase(db func() *sql.DB) *Connector {
 	c.db = db
 	return c

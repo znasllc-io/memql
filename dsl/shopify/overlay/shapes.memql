@@ -39,3 +39,27 @@ shape store storeFull {
 @row
 shape complianceJob complianceJobFull {
 }
+
+/// A privacy job as its row stands, with the row's id and its version. The
+/// connector reads a job by id through this before it writes the row, and
+/// fences the write on the version it read: a request and a pass of the
+/// runner write the same row, and of two that finish together one must lose
+/// and decide again.
+@row
+shape complianceJob complianceJobStored {
+  row.id
+  storeId
+  topic
+  customerGid
+  orderGids
+  requestId
+  shopDomain
+  dueAt
+  status
+  outcome
+  lastError
+  scrubbedAt
+  completedAt
+  requestedAt
+  row.createdAt
+}
