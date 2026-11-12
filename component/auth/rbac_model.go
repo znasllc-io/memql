@@ -293,6 +293,14 @@ var appPartGrants = map[string][]Role{
 	// manages a client's account without reading the cluster's whole ledger
 	// of it. Enforced by the two builtins in dsl/accounts/builtins.memql.
 	"app:accounts/inventory": {RoleOwner, RoleDeveloper},
+	// The export and move parts of the Accounts app (account export, design
+	// record 2026-11-12, section H): writing an account out to one file, and
+	// listing, moving and placing its rows. Owner and developer, each its own
+	// part because carrying an account out and changing what it holds are
+	// different consequences. The builtins also require a person's own
+	// signed-in session (RequirePersonSession).
+	"app:accounts/export": {RoleOwner, RoleDeveloper},
+	"app:accounts/move":   {RoleOwner, RoleDeveloper},
 	// The reviews part: see a store's reviews and act on them in the
 	// Deployables app. Held by the cluster's operators so they can host and
 	// set a store up; the reviews pack still refuses an operator's moderation

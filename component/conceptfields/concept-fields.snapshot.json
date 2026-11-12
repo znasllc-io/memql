@@ -2489,6 +2489,8 @@
         "targetType": [
           "",
           "accessRequest",
+          "account",
+          "accountExport",
           "agent",
           "appSession",
           "authCode",

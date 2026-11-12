@@ -313,6 +313,30 @@ seed capability cap-owner-execute-app-accounts-inventory { roleSlug: "owner"  ve
 @description("developer: the inventory part of the Accounts app -- the rows an account holds by concept, and the progress of assigning existing rows to accounts.")
 seed capability cap-developer-execute-app-accounts-inventory { roleSlug: "developer"  verb: "execute"  resourceType: "app:accounts/inventory"  predefined: true }
 
+// ---- app:accounts/export -- writing an account's rows and bytes to one file ----
+//
+// OWNER AND DEVELOPER, as the account export design record (2026-11-12, section
+// H) decides: an export carries every row and every byte an account holds, so it
+// is the cluster's operators' act, never an admin's. An `execute` part no section
+// requires as a `read`; the Accounts app asks holds("execute", ...) and the
+// export builtins refuse anyone else, then refuse anything but a person's own
+// signed-in session (auth.RequirePersonSession).
+@description("owner: the export part of the Accounts app -- preparing, starting, cancelling, downloading and removing an account's export.")
+seed capability cap-owner-execute-app-accounts-export { roleSlug: "owner"  verb: "execute"  resourceType: "app:accounts/export"  predefined: true }
+@description("developer: the export part of the Accounts app -- preparing, starting, cancelling, downloading and removing an account's export.")
+seed capability cap-developer-execute-app-accounts-export { roleSlug: "developer"  verb: "execute"  resourceType: "app:accounts/export"  predefined: true }
+
+// ---- app:accounts/move -- listing an account's rows, and moving and placing them ----
+//
+// OWNER AND DEVELOPER, for the same reason and in the same section: moving a row
+// changes which account's people can reach it, across every kind. A part of its
+// own rather than export's, because reading and carrying out an account is a
+// different consequence from changing what it holds.
+@description("owner: the move part of the Accounts app -- listing an account's rows, moving them between accounts and placing rows that have none.")
+seed capability cap-owner-execute-app-accounts-move { roleSlug: "owner"  verb: "execute"  resourceType: "app:accounts/move"  predefined: true }
+@description("developer: the move part of the Accounts app -- listing an account's rows, moving them between accounts and placing rows that have none.")
+seed capability cap-developer-execute-app-accounts-move { roleSlug: "developer"  verb: "execute"  resourceType: "app:accounts/move"  predefined: true }
+
 // ---- app:email (registry floor: no floor) ----
 @description("owner: open the email app.")
 seed capability cap-owner-read-app-email { roleSlug: "owner" verb: "read" resourceType: "app:email" predefined: true }

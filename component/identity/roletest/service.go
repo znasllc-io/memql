@@ -65,24 +65,23 @@ func (s *Service) db() (*sql.DB, error) {
 func fresh(ctx context.Context) context.Context {
 	return memql.ContextWithFreshRead(auth.ContextForRoleTestValidation(ctx))
 }
+
+// actor is the operator a role test is for: a person's own signed-in session
+// (auth.RequirePersonSession, shared with the other acts only a person may
+// take), who is not a test persona, read fresh as an active owner or developer
+// whose session is unexpired and carries the user's current revocation epoch.
+// Every refusal is ErrDenied, so a caller learns nothing about which check held.
 func (s *Service) actor(ctx context.Context) (*identity.UserRow, error) {
-	ac, ok := auth.AccessFromContext(ctx)
+	userID, err := auth.RequirePersonSession(ctx)
+	if err != nil || auth.IsRoleTestUser(userID) {
+		return nil, ErrDenied
+	}
 	claims, _ := auth.ClaimsFromContext(ctx)
-	class, _ := claims["class"].(string)
-	if claims["pat_id"] != nil {
-		return nil, ErrDenied
-	}
-	if _, delegated := auth.DelegationFromContext(ctx); delegated {
-		return nil, ErrDenied
-	}
-	if !ok || ac == nil || claims["sub"] != ac.UserId || ac.Synthetic || ac.Unranked || auth.IsRoleTestUser(ac.UserId) || (class != "" && class != verifier.ClassUser) {
-		return nil, ErrDenied
-	}
-	u, err := s.Store.LookupUserById(fresh(ctx), ac.UserId)
+	u, err := s.Store.LookupUserById(fresh(ctx), userID)
 	if err != nil || u == nil || !u.Active || (u.Role != string(auth.RoleOwner) && u.Role != string(auth.RoleDeveloper)) {
 		return nil, ErrDenied
 	}
-	epoch := int64(0)
+	epoch, ok := int64(0), true
 	if value, exists := claims["revocation_epoch"]; exists {
 		epoch, ok = integerClaim(value)
 		if !ok {
