@@ -84,7 +84,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{
 			Name:        "dispatchInbound",
-			Description: "Route one staged inbound request to the connector its source names, apply the returned mirror writes behind the version guard, and stamp the request. Refuses a call without internal origin; reads the delivery from the staged row, and applies a claimed source's row only when the connector's secret verified it. A no-op for a source no connector serves.",
+			Description: "Route one staged inbound request to the connector its source names, apply the returned mirror writes behind the version guard, and stamp the request. Refuses a call without internal origin; reads the delivery from the staged row, and applies a claimed source's row only when the connector's secret verified it. A no-op for a source no connector serves; a request whose connector could not be told is stamped failed and due again, with no try counted, and the retry pass places it.",
 			Handler:     i.handleDispatchInbound,
 			ArgsSchema: map[string]string{
 				"inboundRequestId": "string (required) - staged v1:platform:inboundRequest row id; its source, body, metadata, verifying tier and signature verdict are read from the row",
@@ -251,12 +251,14 @@ func (i *Integration) handleDispatchInbound(ctx context.Context, args map[string
 	// The row is judged INSIDE DispatchStaged, after the connector lookup, so
 	// a row of a source no connector serves stays the no-op Dispatch's
 	// contract promises whatever its tier, its verdict or its metadata say; a
-	// served row that fails any of them is stamped `failed` there.
+	// served row that fails any of them is stamped `failed` there. So is a row
+	// whose connector could not be told: failed and due again, never left
+	// received (Dispatcher.place).
 	res, err := i.dispatcher.DispatchStaged(ctx, staged)
 	if err != nil {
 		// Returned rather than swallowed: the automation step records it,
 		// and the request row has already been stamped `failed` with the
-		// same message, so an operator sees it in both places.
+		// reason, so an operator sees it in both places.
 		return nil, err
 	}
 	if !res.Handled {
