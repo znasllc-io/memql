@@ -44,3 +44,39 @@ func DSLDeprecatedUse(rule string, n int) {
 func DSLDeprecatedUsesValue(rule string) float64 {
 	return counterValue(dslDeprecatedUses.WithLabelValues(rule))
 }
+
+// Concepts that say nothing about which account their rows belong to (design
+// record docs/superpowers/specs/2026-11-12-account-row-ownership-design.md).
+//
+// A GAUGE, not a counter, because the question it answers is a state: how many
+// concepts in the product DSL this node mounted declare no `@belongsTo` RIGHT
+// NOW. A counter adding the same nine concepts on every load would rise with
+// restarts rather than with undeclared concepts, and could never come back down
+// when a bundle declares them -- which is the one event an operator watching it
+// is waiting for.
+//
+// No label. The concept names are in the WARN line the same load writes; a
+// label per concept would mint a series for every name a product bundle ever
+// shipped, and the number is what an alert needs.
+var dslBelongsToUndeclared = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: namespace,
+	Subsystem: "dsl",
+	Name:      "belongs_to_undeclared",
+	Help:      "EVERY NODE TYPE writes this series: the number of concepts in the DSL this node MOUNTED -- a product bundle at MEMQL_DSL_PATH, or a pack registered into the binary; never the engine's own embedded tree, which a build gate holds to zero -- that declare no @belongsTo, set once per load of the tree (engine Init). A concept that declares nothing still loads, and its rows count as cluster-wide: nothing records which account they belong to, so an account's inventory and export do not include them. The same load logs one WARN line naming every such concept and the annotation to add: @belongsTo(account), @belongsTo(account, via=\"<field>\"), @belongsTo(account, shared), @belongsTo(account, stated) or @belongsTo(cluster). ZERO IS THE HEALTHY VALUE, and it is what a node with no product bundle reports. A non-zero value names work to do in the bundle rather than a fault in the node; it is the same on every node that mounted the same bundle, so read one. Alert on it staying above zero across a bundle release that was meant to declare them.",
+})
+
+// BelongsToUndeclared records how many mounted concepts declare no @belongsTo,
+// as one load of the DSL tree found them. Zero is a real answer and is set like
+// any other, so a bundle that has since declared takes the gauge back down. A
+// negative n is ignored: a count cannot be one.
+func BelongsToUndeclared(n int) {
+	if n < 0 {
+		return
+	}
+	dslBelongsToUndeclared.Set(float64(n))
+}
+
+// BelongsToUndeclaredValue returns the gauge's current value, for tests.
+func BelongsToUndeclaredValue() float64 {
+	return gaugeValue(dslBelongsToUndeclared)
+}

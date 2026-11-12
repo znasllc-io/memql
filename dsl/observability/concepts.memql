@@ -17,6 +17,7 @@ use identity.concepts.{ user }
 /// 'method:github.com/znasllc-io/memql/component/auth.(*Handler).Login'). The observe runtime reads
 /// them through a CDC-driven cache.
 @displayCard(primary="codeReference", secondary="reason", tertiary="setBy", status="level")
+@belongsTo(cluster)
 concept codeProfile {
   codeReference  string!  @description("Fully-qualified node id from the architecture model. Format documented in component/architecture/model/ids.go. The single join key shared by static topology, live profile, raw invocations, and aggregate metrics.")
   level          enum("off", "count", "meta", "verbose")!  @description("Capture verbosity. off = not instrumented. count = duration + error only. meta = + arg types/sizes. verbose = + full arg/return values, subject to redaction.")
@@ -38,6 +39,7 @@ concept codeProfile {
 /// aggregates (codeMetric) rather than these raw rows. Hand-querying invocation rows directly is
 /// fine for forensic 'last 20 calls to X' lookups.
 @displayCard(primary="codeReference", secondary="occurredAt", tertiary="durationNs", status="level")
+@belongsTo(cluster)
 concept invocation {
   codeReference  string!  @description("Fully-qualified node id of the Method/Func that ran. Join key shared with codeProfile and codeMetric.")
   occurredAt     datetime!  @description("Wall-clock time when the call started. The hypertable time column.")
@@ -58,6 +60,7 @@ concept invocation {
 /// matching codeMetric rows for that chunk are preserved by the policy so the trendline stays
 /// continuous.
 @displayCard(primary="codeReference", secondary="windowStart", tertiary="callCount", status="bucket")
+@belongsTo(cluster)
 concept codeMetric {
   codeReference  string!  @description("Fully-qualified node id. Same join key as codeProfile / invocation.")
   windowStart    datetime!  @description("Inclusive start of the aggregation window. Matches a TimescaleDB time_bucket boundary -- typically 1m or 1h aligned.")
@@ -89,6 +92,7 @@ concept codeMetric {
 /// docs/superpowers/specs/2026-09-03-logs-design.md.
 @displayCard(primary="message", secondary="component", tertiary="node", status="level")
 @retention(ttl="30d", keepLatest=false, archive="required")
+@belongsTo(cluster)
 concept logLine {
   occurredAt      datetime!  @description("When the line was written. The hypertable time column; createdAt on the wire.")
   nodeType        enum("identity", "bff", "agent", "planner", "workbench", "mcp", "edge", "os")!  @description("Which kind of process wrote it. `os` is the MemQL OS front end, whose lines arrive through logsRecordClient.")
@@ -129,6 +133,7 @@ concept logLine {
 /// bucket size and a summary's is the window the caller asked for. Read the span rather than
 /// looking for a flag, which is codeMetric's own convention.
 @displayCard(primary="siteId", secondary="bucket", tertiary="windowStart", status="bucket")
+@belongsTo(account, via="siteId", parent="v1:platform:site")
 concept siteTraffic {
   siteId            string!  @description("The v1:platform:site this traffic belongs to, as a BARE id -- what the edge stamped on the rows and what a client sends. Authorization is this deployable's own: a caller reads its traffic exactly when they may read it, checked through siteById / sitesAll under their actor.")
   bucket            enum("1m", "1h")!  @description("Which aggregate the row came from. A minute bucket answers an hour-long window; an hour bucket answers a day or a week, because a week of minute buckets is ten thousand rows to draw one line.")
@@ -139,4 +144,5 @@ concept siteTraffic {
   clientErrorCount  int!  @description("The 4xx subset: somebody asking for a page this deployable does not have. Worth showing beside the 5xx count and never instead of it.")
   bytesTotal        int!  @description("Response bytes served in the window, as counted through the edge's own writer. A hijacked connection (a WebSocket through the API proxy) contributes 0, because its bytes leave through the raw connection -- an undercount that is named rather than guessed at.")
   lastServedAt      datetime  @description("The newest request in the window. ABSENT rather than zero when the relation answered no timestamp: a zero datetime renders as the year 1, which is a worse answer than none.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }

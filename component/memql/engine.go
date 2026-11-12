@@ -261,6 +261,18 @@ type MemQLEngine struct {
 	// re-hydration path also records quarantines here (they do NOT fail
 	// boot). Fresh per Init; nil before the first Init.
 	loadReport *LoadReport
+	// accountStamping is this node's copy of the cluster's account-stamping
+	// switch: whether the write path records accountId on the rows it writes.
+	// Off until AccountOwnershipRunner has read the switch as on, and never
+	// cleared by it. Atomic because every write reads it while the runner's
+	// goroutine sets it. See account_ownership_runner.go.
+	accountStamping atomic.Bool
+	// accountParents remembers the account of rows other rows follow
+	// (`@belongsTo(account, via=...)`), so a child write does not read its
+	// parent every time. Only parents whose account is fixed once set are
+	// remembered: engine-managed ones that carry no list of accounts. See
+	// account_stamp.go.
+	accountParents accountParentCache
 }
 
 // #250: the useLegacyMemqlParser field + UseLangparserRuntime

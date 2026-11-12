@@ -4184,30 +4184,6 @@ QueryClient.prototype.markResponsibilityIntakePending = function (this: QueryCli
   return this.executeNamed("markResponsibilityIntakePending", buildMarkResponsibilityIntakePending(args), opts);
 };
 
-/** Stamp the shop/redact purge. The row stays: it is the audit record that a purge happened, and the domain must not be re-registered silently -- only a reinstall Shopify verified clears it (markStoreReconnected), and that reinstall is audited. */
-// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["markStoreRedacted"] in generated_concepts.ts).
-export interface MarkStoreRedactedArgs {
-  storeId: string;
-  redactedAt: string;
-}
-
-export function buildMarkStoreRedacted(args: MarkStoreRedactedArgs): string {
-  const parts: string[] = [];
-  parts.push("storeId: " + renderMemQLValue(args.storeId));
-  parts.push("redactedAt: " + renderMemQLValue(args.redactedAt));
-  return "mutation markStoreRedacted(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    markStoreRedacted(args: MarkStoreRedactedArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.markStoreRedacted = function (this: QueryClient, args: MarkStoreRedactedArgs = {} as MarkStoreRedactedArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("markStoreRedacted", buildMarkStoreRedacted(args), opts);
-};
-
 /** Mint a new v1:skills:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/skills/seeds/*.memql. originatingGoalId + mintedByRunId carry the work provenance. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check. */
 // Bound concept: v1:skills:skill (machine-readable: BoundConcepts["mintSkill"] in generated_concepts.ts).
 export interface MintSkillArgs {
@@ -5044,32 +5020,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.recordRouterCall = function (this: QueryClient, args: RecordRouterCallArgs = {} as RecordRouterCallArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("recordRouterCall", buildRecordRouterCall(args), opts);
-};
-
-/** Record what the connector last observed about a store. Health is a single object so the connector can publish a shape the portal renders without a schema change every time a new counter is worth showing. */
-// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["recordStoreHealth"] in generated_concepts.ts).
-export interface RecordStoreHealthArgs {
-  storeId: string;
-  health: Record<string, unknown>;
-  subscriptionsCheckedAt?: string;
-}
-
-export function buildRecordStoreHealth(args: RecordStoreHealthArgs): string {
-  const parts: string[] = [];
-  parts.push("storeId: " + renderMemQLValue(args.storeId));
-  parts.push("health: " + renderMemQLValue(args.health));
-  if (args.subscriptionsCheckedAt !== undefined) parts.push("subscriptionsCheckedAt: " + renderMemQLValue(args.subscriptionsCheckedAt));
-  return "mutation recordStoreHealth(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    recordStoreHealth(args: RecordStoreHealthArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.recordStoreHealth = function (this: QueryClient, args: RecordStoreHealthArgs = {} as RecordStoreHealthArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("recordStoreHealth", buildRecordStoreHealth(args), opts);
 };
 
 /** ENGINE: add an address to the cluster-wide do-not-mail list. The argument is the SHA-256 hex digest of the normalized address -- the address itself never reaches this mutation, which is what makes a cluster-wide list safe to keep. The digest is the row id, so re-suppressing an address appends a version to the same row rather than creating a second one, and the newest reason wins.
@@ -6520,7 +6470,7 @@ QueryClient.prototype.setEmailRuleStatus = function (this: QueryClient, args: Se
   return this.executeNamed("setEmailRuleStatus", buildSetEmailRuleStatus(args), opts);
 };
 
-/** Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. */
+/** Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. Cluster owner only: the concept's row tier judges the write. */
 // Bound concept: v1:platform:globalSecret (machine-readable: BoundConcepts["setGlobalSecret"] in generated_concepts.ts).
 export interface SetGlobalSecretArgs {
   id: string;
@@ -6556,7 +6506,7 @@ QueryClient.prototype.setGlobalSecret = function (this: QueryClient, args: SetGl
   return this.executeNamed("setGlobalSecret", buildSetGlobalSecret(args), opts);
 };
 
-/** Persist an instance-wide (global) plaintext variable row in v1:platform:globalVariable. */
+/** Persist an instance-wide (global) plaintext variable row in v1:platform:globalVariable. Cluster owner, or server code stamped for the write: the engine judges the write itself. */
 // Bound concept: v1:platform:globalVariable (machine-readable: BoundConcepts["setGlobalVariable"] in generated_concepts.ts).
 export interface SetGlobalVariableArgs {
   id: string;
@@ -6773,7 +6723,7 @@ QueryClient.prototype.setPackageSourceRemoved = function (this: QueryClient, arg
   return this.executeNamed("setPackageSourceRemoved", buildSetPackageSourceRemoved(args), opts);
 };
 
-/** Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. */
+/** Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. Cluster owner only: the concept's row tier judges the write. */
 // Bound concept: v1:platform:partitionSecret (machine-readable: BoundConcepts["setPartitionSecret"] in generated_concepts.ts).
 export interface SetPartitionSecretArgs {
   id: string;
@@ -6809,7 +6759,7 @@ QueryClient.prototype.setPartitionSecret = function (this: QueryClient, args: Se
   return this.executeNamed("setPartitionSecret", buildSetPartitionSecret(args), opts);
 };
 
-/** Persist a partition-scoped plaintext variable row in v1:platform:partitionVariable. */
+/** Persist a partition-scoped plaintext variable row in v1:platform:partitionVariable. Cluster owner, or server code stamped for the write: the engine judges the write itself. */
 // Bound concept: v1:platform:partitionVariable (machine-readable: BoundConcepts["setPartitionVariable"] in generated_concepts.ts).
 export interface SetPartitionVariableArgs {
   id: string;

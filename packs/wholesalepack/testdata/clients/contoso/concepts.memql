@@ -20,12 +20,14 @@ use wholesale.concepts.{ application }
 @description("Contoso's review of one wholesale application: which rep owns it and which approvalChain instance is deciding it. Contoso's own concept -- the pack knows nothing about reps or chains.")
 @displayCard(primary="assignedRepId", secondary="applicationId", tertiary="chainId")
 @rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account, via="applicationId", parent="v1:wholesale:application")
 concept contosoReview {
   ownerUserId    string!  @description("The merchant this review belongs to.")
   applicationId  string!  @description("The v1:wholesale:application under review.")
   storeId        string!  @description("The store, copied from the application (design D9).")
   assignedRepId  string   @description("The v1:commerce:salesRep who owns this account. Contoso notifies them; the pack has no idea they exist.")
   chainId        string   @description("The v1:commerce:approvalChain instance deciding this application.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="references", field="applicationId", target=application, direction="outgoing")
 }

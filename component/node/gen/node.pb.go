@@ -2021,8 +2021,30 @@ type ForwardedAuthority struct {
 	FirstName         string `protobuf:"bytes,13,opt,name=first_name,json=firstName,proto3" json:"first_name,omitempty"`
 	LastName          string `protobuf:"bytes,14,opt,name=last_name,json=lastName,proto3" json:"last_name,omitempty"`
 	RoleTestSessionId string `protobuf:"bytes,15,opt,name=role_test_session_id,json=roleTestSessionId,proto3" json:"role_test_session_id,omitempty"` // bounded session, rechecked on the receiver
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// The account the forwarded call acts in, as the BARE id ("acme", never
+	// "v1:accounts:account:acme"), or empty when the sending node stated none.
+	//
+	// A third kind of field, neither of the two above. It is not an authorization
+	// input: VerifyForwardedAuthority does not read it, and nothing admits or
+	// refuses a caller by it. It is not provenance about a person. It says which
+	// account a row this call writes is recorded in when neither the row's parent
+	// nor the write itself says so, and the receiver binds it under its own
+	// context key (auth.ContextWithCallAccount), never onto the AccessContext.
+	//
+	// It is on the wire because the receiving node cannot always work it out
+	// again. An automation's run acts in the account of the row that triggered
+	// it, and a shopper form in its site's; the principal those run as names a
+	// different account or none, and the fact that says otherwise stays on the
+	// node where the call started.
+	//
+	// Empty is a value: the receiver then resolves the account from the
+	// principal above, by the same rules over the same database. A node that
+	// predates this field sends none and ignores one it is sent, so during a
+	// rolling update a forward between the two releases is resolved on the
+	// receiver, as every forward was before.
+	AccountId     string `protobuf:"bytes,16,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ForwardedAuthority) Reset() {
@@ -2156,6 +2178,13 @@ func (x *ForwardedAuthority) GetLastName() string {
 func (x *ForwardedAuthority) GetRoleTestSessionId() string {
 	if x != nil {
 		return x.RoleTestSessionId
+	}
+	return ""
+}
+
+func (x *ForwardedAuthority) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
 	}
 	return ""
 }
@@ -5288,7 +5317,7 @@ const file_node_proto_rawDesc = "" +
 	"\fcontinuation\x18\x06 \x01(\bR\fcontinuation\x1a7\n" +
 	"\tAuthEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x03\x10\x04R\tpartition\"\xe6\x04\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x03\x10\x04R\tpartition\"\x85\x05\n" +
 	"\x12ForwardedAuthority\x12)\n" +
 	"\x10contract_version\x18\x01 \x01(\tR\x0fcontractVersion\x12T\n" +
 	"\x0eprincipal_kind\x18\x02 \x01(\x0e2-.znasllc.memql.node.v1.ForwardedPrincipalKindR\rprincipalKind\x12\x18\n" +
@@ -5307,7 +5336,9 @@ const file_node_proto_rawDesc = "" +
 	"\n" +
 	"first_name\x18\r \x01(\tR\tfirstName\x12\x1b\n" +
 	"\tlast_name\x18\x0e \x01(\tR\blastName\x12/\n" +
-	"\x14role_test_session_id\x18\x0f \x01(\tR\x11roleTestSessionId\"p\n" +
+	"\x14role_test_session_id\x18\x0f \x01(\tR\x11roleTestSessionId\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x10 \x01(\tR\taccountId\"p\n" +
 	"\x11AiForwardResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12(\n" +

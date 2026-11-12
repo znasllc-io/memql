@@ -14,6 +14,7 @@
 @description("One attached Shopify shop. Token fields hold secret names (MEMQL_SHOPIFY_*), never the token values. Sync is a data toggle so a client can pause ingest without a rebuild.")
 @displayCard(primary="storeDomain", secondary="syncEnabled", status="syncEnabled")
 @rowAuthz(owner="ownerUserId")
+@belongsTo(account)
 concept shop {
   ownerUserId             string!  @description("v1:identity:user.id of the operator who attached this shop. Stamped from actor.userId.")
   storeDomain             string!  @description("Shop hostname (example.myshopify.com). Display only; the Storefront/Admin tokens live behind the secret names below.")
@@ -23,4 +24,5 @@ concept shop {
   apiVersionSecret        string   @description("Optional secret NAME for the API version (MEMQL_SHOPIFY_API_VERSION).")
   apiVersion              string   @description("Optional Storefront API version string when it is data rather than a secret. Not a token.")
   syncEnabled             bool!    @description("When true, inbound apply + reconcile may write the thin index. Flipped at runtime; not compiled into .memql.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }

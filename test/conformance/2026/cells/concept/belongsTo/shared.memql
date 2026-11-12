@@ -1,0 +1,8 @@
+/// A canned reply. The cluster ships a starter set to every account and an
+/// account adds its own beside them: a reply with no account is the cluster's.
+@belongsTo(account, shared)
+concept cannedReply {
+  accountId  string
+  title      string
+  body       string
+}

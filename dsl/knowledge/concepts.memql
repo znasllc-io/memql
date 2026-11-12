@@ -12,6 +12,7 @@ use accounts.concepts.{ account }
 /// sections, markdown chunks, plain text chunks) reuse this concept rather than duplicating the
 /// chunk infrastructure into a new typed concept.
 @displayCard(primary="text", secondary="sourceRef", tertiary="domainId", status="validationStatus")
+@belongsTo(account, via="domainId", parent="v1:knowledge:knowledgeDomain")
 concept documentChunk {
   domainId    string!  @description("ID of the parent v1:knowledge:knowledgeDomain. Queries filter by this to scope retrieval to the agent's selected domains.")
   text        string!  @description("The chunk text. Kept as plain text so findSimilar can re-embed on demand and the model can render it in the system_knowledge prompt block.")
@@ -26,6 +27,7 @@ concept documentChunk {
   superseded  bool @description("Per Q9 trainSpecialist mode='refresh': set true when the Trainer Agent marks this chunk outdated (via markChunkSuperseded). Superseded chunks are excluded from retrieval -- they stay in the table for audit / provenance but no longer surface in the system_knowledge block. The replacement chunk (if any) carries fresher content written in the same refresh run.")
   supersededAt  datetime @description("When this chunk transitioned to superseded. Set alongside superseded=true by markChunkSuperseded.")
   supersededReason  string  @description("The Trainer Agent's stated reason for marking the chunk outdated (e.g. 'superseded by 2026 figures', 'source page removed'). Surfaced in the Knowledge panel's chunk-history view.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
 }
 
@@ -100,6 +102,7 @@ concept documentChunk {
 // a WRITE question this read-side ruling does not touch.
 @displayCard(primary="name", secondary="category", tertiary="description", status="active")
 @rowAuthz(public, requiresIdentity)
+@belongsTo(account, shared, stated)
 concept knowledgeDomain {
  refreshCadenceDays int @description("Optional refresh cadence in days; absent or nonpositive disables the scheduled refresh.")
  lastSeededAt datetime @description("Last successful corpus refresh.")

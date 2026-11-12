@@ -44,7 +44,7 @@ func newRemovalFixture(t *testing.T) *removalFixture {
 		_, _ = db.ExecContext(context.Background(),
 			`DELETE FROM "MemoryNodes" WHERE concept LIKE 'v1:library:%' AND regexp_replace(payload->>'ownerUserId', '^v1:identity:user:', '') = $1`, f.owner)
 	})
-	f.first.SetDatabase(func() *sql.DB { return db })
+	f.first.SetMaintenanceSession(sessionOf(db))
 	return &removalFixture{revisionDB: f, db: db}
 }
 
@@ -217,17 +217,6 @@ func TestARemovedArtifactIsGoneFromTheTableAndFromEveryRead(t *testing.T) {
 	if answer := removalAnswer(t, nodes); fmt.Sprint(answer["removed"]) != "0" || fmt.Sprint(answer["remaining"]) != "0" {
 		t.Errorf("the removal made again answers %v, want nothing removed and nothing remaining", answer)
 	}
-	// By the index row's id, as well as by what it indexes.
-	nodes, err = f.first.handleRemoveArtifact(internal, map[string]any{"artifactId": memql.BareShortId(otherArtifact)}, 0)
-	if err != nil {
-		t.Fatalf("the removal by the index row's id: %v", err)
-	}
-	if answer := removalAnswer(t, nodes); fmt.Sprint(answer["removed"]) != "9" {
-		t.Errorf("the removal by the index row's id answers %v, want the nine row versions", answer)
-	}
-	if left := f.held(other); len(left) != 0 {
-		t.Errorf("after the removal by the index row's id the table still holds %v", left)
-	}
 }
 
 // The removal is the engine's own. A builtin carries no wire bar of its own,
@@ -241,8 +230,8 @@ func TestTheRemovalRefusesACallThatIsNotTheEnginesOwn(t *testing.T) {
 	}
 	output, _ := f.files("kept", `{"customer":"a person's whole export"}`)
 	before := f.held(output)
-	// No raw handle at all: a refusal that came after a read would fail as a read.
-	f.first.SetDatabase(nil)
+	// No session at all: a refusal that came after a read would fail as a read.
+	f.first.SetMaintenanceSession(nil)
 	for who, ctx := range map[string]context.Context{
 		"its owner":                   f.ctx,
 		"its owner, at client origin": auth.ContextWithClientOrigin(f.ctx),
@@ -284,5 +273,156 @@ func TestTheRemovalRefusesAnArtifactWhoseContentIsElsewhere(t *testing.T) {
 	}
 	if after := f.held(f.owner + "-a-file"); strings.Join(after, "\n") != strings.Join(before, "\n") {
 		t.Errorf("a refused removal changed the table: %v", after)
+	}
+}
+
+// sessionOf is the maintenance session of a test: one connection of the
+// test's own handle, held for the removal and returned after it.
+func sessionOf(db *sql.DB) func(context.Context) (*sql.Conn, func(), error) {
+	return func(ctx context.Context) (*sql.Conn, func(), error) {
+		conn, err := db.Conn(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		return conn, func() { _ = conn.Close() }, nil
+	}
+}
+
+// The removal takes what the index row indexes, and nothing else names an
+// artifact to it. Named by the index row's id it used to remove the index row
+// of an output indexed by its bare id, leave the output where it was, and
+// answer that nothing remained.
+func TestTheRemovalTakesTheSourceReferenceAndFindsABareOne(t *testing.T) {
+	f := newRemovalFixture(t)
+	if f == nil {
+		return
+	}
+	output, artifact := f.files("bare", `{"customer":"a person's whole export"}`)
+	// The index row names the output by its bare id, as an older writer did.
+	if _, err := f.db.ExecContext(context.Background(),
+		`UPDATE "MemoryNodes" SET payload = jsonb_set(payload, '{sourceConceptRef}', to_jsonb($2::text)) WHERE id = $1`, artifact, output); err != nil {
+		t.Fatal(err)
+	}
+	before := f.held(output)
+	internal := auth.ContextWithInternalOrigin(context.Background())
+	if _, err := f.first.handleRemoveArtifact(internal, map[string]any{"artifactId": memql.BareShortId(artifact)}, 0); err == nil || !strings.Contains(err.Error(), "sourceConceptRef") {
+		t.Errorf("a removal named by the index row's id alone answered %v, want it refused: it takes what the row indexes", err)
+	}
+	if after := f.held(output); strings.Join(after, "\n") != strings.Join(before, "\n") {
+		t.Fatalf("a refused removal changed the table: %v", after)
+	}
+	nodes, err := f.first.handleRemoveArtifact(internal, map[string]any{"sourceConceptRef": "v1:library:generatedOutput:" + output}, 0)
+	if err != nil {
+		t.Fatalf("the removal: %v", err)
+	}
+	if answer := removalAnswer(t, nodes); fmt.Sprint(answer["removed"]) != "9" || fmt.Sprint(answer["remaining"]) != "0" {
+		t.Errorf("the removal answers %v, want the nine row versions and none remaining", answer)
+	}
+	if left := f.held(output); len(left) != 0 {
+		t.Errorf("after the removal the table still holds %v", left)
+	}
+}
+
+// Another person's index row that names the export is not the export's. A
+// signed-in person who learned an export's id can file an index row of their
+// own, of another kind, that names it by its bare id; the removal, seeing a
+// kind it does not remove, refused: an erasure blocked for ever by a
+// stranger. Only the index rows of the output's own owner count; a foreign
+// row is neither removed nor a reason to refuse.
+//
+// What a person CANNOT do is write under the id of the owner's own index row
+// (the id is made from the full reference): row authorization refuses it, and
+// refuses a version of the output too. The test holds both: what a person can
+// file does not stop the removal and stays; and should a version under the
+// owner's index row id be another's all the same, which only an engine-origin
+// write could leave, it stays and the owner's versions go.
+func TestAnotherPersonsIndexRowDoesNotStopTheRemoval(t *testing.T) {
+	const note = `, lens: "artifact", kind: "note", source: "user_created", title: "mine", summary: "", format: "text", mimeType: "text/plain", live: false, partitionId: "", agentId: "", producedByPlanId: "", producedByWorkerId: "", producedByWorkerName: "")`
+	for name, asThePerson := range map[string]bool{
+		"a row a person filed, naming the export by its bare id":                    true,
+		"a version under the owner's index row id that only the engine could leave": false,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newRemovalFixture(t)
+			if f == nil {
+				return
+			}
+			output, _ := f.files("named-by-a-stranger", `{"customer":"a person's whole export"}`)
+			ref := "v1:library:generatedOutput:" + output
+			stranger := f.owner + "-stranger"
+			t.Cleanup(func() {
+				_, _ = f.db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept LIKE 'v1:library:%' AND payload->>'ownerUserId' LIKE '%' || $1`, stranger)
+			})
+			person := revisionActor(stranger, auth.RoleWriter)
+			file := func(ctx context.Context, named string) error {
+				_, err := f.engine.Execute(ctx, fmt.Sprintf(`mutation createArtifact(sourceConceptRef: %s, ownerUserId: %s`+note, langparser.QuoteString(named), langparser.QuoteString(stranger)))
+				return err
+			}
+			// Under the owner's index row id, a person is refused.
+			if err := file(person, ref); err == nil || !strings.Contains(err.Error(), "row-authz") {
+				t.Fatalf("a person filing under the id of another's index row answered %v, want row authorization to refuse it", err)
+			}
+			named := output
+			if asThePerson {
+				if err := file(person, output); err != nil {
+					t.Fatalf("a person's own index row naming the export by its bare id: %v", err)
+				}
+			} else {
+				named = ref
+				if err := file(auth.ContextWithInternalOrigin(person), ref); err != nil {
+					t.Fatalf("the engine-origin write of another person's version: %v", err)
+				}
+			}
+			foreign := f.rows(`SELECT id FROM "MemoryNodes" WHERE concept = 'v1:library:artifact' AND payload->>'sourceConceptRef' = $1 AND payload->>'ownerUserId' LIKE '%' || $2`, named, stranger)
+			if len(foreign) != 1 {
+				t.Fatalf("the fixture left %d foreign index row version(s) naming the export, want the one", len(foreign))
+			}
+
+			nodes, err := f.first.handleRemoveArtifact(auth.ContextWithInternalOrigin(context.Background()), map[string]any{"sourceConceptRef": ref}, 0)
+			if err != nil {
+				t.Fatalf("the removal was stopped by another person's index row: %v", err)
+			}
+			if answer := removalAnswer(t, nodes); fmt.Sprint(answer["removed"]) != "9" || fmt.Sprint(answer["remaining"]) != "0" {
+				t.Errorf("the removal answers %v, want the owner's nine row versions and none remaining", answer)
+			}
+			if left := f.rows(`SELECT id FROM "MemoryNodes" WHERE concept = 'v1:library:generatedOutput' AND id = $1`, ref); len(left) != 0 {
+				t.Errorf("the output is still in the table")
+			}
+			// The foreign row is as it was, and nothing of the owner's is left
+			// under its id.
+			kept := f.rows(`SELECT payload->>'ownerUserId' FROM "MemoryNodes" WHERE id = $1`, foreign[0])
+			if len(kept) != 1 || !strings.HasSuffix(kept[0], stranger) {
+				t.Errorf("under the foreign row's id the table holds the versions of %v, want the stranger's one and none of the owner's", kept)
+			}
+		})
+	}
+}
+
+// The removal runs on the engine's maintenance session, as the erasure's own
+// statements do, and on nothing else: two of its deletes read every comment
+// and every history snapshot that names the artifact, and the request pool
+// ends a statement at eight seconds. With no session it refuses.
+func TestTheRemovalRunsOnTheMaintenanceSession(t *testing.T) {
+	f := newRemovalFixture(t)
+	if f == nil {
+		return
+	}
+	output, _ := f.files("on-a-session", `{"customer":"a person's whole export"}`)
+	internal := auth.ContextWithInternalOrigin(context.Background())
+	opened, closed := 0, 0
+	f.first.SetMaintenanceSession(func(ctx context.Context) (*sql.Conn, func(), error) {
+		conn, done, err := sessionOf(f.db)(ctx)
+		opened++
+		return conn, func() { closed++; done() }, err
+	})
+	if _, err := f.first.handleRemoveArtifact(internal, map[string]any{"sourceConceptRef": "v1:library:generatedOutput:" + output}, 0); err != nil {
+		t.Fatalf("the removal: %v", err)
+	}
+	if opened != 1 || closed != 1 || len(f.held(output)) != 0 {
+		t.Errorf("the removal opened %d session(s), closed %d and left %v; want one session, closed, and nothing left", opened, closed, f.held(output))
+	}
+	f.first.SetMaintenanceSession(nil)
+	if _, err := f.first.handleRemoveArtifact(internal, map[string]any{"sourceConceptRef": "v1:library:generatedOutput:" + output}, 0); err == nil || !strings.Contains(err.Error(), "maintenance session") {
+		t.Errorf("a removal with no session answered %v, want it refused for want of the maintenance session", err)
 	}
 }

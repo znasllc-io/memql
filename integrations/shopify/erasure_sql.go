@@ -36,6 +36,12 @@ type erasureScope struct {
 	// customer's, whether or not the mirror holds its row, and those of the
 	// earlier records merged into it.
 	Customers []string
+	// Alone are deleted customer rows whose last order is in scope, by
+	// concept. Each is scrubbed whole and BY ITSELF (ruling 98): it is not a
+	// seed, nothing is reached from it, and it is not in an export. The link
+	// cannot tell a record merged into the customer from another deleted
+	// person whose stale pointer names an order that is hers now.
+	Alone map[string][]erasedRow
 	// Earlier are versions of rows OUTSIDE the scope that hold one of
 	// Customers in a link field, by concept: the row was hers once and is
 	// not now. Each is scrubbed by itself, and nothing else of its row.
@@ -123,6 +129,16 @@ func (c *Connector) openPrivacySession(ctx context.Context, what string) (*priva
 		return nil, nil, fmt.Errorf("shopify: %s could not bound its statements: %w", what, err)
 	}
 	return &privacySession{conn: conn}, done, nil
+}
+
+// alive reports whether the session still answers: the server ends one that
+// has been idle past its limit, and a connection it ended does not say so
+// until it is used.
+func (s *privacySession) alive(ctx context.Context) bool {
+	sctx, cancel := context.WithTimeout(ctx, privacyStatementGrace)
+	defer cancel()
+	var one int
+	return s.conn.QueryRowContext(sctx, "SELECT 1").Scan(&one) == nil
 }
 
 // rows runs a read whose every column is text, or NULL read as "".
@@ -235,7 +251,7 @@ func erasureScopeOf(ctx context.Context, s *privacySession, storeID, customerGID
 			return nil, fmt.Errorf("shopify: an order's id is not an order's gid")
 		}
 	}
-	scope := &erasureScope{Rows: map[string][]erasedRow{}, Earlier: map[string][]rowVersion{}, TakenFrom: map[string][]string{}}
+	scope := &erasureScope{Rows: map[string][]erasedRow{}, Alone: map[string][]erasedRow{}, Earlier: map[string][]rowVersion{}, TakenFrom: map[string][]string{}}
 	known := map[string]bool{}
 	add := func(concept, id, gid string) bool {
 		if id == "" || known[id] {
@@ -251,6 +267,7 @@ func erasureScopeOf(ctx context.Context, s *privacySession, storeID, customerGID
 	// customer's gid and the orders the request names, whether or not the
 	// mirror holds a row of either.
 	seen := map[string]bool{}
+	alone := map[string]bool{}
 	frontier := map[string][]string{}
 	reach := func(concept, gid string) {
 		if gid == "" || seen[gid] {
@@ -263,33 +280,56 @@ func erasureScopeOf(ctx context.Context, s *privacySession, storeID, customerGID
 		}
 	}
 	reach(erasedConcept, customerGID)
-	for _, gid := range orderGIDs {
-		reach(requestedConcept, gid)
+
+	// The customer's own row, by its id: every version of it is hers.
+	rows, err := s.rows(ctx,
+		`SELECT id, max(payload->>'gid') FROM "MemoryNodes"
+		  WHERE concept = $1 AND id = $2 AND payload->>'storeId' = $3
+		  GROUP BY id`,
+		generated.ConceptID(erasedConcept), mirrorRowKey(erasedConcept, storeID, customerGID), storeID)
+	if err != nil {
+		return nil, fmt.Errorf("shopify: read the %s row a privacy request names: %w", erasedConcept, err)
+	}
+	for _, row := range rows {
+		add(erasedConcept, row[0], row[1])
 	}
 
-	// The rows the request names, each by its id: the customer's own, and the
-	// orders.
-	for _, seed := range []struct {
-		concept string
-		gids    []string
-	}{{erasedConcept, []string{customerGID}}, {requestedConcept, orderGIDs}} {
-		ids := make([]string, 0, len(seed.gids))
-		for _, gid := range seed.gids {
-			ids = append(ids, mirrorRowKey(seed.concept, storeID, gid))
+	// The orders the request names, each by its id, AS THEY ARE NOW (ruling
+	// 98). A request is compiled when its orders were the customer's, and a
+	// job keeps the orders of every request it was asked; one that has since
+	// been moved to another person is that person's order. So a named order
+	// is a seed when its newest version names her or names no customer. One
+	// that names another customer is not: nothing is reached from it, it is
+	// not exported, and its versions from when it named her are found below
+	// with those of every other row that moved.
+	anothers := map[string]bool{}
+	ids := make([]string, 0, len(orderGIDs))
+	for _, gid := range orderGIDs {
+		ids = append(ids, mirrorRowKey(requestedConcept, storeID, gid))
+	}
+	for _, batch := range batches(ids) {
+		rows, err := s.rows(ctx,
+			`SELECT m.id, m.payload->>'gid', COALESCE(NULLIF(m.payload->>'customerGid', ''), m.payload->'purchasingEntity'->>'id', '')
+			   FROM "MemoryNodes" m
+			  WHERE m.concept = $1 AND m.id IN (SELECT jsonb_array_elements_text($2::jsonb))
+			    AND m.payload->>'storeId' = $3 AND NOT `+aNewerVersion,
+			generated.ConceptID(requestedConcept), jsonArray(batch), storeID)
+		if err != nil {
+			return nil, fmt.Errorf("shopify: read the %s rows a privacy request names: %w", requestedConcept, err)
 		}
-		for _, batch := range batches(ids) {
-			rows, err := s.rows(ctx,
-				`SELECT id, max(payload->>'gid') FROM "MemoryNodes"
-				  WHERE concept = $1 AND id IN (SELECT jsonb_array_elements_text($2::jsonb))
-				    AND payload->>'storeId' = $3
-				  GROUP BY id`,
-				generated.ConceptID(seed.concept), jsonArray(batch), storeID)
-			if err != nil {
-				return nil, fmt.Errorf("shopify: read the %s rows a privacy request names: %w", seed.concept, err)
+		for _, row := range rows {
+			if names := row[2]; names != "" && names != customerGID {
+				anothers[row[1]] = true
+				continue
 			}
-			for _, row := range rows {
-				add(seed.concept, row[0], row[1])
-			}
+			add(requestedConcept, row[0], row[1])
+		}
+	}
+	// A named order the mirror holds no row of is reached from all the same:
+	// what hangs from it names nobody else.
+	for _, gid := range orderGIDs {
+		if !anothers[gid] {
+			reach(requestedConcept, gid)
 		}
 	}
 
@@ -320,18 +360,37 @@ func erasureScopeOf(ctx context.Context, s *privacySession, storeID, customerGID
 				continue
 			}
 			for _, batch := range reachedBatches(round, names) {
-				rows, err := s.rows(ctx, linkStatement(always, whenDeleted),
-					generated.ConceptID(concept), storeID, batch)
-				if err != nil {
-					return nil, fmt.Errorf("shopify: follow an erasure's links into the %s rows: %w", concept, err)
+				if len(always) > 0 {
+					rows, err := s.rows(ctx, linkStatement(always, nil), generated.ConceptID(concept), storeID, batch)
+					if err != nil {
+						return nil, fmt.Errorf("shopify: follow an erasure's links into the %s rows: %w", concept, err)
+					}
+					for _, row := range rows {
+						if add(concept, row[0], row[1]) {
+							reach(concept, row[1])
+						}
+					}
 				}
-				for _, row := range rows {
-					if add(concept, row[0], row[1]) {
-						reach(concept, row[1])
+				// A row a deleted-row link finds is scrubbed by itself: it
+				// joins neither the scope nor what the next round asks of.
+				if len(whenDeleted) > 0 {
+					rows, err := s.rows(ctx, linkStatement(nil, whenDeleted), generated.ConceptID(concept), storeID, batch)
+					if err != nil {
+						return nil, fmt.Errorf("shopify: follow an erasure's links into the deleted %s rows: %w", concept, err)
+					}
+					for _, row := range rows {
+						if !known[row[0]] && !alone[row[0]] {
+							alone[row[0]] = true
+							scope.Alone[concept] = append(scope.Alone[concept], erasedRow{ID: row[0], GID: row[1]})
+						}
 					}
 				}
 			}
 		}
+	}
+	// A row found alone that a later round brought into scope is in scope.
+	for concept, rows := range scope.Alone {
+		scope.Alone[concept] = slices.DeleteFunc(rows, func(row erasedRow) bool { return known[row.ID] })
 	}
 
 	// The versions from when a row that is not hers now was hers: the links
@@ -353,7 +412,7 @@ func erasureScopeOf(ctx context.Context, s *privacySession, storeID, customerGID
 				return nil, fmt.Errorf("shopify: look for the versions of %s rows that were the customer's: %w", concept, err)
 			}
 			for _, row := range rows {
-				if !known[row[0]] {
+				if !known[row[0]] && !alone[row[0]] {
 					scope.Earlier[concept] = append(scope.Earlier[concept], rowVersion{ID: row[0], At: row[1]})
 				}
 			}
@@ -373,7 +432,7 @@ func erasureScopeOf(ctx context.Context, s *privacySession, storeID, customerGID
 				return nil, fmt.Errorf("shopify: look for the customer in the %s rows that can refer to her: %w", concept, err)
 			}
 			for _, row := range rows {
-				if !known[row[0]] && !slices.Contains(scope.TakenFrom[concept], row[0]) {
+				if !known[row[0]] && !alone[row[0]] && !slices.Contains(scope.TakenFrom[concept], row[0]) {
 					scope.TakenFrom[concept] = append(scope.TakenFrom[concept], row[0])
 				}
 			}
@@ -653,6 +712,9 @@ type ErasureResult struct {
 	// held her in a link field and were scrubbed by themselves (ruling 94).
 	// They are counted in Versions when the pass changed them.
 	Earlier int64
+	// Alone is how many deleted customer records whose last order is in
+	// scope were scrubbed by themselves (ruling 98).
+	Alone int64
 	// Unlisted is how many versions of rows OUTSIDE the scope had an entry
 	// that names the customer taken out of them: a field of a merchant's
 	// metaobject, her gid in a list of references.
@@ -699,8 +761,8 @@ func redactCustomer(ctx context.Context, s *privacySession, storeID, customerGID
 		if spec == nil {
 			continue
 		}
-		// Every customer row in scope is the person's own: hers, and the
-		// earlier records merged into it. It keeps nothing.
+		// Every customer row scrubbed here is a person's own: hers, and a
+		// deleted record scrubbed by itself (Alone). It keeps nothing.
 		plan := erasurePlanFor(spec, concept == erasedConcept)
 		for _, batch := range batches(rowIDs(scope.Rows[concept])) {
 			n, err := scrubRows(ctx, s, generated.ConceptID(concept), plan, batch)
@@ -708,6 +770,14 @@ func redactCustomer(ctx context.Context, s *privacySession, storeID, customerGID
 				return res, scope, fmt.Errorf("shopify: redact %s: %w", concept, err)
 			}
 			res.Versions += n
+		}
+		for _, batch := range batches(rowIDs(scope.Alone[concept])) {
+			n, err := scrubRows(ctx, s, generated.ConceptID(concept), plan, batch)
+			if err != nil {
+				return res, scope, fmt.Errorf("shopify: redact the deleted %s rows whose last order is the customer's: %w", concept, err)
+			}
+			res.Versions += n
+			res.Alone += int64(len(batch))
 		}
 		for earlier := scope.Earlier[concept]; len(earlier) > 0; {
 			n := min(len(earlier), erasureBatch)
@@ -719,10 +789,10 @@ func redactCustomer(ctx context.Context, s *privacySession, storeID, customerGID
 			res.Earlier += int64(n)
 			earlier = earlier[n:]
 		}
-		fields := erasureTakeOutsOf(spec)
+		fields, freeForm := erasureTakeOutsOf(spec), erasureFreeFormTakeOutsOf(spec)
 		for _, batch := range batches(scope.TakenFrom[concept]) {
 			for _, customer := range scope.Customers {
-				n, err := takeOut(ctx, s, generated.ConceptID(concept), fields, customer, batch)
+				n, err := takeOut(ctx, s, generated.ConceptID(concept), fields, freeForm, customer, batch)
 				if err != nil {
 					return res, scope, fmt.Errorf("shopify: take the customer out of the %s rows that refer to her: %w", concept, err)
 				}
@@ -807,26 +877,39 @@ func scrub(ctx context.Context, s *privacySession, concept string, plan erasureP
 // in them. A field that is a list loses the entries that name her -- an
 // object of the list, or her gid in a list of references -- and a field that
 // is one object and names her loses its key, which the concept's schema reads
-// as a field that was never set.
+// as a field that was never set. A FREE-FORM field (freeForm: one JSON value
+// by key, a metaobject's values) loses the keys that name her, has her gid
+// taken out of a key that lists several, and keeps its other keys.
 //
 // staged-data: MUST-NOT-GATE -- a staged row skipped here keeps the entry
 // that names the customer.
-func takeOut(ctx context.Context, s *privacySession, concept string, fields []string, customerGID string, ids []string) (int64, error) {
+func takeOut(ctx context.Context, s *privacySession, concept string, fields, freeForm []string, customerGID string, ids []string) (int64, error) {
 	if len(ids) == 0 || len(fields) == 0 {
 		return 0, nil
+	}
+	// The entries of a list that do not name her, in their order.
+	kept := func(list string) string {
+		return `COALESCE((SELECT jsonb_agg(entry.value ORDER BY entry.at)
+		                    FROM jsonb_array_elements(` + list + `) WITH ORDINALITY AS entry(value, at)
+		                   WHERE NOT ` + namesHer("entry.value") + `), '[]'::jsonb)`
 	}
 	return s.exec(ctx,
 		`WITH taken AS (
 		   SELECT m.id, m."createdAt",
 		          COALESCE((SELECT jsonb_object_agg(e.key, CASE
+		                      WHEN e.key IN (SELECT jsonb_array_elements_text($5::jsonb)) AND jsonb_typeof(e.value) = 'object'
+		                        THEN COALESCE((SELECT jsonb_object_agg(v.key, CASE WHEN jsonb_typeof(v.value) = 'array' THEN `+kept("v.value")+` ELSE v.value END)
+		                                         FROM jsonb_each(e.value) v
+		                                        WHERE jsonb_typeof(v.value) = 'array' OR NOT `+namesHer("v.value")+`), '{}'::jsonb)
 		                      WHEN e.key IN (SELECT jsonb_array_elements_text($3::jsonb)) AND jsonb_typeof(e.value) = 'array'
-		                        THEN COALESCE((SELECT jsonb_agg(entry.value ORDER BY entry.at)
-		                                         FROM jsonb_array_elements(e.value) WITH ORDINALITY AS entry(value, at)
-		                                        WHERE NOT `+namesHer("entry.value")+`), '[]'::jsonb)
+		                        THEN `+kept("e.value")+`
 		                      ELSE e.value END)
 		                      FROM jsonb_each(m.payload) e
 		                     WHERE NOT (e.key IN (SELECT jsonb_array_elements_text($3::jsonb))
-		                                AND jsonb_typeof(e.value) = 'object' AND `+namesHer("e.value")+`)), '{}'::jsonb) AS payload
+		                                AND NOT e.key IN (SELECT jsonb_array_elements_text($5::jsonb))
+		                                AND jsonb_typeof(e.value) = 'object' AND `+namesHer("e.value")+`)
+		                       AND NOT (e.key IN (SELECT jsonb_array_elements_text($5::jsonb))
+		                                AND jsonb_typeof(e.value) = 'string' AND `+namesHer("e.value")+`)), '{}'::jsonb) AS payload
 		     FROM "MemoryNodes" m
 		    WHERE m.concept = $1 AND m.id IN (SELECT jsonb_array_elements_text($2::jsonb))
 		 )
@@ -834,5 +917,5 @@ func takeOut(ctx context.Context, s *privacySession, concept string, fields []st
 		   FROM taken t
 		  WHERE m.concept = $1 AND m.id = t.id AND m."createdAt" = t."createdAt"
 		    AND m.payload IS DISTINCT FROM t.payload`,
-		concept, jsonArray(ids), jsonArray(fields), jsonObject(map[string]any{"g": customerGID}))
+		concept, jsonArray(ids), jsonArray(fields), jsonObject(map[string]any{"g": customerGID}), jsonArray(freeForm))
 }

@@ -1,0 +1,7 @@
+/// A support ticket raised by a customer, with no field to record its account in.
+@belongsTo(account)
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+}

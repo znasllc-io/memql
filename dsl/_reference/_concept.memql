@@ -34,8 +34,9 @@ use identity.concepts.{ user }
 //   1. Concept-level annotations
 // =============================================================================
 //
-// Every annotation goes above the `concept` keyword. The full author surface
-// is five annotations -- nothing else is recognized.
+// Every annotation goes above the `concept` keyword. The ones listed here are
+// the common ones; section 14 adds the data-origins pair, and section 15 says
+// more about @belongsTo.
 //
 //   @description("text")        Human-readable description.
 //   @version("MAJOR.MINOR.PATCH") Strict semver. Major flows into ID prefix.
@@ -53,6 +54,18 @@ use identity.concepts.{ user }
 //                               `memqlmigrate --rewrite=attributes`.
 //   @type("object"|"collection"|"reference")  Default: object.
 //   @rowAuthz(<tier>)           Who may see this concept's rows -- see below.
+//   @belongsTo(<form>)          Which ACCOUNT this concept's rows belong to,
+//                               or that it is cluster-wide. It records and
+//                               shares a row with nobody: opening rows to an
+//                               account's members is @rowAuthz's account=
+//                               argument, below. Six forms -- see section 15:
+//                                 @belongsTo(account)
+//                                 @belongsTo(account, via="<field>")
+//                                 @belongsTo(account, via="<field>",
+//                                            parent="<concept id>")
+//                                 @belongsTo(account, shared)
+//                                 @belongsTo(account, stated)
+//                                 @belongsTo(cluster)
 //
 // (`@scope` was retired in #56 -- see section 5.)
 //
@@ -1080,4 +1093,112 @@ concept originExample {
 @description("NATIVE: MemQL owns this data and nobody else holds a copy.")
 concept nativeExample {
   goal  string!
+}
+
+// =============================================================================
+//   15. Which account a row belongs to -- @belongsTo
+// =============================================================================
+//
+// Every concept says which ACCOUNT its rows belong to, or that they belong to
+// none. It is the one answer to "whose row is this": what an account holds and
+// what an export of one account contains are read off this declaration, never
+// worked out from a concept's fields or from who may see its rows.
+//
+//   FORM                                  A ROW OF THE CONCEPT
+//   @belongsTo(account)                   belongs to one account, recorded in
+//                                         `accountId`, which the engine fills
+//                                         in at write time
+//   @belongsTo(account, via="<field>")    takes the account of the row
+//                                         <field> names
+//   @belongsTo(account, via="<field>", parent="<concept id>")
+//                                         the same, where <field> carries no
+//                                         @relationship to say which concept
+//                                         it names
+//   @belongsTo(account, shared)           belongs to an account or to none: a
+//                                         row with no account is provided by
+//                                         the cluster to every account
+//   @belongsTo(account, stated)           belongs to the account the concept's
+//                                         OWN MUTATIONS name; the engine never
+//                                         fills the field in and never refuses
+//                                         a change to it
+//   @belongsTo(cluster)                   is cluster-wide: never inside an
+//                                         account
+//
+// IT RECORDS; IT SHARES A ROW WITH NOBODY. A note belongs to its account and
+// stays private to its author. Opening rows to an account's members is the
+// account= argument of @rowAuthz (section 1), and a concept declares that only
+// when it is meant. The one rule joining the two: a concept carrying account=
+// is inside accounts, so it may not also declare @belongsTo(cluster).
+//
+// THE FIELD IS ALWAYS `accountId`, A `string`, AND THE CONCEPT DECLARES IT.
+// The annotation does not add the field. Every account form needs it --
+// `stated` included, because the field is read the same way whoever wrote it
+// -- and a concept without it, or with it typed as anything else, is refused
+// at load (belongs_to_field). A concept that also takes a LIST of accounts
+// keeps the list in a field of its own beside the single one.
+//
+// `stated` may be written beside `shared`. Neither may be written beside
+// `via`: a row that follows a parent is cluster-provided exactly when its
+// parent is, and has its account decided by the engine.
+//
+// `via` IS A FIELD OF THIS CONCEPT; `parent` IS A CONCEPT ID. Which concept a
+// via field points at comes from the field's own @relationship. Write parent=
+// only when the field carries none, and write the canonical id
+// (v1:<namespace>:<name>) -- not the bare name a @relationship takes as
+// target=. A via field with neither is legal: it holds canonical ids of more
+// than one concept, and the id itself says which.
+//
+// A CHAIN OF via HAS TO REACH A ROW WITH AN ACCOUNT. Refused when the whole
+// tree loads: a parent that declares @belongsTo(cluster)
+// (belongs_to_via_cluster), a parent= naming no registered concept
+// (belongs_to_parent_unknown), and a loop, a concept that follows itself
+// included (belongs_to_via_cycle). A parent that declares NOTHING is accepted.
+//
+// LEAVING IT OFF LOADS, AND IS REPORTED. Nothing records the account of an
+// undeclared concept's rows, so they count as cluster-wide. `memqllint` names
+// each such concept by file and line; a node that mounts a bundle holding one
+// logs it at every load. Declare `cluster` deliberately rather than leaving
+// the annotation off -- only one of the two says somebody decided.
+
+@description("Each row belongs to one account; the engine fills accountId in.")
+@belongsTo(account)
+concept accountExample {
+  accountId  string
+  title      string!
+}
+
+@description("Each row takes the account of the accountExample row it names.")
+@belongsTo(account, via="exampleId")
+concept followsExample {
+  accountId  string
+  exampleId  string!
+
+  @relationship(type="parent", field="exampleId", target=accountExample, direction="outgoing")
+}
+
+@description("The same, where the field holds a bare id and carries no relationship.")
+@belongsTo(account, via="storeId", parent="v1:shopify:store")
+concept namedParentExample {
+  accountId  string
+  storeId    string!
+}
+
+@description("Holds rows the cluster provides to every account beside an account's own.")
+@belongsTo(account, shared)
+concept sharedExample {
+  accountId  string
+  name       string!
+}
+
+@description("The concept's own mutations name the account; the engine leaves accountId alone.")
+@belongsTo(account, stated)
+concept statedExample {
+  accountId  string
+  name       string!
+}
+
+@description("Cluster-wide: never inside an account, and no accountId is asked for.")
+@belongsTo(cluster)
+concept clusterWideExample {
+  hostname  string!
 }

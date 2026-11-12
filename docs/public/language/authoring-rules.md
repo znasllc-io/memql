@@ -3690,6 +3690,143 @@ owner-only — which reads as a permissions bug in a screen that half works. The
 four campaigns children gained a stamped-from-parent `accountId` for exactly
 that reason, with no backfill for the rows written before it.
 
+## 35. `@belongsTo` records an account; it shares a row with nobody
+
+Two declarations on a concept mention an account, and they answer different
+questions:
+
+- `@belongsTo(...)` says which account a row **belongs to**, or that the
+  concept is cluster-wide. Every concept declares it.
+- `@rowAuthz(owner="...", account="<field>")` (rule 34) says an account's
+  members may **read and write** the row. A concept declares it only when that
+  is meant.
+
+A note belongs to its account and is still private to its author. So do not
+reach for `account=` to "put the row in an account", and do not expect
+`@belongsTo` to make a row visible to anyone. The forms are in the
+[language reference](memql.md#which-account-a-row-belongs-to); what follows is
+what goes wrong.
+
+### A concept that shares with an account is not cluster-wide
+
+`account=` on `@rowAuthz` puts a concept's rows inside accounts, so the same
+concept cannot say they are inside none. Refused at load with
+`[belongs_to_sharing_mismatch]`:
+
+<!-- corpus: 2026/cells/concept/belongsTo/cluster-beside-the-account-grant.memql -->
+```memql retired
+/// A support ticket raised by a customer, shared with its account's members
+/// and declared cluster-wide.
+@belongsTo(cluster)
+@rowAuthz(owner="ownerUserId", account="accountId")
+concept ticket {
+  ownerUserId  string
+  accountId    string
+  title        string
+  status       string
+}
+```
+
+Declare an account form instead: `@belongsTo(account)`, or
+`@belongsTo(account, stated)` when the concept's mutations name the account
+themselves.
+
+### The field is `accountId`, and the concept has to declare it
+
+Every account form records the account in a `string` field named `accountId`.
+The annotation does not add the field for you, and it is not satisfied by a
+list. Refused at load with `[belongs_to_field]`:
+
+<!-- corpus: 2026/cells/concept/belongsTo/an-account-field-that-is-a-list.memql -->
+```memql retired
+/// A support ticket raised by a customer, its account field declared as a list.
+@belongsTo(account)
+concept ticket {
+  accountId  []string
+  title      string
+  status     string
+}
+```
+
+A concept with no `accountId` at all is refused the same way. One that takes
+several accounts keeps that list in a field of its own and declares the single
+`accountId string` beside it.
+
+### `via` is a field of this concept, and `parent` is a concept id
+
+`via` names the field holding the parent row's id, so it is one of the
+concept's own fields; a name the concept does not declare is refused
+(`belongs_to_via_unknown`). `parent` is the canonical id of the concept that
+field points at, `v1:<namespace>:<name>`. It is not the bare name a
+`@relationship` takes as `target=`, which is resolved through an import;
+`parent="store"` is refused (`belongs_to_parent_unknown`), and the refusal
+names the id it was reaching for. Write `parent` only when the field carries
+no `@relationship`: where it does, the relationship already says which concept
+it is.
+
+### A chain of `via` has to end somewhere that has an account
+
+A row takes its account from its parent, which may take it from its own. Two
+things stop that chain reaching one, and both are refused when the tree loads:
+
+- a parent that declares `@belongsTo(cluster)`, refused with
+  `[belongs_to_via_cluster]`: a cluster-wide row is inside no account, so there
+  is nothing to take;
+- a loop, a concept that follows itself included, refused with
+  `[belongs_to_via_cycle]`:
+
+<!-- corpus: 2026/negative/concept/belongs-to-via-cycle.memql -->
+```memql retired
+/// A purchase, following its latest invoice.
+@belongsTo(account, via="latestInvoiceId")
+concept purchase {
+  accountId        string
+  latestInvoiceId  string
+
+  @relationship(type="references", field="latestInvoiceId", target=invoice, direction="outgoing")
+}
+
+/// An invoice, following its purchase: the two follow each other.
+@belongsTo(account, via="purchaseId")
+concept invoice {
+  accountId   string
+  purchaseId  string
+
+  @relationship(type="parent", field="purchaseId", target=purchase, direction="outgoing")
+}
+```
+
+One concept in a loop has to take its account directly, with
+`@belongsTo(account)`.
+
+Neither would fail a write, which is why they are refused at load. A row that
+follows a cluster-wide parent finds nothing to take and is filed under
+whichever account the call that wrote it was acting in. In a loop every
+concept says its rows take their account from another's, so none of them is
+where an account starts.
+
+A parent that declares nothing is accepted. Its rows have no account to give
+until it declares, but that is a declaration still to be written, not a
+statement that the concept is cluster-wide.
+
+### `shared` and `stated` describe a root, never a row that follows one
+
+`@belongsTo(account, shared, via="...")` and
+`@belongsTo(account, stated, via="...")` are both refused
+(`belongs_to_conflict`). A row that follows a parent is cluster-provided
+exactly when its parent is, so `shared` goes on the parent concept; and `via`
+has the engine take the account from the parent, which is the opposite of
+leaving it to the concept's own writers.
+
+### Leaving it off loads, and is reported
+
+A concept with no `@belongsTo` still loads, and its rows count as cluster-wide:
+nothing records their account. `memqllint` names each such concept by file and
+line as a warning, and a node that mounts a bundle holding one logs it at every
+load and counts it on `memql_dsl_belongs_to_undeclared`. Declare `cluster`
+deliberately rather than leaving the annotation off: the two read the same
+today, and only one of them says somebody decided.
+
 ## Automation loops
 
 An automation that writes what it triggers on needs a filter the write cannot

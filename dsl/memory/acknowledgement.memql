@@ -2,6 +2,7 @@
 /// cached answer or authority to act. TTL, context and prompt version scope it.
 @rowAuthz(owner="ownerUserId")
 @displayCard(primary="acknowledgement", secondary="request", status="workload")
+@belongsTo(account)
 concept workAcknowledgement {
   ownerUserId string! @serverSet
   domainId string!
@@ -10,6 +11,7 @@ concept workAcknowledgement {
   workload string!
   sourceRunId string!
   expiresAt datetime!
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }
 
 /// Only the receipt indexer may assert that wording came from a classifier.

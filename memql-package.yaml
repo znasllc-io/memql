@@ -139,6 +139,7 @@ pipeline:
       - component/sitehealth
       - component/sitetraffic
       - component/worker
+      - integrations/accounts
       - integrations/compose
       - integrations/embedding
       - integrations/knowledge

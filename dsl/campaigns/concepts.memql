@@ -91,6 +91,7 @@ use platform.concepts.{ outboundRequest, site }
 /// actor.userId on every write and every read gates on `row.ownerUserId == actor.userId`.
 @displayCard(primary="name", secondary="description", tertiary="ownerUserId", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept audience {
   confirmation enum("none", "required") @description("Required signups remain pending until the person confirms their subscription.")
   ownerUserId  string!  @description("v1:identity:user.id that owns this audience. Stamped from actor.userId at create time and re-stamped on every update, so ownership can never be reassigned by a caller. The load-bearing per-row authz key.")
@@ -110,6 +111,7 @@ concept audience {
 /// via ownerUserId, mirrored from the parent audience at create time.
 @displayCard(primary="email", secondary="displayName", tertiary="audienceId", status="subscriptionStatus")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept recipient {
   joinedAt datetime @description("When this membership was first created; edits never move it.")
   confirmedAt datetime @description("When the person confirmed their subscription.")
@@ -136,6 +138,7 @@ concept recipient {
 @version("1.1.0")
 @displayCard(primary="name", secondary="subject", tertiary="ownerUserId", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept template {
   ownerUserId  string!  @description("v1:identity:user.id that owns this template. Stamped from actor.userId. The per-row authz key.")
   name         string!  @description("Operator-facing name for the template, e.g. 'August product update'. Distinct from the subject line, which is what the recipient sees.")
@@ -160,6 +163,7 @@ concept template {
 /// writes against. Only campaignSaveLayout writes it.
 @displayCard(primary="name", secondary="description", tertiary="accountId", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept emailLayout {
   ownerUserId       string!  @description("The person who first saved it. Preserved across edits by organization members.")
   accountId         string!  @description("The owning organization. A layout cannot move between organizations.")
@@ -182,6 +186,7 @@ concept emailLayout {
 // @no-displayCard: one configuration row per organization, shown on Email Settings
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept brandKit {
   ownerUserId  string!  @description("The person who first saved the kit. Preserved when organization members save it again.")
   accountId    string!  @description("The organization the kit belongs to. Fixed when the kit is first saved; an organization has one kit.")
@@ -218,6 +223,7 @@ concept brandKit {
 /// Per-row authz: composite. The operator owns their identities; the cluster owner reads them all.
 @displayCard(primary="address", secondary="fromName", tertiary="accountId", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept senderIdentity {
   ownerUserId  string!  @description("v1:identity:user.id that owns this identity. Stamped from actor.userId on every write. The per-row authz key.")
   address      string!  @description("The mailbox UPN the Graph application may send as, e.g. news@acme-client.com. Becomes the From ADDRESS and the /users/{address}/sendMail path segment, so it is validated for RFC 5322 shape AND header safety on the write path -- a CR or LF here would be header injection into every message this identity sends. Normalized lowercase; it is also the reputation and warmup key, so two spellings of one mailbox would split its ramp in half.")
@@ -247,6 +253,7 @@ concept senderIdentity {
 // frozen estimate would report it as a result.
 @composable(as="campaign", fields="name,status,scheduledAt,startedAt,completedAt,lastError", list="campaigns")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept campaign {
   testSourceCampaignId string @description("Original campaign for a test run. Engine-stamped; a test has its own audience, job and delivery ledger and never advances the original campaign or its series.")
   ownerUserId     string!  @description("v1:identity:user.id that owns this campaign. Stamped from actor.userId. The per-row authz key.")
@@ -316,6 +323,7 @@ concept campaign {
 @serverWritten
 @displayCard(primary="email", secondary="campaignId", tertiary="sentAt", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept delivery {
   providerStatus enum("delivered", "bounced", "suppressed", "quarantined", "filtered-spam", "expanded", "failed") @description("Authenticated ACS recipient delivery outcome; absent until a matching report arrives. Transport acceptance is still status=sent.")
   providerCountersPending bool @description("Internal durable request to reconcile terminal campaign counters after provider evidence or a late worker changes the delivery ledger.")
@@ -374,6 +382,7 @@ concept delivery {
 /// reads every operator's.
 @displayCard(primary="kind", secondary="campaignId", tertiary="occurredAt", status="kind")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept engagementEvent {
   ownerUserId  string!  @description("v1:identity:user.id that owns the campaign this event is about, mirrored so the row is gated without a join. The per-row authz key. Taken from the signed token's own campaign, never from the request.")
   accountId    string   @description("The v1:accounts:account this engagement event is for, COPIED from its campaign at write (epic memql#5165, section J). Denormalized rather than joined for the reason ownerUserId above is: the account grant is a filter conjunct the engine ANDs into every read, and a conjunct that needs a join is one that cannot be pushed down. Missing current attribution is repaired only when its parent already names an organization; explicit attribution and historical versions are preserved.")
@@ -420,6 +429,7 @@ concept engagementEvent {
 /// anybody.
 @displayCard(primary="campaignId", secondary="status", tertiary="startedAt", status="status")
 @rowAuthz(clusterOwner)
+@belongsTo(account, via="campaignId")
 concept sendJob {
   templateSnapshot object @description("Immutable ready template content and revision captured when this send was queued. Later template edits affect future jobs only.")
   campaignId           string!  @description("v1:campaigns:campaign.id this job drains. Stored canonical like every other @relationship field; the worker bare-ifies it (memql.BareShortId) before feeding it back to campaignById, because a named-query argument is the BARE-ids client contract.")
@@ -439,6 +449,7 @@ concept sendJob {
   rosterCursor         string  @description("Where the roster walk resumes (memql#3460). An OPAQUE engine keyset cursor -- the (createdAt, id) position of the last recipient examined, encoded by the engine's own pagination codec -- so a send through a large audience does not re-scan from the start on every 15-second tick. Empty means 'start a fresh pass'. It is an OPTIMIZATION, never a correctness mechanism: the delivery ledger decides who gets mailed, so a cursor lost, stale or refused by a codec change costs one re-scan and nothing else.")
   rosterOutstanding    bool  @description("Whether the pass currently in progress has seen ANY recipient still to deal with -- unmailed, or pending a retry that is not yet due (memql#3460). It is what makes completion decidable without holding the whole roster in memory: a pass that reaches the end of the audience with this false has proved there is nothing left, and the job completes. Reset at the start of each pass.")
   throttledUntil       datetime  @description("When the provider's own throttle response says we may resume. Set from a 429/503 Retry-After; the worker leaves the job alone until it passes. Distinct from our own pacing, which is a per-process token bucket and needs no row.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="campaignId", target=campaign, direction="outgoing")
   @relationship(type="references", field="campaignOwnerUserId", target=user, direction="outgoing")
@@ -454,6 +465,7 @@ concept sendJob {
 /// is stored. Organization scope is derived from a signed unsubscribe token or an authorized action.
 @displayCard(primary="domain", secondary="reason", tertiary="suppressedAt", status="reason")
 @rowAuthz(clusterOwner)
+@belongsTo(account, shared, stated)
 concept suppression {
   liftedAt datetime @description("When the recipient subscribed again from preferences; a lifted organization opt-out no longer blocks sends.")
   accountId         string  @description("Organization whose mail is blocked. Absent on existing cluster-wide safety suppressions.")
@@ -498,6 +510,7 @@ concept suppression {
 /// what it says. It carries no address -- a domain and four integers.
 @displayCard(primary="domain", secondary="windowStart", tertiary="sendingIdentity", status="sendingIdentity")
 @rowAuthz(clusterOwner)
+@belongsTo(cluster)
 concept reputationWindow {
   sendingIdentity  string!  @description("Which sending mailbox these counters belong to. One deployment normally has exactly one, and the default is derived from the configured sender address; the dimension exists so a future multi-mailbox deployment is a value change rather than a re-model.")
   domain           string!  @description("The recipient's domain, lowercased -- gmail.com, outlook.com. The only human-readable field, and it identifies nobody, which is the same property that makes the suppression list safe to keep cluster-wide.")
@@ -522,6 +535,7 @@ concept reputationWindow {
 /// clusterOwner, like the counters it reads: the ramp paces the deployment's one sending mailbox.
 @displayCard(primary="sendingIdentity", secondary="ratePerMinute", tertiary="evaluatedAt", status="decision")
 @rowAuthz(clusterOwner)
+@belongsTo(cluster)
 concept warmupState {
   sendingIdentity  string!  @description("The sending mailbox this ramp paces. Also the row id, so there is exactly one ramp per identity and no way to accumulate competing ones.")
   step             int  @description("Index into MEMQL_CAMPAIGNS_WARMUP_STEPS. Zero is the starting trickle a new sending domain begins on.")
@@ -544,6 +558,7 @@ concept warmupState {
 /// templates stay data, not this schema.
 @displayCard(primary="kind", secondary="emailDigest", tertiary="occurredAt", status="kind")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept consentEvent {
   ownerUserId  string!  @description("v1:identity:user.id of the operator whose send this consent belongs to. Stamped from actor.userId. The per-row authz key for export.")
   accountId    string   @description("The v1:accounts:account this consent event is for, COPIED from its recipient at write (epic memql#5165, section J). Denormalized rather than joined for the reason ownerUserId above is: the account grant is a filter conjunct the engine ANDs into every read, and a conjunct that needs a join is one that cannot be pushed down. Missing current attribution is repaired only when its parent already names an organization; explicit attribution and historical versions are preserved.")
@@ -597,6 +612,7 @@ concept consentEvent {
 /// one returns nothing while looking entirely correct.
 @displayCard(primary="name", secondary="triggerConcept", tertiary="templateId", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept emailRule {
   ownerUserId       string!  @description("v1:identity:user.id that authored this rule. Stamped from actor.userId. The per-row authz key, AND the envelope the generated construct runs under -- see the concept doc's note on the actor trap.")
   name              string!  @description("Operator-facing rule name, e.g. 'Tell the owner about new admins'. The primary display field, and the basis of the generated construct's name, so it is what an operator sees in both places.")
@@ -632,6 +648,7 @@ concept emailRule {
 /// next attempt submits it again.
 // @no-displayCard: internal receipt; the delivery and email rule name the send.
 @rowAuthz(owner="ownerUserId")
+@belongsTo(account, stated)
 concept singleSendReceipt {
   ownerUserId string! @serverSet
   accountId string!
@@ -646,6 +663,7 @@ concept singleSendReceipt {
 /// that person's current authority and snapshots the then-published template.
 @displayCard(primary="name", secondary="nextAt", tertiary="sourceCampaignId", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept campaignSeries {
   ownerUserId string! @description("The creator of this series. Ownership is preserved across organization members editing it.")
   authorizedByUserId string! @description("The person who most recently authorized the active configuration. The worker rechecks their current permissions.")
@@ -671,6 +689,7 @@ concept campaignSeries {
 /// its form uses the same opt-in public-form carrier as storefront packs.
 @displayCard(primary="siteId", secondary="audienceId", status="enabled")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept newsletterBinding {
   ownerUserId string! @description("The authenticated creator; preserved across edits.")
   accountId string! @description("The client organization shared by all resources.")
@@ -693,6 +712,7 @@ concept newsletterBinding {
 /// capability may create it; the worker uses the original site owner's current authority.
 @displayCard(primary="recipientId", secondary="requestedAt", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept newsletterSignup {
   ownerUserId string! @description("Site owner captured at signup. Never replaced when another operator retries.")
   accountId string! @description("The client organization captured from the site binding.")
@@ -725,6 +745,7 @@ concept newsletterSignup {
 /// The shared testing audience for one organization. Only the governed configuration action writes it.
 // @no-displayCard: internal organization configuration; its audience reference has the human-facing name.
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept testSettings {
   ownerUserId string!
   accountId string!
@@ -737,6 +758,7 @@ concept testSettings {
 /// An email automation owned by its organization.
 @displayCard(primary="name", secondary="description", tertiary="accountId", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept journey {
   ownerUserId  string!   // creator; the drain sends under this person's current authority
   accountId    string!   // immutable
@@ -754,6 +776,7 @@ concept journey {
 
 @displayCard(primary="recipientId", secondary="stepId", tertiary="journeyId", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept journeyEnrollment {
   ownerUserId  string!   // the journey's owner, stamped by the drain
   accountId    string!

@@ -917,33 +917,6 @@ export function useTriggerConcepts(): Reading<Concept[]> {
 }
 
 /**
- * The campaigns filed under one account, for the Accounts ledger's fifth band.
- *
- * IT LIVES HERE BECAUSE THE CONCEPT DOES. `apps/accounts/tie.tsx` states the
- * rule for the other direction -- a tie surface belongs to the domain that
- * owns the concept -- and this is the same rule read the other way round: the
- * Accounts detail renders the band, and the read that fills it is the
- * Email app's to own. Nothing in this module imports from `apps/accounts`,
- * so the two apps do not form a cycle.
- *
- * The shape is the Accounts ledger's own `Rollup`, deliberately: five bands
- * that settle independently and print one read time between them only work if
- * the fifth answers in the same vocabulary as the four.
- */
-export function useAccountCampaignsRollup(accountId: string): Reading<Row[]> {
-  const connection = useOsConnection();
-  const query = connection?.query ?? null;
-  const read = useMemo(() => {
-    if (query === null || accountId === "") return null;
-    return async (signal: AbortSignal) => {
-      const result = await query.campaignsForAccount({ accountId }, { signal });
-      return result.rows();
-    };
-  }, [query, accountId]);
-  return useReading<Row[]>(NO_ROWS, read, [query, accountId]);
-}
-
-/**
  * Whether authored automations are running at all, cluster-wide.
  *
  * ===========================================================================

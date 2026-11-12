@@ -4103,7 +4103,15 @@ Settings > AI. Connected workflow:
 - **Where the switches live.** The global variable `MEMQL_PIPELINES_AI`
   (`pipelines.AISettingsVariable`, `component/pipelines/ai.go`), JSON
   `{"review": bool, "diagnosis": bool}`. The OS
-  writes it through `setGlobalVariable` (row `var-global-memql-pipelines-ai`).
+  saves it through `pipelinesAISettingsSave`
+  (`component/pipelinerun/settings.go`, 2026-11-12): the engine writes the
+  variable's row (`var-global-memql-pipelines-ai`, or the active row already
+  carrying the name) for a holder of `execute app:pipelines/settings`, because
+  a variable's row is written by a cluster owner or by stamped server code
+  (`component/memql/platform_variable_write_guard.go`). The weekly security
+  scans switch is saved the same way, through `pipelinesSecuritySettingsSave`.
+  Regression tests: `component/pipelinerun/settings_test.go` and
+  `settings_db_test.go` (two engines over one database).
 - **Read at use, not at run open** (`Deps.aiSettings`,
   `component/pipelinerun/ai_settings.go`). A captured-policy switch would make
   every flip refuse the reviews in flight ("installed independent review policy
@@ -5142,12 +5150,15 @@ now is in `component/automations/journal_trigger.go`.
 - **Chosen path:** the recorded payload keeps the keys its declared args bind,
   the `event.payload.<key>` paths its statements name, the dedup key's keys
   (`Automation.Reads`) and `id` / `nodeId`; a root run records the correlation
-  its first attempt derived from the whole payload as its cause.
+  its first attempt derived from the whole payload as its cause. One more key
+  is kept whatever the body reads, `accountId`, because its reader is the
+  executor and not the body (the next section).
 - **Evidence it is enough:** resume rebinds args from the recorded payload and
   continues the recorded cause; adoption (a run with no steps) re-executes from
   it and recomputes a chain head from the dedup key's keys; the per-row budget
-  reads `id` / `nodeId`; a body can no longer read `event.<field>` at all
-  (refused at compile), only its args or the whole event.
+  reads `id` / `nodeId`; the run's account is read from `accountId` and the
+  recorded topic; a body can no longer read `event.<field>` at all (refused at
+  compile), only its args or the whole event.
 - **What keeps the whole payload:** a body that hands `event` on or reads
   `event.payload` whole, a logic it reaches whose body names `event`, a call the
   function registry cannot resolve, any precondition, and every trigger that is
@@ -5168,6 +5179,71 @@ now is in `component/automations/journal_trigger.go`.
 - **Unverified:** no production run has been observed with the change; the share
   of production's event runs it shrinks is not measured, and the October sample
   predates the inbound handlers journaling only on write.
+
+## A run acts in the account of the row that triggered it (2026-11-12)
+
+Design record `docs/superpowers/specs/2026-11-12-account-row-ownership-design.md`,
+section C. Every call into the engine acts in at most one account. Most calls
+never state it and the engine resolves it from the actor
+(`component/memql/call_account.go`). A run cannot be resolved that way: it acts
+as the cluster, which belongs to no account. So the run's account is the account
+of the row that started it, stated on the run's context
+(`contextWithTriggerAccount` in `component/automations/executor.go`).
+
+- **Trigger:** a run starts (`executeWithEvent`) or resumes (`ResumeFrom`). An
+  adopted scheduler run re-enters `executeWithEvent` with its recorded trigger.
+- **Evidence used:** the triggering event alone. Its topic names the concept
+  (`graph.node.<action>.<concept>`), its kind is one of the node kinds, the
+  concept's `@belongsTo` declaration comes from the concept registry, and the
+  row's flattened payload carries `accountId`. A resume reads the same four off
+  the trigger the run's row recorded, with the row's `callerSuppliedPayload`.
+- **Chosen path:** the account is stated with `auth.ContextWithCallAccount`,
+  right after the run's actor is set and before the journal opens, so the run's
+  own row and every step find it. It is a context key and not an
+  `AccessContext` field: the journal, the steps and borrowed authority each
+  rebuild the actor beneath a run, and a field would be dropped at each.
+- **What states nothing:** a concept that is cluster-wide or declares nothing
+  (a field named `accountId` there means something else), a `stated` concept
+  the organization rules do not govern (its own mutations wrote the value and
+  nothing held it to the writer's accounts; `memql.TriggerAccountTrusted`), a
+  row that has no account yet, a trigger that is not a row's event (a scheduled tick, a
+  sub-automation's call, a compiled goal's dispatch), and every payload a
+  caller supplied (`ExecuteWithClientEvent`, and a resume of such a run), for
+  the reason such a run is kept at client origin.
+- **Fallback:** a run that states nothing keeps what its caller stated, so a
+  sub-automation acts in its parent's account. With nothing stated anywhere the
+  engine resolves the actor: no account for the cluster's own actor, the
+  author's for an authored automation.
+- **Alternatives:** resolving the run's own actor gives no account for every
+  core automation. Re-reading the triggering row when the run starts costs a
+  read per firing and can find a later version than the one that fired. A
+  field on `AccessContext` is lost at every rebuild of the actor.
+- **Invariant:** a run is placed only by the write path's own event for a row
+  whose account the engine filled in or the organization rules held to its
+  writer's accounts. A field's name, a caller's payload, a value a concept's
+  own mutations wrote unchecked, and the run's actor never place it.
+- **Survives a retry, a pause or a replica change:** `recordedTrigger` keeps
+  `accountId` in a projected payload whatever the body reads, and the topic is
+  recorded whole, so a resumed or adopted run states the same account on
+  whichever replica runs it. A projected run recorded before this change
+  carries no such key and resumes with no account stated.
+- **Across a mesh hop:** a step that forwards carries the account on
+  `ForwardedAuthority.account_id`. `auth.ForwardedAuthorityFromContext` reads
+  it off the context at the moment of the forward, a stream session's
+  `forwardedPrincipal` reads it off its stream context, and
+  `auth.BindForwardedContext` states it on the receiving node, over the node
+  proto and over the run relay's JSON request alike. Two producers build a
+  fresh system assertion instead of re-asserting one off the context, and so
+  carry none: `integrations/workbench/build.go` and
+  `integrations/pipelinesteps/executor.go`.
+- **Tests:** `component/automations/call_account_test.go` (each condition, the
+  caller-supplied refusal, the recorded key, resume, adoption and the relay
+  hop), `component/node/account_authority_test.go`,
+  `component/grpc/forwarded_call_account_test.go`,
+  `component/auth/call_account_test.go` and the Postgres-backed
+  `component/memql/call_account_db_test.go`.
+- **Unverified:** the hop tests run two halves in one process. No run on a
+  cluster of several nodes has been observed with the change.
 
 ## Current-step operation completion and retained partial effects
 

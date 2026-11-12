@@ -158,16 +158,45 @@ type ForwardedAuthority struct {
 	//     `createdBy` only.
 	//
 	// TestForwardedAuthorityNamesAreProvenanceOnly pins all three. If you are
-	// adding a field here, ask which of the two kinds it is: everything above
-	// is a decision the receiver binds, and these two are a fact about who
-	// wrote a row. The distinction is the only thing keeping them from
-	// becoming an authorization input by accident later.
+	// adding a field here, ask which kind it is: everything above is a decision
+	// the receiver binds, these two are a fact about who wrote a row, and
+	// AccountId below is neither and says so. The distinction is the only thing
+	// keeping a field from becoming an authorization input by accident later.
 	//
 	// The producer reads them off the session identity, not off the
 	// AccessContext -- an AccessContext carries no names, which is why they
 	// arrive through WithDisplayName rather than through the constructors.
 	FirstName string
 	LastName  string
+
+	// AccountId is the account the forwarded call acts in, as the bare id, or
+	// empty when the sending node stated none (call_account.go).
+	//
+	// A THIRD KIND OF FIELD. It is not a decision the receiver binds onto the
+	// actor: VerifyForwardedAuthority does not read it, the AccessContext it
+	// returns has nowhere to put it, and nothing admits or refuses a caller by
+	// it. It is not provenance about a person either. It says which account a
+	// row this call writes is recorded in when neither the row's parent nor
+	// the write itself says so, and BindForwardedContext binds it under its own
+	// context key rather than onto the actor.
+	// TestTheVerifierIgnoresTheCallAccount pins the first half.
+	//
+	// IT CROSSES THE HOP BECAUSE THE FAR SIDE CANNOT ALWAYS WORK IT OUT. An
+	// automation's run acts in the account of the row that triggered it, and a
+	// shopper form in its site's: the actor those run under (the cluster, a
+	// site's owner) names a different account or none, and the fact that says
+	// otherwise stays on the node where the call started. A node that handles a
+	// forward records the account the originating node stated, never one it
+	// resolved again.
+	//
+	// EMPTY IS A VALUE, not a missing key. The receiver then resolves the
+	// account from the actor this assertion carries, by the same rules over
+	// the same database the sender would have used.
+	//
+	// Like the names it is absent from the constructors, and for a parallel
+	// reason: an AccessContext carries no account, so a producer reads it off
+	// the context the call is running on (WithCallAccount).
+	AccountId string
 }
 
 // Refusal sentinels. One per rule, so a log line, a metric label and a test

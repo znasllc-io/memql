@@ -79,8 +79,13 @@ func writeTreeAsIs(t *testing.T, files map[string]string) string {
 	return root
 }
 
+// testConcepts is the concept the clean fixtures share. It declares where its
+// rows belong, like every concept a clean tree holds: a concept that says
+// nothing draws a warning of its own (undeclaredBelongsToWarnings), and each
+// test here is about the one thing its fixture names.
 const testConcepts = `@version("1.0.0")
 @description("A demo item.")
+@belongsTo(cluster)
 concept item {
   name    string  @required @description("Item name.")
   status  string  @description("Item status.")
@@ -265,7 +270,7 @@ query item queryByStatus {
 func TestRun_ARefusedLineIsReportedOnceForEveryDomainShape(t *testing.T) {
 	files := map[string]string{
 		"demo/concepts.memql":     testConcepts,
-		"beta/sub/concepts.memql": "/// A widget.\nconcept widget {\n  label  string\n}\n",
+		"beta/sub/concepts.memql": "/// A widget.\n@belongsTo(cluster)\nconcept widget {\n  label  string\n}\n",
 		// A concept's namespace is a colon-separated identifier, so a nested
 		// directory holding concepts pins the one it declares under (as
 		// dsl/shopify/generated does). Without it boot refuses the concept's
@@ -420,7 +425,7 @@ func TestRun_ADirectoryNoMountReadsAsADomainGetsNoLanguageLineCheck(t *testing.T
 func TestRun_ASubNamespaceOfADeclaredDomainGetsNoLanguageLineCheck(t *testing.T) {
 	bundle := writeTreeAsIs(t, map[string]string{
 		"beta/memql.toml":         dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}.Render(),
-		"beta/sub/concepts.memql": "/// A widget.\nconcept widget {\n  label  string\n}\n",
+		"beta/sub/concepts.memql": "/// A widget.\n@belongsTo(cluster)\nconcept widget {\n  label  string\n}\n",
 		// The nested concept's namespace pin (see
 		// TestRun_ARefusedLineIsReportedOnceForEveryDomainShape).
 		"beta/sub/namespace.pin": "beta\n",
@@ -1056,9 +1061,11 @@ automation loopProbe {
 }
 
 // deprecatedArrayConcepts declares a field in the deprecated `array(T)` form
-// (memql#5390): `array(` starts at line 5, column 9.
-const deprecatedArrayConcepts = `@version("1.0.0")
-@description("A demo item.")
+// (memql#5390): `array(` starts at line 5, column 9. The concept declares where
+// its rows belong, so the deprecated form is the one thing the lint has to say
+// about it.
+const deprecatedArrayConcepts = `@description("A demo item.")
+@belongsTo(cluster)
 concept item {
   name  string  @required @description("Item name.")
   tags  array(string)  @description("Item tags.")
@@ -1384,6 +1391,173 @@ tool assistantTool {
 	code, out := captureRun(t, []string{root})
 	if code != 0 || strings.Contains(out, "requires_rank_unknown") {
 		t.Fatalf("the rewritten tree does not lint clean (exit %d); a first boot would refuse it:\n%s", code, out)
+	}
+}
+
+// undeclaredBelongsToConcepts declares one concept that says which account its
+// rows belong to and one that says nothing: `concept loose` is on line 9.
+const undeclaredBelongsToConcepts = `@description("A demo item, in an account.")
+@belongsTo(account)
+concept item {
+  accountId  string  @description("The account the item belongs to.")
+  name       string  @required @description("Item name.")
+}
+
+@description("A demo item that says nothing about its account.")
+concept loose {
+  name  string  @required @description("Item name.")
+}`
+
+// TestRun_AConceptWithNoBelongsToIsAWarningThatLeavesTheExitCodeAlone: a
+// concept that declares no @belongsTo still loads -- its rows count as
+// cluster-wide -- so the lint says which concept, where, and what to write, as
+// a WARNING line and in the --json warnings array, and exits as it would
+// without it. It says so in EVERY mode, for the reason the deprecated-form
+// warning does: the file an author is editing is the invocation they reach
+// for, and a rule that only speaks when the whole bundle is linted is one they
+// first meet in a boot log.
+func TestRun_AConceptWithNoBelongsToIsAWarningThatLeavesTheExitCodeAlone(t *testing.T) {
+	if got := strings.Split(undeclaredBelongsToConcepts, "\n")[8]; got != "concept loose {" {
+		t.Fatalf("the fixture's line 9 is %q, want the undeclared concept's header", got)
+	}
+	root := writeTree(t, map[string]string{
+		"demo/concepts.memql": undeclaredBelongsToConcepts,
+		"demo/queries.memql":  testQueries,
+	})
+	for name, tc := range map[string]struct {
+		target string
+		file   string
+	}{
+		"dsl root":            {root, "demo/concepts.memql"},
+		"namespace directory": {filepath.Join(root, "demo"), "concepts.memql"},
+		"single file":         {filepath.Join(root, "demo", "concepts.memql"), "concepts.memql"},
+	} {
+		prefix := tc.file + `:9: concept "loose" declares no @belongsTo`
+
+		code, out := captureRun(t, []string{tc.target})
+		if code != 0 {
+			t.Errorf("%s: run() = %d, want 0: an undeclared concept loads; output:\n%s", name, code, out)
+			continue
+		}
+		if !strings.Contains(out, "WARNING: "+prefix) || strings.Count(out, "WARNING:") != 1 {
+			t.Errorf("%s: want exactly one line starting %q; output:\n%s", name, "WARNING: "+prefix, out)
+		}
+		// The declared concept is not reported, in any mode.
+		if strings.Contains(out, `concept "item"`) {
+			t.Errorf("%s: the warning names a concept that declares @belongsTo; output:\n%s", name, out)
+		}
+
+		code, report, out := jsonReport(t, tc.target)
+		if code != 0 || len(report.Errors) != 0 {
+			t.Errorf("%s --json: run() = %d with %d error(s), want 0 and none; output:\n%s", name, code, len(report.Errors), out)
+			continue
+		}
+		if len(report.Warnings) != 1 || report.Warnings[0].Level != "warning" || !strings.HasPrefix(report.Warnings[0].Message, prefix) {
+			t.Errorf("%s --json warnings = %+v, want one warning starting %q", name, report.Warnings, prefix)
+			continue
+		}
+		// It names every form there is to write, so the line is enough to act on.
+		for _, form := range []string{"@belongsTo(account)", `@belongsTo(account, via="<field>")`, "@belongsTo(account, shared)", "@belongsTo(account, stated)", "@belongsTo(cluster)"} {
+			if !strings.Contains(report.Warnings[0].Message, form) {
+				t.Errorf("%s: the warning does not name %s: %s", name, form, report.Warnings[0].Message)
+			}
+		}
+	}
+
+	// Single-file mode reports on the file the author named: a neighbour that
+	// declares no concept stays quiet about the one that does.
+	if code, out := captureRun(t, []string{filepath.Join(root, "demo", "queries.memql")}); code != 0 || strings.Contains(out, "WARNING: ") {
+		t.Errorf("linting a file that declares no concept warned: code=%d output:\n%s", code, out)
+	}
+
+	// Positive control: once the concept declares, nothing is left to report,
+	// so the warning above is the missing declaration and nothing else about
+	// the fixture.
+	declared := strings.Replace(undeclaredBelongsToConcepts, "concept loose {", "@belongsTo(cluster)\nconcept loose {", 1)
+	clean := writeTree(t, map[string]string{
+		"demo/concepts.memql": declared,
+		"demo/queries.memql":  testQueries,
+	})
+	if code, report, out := jsonReport(t, clean); code != 0 || len(report.Errors) != 0 || len(report.Warnings) != 0 {
+		t.Errorf("the same tree with every concept declared: run() = %d, want 0 with nothing to report:\n%s", code, out)
+	}
+}
+
+// TestRun_AConceptWithNoBelongsToDoesNotSilenceAnError: the warning is not a
+// finding, so it neither hides an error nor becomes one. A tree with a real
+// refusal still exits 1 and still prints the warning beside it.
+func TestRun_AConceptWithNoBelongsToDoesNotSilenceAnError(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"demo/concepts.memql": undeclaredBelongsToConcepts,
+		"demo/automations.memql": `@trigger(event="demo.loop")
+automation loopProbe {
+  publish "demo.loop" { value: 1 }
+}`,
+	})
+	code, out := captureRun(t, []string{root})
+	if code != 1 || !strings.Contains(out, "[loop_cycle]") ||
+		!strings.Contains(out, `WARNING: demo/concepts.memql:9: concept "loose" declares no @belongsTo`) {
+		t.Fatalf("want the loop_cycle refusal and the warning, code=%d output=%s", code, out)
+	}
+}
+
+// TestRun_AMalformedBelongsToIsAnErrorAndNotAlsoAWarning: a concept that wrote
+// a @belongsTo the engine refuses HAS declared one, badly. The refusal names
+// what is wrong with it; reporting the same concept as declaring none beside
+// that would contradict the refusal and send its author to add a second
+// annotation, which is itself refused.
+func TestRun_AMalformedBelongsToIsAnErrorAndNotAlsoAWarning(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"demo/concepts.memql": `@description("An item that names an account and no field to record it in.")
+@belongsTo(account)
+concept item {
+  name  string  @required @description("Item name.")
+}`,
+	})
+	code, report, out := jsonReport(t, root)
+	if code != 1 || len(report.Errors) != 1 {
+		t.Fatalf("run() = %d with %d error(s), want 1 with the one refusal:\n%s", code, len(report.Errors), out)
+	}
+	for _, want := range []string{"demo/concepts.memql", `concept "v1:demo:item" DROPPED`, "@belongsTo(account)", "`accountId`", "[belongs_to_field]"} {
+		if !strings.Contains(report.Errors[0].Message, want) {
+			t.Errorf("the refusal must carry %q, got %q", want, report.Errors[0].Message)
+		}
+	}
+	if len(report.Warnings) != 0 {
+		t.Errorf("a concept with a refused @belongsTo was also reported as declaring none: %+v", report.Warnings)
+	}
+}
+
+// TestRun_AnUnsoundBelongsToChainRefusesTheBundle: the checks that need every
+// concept at once -- here a row following a cluster-wide parent -- are the
+// engine's, made at Init, so they reach an author through the engine-parity
+// pass with their code. Without it a bundle whose chain is unsound lints clean
+// and refuses boot.
+func TestRun_AnUnsoundBelongsToChainRefusesTheBundle(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"demo/concepts.memql": `@description("A goal the whole cluster shares.")
+@belongsTo(cluster)
+concept goal {
+  title  string  @description("Goal title.")
+}
+
+@description("A run that follows its goal, which is inside no account.")
+@belongsTo(account, via="goalId")
+concept run {
+  accountId  string  @description("The account the run belongs to.")
+  goalId     string  @description("The goal the run is for.")
+
+  @relationship(type="parent", field="goalId", target=goal, direction="outgoing")
+}`,
+	})
+	code, report, out := jsonReport(t, root)
+	if code != 1 || len(report.Errors) != 1 {
+		t.Fatalf("run() = %d with %d error(s), want 1 with the one refusal:\n%s", code, len(report.Errors), out)
+	}
+	for _, want := range []string{`concept "v1:demo:run"`, `@belongsTo(account, via="goalId")`, `"v1:demo:goal"`, "@belongsTo(cluster)", "[belongs_to_via_cluster]"} {
+		if !strings.Contains(report.Errors[0].Message, want) {
+			t.Errorf("the refusal must carry %q, got %q", want, report.Errors[0].Message)
+		}
 	}
 }
 

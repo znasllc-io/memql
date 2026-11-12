@@ -105,6 +105,13 @@ func secretNameForVendor(vendor string) string {
 	return strings.ToUpper(strings.TrimSpace(vendor)) + "_API_KEY"
 }
 
+// handleSetApiKey seals a vendor key into v1:platform:partitionSecret.
+//
+// WHO MAY is decided by that concept, not here: the write below runs under the
+// caller's own context, and the concept declares @rowAuthz(clusterOwner), so a
+// cluster owner's key lands and anyone else's call comes back with the tier's
+// refusal. There is deliberately no stamp on the write: nothing in this handler
+// authorizes a caller, so it has no standing to write on one's behalf.
 func (i *Integration) handleSetApiKey(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	vendor := strings.TrimSpace(stringArg(args, "vendor"))
 	plaintext := strings.TrimSpace(stringArg(args, "plaintextKey"))

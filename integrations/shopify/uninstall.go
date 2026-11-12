@@ -108,6 +108,11 @@ func (c *Connector) applyUninstall(ctx context.Context, store Store, req memqlsy
 	if current.AdminTokenRef != "" && c.grantAnswers(fresh, current) {
 		c.logger.Info("shopify: app/uninstalled arrived for a store whose current grant still answers; a reinstall superseded it", "store", current.ID)
 		c.auditUninstall(ctx, current, "shopify_app_uninstall_superseded", at, req, nil)
+		// Its delivery is remembered as an applied one's is: left unknown,
+		// it would be the row the same notice lands on after a later
+		// uninstall, for good. Remembered, it goes at the store's next
+		// reconnect or purge.
+		c.rememberUninstallDelivery(ctx, current, req)
 		return nil
 	}
 
@@ -116,6 +121,9 @@ func (c *Connector) applyUninstall(ctx context.Context, store Store, req memqlsy
 	})); err != nil {
 		return fmt.Errorf("shopify: %s for store %s: mark the store disconnected: %w", TopicAppUninstalled, current.ID, err)
 	}
+	// The delivery that carried the notice is remembered on the store, and
+	// deleted when the store is connected again or purged (compliance.go).
+	c.rememberUninstallDelivery(ctx, current, req)
 	var problems []string
 	if err := c.clearDeadGrant(opCtx, current); err != nil {
 		c.logger.Warn("shopify: the store is disconnected and its dead grant could not be blanked", "store", current.ID, "error", err.Error())

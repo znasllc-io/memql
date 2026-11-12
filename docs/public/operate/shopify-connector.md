@@ -426,7 +426,7 @@ Shopify for the store's plan and records a development store as one
 choose it for the **Testing** row: the list of stores calls it "Sandbox
 store", and the Store slot adds "Sandbox". The Store page does not record
 which live store it stands in for; `developmentOfStoreId` is set only by a
-cluster owner through `updateStore`.
+cluster owner, through `createStore` or `updateStore`.
 
 It is not a store this program provisions, and specifically not a Shopify store
 created with generated test data -- such a store cannot be transferred to a
@@ -489,9 +489,10 @@ past to arrive. A domain's backfill is QUEUED:
   data declaration made since).
 
 The `continueQueuedBackfills` automation then carries every queued or running
-backfill on. It starts **every five minutes** and works for up to **four
-minutes** in rounds: in each round every store with work left takes one step,
-and when a domain is done the store's next queued domain starts in the next
+backfill on. It starts **every five minutes** and works in rounds, starting
+rounds for **four minutes**; a round under way when they are up finishes, so a
+pass can run past four minutes. In each round every store with work left takes
+one step, and when a domain is done the store's next queued domain starts in the next
 round. A round in which every store only waited for Shopify to prepare an
 export is followed by a ten-second pause. A store still runs one backfill at a
 time, a store does not wait for another to finish, and a paused domain is left
@@ -503,9 +504,10 @@ Shopify takes to prepare its exports and the passes to read them.
 **When an export fails.** A history download is an export Shopify prepares,
 and its link lasts a week. The link is never stored: the domain's row keeps
 the export and the line reached, and each step asks Shopify for the link
-again. When Shopify gives no link, refuses the download, or no longer knows
-the export, the backfill starts that export again by itself, from its first
-line. An export Shopify reports as failed, cancelled or expired is started
+again. When Shopify gives no link for an export that counted objects, refuses
+the download, or no longer knows the export, the backfill starts that export
+again by itself, from its first line. An export that counted none and gives no
+link is a domain with nothing in it, and the domain's backfill is done. An export Shopify reports as failed, cancelled or expired is started
 again the same way. All count toward one limit: **two restarts per backfill**. The next failure
 after that leaves the backfill failed, and the Store page says "The last check
 of orders failed" (naming the domain), with the reason beneath it.
@@ -518,8 +520,9 @@ stopped. It is refused while that backfill is running. The same call is
 with `restart: true` to start from the start. While a restarted backfill
 runs, the Store page reads "Starting".
 
-Its reply's `outcome` says what became of it. `waiting` leaves the backfill
-queued for the continuing pass, and its detail says why: for a paused or
+Its reply's `outcome` says what became of it. `waiting` leaves the backfill as
+it was -- queued, or running at its cursor -- for the continuing pass, and its
+detail says why: for a paused or
 uninstalled store, `store "<storeId>" does not ingest now, so its mirror waits
 for it`, and the pass carries it on once the store is recorded again.
 `abandoned` means the domain's row was queued again, or another backfill of it
@@ -596,7 +599,10 @@ and dropped.
   it ([What the mirror cannot do](#what-the-mirror-cannot-do)).
 - **A record the mirror does not hold yet** is asked once more too: a notice
   can arrive before its record is readable. The second empty answer writes
-  nothing, and the record arrives with the next read that finds it.
+  nothing, and the record arrives with the next read that finds it. On the
+  delivery's fourth and last try the first empty answer is taken as it is:
+  the delivery is processed with nothing written, and is not counted among
+  the changes that could not be recorded.
 - **A record the mirror already holds as deleted** is left as it is: an empty
   answer for it writes nothing and is not asked again.
 - **Nothing else retires a record.** An answer with any error, a refusal of
@@ -623,8 +629,11 @@ like any other. The full rules are in
 [Inbound delivery](inbound-delivery.md#when-a-connectors-try-fails).
 
 **Reconciliation.** Every ten minutes the runtime sweeps the domains whose
-own interval has elapsed; a sweep that is still running when the next is due
-is not overlapped. Orders, customers, products, product variants,
+own interval has elapsed. The sweep runs on the cluster's schedule leader, and
+one that is still running there when the next is due is not overlapped; while
+the lead changes hands two nodes can each run one, and each write of a
+domain's row is fenced on the version of the row it read, so neither writes
+over what the other recorded. Orders, customers, products, product variants,
 collections, companies, company locations, locations, inventory items, draft
 orders and subscription contracts are paged by `updated_at:>`, the time each
 last changed. The other swept kinds -- among them discounts, abandoned
@@ -644,7 +653,9 @@ A sweep in which a row could not be written is not a clean sweep: the rest of
 the pass still runs, the domain's last error reads `shopify: 1 row read from
 the store could not be written to the mirror; the next check reads it again`
 (or "N rows ... reads them again"), and the next sweep starts from where this
-one did.
+one did. That next sweep comes at the domain's own interval -- an hour, six or
+twenty-four -- not at the next ten-minute tick, and the store's notice says
+when ("The next check is at" a time).
 
 A full re-list that hits its page cap tombstones **nothing**. Tombstoning is
 an argument from absence, and the argument is only valid if the walk was
@@ -697,6 +708,175 @@ installed (`appClientId`); any other shop is dropped without a job. A
 privacy delivery on a per-store URL is held to the same body check, and a
 **paused** store still queues its privacy jobs -- a pause stops the mirror,
 not the merchant's obligations.
+
+**What each one does.** The three arrive as ordinary webhooks, and each is
+turned into a `v1:shopify:complianceJob` row -- the connector's own queue,
+deliberately not the outbox: the outbox's drain hands every entry to
+`Propagate`, and a privacy job handed to `Propagate` would try to write a
+customer's export into Shopify. The job rows are a cluster owner's to read;
+each says where its request stands (`status`: `pending`, `done` or `failed`),
+what its last run did (`outcome`) and, after a failed run, what failed
+(`lastError`, one sentence that names no customer).
+
+- **`customers/data_request`** is run at the next run of the privacy jobs. It
+  collects the rows an erasure of the same customer reaches (below), each as
+  its newest version, and files them as one JSON document in the Library of
+  the store's owner, with Shopify's request id. What an erasure scrubs beyond
+  those rows -- older versions of rows that moved to somebody else, a deleted
+  customer's record scrubbed by itself, an entry taken out of a metaobject --
+  is not in it. The document is the owner's, and only the owner can read it.
+  Audited as `shopify_data_request_exported`. Three cases come first, in this
+  order:
+  - **the customer has been erased** in that store (her erasure has made its
+    first pass): nothing is filed, any export of hers still in the owner's
+    Library is removed, the request's deliveries are deleted, and the job ends
+    with "the customer has been erased, so nothing is filed";
+  - **the request was answered before**: the same request delivered again
+    files nothing again;
+  - **the store's row is gone**: the job ends with "the store is no longer
+    configured; nothing to export".
+
+  A store with no owner **fails** the request, and says so before a row of the
+  person is read, rather than filing one merchant's customer data in a
+  stranger's library.
+- **`customers/redact`** is due a day after it arrives, so a merchant's own
+  grace period applies, and scrubs the customer from the store's mirror, by
+  the store's id even when the store's row is gone. Audited as
+  `shopify_customer_redacted`, and its second pass as
+  `shopify_customer_redacted_second_pass`.
+- **`shop/redact`** is due 48 hours after it arrives, and purges the store:
+  every mirror row of the store, its sync state and every staged delivery of
+  its own source, every version, then pauses the store row and stamps
+  `redactedAt`. Audited as `shopify_shop_redacted` (its second pass
+  `shopify_shop_redacted_second_pass`), or, when the store answered,
+  `shopify_shop_redact_skipped` (on the second pass
+  `shopify_shop_redact_second_pass_skipped`). A purged store is served as unavailable, like an
+  uninstalled one, until a verified reinstall clears it (see
+  [app/uninstalled](#appuninstalled)).
+
+**What a customer's erasure covers.** The customer is matched by her id as a
+whole value, never as the start of a longer one, and only in the fields that
+say whose a row is:
+
+- **Her own customer record is emptied**: every field but its structure (the
+  store, the account the row belongs to, the id, when the row changed and was
+  read, whether it is deleted). Free text reads `[redacted]`, a list is empty,
+  and anything else -- an address, a count, a date -- loses its value, so a
+  typed read answers null.
+- **The rows that are hers**: her orders (an order whose newest version names
+  her as its customer or its buyer, and the orders the request names), her
+  abandoned checkouts and draft orders, her own company contact record, her
+  payment methods, store credit accounts and subscription contracts, and the
+  gift cards she holds or was sent.
+- **Everything under those orders**: their line items, transactions,
+  fulfilments and fulfilment orders, refunds, returns with their reverse
+  fulfilment orders and deliveries, payments and disputes.
+- In each of those rows **what describes the sale is kept and what describes
+  the person goes**. Amounts and currencies, dates, quantities, statuses, the
+  order's number, product and variant titles and SKUs, tax lines and discount
+  codes stay, so the merchant's books still add up. Names, email addresses,
+  phone numbers, addresses, notes, custom attributes, the shopper's IP address,
+  payment details, tracking, metafields and her consent to marketing as the
+  order recorded it go. A **custom line item** -- one with no product -- loses
+  its name, its title, its variant title and its SKU as well, because a person
+  typed them.
+- **A company is not emptied because one of its contacts was erased**: her own
+  contact record is scrubbed, and the company, its other contacts and its
+  locations stay as they were. A merchant's metaobject that refers to her
+  loses the entry that names her and keeps everything else.
+- **A row is decided on what it is now.** An order that has since moved to
+  another customer -- including one the request names -- is that customer's:
+  it keeps its current state and everything under it, loses only its older
+  versions from when it was hers, and is not in her export. A deleted customer
+  record whose last order is hers is scrubbed by itself, and nothing is reached
+  from it.
+
+Every version of every row in scope is rewritten. The precise statement,
+concept by concept and field by field, with the reason for each field that
+is kept, is the file `integrations/shopify/testdata/erasure-fields.golden` in
+the engine's repository, which its tests hold the code to. What an erasure does
+not reach is in [What the mirror cannot do](#what-the-mirror-cannot-do).
+
+**What else an erasure removes.** A customer's erasure also blanks the content
+of every processed staged delivery of the store's own source (the webhooks
+Shopify sent for its orders and customers carry names and addresses), and
+removes from the owner's Library every export a data request filed for the
+same customer of that store: the document, its index entry, its history and
+the comments on it -- not archived, and not restorable. The deliveries that carried a privacy
+request (on whichever endpoint they arrived) are blanked at each pass and
+deleted when the job is done. A shop's erasure deletes the store's staged
+deliveries with its mirror.
+
+**Every erasure is made twice.** A write already on its way when the scrub
+runs -- the rest of an export's page, a change fetched a moment before --
+lands after it. So the first pass leaves the job `pending`, with when it ran
+(`scrubbedAt`) and a second pass due an hour later; the runner is hourly, so
+the second pass comes one to two hours after the first, and only after it is
+the job `done`. A shop's purge is made twice the same way. A pass that failed
+is run again at every run until it succeeds; a failed first pass is a first
+pass again. A second request for the same customer, or for the same shop
+after a reinstall, opens the job again and runs both passes again; a request
+that arrives while the job is waiting adds the orders it names, and does not
+move the job's time.
+
+**A shop's erasure asks first.** Before each purge -- the second as the first
+-- the store's row is read fresh, and unless it already records the
+uninstall, Shopify is asked whether the app is still installed. Only a clear
+refusal counts as gone: the Admin API answering 401 or 404, or Shopify
+refusing to renew the store's grant as one that no longer exists (401 with
+`invalid_request`). A store that answers is not purged, and the store's
+backfills that had not started are queued: the outcome is "skipped: the store
+is reachable again", or on the second pass "second pass: the store is
+reachable again and was not purged a second time; its reconnect reads
+everything again", followed by "; queued N backfill(s) of the store that had
+not started" when there were any. Anything else -- a timeout, a 5xx, a network error -- fails
+the job with "the store did not say whether the app is still installed, so
+nothing was deleted", and the next run asks again. A store that is connected
+again while it is being purged is left connected, not marked redacted, and its
+history is read again; audited as `shopify_shop_redact_overtaken`.
+
+**The runner.** The `runShopifyComplianceJobs` automation runs the due jobs
+once an hour, at minute 7, one run at a time. New requests go before an older
+erasure being made again, and a run takes jobs for twenty minutes and finishes
+the one it is on; the rest wait for the next run. Its statements run on the
+engine's maintenance session
+([the connection budget](db-connection-budget.md)).
+
+**A request the connector has finished with is not kept as a delivery.** When
+a job is done, the deliveries that asked for it are deleted, so the same
+request arriving again is acted on again: a store reinstalled and removed
+again is erased again, and a customer who asks twice is erased twice. The
+delivery that carried a store's `app/uninstalled` is kept until the store is
+connected again or purged.
+
+**An export taken before the erasure.** A history download the store's
+backfill took before an erasure would write the erased fields back as it is
+read. So an erasure, right after its first scrub or purge, starts every
+backfill of the store that is queued or under way again from nothing, and a
+failed backfill loses the export its cursor named, so "Backfill now" starts a
+new one; the job's outcome then says "; started N backfill(s) again from
+nothing".
+What a download already in flight writes after the first pass, the second
+pass scrubs. When a download cannot be started again the job fails with "the
+erasure ran, but a backfill in flight could not be started again", and is run
+again.
+
+**When a request keeps failing.** A job that fails is tried again at every
+run, every hour. Once a job has failed and was due more than a day ago, the
+store's Store page says "A privacy request for this store could not be completed."
+([the reasons](#the-storefronts-store-page)). Three cases fail every time
+until somebody looks, each with "the store did not say whether the app is
+still installed, so nothing was deleted": a shop's erasure for a store whose
+row records no uninstall and holds no Admin token; one for a store on the
+shared app whose grant's renewal token has itself expired; and one for a
+store on the shared app whose shop no longer exists at Shopify, whose answer
+to a renewal is not documented and so is not read as a refusal.
+
+Redaction is the **one write to a mirror that is not an apply**. Everything
+else converges the mirror onto what the origin says; redaction deliberately
+makes it differ, by rewriting rows the origin has already forgotten. It runs
+under the connector actor and goes through raw SQL, because "every version"
+is exactly what an append-only model will not let you touch.
 
 ### app/uninstalled
 
@@ -768,49 +948,6 @@ request id), which is what following it up by hand starts from.
 A store connected with its **own** custom app, rather than through Connect,
 is unaffected: its per-store URL keeps accepting the three topics, verified
 by that store's own webhook secret.
-
-What each one does:
-
-The three arrive as ordinary webhooks and are turned into
-`v1:shopify:complianceJob` rows -- the connector's own queue, deliberately
-not the outbox: the outbox's drain hands every entry to `Propagate`, and a
-privacy job handed to `Propagate` would try to write a customer's export into
-Shopify. An hourly automation runs the ones whose hold has elapsed.
-
-- **`customers/data_request`** collects every mirror row that mentions the
-  customer's GID -- across every mirrored concept, at any nesting depth --
-  into a JSON artifact in the Library, filed under the store's owner, with
-  the Shopify request id recorded. Audited as
-  `shopify_data_request_exported`. A store with no owner **fails** the export
-  rather than filing one merchant's customer data in a stranger's library.
-- **`customers/redact`** rewrites the customer's PII fields to `[redacted]`
-  across **every version** of every row that mentions them, keeping the
-  opaque GID and the commercial facts -- quantities, totals, dates. The
-  merchant's books are not the customer's personal data, and destroying them
-  would be a different compliance failure. Audited as
-  `shopify_customer_redacted`, and scheduled rather than immediate so a
-  merchant's own grace period applies.
-- **`shop/redact`** purges the store's whole mirror and its sync state after
-  a 48-hour hold, then pauses the store row and stamps `redactedAt`. Before
-  purging it re-checks whether the store is reachable again: an uninstall an
-  operator reverses within the hold must not cost the mirror. Audited as
-  `shopify_shop_redacted` (or `shopify_shop_redact_skipped`). A purged store
-  is served as unavailable, like an uninstalled one, until a verified
-  reinstall clears it (see [app/uninstalled](#appuninstalled)).
-
-A redaction or a purge that runs while one of the store's history downloads
-is queued or under way starts that download again from nothing, so an export
-taken before the erasure is never applied after it. The job's outcome then
-ends "; started N backfill(s) again from nothing". When a download cannot be
-started again the job fails with "shopify: ... but a backfill in flight could
-not be started again, so an export begun before the erasure may still be
-applied", after the erasure itself has run.
-
-Redaction is the **one write to a mirror that is not an apply**. Everything
-else converges the mirror onto what the origin says; redaction deliberately
-makes it differ, by rewriting rows the origin has already forgotten. It runs
-under the connector actor and goes through raw SQL, because "every version"
-is exactly what an append-only model will not let you touch.
 
 ---
 
@@ -940,7 +1077,9 @@ These are limits of this connector, as it is built today.
 - **An order older than sixty days, without `read_all_orders`.** Shopify
   hides it from the app, so the mirror keeps it as last recorded and does not
   follow a later refund, edit or cancellation of it. Its delete notice still
-  retires it. Every store connected through the shared app is in this case.
+  retires it. Every store connected through the shared app is in this case,
+  and so is a store whose grant was never recorded: its order data is never
+  retired by an empty answer either.
 - **An abandoned checkout Shopify expires** is kept the same way, as last
   recorded, for the same reason.
 - **A lost delete notice** is not found by the periodic check of a kind that
@@ -950,12 +1089,18 @@ These are limits of this connector, as it is built today.
   deletion changes no such time. The re-listed kinds
   ([Reconciliation](#step-4----what-happens-next)) find it at their next full
   re-list, except those whose listing is not the whole set.
+- **Some kinds are never checked at all**: the shop itself, its policies and
+  locales, business entities, payment terms templates, metaobjects, metafield
+  definitions, and Shopify Payments payouts and balance transactions. They
+  have no periodic check and are not read with a parent, so a lost delete
+  notice of one is never found.
 - **A delivery being dispatched in the instant a node stopped** is not
   dispatched again. The next periodic check of its kind reads the record's
   present state, and a deletion delivered in that instant is not applied.
 - **After a long pause** the held deliveries are worked fifty a minute, so
-  ten thousand take over three hours. The first periodic check after the
-  resume brings the changed records of a kind current sooner.
+  ten thousand take over three hours. The store reads Recording meanwhile: a
+  held delivery is not a change that could not be recorded. The first periodic
+  check after the resume brings the changed records of a kind current sooner.
 - **A record the mirror cannot write** holds its kind's check back: the kind
   reads "The last check of ... failed" and the store Needs attention until the
   record can be written.
@@ -966,6 +1111,23 @@ These are limits of this connector, as it is built today.
 - **A store connected with its own app** that grants less than the full list
   of [Step 2](#step-2----create-the-app) reads Needs attention for as long as
   it does.
+- **What a customer's erasure does not reach.** A record that carries the
+  person only by an email address, with no customer on it -- a guest's
+  abandoned checkout -- is not reached. The buyer's message inside a gift card
+  another person holds stays: the card is its holder's. An order that moved to
+  another customer keeps that customer's current state, and loses only the
+  erased person's older versions of it. A line item whose product was deleted
+  reads as a custom item, and loses its name, titles and SKU as one does.
+- **A failing shop erasure on a store that is not connected sends no email of
+  its own** ([the owner's email](#when-a-store-stops-being-recorded-the-owners-email)):
+  it is seen on the Store page, as its "A privacy request for this store could
+  not be completed." notice.
+- **A frozen or locked store that was connected again** is not purged by a
+  shop's erasure while Shopify answers neither that the app is installed nor
+  that it is not: its job fails and is run again every hour.
+- **The inbox keeps a processed delivery's content** until an erasure of its
+  store: a customer's erasure blanks it, a shop's erasure deletes it. Nothing
+  removes a staged delivery by its age.
 
 ---
 
@@ -1017,8 +1179,10 @@ of it; the page draws what it is given. What the page shows besides is in
 | `starting` | Starting | A backfill of a domain in the store's connection is queued or running, or a domain has never been checked. A domain somebody paused in Cluster > Data does not count. |
 | `recording` | Recording | None of the above: every domain in the connection has been checked, and no reason holds. |
 
-A paused or not-connected store carries no reasons: nothing it would say is
-something to act on while nobody is recording it. When the verdict itself
+A paused or not-connected store carries none of the reasons about its
+recording: nothing they would say is something to act on while nobody is
+recording it. It can carry one reason, `privacy_request_failing` (below), and
+keeps its state when it does. When the verdict itself
 could not be read, the store reads "Status unknown" and the page says
 "Whether the store is being recorded could not be read.", with "Try again".
 
@@ -1035,6 +1199,7 @@ both destinations shows each reason once. A domain is named in plain words
 | `events_not_registered` | "Shopify is not sending every change." | The subscriptions that failed, or "The last registration left 20 of the 24 subscriptions it wanted." | "Register again": the store's subscription pass, run now. It is refused within a minute of the last pass, and for a store that is not recording. |
 | `check_failing` | "The last check of orders failed" | For a backfill that failed: its own reason, or "The backfill did not finish." Otherwise the sweep's last error, or "No check has run since" a time, then "The next check is at" a time, or "The next check is due now." | None. |
 | `changes_not_recorded` | "3 changes could not be recorded." -- or "1 change could not be recorded.", and "At least 3 changes could not be recorded." when the count is a floor | -- | "Try again": every delivery of the store that used its four tries, back in line. |
+| `privacy_request_failing` | "A privacy request for this store could not be completed." | How many and since when, as in "1 request, due since 2026-11-09T09:07:00Z. It is tried again at every run of the privacy jobs." | None. |
 
 A check is *failing* when a domain's backfill failed, at once, or when twice
 the domain's own sweep interval has passed with no clean sweep. That time is
@@ -1045,6 +1210,14 @@ its verdict was first recorded (`health.verdict.firstRecordedAt`), so it has
 the same grace as a store connected then. So a store resumed after a long
 pause is not late until two of its intervals have passed. An error about the
 store's grant is `grant_lost`, never this.
+
+A privacy request is *failing* when one of the store's privacy jobs failed
+and was due more than a day ago (the privacy jobs are in
+[Step 5](#step-5----the-compliance-topics)). The reason is listed on a store in
+any state. On a store that would read Recording or Starting it makes the store
+Needs attention like any other reason; a paused or not-connected store keeps
+its word and lists the reason beside it, because a shop's erasure is a job of
+a store that is uninstalled.
 
 A change is *not recorded* when a delivery used its four tries and its domain
 has had no clean sweep since it arrived. Once that sweep runs, it has read what
@@ -1087,8 +1260,12 @@ holding `app:cluster/origins`. For Shopify:
   start, and carries any other on from where it stopped; on a paused or
   uninstalled store it leaves the backfill queued, to carry on once the store
   is recorded again ([Step 4](#step-4----what-happens-next)). "Pause" stops
-  the domain's backfill, its periodic check and its pushes to Shopify; the
-  changes Shopify sends for it are still applied. They are not drawn until the connector health has
+  the domain's backfill and its periodic check, and nothing else: the
+  changes Shopify sends for it are still applied, and changes waiting to be
+  pushed to Shopify are still pushed. When one of the three is refused or
+  fails, the page says "The cluster did not finish this.", that the list is
+  read again, and the cluster's reason: a backfill can fail part-way, and
+  keeps what it applied. They are not drawn until the connector health has
   been read, and read to its end: while it is first read, when it could not be
   read, and when it stopped short -- the page then says "The connector health
   was not read to its end, so this list is incomplete." -- no act is drawn.
@@ -1223,7 +1400,8 @@ While a store is paused:
   uncounted, and its `lastError` reads `connector: recording is paused, so this
   delivery is held; it goes back in line when recording resumes`. It is never
   counted as a change that could not be recorded.
-- Its state is Paused. It carries no reasons, and its owner is not emailed.
+- Its state is Paused. It carries no reason but a failing privacy request,
+  and its owner is not emailed.
 - A backfill under way keeps its place and carries on after the resume. If
   the pause outlasted the week Shopify keeps a download, the backfill starts
   that export again by itself (see "When an export fails" in
@@ -1233,8 +1411,8 @@ While a store is paused:
 
 "Resume" answers at once. Before it does, it puts up to fifty held
 deliveries back in line and queues the backfill of every domain the store
-never read. The store watch puts the rest back on its next pass, at most five
-minutes later; it does that on every pass for every connected store that is
+never read. The store watch puts the rest back on its next passes, five thousand at
+most at each, the first at most five minutes later; it does that on every pass for every connected store that is
 not paused, so a store resumed by writing its status directly gets its held deliveries
 back the same way. The retry pass then works them fifty a minute, so a long
 pause takes a while to catch up
@@ -1243,8 +1421,9 @@ counted from the resume, so the store does not read as failing because it was
 paused, and it reads Starting while a backfill it never ran is read.
 
 This is the whole store. Pausing one domain of one store is "Pause" on that
-domain in **Cluster → Data**: it stops that domain's backfill, its periodic
-check and its pushes, and the changes Shopify sends for it are still applied.
+domain in **Cluster → Data**: it stops that domain's backfill and its
+periodic check; the changes Shopify sends for it are still applied, and changes
+waiting to be pushed to Shopify are still pushed.
 
 ### When a store stops being recorded: the owner's email
 
@@ -1270,6 +1449,10 @@ mailed as not connected:
 - A store that **needs attention**: subject `example-store.myshopify.com needs
   attention`; the body opens "MemQL is not recording everything from
   example-store.myshopify.com, since" the episode's start.
+  When a failing privacy request is the store's only reason, the store is
+  being recorded in full, and the body opens instead
+  "example-store.myshopify.com needs attention in MemQL, since" the episode's
+  start; the subject is the same.
 
 Either body goes on with each reason's sentence, one to a line, then "Open the
 storefront's Store page in MemQL OS to see what fixes it:" with MemQL OS's
@@ -1284,10 +1467,25 @@ that was mailed:
 - Body: "MemQL is recording example-store.myshopify.com in full again. It
   needed attention from" the episode's start "to" now.
 
+After an episode whose only reason, at every pass, was a failing privacy
+request, the store was recorded all along, and the second email says so
+instead: subject `example-store.myshopify.com no longer needs attention`, body
+"example-store.myshopify.com no longer needs attention in MemQL. It needed
+attention from" the episode's start "to" now.
+
+A failing privacy request on a store that is **paused** or **not connected**
+sends no email of its own: a paused store is never mailed, and a store that is
+not connected is already in its episode, which is mailed once, after the wait,
+if it is owed an email at all. The reason is seen on the Store page, by the
+store's owner, a cluster owner, and anyone the cluster lets read stores,
+whatever their role.
+
 A store the watch sees for the first time already not connected -- uninstalled
 or its data removed before the watch first looked at it -- is never mailed
-about that episode, and not when it is connected again. A store first seen
-needing attention is mailed after the wait like any other.
+about that episode. Connected again through Starting or Recording, it is not
+mailed then either. Connected again straight into Needs attention, it begins a
+new episode at its reconnection, and is mailed after the wait like any other.
+A store first seen needing attention is mailed after the wait like any other.
 
 The recovery email is sent even when the first could not be delivered. Times
 are written in UTC. A reason's detail never travels: it is the engine's or
@@ -1384,32 +1582,58 @@ The release that holds a paused store's deliveries, believes a deletion only
 on the rules above, and asks a managed store for customers, discounts and
 returns changes what an installation holds. Before you roll it out:
 
-- **It is roll-forward only.** Once a node of this release has written mirror
-  rows, an earlier release cannot read them: they carry fields it does not
-  know. Do not pin the installation back to an earlier release after it.
+- **It is roll-forward only.** Once a node of this release has written, an
+  earlier release cannot carry on from where it left off. It cannot write a
+  mirror row that this release wrote: such a row carries fields the earlier
+  release does not know (`versionSource`, `versionReadAt`), every write of a
+  row is made over the stored row, and the concept's schema takes no field it
+  does not declare, so the write is refused and that record stops changing
+  (the same holds for a staged delivery this release tried, whose tries are
+  such a field). It never puts back in line a delivery this release held for a
+  paused store, because it does not know the held state. And a backfill this
+  release left part-way names no download link, so an earlier release reads
+  that export again from its first line. Do not pin the installation back to
+  an earlier release after it.
 - **Every store connected through the shared app needs attention once.** The
-  permission list grew, so each store reads Needs attention, with "This store
-  approved an older list of permissions." and the scopes it lacks beneath, and
-  its owner is emailed "<store> needs attention" after the alert wait. The
-  store's owner (or a cluster owner) follows "Open MemQL OS from the store's
-  Shopify admin and approve", somebody on the store's staff approves the new
-  list in Shopify's admin, and the store returns to Recording by itself
-  ([When the list grows](#when-the-list-grows)).
-- **Each store reads Starting for some minutes.** At the first boot, every
-  domain of a store being recorded that no backfill read, or whose backfill
-  completed under the earlier release, is queued; a backfill the earlier
-  release left running begins again from the start at its next step. A
-  history read under the earlier release may have put an older snapshot over
-  a newer change, which is why each is read once more. What bounds it is the
-  continuing pass ([Step 4](#step-4----what-happens-next)): four minutes of
-  every five, one domain of a store at a time, for as long as Shopify takes to
-  prepare each export. The first periodic check that reads a record written
-  under the earlier release rewrites it once, to add its `versionSource`, so
-  `driftLast` can read high for that one pass. A store that is paused at that
-  boot is read again when it is resumed.
+  permission list grew. First register the new permissions on the app at
+  Shopify ([When the list grows](#when-the-list-grows), step 1): until then no
+  store can approve them. Each such store reads Needs attention, with "This
+  store approved an older list of permissions." and the scopes it lacks
+  beneath, and its owner is emailed "<store> needs attention" after the alert
+  wait. The store's owner (or a cluster owner) follows "Open MemQL OS from the
+  store's Shopify admin and approve", somebody on the store's staff approves
+  the new list in Shopify's admin, and only then does the store read
+  Starting, and then Recording, by itself.
+- **Each store's history is read again.** At the first boot, every domain of a
+  store being recorded that no backfill read, or whose backfill completed
+  under the earlier release, is queued; a backfill the earlier release left
+  running begins again from the start at its next step. A history read under
+  the earlier release may have put an older snapshot over a newer change,
+  which is why each is read once more. The store reads Starting while that
+  runs -- a store on the shared app once it has approved, above. What bounds it
+  is the continuing pass ([Step 4](#step-4----what-happens-next)): rounds
+  started for four minutes of every five, one domain of a store at a time, for
+  as long as Shopify takes to prepare each export. The first periodic check
+  that reads a record written under the earlier release rewrites it once, to
+  add its `versionSource`, so `driftLast` can read high for that one pass. A
+  store that is paused at that boot is read again when it is resumed.
 - **An index is built at the rollout.** The retry pass reads the failed
-  deliveries through a new index, and building it reads the table of staged
-  deliveries once.
+  deliveries through a new index on the shared table of rows, and building it
+  reads every row of that table once.
+- **The first privacy run makes every earlier erasure again.** Every
+  customer erasure an earlier release recorded as done is made again under the
+  rules of [Step 5](#step-5----the-compliance-topics), twice as every erasure
+  is: the earlier release left the customer's email and phone, never reached
+  an order's transactions, fulfilments or refunds, and could leave rows the
+  mirror cannot write. At the first pass of the first customer erasure made
+  on each store after the upgrade, new or repeated, what the earlier release
+  left is repaired, once, and the store records that it ran: those rows are made writable again, the
+  kinds of the rows of other people it had wrongly scrubbed are read again
+  from Shopify, and the store's older privacy and uninstall deliveries are
+  deleted. Nothing is asked of you. Each job's `outcome` says what it did (for
+  instance "; repaired 3 row(s) an earlier erasure left unwritable"), and new
+  requests are worked first, twenty minutes a run, so an installation with many
+  old erasures takes several runs.
 
 ---
 

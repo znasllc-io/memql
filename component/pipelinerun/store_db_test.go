@@ -843,8 +843,9 @@ func TestEveryPipelinesBuiltinResolvesToACapability(t *testing.T) {
 	if registerErr != nil {
 		t.Fatalf("register: %v", registerErr)
 	}
-	// The control: the engine has loaded all thirty-eight shipped pipeline builtins,
-	// including legacy log adoption and its scheduled enrollment (2026-11-08),
+	// The control: the engine has loaded all forty shipped pipeline builtins,
+	// including the two Pipelines settings saves (2026-11-12),
+	// legacy log adoption and its scheduled enrollment (2026-11-08),
 	// the private security report read and remediation-goal operations,
 	// channel configuration, schedule opt-in,
 	// connect preview, runner status, native merge-group review reporting,
@@ -858,8 +859,8 @@ func TestEveryPipelinesBuiltinResolvesToACapability(t *testing.T) {
 			executors++
 		}
 	}
-	if executors != 38 {
-		t.Fatalf("dsl/pipelines declares %d integration.pipelines builtins on this engine, want 38", executors)
+	if executors != 40 {
+		t.Fatalf("dsl/pipelines declares %d integration.pipelines builtins on this engine, want 40", executors)
 	}
 	if err := eng.AuditIntegrationExecutors(); err != nil {
 		t.Fatalf("the shipped DSL names a pipelines capability this integration does not offer: %v", err)

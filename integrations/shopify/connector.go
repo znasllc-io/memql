@@ -108,8 +108,9 @@ func connectorContext(ctx context.Context) context.Context {
 // The SYSTEM ACTOR is the cluster's own identity: RoleOwner (which is what the
 // `actor.isClusterOwner` conjunct and the clusterOwner tier are both asking),
 // Unranked and Synthetic. INTERNAL ORIGIN is again the @serverOnly axis --
-// `markStoreRedacted`, `recordStoreHealth` and the compliance mutations are all
-// server-only, and the identity alone does not satisfy that.
+// `recordStoreHealth`, the compliance mutations and the stamps of a store's
+// uninstall, reconnect, connect and redaction are all server-only, and the
+// identity alone does not satisfy that.
 //
 // It is composed here rather than inside auth.ContextWithSystemActor on
 // purpose: whose authority a call runs under, and whether the engine is the one

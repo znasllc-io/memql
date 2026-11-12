@@ -344,6 +344,48 @@ func TestAnErasedCustomersRowKeepsNothingButItsStructure(t *testing.T) {
 	}
 }
 
+// Every mirror row records the account it belongs to, its store's, in
+// accountId. The engine fills it in and the connector never states it, so it
+// is in no write the mapper makes; it says whose row this is and nothing about
+// a person. An erasure rebuilds each version from the fields its plan names,
+// and a plan that named only what the connector writes would take every row
+// it touched out of its account. The account is set here as the engine's own
+// assignment of existing rows sets it: in place, on the stored row.
+func TestAnErasureKeepsTheAccountARowBelongsTo(t *testing.T) {
+	f := newErasureFixture(t)
+	if f == nil {
+		return
+	}
+	customer, order := eraCustomerGID("151"), eraOrderGID("5151")
+	f.write("customer", adaCustomer("151", "2026-10-01T10:00:00Z"), seen)
+	f.write("customer", adaCustomer("151", "2026-10-02T10:00:00Z"), seen.Add(24*time.Hour))
+	f.write("order", bikeOrder("5151", customer, "2026-10-01T10:00:00Z"), seen)
+	const account = "account-of-the-erasure-test"
+	if _, err := f.db.ExecContext(context.Background(),
+		`UPDATE "MemoryNodes" SET payload = payload || jsonb_build_object('accountId', $2::text) WHERE payload->>'storeId' = $1`,
+		f.store, account); err != nil {
+		t.Fatal(err)
+	}
+
+	res := f.erase(customer)
+
+	if res.Versions == 0 {
+		t.Fatalf("the erasure changed nothing: %+v", res)
+	}
+	f.holdsNoWordOf("customer", customer, adaWords)
+	for _, row := range []struct{ concept, gid string }{{"customer", customer}, {"order", order}} {
+		versions := f.versions(row.concept, row.gid)
+		if len(versions) == 0 {
+			t.Fatalf("the mirror holds no %s %s", row.concept, row.gid)
+		}
+		for i, v := range versions {
+			if v["accountId"] != account {
+				t.Errorf("%s version %d: accountId = %v after the erasure, want %q: the row left its account", row.concept, i, v["accountId"], account)
+			}
+		}
+	}
+}
+
 // Customer 123 is erased. Customer 1234, whose id only begins the same, and an
 // order of customer 1234, are untouched byte for byte: the old match was a
 // substring of the row's text.
@@ -1227,6 +1269,183 @@ func TestAnErasureIsOfOneStore(t *testing.T) {
 		if text != before[key] {
 			t.Errorf("%s of the other store was changed by this store's erasure", key)
 		}
+	}
+}
+
+// An order the request names is hers to erase only if it is hers, or
+// nobody's, NOW (ruling 98). A request is compiled when its orders were the
+// customer's, and a job keeps the orders of every request it was ever asked;
+// one of them since moved to another person is that person's order. Named, it
+// used to be a seed whoever it named: it was scrubbed whole with its
+// children, and the other person's email and street were in her export.
+func TestAnOrderTheRequestNamesThatIsAnotherPersonsNowIsNotHers(t *testing.T) {
+	f := newErasureFixture(t)
+	if f == nil {
+		return
+	}
+	a, b, order := eraCustomerGID("9811"), eraCustomerGID("9812"), eraOrderGID("59811")
+	f.write("customer", adaCustomer("9811", "2026-10-01T10:00:00Z"), seen)
+	f.write("order", bikeOrder("59811", a, "2026-10-01T10:00:00Z"), seen)
+	bobs := bikeOrder("59811", b, "2026-10-05T10:00:00Z")
+	bobs["email"], bobs["note"] = "bob@example.com", "Bob collects it on Saturday"
+	bobs["billingAddress"] = map[string]any{"firstName": "Bob", "lastName": "Sample", "address1": "2 Sample Road", "city": "Sampleton"}
+	f.write("order", bobs, seen.Add(96*time.Hour))
+	// An order the request names that names nobody now is still a seed.
+	guest := bikeOrder("59812", "", "2026-10-01T10:00:00Z")
+	guest["customer"] = nil
+	f.write("order", guest, seen)
+	versions := f.texts("order", order)
+	before := f.allTexts()
+
+	export, err := f.conn.ExportCustomerData(context.Background(), Store{ID: f.store, Domain: "bicycles.example.com"}, a, []string{order, eraOrderGID("59812")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(export["rows"])
+	for _, theirs := range []string{"bob@example.com", "2 Sample Road", order} {
+		if strings.Contains(string(raw), theirs) {
+			t.Errorf("her export holds %q: the request names an order that is another person's now", theirs)
+		}
+	}
+	if !strings.Contains(string(raw), eraOrderGID("59812")) {
+		t.Errorf("her export does not hold the order the request names that names nobody now")
+	}
+
+	f.erase(a, order, eraOrderGID("59812"))
+
+	after := f.texts("order", order)
+	if after[len(after)-1] != versions[len(versions)-1] {
+		t.Errorf("the named order's newest version is Bob's and was changed:\n  before: %s\n  after:  %s", versions[len(versions)-1], after[len(after)-1])
+	}
+	if earlier := f.versions("order", order)[0]; earlier["email"] != RedactionMarker || earlier["customerGid"] != a {
+		t.Errorf("the version from when the named order was hers is %v, want it scrubbed by itself", earlier)
+	}
+	for key, text := range f.allTexts() {
+		if strings.HasPrefix(key, "customer ") || key == "order "+order || strings.Contains(key, "59812") {
+			continue
+		}
+		if text != before[key] {
+			t.Errorf("%s hangs from an order that is another person's now and was changed", key)
+		}
+	}
+	f.holdsNoWordOf("order", eraOrderGID("59812"), adaWords)
+}
+
+// A deleted customer whose last order is in scope is scrubbed BY ITSELF
+// (ruling 98). The link cannot tell a record merged into her from another
+// person the merchant deleted, whose row still points at an order that has
+// since become hers. So the row is scrubbed, and nothing is reached from it:
+// not his orders, not their children, not a row that names him; and it is
+// never in her export. He, his own order with its line items, transaction,
+// fulfilment and refund used to be scrubbed, and all of it exported to her.
+func TestADeletedCustomerWhoseLastOrderIsHersIsScrubbedByItself(t *testing.T) {
+	f := newErasureFixture(t)
+	if f == nil {
+		return
+	}
+	a, order := eraCustomerGID("9821"), eraOrderGID("59821")
+	b, c := eraCustomerGID("9822"), eraCustomerGID("9823")
+	f.write("customer", adaCustomer("9821", "2026-10-01T10:00:00Z"), seen)
+	f.write("order", bikeOrder("59821", a, "2026-10-01T10:00:00Z"), seen)
+	sample := func(n, first, last string) map[string]any {
+		row := adaCustomer(n, "2026-09-01T10:00:00Z")
+		row["firstName"], row["lastName"], row["displayName"] = first, "Sample", first+" Sample"
+		row["defaultEmailAddress"] = map[string]any{"emailAddress": strings.ToLower(first) + "@example.com"}
+		row["orders"], row["lastOrder"] = nil, map[string]any{"id": last}
+		return row
+	}
+	// Bob: the order was his and was moved to her; his row was never read
+	// again, and the merchant then deleted him.
+	f.write("customer", sample("9822", "Bob", order), seen.Add(-24*time.Hour))
+	if err := f.conn.writeMirror(context.Background(), tombstone("customer", f.store, b, seen.Add(time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	// An order the mirror still holds as Bob's own.
+	bobsOwn := bikeOrder("59850", b, "2026-09-01T10:00:00Z")
+	bobsOwn["email"], bobsOwn["note"] = "bob@example.com", "Bob's own order"
+	f.write("order", bobsOwn, seen.Add(-24*time.Hour))
+	// Cara: deleted, and her last order is somebody else's.
+	f.write("customer", sample("9823", "Cara", eraOrderGID("59899")), seen.Add(-24*time.Hour))
+	if err := f.conn.writeMirror(context.Background(), tombstone("customer", f.store, c, seen.Add(time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	before := f.allTexts()
+
+	export, err := f.conn.ExportCustomerData(context.Background(), Store{ID: f.store, Domain: "bicycles.example.com"}, a, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(export["rows"])
+	for _, his := range []string{"bob@example.com", "Bob Sample", b, eraOrderGID("59850"), "Bob's own order"} {
+		if strings.Contains(string(raw), his) {
+			t.Errorf("her export holds %q, which is a deleted customer's whose last order is hers now", his)
+		}
+	}
+
+	res := f.erase(a)
+
+	// His row is scrubbed, by itself.
+	f.holdsNoWordOf("customer", b, []string{"bob@example.com", "Bob", "Sample"})
+	if v := f.newest("customer", b); v["deleted"] != true || v["gid"] != b {
+		t.Errorf("the deleted customer's row lost its structure: %v", v)
+	}
+	if res.Alone != 1 {
+		t.Errorf("the erasure says it scrubbed %d deleted customer record(s) by themselves, want the one", res.Alone)
+	}
+	// Nothing is reached from it, and nobody else is touched.
+	for key, text := range f.allTexts() {
+		if key == "customer "+a || key == "customer "+b || strings.Contains(key, "59821") {
+			continue
+		}
+		if text != before[key] {
+			t.Errorf("%s was changed by her erasure: it is reached only through a deleted customer whose last order is hers", key)
+		}
+	}
+}
+
+// A metaobject keeps what its fields hold a second time, in one value by
+// key (values). An entry that names her is taken out there as well, and the
+// other keys stay; and an entry that names her in an EARLIER version of the
+// metaobject only is taken out of that version.
+func TestAMetaobjectLosesHerInItsValuesAsWell(t *testing.T) {
+	f := newErasureFixture(t)
+	if f == nil {
+		return
+	}
+	a := eraCustomerGID("9831")
+	f.write("customer", adaCustomer("9831", "2026-10-01T10:00:00Z"), seen)
+	const earlier, both = "gid://shopify/Metaobject/9841", "gid://shopify/Metaobject/9842"
+	entry := map[string]any{"key": "rider", "value": a, "jsonValue": a, "reference": map[string]any{"__typename": "Customer", "id": a}}
+	f.write("metaobject", map[string]any{
+		"id": earlier, "updatedAt": "2026-10-01T10:00:00Z", "displayName": "A rider's word", "handle": "earlier", "type": "testimonial",
+		"fields": []any{map[string]any{"key": "stars", "value": "5"}, entry},
+	}, seen)
+	f.write("metaobject", map[string]any{
+		"id": earlier, "updatedAt": "2026-10-05T10:00:00Z", "displayName": "A rider's word", "handle": "earlier", "type": "testimonial",
+		"fields": []any{map[string]any{"key": "stars", "value": "4"}},
+	}, seen.Add(96*time.Hour))
+	f.write("metaobject", map[string]any{
+		"id": both, "updatedAt": "2026-10-01T10:00:00Z", "displayName": "Another word", "handle": "both", "type": "testimonial",
+		"fields": []any{map[string]any{"key": "stars", "value": "5"}, entry},
+		"values": map[string]any{"stars": "5", "rider": a, "riders": []any{a, eraCustomerGID("9839")}},
+	}, seen)
+	if v := f.newest("metaobject", both); !strings.Contains(fmt.Sprint(v["values"]), a) {
+		t.Fatalf("the fixture's metaobject does not hold her in its values: %v", v["values"])
+	}
+
+	f.erase(a)
+
+	for _, gid := range []string{earlier, both} {
+		for i, text := range f.texts("metaobject", gid) {
+			if strings.Contains(text, a) {
+				t.Errorf("version %d of the metaobject %s still names her: %s", i, gid, text)
+			}
+		}
+	}
+	v := f.newest("metaobject", both)
+	values, _ := v["values"].(map[string]any)
+	if values["stars"] != "5" || len(values) != 2 || fmt.Sprint(values["riders"]) != "["+eraCustomerGID("9839")+"]" || v["displayName"] != "Another word" {
+		t.Errorf("the metaobject's values are %v, want the key that named her gone, her gid out of the list, and the rest as it was", v["values"])
 	}
 }
 

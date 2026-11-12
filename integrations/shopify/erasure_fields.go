@@ -1,6 +1,7 @@
 package shopify
 
 import (
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -70,11 +71,17 @@ type erasureDecision struct {
 }
 
 // erasureStructuralFields are the fields every mirror row carries for itself
-// (the mapper writes them; the generator's mirrorOwnFields is the same list).
-// An erasure never touches them: they say which row this is and when it was
-// read, and nothing about a person.
+// (the generator's mirrorOwnFields is the same list). The mapper writes all
+// of them but the last: accountId, the account the row belongs to, is filled
+// in by the engine from the row's store and is in no write the connector
+// makes. An erasure never touches them: they say which row this is, whose
+// account it is in and when it was read, and nothing about a person. The
+// scrub rebuilds a row from the keys its plan names and drops every other,
+// so a field of this kind that is missing here is taken off every row an
+// erasure rewrites.
 var erasureStructuralFields = []string{
 	"storeId", "gid", "updatedAt", "versionSource", "syncedAt", "versionReadAt", "deleted", "parentGid",
+	"accountId",
 }
 
 // erasureKeptScalars are the Admin scalar types a field is kept for, with what
@@ -443,7 +450,7 @@ var erasureNotALink = map[string]map[string]notALink{
 	"customer": {
 		"lastOrderGid": {
 			Why:             "another person's row can name an order that has since moved to the erased customer; a live customer row is another person",
-			FromADeletedRow: "a deleted customer whose last order is in scope was merged into the erased one: the same person's earlier record",
+			FromADeletedRow: "a deleted customer whose last order is in scope may be a record merged into the erased one; the row is scrubbed by itself, and nothing is reached from it, because it may as well be another deleted person whose pointer is stale",
 		},
 	},
 	"giftCard": {
@@ -480,6 +487,17 @@ var erasureCustomerTakenOut = map[string]map[string]string{
 	"metaobject": {
 		"fields":         "a merchant's own object with a field that refers to her: the object is the merchant's, the reference goes",
 		"thumbnailField": "the one field a metaobject shows for itself; when it refers to her it goes, and the object stays",
+		"values":         "the object's fields a second time, as one value by key: a key that refers to her goes, her gid goes from a key that lists several, and the other keys stay",
+	},
+}
+
+// erasureFreeFormLeft is the free-form values (scalars of Admin type JSON)
+// that are NOT taken her gid out of, each with the reason. A free-form value
+// can hold anything, and the model cannot say what; so every one of them is
+// on erasureCustomerTakenOut or here.
+var erasureFreeFormLeft = map[string]map[string]string{
+	"orderTransaction": {
+		"receiptJson": "the payment provider's receipt for one transaction: it is removed with the rest of the transaction when its order is in scope, and it carries the provider's references, not a customer's gid",
 	},
 }
 
@@ -511,7 +529,7 @@ func (l erasureLink) way() string {
 	}
 	way := "gid field " + l.Field + " naming " + l.Names
 	if l.FromADeletedRow {
-		way += ", from a deleted row only"
+		way += ", from a deleted row only, which is scrubbed by itself"
 	}
 	return way
 }
@@ -588,6 +606,11 @@ func theErasureModel() erasureModel {
 					if _, ok := erasureCustomerTakenOut[concept][f.Name]; ok {
 						takeOuts[concept] = append(takeOuts[concept], f.Name)
 					}
+				case generated.KindScalar:
+					// A free-form value an entry is taken out of.
+					if _, ok := erasureCustomerTakenOut[concept][f.Name]; ok {
+						takeOuts[concept] = append(takeOuts[concept], f.Name)
+					}
 				case generated.KindRefs:
 					// A list of references is never a link. One that can name
 					// a customer has her gid taken out of it.
@@ -657,6 +680,22 @@ func erasureTakeOutsOf(spec *generated.TypeSpec) []string {
 		return nil
 	}
 	return theErasureModel().takeOuts[spec.Concept]
+}
+
+// erasureFreeFormTakeOutsOf is the fields among erasureTakeOutsOf that are
+// free-form values: one JSON value by key, of which a key is taken out, where
+// the others are a list of entries or one entry.
+func erasureFreeFormTakeOutsOf(spec *generated.TypeSpec) []string {
+	var out []string
+	if spec == nil {
+		return out
+	}
+	for _, f := range spec.Fields {
+		if f.Kind == generated.KindScalar && slices.Contains(erasureTakeOutsOf(spec), f.Name) {
+			out = append(out, f.Name)
+		}
+	}
+	return out
 }
 
 // erasureReach is what an erasure can reach, concept by concept: the ways a

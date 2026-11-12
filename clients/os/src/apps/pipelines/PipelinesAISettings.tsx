@@ -23,13 +23,15 @@ import { usePaneActive } from "../deployables/paneActivity";
 // reverse) would misstate what the next run does.
 //
 // ===========================================================================
-// A SAVE WRITES THE WHOLE OBJECT, UNDER THE ROW'S OWN ID
+// A SAVE SENDS BOTH SWITCHES TO THE ENGINE, WHICH WRITES THE ROW
 // ===========================================================================
-// Each toggle writes both keys through `setGlobalVariable`, so the stored value
-// is always one this page can read back. The id is the existing row's, or the
-// seeder's derivation (`var-global-<slug>`) when there is none yet: the
-// resolver looks rows up by NAME, and a second id would add a second row with
-// the same name rather than update the first.
+// Each toggle calls `pipelinesAISettingsSave` with both switches. The engine
+// owns the row: the variable's name, the row a save updates and the stored
+// JSON are derived there (component/pipelinerun settings.go), so the stored
+// value is always one this page can read back and a second row under the same
+// name is never added. A configuration variable is written by a cluster owner
+// or by the engine on behalf of a caller it has authorized, which is why this
+// is not `setGlobalVariable`: a developer's own write of that row is refused.
 //
 // ===========================================================================
 // THE SWITCHES SHOW WHAT THE CLUSTER HOLDS
@@ -43,17 +45,14 @@ import { usePaneActive } from "../deployables/paneActivity";
 //
 // Reads follow the concept's graph events, reconnection and app resume
 // (`useGraphRevision`), and stop while the pane is hidden. There is no role
-// gate here: who may write is the engine's decision, and a refusal is shown in
-// the engine's own words.
+// gate here: who may save is the engine's decision (the settings part of the
+// Pipelines app, held by owner and developer), and a refusal is shown in the
+// engine's own words.
 //
 // Regression tests: test/pipelines/aiSettings.test.tsx.
 
 /** The global variable holding the switches (`pipelines.AISettingsVariable`). */
 const PIPELINES_AI_VARIABLE = "MEMQL_PIPELINES_AI";
-/** The seeder's row id for that variable, used only while no row exists. */
-const PIPELINES_AI_ROW_ID = "var-global-memql-pipelines-ai";
-const PIPELINES_AI_DESCRIPTION =
-  "Pipeline AI features: independent pull-request review and failed-run diagnosis. Off unless turned on here.";
 
 export interface PipelinesAI {
   /** A model reviews a pull request after its checks pass; a rejection fails the check. */
@@ -89,37 +88,24 @@ export function parsePipelinesAI(raw: string): PipelinesAI {
   return out;
 }
 
-/** The value a save writes: both keys, always. */
-function serializePipelinesAI(settings: PipelinesAI): string {
-  return JSON.stringify({ review: settings.review, diagnosis: settings.diagnosis });
-}
-
 function sameAI(a: PipelinesAI, b: PipelinesAI): boolean {
   return a.review === b.review && a.diagnosis === b.diagnosis;
 }
 
 interface StoredAI {
-  /** The row a save updates: the stored row's id, or the seeder's. */
-  id: string;
   settings: PipelinesAI;
 }
 
 async function readPipelinesAI(query: QueryClient, signal?: AbortSignal): Promise<StoredAI> {
   const result = await query.globalVariable({ name: PIPELINES_AI_VARIABLE }, signal ? { signal } : undefined);
   const raw = result.rows()[0];
-  if (raw === undefined) return { id: PIPELINES_AI_ROW_ID, settings: PIPELINES_AI_OFF };
-  const row = flatten(raw);
-  return { id: rowString(row, "id") || PIPELINES_AI_ROW_ID, settings: parsePipelinesAI(rowString(row, "value")) };
+  if (raw === undefined) return { settings: PIPELINES_AI_OFF };
+  return { settings: parsePipelinesAI(rowString(flatten(raw), "value")) };
 }
 
-async function writePipelinesAI(query: QueryClient, id: string, settings: PipelinesAI): Promise<void> {
-  await query.setGlobalVariable({
-    id,
-    name: PIPELINES_AI_VARIABLE,
-    value: serializePipelinesAI(settings),
-    description: PIPELINES_AI_DESCRIPTION,
-    active: true,
-  });
+/** Both switches, always: the engine writes them as one value. */
+async function writePipelinesAI(query: QueryClient, settings: PipelinesAI): Promise<void> {
+  await query.pipelinesAISettingsSave({ review: settings.review, diagnosis: settings.diagnosis });
 }
 
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -202,7 +188,7 @@ export function PipelinesAISettings() {
     setFailure(null);
     let failed: SaveFailure | null = null;
     try {
-      await writePipelinesAI(query, stored.id, choice);
+      await writePipelinesAI(query, choice);
     } catch (err) {
       const interrupted = isTransportInterruption(err);
       failed = { choice, base: stored.settings, interrupted, detail: interrupted ? "" : messageOf(err) };

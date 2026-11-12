@@ -378,11 +378,12 @@ export function coverageSentence(c: ConnectorCoverage): string {
     return `${c.reported} of ${c.concepts} ${noun}${ofStores} have reported. The rest have no measurement, which is not the same as no lag.`;
   }
   if (c.paused === c.concepts) {
-    // A DOMAIN'S PAUSE STOPS ITS RUNNERS AND ITS DRAIN, NOT ITS DELIVERIES:
-    // the dispatcher never reads the sync-state row, so a change the origin
-    // sends is applied. Holding deliveries is the Store page's pause, a
-    // store's, not this switch.
-    return `Every concept${ofStores} is paused: no backfill, check or outbound change runs. Changes the origin sends are still applied.`;
+    // A DOMAIN'S PAUSE STOPS ITS BACKFILL AND ITS PERIODIC CHECK, AND NOTHING
+    // ELSE: the dispatcher never reads the sync-state row, so a change the
+    // origin sends is applied, and the outbound drain never reads it either,
+    // so a change waiting to be pushed is pushed. Holding deliveries is the
+    // Store page's pause, a store's, not this switch.
+    return `Every concept${ofStores} is paused: no backfill or check runs. Changes the origin sends are still applied.`;
   }
   if (c.paused > 0) {
     return `All ${c.concepts} ${noun}${ofStores} have reported; ${c.paused} ${c.paused === 1 ? "is" : "are"} paused.`;

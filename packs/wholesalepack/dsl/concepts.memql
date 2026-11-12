@@ -82,6 +82,7 @@
 @displayCard(primary="companyName", secondary="applicantEmail", tertiary="storeId")
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept application {
   ownerUserId    string!   @description("v1:identity:user.id of the MERCHANT this application belongs to -- the owner of the deployable it was submitted through, NOT the applicant. A shopper is nobody to MemQL: they have no user row, no session and no actor (epic memql#5532, issue memql#5550), so the applicant is applicantName and applicantEmail below and nothing else. On the shopper path this stamps from actor.userId under the site owner's BORROWED authority; on the authenticated path it is the calling user, which is what an operator or an importing job writes as.")
   storeId        string!   @description("The v1:shopify:store this application was made against (design D9). Stamped server-side from the binding the write arrived through -- the serving binding, or the PREVIEW binding when the submission was made while exercising a candidate version -- and never accepted from a form: component/memql/shopper_surface.go refuses a declared field with this name, and the bff stamps it after the declared fields so a form-supplied copy cannot win. Every storefront read filters on it.")
@@ -99,6 +100,7 @@ concept application {
 @displayCard(primary="transition", secondary="applicationId", tertiary="decidedBy")
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept applicationDecision {
   applicationId string!  @description("v1:wholesale:application.id this decision applies to.")
   storeId       string!  @description("The store the decided application belongs to (design D9), copied from that application by the Go capability rather than supplied. A decision scoped to a store its subject is not on would be a decision against somebody else's trade desk.")
@@ -108,6 +110,7 @@ concept applicationDecision {
   accountId     string   @description("The application's organization, copied off it, never supplied. Empty for a decision on an untied application.")
   principalKind enum("client")!  @description("The only expressible principal kind is client. provider is inexpressible -- the enum does not contain it.")
   note          string   @description("Optional client-visible reason. THE ONE FREE-TEXT FIELD IN THE PACK, and it earns its place: append-only storage is only worth having if the reason a decision was made is still there after the next one.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }
 
 @version("1.1.0")
@@ -115,6 +118,7 @@ concept applicationDecision {
 @displayCard(primary="state", secondary="buyerEmail", tertiary="adapter")
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept entitlement {
   ownerUserId   string!  @description("v1:identity:user.id of the merchant who granted this. Same owner as the application it came from.")
   applicationId string!  @description("v1:wholesale:application.id this entitlement was granted against. One entitlement per application.")
@@ -135,6 +139,7 @@ concept entitlement {
 @displayCard(primary="applicationsOpen", secondary="entitlementAdapter", tertiary="storeId")
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept wholesaleSettings {
   ownerUserId        string!  @description("v1:identity:user.id of the Client that owns this storefront's wholesale settings.")
   storeId            string!  @description("The store these settings govern (design D9). ONE ROW PER STORE, at the derived id wholesale:settings:<storeId>, because a merchant with a live store and a development store must be able to take applications on one while they are closed on the other -- which is the whole of what previewing a storefront means.")
@@ -154,6 +159,7 @@ concept wholesaleSettings {
 @displayCard(primary="label", secondary="kind", tertiary="storeId")
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept documentVersion {
   ownerUserId  string!  @description("v1:identity:user.id of the store's merchant: the owner of the site the version was published through. The tier's owner arm.")
   storeId      string!  @description("The store this document belongs to (design D9), in the bare form the pack writes its new rows in. A reader asks every form of the store id.")
@@ -171,6 +177,7 @@ concept documentVersion {
 @displayCard(primary="purpose", secondary="applicationId", tertiary="expiresAt")
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept privateLink {
   ownerUserId    string!    @description("v1:identity:user.id of the application's merchant, copied off the application in canonical form. The shopper path reads the link under the site owner's borrowed authority, which is this person.")
   storeId        string!    @description("The store the application belongs to (design D9), in the bare form the pack writes its new rows in. A token is looked up only within the store the request arrived for, so a token of another store finds nothing.")
@@ -189,6 +196,7 @@ concept privateLink {
 @displayCard(primary="signedName", secondary="applicationId", tertiary="acceptedAt")
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept acceptance {
   ownerUserId     string!    @description("v1:identity:user.id of the application's merchant, copied off the application in canonical form.")
   storeId         string!    @description("The store the application belongs to (design D9), in the bare form the pack writes its new rows in.")

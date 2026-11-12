@@ -101,6 +101,13 @@ const (
 	mStageServerOutboundRequest   = "stageServerOutboundRequest"   // (requestId, medium, target, subject?, body, dedupeKey?, requestedBy?)
 	mStageOutboundRequestToSecret = "stageOutboundRequestToSecret" // (requestId, targetSecret, subject?, body, dedupeKey?, requestedBy?)
 	qOutboundRequestByID          = "outboundRequestById"          // (requestId)
+
+	// The platform's variable constructs (dsl/platform): an installation-wide
+	// setting is a v1:platform:globalVariable row (settings.go). The read is
+	// person-facing and the caller's own; the write is the caller's too, and
+	// stamped, once the settings capability has admitted them.
+	qGlobalVariable    = "globalVariable"    // (name)
+	mSetGlobalVariable = "setGlobalVariable" // (id, name, value, description, active)
 )
 
 // systemActorName is who the server-only reads are made as:
@@ -130,6 +137,12 @@ type dslStore struct {
 //     (stamped);
 //   - as this package's own SYSTEM actor, stamped: systemRead, a server-only
 //     read, and systemWrite, a write to a row with no owner to borrow.
+//
+// And one write as the CALLER, stamped: SaveSetting, an installation-wide
+// setting's row, after the settings capability has admitted the caller
+// (settings.go). The row is the deployment's and no person owns it, so there is
+// no owner to borrow, and the caller's own actor stays on the write so the row
+// records who saved it.
 //
 // The stamp itself is applied in ONE place, executeInternal.
 
@@ -217,6 +230,57 @@ func (s *dslStore) systemWrite(ctx context.Context, name string, args map[string
 		return err
 	}
 	_, err = s.executeInternal(auth.ContextWithSystemActor(ctx, systemActorName), name, query)
+	return err
+}
+
+// ActiveSettingRows implements SettingsStore: every active row carrying name,
+// as the CALLER and unstamped -- a variable's row is readable by every caller,
+// so nothing is gained by reading it as anyone else -- and fresh, because the
+// answer decides which row the save writes and this node's result cache may
+// hold a row another replica has since replaced.
+func (s *dslStore) ActiveSettingRows(ctx context.Context, name string) ([]SettingRow, error) {
+	rows, err := s.callerRead(memql.ContextWithFreshRead(ctx), qGlobalVariable, map[string]any{"name": name})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SettingRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, SettingRow{
+			ID:          bareID(rowString(row, "id")),
+			Name:        rowString(row, "name"),
+			Value:       rowString(row, "value"),
+			Description: rowString(row, "description"),
+		})
+	}
+	return out, nil
+}
+
+// SaveSetting implements SettingsStore: one setGlobalVariable under the
+// CALLER's own actor, stamped internal.
+//
+// THE STAMP, AND WHAT EARNS IT. A v1:platform:globalVariable row is written by
+// a cluster owner or by server code that has authorized its caller and stamps
+// internal origin for the write (component/memql
+// platform_variable_write_guard.go). The settings capabilities admit a
+// developer as well as an owner, so the write is the second kind. It is reached
+// only from Integration.saveSetting, downstream of settingsAuthorized in that
+// function, and what it can write is bounded there: the name is one of the two
+// pipelines settings, the id is that setting's own row, and the value is the
+// engine's own encoding of the switches the caller sent. The caller's actor is
+// KEPT, so `createdBy` names who saved it. settings_test.go holds the order,
+// the actor and the stamp; settings_db_test.go holds that the engine admits it.
+func (s *dslStore) SaveSetting(ctx context.Context, row SettingRow) error {
+	query, err := render("mutation", mSetGlobalVariable, map[string]any{
+		"id":          row.ID,
+		"name":        row.Name,
+		"value":       row.Value,
+		"description": row.Description,
+		"active":      true,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = s.executeInternal(ctx, mSetGlobalVariable, query)
 	return err
 }
 

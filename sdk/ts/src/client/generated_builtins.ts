@@ -5,6 +5,47 @@ import { QueryClient, type QueryCallOptions } from "./query.js";
 import type { Result } from "./types.js";
 import { renderMemQLValue } from "./memqlValue.js";
 
+/** How the assignment of existing rows to accounts is going: one {kind: "switch", enabled, held} (enabled is the cluster's switch, held is this node's MEMQL_ACCOUNT_STAMPING_ACTIVATE=false), one {kind: "progress", ...} per concept the job has worked on, one {kind: "account", accountId, rows} per account holding rows, and up to 200 unresolved {kind: "conflict", ...}, newest first. */
+export interface AccountAssignmentStatusArgs {
+}
+
+export function buildAccountAssignmentStatus(args: AccountAssignmentStatusArgs): string {
+  void args;
+  return "builtin accountAssignmentStatus()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    accountAssignmentStatus(args?: AccountAssignmentStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.accountAssignmentStatus = function (this: QueryClient, args: AccountAssignmentStatusArgs = {} as AccountAssignmentStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("accountAssignmentStatus", buildAccountAssignmentStatus(args), opts);
+};
+
+/** What one account holds: one row per concept that declares an account form and holds at least one row for it ({kind: "concept", concept, namespace, name, rows, versions}, by namespace then name), then one {kind: "files", bytes} with the summed size of its current, unarchived Library files. Either spelling of the id is accepted; an empty or unknown account is refused. */
+export interface AccountInventoryArgs {
+  /** The account, as its bare id or v1:accounts:account:<bare>. */
+  accountId: string;
+}
+
+export function buildAccountInventory(args: AccountInventoryArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  return "builtin accountInventory(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    accountInventory(args: AccountInventoryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.accountInventory = function (this: QueryClient, args: AccountInventoryArgs = {} as AccountInventoryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("accountInventory", buildAccountInventory(args), opts);
+};
+
 /** Ask what kind of tree a zip in the caller's Library is (epic memql#4885, D11). Opens it through the same fetch a deploy uses -- the caller's own bytes, expanded by OpenZip under the packages limits, so a zip the deploy would refuse is refused here by the same code -- and answers {isPackage, isBuiltSite, fileCount, totalBytes}. isPackage: memql-package.yaml sits at the root, and the package path takes it from here. isBuiltSite: index.html sits at the root and there is no manifest, and the hand-made path takes it and asks for the kind. Neither: the zip is something else, commonly a folder wrapping the site one level down. fileCount and totalBytes are counted over the opened tree. Writes nothing; the artifact stays exactly the Library row it was. */
 export interface ArtifactProbeArgs {
   /** The v1:library:artifact index row of the zip to probe. */
@@ -4538,6 +4579,31 @@ QueryClient.prototype.packageSourceRegister = function (this: QueryClient, args:
   return this.executeNamed("packageSourceRegister", buildPackageSourceRegister(args), opts);
 };
 
+/** Save both installation-wide pipeline AI switches, the ones Pipelines > Settings > AI shows. The switches are one configuration variable (MEMQL_PIPELINES_AI), and a variable's row is written by a cluster owner or by server code that has authorized its caller, so the page saves through this and never through setGlobalVariable. The caller sends the two switches and nothing else: the variable's name, its row and the stored JSON are the engine's. */
+export interface PipelinesAISettingsSaveArgs {
+  /** AI review of pull requests: after every check of a pull request passes, a model reviews the change and a rejection fails the run's check. */
+  review: boolean;
+  /** AI diagnosis of failed runs: the installed maintenance policy may open an AI analysis goal for a run's first failure. */
+  diagnosis: boolean;
+}
+
+export function buildPipelinesAISettingsSave(args: PipelinesAISettingsSaveArgs): string {
+  const parts: string[] = [];
+  parts.push("review: " + renderMemQLValue(args.review));
+  parts.push("diagnosis: " + renderMemQLValue(args.diagnosis));
+  return "builtin pipelinesAISettingsSave(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesAISettingsSave(args: PipelinesAISettingsSaveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesAISettingsSave = function (this: QueryClient, args: PipelinesAISettingsSaveArgs = {} as PipelinesAISettingsSaveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesAISettingsSave", buildPipelinesAISettingsSave(args), opts);
+};
+
 /** Ask one of the caller's pipeline runs to stop. It flags the row and ends nothing itself: the agent driving the run reads the flag at its next heartbeat, cancels what is executing and concludes the run cancelled. A queued run no agent has claimed is concluded cancelled on the spot. */
 export interface PipelinesCancelArgs {
   /** The v1:pipelines:run to stop. Must be the caller's own. */
@@ -4937,6 +5003,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.pipelinesRunRelease = function (this: QueryClient, args: PipelinesRunReleaseArgs = {} as PipelinesRunReleaseArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("pipelinesRunRelease", buildPipelinesRunRelease(args), opts);
+};
+
+/** Save the installation-wide weekly security scans switch, the one Pipelines > Settings > Security shows (MEMQL_PIPELINES_SECURITY). Server-side for the reason pipelinesAISettingsSave gives. A setting carried by more than one active row is refused: the engine reads that as no consent, and a save that changed one row would leave the other deciding. */
+export interface PipelinesSecuritySettingsSaveArgs {
+  /** True allows weekly security scans; false stops new ones. */
+  enabled: boolean;
+}
+
+export function buildPipelinesSecuritySettingsSave(args: PipelinesSecuritySettingsSaveArgs): string {
+  const parts: string[] = [];
+  parts.push("enabled: " + renderMemQLValue(args.enabled));
+  return "builtin pipelinesSecuritySettingsSave(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesSecuritySettingsSave(args: PipelinesSecuritySettingsSaveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesSecuritySettingsSave = function (this: QueryClient, args: PipelinesSecuritySettingsSaveArgs = {} as PipelinesSecuritySettingsSaveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesSecuritySettingsSave", buildPipelinesSecuritySettingsSave(args), opts);
 };
 
 /** Read pipeline configuration and each workbench's last runner isolation verdict. This read never starts a build or an isolation probe. Restricted to cluster operators. */
@@ -7124,7 +7212,7 @@ QueryClient.prototype.shopifyRevokeWholesale = function (this: QueryClient, args
   return this.executeNamed("shopifyRevokeWholesale", buildShopifyRevokeWholesale(args), opts);
 };
 
-/** Run the privacy jobs that are due: export what the mirror holds on a customer to the store owner's Library, erase a customer from every version of every row of the person and from the store's processed deliveries, purge a redacted shop's mirror with its sync state and its staged deliveries. Every erasure is made twice, an hour apart, and a job that fails is run again at every run until it is done. Every pass that ran is audited. A shop's purge reads the store as it is now and asks it first, and deletes only when the origin refuses the app outright, so a reverted uninstall does not cost the mirror. For the scheduled automation or a cluster owner; anybody else is refused before anything runs. */
+/** Run the privacy jobs that are due: export what the mirror holds on a customer to the store owner's Library (nothing, once she has been erased), erase a customer from every version of every row of the person and from the store's processed deliveries, purge a redacted shop's mirror with its sync state and its staged deliveries. Every erasure is made twice, an hour apart, and a job that fails is run again at every run until it is done. Every pass that ran is audited. A shop's purge reads the store as it is now: a store whose row records the uninstall is purged, and any other is asked first and purged only when the origin refuses the app outright, so a reverted uninstall does not cost the mirror; a purge that is skipped queues the store's backfills that have not started. The deliveries that asked for a job are deleted when it is done. For the scheduled automation or a cluster owner; anybody else is refused before anything runs. */
 export interface ShopifyRunComplianceJobsArgs {
 }
 

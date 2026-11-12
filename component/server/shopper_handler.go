@@ -126,10 +126,14 @@ type ShopperSite struct {
 	ShopperForms   bool
 	StoreID        string
 	PreviewStoreID string
-	// AccountID is the organization the site belongs to, stamped into the
-	// rows a shopper writes so the people of that organization may read
-	// them. Empty for a site with no organization, which is a legitimate
-	// state: the rows are then written with none, as before.
+	// AccountID is the account the site belongs to, as the site row records
+	// it, or "" for a site with none, which is a legitimate state. It is never
+	// answered to anybody. It has two uses. It says which account a declared
+	// construct acts in (shopperContext), so what a shopper submits is
+	// recorded in the account of the storefront they submitted it on. And it
+	// is stamped into the rows a shopper writes through a form that takes it
+	// (memql.ShopperAccountIDArg), so the people of that organization may read
+	// them; a site with none writes those rows with none.
 	AccountID string
 }
 
@@ -206,6 +210,29 @@ func (h *ShopperHandler) resolveSite(ctx context.Context, stamp shopperStamp) *S
 		return nil
 	}
 	return site
+}
+
+// shopperContext is the context every declared construct of this surface runs
+// under: the site owner's BORROWED AUTHORITY, acting in the SITE'S ACCOUNT.
+//
+// The two are separate facts and only the first comes from the owner. The
+// merchant owns what is written through their storefront, so the actor is
+// theirs. The account is the site's, read off the row resolveSite re-derived
+// under that owner, because the owner's own account is not a reliable stand-in
+// for it: an operator owns the storefronts of several clients and acts in the
+// primary account, and a person in more than one account acts in the one they
+// joined first. Left to the actor, a review a shopper left on one client's site
+// would be recorded in an account that client has nothing to do with.
+//
+// Nothing a request sent reaches either. The owner is the edge's stamp, checked
+// by the read it was used to make, and the account is a field of the row that
+// read returned. A site with no account states none (an empty id leaves the
+// context as it is), and the engine then resolves the account from the borrowed
+// owner, as it did before a site's account was stated here.
+//
+// Never internal origin, for the reason the call sites give.
+func shopperContext(ctx context.Context, owner string, site *ShopperSite) context.Context {
+	return auth.ContextWithCallAccount(auth.ContextWithUserActor(ctx, owner), site.AccountID)
 }
 
 // parseShopperRoute splits "{prefix}{pack}/{name}".
@@ -322,7 +349,8 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 	// storefront, and the shopper is data on it. Never internal origin --
 	// that would put every @serverOnly construct within reach of a public
 	// form, which is the opposite of what a narrowly declared surface means.
-	ctx := auth.ContextWithUserActor(r.Context(), stamp.owner)
+	// And in the site's account, which shopperContext reads off the row.
+	ctx := shopperContext(r.Context(), stamp.owner, site)
 	// EVIDENCE ONLY FOR A FORM THAT ASKED FOR IT (X20), on the context and never
 	// in the arguments, so nothing posted can stand in for it: the address the
 	// edge saw, and the browser's User-Agent cut to its bound.
@@ -463,7 +491,10 @@ func (h *ShopperHandler) serveRead(w http.ResponseWriter, r *http.Request) {
 		writeShopperJSONError(w, http.StatusInternalServerError, shopperReasonFailed)
 		return
 	}
-	result, err := h.engine.Execute(auth.ContextWithUserActor(r.Context(), stamp.owner), call)
+	// The same context a form's construct runs under, account included: a
+	// declared read may be a builtin, and what a builtin writes is recorded in
+	// the site's account like anything else that arrives through the site.
+	result, err := h.engine.Execute(shopperContext(r.Context(), stamp.owner, site), call)
 	if err != nil {
 		h.logger.Warn("shopper surface: the read was refused",
 			"component", "server", "pack", pack, "read", name, "site", site.ID, "err", err)

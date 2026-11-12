@@ -1013,7 +1013,6 @@ query ShopifyListCatalog($first: Int!, $after: String, $query: String) {
 		Scopes:         []string{"read_publications"},
 		VersionField:   "",
 		Fields: []FieldSpec{
-			{Name: "accountId", GraphQL: "accountId", Kind: "scalar", DSLType: "string", Extract: "accountId", AdminType: "String"},
 			{Name: "accountName", GraphQL: "accountName", Kind: "scalar", DSLType: "string", Extract: "accountName", AdminType: "String"},
 			{Name: "activeRegions", GraphQL: "activeRegions", Kind: "scalarList", DSLType: "[]string", Extract: "activeRegions", AdminType: "CountryCode"},
 			{Name: "app", GraphQL: "app", Kind: "object", DSLType: "object", Extract: "app", AdminType: "App", GidsInside: []string{"Channel"}},
@@ -1022,6 +1021,7 @@ query ShopifyListCatalog($first: Int!, $after: String, $query: String) {
 			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
 			{Name: "productsCount", GraphQL: "productsCount", Kind: "object", DSLType: "object", Extract: "productsCount", AdminType: "Count"},
 			{Name: "resourceFeedback", GraphQL: "resourceFeedback", Kind: "object", DSLType: "object", Extract: "resourceFeedback", AdminType: "AppFeedback", GidsInside: []string{"Channel"}},
+			{Name: "sourceAccountId", GraphQL: "accountId", Kind: "scalar", DSLType: "string", Extract: "accountId", AdminType: "String"},
 			{Name: "specificationHandle", GraphQL: "specificationHandle", Kind: "scalar", DSLType: "string", Extract: "specificationHandle", AdminType: "String"},
 			{Name: "supportsFuturePublishing", GraphQL: "supportsFuturePublishing", Kind: "scalar", DSLType: "bool", Extract: "supportsFuturePublishing", AdminType: "Boolean"},
 		},
@@ -1038,7 +1038,6 @@ query ShopifyFetchChannel($id: ID!) {
     __typename
     ... on Channel {
       id
-      accountId
       accountName
       activeRegions
       app { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
@@ -1047,6 +1046,7 @@ query ShopifyFetchChannel($id: ID!) {
       name
       productsCount { count precision }
       resourceFeedback { app { apiKey appStoreAppUrl appStoreDeveloperUrl description developerName developerType embedded features handle id installUrl isPostPurchaseAppInUse previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published shopifyDeveloped title uninstallMessage webhookApiVersion } channel { id } feedbackGeneratedAt link { label url } messages { field message } state }
+      accountId
       specificationHandle
       supportsFuturePublishing
     }
@@ -1058,7 +1058,6 @@ query ShopifyListChannel($first: Int!, $after: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
-      accountId
       accountName
       activeRegions
       app { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
@@ -1067,6 +1066,7 @@ query ShopifyListChannel($first: Int!, $after: String) {
       name
       productsCount { count precision }
       resourceFeedback { app { apiKey appStoreAppUrl appStoreDeveloperUrl description developerName developerType embedded features handle id installUrl isPostPurchaseAppInUse previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published shopifyDeveloped title uninstallMessage webhookApiVersion } channel { id } feedbackGeneratedAt link { label url } messages { field message } state }
+      accountId
       specificationHandle
       supportsFuturePublishing
     }

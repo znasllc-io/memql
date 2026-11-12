@@ -1,0 +1,10 @@
+/// A support ticket raised by a customer, shared with its account's members
+/// and declared cluster-wide.
+@belongsTo(cluster)
+@rowAuthz(owner="ownerUserId", account="accountId")
+concept ticket {
+  ownerUserId  string
+  accountId    string
+  title        string
+  status       string
+}

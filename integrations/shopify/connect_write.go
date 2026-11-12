@@ -465,6 +465,10 @@ func (c *Connector) markReconnected(ctx, opCtx context.Context, storeID string, 
 	if _, err := c.engine.Execute(opCtx, renderCall("markStoreReconnected", args)); err != nil {
 		return err
 	}
+	// The delivery that carried the uninstall is deleted now that the store
+	// is connected again: the same notice after another uninstall must be a
+	// new delivery (compliance.go, forgetUninstallDelivery).
+	c.forgetUninstallDelivery(ctx, prior)
 	at := c.now().UTC()
 	detail := map[string]any{"shopDomain": prior.Domain}
 	if prior.UninstalledAt != "" {

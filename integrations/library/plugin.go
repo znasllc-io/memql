@@ -2,7 +2,6 @@ package library
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"github.com/znasllc-io/memql/component/fileprocessor"
@@ -29,14 +28,11 @@ func init() {
 		}
 		i := NewIntegration(pctx.Engine, pctx.GateDB)
 		i.SetLogger(pctx.Logger)
-		// The raw handle libraryRemoveArtifact deletes on (remove_artifact.go).
-		if pctx.BunDB != nil {
-			i.SetDatabase(func() *sql.DB {
-				if db := pctx.BunDB(); db != nil {
-					return db.DB
-				}
-				return nil
-			})
+		// libraryRemoveArtifact runs its statements on the engine's maintenance
+		// session and on nothing else (remove_artifact.go). A node that offers
+		// none leaves it unset, and the removal then refuses, saying so.
+		if pctx.OpenMaintenanceSession != nil {
+			i.SetMaintenanceSession(pctx.OpenMaintenanceSession)
 		}
 		if err := i.setTrainingReader(pctx); err != nil {
 			return nil, err

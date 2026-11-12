@@ -1,0 +1,16 @@
+/// The support desk's opening hours: one row for the whole deployment.
+@belongsTo(cluster)
+concept supportHours {
+  opensAt   string
+  closesAt  string
+}
+
+/// A change to the opening hours, following a row that is inside no account.
+@belongsTo(account, via="hoursId")
+concept hoursChange {
+  accountId  string
+  hoursId    string
+  reason     string
+
+  @relationship(type="parent", field="hoursId", target=supportHours, direction="outgoing")
+}

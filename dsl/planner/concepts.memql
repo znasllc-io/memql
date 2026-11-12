@@ -16,6 +16,7 @@ use identity.concepts.{ user }
 /// the loop). Replaces the retired standingTask concept -- recurring directives carry the same cron
 /// schedule + soft-disable + last-run bookkeeping standingTask had.
 @displayCard(primary="statement", secondary="trigger", tertiary="scopePartitionId", status="status")
+@belongsTo(account)
 concept responsibility {
   ownerUserId       string! @description("v1:identity:user.id who authored this responsibility. Per-row authz owner; output posts into this user's surfaces. Server-stamped from actor.userId at create -- never caller-supplied.")
   statement         string! @description("Human-readable directive the agent acts on (e.g. 'Every Monday morning summarize last week's marketing performance'). The user's words; shown on cards + settings UIs and fed into the agent's prompt at evaluation/run time.")
@@ -35,6 +36,7 @@ concept responsibility {
   intakeResponse    object  @description("The user's answers to intakeRequest, folded back by foldResponsibilityIntakeAnswers (issue #637): {answers:[{id, answer}], respondedAt}. Carried for audit; the dispatcher uses it to re-infer the final field set before flipping the row to active.")
   lastEvaluatedAt   datetime @description("Last time the evaluator/runner fired this responsibility (reactive: last condition check; recurring: last scheduled tick; standing: last review). Empty means it has never run. Set by recordResponsibilityEvaluation.")
   lastResult        string  @description("Headline of the most recent evaluation/run's result. UI surface for 'last output' widgets. Set by recordResponsibilityEvaluation.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="assignedAgentId", target=agent, direction="outgoing")

@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CopyField } from "../src/kit";
+import { renderBeforeEffects } from "./renderBeforeEffects";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
@@ -70,5 +71,18 @@ describe("copying a whole command field", () => {
     view.rerender(<CopyField value="new" label="the command" />);
     await act(async () => resolve());
     expect(screen.queryByRole("button", { name: "Copied" })).toBeNull();
+  });
+
+  it("keeps the confirmation of a copy that finishes before its mount effects run", async () => {
+    let finish!: () => void;
+    clipboard(vi.fn(() => new Promise<void>(done => { finish = done; })));
+    const view = await renderBeforeEffects(<CopyField value="command" label="the command" />);
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Copy the command" }));
+      await act(async () => finish());
+      expect(screen.getByRole("button", { name: "Copied" })).toBeTruthy();
+    } finally {
+      view.unmount();
+    }
   });
 });

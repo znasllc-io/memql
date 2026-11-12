@@ -19,6 +19,7 @@ use wholesale.concepts.{ application }
 @description("Northwind's own field on a wholesale application: the federal tax identifier a US distributor is required to collect. Northwind's, not the pack's -- the next client will not collect one.")
 @displayCard(primary="ein", secondary="applicationId")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept northwindTaxDetail {
   ownerUserId    string!  @description("The merchant this detail belongs to.")
   applicationId  string!  @description("The v1:wholesale:application this is about.")

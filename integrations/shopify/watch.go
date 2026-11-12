@@ -127,6 +127,10 @@ type recordedVerdict struct {
 	RecoveredFor string
 	AlertState   string
 	AlertReason  string
+	// PrivacyOnly says that at every pass of the episode the one reason was
+	// a failing privacy request: the store was recorded all along. It is
+	// carried after the episode ends, for the recovery mail to read.
+	PrivacyOnly bool
 	// FirstRecordedAt is when a verdict was first recorded for the store. It
 	// is written once, by the pass that records the first one, and carried by
 	// every record after it: a store with no connection time measures a late
@@ -166,6 +170,7 @@ func readRecorded(previous map[string]any) recordedVerdict {
 		MailedFor:    mapString(previous, "mailedFor"),
 		RecoveredFor: mapString(previous, "recoveredFor"),
 		AlertState:   AlertNone,
+		PrivacyOnly:  previous["privacyOnly"] == true,
 
 		FirstRecordedAt: mapString(previous, "firstRecordedAt"),
 	}
@@ -217,13 +222,16 @@ func alertable(state string) bool {
 func recordOf(v Verdict, previous map[string]any) recordedVerdict {
 	r := readRecorded(previous)
 	firstSeen := mapString(previous, "state") == ""
+	onlyPrivacy := len(v.Reasons) == 1 && v.Reasons[0].Code == ReasonPrivacyRequestFailing
 	switch {
 	case !alertable(v.State):
 		r.Episode = ""
 	case alertable(r.State) && r.Episode != "" && !unseenOutageEnds(r, v):
-		// Still the same episode.
+		// Still the same episode: privacy-only while every pass of it is.
+		r.PrivacyOnly = r.PrivacyOnly && onlyPrivacy
 	default:
 		r.Episode = verdictStamp(v.Since)
+		r.PrivacyOnly = onlyPrivacy
 		r.AlertState, r.AlertReason = AlertNone, ""
 		if firstSeen && v.State == VerdictNotConnected {
 			r.MailedFor, r.RecoveredFor = r.Episode, r.Episode
@@ -250,12 +258,18 @@ func unseenOutageEnds(r recordedVerdict, v Verdict) bool {
 
 // payload is the record as it is written to health.verdict.
 func (r recordedVerdict) payload() map[string]any {
-	return map[string]any{
+	out := map[string]any{
 		"state": r.State, "reasons": toAny(r.Reasons), "since": r.Since, "episode": r.Episode, "resumedAt": r.ResumedAt,
 		"mailedFor": r.MailedFor, "recoveredFor": r.RecoveredFor,
 		"alert":           map[string]any{"state": r.AlertState, "reason": r.AlertReason},
 		"firstRecordedAt": r.FirstRecordedAt,
 	}
+	// Written only when it is so, and so absent from every record of an
+	// episode that had another reason.
+	if r.PrivacyOnly {
+		out["privacyOnly"] = true
+	}
+	return out
 }
 
 // alertStaged records that the alert of the episode was staged.
@@ -415,6 +429,19 @@ func alertEmail(v Verdict, episode string, osBase string) (string, string) {
 func recoveryEmail(domain, stamp string, now time.Time) (string, string) {
 	return domain + " is being recorded again",
 		"MemQL is recording " + domain + " in full again. It needed attention from " + stampRFC1123(stamp) + " to " + now.UTC().Format(time.RFC1123) + "."
+}
+
+// recoveryEmailOf is the recovery mail of the episode a record was mailed
+// for. An episode whose ONLY reason, at every pass, was a failing privacy
+// request was of a store that was recorded all along: its recovery says the
+// store no longer needs attention, and not that it "is being recorded
+// again". Every other recovery is recoveryEmail's.
+func recoveryEmailOf(rec recordedVerdict, domain, stamp string, now time.Time) (string, string) {
+	if rec.PrivacyOnly {
+		return domain + " no longer needs attention",
+			domain + " no longer needs attention in MemQL. It needed attention from " + stampRFC1123(stamp) + " to " + now.UTC().Format(time.RFC1123) + "."
+	}
+	return recoveryEmail(domain, stamp, now)
 }
 
 // stampRFC1123 is a recorded stamp as the mail writes it, RFC 1123 in UTC.
@@ -583,7 +610,7 @@ func (c *Connector) watchStoreVerdict(ctx context.Context, store Store, v Verdic
 				rec.alertStaged(rec.Episode)
 			}
 		default:
-			subject, body := recoveryEmail(v.Domain, plan.Recover, now)
+			subject, body := recoveryEmailOf(rec, v.Domain, plan.Recover, now)
 			if err := c.stageEmail(ctx, recoveryRequestID(store.ID, plan.Recover), target, subject, body); err != nil {
 				errs = append(errs, err)
 			} else {

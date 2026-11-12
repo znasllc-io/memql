@@ -17,6 +17,7 @@ use skills.concepts.{ skill }
 /// same way -- keyed by ownerUserId payload field, addressed canonically as
 /// _system:v1:agents:agent:<seedName>-<userShortId>.
 @displayCard(primary="name", secondary="role", tertiary="ownerUserId", status="active")
+@belongsTo(account, shared)
 concept agent {
   ownerUserId     string  @description("Canonical owning-user pointer. Distinct from the engine-auto-stamped `createdBy` column: createdBy carries the request actor at insert time, which is the user when the agent is created via the Create Agent modal but is the system actor (`system:automation:provisionAssistantOnUserCreate`) when the assistant is auto-seeded by the provisioning automation. Owner-keyed lookups (Computer Use status, worker dispatch routing, agent-context auto-injection for worker tools) read this field first and fall back to createdBy.")
   kind            enum("assistant", "specialist", "system")!  @description("First-class agent identity: what KIND of agent this is across the platform. `assistant` -- user-facing conversational agent (the per-user General Assistant). The user's active assistant joins their spaces. `specialist` -- agent that does tool work for a Task (planner-provisioned or user-created). Specialists answer through tools and never write user-facing utterances. `system` -- platform-internal agent (MemQL Planner, MemQL Trainer, future system-owned ones); hidden from every user-facing surface, not editable / deletable by users. Distinct from but aligned with the `role` field, which is the guardrail-routing classifier read at dispatch time (specialist vs assistant); the invariant `kind == \"system\" OR kind == role` keeps the two in sync. Stamping paths: user-actor `createAgent` -> `assistant` via default; planner-driven `createAgent` calls pass `kind: \"specialist\"` (memql#399); seed materializer (plannerAgent / trainerAgent) passes `kind: \"system\"`. The SPA (`frontend#121`) reads this field to filter / route / hide; epic #122 / #123 / #124 land the SPA-side consumers. Backfilled from the prior `enum(\"system\", \"user\")` schema: `system` rows stay `system`; `user` rows split into `assistant` (role=assistant) or `specialist` (role=specialist). Pre-prod (no migration tooling needed; seed regen on a fresh DB).")
@@ -67,6 +68,7 @@ concept agent {
   }
 
   roleEmbedding      []float @description("Embedding of (role + roleSlug + description + the resolved domain union across capabilities.skillIds[]) used by the layered dedupe (Q10) similarity check. Recomputed on insert/update of any of those fields by the agentRoleEmbed automation. Empty for legacy agents until the backfill runs. Stored on the row rather than a sidecar concept for v1 simplicity; can be moved to v1:agents:agentEmbedding later if row width becomes a concern.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="identity.identityId", target=identity, direction="outgoing")
@@ -99,6 +101,7 @@ concept agent {
 /// the ids the guard is asked about.
 @displayCard(primary="action", secondary="agentId", tertiary="userId", status="active")
 @rowAuthz(owner="userId")
+@belongsTo(account)
 concept agentAuthorization {
   agentId         string! @description("v1:agents:agent.id this grant authorizes.")
   userId          string! @description("v1:identity:user.id of the user who granted the authorization. THE ROW-AUTHZ OWNER FIELD: this concept declares @rowAuthz(owner='userId'), so this field decides who may read, revoke or update the grant, and it is server-stamped from actor.userId by every mutation that writes it -- never accepted from caller args. 'Only the granting user can revoke' is ENFORCED as of memql#3177: the engine resolves the target row on update/revoke and refuses a caller who is not this user (component/memql/rowauthz_write_guard.go). Before that it was documented and unenforced, and any authenticated caller who knew an authId could revoke a stranger's grant or write computerUseScope / skillTierAllowlist into it.")
@@ -112,6 +115,7 @@ concept agentAuthorization {
   active          bool @description("Soft-revoke flag. User-revocable from the agent's settings at any time.")
   computerUseScope enum("", "observe", "interact", "full") @description("Standing computer_use authorization tier the user has granted this agent (Q9 layer 2). observe = read-only worker calls (screenshot, fs_read, fs_list, fs_stat, http_fetch GET, cursor/display/window-list). full = adds shell exec, fs_write, full HTTP, mouse + keyboard + window_focus. Empty string means computer_use is not authorized for this agent in this scope; dispatch rejects with denied_by_scope. Plans can declare a NARROWER scope at creation time but never wider. NOTE: the `interact` value is a retired tier kept in the enum for backward compatibility with rows written before the simplification; the read path treats it as `full`.")
   skillTierAllowlist []string @description("For action='mintSkill' grants (Phase 3 / memql#159): the v1:skills:skill tiers (A / B / C) the planner may mint at without per-mint approval. Default is implicitly ['A'] when the grant is created -- the planner integration injects that default at read time when the field is empty AND action='mintSkill'. B and C are riskier (safety-relevant + high-stakes regulated respectively) so they require explicit user opt-in via the 'Approve & always allow this tier' button on the mintSkillApprovalRequested canvas card. Empty / unused for non-mintSkill grants.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="agentId", target=agent, direction="outgoing")
   @relationship(type="parent", field="userId", target=user, direction="outgoing")
@@ -138,6 +142,7 @@ concept agentAuthorization {
 /// user's custom role visible to every caller -- a known trade rather than an oversight, with the
 /// scoped alternative written down. See the note above activeAgentRoles in dsl/agents/queries.memql.
 @displayCard(primary="name", secondary="category", tertiary="tier", status="active")
+@belongsTo(account, shared)
 concept agentRole {
   slug                   string!  @description("Canonical slug -- the value v1:agents:agent.roleSlug points to. Kebab-case, stable, never renamed (rename = new row + migration). Examples: 'it-support', 'family-doctor', 'commercial-pilot', 'union-carpenter'. ENFORCED UNIQUE ACROSS ACTIVE ROWS on the write path by validateAgentRoleSlugUnique (component/memql/agent_role_slug_unique_validation.go, memql#3207): a write that would put a second ACTIVE row under a slug an active row at a different id already holds is refused -- including a RENAME onto a taken slug, and including the raw insert() path that skips the mutation template. Be exact about the bounds, because this description is the thing a reader trusts. (1) The rule is over ACTIVE rows only: deactivating a role releases its slug, so 'never renamed' is a convention about how to treat the field, not a claim that the store forbids reuse afterwards. (2) The SYSTEM actor is carved out, mirroring validateAgentRolePredefinedLock, so the SeedMaterializer's idempotent re-write of every predefined role on each boot cannot be refused -- which means two AUTHORED seeds claiming one slug is not caught here. (3) It is not an ownership control: this concept has no owner field, so a caller supplying NO agentRoleId gets id = slug, which for an existing user role is that row's own id, and the write read-merges over it rather than being refused as a duplicate. Uniqueness is a key constraint; that hole needs an owner column. memql#3066's preference in findRoleBySlug is retained as defence in depth and is now BACKED by this invariant rather than standing in for it.")
   name                   string!  @description("Display name, e.g. 'IT Support' or 'Family Medicine Physician'. Surfaced in role pickers and on the agent card.")
@@ -152,6 +157,7 @@ concept agentRole {
   systemPromptHints      string  @description("Free-text guidance the agent factory layers into the role's system prompt. NOT the full system prompt -- the agent's own systemPrompt field still wins -- but a short paragraph of role-shape direction (tone, scope of expertise, escalation behavior) that the factory can inject. Example for 'family_doctor': 'You provide general health information, not personal medical advice. Always recommend consulting a licensed practitioner for diagnosis or treatment decisions.'")
   active                 bool  @description("Soft-deactivate flag. Inactive roles disappear from the picker but existing agents that carry the role keep functioning.")
   predefined             bool  @description("True for catalog rows seeded by dsl/agents/roles/*.memql on every startup. Predefined rows are LOCKED in the role manager UI: name / description / category / locked + forbidden fields + maxSkills are read-only; only tier edits are accepted. User-created roles default to predefined=false and remain fully editable. The role catalog itself is the only place where 'admin-only edit predefined rows' would happen, and even there the locks come back on the next startup if not aligned with the source slice.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }
 
 /// Append-only audit log for every skill attach / reconfigure event on an agent. Mirrors
@@ -161,6 +167,7 @@ concept agentRole {
 /// lands the concept; Phase 2 starts writing rows from the agent factory. detached is reserved for
 /// a future phase -- v1 is append-only because no consumer currently reads the negative path.
 @displayCard(primary="changeKind", secondary="skillId", tertiary="targetAgentId", status="changeKind")
+@belongsTo(account, via="targetAgentId")
 concept skillChangeEvent {
   targetAgentId   string!  @description("v1:agents:agent.id whose skill set changed. Pair with createdAt to reconstruct an agent's skill timeline.")
   skillId         string!  @description("v1:skills:skill.id that was attached or reconfigured. The event log entries are denormalized by skillId so the audit / trace viewer can answer 'when was X attached to Y'.")
@@ -170,6 +177,7 @@ concept skillChangeEvent {
   actorAgentId    string  @description("v1:agents:agent.id of the agent that drove the change -- the Planner Agent for planner-driven attaches, empty for human-driven changes. Mutually distinguishable from actorUserId; exactly one of the two is set per event.")
   actorUserId     string  @description("v1:identity:user.id of the human that drove the change (cockpit Skills admin view, agent edit modal). Empty for planner-driven attaches.")
   runId           string  @description("v1:work:run.id of the run the change happened under, if any. Lets the trace viewer surface 'attached during run X' attribution + group co-occurring attaches under the same run.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="references", field="targetAgentId", target=agent, direction="outgoing")
   @relationship(type="references", field="skillId", target=skill, direction="outgoing")
@@ -185,12 +193,14 @@ concept skillChangeEvent {
 //   plus a timestamp. The only scalar is the owning-user foreign key, which
 //   says nothing the row id does not already say -- the generic fallback is
 //   the honest rendering.
+@belongsTo(account)
 concept operatorMemory {
   userId  string!  @description("ID of the user this memory belongs to. One-to-one with v1:identity:user.")
 
   entries  []object  @description("Append-only list of memory notes. Each entry is { ts: datetime, kind: string, goal: string, route?: string, summary: string }. The operator agent writes to this list after each successful takeover and reads from it at the start of the next one. Bounded in practice by the agent's own trim rules (most recent N entries).")
 
   lastUpdatedAt  datetime  @description("Timestamp of the most recent entry. Convenience field; the authoritative order is entries[].ts.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="userId", target=user, direction="outgoing")
 }

@@ -60,6 +60,11 @@ func EmitConceptFile(version string, p *TypePlan) string {
 	b.WriteString(conceptDoc(p))
 	b.WriteString("@origin(\"shopify\")\n")
 	b.WriteString("@rowAuthz(clusterOwner)\n")
+	// Every mirror row belongs to the account of the store it was read from
+	// (design record 2026-11-12 account row ownership). `parent` is written
+	// out because storeId carries no @relationship: it holds the store's bare
+	// id, and the engine could not otherwise tell which concept it names.
+	b.WriteString("@belongsTo(account, via=\"storeId\", parent=\"v1:shopify:store\")\n")
 	fmt.Fprintf(&b, "@displayCard(primary=\"gid\", secondary=%q, status=\"deleted\")\n", displaySecondary(p))
 	// No @namespace line (memql#5375): the annotation is retired, and
 	// dsl/shopify/generated/namespace.pin already carries "shopify" -- which
@@ -132,6 +137,8 @@ func mirrorColumns(p *TypePlan) string {
 	var b strings.Builder
 	b.WriteString("  /// The v1:shopify:store row this mirror belongs to. Every read is store-scoped.\n")
 	b.WriteString("  storeId    string!\n")
+	b.WriteString("  /// The account this row belongs to: its store's. The engine fills it in; the connector never supplies it.\n")
+	b.WriteString("  accountId  string\n")
 	if p.HasID {
 		b.WriteString("  /// Shopify's own identity, gid://shopify/<Type>/<id>. Stable across renames.\n")
 	} else {

@@ -76,7 +76,12 @@ var pluginKinds = map[string]moduleKind{
 	// memql#5165). Switching it off would not remove a feature -- it would
 	// leave every account-tied concept declaring an argument nothing can
 	// satisfy, so every client's people would silently reach nothing.
-	"groups":        kindComponent,
+	"groups": kindComponent,
+	// accounts reads what an account holds and how the assignment of
+	// existing rows is going (account row ownership, design record
+	// 2026-11-12, section H). It talks to nobody else's system; it reads the
+	// engine's own tables.
+	"accounts":      kindComponent,
 	"router":        kindComponent,
 	"database":      kindComponent,
 	"identity":      kindComponent,

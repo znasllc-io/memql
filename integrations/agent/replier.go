@@ -1275,11 +1275,13 @@ func countAdapterRows(result any) int {
 // loadAssistantEtiquette returns the current value of the
 // MEMQL_ASSISTANT_ETIQUETTE global variable, which carries the
 // instance-wide behavioural rules every agent reply runs through
-// (name-handling, repeat-back rules, greeting style). Edited from
-// Settings > Assistant Etiquette on the frontend; persisted via
-// the standard setGlobalVariable upsert. Empty string is
-// the safe default -- the template skips the ETIQUETTE block when
-// nothing is configured.
+// (name-handling, repeat-back rules, greeting style). It is a
+// v1:platform:globalVariable row like any other, so a cluster owner
+// sets it with the standard setGlobalVariable upsert and a surface
+// for anyone else has to save it through a capability that
+// authorizes them (component/memql platform_variable_write_guard.go).
+// Empty string is the safe default -- the template skips the
+// ETIQUETTE block when nothing is configured.
 //
 // Best-effort: every failure mode returns an empty string and logs
 // at debug. The agent must not refuse to reply because etiquette

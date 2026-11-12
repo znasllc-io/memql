@@ -19,6 +19,7 @@
 @origin("memql")
 @rowAuthz(clusterOwner, rankFloor="developer")
 @displayCard(primary="domain", secondary="name", tertiary="apiVersion", status="status")
+@belongsTo(account)
 concept store {
   /// The myshopify.com domain, e.g. "acme-widgets.myshopify.com". The one
   /// identifier Shopify never changes; the storefront's public domain does.
@@ -113,6 +114,7 @@ concept store {
   /// it is bound to: without it two rows sit in one list with nothing saying
   /// which belongs to which.
   developmentOfStoreId  string
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="references", as="developmentOf", field="developmentOfStoreId", target=store, direction="outgoing")
 }
@@ -133,6 +135,7 @@ concept store {
 @origin("memql")
 @rowAuthz(clusterOwner)
 @displayCard(primary="topic", secondary="storeId", tertiary="customerGid", status="status")
+@belongsTo(account, via="storeId", parent="v1:shopify:store")
 concept complianceJob {
   /// The store the request concerns.
   storeId      string!
@@ -142,8 +145,10 @@ concept complianceJob {
   /// The customer, for the two customer topics.
   customerGid  string
   /// The orders the request names (orders_to_redact, orders_requested), as
-  /// gids. They are in the request's scope whether or not they name the
-  /// customer.
+  /// gids. One of them is in the request's scope when it names the customer
+  /// now, or names nobody. One that has since become another customer's is
+  /// not: it is that person's order, and only its versions from when it was
+  /// hers are scrubbed.
   orderGids    []string
   /// Shopify's own request id, recorded with the export it produces.
   requestId    string
@@ -183,12 +188,16 @@ concept complianceJob {
   /// privacy delivery's body holds the customer's email address and phone
   /// number, and a managed store's arrive on the app-level source, where
   /// nothing that is done to the store's own deliveries reaches them. So the
-  /// job remembers them, and their bodies are blanked at each pass of an
-  /// erasure and when a job ends done.
+  /// job remembers them: their bodies are blanked at each pass of an erasure,
+  /// and when the job ends done the deliveries themselves are deleted. The
+  /// receiver names a delivery by its signed body, so one that stayed would
+  /// be the row the same request lands on when it is asked again, already
+  /// processed, and never worked.
   deliveryIds  []string
   /// What a data request filed in the store owner's Library: the id of the
   /// v1:library:generatedOutput that holds the export. An erasure of the same
   /// customer removes it. Empty on any other job, and on a data request that
   /// filed nothing or ran before the field existed.
   exportId     string
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }

@@ -14,6 +14,42 @@ var (
 	_ = strings.Builder{}
 )
 
+// AccountAssignmentStatus -- How the assignment of existing rows to accounts is going: one {kind: "switch", enabled, held} (enabled is the cluster's switch, held is this node's MEMQL_ACCOUNT_STAMPING_ACTIVATE=false), one {kind: "progress", ...} per concept the job has worked on, one {kind: "account", accountId, rows} per account holding rows, and up to 200 unresolved {kind: "conflict", ...}, newest first.
+type AccountAssignmentStatusArgs struct {
+}
+
+// AccountAssignmentStatus calls the engine builtin accountAssignmentStatus.
+func (qc *QueryClient) AccountAssignmentStatus(ctx context.Context, args AccountAssignmentStatusArgs) (*Result, error) {
+	call := AccountAssignmentStatusBuild(args)
+	return qc.executeNamed(ctx, "accountAssignmentStatus", call)
+}
+
+func AccountAssignmentStatusBuild(args AccountAssignmentStatusArgs) string {
+	_ = args
+	return "builtin accountAssignmentStatus()"
+}
+
+// AccountInventory -- What one account holds: one row per concept that declares an account form and holds at least one row for it ({kind: "concept", concept, namespace, name, rows, versions}, by namespace then name), then one {kind: "files", bytes} with the summed size of its current, unarchived Library files. Either spelling of the id is accepted; an empty or unknown account is refused.
+type AccountInventoryArgs struct {
+	// The account, as its bare id or v1:accounts:account:<bare>.
+	AccountId string
+}
+
+// AccountInventory calls the engine builtin accountInventory.
+func (qc *QueryClient) AccountInventory(ctx context.Context, args AccountInventoryArgs) (*Result, error) {
+	call := AccountInventoryBuild(args)
+	return qc.executeNamed(ctx, "accountInventory", call)
+}
+
+func AccountInventoryBuild(args AccountInventoryArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin accountInventory(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ArtifactProbe -- Ask what kind of tree a zip in the caller's Library is (epic memql#4885, D11). Opens it through the same fetch a deploy uses -- the caller's own bytes, expanded by OpenZip under the packages limits, so a zip the deploy would refuse is refused here by the same code -- and answers {isPackage, isBuiltSite, fileCount, totalBytes}. isPackage: memql-package.yaml sits at the root, and the package path takes it from here. isBuiltSite: index.html sits at the root and there is no manifest, and the hand-made path takes it and asks for the kind. Neither: the zip is something else, commonly a folder wrapping the site one level down. fileCount and totalBytes are counted over the opened tree. Writes nothing; the artifact stays exactly the Library row it was.
 type ArtifactProbeArgs struct {
 	// The v1:library:artifact index row of the zip to probe.
@@ -6099,6 +6135,34 @@ func PackageSourceRegisterBuild(args PackageSourceRegisterArgs) string {
 	return b.String()
 }
 
+// PipelinesAISettingsSave -- Save both installation-wide pipeline AI switches, the ones Pipelines > Settings > AI shows. The switches are one configuration variable (MEMQL_PIPELINES_AI), and a variable's row is written by a cluster owner or by server code that has authorized its caller, so the page saves through this and never through setGlobalVariable. The caller sends the two switches and nothing else: the variable's name, its row and the stored JSON are the engine's.
+type PipelinesAISettingsSaveArgs struct {
+	// AI review of pull requests: after every check of a pull request passes, a model reviews the change and a rejection fails the run's check.
+	Review bool
+	// AI diagnosis of failed runs: the installed maintenance policy may open an AI analysis goal for a run's first failure.
+	Diagnosis bool
+}
+
+// PipelinesAISettingsSave calls the engine builtin pipelinesAISettingsSave.
+func (qc *QueryClient) PipelinesAISettingsSave(ctx context.Context, args PipelinesAISettingsSaveArgs) (*Result, error) {
+	call := PipelinesAISettingsSaveBuild(args)
+	return qc.executeNamed(ctx, "pipelinesAISettingsSave", call)
+}
+
+func PipelinesAISettingsSaveBuild(args PipelinesAISettingsSaveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesAISettingsSave(")
+	b.WriteString("review: ")
+	b.WriteString(fmt.Sprintf("%v", args.Review))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("diagnosis: ")
+	b.WriteString(fmt.Sprintf("%v", args.Diagnosis))
+	b.WriteString(")")
+	return b.String()
+}
+
 // PipelinesCancel -- Ask one of the caller's pipeline runs to stop. It flags the row and ends nothing itself: the agent driving the run reads the flag at its next heartbeat, cancels what is executing and concludes the run cancelled. A queued run no agent has claimed is concluded cancelled on the spot.
 type PipelinesCancelArgs struct {
 	// The v1:pipelines:run to stop. Must be the caller's own.
@@ -6586,6 +6650,27 @@ func PipelinesRunReleaseBuild(args PipelinesRunReleaseArgs) string {
 	}
 	b.WriteString("tag: ")
 	b.WriteString(quoteMemQL(args.Tag))
+	b.WriteString(")")
+	return b.String()
+}
+
+// PipelinesSecuritySettingsSave -- Save the installation-wide weekly security scans switch, the one Pipelines > Settings > Security shows (MEMQL_PIPELINES_SECURITY). Server-side for the reason pipelinesAISettingsSave gives. A setting carried by more than one active row is refused: the engine reads that as no consent, and a save that changed one row would leave the other deciding.
+type PipelinesSecuritySettingsSaveArgs struct {
+	// True allows weekly security scans; false stops new ones.
+	Enabled bool
+}
+
+// PipelinesSecuritySettingsSave calls the engine builtin pipelinesSecuritySettingsSave.
+func (qc *QueryClient) PipelinesSecuritySettingsSave(ctx context.Context, args PipelinesSecuritySettingsSaveArgs) (*Result, error) {
+	call := PipelinesSecuritySettingsSaveBuild(args)
+	return qc.executeNamed(ctx, "pipelinesSecuritySettingsSave", call)
+}
+
+func PipelinesSecuritySettingsSaveBuild(args PipelinesSecuritySettingsSaveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesSecuritySettingsSave(")
+	b.WriteString("enabled: ")
+	b.WriteString(fmt.Sprintf("%v", args.Enabled))
 	b.WriteString(")")
 	return b.String()
 }
@@ -9320,7 +9405,7 @@ func ShopifyRevokeWholesaleBuild(args ShopifyRevokeWholesaleArgs) string {
 	return b.String()
 }
 
-// ShopifyRunComplianceJobs -- Run the privacy jobs that are due: export what the mirror holds on a customer to the store owner's Library, erase a customer from every version of every row of the person and from the store's processed deliveries, purge a redacted shop's mirror with its sync state and its staged deliveries. Every erasure is made twice, an hour apart, and a job that fails is run again at every run until it is done. Every pass that ran is audited. A shop's purge reads the store as it is now and asks it first, and deletes only when the origin refuses the app outright, so a reverted uninstall does not cost the mirror. For the scheduled automation or a cluster owner; anybody else is refused before anything runs.
+// ShopifyRunComplianceJobs -- Run the privacy jobs that are due: export what the mirror holds on a customer to the store owner's Library (nothing, once she has been erased), erase a customer from every version of every row of the person and from the store's processed deliveries, purge a redacted shop's mirror with its sync state and its staged deliveries. Every erasure is made twice, an hour apart, and a job that fails is run again at every run until it is done. Every pass that ran is audited. A shop's purge reads the store as it is now: a store whose row records the uninstall is purged, and any other is asked first and purged only when the origin refuses the app outright, so a reverted uninstall does not cost the mirror; a purge that is skipped queues the store's backfills that have not started. The deliveries that asked for a job are deleted when it is done. For the scheduled automation or a cluster owner; anybody else is refused before anything runs.
 type ShopifyRunComplianceJobsArgs struct {
 }
 

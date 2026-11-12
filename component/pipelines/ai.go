@@ -7,7 +7,8 @@ import (
 )
 
 // AISettingsVariable is the global variable holding the owner's pipeline AI
-// switches, written from MemQL OS's Pipelines > Settings > AI.
+// switches, saved from MemQL OS's Pipelines > Settings > AI through
+// pipelinesAISettingsSave (component/pipelinerun settings.go).
 //
 // Both features are OFF unless the owner turns them on (owner decision,
 // 2026-10-29): a pipeline runs, reports and gates on its own checks, and a
@@ -41,4 +42,17 @@ func ParseAISettings(raw string) AISettings {
 		return AISettings{}
 	}
 	return s
+}
+
+// Encode is the value a save writes to AISettingsVariable: both switches,
+// always, in the form ParseAISettings reads back. The server-side save
+// (component/pipelinerun settings.go) is its one caller, so the stored value
+// is never composed by a client.
+func (s AISettings) Encode() string {
+	raw, err := json.Marshal(s)
+	if err != nil {
+		// Two booleans cannot fail to encode; an empty value reads as all off.
+		return ""
+	}
+	return string(raw)
 }

@@ -47,14 +47,14 @@ func HasLiveness(concept string) bool {
 // EnableLivenessStorageWhenReady waits for every non-stopped engine reader.
 // An offline old binary may still serve reads, so it blocks this rollout.
 func EnableLivenessStorageWhenReady(ctx context.Context, db *bun.DB, nodeID string) (bool, error) {
-	return enableObservationsWhenReady(ctx, db, nodeID, "memory_liveness_storage", "memory_liveness_readers")
+	return enableObservationsWhenReady(ctx, db, nodeID, "memory_liveness_storage", "memory_liveness_readers", true)
 }
 
 // EnableReconcileObservationsWhenReady has a separate handshake because a
 // reader of the first liveness release does not enumerate these concepts from
 // the observation table. Such a reader must block this second rollout.
 func EnableReconcileObservationsWhenReady(ctx context.Context, db *bun.DB, nodeID string) (bool, error) {
-	return enableObservationsWhenReady(ctx, db, nodeID, "memory_reconcile_observation_storage", "memory_reconcile_observation_readers")
+	return enableObservationsWhenReady(ctx, db, nodeID, "memory_reconcile_observation_storage", "memory_reconcile_observation_readers", true)
 }
 
 // EnablePipelineRunObservationsWhenReady is the third handshake, for the
@@ -73,10 +73,30 @@ func EnableReconcileObservationsWhenReady(ctx context.Context, db *bun.DB, nodeI
 // and TestLeaseRenewalsAreObservationsAcrossTwoReplicas
 // (component/pipelinerun).
 func EnablePipelineRunObservationsWhenReady(ctx context.Context, db *bun.DB, nodeID string) (bool, error) {
-	return enableObservationsWhenReady(ctx, db, nodeID, "memory_pipeline_run_observation_storage", "memory_pipeline_run_observation_readers")
+	return enableObservationsWhenReady(ctx, db, nodeID, "memory_pipeline_run_observation_storage", "memory_pipeline_run_observation_readers", true)
 }
 
-func enableObservationsWhenReady(ctx context.Context, db *bun.DB, nodeID, storage, readers string) (bool, error) {
+// enableObservationsWhenReady is the reader handshake behind every one-way
+// switch that has a storage table and a readers table of this shape: the three
+// observation stores above, and account stamping (account_stamping.go), which
+// stores no observation and waits on the fleet for the same reason. It answers
+// with the switch as the cluster has it. Once on, that is all it does.
+//
+// While the switch is off, a node with an id says it supports what the switch
+// guards, on every call, and then tries to turn it on. It turns on when the
+// caller is itself a node that has not stopped and every such node has said so
+// within 30 seconds; the fleet is the latest version of each v1:cluster:node
+// row, observations included, and is scanned at most once per five seconds for
+// the whole cluster (next_check_at), not once per replica.
+//
+// allowActivation=false is the caller's hold, with the rule
+// EnableSchemaReferencesWhenReady has: a held node still advertises, so that
+// releasing the hold on one replica takes effect at its next check without the
+// others being rolled first, and returns before trying to turn anything on. It
+// is a hold on turning the switch on, never a way to turn it off. The three
+// observation stores pass true: deploying an engine that advertises them is
+// the decision.
+func enableObservationsWhenReady(ctx context.Context, db *bun.DB, nodeID, storage, readers string, allowActivation bool) (bool, error) {
 	var enabled bool
 	if err := db.QueryRowContext(ctx, `SELECT enabled FROM ? WHERE singleton`, bun.Ident(storage)).Scan(&enabled); err != nil || enabled {
 		return enabled, err
@@ -86,6 +106,9 @@ func enableObservationsWhenReady(ctx context.Context, db *bun.DB, nodeID, storag
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO ? (node_id,seen_at) VALUES (?,clock_timestamp()) ON CONFLICT (node_id) DO UPDATE SET seen_at=excluded.seen_at`, bun.Ident(readers), nodeID); err != nil {
 		return false, err
+	}
+	if !allowActivation {
+		return false, nil
 	}
 	// staged-data: MUST-NOT-GATE -- storage rollout must include all engine
 	// readers, irrespective of authored concept publication or caller identity.

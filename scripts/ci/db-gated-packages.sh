@@ -285,6 +285,13 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # answer whatever it was told. What the complement now means, having looked:
 # the package moves from go-checks to db-tests whole, and its guard suites,
 # which drive a recording engine, run beside a database they ignore.
+# `integrations/accounts` joined with accountInventory and
+# accountAssignmentStatus (account row ownership, design record 2026-11-12,
+# section H): both are grouped counts in raw SQL over the node table and the
+# assignment job's tables, and only a real Postgres says whether a row whose
+# versions spell the account both ways counts once. What the complement now
+# means, having looked: the package moves from go-checks to db-tests whole; it
+# has no test that does not read the database.
 readonly DB_GATED_TREES=(
     component/filebackups
 	"app"
@@ -308,6 +315,7 @@ readonly DB_GATED_TREES=(
 	"component/sitehealth"
 	"component/sitetraffic"
 	"component/worker"
+	"integrations/accounts"
 	"integrations/compose"
 	"integrations/embedding"
 	"integrations/knowledge"
@@ -575,8 +583,17 @@ print_patterns() {
 # other half of that trade: if the module is ever renamed, this aborts with a
 # named fix instead of quietly producing a complement that excludes nothing
 # (every db-gated pattern would stop matching) or everything.
+#
+# The module list is read whole before it is searched. Piping `go list -m`
+# straight into `grep -q` is a race under `set -o pipefail`: grep exits at its
+# first match, `go list` is killed by SIGPIPE while it writes the rest, and the
+# pipeline fails although the module was found. It happened on a loaded runner
+# with two modules in scope, and the refusal named the module among the
+# "Modules found" it had just said were not there.
 verify_module_path() {
-	if go list -m 2>/dev/null | grep -Fxq "${MODULE_PATH}"; then
+	local modules
+	modules="$(go list -m 2>/dev/null || true)"
+	if grep -Fxq "${MODULE_PATH}" <<<"${modules}"; then
 		return 0
 	fi
 	echo "db-gated-packages.sh: '${MODULE_PATH}' is not a module in scope here." >&2

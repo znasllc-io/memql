@@ -9,8 +9,6 @@ import { useReadEffect } from "../../live/useReadEffect";
 import { usePaneActive } from "../deployables/paneActivity";
 
 const SECURITY_VARIABLE = "MEMQL_PIPELINES_SECURITY";
-const SECURITY_ROW_ID = "var-global-memql-pipelines-security";
-const SECURITY_DESCRIPTION = "Scheduled pipeline security scans and remediation goals. Off unless enabled in Pipelines settings.";
 
 /** Match pipelines.ParseSecuritySettings: malformed configuration never opts in. */
 export function parsePipelinesSecurity(raw: string): boolean {
@@ -28,7 +26,7 @@ export function parsePipelinesSecurity(raw: string): boolean {
   return enabled;
 }
 
-interface StoredSecurity { id: string; enabled: boolean }
+interface StoredSecurity { enabled: boolean }
 interface ReadSecurity { stored: StoredSecurity | null; fresh: boolean; error: string }
 interface SaveFailure { choice: boolean; base: boolean; interrupted: boolean; detail: string }
 
@@ -39,9 +37,8 @@ async function readSecurity(query: QueryClient, signal?: AbortSignal): Promise<S
   // setting, or overwrite it while another active row still has the same name.
   if (rows.length > 1) throw new Error("More than one active security setting exists. Keep one configuration and try again.");
   const raw = rows[0];
-  if (raw === undefined) return { id: SECURITY_ROW_ID, enabled: false };
-  const row = flatten(raw);
-  return { id: rowString(row, "id") || SECURITY_ROW_ID, enabled: parsePipelinesSecurity(rowString(row, "value")) };
+  if (raw === undefined) return { enabled: false };
+  return { enabled: parsePipelinesSecurity(rowString(flatten(raw), "value")) };
 }
 
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -51,6 +48,12 @@ const messageOf = (error: unknown) => error instanceof Error ? error.message : S
  * The cluster's read-back is the only source of the switch's position: neither
  * a refused write nor a dropped reply is evidence that the setting changed.
  * Graph events, reconnect and pane resume reread the same saved variable.
+ *
+ * A save calls `pipelinesSecuritySettingsSave` with the switch alone. The
+ * engine owns the row (its name, which row a save updates, the stored JSON)
+ * and decides who may save: a configuration variable is written by a cluster
+ * owner or by the engine for a caller it has authorized, so this is not
+ * `setGlobalVariable`. A refusal is shown in the engine's own words.
  */
 export function PipelinesSecuritySettings() {
   const connection = useOsConnection();
@@ -100,13 +103,7 @@ export function PipelinesSecuritySettings() {
     setFailure(null);
     let failed: SaveFailure | null = null;
     try {
-      await query.setGlobalVariable({
-        id: current.id,
-        name: SECURITY_VARIABLE,
-        value: JSON.stringify({ enabled: choice }),
-        description: SECURITY_DESCRIPTION,
-        active: true,
-      });
+      await query.pipelinesSecuritySettingsSave({ enabled: choice });
     } catch (error) {
       const interrupted = isTransportInterruption(error);
       failed = { choice, base: current.enabled, interrupted, detail: interrupted ? "" : messageOf(error) };

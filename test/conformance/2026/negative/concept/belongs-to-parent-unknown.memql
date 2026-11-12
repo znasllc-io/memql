@@ -1,0 +1,7 @@
+/// A product review collected through one store, naming a concept nobody declares.
+@belongsTo(account, via="storeId", parent="v1:shopify:stores")
+concept review {
+  accountId  string
+  storeId    string
+  body       string
+}

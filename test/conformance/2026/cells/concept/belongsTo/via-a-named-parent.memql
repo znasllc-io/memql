@@ -1,0 +1,10 @@
+/// A product review collected through one Shopify store. It belongs to the
+/// account its store belongs to. `storeId` holds the store's bare id and
+/// carries no relationship, so the declaration names the concept it points at.
+@belongsTo(account, via="storeId", parent="v1:shopify:store")
+concept review {
+  accountId  string
+  storeId    string
+  rating     int
+  body       string
+}

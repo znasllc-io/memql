@@ -1,0 +1,7 @@
+/// A support ticket raised by a customer, its account key misspelled.
+@belongsTo(acount)
+concept ticket {
+  accountId  string
+  title      string
+  status     string
+}

@@ -155,12 +155,24 @@ func ContextWithForwardedAuthority(ctx context.Context, a ForwardedAuthority) co
 // legitimately have none. It IS a refusal for anything about to forward -- see
 // the workbench producer, which fails closed rather than sending an envelope it
 // cannot make an assertion for.
+//
+// THE ACCOUNT IS READ OFF THE CONTEXT AT THIS MOMENT, not off the assertion as it
+// was bound. Every other field is what a receiver verified and is re-asserted
+// verbatim. The account the call acts in can be stated AFTER the assertion was
+// bound, further down the same call: an automation run learns it from its
+// triggering row, a shopper form from its site. A second hop that re-asserted
+// the bound value would carry the account of the frame that bound it, or none,
+// and the node handling the hop would record that instead (call_account.go). A
+// context that states no account leaves the bound value alone.
 func ForwardedAuthorityFromContext(ctx context.Context) (ForwardedAuthority, bool) {
 	if ctx == nil {
 		return ForwardedAuthority{}, false
 	}
 	a, ok := ctx.Value(forwardedAuthorityContextKey).(ForwardedAuthority)
-	return a, ok
+	if !ok {
+		return a, false
+	}
+	return a.WithCallAccount(ctx), true
 }
 
 // BindForwardedContext is the ACCEPT-AND-BIND step of the mesh forwarded-auth
@@ -169,7 +181,7 @@ func ForwardedAuthorityFromContext(ctx context.Context) (ForwardedAuthority, boo
 // receivers go through it -- the AI forward (component/grpc) and the workbench
 // forward (integrations/workbench).
 //
-// Four stamps, four distinct jobs.
+// Five stamps, five distinct jobs.
 //   - client origin: this work originated with a client request, not with a
 //     server-initiated sweep (#2889).
 //   - forwarded claims: TokenInfo for `createdBy` ATTRIBUTION only. Never an
@@ -180,6 +192,14 @@ func ForwardedAuthorityFromContext(ctx context.Context) (ForwardedAuthority, boo
 //     assertion alone -- no LoadFromClaims, no FallbackFromClaims, no
 //     userByIdSystem keyed by a wire-supplied subject, and therefore no
 //     per-message DB round trip either.
+//   - the call's account: which account a row written under this context is
+//     recorded in, when the sending node stated one. Under its own key and not
+//     on the access context, so the stamps layered on later cannot drop it
+//     (call_account.go). An assertion that names none binds none, and leaves
+//     alone whatever the context already carried: the callers that bind an
+//     assertion they built themselves (ContextWithPersistedOwner, the worker
+//     and pipeline runners) do so beneath a call that may already be acting in
+//     an account, and they have nothing to say about it.
 //   - the assertion itself: chain of custody for a SECOND hop out of this node,
 //     which is the only thing that reads it. See ContextWithForwardedAuthority.
 //
@@ -189,5 +209,6 @@ func BindForwardedContext(ctx context.Context, claims map[string]string, access 
 	ctx = ContextWithClientOrigin(ctx)
 	ctx = ContextWithForwardedClaims(ctx, claims)
 	ctx = ContextWithAccess(ctx, access)
+	ctx = ContextWithCallAccount(ctx, authority.AccountId)
 	return ContextWithForwardedAuthority(ctx, authority)
 }

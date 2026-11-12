@@ -410,7 +410,7 @@ Every concept a `@relationship` names is a `use ...concepts.{ }` import unless
 it is this domain's own, `target=folder` included — the loader resolves the bare
 name through the file's imports and refuses one it cannot find.
 
-**Concept-level annotations:** `@version`, `@description` (required so humans and AI systems can reason about the dataset).
+**Concept-level annotations:** `@version`, `@description` (required so humans and AI systems can reason about the dataset), and `@belongsTo`, which says [which account a row belongs to](#which-account-a-row-belongs-to).
 
 **Field annotations:** `@required`, `@description("...")`.
 
@@ -623,6 +623,169 @@ it was traversed through, empty when that relationship declared none. The two
 are independent: an edge is `child` because of what the engine did with it, and
 `assignedTo` because of what its author said it means. `as` is additive, so a
 client that ignores it sees exactly the previous contract.
+
+### Which account a row belongs to
+
+Every concept says which account its rows belong to, or that they belong to
+none, with one concept-level annotation: `@belongsTo`. It is the one answer to
+"whose row is this". A reader that needs it -- what an account holds, what an
+export of one account contains -- asks the declaration, and never has to work
+it out from a concept's fields or from who may see its rows.
+
+| Declaration | A row of the concept |
+|---|---|
+| `@belongsTo(account)` | belongs to one account, recorded in its `accountId` field, which the engine fills in at write time. |
+| `@belongsTo(account, via="<field>")` | takes the account of the row `<field>` names. |
+| `@belongsTo(account, via="<field>", parent="<concept id>")` | the same, where `<field>` carries no `@relationship` to say which concept it names. |
+| `@belongsTo(account, shared)` | belongs to an account or to none: a row with no account is provided by the cluster to every account. |
+| `@belongsTo(account, stated)` | belongs to the account the concept's own mutations name. The engine never fills the field in and never refuses a change to it. |
+| `@belongsTo(cluster)` | is cluster-wide: never inside an account. |
+
+<!-- corpus: 2026/cells/concept/belongsTo/an-account.memql -->
+```memql
+/// A support ticket raised by a customer. Each ticket belongs to one account.
+@belongsTo(account)
+concept ticket {
+  accountId    string
+  ownerUserId  string
+  title        string
+  status       string
+}
+```
+
+**The field is always `accountId`, and it is a `string`.** One name, so a
+reader needs no per-concept knowledge; the declaration says how the field gets
+its value, never where it lives. Every account form requires the concept to
+declare it -- `stated` included, since the field is read the same way whoever
+wrote it -- and a concept that does not, or declares it as anything but a
+`string`, is refused at load (`belongs_to_field`). A concept that also takes a
+list of accounts keeps the list in a field of its own beside it.
+
+**Who decides the account.** Without `stated` the account is engine-managed:
+the engine fills `accountId` in at write time, and it is fixed from then on.
+With `stated` the concept's own writers decide -- its mutations accept or copy
+`accountId`, and their own rules say what an absent value means and whether it
+may change -- and the engine leaves the field alone. `stated` may be written
+beside `shared`, and not beside `via`: a row that follows a parent has its
+account decided by the engine.
+
+<!-- corpus: 2026/cells/concept/belongsTo/stated.memql -->
+```memql
+/// A service contract. The mutation that opens one names the account it is
+/// for, so the concept's own writers state `accountId` and the engine leaves
+/// it alone.
+@belongsTo(account, stated)
+concept serviceContract {
+  accountId  string
+  title      string
+  startsOn   datetime
+}
+```
+
+**Following a parent.** `via` names a field of this concept holding the id of
+the row whose account a row takes. Which concept that row is of comes from the
+field's own `@relationship`:
+
+<!-- corpus: 2026/cells/concept/belongsTo/via-a-parent.memql -->
+```memql
+/// A support ticket raised by a customer. Each ticket belongs to one account.
+@belongsTo(account)
+concept ticket {
+  accountId  string
+  title      string
+  status     string
+}
+
+/// A reply on a ticket. It belongs to the account its ticket belongs to.
+@belongsTo(account, via="ticketId")
+concept ticketReply {
+  accountId  string
+  ticketId   string
+  body       string
+
+  @relationship(type="parent", field="ticketId", target=ticket, direction="outgoing")
+}
+```
+
+When the field holds a bare id and carries no relationship, `parent=` writes
+the concept out, by its canonical id:
+
+<!-- corpus: 2026/cells/concept/belongsTo/via-a-named-parent.memql -->
+```memql
+/// A product review collected through one Shopify store. It belongs to the
+/// account its store belongs to. `storeId` holds the store's bare id and
+/// carries no relationship, so the declaration names the concept it points at.
+@belongsTo(account, via="storeId", parent="v1:shopify:store")
+concept review {
+  accountId  string
+  storeId    string
+  rating     int
+  body       string
+}
+```
+
+A `via` field with neither is legal too. It is a field that holds canonical ids
+of more than one concept -- an index row's reference to whatever it indexes --
+and the id itself says which concept the parent is.
+
+**Rows the cluster provides.** `shared` is for a concept that holds both kinds
+of row: the cluster's own, offered to every account, and an account's. On such
+a concept a row with no account is a statement rather than a gap.
+
+<!-- corpus: 2026/cells/concept/belongsTo/shared.memql -->
+```memql
+/// A canned reply. The cluster ships a starter set to every account and an
+/// account adds its own beside them: a reply with no account is the cluster's.
+@belongsTo(account, shared)
+concept cannedReply {
+  accountId  string
+  title      string
+  body       string
+}
+```
+
+**What it does not do.**
+
+- **It opens a row to nobody.** `@belongsTo` records; sharing a row with an
+  account's members is the `account=` argument of `@rowAuthz`. A note records
+  its account and stays private to its author.
+- **It widens and narrows no read.** Which rows a query returns, and who may
+  see them, are what they were before the concept declared it.
+- **It adds nothing to the schema.** `accountId` is a field the concept
+  declares like any other, and the annotation implies no relationship.
+- **It does not claim a field by name.** A cluster-wide concept may carry a
+  field called `accountId` that means something else; only an account form
+  makes the field the row's account.
+
+**Checked at load.** Each refusal carries a stable code, printed last in
+brackets:
+
+| Refused | Code |
+|---|---|
+| `account` and `cluster` together, or neither; `shared`, `stated`, `via` or `parent` beside `cluster`; `parent` without `via`; `shared` or `stated` beside `via` | `belongs_to_conflict` |
+| An account form on a concept with no `accountId` field, or one that is not a `string` | `belongs_to_field` |
+| `via` names no field, or a field the concept does not declare | `belongs_to_via_unknown` |
+| `parent` names no concept, or one that is not registered | `belongs_to_parent_unknown` |
+| The concept a `via` leads to declares `@belongsTo(cluster)` | `belongs_to_via_cluster` |
+| The `via` declarations form a cycle, a concept that follows itself included | `belongs_to_via_cycle` |
+| `@belongsTo(cluster)` on a concept whose `@rowAuthz` carries `account=` | `belongs_to_sharing_mismatch` |
+| The annotation written twice on one concept | `annotation_repeated` |
+
+Three of these need every concept at once -- a `parent` that is not
+registered, `belongs_to_via_cluster` and `belongs_to_via_cycle` -- so they are
+made when the whole tree loads rather than when one concept is built. A `via`
+that leads to a concept which declares **nothing** is accepted: its rows have
+no account to give yet, but unclassified is not the same statement as
+cluster-wide, and the child is not refused for a declaration somebody else has
+still to write.
+
+**A concept that declares nothing still loads.** Nothing records which account
+its rows belong to, so they count as cluster-wide until it declares. For a
+concept mounted beside the engine's own tree -- a product bundle at
+`MEMQL_DSL_PATH`, or a pack -- each load logs one warning naming every such
+concept and the forms to write, and sets the gauge
+`memql_dsl_belongs_to_undeclared` to their count. `memqllint` reports each one
+by file and line, as a warning that leaves its exit code alone.
 
 ### Version retention
 

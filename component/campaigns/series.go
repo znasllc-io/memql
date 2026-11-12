@@ -129,7 +129,9 @@ func (w *Worker) handleConfigureSeries(ctx context.Context, args map[string]any,
 		}
 	} else {
 		next["status"] = map[string]string{"pause": "paused", "resume": "active"}[action]
-		if str(prior, "status") == str(next, "status") && bare(str(prior, "authorizedByUserId")) == callerUserID(ctx) {
+		// Bare both sides: a signed-in caller's id is canonical, and so is an
+		// authorizedByUserId stamped from one.
+		if str(prior, "status") == str(next, "status") && bare(str(prior, "authorizedByUserId")) == bare(callerUserID(ctx)) {
 			return seriesReceipt(prior)
 		}
 		if action == "resume" {
