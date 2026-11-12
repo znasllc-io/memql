@@ -926,13 +926,46 @@ under piece 1's rule, which moves a row without its children.
   account**, which is how the DSL's kinds delete. A deletion marker that names no
   account leaves its row in no account.
 
+**Measured on a test table, not on an installation**
+
+A table shaped like a real one (25 weekly chunks, 700,000 rows and 2.1 million
+versions of about 3 KB, one account holding 85 percent, no compression, which
+is what installations have today):
+
+| Read | Time |
+|---|---|
+| The export's read of the largest kind for the largest account | 22 s, with no scratch files on the database |
+| The export's second count over 12 kinds | 7.1 s |
+| The Data tab's counts for the largest account | 4.6 s, against a deadline of 6 s |
+| The Data tab's counts for a small account | 0.4 s |
+| The totals over 22 accounts beside the assignment status | 9.3 s, against a deadline of 4 s |
+
+Three limits follow from it:
+
+- **The Data tab's counts** for an account that holds most of a large
+  installation take several seconds and can pass their deadline, in which case
+  the tab says the account is too large to count. The export does not depend on
+  them.
+- **The totals beside the assignment status** will usually be missing on a large
+  installation. A wider index does not help: PostgreSQL will not answer from an
+  index alone when the query names an expression over a column the index does
+  not hold. A stored count per account would, and is not built.
+- **Compression.** If compression of the row table is turned on, the export's
+  read in batches re-reads each compressed chunk once per batch (427 s against
+  22 s on the test table). The export then needs a one-pass read for compressed
+  chunks. No installation built from this tree is compressed.
+
 **Not verified**
 
-- How long a run takes, and how large a file is, for an account of real size.
+- How long a run takes, and how large a file is, for an account of real size on
+  a real installation.
 - That the snapshot's hold on vacuum is acceptable for the largest account.
 - A rolling deployment with a run in progress.
 - The settling time after release, which is another session's measurement.
-- The screens, which are described here and not drawn.
+- The screens, which are described here and not drawn, and were not seen
+  rendered in a browser.
+- The run against real blob storage; its tests use an in-memory store behind the
+  same two interfaces.
 
 ## Decided without asking
 

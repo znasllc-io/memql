@@ -150,6 +150,12 @@ page also shows how the assignment of existing rows is going and anything left
 for a decision. Both need the `execute app:accounts/inventory` capability,
 which owners and developers hold.
 
+From the same page an owner or developer opens a kind to its rows, moves rows to
+another account or places rows that have none, and exports the account into one
+checked file. Moving needs `execute app:accounts/move` and exporting needs
+`execute app:accounts/export`; both also need a person's own signed-in session.
+[Account export](../account-export.md) describes both.
+
 ## Membership and delegated management
 
 Every account, including `self`, has a deterministic account group. Creation and

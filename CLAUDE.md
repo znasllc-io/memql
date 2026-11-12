@@ -1906,6 +1906,51 @@ The field is always `accountId`.
   concept with an authored `@relationship` on the field stores the canonical
   one.
 
+### Account export, and moving rows between accounts
+
+**An export is one checked file of everything one account holds, and what goes
+into it is decided by declarations, never by a field name** (second piece of
+the accounts program; design record
+[2026-11-12](docs/superpowers/specs/2026-11-12-account-export-design.md),
+runbook [account-export.md](docs/public/operate/account-export.md)).
+
+- **Three declarations decide a kind's part in a file.** `stays="signin"` /
+  `"transit"` / `"machine"` on `@belongsTo` keeps a kind's rows on the
+  installation. `@bytes(under="library/{ownerUserId}")` on a field says the
+  field names bytes and WHERE that row's bytes live; `tree` is a tree of
+  objects, `counted` is sized and never read. `@secretName` names a secret.
+  A `@secret` field never travels, at any depth. A component with tables of
+  its own registers a hand-over (`accountexport.RegisterHandOver`).
+- **A place has to tie the bytes to the row.** A place needs a placeholder,
+  and a placeholder is the row's `{id}` or its `@rowAuthz` owner field
+  (`counted` fields are exempt). A reference outside the place is recorded as
+  refused and never read. This is `core/librarykey`'s rule, declared.
+- **One reader says whose a row is** (`component/memql/account_rows.go`): the
+  row's NEWEST version names the account. **It decides from index columns and
+  never reads a payload per row**: payloads average several KB, are stored out
+  of line, and a read per row of an account is a read in every chunk. Measure
+  a new account-wide read on a table shaped like a real one before trusting it.
+- **A run is one snapshot.** An agent node claims one export at a time
+  (`integrations/accounts/export_runner.go`), reads everything in one
+  REPEATABLE READ transaction, counts each kind twice, streams to blob storage
+  under a key of its own attempt, reads the object back and checks it. The
+  passphrase is shown once and cleared at every final state.
+- **Acts need a person.** Starting, cancelling, downloading or removing an
+  export, and moving or placing rows, ask `auth.RequirePersonSession` as well
+  as their capability (`execute app:accounts/export`, `execute app:accounts/move`).
+- **A row's children follow it, and the assignment job carries them.** A change
+  of a row's account is recorded (`account_row_moves` for a person's explicit
+  change, `account_follow_tasks` for every change), and the job gives a row
+  whose parent left its account the parent's account as it stands. Nothing
+  locks ordinary writes: a version appended by a write that read the row before
+  it moved is repaired by the job's next pass.
+- **`campaigns.sendJob.campaignAccountId` is not a copy of `accountId`.** It is
+  the account a send was queued for, which the send worker compares at send
+  time. Do not retire it.
+- **A concept with no `@belongsTo` is in a deprecation window**
+  (`concept_belongs_to_undeclared`), and an export refuses to run while one is
+  loaded.
+
 ### Infrastructure concepts
 
 Field inventories live in the `.memql` files; this is only what the schema
