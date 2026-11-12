@@ -921,8 +921,9 @@ func TestTheHandlerAndTheEnginesGateAgree(t *testing.T) {
 // internal origin before it judges any requirement (refuseBelowRequiredCapability).
 // The handler does not take internal origin as a pass: it judges the actor
 // the call carries, so the cluster's own maintenance principal is answered and
-// an actorless or connector context is not. This is the one disagreement left
-// standing, reported rather than settled (the task 17 report, fix round 1).
+// an actorless or connector context is not. It is the one place the handler
+// and the engine's gate still differ, kept on purpose: internal origin would
+// otherwise open the read for whatever actor the context carries.
 func TestInternalOriginIsJudgedByItsActor(t *testing.T) {
 	storeID, site := servedStore(t)
 	handler := statisticsHandler(t, testIntegration(t))

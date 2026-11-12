@@ -232,10 +232,10 @@ func readStatistics(ctx context.Context, db *bun.DB, req statisticsRequest, now 
 	return stats, nil
 }
 
-// frameRow is the part of a store's store_sales_store row the frame reads.
+// frameRow is the part of a store's store_sales_store row the frame reads,
+// scanned by column name from a query on the table itself (no bun model: the
+// table is a side table of this package, never the row table).
 type frameRow struct {
-	bun.BaseModel `bun:"table:store_sales_store"`
-
 	StoreDomain       string          `bun:"store_domain"`
 	StoreName         string          `bun:"store_name"`
 	Currency          string          `bun:"currency"`
@@ -265,11 +265,11 @@ func readFrame(ctx context.Context, tx bun.Tx, req statisticsRequest, now time.T
 		OtherCurrencies: []CurrencyCount{}, Recording: Recording{Reasons: []Reason{}},
 	}
 	var row frameRow
-	err := tx.NewSelect().Model(&row).
+	err := tx.NewSelect().Table("store_sales_store").
 		Column("store_domain", "store_name", "currency", "timezone", "taxes_included", "development",
 			"all_orders_readable", "purging", "history_since", "verdict_state", "verdict_reasons", "verdict_since",
 			"recording_blocked", "last_clear_at", "last_change_at", "rebuilding_since").
-		Where("store_id = ?", req.StoreID).Scan(ctx)
+		Where("store_id = ?", req.StoreID).Limit(1).Scan(ctx, &row)
 	if errors.Is(err, sql.ErrNoRows) {
 		stats.Recording.State = "starting"
 		return stats, nil
