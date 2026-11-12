@@ -1,20 +1,24 @@
 -- The store sales facts: what the store statistics are computed from.
 --
--- SIDE TABLES, NOT GRAPH ROWS. None of the seven is a concept and none is in
--- the row table. They are keyed by store, and a fact's account is its store's,
--- reached through store_id; no column holds an account, because a copy can lag
--- its source. A fact is derived, and can be rebuilt from the mirror rows it is
--- computed from.
+-- SIDE TABLES, NOT GRAPH ROWS. The statistics are sums, counts and series by
+-- period over orders, lines and refunds, and the query language cannot group
+-- those by time over graph rows. What is kept here is derived from the store's
+-- mirror rows and is meant to be rebuilt from them, so it has no history of
+-- its own and nothing here is the only copy; the database sums it with
+-- ordinary SQL. None of the seven is a concept and none is in the row table.
+-- They are keyed by store, and a fact's account is its store's, reached
+-- through store_id; no column holds an account, because a copy can lag its
+-- source.
 --
 -- Every id is BARE: store_id, order_gid, line_gid and refund_gid are the short
 -- slugs the mirror rows carry, never a prefixed form.
 --
--- NO PERSONAL DATA. A buyer is held as buyer_key, a key that stands for the
--- buyer and names no one; no name, address, email or phone is kept.
+-- NO PERSONAL DATA. The tables have no column for a name, address, email or
+-- phone; a buyer is held only as buyer_key, a key that stands for the buyer.
 --
 -- A VERSION is the mirror row's own write time (order_version, line_version,
--- refund_version). A write of an older version than the one held is refused, so
--- a replayed or reordered page never moves a fact backwards.
+-- refund_version). The design refuses a write of an older version than the one
+-- held, so a replayed or reordered page never moves a fact backwards.
 --
 -- A RETIRED ROW'S FACT IS KEPT. When the mirror retires a row the fact stays,
 -- marked deleted: it counts nowhere, and it keeps refusing every older version,
