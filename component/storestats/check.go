@@ -451,6 +451,8 @@ type checkRow struct {
 
 // readCheckRow reads the store's check row inside tx; found is false when it
 // has none.
+//
+// staged-data: INDIFFERENT -- this reads a store_sales_ side table of this package, never MemoryNodes; no staged-data row can exist in it, so the gate has nothing to withhold.
 func readCheckRow(ctx context.Context, tx bun.Tx, storeID string) (row checkRow, found bool, err error) {
 	err = tx.NewSelect().Model(&row).Where("store_id = ?", storeID).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -765,6 +767,9 @@ func checkPage(ctx context.Context, tx bun.Tx, storeID string, p checkedPage) (c
 
 // ---- the stored facts, as the rules would make them ----
 
+// storedOrders reads, inside tx, the stored order facts a check page names, by gid.
+//
+// staged-data: INDIFFERENT -- this reads a store_sales_ side table of this package, never MemoryNodes; no staged-data row can exist in it, so the gate has nothing to withhold.
 func storedOrders(ctx context.Context, tx bun.Tx, storeID string, gids []string) (map[string]orderFactRow, error) {
 	out := map[string]orderFactRow{}
 	if len(gids) == 0 {
@@ -781,6 +786,9 @@ func storedOrders(ctx context.Context, tx bun.Tx, storeID string, gids []string)
 	return out, nil
 }
 
+// storedLines reads, inside tx, the stored line facts a check page names, by gid.
+//
+// staged-data: INDIFFERENT -- this reads a store_sales_ side table of this package, never MemoryNodes; no staged-data row can exist in it, so the gate has nothing to withhold.
 func storedLines(ctx context.Context, tx bun.Tx, storeID string, gids []string) (map[string]lineFactRow, error) {
 	out := map[string]lineFactRow{}
 	if len(gids) == 0 {
@@ -797,6 +805,9 @@ func storedLines(ctx context.Context, tx bun.Tx, storeID string, gids []string) 
 	return out, nil
 }
 
+// storedRefunds reads, inside tx, the stored refund facts and their lines a check page names, by gid.
+//
+// staged-data: INDIFFERENT -- this reads a store_sales_ side table of this package, never MemoryNodes; no staged-data row can exist in it, so the gate has nothing to withhold.
 func storedRefunds(ctx context.Context, tx bun.Tx, storeID string, gids []string) (map[string]refundFactRow, map[string][]refundLineFactRow, error) {
 	out, lines := map[string]refundFactRow{}, map[string][]refundLineFactRow{}
 	if len(gids) == 0 {
