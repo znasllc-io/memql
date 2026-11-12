@@ -89,6 +89,23 @@ func (s *store) ensureStore(ctx context.Context, tx bun.Tx) error { _, err := tx
 		{"a query asked by a helper inside writeTx", `func ask(ctx context.Context, e Engine) error { _, err := e.Execute(ctx, "builtin shopifyStoreVerdict()"); return err }
 func walk(ctx context.Context, db *bun.DB, e Engine) error { return writeTx(ctx, db, "x", -1, func(ctx context.Context, tx bun.Tx) error { return ask(ctx, e) }) }`, nil, "calls the engine inside writeTx"},
 		{"a seam called inside writeTx", `func walk(ctx context.Context, db *bun.DB, seam func(context.Context) error) error { return writeTx(ctx, db, "x", -1, func(ctx context.Context, tx bun.Tx) error { return seam(ctx) }) }`, nil, "calls a function value inside writeTx"},
+		// Round 2: the four routes the re-review wrote past the gate.
+		{"a package-level function literal", `var purgeAll = func(ctx context.Context, db *bun.DB) error { _, err := db.NewDelete().Table("store_sales_store").Exec(ctx); return err }`, nil, "purgeAll"},
+		{"a handle handed to another package", `func viaHelper(ctx context.Context, db *bun.DB) error { return helper.Purge(ctx, db) }`, nil, "viaHelper uses db"},
+		{"a struct embedding the handle", `type wrapped struct{ *bun.DB }
+func viaEmbed(ctx context.Context, w wrapped) error { _, err := w.ExecContext(ctx, "DELETE FROM store_sales_store"); return err }`, nil, "viaEmbed runs ExecContext through w"},
+		{"an interface the package declares", `type execer interface { ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) }
+func viaIface(ctx context.Context, db *bun.DB) error { var e execer = db; _, err := e.ExecContext(ctx, "DELETE FROM store_sales_store"); return err }`, nil, "viaIface uses db"},
+		{"a method value of a handle", `func viaValue(ctx context.Context, db *bun.DB) error { f := db.ExecContext; _, err := f(ctx, "DELETE FROM store_sales_store"); return err }`, nil, "viaValue uses db"},
+		{"a builder redirected to the db", `func redirect(ctx context.Context, db *bun.DB, tx bun.Tx) error { var n int; return tx.NewSelect().Conn(db).Table("store_sales_store").ColumnExpr("1").Scan(ctx, &n) }`, nil, "redirect uses db"},
+		// A method of an interface the package declares is a seam by another name.
+		{"an interface's method inside writeTx", `type judge interface{ isWholesale(email string) bool }
+func walk(ctx context.Context, db *bun.DB, j judge) error { return writeTx(ctx, db, "x", -1, func(ctx context.Context, tx bun.Tx) error { _ = j.isWholesale("a"); return ensureStore(ctx, tx, "x") }) }`, nil, "calls a method of an interface this package declares inside writeTx"},
+		// And what a write transaction's function may call: a method on a
+		// concrete value of the package.
+		{"a method on a value inside writeTx", `type state struct{ granted map[string]bool }
+func (s state) isWholesale(email string) bool { return s.granted[email] }
+func walk(ctx context.Context, db *bun.DB, s state) error { return writeTx(ctx, db, "x", -1, func(ctx context.Context, tx bun.Tx) error { if s.isWholesale("a") { return ensureStore(ctx, tx, "x") }; return nil }) }`, nil, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -131,7 +148,11 @@ import (
 	"errors"
 
 	"github.com/uptrace/bun"
+
+	"example.test/helper"
 )
+
+var _ = helper.Purge
 
 type Engine interface {
 	Execute(ctx context.Context, query string) (any, error)
@@ -222,19 +243,43 @@ func packageSource(t *testing.T) typedSource {
 		}
 		files = append(files, f)
 	}
-	return typeCheck(t, fset, "github.com/znasllc-io/memql/component/storestats", files)
+	return typeCheck(t, fset, "github.com/znasllc-io/memql/component/storestats", files, exportImporter(t, fset))
 }
 
 // fixtureSource is one source string as a package of its own, type-checked.
+// It may import example.test/helper, another package whose one function
+// writes through the bun.IDB it is handed, as a helper of another package of
+// this repository could.
 func fixtureSource(t *testing.T, src string) typedSource {
 	t.Helper()
 	fset := token.NewFileSet()
+	hf, err := parser.ParseFile(fset, "helper.go", fixtureHelper, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	imp := &fixtureImporter{checked: map[string]*types.Package{}, from: exportImporter(t, fset)}
+	helper := typeCheck(t, fset, "example.test/helper", []*ast.File{hf}, imp)
+	imp.checked["example.test/helper"] = helper.pkg
 	f, err := parser.ParseFile(fset, "fixture.go", src, 0)
 	if err != nil {
 		t.Fatalf("the fixture does not parse: %v\n%s", err, src)
 	}
-	return typeCheck(t, fset, "example.test/fixture", []*ast.File{f})
+	return typeCheck(t, fset, "example.test/fixture", []*ast.File{f}, imp)
 }
+
+const fixtureHelper = `package helper
+
+import (
+	"context"
+
+	"github.com/uptrace/bun"
+)
+
+func Purge(ctx context.Context, db bun.IDB) error {
+	_, err := db.NewDelete().Table("store_sales_store").Where("true").Exec(ctx)
+	return err
+}
+`
 
 // exportData maps each import path this package depends on to the export data
 // the go command built for it, so the gate type-checks against the real bun
@@ -245,7 +290,8 @@ var exportData struct {
 	err   error
 }
 
-func typeCheck(t *testing.T, fset *token.FileSet, path string, files []*ast.File) typedSource {
+// exportImporter imports from the export data the go command built.
+func exportImporter(t *testing.T, fset *token.FileSet) types.Importer {
 	t.Helper()
 	exportData.once.Do(func() {
 		cmd := gocmd.Command("go", "list", "-export", "-deps", "-f", "{{if .Export}}{{.ImportPath}}\t{{.Export}}{{end}}", ".")
@@ -266,13 +312,18 @@ func typeCheck(t *testing.T, fset *token.FileSet, path string, files []*ast.File
 	if exportData.err != nil {
 		t.Fatal(exportData.err)
 	}
-	conf := types.Config{Importer: importer.ForCompiler(fset, "gc", func(p string) (io.ReadCloser, error) {
+	return importer.ForCompiler(fset, "gc", func(p string) (io.ReadCloser, error) {
 		file, ok := exportData.paths[p]
 		if !ok {
 			return nil, fmt.Errorf("no export data for %s", p)
 		}
 		return os.Open(file)
-	})}
+	})
+}
+
+func typeCheck(t *testing.T, fset *token.FileSet, path string, files []*ast.File, imp types.Importer) typedSource {
+	t.Helper()
+	conf := types.Config{Importer: imp}
 	info := &types.Info{
 		Types:      map[ast.Expr]types.TypeAndValue{},
 		Defs:       map[*ast.Ident]types.Object{},
@@ -284,6 +335,20 @@ func typeCheck(t *testing.T, fset *token.FileSet, path string, files []*ast.File
 		t.Fatalf("type-check %s: %v", path, err)
 	}
 	return typedSource{fset: fset, files: files, pkg: pkg, info: info}
+}
+
+// fixtureImporter answers a package already checked from source, and asks the
+// export data for every other.
+type fixtureImporter struct {
+	checked map[string]*types.Package
+	from    types.Importer
+}
+
+func (f *fixtureImporter) Import(path string) (*types.Package, error) {
+	if p, ok := f.checked[path]; ok {
+		return p, nil
+	}
+	return f.from.Import(path)
 }
 
 // The handles a statement runs through, and what each method does.
@@ -320,8 +385,39 @@ const lockStatement = "LOCK TABLE store_sales_store IN SHARE ROW EXCLUSIVE MODE"
 //     lock. writeTx's transaction runs lockWrites first.
 //   - Nothing called inside a function handed to writeTx calls the engine
 //     (a method named Execute), directly or through a function of the
-//     package, or calls a function value, which could: a table lock held
-//     across an engine read can deadlock against the engine's own pool.
+//     package, or calls a function value or a method of an interface the
+//     package declares, either of which could: a table lock held across an
+//     engine read can deadlock against the engine's own pool. What such a
+//     function may call is named functions and methods on concrete values of
+//     this package and of the database library, with plain values taken
+//     before the transaction began: the wholesale judgement is a
+//     wholesaleState and its isWholesale method, never a func.
+//   - A call is judged by the method's own receiver as well as its operand's,
+//     so a method promoted from an embedded handle is the handle's.
+//   - Top-level var initialisers are read as function bodies are, keyed by
+//     the variable's name.
+//   - A handle or transaction value is used only as the receiver of a call
+//     judged here, as an argument of exactly its type to this package's
+//     functions (writeTx and readTx among them), assigned to a variable of
+//     exactly its type, or compared with nil (handleEscapes). That one rule
+//     also refuses a handle handed to another package, stored in a struct or
+//     an interface, taken as a method value (db.ExecContext) or a method
+//     expression's argument, or handed to a builder's Conn.
+//
+// What it does not cover, so nobody takes it for more than it is:
+//
+//   - A method value or method expression of a value that is not a handle,
+//     whose method then writes: only calls are followed.
+//   - A generic helper: a call through a type parameter is not resolved to
+//     the method it reaches.
+//   - Reflection: reflect.ValueOf(x).MethodByName and its kind are not read.
+//   - A builder redirected to another connection by a value the gate does not
+//     see as a handle, such as one returned by another package.
+//   - An interface method of another package, called inside writeTx: only
+//     the package's own interfaces are refused there.
+//   - A call into another package that then writes or calls the engine
+//     through something it holds itself: only what this package hands it is
+//     judged.
 func writeDiscipline(src typedSource, writers []string) []string {
 	var findings []string
 	report := func(pos token.Pos, format string, args ...any) {
@@ -329,12 +425,24 @@ func writeDiscipline(src typedSource, writers []string) []string {
 	}
 	decls := map[string]*ast.FuncDecl{}
 	byObj := map[*types.Func]*ast.FuncDecl{}
+	// Every unit the gate reads: each declared function, and each top-level
+	// var whose initialiser is read as a function's body is, keyed by the
+	// variable's name.
+	units := map[string]ast.Node{}
 	for _, f := range src.files {
 		for _, d := range f.Decls {
-			if fn, ok := d.(*ast.FuncDecl); ok {
-				decls[funcKey(fn)] = fn
-				if obj, ok := src.info.Defs[fn.Name].(*types.Func); ok {
-					byObj[obj] = fn
+			switch d := d.(type) {
+			case *ast.FuncDecl:
+				decls[funcKey(d)] = d
+				units[funcKey(d)] = d
+				if obj, ok := src.info.Defs[d.Name].(*types.Func); ok {
+					byObj[obj] = d
+				}
+			case *ast.GenDecl:
+				for _, spec := range d.Specs {
+					if vs, ok := spec.(*ast.ValueSpec); ok && len(vs.Values) > 0 && len(vs.Names) > 0 {
+						units[vs.Names[0].Name] = vs
+					}
 				}
 			}
 		}
@@ -348,15 +456,18 @@ func writeDiscipline(src typedSource, writers []string) []string {
 	}
 	callsOf := map[*ast.FuncDecl]*calls{}
 	var wrote []string
-	for key, fn := range decls {
-		if fn.Body == nil {
+	for key, unit := range units {
+		fn, _ := unit.(*ast.FuncDecl)
+		if fn != nil && fn.Body == nil {
 			continue
 		}
 		c := &calls{}
-		callsOf[fn] = c
+		if fn != nil {
+			callsOf[fn] = c
+		}
 		var stack []ast.Node
 		writes := false
-		ast.Inspect(fn, func(n ast.Node) bool {
+		ast.Inspect(unit, func(n ast.Node) bool {
 			if n == nil {
 				stack = stack[:len(stack)-1]
 				return true
@@ -370,6 +481,9 @@ func writeDiscipline(src typedSource, writers []string) []string {
 			if f, ok := callee.(*types.Func); ok {
 				if f.Name() == "Execute" && f.Type().(*types.Signature).Recv() != nil {
 					c.engine = true
+				}
+				if isPackageInterfaceMethod(src.pkg, f) {
+					c.dynamic = true
 				}
 				if f.Pkg() == src.pkg {
 					c.pkgFuncs = append(c.pkgFuncs, f)
@@ -397,7 +511,7 @@ func writeDiscipline(src typedSource, writers []string) []string {
 				}
 				return true
 			}
-			if inner != ast.Node(fn) {
+			if fn == nil || inner != ast.Node(fn) {
 				report(call.Pos(), "%s writes with %s inside a function literal; a write is made by a named function on the list", key, method)
 				return true
 			}
@@ -454,11 +568,8 @@ func writeDiscipline(src typedSource, writers []string) []string {
 	}
 
 	// Every function handed to writeTx.
-	for key, fn := range decls {
-		if fn.Body == nil {
-			continue
-		}
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
+	for key, unit := range units {
+		ast.Inspect(unit, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok || len(call.Args) == 0 {
 				return true
@@ -478,6 +589,8 @@ func writeDiscipline(src typedSource, writers []string) []string {
 					case *types.Func:
 						if f.Name() == "Execute" && f.Type().(*types.Signature).Recv() != nil {
 							report(inner.Pos(), "%s calls the engine inside writeTx; what a transaction needs from the engine is read before it begins", key)
+						} else if isPackageInterfaceMethod(src.pkg, f) {
+							report(inner.Pos(), "%s calls a method of an interface this package declares inside writeTx, %s, which could call the engine as a function value could", key, f.Name())
 						} else if d := byObj[f]; d != nil && visit(d, map[*ast.FuncDecl]bool{}) {
 							report(inner.Pos(), "%s calls the engine inside writeTx, through %s, or a function value that could; what a transaction needs from the engine is read before it begins", key, funcKey(d))
 						}
@@ -499,6 +612,8 @@ func writeDiscipline(src typedSource, writers []string) []string {
 		})
 	}
 
+	findings = append(findings, handleEscapes(src, units)...)
+
 	sort.Strings(wrote)
 	want := slices.Clone(writers)
 	sort.Strings(want)
@@ -516,7 +631,9 @@ func statementCall(info *types.Info, call *ast.CallExpr) (string, ast.Expr) {
 	switch fun := ast.Unparen(call.Fun).(type) {
 	case *ast.SelectorExpr:
 		if sel, ok := info.Selections[fun]; ok {
-			if sel.Kind() != types.MethodVal || !isHandle(sel.Recv()) {
+			// Judged by the method's own receiver as well as the operand's:
+			// a method promoted from an embedded handle is the handle's.
+			if sel.Kind() != types.MethodVal || !(isHandle(sel.Recv()) || isHandle(methodRecv(sel.Obj()))) {
 				return "", nil
 			}
 			name := fun.Sel.Name
@@ -535,6 +652,157 @@ func statementCall(info *types.Info, call *ast.CallExpr) (string, ast.Expr) {
 		}
 	}
 	return "", nil
+}
+
+// methodRecv is the receiver type a method is declared on; nil for anything
+// that is not a method.
+func methodRecv(obj types.Object) types.Type {
+	f, ok := obj.(*types.Func)
+	if !ok {
+		return nil
+	}
+	recv := f.Type().(*types.Signature).Recv()
+	if recv == nil {
+		return nil
+	}
+	return recv.Type()
+}
+
+// isPackageInterfaceMethod reports whether f is a method of an interface pkg
+// declares: a seam by another name, which may call anything.
+func isPackageInterfaceMethod(pkg *types.Package, f *types.Func) bool {
+	t := methodRecv(f)
+	if p, ok := t.(*types.Pointer); ok {
+		t = p.Elem()
+	}
+	named, ok := t.(*types.Named)
+	if !ok || named.Obj().Pkg() != pkg {
+		return false
+	}
+	_, isIface := named.Underlying().(*types.Interface)
+	return isIface
+}
+
+// handleEscapes answers every use of a database handle or transaction value
+// in units other than these: the receiver of a call statementCall judges; a
+// field of a handle that is itself a handle, read on the way to one; an
+// argument of a function of this package whose parameter has exactly its
+// type (writeTx and readTx among them); a value assigned to a variable of
+// exactly its type; and a comparison with nil. writeTx and readTx are the two
+// that hand their transaction on, and are not read here.
+func handleEscapes(src typedSource, units map[string]ast.Node) []string {
+	var findings []string
+	for key, unit := range units {
+		if key == "writeTx" || key == "readTx" {
+			continue
+		}
+		var stack []ast.Node
+		ast.Inspect(unit, func(n ast.Node) bool {
+			if n == nil {
+				stack = stack[:len(stack)-1]
+				return true
+			}
+			stack = append(stack, n)
+			e, ok := n.(ast.Expr)
+			if !ok || len(stack) < 2 {
+				return true
+			}
+			switch x := e.(type) {
+			case *ast.Ident:
+				if src.info.Defs[x] != nil || src.info.Uses[x] == nil {
+					return true
+				}
+				if _, isVar := src.info.Uses[x].(*types.Var); !isVar {
+					return true
+				}
+			case *ast.SelectorExpr, *ast.CallExpr:
+			default:
+				return true
+			}
+			tv, ok := src.info.Types[e]
+			if !ok || !tv.IsValue() || !isHandle(tv.Type) {
+				return true
+			}
+			if handleUseAllowed(src, e, stack[len(stack)-2], stack) {
+				return true
+			}
+			findings = append(findings, fmt.Sprintf("%s: %s uses %s, a database handle, other than as a judged call's receiver, an argument of exactly its type to this package's functions, or a variable of exactly its type",
+				src.fset.Position(e.Pos()), key, exprText(e)))
+			return true
+		})
+	}
+	return findings
+}
+
+func handleUseAllowed(src typedSource, e ast.Expr, parent ast.Node, stack []ast.Node) bool {
+	typ := src.info.TypeOf(e)
+	switch p := parent.(type) {
+	case *ast.SelectorExpr:
+		if p.X != e {
+			return false
+		}
+		sel, ok := src.info.Selections[p]
+		if !ok {
+			return false
+		}
+		if sel.Kind() == types.FieldVal {
+			return isHandle(sel.Type())
+		}
+		if sel.Kind() == types.MethodVal && len(stack) >= 3 {
+			if call, ok := stack[len(stack)-3].(*ast.CallExpr); ok && call.Fun == ast.Expr(p) {
+				method, _ := statementCall(src.info, call)
+				return method != ""
+			}
+		}
+		return false
+	case *ast.CallExpr:
+		f, ok := calleeOf(src.info, p).(*types.Func)
+		if !ok || f.Pkg() != src.pkg {
+			return false
+		}
+		params := f.Type().(*types.Signature).Params()
+		for k, arg := range p.Args {
+			if arg == e && k < params.Len() {
+				return types.Identical(params.At(k).Type(), typ)
+			}
+		}
+		return false
+	case *ast.AssignStmt:
+		// The variable assigned to: what is assigned is judged by itself.
+		for _, l := range p.Lhs {
+			if l == e {
+				return true
+			}
+		}
+		if len(p.Lhs) != len(p.Rhs) {
+			return false
+		}
+		for k, r := range p.Rhs {
+			if r == e {
+				return types.Identical(src.info.TypeOf(p.Lhs[k]), typ)
+			}
+		}
+		return false
+	case *ast.ValueSpec:
+		for k, v := range p.Values {
+			if v == e && k < len(p.Names) {
+				obj := src.info.Defs[p.Names[k]]
+				return obj != nil && types.Identical(obj.Type(), typ)
+			}
+		}
+		return false
+	case *ast.BinaryExpr:
+		if p.Op != token.EQL && p.Op != token.NEQ {
+			return false
+		}
+		other := p.X
+		if other == e {
+			other = p.Y
+		}
+		id, ok := other.(*ast.Ident)
+		return ok && id.Name == "nil"
+	}
+	return false
 }
 
 // isStatementMethod is every method of a handle that runs a statement or
