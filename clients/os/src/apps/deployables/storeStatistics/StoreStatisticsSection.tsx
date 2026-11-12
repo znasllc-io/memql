@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { AutoRefresh, Caption, Head, Notice, useNow } from "../../../kit";
+import { AutoRefresh, Button, Caption, Head, Notice, useNow } from "../../../kit";
 import type { Breadcrumb } from "../../../kit/Breadcrumbs";
 import { InlineSkeleton } from "../../../kit/ContentSkeleton";
 import { formatFreshness } from "../../../kit/format";
@@ -22,9 +22,12 @@ import { useStoreStatistics } from "./useStoreStatistics";
 //
 // THE PAGE OPENS ON PRODUCTION when Production has a store, else on Testing,
 // and the choice is not remembered: whichever store a person looked at last
-// is not a reason to show it next time. The Destination control is drawn only
-// when the two destinations name two stores; the engine says when they name
-// one ("both"), because only it compares the two forms of an id.
+// is not a reason to show it next time. The Destination control is drawn from
+// the site's own row whenever both destinations name a store -- before any
+// answer and after a refusal, so the other store can always be tried and the
+// Head does not move when an answer lands. It gives way only when an answer
+// says the two name one store ("both"), because only the engine compares the
+// two forms of an id; the context then says "Production and Testing".
 //
 // THE CONTEXT SAYS ONLY WHAT THE ANSWER HOLDS. A store the walk holds no row
 // for yet has no currency, no zone and no period: nothing of those is said,
@@ -35,8 +38,6 @@ import { useStoreStatistics } from "./useStoreStatistics";
 export const OLDER_ORDERS_LINE = "Refunds, edits and cancellations of orders placed more than 60 days ago are not recorded.";
 export const DEVELOPMENT_LINE = "This is a development store: every order on it is a test order, and they are counted.";
 export const TAX_LINE = "Prices on this store include tax.";
-/** A store with no row yet: its orders are still being read in. */
-export const BROUGHT_IN_LINE = "The store's orders are still being brought in.";
 
 export interface StoreStatisticsSectionProps {
   site: SiteRow;
@@ -62,12 +63,12 @@ export function StoreStatisticsSection({ site, name, trail, back }: StoreStatist
 
   // WHETHER THE TWO DESTINATIONS NAME ONE STORE is the last answer's word,
   // held across a change of destination or period so the control does not
-  // leave the Head while the next read is out.
-  const [oneStore, setOneStore] = useState<boolean | null>(null);
+  // come and go while the next read is out.
+  const [oneStore, setOneStore] = useState(false);
   useEffect(() => {
     if (stats !== null && stats.destination !== null) setOneStore(stats.destination === "both");
   }, [stats]);
-  const offerDestination = destinations.production !== "" && destinations.testing !== "" && oneStore === false;
+  const offerDestination = destinations.production !== "" && destinations.testing !== "" && !oneStore;
 
   const pending = stats === null && (reading.state === "idle" || reading.state === "loading");
 
@@ -84,9 +85,13 @@ export function StoreStatisticsSection({ site, name, trail, back }: StoreStatist
           <StatisticsPeriodControl />
         </Head>
         <AutoRefresh onRefresh={reading.reload} busy={reading.state === "loading"} enabled={connection !== null} intervalMs={statisticsRefreshMs(period)} />
-        {reading.state === "error" ? (
-          // VERBATIM: the engine's own sentence, kept while the read is tried again.
-          <Notice tone="error" sentence={reading.error || "Store statistics could not be loaded."} next="Retrying automatically." />
+        {reading.state === "error" && reading.error !== "" ? (
+          // VERBATIM: the engine's own sentence, kept while the read is tried
+          // again. A dropped connection has no sentence here: the shell's own
+          // notice reports it, and the read is tried again when it is back.
+          <Notice tone="error" sentence={reading.error} next="Retrying automatically.">
+            <Button onClick={() => void reading.reload()}>Try again</Button>
+          </Notice>
         ) : null}
         {pending ? <Caption><InlineSkeleton label="Loading the store" /></Caption> : stats !== null ? <StoreContext stats={stats} /> : null}
       </div>
@@ -94,22 +99,38 @@ export function StoreStatisticsSection({ site, name, trail, back }: StoreStatist
   );
 }
 
-/** Block 1: which store, in what currency and days, since when, how fresh; then each line that applies. */
+/** A short phrase that a narrow pane must not break: its spaces do not wrap. */
+function unbroken(phrase: string): string {
+  return phrase.replace(/ /g, "\u00a0");
+}
+
+/** A day as the store's clock read it: "Sep 12", with its year when that is not this year's ("Sep 12, 2025"). */
+function storeDay(at: string, now: Date, zone: string | undefined): string {
+  const year = (instant: string) => bucketLabel(instant, "month", zone).split(" ").at(-1);
+  const day = bucketLabel(at, "day", zone);
+  return year(at) === year(now.toISOString()) ? day : `${day}, ${year(at)}`;
+}
+
+/**
+ * Block 1: which store, in what currency and days, since when, how fresh;
+ * then each line that applies. A store with no row yet shows only what it has
+ * (what is said of its state is the next block's).
+ */
 function StoreContext({ stats }: { stats: StoreStatistics }) {
   const now = useNow(60_000);
   const zone = stats.timezone ?? undefined;
   const line = [
+    // The name may be long, so it alone wraps where it must.
     stats.storeName ?? stats.storeDomain,
-    stats.destination === "both" ? "Production and Testing" : null,
-    stats.currency !== null ? `Prices in ${stats.currency}` : null,
+    stats.destination === "both" ? unbroken("Production and Testing") : null,
+    stats.currency !== null ? unbroken(`Prices in ${stats.currency}`) : null,
     // No period was cut for a store with no row, so no days are named.
-    stats.start !== null ? `Days in ${stats.timezone ?? "UTC"}` : null,
-    stats.historySince !== null ? `Orders since ${bucketLabel(stats.historySince, "day", zone)}` : null,
-    stats.lastChangeAt !== null ? `Last order change recorded ${formatFreshness(stats.lastChangeAt, now)}` : null,
+    stats.start !== null ? unbroken(`Days in ${stats.timezone ?? "UTC"}`) : null,
+    stats.historySince !== null ? unbroken(`Orders since ${storeDay(stats.historySince, now, zone)}`) : null,
+    stats.lastChangeAt !== null ? unbroken(`Last order change recorded ${formatFreshness(stats.lastChangeAt, now)}`) : null,
   ].filter((part): part is string => part !== null && part !== "");
   return (
     <>
-      {stats.start === null ? <Notice sentence={BROUGHT_IN_LINE} /> : null}
       {line.length > 0 ? <Caption>{line.join(" · ")}</Caption> : null}
       {stats.development === true ? <Caption>{DEVELOPMENT_LINE}</Caption> : null}
       {stats.taxesIncluded === true ? <Caption>{TAX_LINE}</Caption> : null}
