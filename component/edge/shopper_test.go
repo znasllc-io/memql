@@ -452,3 +452,32 @@ func TestEveryRefusalPageIsUnindexableAndScriptless(t *testing.T) {
 		}
 	}
 }
+
+// THE EDGE SAYS WHERE A POST CAME FROM, and only the edge: an inbound copy of
+// X-Memql-Shopper-Client is dropped and the address the edge itself saw is set.
+func TestTheEdgeSetsTheShopperClientHeaderAndDropsAnInboundCopy(t *testing.T) {
+	var got []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Values(ShopperClientHeader)
+		w.WriteHeader(http.StatusSeeOther)
+	}))
+	t.Cleanup(upstream.Close)
+	h := shopperHandler(t, shopperSite(nil), upstream.URL)
+
+	req := httptest.NewRequest(http.MethodPost, "/_memql/forms/wholesale/acceptance", strings.NewReader("signedName=Ada"))
+	req.Host = "shop.example.com"
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set(ShopperClientHeader, "203.0.113.250")
+	req.RemoteAddr = "198.51.100.7:40000"
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	if len(got) != 1 || got[0] != "198.51.100.7" {
+		t.Fatalf("the bff received %s = %q, want only the address the edge saw", ShopperClientHeader, got)
+	}
+	for _, name := range shopperStampHeaders {
+		if name == ShopperClientHeader {
+			return
+		}
+	}
+	t.Fatalf("%s is not among the headers the edge strips: %v", ShopperClientHeader, shopperStampHeaders)
+}

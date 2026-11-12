@@ -100,11 +100,13 @@ const (
 	ShopperSiteHeader  = memql.ShopperSiteHeader
 	ShopperStoreHeader = memql.ShopperStoreHeader
 	ShopperOwnerHeader = memql.ShopperOwnerHeader
+	// ShopperClientHeader is the address this edge saw the request come from.
+	ShopperClientHeader = memql.ShopperClientHeader
 )
 
 // shopperStampHeaders is every header this file controls. Used to STRIP
 // before setting, so a client cannot supply its own.
-var shopperStampHeaders = []string{ShopperSiteHeader, ShopperStoreHeader, ShopperOwnerHeader}
+var shopperStampHeaders = []string{ShopperSiteHeader, ShopperStoreHeader, ShopperOwnerHeader, ShopperClientHeader}
 
 func shopperMaxBytes() int64 {
 	raw := strings.TrimSpace(os.Getenv(shopperMaxBytesEnv))
@@ -409,6 +411,9 @@ func (h *Handler) proxyShopperRequest(w http.ResponseWriter, r *http.Request, si
 		}
 		pr.Out.Header.Set(ShopperSiteHeader, site.ID)
 		pr.Out.Header.Set(ShopperOwnerHeader, owner)
+		// THE ADDRESS THIS EDGE SAW, the same one the rate limit keys on: an
+		// acceptance records it as evidence of where the assent came from.
+		pr.Out.Header.Set(ShopperClientHeader, shopperClientAddress(r))
 		if storeID != "" {
 			pr.Out.Header.Set(ShopperStoreHeader, storeID)
 		}

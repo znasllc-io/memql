@@ -183,7 +183,12 @@ func (p *Provider) stagedApplications(ctx context.Context, storeID string) ([]st
 	for _, app := range apps {
 		ids = append(ids, trimmed(app["id"]))
 	}
-	logs, err := p.rowsForApplications(auth.ContextWithSystemActor(ctx, provisionActor), "decisionsForApplicationIds", ids)
+	sys := auth.ContextWithSystemActor(ctx, provisionActor)
+	logs, err := p.rowsForApplications(sys, "decisionsForApplicationIds", ids)
+	if err != nil {
+		return nil, false, err
+	}
+	required, accepted, err := p.acceptancesOf(sys, storeID, ids)
 	if err != nil {
 		return nil, false, err
 	}
@@ -194,9 +199,23 @@ func (p *Provider) stagedApplications(ctx context.Context, storeID string) ([]st
 			continue
 		}
 		state := FoldState(logs[bareID(id)])
-		out = append(out, staged{row: app, id: id, state: state, stage: StageOf(state, false, false), at: rowTime(app["createdAt"])})
+		stage := StageOf(state, required, len(accepted[bareID(id)]) > 0)
+		out = append(out, staged{row: app, id: id, state: state, stage: stage, at: rowTime(app["createdAt"])})
 	}
 	return out, truncated, nil
+}
+
+// acceptancesOf answers whether the store requires its terms and, when it does,
+// the acceptances of the applications at ids grouped by bare id, read through
+// sys IN BATCHES (rowsForApplications) as the decisions are, never one read per
+// application. A store that requires none reads no acceptance.
+func (p *Provider) acceptancesOf(sys context.Context, storeID string, ids []string) (bool, map[string][]map[string]any, error) {
+	required, err := p.termsRequiredAt(sys, storeID)
+	if err != nil || !required {
+		return required, nil, err
+	}
+	accepted, err := p.rowsForApplications(sys, "acceptancesForApplicationIds", ids)
+	return true, accepted, err
 }
 
 // list answers wholesaleList.
@@ -287,7 +306,25 @@ func (p *Provider) get(ctx context.Context, args map[string]any, _ int) ([]memor
 		return nil, err
 	}
 	state := FoldState(log)
-	stage := StageOf(state, false, false)
+	// THE ACCEPTANCE AND THE TERMS LINK, read as the deployment: what the stage
+	// waits for, and what the store's people see of it.
+	termsRequired, err := p.termsRequiredAt(sys, trimmed(app["storeId"]))
+	if err != nil {
+		return nil, err
+	}
+	acceptance, err := p.acceptanceOf(sys, applicationID)
+	if err != nil {
+		return nil, err
+	}
+	acceptanceShown, err := p.acceptanceView(sys, acceptance)
+	if err != nil {
+		return nil, err
+	}
+	termsLink, err := p.termsLinkView(sys, applicationID, p.clock())
+	if err != nil {
+		return nil, err
+	}
+	stage := StageOf(state, termsRequired, acceptance != nil)
 	people := p.people(ctx)
 	decisions := make([]map[string]any, 0, len(log))
 	for _, d := range log {
@@ -338,6 +375,8 @@ func (p *Provider) get(ctx context.Context, args map[string]any, _ int) ([]memor
 		"details":     details,
 		"decisions":   decisions,
 		"entitlement": entitlement,
+		"acceptance":  acceptanceShown,
+		"termsLink":   termsLink,
 		"operator":    operator,
 		"acts":        ActsFor(ActsInput{Stage: stage, AccessState: access, EntitlementExists: ent != nil, Operator: operator}),
 	})

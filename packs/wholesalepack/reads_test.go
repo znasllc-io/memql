@@ -40,6 +40,9 @@ type storeFake struct {
 	settings   map[string]any
 	pages      map[string]int   // RowsPage calls per query
 	docs       []map[string]any // document versions, read by the system only
+	// acceptances are read by the system, keyed by applicationId as written.
+	acceptances []map[string]any
+	single      map[string]int // Rows calls per query
 }
 
 func newStoreFake() *storeFake {
@@ -49,6 +52,7 @@ func newStoreFake() *storeFake {
 		sysOnlyExt: map[string]bool{},
 		settings:   map[string]any{"id": SettingsRowID(readsStore), "storeId": readsStore, "applicationsOpen": true, "tokenHash": "settings-digest"},
 		pages:      map[string]int{},
+		single:     map[string]int{},
 	}
 }
 
@@ -60,7 +64,10 @@ func visible(ctx context.Context, row map[string]any) bool {
 }
 
 func (f *storeFake) Rows(ctx context.Context, query string, args map[string]string) ([]map[string]any, error) {
+	f.single[query]++
 	switch query {
+	case "acceptanceForApplication":
+		return f.byApplication(ctx, f.acceptances, args["applicationId"]), nil
 	case "siteById":
 		if bareID(args["siteId"]) == readsSite {
 			return []map[string]any{{"id": "v1:platform:site:" + readsSite, "accountId": "acct-reads",
@@ -188,11 +195,14 @@ func (f *storeFake) RowsPageWithList(ctx context.Context, query string, args map
 			}
 		}
 		all = newestFirst(all)
-	case "decisionsForApplicationIds", "entitlementsForApplicationIds":
+	case "decisionsForApplicationIds", "entitlementsForApplicationIds", "acceptancesForApplicationIds":
 		size = 200
 		rows := f.decisions
 		if query == "entitlementsForApplicationIds" {
 			rows = f.ents
+		}
+		if query == "acceptancesForApplicationIds" {
+			rows = f.acceptances
 		}
 		for _, id := range list {
 			all = append(all, f.byApplication(ctx, rows, id)...)

@@ -53,7 +53,15 @@
 //     origin only (the store's automation), then the decision log.
 //   - wholesaleBackfillAccounts: internal origin or a cluster operator
 //     only, refusing everyone else before it reads; a row already tied is
-//     never rewritten.
+//     never rewritten;
+//   - wholesaleAcceptTerms: no capability -- the token is the authority. The
+//     token's hash must match a link of the store the call names, read under
+//     the caller, unused, unexpired and of a submitted application, before
+//     anything else is read; an existing acceptance refuses; the acceptance is
+//     fenced on row-absent at its derived id, so none is ever written over, and
+//     only then is the link the token named written again with its usedAt;
+//   - the private link itself: written by mintLink, which only the resolver
+//     that mails the link calls, as the application's merchant.
 //
 // # ownerUserId is an ARGUMENT, accepted
 //
@@ -66,6 +74,7 @@
 // system actor is owned by nobody.
 
 use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings, documentVersion }
+use wholesale.concepts.{ privateLink, acceptance }
 
 /// Write one application. IT NAMES NO ROW ID: on the shopper path the
 /// caller is a member of the public, `id` is a name the shopper surface
@@ -359,6 +368,72 @@ mutation wholesaleSettings backfillSettingsRow {
     accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText, accountId, siteId }
     stamp {
       id: args.settingsId
+    }
+  }
+}
+
+// # The private links and the acceptance (U8)
+
+/// Write one application's link of one purpose WHOLE, at its derived id
+/// (PrivateLinkRowID): every field passed, the empty ones included, because a
+/// write at an existing id merges into the current version. A link sent again
+/// is a new version with a new token hash, which is what refuses the token
+/// before it; marking the link used is a new version with usedAt. EVERY
+/// ARGUMENT IS ACCEPTED AND NOTHING IS STAMPED: the pack names the merchant,
+/// the organization and the clock, and writes as the application's merchant.
+@serverOnly
+@actor
+mutation privateLink putPrivateLinkRow {
+  args {
+    linkId         string!
+    ownerUserId    string!
+    storeId        string!
+    accountId      string
+    siteId         string
+    applicationId  string!
+    purpose        string!  @enum("terms", "priceSheet")
+    tokenHash      string!
+    issuedAt       datetime!
+    expiresAt      datetime
+    usedAt         datetime
+  }
+  insert {
+    accept { ownerUserId, storeId, accountId, siteId, applicationId, purpose, tokenHash, issuedAt, expiresAt, usedAt }
+    stamp {
+      id: args.linkId
+    }
+  }
+}
+
+/// Write one application's acceptance at its derived id (AcceptanceRowID).
+/// WRITTEN ONCE: wholesaleAcceptTerms fences the write on the row being
+/// absent, so a second acceptance is refused rather than written over the
+/// first. Every argument is accepted and nothing is stamped.
+@serverOnly
+@actor
+mutation acceptance putAcceptanceRow {
+  args {
+    acceptanceId    string!
+    ownerUserId     string!
+    storeId         string!
+    accountId       string
+    applicationId   string!
+    applicantEmail  string!  @maxLength(320)
+    signedName      string!  @maxLength(120)
+    acceptedAt      datetime!
+    termsVersionId  string!
+    termsSha256     string!
+    mapVersionId    string!
+    mapSha256       string!
+    statement       string!  @maxLength(2000)
+    clientAddress   string   @maxLength(64)
+    userAgent       string   @maxLength(512)
+    linkIssuedAt    datetime
+  }
+  insert {
+    accept { ownerUserId, storeId, accountId, applicationId, applicantEmail, signedName, acceptedAt, termsVersionId, termsSha256, mapVersionId, mapSha256, statement, clientAddress, userAgent, linkIssuedAt }
+    stamp {
+      id: args.acceptanceId
     }
   }
 }

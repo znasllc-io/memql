@@ -14,9 +14,9 @@ import (
 // export.go -- ONE STORE'S WHOLE WHOLESALE RECORD (wholesaleExportStore).
 //
 // One JSON file holding every application the caller reads -- each with the
-// client's own fields on it and the state its log gives it -- their decisions
-// and entitlements, the store's settings and every version of its documents, so
-// a store can keep its record or take it elsewhere.
+// client's own fields on it and the state its log gives it -- their decisions,
+// entitlements and acceptances, the store's settings and every version of its
+// documents, so a store can keep its record or take it elsewhere.
 //
 // THE SAME RULE AS THE LIST. The applications are read under the caller, so
 // what a caller cannot read is not in their export; an application's decisions
@@ -60,9 +60,20 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 	if err != nil {
 		return nil, err
 	}
+	// EVERY ACCEPTANCE, whether or not the store requires its terms today: what
+	// an applicant accepted is part of the record.
+	accs, err := p.rowsForApplications(sys, "acceptancesForApplicationIds", ids)
+	if err != nil {
+		return nil, err
+	}
+	termsRequired, err := p.termsRequiredAt(sys, storeID)
+	if err != nil {
+		return nil, err
+	}
 	applications := make([]map[string]any, 0, len(apps))
 	decisions := []map[string]any{}
 	entitlements := []map[string]any{}
+	acceptances := []map[string]any{}
 	for _, app := range apps {
 		id := trimmed(app["id"])
 		if id == "" {
@@ -76,7 +87,7 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 		out := withoutTokenHash(app)
 		out["details"] = details
 		out["state"] = FoldState(log)
-		out["stage"] = StageOf(FoldState(log), false, false)
+		out["stage"] = StageOf(FoldState(log), termsRequired, len(accs[bareID(id)]) > 0)
 		applications = append(applications, out)
 		// ONE FORM OF THE APPLICATION'S ID throughout the file: the row's own,
 		// whichever form an older decision or entitlement was written under.
@@ -89,6 +100,11 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 			row := withoutTokenHash(versions[0])
 			row["applicationId"] = id
 			entitlements = append(entitlements, row)
+		}
+		if rows := accs[bareID(id)]; len(rows) > 0 {
+			row := withoutTokenHash(rows[0])
+			row["applicationId"] = id
+			acceptances = append(acceptances, row)
 		}
 	}
 	settings, err := p.settingsRowAt(sys, storeID)
@@ -118,6 +134,7 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 		"applications": applications,
 		"decisions":    decisions,
 		"entitlements": entitlements,
+		"acceptances":  acceptances,
 		"settings":     settingsOut,
 		// Kind by kind (terms, map, priceSheet), each newest first.
 		"documentVersions":      documentVersions,

@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -106,6 +107,11 @@ const (
 	// user who does not own that site reads zero rows, so a forged owner
 	// refuses itself without any comparison being written down.
 	ShopperOwnerHeader = "X-Memql-Shopper-Owner"
+	// ShopperClientHeader names the address the edge saw a request come from
+	// (X20). DATA, NOT A POINTER: the bff hands it, unchecked, to a form that
+	// asks for evidence (ShopperForm.Evidence) and to nothing else, and the edge
+	// deletes an inbound copy before it sets its own, as it does the three above.
+	ShopperClientHeader = "X-Memql-Shopper-Client"
 
 	// ShopperSubmissionIDArg is the argument name the bff stamps one
 	// freshly-minted id into, on BOTH the pack's construct and the client
@@ -178,6 +184,10 @@ var reservedShopperFieldNames = map[string]string{
 	"submittedAt": "stamped from the server clock, never the shopper's",
 	"submissionId": "minted per POST by the bff and stamped into both constructs, so one " +
 		"submission has one id (design record 2026-09-21, D4)",
+	"clientAddress": "the address the edge saw the request come from, handed to an Evidence form " +
+		"on its context (ShopperEvidence), never posted",
+	"userAgent": "the browser's User-Agent, handed to an Evidence form on its context " +
+		"(ShopperEvidence), never posted",
 	"actor":     "a reserved engine root",
 	"now":       "a reserved engine root",
 	"partition": "a reserved engine root",
@@ -258,8 +268,40 @@ type ShopperForm struct {
 	// anything else, so a pack cannot put an arbitrary error on the
 	// merchant's page -- only a code the merchant's page was written for.
 	Refusals []string
+	// Evidence asks the handler to put what the request itself says about where
+	// it came from on the context the construct runs under (ShopperEvidence):
+	// the address the edge saw and the browser's User-Agent. For a construct
+	// that records a person's assent, which is evidence of it. A form that does
+	// not ask is given none.
+	Evidence bool
 	// Description is what the pack guide and the module inventory show.
 	Description string
+}
+
+// ShopperEvidence is what a shopper's request says about where it came from:
+// the address the edge saw it come from (ShopperClientHeader) and the
+// browser's User-Agent, cut to 512 bytes by the handler.
+//
+// A CONTEXT VALUE, NEVER AN ARGUMENT. Nothing a request posts and nothing a
+// DSL caller writes can set it, so a construct that reads it knows the value
+// came from the shopper handler; a direct call of the construct carries none.
+type ShopperEvidence struct {
+	ClientAddress, UserAgent string
+}
+
+type shopperEvidenceKey struct{}
+
+// ContextWithShopperEvidence is ctx carrying ev. The shopper handler is its
+// one caller, for a form that declares Evidence.
+func ContextWithShopperEvidence(ctx context.Context, ev ShopperEvidence) context.Context {
+	return context.WithValue(ctx, shopperEvidenceKey{}, ev)
+}
+
+// ShopperEvidenceFrom is the evidence ctx carries, and false when it carries
+// none.
+func ShopperEvidenceFrom(ctx context.Context) (ShopperEvidence, bool) {
+	ev, ok := ctx.Value(shopperEvidenceKey{}).(ShopperEvidence)
+	return ev, ok
 }
 
 // CallPrefix is the keyword a construct invocation carries, or "" for a

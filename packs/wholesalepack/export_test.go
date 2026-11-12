@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -94,4 +96,46 @@ func SetSettingsForTest(ctx context.Context, eng memql.IntegrationEngineAccess, 
 		return nil, err
 	}
 	return nodes[0].Payload, nil
+}
+
+// MintLinkForTest mints a link of purpose for the application at applicationID,
+// read as the deployment, as Task 14's resolver will, and answers its token.
+func MintLinkForTest(ctx context.Context, eng memql.IntegrationEngineAccess, applicationID, purpose string) (string, error) {
+	p := &Provider{engine: eng, reader: &engineRowReader{engine: eng}, writer: &engineWriter{engine: eng}}
+	rows, err := p.rowsFor(auth.ContextWithSystemActor(ctx, provisionActor), "applicationById",
+		map[string]string{"applicationId": applicationID})
+	if err != nil {
+		return "", err
+	}
+	if len(rows) == 0 {
+		return "", fmt.Errorf("no application %q", applicationID)
+	}
+	token, _, err := p.mintLink(ctx, rows[0], purpose, p.clock())
+	return token, err
+}
+
+// hookedReader runs atCurrent once, the first time the store's current
+// documents are read: in the accept path, after the acceptance read.
+type hookedReader struct {
+	rowReader
+	once      *sync.Once
+	atCurrent func()
+}
+
+func (h hookedReader) RowsPageWithList(ctx context.Context, query string, args map[string]string, listName string, list []string,
+	cursor string) ([]map[string]any, string, error) {
+	if query == documentBriefsQuery && h.atCurrent != nil {
+		h.once.Do(h.atCurrent)
+	}
+	return h.rowReader.RowsPageWithList(ctx, query, args, listName, list, cursor)
+}
+
+// AcceptTermsForTest runs wholesaleAcceptTerms over eng, running atCurrent once
+// past the acceptance read, before the current versions are read and the
+// acceptance written.
+func AcceptTermsForTest(ctx context.Context, eng memql.IntegrationEngineAccess, args map[string]any, atCurrent func()) error {
+	p := &Provider{engine: eng, writer: &engineWriter{engine: eng},
+		reader: hookedReader{rowReader: &engineRowReader{engine: eng}, once: &sync.Once{}, atCurrent: atCurrent}}
+	_, err := p.acceptTerms(ctx, args, 0)
+	return err
 }

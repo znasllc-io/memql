@@ -439,12 +439,22 @@ func (p *Provider) recordDecision(ctx context.Context, args map[string]any, _ in
 	// system, because a decision written before the account tie names no
 	// merchant and the store's side cannot read it -- and an approve judged
 	// against the readable part would re-decide a rejected application.
-	state, err := p.stateOf(auth.ContextWithSystemActor(ctx, provisionActor), applicationID)
+	sys := auth.ContextWithSystemActor(ctx, provisionActor)
+	state, err := p.stateOf(sys, applicationID)
 	if err != nil {
 		return nil, err
 	}
 	if err := LegalTransition(state, transition); err != nil {
 		return nil, err
+	}
+	// AN APPROVAL WAITS FOR THE ACCEPTANCE while the store requires its terms
+	// (7.2), judged as the deployment like the log.
+	termsRequired, accepted, err := p.acceptanceStanding(sys, app)
+	if err != nil {
+		return nil, err
+	}
+	if transition == TransitionApprove && termsRequired && !accepted {
+		return nil, errors.New(NotAcceptedSentence)
 	}
 	if err := p.appendDecision(ctx, app, transition, asString(args["note"])); err != nil {
 		return nil, err
@@ -457,7 +467,7 @@ func (p *Provider) recordDecision(ctx context.Context, args map[string]any, _ in
 		// The value the row holds: the actor's id, in canonical form.
 		"decidedBy": userRef(decider),
 		"state":     after,
-		"stage":     StageOf(after, false, false),
+		"stage":     StageOf(after, termsRequired, accepted),
 	})
 }
 
@@ -511,21 +521,25 @@ func (p *Provider) applicationState(ctx context.Context, args map[string]any, _ 
 	// system for them, so a foreign id is not told from a missing one. One who
 	// can is answered the WHOLE log's fold (X27), read as the system.
 	state := StateSubmitted
+	termsRequired, accepted := false, false
 	rows, err := p.rowsFor(ctx, "applicationById", map[string]string{"applicationId": applicationID})
 	if err != nil {
 		return nil, err
 	}
 	if len(rows) > 0 {
-		if state, err = p.stateOf(auth.ContextWithSystemActor(ctx, provisionActor), applicationID); err != nil {
+		sys := auth.ContextWithSystemActor(ctx, provisionActor)
+		if state, err = p.stateOf(sys, applicationID); err != nil {
+			return nil, err
+		}
+		if termsRequired, accepted, err = p.acceptanceStanding(sys, rows[0]); err != nil {
 			return nil, err
 		}
 	}
 	payload, err := json.Marshal(map[string]any{
 		"applicationId": applicationID,
 		"state":         state,
-		// No store requires its terms yet, so a submitted application is ready.
-		"stage":     StageOf(state, false, false),
-		"legalNext": legalFrom[state],
+		"stage":         StageOf(state, termsRequired, accepted),
+		"legalNext":     legalFrom[state],
 	})
 	if err != nil {
 		return nil, fmt.Errorf("wholesale: marshal state: %w", err)
@@ -562,6 +576,20 @@ func (p *Provider) applicationRow(ctx context.Context, applicationID string) (ma
 			"so it cannot be decided", applicationID)
 	}
 	return rows[0], nil
+}
+
+// acceptanceStanding answers whether app's store requires its terms and, when it
+// does, whether app has accepted them, read through sys. A store that requires
+// none needs no acceptance read.
+func (p *Provider) acceptanceStanding(sys context.Context, app map[string]any) (termsRequired, accepted bool, err error) {
+	if termsRequired, err = p.termsRequiredAt(sys, trimmed(app["storeId"])); err != nil || !termsRequired {
+		return termsRequired, false, err
+	}
+	acceptance, err := p.acceptanceOf(sys, trimmed(app["id"]))
+	if err != nil {
+		return false, false, err
+	}
+	return true, acceptance != nil, nil
 }
 
 // stateOf folds one application's decision log.

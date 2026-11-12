@@ -30,7 +30,7 @@ builtin wholesaleSubmitApplication {
 
 @executor("integration.wholesale.recordDecision")
 @args(profile="object")
-@description("Append one decision to an application's log. A PERSON ON THE STORE'S SIDE DECIDES: the caller holds the wholesale part in the application's organization (the organization gate judges it), is signed in, and is not one of the cluster's operators, who read every store's applications and decide none. The decider recorded is always the caller; principalKind and decidedBy are accepted for old callers and ignored. storeId, the merchant and the organization are read off the application being decided rather than supplied, so a decision can never be scoped to a store its subject is not on -- and the read runs under the CALLER'S own actor, so a caller who cannot read an application cannot decide it. The transition is checked against the FOLDED LOG rather than against an argument: approve and reject are legal from submitted, revoke only from approved, and nothing leads out of rejected or revoked because re-deciding in place would overwrite why the first decision was made.")
+@description("Append one decision to an application's log. A PERSON ON THE STORE'S SIDE DECIDES: the caller holds the wholesale part in the application's organization (the organization gate judges it), is signed in, and is not one of the cluster's operators, who read every store's applications and decide none. The decider recorded is always the caller; principalKind and decidedBy are accepted for old callers and ignored. storeId, the merchant and the organization are read off the application being decided rather than supplied, so a decision can never be scoped to a store its subject is not on -- and the read runs under the CALLER'S own actor, so a caller who cannot read an application cannot decide it. The transition is checked against the FOLDED LOG rather than against an argument: approve and reject are legal from submitted, revoke only from approved, and nothing leads out of rejected or revoked because re-deciding in place would overwrite why the first decision was made. While the store requires its terms (termsRequired), an approve of an application that has not accepted them is refused: \"This application has not accepted the terms yet.\"")
 @requiresCapability("execute", "app:deployables/wholesale")
 builtin wholesaleRecordDecision {
   applicationId  string!  @description("The application being decided. The organization gate judges the call against its organization.")
@@ -127,7 +127,7 @@ builtin wholesaleList {
 
 @executor("integration.wholesale.get")
 @args(profile="object")
-@description("One application as the Wholesale section opens it: the application, its state and stage, the client's own fields (details: shown with its fields for a row the caller reads; none for an application the store's people added, a store with no client fields, or an application with no row of them; unreadable when the caller cannot read the client's row), every decision newest first with the decider's name, the entitlement (null when there is none), whether the caller is one of the cluster's operators, and the acts open to the caller (reject, approve, remove, retryAccess). The application is read under the caller, so a caller who cannot read it is answered nothing; its decisions and entitlement are then read as the deployment, so the state is judged against the whole log. The caller holds the wholesale part in the application's organization (the organization gate judges it).")
+@description("One application as the Wholesale section opens it: the application, its state and stage, the client's own fields (details: shown with its fields for a row the caller reads; none for an application the store's people added, a store with no client fields, or an application with no row of them; unreadable when the caller cannot read the client's row), every decision newest first with the decider's name, the entitlement (null when there is none), the acceptance of the terms (acceptance: {signedName, acceptedAt, termsLabel, termsSha256, mapLabel, mapSha256, clientAddress, userAgent}, or null when there is none), the terms link's dates (termsLink: {expiresAt, expired}, or null when none was sent; expired by the engine's clock now), whether the caller is one of the cluster's operators, and the acts open to the caller (reject, approve, remove, retryAccess). While the store requires its terms, a submitted application that has not accepted them is in stage waitingForTerms. The application is read under the caller, so a caller who cannot read it is answered nothing; its decisions and entitlement are then read as the deployment, so the state is judged against the whole log. The caller holds the wholesale part in the application's organization (the organization gate judges it).")
 @requiresCapability("execute", "app:deployables/wholesale")
 builtin wholesaleGet {
   applicationId  string!  @description("The application to open, bare or canonical. The organization gate judges the call against its organization.")
@@ -159,7 +159,7 @@ builtin wholesaleBuyers {
 
 @executor("integration.wholesale.exportStore")
 @args(profile="object")
-@description("One store's wholesale record as one JSON file, {fileName, json}: every application the caller reads, each with the client's own fields, their decisions and entitlements (read as the deployment once the caller has been admitted), the store's settings at their effective values (a setting the store never named is exported as the default it runs on), and every version of the store's documents (documentVersions). Every decision and entitlement names its application by the application's own id. Document bodies are carried newest first, across every kind, until 4 MiB of body text in all: a version past that is exported with every other field, its fingerprint included, no body and bodyOmitted true, documentBodiesOmitted counts them (0 when none), and a body left out is read with wholesaleDocuments and its versionId. It reads EVERYTHING -- every application in every form of the store id, and each one's whole log -- with no cap, so it can be slow for a store with a long history. It never carries a token hash. The file is named wholesale-<store>-<YYYYMMDD>.json. The caller holds the wholesale part in the site's organization, or is a cluster operator, and the site must serve the store.")
+@description("One store's wholesale record as one JSON file, {fileName, json}: every application the caller reads, each with the client's own fields, their decisions, entitlements and acceptances of the terms (acceptances), read as the deployment once the caller has been admitted, the store's settings at their effective values (a setting the store never named is exported as the default it runs on), and every version of the store's documents (documentVersions). Every decision and entitlement names its application by the application's own id. Document bodies are carried newest first, across every kind, until 4 MiB of body text in all: a version past that is exported with every other field, its fingerprint included, no body and bodyOmitted true, documentBodiesOmitted counts them (0 when none), and a body left out is read with wholesaleDocuments and its versionId. It reads EVERYTHING -- every application in every form of the store id, and each one's whole log -- with no cap, so it can be slow for a store with a long history. It never carries a token hash. The file is named wholesale-<store>-<YYYYMMDD>.json. The caller holds the wholesale part in the site's organization, or is a cluster operator, and the site must serve the store.")
 @requiresCapability("execute", "app:deployables/wholesale")
 builtin wholesaleExportStore {
   siteId   string!  @description("The store's site: the organization gate judges the read against its organization, and the store must be bound to it.")
@@ -186,4 +186,45 @@ builtin wholesaleDocuments {
   siteId     string!  @description("The store's site: the organization gate judges the read against its organization, and the store must be bound to it.")
   storeId    string!  @description("The store whose documents to read.")
   versionId  string  @description("One version to answer, body included.")
+}
+
+// # The private links (U8)
+//
+// THE TOKEN IS THE AUTHORITY. These three carry no capability, as the reviews
+// pack's link builtins do: the shopper who holds a link is nobody to MemQL. So
+// each does nothing and reveals nothing until the token has been verified
+// against a link of the store it was called with, and a token of another store
+// is refused exactly as an unknown one is. storeId and siteId are stamped by
+// the shopper handler from the binding the request arrived through.
+
+@executor("integration.wholesale.termsForLink")
+@args(profile="object")
+@description("THE TERMS LINK'S READ: the store's current terms and MAP policy for the applicant whose link this is, {companyName, documents: [{kind, label, body, sha256}] (terms, then map), statement, expiresAt}, where statement is the sentence they accept with. Never an email, an id or a token hash. Refused by name: link_invalid (no link of this store carries the token, or the token was replaced), link_expired, link_used (the terms were accepted, or the application was decided).")
+builtin wholesaleTermsForLink {
+  requestToken  string!  @description("The link's token.")
+  storeId       string!  @description("Stamped by the shopper handler from the binding the request arrived through.")
+  siteId        string   @description("Stamped by the shopper handler.")
+}
+
+@executor("integration.wholesale.acceptTerms")
+@args(profile="object")
+@description("THE ACCEPTANCE FORM'S CONSTRUCT: an applicant accepts the store's terms and MAP policy through their terms link. The link is verified as the read verifies it; an application that has accepted already is link_used; both boxes must arrive as on, the trimmed name must not be empty and each fingerprint must be 64 hex characters, else invalid. The current terms and MAP versions are read again, and a fingerprint that is not the current version's is terms_changed: nothing is written, the link stays usable, and the applicant reads the current texts again. The acceptance records the versions, their fingerprints, the store's acceptance sentence, the name typed, and the address and browser the storefront's edge saw -- empty for a call that did not arrive through the storefront -- and is written once: of two posts at once, one is recorded and the other is link_used. The link is then marked used.")
+builtin wholesaleAcceptTerms {
+  requestToken  string!  @description("The link's token.")
+  acceptTerms   string!  @description("The terms box: on.")
+  acceptMap     string!  @description("The MAP policy box: on.")
+  signedName    string!  @description("The name the applicant types to accept.")
+  termsSha256   string!  @description("The fingerprint of the terms version the page showed, as the terms read answered it.")
+  mapSha256     string!  @description("The fingerprint of the MAP policy version the page showed, as the terms read answered it.")
+  storeId       string!  @description("Stamped by the shopper handler from the binding the post arrived through.")
+  siteId        string   @description("Stamped by the shopper handler.")
+}
+
+@executor("integration.wholesale.priceSheetForLink")
+@args(profile="object")
+@description("THE PRICE-SHEET LINK'S READ: the store's current price sheet for an approved buyer, {companyName, document: {label, body, sha256, publishedAt}}. Never an email, an id or a token hash. Refused by name: link_invalid (no link of this store carries the token, or the token was replaced), link_used (the application is not approved, or its access is not granted).")
+builtin wholesalePriceSheetForLink {
+  requestToken  string!  @description("The link's token.")
+  storeId       string!  @description("Stamped by the shopper handler from the binding the request arrived through.")
+  siteId        string   @description("Stamped by the shopper handler.")
 }

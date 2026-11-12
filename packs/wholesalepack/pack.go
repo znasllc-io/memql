@@ -9,6 +9,7 @@ package wholesalepack
 
 import (
 	"io/fs"
+	"log/slog"
 	"time"
 
 	"embed"
@@ -70,8 +71,12 @@ type Provider struct {
 	// hasExtension reports whether a client extends the application form; nil
 	// asks the engine's extension registry. A test seam.
 	hasExtension func() bool
-	// now is the clock an export is dated by; nil is the wall clock.
+	// now is the engine's clock (an export's date, a link's issue and expiry, an
+	// acceptance's time); nil is the wall clock.
 	now func() time.Time
+	// logger takes the operator's line about a link that could not be served;
+	// nil is the default logger.
+	logger *slog.Logger
 	// backfillWindow is how many applications the backfill takes from each
 	// page of its walk; zero is the query's own window. A test seam, so a
 	// walk over more than one window needs no more than a handful of rows.
@@ -232,6 +237,44 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema: map[string]string{
 				"siteId":  "string (required) - the store's site; it must serve the store",
 				"storeId": "string (required) - the store whose record to export",
+			},
+		},
+		{
+			Name: "termsForLink",
+			Description: "The terms link's read: the store's current terms and MAP policy for the applicant whose " +
+				"token this is. The token is the authority; refused by name as link_invalid, link_expired or link_used.",
+			Handler: p.termsForLink,
+			ArgsSchema: map[string]string{
+				"requestToken": "string (required) - the link's token",
+				"storeId":      "string (required) - stamped from the binding the request arrived through",
+				"siteId":       "string (optional) - stamped from the site",
+			},
+		},
+		{
+			Name: "acceptTerms",
+			Description: "The acceptance form's construct: an applicant accepts the terms and MAP policy shown on " +
+				"their terms link, once. A version that changed under the page is terms_changed.",
+			Handler: p.acceptTerms,
+			ArgsSchema: map[string]string{
+				"requestToken": "string (required) - the link's token",
+				"acceptTerms":  "string (required) - on",
+				"acceptMap":    "string (required) - on",
+				"signedName":   "string (required) - the name the applicant types",
+				"termsSha256":  "string (required) - the terms version's fingerprint the page showed",
+				"mapSha256":    "string (required) - the MAP policy version's fingerprint the page showed",
+				"storeId":      "string (required) - stamped from the binding the post arrived through",
+				"siteId":       "string (optional) - stamped from the site",
+			},
+		},
+		{
+			Name: "priceSheetForLink",
+			Description: "The price-sheet link's read: the store's current price sheet for an approved buyer whose " +
+				"access is granted. The token is the authority; refused by name as link_invalid or link_used.",
+			Handler: p.priceSheetForLink,
+			ArgsSchema: map[string]string{
+				"requestToken": "string (required) - the link's token",
+				"storeId":      "string (required) - stamped from the binding the request arrived through",
+				"siteId":       "string (optional) - stamped from the site",
 			},
 		},
 		{

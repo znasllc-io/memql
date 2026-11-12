@@ -8658,6 +8658,40 @@
       }
     },
     {
+      "concept": "v1:wholesale:acceptance",
+      "file": "packs/wholesalepack/dsl/concepts.memql",
+      "fields": [
+        "acceptedAt",
+        "accountId",
+        "applicantEmail",
+        "applicationId",
+        "clientAddress",
+        "linkIssuedAt",
+        "mapSha256",
+        "mapVersionId",
+        "ownerUserId",
+        "signedName",
+        "statement",
+        "storeId",
+        "termsSha256",
+        "termsVersionId",
+        "userAgent"
+      ],
+      "required": [
+        "acceptedAt",
+        "applicantEmail",
+        "applicationId",
+        "mapSha256",
+        "mapVersionId",
+        "ownerUserId",
+        "signedName",
+        "statement",
+        "storeId",
+        "termsSha256",
+        "termsVersionId"
+      ]
+    },
+    {
       "concept": "v1:wholesale:application",
       "file": "packs/wholesalepack/dsl/concepts.memql",
       "fields": [
@@ -8779,6 +8813,36 @@
           "granted",
           "pending",
           "revoked"
+        ]
+      }
+    },
+    {
+      "concept": "v1:wholesale:privateLink",
+      "file": "packs/wholesalepack/dsl/concepts.memql",
+      "fields": [
+        "accountId",
+        "applicationId",
+        "expiresAt",
+        "issuedAt",
+        "ownerUserId",
+        "purpose",
+        "siteId",
+        "storeId",
+        "tokenHash",
+        "usedAt"
+      ],
+      "required": [
+        "applicationId",
+        "issuedAt",
+        "ownerUserId",
+        "purpose",
+        "storeId",
+        "tokenHash"
+      ],
+      "enums": {
+        "purpose": [
+          "priceSheet",
+          "terms"
         ]
       }
     },

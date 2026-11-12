@@ -205,7 +205,15 @@ func trimmed(v any) string { return strings.TrimSpace(asString(v)) }
 //     origin only (the store's automation), then the decision log.
 //   - wholesaleBackfillAccounts: internal origin or a cluster operator
 //     only, refusing everyone else before it reads; a row already tied is
-//     never rewritten.
+//     never rewritten;
+//   - wholesaleAcceptTerms: no capability -- the token is the authority. The
+//     token's hash must match a link of the store the call names, read under
+//     the caller, unused, unexpired and of a submitted application, before
+//     anything else is read; an existing acceptance refuses; the acceptance is
+//     fenced on row-absent at its derived id, so none is ever written over, and
+//     only then is the link the token named written again with its usedAt;
+//   - the private link itself: written by mintLink, which only the resolver
+//     that mails the link calls, as the application's merchant.
 //
 // SEPARATE FROM Caller BECAUSE THE CALL FORMS DIFFER AND THE DIFFERENCE IS
 // EASY TO LOSE: a mutation is `name(args)`, a builtin is `builtin

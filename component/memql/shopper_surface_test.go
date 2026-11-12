@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -269,5 +270,41 @@ concept acmeDetail {
 		if got := extensionFieldLabel(name); got != want {
 			t.Errorf("extensionFieldLabel(%q) = %q, want %q", name, got, want)
 		}
+	}
+}
+
+// THE EVIDENCE AN ACCEPTANCE RECORDS IS STAMPED, NEVER POSTED: a form that
+// could declare clientAddress or userAgent would let a shopper write their own.
+func TestClientAddressAndUserAgentAreReservedShopperNames(t *testing.T) {
+	for _, name := range []string{"clientAddress", "userAgent"} {
+		t.Run(name, func(t *testing.T) {
+			t.Cleanup(ResetShopperSurfaceForTest)
+			f := validForm()
+			f.Fields = []ShopperField{{Name: name}}
+			expectPanic(t, "stamped server-side", func() { RegisterShopperForm(f) })
+			r := ShopperRead{Pack: "reviews", Name: "draft", Construct: "x", Kind: ShopperReadKindBuiltin,
+				Fields: []ShopperField{{Name: name}}}
+			expectPanic(t, "stamped server-side", func() { RegisterShopperRead(r) })
+		})
+	}
+	names := strings.Join(ReservedShopperFieldNames(), ",")
+	if !strings.Contains(names, "clientAddress") || !strings.Contains(names, "userAgent") {
+		t.Fatalf("the reserved names %s leave out the evidence", names)
+	}
+}
+
+// THE EVIDENCE RIDES THE CONTEXT, so only server code can set it: a context
+// with none answers false, and the value set is the value read.
+func TestShopperEvidenceRidesTheContext(t *testing.T) {
+	if _, ok := ShopperEvidenceFrom(context.Background()); ok {
+		t.Fatal("a bare context carries evidence")
+	}
+	ev := ShopperEvidence{ClientAddress: "198.51.100.7", UserAgent: "Example Browser/1.0"}
+	got, ok := ShopperEvidenceFrom(ContextWithShopperEvidence(context.Background(), ev))
+	if !ok || got != ev {
+		t.Fatalf("the context carries %+v (%v), want %+v", got, ok, ev)
+	}
+	if ShopperClientHeader != "X-Memql-Shopper-Client" {
+		t.Fatalf("ShopperClientHeader = %q", ShopperClientHeader)
 	}
 }

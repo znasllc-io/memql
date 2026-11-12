@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -421,5 +422,105 @@ func TestAFormCannotSupplyItsOwnAccountId(t *testing.T) {
 	}
 	if !strings.Contains(exec.calls[0], `accountId: "acct-north"`) {
 		t.Fatalf("the site's organization was not stamped: %q", exec.calls[0])
+	}
+}
+
+// evidenceRecordingExecutor records the evidence each call's context carried.
+type evidenceRecordingExecutor struct {
+	shopperRecordingExecutor
+	evidence []memql.ShopperEvidence
+	had      []bool
+}
+
+func (e *evidenceRecordingExecutor) Execute(ctx context.Context, query string) (any, error) {
+	ev, ok := memql.ShopperEvidenceFrom(ctx)
+	e.evidence = append(e.evidence, ev)
+	e.had = append(e.had, ok)
+	return e.shopperRecordingExecutor.Execute(ctx, query)
+}
+
+// evidenceFixture declares one form that asks for evidence and one that does not.
+func evidenceFixture(t *testing.T) (*ShopperHandler, *evidenceRecordingExecutor) {
+	t.Helper()
+	t.Cleanup(memql.ResetShopperSurfaceForTest)
+	memql.ResetShopperSurfaceForTest()
+	memql.RegisterShopperForm(memql.ShopperForm{
+		Pack: "wholesale", Name: "acceptance", Construct: "wholesaleAcceptTerms", Kind: memql.ShopperReadKindBuiltin,
+		Fields:     []memql.ShopperField{{Name: "signedName", Required: true, MaxLength: 120}},
+		Evidence:   true,
+		RedirectOK: "/wholesale/accepted", RedirectError: "/wholesale/link-problem",
+	})
+	memql.RegisterShopperForm(memql.ShopperForm{
+		Pack: "reviews", Name: "review", Construct: "submitReview",
+		Fields:     []memql.ShopperField{{Name: "body", Required: true, MaxLength: 4000}},
+		RedirectOK: "/reviews/thanks", RedirectError: "/reviews/problem",
+	})
+	exec := &evidenceRecordingExecutor{}
+	sites := &shopperFakeSites{
+		owner: "user-merchant",
+		site:  &ShopperSite{ID: "site1", ShopperForms: true, StoreID: "store-live"},
+	}
+	return NewShopperHandler(exec, sites, nil), exec
+}
+
+// AN EVIDENCE FORM CARRIES WHAT THE EDGE SAW AND WHAT THE BROWSER SENT, on the
+// context the construct runs under and nowhere a form could reach: the address
+// from the edge's own header, the User-Agent cut to 512 bytes.
+func TestAnEvidenceFormCarriesTheEdgesAddressAndTheBrowserOnItsContext(t *testing.T) {
+	h, exec := evidenceFixture(t)
+	stamp := goodStamp()
+	stamp[memql.ShopperClientHeader] = "198.51.100.7"
+	stamp["User-Agent"] = strings.Repeat("a", 600)
+	rec := shopperPost(h, "/forms/wholesale/acceptance", "signedName=Ada+Example&clientAddress=203.0.113.9&userAgent=forged", stamp)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/wholesale/accepted" {
+		t.Fatalf("the post answered %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	if len(exec.evidence) != 1 || !exec.had[0] {
+		t.Fatalf("the construct ran with no evidence: %+v", exec.had)
+	}
+	got := exec.evidence[0]
+	if got.ClientAddress != "198.51.100.7" || got.UserAgent != strings.Repeat("a", 512) {
+		t.Fatalf("the evidence is %q / %d bytes, want the edge's address and 512 bytes", got.ClientAddress, len(got.UserAgent))
+	}
+	if strings.Contains(exec.calls[0], "clientAddress") || strings.Contains(exec.calls[0], "forged") {
+		t.Fatalf("a posted copy of the evidence reached the construct: %s", exec.calls[0])
+	}
+}
+
+// A User-Agent cut mid-character is cut at the character before it.
+func TestAnEvidenceUserAgentIsCutOnACharacterBoundary(t *testing.T) {
+	h, exec := evidenceFixture(t)
+	stamp := goodStamp()
+	stamp["User-Agent"] = strings.Repeat("a", 511) + "é"
+	shopperPost(h, "/forms/wholesale/acceptance", "signedName=Ada", stamp)
+	if got := exec.evidence[0].UserAgent; got != strings.Repeat("a", 511) {
+		t.Fatalf("the User-Agent was cut to %d bytes, want the 511 before the cut character", len(got))
+	}
+}
+
+// A FORM THAT DID NOT ASK FOR EVIDENCE IS GIVEN NONE, whatever the edge sent.
+func TestANonEvidenceFormIsGivenNoEvidence(t *testing.T) {
+	h, exec := evidenceFixture(t)
+	stamp := goodStamp()
+	stamp[memql.ShopperClientHeader] = "198.51.100.7"
+	stamp["User-Agent"] = "Example Browser/1.0"
+	rec := shopperPost(h, "/forms/reviews/review", "body=nice", stamp)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("the post answered %d", rec.Code)
+	}
+	if len(exec.had) != 1 || exec.had[0] {
+		t.Fatalf("a form that asked for none carried evidence: %+v", exec.evidence)
+	}
+}
+
+// A CONSTRUCT MAY ANSWER invalid: a declared field that breaks a rule the
+// declaration cannot state (a box that is not on, a fingerprint that is not
+// hex) is told as the surface tells its own field rules.
+func TestAConstructsInvalidIsToldAsInvalid(t *testing.T) {
+	h, exec := evidenceFixture(t)
+	exec.err = fmt.Errorf("wholesale: %w", memql.NewShopperRefusal("invalid", "a box is not on"))
+	rec := shopperPost(h, "/forms/wholesale/acceptance", "signedName=Ada", goodStamp())
+	if loc := rec.Header().Get("Location"); loc != "/wholesale/link-problem?reason=invalid" {
+		t.Fatalf("the refusal redirected to %q", loc)
 	}
 }

@@ -17,6 +17,8 @@
 use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings, documentVersion }
 use wholesale.shapes.{ applicationFull, applicationDecisionFull, entitlementFull, wholesaleSettingsFull, documentVersionFull, wholesaleDocumentVersionBrief }
 use wholesale.shapes.{ wholesaleStorePlan }
+use wholesale.concepts.{ privateLink, acceptance }
+use wholesale.shapes.{ privateLinkFull, privateLinkPublic, acceptanceFull }
 use shopify.overlay.concepts.{ store }
 
 @description("One application by id. The read a decision resolves its subject through, so a caller who cannot read an application cannot record a decision against it either -- which is the same narrowing reviewspack's moderation path carries, and for the same reason: a decision naming an application nobody can read would be a row scoped to no store.")
@@ -208,4 +210,51 @@ query application applicationsForBackfill {
   sort    "row.createdAt", "asc"
   paginate 200
   shape   applicationFull
+}
+
+@description("The link a token belongs to, on one store: the shopper path's only way in to a private link. Matched by the token's hash and the store as written (the bare form the pack writes links in), so a token of another store, or a token a later version of its link replaced, finds nothing. Projects no token hash.")
+@unbounded("one link by its token hash -- a token hash is one link")
+@actor
+query privateLink privateLinkByTokenHash {
+  args {
+    storeId    string!
+    tokenHash  string!
+  }
+  filter  row => row.storeId == args.storeId && row.tokenHash == args.tokenHash
+  shape   privateLinkPublic
+}
+
+@description("One application's link of one purpose (terms or priceSheet). One row per application and purpose at a derived id, so this answers at most one. A link row holds the CANONICAL application id and this query matches it as written, so a reader asks both forms.")
+@actor
+query privateLink privateLinkForApplication {
+  args {
+    applicationId  string!
+    purpose        string!
+  }
+  filter  row => row.applicationId == args.applicationId && row.purpose == args.purpose
+  sort    "row.createdAt", "desc"
+  shape   privateLinkFull
+}
+
+@description("One application's acceptance of the terms. Written once at a derived id, so this answers at most one. An acceptance holds the CANONICAL application id and this query matches it as written, so a reader asks both forms.")
+@actor
+query acceptance acceptanceForApplication {
+  args {
+    applicationId  string!
+  }
+  filter  row => row.applicationId == args.applicationId
+  sort    "row.createdAt", "desc"
+  shape   acceptanceFull
+}
+
+@description("The acceptances of a list of applications, paged to its end by the caller: the list's and the export's batch read, so a store's list reads one batch per fifty applications rather than one read per application. Matched as written, so the list names every form of each application id.")
+@actor
+query acceptance acceptancesForApplicationIds {
+  args {
+    applicationIds  []string!
+  }
+  filter  row => row.applicationId in args.applicationIds
+  sort    "row.createdAt", "desc"
+  paginate 200
+  shape   acceptanceFull
 }

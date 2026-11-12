@@ -19,6 +19,7 @@
 // reach is declared per route.
 
 use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings, documentVersion }
+use wholesale.concepts.{ privateLink, acceptance }
 use shopify.overlay.concepts.{ store }
 
 // THE PACK'S ONE CROSS-DOMAIN READ, AND IT IS DELIBERATELY THREE FIELDS.
@@ -145,5 +146,60 @@ shape documentVersion wholesaleDocumentVersionBrief {
   sha256
   publishedBy
   publishedAt
+  row.createdAt
+}
+
+@description("A private link, whole, its token hash included. Read by the pack only, to write the link's next version; never answered to a shopper or exported.")
+@row
+shape privateLink privateLinkFull {
+  row.id
+  ownerUserId
+  storeId
+  accountId
+  siteId
+  applicationId
+  purpose
+  tokenHash
+  issuedAt
+  expiresAt
+  usedAt
+  row.createdAt
+}
+
+@description("A private link WITHOUT its token hash: what the token lookup answers, so the read that a shopper's token reaches never carries a hash back.")
+@row
+shape privateLink privateLinkPublic {
+  row.id
+  ownerUserId
+  storeId
+  accountId
+  siteId
+  applicationId
+  purpose
+  issuedAt
+  expiresAt
+  usedAt
+  row.createdAt
+}
+
+@description("An acceptance, whole: its evidence and the versions it names. Written once, so a row is an acceptance and this is all of it.")
+@row
+shape acceptance acceptanceFull {
+  row.id
+  ownerUserId
+  storeId
+  accountId
+  applicationId
+  applicantEmail
+  signedName
+  acceptedAt
+  termsVersionId
+  termsSha256
+  mapVersionId
+  mapSha256
+  statement
+  clientAddress
+  userAgent
+  linkIssuedAt
   row.createdAt
 }

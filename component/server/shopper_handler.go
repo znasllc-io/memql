@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -321,6 +322,15 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 	// that would put every @serverOnly construct within reach of a public
 	// form, which is the opposite of what a narrowly declared surface means.
 	ctx := auth.ContextWithUserActor(r.Context(), stamp.owner)
+	// EVIDENCE ONLY FOR A FORM THAT ASKED FOR IT (X20), on the context and never
+	// in the arguments, so nothing posted can stand in for it: the address the
+	// edge saw, and the browser's User-Agent cut to its bound.
+	if form.Evidence {
+		ctx = memql.ContextWithShopperEvidence(ctx, memql.ShopperEvidence{
+			ClientAddress: strings.TrimSpace(r.Header.Get(memql.ShopperClientHeader)),
+			UserAgent:     cutUTF8(r.UserAgent(), shopperUserAgentMaxBytes),
+		})
+	}
 	if _, err := h.engine.Execute(ctx, call); err != nil {
 		h.logger.Warn("shopper surface: the write was refused",
 			"component", "server", "pack", pack, "form", name,
@@ -329,7 +339,7 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 		// can say what happened ("this link has expired"); every other error
 		// is still "failed" and its text stays in the log.
 		reason := shopperReasonFailed
-		if code, declared := memql.ShopperRefusalCode(err, form.Refusals); declared {
+		if code, declared := memql.ShopperRefusalCode(err, constructReasons(form.Refusals)); declared {
 			reason = code
 		}
 		h.redirect(w, r, form.RedirectError, reason)
@@ -458,8 +468,12 @@ func (h *ShopperHandler) serveRead(w http.ResponseWriter, r *http.Request) {
 			"component", "server", "pack", pack, "read", name, "site", site.ID, "err", err)
 		// 422 for a refusal the read declared: the request was understood and
 		// the answer is a reason the caller can act on, not a fault.
-		if code, declared := memql.ShopperRefusalCode(err, read.Refusals); declared {
-			writeShopperJSONError(w, http.StatusUnprocessableEntity, code)
+		if code, declared := memql.ShopperRefusalCode(err, constructReasons(read.Refusals)); declared {
+			status := http.StatusUnprocessableEntity
+			if code == shopperReasonInvalid {
+				status = http.StatusBadRequest
+			}
+			writeShopperJSONError(w, status, code)
 			return
 		}
 		writeShopperJSONError(w, http.StatusBadGateway, shopperReasonFailed)
@@ -483,6 +497,29 @@ func (h *ShopperHandler) serveRead(w http.ResponseWriter, r *http.Request) {
 		rows = []map[string]any{}
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"data": rows})
+}
+
+// constructReasons is what a construct may refuse with by name: the codes its
+// declaration names, and invalid -- a declared field breaking a rule the
+// declaration cannot state (a box that is not on, a fingerprint that is not
+// hex), told exactly as the surface tells a field that fails its own rule.
+func constructReasons(declared []string) []string {
+	return append(append([]string{}, declared...), shopperReasonInvalid)
+}
+
+// shopperUserAgentMaxBytes bounds the User-Agent an Evidence form is handed.
+const shopperUserAgentMaxBytes = 512
+
+// cutUTF8 is s cut to at most max bytes, at the start of the character the
+// bound falls in, so the cut never leaves half of one.
+func cutUTF8(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	for max > 0 && !utf8.RuneStart(s[max]) {
+		max--
+	}
+	return s[:max]
 }
 
 // shopperArgs validates the declared fields against a value source and

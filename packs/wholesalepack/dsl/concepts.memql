@@ -150,3 +150,42 @@ concept documentVersion {
   publishedBy  string!  @description("v1:identity:user.id of the person who published this version: always the caller, never an argument of the builtin.")
   publishedAt  datetime!  @description("When this version was published, by the engine's clock.")
 }
+
+@version("1.0.0")
+@description("A private link the store sends one applicant: terms, on which they read the store's current terms and MAP policy and accept them, or priceSheet, on which an approved buyer reads the current price sheet. THE TOKEN IS NEVER STORED, only tokenHash, the hex SHA-256 of it, so no read of this row yields a working link. ONE ROW PER APPLICATION AND PURPOSE at the derived id wholesale-link-<purpose>-<the application's bare id, as a slug> (PrivateLinkRowID): a link sent again is a new VERSION of that row with a new token, which is what makes the token before it refused. Written by the pack as the application's merchant, never by a client. A new version publishes graph.node.created again with firstVersion false.")
+@displayCard(primary="purpose", secondary="applicationId", tertiary="expiresAt")
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+concept privateLink {
+  ownerUserId    string!    @description("v1:identity:user.id of the application's merchant, copied off the application in canonical form. The shopper path reads the link under the site owner's borrowed authority, which is this person.")
+  storeId        string!    @description("The store the application belongs to (design D9), in the bare form the pack writes its new rows in. A token is looked up only within the store the request arrived for, so a token of another store finds nothing.")
+  accountId      string     @description("The application's organization, copied off it, so the store's people read the link's dates.")
+  siteId         string     @description("The site the application arrived on, copied off it. Provenance.")
+  applicationId  string!    @description("v1:wholesale:application.id this link is for, in canonical form.")
+  purpose        enum("terms", "priceSheet")!  @description("What the link opens: terms, the terms and the MAP policy to read and accept, or priceSheet, the current price sheet for an approved buyer.")
+  tokenHash      string!    @description("The lowercase hex SHA-256 of the link's token. The token itself is never stored, logged or answered to the store's people.")
+  issuedAt       datetime!  @description("When this version of the link was made, by the engine's clock.")
+  expiresAt      datetime   @description("When a terms link stops working: issuedAt plus the store's linkLifetimeDays. A price-sheet link has none: it opens while the buyer stays approved and their access granted.")
+  usedAt         datetime   @description("When the terms were accepted through this link; a terms link that has been used is refused as link_used. Never set on a price-sheet link.")
+}
+
+@version("1.0.0")
+@description("One applicant's acceptance of a store's terms and MAP policy, and its evidence: who typed their name, when, against exactly which versions (each named by its id and the SHA-256 of its body), with which sentence, and from which address and browser as the storefront's edge saw them. WRITTEN ONCE, at the derived id wholesale-acceptance-<the application's bare id, as a slug> (AcceptanceRowID), and fenced on that row being absent, so of two posts at once one is recorded and the other is told the link is used. Written by the pack as the application's merchant, never by a client.")
+@displayCard(primary="signedName", secondary="applicationId", tertiary="acceptedAt")
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+concept acceptance {
+  ownerUserId     string!    @description("v1:identity:user.id of the application's merchant, copied off the application in canonical form.")
+  storeId         string!    @description("The store the application belongs to (design D9), in the bare form the pack writes its new rows in.")
+  accountId       string     @description("The application's organization, copied off it, so the store's people read the acceptance.")
+  applicationId   string!    @description("v1:wholesale:application.id that accepted, in canonical form.")
+  applicantEmail  string!    @description("The applicant's email, copied off the application when they accepted. Unverified data, never an identity.")
+  signedName      string!    @description("The name the applicant typed to accept, trimmed and otherwise as typed.")
+  acceptedAt      datetime!  @description("When the acceptance was recorded, by the engine's clock.")
+  termsVersionId  string!    @description("v1:wholesale:documentVersion.id of the terms version accepted: the store's current one when the acceptance was written.")
+  termsSha256     string!    @description("The SHA-256 of that terms version's body, which the applicant's post named and the pack checked equal to the current version's.")
+  mapVersionId    string!    @description("v1:wholesale:documentVersion.id of the MAP policy version accepted.")
+  mapSha256       string!    @description("The SHA-256 of that MAP policy version's body, checked as termsSha256 is.")
+  statement       string!    @description("The sentence the applicant accepted with: the store's acceptanceText, or the pack's default, as it was when they accepted.")
+  clientAddress   string     @description("The address the storefront's edge saw the post come from, at most 64 bytes. Empty when the acceptance did not arrive through the storefront.")
+  userAgent       string     @description("The browser's User-Agent as the post carried it, at most 512 bytes. Empty when the acceptance did not arrive through the storefront.")
+  linkIssuedAt    datetime   @description("When the link the applicant accepted through was made.")
+}
