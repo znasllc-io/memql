@@ -3,9 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import { AutoRefresh, Button, Caption, Head, Notice, useNow } from "../../../kit";
 import type { Breadcrumb } from "../../../kit/Breadcrumbs";
 import { InlineSkeleton } from "../../../kit/ContentSkeleton";
-import { formatCount, formatFreshness, formatMoment, formatMoney, formatMoneyAxis } from "../../../kit/format";
+import { formatCount, formatFreshness, formatMoney, formatMoneyAxis } from "../../../kit/format";
 import { LocalTabs } from "../../../kit/LocalTabs";
-import { absent, absentSentence, figureOf, type Figure } from "../../../kit/measure";
+import { absent, figureOf, type Figure } from "../../../kit/measure";
 import { PageHelp } from "../../../kit/pageHelp";
 import { RankedList, StatFigures, TimeChart, TimeChartSkeleton, bucketLabel, previousComparable, type RankedRow, type StatFigure } from "../../../kit/statistics";
 import { useWide } from "../../../kit/useWide";
@@ -15,8 +15,9 @@ import { useDeployablesSettings } from "../settingsContext";
 import { StatisticsPeriodControl } from "../statistics/SiteStatisticsView";
 import { statisticsRefreshMs } from "../statistics/useSiteStatistics";
 import { DestinationControl, type DestinationChoice } from "./DestinationControl";
-import { PRODUCTS_SHOWN, ProductTabs, ProductsListPage, productFormat, productRows, productsFooter, type ProductsBy } from "./ProductsListPage";
+import { PRODUCTS_SHOWN, ProductsBlock, ProductsListPage, type ProductsBy } from "./ProductsListPage";
 import { destinationsOf, type StoreFigures, type StorePoint, type StoreStatistics } from "./read";
+import { StoreNotice, absentReason, broughtIn, listAnswer, rowFormat, rowValue, type FigureId } from "./storeState";
 import { useStoreStatistics } from "./useStoreStatistics";
 import "../statistics/statistics.css";
 
@@ -43,16 +44,9 @@ import "../statistics/statistics.css";
 // the period in (`periodZone`): the store's when it loads, UTC otherwise, so
 // UTC days are never presented as the store's.
 //
-// ===========================================================================
-// THE NOTICE SAYS WHAT STANDS IN THE WAY, AND THE ENGINE SAYS WHY
-// ===========================================================================
-// The page has a sentence of its own only for a state the mirror gives no
-// reason for (paused, not connected), for a store still being brought in
-// (starting, purging, rebuilding), and for a state that is not known. Every
-// reason the answer lists is the engine's own sentence, shown in every state,
-// `recording` included; the page writes none for a reason and never branches
-// on a code. Then whether the figures are as of an earlier moment, and the
-// refunds still being read.
+// What the answer says about itself -- the notice, why a figure is absent,
+// what a list with no rows says -- is read in `storeState.tsx`, which the
+// whole list of products reads too.
 //
 // ===========================================================================
 // AN ABSENT FIGURE SAYS WHY, A HOVER AWAY
@@ -66,23 +60,6 @@ export const OLDER_ORDERS_LINE = "Refunds, edits and cancellations of orders pla
 export const DEVELOPMENT_LINE = "This is a development store: every order on it is a test order, and they are counted.";
 export const TAX_LINE = "Prices on this store include tax.";
 
-export const BROUGHT_IN_LINE = "The store's orders are still being brought in.";
-export const PAUSED_LINE = "Recording is paused for this store.";
-export const NOT_CONNECTED_LINE = "This store is not connected.";
-export const NOT_KNOWN_LINE = "Whether this store is recording is not known.";
-export const NO_FIGURE_LINE = "No figure can be given until this is fixed.";
-export const STORE_PAGE_NEXT = "The Store page of this deployable says what fixes it.";
-export const NO_ZONE_REASON = "The store's time zone has not been recorded yet.";
-export const NO_CURRENCY_REASON = "The store's currency has not been recorded yet.";
-export const INCOMPLETE_REFUND_REASON = "A refund in this period has more lines than were recorded.";
-export const NO_ORDERS = "No orders in this period.";
-
-/** "1 refund is still being read from Shopify." / "N refunds are ..." */
-export function refundsUnreadSentence(count: number): string {
-  return count === 1 ? "1 refund is still being read from Shopify." : `${formatCount(count)} refunds are still being read from Shopify.`;
-}
-
-type FigureId = keyof StoreFigures;
 type SeriesId = Exclude<keyof StorePoint, "at">;
 
 interface SalesFigure {
@@ -105,32 +82,6 @@ export const SALES_FIGURES: readonly SalesFigure[] = [
   { id: "unitsSold", label: "Units sold", money: false, series: "unitsSold" },
 ];
 
-/** The four figures a refund not yet read blanks (D22). */
-const BLANKED_BY_UNREAD_REFUNDS: ReadonlySet<FigureId> = new Set(["refunds", "netSales", "totalSales", "unitsSold"]);
-
-/** While the store's orders are being brought in (or deleted, or walked again), no figure is known. */
-function broughtIn(stats: StoreStatistics): boolean {
-  const state = stats.recording.state;
-  return state === "starting" || state === "purging" || state === "rebuilding" || stats.rebuilding === true;
-}
-
-/**
- * Why a figure the answer left null is absent: the first of these that
- * applies. "" when none does, and the kit then says nothing has reported it.
- */
-export function absentReason(stats: StoreStatistics, id: FigureId): string {
-  const money = SALES_FIGURES.find((spec) => spec.id === id)?.money ?? false;
-  // A store with no row yet has recorded nothing at all; its zone is not missing, it is not read yet.
-  if (stats.timezone === null && stats.start !== null) return NO_ZONE_REASON;
-  if (broughtIn(stats)) return BROUGHT_IN_LINE;
-  if (money && stats.currency === null) return NO_CURRENCY_REASON;
-  if ((stats.refundsNotRead ?? 0) > 0 && BLANKED_BY_UNREAD_REFUNDS.has(id)) return refundsUnreadSentence(stats.refundsNotRead ?? 0);
-  if (id === "unitsSold" && (stats.incompleteRefunds ?? 0) > 0) return INCOMPLETE_REFUND_REASON;
-  if (id === "averageOrderValue" && stats.figures.orders === 0) return NO_ORDERS;
-  if (stats.recording.blocked && stats.asOf === null) return NO_FIGURE_LINE;
-  return "";
-}
-
 function figureFor(stats: StoreStatistics, id: FigureId, values: StoreFigures): Figure {
   const value = broughtIn(stats) ? null : values[id];
   return value === null ? absent("unmeasured", absentReason(stats, id)) : figureOf(value, stats.floors[id] === true);
@@ -152,30 +103,6 @@ export function salesFigures(stats: StoreStatistics | null): StatFigure[] {
       chartable: spec.series !== undefined,
     };
   });
-}
-
-/** What a list with no rows says: no orders when the orders were counted, else why they were not. */
-function emptyList(stats: StoreStatistics | null): string {
-  if (stats === null) return NO_ORDERS;
-  const orders = figureFor(stats, "orders", stats.figures);
-  return orders.kind === "measured" ? NO_ORDERS : absentSentence(orders);
-}
-
-/** Block 2: what stands in the way, in the order the design gives; empty when nothing does. */
-export function noticeLines(stats: StoreStatistics): { lines: string[]; next?: string } {
-  const state = stats.recording.state;
-  const lines: string[] = [];
-  const intake = broughtIn(stats);
-  if (intake) lines.push(BROUGHT_IN_LINE);
-  else if (state === "paused") lines.push(PAUSED_LINE);
-  else if (state === "not connected") lines.push(NOT_CONNECTED_LINE);
-  else if (state === "") lines.push(NOT_KNOWN_LINE);
-  for (const reason of stats.recording.reasons) lines.push(reason.sentence);
-  if (!intake && stats.asOf !== null) lines.push(`These figures are as of ${formatMoment(stats.asOf)}.`);
-  else if (!intake && stats.recording.blocked) lines.push(NO_FIGURE_LINE);
-  if ((stats.refundsNotRead ?? 0) > 0) lines.push(refundsUnreadSentence(stats.refundsNotRead ?? 0));
-  const fixable = state === "paused" || state === "not connected" || state === "needs attention";
-  return fixable && !intake && lines.length > 0 ? { lines, next: STORE_PAGE_NEXT } : { lines };
 }
 
 export interface StoreStatisticsSectionProps {
@@ -223,7 +150,7 @@ export function StoreStatisticsSection({ site, name, trail, back }: StoreStatist
     >
       <div className="os-action-body os-app-stack">
         {allProducts !== null ? (
-          <ProductsListPage statistics={stats} by={allProducts} trail={here} back={{ label: "Store statistics", onSelect: () => setAllProducts(null) }} empty={emptyList(stats)} />
+          <ProductsListPage statistics={stats} by={allProducts} trail={here} back={{ label: "Store statistics", onSelect: () => setAllProducts(null) }} />
         ) : (
           <Head navigationKey={`storeStatistics:${site.id}`} title="Store statistics" breadcrumbs={[...trail, { label: "Store statistics" }]} back={back}>
             {offerDestination ? <DestinationControl value={destination} onChange={setDestination} /> : null}
@@ -262,19 +189,13 @@ function StoreBody({ stats, onShowAll }: { stats: StoreStatistics | null; onShow
   const [selected, setSelected] = useState<FigureId>("totalSales");
   const [productsBy, setProductsBy] = useState<ProductsBy>("sales");
   const [sideBy, setSideBy] = useState<"netSales" | "orders">("netSales");
-  const notice = stats === null ? { lines: [] } : noticeLines(stats);
-  const empty = emptyList(stats);
-  const intake = stats !== null && broughtIn(stats);
-  const money = formatMoney(stats?.currency ?? "");
-  const products = stats === null || intake ? [] : productRows(stats, productsBy);
+  const money = rowFormat(formatMoney(stats?.currency ?? ""));
+  const buyers = stats === null ? null : listAnswer(stats, buyerRows(stats), "orders");
+  const sides = stats === null ? null : listAnswer(stats, sideRows(stats, sideBy), sideBy);
 
   return (
     <div ref={root} className="deployable-statistics">
-      {notice.lines.length > 0 ? (
-        <Notice tone={notice.next !== undefined ? "warn" : "info"} sentence={notice.lines[0]} next={notice.next}>
-          {notice.lines.slice(1).map((line, index) => <p key={`${index}:${line}`} className="os-notice-line">{line}</p>)}
-        </Notice>
-      ) : null}
+      {stats !== null ? <StoreNotice stats={stats} /> : null}
 
       <div className="deployable-statistics-figures">
         {/* With no series there is no chart, and a figure that would choose
@@ -284,25 +205,14 @@ function StoreBody({ stats, onShowAll }: { stats: StoreStatistics | null; onShow
       </div>
 
       <div className="deployable-statistics-lists" data-wide={wide || undefined}>
-        <RankedList
-          title="Products"
-          rows={products}
-          limit={PRODUCTS_SHOWN}
-          format={stats === null ? formatCount : productFormat(stats, productsBy)}
-          onShowAll={() => onShowAll(productsBy)}
-          showAllLabel="All products"
-          footer={stats === null ? undefined : productsFooter(stats, Math.min(PRODUCTS_SHOWN, products.length))}
-          control={<ProductTabs value={productsBy} onChange={setProductsBy} />}
-          loading={stats === null}
-          empty={empty}
-        />
-        <RankedList title="Buyers" rows={stats === null || intake ? [] : buyerRows(stats)} loading={stats === null} empty={empty} />
+        <ProductsBlock stats={stats} by={productsBy} onBy={setProductsBy} title="Products" limit={PRODUCTS_SHOWN} onShowAll={() => onShowAll(productsBy)} />
+        <RankedList title="Buyers" rows={buyers?.kind === "rows" ? buyers.rows : []} format={rowFormat(formatCount)} loading={stats === null} empty={buyers?.kind === "empty" ? buyers.empty : undefined} />
         {stats !== null && stats.wholesale !== null ? (
           <RankedList
             title="Wholesale and retail"
-            rows={intake ? [] : sideRows(stats, sideBy)}
-            format={sideBy === "netSales" ? money : formatCount}
-            empty={empty}
+            rows={sides?.kind === "rows" ? sides.rows : []}
+            format={sideBy === "netSales" ? money : rowFormat(formatCount)}
+            empty={sides?.kind === "empty" ? sides.empty : undefined}
             control={
               <div className="deployable-statistics-device-tabs" data-os-scroll-ignore>
                 <LocalTabs label="Wholesale and retail by" value={sideBy} onChange={setSideBy} options={[["netSales", "Net sales"], ["orders", "Orders"]]} />
@@ -341,24 +251,29 @@ function hasSeries(stats: StoreStatistics): boolean {
   return stats.bucket !== null && stats.series.length > 0;
 }
 
-/** New, Returning, No customer recorded; none when no order was counted. */
-function buyerRows(stats: StoreStatistics): RankedRow[] {
+/** New, Returning, No customer recorded; null when the engine sent none, none when no order was counted. */
+function buyerRows(stats: StoreStatistics): RankedRow[] | null {
   const buyers = stats.buyers;
-  if (buyers === null || (buyers.new ?? 0) + (buyers.returning ?? 0) + (buyers.unknown ?? 0) === 0) return [];
+  if (buyers === null) return null;
+  if ((buyers.new ?? 0) + (buyers.returning ?? 0) + (buyers.unknown ?? 0) === 0) return [];
   return [
-    { key: "new", label: "New", value: buyers.new ?? Number.NaN },
-    { key: "returning", label: "Returning", value: buyers.returning ?? Number.NaN },
-    { key: "unknown", label: "No customer recorded", value: buyers.unknown ?? Number.NaN },
+    { key: "new", label: "New", value: rowValue(buyers.new) },
+    { key: "returning", label: "Returning", value: rowValue(buyers.returning) },
+    { key: "unknown", label: "No customer recorded", value: rowValue(buyers.unknown) },
   ];
 }
 
-/** Wholesale and Retail, by net sales or by orders; none when neither side has an order. */
-function sideRows(stats: StoreStatistics, by: "netSales" | "orders"): RankedRow[] {
+/**
+ * Wholesale and Retail, by net sales or by orders; none when neither side has
+ * an order. The block is drawn only when the answer has one (block 7).
+ */
+function sideRows(stats: StoreStatistics, by: "netSales" | "orders"): RankedRow[] | null {
   const sides = stats.wholesale;
-  if (sides === null || (sides.wholesale.orders ?? 0) + (sides.retail.orders ?? 0) === 0) return [];
+  if (sides === null) return null;
+  if ((sides.wholesale.orders ?? 0) + (sides.retail.orders ?? 0) === 0) return [];
   return [
-    { key: "wholesale", label: "Wholesale", value: sides.wholesale[by] ?? Number.NaN },
-    { key: "retail", label: "Retail", value: sides.retail[by] ?? Number.NaN },
+    { key: "wholesale", label: "Wholesale", value: rowValue(sides.wholesale[by]) },
+    { key: "retail", label: "Retail", value: rowValue(sides.retail[by]) },
   ];
 }
 
@@ -391,7 +306,7 @@ function StoreStatisticsHelp() {
 
 /** A short phrase that a narrow pane must not break: its spaces do not wrap. */
 function unbroken(phrase: string): string {
-  return phrase.replace(/ /g, " ");
+  return phrase.replace(/ /g, "\u00a0");
 }
 
 /** A day as the store's clock read it: "Sep 12", with its year when that is not this year's ("Sep 12, 2025"). */

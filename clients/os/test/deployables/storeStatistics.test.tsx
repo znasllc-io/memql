@@ -583,3 +583,127 @@ describe("the Store statistics figures, chart and lists", () => {
     expect(within(page).queryByRole("button", { name: "Try again" })).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix round 1: what a list says, and the All products page in every state
+// ---------------------------------------------------------------------------
+
+const NOTHING_TO_LIST = "Nothing to list for this period.";
+const NOT_REPORTED = "Nothing has reported this yet.";
+const NO_ORDERS = "No orders in this period.";
+const MANY = Array.from({ length: 25 }, (_, i) => ({ key: `p${i + 1}`, title: `Inner tube ${i + 1}`, value: String(100 - i) }));
+
+/** Answer the next read with `over` and let the page's refresh ask for it. */
+async function answerNext(s: FakeSeed, over: Partial<Row>): Promise<void> {
+  s.storeStatistics!["store-example"] = storeStatisticsRow({ storeId: "store-example", ...over });
+  await act(async () => { await vi.advanceTimersByTimeAsync(statisticsRefreshMs("7d") + 1_000); });
+}
+
+/** Opens All products on a store with 25 products, answering `over` first. */
+async function openAllProducts(over: Partial<Row> = {}, s: FakeSeed = seed({ ...WEEK, productsBySales: MANY, productsByUnits: MANY, productCount: 31, ...over })) {
+  const { page } = await openStoreStatistics(s);
+  await figures(page);
+  await click(within(list(page, "Products")).getByRole("button", { name: "All products" }));
+  const all = await screen.findByRole("region", { name: `Store statistics for ${HOST}` });
+  await waitFor(() => expect(within(all).getByRole("heading", { name: "Products" })).toBeTruthy());
+  return { all, s };
+}
+
+/** What a list's empty line reads, and whether it is drawn as absent (the kit's dash). */
+function emptyOf(region: HTMLElement) {
+  return { text: region.querySelector(".os-caption")?.textContent ?? "", dash: region.querySelector(".os-figure-absent") !== null, rows: region.querySelectorAll(".os-ranked-label").length };
+}
+
+describe("what a Store statistics list says when it has no rows", () => {
+  it("draws a list the engine sent as null as absent, with the reason its figures carry, never as no orders", async () => {
+    const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: null, productsByUnits: null, buyers: null }));
+    await figures(page);
+    expect(emptyOf(list(page, "Products"))).toMatchObject({ dash: true, text: `${DASH} ${NOT_REPORTED}` });
+    expect(emptyOf(list(page, "Buyers"))).toMatchObject({ dash: true, text: `${DASH} ${NOT_REPORTED}` });
+    await click(within(within(page).getByRole("navigation", { name: "Products by" })).getByRole("button", { name: "Units" }));
+    expect(emptyOf(list(page, "Products"))).toMatchObject({ dash: true, text: `${DASH} ${NOT_REPORTED}` });
+  });
+
+  it("draws the products by sales of a store with no currency as absent for that reason, beside its orders", async () => {
+    const { page } = await openStoreStatistics(seed({ ...WEEK, currency: null, figures: { ...WEEK.figures, totalSales: null, netSales: null, averageOrderValue: null, grossSales: null, discounts: null, refunds: null }, productsBySales: [], productsByUnits: [{ key: "a", title: "Bell", value: 3 }], productCount: 1 }));
+    const group = await figures(page);
+    expect(figure(group, "Orders").value).toBe("2");
+    expect(emptyOf(list(page, "Products"))).toMatchObject({ dash: true, text: `${DASH} The store's currency has not been recorded yet.` });
+    expect(list(page, "Products").textContent).not.toContain(NO_ORDERS);
+    await click(within(within(page).getByRole("navigation", { name: "Products by" })).getByRole("button", { name: "Units" }));
+    expect(emptyOf(list(page, "Products")).rows).toBe(1);
+  });
+
+  it("says nothing to list when the engine sent an empty list beside orders", async () => {
+    const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: [], productsByUnits: [], buyers: { new: 0, returning: 0, unknown: 0 }, wholesale: { wholesale: { orders: 0, netSales: "0.00" }, retail: { orders: 0, netSales: "0.00" } } }));
+    await figures(page);
+    for (const title of ["Products", "Buyers", "Wholesale and retail"]) expect(emptyOf(list(page, title))).toMatchObject({ dash: false, text: NOTHING_TO_LIST });
+    await click(within(within(page).getByRole("navigation", { name: "Products by" })).getByRole("button", { name: "Units" }));
+    expect(emptyOf(list(page, "Products"))).toMatchObject({ dash: false, text: NOTHING_TO_LIST });
+  });
+
+  it("says no orders in every list when the engine sent empty lists and no orders", async () => {
+    const zero = { totalSales: "0.00", netSales: "0.00", orders: 0, averageOrderValue: null, grossSales: "0.00", discounts: "0.00", refunds: "0.00", unitsSold: 0 };
+    const { page } = await openStoreStatistics(seed({ figures: zero, buyers: { new: 0, returning: 0, unknown: 0 }, wholesale: { wholesale: { orders: 0, netSales: "0.00" }, retail: { orders: 0, netSales: "0.00" } } }));
+    await figures(page);
+    for (const title of ["Products", "Buyers", "Wholesale and retail"]) expect(emptyOf(list(page, title))).toMatchObject({ dash: false, text: NO_ORDERS });
+    await click(within(within(page).getByRole("navigation", { name: "Products by" })).getByRole("button", { name: "Units" }));
+    expect(emptyOf(list(page, "Products"))).toMatchObject({ dash: false, text: NO_ORDERS });
+  });
+
+  it("says nothing to list when the orders were not measured and the list came back empty", async () => {
+    const { page } = await openStoreStatistics(seed({ ...WEEK, figures: { ...WEEK.figures, orders: null }, productsBySales: [], buyers: { new: 0, returning: 0, unknown: 0 } }));
+    await figures(page);
+    expect(emptyOf(list(page, "Products"))).toMatchObject({ dash: false, text: NOTHING_TO_LIST });
+    expect(emptyOf(list(page, "Buyers"))).toMatchObject({ dash: false, text: NOTHING_TO_LIST });
+  });
+
+  it("draws a row whose value the answer left out with the kit's dash, never two hyphens", async () => {
+    const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: [{ key: "a", title: "City bike", value: "80.00" }, { key: "b", title: "Bell", value: null }], productCount: 2, wholesale: { wholesale: { orders: 1, netSales: null }, retail: { orders: 1, netSales: "10.00" } } }));
+    await figures(page);
+    expect([...list(page, "Products").querySelectorAll(".os-ranked-value")].map((v) => v.textContent)).toEqual(["€80.00", DASH]);
+    expect([...list(page, "Wholesale and retail").querySelectorAll(".os-ranked-value")].map((v) => v.textContent)).toEqual([DASH, "€10.00"]);
+    expect(page.textContent).not.toContain("--");
+  });
+
+  it("says which refunds name no product even when there is no product to list", async () => {
+    const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: [], productCount: 0, refundsWithoutItem: "12.00" }));
+    await figures(page);
+    expect(list(page, "Products").parentElement?.textContent ?? "").toContain("Refunds of €12.00 name no product, so they are in Net sales and not here.");
+  });
+});
+
+describe("the All products page in every state", () => {
+  it("says a frozen store's reasons and the moment its products are as of", async () => {
+    const { all } = await openAllProducts({ asOf: "2026-11-04T09:59:15Z", recording: { state: "needs attention", reasons: [{ code: "check_failing", sentence: "The last check of orders failed" }], since: "2026-11-02T08:00:00Z", blocked: true } });
+    const notice = all.querySelector(".os-notice")?.textContent ?? "";
+    expect(notice).toContain("The last check of orders failed");
+    expect(notice).toContain(`These figures are as of ${formatMoment("2026-11-04T09:59:15Z")}.`);
+    expect(notice).toContain("The Store page of this deployable says what fixes it.");
+    expect(all.querySelectorAll(".os-ranked-label")).toHaveLength(25);
+  });
+
+  it("says a paused store is paused", async () => {
+    const { all } = await openAllProducts({ asOf: "2026-11-07T09:00:00Z", recording: { state: "paused", reasons: [], since: "2026-11-07T09:00:00Z", blocked: true } });
+    expect(all.querySelector(".os-notice-line")?.textContent).toBe("Recording is paused for this store.");
+  });
+
+  it("lists nothing while the store is being brought in, even when the answer carries products", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    for (const state of ["starting", "purging", "rebuilding"]) {
+      const { all, s } = await openAllProducts();
+      await answerNext(s, { ...WEEK, productsBySales: MANY, productsByUnits: MANY, productCount: 31, rebuilding: state === "rebuilding", recording: { state, reasons: [], since: "2026-11-08T09:00:00Z", blocked: state !== "starting" } });
+      await waitFor(() => expect(all.querySelector(".os-notice-line")?.textContent).toBe(BROUGHT_IN));
+      expect(emptyOf(all)).toMatchObject({ rows: 0, dash: true });
+      expect(all.querySelector(".os-ranked-list")?.textContent ?? "").toContain(BROUGHT_IN);
+      cleanup();
+    }
+  });
+
+  it("draws the whole list absent when the next answer sends it as null", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { all, s } = await openAllProducts();
+    await answerNext(s, { ...WEEK, productsBySales: null, productsByUnits: null, productCount: null });
+    await waitFor(() => expect(emptyOf(all)).toMatchObject({ rows: 0, dash: true, text: `${DASH} ${NOT_REPORTED}` }));
+  });
+});

@@ -1,12 +1,13 @@
 import { useState, type ReactNode } from "react";
 
-import { Head } from "../../../kit";
+import { Caption, Head } from "../../../kit";
 import type { Breadcrumb } from "../../../kit/Breadcrumbs";
 import { formatCount, formatMoney } from "../../../kit/format";
 import { LocalTabs } from "../../../kit/LocalTabs";
 import { RankedList, periodLabel, type RankedRow } from "../../../kit/statistics";
 import { useDeployablesSettings } from "../settingsContext";
 import type { StoreStatistics } from "./read";
+import { StoreNotice, listAnswer, refundsWithoutItemSentence, rowFormat, rowValue } from "./storeState";
 
 // A STORE'S PRODUCTS, WHOLE: what "All products" opens, as a page in the Store
 // statistics' place under the trail Deployables > <name> > Store statistics >
@@ -15,13 +16,16 @@ import type { StoreStatistics } from "./read";
 // more products than that its footer says so ("The 25 best-selling of 31
 // products.").
 //
-// IT READS NOTHING OF ITS OWN: it is drawn from the answer the Store
-// statistics page holds, which that page keeps current, so the list and the
-// figures one step back never disagree. As the website's whole lists do, its
+// IT READS NOTHING OF ITS OWN, AND TELLS THE SAME TRUTH: it is drawn from the
+// answer the Store statistics page holds, which that page keeps current, under
+// the same notice from the same functions (`storeState.tsx`). A paused or
+// frozen store's list says it is as of an earlier moment, and while the store
+// is being brought in it lists nothing. As the website's whole lists do, its
 // list is headed by the period, because the Head already says "Products".
 //
-// The rows, their footer and the tabs are this file's, and the Store
-// statistics page draws its eight leading products with the same ones.
+// The block -- the tabs, the list, its footer and the line about refunds that
+// name no product -- is this file's, and the Store statistics page draws its
+// eight leading products with the same one.
 
 /** Which list of products: by net sales or by units. */
 export type ProductsBy = "sales" | "units";
@@ -31,17 +35,19 @@ export const PRODUCT_TABS: readonly (readonly [ProductsBy, string])[] = [["sales
 /** How many products the Store statistics page lists before "All products". */
 export const PRODUCTS_SHOWN = 8;
 
-/** One list of products as ranked rows: an amount by sales, a count by units. */
-export function productRows(stats: StoreStatistics, by: ProductsBy): RankedRow[] {
-  const products = by === "sales" ? stats.productsBySales : stats.productsByUnits;
-  // A value the answer did not give is written as the formatters write a
-  // value that is not a number ("--"), never as a zero.
-  return products.map((product, index) => ({ key: product.key !== "" ? product.key : `${product.title}:${index}`, label: product.title, value: product.value ?? Number.NaN }));
+/**
+ * One list of products as ranked rows, or null when it is absent: the engine
+ * sent none, or it is money and the store has no currency to write it in.
+ */
+export function productRows(stats: StoreStatistics, by: ProductsBy): RankedRow[] | null {
+  const products = by === "sales" ? (stats.currency === null ? null : stats.productsBySales) : stats.productsByUnits;
+  if (products === null) return null;
+  return products.map((product, index) => ({ key: product.key !== "" ? product.key : `${product.title}:${index}`, label: product.title, value: rowValue(product.value) }));
 }
 
 /** How a product's value is written. */
-export function productFormat(stats: StoreStatistics, by: ProductsBy): (value: number) => string {
-  return by === "sales" ? formatMoney(stats.currency ?? "") : formatCount;
+function productFormat(stats: StoreStatistics, by: ProductsBy): (value: number) => string {
+  return rowFormat(by === "sales" ? formatMoney(stats.currency ?? "") : formatCount);
 }
 
 /**
@@ -49,34 +55,62 @@ export function productFormat(stats: StoreStatistics, by: ProductsBy): (value: n
  * many products there are beside the `shown` listed, the refunds that name no
  * product, and the orders and refunds that have more lines than were recorded.
  */
-export function productsFooter(stats: StoreStatistics, shown: number): ReactNode {
-  const money = formatMoney(stats.currency ?? "");
+function productsFooter(stats: StoreStatistics, shown: number): ReactNode {
   const lines: string[] = [];
   if (stats.productCount !== null && stats.productCount > shown) lines.push(`The ${formatCount(shown)} best-selling of ${formatCount(stats.productCount)} products.`);
-  // An empty sum can arrive as "0" and a computed one as "0.00": both are zero.
-  if (stats.refundsWithoutItem !== null && stats.refundsWithoutItem !== 0) lines.push(`Refunds of ${money(stats.refundsWithoutItem)} name no product, so they are in Net sales and not here.`);
+  const refunds = refundsWithoutItemSentence(stats);
+  if (refunds !== null) lines.push(refunds);
   const orders = stats.incompleteOrders ?? 0;
   if (orders > 0) lines.push(orders === 1 ? "1 order has more lines than were recorded, so these are floors." : `${formatCount(orders)} orders have more lines than were recorded, so these are floors.`);
-  const refunds = stats.incompleteRefunds ?? 0;
-  if (refunds > 0) lines.push(refunds === 1 ? "1 refund has more lines than were recorded, so units are not exact." : `${formatCount(refunds)} refunds have more lines than were recorded, so units are not exact.`);
+  const short = stats.incompleteRefunds ?? 0;
+  if (short > 0) lines.push(short === 1 ? "1 refund has more lines than were recorded, so units are not exact." : `${formatCount(short)} refunds have more lines than were recorded, so units are not exact.`);
   if (lines.length === 0) return undefined;
   return lines.map((line) => <p key={line} className="store-statistics-footer-line">{line}</p>);
 }
 
 /**
- * The tabs that choose which list of products, under the list's heading. They
- * switch one list in place, so the shared tabs' return to the top of the page
- * does not apply.
+ * The tabs, the list and its footer. The kit draws no footer under a list
+ * with no rows, so the line about refunds that name no product is drawn
+ * beneath it then: those refunds are in Net sales whether or not a product
+ * sold.
  */
-export function ProductTabs({ value, onChange }: { value: ProductsBy; onChange: (by: ProductsBy) => void }) {
+export function ProductsBlock({ stats, by, onBy, title, limit, onShowAll }: {
+  stats: StoreStatistics | null;
+  by: ProductsBy;
+  onBy: (by: ProductsBy) => void;
+  title: string;
+  limit: number;
+  onShowAll?: () => void;
+}) {
+  const answer = stats === null ? null : listAnswer(stats, productRows(stats, by), by === "sales" ? "netSales" : "unitsSold");
+  const rows = answer?.kind === "rows" ? answer.rows : [];
+  const refunds = stats !== null && answer?.kind === "empty" ? refundsWithoutItemSentence(stats) : null;
   return (
-    <div className="deployable-statistics-device-tabs" data-os-scroll-ignore>
-      <LocalTabs label="Products by" value={value} onChange={onChange} options={PRODUCT_TABS} />
+    <div className="store-statistics-products">
+      <RankedList
+        title={title}
+        rows={rows}
+        limit={limit}
+        format={stats === null ? formatCount : productFormat(stats, by)}
+        onShowAll={onShowAll}
+        showAllLabel="All products"
+        footer={stats === null ? undefined : productsFooter(stats, Math.min(limit, rows.length))}
+        control={
+          // The tabs switch one list in place, so the shared tabs' return to
+          // the top of the page does not apply.
+          <div className="deployable-statistics-device-tabs" data-os-scroll-ignore>
+            <LocalTabs label="Products by" value={by} onChange={onBy} options={PRODUCT_TABS} />
+          </div>
+        }
+        loading={stats === null}
+        empty={answer?.kind === "empty" ? answer.empty : undefined}
+      />
+      {refunds !== null ? <Caption>{refunds}</Caption> : null}
     </div>
   );
 }
 
-export function ProductsListPage({ statistics, by, trail, back, empty }: {
+export function ProductsListPage({ statistics, by, trail, back }: {
   /** The answer the Store statistics page holds; null while its read is out. */
   statistics: StoreStatistics | null;
   /** The list that was showing when "All products" was pressed. */
@@ -85,25 +119,14 @@ export function ProductsListPage({ statistics, by, trail, back, empty }: {
   trail: readonly Breadcrumb[];
   /** Back to Store statistics. */
   back: { label: string; onSelect: () => void };
-  /** What an empty list says. */
-  empty: string;
 }) {
   const { settings } = useDeployablesSettings();
   const [shown, setShown] = useState<ProductsBy>(by);
-  const rows = statistics === null ? [] : productRows(statistics, shown);
   return (
     <>
       <Head navigationKey="storeStatistics:products" title="Products" breadcrumbs={[...trail, { label: "Products" }]} back={back} />
-      <RankedList
-        title={periodLabel(statistics?.period ?? settings.statisticsPeriod)}
-        rows={rows}
-        limit={Number.POSITIVE_INFINITY}
-        format={statistics === null ? formatCount : productFormat(statistics, shown)}
-        loading={statistics === null}
-        empty={empty}
-        footer={statistics === null ? undefined : productsFooter(statistics, rows.length)}
-        control={<ProductTabs value={shown} onChange={setShown} />}
-      />
+      {statistics !== null ? <StoreNotice stats={statistics} /> : null}
+      <ProductsBlock stats={statistics} by={shown} onBy={setShown} title={periodLabel(statistics?.period ?? settings.statisticsPeriod)} limit={Number.POSITIVE_INFINITY} />
     </>
   );
 }
