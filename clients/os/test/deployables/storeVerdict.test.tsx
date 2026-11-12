@@ -272,6 +272,46 @@ describe("what needs attention", () => {
   });
 });
 
+// A STORE'S REASONS ARE DRAWN IN EVERY STATE. The engine raises one reason on
+// a paused or not-connected store without changing its state: a privacy
+// request that keeps failing, which is where a failing shop erasure lands.
+describe("a reason on a store that is paused or not connected", () => {
+  const PRIVACY = verdictReasonRow({
+    code: "privacy_request_failing",
+    sentence: "A privacy request for this store could not be completed.",
+    detail: "1 request, due since 2026-11-09T09:07:00Z. It is tried again at every run of the privacy jobs.",
+  });
+
+  it("draws the reason on a paused store, beside Paused and Resume", async () => {
+    openPage(seedFor({ storeVerdict: verdict({ state: "paused", reasons: [PRIVACY] }) }));
+    await productionRow("Paused");
+    const notice = noticeWith("A privacy request for this store could not be completed.");
+    expect(notice.getAttribute("data-tone")).toBe("warn");
+    expect(notice.textContent).toContain("It is tried again at every run of the privacy jobs.");
+    expect(within(notice).queryByRole("button")).toBeNull();
+    expect(within(notice).queryByRole("link")).toBeNull();
+    await waitFor(() => expect(within(bar()).getByRole("button", { name: "Resume" })).toBeTruthy());
+  });
+
+  it("draws the reason on a store that is not connected, beside its Reconnect notice", async () => {
+    openPage(seedFor({
+      store: { ...OWN, adminTokenRef: "", uninstalledAt: "2026-11-07T08:00:00Z" },
+      storeVerdict: verdict({ state: "not connected", reasons: [PRIVACY] }),
+    }));
+    await productionRow("Uninstalled");
+    expect(noticeWith(/acme-widgets\.myshopify\.com was uninstalled in Shopify/)).toBeTruthy();
+    await waitFor(() => expect(screen.getAllByText("A privacy request for this store could not be completed.")).toHaveLength(1));
+    const notice = noticeWith("A privacy request for this store could not be completed.");
+    expect(within(notice).queryByRole("button")).toBeNull();
+  });
+
+  it("draws a paused store with no reason as before: no notice", async () => {
+    openPage(seedFor({ storeVerdict: verdict({ state: "paused" }) }));
+    await productionRow("Paused");
+    expect(document.querySelectorAll('.os-notice[data-tone="warn"]')).toHaveLength(0);
+  });
+});
+
 describe("what is recorded", () => {
   it("lists what is recorded, with orders since", async () => {
     openPage(seedFor({

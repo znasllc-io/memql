@@ -149,10 +149,10 @@ export function ShopifyStorePanel({ site, canBind, trail, back, onWritten, can }
       <div><Button onClick={verdict!.reread}>Try again</Button></div>
     </Notice>)}
     {/* THE ENGINE'S REASONS, ONE NOTICE EACH, in its words and with its one
-        act. A paused or disconnected store carries none. */}
-    {recording.flatMap(({ store, verdict }) => verdict?.verdict?.state === "needs attention"
-      ? verdict.verdict.reasons.map((reason, index) => <ReasonNotice key={`${store.id}:${reason.code}:${index}`} storeId={store.id} label={labelOf(store)} reason={reason} mayAct={verdict.verdict!.may.act} write={write} onReconnect={openSettings} />)
-      : [])}
+        act, WHATEVER THE STATE: a failing privacy request is raised on a
+        paused or not-connected store without changing its state, and that is
+        where a failing shop erasure lands. A state with no reasons draws none. */}
+    {bound.flatMap(({ store, verdict }) => (verdict?.verdict?.reasons ?? []).map((reason, index) => <ReasonNotice key={`${store.id}:${reason.code}:${index}`} storeId={store.id} label={labelOf(store)} reason={reason} mayAct={verdict!.verdict!.may.act} write={write} onReconnect={openSettings} />))}
     {bound.map(({ store, verdict }) => alertFailed(verdict?.verdict ?? null) ? <Notice key={`${store.id}:alert`} tone="warn" sentence="The alert could not be sent."><StoreCaptions label={labelOf(store)} detail={verdict!.verdict!.alert.reason} /></Notice> : null)}
     {recording.map(({ store, verdict }) => verdict?.verdict ? <Recorded key={`${store.id}:recorded`} verdict={verdict.verdict} label={labelOf(store)} /> : null)}
     <p className="os-caption">Both websites share the same design. Connect either to any of your stores, including the same sandbox. An unconnected website shows design preview.</p>

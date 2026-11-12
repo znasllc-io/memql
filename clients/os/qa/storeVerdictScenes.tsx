@@ -18,6 +18,10 @@ import { fakeConnection, previewReadinessRow, SHOP, siteRow, storeVerdictRow, ve
 //   view=store-verdict-attention    every reason and its act, and a failed alert
 //   view=store-verdict-readonly     the same, for somebody who may not act
 //   view=store-verdict-uninstalled  Shopify uninstalled the app: not connected
+//   view=store-verdict-paused-privacy
+//                                   paused, carrying a failing privacy request: its notice beside Resume
+//   view=store-verdict-uninstalled-privacy
+//                                   not connected, carrying a failing privacy request: its notice beside Reconnect
 //   view=store-verdict-unknown      the verdict could not be read
 //   view=store-verdict-nostate      the reply named no state (no Shopify connector)
 //   view=store-verdict-two-stores   two different stores, each notice naming its own
@@ -60,6 +64,10 @@ const REASONS = [
   verdictReasonRow({ code: "changes_not_recorded", sentence: "At least 3 changes could not be recorded.", count: 3, atLeast: true, act: "retry", actLabel: "Try again" }),
 ];
 
+// A failing privacy request: the one reason a paused or not-connected store
+// carries, beside its own word.
+const PRIVACY = verdictReasonRow({ code: "privacy_request_failing", sentence: "A privacy request for this store could not be completed.", detail: "1 request, due since 2026-11-09T09:07:00Z. It is tried again at every run of the privacy jobs." });
+
 function seed(verdict: Partial<Row> | null, over: Partial<FakeSeed> = {}, store: Row = OWN): FakeSeed {
   return {
     sites: [SITE],
@@ -84,6 +92,8 @@ export function storeVerdictScenes(Frame: Frame) {
     "store-verdict-own-app": page(seed({ state: "needs attention", reasons: [verdictReasonRow({ code: "approval_outdated", sentence: "This store's own app does not allow everything MemQL records.", detail: "read_returns" })], recorded: RECORDED })),
     "store-verdict-readonly": page(seed({ state: "needs attention", reasons: REASONS, recorded: RECORDED, may: { act: false } })),
     "store-verdict-uninstalled": page(seed({ state: "not connected", alert: { state: "failed", reason: "the store has no owner with an address" } }, {}, { ...OWN, adminTokenRef: "", uninstalledAt: "2026-11-10T08:00:00Z" } as unknown as Row)),
+    "store-verdict-paused-privacy": page(seed({ state: "paused", reasons: [PRIVACY], recorded: RECORDED })),
+    "store-verdict-uninstalled-privacy": page(seed({ state: "not connected", reasons: [PRIVACY] }, {}, { ...OWN, adminTokenRef: "", uninstalledAt: "2026-11-07T08:00:00Z" } as unknown as Row)),
     "store-verdict-unknown": page(seed(null, { storeVerdictError: "shopify: the store's sync state could not be read" })),
     "store-verdict-nostate": page(seed(null)),
     "store-verdict-two-stores": {
