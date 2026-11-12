@@ -266,13 +266,17 @@ func happenedRow(row map[string]any, field string) map[string]any {
 }
 
 // happenedEntitlementRow is an entitlement as the export holds it: dated by its
-// attempt (happenedRow), with when trade prices went on and came off as the
-// row holds them, or, on a row written before those fields, its write time
-// while it is granted or revoked -- what the buyers list and the page read.
+// attempt (happenedRow), with the times of its CURRENT spell only -- grantedAt
+// while it is granted (the start of the unbroken granted period), revokedAt
+// while it is revoked -- each as the row holds it, or, on a row written before
+// those fields, its write time. A time from a spell that is over (a removal
+// before a grant again, a grant before a failure) is left out, as the buyers
+// list and the page leave it out.
 func happenedEntitlementRow(row map[string]any) map[string]any {
 	out := happenedRow(row, fieldAttemptedAt)
 	for field, state := range map[string]string{fieldGrantedAt: EntitlementGranted, fieldRevokedAt: EntitlementRevoked} {
-		if rowTime(row[field]).IsZero() && trimmed(row["state"]) != state {
+		if trimmed(row["state"]) != state {
+			delete(out, field)
 			continue
 		}
 		out[field] = timeText(happenedAt(row, field))

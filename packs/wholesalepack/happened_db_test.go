@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -92,7 +93,7 @@ func (s happenedStore) backfill(t *testing.T, eng *memql.MemQLEngine) map[string
 
 // happenedNow is now as a MemQL literal, for a fixture written through one of
 // the pack's own mutations, which take the time a thing happened.
-func happenedNow() string { return quote(time.Now().UTC().Format(time.RFC3339Nano)) }
+func happenedNow() string { return quote(wholesalepack.HappenedStamp(time.Now())) }
 
 // textOf is a row's value as text, a time in RFC3339Nano.
 func textOf(v any) string {
@@ -274,7 +275,7 @@ func TestABackfillStoppedHalfwayAndRunAgainKeepsTheLog(t *testing.T) {
 		t.Fatal("the old approve decision is not readable")
 	}
 	wsExec(t, eng, seedCtx(), `backfillDecisionRow(accountId: `+quote(s.account)+`, applicationId: `+quote(textOf(oldest["applicationId"]))+
-		`, decidedAt: `+quote(textOf(oldest["createdAt"]))+`, decidedBy: `+quote(textOf(oldest["decidedBy"]))+
+		`, decidedAt: `+quote(wholesalepack.HappenedStamp(rowTimeOf(oldest["createdAt"])))+`, decidedBy: `+quote(textOf(oldest["decidedBy"]))+
 		`, decisionId: `+quote(bareID(textOf(oldest["id"])))+`, note: `+quote(textOf(oldest["note"]))+
 		`, ownerUserId: `+quote(userRef(s.merchant))+`, principalKind: "client", storeId: `+quote(s.store)+`, transition: "approve")`)
 	if got := happenedState(t, eng, s, app); got != wholesalepack.StateRevoked {
@@ -514,7 +515,7 @@ func TestTheBackfillNeverOverwritesATimeThatIsSet(t *testing.T) {
 	s := newHappenedStore(t, eng, "set")
 	app := s.oldApplication(t, eng, "set")
 	decided := time.Now().UTC().Add(-36 * time.Hour).Truncate(time.Millisecond)
-	s.oldDecision(t, eng, app, app+"-set", "approve", map[string]any{"decidedAt": decided.Format(time.RFC3339Nano)})
+	s.oldDecision(t, eng, app, app+"-set", "approve", map[string]any{"decidedAt": wholesalepack.HappenedStamp(decided)})
 	want := decided.Format(time.RFC3339Nano)
 	check := func(when string) {
 		t.Helper()
@@ -530,4 +531,91 @@ func TestTheBackfillNeverOverwritesATimeThatIsSet(t *testing.T) {
 	check("before the backfill")
 	s.backfill(t, eng)
 	check("after the backfill")
+}
+
+// fixedWidthTime is the one form a when-it-happened field is stored in: UTC,
+// nine fractional digits, so the text sorts as the time (the engine orders a
+// datetime field by its text).
+var fixedWidthTime = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{9}Z$`)
+
+// EVERY WRITER OF A WHEN-IT-HAPPENED FIELD STORES THE FIXED-WIDTH FORM: the
+// shopper's submission, a person adding a buyer, a decision, an access attempt
+// and each time the backfill carries across.
+func TestEveryWriterStoresTheFixedWidthForm(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	stored := func(concept, rowID, field string) {
+		t.Helper()
+		if got := asString(latestPayload(t, concept, rowID)[field]); !fixedWidthTime.MatchString(got) {
+			t.Fatalf("%s %s holds %s %q, not the fixed-width form", concept, rowID, field, got)
+		}
+	}
+	s := newAccessStore(t, eng, "fixed-width")
+	stored("v1:wholesale:application", s.appID, "submittedAt")
+	if err := s.approve(eng, signedIn(s.staff)); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	h := happenedStore{merchant: s.merchant, store: s.store, site: s.site, account: s.account}
+	decisions := decisionRows(t, eng, h, s.appID)
+	if len(decisions) != 1 {
+		t.Fatalf("the application has %d decisions, want 1", len(decisions))
+	}
+	stored("v1:wholesale:applicationDecision", bareID(textOf(decisions[0]["id"])), "decidedAt")
+	if _, err := eng.Execute(signedIn(s.staff), `builtin wholesaleRetryAccess(applicationId: `+quote(s.appID)+`)`); err != nil {
+		t.Fatalf("retry access: %v", err)
+	}
+	stored("v1:wholesale:entitlement", wholesalepack.EntitlementRowID(s.appID), "attemptedAt")
+	added := answerOf(t, eng, signedIn(s.staff), addBuyerCall(s.site, s.store, "Added Trading", "Ada Added", "ada@added.example.com"))
+	stored("v1:wholesale:application", bareID(textOf(added["applicationId"])), "submittedAt")
+
+	old := newHappenedStore(t, eng, "fixed-width-old")
+	removed := old.oldApplication(t, eng, "removed", "approve", "revoke")
+	old.oldEntitlement(t, eng, removed, wholesalepack.EntitlementRevoked)
+	granted := old.oldApplication(t, eng, "granted", "approve")
+	old.oldEntitlement(t, eng, granted, wholesalepack.EntitlementGranted)
+	old.backfill(t, eng)
+	for _, app := range []string{removed, granted} {
+		stored("v1:wholesale:application", app, "submittedAt")
+		for _, d := range decisionRows(t, eng, old, app) {
+			stored("v1:wholesale:applicationDecision", bareID(textOf(d["id"])), "decidedAt")
+		}
+		stored("v1:wholesale:entitlement", wholesalepack.EntitlementRowID(app), "attemptedAt")
+	}
+	stored("v1:wholesale:entitlement", wholesalepack.EntitlementRowID(removed), "revokedAt")
+	stored("v1:wholesale:entitlement", wholesalepack.EntitlementRowID(granted), "grantedAt")
+}
+
+// TWO DECISIONS WHOSE TIMES DIFFER ONLY PAST THE SECOND. Stored in the short
+// spelling (RFC3339Nano drops trailing zeros), "...:07.1Z" sorts after
+// "...:07.12Z" as text, so the engine's newest-first order put the older
+// first; stored as the pack writes them, the log is in the order they were
+// made.
+func TestTwoDecisionsApartLessThanASecondAreLoggedInTheOrderTheyWereMade(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	s := newHappenedStore(t, eng, "subsecond")
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	older, newer := base.Add(100*time.Millisecond), base.Add(120*time.Millisecond)
+	logOf := func(app string) []string {
+		var out []string
+		for _, row := range listRows(answerOf(t, eng, s.operator(), `builtin wholesaleDecisionLog(siteId: `+quote(s.site)+
+			`, storeId: `+quote(s.store)+`)`)["rows"]) {
+			if bareID(textOf(row["applicationId"])) == app {
+				out = append(out, textOf(row["transition"]))
+			}
+		}
+		return out
+	}
+	seed := func(label string, spell func(time.Time) string) string {
+		app := s.oldApplication(t, eng, label)
+		s.oldDecision(t, eng, app, app+"-older", "approve", map[string]any{"decidedAt": spell(older)})
+		s.oldDecision(t, eng, app, app+"-newer", "revoke", map[string]any{"decidedAt": spell(newer)})
+		return app
+	}
+	short := seed("short", func(at time.Time) string { return at.Format(time.RFC3339Nano) })
+	fixed := seed("fixed", wholesalepack.HappenedStamp)
+	if got := logOf(short); len(got) != 2 || got[0] != "approve" {
+		t.Fatalf("in the short spelling the log reads %v; the case needs the engine's text order (older first)", got)
+	}
+	if got := logOf(fixed); len(got) != 2 || got[0] != "revoke" || got[1] != "approve" {
+		t.Fatalf("as the pack writes them the log reads %v, want [revoke approve], newest first", got)
+	}
 }

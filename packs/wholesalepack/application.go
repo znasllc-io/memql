@@ -243,7 +243,9 @@ var happenedField = map[string]string{
 
 // happenedStamp is a time as a happened field holds it: UTC with every
 // fractional digit, so the text sorts as the time does -- the queries order
-// by the field's text.
+// by the field's text. IT IS THE ONLY WRITER of these fields' text: every
+// builtin and the backfill format through it, so two times that differ only
+// past the second never sort as text in the wrong order.
 func happenedStamp(at time.Time) string {
 	return at.UTC().Format("2006-01-02T15:04:05.000000000Z")
 }
