@@ -15,11 +15,14 @@ package accounts
 //
 // The answer is one grouped count over every concept that declares an account
 // form. The engine's read path answers one concept per query and pages its
-// rows; a count of distinct ids and of versions per concept, for every concept
-// at once, is the one statement below over the partial index
-// idx_memorynodes_account. Each statement repeats that index's predicate so the
-// planner can use it, and none depends on it: without the index the same
-// statement is a sequential scan with the same answer.
+// rows. The counts come from memql.AccountCensus (component/memql/account_rows.go),
+// the reader the export and the move act use too, so the inventory and an
+// export can never disagree about whose a row is: a row is counted once, under
+// the account its NEWEST version names (across the row table and the
+// observation store), and `versions` is every version of those rows, whatever
+// account an older one names. The file sum below is raw SQL of its own over
+// the partial index idx_memorynodes_account, whose predicate it repeats so the
+// planner can use it.
 //
 // # What counts
 //
@@ -28,7 +31,7 @@ package accounts
 // accountId (a mirrored vendor's own account number, say); its rows are not
 // the account's, and counting them would put foreign rows in the ledger.
 //
-// Readers match both spellings of an account id, bare and
+// Every read matches both spellings of an account id, bare and
 // `v1:accounts:account:<bare>`, because the stamp writes the bare id while a
 // concept that declares a relationship on the field stores the canonical one
 // (design record, R7).
@@ -75,12 +78,12 @@ const (
 
 	// inventoryDeadline bounds the inventory's two statements together. The
 	// request pool cancels a statement at 8 seconds and the node table holds
-	// tens of millions of rows; `versions` comes from the partial index alone
-	// but `rows` (distinct ids) visits the heap, so an account holding most of
-	// a large cluster can take longer than one read may. A deadline of its own,
-	// shorter than the pool's, lets the handler answer in words the panel can
-	// show instead of a raw timeout. No second index: the export piece brings
-	// a narrower read.
+	// tens of millions of rows; the census finds its candidates through the
+	// partial index but decides each by a read of its newest version and
+	// counts its versions, so an account holding most of a large cluster can
+	// take longer than one read may. A deadline of its own, shorter than the
+	// pool's, lets the handler answer in words the panel can show instead of a
+	// raw timeout.
 	inventoryDeadline = 6 * time.Second
 	// totalsDeadline bounds the per-account totals in the status. They are a
 	// convenience beside the switch, the progress and the conflicts, which
@@ -149,6 +152,15 @@ func (i *Integration) accountScopedConcepts() map[string]bool {
 	return out
 }
 
+// conceptList is the registry's concepts, read on every call for the reason
+// accountScopedConcepts gives.
+func (i *Integration) conceptList() []*memorynodes.Concept {
+	if i.concepts == nil {
+		return nil
+	}
+	return i.concepts()
+}
+
 func (i *Integration) database() (*bun.DB, error) {
 	if i.db == nil {
 		return nil, errors.New("accounts: this node has no database")
@@ -174,23 +186,13 @@ func splitConcept(id string) (namespace, name string) {
 // repeated so the planner can match it.
 const accountIdPresentSQL = `(payload->>'accountId') IS NOT NULL AND (payload->>'accountId') <> ''`
 
-// inventoryCountsSQL counts, per concept, the distinct rows and the versions
-// that name the account in either spelling.
-//
-// staged-data: MUST-NOT-GATE -- an inventory of what an account holds; a staged concept's rows are the account's all the same, and leaving them out would report an account smaller than it is (the export that follows this piece reads the same ledger).
-const inventoryCountsSQL = `SELECT concept, count(DISTINCT id), count(*)
-  FROM "MemoryNodes"
- WHERE ` + accountIdPresentSQL + `
-   AND (payload->>'accountId') IN ($1, $2)
- GROUP BY concept`
-
 // inventoryFilesSQL sums the size of the account's current files: the newest
 // version of each file row that ever named the account, when that version
 // still names it and is not archived. Archived files are left out because an
 // archive is the Library's delete; a version whose size is not a JSON number
 // contributes nothing rather than failing the read.
 //
-// staged-data: MUST-NOT-GATE -- the inventoryCountsSQL reason: the bytes are the account's whether or not the file concept's data is staged.
+// staged-data: MUST-NOT-GATE -- an inventory of what an account holds; the bytes are the account's whether or not the file concept's data is staged, and leaving them out would report an account smaller than it is.
 const inventoryFilesSQL = `SELECT COALESCE(sum((f.payload->>'size')::numeric), 0)::bigint
   FROM (SELECT DISTINCT ON (id) payload
           FROM "MemoryNodes"
@@ -213,7 +215,7 @@ const accountExistsSQL = `SELECT EXISTS (SELECT 1 FROM "MemoryNodes" WHERE conce
 // every row that names an account. Grouped by the BARE id so a row whose
 // versions spell the account both ways counts once.
 //
-// staged-data: MUST-NOT-GATE -- the inventoryCountsSQL reason, for every account at once.
+// staged-data: MUST-NOT-GATE -- an inventory of what every account holds; a staged concept's rows are the account's all the same.
 const accountTotalsSQL = `SELECT CASE WHEN (payload->>'accountId') LIKE 'v1:accounts:account:%'
             THEN substr(payload->>'accountId', 21) ELSE payload->>'accountId' END AS account,
        concept, count(DISTINCT id)
@@ -233,21 +235,13 @@ const conflictsSQL = `SELECT concept, row_id, kind, detail, found_at
  ORDER BY found_at DESC, concept, row_id, kind
  LIMIT $1`
 
-// normalizeAccountId returns the bare id, refusing an empty one and one that
-// is canonical for some other concept.
+// normalizeAccountId returns the bare id (memql.BareAccountID), naming the
+// builtin when the id is empty.
 func normalizeAccountId(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+	if strings.TrimSpace(raw) == "" {
 		return "", errors.New("accountInventory needs an account: accountId is empty")
 	}
-	if strings.Contains(raw, ":") && !strings.HasPrefix(raw, canonicalPrefix) {
-		return "", fmt.Errorf("%q is not an account id", raw)
-	}
-	bare := memql.BareShortId(strings.TrimPrefix(raw, canonicalPrefix))
-	if bare == "" || strings.Contains(bare, ":") {
-		return "", fmt.Errorf("%q is not an account id", raw)
-	}
-	return bare, nil
+	return memql.BareAccountID(raw)
 }
 
 func (i *Integration) handleInventory(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
@@ -271,7 +265,6 @@ func (i *Integration) handleInventory(ctx context.Context, args map[string]any, 
 		}
 	}
 
-	scoped := i.accountScopedConcepts()
 	countCtx, cancel := context.WithTimeout(ctx, i.inventoryDeadline)
 	defer cancel()
 	// tooLarge turns a passed deadline into the panel's sentence. It asks the
@@ -284,7 +277,7 @@ func (i *Integration) handleInventory(ctx context.Context, args map[string]any, 
 		}
 		return fmt.Errorf("accountInventory: %s: %w", what, err)
 	}
-	rows, err := db.DB.QueryContext(countCtx, inventoryCountsSQL, bare, canonical)
+	census, err := memql.AccountCensus(countCtx, db.DB, bare, memql.AccountKinds(i.conceptList(), false))
 	if err != nil {
 		return nil, tooLarge(err, "count rows")
 	}
@@ -292,24 +285,12 @@ func (i *Integration) handleInventory(ctx context.Context, args map[string]any, 
 		concept, namespace, name string
 		rows, versions           int64
 	}
-	var lines []line
-	for rows.Next() {
-		var l line
-		if err := rows.Scan(&l.concept, &l.rows, &l.versions); err != nil {
-			rows.Close()
-			return nil, tooLarge(err, "read counts")
-		}
-		if !scoped[l.concept] {
-			continue
-		}
+	lines := make([]line, 0, len(census))
+	for _, c := range census {
+		l := line{concept: c.Concept, rows: c.Rows, versions: c.Versions}
 		l.namespace, l.name = splitConcept(l.concept)
 		lines = append(lines, l)
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, tooLarge(err, "read counts")
-	}
-	rows.Close()
 	sort.Slice(lines, func(a, b int) bool {
 		if lines[a].namespace != lines[b].namespace {
 			return lines[a].namespace < lines[b].namespace

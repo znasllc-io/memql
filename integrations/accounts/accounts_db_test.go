@@ -24,16 +24,21 @@ import (
 	"github.com/znasllc-io/memql/component/language/parser"
 )
 
-// The fixture's concepts. Three declare an account form, one is cluster-wide
+// The fixture's concepts. Four declare an account form (one of them a concept
+// whose newest version may be an observation in memory_liveness), one is cluster-wide
 // with an unrelated field called accountId (a mirrored vendor's own account
 // number), and one declares nothing.
 var fixtureConcepts = []*memorynodes.Concept{
 	{Name: "v1:testa:note", BelongsTo: &parser.BelongsToDecl{Scope: parser.BelongsToAccount}},
 	{Name: "v1:testb:task", BelongsTo: &parser.BelongsToDecl{Scope: parser.BelongsToAccount, Via: "noteId"}},
 	{Name: fileConcept, BelongsTo: &parser.BelongsToDecl{Scope: parser.BelongsToAccount}},
+	{Name: runConcept, BelongsTo: &parser.BelongsToDecl{Scope: parser.BelongsToAccount}},
 	{Name: "v1:testc:vendorChannel", BelongsTo: &parser.BelongsToDecl{Scope: parser.BelongsToCluster}},
 	{Name: "v1:testc:undeclared"},
 }
+
+// runConcept is listed in memorynodes.HasLiveness.
+const runConcept = "v1:pipelines:run"
 
 func fixtureLister() []*memorynodes.Concept { return fixtureConcepts }
 
@@ -50,7 +55,7 @@ func openTempDB(t *testing.T) *bun.DB {
 	// shadow the public ones on this session's search path.
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
-	for _, table := range []string{`"MemoryNodes"`, "account_stamping_storage", "account_assignment_progress", "account_assignment_conflict"} {
+	for _, table := range []string{`"MemoryNodes"`, "memory_liveness", "account_stamping_storage", "account_assignment_progress", "account_assignment_conflict"} {
 		_, err := db.ExecContext(ctx, `CREATE TEMP TABLE `+table+` (LIKE public.`+table+` INCLUDING ALL)`)
 		require.NoError(t, err, table)
 	}
@@ -62,10 +67,18 @@ var fixtureClock = time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
 // version writes one version of a row; minutes orders the versions of one id.
 func version(t *testing.T, db *bun.DB, concept, id string, minutes int, payload map[string]any) {
 	t.Helper()
+	versionIn(t, db, `"MemoryNodes"`, concept, id, minutes, payload)
+}
+
+// versionIn writes one version to the given table: "MemoryNodes", or
+// memory_liveness for a row's current observation (the temp copy has no
+// trigger, so it is written there directly).
+func versionIn(t *testing.T, db *bun.DB, table, concept, id string, minutes int, payload map[string]any) {
+	t.Helper()
 	encoded, err := json.Marshal(payload)
 	require.NoError(t, err)
 	_, err = db.DB.ExecContext(context.Background(),
-		`INSERT INTO "MemoryNodes" (id, "createdAt", "createdBy", schema, payload, concept) VALUES ($1, $2, 'test', '{}', $3, $4)`,
+		`INSERT INTO `+table+` (id, "createdAt", "createdBy", schema, payload, concept) VALUES ($1, $2, 'test', '{}', $3, $4)`,
 		id, fixtureClock.Add(time.Duration(minutes)*time.Minute), string(encoded), concept)
 	require.NoError(t, err)
 }
@@ -95,9 +108,9 @@ func seedTwoAccounts(t *testing.T, db *bun.DB) {
 	// acme task: 1 row, 1 version.
 	version(t, db, "v1:testb:task", "v1:testb:task:t1", 1, map[string]any{"accountId": "acme"})
 
-	// acme files: f1, f2, f3, f4 name acme in some version (4 rows, 5
-	// versions). Bytes count the CURRENT version only: f1 100, f2's newest 50,
-	// f3 archived, f4 now globex's -- 150.
+	// acme files: f1, f2, f3 (3 rows, 4 versions); f4 named acme once and its
+	// newest version names globex, so it is globex's. Bytes count the CURRENT
+	// version only: f1 100, f2's newest 50, f3 archived -- 150.
 	version(t, db, fileConcept, "v1:library:file:f1", 1, map[string]any{"accountId": "acme", "size": 100})
 	version(t, db, fileConcept, "v1:library:file:f2", 1, map[string]any{"accountId": acmeCanonical, "size": 40})
 	version(t, db, fileConcept, "v1:library:file:f2", 2, map[string]any{"accountId": acmeCanonical, "size": 50})
@@ -110,7 +123,8 @@ func seedTwoAccounts(t *testing.T, db *bun.DB) {
 	version(t, db, "v1:testc:vendorChannel", "v1:testc:vendorChannel:c1", 1, map[string]any{"accountId": "acme"})
 	version(t, db, "v1:testc:undeclared", "v1:testc:undeclared:u1", 1, map[string]any{"accountId": "acme"})
 
-	// globex: 1 note; files f4 (above) and f5 -- 2 rows, 2 versions, 27 bytes.
+	// globex: 1 note; files f4 (above, both versions) and f5 -- 2 rows, 3
+	// versions, 27 bytes.
 	version(t, db, "v1:testa:note", "v1:testa:note:g1", 1, map[string]any{"accountId": globexCanonical})
 	version(t, db, fileConcept, "v1:library:file:f5", 1, map[string]any{"accountId": "globex", "size": 20})
 }
@@ -141,7 +155,7 @@ func TestAccountInventoryCountsOnlyTheAccountsDeclaredConcepts(t *testing.T) {
 	ctx := context.Background()
 
 	acme := []map[string]any{
-		conceptLine(fileConcept, "library", "file", 4, 5),
+		conceptLine(fileConcept, "library", "file", 3, 4),
 		conceptLine("v1:testa:note", "testa", "note", 3, 5),
 		conceptLine("v1:testb:task", "testb", "task", 1, 1),
 		{"kind": "files", "bytes": float64(150)},
@@ -155,7 +169,7 @@ func TestAccountInventoryCountsOnlyTheAccountsDeclaredConcepts(t *testing.T) {
 	nodes, err := i.handleInventory(ctx, map[string]any{"accountId": "globex"}, 0)
 	require.NoError(t, err)
 	require.Equal(t, []map[string]any{
-		conceptLine(fileConcept, "library", "file", 2, 2),
+		conceptLine(fileConcept, "library", "file", 2, 3),
 		conceptLine("v1:testa:note", "testa", "note", 1, 1),
 		{"kind": "files", "bytes": float64(27)},
 	}, payloads(t, nodes), "globex's inventory must hold none of acme's rows")
@@ -170,6 +184,39 @@ func TestAccountInventoryCountsOnlyTheAccountsDeclaredConcepts(t *testing.T) {
 	nodes, err = i.handleInventory(ctx, map[string]any{"accountId": "self"}, 0)
 	require.NoError(t, err)
 	require.Equal(t, []map[string]any{{"kind": "files", "bytes": float64(0)}}, payloads(t, nodes))
+}
+
+func TestAccountInventoryCountsARowUnderTheAccountItsNewestVersionNames(t *testing.T) {
+	db := openTempDB(t)
+	seedTwoAccounts(t, db)
+	i := New(func() *bun.DB { return db }, fixtureLister, false, nil)
+	ctx := context.Background()
+
+	// t5 moved from acme to globex: globex's, with both versions.
+	version(t, db, "v1:testb:task", "v1:testb:task:t5", 1, map[string]any{"accountId": "acme"})
+	version(t, db, "v1:testb:task", "v1:testb:task:t5", 2, map[string]any{"accountId": globexCanonical})
+	// r1's versioned row names no account; its newest version is an
+	// observation naming globex.
+	version(t, db, runConcept, runConcept+":r1", 1, map[string]any{"state": "running"})
+	versionIn(t, db, "memory_liveness", runConcept, runConcept+":r1", 2, map[string]any{"state": "running", "accountId": "globex"})
+
+	nodes, err := i.handleInventory(ctx, map[string]any{"accountId": "acme"}, 0)
+	require.NoError(t, err)
+	got := payloads(t, nodes)
+	require.Contains(t, got, conceptLine("v1:testb:task", "testb", "task", 1, 1), "only t1 is acme's")
+	for _, p := range got {
+		require.NotEqual(t, runConcept, p["concept"], "the run is globex's: %v", p)
+	}
+
+	nodes, err = i.handleInventory(ctx, map[string]any{"accountId": "globex"}, 0)
+	require.NoError(t, err)
+	require.Equal(t, []map[string]any{
+		conceptLine(fileConcept, "library", "file", 2, 3),
+		conceptLine(runConcept, "pipelines", "run", 1, 2),
+		conceptLine("v1:testa:note", "testa", "note", 1, 1),
+		conceptLine("v1:testb:task", "testb", "task", 1, 2),
+		{"kind": "files", "bytes": float64(27)},
+	}, payloads(t, nodes))
 }
 
 func TestAccountInventoryRefusesAnEmptyOrUnknownAccount(t *testing.T) {
