@@ -197,15 +197,16 @@ func trimmed(v any) string { return strings.TrimSpace(asString(v)) }
 //   - wholesaleRetryAccess: the part against the application's organization,
 //     the application read under the caller, then the decision log and the
 //     entitlement row decide whether there is access to retry;
-//   - wholesaleUpdateSettings: the part against the SITE's organization, the
-//     site checked to serve the store (siteForStore), and a store with no
-//     settings row refused; it merges into the row the operators set up and
-//     keeps the row's owner, organization and site;
+//   - wholesaleUpdateSettings: the part against the SITE's organization, then
+//     the store gate (siteForStore): the site serves the store, the store is
+//     set up -- its settings row is tied to an organization -- and the site is
+//     of it; it merges into the row the operators set up and keeps the row's
+//     owner, organization and site;
 //   - wholesaleSetSettings: internal origin or a cluster operator only,
-//     never the part. An existing row keeps its owner. A NEW ROW'S OWNER is
-//     the named site's owner (siteForStore: the site serves the store), or
-//     else the one owner of the deployables bound to the store; two owners,
-//     or none, are refused;
+//     never the part. The row is always tied to an organization: the named
+//     site's, or the one bound site's, else refused (NameTheSiteSentence). An
+//     existing row keeps its owner, and is tied only to a site of that owner
+//     (AnotherOwnerSentence); a NEW ROW'S OWNER is the site's owner;
 //   - wholesaleProvisionEntitlement / wholesaleRevokeEntitlement: internal
 //     origin only (the store's automation), then the decision log.
 //   - wholesaleBackfillAccounts: internal origin or a cluster operator

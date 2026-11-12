@@ -243,6 +243,12 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 	if !s.ApplicationsOpen {
 		return nil, errNotAccepting
 	}
+	// A STORE TAKES APPLICATIONS ONLY THROUGH A SITE OF THE ORGANIZATION ITS
+	// PROGRAM IS TIED TO (ruling 56), judged by the store gate's own judgement.
+	// Any other post is refused exactly as a closed store refuses it.
+	if err := p.storefrontAdmits(ctx, trimmed(args["siteId"]), storeID); err != nil {
+		return nil, err
+	}
 	// THE BUILTIN DECIDED; THE MUTATION WRITES. A builtin's returned nodes
 	// are the expression's VALUE and are never persisted, so the row is
 	// written through the pack's own mutation. ownerUserId is the CALLING
@@ -306,9 +312,9 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 	}
 	fenced := memql.ContextWithRowVersionFence(ctx, applicationConcept, applicationID, time.Time{})
 	// accountId IS THE SITE'S ORGANIZATION, stamped by the shopper handler
-	// from the site the post arrived on, and empty for a site with none --
-	// which is a legitimate state: the application is then written untied and
-	// stays its owner's, as before.
+	// from the site the post arrived on. The site was admitted above, so it is
+	// the organization the store's program is tied to; a site with none never
+	// reaches this write (ruling 56).
 	if err := p.write(fenced, "createApplicationRow", map[string]any{
 		"applicationId":  applicationID,
 		"ownerUserId":    owner,
@@ -368,8 +374,35 @@ func formatNoun(format string) string {
 }
 
 // errNotAccepting is a shopper's refusal by a store that takes no application
-// now: closed, or requiring terms it has not published.
+// now: closed, requiring terms it has not published, not set up, or reached
+// through a site that is not of its program's organization.
 var errNotAccepting = errors.New("wholesale: this store is not accepting applications")
+
+// storefrontAdmits refuses a submission, as a store that is not accepting
+// applications refuses it, unless it arrived through a site that serves the
+// store and that the store gate admits (storeAdmitsSite): the store is set up,
+// and the site is of the organization its program is tied to. The site is read
+// as the system: the shopper path's owner is borrowed, and the judgement is of
+// the site, not of who can read it.
+func (p *Provider) storefrontAdmits(ctx context.Context, siteID, storeID string) error {
+	if siteID == "" {
+		return errNotAccepting
+	}
+	rows, err := p.rowsFor(auth.ContextWithSystemActor(ctx, storeLookupActor), "siteById", map[string]string{"siteId": siteID})
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 || !servesStore(rows[0], bareID(storeID)) {
+		return errNotAccepting
+	}
+	if err := p.storeAdmitsSite(ctx, rows[0], siteID, storeID); err != nil {
+		if errors.Is(err, errNotSetUp) || errors.Is(err, errAnotherOrganization) {
+			return errNotAccepting
+		}
+		return err
+	}
+	return nil
+}
 
 // accountIsTheSites refuses an accountId unless the named site, read as the
 // system, is of that organization, serves the named store, and is owned by

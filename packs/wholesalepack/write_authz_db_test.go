@@ -151,7 +151,7 @@ func TestLiveE2E_AnApplicationIsNeverWrittenOver(t *testing.T) {
 
 	// THE SAME SUBMISSION AGAIN answers and writes nothing.
 	wsExec(t, eng, asSiteOwner(merchant), `builtin wholesaleSubmitApplication(applicantEmail: "first@original.example"`+
-		`, applicantName: "Sam Rivers", companyName: "Original Trading", siteId: "site-wholesale-e2e", storeId: `+
+		`, applicantName: "Sam Rivers", companyName: "Original Trading", siteId: `+wsQuote(storeSite(t, eng, storeLive))+`, storeId: `+
 		wsQuote(storeLive)+`, submissionId: `+wsQuote(appID)+`)`)
 	if got := versionCount(t, concept, appID); got != 1 {
 		t.Fatalf("a repeated submission wrote a second version: %d versions", got)
@@ -165,6 +165,7 @@ func TestLiveE2E_TwoSubmissionsAtOneIdAtOnceLeaveOneRow(t *testing.T) {
 	merchant, storeLive, _ := wholesaleScope()
 	openApplications(t, eng, asSiteOwner(merchant), storeLive, wholesalepack.AdapterCustomerTag)
 	appID := "sub-" + id.NewShortId()
+	site := storeSite(t, eng, storeLive)
 
 	var wg sync.WaitGroup
 	start := make(chan struct{})
@@ -174,7 +175,7 @@ func TestLiveE2E_TwoSubmissionsAtOneIdAtOnceLeaveOneRow(t *testing.T) {
 			defer wg.Done()
 			<-start
 			_, _ = eng.Execute(asSiteOwner(merchant), `builtin wholesaleSubmitApplication(applicantEmail: "race@race.example"`+
-				`, applicantName: "Racer", companyName: `+wsQuote(company)+`, storeId: `+wsQuote(storeLive)+
+				`, applicantName: "Racer", companyName: `+wsQuote(company)+`, siteId: `+wsQuote(site)+`, storeId: `+wsQuote(storeLive)+
 				`, submissionId: `+wsQuote(appID)+`)`)
 		}(company)
 	}

@@ -256,6 +256,18 @@ func openApplications(t *testing.T, eng *memql.MemQLEngine, ctx context.Context,
 	}
 }
 
+// storeSite is the one site bound to store: a store takes applications only
+// through a site of its program's organization (ruling 56), so a direct
+// submission names the site the shopper handler would have stamped.
+func storeSite(t *testing.T, eng *memql.MemQLEngine, storeID string) string {
+	t.Helper()
+	rows := wsRows(t, eng, asOperator("operator-"+storeID), `query sitesBoundToStore(storeIds: [`+wsQuote(storeID)+`])`)
+	if len(rows) != 1 {
+		t.Fatalf("store %s has %d sites bound, want one", storeID, len(rows))
+	}
+	return bareID(asString(rows[0]["id"]))
+}
+
 // submit stands in for component/server/shopper_handler.go: the pack's
 // declared fields plus the three it stamps -- storeId, siteId, and the
 // submission id it mints for this POST (design record 2026-09-21, D4).
@@ -267,7 +279,7 @@ func submit(t *testing.T, eng *memql.MemQLEngine, ctx context.Context, storeID, 
 	submissionID := "sub-" + id.NewShortId()
 	wsExec(t, eng, ctx, `builtin wholesaleSubmitApplication(applicantEmail: `+wsQuote(email)+
 		`, applicantName: "Sam Rivers", companyName: `+wsQuote(company)+
-		`, siteId: "site-wholesale-e2e", storeId: `+wsQuote(storeID)+
+		`, siteId: `+wsQuote(storeSite(t, eng, storeID))+`, storeId: `+wsQuote(storeID)+
 		`, submissionId: `+wsQuote(submissionID)+`)`)
 	return submissionID
 }

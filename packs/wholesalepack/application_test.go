@@ -156,6 +156,14 @@ func (f *fakeWriter) Insert(ctx context.Context, mutation string, args map[strin
 
 // asShopperPath is the borrowed authority the shopper handler submits under:
 // the site owner's actor.
+// shopperSite is the site the shopper path's posts arrive through: owned by
+// site-owner-1, of acct-north, bound to store-live. A store takes applications
+// only through a site of its program's organization (ruling 56).
+func shopperSite() map[string]any {
+	return map[string]any{"id": "site-1", "ownerUserId": "v1:identity:user:site-owner-1", "accountId": "acct-north",
+		"binding": map[string]any{"storeId": "store-live"}}
+}
+
 func asShopperPath() context.Context {
 	return auth.ContextWithUserActor(context.Background(), "site-owner-1")
 }
@@ -684,10 +692,11 @@ func TestUserRefLeavesAnIdOfAnotherKindAlone(t *testing.T) {
 func TestASubmissionWritesItsOwnerInCanonicalForm(t *testing.T) {
 	writer := &fakeWriter{}
 	p := &Provider{writer: writer, reader: &fixtureReader{
-		settings: map[string][]map[string]any{"store-live": {{"storeId": "store-live", "applicationsOpen": true}}},
+		sites:    []map[string]any{shopperSite()},
+		settings: map[string][]map[string]any{"store-live": {{"storeId": "store-live", "applicationsOpen": true, "accountId": "acct-north"}}},
 	}}
 	if _, err := p.submitApplication(asShopperPath(), map[string]any{
-		"submissionId": "sub-canon", "storeId": "store-live", "companyName": "Acme",
+		"submissionId": "sub-canon", "storeId": "store-live", "siteId": "site-1", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0); err != nil {
 		t.Fatalf("submitApplication: %v", err)
@@ -848,13 +857,14 @@ func TestClosedApplicationsRefuseASubmission(t *testing.T) {
 func TestTheGateIsPerStore(t *testing.T) {
 	writer := &fakeWriter{}
 	p := &Provider{writer: writer, reader: &fixtureReader{
+		sites: []map[string]any{shopperSite()},
 		settings: map[string][]map[string]any{
-			"store-live": {{"storeId": "store-live", "applicationsOpen": true}},
+			"store-live": {{"storeId": "store-live", "applicationsOpen": true, "accountId": "acct-north"}},
 			"store-dev":  {{"storeId": "store-dev", "applicationsOpen": false}},
 		},
 	}}
 	if _, err := p.submitApplication(asShopperPath(), map[string]any{
-		"submissionId": "sub-1", "storeId": "store-live", "companyName": "Acme",
+		"submissionId": "sub-1", "storeId": "store-live", "siteId": "site-1", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0); err != nil {
 		t.Fatalf("submitApplication: %v", err)
@@ -883,8 +893,9 @@ func TestTheGateIsPerStore(t *testing.T) {
 func TestASubmissionIsRefusedWhenTermsAreRequiredAndADocumentIsMissing(t *testing.T) {
 	writer := &fakeWriter{}
 	reader := &fixtureReader{
+		sites: []map[string]any{shopperSite()},
 		settings: map[string][]map[string]any{
-			"store-live":   {{"storeId": "store-live", "applicationsOpen": true, "termsRequired": true}},
+			"store-live":   {{"storeId": "store-live", "applicationsOpen": true, "accountId": "acct-north", "termsRequired": true}},
 			"store-closed": {{"storeId": "store-closed", "applicationsOpen": false}},
 		},
 		docs: docsFor(DocumentTerms, DocumentPriceSheet),
@@ -892,7 +903,7 @@ func TestASubmissionIsRefusedWhenTermsAreRequiredAndADocumentIsMissing(t *testin
 	p := &Provider{writer: writer, reader: reader}
 	submit := func(store, id string) error {
 		_, err := p.submitApplication(asShopperPath(), map[string]any{
-			"submissionId": id, "storeId": store, "companyName": "Spoke and Chain Cycles",
+			"submissionId": id, "storeId": store, "siteId": "site-1", "companyName": "Spoke and Chain Cycles",
 			"applicantName": "Sam", "applicantEmail": "sam@example.com",
 		}, 0)
 		return err
@@ -1010,12 +1021,13 @@ func TestUnknownAdapterIsRefusedWhenSettingsAreWritten(t *testing.T) {
 func TestTheApplicationIsWrittenAtTheSubmissionId(t *testing.T) {
 	writer := &fakeWriter{}
 	p := &Provider{writer: writer, reader: &fixtureReader{
+		sites: []map[string]any{shopperSite()},
 		settings: map[string][]map[string]any{
-			"store-live": {{"storeId": "store-live", "applicationsOpen": true}},
+			"store-live": {{"storeId": "store-live", "applicationsOpen": true, "accountId": "acct-north"}},
 		},
 	}}
 	if _, err := p.submitApplication(asShopperPath(), map[string]any{
-		"submissionId": "sub-abc", "storeId": "store-live", "companyName": "Acme",
+		"submissionId": "sub-abc", "storeId": "store-live", "siteId": "site-1", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0); err != nil {
 		t.Fatalf("submitApplication: %v", err)
@@ -1161,15 +1173,16 @@ func TestANewStoresSettingsAreOwnedByItsSitesOwner(t *testing.T) {
 func TestARepeatedSubmissionAnswersItsIdAndWritesNothing(t *testing.T) {
 	writer := &fakeWriter{}
 	p := &Provider{writer: writer, reader: &fixtureReader{
+		sites: []map[string]any{shopperSite()},
 		settings: map[string][]map[string]any{
-			"store-live": {{"storeId": "store-live", "applicationsOpen": true}},
+			"store-live": {{"storeId": "store-live", "applicationsOpen": true, "accountId": "acct-north"}},
 		},
 		apps: map[string][]map[string]any{
 			"sub-abc": {{"id": "sub-abc", "storeId": "store-live", "ownerUserId": "site-owner-1"}},
 		},
 	}}
 	got := decodedBy(t)(p.submitApplication(asShopperPath(), map[string]any{
-		"submissionId": "sub-abc", "storeId": "store-live", "companyName": "Acme",
+		"submissionId": "sub-abc", "storeId": "store-live", "siteId": "site-1", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0))
 	if got["applicationId"] != "sub-abc" {
@@ -1185,12 +1198,13 @@ func TestARepeatedSubmissionAnswersItsIdAndWritesNothing(t *testing.T) {
 func TestANewApplicationIsFencedOnRowAbsent(t *testing.T) {
 	writer := &fakeWriter{}
 	p := &Provider{writer: writer, reader: &fixtureReader{
+		sites: []map[string]any{shopperSite()},
 		settings: map[string][]map[string]any{
-			"store-live": {{"storeId": "store-live", "applicationsOpen": true}},
+			"store-live": {{"storeId": "store-live", "applicationsOpen": true, "accountId": "acct-north"}},
 		},
 	}}
 	if _, err := p.submitApplication(asShopperPath(), map[string]any{
-		"submissionId": "sub-new", "storeId": "store-live", "companyName": "Acme",
+		"submissionId": "sub-new", "storeId": "store-live", "siteId": "site-1", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0); err != nil {
 		t.Fatalf("submitApplication: %v", err)
@@ -1241,8 +1255,8 @@ func TestASubmittedAccountMustBeTheSites(t *testing.T) {
 	served := func(store string) map[string]any { return map[string]any{"storeId": store} }
 	reader := &fixtureReader{
 		settings: map[string][]map[string]any{
-			"store-live": {{"storeId": "store-live", "applicationsOpen": true}},
-			"store-b":    {{"storeId": "store-b", "applicationsOpen": true}},
+			"store-live": {{"storeId": "store-live", "applicationsOpen": true, "accountId": "acct-north"}},
+			"store-b":    {{"storeId": "store-b", "applicationsOpen": true, "accountId": "acct-b"}},
 		},
 		sites: []map[string]any{
 			{"id": "v1:platform:site:site-1", "ownerUserId": "v1:identity:user:site-owner-1",
