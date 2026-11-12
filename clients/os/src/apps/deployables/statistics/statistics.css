@@ -14,6 +14,12 @@
 .deployable-statistics-lists { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; min-width: 0; }
 .deployable-statistics-lists[data-wide] { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 40px; }
 
+/* A store's products list: each of its footer's lines stands on its own line. */
+.store-statistics-footer-line { margin: 0; }
+/* A store's products: the list, and under it the line about refunds that name
+ * no product when the list has no footer to hold it. */
+.store-statistics-products { display: grid; gap: 8px; min-width: 0; align-content: start; }
+
 /* The tabs that choose what the Devices list lists, under its heading. */
 .deployable-statistics-device-tabs > .os-local-tabs { margin: 0; }
 

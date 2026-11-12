@@ -374,6 +374,13 @@ export interface FakeSeed {
   siteStatistics?: Row;
   /** Fails every `siteStatistics` read with this server message. */
   siteStatisticsError?: string;
+  /**
+   * What `storeStatistics` answers, keyed by the store id the call names
+   * (`storeStatisticsRow` builds one). A store with no entry answers no node.
+   */
+  storeStatistics?: Record<string, Row>;
+  /** Fails every `storeStatistics` read with this server message. */
+  storeStatisticsError?: string;
   /** Fails the next `updateSiteSettings` with this server message. */
   settingsError?: string;
   /** Fails the next `updateSiteStatus` with this server message. */
@@ -769,6 +776,12 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call.startsWith("builtin siteStatistics(")) {
         if (seed.siteStatisticsError !== undefined) throw new Error(seed.siteStatisticsError);
         return builtinReply("siteStatistics", seed.siteStatistics === undefined ? [] : [seed.siteStatistics]);
+      }
+
+      if (call.startsWith("builtin storeStatistics(")) {
+        if (seed.storeStatisticsError !== undefined) throw new Error(seed.storeStatisticsError);
+        const answer = seed.storeStatistics?.[String(parseCall(call).args["storeId"] ?? "")];
+        return builtinReply("storeStatistics", answer === undefined ? [] : [answer]);
       }
 
       if (call.startsWith("mutation updateSiteSettings(")) {
@@ -1715,6 +1728,59 @@ export function siteStatisticsRow(over: Partial<Row> = {}): Row {
       os: [{ value: "macOS", visitors: 600, visits: 800, pageViews: 2200 }, { value: "Windows", visitors: 604, visits: 730, pageViews: 2010 }],
     },
     sites: [],
+    ...over,
+  };
+}
+
+/** The eight figures of a `storeStatistics` answer: every one null unless named. */
+export function storeFigures(over: Partial<Row> = {}): Row {
+  return { totalSales: null, netSales: null, averageOrderValue: null, grossSales: null, discounts: null, refunds: null, orders: null, unitsSold: null, ...over };
+}
+
+/**
+ * A `storeStatistics` answer as `Statistics.Payload()` writes it
+ * (component/storestats): a recording store (`recording.blocked` false,
+ * `asOf` null) in EUR and Europe/Madrid, read for the week of Nov 2 to Nov 8
+ * 2026, under the names of `STORE`, with every figure null and every list
+ * empty unless named. Override any key.
+ */
+export function storeStatisticsRow(over: Partial<Row> & { storeId: string }): Row {
+  const day = (index: number) => `2026-11-0${index + 2}T00:00:00+01:00`;
+  return {
+    siteId: "site-shop",
+    storeName: STORE["name"],
+    storeDomain: STORE["domain"],
+    destination: "binding",
+    currency: "EUR",
+    timezone: "Europe/Madrid",
+    periodZone: "Europe/Madrid",
+    development: false,
+    taxesIncluded: false,
+    olderOrderChangesNotRecorded: false,
+    period: "7d",
+    bucket: "day",
+    start: day(0),
+    end: "2026-11-09T00:00:00+01:00",
+    prevStart: "2026-10-26T00:00:00+01:00",
+    historySince: "2026-09-12T00:00:00+02:00",
+    lastChangeAt: "2026-11-08T10:55:00+01:00",
+    asOf: null,
+    recording: { state: "recording", reasons: [], since: "2026-11-07T10:00:00+01:00", blocked: false },
+    rebuilding: false,
+    figures: storeFigures(),
+    previous: null,
+    floors: {},
+    series: Array.from({ length: 7 }, (_, index) => ({ at: day(index), totalSales: null, netSales: null, grossSales: null, discounts: null, refunds: null, orders: null, unitsSold: null })),
+    productsBySales: [],
+    productsByUnits: [],
+    productCount: null,
+    refundsWithoutItem: null,
+    incompleteOrders: null,
+    incompleteRefunds: null,
+    refundsNotRead: null,
+    buyers: null,
+    wholesale: null,
+    otherCurrencies: [],
     ...over,
   };
 }
