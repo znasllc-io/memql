@@ -23,7 +23,10 @@ type ledgerHarness struct {
 	n        *digestNewsletter
 	campaign string
 	receipt  func(label, status string, withRow bool) (operation, address, delivery string)
-	post     func(operation, address, status string) int
+	// laneReceipt is a sent row lane message's receipt: its delivery row names a
+	// row (rowConcept, rowId) and a recipient id that names no recipient row.
+	laneReceipt func(label string) (operation, address, delivery string)
+	post        func(operation, address, status string) int
 	// noAcceptedTime stores the next receipts with no accepted time, as a
 	// send whose response was lost has none.
 	noAcceptedTime bool
@@ -119,6 +122,21 @@ func newLedgerHarness(t *testing.T) *ledgerHarness {
 		n.execute(t, n.system, call("mutation", "storeEmailSendOperation", arg{"id", n.suffix + "-op-" + label}, arg{"accountId", n.org}, arg{"providerMessageId", operation}, arg{"status", "unknown"}, arg{"nextPollAt", now.Format(time.RFC3339Nano)}, arg{"encryptedValue", seal(value)}, arg{"versionTime", now.Format(time.RFC3339Nano)}))
 		return operation, address, delivery
 	}
+	h.laneReceipt = func(label string) (string, string, string) {
+		t.Helper()
+		request := n.suffix + "-lane-" + label
+		recipient := rowRecipientID("v1:test:laneFeedback", request)
+		address := label + "-" + n.suffix + "@example.test"
+		if err := n.store.RecordDelivery(n.owner, Delivery{RecipientID: recipient, Email: address, AccountID: n.org, Status: "sent", Attempts: 1, RequestID: request,
+			TemplateID: n.suffix + "-tpl", RowConcept: "v1:test:laneFeedback", RowID: request, RowKind: "approved"}); err != nil {
+			t.Fatal(err)
+		}
+		delivery := singleDeliveryRowID(request, recipient)
+		operation := id.NewShortId()
+		value := map[string]any{"ID": operation, "AccountID": n.org, "DeliveryID": delivery, "ResourceID": topic, "RecipientDigest": EmailDigest(address), "SenderDigest": EmailDigest("sender@example.test"), "Status": "unknown", "SubmittedAt": now}
+		n.execute(t, n.system, call("mutation", "storeEmailSendOperation", arg{"id", n.suffix + "-op-" + label}, arg{"accountId", n.org}, arg{"providerMessageId", operation}, arg{"status", "unknown"}, arg{"nextPollAt", now.Format(time.RFC3339Nano)}, arg{"encryptedValue", seal(value)}, arg{"versionTime", now.Format(time.RFC3339Nano)}))
+		return operation, address, delivery
+	}
 	h.post = func(operation, address, status string) int {
 		t.Helper()
 		body, _ := json.Marshal([]map[string]any{{"id": "event-" + operation + "-" + status, "eventType": "Microsoft.Communication.EmailDeliveryReportReceived", "topic": topic, "data": map[string]any{"sender": "sender@example.test", "recipient": address, "messageId": operation, "status": status, "deliveryAttemptTimeStamp": now.Add(time.Minute)}}})
@@ -188,5 +206,34 @@ func TestADeliveredReportWithNoAcceptedTimeSetsSentAtFromTheReport(t *testing.T)
 	sent, provider := templateTime(row["sentAt"]), templateTime(row["providerAt"])
 	if str(row, "status") != "sent" || sent.IsZero() || !sent.Equal(provider) {
 		t.Fatalf("sentAt %v should be the report's time %v: %v", sent, provider, row)
+	}
+}
+
+// A bounce of a row lane message suppresses its address and settles its row. Its
+// consent audit names no recipient: the row's recipient id was minted for the
+// one send and names no audience membership, so the audit is written without it
+// rather than refused for it.
+func TestABounceOfARowLaneMessageIsRecorded(t *testing.T) {
+	h := newLedgerHarness(t)
+	operation, address, delivery := h.laneReceipt("bounced")
+	if code := h.post(operation, address, "Bounced"); code != http.StatusNoContent {
+		t.Fatalf("feedback code %d", code)
+	}
+	if _, suppressed, err := h.n.worker.store.SuppressionByDigest(h.n.system, EmailDigest(address)); err != nil || !suppressed {
+		t.Fatalf("the bounced address was not suppressed: %v %v", suppressed, err)
+	}
+	row, err := h.n.worker.newsletterRow(h.n.system, "providerDeliveryById", "deliveryId", delivery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if str(row, "providerStatus") != "bounced" || str(row, "rowConcept") != "v1:test:laneFeedback" {
+		t.Fatalf("ledger %v", row)
+	}
+	var audits int
+	if err := h.n.db.QueryRowContext(t.Context(), `SELECT count(*) FROM "MemoryNodes" WHERE concept = 'v1:campaigns:consentEvent' AND payload->>'emailDigest' = ? AND coalesce(payload->>'recipientId', '') = ''`, EmailDigest(address)).Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	if audits != 1 {
+		t.Fatalf("%d consent audits with no recipient for the bounce", audits)
 	}
 }

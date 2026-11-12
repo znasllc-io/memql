@@ -38,7 +38,7 @@ func (w *Worker) retryDeferredSends(ctx, systemCtx context.Context) {
 			for _, key := range []string{"templateId", "recipientId", "senderIdentityId", "emailRuleId", "requestId"} {
 				args[key] = str(row, key)
 			}
-			opts := singleSend{deferWhenLimited: true}
+			opts := deferredSendOptions(row)
 			receipt, ok, err := singleSendReceiptFor(actor, args, opts)
 			if err != nil || !ok {
 				return fmt.Errorf("deferred send identity is invalid")
@@ -67,6 +67,7 @@ func (w *Worker) retryDeferredSends(ctx, systemCtx context.Context) {
 			for key := range args {
 				args[key] = str(current, key)
 			}
+			opts = deferredSendOptions(current)
 			receipt, ok, err = singleSendReceiptFor(actor, args, opts)
 			if err != nil || !ok {
 				return fmt.Errorf("deferred send identity is invalid")
@@ -122,6 +123,24 @@ func (w *Worker) retryDeferredSends(ctx, systemCtx context.Context) {
 		}
 		cursor = next
 	}
+}
+
+// deferredSendOptions is how a deferred send is replayed. A row that names the
+// row it is about (rowConcept, rowId, rowKind) was a row lane send, and is
+// replayed as one: its rowSend is rebuilt from those fields and its organization,
+// and the replay asks the row's resolver again. They are written only by the
+// server (recordCampaignDelivery is @serverOnly, the delivery concept
+// @serverWritten, and the fields are set only from singleSend.ledgerRow), so no
+// client can make a replay a row send. Every other row replays as the ordinary
+// send it was. An order message is never deferred (send_to_recipient.go), so no
+// pending row names an order; one that did would be refused for naming a concept
+// with no registered resolver.
+func deferredSendOptions(row map[string]any) singleSend {
+	opts := singleSend{deferWhenLimited: true}
+	if concept := str(row, "rowConcept"); concept != "" {
+		opts.rowSend = &rowSend{Concept: concept, RowID: str(row, "rowId"), Kind: str(row, "rowKind"), AccountID: bare(str(row, "accountId"))}
+	}
+	return opts
 }
 
 // The verdict updates only an existing pending row, with attribution preserved.

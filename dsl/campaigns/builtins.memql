@@ -202,7 +202,7 @@ builtin campaignSendToRecipient {
   emailRuleId       string   @description("Optional v1:campaigns:emailRule.id this send came from, stamped on the ledger row so 'which rule mailed this person' is answerable.")
 }
 
-@description("Send ONE message an ORDER entitles to that order's buyer -- the third shape of automated mail, beside the transactional outbox (this cluster's own people) and the marketing lane (people on a list). It takes an order, never an address: the buyer's address is read off the mirrored order, so nothing can point it at a stranger. The organization's suppression list is consulted at the point of send, the RFC 8058 one-click pair is attached (its unsubscribe suppresses the address for the organization), the organization's sender is resolved, the reviewed template's {{fields.<key>}} tags are filled from fields, and the outcome is ledgered, once per requestId. No subscription is asked: the order is the reason for the message. TRUSTED JOBS ONLY: a call without internal origin is refused, because a client that could call it could mail the buyer of any order.")
+@description("Send ONE message an ORDER entitles to that order's buyer -- the third shape of automated mail, beside the transactional outbox (this cluster's own people) and the marketing lane (people on a list). It takes an order, never an address: the buyer's address is read off the mirrored order, so nothing can point it at a stranger. The organization's suppression list is consulted at the point of send, the RFC 8058 one-click pair is attached (its unsubscribe suppresses the address for the organization), the organization's sender is resolved, the reviewed template's {{fields.<key>}} tags are filled from fields, and the outcome is ledgered, once per requestId. No subscription is asked: the order is the reason for the message. TRUSTED JOBS ONLY: a call without internal origin is refused, because a client that could call it could mail the buyer of any order. An order message that meets the send-rate limit is NOT queued: the reply says limited (sent false, skipped false, limited true) and the caller sends it again, because its fields and its sender are the caller's and are kept nowhere a replay could read them.")
 @executor("integration.campaigns.sendOrderMessage")
 builtin campaignSendOrderMessage {
   storeId           string!  @description("The store the order was placed on.")
@@ -212,6 +212,24 @@ builtin campaignSendOrderMessage {
   requestId         string!  @description("Stable identifier for this one message. A retry returns its durable receipt; it is never sent twice.")
   fields            object   @description("Text values for the template's {{fields.<key>}} tags -- the product, the link, its expiry.")
   senderIdentityId  string   @description("An identity in the organization. Omit to resolve its configured sender.")
+}
+
+@description("Send ONE message about one person's own request to the person a pack's row names: the transactional row lane. It takes a row, never an address: the pack that owns the concept registered, in Go, the resolver that answers the row's address, organization and {{fields.<key>}} values, and the lane asks it only when the message is about to be handed to the provider. The template must be a published transactional template of accountId. The message carries no unsubscribe: no List-Unsubscribe pair and no footer, and a template that still carries the unsubscribe or preferences tag is held. A hard bounce, a complaint or an operator's block of the address skips it; an unsubscribe from a list does not. Once per requestId: a repeat returns the receipt and asks no resolver. A send that meets the rate limit is queued and replayed, and the replay asks the resolver again. TRUSTED JOBS ONLY: a call without internal origin is refused before anything is read.")
+@executor("integration.campaigns.sendRowMessage")
+builtin campaignSendRowMessage {
+  rowConcept        string!  @description("A concept a pack registered for the lane.")
+  rowId             string!  @description("The row whose person is mailed.")
+  accountId         string!  @description("The row's organization. The template and the sender must be its, and the resolver must answer it.")
+  kind              string!  @description("Which message about the row; handed to the row's resolver.")
+  templateId        string!  @description("A published transactional v1:campaigns:template of the organization.")
+  requestId         string!  @description("Stable identifier for this one message. A retry returns its receipt; it is never sent twice.")
+  senderIdentityId  string   @description("An identity in the organization. Omit to resolve its configured sender.")
+}
+
+@description("The outcome of the row lane's messages, one row per request id: {requestId, status, skipReason, providerStatus, sentAt}, read under the system actor, and nothing else of the delivery. TRUSTED JOBS ONLY: a call without internal origin is refused before anything is read.")
+@executor("integration.campaigns.rowMessageStatus")
+builtin campaignRowMessageStatus {
+  requestIds  list!  @description("The request ids the trusted job sent its messages under.")
 }
 
 @description("Generate an event-email rule's automation construct and arm it (memql#4829). The generator is a DETERMINISTIC template over the rule's form -- the LLM authoring path stays off, because a rule that mails strangers is not a place for a model to improvise and a deterministic generator is one a person can read the output of. The generated .memql goes through the ordinary authoring pipeline: bundle, validate, activate. Activation takes effect IMMEDIATELY rather than at next boot. The rule row records the bundle and construct it produced; on refusal it records the engine's own sentence on lastError and the rule goes to 'failed' rather than silently staying draft.")

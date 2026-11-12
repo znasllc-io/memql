@@ -222,6 +222,12 @@ type Template struct {
 	// existed), is marketing (X10).
 	Purpose string `json:"purpose,omitempty"`
 
+	// Preheader is the hidden line an inbox shows after the subject. It is
+	// already written into HTMLBody; it is kept here so a send can judge every
+	// part the person sees (carriesListLink). Never written into a send job's
+	// copy of the template.
+	Preheader string `json:"-"`
+
 	// ExpectsHTML says the template was written to have an HTML part: it is a
 	// layout email, or custom HTML. Its HTMLBody is then empty only when it was
 	// too large to send, which a draft stores without HTML. A template saved
@@ -469,6 +475,7 @@ func (s *Store) TemplateByID(ctx context.Context, templateID string) (Template, 
 		HTMLBody:  str(r, "htmlBody"),
 		Status:    str(r, "status"),
 		Purpose:   str(r, "purpose"),
+		Preheader: str(r, "preheader"),
 
 		ExpectsHTML: templateExpectsHTML(r),
 	}, true, nil
@@ -936,6 +943,16 @@ type Delivery struct {
 	RequestID        string
 	TemplateID       string
 	SenderIdentityID string
+
+	// RowConcept, RowID and RowKind say which row a message is about when the
+	// person it went to has no recipient row: a pack's row for the row lane
+	// (send_row.go), or the mirrored order for an order message (send_order.go).
+	// Set only by the server, from the send's own options, never from a caller's
+	// argument; the replay of a deferred row send is rebuilt from them. A message's
+	// fields are never kept on the row. Each is rendered only when set.
+	RowConcept string
+	RowID      string
+	RowKind    string
 }
 
 // RecordDelivery writes the ledger row. OWNED tier: issue under the
@@ -984,6 +1001,12 @@ func (s *Store) RecordDelivery(ctx context.Context, d Delivery) error {
 	}
 	if d.AccountID != "" {
 		args = append(args, arg{"accountId", d.AccountID})
+	}
+	if d.RowConcept != "" {
+		args = append(args, arg{"rowConcept", d.RowConcept}, arg{"rowId", d.RowID})
+	}
+	if d.RowKind != "" {
+		args = append(args, arg{"rowKind", d.RowKind})
 	}
 	return s.execServerOnly(ctx, call("mutation", "recordCampaignDelivery", args...))
 }

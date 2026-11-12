@@ -163,3 +163,46 @@ func TestOrganizationSuppressionLookupFailurePreventsMail(t *testing.T) {
 		t.Fatal("queued worker ignored an unread organization suppression")
 	}
 }
+
+// The row lane's suppression read (X9, G7): an unsubscribe, cluster-wide or from
+// the organization, does not stop a message about the person's own request.
+func TestBlockingSuppressionIgnoresAnUnsubscribe(t *testing.T) {
+	digest := EmailDigest("applicant@example.com")
+	e := &fakeEngine{suppression: map[string]map[string]any{
+		digest: {"id": digest, "reason": "unsubscribed"},
+		organizationSuppressionID("acct-1", digest): {"accountId": "acct-1", "reason": "unsubscribed"},
+	}}
+	if sup, blocked, err := NewStore(e).BlockingSuppression(context.Background(), "acct-1", digest); err != nil || blocked {
+		t.Fatalf("an unsubscribe blocked the lane: %+v %v %v", sup, blocked, err)
+	}
+	// The marketing read still honours both.
+	if _, suppressed, err := NewStore(e).SuppressionForSend(context.Background(), "acct-1", digest); err != nil || !suppressed {
+		t.Fatalf("the marketing read stopped honouring an unsubscribe: %v %v", suppressed, err)
+	}
+}
+
+// The cluster row is read first, and an unsubscribe there does not hide the
+// organization's bounce behind it.
+func TestBlockingSuppressionFindsAnOrganizationBounceBehindAClusterUnsubscribe(t *testing.T) {
+	digest := EmailDigest("applicant@example.com")
+	for _, reason := range []string{"hard_bounce", "complaint", "manual"} {
+		e := &fakeEngine{suppression: map[string]map[string]any{
+			digest: {"id": digest, "reason": "unsubscribed"},
+			organizationSuppressionID("acct-1", digest): {"accountId": "acct-1", "reason": reason},
+		}}
+		sup, blocked, err := NewStore(e).BlockingSuppression(context.Background(), "acct-1", digest)
+		if err != nil || !blocked || sup.Reason != reason {
+			t.Fatalf("%s behind a cluster unsubscribe: %+v %v %v", reason, sup, blocked, err)
+		}
+		// A lifted organization row blocks nothing.
+		e.suppression[organizationSuppressionID("acct-1", digest)]["liftedAt"] = "2026-11-01T00:00:00Z"
+		if _, blocked, _ := NewStore(e).BlockingSuppression(context.Background(), "acct-1", digest); blocked {
+			t.Fatalf("a lifted %s blocked the lane", reason)
+		}
+	}
+	// A cluster bounce blocks on its own.
+	e := &fakeEngine{suppression: map[string]map[string]any{digest: {"id": digest, "reason": "hard_bounce"}}}
+	if sup, blocked, _ := NewStore(e).BlockingSuppression(context.Background(), "acct-1", digest); !blocked || sup.Reason != "hard_bounce" {
+		t.Fatalf("a cluster bounce: %+v %v", sup, blocked)
+	}
+}

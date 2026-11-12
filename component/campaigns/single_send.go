@@ -89,6 +89,41 @@ type singleSend struct {
 	// the message handed over, under the caller's locks. An error stops the send
 	// with nothing attempted: an automation that was paused sends nothing.
 	beforeAttempt func(context.Context) error
+	// orderGid, set only with orderRecipient, is the mirrored order the message
+	// is about. It goes on the ledger row as its rowId (rowConcept
+	// v1:shopify:order), which is what lets the row be written for a recipient
+	// that exists only for this send.
+	orderGid string
+	// rowSend, when set, makes this a row lane send (send_row.go): a message about
+	// one person's own request, to the person a pack's row names. It is the only
+	// thing that passes the hold on a transactional template, and it is set only
+	// by handleSendRowMessage and by the replay of a deferred row send, which
+	// rebuilds it from the ledger fields the server itself wrote.
+	rowSend *rowSend
+}
+
+// ledgerRow marks a delivery with the row it is about, when the person it went
+// to has no recipient row: the row lane's row, or the order an order message is
+// about. Every other send's row is left as it was.
+func (o singleSend) ledgerRow(d Delivery) Delivery {
+	switch {
+	case o.rowSend != nil:
+		d.RowConcept, d.RowID, d.RowKind = o.rowSend.Concept, o.rowSend.RowID, o.rowSend.Kind
+	case o.orderRecipient != nil && o.orderGid != "":
+		d.RowConcept, d.RowID = orderRowConcept, o.orderGid
+	}
+	return d
+}
+
+// orderRowConcept is the concept an order message's ledger row names.
+const orderRowConcept = "v1:shopify:order"
+
+// rowSend is what a row lane send is about: the registered concept, the row, the
+// kind of message handed to the row's resolver, and the organization the call
+// named. None of it is an address; the resolver answers that, at the moment the
+// message is handed over.
+type rowSend struct {
+	Concept, RowID, Kind, AccountID string
 }
 
 // singleSendReceiptID is the identity of one single send's receipt, and of the lock
@@ -123,6 +158,12 @@ func singleSendReceiptFor(ctx context.Context, args map[string]any, opts singleS
 	}
 	if opts.confirm {
 		values["confirm"] = "true"
+	}
+	if opts.rowSend != nil {
+		// The recipient id already derives from the concept and the row; the kind
+		// and the organization name the message too.
+		values["rowKind"] = opts.rowSend.Kind
+		values["rowAccountId"] = bare(opts.rowSend.AccountID)
 	}
 	encoded, _ := json.Marshal(values)
 	return &singleSendReceipt{id: singleSendReceiptID(owner, requestID), fingerprint: sha256Hex(string(encoded))}, true, nil

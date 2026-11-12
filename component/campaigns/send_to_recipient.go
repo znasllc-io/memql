@@ -151,7 +151,9 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	if ownerUserID == "" {
 		return nil, errors.New("campaigns.sendToRecipient: no caller identity; a send is always made by somebody")
 	}
-	if reason := w.cfg.RequireUnsubscribe(); reason != "" {
+	// A row lane send carries no unsubscribe, so whether one is configured is not
+	// its question (send_row.go).
+	if reason := w.cfg.RequireUnsubscribe(); reason != "" && opts.rowSend == nil {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: %s", reason)
 	}
 	if w.resolveSender() == nil {
@@ -179,6 +181,17 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 			return nil, errors.New("campaigns.sendToRecipient: reviewed welcome snapshot does not match its template")
 		}
 		tmpl = *opts.snapshot
+	}
+	// THE ROW LANE IS THE ONE WAY PAST THE HOLD BELOW, and the reverse holds too:
+	// a row send carries only a published transactional template. opts.rowSend is
+	// set only by Go inside this package (handleSendRowMessage, and the replay of a
+	// deferred row send from the ledger fields the server wrote); no wire argument
+	// reaches it.
+	if opts.rowSend != nil {
+		if !transactional || opts.snapshot != nil || tmpl.Status != "ready" {
+			return nil, rowTemplateHeld(tmpl)
+		}
+		return w.sendRow(ctx, args, receipt, opts, tmpl, ownerUserID)
 	}
 	if transactional || tmpl.Transactional() {
 		return nil, sendHeld{reason: errTransactionalTemplate.Error()}
@@ -291,7 +304,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 			}
 		}
 		return detachedWrite(ctx, func(write context.Context) error {
-			return w.recordLoneDelivery(write, args, campaign, recipient, emailRuleID, outcome)
+			return w.recordLoneDelivery(write, args, campaign, recipient, emailRuleID, opts.ledgerRow(outcome))
 		})
 	}
 	if sup, suppressed, err := w.store.SuppressionForSend(w.systemActorContext(ctx), campaign.AccountID, digest); err != nil {
@@ -348,6 +361,13 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	}
 
 	if !w.allowSend() {
+		// AN ORDER MESSAGE IS NOT QUEUED. Its fields and its sender are the
+		// caller's arguments and are kept nowhere a replay could read them, so the
+		// caller is told it was limited -- an answer, not a failure -- and sends it
+		// again. Nothing is recorded: the receipt says no attempt began.
+		if opts.orderRecipient != nil {
+			return resultNode("campaignRecipientSend", map[string]any{"sent": false, "skipped": false, "limited": true, "reason": orderLimitedReason, "recipientId": recipient.ID, "emailRuleId": emailRuleID})
+		}
 		if opts.deferWhenLimited && receipt != nil {
 			if err := recordOutcome(Delivery{Status: "pending", NextAttemptAt: w.nowUTC().Add(time.Minute)}); err != nil {
 				return nil, undecided(err)
@@ -356,6 +376,16 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		}
 		return nil, errCampaignRateLimited
 	}
+	return w.handOver(ctx, args, receipt, opts, campaign, recipient, emailRuleID, identity, msg, recordOutcome)
+}
+
+// orderLimitedReason is what an order message that met the send-rate limit says.
+const orderLimitedReason = "The send-rate limit is reached; this email was not queued. Send it again later."
+
+// handOver is the last part of every single send: the attempt is recorded, the
+// message handed to the transport, and the outcome ledgered. Everything that can
+// refuse the message has already run.
+func (w *Worker) handOver(ctx context.Context, args map[string]any, receipt *singleSendReceipt, opts singleSend, campaign Campaign, recipient Recipient, emailRuleID string, identity resolvedIdentity, msg email.Message, recordOutcome func(Delivery) error) ([]memorynodes.MemoryNode, error) {
 	// Record the attempt before contacting the transport. After this point a
 	// timeout or a node loss is uncertain, and replay must never send it again.
 	//

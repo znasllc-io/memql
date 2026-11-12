@@ -171,6 +171,9 @@ shape delivery deliveryFull {
   requestId
   templateId
   senderIdentityId
+  rowConcept
+  rowId
+  rowKind
   row.createdAt
 }
 
@@ -440,8 +443,23 @@ shape delivery deferredSendRef {
  templateId
  senderIdentityId
  requestId
+ rowConcept
+ rowId
+ rowKind
  attempts
  nextAttemptAt
+ row.createdAt
+}
+
+/// What the row lane's status read answers about one message: its outcome and nothing else of the
+/// delivery -- no address, no recipient, no row.
+@row
+shape delivery rowMessageStatusRef {
+ requestId
+ status
+ skipReason
+ providerStatus
+ sentAt
  row.createdAt
 }
 

@@ -202,6 +202,31 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 				"senderIdentityId": "string (optional) - an identity in the organization; omission resolves its configured sender",
 			},
 		},
+		{
+			Name: "sendRowMessage",
+			Description: "Send ONE message about one person's own request to the person a pack's row names (the row lane): the address, the organization " +
+				"and the fields come from the resolver the row's concept registered in Go, never from an argument; a published transactional template; " +
+				"no unsubscribe; a bounce, a complaint or a block skips it, an unsubscribe does not. Trusted jobs only (internal origin).",
+			Handler: w.handleSendRowMessage,
+			ArgsSchema: map[string]string{
+				"rowConcept":       "string (required) - a concept registered for the row lane",
+				"rowId":            "string (required) - the row whose person is mailed",
+				"accountId":        "string (required) - the row's organization; the template, the sender and the resolver's answer must be its",
+				"kind":             "string (required) - which message about the row; handed to the resolver",
+				"templateId":       "string (required) - a published transactional template",
+				"requestId":        "string (required) - stable identifier for this one message; a retry returns its receipt",
+				"senderIdentityId": "string (optional) - an identity in the organization; omission resolves its configured sender",
+			},
+		},
+		{
+			Name:          "rowMessageStatus",
+			Description:   "The outcome of row lane messages, one row per request id: {requestId, status, skipReason, providerStatus, sentAt}. Trusted jobs only (internal origin).",
+			Handler:       w.handleRowMessageStatus,
+			PreserveOrder: true,
+			ArgsSchema: map[string]string{
+				"requestIds": "list (required) - the request ids the messages were sent under",
+			},
+		},
 	}, workflowhost.ScopedCapabilities(ops)...)
 }
 
