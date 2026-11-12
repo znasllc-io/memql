@@ -87,6 +87,8 @@ use wholesale.concepts.{ privateLink, acceptance, emailSend }
 /// ownerUserId is the site owner whose authority the shopper handler
 /// borrowed, which is the calling actor. accountId is the site's
 /// organization, stamped by the handler; source says how it arrived.
+/// submittedAt is the engine's clock when the builtin wrote it, never a
+/// caller's value.
 @serverOnly
 @actor
 mutation application createApplicationRow {
@@ -101,9 +103,10 @@ mutation application createApplicationRow {
     accountId       string
     source          string   @enum("storefront", "staff")
     addedBy         string
+    submittedAt     datetime!
   }
   insert {
-    accept { ownerUserId, storeId, siteId, companyName, applicantName, applicantEmail, accountId, source, addedBy }
+    accept { ownerUserId, storeId, siteId, companyName, applicantName, applicantEmail, accountId, source, addedBy, submittedAt }
     stamp {
       id: args.applicationId
     }
@@ -122,7 +125,8 @@ mutation application createApplicationRow {
 /// attribute somebody else's approval to them permanently, with no later
 /// write able to correct it. When the two disagree the actor wins, which
 /// is the only one of them that cannot be forged. ownerUserId is the
-/// application's merchant, copied off it by the builtin.
+/// application's merchant, copied off it by the builtin. decidedAt is the
+/// engine's clock when the builtin wrote it.
 @serverOnly
 @actor
 mutation applicationDecision appendApplicationDecision {
@@ -133,9 +137,10 @@ mutation applicationDecision appendApplicationDecision {
     transition     string!  @enum("approve", "reject", "revoke")
     note           string   @maxLength(2000)
     accountId      string
+    decidedAt      datetime!
   }
   insert {
-    accept { applicationId, ownerUserId, storeId, transition, note, accountId }
+    accept { applicationId, ownerUserId, storeId, transition, note, accountId, decidedAt }
     stamp {
       decidedBy: actor.userId
       principalKind: "client"
@@ -241,9 +246,10 @@ mutation documentVersion appendWholesaleDocumentVersion {
 
 /// Write one application's entitlement. NAMES ITS ID, derived from the
 /// application, so a re-provision after a failure is a new version of one
-/// logical row -- and "revoked when" is that version's own createdAt,
-/// which is why the concept carries no revokedAt. ownerUserId is the
-/// application's merchant: the write runs as that merchant, and a row owned
+/// logical row. attemptedAt is when this attempt was made; grantedAt and
+/// revokedAt are when trade prices went on and came off, written by the
+/// attempt that made it so and carried by the versions after it. ownerUserId
+/// is the application's merchant: the write runs as that merchant, and a row owned
 /// by anybody else is invisible to the merchant who granted it.
 @serverOnly
 @actor
@@ -264,9 +270,12 @@ mutation entitlement writeEntitlementRow {
     accountId          string
     direction          string   @enum("grant", "revoke")
     attempt            int
+    attemptedAt        datetime!
+    grantedAt          datetime
+    revokedAt          datetime
   }
   insert {
-    accept { ownerUserId, applicationId, storeId, buyerEmail, adapter, state, reference, error, errorCode, shopifyCustomerId, customerCreated, accountId, direction, attempt }
+    accept { ownerUserId, applicationId, storeId, buyerEmail, adapter, state, reference, error, errorCode, shopifyCustomerId, customerCreated, accountId, direction, attempt, attemptedAt, grantedAt, revokedAt }
     stamp {
       id: args.entitlementId
     }
@@ -281,7 +290,10 @@ mutation entitlement writeEntitlementRow {
 // OWN id with every field the row held plus the ones it lacked. The engine
 // merges a write at an existing id into the row's current version, so a field
 // named here with the value it already held changes nothing; what the write
-// adds is the tie. The builtin admits internal origin or a cluster operator
+// adds is the tie -- and, for a row written before the pack recorded when
+// things happened, that time: the row's own write time as it stood before the
+// tie, carried into the field in the same write, and never over a value the
+// field holds. The builtin admits internal origin or a cluster operator
 // and nobody else, before it reads, because these writes run at internal
 // origin and the row gate does not owner-check them.
 
@@ -300,9 +312,10 @@ mutation application backfillApplicationRow {
     applicantName   string!
     applicantEmail  string!
     accountId       string!
+    submittedAt     datetime
   }
   insert {
-    accept { ownerUserId, storeId, siteId, companyName, applicantName, applicantEmail, accountId }
+    accept { ownerUserId, storeId, siteId, companyName, applicantName, applicantEmail, accountId, submittedAt }
     stamp {
       id: args.applicationId
     }
@@ -329,9 +342,10 @@ mutation applicationDecision backfillDecisionRow {
     principalKind  string!  @enum("client")
     note           string
     accountId      string!
+    decidedAt      datetime
   }
   insert {
-    accept { applicationId, ownerUserId, storeId, transition, decidedBy, principalKind, note, accountId }
+    accept { applicationId, ownerUserId, storeId, transition, decidedBy, principalKind, note, accountId, decidedAt }
     stamp {
       id: args.decisionId
     }
@@ -359,9 +373,12 @@ mutation entitlement backfillEntitlementRow {
     accountId          string!
     direction          string   @enum("grant", "revoke")
     attempt            int
+    attemptedAt        datetime
+    grantedAt          datetime
+    revokedAt          datetime
   }
   insert {
-    accept { ownerUserId, applicationId, storeId, buyerEmail, adapter, state, reference, error, errorCode, shopifyCustomerId, customerCreated, accountId, direction, attempt }
+    accept { ownerUserId, applicationId, storeId, buyerEmail, adapter, state, reference, error, errorCode, shopifyCustomerId, customerCreated, accountId, direction, attempt, attemptedAt, grantedAt, revokedAt }
     stamp {
       id: args.entitlementId
     }

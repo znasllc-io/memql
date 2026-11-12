@@ -139,6 +139,7 @@ func (p *Provider) addBuyer(ctx context.Context, args map[string]any, _ int) ([]
 		"accountId":      trimmed(site["accountId"]),
 		"source":         SourceStaff,
 		"addedBy":        userRef(addedBy),
+		"submittedAt":    happenedStamp(p.clock()),
 	}); err != nil {
 		return nil, err
 	}

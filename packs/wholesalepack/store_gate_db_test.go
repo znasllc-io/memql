@@ -202,7 +202,7 @@ func TestTheActsOnOneApplicationOfAStoreNotSetUpAreTheApplicationsOrganizations(
 		appID := "seeded-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 		wsExec(t, eng, seedCtx(), `createApplicationRow(applicationId: `+quote(appID)+`, ownerUserId: `+quote(g.a.owner)+
 			`, storeId: `+quote(g.a.store)+`, siteId: `+quote(g.a.site)+`, accountId: `+quote(g.a.account)+
-			`, companyName: "Plover Cycles", applicantName: "Ida Example", applicantEmail: "ida@plover.example.com")`)
+			`, companyName: "Plover Cycles", applicantName: "Ida Example", applicantEmail: "ida@plover.example.com", submittedAt: `+happenedNow()+`)`)
 		calls := []struct{ name, call string }{
 			{"wholesaleGet", `builtin wholesaleGet(applicationId: ` + quote(appID) + `)`},
 			{"wholesaleRecordDecision", `builtin wholesaleRecordDecision(applicationId: ` + quote(appID) + `, transition: "approve")`},

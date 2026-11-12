@@ -219,7 +219,7 @@ func TestADirectClientCallToAppendApplicationDecisionIsRefused(t *testing.T) {
 
 	client := auth.ContextWithClientOrigin(ctx)
 	_, err := eng.Execute(client, `appendApplicationDecision(applicationId: `+wsQuote(appID)+
-		`, note: "around the builtin", storeId: `+wsQuote(storeLive)+`, transition: "approve")`)
+		`, note: "around the builtin", storeId: `+wsQuote(storeLive)+`, transition: "approve", decidedAt: `+happenedNow()+`)`)
 	if err == nil {
 		t.Fatal("a client-origin call to appendApplicationDecision was accepted; it must be " +
 			"refused, because the decision is the builtin's to judge")

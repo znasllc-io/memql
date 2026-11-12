@@ -63,6 +63,7 @@ shape application applicationFull {
   accountId
   source
   addedBy
+  submittedAt
   row.createdAt
 }
 
@@ -78,10 +79,11 @@ shape applicationDecision applicationDecisionFull {
   principalKind
   note
   accountId
+  decidedAt
   row.createdAt
 }
 
-@description("An entitlement, whole. row.createdAt is the version clock, so on a revoked row it is WHEN it was revoked -- which is why the concept carries no revokedAt of its own.")
+@description("An entitlement, whole. row.createdAt is the version clock: the time of the newest version, which any write of the row moves. When the attempt was made, when trade prices went on and when they came off are attemptedAt, grantedAt and revokedAt.")
 @row
 shape entitlement entitlementFull {
   row.id
@@ -99,6 +101,9 @@ shape entitlement entitlementFull {
   accountId
   direction
   attempt
+  attemptedAt
+  grantedAt
+  revokedAt
   row.createdAt
 }
 

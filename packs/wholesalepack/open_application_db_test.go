@@ -276,7 +276,7 @@ func TestAnApproveIsRefusedWhileAnotherApplicationOfTheAddressIsApproved(t *test
 		id := "twin-" + label + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 		wsExec(t, eng, seedCtx(), `createApplicationRow(applicationId: `+quote(id)+`, ownerUserId: `+quote(s.owner)+
 			`, storeId: `+quote(s.store)+`, siteId: `+quote(s.site)+`, accountId: `+quote(s.account)+
-			`, companyName: "Trading twin", applicantName: "Sam Rivers", applicantEmail: " SAM@open-race.example.com ")`)
+			`, companyName: "Trading twin", applicantName: "Sam Rivers", applicantEmail: " SAM@open-race.example.com ", submittedAt: `+happenedNow()+`)`)
 		return id
 	}
 	second, third := twin("second"), twin("third")

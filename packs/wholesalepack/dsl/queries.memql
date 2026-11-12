@@ -34,15 +34,17 @@ query application applicationById {
   shape   applicationFull
 }
 
-@description("This store's applications, newest first -- the merchant's queue. A bounded first page with a keyset cursor, because a trade desk's inbox is the one list here that grows without limit. A store id is held in more than one form (bare, or v1:shopify:store:<id>): storeIds, when given, names every form to match beside storeId, so one stream answers the store whichever form each row holds.")
+@description("This store's applications, newest submitted first -- the merchant's queue. A bounded first page with a keyset cursor, because a trade desk's inbox is the one list here that grows without limit. A store id is held in more than one form (bare, or v1:shopify:store:<id>): storeIds, when given, names every form to match beside storeId, so one stream answers the store whichever form each row holds. Ordered by submittedAt, and a row written before that field (which holds none) sorts after every row that holds one: dated yes answers only the rows that hold it, and dated no only those that do not -- ordered by their write time, which is when they were submitted until a later write -- so a reader merges the two in the order the applications arrived.")
 @actor
 query application applicationsForStore {
   args {
     storeId   string!
     storeIds  array
+    dated     string
   }
-  filter  row => row.storeId == args.storeId || (args.storeIds != nil && row.storeId in args.storeIds)
-  sort    "row.createdAt", "desc"
+  filter  row => (row.storeId == args.storeId || (args.storeIds != nil && row.storeId in args.storeIds))
+    && (args.dated == nil || (args.dated == "yes" && row.submittedAt != nil && row.submittedAt != "") || (args.dated == "no" && (row.submittedAt == nil || row.submittedAt == "")))
+  sort    "submittedAt", "desc", "row.createdAt", "desc"
   paginate 50
   shape   applicationFull
 }
@@ -54,7 +56,7 @@ query applicationDecision decisionsForApplication {
     applicationId  string!
   }
   filter  row => row.applicationId == args.applicationId
-  sort    "row.createdAt", "desc"
+  sort    "decidedAt", "desc", "row.createdAt", "desc"
   shape   applicationDecisionFull
 }
 
@@ -66,19 +68,21 @@ query applicationDecision decisionsForApplications {
     applicationIds  []string!
   }
   filter  row => row.storeId == args.storeId && row.applicationId in args.applicationIds
-  sort    "row.createdAt", "desc"
+  sort    "decidedAt", "desc", "row.createdAt", "desc"
   shape   applicationDecisionFull
 }
 
-@description("This store's decisions, newest first -- the Wholesale section's decision log. A bounded page with a keyset cursor, because a log is append-only and only grows. A decision names its application in whichever form its writer used (bare or v1:wholesale:application:<id>), so a reader joins it to its application by the bare id; storeIds, when given, names every form of the store id to match beside storeId. Read under the caller's own actor: wholesaleDecisionLog shows a line only for an application the caller reads.")
+@description("This store's decisions, newest decided first -- the Wholesale section's decision log. A bounded page with a keyset cursor, because a log is append-only and only grows. A decision names its application in whichever form its writer used (bare or v1:wholesale:application:<id>), so a reader joins it to its application by the bare id; storeIds, when given, names every form of the store id to match beside storeId. Read under the caller's own actor: wholesaleDecisionLog shows a line only for an application the caller reads. Ordered by decidedAt, and a row written before that field (which holds none) sorts after every row that holds one: dated yes answers only the rows that hold it, and dated no only those that do not -- ordered by their write time, which is when they were decided until a later write -- so a reader merges the two in the order the decisions were made.")
 @actor
 query applicationDecision decisionsForStore {
   args {
     storeId   string!
     storeIds  array
+    dated     string
   }
-  filter  row => row.storeId == args.storeId || (args.storeIds != nil && row.storeId in args.storeIds)
-  sort    "row.createdAt", "desc"
+  filter  row => (row.storeId == args.storeId || (args.storeIds != nil && row.storeId in args.storeIds))
+    && (args.dated == nil || (args.dated == "yes" && row.decidedAt != nil && row.decidedAt != "") || (args.dated == "no" && (row.decidedAt == nil || row.decidedAt == "")))
+  sort    "decidedAt", "desc", "row.createdAt", "desc"
   paginate 50
   shape   applicationDecisionFull
 }
@@ -90,7 +94,7 @@ query applicationDecision decisionsForApplicationIds {
     applicationIds  []string!
   }
   filter  row => row.applicationId in args.applicationIds
-  sort    "row.createdAt", "desc"
+  sort    "decidedAt", "desc", "row.createdAt", "desc"
   paginate 200
   shape   applicationDecisionFull
 }
@@ -102,7 +106,7 @@ query entitlement entitlementsForApplicationIds {
     applicationIds  []string!
   }
   filter  row => row.applicationId in args.applicationIds
-  sort    "row.createdAt", "desc"
+  sort    "attemptedAt", "desc", "row.createdAt", "desc"
   paginate 200
   shape   entitlementFull
 }
@@ -114,7 +118,7 @@ query entitlement entitlementForApplication {
     applicationId  string!
   }
   filter  row => row.applicationId == args.applicationId
-  sort    "row.createdAt", "desc"
+  sort    "attemptedAt", "desc", "row.createdAt", "desc"
   shape   entitlementFull
 }
 
@@ -125,7 +129,7 @@ query entitlement entitlementsForStore {
     storeId  string!
   }
   filter  row => row.storeId == args.storeId
-  sort    "row.createdAt", "desc"
+  sort    "attemptedAt", "desc", "row.createdAt", "desc"
   paginate 50
   shape   entitlementFull
 }

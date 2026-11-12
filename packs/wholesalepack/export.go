@@ -126,7 +126,7 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 		if err != nil {
 			return nil, err
 		}
-		out := withoutTokenHash(app)
+		out := happenedRow(app, fieldSubmittedAt)
 		out["details"] = details
 		out["state"] = FoldState(log)
 		out["stage"] = StageOf(FoldState(log), termsRequired, len(accs[bareID(id)]) > 0)
@@ -134,12 +134,12 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 		// ONE FORM OF THE APPLICATION'S ID throughout the file: the row's own,
 		// whichever form an older decision or entitlement was written under.
 		for _, d := range log {
-			row := withoutTokenHash(d)
+			row := happenedRow(d, fieldDecidedAt)
 			row["applicationId"] = id
 			decisions = append(decisions, row)
 		}
 		if versions := ents[bareID(id)]; len(versions) > 0 {
-			row := withoutTokenHash(versions[0])
+			row := happenedEntitlementRow(versions[0])
 			row["applicationId"] = id
 			entitlements = append(entitlements, row)
 		}
@@ -252,6 +252,31 @@ func effectiveSettingsRow(row map[string]any) map[string]any {
 	out["termsRequired"] = s.TermsRequired
 	out["linkLifetimeDays"] = s.LinkLifetimeDays
 	out["acceptanceText"] = s.AcceptanceText
+	return out
+}
+
+// happenedRow is row as the export holds it, without its token hash: its
+// createdAt and its field answer when the row's thing happened (happenedAt),
+// never the write time of its newest version, which any later write moves.
+func happenedRow(row map[string]any, field string) map[string]any {
+	out := withoutTokenHash(row)
+	at := timeText(happenedAt(row, field))
+	out["createdAt"], out[field] = at, at
+	return out
+}
+
+// happenedEntitlementRow is an entitlement as the export holds it: dated by its
+// attempt (happenedRow), with when trade prices went on and came off as the
+// row holds them, or, on a row written before those fields, its write time
+// while it is granted or revoked -- what the buyers list and the page read.
+func happenedEntitlementRow(row map[string]any) map[string]any {
+	out := happenedRow(row, fieldAttemptedAt)
+	for field, state := range map[string]string{fieldGrantedAt: EntitlementGranted, fieldRevokedAt: EntitlementRevoked} {
+		if rowTime(row[field]).IsZero() && trimmed(row["state"]) != state {
+			continue
+		}
+		out[field] = timeText(happenedAt(row, field))
+	}
 	return out
 }
 
