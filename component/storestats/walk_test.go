@@ -675,9 +675,10 @@ func TestABoundedRunCarriesOnWhereItStopped(t *testing.T) {
 }
 
 // THE FLOOR IS THE FIRST INSTANT WITH NO STORE ROW, asked at the clock first
-// (the store must exist now) and then at the clock less 1, 2, 4 ... days. A store first written 100 days ago and rewritten since has a
-// row as of 1 to 64 days back and none as of 128: its floor is the clock less
-// 128 days. One written an hour ago: the clock less a day.
+// (the store must exist now) and then at the clock less 1, 2, 4 ... days. A
+// store first written 100 days ago and rewritten since has a row as of 1 to 64
+// days back and none as of 128: its floor is the clock less 128 days. One
+// written an hour ago: the clock less a day.
 func TestTheFloorIsTheFirstInstantWithNoStoreRow(t *testing.T) {
 	for _, c := range []struct {
 		name         string
@@ -1344,11 +1345,11 @@ func TestNoRowLateInsideTheOverlapIsLostOverRandomWalks(t *testing.T) {
 // and between runs too, for runs runs every 60 s (a run that outlasts its
 // minute is followed at the next minute mark), with pages of size rows that
 // take d each and a two-hour backlog; the engine is unique. It answers how many
-// of the last 20 runs caught up, the most runs in a row that did not after the
-// first that did, the largest lag after any run from the first that caught up,
-// and fails the test if Through ever stood still or a row the walk stands past
-// was never handed on.
-func catchUp(t *testing.T, d time.Duration, size, num, den, runs int) (caughtLast, behindInARow int, worstLag time.Duration) {
+// of the last 20 runs caught up, the largest lag (the clock less where the walk
+// stands) after any run of the second half, caught up or not, and the lag after
+// the middle run and after the last, and fails the test if Through ever stood
+// still or a row the walk stands past was never handed on.
+func catchUp(t *testing.T, d time.Duration, size, num, den, runs int) (caughtLast int, worstLag, midLag, endLag time.Duration) {
 	t.Helper()
 	e := newScripted(t)
 	e.unique = true
@@ -1375,7 +1376,6 @@ func catchUp(t *testing.T, d time.Duration, size, num, den, runs int) (caughtLas
 	handed := map[string]bool{}
 	w := walkWindow{Through: e.clock.Add(-3 * time.Hour)}
 	start := e.clock
-	reached, inARow := false, 0
 	for run := 1; run <= runs; run++ {
 		var p pages
 		next, caught, err := e.walk(time.Time{}, w, maxPagesPerRun, &p)
@@ -1389,19 +1389,17 @@ func catchUp(t *testing.T, d time.Duration, size, num, den, runs int) (caughtLas
 			t.Fatalf("pages of %d at %v, %d:%d, run %d did not move the walk from %v", size, d, num, den, run, w.Through)
 		}
 		w = next
-		if !caught.IsZero() {
-			reached, inARow = true, 0
-			if run > runs-20 {
-				caughtLast++
-			}
-		} else if reached {
-			if inARow++; inARow > behindInARow {
-				behindInARow = inARow
-			}
+		if !caught.IsZero() && run > runs-20 {
+			caughtLast++
 		}
-		if lag := e.clock.Sub(w.Through); reached && lag > worstLag {
+		lag := e.clock.Sub(w.Through)
+		if run > runs/2 && lag > worstLag {
 			worstLag = lag
 		}
+		if run == runs/2 {
+			midLag = lag
+		}
+		endLag = lag
 		e.clock = start.Add((e.clock.Sub(start)/time.Minute + 1) * time.Minute)
 		arrive()
 	}
@@ -1410,7 +1408,7 @@ func catchUp(t *testing.T, d time.Duration, size, num, den, runs int) (caughtLas
 			t.Fatalf("pages of %d at %v, %d:%d: the row written at %v is behind where the walk stands, %v, and was never handed on", size, d, num, den, v.at, w.Through)
 		}
 	}
-	return caughtLast, behindInARow, worstLag
+	return caughtLast, worstLag, midLag, endLag
 }
 
 // THE RE-REVIEWER'S CASE: pages that each take 8 s, near the statement
@@ -1468,38 +1466,66 @@ func TestAStoreAtHalfItsReadRateWithPagesNearTheStatementTimeoutReachesTheClock(
 }
 
 // THE CATCH-UP TABLE, AS THE COMMENT STATES IT ("What it costs"): a run every
-// 60 s, rows arriving steadily, pages taking 8 s (near the statement timeout),
-// 30 s or six minutes, at 1:2 and 1:4 of the read rate (pages of two rows) and
-// 5:10 and 9:10 (pages of ten), and at 8 s, 4:10, the fastest arrival that
-// keeps up with pages near the statement timeout. A cell that keeps up is caught up in every one
-// of the last 20 of 60 runs; one that falls behind still moves Through forward
-// every run and hands on every row it stands past (catchUp fails otherwise).
+// 60 s for 60 runs, rows arriving steadily, pages taking 8 s (near the
+// statement timeout), 30 s or six minutes, at 1:4 and 1:2 of the read rate
+// (pages of two rows) and 4:10, 5:10, 6:10 and 9:10 (pages of ten). Each cell
+// is one of three outcomes:
+//   - keeps up: caught up in every one of the last 20 runs;
+//   - behind, bounded: the lag after every run of the second half is at most
+//     the cell's stated ceiling;
+//   - the lag grows: no run of the last 20 is caught up, and the lag after the
+//     last run is greater than after the middle one.
+//
+// In every cell Through moves forward every run and every row the walk stands
+// past is handed on (catchUp fails otherwise): nothing is lost.
 func TestTheCatchUpTableHoldsAsTheCommentStatesIt(t *testing.T) {
+	const (
+		keepsUp = iota
+		bounded
+		grows
+	)
 	for _, c := range []struct {
 		page           time.Duration
 		size, num, den int
-		keepsUp        bool
+		outcome        int
+		ceiling        time.Duration // for bounded
 	}{
-		{8 * time.Second, 2, 1, 4, true},
-		{8 * time.Second, 10, 4, 10, true},
-		{8 * time.Second, 2, 1, 2, false},
-		{8 * time.Second, 10, 5, 10, false},
-		{8 * time.Second, 10, 9, 10, false},
-		{30 * time.Second, 2, 1, 4, true},
-		{30 * time.Second, 2, 1, 2, true},
-		{30 * time.Second, 10, 5, 10, true},
-		{30 * time.Second, 10, 9, 10, false},
-		{6 * time.Minute, 2, 1, 4, true},
-		{6 * time.Minute, 2, 1, 2, true},
-		{6 * time.Minute, 10, 5, 10, true},
-		{6 * time.Minute, 10, 9, 10, false},
+		{8 * time.Second, 2, 1, 4, keepsUp, 0},
+		{8 * time.Second, 10, 4, 10, keepsUp, 0},
+		{8 * time.Second, 2, 1, 2, bounded, watermarkOverlap},
+		{8 * time.Second, 10, 5, 10, bounded, watermarkOverlap},
+		{8 * time.Second, 10, 9, 10, grows, 0},
+		{30 * time.Second, 2, 1, 4, keepsUp, 0},
+		{30 * time.Second, 2, 1, 2, keepsUp, 0},
+		{30 * time.Second, 10, 5, 10, keepsUp, 0},
+		{30 * time.Second, 10, 6, 10, keepsUp, 0},
+		{30 * time.Second, 10, 9, 10, grows, 0},
+		{6 * time.Minute, 2, 1, 4, keepsUp, 0},
+		{6 * time.Minute, 2, 1, 2, keepsUp, 0},
+		{6 * time.Minute, 10, 5, 10, keepsUp, 0},
+		{6 * time.Minute, 10, 9, 10, bounded, time.Hour},
 	} {
-		caught, inARow, lag := catchUp(t, c.page, c.size, c.num, c.den, 60)
-		t.Logf("pages of %d taking %v, %d:%d: caught up in %d of the last 20 runs, at most %d behind in a row, lag at most %v",
-			c.size, c.page, c.num, c.den, caught, inARow, lag)
-		if keptUp := caught == 20; keptUp != c.keepsUp {
-			t.Errorf("pages of %d taking %v, %d:%d: caught up in %d of the last 20 runs; the comment says it keeps up: %v",
-				c.size, c.page, c.num, c.den, caught, c.keepsUp)
+		name := fmt.Sprintf("pages of %d taking %v, %d:%d", c.size, c.page, c.num, c.den)
+		caught, worst, mid, end := catchUp(t, c.page, c.size, c.num, c.den, 60)
+		t.Logf("%s: caught up in %d of the last 20 runs; lag at most %v in the second half, %v after run 30, %v after run 60",
+			name, caught, worst, mid, end)
+		switch c.outcome {
+		case keepsUp:
+			if caught != 20 {
+				t.Errorf("%s: caught up in %d of the last 20 runs; the comment says every run ends caught up", name, caught)
+			}
+		case bounded:
+			if caught == 20 {
+				t.Errorf("%s: caught up in every one of the last 20 runs; the comment says it is behind, bounded", name)
+			}
+			if worst > c.ceiling {
+				t.Errorf("%s: the lag reached %v in the second half; the comment says it stays under %v", name, worst, c.ceiling)
+			}
+		case grows:
+			if caught != 0 || end <= mid {
+				t.Errorf("%s: caught up in %d of the last 20 runs, lag %v after run 30 and %v after run 60; the comment says it is behind and growing",
+					name, caught, mid, end)
+			}
 		}
 	}
 }

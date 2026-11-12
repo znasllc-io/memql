@@ -133,9 +133,10 @@ import (
 // IS INCLUSIVE: a newest row exactly the overlap before the asking time counts
 // -- or, when no page does, the first empty page, or else the last page of a
 // read that reached the clock. Call its asking time T. After the call the walk
-// never stands later than T (nor earlier than where the call began). A call none of whose pages qualifies -- a backlog read stopped by
-// its budget, its read limit or a timeout -- stands where it otherwise would:
-// at its newest row.
+// never stands later than T (nor earlier than where the call began). A call
+// none of whose pages qualifies -- a backlog read stopped by its budget, its
+// read limit or a timeout -- stands where it otherwise would: at its newest
+// row.
 //
 // Why that is enough. A row this read missed belongs to the range some page j
 // covered and was not yet visible when page j was asked; it is at or before
@@ -155,18 +156,26 @@ import (
 // asking time, so they do not pull the bound back to the call's start. But a
 // read's pages from T on are read again by the next run, which starts the
 // overlap before T, and that re-read is what limits how fast a store's rows
-// may arrive. For a run every 60 seconds, measured on the scripted engine
-// (TestTheCatchUpTableHoldsAsTheCommentStatesIt), a store keeps up -- every
-// run ends caught up -- while its rows arrive at up to four tenths of its read
-// rate when its pages take 8 s, near the statement timeout, and at up to half
-// of it when they take 30 s or six minutes; at half its read rate with 8 s
-// pages, and at nine tenths with 30 s or six-minute pages, it falls behind.
-// The read rate is a page's rows over the time a page takes, so with pages of
-// walkPageSize rows read in well under a second these rates are far above any
-// one store's. A store above them falls behind and stays behind: every run
-// still moves Through forward and hands on every row it stands past, nothing
-// is lost, and its read does not catch up, so the run reports the source
-// behind.
+// may arrive. For a run every 60 seconds and rows arriving steadily, measured
+// on the scripted engine over 60 runs (TestTheCatchUpTableHoldsAsTheCommentStatesIt):
+//
+//   - Pages of 8 s, near the statement timeout: at a quarter and at four
+//     tenths of the read rate every run ends caught up. At half of it the
+//     walk does not report caught up, but its lag stays bounded, about four
+//     minutes, inside the overlap. At nine tenths the lag grows every run.
+//   - Pages of 30 s: at a quarter, at half and at six tenths every run ends
+//     caught up; at nine tenths the lag grows every run.
+//   - Pages of six minutes: at a quarter and at half every run ends caught
+//     up; at nine tenths the walk is caught up in some runs and its lag stays
+//     bounded, under an hour.
+//
+// Where the lag grows, it is the page budget: a run reads at most
+// maxPagesPerRun counted pages, against the rows arriving and the re-read
+// after T. Every run still moves Through forward and hands on every row it
+// stands past, nothing is lost, and the run reports the source behind. Rates
+// the table does not cover are not claimed here. The read rate is a page's
+// rows over the time a page takes, so with pages of walkPageSize rows read in
+// well under a second these rates are far above any one store's.
 //
 // # Bounded work
 //
@@ -177,10 +186,11 @@ import (
 // the last run read already -- those after the bound page's asking time, see
 // "Where a read leaves the walk" -- are paid for again: the walk keeps only
 // Through and Width per source, so nothing says how far past Through the last
-// run read, and counting them is the honest measure of the run's work. Both are checked before
-// every page, never only between windows. A run that reaches either stops
-// behind, and next says where: the next run carries on from there. A cursor the
-// engine hands back unchanged is an error, never a loop.
+// run read, and counting them is the honest measure of the run's work. Both
+// are checked before every page, never only between windows. A run that
+// reaches either stops behind, and next says where: the next run carries on
+// from there. A cursor the engine hands back unchanged is an error, never a
+// loop.
 //
 // A page that outlasts a read halves Width, down to minWindow, and ends the
 // source for the run with no error: the halved width is in next and the caller
@@ -205,8 +215,9 @@ import (
 //
 // Every read is made under walkContext (rollup.go): internal origin, fresh and
 // roots-only. The statements are written out by name in rollup.go, beside the
-// stamp, so test/dslconformance sees each call and its stamp in one file. Never as a journaled automation step, for the same reason as the
-// errors: the work journal keeps what a step answers, rows included.
+// stamp, so test/dslconformance sees each call and its stamp in one file.
+// Never as a journaled automation step, for the same reason as the errors: the
+// work journal keeps what a step answers, rows included.
 
 const (
 	sourceOrder  = "order"
