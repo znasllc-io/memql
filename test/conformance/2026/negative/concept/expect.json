@@ -18,6 +18,27 @@
       "verdict": "refuse_parse",
       "message": "expected property name, got \"{\"",
       "note": "A concept whose `{` never closes is refused. The corpus reads the whole file with the parser, which reads the next concept as a field of this one; the concept loader slices each concept on its own, and used to lose this one AND every concept below it without a word, because the unclosed brace left the rest of the file inside it. It refuses this one by name now, concept_unparsed, and builds the note below it (memql#5426)."
+    },
+    {
+      "file": "belongs-to-via-cluster.memql",
+      "verdict": "refuse_load",
+      "code": "belongs_to_via_cluster",
+      "message": "which declares @belongsTo(cluster). A cluster-wide row is inside no account, so a row that follows one has no account to take",
+      "note": "A @belongsTo via chain is checked where every concept is known, at the engine's load. Each concept here builds on its own; what is refused is the pair. At write time nothing would fail: the row finds no account on its parent, falls through to the call's account and is filed under the wrong one, which is why the tree is refused instead. A parent that declares NOTHING is accepted -- unclassified is not the same statement as cluster-wide (cells/concept/belongsTo holds the single-concept refusals)."
+    },
+    {
+      "file": "belongs-to-parent-unknown.memql",
+      "verdict": "refuse_load",
+      "code": "belongs_to_parent_unknown",
+      "message": "is not a registered concept. parent= is the canonical id of the concept whose rows the \"storeId\" field names",
+      "note": "parent= is the one name in a via declaration nothing else resolves: a via field's @relationship target is resolved, and a missing one refused, by the relationship derivation. The refusal suggests the registered id nearest the one written."
+    },
+    {
+      "file": "belongs-to-via-cycle.memql",
+      "verdict": "refuse_load",
+      "code": "belongs_to_via_cycle",
+      "message": "the @belongsTo via declarations form a cycle:",
+      "note": "Each of two concepts following the other says its rows take their account from the other's, so neither is where an account starts, and existing rows could not be assigned parents first. The loop is reported once, walked from the member whose name sorts first. The two relationships are of different types because the relationship derivation refuses, earlier and without a code, two concepts each declaring the same edge type outgoing to the other."
     }
   ]
 }

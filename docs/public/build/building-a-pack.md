@@ -269,6 +269,27 @@ default that did nothing, and the pack ships enabled with nothing saying so.
 as `dsl/`, because a pack in the default build holds rows that dropping a field
 would brick -- silently, since CI's db-tests run on a fresh database.
 
+**Every pack concept says which account its rows belong to.** One `@belongsTo`
+per concept ([reference](../language/memql.md#which-account-a-row-belongs-to)),
+and a build gate fails on a concept under `packs/` that has none. A storefront
+pack's rows arrive through one store, so they follow it; a row about another
+pack row follows that row:
+
+```memql fragment
+@belongsTo(account, via="storeId", parent="v1:shopify:store")
+concept application { accountId string  storeId string! ... }
+
+@belongsTo(account, via="applicationId", parent="v1:wholesale:application")
+concept applicationDecision { accountId string  applicationId string! ... }
+```
+
+Declare the `accountId` field and leave it alone: the engine fills it in from
+the parent row, and no mutation, form or shopper field names it. `parent=` is
+there because `storeId` holds a bare id with no `@relationship` to say which
+concept it points at. A pack whose mutations already name the account (the
+reviews pack copies it onto each review) declares `@belongsTo(account, stated)`
+instead, and the engine leaves the field to them.
+
 ---
 
 ## How a shopper writes to a pack
@@ -610,7 +631,8 @@ core, and extends both the concept and tool surfaces -- with no database.
    refuses to boot a pack domain without one -- see
    [The language line](../language/memql.md#the-language-line).
 2. Write your concept(s) with `@version` + `@namespace("yourdomain")`; model
-   authz with an `ownerUserId` (owned tier) or the granted/admin/public pattern.
+   authz with an `ownerUserId` (owned tier) or the granted/admin/public pattern,
+   and say which account each concept's rows belong to with one `@belongsTo`.
 3. Write any builtins (`@executor("integration.yourdomain.<fn>")`), tools, and
    automations. Cross-file deps go through file-top `use` imports.
 4. Implement an `IntegrationProvider` whose `IntegrationName()` matches your

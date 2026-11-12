@@ -287,6 +287,12 @@ var appPartGrants = map[string][]Role{
 	// their storefront's visitors. component/sitetraffic blanks the figures for
 	// a caller without the part; the OS draws the section only to a holder.
 	"app:deployables/health": {RoleOwner, RoleDeveloper},
+	// The inventory part of the Accounts app (account row ownership, design
+	// record 2026-11-12, section H): the rows an account holds by concept and
+	// the progress of assigning existing rows. Owner and developer; an admin
+	// manages a client's account without reading the cluster's whole ledger
+	// of it. Enforced by the two builtins in dsl/accounts/builtins.memql.
+	"app:accounts/inventory": {RoleOwner, RoleDeveloper},
 	// The reviews part: see a store's reviews and act on them in the
 	// Deployables app. Held by the cluster's operators so they can host and
 	// set a store up; the reviews pack still refuses an operator's moderation

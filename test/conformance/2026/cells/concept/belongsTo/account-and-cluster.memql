@@ -1,0 +1,8 @@
+/// A support ticket raised by a customer, said to belong to an account and to
+/// be cluster-wide at once.
+@belongsTo(account, cluster)
+concept ticket {
+  accountId  string
+  title      string
+  status     string
+}

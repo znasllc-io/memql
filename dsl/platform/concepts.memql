@@ -26,6 +26,7 @@ use worker.concepts.{ registration }
 /// characters of what it seals.
 @displayCard(primary="name", secondary="kind", tertiary="fingerprint", status="active")
 @rowAuthz(clusterOwner)
+@belongsTo(cluster)
 concept globalSecret {
   name            string!  @description("Secret name (uppercase with underscores by convention).")
   encryptedValue  string!  @secret  @description("Base64-encoded nonce || NaCl-secretbox ciphertext, sealed under MEMQL_MASTER_KEY. Opaque -- never rendered to humans. @secret redacts a rejected value in the function-args validator ONLY, and matches by ARGUMENT NAME, so a mutation writing encryptedValue: args.somethingElse is not covered -- see Concept.SecretFields for the full scope.")
@@ -52,6 +53,7 @@ concept globalSecret {
 /// for the one write -- a settings save such as integrationConfigure, providerFederationSet or the
 /// Pipelines settings saves. The raw insert literal is judged by the same rule as setGlobalVariable.
 @displayCard(primary="name", secondary="value", tertiary="description", status="active")
+@belongsTo(cluster)
 concept globalVariable {
   name         string!  @description("Variable name (uppercase with underscores by convention).")
   value        string!  @description("Variable value, always stored as string. Callers parse if they need typed data.")
@@ -102,6 +104,7 @@ concept globalVariable {
 /// deployment's, its value is read through the resolvers, and its fields are sealed.
 @displayCard(primary="name", secondary="kind", tertiary="fingerprint", status="active")
 @rowAuthz(clusterOwner)
+@belongsTo(cluster)
 concept partitionSecret {
   name            string!  @description("Secret name (uppercase with underscores by convention).")
   encryptedValue  string!  @secret  @description("Base64-encoded nonce || NaCl-secretbox ciphertext, sealed under MEMQL_MASTER_KEY. Opaque -- never rendered to humans. @secret redacts a rejected value in the function-args validator ONLY, and matches by ARGUMENT NAME, so a mutation writing encryptedValue: args.somethingElse is not covered -- see Concept.SecretFields for the full scope.")
@@ -125,6 +128,7 @@ concept partitionSecret {
 /// Read by everyone signed in and written by the deployment, for the reasons written on
 /// v1:platform:globalVariable: a cluster owner, or server code stamped for the write.
 @displayCard(primary="name", secondary="value", tertiary="description", status="active")
+@belongsTo(cluster)
 concept partitionVariable {
   name         string!  @description("Variable name (uppercase with underscores by convention).")
   value        string!  @description("Variable value, always stored as string. Callers parse if they need typed data.")
@@ -143,6 +147,7 @@ concept partitionVariable {
 /// 'these are the things the platform can't do yet that users actually want.' Global-scoped so it's
 /// visible across tenants for prioritization.
 @displayCard(primary="capability", secondary="kind", tertiary="description", status="status")
+@belongsTo(cluster)
 concept missingCapability {
   kind            enum("tool", "integration", "liveSource", "connectorKind", "knowledgeDomain", "modelCapability", "other")! @description("What category of platform extension would close this gap. 'tool' = an agent-callable action that doesn't exist yet (e.g. 'sendSlackMessage'). 'integration' = a backing service we don't speak to yet (e.g. Jira). 'liveSource' = a volatile data source we'd want bound to agents but don't have a query for. 'connectorKind' = an external system MemQL has no connector for, to mirror its data or sync to it (e.g. 'snowflake'). 'knowledgeDomain' = a category-level gap, e.g. agents trying to act in a domain we never seeded. 'modelCapability' = a model-level feature we don't support yet (e.g. structured-output with strict schemas on a new provider).")
   capability      string! @description("Short identifier for the missing thing, e.g. 'sendSlackMessage', 'jira.createIssue', 'erp.inventory.live'. Stable across multiple sightings so duplicate signals collapse onto one row.")
@@ -172,6 +177,7 @@ concept missingCapability {
 /// state products can query and react to. See docs/internal/design/outbound-delivery-adr.md.
 @displayCard(primary="target", secondary="subject", tertiary="medium", status="status")
 @rowAuthz(clusterOwner)
+@belongsTo(cluster)
 concept outboundRequest {
   htmlBody string @description("For email, the HTML alternative sent alongside the text body. Limited to 2 MiB by the outbound worker.")
   medium        enum("email", "webhook")! @description("Delivery transport. 'email' delivers via the engine email integration (Graph/SMTP/log per deployment). 'webhook' POSTs the payload as JSON to the target URL.")
@@ -201,6 +207,7 @@ concept outboundRequest {
 /// docs/internal/design/inbound-delivery-adr.md.
 @displayCard(primary="source", secondary="medium", tertiary="dedupeKey", status="status")
 @rowAuthz(clusterOwner)
+@belongsTo(cluster)
 concept inboundRequest {
   source        string! @description("Which allowlisted sender this arrived from -- the {source} path segment, matched against MEMQL_INBOUND_SOURCE_ALLOWLIST. Products filter their automation on it. Never caller-chosen beyond the allowlist: an unlisted source is refused before a row exists.")
   medium        enum("webhook", "mailbox")! @description("How it arrived. 'webhook' is a third party POSTing to /inbound/{source}. 'mailbox' is the Graph NDR reader (memql#4824) staging a delivery-status report it read out of our OWN sending mailbox -- which is why those rows are stamped signatureVerified even though nobody signed anything: provenance IS the verification there, and the field is what gates campaignIngestFeedback. The enum was written with one value and the note that a second inbound transport should not need a concept change; this is that second transport, and it did.")
@@ -232,6 +239,7 @@ concept inboundRequest {
 /// alone -- never by a caller who happens to have no identity resolved.
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @displayCard(primary="hostname", secondary="kind", tertiary="title", status="status")
+@belongsTo(account, shared, stated)
 concept site {
   extensionRuntimePath string @description("Optional absolute bundle subtree for a browser extension runtime, e.g. /editor/. Empty disables it. The edge grants workers and WebAssembly only in this subtree. Sandboxed renderers use asset-only sibling origins with no cookies, API or runtime config. This is browser hosting configuration, not permission to read MemQL data.")
   ownerUserId  string   @description("The authenticated person who owns this deployable, stamped from actor.userId at creation and preserved through package pipeline writes. Real cluster operators retain this attribution. Only synthetic deployment actors create unowned system sites such as MemQL OS; internal call origin alone never erases ownership.")
@@ -313,6 +321,7 @@ concept site {
 /// any operator without holding anybody's credential.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="siteId", secondary="candidateRef", tertiary="expiresAt")
+@belongsTo(account, via="siteId")
 concept sitePreviewGrant {
   siteId         string!  @description("The v1:platform:site this grant previews. Required: a grant naming no deployable is a credential for nothing, and the edge matches this against the site it just resolved before it looks at anything else.")
   ownerUserId    string!  @description("The v1:identity:user this grant was minted for -- the operator who asked, never a role or a group. It is the row-authz key, and it is also what an observation is attributed to, so the four things the engine observed of an exercise belong to the person who ran it. A grant is one person's: sharing a preview is sharing a URL, which is exactly why the lifetime is short and the revoke is an act.")
@@ -323,6 +332,7 @@ concept sitePreviewGrant {
   expiresAt      datetime!  @description("When it stops resolving. SHORT by construction -- MEMQL_SITE_PREVIEW_GRANT_TTL_MINUTES, default 30, capped at 240 -- because a preview URL is a bearer credential for an unpublished version and the honest bound on a bearer credential is its lifetime. Comparison is against the engine's clock at serve time; there is no grace.")
   revokedAt      datetime   @description("When an operator ended this preview, or empty. A SOFT end: the row stays as the record that a preview was opened, by whom, against which version and which store, which is the question asked after a test payment lands somewhere unexpected.")
   lastSeenAt     datetime   @description("When the edge last honoured this grant, or empty for one nobody has used. ABSENT MEANS NOBODY OPENED IT, never 'a long time ago' -- the two are different answers and an operator deciding whether a preview URL escaped needs to be able to tell them apart.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="siteId", target=site, direction="outgoing")
   @relationship(type="references", as="previewedBy", field="ownerUserId", target=user, direction="outgoing")
@@ -357,6 +367,7 @@ concept sitePreviewGrant {
 /// "nobody asked" and "we asked and got nothing" the same shape on the screen.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="kind", secondary="siteId", tertiary="observedAt", status="ok")
+@belongsTo(account, via="siteId")
 concept sitePreviewObservation {
   grantId      string!  @description("The v1:platform:sitePreviewGrant this observation belongs to -- the session id that gathers the four steps of one exercise together. Required: an observation with no exercise behind it is a measurement of nothing, and there would be no way to say which run of which version it described.")
   siteId       string!  @description("The v1:platform:site exercised, denormalized off the grant so the deployable's own page reads observations without walking every grant it ever issued.")
@@ -368,6 +379,7 @@ concept sitePreviewObservation {
   detail       string   @description("The shortest true thing about what came back -- a product handle, a cart id, the checkout host, the mirrored order's id. Never the checkoutUrl itself and never a token: this row is read by every operator the composite tier admits, and a checkout URL is a live cart somebody else could pay from.")
   failure      string   @description("Why the step did not answer, when it did not: the Storefront API's own error, a timeout, a missing token reference, an unbound preview store. Empty when `ok`. It is the operator's whole diagnosis, so it names the condition rather than the exception type.")
   durationMs   int      @description("How long the step took, for the three active ones. ZERO ON THE PASSIVE ONE and that is honest rather than missing: nothing timed the order's journey, and a duration invented for it would be a measurement of the mirror's lag dressed as the storefront's.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="grantId", target=sitePreviewGrant, direction="outgoing")
   @relationship(type="references", as="observedOn", field="siteId", target=site, direction="outgoing")
@@ -459,6 +471,7 @@ concept sitePreviewObservation {
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @displayCard(primary="label", secondary="gate", tertiary="codeHint")
+@belongsTo(account, stated)
 concept siteAccessCode {
   siteId         string!  @description("The v1:platform:site this code opens a part of. Required: a code naming no deployable is a credential for nothing, and the bff matches it against the site it just resolved before it looks at anything else -- so a code minted for one site opens nothing on another, and an unknown code and another site's code are the same refusal.")
   ownerUserId    string!  @description("The v1:identity:user who owned the site when this code was minted -- the row-authz key. STAMPED by the create from the actor it runs as, never an argument, and the integration runs the create as the site's owner: this is the SITE'S owner and not the operator who asked. IT NEVER MOVES: an ownership transfer skips this concept, and a site that changes hands leaves its codes where they were stamped. So nothing that decides whether a code opens reads this field: the bff's store reads as the cluster acting, and the bff compares the edge's stamp with the site's own owner itself. The operator is `lastChangedBy`.")
@@ -529,6 +542,7 @@ concept siteAccessCode {
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @retention(ttl="30d", keepLatest=false, archive="none")
 @displayCard(primary="siteId", secondary="codeId", tertiary="issuedAt")
+@belongsTo(account, via="siteId")
 concept siteAccessSession {
   siteId       string!  @description("The v1:platform:site this session was opened on, copied from the code it was opened with. Required, and compared with the site the bff resolved for the request before anything else: a cookie is good for exactly one site, so a session replayed against another origin is `ended`.")
   codeId       string!  @description("The v1:platform:siteAccessCode this session was opened with. The bff reads the code on every request and requires it neither removed nor past its expiry, which is how removing a code, or shortening its expiry, reaches a session that is already open.")
@@ -537,6 +551,7 @@ concept siteAccessSession {
   tokenHash    string!  @description("SHA-256, lowercase hex, of the plain `mql_acs_<43>` cookie value this session was opened with. THE PLAIN TOKEN IS NEVER STORED: it exists in the unlock reply's Set-Cookie and in the visitor's browser. The bff hashes the cookie it was presented and looks the row up by this, so a leaked ROW is not a leaked session. Absent from siteAccessSessionFull.")
   issuedAt     datetime!  @description("When the unlock happened. The 24 hour cap on a session is counted from here. WRITTEN AS UTC RFC 3339 AT WHOLE SECONDS, ALWAYS IN THAT ONE FORM, because siteAccessSessionLatestForCode orders by the text of this field and the engine stores the value as given: a form that mixed fractions or offsets would put an older session ahead of a newer one.")
   endedAt      datetime   @description("When the visitor left, or empty for a session nothing has ended. A SOFT end, as everywhere: the row stays, and an ended session resolves as `ended`. Expiry, regeneration and removal do not depend on it -- they are comparisons made at request time, so there is no sweep to run and nothing to be late.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="codeId", target=siteAccessCode, direction="outgoing")
   @relationship(type="references", as="openedOn", field="siteId", target=site, direction="outgoing")
@@ -545,6 +560,7 @@ concept siteAccessSession {
 
 @rowAuthz(clusterOwner)
 @displayCard(primary="hostname", secondary="siteId", tertiary="failureReason", status="status")
+@belongsTo(account, stated)
 concept customDomain {
   siteId         string!  @description("The v1:platform:site row this domain serves. Required: a custom domain with no deployable behind it is a hostname the edge would resolve to nothing, and the alias step reads exactly this field to answer a request. The relationship below is what canonicalizes it, so a client may pass the bare id.")
   hostname       string!  @description("The client's own fully qualified host, e.g. www.acme.com or acme.com. Cluster-unique across BOTH this concept and v1:platform:site -- the edge resolves one Host to one site, so a second live claim makes which site answers depend on row order. Three things it may NOT be, refused at create by component/memql/platform_custom_domain_policy.go: a hostname under the cluster's own domain (that is slug territory, and createSite already owns it), one of the front-door hosts (api / identity / mcp / os / the apex), or a claim past the per-site maximum. None of the three is expressible in a mutation body -- the domain comes from the environment, the maximum is env-tunable, and the collision needs a read.")
@@ -579,6 +595,7 @@ concept customDomain {
 /// THREE hosts, which is what makes activation all-or-nothing without a rule to police (design D8).
 @rowAuthz(clusterOwner)
 @displayCard(primary="reservedName", secondary="accountId", tertiary="failureReason", status="status")
+@belongsTo(account, stated)
 concept accountFrontDoor {
   accountId     string!  @description("The v1:accounts:account this door is served for. Required, and ONE LIVE ROW PER ACCOUNT: a second door for the same account is a second certificate order for the same three names, which spends a Let's Encrypt rate-limit unit to produce the same result -- and because every object is named after the ACCOUNT, the second door would apply the same five object names over the first's and then have them deleted underneath it by the first's unbind. WHERE THAT IS ENFORCED, precisely: the sweep drops an account from its work list the moment it sees ANY non-removed door for it (integrations/customdomain/accountdoor_reconcile.go, and TestAReservationThatAlreadyHasADoorOpensNothing). It is NOT a Go pre-insert guard -- an earlier version of this description said it was refused in account_domain_validation.go, which was never true: that file guards the account WRITE, and a door is created by the sweep. A pre-insert uniqueness guard is still worth having as the belt to the sweep's braces; it is not here yet, and this says so rather than implying otherwise.")
   reservedName  string!  @description("The name this door serves beneath -- account.memqlDomain as it stood when the door was created, e.g. memql.acme.com. COPIED rather than read through the relationship, and that is the field's whole job: changing an account's domain CLEARS memqlDomain, the token and the verification (record A's resetAccountDomainOnChange), and the reconciler then has to tear down three hosts it can no longer name from the account row. A door that cannot say what it serves is one nothing can unbind.")
@@ -614,6 +631,7 @@ concept accountFrontDoor {
 /// pack's state" must be expressible.
 @rowAuthz(clusterOwner)
 @displayCard(primary="packDomain", secondary="reason", status="enabled")
+@belongsTo(cluster)
 concept packState {
   packDomain  string!  @description("The registered pack domain this row governs (the RegisterTree name, e.g. 'harness', 'referencepack'). Also the row id's short form.")
   enabled     bool!    @description("Desired per-instance state. false = the pack is mounted-inert on every node's next boot: its namespace stays owned and its concepts (and rows) stay readable, but its queries, mutations, builtins, tools, prompts, automations and Go factories are not loaded.")
@@ -630,6 +648,7 @@ concept packState {
 /// time and is a persisted row instead. Serving both from one place would make a staleness bug in
 /// either look like the other.
 @displayCard(primary="conceptId", secondary="dataState", tertiary="origin")
+@belongsTo(cluster)
 concept dataOrigin {
   conceptId   string!  @description("Canonical id of the concept this row describes. Also the row id -- there is exactly one row per concept and the concept is what it is about. Named conceptId rather than concept because `concept` is a reserved row intrinsic; a payload field by that name is refused at load.")
   dataState   enum("mirror", "origin", "native")!  @description("MemQL's relationship to this concept's data. mirror: an external system owns it and MemQL holds a faithful read-only copy. origin: MemQL owns it and pushes changes out to the systems in mirroredTo. native: MemQL owns it and nobody else has a copy. There is no fourth state -- two systems both authoring one domain is the option the model rejects.")
@@ -651,6 +670,7 @@ concept dataOrigin {
 /// bundle that node loaded; two nodes that loaded different bundles would answer differently, and
 /// that difference is the truth about them.
 @displayCard(primary="name", secondary="trigger", tertiary="stratum")
+@belongsTo(cluster)
 concept automationNode {
   name            string!    @description("The automation's name. Also the row id -- there is one row per registered automation and the automation is what it is about.")
   stratum         int!       @description("Its layer in the graph read left to right: 0 is fired from outside (a person, a schedule, or a topic nothing here publishes), and N reacts to stratum N-1 at the latest. Every member of one cycle shares a stratum.")
@@ -682,6 +702,7 @@ concept automationNode {
 /// owner tier, and a system run has no owner, so a builtin reply carrying it would be filtered to
 /// nothing for every reader who is not a cluster owner. The builtin's capability is the wall.
 @displayCard(primary="automationName", secondary="reason", tertiary="finishedAt")
+@belongsTo(cluster)
 concept automationLoopStop {
   runId           string!    @description("The refused run's id. Also the row id.")
   automationName  string!    @description("The automation that would have run and was refused: the last link of the chain, which the chain itself does not hold because the refused run never ran.")
@@ -706,6 +727,7 @@ concept automationLoopStop {
 /// never reads a key back; "is this key good" is answered by `providerVerify` making a live call,
 /// not by comparing against something rendered here.
 @displayCard(primary="name", secondary="vendor", tertiary="authSource", status="available")
+@belongsTo(cluster)
 concept providerAuthStatus {
   name        string!  @description("The DSL provider entry's name. Also the row id -- there is exactly one row per provider and the provider is what it is about.")
   vendor      string!  @description("The provider TYPE the DSL declares (OpenAI, AnthropicChat, ...), which is what selects the Go client.")
@@ -744,6 +766,7 @@ concept providerAuthStatus {
 /// because activating a binding is four ordered steps and not a write.
 @rowAuthz(public, requiresIdentity)
 @displayCard(primary="providerRef", secondary="dimensions", tertiary="activatedAt")
+@belongsTo(cluster)
 concept embedderBinding {
   providerRef   string!  @description("A provider record name (embedding3Small) or a fleet reference (fleet:qwen3-embedding:0.6b). Resolved through the same registry path every other provider name takes, so a fleet embedder is resolved against the ACTING USER's machines exactly like any other fleet call.")
   dimensions    int!     @description("The vector width this provider produces, and therefore which node_vectors_<dims> table its vectors live in. NEVER ZERO on a valid binding: a width of zero cannot have a table and cannot have an index, and pgvector refuses both rather than accepting them quietly. For a fleet model the width comes from the catalog row, because the machine serving it does not know it either.")
@@ -777,6 +800,7 @@ concept embedderBinding {
 /// output, the model can, because a call needing it routes there. The intersection would hide a
 /// capability the fleet actually has whenever one machine under-reports.
 @displayCard(primary="modelId", secondary="machineCount", tertiary="contextWindow", status="online")
+@belongsTo(cluster)
 concept fleetModel {
   modelId           string!  @description("The runtime-facing model id, exactly as the machine advertised it (llama3.1:8b). Also the row id -- there is one row per model and the model is what it is about. The router selected on this exact string, so no translation happens anywhere between the cockpit and a policy naming fleet:<modelId>.")
   contextWindow     int      @description("Largest context window any machine behind this model advertises, in tokens. Zero means no machine said, which does not meet any floor -- the fail-closed direction, because a guessed window fails as a truncation three layers away that names nothing.")
@@ -803,6 +827,7 @@ concept fleetModel {
 /// router actually applies. Every input is named on the row anyway, so a person looking at a gate
 /// they do not understand can see exactly what it read.
 @displayCard(primary="eligible", secondary="localModelCount", tertiary="minimumContextWindow")
+@belongsTo(cluster)
 concept inferenceStatus {
   eligible                 bool!    @description("Whether ANY door is open. This is what the first-run gate branches on.")
   streamingChatEligible     bool     @description("Whether this caller has a usable plain streaming chat door for Ask: an online non-embedding fleet model meeting minimumContextWindow, a runnable app that implements plain streaming chat, or an available federated plain streaming chat provider. Read from the caller's own and shared fleet catalog even on query nodes without local worker dispatch. Does not guarantee a particular prompt fits or a call succeeds; routing applies the actual call's needs and policy.")
@@ -824,6 +849,7 @@ concept inferenceStatus {
 /// an action's outcome is a reply, not a record. What IS recorded is the v1:identity:auditEvent line
 /// naming who asked.
 @displayCard(primary="requestId", secondary="availableOnThisNode")
+@belongsTo(cluster)
 concept providersReloadResult {
   requestId            string!  @description("Ties every node's log line back to one Apply. Also the row id. Generated by the engine when the caller supplies none.")
   availableOnThisNode  int!     @description("How many providers are callable on the node that HANDLED the call, after its reload. Named so it cannot be mistaken for a fleet-wide number: the other replicas reload asynchronously off the broadcast, and their answer comes from re-reading providerAuthStatus.")
@@ -838,6 +864,7 @@ concept providersReloadResult {
 /// distinction matters to the page: a refusal is something to show the operator in place, and an
 /// error is an exception dialog about a question that could not be asked.
 @displayCard(primary="provider", secondary="authSource", status="verified")
+@belongsTo(cluster)
 concept providerVerifyResult {
   provider      string!  @description("The provider entry that was verified. Also the row id.")
   vendor        string!  @description("The provider TYPE, which decides how verification is performed. Only Anthropic has a live check today; anything else reports that plainly rather than claiming a pass it did not observe.")
@@ -857,6 +884,7 @@ concept providerVerifyResult {
 /// and what comes back is the row NAMES the resolver will try. "Is this configuration good" is
 /// answered by `providerVerify` making a live call, not by showing an operator what they typed.
 @displayCard(primary="name", secondary="vendor", tertiary="fingerprint")
+@belongsTo(cluster)
 concept providerConfigResult {
   name         string!  @description("The row name written, which is the exact name the auth resolver tries. Also the row id. The VENDOR is what the caller chooses; this name is derived, so a mistyped name the resolver never tries is not a state an operator can reach.")
   vendor       string!  @description("Which vendor the configuration is for.")
@@ -880,6 +908,7 @@ concept providerConfigResult {
 /// operator identity -- the campaigns precedent.
 @rowAuthz(clusterOwner)
 @displayCard(primary="conceptId", secondary="target", tertiary="rowRef", status="status")
+@belongsTo(account, via="rowRef")
 concept outboxEntry {
   conceptId       string!  @description("Canonical id of the concept whose row changed. Named conceptId because `concept` is a reserved row intrinsic.")
   rowRef          string!  @description("Id of the row that changed. Not named rowId to keep it clearly a reference rather than this entry's own id.")
@@ -892,6 +921,7 @@ concept outboxEntry {
   lastError       string   @description("Truncated error from the last failed attempt. Never a payload body -- the runtime does not log those.")
   idempotencyKey  string!  @description("(conceptId, rowRef, version, target), rendered once by the engine so every attempt at this entry presents the same key to the receiver. This is what makes a redelivery arrive once.")
   deliveredAt     datetime @description("When the receiver accepted it. Set once; a redelivery that the receiver recognises does not move it.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }
 
 /// Per-(concept, connector) SYNC HEALTH (epic memql#4378, D7). Health is a ROW, not a log line: an
@@ -905,6 +935,7 @@ concept outboxEntry {
 /// clusterOwner for the same reason outboxEntry is: this is the deployment's operational state.
 @rowAuthz(clusterOwner)
 @displayCard(primary="conceptId", secondary="connector", tertiary="direction", status="backfillStatus")
+@belongsTo(cluster)
 concept syncState {
   conceptId        string!  @description("Canonical id of the concept this row reports on.")
   connector        string!  @description("Connector name on the other side.")
@@ -956,6 +987,7 @@ concept syncState {
 /// server-written until that file says otherwise.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="label", secondary="host", tertiary="fingerprint", status="status")
+@belongsTo(cluster)
 concept sourceCredential {
   ownerUserId     string    @description("v1:identity:user.id of the person this credential belongs to. Stamped from the actor by the writer (createSourceCredential), never accepted from an argument -- it is the row-authz key the composite tier compares against actor.userId, and a caller-supplied value would record a guarantee nothing provides. NOT `string!`, for the reason its siblings are not: the declaration form is shared, and an empty value is the meaningful cluster-owned state even though nothing writes one here.")
   kind            enum("token", "github_app")  @description("How this credential was obtained, and therefore what the engine may do with it. `token` is a value a person pasted; `github_app` is an authorization grant from the GitHub App, whose `encryptedValue` is a user token the engine refreshes and whose background work runs on installation tokens minted from the app's private key instead. NOT `string!` and DELIBERATELY not required: every row written before Connect existed carries no value, and an ABSENT kind must read as `token` -- the pre-Connect behaviour, the reading that asserts least. A row is never rewritten to add it.")
@@ -1005,6 +1037,7 @@ concept sourceCredential {
 /// client is picked, which is what makes the departure the default rather than an option.
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @displayCard(primary="name", secondary="repoUrl", tertiary="deployedVersion", status="status")
+@belongsTo(account, stated)
 concept package {
   sourceRemoved       bool  @description("Removed from the configured Sources list only. Absent means listed. Deployables, polling, credentials and history remain active; re-adding restores this same record.")
   sourceConnectionId  string  @description("The personal GitHub installation binding selected at registration. Removal prevents new selection but preserves this package and its credential.")
@@ -1059,6 +1092,7 @@ concept package {
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @displayCard(primary="sourceVersion", secondary="packageId", tertiary="requestedBy", status="status")
+@belongsTo(account, stated)
 concept packageDeployment {
   ownerUserId    string  @description("Copied from the package row this deployment belongs to, never from the actor. It is the row-authz key, and taking it from the package is what keeps a deployment visible to exactly the people the package is -- including when the pipeline, not the person, writes the row.")
   accountId      string  @description("Copied from the package row at open, for the reason ownerUserId is (memql#5303): it is the account argument of the tier, and taking it from the package is what keeps the run timeline readable by the people the package is tied to. Written by openPackageDeployment alone and never rewritten; EMPTY for the run of an untied package, and for every run opened before the field existed, which read exactly as they did.")
@@ -1115,6 +1149,7 @@ concept packageDeployment {
 /// carries neither, which reads as false: the module it describes declared neither.
 @rowAuthz(public, requiresIdentity)
 @displayCard(primary="module", secondary="nodeId", tertiary="nodeType", status="state")
+@belongsTo(cluster)
 concept moduleReadiness {
   module       string!  @description("The readiness module id from the env manifest's modules block: ai, storage, email, githubApp, campaigns, workbench, localApps, pipelines.")
   nodeId       string!  @description("The reporting node's MEMQL_NODE_ID.")
@@ -1139,6 +1174,7 @@ concept moduleReadiness {
 /// `core`, `optional` and `dismissable` are read off every report of the module, voting or not, so
 /// an optional module nobody has set up still says it is optional while its state is unreported.
 @displayCard(primary="module", secondary="state", tertiary="core")
+@belongsTo(cluster)
 concept moduleVerdict {
   module        string!  @description("The module id.")
   state         enum("configured", "partial", "unconfigured", "unreported")!  @description("Worst state across the live reporting nodes that vote; partial with disagreement when they differ; unreported when no live node voted.")
@@ -1155,6 +1191,7 @@ concept moduleVerdict {
 /// rewrote, and which node it was. One row, id "current", because it answers one question about one
 /// node rather than describing a set.
 @displayCard(primary="nodeId", secondary="written")
+@belongsTo(cluster)
 concept readinessRecomputeResult {
   nodeId   string!   @description("The node that re-evaluated.")
   written  int!      @description("How many moduleReadiness rows were written. Zero is an answer: an unchanged verdict younger than the restatement floor is not rewritten.")
@@ -1198,6 +1235,7 @@ concept readinessRecomputeResult {
 /// machine's figures from the operator who has to explain the routing.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="modelId", secondary="machineId", tertiary="measuredAt", status="suiteVersion")
+@belongsTo(cluster)
 concept modelMeasurement {
   ownerUserId          string!  @serverSet  @description("v1:identity:user.id who owns the machine the suite ran on. THE ROW-AUTHZ OWNER FIELD, stamped from the actor and never taken from caller args. The probe's report arrives on an agent replica, which runs the write under auth.ContextWithUserActor for the registration's owner -- the borrowed-authority shape every other write about somebody's machine already uses.")
   machineId            string!  @description("v1:worker:registration.id the suite ran on. A figure with no machine is a figure about nothing: the whole content of a measurement is which hardware produced it, which is also why a probe names one machine and has nothing to fall through to.")
@@ -1235,6 +1273,7 @@ concept modelMeasurement {
 /// across the fleet, not how it behaved for one person -- so there is no owner to scope it to.
 @rowAuthz(clusterOwner)
 @displayCard(primary="modelId", secondary="level", tertiary="week", status="proposal")
+@belongsTo(cluster)
 concept modelEvidence {
   modelId             string!  @description("The runtime's own id, matching v1:router:call and the model label byte for byte.")
   level               enum("fast", "strong", "reasoning", "embeddings")!  @description("The level these calls were serving. Evidence is per level because a model can be right for one and wrong for another, and a demotion that took a model out of every level for a failure at one would be a heavier act than the evidence supports.")
@@ -1255,6 +1294,7 @@ concept modelEvidence {
 /// Synthetic current website observation, stored outside append-only graph history.
 /// siteHealthRead authorizes every result against the current site under the caller.
 @displayCard(primary="siteId", secondary="reason", tertiary="checkedAt", status="state")
+@belongsTo(account, via="siteId", parent="v1:platform:site")
 concept siteHealth {
   siteId string!
   hostname string!
@@ -1264,6 +1304,7 @@ concept siteHealth {
   reason string!
   httpStatus int!
   durationMs int!
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }
 
 /// A person's saved GitHub installation access grouping. It carries no token
@@ -1271,6 +1312,7 @@ concept siteHealth {
 /// packages retain their credential and deployed sites remain untouched.
 @rowAuthz(owner="ownerUserId")
 @displayCard(primary="accountLogin", secondary="accountType", status="status")
+@belongsTo(cluster)
 concept sourceConnection {
   ownerUserId       string!
   credentialId      string!
@@ -1287,6 +1329,7 @@ concept sourceConnection {
 /// the provider integration; removing this selection never uninstalls it.
 @rowAuthz(owner="ownerUserId")
 @displayCard(primary="label", secondary="provider", status="status")
+@belongsTo(cluster)
 concept externalConnection {
   ownerUserId string!
   provider string!

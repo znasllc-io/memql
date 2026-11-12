@@ -47,6 +47,7 @@ use identity.concepts.{ user }
 /// verified replay; mismatches fall back to the LLM.
 @displayCard(primary="slug", secondary="status", tertiary="ownerUserId", status="status")
 @rowAuthz(owner="ownerUserId")
+@belongsTo(account)
 concept action {
   ownerUserId       string!  @description("v1:identity:user.id of the owner. The per-row authz key (owned tier), stamped from actor.userId by mintAction.")
   slug              string!  @description("Human-readable name (e.g. the dominant capability slug). Not unique on its own; (ownerUserId, inputFingerprint) is the replay key.")
@@ -73,6 +74,7 @@ concept action {
   provenancePlanId  string  @description("The run that minted this action. A plain string FK: the harness plan and step concepts it pointed at are retired (work spine A1), and epic A3 re-points it at v1:work:run when the trust ladder moves onto the construct.")
   provenanceStepId  string  @description("The step of that run. A plain string FK, for provenancePlanId's reason.")
   provenanceMutation  string  @description("Name of the mutation that produced this action version (audit trail).")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
@@ -97,6 +99,7 @@ concept action {
 /// availability precedence (decision A pins coupled actions to one surface).
 @displayCard(primary="slug", secondary="kind", tertiary="ownerUserId", status="status")
 @rowAuthz(owner="ownerUserId")
+@belongsTo(cluster)
 concept surface {
   ownerUserId   string!  @description("v1:identity:user.id of the owner. Per-row authz key (owned tier); computer-use machines + workbenches are per-user. Stamped from actor.userId by registerSurface.")
   slug          string!  @description("Stable surface identifier used in bindings/policies: 'workbench', 'computer-use:<machineId>', 'mcp:<server>'. (ownerUserId, slug) is the registry key.")

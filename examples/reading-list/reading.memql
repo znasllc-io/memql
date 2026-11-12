@@ -1,10 +1,12 @@
 /// A reading-list item owned by the signed-in person.
 @rowAuthz(owner="ownerUserId")
 @displayCard(primary="title", status="finished")
+@belongsTo(account)
 concept readingItem {
   ownerUserId  string!
   title        string!
   finished     bool
+  accountId    string
 }
 
 /// Add an item. Ownership comes from the authenticated actor.

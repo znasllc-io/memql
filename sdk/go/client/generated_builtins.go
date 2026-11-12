@@ -14,6 +14,42 @@ var (
 	_ = strings.Builder{}
 )
 
+// AccountAssignmentStatus -- How the assignment of existing rows to accounts is going: one {kind: "switch", enabled, held} (enabled is the cluster's switch, held is this node's MEMQL_ACCOUNT_STAMPING_ACTIVATE=false), one {kind: "progress", ...} per concept the job has worked on, one {kind: "account", accountId, rows} per account holding rows, and up to 200 unresolved {kind: "conflict", ...}, newest first.
+type AccountAssignmentStatusArgs struct {
+}
+
+// AccountAssignmentStatus calls the engine builtin accountAssignmentStatus.
+func (qc *QueryClient) AccountAssignmentStatus(ctx context.Context, args AccountAssignmentStatusArgs) (*Result, error) {
+	call := AccountAssignmentStatusBuild(args)
+	return qc.executeNamed(ctx, "accountAssignmentStatus", call)
+}
+
+func AccountAssignmentStatusBuild(args AccountAssignmentStatusArgs) string {
+	_ = args
+	return "builtin accountAssignmentStatus()"
+}
+
+// AccountInventory -- What one account holds: one row per concept that declares an account form and holds at least one row for it ({kind: "concept", concept, namespace, name, rows, versions}, by namespace then name), then one {kind: "files", bytes} with the summed size of its current, unarchived Library files. Either spelling of the id is accepted; an empty or unknown account is refused.
+type AccountInventoryArgs struct {
+	// The account, as its bare id or v1:accounts:account:<bare>.
+	AccountId string
+}
+
+// AccountInventory calls the engine builtin accountInventory.
+func (qc *QueryClient) AccountInventory(ctx context.Context, args AccountInventoryArgs) (*Result, error) {
+	call := AccountInventoryBuild(args)
+	return qc.executeNamed(ctx, "accountInventory", call)
+}
+
+func AccountInventoryBuild(args AccountInventoryArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin accountInventory(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ArtifactProbe -- Ask what kind of tree a zip in the caller's Library is (epic memql#4885, D11). Opens it through the same fetch a deploy uses -- the caller's own bytes, expanded by OpenZip under the packages limits, so a zip the deploy would refuse is refused here by the same code -- and answers {isPackage, isBuiltSite, fileCount, totalBytes}. isPackage: memql-package.yaml sits at the root, and the package path takes it from here. isBuiltSite: index.html sits at the root and there is no manifest, and the hand-made path takes it and asks for the kind. Neither: the zip is something else, commonly a folder wrapping the site one level down. fileCount and totalBytes are counted over the opened tree. Writes nothing; the artifact stays exactly the Library row it was.
 type ArtifactProbeArgs struct {
 	// The v1:library:artifact index row of the zip to probe.

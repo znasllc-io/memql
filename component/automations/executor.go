@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/metrics"
 	"github.com/znasllc-io/memql/component/provenance"
@@ -104,6 +106,76 @@ func contextWithSystemActor(ctx context.Context, automationName string) context.
 		})
 	}
 	return ctx
+}
+
+// triggerAccountField is the payload key a triggering row carries its account
+// under: the one field every account-scoped concept records it in.
+const triggerAccountField = languageParser.BelongsToAccountField
+
+// contextWithTriggerAccount states the account a run acts in: the account of the
+// ROW THAT TRIGGERED IT (design record 2026-11-12 account row ownership, section
+// C). It is the only thing that can say. The run's actor, set just above, is the
+// cluster, and the cluster belongs to no account, so a row the run writes that
+// has no parent to follow would record none; and the run usually executes with
+// nothing of the write that fired it but the event.
+//
+// Four conditions, and each one refuses something that looks like an account
+// and is not a row's statement of one.
+//
+//   - A ROW'S EVENT, BY TOPIC AND BY KIND. The write path publishes a row on
+//     graph.node.<action>.<concept> with one of the node kinds, and that pair
+//     is what makes an event the engine's own account of a row it wrote. Both
+//     are asked for. A topic is a string and names the concept; the kind is
+//     what says the event came from a write.
+//   - THE CONCEPT DECLARES AN ACCOUNT FORM, AND SOMETHING STANDS BEHIND THE
+//     VALUE (memql.TriggerAccountTrusted). Readers of a row's account go
+//     through @belongsTo, never through the name of a field: a cluster-wide
+//     concept may carry an `accountId` that means something else entirely
+//     (the identity service's entitlement row keeps a user id there). A concept
+//     that declares nothing is treated as cluster-wide, the rule the load
+//     reports it under. And the declaration alone is not enough: the account
+//     has to be one the engine filled in, or one the organization rules held
+//     to the accounts its writer may work in. A `stated` concept outside those
+//     rules records whatever its own mutations wrote, with no check against
+//     the writer, so a row of one places nothing: a run acts in an account,
+//     and every row it writes is recorded there.
+//   - THE ROW HAS AN ACCOUNT. One written before accounts were recorded has
+//     none yet, and then nothing is stated: the run keeps whatever the frame
+//     around it was acting in, which for a run the bus fired is nothing.
+//   - THE CALLER DID NOT SUPPLY THE PAYLOAD. The run paths that take an event
+//     from a caller (ExecuteWithClientEvent) hand over topic, kind and payload
+//     alike, so none of the above can be believed of it. It is the rule that
+//     keeps such a run at client origin, applied to the same input for the same
+//     reason, and a resume applies it from the flag the run recorded.
+//
+// The concept comes off the TOPIC and not the payload's `concept` key. The
+// payload is the row's fields flattened over the event's own, so a row with a
+// field of that name would answer for it; and a resumed run's recorded payload
+// is projected to what its body reads (journal_trigger.go), which keeps the
+// account and need not keep the concept.
+//
+// Nothing is cleared. A sub-automation's call, a scheduled tick and a compiled
+// goal's dispatch state no account here and inherit their caller's, which is
+// what auth.ContextWithCallAccount leaves in place for an empty id.
+func contextWithTriggerAccount(ctx context.Context, trigger *events.Event, callerSuppliedPayload bool) context.Context {
+	if trigger == nil || callerSuppliedPayload {
+		return ctx
+	}
+	switch trigger.Kind {
+	case events.KindNodeCreated, events.KindNodeUpdated, events.KindNodeDeleted:
+	default:
+		return ctx
+	}
+	conceptName, ok := events.ConceptFromGraphNodeTopic(trigger.Topic)
+	if !ok {
+		return ctx
+	}
+	concept, err := memoryNodes.Get(conceptName)
+	if err != nil || concept == nil || !memql.TriggerAccountTrusted(concept) {
+		return ctx
+	}
+	account, _ := trigger.Payload[triggerAccountField].(string)
+	return auth.ContextWithCallAccount(ctx, memql.BareShortId(account))
 }
 
 // Executor orchestrates automation execution.
@@ -582,6 +654,12 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	// Inject system actor for automation execution
 	// This allows automations to execute mutations without user authentication
 	ctx = contextWithSystemActor(ctx, automation.Name)
+
+	// WHO the run acts as is set above; WHERE it acts is the account of the row
+	// that triggered it, when one did (contextWithTriggerAccount). Stated here,
+	// ahead of the journal's open, so the run's own row and every step beneath
+	// it find it on the context.
+	ctx = contextWithTriggerAccount(ctx, triggeringEvent, callerSuppliedPayload)
 
 	// Each automation decides for itself: this sets what it declared, or clears what
 	// a caller's run declared (component/memql/deployer_fleet.go, D11).

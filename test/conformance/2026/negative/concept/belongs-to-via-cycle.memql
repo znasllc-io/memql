@@ -1,0 +1,17 @@
+/// A purchase, following its latest invoice.
+@belongsTo(account, via="latestInvoiceId")
+concept purchase {
+  accountId        string
+  latestInvoiceId  string
+
+  @relationship(type="references", field="latestInvoiceId", target=invoice, direction="outgoing")
+}
+
+/// An invoice, following its purchase: the two follow each other.
+@belongsTo(account, via="purchaseId")
+concept invoice {
+  accountId   string
+  purchaseId  string
+
+  @relationship(type="parent", field="purchaseId", target=purchase, direction="outgoing")
+}

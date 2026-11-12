@@ -1,0 +1,9 @@
+/// A service contract. The mutation that opens one names the account it is
+/// for, so the concept's own writers state `accountId` and the engine leaves
+/// it alone.
+@belongsTo(account, stated)
+concept serviceContract {
+  accountId  string
+  title      string
+  startsOn   datetime
+}

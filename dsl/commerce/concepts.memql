@@ -34,6 +34,7 @@
 @mirroredTo("shopify")
 @rowAuthz(clusterOwner)
 @displayCard(primary="productGid", secondary="storeId", status="status")
+@belongsTo(account, via="storeId", parent="v1:shopify:store")
 concept productContent {
   /// The v1:shopify:store this content belongs to.
   storeId       string!
@@ -55,6 +56,7 @@ concept productContent {
   status        enum("draft", "live", "failed")
   /// Which agent or person last wrote it.
   authoredBy    string
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }
 
 /// An internal note about a customer, projected to a memql-namespace
@@ -63,6 +65,7 @@ concept productContent {
 @mirroredTo("shopify")
 @rowAuthz(clusterOwner)
 @displayCard(primary="customerGid", secondary="storeId", status="status")
+@belongsTo(account, via="storeId", parent="v1:shopify:store")
 concept customerNote {
   storeId      string!
   customerGid  string!
@@ -70,6 +73,7 @@ concept customerNote {
   note         string
   status       enum("draft", "live", "failed")
   authoredBy   string
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }
 
 /// An internal note about a company location, projected the same way.
@@ -77,6 +81,7 @@ concept customerNote {
 @mirroredTo("shopify")
 @rowAuthz(clusterOwner)
 @displayCard(primary="companyLocationGid", secondary="storeId", status="status")
+@belongsTo(account, via="storeId", parent="v1:shopify:store")
 concept companyLocationNote {
   storeId             string!
   companyLocationGid  string!
@@ -84,6 +89,7 @@ concept companyLocationNote {
   note                string
   status              enum("draft", "live", "failed")
   authoredBy          string
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }
 
 /// A credit limit for a company location.
@@ -97,6 +103,7 @@ concept companyLocationNote {
 @mirroredTo("shopify")
 @rowAuthz(clusterOwner)
 @displayCard(primary="companyLocationGid", secondary="limitAmount", tertiary="currencyCode", status="status")
+@belongsTo(account, via="storeId", parent="v1:shopify:store")
 concept creditLimit {
   storeId             string!
   companyGid          string!
@@ -115,6 +122,7 @@ concept creditLimit {
   status              enum("active", "hold", "waived", "failed")
   reviewedAt          datetime
   reviewedBy          string
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }
 
 /// A quote: priced, time-boxed, and turned into a Shopify draft order when
@@ -127,6 +135,7 @@ concept creditLimit {
 @origin("memql")
 @rowAuthz(clusterOwner)
 @displayCard(primary="quoteNumber", secondary="companyGid", tertiary="totalAmount", status="status")
+@belongsTo(account, via="storeId", parent="v1:shopify:store")
 concept quote {
   storeId             string!
   /// Human-readable reference the buyer and the rep both quote.
@@ -159,6 +168,7 @@ concept quote {
   draftOrderGid       string
   /// Which approval chain, if any, has to clear before this can be sent.
   approvalChainId     string
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }
 
 /// An approval chain: who has to say yes, in what order, above what value.
@@ -169,6 +179,7 @@ concept quote {
 @origin("memql")
 @rowAuthz(clusterOwner)
 @displayCard(primary="name", secondary="companyGid", tertiary="thresholdAmount", status="status")
+@belongsTo(account, via="storeId", parent="v1:shopify:store")
 concept approvalChain {
   storeId          string!
   name             string!
@@ -189,6 +200,7 @@ concept approvalChain {
   /// instance rather than a template.
   subjectId        string
   decidedAt        datetime
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }
 
 /// A sales rep. A MemQL identity, deliberately: a rep is a person in the
@@ -197,6 +209,7 @@ concept approvalChain {
 @origin("memql")
 @rowAuthz(clusterOwner)
 @displayCard(primary="displayName", secondary="email", tertiary="territoryId", status="active")
+@belongsTo(account, via="storeId", parent="v1:shopify:store")
 concept salesRep {
   storeId      string!
   displayName  string!
@@ -205,12 +218,14 @@ concept salesRep {
   userId       string
   territoryId  string
   active       bool
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }
 
 /// A territory: a named set of companies and locations one rep covers.
 @origin("memql")
 @rowAuthz(clusterOwner)
 @displayCard(primary="name", secondary="storeId", status="active")
+@belongsTo(account, via="storeId", parent="v1:shopify:store")
 concept territory {
   storeId              string!
   name                 string!
@@ -219,12 +234,14 @@ concept territory {
   /// Individual locations, for a company split across territories.
   companyLocationGids  []string
   active               bool
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }
 
 /// A saved reorder list: what a buyer buys again.
 @origin("memql")
 @rowAuthz(clusterOwner)
 @displayCard(primary="name", secondary="companyGid", status="active")
+@belongsTo(account, via="storeId", parent="v1:shopify:store")
 concept reorderList {
   storeId             string!
   name                string!
@@ -235,4 +252,5 @@ concept reorderList {
   lines               []object
   lastOrderedAt       datetime
   active              bool
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }

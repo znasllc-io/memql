@@ -1482,7 +1482,7 @@ rules rather than repetitions of the five before it.
   account-choice catalog is requested only by editors that need valid options.
 
 - **THE PEOPLE BAND IS FIRST, AND IT COUNTS PEOPLE RATHER THAN ROWS** (epic
-  memql#5167). It is the band the other five are about: the people are who the
+  memql#5167). It is the band the inventory is about: the people are who the
   deployables, the files, the knowledge and the campaigns are FOR. Two reads
   fill it -- `groupsForAccount`, then `membersOfGroup` per group -- and it
   counts DISTINCT people, because somebody in two of a client's groups is one
@@ -1522,24 +1522,32 @@ rules rather than repetitions of the five before it.
   grant cluster administration. See [Organization ownership](../../docs/public/operate/auth/organization-ownership.md)
   for the full resource audit and existing-data policy.
 
-- **THE LEDGER IS AN ON-DEMAND READ, AND ALL FOUR BANDS ARE, DELIBERATELY.**
-  Three of the four rolled-up concepts DO broadcast (`v1:platform:site`,
-  `v1:library:artifact`, `v1:identity:invitation`), so a live ledger is
-  buildable. `v1:knowledge:knowledgeDomain` carries no rule and nothing
-  broadcasts it, so the fourth band could never be live -- and a ledger where
-  three bands move and the fourth silently does not is worse than one where
-  none do, because the reader has no way to tell which kind of band they are
-  looking at. So all four are read together, print when they were read, and
-  re-read on demand. Consistency across a composite surface beat liveness on
-  part of it.
+- **THE LEDGER IS WHO, THEN WHAT** (account row ownership, section H). The
+  People and Guests bands say who the client's people and invited guests are.
+  The inventory says what the account holds: one line per area, from ONE
+  builtin, `accountInventory`, which counts every concept's rows recorded
+  under the account; an area opens in place to list its concepts. It replaced
+  four bands (deployables, files, knowledge, campaigns), each one query over
+  one population. Guests stayed because the inventory counts invitations but
+  cannot say who was invited. The inventory, and the primary account's
+  "Existing data" panel (`accountAssignmentStatus`: held, waiting for every
+  node, running, finished, and the rows that need a decision), are drawn only
+  for a holder of `execute app:accounts/inventory`; for anyone else they are
+  absent. Missing per-account totals in the status are "not available right
+  now", never zero.
+
+- **THE LEDGER IS AN ON-DEMAND READ, DELIBERATELY.** The inventory is a count
+  over every concept, so no event could keep it current, and a ledger where
+  two bands move and the rest do not is worse than one where none do. So the
+  whole ledger prints when it was read and re-reads on demand.
 
 - **A REFUSAL IS NOT A ZERO.** `invitationsForAccount` carries
   `@requiresRank("developer")`, so below that floor the engine refuses the read.
   The band renders "Not yours to read" plus the server's own sentence, and
   never a count -- a `0` there would be this window inventing a fact about a
-  client. Each band settles on its own for the same reason: one
-  `Promise.all` would let the one refusal that WILL happen decide the state
-  of three reads that succeeded.
+  client. The inventory renders a refusal the same way, with a retry. Each
+  read settles on its own: one `Promise.all` would let one refusal decide the
+  state of reads that succeeded.
 
 - **THE FIRST-RUN CARD IS GATED ON A ROW, NOT ON A FLAG.** It renders when
   `v1:accounts:account:self` carries no `configuredAt`, read off the feed the

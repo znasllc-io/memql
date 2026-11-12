@@ -26,6 +26,7 @@ use work.concepts.{ goal, run }
 /// migrates roles + agents to skillIds[]; Phase 3 lands the mintSkill authority + approval card.
 @rowAuthz(public, requiresIdentity)
 @displayCard(primary="name", secondary="category", tertiary="tier", status="active")
+@belongsTo(account, shared)
 concept skill {
   ownerUserId    string  @serverSet  @description("v1:identity:user.id of the person whose planner minted this skill; present-and-empty for a predefined catalog row. PROVENANCE ONLY -- the tier is public, so this narrows nothing.")
   slug           string!  @description("Canonical slug -- stable, kebab-case identifier. Examples: workbench-baseline, web-research, go-backend-engineering. Never renamed (rename = new row + migration).")
@@ -60,6 +61,7 @@ concept skill {
   reinforceCount  int  @description("How many successful runs have used this skill. Absent reads as 0.")
   lastReinforced  datetime  @description("When reliability last moved up. Empty for a skill that has never been used successfully; the decay-on-disuse rule reads it, and an empty value means the skill has nothing to decay from.")
   status          enum("candidate", "active", "deprecated")  @description("Where the skill stands. `candidate` is minted and not yet proven -- selection may bind it, and the ladder is what promotes it. `active` is the predefined catalog and anything that earned its way there. `deprecated` is retired: still readable, so a run that bound it can be explained, and never selected as a direct match. DISTINCT FROM `active` above, which is the soft-delete flag the picker reads; this is the ladder's own axis, and collapsing them would make 'retired by an operator' and 'never proved itself' the same state.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="originatingGoalId", target=goal, direction="outgoing")
@@ -71,6 +73,7 @@ concept skill {
 /// vector matches.
 @rowAuthz(public, requiresIdentity)
 @displayCard(primary="edgeType", secondary="fromSkillId", tertiary="toSkillId", status="status")
+@belongsTo(account, shared)
 concept skillEdge {
   ownerUserId  string  @serverSet  @description("Who proposed it, when a person's run did; present-and-empty for a system-proposed edge. Provenance only -- the tier is public.")
   fromSkillId  string!  @description("The skill the edge starts at.")
@@ -79,6 +82,7 @@ concept skillEdge {
   evidence     []object  @description("[{runId, stepKey}] -- the executions that established it.")
   proposedBy   enum("system", "user")!  @description("Who proposed it.")
   status       enum("proposed", "committed")!  @description("proposed until a successful run commits it.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="references", as="edgeFrom", field="fromSkillId", target=skill, direction="outgoing")
   @relationship(type="references", as="edgeTo", field="toSkillId", target=skill, direction="outgoing")

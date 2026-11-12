@@ -73,12 +73,14 @@ use identity.concepts.{ user }
 /// half-record. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write.
 @displayCard(primary="companyName", secondary="billingEmail", tertiary="ownerUserId", status="status")
 @rowAuthz(owner="ownerUserId")
+@belongsTo(account)
 concept subscriber {
   ownerUserId       string!  @description("v1:identity:user.id of the person who signed up -- the account's owner and, today, its only administrator. Stamped from actor.userId at create time and re-stamped on every update, so ownership can never be reassigned by a caller. The load-bearing per-row authz key for this concept and, mirrored, for every other customer-facing concept in this domain.")
   companyName       string!  @description("The customer-facing account name, e.g. 'Acme Corp'. Shown on invoices and in Orbit's account header. Not required to be unique -- two customers may genuinely share a name, and forcing uniqueness here would make signup fail for the second one.")
   billingEmail      string!  @pii  @description("Where invoices, dunning notices and trial nudges are sent. Kept distinct from the owner's login address because finance and engineering are usually different mailboxes; defaults to the login address at signup. Marked @pii: the deletion path scrubs it and every query projecting it must constrain its caller.")
   stripeCustomerId  string   @description("The Stripe `cus_...` id this account maps to. Empty until the first checkout session completes -- a subscriber exists before Stripe knows about them. Once set it is never changed: re-pointing an account at a different Stripe customer would silently re-parent its entire billing history.")
   status            enum("active", "delinquent", "cancelled")  @description("Account standing, as distinct from any one subscription's status. 'delinquent' means a payment failed and dunning is running -- instances keep running through the grace period, because cutting a customer off mid-incident over a expired card is how you lose the customer AND the invoice. 'cancelled' means the relationship ended; rows are kept for the invoices that reference them.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
@@ -97,6 +99,7 @@ concept subscriber {
 /// lives in three places is a price that is wrong in at least one of them the first time it moves.
 @rowAuthz(public)
 @displayCard(primary="displayName", secondary="monthlyPriceUsd", tertiary="tier", status="status")
+@belongsTo(cluster)
 concept tierSpec {
   tier                  enum("trial", "node", "graph", "mesh", "enterprise")!  @description("The tier's stable identifier. Also the key every other row in this domain names, so renaming a tier is a data migration rather than a copy edit -- which is the correct amount of friction for a change that repoints live subscriptions.")
   displayName           string!  @description("Customer-facing name, e.g. 'Graph'. Distinct from `tier` so marketing can rename a tier without repointing subscriptions.")
@@ -125,6 +128,7 @@ concept tierSpec {
 /// from a missing event is a state that either bills a cancelled customer or serves a churned one.
 @displayCard(primary="tier", secondary="status", tertiary="subscriberId", status="status")
 @rowAuthz(owner="ownerUserId")
+@belongsTo(account, via="subscriberId", parent="v1:fleet:subscriber")
 concept subscription {
   ownerUserId            string!  @description("v1:identity:user.id that owns this subscription -- mirrored from the parent subscriber at create time. The per-row authz key; see the header for why the key is a user id rather than the subscriberId.")
   subscriberId           string!  @description("v1:fleet:subscriber.id this subscription belongs to. The domain relationship, as distinct from the authz key above.")
@@ -140,6 +144,7 @@ concept subscription {
   stripePriceId          string   @description("The Stripe `price_...` id currently attached, recorded so a tier change can be reconciled against what Stripe actually charged rather than against what we meant to charge.")
   billingEmail           string   @pii  @description("Where notices about THIS subscription go -- dunning, trial nudges, renewal. Denormalised from the parent subscriber's billingEmail at create time, for the same reason instance.notifyEmail is: the automations that send them read only the row that triggered them, because an automation's actor is not the row's owner and a caller-scoped read of the subscriber from inside one returns nothing while looking entirely correct. Marked @pii.")
   cancelAt               datetime  @description("When a customer-requested cancellation takes effect. A cancellation is not immediate: the customer paid through the period, so the row stays 'active' until this passes and only then moves to 'cancelled'. Empty when no cancellation is pending.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="subscriberId", target=subscriber, direction="outgoing")
@@ -159,6 +164,7 @@ concept subscription {
 /// far larger blast radius than 'can read my own rows' for the sake of a progress bar.
 @displayCard(primary="name", secondary="domain", tertiary="tier", status="status")
 @rowAuthz(owner="ownerUserId")
+@belongsTo(account, via="subscriptionId", parent="v1:fleet:subscription")
 concept instance {
   ownerUserId      string!  @description("v1:identity:user.id that owns this instance -- mirrored from the subscription. The per-row authz key.")
   subscriptionId   string!  @description("v1:fleet:subscription.id that pays for this instance. One subscription has exactly one instance today; the field is a pointer rather than the instance being a field on the subscription so that a future multi-instance plan is a new row rather than a re-model.")
@@ -180,6 +186,7 @@ concept instance {
   maxLlmCostUsd    string!  @description("The cumulative estimated-USD ceiling this instance boots with. Same tier resolution, same string-not-number reasoning as maxLlmCalls. Both are set because a runaway can be either shape -- many cheap calls, or a few very expensive ones.")
   notifyEmail      string   @pii  @description("Where lifecycle notices about THIS instance go -- the welcome message, and later the hibernation and teardown warnings. Denormalised from the parent subscriber's billingEmail at create time rather than looked up when a notice is sent, because the automations that send them read only the row that triggered them: an automation's actor is not the row's owner, so a caller-scoped read of the subscriber from inside one returns nothing while looking entirely correct. Marked @pii for the same reasons subscriber.billingEmail is.")
   lastError        string   @description("Why the last lifecycle transition failed, verbatim from the capability script's JSON error envelope. Empty when the last transition succeeded. Operator-facing; Orbit shows a generic message and this text is for the fleet console.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="subscriptionId", target=subscription, direction="outgoing")
@@ -208,6 +215,7 @@ concept instance {
 /// lookup that changes underneath it.
 @displayCard(primary="metric", secondary="consumed", tertiary="subscriptionId", status="status")
 @rowAuthz(owner="ownerUserId")
+@belongsTo(account, via="subscriptionId", parent="v1:fleet:subscription")
 concept usageMeter {
   ownerUserId      string!  @description("v1:identity:user.id that owns this meter -- mirrored from the subscription. The per-row authz key.")
   subscriptionId   string!  @description("v1:fleet:subscription.id being metered.")
@@ -219,6 +227,7 @@ concept usageMeter {
   overage          float!  @description("How much has been used PAST the allowance. Derived at increment time rather than at read time so that the number Stripe is told and the number the customer is shown come from one computation. Zero while consumed <= included.")
   reportedToStripe float!  @description("How much of `overage` has already been pushed to Stripe as a usage record. The difference between this and `overage` is what the next push owes -- which makes the push idempotent under retry, and makes a missed push self-healing on the next one rather than a permanently lost charge.")
   status           enum("open", "closed", "reported")!  @description("'open' is the current period and still accumulating; 'closed' means the period ended and no further increments are accepted; 'reported' means the final overage has been pushed to Stripe and the row is history. The three states exist so a late increment arriving after period close is visibly refused rather than silently landing on a period that has already been invoiced.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="subscriptionId", target=subscription, direction="outgoing")

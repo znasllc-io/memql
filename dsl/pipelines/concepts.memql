@@ -39,6 +39,7 @@ use work.concepts.{ goal }
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @displayCard(primary="name", secondary="repository", tertiary="delivery", status="status")
+@belongsTo(account, stated)
 concept pipeline {
   ownerUserId       string  @serverSet  @description("v1:identity:user.id of the person this pipeline belongs to: the owner of its package, stamped from the actor by createPipeline and never accepted from an argument. It is the row-authz key the composite tier compares against actor.userId, and the person whose GitHub grant mints every token a run of this pipeline uses.")
   accountId         string  @description("The v1:accounts:account organization this pipeline is for, copied from its package when it is connected, so a member of that organization reads it exactly as they read the source. Empty for a package tied to no account.")
@@ -94,6 +95,7 @@ concept pipeline {
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @retention(ttl="1d", keepLatest=true, archive="none")
 @displayCard(primary="sha", secondary="title", tertiary="conclusion", status="status")
+@belongsTo(account, stated)
 concept run {
   ownerUserId        string  @serverSet  @description("v1:identity:user.id of the pipeline's owner, stamped from the actor by createPipelineRun -- the run is written under the owner's borrowed authority, so this is always the person whose grant drives it.")
   accountId          string  @description("Copied from the pipeline at open, so the run is readable by exactly the people its pipeline is.")
@@ -160,6 +162,7 @@ concept run {
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @displayCard(primary="name", secondary="kind", status="status")
+@belongsTo(account, stated)
 concept channel {
   ownerUserId  string  @serverSet  @description("v1:identity:user.id of the person this channel belongs to, stamped from the actor by its writer.")
   accountId    string  @description("The v1:accounts:account organization this channel is for, so its members read it with the pipelines that deliver to it.")

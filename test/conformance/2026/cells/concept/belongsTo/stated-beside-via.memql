@@ -1,0 +1,8 @@
+/// A reply on a ticket, said both to follow its ticket and to have its account
+/// stated by its own writers.
+@belongsTo(account, stated, via="ticketId")
+concept ticketReply {
+  accountId  string
+  ticketId   string
+  body       string
+}

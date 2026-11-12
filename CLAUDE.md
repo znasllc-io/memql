@@ -1858,6 +1858,53 @@ later, because `MemQLEngine.Init` runs BEFORE integrations are wired. An
 unresolvable name **refuses boot**: a mirror nobody fills reads as an empty
 catalog, silently. [data-origins.md](docs/public/concepts/data-origins.md).
 
+### Which account a row belongs to -- `@belongsTo`
+
+**Every concept says whose its rows are, and a reader asks the declaration,
+never a field name** (first piece of the accounts program; design record
+[2026-11-12](docs/superpowers/specs/2026-11-12-account-row-ownership-design.md),
+reference [memql.md](docs/public/language/memql.md#which-account-a-row-belongs-to)).
+The field is always `accountId`.
+
+```memql
+@belongsTo(account)                                              concept note { accountId string ... }
+@belongsTo(account, via="goalId")                                concept run { ... }       // follows its parent
+@belongsTo(account, via="storeId", parent="v1:shopify:store")    concept review { ... }    // a bare id with no @relationship
+@belongsTo(account, shared)                                      concept skill { ... }     // no account = the cluster's own row
+@belongsTo(account, stated)                                      concept campaign { ... }  // its own mutations name the account
+@belongsTo(cluster)                                              concept node { ... }
+```
+
+- **Engine-managed means account-scoped and not `stated`**
+  (`BelongsToDecl.EngineManaged`). The engine fills `accountId` on those in
+  `executeWrite` (`component/memql/account_stamp.go`): the parent's account,
+  else the call's account on a create (`component/memql/call_account.go`),
+  else nothing. **It never defaults to `self` and never changes a recorded
+  account**: a child whose parent has no account yet waits for it. A `stated`
+  concept is never touched; the organization rules
+  (`organization_ownership.go`) stay in charge of theirs.
+- **Recording is not sharing.** `@belongsTo` records; `@rowAuthz(account=...)`
+  is what opens rows to an account's members. No read changed.
+- **A new concept needs one.** `TestEveryShippedConceptDeclaresBelongsTo`
+  (`test/dslconformance`) fails the build on an undeclared concept in `dsl/`,
+  `packs/` or `deploy/fleet/dsl`. A bundle's undeclared concept still loads:
+  one warning at load, `memql_dsl_belongs_to_undeclared`, and a `memqllint`
+  warning. A `via` that leads to a cluster-wide concept, an unknown `parent=`
+  or a cycle refuses the load.
+- **Recording starts behind a one-way switch**, the reader handshake on
+  `account_stamping_storage` / `account_stamping_readers`: off until every
+  node that has not stopped advertises, because an older engine refuses to
+  update a row carrying a field its schema does not declare.
+  `MEMQL_ACCOUNT_STAMPING_ACTIVATE=false` on EVERY node holds it. Tests run
+  with it off; one that wants the stamp calls `SetAccountStampingEnabled(true)`.
+- **Existing rows are assigned by a background job behind the same switch**
+  (`component/memql/account_assignment.go`): newest version only, in place, no
+  event, parents first, progress in `account_assignment_progress`, and what it
+  will not guess in `account_assignment_conflict`.
+- **Readers match both spellings of the id.** The stamp writes the bare id; a
+  concept with an authored `@relationship` on the field stores the canonical
+  one.
+
 ### Infrastructure concepts
 
 Field inventories live in the `.memql` files; this is only what the schema

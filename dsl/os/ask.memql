@@ -79,10 +79,12 @@ builtin askRouteDecide { prompt string! previousError string timeoutSeconds int 
 /// service; ownership is always taken from the authenticated caller.
 // @no-displayCard: contains a private transcript object; Ask renders named message rows and a separate conversation list, not a generic concept card.
 @rowAuthz(owner="ownerUserId")
+@belongsTo(account)
 concept askConversation {
   ownerUserId string! @serverSet
   title string!
   transcript object!
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
 

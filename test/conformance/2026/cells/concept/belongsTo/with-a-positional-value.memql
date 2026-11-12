@@ -1,0 +1,7 @@
+/// A support ticket raised by a customer, its account form written as a string.
+@belongsTo("account")
+concept ticket {
+  accountId  string
+  title      string
+  status     string
+}

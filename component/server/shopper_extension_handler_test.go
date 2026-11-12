@@ -72,6 +72,14 @@ func TestAnExtendedFormRunsThePackThenTheExtension(t *testing.T) {
 	if got, want := submissionIDIn(t, exec.calls[1]), submissionIDIn(t, exec.calls[0]); got != want {
 		t.Errorf("the two constructs were stamped different submission ids: %q and %q", want, got)
 	}
+	// ONE SUBMISSION, ONE ACCOUNT. The client's row is the other half of the
+	// pack's, and both act in the site's account: two halves recorded in two
+	// accounts would be a submission no single account holds whole.
+	for i, half := range []string{"the pack's construct", "the extension's mutation"} {
+		if exec.account[i] != "acct-merchant" {
+			t.Errorf("%s acts in account %q, want the site's", half, exec.account[i])
+		}
+	}
 	assertRedirect(t, rec, "/reviews/thanks", "")
 }
 

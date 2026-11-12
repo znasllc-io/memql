@@ -12,7 +12,7 @@ import { planRestore, runRestore } from "../bin/restore";
 import { Button, CopyValue, Fact, Facts, Notice, Head, Subhead, formatBytes, formatMoment } from "../../kit";
 import { ActionBar } from "../../kit/ActionBar";
 import { LabelEditor } from "./LabelEditor";
-import { AccountLabelPicker } from "../accounts/AccountPicker";
+import { AccountPicker } from "../accounts/AccountPicker";
 import { useAccountOptions } from "../accounts/tie";
 import { useArtifactAccounts } from "./actions/accounts";
 import { useFileVersions } from "./actions/versions";
@@ -365,12 +365,13 @@ export function Inspector({
         <LabelEditor artifactId={row.id} labels={row.labels} />
       </div>
 
-      {/* WHO THIS IS FOR (epic memql#4800, D5). MULTIPLE, because the index's
-          `accountIds` is a list -- a contract naming two clients is one file,
-          and making it pick would be the schema disagreeing with the filing
-          cabinet. Toggles rather than a multi-select: that control drops every
-          selection on an unmodified click, which is the most destructive
-          interaction available on a picker whose job is "one or two".
+      {/* WHO THIS IS FOR (epic memql#4800, D5). ONE ACCOUNT PER ROW (account
+          row ownership, section G): a row belongs to one account, so this is
+          the single picker. The index still stores the list `accountIds`
+          until the export piece retires it, so the write sends a one-element
+          list, or an empty one for none; the engine derives `accountId` from
+          it. A file labelled with several accounts before this change shows
+          its first, and choosing here replaces the list with that one choice.
 
           The write is ordinary and ungated. An account is a record with no
           read effect, so labelling a file changes who it is ABOUT and nothing
@@ -379,19 +380,20 @@ export function Inspector({
           It is the one EDITABLE thing on a surface that is otherwise a
           reading, which is why it is its own group rather than a fact row. */}
       <div className="os-files-group">
-        <Subhead>Clients</Subhead>
-        <AccountLabelPicker
-          selected={row.accountIds}
+        <Subhead>Client</Subhead>
+        <AccountPicker
+          id={`files-inspector-account-${row.id}`}
+          label="The client this file is about"
+          value={row.accountIds[0] ?? ""}
           accounts={accounts}
-          label="The clients this file is about"
           disabled={accountTie.busy}
-          onChange={(next) => void accountTie.setAccounts(row.id, next)}
+          onChange={(next) => void accountTie.setAccounts(row.id, next === "" ? [] : [next])}
         />
         {accountTie.error === "" ? null : (
           <Notice
             tone="error"
-            sentence="The client labels were not changed."
-            next="This file still carries whatever labels it had."
+            sentence="The client was not changed."
+            next="This file still has the client it had."
             detail={accountTie.error}
           />
         )}

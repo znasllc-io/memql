@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { betweenTheClicks, readTheBar, useFakeDate } from "../readTheBar";
+import { installSeededAccess } from "../seededAccess";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -14,7 +15,7 @@ vi.mock("../../src/live/connection", () => ({
 const { AccountsApp } = await import("../../src/apps/accounts/AccountsApp");
 const { LocalAccountsSettingsStore } = await import("../../src/apps/accounts/settings");
 const { SELF_ACCOUNT_ID } = await import("../../src/apps/accounts/rows");
-const { accountRow, fakeConnection, withSession } = await import("./harness");
+const { accountRow, fakeConnection, rowsResult, withSession } = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -254,48 +255,257 @@ describe("the ledger", () => {
     return screen.findByLabelText("What belongs to Acme Consulting");
   }
 
-  it("counts each of the four populations", async () => {
+  it("names the guests, which the inventory cannot", async () => {
     const conn = fakeConnection({
-      clientAccountsAll: [accountRow({ id: "v1:accounts:account:a1" })],
-      sitesForAccount: [{ id: "s1", hostname: "acme.example.com" }, { id: "s2", hostname: "b.example.com" }],
-      libraryItemsForAccount: [{ id: "f1", title: "Contract.pdf" }],
-      domainsForAccount: [],
+      clientAccountsAll: [accountRow({ id: "a1" })],
       invitationsForAccount: [{ id: "i1", inviteeEmail: "guest@acme.com" }],
     });
     const ledger = await openDetail(conn);
-    await waitFor(() => expect(within(ledger).getByText("2")).toBeTruthy());
-    expect(within(ledger).getByText("acme.example.com")).toBeTruthy();
-    expect(within(ledger).getByText("Contract.pdf")).toBeTruthy();
-    expect(within(ledger).getByText("No domains yet")).toBeTruthy();
+    await waitFor(() => expect(within(ledger).getByText("guest@acme.com")).toBeTruthy());
   });
 
   it("A REFUSAL IS NOT A ZERO -- the gated band says so verbatim", async () => {
-    // The guest-invitation rollup carries `@requiresRank("developer")`, so below
-    // that floor the engine refuses. Rendering it as "0 invitations" would be
-    // this window inventing a fact about a client.
     const conn = fakeConnection({
-      clientAccountsAll: [accountRow({ id: "v1:accounts:account:a1" })],
+      clientAccountsAll: [accountRow({ id: "a1" })],
       invitationsForAccount: new Error("reading invitations is owner and admin only"),
     });
     const ledger = await openDetail(conn);
-    // SCOPED TO THE BAND, because the People band refuses in this harness too
-    // (its two reads are not stubbed here) and "Not yours to read" is
-    // deliberately the same sentence for every band: a refusal reads the same
-    // whichever population it was about.
     await waitFor(() =>
       expect(within(ledger).getByText("reading invitations is owner and admin only")).toBeTruthy(),
     );
     expect(within(ledger).getAllByText("Not yours to read").length).toBeGreaterThan(0);
   });
 
-  it("one band refusing does not take the other three down with it", async () => {
-    const conn = fakeConnection({
-      clientAccountsAll: [accountRow({ id: "v1:accounts:account:a1" })],
-      sitesForAccount: [{ id: "s1", hostname: "acme.example.com" }],
-      invitationsForAccount: new Error("refused"),
+  it("no longer reads the four retired bands", async () => {
+    const conn = fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })] });
+    await openDetail(conn);
+    const query = conn.query as Record<string, unknown>;
+    for (const name of ["sitesForAccount", "libraryItemsForAccount", "domainsForAccount", "campaignsForAccount"]) {
+      expect(query[name]).toBeUndefined();
+    }
+  });
+});
+
+/** The calls the page made to one builtin, by name. */
+function builtinCalls(conn: Conn, name: string): string[] {
+  return conn.query.executeNamed.mock.calls.filter((c) => c[0] === name).map((c) => String(c[1]));
+}
+
+/** Hold one builtin's answer until the test releases it. */
+function holdBuiltin(conn: Conn, name: string) {
+  const original = conn.query.executeNamed.getMockImplementation()!;
+  let release: (rows: Record<string, unknown>[]) => void = () => {};
+  conn.query.executeNamed.mockImplementation(async (n: string, call: string) => {
+    if (n !== name) return original(n, call);
+    return new Promise((resolve) => {
+      release = (rows) => resolve(rowsResult(rows as never));
     });
-    const ledger = await openDetail(conn);
-    await waitFor(() => expect(within(ledger).getByText("acme.example.com")).toBeTruthy());
+  });
+  return (rows: Record<string, unknown>[]) => act(async () => release(rows));
+}
+
+const POPULATED = [
+  { kind: "concept", concept: "v1:campaigns:campaign", namespace: "campaigns", name: "campaign", rows: 1, versions: 3 },
+  { kind: "concept", concept: "v1:commerce:order", namespace: "commerce", name: "order", rows: 1, versions: 1 },
+  { kind: "concept", concept: "v1:library:artifact", namespace: "library", name: "artifact", rows: 2, versions: 2 },
+  { kind: "concept", concept: "v1:library:file", namespace: "library", name: "file", rows: 2, versions: 5 },
+  { kind: "concept", concept: "v1:shopify:product", namespace: "shopify", name: "product", rows: 4, versions: 4 },
+  { kind: "concept", concept: "v1:zebra:stripe", namespace: "zebra", name: "stripe", rows: 7, versions: 7 },
+  { kind: "files", bytes: 2048 },
+];
+
+describe("the inventory", () => {
+  afterEach(() => installSeededAccess("owner"));
+
+  async function openInventory(conn: Conn) {
+    mount(conn);
+    fireEvent.click(await screen.findByText("Acme Consulting"));
+    return screen.findByRole("region", { name: "Inventory" });
+  }
+
+  it("reads the account by its id, through the one builtin", async () => {
+    const conn = fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })], accountInventory: POPULATED });
+    await openInventory(conn);
+    await waitFor(() => expect(builtinCalls(conn, "accountInventory")).toEqual(['builtin accountInventory(accountId: "a1")']));
+  });
+
+  it("draws the shape of a list while it reads", async () => {
+    const conn = fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })] });
+    const release = holdBuiltin(conn, "accountInventory");
+    const inventory = await openInventory(conn);
+    expect(within(inventory).getByText("Loading inventory")).toBeTruthy();
+    expect(within(inventory).queryByText("Nothing belongs to this account yet")).toBeNull();
+    await release([]);
+    expect(await within(inventory).findByText("Nothing belongs to this account yet")).toBeTruthy();
+  });
+
+  it("says so when the account holds nothing", async () => {
+    const conn = fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })], accountInventory: [{ kind: "files", bytes: 0 }] });
+    const inventory = await openInventory(conn);
+    expect(await within(inventory).findByText("Nothing belongs to this account yet")).toBeTruthy();
+  });
+
+  it("groups concepts into areas with their totals, and Files with its bytes", async () => {
+    const conn = fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })], accountInventory: POPULATED });
+    const inventory = await openInventory(conn);
+    const list = await within(inventory).findByRole("list", { name: "Inventory by area" });
+    const names = within(list).getAllByRole("button").map((b) => b.getAttribute("aria-label"));
+    // Ordered by area; shopify and commerce are one Store; an unknown
+    // namespace shows under its own name.
+    expect(names).toEqual(["Email, 1 row", "Files, 4 rows, 2.0 KiB", "Store, 5 rows", "Zebra, 7 rows"]);
+  });
+
+  it("opens an area to list its concepts", async () => {
+    const conn = fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })], accountInventory: POPULATED });
+    const inventory = await openInventory(conn);
+    const store = await within(inventory).findByRole("button", { name: "Store, 5 rows" });
+    expect(within(inventory).queryByText("product")).toBeNull();
+    fireEvent.click(store);
+    expect(store.getAttribute("aria-expanded")).toBe("true");
+    expect(within(inventory).getByText("product")).toBeTruthy();
+    expect(within(inventory).getByText("4 rows")).toBeTruthy();
+    expect(within(inventory).getByText("order")).toBeTruthy();
+    fireEvent.click(store);
+    expect(within(inventory).queryByText("product")).toBeNull();
+  });
+
+  it("shows a refusal in the server's words, and retries in place", async () => {
+    const sentence = "This account holds too many rows to count in one read. Try again; a narrower read is coming with export.";
+    const conn = fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })], accountInventory: new Error(sentence) });
+    const inventory = await openInventory(conn);
+    expect(await within(inventory).findByText(sentence)).toBeTruthy();
+    expect(within(inventory).queryByText("Nothing belongs to this account yet")).toBeNull();
+    const original = conn.query.executeNamed.getMockImplementation()!;
+    conn.query.executeNamed.mockImplementation(async (n: string, call: string) =>
+      n === "accountInventory" ? rowsResult(POPULATED as never) : original(n, call));
+    fireEvent.click(within(inventory).getByRole("button", { name: "Try again" }));
+    expect(await within(inventory).findByRole("button", { name: "Store, 5 rows" })).toBeTruthy();
+    expect(within(inventory).queryByText(sentence)).toBeNull();
+  });
+
+  it("re-reads on demand and says when it read", async () => {
+    const conn = fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })], accountInventory: POPULATED });
+    await openInventory(conn);
+    const ledger = screen.getByLabelText("What belongs to Acme Consulting");
+    await waitFor(() => expect(within(ledger).getByText(/^Read at /)).toBeTruthy());
+    expect(builtinCalls(conn, "accountInventory")).toHaveLength(1);
+    fireEvent.click(within(ledger).getByRole("button", { name: "Re-read" }));
+    await waitFor(() => expect(builtinCalls(conn, "accountInventory")).toHaveLength(2));
+  });
+
+  it("is absent, and never asked for, without the inventory part", async () => {
+    installSeededAccess("admin");
+    const conn = fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })], accountInventory: POPULATED });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Acme Consulting"));
+    const ledger = await screen.findByLabelText("What belongs to Acme Consulting");
+    // The People band still stands.
+    expect(within(ledger).getByText("People")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Inventory" })).toBeNull();
+    expect(builtinCalls(conn, "accountInventory")).toHaveLength(0);
+  });
+});
+
+describe("existing data", () => {
+  afterEach(() => installSeededAccess("owner"));
+
+  const ACCOUNTS = [
+    accountRow({ id: SELF_ACCOUNT_ID, name: "Our Studio", createdAt: "2026-08-02T00:00:00Z" }),
+    accountRow({ id: "a1" }),
+  ];
+
+  async function openPrimary(status: Record<string, unknown>[]) {
+    const conn = fakeConnection({ clientAccountsAll: ACCOUNTS, accountAssignmentStatus: status });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Our Studio"));
+    return { conn, panel: await screen.findByRole("region", { name: "Existing data" }) };
+  }
+
+  const progress = (concept: string, assigned: number, finished: boolean) => ({
+    kind: "progress", concept, assigned, kept: 0, shared: 0, conflicts: 0,
+    passStartedAt: "2026-11-12T09:00:00Z", passFinishedAt: finished ? "2026-11-12T09:05:00Z" : "", verifiedThrough: "",
+  });
+
+  it("says the switch is held, and shows no totals", async () => {
+    const { panel } = await openPrimary([{ kind: "switch", enabled: false, held: true }]);
+    expect(await within(panel).findByText("Recording accounts on rows is held on this cluster.")).toBeTruthy();
+    expect(within(panel).queryByText("Totals are not available right now.")).toBeNull();
+  });
+
+  it("says it is waiting for every node", async () => {
+    const { panel } = await openPrimary([{ kind: "switch", enabled: false, held: false }]);
+    expect(await within(panel).findByText(/^Waiting for every node/)).toBeTruthy();
+    expect(within(panel).queryByText("Totals are not available right now.")).toBeNull();
+  });
+
+  it("counts finished concepts and shows the totals while it runs", async () => {
+    const { panel } = await openPrimary([
+      { kind: "switch", enabled: true, held: false },
+      progress("v1:notes:note", 10, true),
+      progress("v1:todos:todo", 5, false),
+      { kind: "account", accountId: "a1", rows: 15 },
+    ]);
+    expect(await within(panel).findByText("Assigning existing rows to accounts.")).toBeTruthy();
+    expect(within(panel).getByText("1 of 2")).toBeTruthy();
+    // The per-concept counts start again with every pass, so they are not
+    // summed into a figure; the per-account total is the one shown.
+    expect(within(panel).queryByText("15")).toBeNull();
+    expect(within(panel).getByText("15 rows")).toBeTruthy();
+  });
+
+  it("lists rows per account, by name, once finished", async () => {
+    const { panel } = await openPrimary([
+      { kind: "switch", enabled: true, held: false },
+      progress("v1:notes:note", 12, true),
+      { kind: "account", accountId: SELF_ACCOUNT_ID, rows: 12 },
+      { kind: "account", accountId: "a1", rows: 3 },
+    ]);
+    expect(await within(panel).findByText("Existing rows have been assigned.")).toBeTruthy();
+    expect(within(panel).getByText("Our Studio")).toBeTruthy();
+    expect(within(panel).getByText("12 rows")).toBeTruthy();
+    expect(within(panel).getByText("Acme Consulting")).toBeTruthy();
+    expect(within(panel).getByText("3 rows")).toBeTruthy();
+    expect(within(panel).queryByText("Needs a decision")).toBeNull();
+  });
+
+  it("finished with no account rows: the state, and that totals are not available", async () => {
+    const { panel } = await openPrimary([
+      { kind: "switch", enabled: true, held: false },
+      progress("v1:notes:note", 12, true),
+    ]);
+    expect(await within(panel).findByText("Existing rows have been assigned.")).toBeTruthy();
+    expect(within(panel).getByText("Totals are not available right now.")).toBeTruthy();
+    expect(within(panel).queryByRole("alert")).toBeNull();
+  });
+
+  it("lists the rows that need a decision", async () => {
+    const { panel } = await openPrimary([
+      { kind: "switch", enabled: true, held: false },
+      progress("v1:library:artifact", 4, true),
+      { kind: "conflict", concept: "v1:library:artifact", rowId: "art-7", conflict: "several_accounts", detail: "Tagged for two accounts", foundAt: "2026-11-12T09:01:00Z" },
+    ]);
+    expect(await within(panel).findByText("Needs a decision")).toBeTruthy();
+    expect(within(panel).getByText("art-7")).toBeTruthy();
+    expect(within(panel).getByText("Tagged for two accounts")).toBeTruthy();
+  });
+
+  it("is absent on any account but the primary one", async () => {
+    const conn = fakeConnection({ clientAccountsAll: ACCOUNTS, accountAssignmentStatus: [{ kind: "switch", enabled: true, held: false }] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Acme Consulting"));
+    await screen.findByLabelText("What belongs to Acme Consulting");
+    expect(screen.queryByRole("region", { name: "Existing data" })).toBeNull();
+    expect(builtinCalls(conn, "accountAssignmentStatus")).toHaveLength(0);
+  });
+
+  it("is absent on the primary account without the inventory part", async () => {
+    installSeededAccess("admin");
+    const conn = fakeConnection({ clientAccountsAll: ACCOUNTS, accountAssignmentStatus: [{ kind: "switch", enabled: true, held: false }] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Our Studio"));
+    await screen.findByLabelText("What belongs to Our Studio");
+    expect(screen.queryByRole("region", { name: "Existing data" })).toBeNull();
+    expect(builtinCalls(conn, "accountAssignmentStatus")).toHaveLength(0);
   });
 });
 

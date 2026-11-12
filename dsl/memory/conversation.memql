@@ -4,6 +4,7 @@ use identity.concepts.{ user }
 /// conversation remains authoritative; readers revalidate its turn hash.
 @rowAuthz(owner="ownerUserId")
 @displayCard(primary="content", secondary="conversationId", tertiary="turnId")
+@belongsTo(account)
 concept conversationEvidence {
   ownerUserId string! @serverSet
   domainId string!
@@ -12,6 +13,7 @@ concept conversationEvidence {
   sourceHash string!
   content string!
   recordedAt datetime!
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
 

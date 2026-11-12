@@ -212,6 +212,23 @@ type (
 		Origin     string   `json:"origin,omitempty"`
 		MirroredTo []string `json:"mirroredTo,omitempty"`
 
+		// BelongsTo is the concept's `@belongsTo(...)` declaration: which
+		// account its rows belong to, or that it is cluster-wide (design
+		// record docs/superpowers/specs/2026-11-12-account-row-ownership-design.md).
+		//
+		// NIL MEANS UNDECLARED, which is not the same statement as
+		// cluster-wide. The engine's own tree may not leave it out (a test
+		// over the corpus fails the build); a mounted product bundle that
+		// does is reported at load, and its rows are treated as cluster-wide
+		// until it declares.
+		//
+		// THE WRITE PATH READS THIS: the engine's account stamp fills
+		// `accountId` on a row of a concept whose declaration is
+		// account-scoped (component/memql/account_stamp.go). It records the
+		// account and opens the row to nobody; sharing a row with an account's
+		// members is RowAuthz's `account=` argument.
+		BelongsTo *parser.BelongsToDecl `json:"belongsTo,omitempty"`
+
 		contentIdSalt string // server-side salt for content-addressed ID derivation
 	}
 

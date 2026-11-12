@@ -599,6 +599,16 @@ func (e *Executor) ResumeFrom(
 	// Inject system actor for automation execution
 	ctx = contextWithSystemActor(ctx, automation.Name)
 
+	// As executeWithEvent does: a resumed run acts in the account its first
+	// attempt acted in, the triggering row's. A resume does not pass through the
+	// trigger path, and it runs on whichever replica picked the run up, which
+	// holds nothing of the first attempt but the run's row. So the account is
+	// read back off the trigger that row recorded (recordedTrigger keeps the
+	// key for exactly this), under the caller-supplied flag the row recorded
+	// too: a run whose payload a caller chose is not placed by it on the second
+	// attempt any more than on the first.
+	ctx = contextWithTriggerAccount(ctx, journalTriggerEvent(journal.TriggerEvent), journal.CallerSuppliedPayload)
+
 	// As executeWithEvent does: a resumed run's model calls are declared the same way
 	// its first attempt's were (component/memql/deployer_fleet.go).
 	ctx = memql.ContextWithDeployerFleet(ctx, automation.UsesDeployerFleet, automation.Domain)

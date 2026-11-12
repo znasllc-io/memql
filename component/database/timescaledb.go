@@ -99,6 +99,7 @@ func registerTimescaleMigrations(m *migrate.Migrations, logger *slog.Logger) {
 	registerAuthSessionHashLookupIndex(m, logger)
 	registerWorkRunRevisionLookupIndex(m, logger)
 	registerSiteAccessLookupIndexes(m, logger)
+	registerAccountIndex(m, logger)
 }
 
 func timescaleExtensionPostHook(fallbackLogger *slog.Logger) PostMigrationHook {

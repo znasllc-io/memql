@@ -173,8 +173,11 @@ func TestAnAccessCodeCarriesNoHeartbeat(t *testing.T) {
 			"accountId", "codeHash", "codeHint", "expiresAt", "gate", "generation", "guest", "issuedAt",
 			"label", "lastChangedBy", "ownerUserId", "revokedAt", "siteId", "subject",
 		},
+		// `accountId` on a session is the engine's account stamp (@belongsTo,
+		// via its site): written once when the session is created and carried
+		// forward, never on a visitor's schedule, so it is not a heartbeat.
 		"v1:platform:siteAccessSession": {
-			"codeId", "endedAt", "generation", "issuedAt", "ownerUserId", "siteId", "tokenHash",
+			"accountId", "codeId", "endedAt", "generation", "issuedAt", "ownerUserId", "siteId", "tokenHash",
 		},
 	} {
 		if got := accessConceptFields(t, name); strings.Join(got, ",") != strings.Join(want, ",") {

@@ -73,13 +73,15 @@ export interface FakeSeed {
   senderIdentities?: Row[];
   /** v1:platform:accountFrontDoor rows, for the MemQL address stop. */
   accountFrontDoorsOpen?: Row[];
-  sitesForAccount?: Row[];
-  libraryItemsForAccount?: Row[];
-  domainsForAccount?: Row[];
-  /** Pass an Error to make the invitation rollup REFUSE, which is the
-   *  interesting case: it is the one band the engine gates. */
+  /** Pass an Error to make the guests band REFUSE, which is the
+   *  interesting case: the engine gates it on rank. */
   invitationsForAccount?: Row[] | Error;
-  campaignsForAccount?: Row[] | Error;
+  /** The inventory builtin's rows (account row ownership, section H). An
+   *  Error makes it refuse. Empty by default: an unstubbed read would throw
+   *  and render as a refusal in every unrelated test. */
+  accountInventory?: Row[] | Error;
+  /** The assignment status builtin's rows. An Error makes it refuse. */
+  accountAssignmentStatus?: Row[] | Error;
   /** The credentials issued on behalf of a BILLING account (memql#5013). An
    *  Error makes the read REFUSE, which is a first-class state: "none" and
    *  "the cluster would not tell you" are different answers and the panel
@@ -124,16 +126,7 @@ export function fakeConnection(seed: FakeSeed = {}) {
       // rollup so a harness that says nothing about doors gets an empty feed
       // rather than an unstubbed call.
       accountFrontDoorsOpen: vi.fn(async () => rowsResult(seed.accountFrontDoorsOpen ?? [])),
-      sitesForAccount: rollup(seed.sitesForAccount),
-      libraryItemsForAccount: rollup(seed.libraryItemsForAccount),
-      domainsForAccount: rollup(seed.domainsForAccount),
       invitationsForAccount: rollup(seed.invitationsForAccount),
-      // The fifth band (epic memql#4819). Stubbed to EMPTY rather than left
-      // unstubbed, because an unstubbed read throws and the band renders the
-      // refusal -- which would make the "a refusal is not a zero" assertion
-      // below match two elements and fail for a reason that has nothing to do
-      // with what it is testing.
-      campaignsForAccount: rollup(seed.campaignsForAccount),
       // The credentials panel's read (memql#5013). TYPED ARGS for the reason
       // the writes below carry them: a test that asserts the panel asked
       // about THIS client cannot do it through an empty parameter list. It is
@@ -171,7 +164,14 @@ export function fakeConnection(seed: FakeSeed = {}) {
         const groupId = typeof args["groupId"] === "string" ? args["groupId"] : "";
         return rowsResult(seed.membersOfGroup?.[groupId] ?? []);
       }),
-      executeNamed: vi.fn(async (_name: string, filter: string) => {
+      executeNamed: vi.fn(async (name: string, filter: string) => {
+        // The two builtins the page calls BY NAME until the SDK generates
+        // them (account row ownership, section H).
+        if (name === "accountInventory" || name === "accountAssignmentStatus") {
+          const rows = seed[name];
+          if (rows instanceof Error) throw rows;
+          return rowsResult(rows ?? []);
+        }
         // Decode the SDK's quoted ID so a reread does not retain stale seed data.
         const match = /id==("(?:[^"\\]|\\.)*")$/.exec(filter);
         const wanted = match ? JSON.parse(match[1]!) as string : "";

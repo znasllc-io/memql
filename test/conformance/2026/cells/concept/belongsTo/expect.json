@@ -1,0 +1,94 @@
+{
+  "cases": [
+    {
+      "file": "an-account.memql",
+      "verdict": "load_ok",
+      "note": "The root form: each row belongs to one account, recorded in `accountId`, which the engine fills in at write time."
+    },
+    {
+      "file": "via-a-parent.memql",
+      "verdict": "load_ok",
+      "note": "A row that takes the account of the row a field names. The field's own @relationship says which concept that is, so the declaration names only the field."
+    },
+    {
+      "file": "via-a-named-parent.memql",
+      "verdict": "load_ok",
+      "note": "The same, where the field holds a bare id and carries no @relationship: parent= writes out the concept, by its canonical id, and it has to be a registered one (negative/concept/belongs-to-parent-unknown.memql)."
+    },
+    {
+      "file": "shared.memql",
+      "verdict": "load_ok",
+      "note": "A concept holding cluster-provided rows beside its accounts' rows. On it a row with no account is a statement rather than a gap."
+    },
+    {
+      "file": "stated.memql",
+      "verdict": "load_ok",
+      "note": "The concept's own writers state the account, so the engine never fills the field and never refuses a change to it. The field is still required: every reader of the declaration reads `accountId`, whoever wrote it."
+    },
+    {
+      "file": "cluster.memql",
+      "verdict": "load_ok",
+      "note": "Cluster-wide: never inside an account, and no `accountId` field is asked for."
+    },
+    {
+      "file": "with-a-positional-value.memql",
+      "verdict": "refuse_load",
+      "code": "annotation_form",
+      "message": "@belongsTo on a concept takes keyword arguments"
+    },
+    {
+      "file": "a-misspelled-key.memql",
+      "verdict": "refuse_load",
+      "code": "annotation_key",
+      "message": "@belongsTo on a concept has no key acount -- did you mean account?"
+    },
+    {
+      "file": "written-twice.memql",
+      "verdict": "refuse_load",
+      "code": "annotation_repeated",
+      "message": "@belongsTo is written more than once on a concept",
+      "note": "One concept, one answer. The annotation registry's repeat rule refuses the second declaration before either is read for what it means, so this carries the registry's code rather than belongs_to_conflict."
+    },
+    {
+      "file": "account-and-cluster.memql",
+      "verdict": "refuse_load",
+      "code": "belongs_to_conflict",
+      "message": "@belongsTo(account, cluster) names both -- a concept's rows belong to an account or are cluster-wide, never both"
+    },
+    {
+      "file": "stated-beside-via.memql",
+      "verdict": "refuse_load",
+      "code": "belongs_to_conflict",
+      "message": "`stated` leaves the account to the concept's own writers, and `via` has the engine take it from a parent",
+      "note": "`stated` and `via` are two answers to who decides the account. A row that follows a parent is engine-managed by definition."
+    },
+    {
+      "file": "no-account-field.memql",
+      "verdict": "refuse_load",
+      "code": "belongs_to_field",
+      "message": "records the account in a field named `accountId`, and the concept declares none",
+      "note": "The field's name is fixed so a reader of whose-row-is-this needs no per-concept knowledge, which only holds if every account-scoped concept declares it."
+    },
+    {
+      "file": "an-account-field-that-is-a-list.memql",
+      "verdict": "refuse_load",
+      "code": "belongs_to_field",
+      "message": "records the account in `accountId`, which the concept declares as []string",
+      "note": "One row belongs to one account. A concept that also takes a list of accounts keeps the list in a field of its own beside the single one."
+    },
+    {
+      "file": "via-an-undeclared-field.memql",
+      "verdict": "refuse_load",
+      "code": "belongs_to_via_unknown",
+      "message": "names a field the concept does not declare",
+      "note": "A via naming no field resolves to no parent on every write, and the write does not fail: the row falls through to the call's account and is filed under the wrong one."
+    },
+    {
+      "file": "cluster-beside-the-account-grant.memql",
+      "verdict": "refuse_load",
+      "code": "belongs_to_sharing_mismatch",
+      "message": "The account grant opens a row to the members of the account",
+      "note": "@rowAuthz(account=...) puts a concept's rows inside accounts; declaring it cluster-wide says they are inside none, and the row gate and the inventory would then disagree about the same row."
+    }
+  ]
+}

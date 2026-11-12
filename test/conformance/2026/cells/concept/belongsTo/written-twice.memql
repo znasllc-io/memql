@@ -1,0 +1,8 @@
+/// A support ticket raised by a customer, with two answers to where its rows belong.
+@belongsTo(account)
+@belongsTo(cluster)
+concept ticket {
+  accountId  string
+  title      string
+  status     string
+}

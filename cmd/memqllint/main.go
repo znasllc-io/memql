@@ -25,6 +25,11 @@
 // and in the --json warnings array, and leaves the exit code alone. That scan
 // runs in EVERY mode, single-file included -- see deprecatedFormWarnings.
 //
+// A concept that declares no @belongsTo -- nothing says which account its rows
+// belong to -- LOADS too, so it is a warning of the same kind, in every mode:
+// `WARNING: <file>:<line>: concept "<name>" declares no @belongsTo ...`, naming
+// every form there is to write. See undeclaredBelongsToWarnings.
+//
 // Usage:
 //
 //	memqllint [flags] [path]
@@ -280,6 +285,7 @@ func run(args []string) int {
 	}
 	sort.SliceStable(report.Errors, func(i, j int) bool { return report.Errors[i].Message < report.Errors[j].Message })
 	report.Warnings = append(report.Warnings, deprecatedFormWarnings(tree, target)...)
+	report.Warnings = append(report.Warnings, undeclaredBelongsToWarnings(tree, target)...)
 	report.Warnings = append(report.Warnings, parityWarnings...)
 	if rootLineWarning != "" {
 		report.Warnings = append(report.Warnings, Diagnostic{Level: "warning", Message: rootLineWarning})
@@ -310,6 +316,8 @@ type Report struct {
 	//   - each use of a deprecated form still inside its window (memql#5390),
 	//     "<file>:<line>:<column>: <the form's warning>", in file and line
 	//     order;
+	//   - each concept that declares no @belongsTo, "<file>:<line>: concept
+	//     "<name>" declares no @belongsTo ...", in file and line order;
 	//   - a root that is itself a domain a mount would read, and declares no
 	//     language line. Whether that directory IS a mounted domain depends on
 	//     the tree it is mounted in, which this run cannot see.
@@ -408,6 +416,65 @@ func deprecatedFormWarnings(tree *dslimports.Tree, target string) []Diagnostic {
 			out = append(out, Diagnostic{
 				Level:   "warning",
 				Message: fmt.Sprintf("%s:%d:%d: %s", p, u.Line, u.Column, form.Warning()),
+			})
+		}
+	}
+	return out
+}
+
+// undeclaredBelongsToWarnings is this tool's account of the concepts in the
+// linted source that declare no @belongsTo: one warning per concept,
+// "<file>:<line>: concept "<name>" declares no @belongsTo ...", in file and
+// line order, the line being the concept's own `concept` keyword.
+//
+// A WARNING, NEVER AN ERROR. An undeclared concept loads, and its rows are
+// treated as they always were: nothing records which account they belong to,
+// so they count as cluster-wide. That is a declaration still to be written, not
+// a tree that will not mount, and this tool's exit code answers the second
+// question only.
+//
+// It scans the tree THIS COMMAND LOADED rather than asking the engine-parity
+// pass, for the two reasons deprecatedFormWarnings does. The parity pass runs
+// in directory mode only, so single-file mode -- the invocation an author
+// reaches for on the file they are editing -- would say nothing; and the
+// engine deliberately keeps this finding off the load report the parity pass
+// reads, where it would turn every load that is clean today into one that
+// warns (memql.warnUndeclaredBelongsTo says why). At boot it is one log line
+// and a gauge. Here it is per file and line, which is where an author can act
+// on it.
+//
+// The engine's own tree is reported like any other: a linter is pointed at
+// files, and the boot log's exemption for core domains is about not repeating
+// a build gate on every node, not about those concepts being different.
+//
+// The text is the engine's (memql.UndeclaredBelongsToConcept.Warning), so the
+// forms an author is told to write here are the forms the boot log names.
+func undeclaredBelongsToWarnings(tree *dslimports.Tree, target string) []Diagnostic {
+	if tree == nil {
+		return nil
+	}
+	paths := make([]string, 0, len(tree.Files))
+	for p := range tree.Files {
+		// Single-file mode reports on the target file, as every other lane
+		// here does: its neighbours are loaded to resolve imports, not to be
+		// linted.
+		if target != "" && p != target {
+			continue
+		}
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	var out []Diagnostic
+	for _, p := range paths {
+		src, err := fs.ReadFile(tree.Root, p)
+		if err != nil {
+			continue // unreadable here means the load already said so
+		}
+		for _, undeclared := range memql.ConceptsDeclaringNoBelongsTo(string(src)) {
+			out = append(out, Diagnostic{
+				Level:   "warning",
+				Message: fmt.Sprintf("%s:%d: %s", p, undeclared.Line, undeclared.Warning()),
 			})
 		}
 	}

@@ -23,6 +23,7 @@ use identity.concepts.{ user }
 /// at create time; only the owner reaches their own beliefs.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="content", secondary="kind", tertiary="ownerUserId", status="kind")
+@belongsTo(account)
 concept belief {
   ownerUserId    string!  @description("v1:identity:user.id of the belief owner. The per-row authz key (owned tier); stamped from actor.userId at create time. Consolidation runs per owner, so a belief only ever draws on -- and is only ever recall-able by -- its owner's own episodes.")
   kind           enum("fact", "preference", "outcome")!  @description("What flavor of belief this is. fact = a stable truth about the user / domain / world the agent learned ('the user's primary repo is memql'). preference = a stated or inferred preference ('the user prefers terse answers'). outcome = a learned result of trying something ('approach Y failed twice for task Z' / 'tool T reliably solves problem P'). Drives how the recall path (#585) weights and presents the belief.")
@@ -34,6 +35,7 @@ concept belief {
   lastReinforced datetime!  @description("When this belief was last created or reinforced -- the decay clock. The decay sweep measures age as now - lastReinforced; beliefs unreinforced past MEMQL_HARNESS_CONSOLIDATION_DECAY_DAYS lose confidence, and ones that fall below the prune floor are removed. Reset to now on every reinforcement.")
   status         enum("active", "pruned")!  @description("Belief lifecycle. active = a live belief the recall path returns. pruned = decayed below the confidence floor and retired; the row is kept (append-only model) but filtered out of recall and dedup. Soft-delete because MemQL has no row-removal mutation -- mirrors the safety / platform retention crons.")
   provenanceMutation  string  @description("Name of the mutation that produced this belief version (createMemoryBelief / reinforceMemoryBelief / decayMemoryBelief / pruneMemoryBelief). Pairs with the engine-stamped createdBy intrinsic to name every transition in the audit trail.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
@@ -48,12 +50,14 @@ concept belief {
 /// (owned tier), stamped from actor.userId at create time.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="ownerUserId", secondary="watermark", tertiary="lastRunAt")
+@belongsTo(account)
 concept consolidationCursor {
   ownerUserId  string!  @description("v1:identity:user.id this cursor belongs to. The per-row authz key (owned tier); stamped from actor.userId at create time. One cursor row per owner -- consolidation is per-owner, so each owner's watermark advances independently.")
   watermark    datetime!  @description("The createdAt of the newest episodic node already consolidated for this owner. The next run reads episodes with createdAt > watermark only; advancing this after each run is what bounds consolidation cost incrementally. Set to the engine-computed max(createdAt) over the batch the run processed.")
   lastRunAt    datetime  @description("When consolidation last ran for this owner. Diagnostic / observability only -- the watermark (not this) is the correctness-bearing field. Useful for spotting an owner whose consolidation has stalled.")
   episodesSeen int     @description("Running count of episodic nodes consolidated for this owner across all runs. Diagnostic only -- lets an operator see consolidation throughput per owner. The reinforce/advance mutation takes the bumped value (computed engine-side, since the parser has no arithmetic).")
   provenanceMutation  string  @description("Name of the mutation that produced this cursor version (advanceMemoryConsolidationCursor). Pairs with the engine-stamped createdBy intrinsic to name the transition in the audit trail.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
