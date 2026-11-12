@@ -3,6 +3,7 @@ package shopify
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -52,14 +53,37 @@ func (c *Connector) exchangeOffline(ctx context.Context, shop, clientID, clientS
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	client := &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := &http.Client{Timeout: tokenExchangeTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(req)
 	if err != nil {
 		return grant, errConnectExchange
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxConnectExchangeBody+1))
-	if err != nil || len(body) > maxConnectExchangeBody || response.StatusCode != http.StatusOK {
+	if err != nil || len(body) > maxConnectExchangeBody {
+		return grant, errConnectExchange
+	}
+	// THE ORIGIN'S OWN REFUSAL OF A RENEWAL. Shopify's token endpoint answers
+	// a refresh token it no longer honours -- of an app that was uninstalled
+	// or revoked, expired, unknown, or already replaced -- with one response
+	// for all of them: 401 Unauthorized and {"error": "invalid_request"}
+	// ("This request requires an active refresh_token"), which its
+	// documentation calls final. THAT PAIR, AND ONLY THAT PAIR, says the grant
+	// no longer exists. A 401 that says anything else, a 400 or a 403 about
+	// the request or the app's own credentials, a 429, a 5xx and a renewal
+	// that does not arrive say nothing about the grant: a shop's purge is
+	// decided on this (compliance.go, storeAnswers), and a purge cannot be
+	// taken back.
+	if refresh != "" && response.StatusCode == http.StatusUnauthorized {
+		var refusal struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(body, &refusal) == nil && refusal.Error == renewalRefusedError {
+			return grant, grantRefused{}
+		}
+		return grant, errConnectExchange
+	}
+	if response.StatusCode != http.StatusOK {
 		return grant, errConnectExchange
 	}
 	var wire struct {
@@ -75,6 +99,24 @@ func (c *Connector) exchangeOffline(ctx context.Context, shop, clientID, clientS
 	now := c.now().UTC()
 	return offlineGrant{AccessToken: wire.AccessToken, RefreshToken: wire.RefreshToken, ClientID: clientID, ClientSecret: clientSecret, Scope: wire.Scope, ExpiresAt: now.Add(time.Duration(wire.ExpiresIn) * time.Second), RefreshExpiresAt: now.Add(time.Duration(wire.RefreshExpiresIn) * time.Second)}, nil
 }
+
+// tokenExchangeTimeout is how long the token endpoint is given to answer an
+// exchange or a renewal. A variable, so a test can have one time out without
+// sitting through it.
+var tokenExchangeTimeout = 15 * time.Second
+
+// renewalRefusedError is the error the token endpoint names, with a 401, when
+// the refresh token it was shown is not one it honours any more.
+const renewalRefusedError = "invalid_request"
+
+// grantRefused is the origin's own refusal to renew a store's grant: the token
+// endpoint's 401 invalid_request to its refresh token (exchangeOffline). It
+// reads as any other failed renewal does, and can be told from one: a shop's
+// purge takes it for the origin saying the app is gone (compliance.go,
+// storeAnswers).
+type grantRefused struct{}
+
+func (grantRefused) Error() string { return "shopify: this store's connection could not be renewed" }
 
 func (c *Connector) adminToken(ctx context.Context, store Store) (string, error) {
 	if !store.Managed() {
@@ -115,6 +157,9 @@ func (c *Connector) offlineAdminTokenLocked(ctx context.Context, store Store) (s
 		return "", fmt.Errorf("shopify: reconnect this store")
 	}
 	next, err := c.exchangeOffline(ctx, store.Domain, grant.ClientID, grant.ClientSecret, "", grant.RefreshToken)
+	if errors.As(err, &grantRefused{}) {
+		return "", grantRefused{}
+	}
 	if err != nil {
 		return "", fmt.Errorf("shopify: this store's connection could not be renewed")
 	}

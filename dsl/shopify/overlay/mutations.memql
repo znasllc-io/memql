@@ -253,10 +253,17 @@ mutation complianceJob queueComplianceJob {
 ///
 /// A second request for the same erasure -- a customer who asks again, a shop
 /// uninstalled a second time -- lands on the row of the first, which is done.
-/// It is made due again: waiting, with no first pass recorded, after the hold
-/// of the new request (dueAt), naming the orders of both requests. The runner
-/// also calls it, without a dueAt, when a request reached a job while its last
-/// pass ran: the job is not done, and both passes are made again.
+/// It is made due again: waiting, with no first pass recorded and nothing
+/// left of its earlier completion (completedAt, and the outcome the caller
+/// passes empty), after the hold of the new request (dueAt), naming the
+/// orders of both requests. The runner also calls it, without a dueAt, when
+/// a request reached a job while its last pass ran: the job is not done, and
+/// both passes are made again.
+///
+/// A data request is opened again too, when it is delivered again after it
+/// was answered: not to answer it a second time (a job that has filed its
+/// export files nothing), but because the job is what deletes the delivery
+/// that brought it back.
 ///
 /// Server-only, and actor.userId scoping is not the fix: the caller is the
 /// connector reacting to a verified webhook, or its hourly runner, and
@@ -279,6 +286,7 @@ mutation complianceJob reopenComplianceJob {
       id:          args.jobId
       status:      "pending"
       scrubbedAt:  ""
+      completedAt: ""
       lastError:   ""
     }
   }

@@ -6,7 +6,7 @@ builtin shopifyEnsureSubscriptions {
 
 @sdk
 @executor("integration.shopify.runComplianceJobs")
-@description("Run the privacy jobs that are due: export what the mirror holds on a customer to the store owner's Library, erase a customer from every version of every row of the person and from the store's processed deliveries, purge a redacted shop's mirror with its sync state and its staged deliveries. Every erasure is made twice, an hour apart, and a job that fails is run again at every run until it is done. Every pass that ran is audited. A shop's purge reads the store as it is now and asks it first, and deletes only when the origin refuses the app outright, so a reverted uninstall does not cost the mirror. For the scheduled automation or a cluster owner; anybody else is refused before anything runs.")
+@description("Run the privacy jobs that are due: export what the mirror holds on a customer to the store owner's Library, erase a customer from every version of every row of the person and from the store's processed deliveries, purge a redacted shop's mirror with its sync state and its staged deliveries. Every erasure is made twice, an hour apart, and a job that fails is run again at every run until it is done. Every pass that ran is audited. A shop's purge reads the store as it is now: a store whose row records the uninstall is purged, and any other is asked first and purged only when the origin refuses the app outright, so a reverted uninstall does not cost the mirror. The deliveries that asked for a job are deleted when it is done. For the scheduled automation or a cluster owner; anybody else is refused before anything runs.")
 builtin shopifyRunComplianceJobs {
 }
 

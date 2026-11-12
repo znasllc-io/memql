@@ -142,8 +142,10 @@ concept complianceJob {
   /// The customer, for the two customer topics.
   customerGid  string
   /// The orders the request names (orders_to_redact, orders_requested), as
-  /// gids. They are in the request's scope whether or not they name the
-  /// customer.
+  /// gids. One of them is in the request's scope when it names the customer
+  /// now, or names nobody. One that has since become another customer's is
+  /// not: it is that person's order, and only its versions from when it was
+  /// hers are scrubbed.
   orderGids    []string
   /// Shopify's own request id, recorded with the export it produces.
   requestId    string
@@ -183,8 +185,11 @@ concept complianceJob {
   /// privacy delivery's body holds the customer's email address and phone
   /// number, and a managed store's arrive on the app-level source, where
   /// nothing that is done to the store's own deliveries reaches them. So the
-  /// job remembers them, and their bodies are blanked at each pass of an
-  /// erasure and when a job ends done.
+  /// job remembers them: their bodies are blanked at each pass of an erasure,
+  /// and when the job ends done the deliveries themselves are deleted. The
+  /// receiver names a delivery by its signed body, so one that stayed would
+  /// be the row the same request lands on when it is asked again, already
+  /// processed, and never worked.
   deliveryIds  []string
   /// What a data request filed in the store owner's Library: the id of the
   /// v1:library:generatedOutput that holds the export. An erasure of the same

@@ -228,7 +228,10 @@ func TestAPurgeStartsAgainABackfillStillInFlightOnceItIsDone(t *testing.T) {
 	h := redactionHarness(t, db, purged, map[string]map[string]any{"order": {"backfillStatus": "running", "backfillCursor": "c-1"}})
 	job := ComplianceJob{Topic: TopicShopRedact, StoreID: purged, ReceivedAt: h.now, DueAt: h.now}
 
-	step, err := h.conn.runComplianceJob(context.Background(), Store{ID: purged, Domain: "acme-widgets.myshopify.com"}, true, job)
+	// The store's row records the uninstall, as the row of a store whose
+	// shop/redact comes due does: one that does not is asked first.
+	uninstalled := Store{ID: purged, Domain: "acme-widgets.myshopify.com", UninstalledAt: h.now.Add(-49 * time.Hour).Format(time.RFC3339)}
+	step, err := h.conn.runComplianceJob(context.Background(), uninstalled, true, job)
 	outcome := step.Outcome
 	if err != nil {
 		t.Fatal(err)
@@ -238,5 +241,36 @@ func TestAPurgeStartsAgainABackfillStillInFlightOnceItIsDone(t *testing.T) {
 	}
 	if !strings.Contains(outcome, "purged ") || !strings.Contains(outcome, "started 1 backfill(s) again from nothing") {
 		t.Errorf("outcome = %q, want what was purged and that one backfill was started again", outcome)
+	}
+}
+
+// A purge starts the store's backfills in flight again right after it, before
+// the deliveries it deletes and the stamp, as a customer's erasure does after
+// its scrub: a pass that keeps failing on either would otherwise never reach
+// the restart, and an export the origin took before the purge would write the
+// store back.
+func TestAPurgeStartsItsBackfillsAgainBeforeItsStamp(t *testing.T) {
+	db := openTestDB(t, "shop/redact restarts a backfill before it stamps")
+	if db == nil {
+		return
+	}
+	const purged = "dbtest-acme-restart-first"
+	h := redactionHarness(t, db, purged, map[string]map[string]any{"order": {"backfillStatus": "running", "backfillCursor": "c-1"}})
+	job := ComplianceJob{Topic: TopicShopRedact, StoreID: purged, ReceivedAt: h.now, DueAt: h.now}
+	uninstalled := Store{ID: purged, Domain: "acme-widgets.myshopify.com", UninstalledAt: h.now.Add(-49 * time.Hour).Format(time.RFC3339)}
+	if _, err := h.conn.runComplianceJob(context.Background(), uninstalled, true, job); err != nil {
+		t.Fatal(err)
+	}
+	restart, stamp := -1, -1
+	for i, q := range h.engine.calls() {
+		if restart < 0 && strings.Contains(q, "datasyncQueueBackfill(") {
+			restart = i
+		}
+		if stamp < 0 && strings.HasPrefix(q, "markStoreRedacted(") {
+			stamp = i
+		}
+	}
+	if restart < 0 || stamp < 0 || restart > stamp {
+		t.Errorf("the restart of the backfill in flight is call %d and the stamp call %d of the pass, want the restart made, and first", restart, stamp)
 	}
 }
