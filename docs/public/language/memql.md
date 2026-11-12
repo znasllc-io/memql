@@ -195,10 +195,27 @@ by one needs that decided before its rewrite lands. An agent-list rewrite
 admits nothing new: `@requiresAgentRole` compares the same agent role the list
 did.
 
+**A concept with no `@belongsTo` is the one form that is not a spelling.**
+Nothing you wrote is wrong; a declaration is missing, and which account a
+concept's rows belong to is a decision no rewrite can make for you, so the
+table names `memqllint`, which reports each undeclared concept by file and
+line, instead of a rewrite. It is judged on the concepts a node mounts beside
+the engine's own tree -- a product bundle at `MEMQL_DSL_PATH` and a pack -- since
+a build gate already holds the engine's tree to declaring every concept. Inside
+the window a load writes one warning line naming every undeclared concept and
+counts each on `memql_dsl_deprecated_uses_total{rule="concept_belongs_to_undeclared"}`,
+and puts nothing on the load report, so the editor shows no squiggle for it.
+From `0.34` a load refuses each one as `belongs_to_undeclared`, naming the
+concept and the forms to write ([which account a row belongs
+to](#which-account-a-row-belongs-to)). An account export refuses to run while
+any loaded concept declares nothing, and a concept taught to a running cluster
+must declare one already: its promotion is refused with the same code.
+
 <!-- deprecation-window:begin -- generated from component/language/deprecation; see deprecation_window_docs_test.go -->
 
 | Form | Write instead | Rewrite | Deprecated in | Stops loading in | Rule |
 |---|---|---|---|---|---|
+| `a concept with no @belongsTo` | `@belongsTo(account, ...) or @belongsTo(cluster)` | `memqllint` | 0.32.0 | 0.34 | `concept_belongs_to_undeclared` |
 | `@allowedRoles(...)` | `@requiresAgentRole(...) or @requiresRank(...)` | `memqlmigrate --rewrite=allowed-roles` | 0.24.0 | 0.26 | `deprecated_allowed_roles` |
 | `array(T)` | `[]T` | `memqlmigrate --rewrite=slice-syntax` | 0.23.0 | 0.25 | `deprecated_array_type` |
 

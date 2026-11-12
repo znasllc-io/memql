@@ -159,6 +159,7 @@ func (e *MemQLEngine) promoteConceptIntoLiveRegistry(ctx context.Context, gate *
 	// The candidate set: every concept currently registered, with this one
 	// added (or replacing its prior promotion). All() hands back a copy of the
 	// map, so building the candidate set touches nothing live.
+	current := registry.List()
 	candidates := registry.All()
 	candidates[id] = built
 	list := make([]*memoryNodes.Concept, 0, len(candidates))
@@ -168,6 +169,29 @@ func (e *MemQLEngine) promoteConceptIntoLiveRegistry(ctx context.Context, gate *
 
 	relationships, err := deriveConceptRegistryState(list)
 	if err != nil {
+		return fmt.Errorf("authoring: promote concept %q: %w", c.Name, err)
+	}
+
+	// Which account the concept's rows belong to (design record
+	// docs/superpowers/specs/2026-11-12-account-export-design.md, E5). A concept
+	// authored at runtime must declare it: nothing outside this repository can
+	// have written one before this check, so unlike a mounted bundle it gets
+	// no deprecation window. Checked after the derivation, whose refusals (a
+	// relationship to nothing, a broken node type) are about the concept's
+	// shape and come first, and before anything is merged.
+	if built.BelongsTo == nil {
+		return fmt.Errorf("authoring: promote concept %q: %w", c.Name,
+			undeclaredBelongsToRefusal(id, "a concept taught to a running cluster declares one"))
+	}
+
+	// The cross-concept @belongsTo checks a load runs (belongsToProblems),
+	// over the candidate set, after the derivation has resolved each
+	// relationship's target, which is what a `via` is followed through. Only
+	// a problem THIS promote introduces refuses it: one the live registry
+	// already had would refuse every promote for a fault that is not the
+	// author's, so the live set's problems are subtracted. Refused with the
+	// load's own code and words.
+	if err := newBelongsToProblem(current, list); err != nil {
 		return fmt.Errorf("authoring: promote concept %q: %w", c.Name, err)
 	}
 
@@ -204,5 +228,20 @@ func (e *MemQLEngine) promoteConceptIntoLiveRegistry(ctx context.Context, gate *
 	// on replica A visible to a client on replica B without a reconnect. An add
 	// and a re-promote both ride Added; the client upserts by id.
 	e.broadcastConceptAdded(built)
+	return nil
+}
+
+// newBelongsToProblem returns the first @belongsTo cross-concept refusal the
+// candidate set has and the current set did not, or nil.
+func newBelongsToProblem(current, candidates []*memoryNodes.Concept) error {
+	had := map[string]bool{}
+	for _, p := range belongsToProblems(current) {
+		had[p.concept+"\x00"+p.err.Error()] = true
+	}
+	for _, p := range belongsToProblems(candidates) {
+		if !had[p.concept+"\x00"+p.err.Error()] {
+			return p.err
+		}
+	}
 	return nil
 }

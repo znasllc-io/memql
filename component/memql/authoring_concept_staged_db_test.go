@@ -101,6 +101,7 @@ func (s *recordingPromoteStore) CreatePromoteConstruct(ctx context.Context, cons
 func stagedDataDBConceptSrc() string {
 	return `@version("1.0.0")
 @description("A concept taught to a running cluster, with its data staged")
+@belongsTo(cluster)
 concept stagedWidget {
   ownerUserId  string
   label        string

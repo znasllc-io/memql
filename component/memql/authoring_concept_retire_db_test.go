@@ -48,6 +48,7 @@ func newRetireDBFixture(suffix string) retireDBFixture {
 	ns := "retire3756" + strings.ReplaceAll(suffix, "-", "")
 	conceptSrc := `@version("1.0.0")
 @description("A concept taught to a running cluster, then withdrawn")
+@belongsTo(cluster)
 concept demoWidget {
   ownerUserId  string
   label        string

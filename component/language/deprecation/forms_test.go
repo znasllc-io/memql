@@ -204,3 +204,48 @@ func TestAnUnstampedBuildRefusesNothing(t *testing.T) {
 		}
 	}
 }
+
+// A concept with no @belongsTo is the third form through the window, and the
+// first that is not a spelling: nothing in the source is written wrong, a
+// declaration is missing. It enters in 0.32.0 -- VERSION is 0.31.x, so the next
+// minor to ship is 0.32 -- and refuses from 0.34, two minors later. Its fix is
+// to write a declaration, which no rewrite can choose, so it names the linter
+// that finds each one rather than a rewrite.
+func TestAConceptWithNoBelongsToIsInAWindow(t *testing.T) {
+	f, ok := Lookup(ConceptBelongsToUndeclared)
+	if !ok {
+		t.Fatalf("%s is not registered", ConceptBelongsToUndeclared)
+	}
+	if f.DeprecatedIn != "0.32.0" {
+		t.Errorf("DeprecatedIn = %q, want 0.32.0", f.DeprecatedIn)
+	}
+	if got := f.RefusedFrom(); got != "0.34" {
+		t.Errorf("RefusedFrom() = %q, want 0.34", got)
+	}
+	if f.RefusesAt("0.33.9") || !f.RefusesAt("0.34.0") {
+		t.Errorf("RefusesAt: 0.33.9=%v 0.34.0=%v, want false then true", f.RefusesAt("0.33.9"), f.RefusesAt("0.34.0"))
+	}
+	if f.Spelling != "a concept with no @belongsTo" {
+		t.Errorf("Spelling = %q", f.Spelling)
+	}
+	for _, want := range []string{"@belongsTo(account", "@belongsTo(cluster)"} {
+		if !strings.Contains(f.Replacement, want) {
+			t.Errorf("Replacement %q does not name %q", f.Replacement, want)
+		}
+	}
+	if f.Rewrites() {
+		t.Errorf("Migrator %q reads as a rewrite; a missing declaration has none", f.Migrator)
+	}
+	for _, text := range []string{f.Warning(), f.Refusal()} {
+		if !strings.Contains(text, "`memqllint` names each one") || strings.Contains(text, "rewrites it") {
+			t.Errorf("the text must say the linter names each one, and claim no rewrite:\n%s", text)
+		}
+	}
+	// The two spelling forms still name their rewrite.
+	for _, rule := range []string{ArrayType, AllowedRoles} {
+		g, _ := Lookup(rule)
+		if !g.Rewrites() || !strings.Contains(g.Warning(), "rewrites it") {
+			t.Errorf("form %s: Rewrites()=%v, warning %q", rule, g.Rewrites(), g.Warning())
+		}
+	}
+}

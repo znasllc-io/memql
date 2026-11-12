@@ -75,6 +75,11 @@ const (
 	CodeBelongsToSharingMismatch = "belongs_to_sharing_mismatch"
 	CodeBelongsToStaysUnknown    = "belongs_to_stays_unknown"
 	CodeBelongsToViaStays        = "belongs_to_via_stays"
+	// CodeBelongsToUndeclared is the load's refusal of a concept that declares
+	// no @belongsTo, once that form's deprecation window has closed
+	// (component/language/deprecation, ConceptBelongsToUndeclared), and the
+	// promotion's refusal of an authored concept with none.
+	CodeBelongsToUndeclared = "belongs_to_undeclared"
 )
 
 // The reasons a kind STAYS on its cluster: an account export counts its rows,

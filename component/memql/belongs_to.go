@@ -41,7 +41,9 @@ import (
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/language/deprecation"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql/baseloader"
 	"github.com/znasllc-io/memql/component/metrics"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
@@ -639,6 +641,104 @@ func warnUndeclaredBelongsTo(logger *slog.Logger, all []*memorynodes.Concept, pu
 			"and export leave them out. Declare one of: "+belongsToForms+
 			". `memqllint` names each undeclared concept by file and line.")
 	return undeclared
+}
+
+// recordUndeclaredBelongsTo is the load's whole handling of the concepts that
+// declare no @belongsTo, read through the deprecation window of
+// deprecation.ConceptBelongsToUndeclared at release (design record
+// docs/superpowers/specs/2026-11-12-account-export-design.md, E5).
+//
+// The rule is fed from the REGISTRY rather than from the parser's scan of
+// deprecated uses (recordDeprecatedUses): the form is a missing declaration,
+// not a spelling, so there is nothing in a source to find. Which concepts it
+// judges is undeclaredBelongsTo's set -- a mounted bundle's and a pack's; the
+// engine's own tree is a build gate's.
+//
+//   - INSIDE THE WINDOW (and in every unstamped build, which reads no release
+//     and fails open): the one warning line and the gauge warnUndeclaredBelongsTo
+//     has always written, and NOTHING on the load report. Row-ownership R3: a
+//     report warning would end the clean load of every corpus case that
+//     declares a concept for another purpose.
+//   - PAST IT: one coded skip per concept (belongs_to_undeclared), naming it and
+//     the forms to write, which strict boot refuses like any other skip.
+//
+// A publishing load also counts each concept under the rule on
+// memql_dsl_deprecated_uses_total, so the decision to let the window close is
+// taken on evidence. logger may be nil. It returns the concepts it judged.
+func recordUndeclaredBelongsTo(report *LoadReport, logger *slog.Logger, all []*memorynodes.Concept, release string, publish bool) []string {
+	form, ok := deprecation.Lookup(deprecation.ConceptBelongsToUndeclared)
+	if !ok || !form.RefusesAt(release) {
+		undeclared := warnUndeclaredBelongsTo(logger, all, publish)
+		if publish && ok {
+			metrics.DSLDeprecatedUse(form.Rule, len(undeclared))
+		}
+		return undeclared
+	}
+	undeclared := undeclaredBelongsTo(all)
+	if publish {
+		metrics.BelongsToUndeclared(len(undeclared))
+		metrics.DSLDeprecatedUse(form.Rule, len(undeclared))
+	}
+	for _, name := range undeclared {
+		report.AddSkip(baseloader.Skip{
+			Component: "memql.engine",
+			Keyword:   "concept",
+			Name:      name,
+			Phase:     "contract-gate:belongsTo",
+			Err:       undeclaredBelongsToRefusal(name, undeclaredWindowClosed(form)).Error(),
+			Code:      langparser.CodeBelongsToUndeclared,
+		})
+	}
+	if logger != nil && len(undeclared) > 0 {
+		logger.Error("DSL concepts declare no @belongsTo, and that form's deprecation window has closed: refused",
+			"component", "memql.belongsTo",
+			"count", len(undeclared),
+			"concepts", strings.Join(undeclared, ", "),
+			"detail", form.Refusal())
+	}
+	return undeclared
+}
+
+// undeclaredBelongsToRefusal is the refusal of one concept that declares no
+// @belongsTo: the concept, why it is refused, every form there is to write, and
+// the linter that finds the rest. The load passes the window that closed; a
+// promotion, which never had one, passes its own reason.
+func undeclaredBelongsToRefusal(name, why string) *langparser.BelongsToError {
+	return langparser.NewBelongsToError(langparser.CodeBelongsToUndeclared,
+		"concept %q declares no @belongsTo, so nothing records which account its rows belong to; %s. "+
+			"Write one above it: %s. `memqllint` names each undeclared concept by file and line",
+		name, why, belongsToForms)
+}
+
+// undeclaredWindowClosed is the load's reason: the form's window has closed.
+func undeclaredWindowClosed(form deprecation.Form) string {
+	return fmt.Sprintf("%s was deprecated in %s and stopped loading in %s", form.Spelling, form.DeprecatedIn, form.RefusedFrom())
+}
+
+// UndeclaredAccountConcepts is the sorted names of the registered concepts that
+// declare no @belongsTo. An account export refuses to run while it is not
+// empty, and the account page lists it (design section C, E5).
+//
+// It leaves out only a nil entry and one with no name. It does NOT leave out
+// the engine's own domains, unlike the load's warning (undeclaredBelongsTo):
+// that warning is for an operator who can act on a bundle, while this answer
+// decides whether a file is complete, and the registry can hold a concept in a
+// core namespace that no build gate saw -- an authored concept promoted under
+// a core domain's origin. Today's tree and today's promotion hold none (a build
+// gate and the promote check refuse them), so on a cluster that booted the
+// answer is a mounted bundle's or a pack's; the test pins both halves.
+func UndeclaredAccountConcepts(concepts []*memorynodes.Concept) []string {
+	var out []string
+	for _, c := range concepts {
+		if c == nil || c.BelongsTo != nil {
+			continue
+		}
+		if name := strings.TrimSpace(c.Name); name != "" {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // UndeclaredBelongsToConcept is one concept declaration that carries no

@@ -1197,10 +1197,12 @@ concept nativeExample {
 // leave its parent behind; the reverse is accepted. A parent that declares
 // NOTHING is accepted.
 //
-// LEAVING IT OFF LOADS, AND IS REPORTED. Nothing records the account of an
-// undeclared concept's rows, so they count as cluster-wide. `memqllint` names
-// each such concept by file and line; a node that mounts a bundle holding one
-// logs it at every load. Declare `cluster` deliberately rather than leaving
+// LEAVING IT OFF LOADS, AND IS REPORTED -- FOR NOW. Nothing records the account
+// of an undeclared concept's rows, so they count as cluster-wide. `memqllint`
+// names each such concept by file and line; a node that mounts a bundle holding
+// one logs it at every load. Deprecated in 0.32.0: from 0.34 a release refuses
+// it (belongs_to_undeclared), an account export refuses to run while one is
+// loaded, and a concept promoted at runtime is refused without one. Declare `cluster` deliberately rather than leaving
 // the annotation off -- only one of the two says somebody decided.
 
 @description("Each row belongs to one account; the engine fills accountId in.")

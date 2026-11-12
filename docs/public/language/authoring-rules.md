@@ -3889,7 +3889,12 @@ concept ticketAttachment {
 A concept with no `@belongsTo` still loads, and its rows count as cluster-wide:
 nothing records their account. `memqllint` names each such concept by file and
 line as a warning, and a node that mounts a bundle holding one logs it at every
-load and counts it on `memql_dsl_belongs_to_undeclared`. Declare `cluster`
+load and counts it on `memql_dsl_belongs_to_undeclared`. It is in a deprecation
+window: deprecated in 0.32.0, a release from 0.34 refuses a mounted bundle's
+undeclared concept as `belongs_to_undeclared`
+([forms in a deprecation window](memql.md#forms-in-a-deprecation-window)), an
+account export refuses to run while one is loaded, and a concept taught to a
+running cluster is refused without one. Declare `cluster`
 deliberately rather than leaving the annotation off: the two read the same
 today, and only one of them says somebody decided.
 

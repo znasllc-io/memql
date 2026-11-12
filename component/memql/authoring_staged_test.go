@@ -141,6 +141,7 @@ func TestStageBundleDurable_RefusesConceptByName(t *testing.T) {
 	store := &fakePromoteStore{}
 
 	bundle := `
+@belongsTo(cluster)
 concept order {
   ownerUserId string!
 }

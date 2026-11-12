@@ -32,6 +32,7 @@ const catalogFixtureDomain = "catalogfixture"
 const catalogFixtureConcepts = `/// A widget owned by one user.
 @displayCard(primary="label")
 @rowAuthz(owner="ownerUserId")
+@belongsTo(cluster)
 concept widget {
   ownerUserId string! @description("Owner.")
   label       string  @description("Display label.")

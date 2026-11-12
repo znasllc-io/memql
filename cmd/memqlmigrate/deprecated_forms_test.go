@@ -22,6 +22,12 @@ import (
 
 func TestEveryDeprecatedFormNamesARewriteThisToolHas(t *testing.T) {
 	for _, f := range deprecation.Forms() {
+		if !f.Rewrites() {
+			// A form no rewrite can fix -- a concept with no @belongsTo, whose
+			// declaration only its author can choose -- names the linter that
+			// finds each use instead, and its warning says so.
+			continue
+		}
 		name, ok := strings.CutPrefix(f.Migrator, "memqlmigrate --rewrite=")
 		if !ok {
 			t.Errorf("form %s: Migrator %q is not a `memqlmigrate --rewrite=<name>` invocation, so an author "+

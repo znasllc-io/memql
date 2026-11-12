@@ -11,6 +11,7 @@ import (
 
 const sessionConceptSrc = `@version("1.0.0")
 @description("Session test widget")
+@belongsTo(cluster)
 concept mcpWidget {
   ownerUserId  string  @required
   label        string

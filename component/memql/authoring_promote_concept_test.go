@@ -25,12 +25,14 @@ import (
 	"testing"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // --- fixtures -------------------------------------------------------------
 
 const trainedWidgetSrc = `@version("1.0.0")
 @description("A concept taught to a running cluster")
+@belongsTo(cluster)
 concept trainedWidget {
   ownerUserId  string  @required
   label        string
@@ -452,6 +454,7 @@ func TestPromoteConcept_CannotShadowACoreConcept(t *testing.T) {
 
 	shadow := `@version("1.0.0")
 @description("An impostor")
+@belongsTo(cluster)
 concept user {
   label  string
 }`
@@ -482,6 +485,7 @@ func TestPromoteConcept_RepromoteReplacesItsOwnPromotion(t *testing.T) {
 
 	revised := `@version("1.0.0")
 @description("A concept taught to a running cluster, revised")
+@belongsTo(cluster)
 concept trainedWidget {
   ownerUserId  string  @required
   label        string
@@ -523,7 +527,7 @@ func TestPromoteConcept_RefusesReservedPayloadField(t *testing.T) {
 	for _, field := range []string{"provenance", "actor", "args", "row", "config", "id", "createdAt"} {
 		t.Run(field, func(t *testing.T) {
 			e := promoteConceptEngine(t)
-			src := "@version(\"1.0.0\")\nconcept trainedReserved {\n  " +
+			src := "@version(\"1.0.0\")\n@belongsTo(cluster)\nconcept trainedReserved {\n  " +
 				field + "  object\n  label  string\n}"
 
 			err := promoteConceptSource(t, e, src, "trainedReserved")
@@ -543,6 +547,7 @@ func TestPromoteConcept_RefusesReservedPayloadField(t *testing.T) {
 func TestPromoteConcept_RefusesConceptWithoutANamespace(t *testing.T) {
 	e := promoteConceptEngine(t)
 	src := `@description("no namespace")
+@belongsTo(cluster)
 concept trainedNoNamespace {
   label  string
 }`
@@ -584,6 +589,7 @@ func TestPromoteConcept_RelationshipToACoreConceptIsDerived(t *testing.T) {
 
 	src := `@version("1.0.0")
 @description("A trained concept pointing at a core one")
+@belongsTo(cluster)
 concept trainedNote {
   ownerUserId  string  @required
   body         string
@@ -620,6 +626,7 @@ func TestPromoteConcept_RefusesUnresolvableRelationshipTarget(t *testing.T) {
 	e := promoteConceptEngine(t)
 
 	src := `@version("1.0.0")
+@belongsTo(cluster)
 concept trainedDangling {
   ownerUserId  string  @required
 
@@ -652,6 +659,7 @@ func TestPromoteConcept_RefusesRelationshipFieldNotDeclared(t *testing.T) {
 	e := promoteConceptEngine(t)
 
 	src := `@version("1.0.0")
+@belongsTo(cluster)
 concept trainedTypo {
   ownerUserId  string  @required
 
@@ -682,6 +690,7 @@ func TestPromoteConcept_NodeTypeInvariantsApply(t *testing.T) {
 			name: "collection without contains",
 			source: `@version("1.0.0")
 @type("collection")
+@belongsTo(cluster)
 concept trainedBadBasket {
   ownerUserId  string  @required
 }`,
@@ -691,6 +700,7 @@ concept trainedBadBasket {
 			name: "reference without alias or equals",
 			source: `@version("1.0.0")
 @type("reference")
+@belongsTo(cluster)
 concept trainedBadPointer {
   ownerUserId  string  @required
 }`,
@@ -699,6 +709,7 @@ concept trainedBadPointer {
 		{
 			name: "contains on a non-collection",
 			source: `@version("1.0.0")
+@belongsTo(cluster)
 concept trainedBadContainer {
   ownerUserId  string  @required
   itemId       string
@@ -735,12 +746,14 @@ func TestPromoteConcept_CollectionWithContainsLands(t *testing.T) {
 	e := promoteConceptEngine(t)
 
 	item := `@version("1.0.0")
+@belongsTo(cluster)
 concept trainedItem {
   ownerUserId  string  @required
   label        string
 }`
 	basket := `@version("1.0.0")
 @type("collection")
+@belongsTo(cluster)
 concept trainedBasket {
   ownerUserId  string  @required
   itemId       string
@@ -920,3 +933,55 @@ func TestRehydratePromotedConcept_PropagatesAcrossNodes(t *testing.T) {
 // them (memql#3756). Two tests here pinned the interim refusal ("a concept can be
 // taught and cannot yet be un-taught") and were deleted with it, rather than
 // weakened into asserting the new behaviour from the promote side.
+
+// --- which account a promoted concept's rows belong to ---------------------
+
+// A concept authored at runtime declares @belongsTo from the account-export
+// piece on (design section C, E5): nothing outside this repository can have
+// written one, so it needs no window. A promote with no declaration is refused
+// naming the forms to write; one with a declaration lands; one whose `via`
+// chain the load would refuse is refused with the load's own code, and the live
+// registry is untouched in both refusals.
+func TestPromoteConcept_RefusesOneThatDeclaresNoBelongsTo(t *testing.T) {
+	e := promoteConceptEngine(t)
+	src := "@version(\"1.0.0\")\nconcept trainedUndeclared {\n  label  string\n}"
+	err := promoteConceptSource(t, e, src, "trainedUndeclared")
+	if err == nil {
+		t.Fatal("a concept with no @belongsTo was promoted")
+	}
+	for _, want := range []string{"[" + langparser.CodeBelongsToUndeclared + "]", "@belongsTo(account)", "@belongsTo(cluster)"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not carry %q: %v", want, err)
+		}
+	}
+	if _, getErr := e.concepts.Get("v1:trainingns:trainedUndeclared"); getErr == nil {
+		t.Error("the refused concept reached the live registry")
+	}
+}
+
+func TestPromoteConcept_PromotesOneThatDeclaresBelongsTo(t *testing.T) {
+	e := promoteConceptEngine(t)
+	src := "@version(\"1.0.0\")\n@belongsTo(account)\nconcept trainedDeclared {\n  accountId  string\n  label      string\n}"
+	if err := promoteConceptSource(t, e, src, "trainedDeclared"); err != nil {
+		t.Fatalf("a declared concept was refused: %v", err)
+	}
+	got, err := e.concepts.Get("v1:trainingns:trainedDeclared")
+	if err != nil || !got.AccountScoped() {
+		t.Fatalf("the promoted concept is missing or lost its declaration: %v %+v", err, got)
+	}
+}
+
+func TestPromoteConcept_RefusesAnUnsoundBelongsToChain(t *testing.T) {
+	e := promoteConceptEngine(t)
+	// v1:identity:user is cluster-wide, so a row that follows one has no
+	// account to take: the load's belongs_to_via_cluster.
+	src := "@version(\"1.0.0\")\n@belongsTo(account, via=\"userId\", parent=\"v1:identity:user\")\n" +
+		"concept trainedFollower {\n  accountId  string\n  userId     string\n}"
+	err := promoteConceptSource(t, e, src, "trainedFollower")
+	if err == nil || !strings.Contains(err.Error(), "["+langparser.CodeBelongsToViaCluster+"]") {
+		t.Fatalf("want the load's %s refusal, got %v", langparser.CodeBelongsToViaCluster, err)
+	}
+	if _, getErr := e.concepts.Get("v1:trainingns:trainedFollower"); getErr == nil {
+		t.Error("the refused concept reached the live registry")
+	}
+}

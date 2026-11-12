@@ -375,6 +375,7 @@ spec ghostShape danglingSpec = row => row.status == "open"`,
 // bound to `ticket` binds is observable from the fields it may read.
 const twinTicketConcepts = `@version("1.0.0")
 @description("A second ticket, in another domain.")
+@belongsTo(cluster)
 concept ticket {
   state  string!  @description("Workflow state.")
 }

@@ -709,17 +709,20 @@ func (e *MemQLEngine) initFromTree(concepts concept.Registry, tree fs.FS, publis
 		}
 	}
 
-	// The concepts that declared no `@belongsTo` at all. NOT a problem and NOT
-	// on the report: an undeclared concept still loads, and its rows are
-	// treated as they always were. It is one WARN line and a gauge, and
+	// The concepts that declared no `@belongsTo` at all, read through that
+	// form's deprecation window (recordUndeclaredBelongsTo). Inside the window
+	// -- and in every unstamped build -- NOT a problem and NOT on the report:
+	// one WARN line, the gauge and the count under the rule, and
 	// warnUndeclaredBelongsTo says why it is deliberately neither a skip nor a
-	// report warning. The gauge is the node's own, so only a publishing load
-	// sets it; a candidate validation logs to whatever logger it was handed.
+	// report warning. Past the window, a release refuses each one as a coded
+	// skip. The gauge and the count are the node's own, so only a publishing
+	// load sets them; a candidate validation logs to whatever logger it was
+	// handed.
 	var belongsToLogger *slog.Logger
 	if e.Component != nil && e.Logger != nil {
 		belongsToLogger = e.Logger
 	}
-	warnUndeclaredBelongsTo(belongsToLogger, all, publish)
+	recordUndeclaredBelongsTo(report, belongsToLogger, all, deprecation.Current(), publish)
 
 	dups := DetectDuplicateConstructs(rawTree)
 	report.SetDuplicates(dups)

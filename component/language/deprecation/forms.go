@@ -38,6 +38,7 @@ package deprecation
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -54,6 +55,20 @@ const ArrayType = "deprecated_array_type"
 // rank of the person the call is for). A constant for ArrayType's reason.
 const AllowedRoles = "deprecated_allowed_roles"
 
+// ConceptBelongsToUndeclared is the rule of a concept that declares no
+// @belongsTo (design record
+// docs/superpowers/specs/2026-11-12-account-export-design.md, E5). It is the
+// first form in a window that is not a SPELLING: nothing in the source is
+// written wrong, a declaration is missing, so the parser's scan has nothing to
+// find. The engine's load feeds it from the concept registry instead
+// (component/memql/belongs_to.go), and the linter names each concept by file
+// and line. A constant for ArrayType's reason.
+const ConceptBelongsToUndeclared = "concept_belongs_to_undeclared"
+
+// rewritePrefix opens a Migrator that is a rewrite this repository's
+// memqlmigrate holds.
+const rewritePrefix = "memqlmigrate --rewrite="
+
 // Form is one deprecated spelling and the two releases that bound its window.
 type Form struct {
 	// Rule is the stable id: the diagnostic code, the metric's label, and what
@@ -65,7 +80,9 @@ type Form struct {
 	Spelling string
 	// Replacement is what to write instead: "[]T".
 	Replacement string
-	// Migrator is the rewrite that carries a tree across.
+	// Migrator is the rewrite that carries a tree across, or -- for a form no
+	// rewrite can fix, such as a declaration only its author can choose -- the
+	// tool that names each use (see Rewrites).
 	Migrator string
 	// DeprecatedIn is the release whose load first warns, as window.go reads a
 	// release: "MAJOR.MINOR" or "MAJOR.MINOR.PATCH".
@@ -89,6 +106,14 @@ type Form struct {
 // so the rewrite decides per use, and leaves a list it cannot carry across
 // exactly (one that mixes the two, or names a value it does not know) for the
 // author, saying why.
+//
+// A concept with no @belongsTo is deprecated in 0.32.0 the same way: VERSION is
+// 0.31.x, so the next minor to ship is 0.32, and the refusal lands at 0.34. Its
+// Migrator is `memqllint`, which names each undeclared concept by file and
+// line; no rewrite exists, because which account a concept's rows belong to is
+// the author's decision. The engine's load refuses one only in a mounted bundle
+// or a pack: the engine's own tree is held to "every concept declares" by a
+// build gate.
 var shipped = []Form{
 	{
 		Rule:         ArrayType,
@@ -103,6 +128,13 @@ var shipped = []Form{
 		Replacement:  "@requiresAgentRole(...) or @requiresRank(...)",
 		Migrator:     "memqlmigrate --rewrite=allowed-roles",
 		DeprecatedIn: "0.24.0",
+	},
+	{
+		Rule:         ConceptBelongsToUndeclared,
+		Spelling:     "a concept with no @belongsTo",
+		Replacement:  "@belongsTo(account, ...) or @belongsTo(cluster)",
+		Migrator:     "memqllint",
+		DeprecatedIn: "0.32.0",
 	},
 }
 
@@ -129,6 +161,20 @@ func Forms() []Form {
 func Lookup(rule string) (Form, bool) {
 	f, ok := byRule[rule]
 	return f, ok
+}
+
+// Rewrites reports whether f's Migrator is a memqlmigrate rewrite that writes
+// the replacement. False for a form whose fix only its author can choose; its
+// Migrator is then the tool that names each use.
+func (f Form) Rewrites() bool { return strings.HasPrefix(f.Migrator, rewritePrefix) }
+
+// fixClause is how the warning and the refusal name the way across: the
+// rewrite that does the work, or the tool that names each use.
+func (f Form) fixClause() string {
+	if f.Rewrites() {
+		return "`" + f.Migrator + "` rewrites it"
+	}
+	return "`" + f.Migrator + "` names each one"
 }
 
 // Window is the window f is read through at release current.
@@ -164,17 +210,17 @@ func (f Form) RefusesAt(current string) bool { return New(f.Window(current)).Ref
 // load report, the lint line and the squiggle are the same words, which is what
 // lets the language server match an action to the diagnostic that asked for it.
 func (f Form) Warning() string {
-	return fmt.Sprintf("%s (deprecated in %s; `%s` rewrites it) [%s]",
+	return fmt.Sprintf("%s (deprecated in %s; %s) [%s]",
 		New(f.Window("")).Message("`"+f.Spelling+"`", "`"+f.Replacement+"`"),
-		f.DeprecatedIn, f.Migrator, f.Rule)
+		f.DeprecatedIn, f.fixClause(), f.Rule)
 }
 
 // Refusal is what a parse and a load say about a use of f once the window is
 // spent, in the same shape and naming the same three things: the window it had,
 // what to write, and the rewrite that writes it.
 func (f Form) Refusal() string {
-	return fmt.Sprintf("`%s` was deprecated in %s and stopped loading in %s; write `%s` instead (`%s` rewrites it) [%s]",
-		f.Spelling, f.DeprecatedIn, f.RefusedFrom(), f.Replacement, f.Migrator, f.Rule)
+	return fmt.Sprintf("`%s` was deprecated in %s and stopped loading in %s; write `%s` instead (%s) [%s]",
+		f.Spelling, f.DeprecatedIn, f.RefusedFrom(), f.Replacement, f.fixClause(), f.Rule)
 }
 
 // Trackers returns one Tracker per registered form, keyed by rule, each over

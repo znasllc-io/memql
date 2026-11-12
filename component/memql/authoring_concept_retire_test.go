@@ -32,6 +32,7 @@ import (
 // authoring_promote_concept_test.go.
 const retiredGadgetSrc = `@version("1.0.0")
 @description("A second concept taught to a running cluster")
+@belongsTo(cluster)
 concept trainedGadget {
   ownerUserId  string  @required
   label        string
