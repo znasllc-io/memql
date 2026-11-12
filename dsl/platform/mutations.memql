@@ -442,7 +442,14 @@ mutation outboundRequest updateOutboundRequestStatus {
 /// the way to a connector's privacy purge, so the writer must be the receiver (or the NDR poller),
 /// each staging under internal origin, and never a client choosing a source name and a topic
 /// header. Only the wire bar expresses that.
-@createOnly("status", "headersJson", "receivedAt", "verifiedBy")
+///
+/// THE BODY IS KEPT TOO. A redelivery lands on this row only when it carries the same signed
+/// payload, so its body is the stored body by definition and writing it again changes nothing --
+/// except on a row whose body was blanked since: a privacy erasure empties the body of a delivery
+/// that has been processed, and a redelivery that wrote it back would put a person's name and
+/// address into a row nothing looks at again. So `body` is one of the fields a later write of the
+/// same delivery does not replace.
+@createOnly("status", "headersJson", "receivedAt", "verifiedBy", "body")
 @serverOnly
 mutation inboundRequest stageInboundRequest {
   args {
