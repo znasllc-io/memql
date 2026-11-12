@@ -181,21 +181,6 @@ func listLen(row map[string]any, key string) int {
 	return len(list)
 }
 
-// keysAnywhere is every key of a stored value, at any depth.
-func keysAnywhere(v any, into map[string]bool) {
-	switch x := v.(type) {
-	case map[string]any:
-		for k, item := range x {
-			into[k] = true
-			keysAnywhere(item, into)
-		}
-	case []any:
-		for _, item := range x {
-			keysAnywhere(item, into)
-		}
-	}
-}
-
 // requireDetail holds a store's three refund rows to what the order's refunds
 // were: the refunded line, the refunded shipping, and the adjustment of an
 // amount with no line.
@@ -228,9 +213,12 @@ func (r *holdRig) requireDetail(s refundStore) {
 	}
 }
 
-// A REFUND ROW HOLDS ITS LINES, ITS SHIPPING AND ITS ADJUSTMENTS, and nothing
-// a person typed: no refund row carries a shipping line, or the phone number
-// at the delivery address that a shipping line holds.
+// A REFUND ROW HOLDS ITS LINES, ITS SHIPPING AND ITS ADJUSTMENTS. That a
+// refund's shipping line carries nothing a person typed (not the order's
+// shipping line, not the phone at the delivery address) is held by the
+// selection the generator emits, not by the mapper, which stores a node whole:
+// cmd/shopifyschema's TestAnInlinedConnectionCarriesOnlyTheFieldsItNames and
+// the live TestLiveARefundIsMirroredWithItsLinesAndItsShipping hold it.
 func TestARefundRowHoldsItsLinesItsShippingAndItsAdjustments(t *testing.T) {
 	r := newHoldRig(t)
 	if r == nil {
@@ -239,15 +227,6 @@ func TestARefundRowHoldsItsLinesItsShippingAndItsAdjustments(t *testing.T) {
 	s := newRefundStore(1)
 	r.sweepOrders(s, "2026-11-10T09:00:00Z", r.at)
 	r.requireDetail(s)
-	for _, gid := range []string{s.lineRefund, s.shippingRefund, s.amountRefund} {
-		keys := map[string]bool{}
-		keysAnywhere(r.refundRow(gid), keys)
-		for _, never := range []string{"shippingLine", "phone"} {
-			if keys[never] {
-				t.Errorf("refund %s carries a key %q", gid, never)
-			}
-		}
-	}
 }
 
 // O3: the detail arrives whichever of the backfill and a store's first sweep

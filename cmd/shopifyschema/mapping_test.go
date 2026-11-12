@@ -680,8 +680,42 @@ func TestAnInlinedConnectionWhoseNodeIsMirroredIsRefused(t *testing.T) {
 			Inline: []Inline{{Connection: "lineItems", Page: 10, Fields: []string{"quantity"}}}},
 		Entry{Type: "LineItem", Concept: "orderLineItem", Reconcile: ReconcileNone},
 	)
-	if err == nil || !strings.Contains(err.Error(), "Order.lineItems") || !strings.Contains(err.Error(), "LineItem") {
-		t.Fatalf("an inlined connection of a mirrored node was accepted, or the error does not name it: %v", err)
+	if err == nil {
+		t.Fatal("an inlined connection of a mirrored node was accepted")
+	}
+	for _, want := range []string{"Order.lineItems", "its node LineItem is mirrored"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not say %q", err, want)
+		}
+	}
+}
+
+// An inlined list is kept whole through a customer's erasure, and the erasure
+// neither follows nor takes out a reference inside it. So an inline may not
+// hold a reference to a row the erasure treats as a person: a company's
+// contacts inlined with their customer would keep her gid after her erasure.
+func TestAnInlinedReferenceToAPersonsRowIsRefused(t *testing.T) {
+	_, err := recordedPlanWith(t,
+		Entry{Type: "Company", Concept: "company", Reconcile: ReconcileNone,
+			Inline: []Inline{{Connection: "contacts", Page: 10, Fields: []string{"customer"}}}},
+		Entry{Type: "Customer", Concept: "customer", Reconcile: ReconcileNone},
+	)
+	if err == nil {
+		t.Fatal("an inline holding a reference to a customer was accepted")
+	}
+	for _, want := range []string{"Company.contacts", "customer", "a reference to a Customer", "erasure"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not say %q", err, want)
+		}
+	}
+	// A reference to a row that is not a person's is still held: the
+	// refund lines' own line.
+	if _, err := recordedPlanWith(t,
+		Entry{Type: "Refund", Concept: "refund", Reconcile: ReconcileNone,
+			Inline: []Inline{{Connection: "refundLineItems", Page: 10, Fields: []string{"lineItem"}}}},
+		Entry{Type: "LineItem", Concept: "orderLineItem", Reconcile: ReconcileNone},
+	); err != nil {
+		t.Errorf("an inline holding a reference to a line item was refused: %v", err)
 	}
 }
 

@@ -1060,3 +1060,56 @@ func TestAnErasedRefundKeepsItsDetail(t *testing.T) {
 		t.Errorf("an erasure does not mark refund.note (marks %v)", plan.Mark)
 	}
 }
+
+// inlinedReferencesToAPerson is every reference an inlined list of the model
+// holds to a row an erasure treats as a person: the erased customer's, the
+// order a request names, and the rows that hold the customer inside an object
+// (erasureCustomerInside). An inlined list is kept whole and nothing inside it
+// is followed or taken out, so such a reference would keep her gid after her
+// erasure. The generator refuses one (cmd/shopifyschema, inlinePersonTypes);
+// this holds the model it emitted to the erasure's own lists.
+func inlinedReferencesToAPerson(types map[string]*generated.TypeSpec) []string {
+	conceptOf := map[string]string{}
+	for concept, spec := range generated.Types {
+		conceptOf[spec.GraphQLType] = concept
+	}
+	person := map[string]bool{erasedConcept: true, requestedConcept: true}
+	for concept := range erasureCustomerInside {
+		person[concept] = true
+	}
+	var out []string
+	for concept, spec := range types {
+		for _, f := range spec.Fields {
+			if f.Kind != generated.KindInlineList {
+				continue
+			}
+			for _, h := range f.Holds {
+				if h.Kind == generated.KindGid && person[conceptOf[h.AdminType]] {
+					out = append(out, concept+"."+f.Name+" holds "+h.Name+", a reference to a "+conceptOf[h.AdminType])
+				}
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func TestNoInlinedListHoldsAReferenceToAPersonsRow(t *testing.T) {
+	for _, p := range inlinedReferencesToAPerson(generated.Types) {
+		t.Error(p)
+	}
+	// It can still say otherwise: a refund line that held its buyer.
+	spec := *generated.Types["refund"]
+	spec.Fields = append([]generated.FieldSpec(nil), spec.Fields...)
+	for i, f := range spec.Fields {
+		if f.Name == "refundLineItems" {
+			holds := append([]generated.HeldField(nil), f.Holds...)
+			holds[0] = generated.HeldField{Name: "customer", Kind: generated.KindGid, AdminType: generated.Types[erasedConcept].GraphQLType}
+			spec.Fields[i].Holds = holds
+		}
+	}
+	got := inlinedReferencesToAPerson(map[string]*generated.TypeSpec{"refund": &spec})
+	if len(got) != 1 || !strings.Contains(got[0], "refund.refundLineItems holds customer") {
+		t.Errorf("a refund line holding its buyer was told as %v", got)
+	}
+}

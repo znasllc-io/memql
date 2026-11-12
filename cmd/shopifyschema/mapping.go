@@ -646,6 +646,24 @@ var inlineScalars = map[string]bool{
 	"UnsignedInt64": true, "Date": true, "DateTime": true, "ID": true,
 }
 
+// inlinePersonTypes are the mirrored types an inlined connection may not hold
+// a reference to: the rows a customer's erasure treats as a person's. An
+// inlined list is kept whole through an erasure, which neither follows nor
+// takes out a reference inside it, so a reference to one of these would keep
+// her gid after her erasure, in a row nobody marks as hers.
+//
+// The list is the erasure's, by name, because the generator may not import the
+// integration (integrations/shopify/erasure_fields.go): Customer is the erased
+// concept (erasedConcept); Order is the one a request names (requestedConcept);
+// Order, DraftOrder and GiftCard are the rows it reaches as "the customer
+// inside an object" (erasureCustomerInside). That package's
+// TestNoInlinedListHoldsAReferenceToAPersonsRow fails if the generated model
+// holds one of its own list's types, so a type added there and not here is
+// caught.
+var inlinePersonTypes = map[string]bool{
+	"Customer": true, "Order": true, "DraftOrder": true, "GiftCard": true,
+}
+
 // inlineRefusal is what every refused inlined field is told.
 const inlineRefusal = "an inlined connection holds amounts, counts, moments, enums and references, and nothing a person typed"
 
@@ -729,6 +747,9 @@ func (p *Planner) inlineHeldField(node *Type, name string, kept map[string]bool)
 	case moneyShape(typeName) != "":
 		return HeldField{Name: name, Kind: KindObject, AdminType: typeName}, name + " " + p.objectSelection(target, 0, kept), nil
 	case (target.Kind == "OBJECT" || target.Kind == "INTERFACE") && p.referencedByGid(target):
+		if inlinePersonTypes[target.Name] {
+			return HeldField{}, "", fmt.Errorf("inline names %s, a reference to a %s: an inlined list is kept whole through a customer's erasure, which neither follows nor takes out a reference inside it, so it may not hold a row the erasure treats as a person's", name, target.Name)
+		}
 		kept[target.Name] = true
 		return HeldField{Name: name, Kind: KindGid, AdminType: typeName}, name + " { id }", nil
 	}

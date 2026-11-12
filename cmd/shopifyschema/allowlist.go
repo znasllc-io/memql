@@ -66,7 +66,8 @@ type Child struct {
 // shipping line, and with it the phone number at the buyer's delivery
 // address, into every refund row. What may be named is checked where the
 // field is planned (inlineHeldField): a figure or a moment, an enum, a money
-// object, or a reference to a mirrored row -- nothing a person typed.
+// object, or a reference to a mirrored row that is not a person's
+// (inlinePersonTypes) -- nothing a person typed.
 type Inline struct {
 	// Connection is the field name on the entry's type (e.g. "refundLineItems").
 	Connection string `yaml:"connection"`
