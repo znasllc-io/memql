@@ -3,7 +3,6 @@ package shopify
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"io"
 	"log/slog"
 	"slices"
@@ -109,6 +108,13 @@ type statisticsRead struct {
 	reader context.Context
 	// seeded reports whether a row is the one the fixtures wrote.
 	seeded func(map[string]any) bool
+	// admitted is a read of the same concept with no cluster-owner
+	// predicate, which the reader is expected to reach the seeded row
+	// through: the premise that row authorization admits the reader, so the
+	// zero rows of the statistics read are the predicate's. admittedRow
+	// reports whether a row it answers is the seeded one.
+	admitted    string
+	admittedRow func(map[string]any) bool
 }
 
 func (r statisticsRead) call() string { return renderCall(r.name, r.args) }
@@ -127,16 +133,36 @@ func statisticsReads() []statisticsRead {
 		return func(row map[string]any) bool { return mapString(row, "gid") == gid }
 	}
 	walk := map[string]any{"storeId": authorityTestStoreId, "since": since}
+	// The mirror concepts' generated reads all carry the cluster-owner
+	// predicate too, so the predicate-free read of a mirror concept is the
+	// engine's plain concept read: what row authorization alone lets through.
+	mirror := func(concept string) string {
+		return `paginate(concept==v1:shopify:` + concept + ` && payload.storeId=="` + authorityTestStoreId + `", 250)`
+	}
+	mirrorRow := func(gid string) func(map[string]any) bool {
+		return func(row map[string]any) bool {
+			return strings.HasSuffix(mapString(row, "id"), ":"+MirrorRowID(authorityTestStoreId, gid))
+		}
+	}
+	// storeById is the tree's own read of a store, with no cluster-owner
+	// predicate: v1:shopify:store's tier admits a developer.
+	storeById := renderCall("storeById", map[string]any{"storeId": authorityTestStoreId})
 	return []statisticsRead{
-		{name: "storeStatisticsOrdersChanged", args: walk, reader: connector, seeded: byGid(statsOrderGid)},
-		{name: "storeStatisticsLinesChanged", args: walk, reader: connector, seeded: byGid(statsLineGid)},
-		{name: "storeStatisticsRefundsChanged", args: walk, reader: connector, seeded: byGid(statsRefundGid)},
-		{name: "storeStatisticsOrderBuyers", args: walk, reader: connector, seeded: byGid(statsOrderGid)},
+		{name: "storeStatisticsOrdersChanged", args: walk, reader: connector, seeded: byGid(statsOrderGid),
+			admitted: mirror("order"), admittedRow: mirrorRow(statsOrderGid)},
+		{name: "storeStatisticsLinesChanged", args: walk, reader: connector, seeded: byGid(statsLineGid),
+			admitted: mirror("orderLineItem"), admittedRow: mirrorRow(statsLineGid)},
+		{name: "storeStatisticsRefundsChanged", args: walk, reader: connector, seeded: byGid(statsRefundGid),
+			admitted: mirror("refund"), admittedRow: mirrorRow(statsRefundGid)},
+		{name: "storeStatisticsOrderBuyers", args: walk, reader: connector, seeded: byGid(statsOrderGid),
+			admitted: mirror("order"), admittedRow: mirrorRow(statsOrderGid)},
 		{name: "storeStatisticsShop", args: map[string]any{"storeId": authorityTestStoreId}, reader: connector,
-			seeded: func(row map[string]any) bool { return mapString(row, "name") == statsShopName }},
-		{name: "storeStatisticsStores", reader: developer, seeded: isStoreRow},
+			seeded:   func(row map[string]any) bool { return mapString(row, "name") == statsShopName },
+			admitted: mirror("shop"), admittedRow: mirrorRow(statsShopGid)},
+		{name: "storeStatisticsStores", reader: developer, seeded: isStoreRow,
+			admitted: storeById, admittedRow: isStoreRow},
 		{name: "storeStatisticsStoreAt", args: map[string]any{"storeId": authorityTestStoreId, "at": time.Now().UTC().Add(time.Minute).Format(time.RFC3339)},
-			reader: developer, seeded: isStoreRow},
+			reader: developer, seeded: isStoreRow, admitted: storeById, admittedRow: isStoreRow},
 	}
 }
 
@@ -186,6 +212,14 @@ func TestTheStatisticsReadsAnswerNothingToAReaderAndRowsToAClusterOwner(t *testi
 			if !slices.ContainsFunc(rows, read.seeded) {
 				t.Fatalf("a cluster owner with internal origin read %d rows of %s and not the seeded one, "+
 					"so nothing below measures a lock: %v", len(rows), read.name, rows)
+			}
+
+			// THE PREMISE: row authorization admits the reader to the
+			// concept, so what it reads below is the predicate's answer and
+			// not the tier's.
+			if admitted := readAll(t, eng, read.reader, read.admitted); !slices.ContainsFunc(admitted, read.admittedRow) {
+				t.Fatalf("the reader of %s does not reach the seeded row through %s (%d rows), so row authorization "+
+					"refuses it and the zero rows below would prove nothing about the predicate", read.name, read.admitted, len(admitted))
 			}
 
 			// THE PREDICATE: an internal-origin caller who is not a cluster
@@ -365,28 +399,47 @@ func TestTheStoreRowIsAnsweredAsOfAnInstantAndNotBeforeItWasWritten(t *testing.T
 	if eng == nil {
 		return
 	}
-	before := time.Now().UTC().Add(-2 * time.Second)
 	seedStore(t, eng, db)
-	time.Sleep(1100 * time.Millisecond)
-	between := time.Now().UTC()
-	time.Sleep(1100 * time.Millisecond)
+	// The instants are the store's own write times, read back exactly: an
+	// at is sent with its fractions of a second, so the test needs no wait
+	// between the writes for the instants to fall apart.
+	first := storeWrittenAt(t, eng)
 	if _, err := eng.Execute(seedCtx(), renderCall("updateStore", map[string]any{"storeId": authorityTestStoreId, "name": "Renamed Probe"})); err != nil {
 		t.Fatalf("rename the store: %v", err)
 	}
+	renamed := storeWrittenAt(t, eng)
+	if !renamed.After(first) {
+		t.Fatalf("the rename was written at %v, not after the first write at %v", renamed, first)
+	}
+	between, before := first, first.Add(-time.Microsecond)
 	at := func(instant time.Time) []map[string]any {
 		return readAll(t, eng, seedCtx(), renderCall("storeStatisticsStoreAt", map[string]any{
-			"storeId": authorityTestStoreId, "at": instant.Format(time.RFC3339),
+			"storeId": authorityTestStoreId, "at": instant.Format(time.RFC3339Nano),
 		}))
 	}
-	if rows := at(time.Now().UTC().Add(time.Minute)); len(rows) != 1 || mapString(rows[0], "name") != "Renamed Probe" {
-		t.Errorf("as of now the store reads %v; want the one row, renamed", rows)
+	if rows := at(renamed); len(rows) != 1 || mapString(rows[0], "name") != "Renamed Probe" {
+		t.Errorf("as of the rename the store reads %v; want the one row, renamed", rows)
 	}
 	if rows := at(between); len(rows) != 1 || mapString(rows[0], "name") != "Authority Probe" {
-		t.Errorf("as of an instant between its first write and the rename the store reads %v; want the one row with its older name", rows)
+		t.Errorf("as of its first write, before the rename, the store reads %v; want the one row with its older name", rows)
 	}
 	if rows := at(before); len(rows) != 0 {
-		t.Errorf("as of an instant before the store was first written it reads %v; want no row", rows)
+		t.Errorf("as of a microsecond before the store was first written it reads %v; want no row", rows)
 	}
+}
+
+// storeWrittenAt is the write time of the seeded store's newest version.
+func storeWrittenAt(t *testing.T, eng *memql.MemQLEngine) time.Time {
+	t.Helper()
+	rows := readAll(t, eng, seedCtx(), renderCall("storeById", map[string]any{"storeId": authorityTestStoreId}))
+	if len(rows) != 1 {
+		t.Fatalf("storeById read %d rows of the seeded store, want 1", len(rows))
+	}
+	at, ok := rows[0]["createdAt"].(time.Time)
+	if !ok {
+		t.Fatalf("the store row's createdAt is %T %v, not a time", rows[0]["createdAt"], rows[0]["createdAt"])
+	}
+	return at.UTC()
 }
 
 // sqlRecorder keeps every SQL statement the engine sends.
@@ -445,11 +498,16 @@ func recordingAuthorityEngine(t *testing.T) (*memql.MemQLEngine, *sql.DB, *sqlRe
 
 // A walk since a watermark costs what was written since, not the concept's
 // history: the engine collapses only the versions at or after the bound, and
-// only when `row.createdAt >= args.since` is a top-level conjunct
-// (latestScanLowerBounds, component/memql/latest_scan_keys.go). The four walks
-// are held to the SQL: the latest-key enumeration -- the DISTINCT ON over the
-// concept's ids -- carries the bound. Move the conjunct under an `||` or a
-// `!` and the enumeration loses it, and this fails.
+// only when `row.createdAt >= args.since` is a top-level conjunct. The rule
+// this pins is latestScanLowerBounds in component/memql/latest_scan_keys.go,
+// which narrows the latest-key enumeration with that one clause.
+//
+// What is matched is kept to that clause: the enumeration is the subquery the
+// engine aliases `latest_keys` (component/memql/executor_filter.go), so the
+// text before the alias is the enumeration, and it must hold
+// `"createdAt" >= '<since>`. The instant is matched to the second and its zone
+// suffix is left out. Move the conjunct under an `||` with a real other arm
+// and the enumeration loses it, and this fails.
 func TestTheStatisticsWalksCollapseOnlyTheVersionsWrittenSince(t *testing.T) {
 	eng, db, rec := recordingAuthorityEngine(t)
 	if eng == nil {
@@ -457,7 +515,7 @@ func TestTheStatisticsWalksCollapseOnlyTheVersionsWrittenSince(t *testing.T) {
 	}
 	seedStatisticsRows(t, eng, db)
 	sinceAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	bound := fmt.Sprintf(`"createdAt" >= '%s+00:00'`, sinceAt.Format("2006-01-02 15:04:05"))
+	bound := `"createdAt" >= '` + sinceAt.Format("2006-01-02 15:04:05")
 	for name, concept := range map[string]string{
 		"storeStatisticsOrdersChanged":  "order",
 		"storeStatisticsLinesChanged":   "orderLineItem",
@@ -465,9 +523,6 @@ func TestTheStatisticsWalksCollapseOnlyTheVersionsWrittenSince(t *testing.T) {
 		"storeStatisticsOrderBuyers":    "order",
 	} {
 		t.Run(name, func(t *testing.T) {
-			// The concept's enumeration, not the per-id recheck of the rows it
-			// found, which is bounded by their ids.
-			enumeration := fmt.Sprintf("WHERE (concept = '%s')", "v1:shopify:"+concept)
 			rec.take()
 			if _, err := eng.Execute(seedCtx(), renderCall(name, map[string]any{
 				"storeId": authorityTestStoreId, "since": sinceAt.Format(time.RFC3339),
@@ -476,40 +531,19 @@ func TestTheStatisticsWalksCollapseOnlyTheVersionsWrittenSince(t *testing.T) {
 			}
 			enumerations := 0
 			for _, stmt := range rec.take() {
-				for _, keys := range distinctOnEnumerations(stmt) {
-					if !strings.Contains(keys, enumeration) {
-						continue
-					}
-					enumerations++
-					if !strings.Contains(keys, bound) {
-						t.Errorf("%s enumerated its latest keys without the watermark (%s), so a page costs the concept's "+
-							"whole history:\n%s", name, bound, keys)
-					}
+				end := strings.Index(stmt, "AS latest_keys")
+				if end < 0 || !strings.Contains(stmt[:end], "'v1:shopify:"+concept+"'") {
+					continue
+				}
+				enumerations++
+				if keys := stmt[:end]; !strings.Contains(keys, bound) {
+					t.Errorf("%s enumerated its latest keys without the watermark (%s), so a page costs the concept's "+
+						"whole history:\n%s", name, bound, keys)
 				}
 			}
 			if enumerations == 0 {
 				t.Errorf("%s sent no latest-key enumeration of %s; the read no longer takes the path this test pins", name, concept)
 			}
 		})
-	}
-}
-
-// distinctOnEnumerations cuts each latest-key enumeration out of a statement:
-// from `DISTINCT ON` to the ordering it reads its keys in.
-func distinctOnEnumerations(stmt string) []string {
-	const order = `ORDER BY id ASC, "createdAt" DESC`
-	var out []string
-	for {
-		i := strings.Index(stmt, "DISTINCT ON")
-		if i < 0 {
-			return out
-		}
-		rest := stmt[i:]
-		j := strings.Index(rest, order)
-		if j < 0 {
-			return out
-		}
-		out = append(out, rest[:j])
-		stmt = rest[j+len(order):]
 	}
 }

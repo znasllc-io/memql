@@ -145,19 +145,30 @@ func TestThePacksStatisticsReadsAreForAClusterOwnerWithInternalOrigin(t *testing
 	writeEntitlement(t, eng, merchant, store, "locks", "locks@example.com", "granted")
 	writeSettings(t, eng, merchant, store)
 
-	for name, call := range map[string]string{
-		"wholesaleStatisticsGranted":  grantedCall(store),
-		"wholesaleStatisticsSettings": settingsCall(store),
+	reader := auth.ContextWithInternalOrigin(asSiteOwner(merchant))
+	for name, read := range map[string]struct{ call, admitted string }{
+		// admitted is the pack's own read of the same concept, with no
+		// cluster-owner predicate: what row authorization alone lets the
+		// merchant reach.
+		"wholesaleStatisticsGranted":  {grantedCall(store), `query entitlementsForStore(storeId: ` + wsQuote(store) + `)`},
+		"wholesaleStatisticsSettings": {settingsCall(store), `query wholesaleSettingsForStore(storeId: ` + wsQuote(store) + `)`},
 	} {
+		call := read.call
 		t.Run(name, func(t *testing.T) {
 			// The reachable positive.
 			if rows := wsRows(t, eng, statsClusterOwner(), call); len(rows) != 1 {
 				t.Fatalf("a cluster owner with internal origin read %d rows of %s; want the one seeded, "+
 					"so nothing below measures a lock", len(rows), name)
 			}
+			// The premise: row authorization admits the merchant who owns
+			// the rows, so the zero rows below are the predicate's.
+			if rows := wsRows(t, eng, reader, read.admitted); len(rows) != 1 {
+				t.Fatalf("the merchant reads %d rows through %s; want the one seeded, or the zero rows below "+
+					"would prove nothing about the predicate", len(rows), read.admitted)
+			}
 			// The merchant who owns the rows, with internal origin: row
 			// authorization admits them, the predicate does not.
-			if rows := wsRows(t, eng, auth.ContextWithInternalOrigin(asSiteOwner(merchant)), call); len(rows) != 0 {
+			if rows := wsRows(t, eng, reader, call); len(rows) != 0 {
 				t.Errorf("%s answered %d rows to an internal-origin caller who is not a cluster owner; want 0", name, len(rows))
 			}
 			// A cluster owner from a client is refused as server-only.
@@ -181,9 +192,40 @@ func TestWithThePackDisabledItsStatisticsQueriesAreNotLoaded(t *testing.T) {
 		}
 	}
 	disabled := liveWholesaleEngine(t, wholesalepack.Domain)
-	for _, call := range []string{grantedCall(store), settingsCall(store)} {
-		if _, err := disabled.Execute(statsClusterOwner(), call); err == nil {
-			t.Errorf("with the pack disabled, %s still resolved; a disabled pack loads none of its queries", call)
+	for name, call := range map[string]string{
+		"wholesaleStatisticsGranted":  grantedCall(store),
+		"wholesaleStatisticsSettings": settingsCall(store),
+	} {
+		// The engine's answer for a call that does not exist, and no other
+		// refusal: a lost internal origin ("server-only") or a bad argument
+		// would also be an error, and neither is the pack being off.
+		_, err := disabled.Execute(statsClusterOwner(), call)
+		if want := `function "` + name + `" not found`; err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("with the pack disabled, %s answered err = %v; want the unknown-function error %q", name, err, want)
+		}
+	}
+}
+
+// None of the nine statistics reads is kept in a node's result cache: a page
+// of them is every organization's rows, and the granted read's carries buyer
+// emails, which must not rest anywhere a figure does not need them. With no
+// @cache the engine keeps a read's result for 60 seconds by default, so each
+// carries @cache(0). Read off the loaded tree, which this engine loads whole:
+// the shopify overlay's seven and this pack's two.
+func TestTheStatisticsReadsAreNeverCached(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	for _, name := range []string{
+		"storeStatisticsOrdersChanged", "storeStatisticsLinesChanged", "storeStatisticsRefundsChanged",
+		"storeStatisticsOrderBuyers", "storeStatisticsShop", "storeStatisticsStores", "storeStatisticsStoreAt",
+		"wholesaleStatisticsGranted", "wholesaleStatisticsSettings",
+	} {
+		fn, err := eng.Functions().Get(name)
+		if err != nil {
+			t.Errorf("the loaded tree has no %s: %v", name, err)
+			continue
+		}
+		if fn.CacheTTL != "0" {
+			t.Errorf("%s caches its result (@cache %q); want @cache(0)", name, fn.CacheTTL)
 		}
 	}
 }
