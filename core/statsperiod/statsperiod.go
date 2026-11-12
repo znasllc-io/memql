@@ -19,7 +19,7 @@
 // # The bucket under way is included
 //
 // A period ends where the bucket holding `now` ends: the next whole hour, the
-// next UTC midnight, the first of next month. So "last 7 days" is today and
+// start of tomorrow in the period's zone (UTC for For), the first of next month. So "last 7 days" is today and
 // the six days before it, and today's partial figures are part of it. A period
 // that ended at `now` would leave the newest bucket out until it closed.
 //
@@ -170,7 +170,15 @@ func ForIn(p Period, now time.Time, loc *time.Location) Bounds {
 //
 // time.Date(y, m, d, 0, 0, 0, 0, loc) is that instant except where the clocks
 // skip midnight: there it answers an instant on the day before or an hour into
-// the day, and the day starts at the change itself.
+// the day, and the day starts at the change itself. A date the zone never had
+// (Pacific/Apia, 2011-12-30) starts where the next date that exists starts, so
+// the missing day has no bucket.
+//
+// Two assumptions are not handled. Where a zone's clocks go back across
+// midnight, so that a date begins twice, the day is taken from the midnight the
+// standard library answers; no zone does this at present. And where a clock goes
+// back within the first minutes of a day, the period's end can fall before `now`
+// for that stretch.
 func StartOfDay(y int, m time.Month, d int, loc *time.Location) time.Time {
 	if loc == nil {
 		loc = time.UTC
@@ -187,7 +195,9 @@ func StartOfDay(y int, m time.Month, d int, loc *time.Location) time.Time {
 	if gy*10000+int(gm)*100+gd < wy*10000+int(wm)*100+wd {
 		candidate = until
 	}
-	if cy, cm, cd := candidate.Date(); !candidate.IsZero() && cy == wy && cm == wm && cd == wd {
+	// The change is the day's first instant, or, for a date the zone skipped
+	// altogether, the first instant after it.
+	if cy, cm, cd := candidate.Date(); !candidate.IsZero() && cy*10000+int(cm)*100+cd >= wy*10000+int(wm)*100+wd {
 		return candidate.In(loc)
 	}
 	return t
