@@ -26,10 +26,6 @@ type VerifyResult struct {
 	Bytes int64
 }
 
-// manifestMaxBytes bounds the manifest, which is read whole before anything
-// is known about the file.
-const manifestMaxBytes = 16 << 20
-
 // Verify walks an unprotected tar stream: structure, every member against
 // SHA256SUMS, and the report's written counts against the lines. A file with
 // no SHA256SUMS is cut short. The manifest's formatVersion is checked before
@@ -147,25 +143,30 @@ func (v *verifier) run() error {
 }
 
 func (v *verifier) readManifest(h *tar.Header) error {
-	if h.Size > manifestMaxBytes {
-		return fmt.Errorf("%d bytes is too large for a manifest", h.Size)
+	if h.Size > int64(bounds.manifestBytes) {
+		return over(h.Size, "bytes in the manifest", bounds.manifestBytes)
 	}
 	data, err := v.readAll(MemberManifest, h)
 	if err != nil {
 		return err
 	}
-	var probe struct {
-		Kind          string `json:"kind"`
-		FormatVersion int    `json:"formatVersion"`
+	// "Too new" is decided first, from a struct holding nothing but the
+	// version: a later format may change what any other field holds, and
+	// such a file must read as too new, never as malformed.
+	var version struct {
+		FormatVersion int `json:"formatVersion"`
 	}
-	if err := json.Unmarshal(data, &probe); err != nil {
-		return fmt.Errorf("not JSON: %w", err)
+	if err := json.Unmarshal(data, &version); err != nil {
+		return fmt.Errorf("no formatVersion a reader can take: %w", err)
 	}
-	if probe.Kind != KindManifest {
-		return fmt.Errorf("kind is %q, not %q: not an account export", probe.Kind, KindManifest)
-	}
-	if err := checkFormatVersion(probe.FormatVersion); err != nil {
+	if err := checkFormatVersion(version.FormatVersion); err != nil {
 		return err
+	}
+	var kind struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(data, &kind); err != nil || kind.Kind != KindManifest {
+		return fmt.Errorf("kind is not %q: not an account export", KindManifest)
 	}
 	if err := json.Unmarshal(data, &v.manifest); err != nil {
 		return err
@@ -280,6 +281,13 @@ func (v *verifier) readAll(rel string, h *tar.Header) ([]byte, error) {
 
 func (v *verifier) read(rel string, h *tar.Header) error {
 	pm, _ := parseMember(rel)
+	// Every member but a bytes/ object is held to its bound from the header,
+	// before a byte of it is read. An object is streamed and only hashed.
+	if pm.phase != phaseBytes {
+		if bound, what := memberBound(rel); h.Size > int64(bound) {
+			return over(h.Size, what, bound)
+		}
+	}
 	switch {
 	case pm.phase == phaseRows || pm.phase == phaseTables:
 		return v.readPart(rel, pm)
@@ -305,17 +313,8 @@ func (v *verifier) read(rel string, h *tar.Header) error {
 		}
 		return nil
 	case pm.phase == phaseSums:
-		data, err := io.ReadAll(v.tr)
-		if err != nil {
-			return v.cut(err)
-		}
 		v.sawSums = true
-		return v.checkSums(data)
-	}
-	// A single member is read whole; the writer refuses one above this
-	// bound, so a larger one is not a file it wrote.
-	if h.Size > singleMaxBytes {
-		return fmt.Errorf("%d bytes is above the %d MiB bound of a single member", h.Size, singleMaxBytes>>20)
+		return v.checkSums(bufio.NewReader(v.tr))
 	}
 	data, err := v.readAll(rel, h)
 	if err != nil {
@@ -372,13 +371,23 @@ func (v *verifier) readPart(rel string, pm parsedMember) error {
 	}
 	// One part is one gzip member.
 	zr.Multistream(false)
-	br := bufio.NewReader(zr)
+	// At most one byte past the decompressed bound is read, which is how a
+	// part that inflates past it is told from one that ends at it.
+	raw := &countingReader{r: io.LimitReader(zr, int64(bounds.partRawBytes)+1)}
+	br := bufio.NewReader(raw)
 	concept := conceptOfRowsDir(pm.dir)
+	lines := 0
 	for {
-		line, err := br.ReadBytes('\n')
+		line, err := readLine(br, bounds.lineBytes)
+		if raw.n > int64(bounds.partRawBytes) {
+			return over(raw.n, "bytes decompressed from a part, or more,", bounds.partRawBytes)
+		}
 		if len(line) > 0 {
 			if line[len(line)-1] != '\n' {
 				return errors.New("the last line has no newline")
+			}
+			if lines++; lines > bounds.partLines {
+				return over(int64(lines), "lines in a part, or more,", bounds.partLines)
 			}
 			if pm.phase == phaseRows {
 				row, rerr := v.row(line)
@@ -449,43 +458,72 @@ func (v *verifier) bytesLine(line []byte) error {
 	return nil
 }
 
-// checkSums holds every member read to its line in SHA256SUMS, in order.
-func (v *verifier) checkSums(data []byte) error {
-	listed, order, err := parseSums(data)
-	if err != nil {
-		return err
-	}
-	for _, d := range v.digests {
-		want, ok := listed[d.path]
-		if !ok {
-			return fmt.Errorf("%s is not listed", d.path)
-		}
-		if want != d.digest {
-			return fmt.Errorf("%s does not match its line: the member was changed", d.path)
-		}
-	}
-	if len(order) != len(v.digests) {
-		for _, p := range order {
-			found := false
-			for _, d := range v.digests {
-				found = found || d.path == p
+// checkSums reads SHA256SUMS as a stream and holds every member read to
+// its line, in the order the members came: the writer lists them in that
+// order, and reading line by line keeps the list out of memory.
+func (v *verifier) checkSums(br *bufio.Reader) error {
+	n := 0
+	for {
+		line, err := readLine(br, sumLineBytes(strings.Repeat("x", relMaxBytes)))
+		if len(line) > 0 {
+			got, perr := parseSumLine(line)
+			if perr != nil {
+				return fmt.Errorf("line %d: %w", n+1, perr)
 			}
-			if !found {
-				return fmt.Errorf("lists %s, which the file does not hold", p)
+			if n >= len(v.digests) {
+				return fmt.Errorf("lists %s, which the file does not hold", got.path)
 			}
+			want := v.digests[n]
+			if got.path != want.path {
+				return fmt.Errorf("line %d lists %s where the file holds %s", n+1, got.path, want.path)
+			}
+			if got.digest != want.digest {
+				return fmt.Errorf("%s does not match its line: the member was changed", want.path)
+			}
+			n++
 		}
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return v.cut(err)
+		}
+	}
+	if n < len(v.digests) {
+		return fmt.Errorf("%s is not listed", v.digests[n].path)
 	}
 	return nil
 }
 
-// eachLine calls fn for each newline-ended line. A member that does not end
-// in a newline was cut or changed.
+// readLine reads one line, its newline included, refusing one longer than
+// max before reading past it. At the end of the input it answers what is
+// left with io.EOF.
+func readLine(br *bufio.Reader, max int) ([]byte, error) {
+	var line []byte
+	for {
+		chunk, err := br.ReadSlice('\n')
+		if len(line)+len(chunk) > max {
+			return nil, over(int64(len(line)+len(chunk)), "bytes in one line, or more,", max)
+		}
+		line = append(line, chunk...)
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		return line, err
+	}
+}
+
+// eachLine calls fn for each newline-ended line, held to the line bound. A
+// member that does not end in a newline was cut or changed.
 func eachLine(data []byte, fn func([]byte) error) error {
 	if len(data) > 0 && data[len(data)-1] != '\n' {
 		return errors.New("the last line has no newline")
 	}
 	for len(data) > 0 {
 		i := bytes.IndexByte(data, '\n')
+		if i+1 > bounds.lineBytes {
+			return over(int64(i+1), "bytes in one line", bounds.lineBytes)
+		}
 		if err := fn(data[:i]); err != nil {
 			return err
 		}

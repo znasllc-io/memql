@@ -10,16 +10,95 @@ import (
 	"strings"
 )
 
-// The bounds a part is cut at (spec D). Variables, not constants, only so a
-// test can cut parts without writing megabytes.
-var (
+// limits are every bound of the format. The writer and Verify both read
+// them, so a file the writer finishes is always within what Verify accepts.
+type limits struct {
+	partBytes, partLines, partRawBytes, partStoredBytes int
+	lineBytes, singleBytes, manifestBytes, schemaBytes  int
+	sumsBytes                                           int
+}
+
+// The bounds. Verify will read files someone outside could have edited, so
+// every read it makes is bounded by one of these, and the writer refuses to
+// write past any of them.
+const (
+	// partMaxBytes is where a part is cut by its compressed size (spec D).
 	partMaxBytes = 8 << 20
+	// partMaxLines is where a part is cut by its line count (spec D).
 	partMaxLines = 50000
+	// lineMaxBytes bounds one JSON line. It is far above any row payload the
+	// engine writes and small enough to hold one line in memory; a line
+	// larger than partMaxBytes is a part of its own, so this, not
+	// partMaxBytes, sizes the largest legal part.
+	lineMaxBytes = 64 << 20
+	// partMaxStoredBytes bounds a part's size in the tar: one line of
+	// lineMaxBytes that does not compress, plus 1 MiB, which covers deflate's
+	// framing (five bytes per 64 KiB block, plus the flushes) many times over.
+	partMaxStoredBytes = lineMaxBytes + 1<<20
+	// partMaxRawBytes bounds a part's decompressed size, so a small part
+	// cannot inflate without end; it is four of the largest lines, and the
+	// writer cuts a part before passing it.
+	partMaxRawBytes = 256 << 20
+	// singleMaxBytes bounds a single member (account.jsonl, people.jsonl,
+	// bytes.jsonl, report.json, ...), which is built in memory because a tar
+	// member needs its size before its bytes (spec D).
+	singleMaxBytes = 256 << 20
+	// manifestMaxBytes bounds the manifest, read whole before anything is
+	// known about the file; its kinds and language lines are a few KiB.
+	manifestMaxBytes = 16 << 20
+	// schemaMaxBytes bounds one schema document; a concept's schema is tens
+	// of KiB, so this leaves two orders of magnitude.
+	schemaMaxBytes = 4 << 20
+	// sumsMaxBytes bounds SHA256SUMS: at most about 320 bytes a line (a
+	// digest, two spaces, a path of at most relMaxBytes), it fits more than
+	// three million members.
+	sumsMaxBytes = 1 << 30
+	// relMaxBytes bounds a member's path inside the folder, which keeps each
+	// line of SHA256SUMS bounded.
+	relMaxBytes = 255
 )
 
-// singleMaxBytes bounds a single-member .jsonl file. It is built in memory
-// because a tar member needs its size before its bytes.
-const singleMaxBytes = 256 << 20
+// bounds is a variable holding the constants above only so a test can reach
+// a bound without writing megabytes.
+var bounds = limits{
+	partBytes:       partMaxBytes,
+	partLines:       partMaxLines,
+	partRawBytes:    partMaxRawBytes,
+	partStoredBytes: partMaxStoredBytes,
+	lineBytes:       lineMaxBytes,
+	singleBytes:     singleMaxBytes,
+	manifestBytes:   manifestMaxBytes,
+	schemaBytes:     schemaMaxBytes,
+	sumsBytes:       sumsMaxBytes,
+}
+
+// over is the one wording for a refused bound. The caller names the member.
+func over(n int64, what string, bound int) error {
+	return fmt.Errorf("%d %s is above the bound of %d", n, what, bound)
+}
+
+// memberBound answers the bound on a whole member's size, by its place in
+// the layout. A bytes/ object is bounded by the size its row gives, not
+// here; SHA256SUMS is bounded by bounds.sumsBytes.
+func memberBound(rel string) (int, string) {
+	pm, _ := parseMember(rel)
+	switch {
+	case pm.phase == phaseManifest:
+		return bounds.manifestBytes, "bytes in the manifest"
+	case pm.phase == phaseSchemas:
+		return bounds.schemaBytes, "bytes in a schema"
+	case pm.phase == phaseRows || pm.phase == phaseTables:
+		return bounds.partStoredBytes, "bytes in a part"
+	case pm.phase == phaseSums:
+		return bounds.sumsBytes, "bytes in the checksum list"
+	}
+	return bounds.singleBytes, "bytes in a single member"
+}
+
+// sumLineBytes is the length of a member's line in SHA256SUMS.
+func sumLineBytes(rel string) int { return sha256HexLen + 2 + len(rel) + 1 }
+
+const sha256HexLen = 64
 
 // gzipLevel is fixed: the same lines must give the same bytes, and a level
 // is part of what the bytes depend on.
@@ -172,6 +251,7 @@ type part struct {
 	buf        bytes.Buffer
 	zw         *gzip.Writer
 	lines      int
+	raw        int
 	sinceFlush int
 }
 
@@ -193,7 +273,7 @@ func (p *part) full(n int) bool {
 	if p.lines == 0 {
 		return false
 	}
-	return p.lines >= partMaxLines || p.estimate()+n > partMaxBytes
+	return p.lines >= bounds.partLines || p.estimate()+n > bounds.partBytes || p.raw+n > bounds.partRawBytes
 }
 
 func (p *part) add(line []byte) error {
@@ -201,6 +281,7 @@ func (p *part) add(line []byte) error {
 		return err
 	}
 	p.lines++
+	p.raw += len(line)
 	p.sinceFlush += len(line)
 	if p.sinceFlush >= flushEvery {
 		if err := p.zw.Flush(); err != nil {

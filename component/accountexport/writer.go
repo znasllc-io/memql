@@ -38,6 +38,7 @@ type Writer struct {
 	sums     []sumLine
 	counts   *tally
 	acctLast string
+	sumsLen  int
 
 	bytesIndex bytes.Buffer
 	objects    int
@@ -95,8 +96,15 @@ func (w *Writer) fail(err error) error {
 	return w.err
 }
 
-// member writes one whole member and records its digest.
+// member writes one whole member and records its digest. It refuses a
+// member past the bound Verify will hold it to, before writing a byte of it.
 func (w *Writer) member(rel string, data []byte) error {
+	if bound, what := memberBound(rel); len(data) > bound {
+		return w.fail(fmt.Errorf("%s: %w", rel, over(int64(len(data)), what, bound)))
+	}
+	if err := w.reserveSum(rel); err != nil {
+		return err
+	}
 	if err := w.tw.WriteHeader(w.header(rel, int64(len(data)))); err != nil {
 		return w.fail(fmt.Errorf("%s: %w", rel, err))
 	}
@@ -105,6 +113,44 @@ func (w *Writer) member(rel string, data []byte) error {
 	}
 	d := sha256.Sum256(data)
 	w.sums = append(w.sums, sumLine{path: rel, digest: hex.EncodeToString(d[:])})
+	return nil
+}
+
+// reserveSum makes room for rel's line in SHA256SUMS, refusing the member
+// that would take the list past its bound: the list is written last, and a
+// writer that found out only then would have written the whole file for
+// nothing.
+func (w *Writer) reserveSum(rel string) error {
+	if len(rel) > relMaxBytes {
+		return w.fail(fmt.Errorf("%s: %w", rel, over(int64(len(rel)), "bytes in a path", relMaxBytes)))
+	}
+	n := w.sumsLen + sumLineBytes(rel)
+	if n > bounds.sumsBytes {
+		return w.fail(fmt.Errorf("%s: adding %s: %w", MemberSums, rel, over(int64(n), "bytes in the checksum list", bounds.sumsBytes)))
+	}
+	w.sumsLen = n
+	return nil
+}
+
+// line encodes one JSON line of member and holds it to the line bound.
+func (w *Writer) line(member string, v any) ([]byte, error) {
+	line, err := encodeLine(v)
+	if err != nil {
+		return nil, w.fail(fmt.Errorf("%s: %w", member, err))
+	}
+	if len(line) > bounds.lineBytes {
+		return nil, w.fail(fmt.Errorf("%s: %w", member, over(int64(len(line)), "bytes in one line", bounds.lineBytes)))
+	}
+	return line, nil
+}
+
+// appendBounded adds a line to a single member built in memory, failing at
+// the line that would take it past the single-member bound.
+func (w *Writer) appendBounded(name string, buf *bytes.Buffer, line []byte) error {
+	if n := buf.Len() + len(line); n > bounds.singleBytes {
+		return w.fail(fmt.Errorf("%s: %w", name, over(int64(n), "bytes in a single member", bounds.singleBytes)))
+	}
+	buf.Write(line)
 	return nil
 }
 
@@ -162,23 +208,19 @@ func (w *Writer) addLine(name string, line []byte) error {
 		buf = &bytes.Buffer{}
 		w.lines[name] = buf
 	}
-	if buf.Len()+len(line) > singleMaxBytes {
-		return w.fail(fmt.Errorf("%s would pass %d MiB, the bound of a single member", name, singleMaxBytes>>20))
-	}
-	buf.Write(line)
-	return nil
+	return w.appendBounded(name, buf, line)
 }
 
-// rowLine stamps and checks a row before it is written.
-func (w *Writer) rowLine(r Row) ([]byte, error) {
+// rowLine stamps and checks a row of member before it is written.
+func (w *Writer) rowLine(member string, r Row) ([]byte, error) {
 	if !w.declared[r.Concept] {
-		return nil, fmt.Errorf("a row of %s, which the manifest does not declare", r.Concept)
+		return nil, w.fail(fmt.Errorf("%s: a row of %s, which the manifest does not declare", member, r.Concept))
 	}
 	if r.ID == "" {
-		return nil, fmt.Errorf("a row of %s with no id", r.Concept)
+		return nil, w.fail(fmt.Errorf("%s: a row of %s with no id", member, r.Concept))
 	}
 	r.Kind = KindRow
-	return encodeLine(r)
+	return w.line(member, r)
 }
 
 // AccountRow adds one version of the account's own row to account.jsonl.
@@ -186,9 +228,9 @@ func (w *Writer) AccountRow(r Row) error {
 	if err := w.advance(phaseAccount, MemberAccount); err != nil {
 		return err
 	}
-	line, err := w.rowLine(r)
+	line, err := w.rowLine(MemberAccount, r)
 	if err != nil {
-		return w.fail(fmt.Errorf("%s: %w", MemberAccount, err))
+		return err
 	}
 	if err := w.addLine(MemberAccount, line); err != nil {
 		return err
@@ -207,9 +249,9 @@ func (w *Writer) Line(member string, v any) error {
 	if err := w.advance(phase, member); err != nil {
 		return err
 	}
-	line, err := encodeLine(v)
+	line, err := w.line(member, v)
 	if err != nil {
-		return w.fail(fmt.Errorf("%s: %w", member, err))
+		return err
 	}
 	if err := w.addLine(member, line); err != nil {
 		return err
@@ -250,6 +292,9 @@ func (w *Writer) Bytes(meta BytesMeta, size int64, r io.Reader) error {
 	}
 	w.objects++
 	rel := objectFile(w.objects)
+	if err := w.reserveSum(rel); err != nil {
+		return err
+	}
 	if err := w.tw.WriteHeader(w.header(rel, size)); err != nil {
 		return w.fail(fmt.Errorf("%s: %w", rel, err))
 	}
@@ -267,11 +312,13 @@ func (w *Writer) Bytes(meta BytesMeta, size int64, r io.Reader) error {
 	}
 	digest := hex.EncodeToString(h.Sum(nil))
 	w.sums = append(w.sums, sumLine{path: rel, digest: digest})
-	line, err := encodeLine(BytesLine{BytesMeta: meta, File: rel, Size: size, SHA256: digest})
+	line, err := w.line(MemberBytesIndex, BytesLine{BytesMeta: meta, File: rel, Size: size, SHA256: digest})
 	if err != nil {
-		return w.fail(err)
+		return err
 	}
-	w.bytesIndex.Write(line)
+	if err := w.appendBounded(MemberBytesIndex, &w.bytesIndex, line); err != nil {
+		return err
+	}
 	w.counts.objects++
 	w.counts.objBytes += size
 	return nil
@@ -287,11 +334,13 @@ func (w *Writer) MissingBytes(meta BytesMeta) error {
 		return w.fail(errors.New("missing bytes need a key"))
 	}
 	meta.Missing = true
-	line, err := encodeLine(BytesLine{BytesMeta: meta})
+	line, err := w.line(MemberBytesIndex, BytesLine{BytesMeta: meta})
 	if err != nil {
-		return w.fail(err)
+		return err
 	}
-	w.bytesIndex.Write(line)
+	if err := w.appendBounded(MemberBytesIndex, &w.bytesIndex, line); err != nil {
+		return err
+	}
 	w.counts.missing++
 	return nil
 }
@@ -436,12 +485,12 @@ func (p *PartWriter) Write(v any) error {
 			p.err = p.w.fail(fmt.Errorf("%s: a row of %s in the folder of %s", p.dir, row.Concept, p.concept))
 			return p.err
 		}
-		line, err = p.w.rowLine(row)
+		line, err = p.w.rowLine(p.dir, row)
 	} else {
-		line, err = encodeLine(v)
+		line, err = p.w.line(p.dir, v)
 	}
 	if err != nil {
-		p.err = p.w.fail(fmt.Errorf("%s: %w", p.dir, err))
+		p.err = err
 		return p.err
 	}
 	if p.cur != nil && p.cur.full(len(line)) {

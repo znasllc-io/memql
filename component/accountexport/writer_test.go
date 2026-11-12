@@ -213,9 +213,7 @@ func TestAccountWithNoRows(t *testing.T) {
 
 func withBounds(t *testing.T, maxBytes, maxLines int) {
 	t.Helper()
-	ob, ol := partMaxBytes, partMaxLines
-	partMaxBytes, partMaxLines = maxBytes, maxLines
-	t.Cleanup(func() { partMaxBytes, partMaxLines = ob, ol })
+	withLimits(t, func(l *limits) { l.partBytes, l.partLines = maxBytes, maxLines })
 }
 
 func partsOf(t *testing.T, file []byte, dir string) [][]string {

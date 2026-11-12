@@ -1,7 +1,6 @@
 package accountexport
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/hex"
 	"fmt"
@@ -27,30 +26,15 @@ func renderSums(lines []sumLine) []byte {
 	return b.Bytes()
 }
 
-// parseSums reads what renderSums wrote.
-func parseSums(data []byte) (map[string]string, []string, error) {
-	out := map[string]string{}
-	var order []string
-	sc := bufio.NewScanner(bytes.NewReader(data))
-	n := 0
-	for sc.Scan() {
-		n++
-		line := sc.Text()
-		digest, path, ok := strings.Cut(line, "  ")
-		if !ok || len(digest) != 64 || path == "" {
-			return nil, nil, fmt.Errorf("line %d is not `<sha256>  <path>`", n)
-		}
-		if _, err := hex.DecodeString(digest); err != nil {
-			return nil, nil, fmt.Errorf("line %d: %v", n, err)
-		}
-		if _, dup := out[path]; dup {
-			return nil, nil, fmt.Errorf("line %d lists %s twice", n, path)
-		}
-		out[path] = digest
-		order = append(order, path)
+// parseSumLine reads one line renderSums wrote, its newline included.
+func parseSumLine(line []byte) (sumLine, error) {
+	text := strings.TrimSuffix(string(line), "\n")
+	digest, path, ok := strings.Cut(text, "  ")
+	if !ok || len(digest) != sha256HexLen || path == "" {
+		return sumLine{}, fmt.Errorf("not `<sha256>  <path>`")
 	}
-	if err := sc.Err(); err != nil {
-		return nil, nil, err
+	if _, err := hex.DecodeString(digest); err != nil || strings.ToLower(digest) != digest {
+		return sumLine{}, fmt.Errorf("the digest is not lower-case hex")
 	}
-	return out, order, nil
+	return sumLine{path: path, digest: digest}, nil
 }
