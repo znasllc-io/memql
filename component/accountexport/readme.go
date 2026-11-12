@@ -36,6 +36,9 @@ func renderReadme(stem string, m Manifest, r Report) string {
 	if r.Bytes.Missing > 0 {
 		p("  Missing at the source before this file was taken: %s, each named in bytes.jsonl.", count(r.Bytes.Missing, "object"))
 	}
+	if r.Bytes.Refused > 0 {
+		p("  Refused and not read, because a row named bytes outside the place its kind keeps them: %s, each named in bytes.jsonl.", count(r.Bytes.Refused, "reference"))
+	}
 	for _, mc := range r.Members {
 		p("  %s: %s.", mc.Name, count(mc.Lines, "line"))
 	}

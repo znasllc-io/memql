@@ -287,8 +287,8 @@ func (w *Writer) Bytes(meta BytesMeta, size int64, r io.Reader) error {
 	if err := w.advance(phaseBytes, "bytes"); err != nil {
 		return err
 	}
-	if meta.Key == "" || size < 0 || meta.Missing {
-		return w.fail(fmt.Errorf("bytes need a key and a size, and are not missing"))
+	if meta.Key == "" || size < 0 || meta.Missing || meta.Refused {
+		return w.fail(fmt.Errorf("bytes need a key and a size, and are neither missing nor refused"))
 	}
 	w.objects++
 	rel := objectFile(w.objects)
@@ -333,6 +333,9 @@ func (w *Writer) MissingBytes(meta BytesMeta) error {
 	if meta.Key == "" {
 		return w.fail(errors.New("missing bytes need a key"))
 	}
+	if meta.Refused {
+		return w.fail(errors.New("a reference is missing or refused, never both"))
+	}
 	meta.Missing = true
 	line, err := w.line(MemberBytesIndex, BytesLine{BytesMeta: meta})
 	if err != nil {
@@ -342,6 +345,32 @@ func (w *Writer) MissingBytes(meta BytesMeta) error {
 		return err
 	}
 	w.counts.missing++
+	return nil
+}
+
+// RefusedBytes records a reference a carried row makes to bytes outside the
+// place its kind's declaration allows (design section B, "Bytes"). Nothing is
+// read: the line names the row, the field and the key as the row wrote it,
+// and no file. The run goes on, as for missing bytes.
+func (w *Writer) RefusedBytes(meta BytesMeta) error {
+	if err := w.advance(phaseBytes, "bytes"); err != nil {
+		return err
+	}
+	if meta.Key == "" {
+		return w.fail(errors.New("refused bytes need a key"))
+	}
+	if meta.Missing {
+		return w.fail(errors.New("a reference is missing or refused, never both"))
+	}
+	meta.Refused = true
+	line, err := w.line(MemberBytesIndex, BytesLine{BytesMeta: meta})
+	if err != nil {
+		return err
+	}
+	if err := w.appendBounded(MemberBytesIndex, &w.bytesIndex, line); err != nil {
+		return err
+	}
+	w.counts.refused++
 	return nil
 }
 

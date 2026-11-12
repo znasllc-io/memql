@@ -434,6 +434,16 @@ func (v *verifier) bytesLine(line []byte) error {
 	if b.Key == "" {
 		return errors.New("a line names no key")
 	}
+	if b.Refused {
+		if b.Missing {
+			return fmt.Errorf("%s is recorded as both missing and refused", b.Key)
+		}
+		if b.File != "" || b.Size != 0 || b.SHA256 != "" {
+			return fmt.Errorf("%s was refused and names a file, a size or a checksum", b.Key)
+		}
+		v.counts.refused++
+		return nil
+	}
 	if b.Missing {
 		if b.File != "" {
 			return fmt.Errorf("%s is missing at the source and names a file", b.Key)

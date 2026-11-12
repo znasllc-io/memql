@@ -164,9 +164,12 @@ type ScrubbedField struct {
 // BytesReport counts the bytes carried, missing at the source, and counted
 // but not carried.
 type BytesReport struct {
-	Objects               int64 `json:"objects"`
-	Bytes                 int64 `json:"bytes"`
-	Missing               int64 `json:"missing"`
+	Objects int64 `json:"objects"`
+	Bytes   int64 `json:"bytes"`
+	Missing int64 `json:"missing"`
+	// Refused counts the references a row made to bytes outside the place its
+	// kind's declaration gives it: recorded in bytes.jsonl and never read.
+	Refused               int64 `json:"refused"`
 	NotCarriedObjects     int64 `json:"notCarriedObjects"`
 	NotCarriedBytes       int64 `json:"notCarriedBytes"`
 	NotCarriedUnknownSize int64 `json:"notCarriedUnknownSize"`
@@ -204,6 +207,11 @@ type BytesMeta struct {
 	// Path is the object's path under that prefix.
 	Path    string `json:"path,omitempty"`
 	Missing bool   `json:"missing,omitempty"`
+	// Refused marks a reference outside the place the row's kind allows its
+	// bytes to live in (design section B, "Bytes"). The key is as the row
+	// wrote it; nothing was read, so the line names no file. A line is never
+	// both missing and refused.
+	Refused bool `json:"refused,omitempty"`
 }
 
 // RowField names the field of a row that points at an object.

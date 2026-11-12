@@ -307,6 +307,7 @@ type tally struct {
 	objects  int64
 	objBytes int64
 	missing  int64
+	refused  int64
 }
 
 type kindTally struct{ rows, versions int64 }
@@ -379,6 +380,9 @@ func checkReport(r Report, t *tally) error {
 	if b.Objects != t.objects || b.Bytes != t.objBytes || b.Missing != t.missing {
 		return fmt.Errorf("report says %d objects of %d bytes written and %d missing, the file holds %d of %d and %d missing",
 			b.Objects, b.Bytes, b.Missing, t.objects, t.objBytes, t.missing)
+	}
+	if b.Refused != t.refused {
+		return fmt.Errorf("report says %d bytes references refused, the file records %d", b.Refused, t.refused)
 	}
 	return nil
 }
