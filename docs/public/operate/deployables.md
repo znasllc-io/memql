@@ -365,7 +365,8 @@ which answers from the same rule the write guard refuses with. A storefront
 with no connected store may go live for design review. Catalog, cart and checkout
 become available after a store is connected through the Store, the first of the
 connections on the deployable's page.
-An amber marker identifies incomplete Shopify setup independently of Live status.
+The Store slot says what Shopify setup remains in words ("Not connected",
+"Setup needed"), independently of Live status.
 A bound development store or unreadable store still refuses publication.
 GitHub accounts and organization access are managed in Settings; the repository
 wizard selects that saved access, with an accent text action back to Settings.
@@ -763,9 +764,11 @@ has three parts:
    store's domain and the same word as the slot. A destination with no store
    reads "Design preview". Opening a row chooses its store. "Manage Shopify
    connections in Settings" is beneath.
-2. **Notices.** One for each reason a store needs attention, in the engine's
-   sentence, with what is wrong beneath and the one act that fixes it. A store
-   bound to both destinations shows each reason once. The three repairs a
+2. **Notices.** One for each reason the engine gives for a store, in its
+   sentence, with what is wrong beneath and the one act that fixes it, whatever
+   the store's state: a paused or not-connected store can carry one, a privacy
+   request that keeps failing. A store bound to both destinations shows each
+   reason once. The three repairs a
    store's connection can need -- "was uninstalled in Shopify", "Shopify
    removed the data of", a Storefront token "registered under a different
    name" -- are notices too, each with "Reconnect in Settings". When the

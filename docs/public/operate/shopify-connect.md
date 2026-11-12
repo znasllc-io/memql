@@ -10,8 +10,8 @@ owner: znas
 # Connect Shopify
 
 A Shopify storefront can go live for design review before a store is connected.
-Its catalog, cart and checkout become available after connecting a store. An amber
-marker on the Store icon indicates that setup remains.
+Its catalog, cart and checkout become available after connecting a store. Until
+then the deployable's Store slot reads "Not connected".
 
 ## Connect and select a store
 
@@ -41,8 +41,9 @@ app at Shopify is a different action and revokes access there.
 When a store's staff uninstall the app in Shopify, MemQL marks the store
 disconnected. Websites connected to it show the store as unavailable instead of
 serving a catalog, the store stops mirroring, and it leaves your list of
-connected stores. Its mirrored data stays until Shopify's `shop/redact` request
-48 hours later, which purges it.
+connected stores. Its mirrored data stays until Shopify's `shop/redact` request,
+which Shopify sends 48 hours after the uninstall; MemQL purges the store 48 hours
+after that request arrives, unless the store has been connected again.
 
 To reconnect, add the store again from **Settings → Connections → Shopify**. The
 store's staff approve the app in Shopify, and MemQL restores the store, including
