@@ -17,7 +17,7 @@ vi.mock("../../src/live/connection", () => ({
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { dayWords } from "../../src/apps/deployables/wholesale/model";
-import { click, fakeConnection, loseTheReply, siteRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
+import { click, droppedSocket, fakeConnection, loseTheReply, siteRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
 
 // THE WHOLESALE SECTION, COMPLETE: the buyers, the documents and their
 // versions, the whole of the settings, and on one application its terms and
@@ -149,6 +149,40 @@ async function openTab(name: string) {
 async function openApplication(company: string) {
   await click(within(await screen.findByRole("list", { name: "Applications" })).getByRole("button", { name: `Open ${company}` }));
   await screen.findByRole("heading", { name: company });
+}
+
+/**
+ * A write whose answer is lost -- after it landed (`landed`), or before it
+ * left -- and then the page's re-read of the store, held open until the test
+ * releases it. Each released read answers as `checks` says, in turn: the
+ * store's own answer, another dropped connection, or a refusal to read.
+ */
+function loseTheAnswerThenHold(connection: FakeConnection, write: string, check: (name: string, call: string) => boolean,
+  opts: { landed: boolean; land?: () => void; checks: ("answer" | "drop" | "fail")[] }) {
+  const real = connection.query.executeNamed.bind(connection.query);
+  let lost = false;
+  const waiting: (() => void)[] = [];
+  connection.query.executeNamed = (async (name: string, call: string, o?: object) => {
+    if (name === write) {
+      if (opts.landed) {
+        await real(name, call, o);
+        opts.land?.();
+      }
+      lost = true;
+      throw droppedSocket();
+    }
+    if (lost && check(name, call)) {
+      await new Promise<void>((resolve) => waiting.push(resolve));
+      const next = opts.checks.shift() ?? "answer";
+      if (next === "drop") throw droppedSocket();
+      if (next === "fail") throw new Error("wholesale: the store could not be read just now");
+    }
+    return real(name, call, o);
+  }) as typeof connection.query.executeNamed;
+  return {
+    held: () => waiting.length,
+    release: async () => { await act(async () => { waiting.shift()?.(); }); },
+  };
 }
 
 /** Moves a wizard on, once its floor has been read. */
@@ -367,6 +401,78 @@ describe("the buyers", () => {
     await readTheBar();
     expect(barButtons()).toEqual(["Cancel", "Add and send the terms"]);
   });
+  describe("a lost answer on Add buyer", () => {
+    const empty = { rows: [], counts: {}, next: "", truncated: false };
+    const isCheck = (name: string, call: string) => name === "wholesaleList" && call.includes('stage: "all"');
+
+    async function answerAndAdd() {
+      await openTab("Buyers");
+      await click(await screen.findByRole("button", { name: "Add buyer" }));
+      await fill("Company", "Lark Cycles");
+      await next();
+      await fill("Name", "Robin Vale");
+      await next();
+      await fill("Email", "robin@lark.example.com");
+      await next("Add and send the terms");
+    }
+
+    it("draws no forward act while the store is read again, then says the buyer is there", async () => {
+      const lark = detail("Lark Cycles", LARK_ID, { stage: "waitingForTerms", acts: ["reject"] });
+      const seed = seedWith({ addedId: LARK_ID, get: { [LARK_ID]: lark }, list: { readyToReview: empty as unknown as Row, all: empty as unknown as Row } });
+      const connection = await openWholesale(seed);
+      const check = loseTheAnswerThenHold(connection, "wholesaleAddBuyer", isCheck, {
+        landed: true,
+        land: () => { seed.wholesale!.list!.all = { ...empty, rows: [{ ...KESTREL, applicationId: LARK_ID, companyName: "Lark Cycles", applicantEmail: "robin@lark.example.com", stage: "waitingForTerms" }] } as unknown as Row; },
+        checks: ["answer"],
+      });
+      await answerAndAdd();
+      await waitFor(() => expect(check.held()).toBe(1));
+      // FROM THE LOST ANSWER UNTIL THE CHECK ENDS, there is nothing to press but the way out.
+      expect(screen.queryByRole("button", { name: "Add and send the terms" })).toBeNull();
+      expect(barButtons()).toEqual(["Cancel"]);
+      expect(bar().getAttribute("data-tone")).toBe("busy");
+      await check.release();
+      expect(await screen.findByText(/The buyer is there/)).toBeTruthy();
+      await readTheBar();
+      expect(barButtons()).toEqual(["Done"]);
+      expect(screen.queryByRole("button", { name: "Add and send the terms" })).toBeNull();
+      expect(connection.callsNamed("wholesaleAddBuyer")).toHaveLength(1);
+    });
+
+    it("says the buyer is not there and offers the add again, every answer kept", async () => {
+      const connection = await openWholesale(seedWith({ list: { readyToReview: empty as unknown as Row, all: empty as unknown as Row } }));
+      const check = loseTheAnswerThenHold(connection, "wholesaleAddBuyer", isCheck, { landed: false, checks: ["answer"] });
+      await answerAndAdd();
+      await waitFor(() => expect(check.held()).toBe(1));
+      expect(screen.queryByRole("button", { name: "Add and send the terms" })).toBeNull();
+      await check.release();
+      expect(await screen.findByText(/The buyer is not there/)).toBeTruthy();
+      await readTheBar();
+      expect(barButtons()).toEqual(["Cancel", "Add and send the terms"]);
+      expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("robin@lark.example.com");
+    });
+
+    it("offers only Check again when the store cannot be read, and stays there when the connection drops again", async () => {
+      const connection = await openWholesale(seedWith({ list: { readyToReview: empty as unknown as Row, all: empty as unknown as Row } }));
+      const check = loseTheAnswerThenHold(connection, "wholesaleAddBuyer", isCheck, { landed: false, checks: ["fail", "drop"] });
+      await answerAndAdd();
+      await waitFor(() => expect(check.held()).toBe(1));
+      await check.release();
+      expect(await screen.findByText(/could not be read/)).toBeTruthy();
+      await readTheBar();
+      expect(barButtons()).toEqual(["Cancel", "Check again"]);
+      expect(screen.queryByRole("button", { name: "Add and send the terms" })).toBeNull();
+      await click(within(bar()).getByRole("button", { name: "Check again" }));
+      await waitFor(() => expect(check.held()).toBe(1));
+      expect(screen.queryByRole("button", { name: "Add and send the terms" })).toBeNull();
+      await check.release();
+      await readTheBar();
+      await waitFor(() => expect(barButtons()).toEqual(["Cancel", "Check again"]));
+      expect(screen.getByText(/could not be read/)).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Add and send the terms" })).toBeNull();
+      expect(connection.callsNamed("wholesaleAddBuyer")).toHaveLength(0);
+    });
+  });
 });
 
 describe("the documents", () => {
@@ -537,6 +643,85 @@ describe("the documents", () => {
     await readTheBar();
     expect(barButtons()).toEqual(["Done"]);
     expect(connection.callsNamed("wholesalePublishDocument")).toHaveLength(1);
+  });
+
+  describe("a lost answer on Publish", () => {
+    const isCheck = (name: string, call: string) => name === "wholesaleDocuments" && !call.includes("versionId");
+    const BODY = "No advertised price below MAP, from 2027.";
+
+    async function answerAndPublish() {
+      await openTab("Documents");
+      await openPublish("MAP policy", "Publish a new version of the MAP policy");
+      await fill("Label", "MAP policy 2027");
+      await next();
+      await fill("Text", BODY);
+      await next();
+      await next("Publish");
+    }
+
+    it("draws no forward act while the documents are read again, then says the version is there", async () => {
+      const seed = seedWith();
+      const connection = await openWholesale(seed);
+      const published = { ...DOCUMENTS, kinds: DOCUMENTS.kinds.map((k) => (k.kind === "map" ? { ...k, current: { ...k.current!, id: "doc-map-2", label: "MAP policy 2027", body: BODY } } : k)) };
+      const check = loseTheAnswerThenHold(connection, "wholesalePublishDocument", isCheck, {
+        landed: true, land: () => { seed.wholesale!.documents = published as unknown as Row; }, checks: ["answer"],
+      });
+      await answerAndPublish();
+      await waitFor(() => expect(check.held()).toBe(1));
+      // A press here would write a second version: there is none to press.
+      expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
+      expect(barButtons()).toEqual(["Cancel"]);
+      expect(bar().getAttribute("data-tone")).toBe("busy");
+      await check.release();
+      expect(await screen.findByText(/The version is there/)).toBeTruthy();
+      await readTheBar();
+      expect(barButtons()).toEqual(["Done"]);
+      expect(connection.callsNamed("wholesalePublishDocument")).toHaveLength(1);
+    });
+
+    it("says the version is not there when the request never left, and offers Publish again", async () => {
+      const connection = await openWholesale();
+      const check = loseTheAnswerThenHold(connection, "wholesalePublishDocument", isCheck, { landed: false, checks: ["answer"] });
+      await answerAndPublish();
+      await waitFor(() => expect(check.held()).toBe(1));
+      expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
+      await check.release();
+      expect(await screen.findByText(/The version is not there/)).toBeTruthy();
+      await readTheBar();
+      expect(barButtons()).toEqual(["Cancel", "Publish"]);
+      expect(connection.callsNamed("wholesalePublishDocument")).toHaveLength(0);
+    });
+
+    it("offers only Check again when the documents cannot be read, and stays there when the connection drops again", async () => {
+      const connection = await openWholesale();
+      const check = loseTheAnswerThenHold(connection, "wholesalePublishDocument", isCheck, { landed: true, checks: ["fail", "drop"] });
+      await answerAndPublish();
+      await waitFor(() => expect(check.held()).toBe(1));
+      await check.release();
+      expect(await screen.findByText(/could not be read/)).toBeTruthy();
+      await readTheBar();
+      expect(barButtons()).toEqual(["Cancel", "Check again"]);
+      expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
+      await click(within(bar()).getByRole("button", { name: "Check again" }));
+      await waitFor(() => expect(check.held()).toBe(1));
+      expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
+      await check.release();
+      await readTheBar();
+      await waitFor(() => expect(barButtons()).toEqual(["Cancel", "Check again"]));
+      expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
+      expect(connection.callsNamed("wholesalePublishDocument")).toHaveLength(1);
+    });
+  });
+
+  it("draws an earlier version's missing fingerprint as the dash with its reason", async () => {
+      const kinds = DOCUMENTS.kinds.map((k) => (k.kind === "terms" ? { ...k, history: k.history.map((v) => (v.id === "doc-terms-1" ? { ...v, sha256: "" } : v)) } : k));
+      await openWholesale(seedWith({ documents: { kinds } as unknown as Row }));
+      await openTab("Documents");
+      const earlier = within(await screen.findByRole("region", { name: "Wholesale terms" })).getByRole("list", { name: "Earlier versions" });
+      const absent = earlier.querySelector(".os-figure-absent") as HTMLElement;
+      expect(absent).toBeTruthy();
+      expect(absent.getAttribute("title")).toBe("Not recorded");
+      expect(within(earlier).getByText("Not recorded")).toBeTruthy();
   });
 
   it("opens an earlier version read-only", async () => {

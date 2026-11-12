@@ -99,7 +99,7 @@ function DocumentSection({ view, title, onPublish, onOpenVersion }: {
             <RecordRow key={v.id} icon={<FileText size={18} aria-hidden />} name={v.label} label={`Open ${v.label}`}
               trailing={<span className="os-caption">{dayWords(v.publishedAt)}</span>}
               onOpen={() => onOpenVersion(v.id, v.label)}>
-              <span className="os-mono">{fingerprint(v.sha256)}</span>
+              <span className="os-mono">{orNotRecorded(v.sha256, fingerprint(v.sha256))}</span>
             </RecordRow>
           ))}
         </RecordList>

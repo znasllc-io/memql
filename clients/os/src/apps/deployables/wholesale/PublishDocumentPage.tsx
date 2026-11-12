@@ -34,6 +34,10 @@ import { useWholesaleChecks, type Found, type WholesaleScope, type WholesaleWrit
 // A LOST ANSWER IS NOT PRESSED AGAIN BLIND: versions are append-only, so a
 // second Publish would be a second version. The wizard reads the documents
 // again and says whether this label and text are the kind's current version.
+// FROM THE PRESS UNTIL THE CHECK ENDS THERE IS NO PUBLISH TO PRESS: the act is
+// busy while the write is out, then only Cancel stands while the check is the
+// cluster's turn. Publish comes back only once the version is known not to be
+// there; a store that could not be read offers Check again and nothing else.
 
 const READABLE = /\.(md|markdown|txt)$/i;
 
@@ -59,9 +63,11 @@ export function PublishDocumentPage({ scope, kind, writes, trail, back, onPublis
   const [waiting, setWaiting] = useState<{ name: string; text: string } | null>(null);
   const [refusal, setRefusal] = useState("");
   const [settled, setSettled] = useState<Found | null>(null);
-  const [checking, setChecking] = useState(false);
+  // The press's own life: the write on its way, then the check of a lost answer.
+  const [phase, setPhase] = useState<"idle" | "writing" | "checking">("idle");
   const picker = useRef<HTMLInputElement>(null);
-  const publishing = writes.busy === "publish";
+  const publishing = phase === "writing";
+  const checking = phase === "checking";
 
   const answered: Record<Step, boolean> = { label: label.trim() !== "", text: body !== "", preview: false };
   const reached = (candidate: Step) => ORDER.slice(0, ORDER.indexOf(candidate)).every((s) => answered[s]);
@@ -88,22 +94,30 @@ export function PublishDocumentPage({ scope, kind, writes, trail, back, onPublis
   }
 
   async function check() {
-    setChecking(true);
+    setPhase("checking");
     setSettled(await findVersion(kind, label, body));
-    setChecking(false);
+    setPhase("idle");
   }
 
   async function publish() {
     setRefusal("");
     setSettled(null);
+    setPhase("writing");
     const { outcome, sentence } = await writes.publishDocument(kind, label, body);
-    if (outcome === "done") onPublished();
-    else if (outcome === "unknown") await check();
-    else setRefusal(sentence);
+    if (outcome === "done") {
+      onPublished();
+      return;
+    }
+    if (outcome === "unknown") {
+      await check();
+      return;
+    }
+    setPhase("idle");
+    setRefusal(sentence);
   }
 
   const settledSentence = settled === null ? "" :
-    settled === "there" ? `The connection dropped before the cluster answered. The version is there: it is ${words.subject}'s current version.`
+    settled === "there" ? `The connection dropped before the cluster answered. The version is there: it is now the current version of ${words.subject}.`
     : settled === "absent" ? "The connection dropped before the cluster answered. The version is not there: nothing was published."
     : "The connection dropped before the cluster answered, and the documents could not be read. Check again before publishing.";
 
@@ -153,8 +167,9 @@ export function PublishDocumentPage({ scope, kind, writes, trail, back, onPublis
 
   const cancel: Act = { label: "Cancel", text: true, onAct: back.onSelect };
   const acts: Act[] =
-    settled === "there" ? [{ label: "Done", tone: "primary", onAct: onPublished }]
-    : settled === "unread" ? [cancel, { label: "Check again", tone: "primary", busy: checking, onAct: () => void check() }]
+    checking ? [cancel]
+    : settled === "there" ? [{ label: "Done", tone: "primary", onAct: onPublished }]
+    : settled === "unread" ? [cancel, { label: "Check again", tone: "primary", onAct: () => void check() }]
     : step === "label" ? [cancel, ...(answered.label ? [{ label: "Continue", tone: "primary" as const, onAct: () => go("text") }] : [])]
     : step === "text" ? [cancel, ...(answered.text && waiting === null ? [{ label: "Continue", tone: "primary" as const, onAct: () => go("preview") }] : [])]
     : [cancel, ...(reached("preview") ? [{ label: "Publish", tone: "primary" as const, busy: publishing, onAct: () => void publish() }] : [])];
@@ -176,7 +191,7 @@ export function PublishDocumentPage({ scope, kind, writes, trail, back, onPublis
       steps={steps}
       open={step}
       onOpen={(next) => go(next as Step)}
-      status={{ word, tone: "none" }}
+      status={{ word, tone: checking ? "busy" : "none" }}
       acts={acts}
       context={{ page: "Wholesale publish document", kind, step }}
     />

@@ -89,6 +89,11 @@ describe("an email's line", () => {
     expect(emailWords(email({ state: "uncertain", sentAt: "", reason: "It may have been delivered." }))).toBe("It may have been delivered.");
   });
 
+  it("says Not confirmed, and nothing else, for an uncertain attempt the engine gave no sentence", () => {
+    expect(emailWords(email({ state: "uncertain", sentAt: "", reason: "" }))).toBe("Not confirmed");
+    expect(emailWords(email({ state: "uncertain", sentAt: "", reason: "  " }))).toBe("Not confirmed");
+  });
+
   it("draws one line per attempt, each kind's newest first", () => {
     const lines = emailLines([
       email({ kind: "approved", attempt: 1 }),

@@ -28,7 +28,10 @@ import { useWholesaleChecks, type Found, type WholesaleScope, type WholesaleWrit
 // the engine answers, the wizard asks the store whether it now holds an
 // application for the address, and says which it found: the buyer is there
 // (Done opens them), or not (the act is offered again), or the store could not
-// be read (Check again).
+// be read (Check again). FROM THE PRESS UNTIL THE CHECK ENDS THERE IS NO
+// FORWARD ACT TO PRESS: the write's own act is busy, then the check is the
+// cluster's turn, and only Cancel stands. It comes back only once the store
+// is known not to hold the buyer.
 
 type Step = "company" | "buyer" | "email";
 const ORDER: readonly Step[] = ["company", "buyer", "email"];
@@ -54,8 +57,10 @@ export function AddBuyerPage({ scope, settings, writes, trail, back, onAdded }: 
   const [applicantEmail, setApplicantEmail] = useState("");
   const [refusal, setRefusal] = useState("");
   const [settled, setSettled] = useState<Settled>(null);
-  const [checking, setChecking] = useState(false);
-  const adding = writes.busy === "add";
+  // The press's own life: the write on its way, then the check of a lost answer.
+  const [phase, setPhase] = useState<"idle" | "writing" | "checking">("idle");
+  const adding = phase === "writing";
+  const checking = phase === "checking";
   const words = addBuyerWords(settings);
 
   const answered: Record<Step, boolean> = {
@@ -69,21 +74,27 @@ export function AddBuyerPage({ scope, settings, writes, trail, back, onAdded }: 
   const go = (next: Step) => { if (reached(next)) setStep(next); };
 
   async function check() {
-    setChecking(true);
+    setPhase("checking");
     setSettled(await findBuyer(applicantEmail));
-    setChecking(false);
+    setPhase("idle");
   }
 
   async function add() {
     setRefusal("");
     setSettled(null);
+    setPhase("writing");
     const { outcome, applicationId, sentence } = await writes.addBuyer({ companyName, applicantName, applicantEmail });
-    if (outcome === "done" && applicationId !== undefined) onAdded(applicationId, companyName.trim());
-    else if (outcome === "unknown") await check();
-    else {
-      setRefusal(sentence);
-      setStep("email");
+    if (outcome === "done" && applicationId !== undefined) {
+      onAdded(applicationId, companyName.trim());
+      return;
     }
+    if (outcome === "unknown") {
+      await check();
+      return;
+    }
+    setPhase("idle");
+    setRefusal(sentence);
+    setStep("email");
   }
 
   const settledSentence = settled === null ? "" :
@@ -118,8 +129,9 @@ export function AddBuyerPage({ scope, settings, writes, trail, back, onAdded }: 
   // before the last act, so Cancel is simply going.
   const cancel: Act = { label: "Cancel", text: true, onAct: back.onSelect };
   const acts: Act[] =
-    settled?.found === "there" ? [{ label: "Done", tone: "primary", onAct: () => { if (settled.applicationId) onAdded(settled.applicationId, companyName.trim()); else back.onSelect(); } }]
-    : settled?.found === "unread" ? [cancel, { label: "Check again", tone: "primary", busy: checking, onAct: () => void check() }]
+    checking ? [cancel]
+    : settled?.found === "there" ? [{ label: "Done", tone: "primary", onAct: () => { if (settled.applicationId) onAdded(settled.applicationId, companyName.trim()); else back.onSelect(); } }]
+    : settled?.found === "unread" ? [cancel, { label: "Check again", tone: "primary", onAct: () => void check() }]
     : step === "company" ? [cancel, ...(answered.company ? [{ label: "Continue", tone: "primary" as const, onAct: () => go("buyer") }] : [])]
     : step === "buyer" ? [cancel, ...(answered.buyer ? [{ label: "Continue", tone: "primary" as const, onAct: () => go("email") }] : [])]
     : [cancel, ...(answered.email && reached("email") ? [{ label: words.act, tone: "primary" as const, busy: adding, onAct: () => void add() }] : [])];
@@ -142,7 +154,7 @@ export function AddBuyerPage({ scope, settings, writes, trail, back, onAdded }: 
       steps={steps}
       open={step}
       onOpen={(next) => go(next as Step)}
-      status={{ word, tone: "none" }}
+      status={{ word, tone: checking ? "busy" : "none" }}
       acts={acts}
       context={{ page: "Wholesale add buyer", step }}
     />

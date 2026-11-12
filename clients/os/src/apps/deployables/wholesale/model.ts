@@ -666,7 +666,7 @@ export function emailLines(emails: readonly WholesaleEmail[]): { kind: string; n
  * state and the lane's provider report -- the seven statuses the row lane
  * really records (campaigns stats.go), and nothing guessed for any other:
  *   on its way (pending, deferred, sending)   "On its way", and the engine's sentence
- *   uncertain                                 the engine's sentence alone
+ *   uncertain                                 the engine's sentence alone ("Not confirmed" with none)
  *   failed, held, skipped                     "Not sent: " and the engine's sentence
  *   sent, no report yet                       "Sent on <day>"
  *   delivered                                 "Sent on <day>; delivered"
@@ -684,7 +684,8 @@ export function emailWords(email: WholesaleEmail): string {
   if (email.state === "deferred" || email.state === "pending" || email.state === "sending") return reason ? `On its way: ${reason}` : "On its way";
   // THE ENGINE'S SENTENCE FOR AN UNCERTAIN HAND-OVER says it may have been
   // delivered: "Not sent" before it would contradict it.
-  if (email.state === "uncertain") return reason || "Not sent";
+  // Until a reply carries one, an uncertain attempt is "Not confirmed" and nothing more.
+  if (email.state === "uncertain") return reason || "Not confirmed";
   if (email.state !== "sent") return reason ? `Not sent: ${reason}` : "Not sent";
   const day = dayWords(email.delivery?.sentAt || email.sentAt);
   const sent = day ? `Sent on ${day}` : "Sent";
