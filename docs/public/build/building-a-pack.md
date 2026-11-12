@@ -294,10 +294,12 @@ Every kind a pack declares travels when its account is exported, unless the
 concept adds `stays` with a reason (`signin`, `transit` or `machine`) for rows
 that mean nothing on another cluster. A field that names bytes in blob storage
 is declared `@bytes(under="<place>")`, naming the place built from the row's
-own id or fields where its bytes live (`under="reviews/{storeId}"`), and one
-that names a secret `@secretName`. The export carries only the bytes inside
-that place and lists the secret as a connection to set up again; a secret's
-value never travels.
+own id or its `@rowAuthz` owner field where its bytes live
+(`under="reviews/{id}"`), and one that names a secret `@secretName`. The
+export carries only the bytes inside that place and lists the secret as a
+connection to set up again; a secret's value never travels. A field whose key
+no such value ties to the row is declared `@bytes(counted, ...)`: its bytes
+are counted in the file's report and not carried.
 
 ---
 

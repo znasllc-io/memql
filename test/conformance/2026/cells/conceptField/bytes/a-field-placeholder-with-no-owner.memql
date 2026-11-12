@@ -1,0 +1,7 @@
+/// A file attached to a ticket, on a concept that declares no owner, whose
+/// place names one of its fields.
+concept ticketAttachment {
+  ownerUserId  string
+  title        string
+  blobUrl      string  @bytes(under="attachments/{ownerUserId}")
+}

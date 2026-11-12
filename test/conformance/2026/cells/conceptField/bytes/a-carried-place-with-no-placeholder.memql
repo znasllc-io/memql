@@ -1,0 +1,7 @@
+/// A file attached to a ticket, whose place names no value of the row.
+@rowAuthz(owner="ownerUserId")
+concept ticketAttachment {
+  ownerUserId  string
+  title        string
+  blobUrl      string  @bytes(under="attachments")
+}

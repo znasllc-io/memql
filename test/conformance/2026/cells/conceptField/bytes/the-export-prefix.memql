@@ -3,5 +3,5 @@ concept ticketAttachment {
   ownerUserId  string
   fileSize     int
   title        string
-  blobUrl      string  @bytes(under="exports/{ownerUserId}")
+  blobUrl      string  @bytes(under="exports/{id}")
 }

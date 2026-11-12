@@ -1,0 +1,7 @@
+/// A snapshot of a ticket's help page, filed under the page it was taken of.
+/// Counted, never carried, so its place may name any string field.
+concept ticketHelpSnapshot {
+  pageId    string
+  title     string
+  objectId  string  @bytes(counted, under="help/snapshots/{pageId}")
+}

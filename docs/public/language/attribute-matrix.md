@@ -578,9 +578,9 @@ Declares WHICH ACCOUNT this concept's rows belong to, or that they belong to non
 |---|---|---|
 | `tree` | flag | The field names a prefix, and the bytes are every object under it (a site's bundle), not one object. |
 | `counted` | flag | An account export counts the bytes in the file's report and never carries them. |
-| `under` | string | Required: the place the row's own bytes live in, as path segments -- {id} for the row's id, {&lt;field>} for one of the concept's top-level string fields, anything else literal. A key outside it is not the row's and is never read. |
+| `under` | string | Required: the place the row's own bytes live in, as path segments -- {id} for the row's id, {&lt;owner>} for the field @rowAuthz(owner=...) names, anything else literal; a counted field may also name a literal place or any top-level string field. A key outside it is not the row's and is never read. |
 
-The field points at bytes in blob storage: one object, or with tree every object under the prefix it names. under="&lt;place>" is required: the place the row's own bytes live in, {id} for the row's id and {&lt;field>} for one of its top-level string fields, and a key outside it is never read. Emitted as x-bytes. An account export copies the bytes the newest version of each carried row points at into the file; with counted it only counts them in the file's report. On a string or a list of strings.
+The field points at bytes in blob storage: one object, or with tree every object under the prefix it names. under="&lt;place>" is required: the place the row's own bytes live in, {id} for the row's id and {&lt;owner>} for the field @rowAuthz(owner=...) names; a counted field may also use a literal place or any top-level string field. A key outside it is never read. Emitted as x-bytes. An account export copies the bytes the newest version of each carried row points at into the file; with counted it only counts them in the file's report. On a string or a list of strings.
 
 ### @cache
 

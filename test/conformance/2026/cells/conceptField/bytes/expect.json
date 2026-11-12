@@ -3,12 +3,22 @@
     {
       "file": "under-the-owner.memql",
       "verdict": "load_ok",
-      "note": "The field names one object in blob storage, and `under` names the place the row's own bytes live in: {ownerUserId} is the row's own owner. An account export copies the object only when its key lies strictly inside that place."
+      "note": "The field names one object in blob storage, and `under` names the place the row's own bytes live in: {ownerUserId} is the field the concept's @rowAuthz(owner=...) names, which the write guard holds to the writer's own user id. An account export copies the object only when its key lies strictly inside that place."
     },
     {
       "file": "with-its-flags.memql",
       "verdict": "load_ok",
       "note": "`tree`: the field names a prefix, and the bytes are every object under it; {id} is the row's own id. `counted`: the bytes are counted in the file's report and never carried. Either takes a list of strings as well as a string, and both still name their place."
+    },
+    {
+      "file": "counted-under-a-literal-place.memql",
+      "verdict": "load_ok",
+      "note": "A counted field's bytes are sized in an export's report and never read, so its place may be literal: an attachment's key is built from values that are not fields of the row."
+    },
+    {
+      "file": "counted-under-any-field.memql",
+      "verdict": "load_ok",
+      "note": "A counted field may name any top-level string field, since nothing is read from the place it builds."
     },
     {
       "file": "written-bare.memql",
@@ -92,6 +102,26 @@
       "verdict": "refuse_load",
       "code": "annotation_key",
       "message": "@bytes on a concept field has no key tre"
+    },
+    {
+      "file": "a-carried-place-with-no-placeholder.memql",
+      "verdict": "refuse_load",
+      "code": "bytes_under",
+      "message": "names the place \"attachments\", which has no placeholder: every row of the kind could name any key under it",
+      "note": "A carried field is read, so its place must be the row's own. Declare the field `counted` when no row value ties its key to the row."
+    },
+    {
+      "file": "a-carried-field-the-writer-chooses.memql",
+      "verdict": "refuse_load",
+      "code": "bytes_under",
+      "message": "`{folderId}` is neither the row's id, `{id}`, nor the owner field `{ownerUserId}` its @rowAuthz names",
+      "note": "A row's writer sets an ordinary field to whatever it likes, so a place built from one would let a row name another's bytes. Only the id and the owner field the write guard holds are the row's own."
+    },
+    {
+      "file": "a-field-placeholder-with-no-owner.memql",
+      "verdict": "refuse_load",
+      "code": "bytes_under",
+      "message": "the concept declares no @rowAuthz(owner=...), so a carried field's place may use only `{id}`"
     }
   ]
 }

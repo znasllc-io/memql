@@ -64,7 +64,7 @@ func TestBytesAndSecretNameFields(t *testing.T) {
 	wantBytes := []string{
 		"v1:library:file.blobUrl=plain under library/{ownerUserId}",
 		"v1:library:fileVersion.blobUrl=plain under library/{ownerUserId}",
-		"v1:common:attachment.blobUrl=plain under spaces",
+		"v1:common:attachment.blobUrl=counted under spaces",
 		"v1:platform:site.bundleRef=tree under sites/{id}",
 		"v1:platform:site.candidateRef=tree under sites/{id}",
 		"v1:platform:packageDeployment.snapshotArtifactId=counted under packages/snapshots/{packageId}",

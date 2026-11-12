@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // @bytes and @secretName -- a field that NAMES something kept outside the row
@@ -43,6 +44,12 @@ type BytesField struct {
 	// Under is the place the row's own bytes live in, the template as
 	// written (`library/{ownerUserId}`). Places and Admits read it.
 	Under string
+	// Concept is the concept that declares the field: the concept a `{id}`
+	// placeholder's id must be of.
+	Concept string
+	// OwnerField is the field the concept's @rowAuthz(owner=...) names, or
+	// "" when it names none. Its placeholder's id must be a user's.
+	OwnerField string
 }
 
 // FieldAnnotationTypeError refuses a @bytes or @secretName the field's type
@@ -164,7 +171,10 @@ func (c *Concept) BytesFields() []BytesField {
 		if prop.Bytes == nil {
 			continue
 		}
-		out = append(out, BytesField{Name: name, Tree: prop.Bytes.Tree, Counted: prop.Bytes.Counted, Under: prop.Bytes.Under})
+		out = append(out, BytesField{
+			Name: name, Tree: prop.Bytes.Tree, Counted: prop.Bytes.Counted, Under: prop.Bytes.Under,
+			Concept: c.Name, OwnerField: rowAuthzOwnerField(c.RowAuthz),
+		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -232,7 +242,8 @@ func (e *BytesUnderError) RuleCode() string { return CodeBytesUnder }
 // lies strictly inside the place the row's own values build. A field with no
 // place has no bytes the export may read, so it is refused rather than read
 // without one.
-func validateBytesUnder(props []parsedProperty) error {
+func validateBytesUnder(props []parsedProperty, rowAuthz *parser.RowAuthzDecl) error {
+	owner := rowAuthzOwnerField(rowAuthz)
 	stringFields := map[string]bool{}
 	for _, p := range props {
 		if p.typeName == "string" {
@@ -243,13 +254,14 @@ func validateBytesUnder(props []parsedProperty) error {
 		if p.bytes == nil {
 			continue
 		}
-		if reason := bytesUnderProblem(p.bytes, stringFields); reason != "" {
+		if reason := bytesUnderProblem(p.bytes, stringFields, owner); reason != "" {
 			return &BytesUnderError{
 				Field: p.name,
 				Under: p.bytes.Under,
 				Msg: fmt.Sprintf("@bytes on `%s` %s. Write the place the row's own bytes live in, as path segments: "+
-					"{id} for the row's id, {<field>} for one of the concept's top-level string fields, anything else "+
-					"literal -- `@bytes(under=\"library/{ownerUserId}\")`, `@bytes(tree, under=\"sites/{id}\")`",
+					"{id} for the row's id, {<owner>} for the field @rowAuthz(owner=...) names, anything else literal "+
+					"-- `@bytes(under=\"library/{ownerUserId}\")`, `@bytes(tree, under=\"sites/{id}\")`; a `counted` "+
+					"field may also name a literal place or any top-level string field",
 					p.name, reason),
 			}
 		}
@@ -258,12 +270,20 @@ func validateBytesUnder(props []parsedProperty) error {
 }
 
 // bytesUnderProblem says what is wrong with one place, or "" when nothing is.
-func bytesUnderProblem(d *bytesDecl, stringFields map[string]bool) string {
+//
+// A CARRIED field (not `counted`) is read, so its place must be the row's own
+// in a way the row's writer cannot choose: the row's id, or the owner field
+// the write guard holds to the writer's own user id. A literal-only place
+// would let any row of the kind name any key under it, and any other field is
+// one the writer sets to whatever it likes. A COUNTED field's bytes are only
+// sized, never read, so it may name a literal place or any string field.
+func bytesUnderProblem(d *bytesDecl, stringFields map[string]bool, owner string) string {
 	under := d.Under
 	if under == "" {
 		return "names no place (`under` is missing or empty)"
 	}
 	segments := strings.Split(under, "/")
+	placeholders := 0
 	for _, seg := range segments {
 		switch {
 		case seg == "":
@@ -281,6 +301,17 @@ func bytesUnderProblem(d *bytesDecl, stringFields map[string]bool) string {
 		if name != "id" && !stringFields[name] {
 			return fmt.Sprintf("writes under=%q, and `{%s}` names neither the row's id nor a string field the concept declares at its top level", under, name)
 		}
+		if d.Counted || name == "id" || name == owner {
+			placeholders++
+			continue
+		}
+		if owner == "" {
+			return fmt.Sprintf("writes under=%q, and the concept declares no @rowAuthz(owner=...), so a carried field's place may use only `{id}`: `{%s}` is a field the row's writer chooses", under, name)
+		}
+		return fmt.Sprintf("writes under=%q, and `{%s}` is neither the row's id, `{id}`, nor the owner field `{%s}` its @rowAuthz names: a carried field may name only bytes that are its own, and `{%s}` is a field the row's writer chooses", under, name, owner, name)
+	}
+	if !d.Counted && placeholders == 0 {
+		return fmt.Sprintf("names the place %q, which has no placeholder: every row of the kind could name any key under it. A carried field's place names the row's id, `{id}`, or the owner field its @rowAuthz names; a field whose keys no row value ties to the row is `counted`", under)
 	}
 	if segments[0] == bytesUnderReservedPrefix {
 		return fmt.Sprintf("names a place under `%s` in under=%q, where an account export writes its own files", bytesUnderReservedPrefix, under)
@@ -302,23 +333,104 @@ func bytesPlaceholder(seg string) (string, bool) {
 	return seg[1 : len(seg)-1], true
 }
 
-// bareIdForm is the bare spelling of an id: the part after the last ":". A
-// value with no ":" is its own bare form.
-func bareIdForm(v string) string {
-	if i := strings.LastIndex(v, ":"); i >= 0 {
-		return v[i+1:]
+// rowAuthzOwnerField is the field an owned @rowAuthz names, or "" when the
+// concept declares none. `owner="id"` (a self-owned concept) is the row's id,
+// which `{id}` already names, so it names no field here.
+func rowAuthzOwnerField(d *parser.RowAuthzDecl) string {
+	if d == nil || d.Tier != parser.RowAuthzOwned || d.Owner == "id" {
+		return ""
 	}
-	return v
+	return d.Owner
+}
+
+// userConcept is the concept an owner field's id is of.
+const userConcept = "v1:identity:user"
+
+// idSpelling is one id read the way core/librarykey reads it (id.ParseNodeId):
+// its concept, empty for a bare id, and its short id. ok is false for a value
+// that is not exactly one of the two spellings `<short>` and
+// `<concept>:<short>` -- a value carrying anything ahead of its concept, or
+// none of a short id, is compared only as written.
+func idSpelling(v string) (concept, short string, ok bool) {
+	c, sh, err := id.ParseNodeId(v)
+	if err != nil || sh == "" {
+		return "", "", false
+	}
+	if c == "" {
+		return "", sh, sh == v
+	}
+	return c, sh, c+":"+sh == v
+}
+
+// sameId reports whether a key segment names the same id as a row's stored
+// value, the way core/librarykey's sameUser does: equal as written, or both
+// the same short id with each side's concept absent or the expected one. So a
+// segment `v1:agents:agent:u1` never passes for user `u1`.
+func sameId(value, segment, expected string) bool {
+	if value == segment {
+		return true
+	}
+	vc, vs, vok := idSpelling(value)
+	sc, ss, sok := idSpelling(segment)
+	if !vok || !sok || vs != ss {
+		return false
+	}
+	return (vc == "" || vc == expected) && (sc == "" || sc == expected)
+}
+
+// placeholderValue is the stored value one placeholder stands for and the
+// concept its id must be of: the row's own concept for `{id}`, a user for the
+// owner field, and for any other field (counted fields only) the concept the
+// stored value itself names, when it names one.
+func (f BytesField) placeholderValue(name, rowID string, payload map[string]any) (value, expected string) {
+	switch {
+	case name == "id":
+		value, expected = rowID, f.Concept
+	default:
+		if v, ok := payload[name].(string); ok {
+			value = v
+		}
+		if name == f.OwnerField {
+			expected = userConcept
+		} else if c, _, ok := idSpelling(strings.TrimSpace(value)); ok {
+			expected = c
+		}
+	}
+	return strings.TrimSpace(value), expected
+}
+
+// spellings is every way a key segment may write the same id as value: the
+// value as stored, and -- when the value is itself one of the two spellings
+// of an id of the expected concept, or bare -- its short id and the short id
+// under the expected concept. It is exactly the set sameId admits.
+func spellings(value, expected string) []string {
+	out := []string{value}
+	c, short, ok := idSpelling(value)
+	if !ok || (c != "" && c != expected) {
+		return out
+	}
+	out = append(out, short)
+	if expected != "" {
+		out = append(out, expected+":"+short)
+	}
+	return out
+}
+
+// usableSegment reports whether a stored value can stand as one key segment.
+// A value holding a separator or naming a relative step would build a place
+// of another depth, or one that climbs out, so it builds none.
+func usableSegment(v string) bool {
+	return v != "" && v != "." && v != ".." && !strings.ContainsAny(v, "/\\")
 }
 
 // Places answers the key prefixes the row's own bytes may live under: Under
-// with `{id}` replaced by the row's id and each `{field}` by the payload's
-// value, segments joined by "/", no trailing slash. An id is stored in two
-// spellings, bare and canonical, and a key may hold either, so a placeholder
-// whose value has a canonical form contributes both, one prefix per
-// combination, deduplicated and sorted. A placeholder with no value (missing,
-// empty or not a string) gives an empty slice: a row that does not say whose
-// bytes these are owns none.
+// with each placeholder replaced by every spelling of the row's value
+// (spellings), segments joined by "/", no trailing slash, one prefix per
+// combination, deduplicated and sorted. The blob reader compares these
+// prefixes exactly, so the list is every spelling a real key can have and no
+// other -- the same set Admits accepts. A placeholder with no usable value
+// (missing, empty, not a string, or holding a separator) gives an empty
+// slice: a row that does not say whose bytes these are owns none.
 func (f BytesField) Places(rowID string, payload map[string]any) []string {
 	out := []string{}
 	if strings.TrimSpace(f.Under) == "" {
@@ -328,23 +440,11 @@ func (f BytesField) Places(rowID string, payload map[string]any) []string {
 	for i, seg := range strings.Split(f.Under, "/") {
 		choices := []string{seg}
 		if name, ok := bytesPlaceholder(seg); ok {
-			var value string
-			if name == "id" {
-				value = rowID
-			} else if v, isString := payload[name].(string); isString {
-				value = v
-			}
-			value = strings.TrimSpace(value)
-			if value == "" {
+			value, expected := f.placeholderValue(name, rowID, payload)
+			if !usableSegment(value) {
 				return out
 			}
-			choices = []string{value}
-			if bare := bareIdForm(value); bare != value {
-				if bare == "" {
-					return out
-				}
-				choices = append(choices, bare)
-			}
+			choices = spellings(value, expected)
 		}
 		next := make([]string, 0, len(prefixes)*len(choices))
 		for _, p := range prefixes {
@@ -369,12 +469,11 @@ func (f BytesField) Places(rowID string, payload map[string]any) []string {
 	return out
 }
 
-// Admits reports whether key lies STRICTLY inside one of the row's places:
-// split on "/", every segment of the place equal to the key's, and at least
-// one more segment after it. A placeholder segment is compared in bare form on
-// both sides, so `library/u1/...` and `library/v1:identity:user:u1/...` are
-// the same owner's. A key with a relative segment anywhere is refused, since
-// storage could resolve it outside the place.
+// Admits reports whether key lies STRICTLY inside the row's place: split on
+// "/", every literal segment equal, every placeholder segment the same id as
+// the row's value (sameId, with the concept that placeholder expects), and at
+// least one more non-empty segment after the place. A key with a relative
+// segment anywhere is refused, since storage could resolve it outside.
 func (f BytesField) Admits(rowID string, payload map[string]any, key string) bool {
 	if key == "" || len(f.Places(rowID, payload)) == 0 {
 		return false
@@ -394,28 +493,18 @@ func (f BytesField) Admits(rowID string, payload map[string]any, key string) boo
 	if len(keySegs) <= len(tmpl) || strings.Join(keySegs[len(tmpl):], "") == "" {
 		return false
 	}
-	for _, place := range f.Places(rowID, payload) {
-		placeSegs := strings.Split(place, "/")
-		if len(placeSegs) != len(tmpl) {
+	for i, seg := range tmpl {
+		name, isPlaceholder := bytesPlaceholder(seg)
+		if !isPlaceholder {
+			if seg != keySegs[i] {
+				return false
+			}
 			continue
 		}
-		match := true
-		for i, ps := range placeSegs {
-			if _, isPlaceholder := bytesPlaceholder(tmpl[i]); isPlaceholder {
-				if bareIdForm(ps) != bareIdForm(keySegs[i]) {
-					match = false
-					break
-				}
-				continue
-			}
-			if ps != keySegs[i] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
+		value, expected := f.placeholderValue(name, rowID, payload)
+		if !sameId(value, keySegs[i], expected) {
+			return false
 		}
 	}
-	return false
+	return true
 }

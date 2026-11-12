@@ -481,6 +481,7 @@ func TestStaysAndTravelsAnswerForEveryDeclaration(t *testing.T) {
 // as written.
 func TestBytesAndSecretNameFieldsAreReadBackFromTheSchema(t *testing.T) {
 	c, err := buildConcept(t, `@belongsTo(account)
+@rowAuthz(owner="ownerUserId")
 concept probe {
   accountId    string
   ownerUserId  string
@@ -497,10 +498,10 @@ concept probe {
 		t.Fatalf("BuildConceptFromDecl: %v", err)
 	}
 	wantBytes := []BytesField{
-		{Name: "archives", Tree: true, Counted: true, Under: "archives/{id}"},
-		{Name: "blobUrl", Under: "library/{ownerUserId}"},
-		{Name: "bundleRef", Tree: true, Under: "sites/{id}"},
-		{Name: "snapshot", Counted: true, Under: "packages"},
+		{Name: "archives", Tree: true, Counted: true, Under: "archives/{id}", Concept: "v1:test:probe", OwnerField: "ownerUserId"},
+		{Name: "blobUrl", Under: "library/{ownerUserId}", Concept: "v1:test:probe", OwnerField: "ownerUserId"},
+		{Name: "bundleRef", Tree: true, Under: "sites/{id}", Concept: "v1:test:probe", OwnerField: "ownerUserId"},
+		{Name: "snapshot", Counted: true, Under: "packages", Concept: "v1:test:probe", OwnerField: "ownerUserId"},
 	}
 	gotBytes := c.BytesFields()
 	if len(gotBytes) != len(wantBytes) {
@@ -561,7 +562,7 @@ func TestBytesAndSecretNameEmitTheirSchemaKeywords(t *testing.T) {
 // would be a declaration nothing can read. Refused at load, with the field,
 // its type and what to write.
 func TestBytesAndSecretNameAreRefusedOnAFieldThatIsNotAString(t *testing.T) {
-	for _, annotation := range []string{`@bytes(under="spaces")`, `@bytes(tree, under="sites/{id}")`, "@secretName"} {
+	for _, annotation := range []string{`@bytes(counted, under="spaces")`, `@bytes(tree, under="sites/{id}")`, "@secretName"} {
 		for _, fieldType := range []string{"int", "bool", "object", "[]int", "map[string]string"} {
 			t.Run(annotation+" on "+fieldType, func(t *testing.T) {
 				_, err := buildConcept(t, "concept probe {\n  target  "+fieldType+"  "+annotation+"\n}\n")
@@ -586,7 +587,7 @@ func TestBytesAndSecretNameAreRefusedOnAFieldThatIsNotAString(t *testing.T) {
 // The accessors read top-level fields only, so a @bytes or @secretName inside
 // a nested block would load and be read by nobody. Refused with the same code.
 func TestBytesAndSecretNameAreRefusedOnANestedField(t *testing.T) {
-	for _, annotation := range []string{`@bytes(under="spaces")`, "@secretName"} {
+	for _, annotation := range []string{`@bytes(under="spaces/{id}")`, "@secretName"} {
 		t.Run(annotation, func(t *testing.T) {
 			_, err := buildConcept(t, "concept probe {\n  bundle {\n    ref  string  "+annotation+"\n  }\n}\n")
 			var coded interface{ RuleCode() string }
@@ -603,31 +604,41 @@ func TestBytesAndSecretNameAreRefusedOnANestedField(t *testing.T) {
 // `under` is the place a row's bytes live in, and it is required: a kind that
 // does not say where its bytes are has none an export may read. Every way of
 // writing a place that names nothing, or names something other than the row's
-// own values, is refused with bytes_under.
+// own values, is refused with bytes_under. A CARRIED field (not `counted`) is
+// read, so its place must be the row's own: it names the row's id or the owner
+// field the concept's @rowAuthz holds to the writer, and nothing else. A
+// counted field is only sized, so it may name a literal place or any string
+// field.
 func TestBytesUnderIsRequiredAndChecked(t *testing.T) {
+	const owned = "@rowAuthz(owner=\"ownerUserId\")\n"
+	const body = "concept probe {\n  ownerUserId  string\n  folderId  string\n  size  int\n  details {\n    owner  string\n  }\n  blobUrl  string  "
 	cases := []struct {
 		name       string
+		preamble   string
 		annotation string
 		wantText   string
 	}{
-		{"written bare", `@bytes`, "names no place"},
-		{"flags and no place", `@bytes(tree)`, "names no place"},
-		{"an empty place", `@bytes(under="")`, "names no place"},
-		{"an empty segment", `@bytes(under="library//x")`, "an empty segment"},
-		{"a leading slash", `@bytes(under="/library")`, "an empty segment"},
-		{"a trailing slash", `@bytes(under="library/")`, "an empty segment"},
-		{"a dot segment", `@bytes(under="library/./x")`, "a relative segment"},
-		{"a dot-dot segment", `@bytes(under="library/../x")`, "a relative segment"},
-		{"a field the concept does not declare", `@bytes(under="library/{nobody}")`, "`{nobody}` names neither the row's id nor a string field"},
-		{"a field that is not a string", `@bytes(under="library/{size}")`, "`{size}` names neither the row's id nor a string field"},
-		{"a nested field", `@bytes(under="library/{details}")`, "`{details}` names neither the row's id nor a string field"},
-		{"the export prefix", `@bytes(under="exports/{id}")`, "`exports`"},
-		{"a tree at the top level", `@bytes(tree, under="sites")`, "a tree"},
+		{"written bare", owned, `@bytes`, "names no place"},
+		{"flags and no place", owned, `@bytes(tree)`, "names no place"},
+		{"an empty place", owned, `@bytes(under="")`, "names no place"},
+		{"an empty segment", owned, `@bytes(under="library//{id}")`, "an empty segment"},
+		{"a leading slash", owned, `@bytes(under="/library/{id}")`, "an empty segment"},
+		{"a trailing slash", owned, `@bytes(under="library/{id}/")`, "an empty segment"},
+		{"a dot segment", owned, `@bytes(under="library/./{id}")`, "a relative segment"},
+		{"a dot-dot segment", owned, `@bytes(under="library/../{id}")`, "a relative segment"},
+		{"a field the concept does not declare", owned, `@bytes(counted, under="library/{nobody}")`, "`{nobody}` names neither the row's id nor a string field"},
+		{"a field that is not a string", owned, `@bytes(counted, under="library/{size}")`, "`{size}` names neither the row's id nor a string field"},
+		{"a nested field", owned, `@bytes(counted, under="library/{details}")`, "`{details}` names neither the row's id nor a string field"},
+		{"the export prefix", owned, `@bytes(under="exports/{id}")`, "`exports`"},
+		{"a tree at the top level", owned, `@bytes(tree, under="{id}")`, "a tree"},
+		{"a carried field with no placeholder", owned, `@bytes(under="spaces")`, "has no placeholder"},
+		{"a carried tree with no placeholder", owned, `@bytes(tree, under="sites/all")`, "has no placeholder"},
+		{"a carried field naming a field the writer chooses", owned, `@bytes(under="library/{folderId}")`, "`{folderId}` is neither the row's id, `{id}`, nor the owner field `{ownerUserId}`"},
+		{"a carried field naming a field on a concept with no owner", "", `@bytes(under="library/{ownerUserId}")`, "declares no @rowAuthz(owner=...), so a carried field's place may use only `{id}`"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			src := "concept probe {\n  ownerUserId  string\n  size  int\n  details {\n    owner  string\n  }\n  blobUrl  string  " + tc.annotation + "\n}\n"
-			_, err := buildConcept(t, src)
+			_, err := buildConcept(t, tc.preamble+body+tc.annotation+"\n}\n")
 			var coded interface{ RuleCode() string }
 			if err == nil || !errors.As(err, &coded) || coded.RuleCode() != CodeBytesUnder {
 				t.Fatalf("error = %v, want code %s", err, CodeBytesUnder)
@@ -639,26 +650,36 @@ func TestBytesUnderIsRequiredAndChecked(t *testing.T) {
 			}
 		})
 	}
-	for _, ok := range []string{
-		`@bytes(under="spaces")`,
-		`@bytes(under="library/{ownerUserId}")`,
-		`@bytes(tree, under="sites/{id}")`,
-		`@bytes(counted, under="packages")`,
-		`@bytes(tree, counted, under="sites/{id}/{ownerUserId}")`,
+	for _, ok := range []struct{ preamble, annotation string }{
+		{owned, `@bytes(under="library/{ownerUserId}")`},
+		{owned, `@bytes(tree, under="sites/{id}")`},
+		{owned, `@bytes(tree, under="sites/{id}/{ownerUserId}")`},
+		{"", `@bytes(tree, under="sites/{id}")`},
+		{"", `@bytes(counted, under="spaces")`},
+		{"", `@bytes(counted, under="packages/snapshots/{folderId}")`},
+		{owned, `@bytes(counted, tree, under="packages/{folderId}")`},
 	} {
-		if _, err := buildConcept(t, "concept probe {\n  ownerUserId  string\n  blobUrl  string  "+ok+"\n}\n"); err != nil {
-			t.Errorf("%s: %v", ok, err)
+		if _, err := buildConcept(t, ok.preamble+body+ok.annotation+"\n}\n"); err != nil {
+			t.Errorf("%s%s: %v", ok.preamble, ok.annotation, err)
 		}
 	}
 }
 
-// Places answers the prefixes a row's own bytes may live under, with every
-// placeholder in both spellings an id is stored in. A row that does not say
-// whose bytes these are owns none.
+// The fields the shipped tree declares, as BytesFields() fills them: the
+// concept and its owner field ride along, so Places and Admits know which
+// concept each placeholder's id must be of.
+var (
+	libraryFile = BytesField{Name: "blobUrl", Under: "library/{ownerUserId}", Concept: "v1:library:file", OwnerField: "ownerUserId"}
+	siteBundle  = BytesField{Name: "bundleRef", Tree: true, Under: "sites/{id}", Concept: "v1:platform:site", OwnerField: "ownerUserId"}
+	snapshot    = BytesField{Name: "snapshotArtifactId", Counted: true, Under: "packages/snapshots/{packageId}", Concept: "v1:platform:packageDeployment"}
+	spacesFile  = BytesField{Name: "blobUrl", Counted: true, Under: "spaces", Concept: "v1:common:attachment"}
+)
+
+// Places answers, per placeholder, the value as stored, its short id and the
+// short id under the concept the placeholder's id must be of -- every spelling
+// a real key can have and no other, because the blob reader compares its
+// prefixes exactly.
 func TestBytesFieldPlaces(t *testing.T) {
-	library := BytesField{Name: "blobUrl", Under: "library/{ownerUserId}"}
-	site := BytesField{Name: "bundleRef", Tree: true, Under: "sites/{id}"}
-	spaces := BytesField{Name: "blobUrl", Under: "spaces"}
 	cases := []struct {
 		name    string
 		field   BytesField
@@ -666,17 +687,25 @@ func TestBytesFieldPlaces(t *testing.T) {
 		payload map[string]any
 		want    []string
 	}{
-		{"a bare owner", library, "file1", map[string]any{"ownerUserId": "u1"}, []string{"library/u1"}},
-		{"a canonical owner", library, "file1", map[string]any{"ownerUserId": "v1:identity:user:u1"},
+		{"a bare owner", libraryFile, "f1", map[string]any{"ownerUserId": "u1"}, []string{"library/u1", "library/v1:identity:user:u1"}},
+		{"a canonical owner", libraryFile, "f1", map[string]any{"ownerUserId": "v1:identity:user:u1"},
 			[]string{"library/u1", "library/v1:identity:user:u1"}},
-		{"the row's id, canonical", site, "v1:platform:site:s1", nil, []string{"sites/s1", "sites/v1:platform:site:s1"}},
-		{"the row's id, bare", site, "s1", nil, []string{"sites/s1"}},
-		{"a literal place", spaces, "a1", nil, []string{"spaces"}},
-		{"no owner", library, "file1", map[string]any{}, []string{}},
-		{"an empty owner", library, "file1", map[string]any{"ownerUserId": "  "}, []string{}},
-		{"an owner that is not a string", library, "file1", map[string]any{"ownerUserId": 7}, []string{}},
-		{"no row id", site, "", nil, []string{}},
-		{"two placeholders", BytesField{Under: "x/{id}/{ownerUserId}"}, "v1:a:b:r1", map[string]any{"ownerUserId": "v1:identity:user:u1"},
+		{"an owner of another concept is only itself", libraryFile, "f1", map[string]any{"ownerUserId": "v1:agents:agent:u1"},
+			[]string{"library/v1:agents:agent:u1"}},
+		{"the row's id, canonical", siteBundle, "v1:platform:site:s1", nil, []string{"sites/s1", "sites/v1:platform:site:s1"}},
+		{"the row's id, bare", siteBundle, "s1", nil, []string{"sites/s1", "sites/v1:platform:site:s1"}},
+		{"another concept's row with the same short id", siteBundle, "v1:platform:package:s1", nil, []string{"sites/v1:platform:package:s1"}},
+		{"a counted field naming another field, canonical", snapshot, "d1", map[string]any{"packageId": "v1:platform:package:p1"},
+			[]string{"packages/snapshots/p1", "packages/snapshots/v1:platform:package:p1"}},
+		{"a counted field naming another field, bare", snapshot, "d1", map[string]any{"packageId": "p1"}, []string{"packages/snapshots/p1"}},
+		{"a literal counted place", spacesFile, "a1", nil, []string{"spaces"}},
+		{"no owner", libraryFile, "f1", map[string]any{}, []string{}},
+		{"an empty owner", libraryFile, "f1", map[string]any{"ownerUserId": "  "}, []string{}},
+		{"an owner that is not a string", libraryFile, "f1", map[string]any{"ownerUserId": 7}, []string{}},
+		{"an owner holding a slash", libraryFile, "f1", map[string]any{"ownerUserId": "u1/../u2"}, []string{}},
+		{"no row id", siteBundle, "", nil, []string{}},
+		{"two placeholders", BytesField{Under: "x/{id}/{ownerUserId}", Concept: "v1:a:b", OwnerField: "ownerUserId"}, "v1:a:b:r1",
+			map[string]any{"ownerUserId": "u1"},
 			[]string{"x/r1/u1", "x/r1/v1:identity:user:u1", "x/v1:a:b:r1/u1", "x/v1:a:b:r1/v1:identity:user:u1"}},
 	}
 	for _, tc := range cases {
@@ -690,11 +719,12 @@ func TestBytesFieldPlaces(t *testing.T) {
 }
 
 // Admits holds a key to the row's own place: strictly inside it, segment by
-// segment, with a placeholder compared in its bare form on both sides.
+// segment, with a placeholder segment the same id as the row's value the way
+// core/librarykey judges one -- equal as written, or the same short id with
+// each side's concept absent or the one the placeholder expects.
 func TestBytesFieldAdmits(t *testing.T) {
-	library := BytesField{Name: "blobUrl", Under: "library/{ownerUserId}"}
-	site := BytesField{Name: "bundleRef", Tree: true, Under: "sites/{id}"}
 	owned := map[string]any{"ownerUserId": "v1:identity:user:u1"}
+	bareOwner := map[string]any{"ownerUserId": "u1"}
 	cases := []struct {
 		name    string
 		field   BytesField
@@ -703,20 +733,30 @@ func TestBytesFieldAdmits(t *testing.T) {
 		key     string
 		want    bool
 	}{
-		{"under the owner's bare id", library, "f1", owned, "library/u1/f1/report.pdf", true},
-		{"under the owner's canonical id", library, "f1", owned, "library/v1:identity:user:u1/f1/report.pdf", true},
-		{"a bare owner, a canonical key", library, "f1", map[string]any{"ownerUserId": "u1"}, "library/v1:identity:user:u1/f1/a", true},
-		{"under another owner", library, "f1", owned, "library/u2/f1/report.pdf", false},
-		{"the place itself", library, "f1", owned, "library/u1", false},
-		{"the place with a trailing slash", library, "f1", owned, "library/u1/", false},
-		{"a key that climbs out", library, "f1", owned, "library/u1/../u2/x", false},
-		{"a key that climbs out with a backslash", library, "f1", owned, "library/u1/f1\\..\\..\\u2\\x", false},
-		{"a prefix that only shares characters", library, "f1", owned, "library/u10/x", false},
-		{"a row with no owner", library, "f1", map[string]any{}, "library/u1/f1/a", false},
-		{"a tree key", site, "v1:platform:site:s1", nil, "sites/s1/v3/", true},
-		{"a tree key under the canonical id", site, "s1", nil, "sites/v1:platform:site:s1/v3/index.html", true},
-		{"another site's tree", site, "s1", nil, "sites/s2/v3/", false},
-		{"an empty key", library, "f1", owned, "", false},
+		{"under the owner's bare id", libraryFile, "f1", owned, "library/u1/f1/report.pdf", true},
+		{"under the owner's canonical id", libraryFile, "f1", owned, "library/v1:identity:user:u1/f1/report.pdf", true},
+		{"a bare stored owner, a canonical key of the right concept", libraryFile, "f1", bareOwner, "library/v1:identity:user:u1/f1/a", true},
+		{"a canonical stored owner, a bare key", libraryFile, "f1", owned, "library/u1/f1/a", true},
+		{"another concept's canonical id in the owner segment", libraryFile, "f1", bareOwner, "library/v1:agents:agent:u1/f1/a", false},
+		{"a stored owner of the wrong concept, a bare key", libraryFile, "f1", map[string]any{"ownerUserId": "v1:agents:agent:u1"}, "library/u1/f1/a", false},
+		{"a stored owner of the wrong concept, a user key", libraryFile, "f1", map[string]any{"ownerUserId": "v1:agents:agent:u1"}, "library/v1:identity:user:u1/f1/a", false},
+		{"a key that only contains the canonical id", libraryFile, "f1", bareOwner, "library/x:v1:identity:user:u1/f1/a", false},
+		{"under another owner", libraryFile, "f1", owned, "library/u2/f1/report.pdf", false},
+		{"the place itself", libraryFile, "f1", owned, "library/u1", false},
+		{"the place with a trailing slash", libraryFile, "f1", owned, "library/u1/", false},
+		{"a key that climbs out", libraryFile, "f1", owned, "library/u1/../u2/x", false},
+		{"a key that climbs out with a backslash", libraryFile, "f1", owned, "library/u1/f1\\..\\..\\u2\\x", false},
+		{"a prefix that only shares characters", libraryFile, "f1", owned, "library/u10/x", false},
+		{"a row with no owner", libraryFile, "f1", map[string]any{}, "library/u1/f1/a", false},
+		{"a tree key", siteBundle, "v1:platform:site:s1", nil, "sites/s1/v3/", true},
+		{"a tree key under the canonical id", siteBundle, "s1", nil, "sites/v1:platform:site:s1/v3/index.html", true},
+		{"another site's tree", siteBundle, "s1", nil, "sites/s2/v3/", false},
+		{"another concept's row with the same short id", siteBundle, "v1:platform:package:s1", nil, "sites/s1/v3/", false},
+		{"a site's key spelled with another concept", siteBundle, "s1", nil, "sites/v1:platform:package:s1/v3/", false},
+		{"a counted field's other placeholder", snapshot, "d1", map[string]any{"packageId": "v1:platform:package:p1"}, "packages/snapshots/p1/3.tar.gz", true},
+		{"a counted field's other placeholder, another concept", snapshot, "d1", map[string]any{"packageId": "v1:platform:package:p1"}, "packages/snapshots/v1:platform:site:p1/3.tar.gz", false},
+		{"a literal counted place", spacesFile, "a1", nil, "spaces/part/attachments/d/name.txt", true},
+		{"an empty key", libraryFile, "f1", owned, "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -724,5 +764,56 @@ func TestBytesFieldAdmits(t *testing.T) {
 				t.Fatalf("Admits(%q) = %v, want %v (places %v)", tc.key, got, tc.want, tc.field.Places(tc.rowID, tc.payload))
 			}
 		})
+	}
+}
+
+// Places and Admits are one rule said twice. Every spelling Places returns
+// admits a key under it, and over a set of candidate segments (every spelling
+// an id could be written in, for the right concept and the wrong ones) a key is
+// admitted exactly when its prefix is one of Places.
+func TestBytesFieldPlacesAndAdmitsAgree(t *testing.T) {
+	rows := []struct {
+		field   BytesField
+		rowID   string
+		payload map[string]any
+	}{
+		{libraryFile, "f1", map[string]any{"ownerUserId": "u1"}},
+		{libraryFile, "f1", map[string]any{"ownerUserId": "v1:identity:user:u1"}},
+		{libraryFile, "f1", map[string]any{"ownerUserId": "v1:agents:agent:u1"}},
+		{siteBundle, "s1", nil},
+		{siteBundle, "v1:platform:site:s1", nil},
+		{siteBundle, "v1:platform:package:s1", nil},
+		{snapshot, "d1", map[string]any{"packageId": "v1:platform:package:p1"}},
+		{snapshot, "d1", map[string]any{"packageId": "p1"}},
+	}
+	candidates := []string{}
+	for _, short := range []string{"u1", "s1", "p1", "u2"} {
+		candidates = append(candidates, short)
+		for _, concept := range []string{"v1:identity:user", "v1:agents:agent", "v1:platform:site", "v1:platform:package", "v1:library:file"} {
+			candidates = append(candidates, concept+":"+short, "x:"+concept+":"+short)
+		}
+	}
+	for _, r := range rows {
+		places := r.field.Places(r.rowID, r.payload)
+		inPlaces := map[string]bool{}
+		for _, p := range places {
+			inPlaces[p] = true
+			if !r.field.Admits(r.rowID, r.payload, p+"/obj") {
+				t.Errorf("%s %s %v: Places gave %q, and Admits refuses %q", r.field.Under, r.rowID, r.payload, p, p+"/obj")
+			}
+		}
+		literal := strings.Split(r.field.Under, "/")
+		for _, c := range candidates {
+			segs := append([]string(nil), literal...)
+			for i, s := range segs {
+				if _, ok := bytesPlaceholder(s); ok {
+					segs[i] = c
+				}
+			}
+			prefix := strings.Join(segs, "/")
+			if got, want := r.field.Admits(r.rowID, r.payload, prefix+"/obj"), inPlaces[prefix]; got != want {
+				t.Errorf("%s %s %v: Admits(%q) = %v, but %q in Places is %v", r.field.Under, r.rowID, r.payload, prefix+"/obj", got, prefix, want)
+			}
+		}
 	}
 }

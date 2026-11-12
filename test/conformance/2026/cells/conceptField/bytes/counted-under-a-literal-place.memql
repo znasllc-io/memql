@@ -1,0 +1,6 @@
+/// A file attached to a ticket. No value of the row ties its key to the row,
+/// so its bytes are counted in an export's report and never carried.
+concept ticketAttachment {
+  title    string
+  blobUrl  string  @bytes(counted, under="attachments")
+}

@@ -517,17 +517,41 @@ concept ticketHelpPage {
 ```
 
 **`under` is required: it is the place the row's own bytes live in.** A row
-names its own bytes, and its writer could name anything, so an export reads a
-key only when it lies strictly inside the place built from the row's own
-values. The place is path segments separated by `/`: `{id}` is the row's id,
-`{<field>}` the value of one of the concept's top-level string fields, and any
-other segment is literal. An id is compared in its bare form, so a key under
-`library/u1/` and one under `library/v1:identity:user:u1/` are the same
-owner's. A row whose placeholder field is empty owns no bytes at all. The load
-refuses (`bytes_under`) a `@bytes` with no `under` or an empty one, an empty,
-`.` or `..` segment (so no leading or trailing `/`), a `{...}` naming neither
-`id` nor a top-level string field, a place under `exports`, where account
-exports are written, and a `tree` whose place has a single segment.
+may only name bytes that are its own, and its writer could name anything, so
+an export reads a key only when it lies strictly inside the place built from
+the row's own values. The place is path segments separated by `/`, and a
+segment written in braces is a placeholder:
+
+| Placeholder | Stands for | Allowed on |
+|---|---|---|
+| `{id}` | the row's own id | any `@bytes` field |
+| `{<owner>}` | the field the concept's `@rowAuthz(owner="<owner>")` names, which the write guard holds to the writer's own user id | any `@bytes` field |
+| `{<field>}` | any other top-level string field | a `counted` field only |
+
+Any other segment is literal. A carried field (one that is not `counted`) is
+read, so its place needs at least one placeholder: a literal place would let
+every row of the kind name any key under it, and any other field is one the
+row's writer sets to whatever it likes. A concept with no `@rowAuthz` owner may
+use only `{id}` on a carried field. A counted field's bytes are only sized,
+never read, so it may name a literal place or any string field: an
+attachment's key is `spaces/<partition>/attachments/<digest>/<name>`, and no
+part of it is a field of the row, so `v1:common:attachment` declares
+`@bytes(counted, under="spaces")`.
+
+Ids are compared the way the Library compares them: a key segment is the
+row's id when it is equal as written, or the same short id with each side
+either bare or of the concept the placeholder expects -- the row's own concept
+for `{id}`, a user for the owner field. So `library/u1/` and
+`library/v1:identity:user:u1/` are the same owner's, and
+`library/v1:agents:agent:u1/` is nobody's. A row whose placeholder field is
+empty owns no bytes at all.
+
+The load refuses (`bytes_under`) a `@bytes` with no `under` or an empty one; an
+empty, `.` or `..` segment (so no leading or trailing `/`); a `{...}` naming
+neither `id` nor a top-level string field; on a carried field, a place with no
+placeholder or a placeholder that is neither `{id}` nor the owner field; a
+place under `exports`, where account exports are written; and a `tree` whose
+place has a single segment.
 
 Both are written on a top-level field that is a `string` or a list of strings,
 and become the schema keywords `x-bytes` and `x-secret-name`. On any other

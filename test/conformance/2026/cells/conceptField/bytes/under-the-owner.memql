@@ -1,5 +1,7 @@
 /// A file attached to a ticket. Its bytes are one object in blob storage, in
-/// the place its owner's own files live in.
+/// the place its owner's own files live in: the owner field is the one the
+/// write guard holds to the writer's own user id.
+@rowAuthz(owner="ownerUserId")
 concept ticketAttachment {
   ownerUserId  string
   title        string

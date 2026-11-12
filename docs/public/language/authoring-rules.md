@@ -3844,10 +3844,11 @@ concept ticket {
 ### `@bytes` says where its bytes live
 
 `@bytes` takes a required `under`: the place the row's own bytes live in,
-built from the row's id (`{id}`), its own top-level string fields
-(`{ownerUserId}`) and literal segments. Without one, or with a place that
-names something other than the row's own values, the load refuses it with
-`[bytes_under]`:
+built from the row's id (`{id}`), the owner field its `@rowAuthz(owner=...)`
+names (`{ownerUserId}`) and literal segments. A `counted` field, whose bytes
+are only sized, may also use a literal place or any string field. Without a
+place, or with one that names something other than the row's own values, the
+load refuses it with `[bytes_under]`:
 
 <!-- corpus: 2026/cells/conceptField/bytes/written-bare.memql -->
 ```memql retired
@@ -3860,7 +3861,12 @@ concept ticketAttachment {
 
 Write `@bytes(under="library/{ownerUserId}")` for one object in its owner's
 place and `@bytes(tree, under="sites/{id}")` for a tree in the row's own. A
-tree's place has at least two segments, and no place starts with `exports`.
+field that is not `counted` is read, so its place needs `{id}` or the owner
+field: a literal place would let any row of the kind name any key under it,
+and any other field is one the writer chooses. A concept with no owner uses
+`{id}`. When no row value ties a key to its row, as with an attachment, declare
+the field `counted`. A tree's place has at least two segments, and no place
+starts with `exports`.
 
 ### `@bytes` and `@secretName` go on a string
 

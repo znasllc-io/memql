@@ -146,7 +146,7 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 
 	// `@bytes(under=...)` names the row's own fields, so it is checked once
 	// the whole property set is known, like the declarations above.
-	if err := validateBytesUnder(parsed.properties); err != nil {
+	if err := validateBytesUnder(parsed.properties, parsed.rowAuthz); err != nil {
 		return nil, err
 	}
 

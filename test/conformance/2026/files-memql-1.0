@@ -136,8 +136,11 @@ cells/concept/version/with-no-value.memql
 cells/conceptBody/relationship/a-domain-verb-in-the-type-slot.memql
 cells/conceptBody/relationship/keyword-arguments.memql
 cells/conceptBody/relationship/with-a-positional-value.memql
+cells/conceptField/bytes/a-carried-field-the-writer-chooses.memql
+cells/conceptField/bytes/a-carried-place-with-no-placeholder.memql
 cells/conceptField/bytes/a-dot-dot-segment.memql
 cells/conceptField/bytes/a-dot-segment.memql
+cells/conceptField/bytes/a-field-placeholder-with-no-owner.memql
 cells/conceptField/bytes/a-field-that-is-not-a-string.memql
 cells/conceptField/bytes/a-leading-slash.memql
 cells/conceptField/bytes/a-trailing-slash.memql
@@ -145,6 +148,8 @@ cells/conceptField/bytes/a-tree-at-the-top-level.memql
 cells/conceptField/bytes/an-empty-place.memql
 cells/conceptField/bytes/an-empty-segment.memql
 cells/conceptField/bytes/an-undeclared-field.memql
+cells/conceptField/bytes/counted-under-a-literal-place.memql
+cells/conceptField/bytes/counted-under-any-field.memql
 cells/conceptField/bytes/on-a-number.memql
 cells/conceptField/bytes/the-export-prefix.memql
 cells/conceptField/bytes/under-the-owner.memql
