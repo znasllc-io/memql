@@ -122,8 +122,11 @@ const (
 	ReasonTermsNotRequired = "terms are not required on this store"
 	ReasonNotWaiting       = "the application is not waiting for terms"
 	ReasonAccessNotGranted = "access is not granted yet"
-	ReasonNoOrganization   = "the application belongs to no organization, so no email can be sent for it"
-	reasonUnreadableAnswer = "the row lane answered nothing this pack can read"
+	// ReasonAccessPredatesEmail declines the approval email and the access
+	// notices for an access record written before the pack sent either.
+	ReasonAccessPredatesEmail = "this access record predates the pack's emails and notices, so nothing is sent for it"
+	ReasonNoOrganization      = "the application belongs to no organization, so no email can be sent for it"
+	reasonUnreadableAnswer    = "the row lane answered nothing this pack can read"
 	// reasonUncertainHandOver is an uncertain hand-over's sentence; the lane's
 	// own error carries the transport's words, which are not for a person.
 	reasonUncertainHandOver = "The email service did not say whether it accepted this email, so it is not sent again automatically."
@@ -245,6 +248,18 @@ func (p *Provider) sendBuyerEmail(ctx context.Context, args map[string]any, _ in
 		}
 		if !granted {
 			return declined(app, kind, ReasonAccessNotGranted)
+		}
+		// NOTHING IS MAILED FOR WHAT HAPPENED BEFORE THIS RELEASE. Every version
+		// the pack writes now carries its attempt, and the backfill carries one
+		// forward only when the row holds it, so a granted row with none is an
+		// access granted before the pack sent emails -- re-written, perhaps, by the
+		// backfill, which a client's automation sees as any other granted version.
+		ent, err := p.entitlementRow(sys, trimmed(app["id"]))
+		if err != nil {
+			return nil, err
+		}
+		if attemptOf(ent) == 0 {
+			return declined(app, kind, ReasonAccessPredatesEmail)
 		}
 	case EmailRejected:
 		if state != StateRejected {

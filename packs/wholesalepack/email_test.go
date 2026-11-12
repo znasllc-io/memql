@@ -508,6 +508,69 @@ func TestAVersionTheBackfillReWroteSendsNoSecondApprovalEmail(t *testing.T) {
 	}
 }
 
+// NOTHING IS MAILED FOR WHAT HAPPENED BEFORE THIS RELEASE. An application
+// approved and granted before the pack sent emails has no email row, and its
+// entitlement no attempt and no direction. The real backfill ties it with new
+// versions; an automation wired on entitlement versions then asks for the
+// approval email and the access notice, and nothing is sent, staged or
+// recorded. A retry of the buyer's access after the release is attempt 1, and
+// its approval email is sent once.
+func TestNothingIsMailedForAnAccessGrantedBeforeEmailsAndARetryIsMailedOnce(t *testing.T) {
+	registerShippedAdapters()
+	w := newEmailWorld()
+	w.apps[0]["accountId"] = ""
+	p := w.provider()
+	w.decisions = append(w.decisions, map[string]any{"id": "dec-approve", "applicationId": applicationConcept + ":" + linkApp,
+		"transition": TransitionApprove, "decidedBy": emailStaff, "createdAt": w.next()})
+	w.ents = append(w.ents, map[string]any{"id": "v1:wholesale:entitlement:" + EntitlementRowID(linkApp),
+		"applicationId": applicationConcept + ":" + linkApp, "storeId": linkStore, "state": EntitlementGranted,
+		"adapter": AdapterCustomerTag, "ownerUserId": linkMerchant, "createdAt": w.next()})
+	before := len(w.ents)
+	nodes, err := p.backfillAccounts(automation(), map[string]any{}, 0)
+	reply(t, nodes, err)
+	if len(w.ents) != before+1 {
+		t.Fatalf("the backfill wrote %d entitlement versions, want one", len(w.ents)-before)
+	}
+	if _, has := w.ents[len(w.ents)-1]["attempt"]; has {
+		t.Fatalf("the backfill gave an old row an attempt: %v", w.ents[len(w.ents)-1])
+	}
+	// THE AUTOMATION ON THE RE-WRITTEN VERSION.
+	got := w.sendBuyer(t, p, EmailApproved)
+	if got["state"] != SendSkipped || got["recorded"] != false || got["reason"] != ReasonAccessPredatesEmail {
+		t.Fatalf("the approval email for an access granted before emails answered %v", got)
+	}
+	notice := w.notify(t, p, map[string]any{"event": StaffEventAccessNotGranted})
+	if notice["status"] != "skipped" || notice["reason"] != ReasonAccessPredatesEmail {
+		t.Fatalf("the access notice for an access record from before emails answered %v", notice)
+	}
+	if len(w.lane.calls) != 0 || w.stages != 0 || len(w.sends) != 0 {
+		t.Fatalf("%d lane calls, %d notices staged, %d email rows for an old access", len(w.lane.calls), w.stages, len(w.sends))
+	}
+	// AN ACCESS RECORD FROM BEFORE EMAILS THAT DID NOT LAND is told of by no notice either.
+	w.ents = append(w.ents, map[string]any{"id": "v1:wholesale:entitlement:" + EntitlementRowID(linkApp),
+		"applicationId": applicationConcept + ":" + linkApp, "storeId": linkStore, "state": EntitlementFailed,
+		"adapter": AdapterCustomerTag, "ownerUserId": linkMerchant, "accountId": "acct-links", "createdAt": w.next()})
+	if notice := w.notify(t, p, map[string]any{"event": StaffEventAccessNotGranted}); notice["status"] != "skipped" || w.stages != 0 {
+		t.Fatalf("a failed access record from before emails answered %v", notice)
+	}
+	// A RETRY AFTER THE RELEASE is attempt 1, and is mailed once. (This world
+	// keeps the application's rows as seeded; the tie the backfill wrote is the
+	// database test's to read.)
+	w.apps[0]["accountId"] = "acct-links"
+	if _, err := p.retryAccess(staffCtx(emailStaff), map[string]any{"applicationId": linkApp}, 0); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if last := w.ents[len(w.ents)-1]; last["attempt"] != 1 || last["state"] != EntitlementGranted {
+		t.Fatalf("the retry wrote %v, want attempt 1 granted", last)
+	}
+	if got := w.sendBuyer(t, p, EmailApproved); got["state"] != SendSent || got["attempt"] != float64(1) || len(w.lane.sent) != 1 {
+		t.Fatalf("the approval email after the retry answered %v after %d sent", got, len(w.lane.sent))
+	}
+	if again := w.sendBuyer(t, p, EmailApproved); again["state"] != SendSent || len(w.lane.calls) != 1 {
+		t.Fatalf("a second call answered %v after %d lane calls", again, len(w.lane.calls))
+	}
+}
+
 // A SECOND AUTOMATIC TERMS SEND MINTS NO NEW LINK: the link's token hash is the
 // one the first send minted.
 func TestASecondAutomaticTermsSendMintsNoNewLink(t *testing.T) {
@@ -1326,8 +1389,7 @@ func TestAnAccessRowWithNoDirectionIsReadByItsState(t *testing.T) {
 	p := w.provider()
 	w.approveAndGrant(EntitlementPending)
 	delete(w.ents[len(w.ents)-1], "direction")
-	delete(w.ents[len(w.ents)-1], "attempt")
-	if got := w.notify(t, p, map[string]any{"event": StaffEventAccessNotGranted}); got["requestId"] != AccessStaffRequestID(StaffEventAccessNotGranted, linkApp, 0) {
+	if got := w.notify(t, p, map[string]any{"event": StaffEventAccessNotGranted}); got["requestId"] != AccessStaffRequestID(StaffEventAccessNotGranted, linkApp, 1) {
 		t.Fatalf("an approved application's undirected pending row answered %v", got)
 	}
 	w.decisions = append(w.decisions, map[string]any{"id": "dec-revoke", "applicationId": applicationConcept + ":" + linkApp,

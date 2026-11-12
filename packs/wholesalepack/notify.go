@@ -218,6 +218,12 @@ func (p *Provider) notifyStaff(ctx context.Context, args map[string]any, _ int) 
 		if err != nil {
 			return nil, err
 		}
+		// AN ACCESS RECORD FROM BEFORE THE PACK SENT NOTICES (no attempt: see
+		// sendBuyerEmail) is told of by none, whatever its versions look like now.
+		if attempt == 0 {
+			return confirm("wholesale:staffNotice", map[string]any{"applicationId": id, "event": event,
+				"status": "skipped", "reason": ReasonAccessPredatesEmail, "requestId": ""})
+		}
 		requestID = AccessStaffRequestID(event, id, attempt)
 	}
 	defaults := staffDefaults[event]
@@ -310,6 +316,11 @@ func (p *Provider) accessDidNotLand(sys context.Context, applicationID, state, e
 	}
 	if ent == nil {
 		return 0, fmt.Errorf("wholesale: application %q has no access record, so no access failed to land", applicationID)
+	}
+	if attemptOf(ent) == 0 {
+		// Written before the pack sent notices: answered as such, before any
+		// reading of its direction (notifyStaff declines it).
+		return 0, nil
 	}
 	entState := trimmed(ent["state"])
 	direction := trimmed(ent["direction"])

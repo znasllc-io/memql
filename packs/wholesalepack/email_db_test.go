@@ -15,9 +15,11 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/campaigns"
@@ -436,6 +438,81 @@ func TestTwoNodesAtOnceStageOneStaffNoticeAndASentOneStaysSent(t *testing.T) {
 			versionCount(t, "v1:platform:outboundRequest", want))
 	}
 	if lines := s.logs.lines("sam@"); lines != "" {
+		t.Fatalf("a log line carries the applicant's address:\n%s", lines)
+	}
+}
+
+// NOTHING IS MAILED ON UPGRADE FOR WHAT HAPPENED BEFORE IT. An application
+// approved and granted before the pack sent emails -- its rows written without
+// an attempt, a direction or an email row, and not yet tied to its
+// organization -- is tied by the real account backfill. The store's automation
+// on the versions the backfill re-wrote then asks for the approval email and
+// the access notice, as an automation wired on every entitlement version would:
+// no email reaches the lane, no notice is staged, and no email row is written.
+// A retry of the buyer's access after the upgrade is attempt 1, and its
+// approval email is sent once.
+func TestNothingIsMailedOnUpgradeForAnAccessGrantedBeforeEmails(t *testing.T) {
+	fakeAdapterOnce.Do(func() { wholesalepack.RegisterAdapter(fakeAdapter) })
+	eng, s := newEmailStore(t, "mail-old", false)
+	oldApp := "old-mail-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	wsExec(t, eng, seedCtx(), rawInsert("v1:wholesale:application", oldApp, map[string]any{"ownerUserId": userRef(s.owner),
+		"storeId": s.store, "siteId": s.site, "companyName": "Old Trading", "applicantName": "Pat Old",
+		"applicantEmail": "pat@mail-old.example.com"}))
+	wsExec(t, eng, seedCtx(), rawInsert("v1:wholesale:applicationDecision", "old-dec-"+oldApp, map[string]any{
+		"applicationId": "v1:wholesale:application:" + oldApp, "storeId": s.store, "transition": "approve",
+		"decidedBy": userRef(s.staff), "principalKind": "client", "note": "known to us"}))
+	wsExec(t, eng, seedCtx(), rawInsert("v1:wholesale:entitlement", wholesalepack.EntitlementRowID(oldApp), map[string]any{
+		"ownerUserId": userRef(s.owner), "applicationId": "v1:wholesale:application:" + oldApp, "storeId": s.store,
+		"buyerEmail": "pat@mail-old.example.com", "adapter": wholesalepack.AdapterCustomerTag, "state": "granted", "reference": "wholesale"}))
+
+	report := answerOf(t, eng, asOperator("operator-"+s.site), `builtin wholesaleBackfillAccounts(storeId: `+quote(s.store)+`)`)
+	if countOf(report["tied"]) < 3 {
+		t.Fatalf("the backfill tied %v rows, want the application, its decision and its entitlement: %v", report["tied"], report)
+	}
+	ent := latestPayload(t, "v1:wholesale:entitlement", wholesalepack.EntitlementRowID(oldApp))
+	if bareID(asString(ent["accountId"])) != s.account || ent["attempt"] != nil || ent["state"] != "granted" {
+		t.Fatalf("the re-written entitlement is %v, want it tied, granted and still without an attempt", ent)
+	}
+
+	sendCall := `builtin wholesaleSendBuyerEmail(applicationId: ` + quote(oldApp) + `, kind: "approved")`
+	got := automationCall(t, eng, sendCall)
+	if got["state"] != wholesalepack.SendSkipped || got["recorded"] != false || got["reason"] != wholesalepack.ReasonAccessPredatesEmail {
+		t.Fatalf("the approval email for an access granted before emails answered %v", got)
+	}
+	notice := automationCall(t, eng, `builtin wholesaleNotifyStaff(applicationId: `+quote(oldApp)+`, event: "accessNotGranted")`)
+	if notice["status"] != "skipped" || notice["reason"] != wholesalepack.ReasonAccessPredatesEmail {
+		t.Fatalf("the access notice for an access from before emails answered %v", notice)
+	}
+	if n := len(s.mail.messages()); n != 0 {
+		t.Fatalf("%d emails reached the lane for an access granted before emails", n)
+	}
+	for _, attempt := range []int{0, 1} {
+		if n := versionCount(t, "v1:platform:outboundRequest",
+			wholesalepack.AccessStaffRequestID(wholesalepack.StaffEventAccessNotGranted, oldApp, attempt)); n != 0 {
+			t.Fatalf("an access notice was staged for attempt %d", attempt)
+		}
+	}
+	if n := versionCount(t, "v1:wholesale:emailSend", wholesalepack.EmailSendRowID(wholesalepack.EmailApproved, oldApp, 1)); n != 0 {
+		t.Fatalf("%d email rows were written for an access granted before emails", n)
+	}
+
+	// A RETRY AFTER THE UPGRADE, through an adapter that reaches no store.
+	openApplications(t, eng, asSiteOwner(s.owner), s.store, automationFakeAdapter)
+	if _, err := eng.Execute(signedIn(s.staff), `builtin wholesaleRetryAccess(applicationId: `+quote(oldApp)+`)`); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	ent = latestPayload(t, "v1:wholesale:entitlement", wholesalepack.EntitlementRowID(oldApp))
+	if ent["state"] != "granted" || ent["attempt"] != float64(1) || ent["direction"] != "grant" {
+		t.Fatalf("the retry wrote %v, want attempt 1, a granted grant", ent)
+	}
+	if got := automationCall(t, eng, sendCall); got["state"] != wholesalepack.SendSent || got["attempt"] != float64(1) {
+		t.Fatalf("the approval email after the retry answered %v", got)
+	}
+	automationCall(t, eng, sendCall) // the automation on the next version
+	if sent := s.mail.messages(); len(sent) != 1 || sent[0].To != "pat@mail-old.example.com" {
+		t.Fatalf("%d approval emails after the retry, want one to the stored address", len(sent))
+	}
+	if lines := s.logs.lines("pat@"); lines != "" {
 		t.Fatalf("a log line carries the applicant's address:\n%s", lines)
 	}
 }
