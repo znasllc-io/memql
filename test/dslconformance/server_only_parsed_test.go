@@ -240,6 +240,24 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// cluster-owner actor walks the installation directory at one snapshot;
 		// per-user scoping would silently discard other configured stores.
 		{Path: "shopify/overlay/queries.memql", Name: "storesForConnector"}: true,
+		// The store statistics walk (the 2026-11-11 store statistics design)
+		// reads every organization's stores at once. A mirror row has no owner
+		// to scope an actor against -- its store is the only key it has -- and
+		// the one reader is the statistics walk under its maintenance principal.
+		// Each also spells `actor.isClusterOwner == true` out; both locks are
+		// shown to hold alone in integrations/shopify's
+		// TestTheStatisticsReadsAnswerNothingToAReaderAndRowsToAClusterOwner.
+		{Path: "shopify/overlay/queries.memql", Name: "storeStatisticsOrdersChanged"}:  true,
+		{Path: "shopify/overlay/queries.memql", Name: "storeStatisticsLinesChanged"}:   true,
+		{Path: "shopify/overlay/queries.memql", Name: "storeStatisticsRefundsChanged"}: true,
+		{Path: "shopify/overlay/queries.memql", Name: "storeStatisticsOrderBuyers"}:    true,
+		{Path: "shopify/overlay/queries.memql", Name: "storeStatisticsShop"}:           true,
+		// The store directory: the walk figures every configured store, which
+		// per-user scoping would cut to one person's.
+		{Path: "shopify/overlay/queries.memql", Name: "storeStatisticsStores"}: true,
+		// The store row as it stood at an instant, which the walk reads to find
+		// when a store first existed; same reader, same reason.
+		{Path: "shopify/overlay/queries.memql", Name: "storeStatisticsStoreAt"}: true,
 		// Capture belongs to the installation's restricted test inbox, not
 		// actor.userId: identity mail can precede a recipient account. Only
 		// the capture service writes encrypted bodies; the public read capability

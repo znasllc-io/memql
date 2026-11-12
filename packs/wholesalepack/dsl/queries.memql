@@ -109,3 +109,39 @@ query store storePlanById {
   filter  row => row.id == args.storeId
   shape   wholesaleStorePlan
 }
+
+// ---- the store statistics walk (the 2026-11-11 store statistics design) ----
+//
+// Two reads for one reader: the store statistics walk, under its maintenance
+// principal, across every organization's stores. They take a LIST of store ids
+// because this pack's rows hold a store id in either form, bare or
+// v1:shopify:store:<id>, and the engine does not join the two: the walk passes
+// both. The settings read is a query of its own because a query is bound to
+// one concept. A disabled pack loads neither (dsl/pack_enablement.go), so the
+// walk asks the pack's state before it asks them.
+
+@description("Internal statistics read of the buyers granted wholesale on a list of stores. actor.userId scoping would answer only one merchant's grants, and the walk figures every organization's stores; the clusterOwner predicate and internal origin are both mandatory, and the statistics walk's maintenance principal is the one caller.")
+@serverOnly
+@actor
+query entitlement wholesaleStatisticsGranted {
+  args {
+    storeIds  []string!
+  }
+  filter    row => actor.isClusterOwner == true && row.storeId in args.storeIds && row.state == "granted"
+  sort      "row.createdAt", "asc"
+  paginate  250
+  shape     entitlementStatisticsRef
+}
+
+@description("Internal statistics read of which of a list of stores have wholesale settings. actor.userId scoping would answer only one merchant's stores, and the walk figures every organization's; the clusterOwner predicate and internal origin are both mandatory, and the statistics walk's maintenance principal is the one caller.")
+@serverOnly
+@actor
+query wholesaleSettings wholesaleStatisticsSettings {
+  args {
+    storeIds  []string!
+  }
+  filter    row => actor.isClusterOwner == true && row.storeId in args.storeIds
+  sort      "row.createdAt", "asc"
+  paginate  250
+  shape     wholesaleSettingsStatisticsRef
+}

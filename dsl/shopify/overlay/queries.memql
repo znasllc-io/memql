@@ -5,6 +5,8 @@ use shopify.generated.refund.{ refund, refundMirror }
 use shopify.generated.inventoryLevel.{ inventoryLevel, inventoryLevelMirror }
 use shopify.generated.abandonedCheckout.{ abandonedCheckout, abandonedCheckoutMirror }
 use shopify.overlay.shapes.{ storeFull }
+use shopify.overlay.shapes.{ storeStatisticsOrder, storeStatisticsLine, storeStatisticsRefund, storeStatisticsBuyer, storeStatisticsShop, storeStatisticsStore }
+use shopify.generated.shop.{ shop }
 use shopify.generated.productVariant.{ productVariant, productVariantMirror }
 use common.traits.{ isNotDeleted, statusIsPending }
 
@@ -414,4 +416,123 @@ query complianceJob complianceJobsForStore {
   sort      "row.createdAt", "desc"
   paginate  100
   shape     complianceJobFull
+}
+
+// ---- the store statistics walk (the 2026-11-11 store statistics design) ----
+//
+// Seven reads for one reader: the store statistics walk, which runs under its
+// maintenance principal. A mirror row has no owner to scope an actor against
+// -- the mirror is the cluster owner's business data, and its store is the
+// only key it has -- so each read is @serverOnly and spells
+// `actor.isClusterOwner == true` out, and each is shown to hold alone in
+// integrations/shopify/statistics_reads_authz_db_test.go.
+//
+// The four walks read, in row.createdAt order, the rows of one store written
+// since a watermark, at each row's latest version, tombstones included: a row
+// the mirror retired comes back with `deleted` true, and the walk retires the
+// fact it made. Keep `row.createdAt >= args.since` a top-level `&&` conjunct:
+// that shape alone lets the engine collapse only the versions written since,
+// so a page costs what was written since and not the concept's history
+// (latestScanLowerBounds in component/memql/latest_scan_keys.go). Under `||`
+// or `!` it collapses the whole history again;
+// TestTheStatisticsWalksCollapseOnlyTheVersionsWrittenSince holds it.
+
+/// Internal statistics walk across every organization's mirrored orders. actor.userId scoping would read only the orders of stores one person owns, and a mirrored order has no owner; the clusterOwner predicate and internal origin are both mandatory, and the statistics walk's maintenance principal is the one caller.
+@actor
+@serverOnly
+@cache(0)
+query order storeStatisticsOrdersChanged {
+  args {
+    storeId  string!
+    since    datetime!
+  }
+  filter    row => actor.isClusterOwner == true && row.storeId == args.storeId && row.createdAt >= args.since
+  sort      "row.createdAt", "asc"
+  paginate  250
+  shape     storeStatisticsOrder
+}
+
+/// Internal statistics walk across every organization's mirrored order lines. actor.userId scoping would read only the lines of stores one person owns, and a mirrored line has no owner; the clusterOwner predicate and internal origin are both mandatory, and the statistics walk's maintenance principal is the one caller.
+@actor
+@serverOnly
+@cache(0)
+query orderLineItem storeStatisticsLinesChanged {
+  args {
+    storeId  string!
+    since    datetime!
+  }
+  filter    row => actor.isClusterOwner == true && row.storeId == args.storeId && row.createdAt >= args.since
+  sort      "row.createdAt", "asc"
+  paginate  250
+  shape     storeStatisticsLine
+}
+
+/// Internal statistics walk across every organization's mirrored refunds. actor.userId scoping would read only the refunds of stores one person owns, and a mirrored refund has no owner; the clusterOwner predicate and internal origin are both mandatory, and the statistics walk's maintenance principal is the one caller.
+@actor
+@serverOnly
+@cache(0)
+query refund storeStatisticsRefundsChanged {
+  args {
+    storeId  string!
+    since    datetime!
+  }
+  filter    row => actor.isClusterOwner == true && row.storeId == args.storeId && row.createdAt >= args.since
+  sort      "row.createdAt", "asc"
+  paginate  250
+  shape     storeStatisticsRefund
+}
+
+/// Internal statistics walk across every organization's order buyers. actor.userId scoping would count only the buyers of stores one person owns, and a mirrored order has no owner; the clusterOwner predicate and internal origin are both mandatory, and the statistics walk's maintenance principal is the one caller.
+@actor
+@serverOnly
+@cache(0)
+query order storeStatisticsOrderBuyers {
+  args {
+    storeId  string!
+    since    datetime!
+  }
+  filter    row => actor.isClusterOwner == true && row.storeId == args.storeId && row.createdAt >= args.since
+  sort      "row.createdAt", "asc"
+  paginate  250
+  shape     storeStatisticsBuyer
+}
+
+/// Internal statistics read of one store's shop row: its currency, time zone and plan, newest first. actor.userId scoping would read only the shops of stores one person owns, and a mirrored shop has no owner; the clusterOwner predicate and internal origin are both mandatory, and the statistics walk's maintenance principal is the one caller.
+@actor
+@serverOnly
+@cache(0)
+query shop storeStatisticsShop {
+  args {
+    storeId  string!
+  }
+  filter    row => actor.isClusterOwner == true && row.storeId == args.storeId
+  sort      "row.createdAt", "desc"
+  paginate  1
+  shape     storeStatisticsShop
+}
+
+/// Internal statistics directory of every configured store, oldest first. actor.userId scoping would list only one person's stores, and the walk figures every organization's; the clusterOwner predicate and internal origin are both mandatory, and the statistics walk's maintenance principal is the one caller.
+@actor
+@serverOnly
+@cache(0)
+query store storeStatisticsStores {
+  filter    row => actor.isClusterOwner == true
+  sort      "row.createdAt", "asc"
+  paginate  100
+  shape     storeStatisticsStore
+}
+
+/// Internal statistics read of one store row as it stood at an instant, and no row for an instant before the row was first written. Nothing on a store row says when it was first written -- row.createdAt is its newest version's, and a store row is rewritten at least daily -- so the walk asks earlier and earlier instants to find one before it existed. actor.userId scoping would answer only one person's stores; the clusterOwner predicate and internal origin are both mandatory, and the statistics walk's maintenance principal is the one caller.
+@actor
+@serverOnly
+@cache(0)
+query store storeStatisticsStoreAt {
+  args {
+    storeId  string!
+    at       datetime!
+  }
+  filter    row => actor.isClusterOwner == true && row.id == args.storeId
+  asOf      args.at ?? latest
+  paginate  1
+  shape     storeStatisticsStore
 }
