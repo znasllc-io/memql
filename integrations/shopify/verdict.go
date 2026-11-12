@@ -292,10 +292,13 @@ type Verdict struct {
 	Since                  time.Time
 	ResumedAt              time.Time
 	ConnectedAt            time.Time
-	Reasons                []VerdictReason
-	Recorded               []RecordedKind
-	Outside, Withheld      []string
-	OrdersFrom             string
+	// GrantRecordedAt is when a connect last recorded the store's grant, or
+	// zero when the store's health does not say (grantRecordedKey).
+	GrantRecordedAt   time.Time
+	Reasons           []VerdictReason
+	Recorded          []RecordedKind
+	Outside, Withheld []string
+	OrdersFrom        string
 	// OutsideConcepts is the generated concept names, sorted, of the domains
 	// outside what the store records (outsideConceptsOf): Outside's domains,
 	// and every domain whose row the origin refuses as not granted.
@@ -316,6 +319,9 @@ type verdictInput struct {
 	// ConnectedAt is when the store was connected, or zero when the row
 	// does not say. One of the three times a late check is measured from.
 	ConnectedAt time.Time
+	// GrantRecordedAt is when a connect last recorded the store's grant
+	// (grantRecordedKey on its health), or zero.
+	GrantRecordedAt time.Time
 	// Privacy is the store's privacy requests that have been failing for
 	// longer than a day (privacy_verdict.go).
 	Privacy privacyFailing
@@ -355,6 +361,7 @@ func computeVerdict(in verdictInput) Verdict {
 		Domain:          store.Domain,
 		OrdersFrom:      healthString(store.Health, "ordersFrom"),
 		ConnectedAt:     in.ConnectedAt,
+		GrantRecordedAt: in.GrantRecordedAt,
 		Recorded:        recordedOf(store, rows),
 		Outside:         outsideOf(store, rows),
 		OutsideConcepts: outsideConceptsOf(store, rows),
@@ -554,6 +561,13 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from, fromNeverC
 		since := from
 		if rowTime(rows[concept], "lastReconcileAt").IsZero() {
 			since = fromNeverClean
+		}
+		// A domain with no attempt on record -- one the sync runtime retried
+		// after a connect recorded the grant, waiting for its check -- is
+		// measured from that connect too. Every other row is judged as before:
+		// an attempt on record says checks ran, and their lateness is theirs.
+		if rowTime(rows[concept], "lastAttemptAt").IsZero() && in.GrantRecordedAt.After(since) {
+			since = in.GrantRecordedAt
 		}
 		if r, ok := checkFailing(concept, rows[concept], intervalOf(in.Intervals, concept), since, in.Now); ok {
 			out = append(out, r)

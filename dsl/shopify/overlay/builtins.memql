@@ -42,7 +42,8 @@ builtin shopifyStoreHealth {
 /// `state` is recording, starting, paused, needs attention or not connected, `since` when it began,
 /// `resumedAt` when the store last left paused or not connected (empty when it never has), and
 /// `connectedAt` when a connect last started its recording afresh (empty for a store connected before
-/// that was recorded). Each reason has a `code` (data_not_declared, approval_outdated, grant_lost,
+/// that was recorded), and `grantRecordedAt` when a connect last recorded its grant (empty for a store
+/// connected before that was recorded). Each reason has a `code` (data_not_declared, approval_outdated, grant_lost,
 /// events_not_registered, check_failing, changes_not_recorded, privacy_request_failing), one
 /// `sentence` for a person, and an `act` with its `actLabel` and `actUrl` (or none); `count` is a
 /// floor when `atLeast` is true. Each reason also says in machine fields what it stands in the way
@@ -58,7 +59,7 @@ builtin shopifyStoreHealth {
 @sdk
 @executor("integration.shopify.storeVerdict")
 @requiresCapability("execute", "app:deployables/store")
-@description("One store's verdict: state (recording, starting, paused, needs attention, not connected), since, resumedAt and connectedAt; reasons, each {code, domain, sentence, detail, count, atLeast, act, actLabel, actUrl, concerns, concepts} (atLeast: the count is a floor; concerns: wholeStore, concepts or noRecording, what the reason stands in the way of; concepts: the generated concept names it concerns, sorted, empty unless concerns is concepts); recorded, each {kind, lastChangeAt, lastCheckedAt}; outside and withheld in plain words; outsideConcepts, the generated concept names, sorted, of the domains the store does not record (outside its connection, not requested, or not granted by the origin); ordersFrom; alert {state, reason}; may {act}. For the store's owner, a cluster owner, or a caller who may read stores.")
+@description("One store's verdict: state (recording, starting, paused, needs attention, not connected), since, resumedAt, connectedAt and grantRecordedAt (when a connect last recorded the store's grant); reasons, each {code, domain, sentence, detail, count, atLeast, act, actLabel, actUrl, concerns, concepts} (atLeast: the count is a floor; concerns: wholeStore, concepts or noRecording, what the reason stands in the way of; concepts: the generated concept names it concerns, sorted, empty unless concerns is concepts); recorded, each {kind, lastChangeAt, lastCheckedAt}; outside and withheld in plain words; outsideConcepts, the generated concept names, sorted, of the domains the store does not record (outside its connection, not requested, or not granted by the origin); ordersFrom; alert {state, reason}; may {act}. For the store's owner, a cluster owner, or a caller who may read stores.")
 builtin shopifyStoreVerdict {
   storeId  string!  @description("The store.")
 }
