@@ -456,11 +456,23 @@ func (r *reader) fail(field, what string) {
 	if r.err != nil {
 		return
 	}
-	if r.gid == "" {
-		r.err = fmt.Errorf("storestats: %s: %s %s", r.concept, field, what)
-		return
+	r.err = &rowError{Concept: r.concept, GID: r.gid, Field: field, what: what}
+}
+
+// rowError is why a row could not be read: the concept, the row's gid (empty
+// when it has none) and the NAME of the field the rules stopped on, each a
+// value of its own, so a record of the row keeps the field without cutting it
+// out of a sentence. It holds no value of the row.
+type rowError struct {
+	Concept, GID, Field string
+	what                string // a fixed phrase: "is missing", "is not an amount", ...
+}
+
+func (e *rowError) Error() string {
+	if e.GID == "" {
+		return fmt.Sprintf("storestats: %s: %s %s", e.Concept, e.Field, e.what)
 	}
-	r.err = fmt.Errorf("storestats: %s %s: %s %s", r.concept, r.gid, field, what)
+	return fmt.Sprintf("storestats: %s %s: %s %s", e.Concept, e.GID, e.Field, e.what)
 }
 
 // str is a string field; absent is "".

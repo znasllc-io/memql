@@ -31,7 +31,8 @@ import (
 // least expected_quantity -- false when a line was never read, which is how a
 // line the rules could not read shows on its order. A refund whose detail was
 // read has gift_card_refunded, the subtotals of its lines that name a gift-card
-// line, units_returned, the quantities of the others, and item_refunds,
+// line, units_returned, the quantities of its lines that name neither a
+// gift-card line nor a deleted one, and item_refunds,
 // money_refunded less shipping, duties, gift cards and, unless the order's
 // prices include tax, tax: the tax setting of an order fact that is not
 // deleted, and none for a refund whose order is deleted or not yet folded. All three are null for a refund whose detail is not
@@ -64,6 +65,7 @@ type deriveOrder struct {
 type deriveLine struct {
 	LineGID            string    `bun:"line_gid"`
 	OrderGID           string    `bun:"order_gid"`
+	Deleted            bool      `bun:"deleted"`
 	LineVersion        time.Time `bun:"line_version"`
 	Currency           string    `bun:"currency"`
 	GiftCard           bool      `bun:"gift_card"`
@@ -134,7 +136,7 @@ func deriveOrders(ctx context.Context, tx bun.Tx, storeID string, orderGIDs []st
 	}
 	var lines []deriveLine
 	if err := tx.NewSelect().TableExpr("store_sales_line_fact").
-		Column("line_gid", "order_gid", "line_version", "currency", "gift_card", "quantity", "current_quantity", "unit_price",
+		Column("line_gid", "order_gid", "deleted", "line_version", "currency", "gift_card", "quantity", "current_quantity", "unit_price",
 			"allocated_discounts", "refunded_quantity", "sold_quantity", "gross", "discounts").
 		Where("store_id = ? AND order_gid IN (?) AND NOT deleted", storeID, in).
 		OrderExpr("line_gid").Scan(ctx, &lines); err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -154,6 +156,28 @@ func deriveOrders(ctx context.Context, tx bun.Tx, storeID string, orderGIDs []st
 		Where("store_id = ? AND order_gid IN (?)", storeID, in).
 		OrderExpr("refund_gid, position").Scan(ctx, &refundLines); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("read the refunds' lines to derive: %w", err)
+	}
+
+	// The deleted lines the refunds' lines name, found by their own gid: a
+	// line retired before its live version was folded holds no order.
+	named := map[string]bool{}
+	var namedGIDs []string
+	for _, rl := range refundLines {
+		if !named[rl.LineGID] {
+			named[rl.LineGID] = true
+			namedGIDs = append(namedGIDs, rl.LineGID)
+		}
+	}
+	if len(namedGIDs) > 0 {
+		var deletedGIDs []string
+		if err := tx.NewSelect().TableExpr("store_sales_line_fact").Column("line_gid").
+			Where("store_id = ? AND deleted AND line_gid IN (?)", storeID, bun.In(namedGIDs)).
+			OrderExpr("line_gid").Scan(ctx, &deletedGIDs); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("read the deleted lines the refunds name: %w", err)
+		}
+		for _, gid := range deletedGIDs {
+			lines = append(lines, deriveLine{LineGID: gid, Deleted: true})
+		}
 	}
 
 	d, err := derive(orders, lines, refunds, refundLines)
@@ -226,8 +250,13 @@ func derive(orders []deriveOrder, lines []deriveLine, refunds []deriveRefund, re
 		version          time.Time
 	}
 	byOrder := map[string]*sums{}
-	giftCard := map[string]bool{}
+	giftCard, deleted := map[string]bool{}, map[string]bool{}
 	for _, l := range lines {
+		if l.Deleted {
+			// Known only so a refund line naming it is no item return.
+			deleted[l.LineGID] = true
+			continue
+		}
 		giftCard[l.LineGID] = l.GiftCard
 		price, err := parseStored(l.UnitPrice, "store_sales_line_fact", "unit_price")
 		if err != nil {
@@ -308,13 +337,17 @@ func derive(orders []deriveOrder, lines []deriveLine, refunds []deriveRefund, re
 			var gift money.Amount
 			units := 0
 			for _, rl := range linesOf[r.RefundGID] {
-				if giftCard[rl.LineGID] {
+				switch {
+				case giftCard[rl.LineGID]:
 					subtotal, err := parseStored(rl.Subtotal, "store_sales_refund_line_fact", "subtotal")
 					if err != nil {
 						return d, err
 					}
 					gift = gift.Add(subtotal)
-				} else {
+				case deleted[rl.LineGID]:
+					// A deleted line is no item return: what it was is not known
+					// for certain (a tombstone folded first holds none of it).
+				default:
 					units += rl.Quantity
 				}
 			}

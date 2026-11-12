@@ -2,6 +2,7 @@ package storestats
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/integrations/shopify"
 )
 
 // fold_db_test.go -- the fold and the derivation (fold.go, derive.go): a page
@@ -46,6 +48,8 @@ const (
 // pair over it.
 func withFields(row map[string]any, storeID, gid string, version time.Time, kv []any) map[string]any {
 	row["storeId"], row["gid"], row["createdAt"] = storeID, gid, stampOf(version)
+	// The row's own id, as the mirror makes it: one per row.
+	row["id"] = "v1:shopify:row:" + shopify.MirrorRowID(storeID, gid)
 	for n := 0; n+1 < len(kv); n += 2 {
 		row[kv[n].(string)] = kv[n+1]
 	}
@@ -132,6 +136,10 @@ func foldRows(t *testing.T, storeID, source string, wholesale wholesaleState, ro
 	t.Helper()
 	_, db := statsEngine(t)
 	ctx := context.Background()
+	page, err := readPage(storeID, source, rows, wholesale)
+	if err != nil {
+		return pageResult{}, err
+	}
 	generation, err := generationOf(ctx, db, storeID)
 	if err != nil {
 		return pageResult{}, err
@@ -139,7 +147,7 @@ func foldRows(t *testing.T, storeID, source string, wholesale wholesaleState, ro
 	var res pageResult
 	err = writeTx(ctx, db, storeID, generation, func(ctx context.Context, tx bun.Tx) error {
 		var err error
-		res, err = foldPage(ctx, tx, storeID, source, rows, wholesale)
+		res, err = foldPage(ctx, tx, storeID, source, page)
 		return err
 	})
 	return res, err
@@ -586,14 +594,15 @@ func genStore(r *rand.Rand, storeID string) []propVersion {
 	clock := foldBase
 	tick := func() time.Time { clock = clock.Add(time.Second); return clock }
 	var out []propVersion
-	// versionsOf writes a row 1 to 3 times; the last may be its tombstone;
-	// any but a tombstone may be unreadable.
+	// versionsOf writes a row 1 to 4 times; any version may be its
+	// tombstone, so a row can come back after one; any but a tombstone may be
+	// unreadable, its newest included.
 	versionsOf := func(make func(n int) propVersion) {
-		count := 1 + r.IntN(3)
+		count := 1 + r.IntN(4)
 		for n := range count {
 			v := make(n)
 			v.at = tick()
-			if n == count-1 && r.IntN(6) == 0 {
+			if r.IntN(6) == 0 {
 				v = propVersion{source: v.source, gid: v.gid, at: v.at, gone: true}
 			} else if r.IntN(8) == 0 {
 				v.unreadable = true
@@ -781,6 +790,70 @@ func TestFoldsInAnyOrderMatchAnIndependentComputation(t *testing.T) {
 			t.Fatalf("seed %d: the shuffled fold differs from the fold in order:\nin order %s\nshuffled %s", seed, a, b)
 		}
 		checkDerived(t, seed, shuffled, finalOf(versions))
+		checkDeleted(t, seed, shuffled, finalOf(versions))
+		checkRecords(t, seed, shuffled, versions)
+	}
+}
+
+// newestOf is each row's newest version met, readable or not.
+func newestOf(versions []propVersion) map[string]propVersion {
+	out := map[string]propVersion{}
+	for _, v := range versions {
+		if had, ok := out[v.source+v.gid]; !ok || v.at.After(had.at) {
+			out[v.source+v.gid] = v
+		}
+	}
+	return out
+}
+
+// checkDeleted holds that each row whose newest readable version is its
+// tombstone has a fact marked deleted at that version.
+func checkDeleted(t *testing.T, seed int, storeID string, final map[string]propVersion) {
+	t.Helper()
+	facts := map[string]map[string]map[string]any{
+		sourceOrder: orderFactsOf(t, storeID), sourceLine: lineFactsOf(t, storeID), sourceRefund: refundFactsOf(t, storeID),
+	}
+	versionColumn := map[string]string{sourceOrder: "order_version", sourceLine: "line_version", sourceRefund: "refund_version"}
+	for _, v := range final {
+		if !v.gone {
+			continue
+		}
+		fact := facts[v.source][v.gid]
+		if fact == nil || cell(fact, "deleted") != "true" {
+			t.Errorf("seed %d: the %s %s, retired at its newest readable version, has fact %v, want one marked deleted", seed, v.source, v.gid, fact)
+			continue
+		}
+		if got := instantCell(t, fact, versionColumn[v.source]); !got.Equal(v.at) {
+			t.Errorf("seed %d: the deleted %s %s is at version %v, want its tombstone's %v", seed, v.source, v.gid, got, v.at)
+		}
+	}
+}
+
+// checkRecords holds that a row has a record exactly when the newest version
+// met of it could not be read, at that version.
+func checkRecords(t *testing.T, seed int, storeID string, versions []propVersion) {
+	t.Helper()
+	records := recordsOf(t, storeID)
+	want := 0
+	for _, v := range newestOf(versions) {
+		r := records[v.source+"/"+v.gid]
+		if !v.unreadable {
+			if r != nil {
+				t.Errorf("seed %d: the %s %s, readable at its newest version, has a record %v", seed, v.source, v.gid, r)
+			}
+			continue
+		}
+		want++
+		if r == nil {
+			t.Errorf("seed %d: the %s %s, unreadable at its newest version, has no record", seed, v.source, v.gid)
+			continue
+		}
+		if got := instantCell(t, r, "version"); !got.Equal(v.at) || cell(r, "field") == "" {
+			t.Errorf("seed %d: the record of the %s %s is %v, want its newest version %v and a field", seed, v.source, v.gid, r, v.at)
+		}
+	}
+	if len(records) != want {
+		t.Errorf("seed %d: the store keeps %d records, want %d", seed, len(records), want)
 	}
 }
 
@@ -819,11 +892,16 @@ func comparable(t *testing.T, storeID string) string {
 	for _, row := range lines {
 		delete(row, "store_id")
 	}
+	records := recordsOf(t, storeID)
+	for _, row := range records {
+		delete(row, "store_id")
+	}
 	raw, err := json.Marshal(map[string]any{
 		"order":       cut(orderFactsOf(t, storeID), "order_version"),
 		"line":        cut(lineFactsOf(t, storeID), "line_version"),
 		"refund":      cut(refundFactsOf(t, storeID), "refund_version"),
 		"refund_line": lines,
+		"unreadable":  records,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -875,7 +953,12 @@ func checkDerived(t *testing.T, seed int, storeID string, final map[string]propV
 		version           time.Time
 	}
 	byOrder := map[string]*sums{}
-	giftLine := map[string]bool{}
+	giftLine, deletedLine := map[string]bool{}, map[string]bool{}
+	for _, v := range final {
+		if v.source == sourceLine && v.gone {
+			deletedLine[v.gid] = true
+		}
+	}
 	for _, l := range live(sourceLine) {
 		giftLine[l.gid] = l.gift
 		refunded := refundedOf[l.gid]
@@ -967,9 +1050,11 @@ func checkDerived(t *testing.T, seed int, storeID string, final map[string]propV
 		}
 		gift, units := new(big.Rat), 0
 		for _, l := range f.refundLines {
-			if giftLine[l.line] {
+			switch {
+			case giftLine[l.line]:
 				gift.Add(gift, ratOf(t, l.subtotal))
-			} else {
+			case deletedLine[l.line]:
+			default:
 				units += l.quantity
 			}
 		}
@@ -992,27 +1077,6 @@ func currencyOfLine(fact map[string]any) string {
 }
 
 // ---- the wholesale judgement ----
-
-func TestIsWholesaleIsAnEnabledStoresGrantedFoldedAddress(t *testing.T) {
-	granted := map[string]bool{"buyer@example.com": true}
-	cases := []struct {
-		state wholesaleState
-		email string
-		want  bool
-	}{
-		{wholesaleState{Enabled: true, Granted: granted}, "buyer@example.com", true},
-		{wholesaleState{Enabled: true, Granted: granted}, "  Buyer@Example.COM ", true},
-		{wholesaleState{Enabled: true, Granted: granted}, "other@example.com", false},
-		{wholesaleState{Enabled: true, Granted: granted}, "", false},
-		{wholesaleState{Enabled: false, Granted: granted}, "buyer@example.com", false},
-		{wholesaleState{}, "buyer@example.com", false},
-	}
-	for _, c := range cases {
-		if got := c.state.isWholesale(c.email); got != c.want {
-			t.Errorf("enabled %v, %q: isWholesale = %v, want %v", c.state.Enabled, c.email, got, c.want)
-		}
-	}
-}
 
 // AN ORDER IS FOLDED WITH ITS WHOLESALE JUDGEMENT: a granted buyer's order is
 // wholesale, another's is not.
@@ -1054,7 +1118,7 @@ func TestTheWalkReadsNoFieldOutsideItsShapes(t *testing.T) {
 		for n, row := range c.rows {
 			rows[n] = recording{m: row, seen: seen}
 		}
-		if _, err := readPage("store-a", c.source, rows, wholesaleState{Enabled: true, Granted: map[string]bool{buyerEmail: true}}); err != nil {
+		if _, err := readPageFrom("store-a", c.source, rows, wholesaleState{Enabled: true, Granted: map[string]bool{buyerEmail: true}}); err != nil {
 			t.Fatalf("%s: %v", c.source, err)
 		}
 		if len(seen) == 0 {
@@ -1382,6 +1446,7 @@ func refuseWrites(t *testing.T, table, storeID string, columns ...string) {
 			return
 		}
 		dropped = true
+		delete(refusals, storeID+table)
 		exec(t, `DROP TRIGGER IF EXISTS `+name+` ON `+table)
 		exec(t, `DROP FUNCTION IF EXISTS `+name+`()`)
 	}
@@ -1395,7 +1460,6 @@ var refusals = map[string]func(){}
 func allowWrites(table, storeID string) {
 	if drop := refusals[storeID+table]; drop != nil {
 		drop()
-		delete(refusals, storeID+table)
 	}
 }
 
@@ -1499,5 +1563,393 @@ func TestAPageIsFoldedWithItsWatermarkOrNotAtAll(t *testing.T) {
 			}
 			wantThreeLines(t, id)
 		})
+	}
+}
+
+// ==== fix round 1 ====
+
+func recordsOf(t *testing.T, storeID string) map[string]map[string]any {
+	return salesRows(t, "store_sales_unreadable", storeID, "source", "gid")
+}
+
+// wantRecord holds the store's one record of a source's row.
+func wantRecord(t *testing.T, storeID, source, gid string, version time.Time, field string) {
+	t.Helper()
+	r := recordsOf(t, storeID)[source+"/"+gid]
+	if r == nil {
+		t.Errorf("no record of the %s %s that could not be read; records %v", source, gid, recordsOf(t, storeID))
+		return
+	}
+	want(t, "the record of "+gid, r, "field", field)
+	wantVersion(t, "the record of "+gid, r, "version", version)
+	if cell(r, "row_id") == "" || strings.Contains(cell(r, "row_id"), ":") {
+		t.Errorf("the record of %s keeps row_id %q, want the row's bare id", gid, cell(r, "row_id"))
+	}
+}
+
+func wantNoRecord(t *testing.T, storeID string) {
+	t.Helper()
+	if r := recordsOf(t, storeID); len(r) != 0 {
+		t.Errorf("the store keeps %d records of rows that could not be read, want none: %v", len(r), r)
+	}
+}
+
+// 1. A PAGE THAT CANNOT BE READ AT ALL OPENS NO TRANSACTION: the page is read
+// into facts before its transaction begins.
+func TestAPageThatCannotBeReadOpensNoTransaction(t *testing.T) {
+	_, db := statsEngine(t)
+	id := foldStore(t)
+	generation, err := generationOf(context.Background(), db, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queries := storeSalesQueries(t)
+	if _, err := keepPage(context.Background(), db, id, "nonsense", generation, walkPage{Rows: []map[string]any{orderAt(id, theOrder, ver(0))}, Through: ver(0)}, wholesaleState{}); err == nil {
+		t.Fatal("a page of a source the walk does not have was folded")
+	}
+	locks := 0
+	for _, q := range queries() {
+		if strings.HasPrefix(q, "LOCK TABLE") {
+			locks++
+		}
+	}
+	if locks != 0 {
+		t.Errorf("a page that could not be read took %d locked transactions, want none", locks)
+	}
+}
+
+// 2. A FIRST WINDOW THAT TIMES OUT KEEPS ITS HALVED WIDTH. A source with no
+// watermark yet whose first read outlasts a read keeps the halved width at the
+// floor, and the next run asks the narrower window.
+func TestAFirstWindowThatTimesOutKeepsItsHalvedWidth(t *testing.T) {
+	floor := time.Now().UTC().Add(-72 * time.Hour).Truncate(time.Second)
+	floorAt(t, floor)
+	i, id := runStore(t)
+	mirrorOrder(t, id, theOrder)
+	fails := 1
+	var asked []string
+	i.engine = &hookEngine{inner: i.engine, before: func(query string) error {
+		if strings.Contains(query, "storeStatisticsOrdersChanged") {
+			asked = append(asked, query)
+			if fails > 0 {
+				fails--
+				return errors.New("ERROR: canceling statement due to statement timeout")
+			}
+		}
+		return nil
+	}}
+	if _, err := run(t, i); err != nil {
+		t.Fatal(err)
+	}
+	w := watermarksOf(t, id)[sourceOrder]
+	if w == nil {
+		t.Fatal("no order watermark after a first window timed out: the halved width is lost")
+	}
+	want(t, "the order watermark", w, "window_seconds", "43200")
+	wantVersion(t, "the order watermark", w, "through", floor)
+	asked = nil
+	if _, err := run(t, i); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) == 0 || !strings.Contains(asked[0], quoteInstant(floor.Add(12*time.Hour))) {
+		t.Errorf("the next run's first order read is %v, want the window to the floor plus twelve hours", asked)
+	}
+}
+
+// 3. A STORE ID IS COMPARED BARE: a row holding the walked store's id in its
+// prefixed form is the store's; a row of another store is not.
+func TestARowOfTheStoreInItsPrefixedFormIsFolded(t *testing.T) {
+	id := foldStore(t)
+	other := "gid://shopify/Order/1002"
+	res := fold(t, id, sourceOrder, orderAt(id, theOrder, ver(0), "storeId", "v1:shopify:store:"+id),
+		orderAt(id, other, ver(0), "storeId", "dbtest-storestats-another"))
+	facts := orderFactsOf(t, id)
+	if facts[theOrder] == nil {
+		t.Error("a row naming the store in its prefixed form was not folded")
+	}
+	if facts[other] != nil || res.Unreadable != 1 {
+		t.Errorf("a row of another store was folded (%v) or not counted (%d unreadable)", facts[other], res.Unreadable)
+	}
+}
+
+// 4. EACH SOURCE RECORDS A ROW IT CANNOT READ, by its bare row id, its gid,
+// its version and the name of the field.
+func TestEachSourceRecordsARowItCannotRead(t *testing.T) {
+	id := foldStore(t)
+	fold(t, id, sourceOrder, orderAt(id, theOrder, ver(1), "totalShippingPriceSet", set("12,50", "EUR")))
+	fold(t, id, sourceLine, lineAt(id, lineOne, theOrder, ver(1), "originalUnitPriceSet", set("1,00", "EUR")))
+	fold(t, id, sourceRefund, refundAt(id, theRefund, theOrder, ver(1), "totalRefundedSet", set("1,0", "EUR")))
+	wantRecord(t, id, sourceOrder, theOrder, ver(1), "totalShippingPriceSet.shopMoney.amount")
+	wantRecord(t, id, sourceLine, lineOne, ver(1), "originalUnitPriceSet.shopMoney.amount")
+	wantRecord(t, id, sourceRefund, theRefund, ver(1), "totalRefundedSet.shopMoney.amount")
+	if n := len(recordsOf(t, id)); n != 3 {
+		t.Errorf("the store keeps %d records, want three", n)
+	}
+}
+
+func TestANewerVersionThatCannotBeReadKeepsTheOlderFactAndIsRecorded(t *testing.T) {
+	id := foldStore(t)
+	fold(t, id, sourceOrder, orderAt(id, theOrder, ver(0)))
+	fold(t, id, sourceOrder, orderAt(id, theOrder, ver(2), "totalShippingPriceSet", set("12,50", "EUR")))
+	wantVersion(t, "the order", orderFactsOf(t, id)[theOrder], "order_version", ver(0))
+	wantRecord(t, id, sourceOrder, theOrder, ver(2), "totalShippingPriceSet.shopMoney.amount")
+
+	// An older readable version, met after it, leaves the record.
+	fold(t, id, sourceOrder, orderAt(id, theOrder, ver(1)))
+	wantRecord(t, id, sourceOrder, theOrder, ver(2), "totalShippingPriceSet.shopMoney.amount")
+
+	// Readable again at a later version: no record.
+	fold(t, id, sourceOrder, orderAt(id, theOrder, ver(3)))
+	wantNoRecord(t, id)
+	wantVersion(t, "the order", orderFactsOf(t, id)[theOrder], "order_version", ver(3))
+}
+
+func TestAnOlderUnreadableVersionMetAfterAReadableOneIsNotRecorded(t *testing.T) {
+	id := foldStore(t)
+	fold(t, id, sourceOrder, orderAt(id, theOrder, ver(2)))
+	fold(t, id, sourceOrder, orderAt(id, theOrder, ver(1), "totalShippingPriceSet", set("12,50", "EUR")))
+	wantNoRecord(t, id)
+}
+
+func TestATombstoneAtALaterVersionClearsTheRecord(t *testing.T) {
+	id := foldStore(t)
+	fold(t, id, sourceLine, lineAt(id, lineOne, theOrder, ver(1), "originalUnitPriceSet", set("1,00", "EUR")))
+	wantRecord(t, id, sourceLine, lineOne, ver(1), "originalUnitPriceSet.shopMoney.amount")
+	fold(t, id, sourceLine, tombstone(id, lineOne, ver(2)))
+	wantNoRecord(t, id)
+	want(t, "the line", lineFactsOf(t, id)[lineOne], "deleted", "true")
+}
+
+// ONLY A ROW WITH NO ID OF ITS OWN IS LEFT UNRECORDED: one with no gid, one
+// with no store and one of another store are each recorded; one with no row
+// id is counted and has no record.
+func TestOnlyARowWithNoIdIsLeftUnrecorded(t *testing.T) {
+	id := foldStore(t)
+	noGID := orderAt(id, "", ver(1))
+	delete(noGID, "gid")
+	noGID["id"] = "v1:shopify:order:shp-no-gid"
+	noStore := orderAt(id, "gid://shopify/Order/3", ver(1))
+	delete(noStore, "storeId")
+	another := orderAt(id, "gid://shopify/Order/4", ver(1), "storeId", "dbtest-storestats-another")
+	noID := orderAt(id, "gid://shopify/Order/5", ver(1), "totalTaxSet", set("1,0", "EUR"))
+	delete(noID, "id")
+	res := fold(t, id, sourceOrder, noGID, noStore, another, noID)
+	if res.Unreadable != 4 {
+		t.Errorf("the page counted %d unreadable rows, want four", res.Unreadable)
+	}
+	records := recordsOf(t, id)
+	want(t, "the row with no gid", records[sourceOrder+"/"], "row_id", "shp-no-gid", "field", "gid")
+	want(t, "the row with no store", records[sourceOrder+"/gid://shopify/Order/3"], "field", "storeId")
+	want(t, "the row of another store", records[sourceOrder+"/gid://shopify/Order/4"], "field", "storeId")
+	if records[sourceOrder+"/gid://shopify/Order/5"] != nil || len(records) != 3 {
+		t.Errorf("records %v, want the three rows that have an id of their own", records)
+	}
+}
+
+// A PURGE, A REMOVAL AND A REBUILD LEAVE NO RECORD.
+func TestAPurgeARemovalAndARebuildLeaveNoRecord(t *testing.T) {
+	_, db := statsEngine(t)
+	ctx := sweepCtx(t)
+	for _, how := range []string{"rebuild", "removal"} {
+		t.Run(how, func(t *testing.T) {
+			i := testIntegration(t)
+			id := foldStore(t)
+			fold(t, id, sourceOrder, orderAt(id, theOrder, ver(1), "totalShippingPriceSet", set("12,50", "EUR")))
+			if len(recordsOf(t, id)) != 1 {
+				t.Fatal("no record to delete")
+			}
+			switch how {
+			case "rebuild":
+				markRebuild(t, id, time.Now())
+				if done, err := purgeStore(ctx, i, id, purgeBudget); err != nil || !done {
+					t.Fatalf("purge: done %v, %v", done, err)
+				}
+			case "removal":
+				if _, err := i.removeStore(ctx, db, id, time.Now()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			wantNoRecord(t, id)
+		})
+	}
+}
+
+// AN UNREADABLE ROW READ AGAIN IS ONE RECORD AND ONE LOG LINE. Two runs read
+// the same unreadable order, the second inside the overlap: one record, and
+// one Warn line in all; the report of each run counts what it met.
+func TestAnUnreadableRowReadAgainIsOneRecordAndOneLogLine(t *testing.T) {
+	i, id := runStore(t)
+	logs := captureLogs(i)
+	bad := "gid://shopify/Order/2002"
+	mirrorOrder(t, id, bad, "totalShippingPriceSet", set("12,50", "EUR"))
+	for n := range 2 {
+		rep, err := run(t, i)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rep.Unreadable != 1 {
+			t.Errorf("run %d counted %d unreadable rows, want the one it met", n+1, rep.Unreadable)
+		}
+	}
+	lines := 0
+	for _, l := range logs() {
+		if strings.Contains(l, bad) {
+			lines++
+		}
+	}
+	if lines != 1 {
+		t.Errorf("the unreadable order is in %d log lines over two runs, want one", lines)
+	}
+	if r := recordsOf(t, id); len(r) != 1 {
+		t.Errorf("the store keeps %d records, want one: %v", len(r), r)
+	}
+	wantRecord(t, id, sourceOrder, bad, writtenAt(t, orderConcept, id, bad), "totalShippingPriceSet.shopMoney.amount")
+}
+
+// A RECORD HOLDS NO VALUE OF ITS ROW: an order whose amount and email are
+// recognisable is recorded, and neither the record, a log line nor the report
+// holds either.
+func TestARecordHoldsNoValueOfItsRow(t *testing.T) {
+	i, id := runStore(t)
+	logs := captureLogs(i)
+	n := time.Now().UnixNano()
+	email := fmt.Sprintf("recorded-buyer-%d@example.com", n)
+	amount := fmt.Sprintf("%d,4321", n%100000)
+	mirrorOrder(t, id, theOrder, "email", email, "totalShippingPriceSet", set(amount, "EUR"))
+	rep, err := run(t, i)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := recordsOf(t, id)
+	if len(records) != 1 {
+		t.Fatalf("the store keeps %d records, want one", len(records))
+	}
+	raw, _ := json.Marshal(records)
+	report, _ := json.Marshal(rep)
+	for _, d := range []string{email, amount} {
+		if strings.Contains(string(raw), d) {
+			t.Errorf("the record holds %q: %s", d, raw)
+		}
+		if strings.Contains(string(report), d) {
+			t.Errorf("the report holds %q: %s", d, report)
+		}
+		for _, line := range logs() {
+			if strings.Contains(line, d) {
+				t.Errorf("a log line holds %q: %s", d, line)
+			}
+		}
+	}
+}
+
+// MINOR 2. A page's last recorded time takes the fallback recorded_at takes:
+// an order with no syncedAt moves it to its version.
+func TestTheLastRecordedTimeOfAPageFallsBackToTheVersion(t *testing.T) {
+	id := foldStore(t)
+	res := fold(t, id, sourceOrder, orderAt(id, theOrder, ver(3), "syncedAt", nil))
+	if !res.LastRecorded.Equal(ver(3)) {
+		t.Errorf("the page's last recorded time is %v, want the order's version %v", res.LastRecorded, ver(3))
+	}
+}
+
+// MINOR 3. Facts counts the facts a fold wrote: a version the guard refused
+// is not one.
+func TestFactsCountsTheFactsAFoldWrote(t *testing.T) {
+	id := foldStore(t)
+	if res := fold(t, id, sourceOrder, orderAt(id, theOrder, ver(2))); res.Facts != 1 {
+		t.Errorf("a new order wrote %d facts, want one", res.Facts)
+	}
+	if res := fold(t, id, sourceOrder, orderAt(id, theOrder, ver(1))); res.Facts != 0 {
+		t.Errorf("an older version the guard refused counted %d facts, want none", res.Facts)
+	}
+}
+
+// MINOR 4. A refund line naming a deleted line, or a gift-card line, is not
+// an item return.
+func TestARefundLineNamingADeletedOrGiftCardLineIsNoItemReturn(t *testing.T) {
+	id := foldStore(t)
+	order, lines := threeLines(id, ver(0))
+	fold(t, id, sourceOrder, order)
+	fold(t, id, sourceLine, lines...)
+	fold(t, id, sourceLine, tombstone(id, lineTwo, ver(1)))
+	fold(t, id, sourceRefund, refundAt(id, theRefund, theOrder, ver(2), "totalRefundedSet", set("84.99", "EUR"),
+		"refundLineItems", []any{refundLine(lineOne, float64(1), "40.00", "0.00"), refundLine(lineTwo, float64(1), "19.99", "0.00"),
+			refundLine(lineGift, float64(1), "25.00", "0.00")}, "refundShippingLines", []any{}))
+	want(t, "the refund", refundFactsOf(t, id)[theRefund], "units_returned", "1", "gift_card_refunded", "25.00")
+}
+
+// MINOR 6. WHAT A QUIET STORE'S WALK COSTS. A store walked to the clock with
+// nothing new: one turn, the real walk, counted.
+//
+//   - Locked transactions: keepStore's one (the store's row); one page per
+//     source, each a read to the clock that holds no row and is folded with its
+//     watermark (three); and keepWalked's one. Five.
+//   - Engine reads: the shop row and the verdict (keepStore), and one read
+//     to the clock per source. Five. The floor is kept, so it asks nothing.
+func TestAQuietStoresWalkCosts(t *testing.T) {
+	i, id := runStore(t)
+	answerVerdict(i, verdictReply("recording", time.Now()))
+	_, db := statsEngine(t)
+	mirrorThreeLines(t, id)
+	for range 2 {
+		if _, err := run(t, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	engine := &contextEngine{inner: i.engine}
+	i.engine = engine
+	verdicts := 0
+	answer := i.verdictOf
+	i.verdictOf = func(ctx context.Context, storeID string) (storeVerdict, error) {
+		verdicts++
+		return answer(ctx, storeID)
+	}
+	queries := storeSalesQueries(t)
+	rep := RollupReport{Rows: map[string]int{}}
+	if err := i.rollStore(sweepCtx(t), db, storeOf(id, nil), time.Now(), wholesaleState{}, true, &rep); err != nil {
+		t.Fatal(err)
+	}
+	locks := 0
+	for _, q := range queries() {
+		if strings.HasPrefix(q, "LOCK TABLE") {
+			locks++
+		}
+	}
+	if locks != 5 || engine.asked()+verdicts != 5 {
+		t.Errorf("a quiet store's turn with its walk took %d locked transactions and %d engine and %d verdict reads; want 5 and 5 in all",
+			locks, engine.asked(), verdicts)
+	}
+}
+
+// MINOR 4, THE PURE RULE. derive counts a refund line as an item return only
+// when it names a live line that is not a gift card; a deleted line's derived
+// columns are not written.
+func TestDeriveCountsNoItemReturnForADeletedOrGiftCardLine(t *testing.T) {
+	line := func(gid string, gift, deleted bool) deriveLine {
+		return deriveLine{LineGID: gid, OrderGID: "o", GiftCard: gift, Deleted: deleted, Quantity: 1, CurrentQuantity: 1,
+			UnitPrice: "10.00", AllocatedDiscounts: "0", Currency: "EUR", Gross: "0", Discounts: "0"}
+	}
+	zero := sql.NullString{String: "0", Valid: true}
+	d, err := derive(nil,
+		[]deriveLine{line("a", false, false), line("g", true, false), line("d", false, true)},
+		[]deriveRefund{{RefundGID: "r", OrderGID: "o", DetailFetched: true, MoneyRefunded: "45.00",
+			ShippingRefunded: zero, TaxRefunded: zero, DutiesRefunded: zero}},
+		[]deriveRefundLine{{RefundGID: "r", LineGID: "a", Quantity: 1, Subtotal: "10.00"},
+			{RefundGID: "r", LineGID: "g", Quantity: 1, Subtotal: "25.00"},
+			{RefundGID: "r", LineGID: "d", Quantity: 2, Subtotal: "10.00"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.refunds) != 1 {
+		t.Fatalf("derive changed %d refunds, want one", len(d.refunds))
+	}
+	r := d.refunds[0]
+	if r.UnitsReturned.Int64 != 1 || r.GiftCardRefunded.String != "25.00" || r.ItemRefunds.String != "20.00" {
+		t.Errorf("the refund derives units %d, gift cards %s, items %s; want 1, 25.00 and 20.00",
+			r.UnitsReturned.Int64, r.GiftCardRefunded.String, r.ItemRefunds.String)
+	}
+	for _, l := range d.lines {
+		if l.Deleted {
+			t.Errorf("derive wrote the deleted line %s", l.LineGID)
+		}
 	}
 }

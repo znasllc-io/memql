@@ -12,6 +12,7 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/driver/pgdriver"
 
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/money"
 )
 
@@ -68,14 +69,32 @@ import (
 // go with it: they have no version of their own, and are only ever written
 // with their refund, replaced whole when the refund's own write took effect.
 //
+// # Read first, then written
+//
+// A page is read into facts by readPage before its transaction begins, and
+// the transaction is handed the facts and only writes: nothing of the fact
+// rules runs while the lock is held, and a page that cannot be read opens no
+// transaction.
+//
 // # An unreadable row
 //
-// A row the rules cannot read writes no fact. It is counted in the run's
-// report (RollupReport.Unreadable) and logged once, with the store, the source
-// and the rules' error, which names the row's gid and the field and never a
-// value. What depends on it shows that it is missing: an order whose line could
-// not be read has its recorded quantities short of subtotalLineItemsQuantity,
-// so lines_complete is false (derive.go).
+// A row the rules cannot read writes no fact. It is recorded instead, in
+// store_sales_unreadable, keyed by the mirror row's own id, with its gid, the
+// version that could not be read and the NAME of the field the rules stopped
+// on (rowError, facts.go), never a value. The record is written under the same
+// kind of guard as a fact, and only when no fact of the row holds that version
+// or a newer one; a row that WAS read, live or gone, deletes its own record
+// when the record's version is at or before the row's. So a record exists
+// exactly while the newest version the walk has met of its row could not be
+// read, and the read can say how many rows a figure leaves out.
+//
+// It is counted in the run's report (RollupReport.Unreadable: what this run
+// met) and logged once per row and version, when its record is new or its
+// version moved: a re-read inside the overlap writes no line. A row with no id
+// of its own, or no write time, cannot be recorded: it is counted and logged
+// every time it is met. What depends on an unreadable line shows it too: its
+// order's recorded quantities fall short of subtotalLineItemsQuantity, so
+// lines_complete is false (derive.go).
 //
 // # Errors
 //
@@ -85,11 +104,11 @@ import (
 
 // pageResult is what one page's fold did.
 type pageResult struct {
-	Facts, Unreadable int
+	Facts, Unreadable int      // the facts the fold wrote (the version guard refuses some); the rows that could not be read
 	Orders            []string // the order gids the page touched
 	LastRecorded      time.Time
 
-	unreadable []error // the rules' errors: each a gid and a field, never a value
+	logged []unreadableRow // the rows that could not be read to log: each new or moved record, and each that cannot be recorded
 }
 
 // walkedSource is one source of a store's walk: its name, the concept its
@@ -177,9 +196,9 @@ func (i *Integration) walkOneSource(ctx context.Context, db *bun.DB, storeID str
 		report.Rows[s.source] += len(page.Rows)
 		report.Facts += res.Facts
 		report.Unreadable += res.Unreadable
-		for _, e := range res.unreadable {
-			i.logger.Warn("Store statistics: a mirrored row could not be read; it was counted and no fact was written",
-				"component", "storestats", "storeId", storeID, "source", s.source, "error", e.Error())
+		for _, u := range res.logged {
+			i.logger.Warn("Store statistics: a mirrored row could not be read; it was recorded and no fact was written",
+				"component", "storestats", "storeId", storeID, "source", s.source, "gid", u.gid, "field", u.field, "error", u.err.Error())
 		}
 		return nil
 	})
@@ -187,8 +206,14 @@ func (i *Integration) walkOneSource(ctx context.Context, db *bun.DB, storeID str
 		return err
 	}
 	// A width the walk changed with no page handed on -- a page that
-	// outlasted a read halves it -- is kept for the next run.
-	if next != kept && !next.Through.IsZero() {
+	// outlasted a read halves it -- is kept for the next run. A source with no
+	// watermark yet keeps it at the floor, which the walk reads as where a
+	// source not walked yet stands: without it the first window, the one that
+	// holds the mirror's first fill, would time out the same way every run.
+	if next.Through != kept.Through || next.Width != windowWidth(kept.Width) {
+		if next.Through.IsZero() {
+			next.Through = floor
+		}
 		if kerr := writeTx(ctx, db, storeID, generation, func(ctx context.Context, tx bun.Tx) error {
 			return keepWatermark(ctx, tx, storeID, s.source, next, time.Time{}, time.Time{})
 		}); kerr != nil {
@@ -225,13 +250,18 @@ func watermarkOf(ctx context.Context, db *bun.DB, storeID, source string) (walkW
 	return walkWindow{Through: through.UTC(), Width: time.Duration(seconds) * time.Second}, nil
 }
 
-// keepPage folds one walked page and keeps its watermark, in one writeTx. See
-// "One transaction a page".
+// keepPage reads one walked page into facts and then, in one writeTx, folds
+// it and keeps its watermark. See "One transaction a page" and "Read first,
+// then written".
 func keepPage(ctx context.Context, db *bun.DB, storeID, source string, generation int64, page walkPage, wholesale wholesaleState) (pageResult, error) {
+	facts, err := readPage(storeID, source, page.Rows, wholesale)
+	if err != nil {
+		return pageResult{}, fmt.Errorf("store %s, %s: a page could not be read: %w", storeID, source, err)
+	}
 	var res pageResult
-	err := writeTx(ctx, db, storeID, generation, func(ctx context.Context, tx bun.Tx) error {
+	err = writeTx(ctx, db, storeID, generation, func(ctx context.Context, tx bun.Tx) error {
 		var err error
-		res, err = foldPage(ctx, tx, storeID, source, page.Rows, wholesale)
+		res, err = foldPage(ctx, tx, storeID, source, facts)
 		if err != nil {
 			return err
 		}
@@ -263,26 +293,42 @@ type foldedOrder struct {
 	fact      OrderFact
 	gone      bool
 	wholesale bool
+	rowID     string // the mirror row's own id, bare
 }
 
 type foldedLine struct {
-	fact LineFact
-	gone bool
+	fact  LineFact
+	gone  bool
+	rowID string
 }
 
 type foldedRefund struct {
-	fact RefundFact
-	gone bool
+	fact  RefundFact
+	gone  bool
+	rowID string
 }
 
+// unreadableRow is a row the rules could not read, as it is recorded: its own
+// id (bare), its gid, its version and the name of the field. No value of the
+// row.
+type unreadableRow struct {
+	rowID, gid, field   string
+	version, recordedAt time.Time
+	err                 error // the rules' error: a gid and a field
+}
+
+// recordable says the row can be recorded: it has an id of its own and a
+// write time.
+func (u unreadableRow) recordable() bool { return u.rowID != "" && !u.version.IsZero() }
+
 // pageFacts is a page as the fold writes it: each readable row once, at its
-// newest version, and the rules' error for each row that could not be read.
+// newest version, and each row that could not be read once, at its newest.
 type pageFacts struct {
 	source       string
 	orders       []foldedOrder
 	lines        []foldedLine
 	refunds      []foldedRefund
-	unreadable   []error
+	unreadable   []unreadableRow
 	lastRecorded time.Time
 }
 
@@ -297,77 +343,121 @@ func pageOf(rows []map[string]any) []fields {
 
 // errAnotherStore is a row of another store than the one walked: no fact.
 func errAnotherStore(concept, gid string) error {
-	return fmt.Errorf("storestats: %s %s: storeId is not the store walked", concept, gid)
+	return &rowError{Concept: concept, GID: gid, Field: "storeId", what: "is not the store walked"}
 }
 
-// readPage reads a page of a source with the rules. Pure: called inside the
-// page's transaction, it reads the rows it is handed and nothing else.
-func readPage(storeID, source string, rows []fields, wholesale wholesaleState) (pageFacts, error) {
+// sameStore compares two store ids bare: a row may hold its store's id in
+// either form.
+func sameStore(a, b string) bool { return memql.BareShortId(a) == memql.BareShortId(b) }
+
+// unreadableOf is a row the rules refused with err, as it is recorded. Its
+// id, gid and dates are read here, as the shape projects them; the field is
+// the rules' own.
+func unreadableOf(row fields, err error) unreadableRow {
+	u := unreadableRow{err: err}
+	if id, ok := row.get("id").(string); ok {
+		u.rowID = memql.BareShortId(id)
+	}
+	u.gid, _ = row.get("gid").(string)
+	u.version, _ = instantOf(row.get("createdAt"))
+	recorded, _ := instantOf(row.get("syncedAt"))
+	u.recordedAt = recordedOr(recorded, u.version)
+	var rerr *rowError
+	if errors.As(err, &rerr) {
+		u.field = rerr.Field
+	}
+	return u
+}
+
+// readPage reads a page of a source into facts, before the page's
+// transaction begins. Pure: no database and no engine.
+func readPage(storeID, source string, rows []map[string]any, wholesale wholesaleState) (pageFacts, error) {
+	return readPageFrom(storeID, source, pageOf(rows), wholesale)
+}
+
+// readPageFrom is readPage over rows read through fields, so a test can see
+// every key it reads.
+func readPageFrom(storeID, source string, rows []fields, wholesale wholesaleState) (pageFacts, error) {
 	p := pageFacts{source: source}
 	seen := map[string]int{}
+	unread := map[string]int{}
 	linesPage := refundLinesPage()
 	for _, row := range rows {
+		rowID, _ := row.get("id").(string)
+		rowID = memql.BareShortId(rowID)
+		var err error
 		switch source {
 		case sourceOrder:
-			f, kind, err := orderFactFrom(row)
+			f, kind, ferr := orderFactFrom(row)
 			switch {
 			case kind == rowUnreadable:
-				p.unreadable = append(p.unreadable, err)
-				continue
-			case f.StoreID != storeID:
-				p.unreadable = append(p.unreadable, errAnotherStore("order", f.OrderGID))
-				continue
-			}
-			o := foldedOrder{fact: f, gone: kind == rowGone}
-			if !o.gone {
-				o.wholesale = wholesale.isWholesale(f.Email)
-			}
-			p.lastRecorded = later(p.lastRecorded, f.RecordedAt)
-			if n, ok := seen[f.OrderGID]; !ok {
-				seen[f.OrderGID] = len(p.orders)
-				p.orders = append(p.orders, o)
-			} else if f.Version.After(p.orders[n].fact.Version) {
-				p.orders[n] = o
+				err = ferr
+			case !sameStore(f.StoreID, storeID):
+				err = errAnotherStore("order", f.OrderGID)
+			default:
+				o := foldedOrder{fact: f, gone: kind == rowGone, rowID: rowID}
+				if !o.gone {
+					o.wholesale = wholesale.isWholesale(f.Email)
+				}
+				p.lastRecorded = later(p.lastRecorded, recordedOr(f.RecordedAt, f.Version))
+				if n, ok := seen[f.OrderGID]; !ok {
+					seen[f.OrderGID] = len(p.orders)
+					p.orders = append(p.orders, o)
+				} else if f.Version.After(p.orders[n].fact.Version) {
+					p.orders[n] = o
+				}
 			}
 		case sourceLine:
-			f, kind, err := lineFactFrom(row)
+			f, kind, ferr := lineFactFrom(row)
 			switch {
 			case kind == rowUnreadable:
-				p.unreadable = append(p.unreadable, err)
-				continue
-			case f.StoreID != storeID:
-				p.unreadable = append(p.unreadable, errAnotherStore("orderLineItem", f.LineGID))
-				continue
-			}
-			l := foldedLine{fact: f, gone: kind == rowGone}
-			// A line carries no syncedAt: its write time stands for it.
-			p.lastRecorded = later(p.lastRecorded, f.Version)
-			if n, ok := seen[f.LineGID]; !ok {
-				seen[f.LineGID] = len(p.lines)
-				p.lines = append(p.lines, l)
-			} else if f.Version.After(p.lines[n].fact.Version) {
-				p.lines[n] = l
+				err = ferr
+			case !sameStore(f.StoreID, storeID):
+				err = errAnotherStore("orderLineItem", f.LineGID)
+			default:
+				l := foldedLine{fact: f, gone: kind == rowGone, rowID: rowID}
+				// A line carries no syncedAt: its write time stands for it.
+				p.lastRecorded = later(p.lastRecorded, f.Version)
+				if n, ok := seen[f.LineGID]; !ok {
+					seen[f.LineGID] = len(p.lines)
+					p.lines = append(p.lines, l)
+				} else if f.Version.After(p.lines[n].fact.Version) {
+					p.lines[n] = l
+				}
 			}
 		case sourceRefund:
-			f, kind, err := refundFactFrom(row, linesPage)
+			f, kind, ferr := refundFactFrom(row, linesPage)
 			switch {
 			case kind == rowUnreadable:
-				p.unreadable = append(p.unreadable, err)
-				continue
-			case f.StoreID != storeID:
-				p.unreadable = append(p.unreadable, errAnotherStore("refund", f.RefundGID))
-				continue
-			}
-			r := foldedRefund{fact: f, gone: kind == rowGone}
-			p.lastRecorded = later(p.lastRecorded, f.RecordedAt)
-			if n, ok := seen[f.RefundGID]; !ok {
-				seen[f.RefundGID] = len(p.refunds)
-				p.refunds = append(p.refunds, r)
-			} else if f.Version.After(p.refunds[n].fact.Version) {
-				p.refunds[n] = r
+				err = ferr
+			case !sameStore(f.StoreID, storeID):
+				err = errAnotherStore("refund", f.RefundGID)
+			default:
+				r := foldedRefund{fact: f, gone: kind == rowGone, rowID: rowID}
+				p.lastRecorded = later(p.lastRecorded, recordedOr(f.RecordedAt, f.Version))
+				if n, ok := seen[f.RefundGID]; !ok {
+					seen[f.RefundGID] = len(p.refunds)
+					p.refunds = append(p.refunds, r)
+				} else if f.Version.After(p.refunds[n].fact.Version) {
+					p.refunds[n] = r
+				}
 			}
 		default:
 			return pageFacts{}, errors.New("storestats: a page of a source the walk does not have")
+		}
+		if err == nil {
+			continue
+		}
+		u := unreadableOf(row, err)
+		if !u.recordable() {
+			p.unreadable = append(p.unreadable, u)
+			continue
+		}
+		if n, ok := unread[u.rowID]; !ok {
+			unread[u.rowID] = len(p.unreadable)
+			p.unreadable = append(p.unreadable, u)
+		} else if u.version.After(p.unreadable[n].version) {
+			p.unreadable[n] = u
 		}
 	}
 	return p, nil
@@ -526,21 +616,18 @@ func refundRowOf(storeID string, r foldedRefund) refundFactRow {
 // ---- the fold ----
 
 // foldPage writes one page's facts inside tx: guarded upserts, a retired row
-// kept as a fact marked deleted, a refund's lines replaced with it, then
-// deriveOrders over the orders the page touched. It never writes a derived
-// column or checked_at. See the file's comment.
-func foldPage(ctx context.Context, tx bun.Tx, storeID, source string, rows []map[string]any, wholesale wholesaleState) (pageResult, error) {
-	page, err := readPage(storeID, source, pageOf(rows), wholesale)
-	if err != nil {
-		return pageResult{}, err
+// kept as a fact marked deleted, a refund's lines replaced with it, the
+// records of the rows that could not be read, then deriveOrders over the
+// orders the page touched. It is handed the page as readPage read it, and only
+// writes: it never writes a derived column or checked_at. See the file's
+// comment.
+func foldPage(ctx context.Context, tx bun.Tx, storeID, source string, page pageFacts) (pageResult, error) {
+	if page.source != source {
+		return pageResult{}, errors.New("storestats: a page read for one source was folded as another")
 	}
-	res := pageResult{
-		Facts:        len(page.orders) + len(page.lines) + len(page.refunds),
-		Unreadable:   len(page.unreadable),
-		LastRecorded: page.lastRecorded,
-		unreadable:   page.unreadable,
-	}
+	res := pageResult{Unreadable: len(page.unreadable), LastRecorded: page.lastRecorded}
 	touched := map[string]bool{}
+	var wrote []string
 
 	// Orders.
 	var liveOrders, goneOrders []orderFactRow
@@ -553,21 +640,27 @@ func foldPage(ctx context.Context, tx bun.Tx, storeID, source string, rows []map
 		}
 	}
 	if len(liveOrders) > 0 {
-		if _, err := tx.NewInsert().Model(&liveOrders).
+		wrote = wrote[:0]
+		if err := tx.NewInsert().Model(&liveOrders).
 			On("CONFLICT (store_id, order_gid) DO UPDATE").
 			Where("EXCLUDED.order_version >= f.order_version").
-			Exec(ctx); err != nil {
+			Returning("order_gid").
+			Scan(ctx, &wrote); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return pageResult{}, fmt.Errorf("write the order facts: %w", err)
 		}
+		res.Facts += len(wrote)
 	}
 	if len(goneOrders) > 0 {
-		if _, err := tx.NewInsert().Model(&goneOrders).
+		wrote = wrote[:0]
+		if err := tx.NewInsert().Model(&goneOrders).
 			On("CONFLICT (store_id, order_gid) DO UPDATE").
 			Set("order_version = EXCLUDED.order_version").Set("deleted = true").Set("recorded_at = EXCLUDED.recorded_at").
 			Where("EXCLUDED.order_version >= f.order_version").
-			Exec(ctx); err != nil {
+			Returning("order_gid").
+			Scan(ctx, &wrote); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return pageResult{}, fmt.Errorf("mark the retired orders' facts deleted: %w", err)
 		}
+		res.Facts += len(wrote)
 	}
 
 	// Lines.
@@ -583,12 +676,15 @@ func foldPage(ctx context.Context, tx bun.Tx, storeID, source string, rows []map
 		}
 	}
 	if len(liveLines) > 0 {
-		if _, err := tx.NewInsert().Model(&liveLines).
+		wrote = wrote[:0]
+		if err := tx.NewInsert().Model(&liveLines).
 			On("CONFLICT (store_id, line_gid) DO UPDATE").
 			Where("EXCLUDED.line_version >= f.line_version").
-			Exec(ctx); err != nil {
+			Returning("line_gid").
+			Scan(ctx, &wrote); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return pageResult{}, fmt.Errorf("write the line facts: %w", err)
 		}
+		res.Facts += len(wrote)
 	}
 	if len(goneLines) > 0 {
 		// The order a deleted line named is touched: the fact's, which its
@@ -602,7 +698,26 @@ func foldPage(ctx context.Context, tx bun.Tx, storeID, source string, rows []map
 			Scan(ctx, &orders); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return pageResult{}, fmt.Errorf("mark the retired lines' facts deleted: %w", err)
 		}
+		res.Facts += len(orders)
 		for _, o := range orders {
+			if o != "" {
+				touched[o] = true
+			}
+		}
+		// And the orders whose refunds name a retired line: a line retired
+		// before any version of it was read holds no order, and a refund
+		// naming it returns no item once it is deleted (derive.go).
+		gids := make([]string, len(goneLines))
+		for n, l := range goneLines {
+			gids[n] = l.LineGID
+		}
+		var naming []string
+		if err := tx.NewSelect().TableExpr("store_sales_refund_line_fact").ColumnExpr("DISTINCT order_gid").
+			Where("store_id = ? AND line_gid IN (?)", storeID, bun.In(gids)).
+			Scan(ctx, &naming); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return pageResult{}, fmt.Errorf("read the orders whose refunds name a retired line: %w", err)
+		}
+		for _, o := range naming {
 			if o != "" {
 				touched[o] = true
 			}
@@ -650,6 +765,7 @@ func foldPage(ctx context.Context, tx bun.Tx, storeID, source string, rows []map
 			}
 		}
 	}
+	res.Facts += len(replaced) + len(removed)
 	if gone := append(append([]string(nil), replaced...), removed...); len(gone) > 0 {
 		if _, err := tx.NewDelete().TableExpr("store_sales_refund_line_fact").
 			Where("store_id = ? AND refund_gid IN (?)", storeID, bun.In(gone)).
@@ -671,6 +787,42 @@ func foldPage(ctx context.Context, tx bun.Tx, storeID, source string, rows []map
 		}
 	}
 
+	// The records of the rows that could not be read: a row that was read
+	// deletes its own record at or before its version; one that could not be
+	// read is recorded, unless a fact of it holds that version or a newer one,
+	// and is logged when its record is new or its version moved.
+	values, args := readRowValues(page)
+	if len(args) > 0 {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM store_sales_unreadable u USING (VALUES `+values+`) AS r(row_id, version)
+			WHERE u.store_id = ? AND u.source = ? AND u.row_id = r.row_id AND u.version <= r.version`,
+			append(args, storeID, source)...); err != nil {
+			return pageResult{}, fmt.Errorf("clear the records of rows that were read: %w", err)
+		}
+	}
+	table, gidColumn, versionColumn := factColumnsOf(source)
+	for _, u := range page.unreadable {
+		if !u.recordable() {
+			res.logged = append(res.logged, u)
+			continue
+		}
+		var recorded []string
+		if err := tx.NewRaw(`INSERT INTO store_sales_unreadable AS u (store_id, source, row_id, gid, version, field, recorded_at)
+			SELECT ?, ?, ?, ?, ?::timestamptz, ?, ?::timestamptz
+			WHERE ? = '' OR NOT EXISTS (SELECT 1 FROM ? AS f WHERE f.store_id = ? AND f.? = ? AND f.? >= ?::timestamptz)
+			ON CONFLICT (store_id, source, row_id) DO UPDATE
+				SET gid = EXCLUDED.gid, version = EXCLUDED.version, field = EXCLUDED.field, recorded_at = EXCLUDED.recorded_at
+				WHERE EXCLUDED.version > u.version
+			RETURNING row_id`,
+			storeID, source, u.rowID, u.gid, u.version.UTC(), u.field, u.recordedAt.UTC(),
+			u.gid, bun.Ident(table), storeID, bun.Ident(gidColumn), u.gid, bun.Ident(versionColumn), u.version.UTC()).
+			Scan(ctx, &recorded); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return pageResult{}, fmt.Errorf("record a row that could not be read: %w", err)
+		}
+		if len(recorded) > 0 {
+			res.logged = append(res.logged, u)
+		}
+	}
+
 	for gid := range touched {
 		res.Orders = append(res.Orders, gid)
 	}
@@ -679,6 +831,42 @@ func foldPage(ctx context.Context, tx bun.Tx, storeID, source string, rows []map
 		return pageResult{}, err
 	}
 	return res, nil
+}
+
+// readRowValues is the VALUES list of every row the page read, live or gone,
+// that has an id of its own: its id and its version, and the arguments that
+// fill it.
+func readRowValues(page pageFacts) (string, []any) {
+	var args []any
+	for _, o := range page.orders {
+		args = appendReadRow(args, o.rowID, o.fact.Version)
+	}
+	for _, l := range page.lines {
+		args = appendReadRow(args, l.rowID, l.fact.Version)
+	}
+	for _, r := range page.refunds {
+		args = appendReadRow(args, r.rowID, r.fact.Version)
+	}
+	return strings.TrimSuffix(strings.Repeat("(?, ?::timestamptz), ", len(args)/2), ", "), args
+}
+
+func appendReadRow(args []any, rowID string, version time.Time) []any {
+	if rowID == "" {
+		return args
+	}
+	return append(args, rowID, version.UTC())
+}
+
+// factColumnsOf is the fact table of a source, and its gid and version
+// columns.
+func factColumnsOf(source string) (table, gid, version string) {
+	switch source {
+	case sourceOrder:
+		return "store_sales_order_fact", "order_gid", "order_version"
+	case sourceLine:
+		return "store_sales_line_fact", "line_gid", "line_version"
+	}
+	return "store_sales_refund_fact", "refund_gid", "refund_version"
 }
 
 // keepWatermark keeps where the source's walk stands -- through by GREATEST,
