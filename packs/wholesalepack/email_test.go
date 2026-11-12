@@ -229,6 +229,16 @@ func (w *emailWorld) Rows(ctx context.Context, query string, args map[string]str
 		}, nil
 	case "applicationsForBackfill":
 		return w.apps, nil
+	case "senderIdentityById":
+		for _, sender := range []map[string]any{
+			{"id": "v1:campaigns:senderIdentity:sender-1", "accountId": "acct-links", "status": "active"},
+			{"id": "v1:campaigns:senderIdentity:sender-other", "accountId": "v1:accounts:account:acct-other", "status": "active"},
+		} {
+			if bareID(trimmed(sender["id"])) == bareID(args["senderIdentityId"]) {
+				return []map[string]any{sender}, nil
+			}
+		}
+		return nil, nil
 	}
 	return w.linkWorld.Rows(ctx, query, args)
 }
@@ -1088,6 +1098,27 @@ func TestTheExportCarriesTheEmailSends(t *testing.T) {
 
 // ONLY AN OPERATOR CHOOSES THE SENDER; the store's people choose the templates,
 // from the ones they are offered.
+// A SENDER IS ONE OF THE STORE'S ORGANIZATION'S: a cluster operator who names
+// another organization's sender, or one that does not exist, is refused with a
+// sentence, and nothing is written.
+func TestTheSenderIsASenderOfTheStoresOrganization(t *testing.T) {
+	t.Setenv("MEMQL_OUTBOUND_EMAIL_ALLOWLIST", "")
+	w := newEmailWorld()
+	p := w.provider()
+	for _, bad := range []string{"sender-other", "sender-none"} {
+		_, err := p.updateSettings(operatorCtx("op-1"), map[string]any{"siteId": linkSite, "storeId": linkStore, "senderIdentityId": bad}, 0)
+		if err == nil || !strings.Contains(err.Error(), "is not a sender of this store's organization") {
+			t.Fatalf("an operator naming %s answered %v", bad, err)
+		}
+	}
+	if w.count("putWholesaleSettingsRow") != 0 {
+		t.Fatal("a refused sender was written")
+	}
+	if _, err := p.updateSettings(operatorCtx("op-1"), map[string]any{"siteId": linkSite, "storeId": linkStore, "senderIdentityId": "sender-1"}, 0); err != nil {
+		t.Fatalf("an operator naming the organization's sender: %v", err)
+	}
+}
+
 func TestOnlyAnOperatorChoosesTheSender(t *testing.T) {
 	t.Setenv("MEMQL_OUTBOUND_EMAIL_ALLOWLIST", "")
 	w := newEmailWorld()

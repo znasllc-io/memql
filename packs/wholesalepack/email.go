@@ -1023,6 +1023,21 @@ func (p *Provider) mergeEmailSettings(ctx context.Context, args map[string]any, 
 		if sender != held.senderIdentityID && !isClusterOperator(ctx) {
 			return heldEmail{}, errors.New(OnlyOperatorsChooseTheSenderSentence)
 		}
+		// THE SENDER IS ONE OF THE STORE'S ORGANIZATION'S, even when an operator
+		// chooses it: the lane would refuse another organization's at send time,
+		// after the store's people believed it chosen. Read under the caller, as
+		// the send path reads a sender.
+		if sender != "" && sender != held.senderIdentityID {
+			rows, err := p.rowsFor(ctx, "senderIdentityById", map[string]string{"senderIdentityId": sender})
+			if err != nil {
+				return heldEmail{}, err
+			}
+			account := bareID(trimmed(row["accountId"]))
+			if len(rows) == 0 || account == "" || bareID(trimmed(rows[0]["accountId"])) != account {
+				return heldEmail{}, fmt.Errorf("wholesale: %q is not a sender of this store's organization; choose one "+
+					"of the organization's senders, or none", sender)
+			}
+		}
 		held.senderIdentityID = sender
 	}
 	var offered map[string]bool
