@@ -35,6 +35,7 @@ package statsperiod
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -111,7 +112,24 @@ func Parse(s string, allowed ...Period) (Period, error) {
 	if p == "" {
 		return "", fmt.Errorf("period is required: one of %s", list(offered))
 	}
-	return "", fmt.Errorf("period must be one of %s; got %q", list(offered), s)
+	return "", fmt.Errorf("period must be one of %s; got %s", list(offered), quoted(s))
+}
+
+// quotedRunes is the most of a refused value an error quotes: a caller who
+// sent a megabyte as a period gets a sentence back, not the megabyte.
+const quotedRunes = 32
+
+// quoted is s as a refusal quotes it: Go-quoted, and cut at quotedRunes
+// characters with " and more" after the quote when it is longer.
+func quoted(s string) string {
+	n := 0
+	for i := range s {
+		if n == quotedRunes {
+			return strconv.Quote(s[:i]) + " and more"
+		}
+		n++
+	}
+	return strconv.Quote(s)
 }
 
 // For answers the bounds of p as of now, cut in UTC. A period Parse would not
