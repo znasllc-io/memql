@@ -225,6 +225,7 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 			PreserveOrder: true,
 			ArgsSchema: map[string]string{
 				"requestIds": "list (required) - the request ids the messages were sent under",
+				"accountId":  "string (required) - the organization the messages were sent for; another organization's request ids answer nothing",
 			},
 		},
 	}, workflowhost.ScopedCapabilities(ops)...)

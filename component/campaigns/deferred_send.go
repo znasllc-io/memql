@@ -132,9 +132,12 @@ func (w *Worker) retryDeferredSends(ctx, systemCtx context.Context) {
 // server (recordCampaignDelivery is @serverOnly, the delivery concept
 // @serverWritten, and the fields are set only from singleSend.ledgerRow), so no
 // client can make a replay a row send. Every other row replays as the ordinary
-// send it was. An order message is never deferred (send_to_recipient.go), so no
-// pending row names an order; one that did would be refused for naming a concept
-// with no registered resolver.
+// send it was. An order message is never deferred (send_to_recipient.go), and
+// before that its ledger rows were refused, so no pending row names an order. One
+// that did would be replayed as a row send and held by the template check before
+// anything else -- an order's template is a marketing one, and a row send carries
+// only a published transactional template -- and the replay settles it failed
+// with that hold's sentence. It would never reach a resolver.
 func deferredSendOptions(row map[string]any) singleSend {
 	opts := singleSend{deferWhenLimited: true}
 	if concept := str(row, "rowConcept"); concept != "" {

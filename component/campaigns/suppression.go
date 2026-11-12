@@ -76,11 +76,23 @@ func blocksATransactionalMessage(reason string) bool {
 	return false
 }
 
-// RecordOrganizationSuppression is append-only: no read-modify-write, process
-// cache, or lease is involved. A retry writes the same organization/digest key.
+// RecordOrganizationSuppression writes the organization/digest key; a retry
+// writes the same key. An unsubscribe is read against the stored row first, so
+// it never replaces a blocking reason.
 func (s *Store) RecordOrganizationSuppression(ctx context.Context, accountID, digest, reason, domain, campaignID, note string) error {
 	if accountID == "" || digest == "" {
 		return errors.New("organization and email digest are required for an organization suppression")
+	}
+	// An unsubscribe never weakens the organization's block on the address
+	// (ruling 43, as RecordSuppression keeps the cluster's).
+	if reason == "unsubscribed" {
+		stored, err := s.organizationSuppression(ctx, accountID, digest)
+		if err != nil {
+			return err
+		}
+		if stored != nil && str(stored, "liftedAt") == "" && blocksATransactionalMessage(str(stored, "reason")) {
+			return nil
+		}
 	}
 	return s.execServerOnly(ctx, call("mutation", "recordOrganizationSuppression",
 		arg{"suppressionId", organizationSuppressionID(accountID, digest)}, arg{"accountId", bare(accountID)},

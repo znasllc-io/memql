@@ -1071,7 +1071,23 @@ func (s *Store) SetCampaignStatus(ctx context.Context, mutationName, campaignID 
 
 // RecordSuppression adds an address's digest to the cluster-wide list.
 // clusterOwner-tier. The plaintext address never reaches the engine.
+//
+// A block is never weakened by a later unsubscribe (ruling 43): the row is
+// overwritten in place, so an unsubscribe written over a bounce, a complaint or
+// an operator's block would leave the address reading merely unsubscribed, and
+// the row lane, which ignores an unsubscribe, would mail it. So an unsubscribe
+// over a blocking reason writes nothing, and the row keeps its reason. A
+// blocking reason over anything replaces it, as it always has.
 func (s *Store) RecordSuppression(ctx context.Context, digest, reason, domain, sourceCampaignID, note string) error {
+	if reason == "unsubscribed" {
+		stored, found, err := s.SuppressionByDigest(ctx, digest)
+		if err != nil {
+			return err
+		}
+		if found && blocksATransactionalMessage(stored.Reason) {
+			return nil
+		}
+	}
 	args := []arg{
 		{"emailDigest", digest},
 		{"reason", reason},

@@ -59,7 +59,13 @@ type RowMessage struct {
 }
 
 // RowWithdrawn is a resolver's answer that the message is no longer due. The
-// lane ledgers it skipped with Reason and sends nothing.
+// lane ledgers it skipped with Reason and sends nothing; a value or a pointer is
+// a withdrawal.
+//
+// Reason is shown: in the send's reply, on the ledger row and in the status
+// read. It is a sentence about the row's state ("the application was
+// withdrawn") and must never carry an address or anything of the message's
+// fields.
 type RowWithdrawn struct{ Reason string }
 
 func (w RowWithdrawn) Error() string {
@@ -67,6 +73,13 @@ func (w RowWithdrawn) Error() string {
 }
 
 // RowAddress is one concept's resolver.
+//
+// Resolve answers the row's OWN organization as RowMessage.AccountID, read from
+// the row, and never echoes the AccountID it was asked with: the lane refuses
+// an answer for another organization, and that check is what keeps one
+// organization's caller from sending about another organization's row. Its
+// error is never shown or logged, so it may say what it likes; a withdrawal is
+// a RowWithdrawn.
 type RowAddress struct {
 	Concept string
 	Resolve func(ctx context.Context, req RowMessageRequest) (RowMessage, error)
@@ -230,15 +243,18 @@ func (w *Worker) sendRow(ctx context.Context, args map[string]any, receipt *sing
 	}
 
 	resolved, err := address.Resolve(ctx, RowMessageRequest{Concept: row.Concept, RowID: row.RowID, AccountID: account, Kind: row.Kind, RequestID: argString(args, "requestId")})
-	var withdrawn RowWithdrawn
-	if errors.As(err, &withdrawn) {
+	if withdrawn, ok := asWithdrawal(err); ok {
 		if err := recordOutcome(Delivery{Status: "skipped", SkipReason: withdrawn.Reason}); err != nil {
 			w.logger.Warn("campaigns.sendRowMessage: a withdrawn message could not be ledgered", "recipient", recipient.ID, "error", err)
 		}
 		return resultNode("campaignRecipientSend", map[string]any{"sent": false, "skipped": true, "reason": withdrawn.Reason, "recipientId": recipient.ID, "emailRuleId": ""})
 	}
 	if err != nil {
-		return nil, fmt.Errorf("campaigns.sendRowMessage: the row's resolver did not answer: %w", err)
+		// The resolver's error is a pack's words, and they may name the row and its
+		// address. None of it reaches the caller or a log line: the reply is the
+		// lane's own sentence, and the log says only what kind of failure it was.
+		w.logger.Warn("campaigns.sendRowMessage: the row's resolver did not answer", "recipient", recipient.ID, "failure", resolverFailure(err))
+		return nil, errResolverDidNotAnswer
 	}
 	if bare(resolved.AccountID) == "" || !sameOrganization(resolved.AccountID, account) {
 		return nil, errors.New("campaigns.sendRowMessage: the row belongs to another organization, so nothing was sent")
@@ -283,13 +299,46 @@ func (w *Worker) sendRow(ctx context.Context, args map[string]any, receipt *sing
 	return w.handOver(ctx, args, receipt, opts, campaign, recipient, "", identity, msg, recordOutcome)
 }
 
+// errResolverDidNotAnswer is what a send says when the row's resolver failed:
+// the lane's own sentence, never the resolver's.
+var errResolverDidNotAnswer = errors.New("campaigns.sendRowMessage: the row's resolver did not answer, so nothing was sent")
+
+// asWithdrawal reads a resolver's withdrawal, answered as a value or a pointer.
+func asWithdrawal(err error) (RowWithdrawn, bool) {
+	var value RowWithdrawn
+	if errors.As(err, &value) {
+		return value, true
+	}
+	var pointer *RowWithdrawn
+	if errors.As(err, &pointer) && pointer != nil {
+		return *pointer, true
+	}
+	return RowWithdrawn{}, false
+}
+
+// resolverFailure classifies a resolver's error for a log line without its text.
+func resolverFailure(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	}
+	return "failed"
+}
+
 // handleRowMessageStatus answers campaignRowMessageStatus: one row per request
 // id, {requestId, status, skipReason, providerStatus, sentAt}, read under the
-// system actor, and nothing else of the delivery. A request id with no message
+// system actor for the one organization the call names, and nothing else of the
+// delivery. Another organization's request id answers nothing, as an unknown one. A request id with no message
 // recorded under it answers an empty status.
 func (w *Worker) handleRowMessageStatus(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if !auth.OriginFromContext(ctx).IsInternal() {
 		return nil, errors.New("campaigns.rowMessageStatus: read by a trusted job, never by a client")
+	}
+	account := memql.BareShortId(strings.TrimSpace(argString(args, "accountId")))
+	if account == "" {
+		return nil, errors.New("campaigns.rowMessageStatus: accountId is required: the read answers one organization's messages")
 	}
 	raw, _ := args["requestIds"].([]any)
 	if len(raw) == 0 || len(raw) > maxRowStatusRequests {
@@ -309,7 +358,8 @@ func (w *Worker) handleRowMessageStatus(ctx context.Context, args map[string]any
 		}
 	}
 	system := auth.ContextWithInternalOrigin(memql.ContextWithFreshRead(w.systemActorContext(ctx)))
-	rows, err := w.store.rows(system, call("query", "deliveriesByRequestIds", arg{"requestIds", ids}))
+	rows, err := w.store.rows(system, call("query", "deliveriesByRequestIds", arg{"requestIds", ids},
+		arg{"accountIds", []string{account, "v1:accounts:account:" + account}}))
 	if err != nil {
 		return nil, undecided(fmt.Errorf("campaigns.rowMessageStatus: %w", err))
 	}

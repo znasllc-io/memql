@@ -544,7 +544,8 @@ func TestALaneLedgerRowIsExemptFromTheRecipientReferenceAndFromNothingElse(t *te
 	}
 	raw := map[string]any{"recipientId": "row-raw", "email": "person@example.com", "status": "pending", "accountId": acme, "requestId": "lane-raw-" + suffix,
 		"templateId": "tpl-" + suffix, "rowConcept": "v1:test:laneRow", "rowId": "lane-row-" + suffix, "ownerUserId": merchant}
-	if err := organizationInsert(t, engine, rankActorCtx(merchant, auth.RoleWriter), "v1:campaigns:delivery", "raw-"+suffix, raw); err == nil {
-		t.Fatal("a client wrote a lane's ledger row with a raw insert")
+	if err := organizationInsert(t, engine, rankActorCtx(merchant, auth.RoleWriter), "v1:campaigns:delivery", "raw-"+suffix, raw); err == nil ||
+		!strings.Contains(err.Error(), "v1:campaigns:delivery: @serverWritten requires internal origin") {
+		t.Fatalf("a client's raw insert of a lane's ledger row was not refused as server-written: %v", err)
 	}
 }

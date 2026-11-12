@@ -189,7 +189,7 @@ func TestRowMessageStatusAnswersEachRequestId(t *testing.T) {
 		t.Fatalf("withdrawn: %v", got)
 	}
 	ids := []any{l.suffix + "-status-sent", l.suffix + "-status-withdrawn", l.suffix + "-status-never"}
-	nodes, err := l.worker.handleRowMessageStatus(auth.ContextWithInternalOrigin(l.owner), map[string]any{"requestIds": ids}, 0)
+	nodes, err := l.worker.handleRowMessageStatus(auth.ContextWithInternalOrigin(l.owner), map[string]any{"requestIds": ids, "accountId": l.org}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,5 +215,107 @@ func TestRowMessageStatusAnswersEachRequestId(t *testing.T) {
 		if strings.Contains(string(node.Payload), l.address) {
 			t.Fatalf("the status reply names the address: %s", node.Payload)
 		}
+	}
+}
+
+// The status read names its organization: another organization's request id
+// answers nothing, exactly as an unknown one does.
+func TestRowMessageStatusAnswersOnlyItsOrganization(t *testing.T) {
+	l := newRowLane(t, "lane-status-org")
+	if got := l.send(t, "status-org"); got["sent"] != true {
+		t.Fatalf("send: %v", got)
+	}
+	ask := func(account string) map[string]any {
+		t.Helper()
+		nodes, err := l.worker.handleRowMessageStatus(auth.ContextWithInternalOrigin(l.owner), map[string]any{"requestIds": []any{l.suffix + "-status-org"}, "accountId": account}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return decodeResult(t, nodes)
+	}
+	if got := ask(l.suffix + "-another-org"); got["status"] != "" || got["sentAt"] != "" {
+		t.Fatalf("another organization's account read the message: %v", got)
+	}
+	if got := ask(l.org); got["status"] != "sent" {
+		t.Fatalf("the organization's own account: %v", got)
+	}
+	if got := ask("v1:accounts:account:" + l.org); got["status"] != "sent" {
+		t.Fatalf("the organization's canonical account: %v", got)
+	}
+}
+
+// A block on an address is never weakened by a later unsubscribe (ruling 43):
+// an unsubscribe written over a bounce, a complaint or an operator's block
+// leaves the row's reason as it was, at either scope. A blocking reason written
+// over an unsubscribe replaces it.
+func TestABlockOnAnAddressIsNeverWeakenedByALaterUnsubscribe(t *testing.T) {
+	l := newRowLane(t, "lane-sticky")
+	digest := EmailDigest(l.address)
+	cluster := func(reason string) {
+		t.Helper()
+		if err := l.store.RecordSuppression(l.system, digest, reason, "example.com", "", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clusterReason := func() string {
+		t.Helper()
+		sup, found, err := l.store.SuppressionByDigest(l.system, digest)
+		if err != nil || !found {
+			t.Fatalf("the cluster row: %v %v", found, err)
+		}
+		return sup.Reason
+	}
+	cluster("hard_bounce")
+	cluster("unsubscribed")
+	if got := clusterReason(); got != "hard_bounce" {
+		t.Fatalf("a hard bounce then an unsubscribe reads %q", got)
+	}
+	if sup, blocked, err := l.store.BlockingSuppression(l.system, l.org, digest); err != nil || !blocked || sup.Reason != "hard_bounce" {
+		t.Fatalf("BlockingSuppression: %+v %v %v", sup, blocked, err)
+	}
+	if got := l.send(t, "sticky"); got["skipped"] != true || got["reason"] != "hard_bounce" || l.sender.count() != 0 {
+		t.Fatalf("a lane send to a bounced address that later unsubscribed: %v, %d sent", got, l.sender.count())
+	}
+	// An operator's suppress with reason unsubscribed, over a complaint.
+	cluster("complaint")
+	admin := auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: l.user, Role: auth.RoleOwner}))
+	if _, err := l.worker.handleSuppress(admin, map[string]any{"email": l.address, "reason": "unsubscribed"}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := clusterReason(); got != "complaint" {
+		t.Fatalf("a complaint then an operator's unsubscribed reads %q", got)
+	}
+
+	// The organization's row, in the same order.
+	org := func(reason string) {
+		t.Helper()
+		if err := l.store.RecordOrganizationSuppression(l.system, l.org, digest, reason, "example.com", "", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	orgReason := func() string {
+		t.Helper()
+		row, err := l.store.organizationSuppression(l.system, l.org, digest)
+		if err != nil || row == nil {
+			t.Fatalf("the organization row: %v %v", row, err)
+		}
+		return str(row, "reason")
+	}
+	org("manual")
+	org("unsubscribed")
+	if got := orgReason(); got != "manual" {
+		t.Fatalf("an operator's block then an unsubscribe reads %q at the organization", got)
+	}
+
+	// An unsubscribe then a hard bounce: the bounce replaces it.
+	other := "unsub-first-" + l.suffix + "@example.com"
+	if err := l.store.RecordSuppression(l.system, EmailDigest(other), "unsubscribed", "example.com", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.store.RecordSuppression(l.system, EmailDigest(other), "hard_bounce", "example.com", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if sup, _, _ := l.store.SuppressionByDigest(l.system, EmailDigest(other)); sup.Reason != "hard_bounce" {
+		t.Fatalf("an unsubscribe then a hard bounce reads %q", sup.Reason)
 	}
 }

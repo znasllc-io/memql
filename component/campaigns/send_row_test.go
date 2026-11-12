@@ -1,8 +1,11 @@
 package campaigns
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -315,5 +318,60 @@ func TestAnOrderMessageStillHoldsATransactionalTemplate(t *testing.T) {
 	var held sendHeld
 	if !errors.As(err, &held) || held.reason != errTransactionalTemplate.Error() || sender.count() != 0 {
 		t.Fatalf("an order message with a transactional template: %v", err)
+	}
+}
+
+// A resolver is a pack's code, and its error is its own words: they may name the
+// row and its address. None of it reaches the error the caller gets, nor a log
+// line; the lane says only that the resolver did not answer.
+func TestAResolverErrorNeverReachesTheCallerOrTheLog(t *testing.T) {
+	for _, cause := range []error{
+		fmt.Errorf("row application-77 has no valid email applicant@example.com"),
+		fmt.Errorf("reading row application-77 for applicant@example.com: %w", context.DeadlineExceeded),
+	} {
+		engine := rowSendEngine()
+		sender := &recordingSender{}
+		w := rowWorker(t, engine, sender)
+		var logs bytes.Buffer
+		w.logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		resolver := &countingResolver{answer: func(int) (RowMessage, error) { return RowMessage{}, cause }}
+		registerTestRowAddress(t, testRowConcept, resolver.resolve)
+
+		_, err := w.handleSendRowMessage(fromTrustedJob(), rowArgs(), 0)
+		if err == nil {
+			t.Fatal("a failed resolver was a send")
+		}
+		for _, leaked := range []string{"applicant@example.com", "application-77"} {
+			if strings.Contains(err.Error(), leaked) {
+				t.Fatalf("the error names %q: %v", leaked, err)
+			}
+			if strings.Contains(logs.String(), leaked) {
+				t.Fatalf("the log names %q: %s", leaked, logs.String())
+			}
+		}
+		if errors.Is(err, cause) || errors.Unwrap(err) != nil {
+			t.Fatalf("the error wraps the resolver's own: %v", err)
+		}
+		if sender.count() != 0 {
+			t.Fatal("a failed resolver sent mail")
+		}
+	}
+}
+
+// A resolver may answer a withdrawal as a pointer; it is a withdrawal still.
+func TestAWithdrawalAnsweredAsAPointerIsAWithdrawal(t *testing.T) {
+	engine := rowSendEngine()
+	sender := &recordingSender{}
+	w := rowWorker(t, engine, sender)
+	resolver := &countingResolver{answer: func(int) (RowMessage, error) {
+		return RowMessage{}, &RowWithdrawn{Reason: "the application was withdrawn"}
+	}}
+	registerTestRowAddress(t, testRowConcept, resolver.resolve)
+	nodes, err := w.handleSendRowMessage(fromTrustedJob(), rowArgs(), 0)
+	if err != nil {
+		t.Fatalf("a pointer withdrawal failed the send: %v", err)
+	}
+	if got := decodeResult(t, nodes); got["skipped"] != true || got["reason"] != "the application was withdrawn" || sender.count() != 0 {
+		t.Fatalf("result = %+v", got)
 	}
 }
