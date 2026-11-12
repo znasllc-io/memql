@@ -23,6 +23,7 @@ Nothing here changes the plan. Each is a consequence of a decision already made,
   - "The store's time zone has not been recorded yet."
   - "The Store page of this deployable says what fixes it."
   - "No figure can be given until this is fixed." (a store blocked before any clear run, ruling R1)
+  - "Recording is paused for this store." and "This store is not connected." (the notice's sentence for the two states the mirror gives no reason, A40)
   - "1 refund is still being read from Shopify." (the singular of the record's "N refunds are still being read from Shopify.")
   - "A refund in this period has more lines than were recorded."
   - "1 refund has more lines than were recorded, so units are not exact." and "N refunds have more lines than were recorded, so units are not exact."
@@ -33,7 +34,7 @@ Nothing here changes the plan. Each is a consequence of a decision already made,
 
 ## Amendments to the record
 
-A1 to A13 were made with the first commit of this plan. A14 to A25 were made after the plan's review, in the commit that corrected it; where a later amendment changes an earlier one, the earlier row says what holds now. A26 to A33 were made when the plan was checked against the tree it will be built on: the finished store mirror with engine main merged in (`feat/store-mirror` at `f5df0fb3f`, main at `24e8dab2b`, engine 0.31.35). A34 to A37 write in the three rulings given on that check and the branch's two later commits (head `f9a50d3c3`). No decision of the owner's (S1 to S14) changed; R1 changes a decision made here, D16.
+A1 to A13 were made with the first commit of this plan. A14 to A25 were made after the plan's review, in the commit that corrected it; where a later amendment changes an earlier one, the earlier row says what holds now. A26 to A33 were made when the plan was checked against the tree it will be built on: the finished store mirror with engine main merged in (`feat/store-mirror` at `f5df0fb3f`, main at `24e8dab2b`, engine 0.31.35). A34 to A37 write in the three rulings given on that check and the branch's two later commits (head `f9a50d3c3`), and A38 to A40 the corrections made to those rulings from what the code says. No decision of the owner's (S1 to S14) changed; R1 changes a decision made here, D16.
 
 | # | Where in the record | What it says now |
 | --- | --- | --- |
@@ -74,6 +75,9 @@ A1 to A13 were made with the first commit of this plan. A14 to A25 were made aft
 | A35 | 6.2 | Ruling R2: no account column on any statistics table; A27 says why. Record corrected. |
 | A36 | Section 8 ("The button"), D15 | Ruling R3: Store statistics is drawn on a draft storefront that has a store, where Statistics is absent: the figures are the store's sales, which do not depend on whether this site is published, and the gate is D15's part, unchanged. On a draft it stands where Statistics would, right after the Logs button (Task 21, with a test). Record corrected. |
 | A37 | none (the plan's own) | The store-mirror branch moved to `f9a50d3c3`: `cb51cc509` gives `integrations/shopify` (600s) and `component/datasync` (300s) classes of their own, pinned in `pipeline_db_tests_test.py`; Task 24 compares against those, and Tasks 11 and 19 cite that comment's own figures (310s for 125s, 135s for 61s) for the runner's factor. `f9a50d3c3` is a docs commit that nothing here reads. |
+| A38 | D16 (through Task 4a) | An outdated approval follows the mirror's own rule for a refused domain: it concerns the concepts for which `scopesMissingFor` (the grant holds none of the concept's scopes) is not empty, computed by that function, and none when the scopes not approved only widen a read. It changes A34's wording, which named every concept whose scopes include one not approved: that froze a store on its own app lacking only `read_all_orders` while its last sixty days of orders are recorded. Such a store is not frozen, and the record's line on orders older than sixty days is drawn for it (Tasks 14, 17, 21). A store whose grant holds no order scope is frozen. |
+| A39 | D16 (through Task 4a) | `changes_not_recorded` is by concept where the mirror knows the concepts: the routed domains of the given-up deliveries it counted. It is whole-store when the count is a floor or when a given-up delivery it read routes to no domain. A34 had it whole-store always. |
+| A40 | Section 8 (block 2) | The mirror gives a paused or a not-connected store no reason (`integrations/shopify/verdict.go`, `computeVerdict`; only a failing privacy request is listed beside either), so the notice says the state in one sentence of the page's own, before any reason: `Recording is paused for this store.` and `This store is not connected.` MemQL OS has no sentence for either verdict state to reuse: the Store page words the state in one word (`clients/os/src/apps/deployables/store/verdict.ts`, "Paused", "Not connected") and words a cut-off store by its cause (`ShopifyStorePanel.tsx`, `REPAIR_WORDS`: uninstalled, data removed), and Cluster > Data's paused sentence is about a domain's pause (`clients/os/src/apps/cluster/origins/rows.ts`). Task 22's paused test fed a reason that does not exist and now uses the real shape. Record corrected. |
 
 ## How the tasks follow the record's units
 
@@ -374,7 +378,7 @@ Ruling R1 (A34). The figures are drawn "as of" an earlier moment only when somet
 - Regenerate: `make sdk-gen` (the builtin's description is carried into the generated clients)
 
 **Interfaces:**
-- Consumes: `reasonsOf`, `checkFailing(concept string, row map[string]any, interval time.Duration, from, now time.Time) (VerdictReason, bool)`, `scopesNotApproved(store Store) []string` (`connections.go`), `insideDomains`, `sweptParentOf(concept string) string`, `generated.Types`, `generated.ConceptFromID`, and the test helpers of `verdict_test.go` (`managedStore`, `cleanRows`, `setRow`, `verdictInputOf`, `reasonCodes`).
+- Consumes: `reasonsOf`, `changesNotRecorded`, `scopesMissingFor(store Store, spec *generated.TypeSpec) []string` and `domainInConnection(store Store, spec *generated.TypeSpec) bool` (`reconcile.go`), `checkFailing(concept string, row map[string]any, interval time.Duration, from, now time.Time) (VerdictReason, bool)`, `scopesNotApproved(store Store) []string` (`connections.go`, which decides whether the reason is listed at all), `insideDomains`, `sweptParentOf(concept string) string`, `generated.Types`, `generated.ConceptFromID`, and the test helpers of `verdict_test.go` (`managedStore`, `cleanRows`, `setRow`, `verdictInputOf`, `reasonCodes`).
 - Produces:
 
 ```go
@@ -390,15 +394,16 @@ const (
 //	Concerns string   // one of the Concerns* constants
 //	Concepts []string // generated concept names ("order"), sorted; set only with ConcernsConcepts, never empty then
 
-// reasonConcerns is THE classification: every Reason* code with its kind.
-var reasonConcerns = map[string]string{
-	ReasonDataNotDeclared:       ConcernsConcepts,
-	ReasonApprovalOutdated:      ConcernsConcepts,
-	ReasonGrantLost:             ConcernsWholeStore,
-	ReasonEventsNotRegistered:   ConcernsWholeStore,
-	ReasonCheckFailing:          ConcernsConcepts,
-	ReasonChangesNotRecorded:    ConcernsWholeStore,
-	ReasonPrivacyRequestFailing: ConcernsNoRecording,
+// reasonConcerns is THE classification: every Reason* code with the kinds a reason of it may carry.
+// Two codes take one of two kinds by what the mirror found (Decisions, A38 and A39).
+var reasonConcerns = map[string][]string{
+	ReasonDataNotDeclared:       {ConcernsConcepts},
+	ReasonApprovalOutdated:      {ConcernsConcepts, ConcernsNoRecording},
+	ReasonGrantLost:             {ConcernsWholeStore},
+	ReasonEventsNotRegistered:   {ConcernsWholeStore},
+	ReasonCheckFailing:          {ConcernsConcepts},
+	ReasonChangesNotRecorded:    {ConcernsConcepts, ConcernsWholeStore},
+	ReasonPrivacyRequestFailing: {ConcernsNoRecording},
 }
 
 // StandsInTheWayOf reports whether the reason keeps any of these generated
@@ -420,11 +425,12 @@ func VerdictReasonFromPayload(m map[string]any) VerdictReason
 Decisions:
 - Where each reason's concepts come from, all in code that already knows them:
   - `data_not_declared`: the undeclared concepts of `inside`, by `generated.ConceptFromID` of each, collected beside the `plainDomain` words already built.
-  - `approval_outdated`: every generated concept whose `Scopes` holds a scope `scopesNotApproved(store)` answers, as ruled. The mirror's own reading rule is softer (`scopesMissingFor`, `reconcile.go`: a domain is refused only when the grant holds NONE of its scopes), so an order domain missing only `read_all_orders` is still recorded for sixty days and is classified here as stood in the way of all the same. A managed connection never asks for `read_all_orders` (`apply.go`, the comment on `ordersScope`), so on the shared app the two rules agree for orders; the test below pins the ruling's reading and names the difference.
+  - `approval_outdated` (A38): the concepts the mirror itself refuses, computed by the mirror's own function so the two cannot disagree: every generated concept of the store's connection (`domainInConnection(store, spec)`) for which `scopesMissingFor(store, spec)` (`reconcile.go`) is not empty, that is, whose grant holds NONE of its scopes. When that set is empty (the scopes not approved only widen what is read, as `read_all_orders` widens orders past sixty days) the reason is `ConcernsNoRecording`: everything the connection reads is still read. So a store on its own app that asks `read_all_orders` and lacks only it is not frozen; its limit on orders older than sixty days is said on the page by the record's own line ("Refunds, edits and cancellations of orders placed more than 60 days ago are not recorded."), which Task 14 (`all_orders_readable` from `scopesGranted`), Task 17 (`olderOrderChangesNotRecorded`) and Task 21 (the context line) draw for exactly that store. A store whose grant holds no order scope at all is frozen.
   - `check_failing`: the concept `checkFailing` was asked about.
-  - `grant_lost`, `events_not_registered`, `changes_not_recorded`: the whole store. (`changes_not_recorded` is counted from deliveries routed to the asked domains; it is classified whole-store as ruled, not per domain.)
+  - `grant_lost`, `events_not_registered`: the whole store.
+  - `changes_not_recorded` (A39): `changesNotRecorded` (`verdict.go`) also answers the domains it counted and whether it met a delivery it could not route: `func changesNotRecorded(givenUp []map[string]any, inside []string, rows map[string]map[string]any) (n int, concepts []string, unrouted bool)`. The reason is `ConcernsConcepts` with those routed domains (by `generated.ConceptFromID`, sorted), and `ConcernsWholeStore` when the count is a floor (`GivenUpFloor`: the read ran out of budget, so the deliveries it did not read may be of any domain) or when any given-up delivery it read routes to no domain (such a delivery is not counted, as today, and still makes the reason whole-store).
   - `privacy_request_failing`: not about recording.
-- The reason is built with its classification from `reasonConcerns` at each construction site, so a reason cannot be built without one; the gate test below checks every reason `computeVerdict` answers against the table.
+- The reason is built with its classification at each construction site, so a reason cannot be built without one; the gate test below checks every reason `computeVerdict` answers: its `Concerns` is one of its code's kinds in `reasonConcerns`, and `Concepts` is not empty exactly when `Concerns` is `ConcernsConcepts`.
 - Nothing about the verdict's state, its `since`, its sentences or its acts changes, and neither do the screens that read it: the Store page keeps every reason in every state.
 
 - [ ] **Step 1: Write the failing tests**
@@ -434,11 +440,11 @@ Decisions:
 func TestEveryReasonCodeIsClassified(t *testing.T) {
 	// Parses this package's non-test files for constants whose name begins
 	// "Reason" and whose value is a string: every one is a key of
-	// reasonConcerns with one of the three kinds, and reasonConcerns names no
+	// reasonConcerns whose kinds are all among the three, and reasonConcerns names no
 	// other code. A reason added later without a kind fails here, naming it.
 }
 
-func TestEachReasonComputeVerdictAnswersCarriesItsKind(t *testing.T) // for a fixture of each code (the cases verdict_test.go builds): Concerns == reasonConcerns[Code]; Concepts sorted, not empty with ConcernsConcepts, empty otherwise
+func TestEachReasonComputeVerdictAnswersCarriesItsKind(t *testing.T) // for a fixture of each code (the cases verdict_test.go builds): Concerns is one of reasonConcerns[Code]; Concepts sorted, not empty with ConcernsConcepts, empty otherwise
 
 func TestAReasonSaysWhatItStandsInTheWayOf(t *testing.T) {
 	walked := []string{"order", "orderLineItem", "refund", "shop"}
@@ -468,13 +474,21 @@ func TestAReasonSaysWhatItStandsInTheWayOf(t *testing.T) {
 	}
 }
 
-func TestAnOutdatedApprovalNamesEveryConceptReadUnderAScopeNotApproved(t *testing.T) // a managed store missing read_products: the reason's Concepts hold product and its children and no order concept; one missing read_orders holds order, orderLineItem and refund. And the stated difference: a store on its own app that asks read_all_orders and lacks only it gets order in Concepts although scopesMissingFor answers nothing for the order domain
+func TestAnOutdatedApprovalNamesTheConceptsTheMirrorRefuses(t *testing.T) // each Concepts is exactly the concepts of the connection for which scopesMissingFor is not empty. A managed store whose grant holds no product scope: product and its children, no order concept, and StandsInTheWayOf(walked) false. A store whose grant holds no order scope: order (and the children read with it), StandsInTheWayOf(walked) true
+func TestAnApprovalLackingOnlyAWideningScopeFreezesNothing(t *testing.T) // a store on its own app that asks read_orders and read_all_orders and holds only read_orders: the reason is listed, Concerns ConcernsNoRecording, no Concepts, StandsInTheWayOf(walked) false
+func TestChangesNotRecordedNameTheirDomains(t *testing.T) {
+	walked := []string{"order", "orderLineItem", "refund", "shop"}
+	// given-up deliveries of products only: ConcernsConcepts, Concepts ["product"], StandsInTheWayOf(walked) false
+	// one of orders among them: Concepts holds order, StandsInTheWayOf(walked) true
+	// the same products-only deliveries with GivenUpFloor: ConcernsWholeStore, StandsInTheWayOf(walked) true
+	// products-only deliveries beside one whose topic routes to no domain: ConcernsWholeStore, StandsInTheWayOf(walked) true
+}
 func TestAFailingCheckNamesItsConcept(t *testing.T)                  // setRow(..., "order", a stale lastReconcileAt): Concepts ["order"]
 func TestThePrivacyReasonConcernsNoRecording(t *testing.T)           // on a recording store and on a paused one
 func TestTheVerdictReplyCarriesEachReasonsKindAndConcepts(t *testing.T) // verdictPayload: concerns and concepts on every reason; VerdictReasonFromPayload of it gives back the same three fields
 ```
 
-- [ ] **Step 2:** Run `MEMQL_DATABASE_DSN="$STATS_DSN" go test -count=1 ./integrations/shopify/ -run 'Classified|CarriesItsKind|StandsInTheWay|OutdatedApprovalNames|FailingCheckNames|PrivacyReasonConcerns|ReplyCarriesEachReason'`. Expected: FAIL to compile, then FAIL.
+- [ ] **Step 2:** Run `MEMQL_DATABASE_DSN="$STATS_DSN" go test -count=1 ./integrations/shopify/ -run 'Classified|CarriesItsKind|StandsInTheWay|OutdatedApprovalNames|WideningScope|ChangesNotRecordedName|FailingCheckNames|PrivacyReasonConcerns|ReplyCarriesEachReason'`. Expected: FAIL to compile, then FAIL.
 - [ ] **Step 3:** Implement, then `make sdk-gen`.
 - [ ] **Step 4:** Run the same command, the package whole in the database lane (`TestA*` of `verdict_test.go` unchanged and passing), `scripts/ci/module-boundaries.sh integrations`, and the generated-file gates. Expected: PASS.
 - [ ] **Step 5: Commit** `shopify: each reason of a store's verdict says what it stands in the way of`.
@@ -1760,7 +1774,7 @@ func TestABlockedStoreIsAnsweredAsOfItsLastClearRun(t *testing.T)           // r
 func TestAReasonThatFreezesNothingIsStillInTheAnswer(t *testing.T)         // needs attention, privacy_request_failing only, recording_blocked false: asOf null, recording.reasons holds the reason with its sentence
 func TestABlockedStoreWithNoClearRunAnswersNoFigure(t *testing.T)          // recording_blocked, last_clear_at null: asOf null, the eight figures null, recording.reasons as stored
 func TestAStoreWithNoZoneIsCutInUTC(t *testing.T)                           // timezone null in the answer, start a UTC midnight
-func TestAGrantWithoutAllOrdersSaysOlderChangesAreNotRecorded(t *testing.T)
+func TestAGrantWithoutAllOrdersSaysOlderChangesAreNotRecorded(t *testing.T) // and a store needing attention only for an approval that lacks read_all_orders (Task 4a: ConcernsNoRecording): olderOrderChangesNotRecorded true, recording.blocked false, asOf null (A38)
 func TestAStoreTheWalkHasNotSeenYetIsAnsweredAsStarting(t *testing.T)
 func TestAStartingStoresFiguresAreNullAndEveryKeyIsThere(t *testing.T)       // a store whose state is starting: the eight are null, never 0, and the payload holds every key of the answer
 ```
@@ -2145,7 +2159,7 @@ it("judges the sales part per organization", () => {
 
 Decisions:
 - Blocks, top to bottom after the context, spacing only between them:
-  2. A `Notice`, only when one applies: for `starting` or a rebuild, "The store's orders are still being brought in."; for `paused`, `needs attention` and `not connected`, the mirror's sentence for every reason the answer lists, those that freeze nothing included (ruling R1, A34), then, only when the answer carries an `asOf`, "These figures are as of " and `formatMoment(asOf)` and a full stop, and when `recording.blocked` is true with no `asOf` (blocked before any clear run), "No figure can be given until this is fixed." instead; for a state not known, "Whether this store is recording is not known."; for refunds not read, "1 refund is still being read from Shopify." or "N refunds are still being read from Shopify." Its `next` is "The Store page of this deployable says what fixes it." for the three states the mirror gives a reason for, and nothing otherwise. It holds no act.
+  2. A `Notice`, only when one applies: for `starting` or a rebuild, "The store's orders are still being brought in."; for `paused` and `not connected`, first one sentence of the page's own from the verdict's state, because the mirror gives either state no reason of its own (A40): `Recording is paused for this store.` and `This store is not connected.`; then, for these two and for `needs attention`, the mirror's sentence for every reason the answer lists, those that freeze nothing included (ruling R1, A34), then, only when the answer carries an `asOf`, "These figures are as of " and `formatMoment(asOf)` and a full stop, and when `recording.blocked` is true with no `asOf` (blocked before any clear run), "No figure can be given until this is fixed." instead; for a state not known, "Whether this store is recording is not known."; for refunds not read, "1 refund is still being read from Shopify." or "N refunds are still being read from Shopify." Its `next` is "The Store page of this deployable says what fixes it." for the three states the mirror gives a reason for, and nothing otherwise. It holds no act.
   3. `StatFigures`, labelled "Sales figures", eight, in this order and with these labels: Total sales, Net sales, Orders, Average order value, Gross sales, Discounts, Refunds, Units sold. Money through `formatMoney(currency)`, counts through `formatCount`. All but the average are chartable. A previous figure is given only when `previousComparable(prevStart, historySince)`. A figure in `floors` is a floor. An absent figure carries its reason as the figure's detail: "The store's currency has not been recorded yet.", "The store's time zone has not been recorded yet.", "The store's orders are still being brought in.", the refunds sentence above, "A refund in this period has more lines than were recorded.", or "No orders in this period." for the average. When more than one applies the reason is the first of these that does: no time zone; still being brought in; no currency, for a money figure; refunds still being read, for the four figures they blank; a refund with more lines than were recorded, for Units sold; no orders, for the average. When the store's state and unread refunds both call for the `Notice`, the state is said first and the refunds sentence after it.
   4. `TimeChart` of the chosen figure, labelled with the figure's label, with `timeZone`.
   5. `RankedList` "Products", with a `LocalTabs` control labelled "Products by", "Net sales" and "Units"; eight rows; when `productCount` is larger its footer says "The 8 best-selling of 31 products." and "All products" opens `ProductsListPage` under the trail. Further footer lines when they apply, every amount through `formatMoney(currency)`: "Refunds of €12.00 name no product, so they are in Net sales and not here."; "3 orders have more lines than were recorded, so these are floors."; "1 refund has more lines than were recorded, so units are not exact."
@@ -2190,14 +2204,25 @@ it("says the store is still being brought in, and draws every figure absent with
   expect(page.querySelector(".os-notice-line")?.textContent).toBe("The store's orders are still being brought in.");
   for (const label of ["Total sales", "Orders", "Units sold"]) expect(figure(group, label)).toMatchObject({ value: "--", reason: "The store's orders are still being brought in." });
 });
-it("gives the mirror's sentence and the moment the figures are as of, and names the Store page", async () => {
-  const { page } = await openStoreStatistics(seed({ ...WEEK, asOf: "2026-11-07T09:00:00Z", recording: { state: "paused", reasons: [{ code: "paused", sentence: "Recording is paused for this store." }], since: "2026-11-07T09:00:00Z", blocked: true } }));
+it("says a paused store's state in its own sentence, then the moment the figures are as of, and names the Store page", async () => {
+  // The real shape: a paused store carries no reason.
+  const { page } = await openStoreStatistics(seed({ ...WEEK, asOf: "2026-11-07T09:00:00Z", recording: { state: "paused", reasons: [], since: "2026-11-07T09:00:00Z", blocked: true } }));
   await figures(page);
   const notice = page.querySelector(".os-notice")?.textContent ?? "";
   expect(notice).toContain("Recording is paused for this store.");
   expect(notice).toContain(`These figures are as of ${formatMoment("2026-11-07T09:00:00Z")}.`);
   expect(notice).toContain("The Store page of this deployable says what fixes it.");
   expect(within(page.querySelector(".os-notice") as HTMLElement).queryByRole("button")).toBeNull();
+});
+it("says a store is not connected before the one reason it lists", async () => {
+  // A not-connected store lists no reason but a failing privacy request.
+  const privacy = "A privacy request for this store could not be completed.";
+  const { page } = await openStoreStatistics(seed({ ...WEEK, asOf: "2026-11-06T12:00:00Z", recording: { state: "not connected", reasons: [{ code: "privacy_request_failing", sentence: privacy }], since: "2026-11-06T12:00:00Z", blocked: true } }));
+  await figures(page);
+  const notice = page.querySelector(".os-notice")?.textContent ?? "";
+  expect(notice.indexOf("This store is not connected.")).toBeGreaterThanOrEqual(0);
+  expect(notice.indexOf(privacy)).toBeGreaterThan(notice.indexOf("This store is not connected."));
+  expect(notice).toContain(`These figures are as of ${formatMoment("2026-11-06T12:00:00Z")}.`);
 });
 it("lists a reason that freezes nothing and draws current figures with no as-of", async () => {
   for (const reason of [

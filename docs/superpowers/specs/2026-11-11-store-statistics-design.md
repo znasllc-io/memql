@@ -65,7 +65,8 @@ A26 to A28. No decision of the owner's changed.
 **Amended with the owner's three rulings on that check (2026-11-12).** D16 is changed by
 ruling R1 (the figures freeze only for what stands in the way of the data the walk reads),
 6.2 by rulings R1 and R2, 6.5 and section 8 by R1 and R3, and section 9 by R1 (a unit of work
-in the mirror). The plan lists each as A34 to A36. No decision of the owner's (S1 to S14)
+in the mirror). The plan lists each as A34 to A36, and the corrections made to them from the
+code as A38 to A40 (section 8 block 2 among them). No decision of the owner's (S1 to S14)
 changed.
 
 ## 1. What the owner asked for
@@ -708,8 +709,10 @@ the Logs button.
    `olderOrderChangesNotRecorded` is true, a line of its own: "Refunds, edits and
    cancellations of orders placed more than 60 days ago are not recorded."
 2. **Recording notice**, a `Notice`, only when the verdict is not `recording`, a rebuild runs,
-   the verdict is not known, or refunds are still being read (D22): the mirror's sentence for
-   every reason, then, only when the answer carries an `asOf`, "These figures are as of
+   the verdict is not known, or refunds are still being read (D22): for a paused and a
+   not-connected store, which the mirror gives no reason, first the page's own sentence for the
+   state, "Recording is paused for this store." or "This store is not connected."; then the
+   mirror's sentence for every reason, then, only when the answer carries an `asOf`, "These figures are as of
    <moment>." (D16); a store blocked before any clear run reads "No figure can be given until
    this is fixed." instead. For `starting` and a rebuild: "The
    store's orders are still being brought in." and every figure absent. For a verdict
