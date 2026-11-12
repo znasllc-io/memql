@@ -21,9 +21,11 @@ import (
 )
 
 // followTestConceptSrc is a standalone trainable concept (no cross-concept
-// binding, so it compiles against the core registry Gate-1 clones).
+// binding, so it compiles against the core registry Gate-1 clones). It says
+// where its rows belong, as a concept taught to a running cluster must.
 const followTestConceptSrc = `@version("1.0.0")
 @description("A concept trained into a running cluster, for the follow stream")
+@belongsTo(cluster)
 concept followWidget {
   ownerUserId  string  @required
   label        string
@@ -281,6 +283,7 @@ func TestConceptsFollow_GenerationIncrementsAndStaleReSnapshots(t *testing.T) {
 
 const followTestConceptTwoSrc = `@version("1.0.0")
 @description("A second trained concept")
+@belongsTo(cluster)
 concept followWidgetTwo {
   ownerUserId  string  @required
   label        string

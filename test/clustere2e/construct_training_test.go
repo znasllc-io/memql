@@ -142,6 +142,7 @@ func newTrainingFixture() trainingFixture {
 func (f trainingFixture) conceptSrc() string {
 	return fmt.Sprintf(`@version("1.0.0")
 @description("A concept taught to a running cluster by the memql#3745 gate")
+@belongsTo(cluster)
 concept %s {
   ownerUserId  string  @required
   label        string
@@ -152,6 +153,7 @@ concept %s {
 func (f trainingFixture) conceptSrcAdditive() string {
 	return fmt.Sprintf(`@version("1.0.0")
 @description("A concept taught to a running cluster by the memql#3745 gate")
+@belongsTo(cluster)
 concept %s {
   ownerUserId  string  @required
   label        string
@@ -164,6 +166,7 @@ concept %s {
 func (f trainingFixture) conceptSrcBreaking() string {
 	return fmt.Sprintf(`@version("1.0.0")
 @description("A concept taught to a running cluster by the memql#3745 gate")
+@belongsTo(cluster)
 concept %s {
   ownerUserId  string  @required
   notes        string
