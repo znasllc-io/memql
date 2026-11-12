@@ -247,9 +247,11 @@ Your own fields — the EIN — do **not** go in this form. They go in your own
 write, against your own concept, from your own route. See
 [the shopper write path](building-a-pack.md) for what declaring one costs.
 
-Submissions are refused when this store's `applicationsOpen` is false, and
-**absent settings are closed**: a merchant who has never touched their wholesale
-settings has not asked the internet for their customers' business details.
+Submissions are refused as `applications_closed` when this store's
+`applicationsOpen` is false, and **absent settings are closed**: a merchant who
+has never touched their wholesale settings has not asked the internet for their
+customers' business details. Every refusal code each route can answer is in
+[What each refusal means](#6-what-each-refusal-means).
 
 **One open application per address on a store.** A post from an address that
 already has a `submitted` or `approved` application on the store — compared
@@ -273,6 +275,78 @@ for a buyer's own data and deliberately did not build.
 
 Nothing forecloses it — reach is declared per route, so a second kind of caller
 on a second route is an addition rather than a rewrite.
+
+## 6. What each refusal means
+
+A storefront is a static site: all it knows about a refusal is the `reason` a
+form redirects with (`?reason=` on its error page) or the `error` a read
+answers (`422` with `{"error": "<code>"}`), and it words each code in its own
+design and language. Each code below means one thing, so a page can word it
+truthfully. A route forwards only the codes it lists; any other error reaches
+the page as the surface's `failed`.
+
+The surface answers four codes itself, before the pack is reached, on every
+route: `invalid` (a declared field broke its own rule: a required field is
+empty, a value is too long, a box is not `on`, a fingerprint is not 64 hex
+characters), `too_large`, `unavailable` and `failed`. A route may not declare
+one of these four; the surface refuses such a declaration when the pack
+registers.
+
+### The application form
+
+`POST /_memql/forms/wholesale/application`; error page `/wholesale/problem`.
+
+| `reason` | What happened | What the page should say |
+|---|---|---|
+| `applications_closed` | The store takes no application through this site now: its switch is off, it is not set up, the site is not one the store admits, or it requires its terms and a document is not published. The four are answered alike, so a visitor cannot tell one from another | The program is not accepting applications at the moment |
+
+A post from an address with an open application is not a refusal: it is
+answered as an accepted post (see [the form contract](#4-the-form-contract)).
+
+### The terms read
+
+`GET /_memql/reads/wholesale/terms?requestToken=<token>`, the read a terms link's
+page makes. On success it answers the company name, the current terms and MAP
+policy (`kind`, `label`, `body`, `sha256` each), the acceptance `statement` and
+its `statementSha256`, and the link's `expiresAt`.
+
+| `error` | What happened | What the page should say |
+|---|---|---|
+| `link_used` | The terms were accepted through this application's link. Checked first, so it stays the answer once the application is approved | The terms are already accepted; nothing more to do here |
+| `link_closed` | The link is real, and its application is no longer waiting for its terms: rejected, approved without an acceptance, or removed | This link no longer applies |
+| `link_expired` | The link is past its expiry, and its application is still waiting for its terms | Ask the store for a new link |
+| `link_invalid` | The token is no link of this store: unknown, malformed, replaced by a newer link, or another store's, never told apart | This link is not valid |
+| `documents_unavailable` | The store has no current terms or MAP version to show. A new link would not help | The terms are not available at the moment |
+
+A terms link is judged in the order `link_used`, `link_closed`, `link_expired`.
+
+### The acceptance form
+
+`POST /_memql/forms/wholesale/acceptance`; success page `/wholesale/accepted`,
+error page `/wholesale/link-problem`. The page posts the `requestToken`, both
+boxes as `on` (`acceptTerms`, `acceptMap`), the `signedName`, and **the three
+fingerprints the terms read answered**: `termsSha256`, `mapSha256` and
+`statementSha256`. The acceptance records the versions and the sentence those
+fingerprints name, so what is recorded is what the applicant was shown.
+
+| `reason` | What happened | What the page should say |
+|---|---|---|
+| `link_used`, `link_closed`, `link_expired`, `link_invalid`, `documents_unavailable` | As on the terms read. `link_used` is also the answer to the second of two acceptances posted at once | As on the terms read |
+| `terms_changed` | A document or the acceptance sentence changed between the read and the post. Nothing is written and the link stays usable | The terms have changed; read them again and accept the current ones |
+| `invalid` | The surface's own code: a field broke its rule | Check the form and send it again |
+
+### The price-sheet read
+
+`GET /_memql/reads/wholesale/priceSheet?requestToken=<token>`, the read a
+price-sheet link's page makes. On success it answers the company name and the
+current price sheet (`label`, `body`, `sha256`, `publishedAt`). A price-sheet
+link has no expiry and is never used up.
+
+| `error` | What happened | What the page should say |
+|---|---|---|
+| `link_closed` | The link is real, and the buyer cannot read the sheet now: the application is not approved (submitted, rejected or revoked), or it is approved and its access is not granted yet | The price sheet is not available on this link now, which can be for good or for the moment |
+| `link_invalid` | As on the terms read | This link is not valid |
+| `documents_unavailable` | The store has no current price sheet | The price sheet is not available at the moment |
 
 ## The test your adoption is held to
 
