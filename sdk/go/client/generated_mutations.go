@@ -2041,7 +2041,7 @@ type CreateAuditEventArgs struct {
 	ActorEmail      string
 	ActorRole       string
 	ActorIdentityId string
-	// Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity | rowOwnership | githubGrant | role | group | groupMembership | grant | worker | agent | siteAccessCode | accountExport | account
+	// Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity | rowOwnership | githubGrant | role | group | groupMembership | grant | worker | agent | siteAccessCode
 	TargetType    string
 	TargetId      string
 	TargetEmail   string
@@ -7007,6 +7007,7 @@ type EnqueueCampaignSendArgs struct {
 	TemplateSnapshot    map[string]any
 	CampaignId          string
 	CampaignOwnerUserId string
+	CampaignAccountId   string
 	AudienceId          string
 	TemplateId          string
 	Status              string
@@ -7036,6 +7037,13 @@ func EnqueueCampaignSendBuild(args EnqueueCampaignSendArgs) string {
 	}
 	b.WriteString("campaignOwnerUserId: ")
 	b.WriteString(quoteMemQL(args.CampaignOwnerUserId))
+	if args.CampaignAccountId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("campaignAccountId: ")
+		b.WriteString(quoteMemQL(args.CampaignAccountId))
+	}
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}

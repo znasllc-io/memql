@@ -23,7 +23,7 @@ func TestLateCampaignSendRequeuesTerminalCounterRepair(t *testing.T) {
 			if err := n.store.SetCampaignStatus(n.owner, "startCampaign", campaignID); err != nil {
 				t.Fatal(err)
 			}
-			if err := n.store.EnqueueSend(n.system, SendJob{CampaignID: campaignID, CampaignOwnerUserID: n.user, AudienceID: n.audience, TemplateID: n.suffix + "-tpl", Status: "running"}); err != nil {
+			if err := n.store.EnqueueSend(n.system, SendJob{CampaignID: campaignID, CampaignOwnerUserID: n.user, CampaignAccountID: n.org, AudienceID: n.audience, TemplateID: n.suffix + "-tpl", Status: "running"}); err != nil {
 				t.Fatal(err)
 			}
 			proof, late := n.suffix+"-proof", n.suffix+"-late"

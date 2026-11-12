@@ -36,7 +36,7 @@ func (w *Worker) progressWrite(systemCtx, ownerCtx context.Context, job SendJob)
 	if err != nil {
 		return nil, SendJob{}, Campaign{}, err
 	}
-	if !found || current.CampaignID != job.CampaignID || current.CampaignOwnerUserID != job.CampaignOwnerUserID || !sameOrganization(current.AccountOr(campaign.AccountID), job.AccountOr(campaign.AccountID)) || campaign.OwnerUserID != current.CampaignOwnerUserID || !sameOrganization(campaign.AccountID, current.AccountOr(campaign.AccountID)) {
+	if !found || current.CampaignID != job.CampaignID || current.CampaignOwnerUserID != job.CampaignOwnerUserID || !sameOrganization(current.CampaignAccountID, job.CampaignAccountID) || campaign.OwnerUserID != current.CampaignOwnerUserID || !sameOrganization(campaign.AccountID, current.CampaignAccountID) {
 		return nil, SendJob{}, Campaign{}, fmt.Errorf("campaign progress attribution changed")
 	}
 	keep = true
@@ -111,7 +111,7 @@ func (w *Worker) repairProviderCampaign(ctx context.Context, selected map[string
 		return err
 	}
 	owner, account := bare(str(campaign, "ownerUserId")), bare(str(campaign, "accountId"))
-	if campaign == nil || owner == "" || account == "" || job.CampaignID != campaignID || job.CampaignOwnerUserID != owner || !sameOrganization(job.AccountOr(account), account) || bare(str(selected, "ownerUserId")) != owner || !sameOrganization(str(selected, "accountId"), account) {
+	if campaign == nil || owner == "" || account == "" || job.CampaignID != campaignID || job.CampaignOwnerUserID != owner || !sameOrganization(job.CampaignAccountID, account) || bare(str(selected, "ownerUserId")) != owner || !sameOrganization(str(selected, "accountId"), account) {
 		return fmt.Errorf("provider counter attribution does not match the send job")
 	}
 	// Always page the ledger. Count queries can be lower bounds; subtracting a
@@ -215,7 +215,7 @@ func (w *Worker) recordWorkerDelivery(ownerCtx context.Context, delivery Deliver
 	if owner == "" {
 		return fmt.Errorf("campaign ledger owner is unavailable")
 	}
-	if found && (job.CampaignOwnerUserID != owner || job.CampaignID != bare(delivery.CampaignID) || !sameOrganization(job.AccountOr(delivery.AccountID), delivery.AccountID)) {
+	if found && (job.CampaignOwnerUserID != owner || job.CampaignID != bare(delivery.CampaignID) || !sameOrganization(job.CampaignAccountID, delivery.AccountID)) {
 		return fmt.Errorf("campaign ledger attribution changed")
 	}
 	prior, err := w.newsletterRow(system, "providerDeliveryById", "deliveryId", deliveryRowID(delivery.CampaignID, delivery.RecipientID))

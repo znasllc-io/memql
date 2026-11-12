@@ -1360,7 +1360,7 @@ export interface CreateAuditEventArgs {
   actorEmail?: string;
   actorRole?: string;
   actorIdentityId?: string;
-  // Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity | rowOwnership | githubGrant | role | group | groupMembership | grant | worker | agent | siteAccessCode | accountExport | account
+  // Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity | rowOwnership | githubGrant | role | group | groupMembership | grant | worker | agent | siteAccessCode
   targetType?: string;
   targetId?: string;
   targetEmail?: string;
@@ -3854,6 +3854,7 @@ export interface EnqueueCampaignSendArgs {
   templateSnapshot?: Record<string, unknown>;
   campaignId: string;
   campaignOwnerUserId: string;
+  campaignAccountId?: string;
   audienceId: string;
   templateId: string;
   status?: string;
@@ -3865,6 +3866,7 @@ export function buildEnqueueCampaignSend(args: EnqueueCampaignSendArgs): string 
   if (args.templateSnapshot !== undefined) parts.push("templateSnapshot: " + renderMemQLValue(args.templateSnapshot));
   parts.push("campaignId: " + renderMemQLValue(args.campaignId));
   parts.push("campaignOwnerUserId: " + renderMemQLValue(args.campaignOwnerUserId));
+  if (args.campaignAccountId !== undefined) parts.push("campaignAccountId: " + renderMemQLValue(args.campaignAccountId));
   parts.push("audienceId: " + renderMemQLValue(args.audienceId));
   parts.push("templateId: " + renderMemQLValue(args.templateId));
   if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));

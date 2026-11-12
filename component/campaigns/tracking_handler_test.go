@@ -176,39 +176,6 @@ func TestTheEngagementRowIsWrittenUnderTheCampaignOwnersActor(t *testing.T) {
 	}
 }
 
-// TestTheEngagementRowTakesTheJobsAccount: the event is filed in the account
-// the send job records (its accountId, which the engine stamps from the
-// campaign it follows), and, for a job written before that or on a node that
-// does not record accounts, in the campaign's own account. The job's old copy,
-// campaignAccountId, is no longer read (design record
-// docs/superpowers/specs/2026-11-12-account-export-design.md, section J).
-func TestTheEngagementRowTakesTheJobsAccount(t *testing.T) {
-	for name, tc := range map[string]struct {
-		job      map[string]any
-		campaign string
-		want     string
-	}{
-		"the job's account":                      {job: map[string]any{"accountId": "client-a"}, campaign: "client-a", want: "client-a"},
-		"the campaign's when the job has none":   {job: map[string]any{}, campaign: "client-b", want: "client-b"},
-		"never the job's old copy of the account": {job: map[string]any{"campaignAccountId": "stale"}, campaign: "client-b", want: "client-b"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			job := jobRow()
-			for k, v := range tc.job {
-				job[k] = v
-			}
-			campaign := campaignRow()
-			campaign["accountId"] = tc.campaign
-			engine := &fakeEngine{jobs: []map[string]any{job}, campaign: campaign}
-			h := NewTrackingHandler(engine, trackingConfig(), quietLogger())
-			trackedGet(t, h, TrackingOpenPath+mintFor(t, EngagementOpen, ""))
-			if !wroteContaining(engine, "mutation recordEngagementEvent", `accountId: "`+tc.want+`"`) {
-				t.Fatalf("the engagement row was not filed in %q: %v", tc.want, callsWithPrefix(engine, "mutation recordEngagementEvent"))
-			}
-		})
-	}
-}
-
 // TestACampaignWithNoSendJobRecordsNothing: a signed token whose campaign has
 // no send job cannot have its owner resolved, and a row written under a blank
 // actor is a row nobody -- including the operator asking where their numbers

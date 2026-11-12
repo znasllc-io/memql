@@ -223,14 +223,6 @@ func (h *TrackingHandler) record(ctx context.Context, payload TrackingPayload) {
 			"campaign", payload.CampaignID)
 		return
 	}
-	if account == "" {
-		// A job that records no account: the campaign's own stands for it. Read
-		// under the owner, who may read their campaign; a failed read leaves the
-		// event unfiled, as it was before jobs recorded an account at all.
-		if campaign, found, err := h.store.CampaignByID(ownerActorContext(ctx, owner), payload.CampaignID); err == nil && found {
-			account = bare(campaign.AccountID)
-		}
-	}
 	if err := h.store.RecordEngagementEvent(ownerActorContext(ctx, owner), EngagementEvent{
 		CampaignID: payload.CampaignID,
 		DeliveryID: payload.DeliveryID,
@@ -326,18 +318,14 @@ func (s *Store) CampaignOwnerForSend(ctx context.Context, campaignID string) (st
 	return owner, found, err
 }
 
-// CampaignOwnerAndAccountForSend answers the owner AND the account the job
-// records in the same read (epic memql#5165, section J).
+// CampaignOwnerAndAccountForSend answers the owner AND the client tie in the
+// same read (epic memql#5165, section J).
 //
 // ONE READ, not two. The tracking path is per pixel fetch and per followed
 // link, and it already reads this row to learn the owner -- so taking the
-// account off the same row costs nothing. The account is the job's own
-// `accountId`, which the engine stamps from the campaign the job follows; a job
-// that records none (written before the engine recorded accounts, or on a node
-// that holds the switch) answers "", and the caller reads the campaign under
-// the owner it now knows (TrackingHandler.record). The job's old copy,
-// campaignAccountId, is no longer read (design record
-// docs/superpowers/specs/2026-11-12-account-export-design.md, section J).
+// account off the same row costs nothing, while reading the campaign for it
+// would cost a query per hit and could not be done anyway before the owner is
+// known.
 func (s *Store) CampaignOwnerAndAccountForSend(ctx context.Context, campaignID string) (owner, account string, found bool, err error) {
 	rows, err := s.rows(ctx, call("query", "sendJobById", arg{"sendJobId", campaignID}))
 	if err != nil || len(rows) == 0 {
@@ -345,6 +333,6 @@ func (s *Store) CampaignOwnerAndAccountForSend(ctx context.Context, campaignID s
 	}
 	row := rows[len(rows)-1]
 	owner = bare(str(row, "campaignOwnerUserId"))
-	account = bare(str(row, "accountId"))
+	account = bare(str(row, "campaignAccountId"))
 	return owner, account, owner != "", nil
 }

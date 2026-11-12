@@ -65,7 +65,7 @@ func counterFixture(t *testing.T) (*Worker, *counterRepairEngine, map[string]any
 	t.Helper()
 	e := &counterRepairEngine{fakeEngine: fakeEngine{jobs: []map[string]any{jobRow()}, campaign: campaignRow()}}
 	e.jobs[0]["status"] = "completed"
-	e.jobs[0]["accountId"] = "account"
+	e.jobs[0]["campaignAccountId"] = "account"
 	e.jobs[0]["createdAt"] = time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano)
 	e.campaign["accountId"] = "account"
 	e.campaign["createdAt"] = time.Now().UTC().Add(2 * time.Hour).Format(time.RFC3339Nano)
@@ -75,21 +75,6 @@ func counterFixture(t *testing.T) (*Worker, *counterRepairEngine, map[string]any
 	w := newTestWorker(t, e, &recordingSender{})
 	w.newsletterGate = func(context.Context, ...string) (gateHold, error) { return openGate{}, nil }
 	return w, e, e.ledger[0]
-}
-
-// A job written before the engine recorded its account, or on a node that does
-// not, names none: the campaign's own account stands for it (design record
-// docs/superpowers/specs/2026-11-12-account-export-design.md, section J).
-func TestProviderCounterRepairTakesTheCampaignsAccountForAJobWithNone(t *testing.T) {
-	w, e, row := counterFixture(t)
-	delete(e.jobs[0], "accountId")
-	e.jobs[0]["campaignAccountId"] = "stale"
-	if err := w.repairProviderCampaign(context.Background(), row); err != nil {
-		t.Fatalf("a job with no account of its own was refused: %v", err)
-	}
-	if len(e.mutations("updateSendJob")) == 0 {
-		t.Fatal("the job was not repaired")
-	}
 }
 
 func TestProviderCounterRepairPagesAndRetriesEveryWrite(t *testing.T) {
@@ -156,7 +141,7 @@ func TestProviderCounterRepairWaitsForTerminalAndRejectsAttributionChanges(t *te
 			}
 		})
 	}
-	for _, field := range []string{"accountId", "campaignOwnerUserId", "campaignId"} {
+	for _, field := range []string{"campaignAccountId", "campaignOwnerUserId", "campaignId"} {
 		t.Run(field, func(t *testing.T) {
 			w, e, row := counterFixture(t)
 			e.jobs[0][field] = "another"

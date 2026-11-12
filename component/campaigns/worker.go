@@ -645,7 +645,7 @@ func (w *Worker) processJob(ctx context.Context, systemCtx context.Context, job 
 		w.failJob(systemCtx, job, err.Error())
 		return
 	}
-	if !sameOrganization(job.AccountOr(campaign.AccountID), campaign.AccountID) || bare(job.AudienceID) != bare(campaign.AudienceID) || bare(job.TemplateID) != bare(campaign.TemplateID) {
+	if !sameOrganization(job.CampaignAccountID, campaign.AccountID) || bare(job.AudienceID) != bare(campaign.AudienceID) || bare(job.TemplateID) != bare(campaign.TemplateID) {
 		w.failJob(systemCtx, job, "campaign organization or resources changed after this send was queued")
 		return
 	}

@@ -308,9 +308,6 @@ func TestScheduleSendEnqueuesAnInertJob(t *testing.T) {
 	if got := argOf(enqueued[0].query, "status"); got != "scheduled" {
 		t.Errorf("job status = %q, want scheduled -- a queued job would send immediately", got)
 	}
-	if strings.Contains(enqueued[0].query, "campaignAccountId") {
-		t.Errorf("the send job was given campaignAccountId; nothing writes it any more, the engine records the job's account: %s", enqueued[0].query)
-	}
 	if got := argOf(enqueued[0].query, "campaignOwnerUserId"); got != testOwner {
 		t.Errorf("campaignOwnerUserId = %q; it must be copied off the campaign the caller could read", got)
 	}

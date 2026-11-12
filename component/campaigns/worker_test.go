@@ -1110,7 +1110,7 @@ func TestTheViewLinkCarriesTheSenderTheFooterNamed(t *testing.T) {
 			// An organization's campaign sends as one of its sender identities, and
 			// every resource it touches belongs to the organization.
 			job["templateSnapshot"].(map[string]any)["accountId"] = organization
-			job["accountId"] = organization
+			job["campaignAccountId"] = organization
 			campaign["accountId"], campaign["senderIdentityId"] = organization, "sender"
 			recipient["accountId"] = organization
 			engine.senderIdentities = map[string]map[string]any{"sender": {
@@ -1143,55 +1143,6 @@ func TestTheViewLinkCarriesTheSenderTheFooterNamed(t *testing.T) {
 	}
 }
 
-// TestASendJobsAccountFallsBackToItsCampaigns: the drain compares the job's
-// recorded account (accountId, stamped by the engine from the campaign it
-// follows) with the campaign's. A job that names none -- written before the
-// engine recorded it, or on a node that does not -- takes the campaign's own
-// account; one that names another account is refused. The job's old copy,
-// campaignAccountId, is no longer read (design record
-// docs/superpowers/specs/2026-11-12-account-export-design.md, section J).
-func TestASendJobsAccountFallsBackToItsCampaigns(t *testing.T) {
-	const organization = "client-a"
-	for name, tc := range map[string]struct {
-		job  map[string]any
-		want int
-	}{
-		"the job's own account":                 {job: map[string]any{"accountId": organization}, want: 1},
-		"none, so the campaign's":               {job: map[string]any{}, want: 1},
-		"none, and an old copy naming another":  {job: map[string]any{"campaignAccountId": "client-b"}, want: 1},
-		"another account than the campaign's":   {job: map[string]any{"accountId": "client-b"}, want: 0},
-	} {
-		t.Run(name, func(t *testing.T) {
-			job := jobRow()
-			job["templateSnapshot"] = map[string]any{
-				"id": testTemplate, "subject": "Reviewed copy", "status": "ready", "revision": "2026-10-11T09:30:00.123456789Z",
-				"textBody": "Hello\n", "htmlBody": `<p>Hello</p>`, "accountId": organization,
-			}
-			for k, v := range tc.job {
-				job[k] = v
-			}
-			campaign := campaignRow()
-			campaign["accountId"], campaign["senderIdentityId"] = organization, "sender"
-			recipient := recipientRow("r-1", "reader@example.test", "subscribed")
-			recipient["accountId"] = organization
-			engine := &fakeEngine{jobs: []map[string]any{job}, campaign: campaign, template: templateRow(), roster: []map[string]any{recipient}}
-			engine.senderIdentities = map[string]map[string]any{"sender": {
-				"id": "sender", "accountId": organization, "address": "hello@client-a.test", "fromName": "", "status": "active",
-			}}
-			engine.accounts = map[string]map[string]any{organization: {"name": "Client A"}}
-			engine.audiences = map[string]map[string]any{testAudience: {"id": "v1:campaigns:audience:" + testAudience, "accountId": organization}}
-			sender := &recordingSender{}
-			w := newTestWorker(t, engine, sender)
-
-			w.DrainOnce(context.Background())
-
-			if sender.count() != tc.want {
-				t.Fatalf("want %d messages, got %d", tc.want, sender.count())
-			}
-		})
-	}
-}
-
 // TestAnOrganizationNameTooLongForTheViewLinkIsClippedNotDropped -- the footer
 // can name the organization, and an organization's name has no cap of its own,
 // unlike a sender's. The view link's token has a size limit, and a name that
@@ -1206,7 +1157,7 @@ func TestAnOrganizationNameTooLongForTheViewLinkIsClippedNotDropped(t *testing.T
 		"id": testTemplate, "subject": "Reviewed copy", "status": "ready", "revision": "2026-10-11T09:30:00.123456789Z",
 		"textBody": "View: {{viewUrl}}\n", "htmlBody": `<p><a href="{{viewUrl}}">View</a></p>`, "accountId": organization,
 	}
-	job["accountId"] = organization
+	job["campaignAccountId"] = organization
 	campaign := campaignRow()
 	campaign["accountId"], campaign["senderIdentityId"] = organization, "sender"
 	recipient := recipientRow("r-1", "reader@example.test", "subscribed")

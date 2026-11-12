@@ -635,13 +635,14 @@ mutation sendJob enqueueCampaignSend {
     templateSnapshot object
     campaignId           string!
     campaignOwnerUserId  string!
+    campaignAccountId    string
     audienceId           string!
     templateId           string!
     status               string
     scheduledAt          datetime
   }
   insert {
-    accept { campaignId, campaignOwnerUserId, audienceId, templateId, scheduledAt, templateSnapshot }
+    accept { campaignId, campaignOwnerUserId, campaignAccountId, audienceId, templateId, scheduledAt, templateSnapshot }
     stamp {
       id: args.campaignId
       status: args.status ?? "queued"

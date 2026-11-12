@@ -333,10 +333,10 @@ func (w *Worker) promoteSeries(ctx, systemCtx context.Context, scanned map[strin
 		if err != nil {
 			return err
 		}
-		if err = w.store.EnqueueSend(systemCtx, SendJob{CampaignID: campaign.ID, CampaignOwnerUserID: campaign.OwnerUserID, AudienceID: campaign.AudienceID, TemplateID: campaign.TemplateID, TemplateSnapshot: &snapshot, Status: "scheduled", ScheduledAt: when}); err != nil {
+		if err = w.store.EnqueueSend(systemCtx, SendJob{CampaignID: campaign.ID, CampaignOwnerUserID: campaign.OwnerUserID, CampaignAccountID: campaign.AccountID, AudienceID: campaign.AudienceID, TemplateID: campaign.TemplateID, TemplateSnapshot: &snapshot, Status: "scheduled", ScheduledAt: when}); err != nil {
 			return err
 		}
-	} else if job.CampaignID != campaign.ID || job.CampaignOwnerUserID != campaign.OwnerUserID || !sameOrganization(job.AccountOr(campaign.AccountID), campaign.AccountID) {
+	} else if job.CampaignID != campaign.ID || job.CampaignOwnerUserID != campaign.OwnerUserID || !sameOrganization(job.CampaignAccountID, campaign.AccountID) {
 		return fmt.Errorf("occurrence send job does not match its campaign")
 	}
 	// The inert job precedes commitment. If a later retry sees a completed or
