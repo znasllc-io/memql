@@ -1237,8 +1237,9 @@ QueryClient.prototype.clusterStorageStatus = function (this: QueryClient, args: 
   return this.executeNamed("clusterStorageStatus", buildClusterStorageStatus(args), opts);
 };
 
-/** One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both. */
+/** One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both. For the store's owner or a cluster owner; anybody else is refused before the mirror is read. */
 export interface CommerceCompanyArgs {
+  /** The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several. */
   storeId?: string;
   companyGid?: string;
   from?: string;
@@ -1264,8 +1265,9 @@ QueryClient.prototype.commerceCompany = function (this: QueryClient, args: Comme
   return this.executeNamed("commerceCompany", buildCommerceCompany(args), opts);
 };
 
-/** Repeat-customer and refund rates for a window, from the mirror. Repeat rate is customers with more than one order over customers with any; refund rate is refunds over orders. */
+/** Repeat-customer and refund rates for a window, from the mirror. Repeat rate is customers with more than one order over customers with any; refund rate is refunds over orders. For the store's owner or a cluster owner; anybody else is refused before the mirror is read. */
 export interface CommerceCustomersArgs {
+  /** The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several. */
   storeId?: string;
   from?: string;
   to?: string;
@@ -1289,8 +1291,9 @@ QueryClient.prototype.commerceCustomers = function (this: QueryClient, args: Com
   return this.executeNamed("commerceCustomers", buildCommerceCustomers(args), opts);
 };
 
-/** What sold in a window, grouped by product or by variant, read entirely from the mirror -- no Admin API call and no cost points. Reports units and orders per line, and reports truncated=true when the walk hit its page cap rather than returning a smaller number and letting the caller believe it. */
+/** What sold in a window, grouped by product or by variant, read entirely from the mirror -- no Admin API call and no cost points. Reports units and orders per line, and reports truncated=true when the walk hit its page cap rather than returning a smaller number and letting the caller believe it. For the store's owner or a cluster owner; anybody else is refused before the mirror is read. */
 export interface CommerceSoldArgs {
+  /** The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several. */
   storeId?: string;
   from?: string;
   to?: string;
@@ -1316,8 +1319,9 @@ QueryClient.prototype.commerceSold = function (this: QueryClient, args: Commerce
   return this.executeNamed("commerceSold", buildCommerceSold(args), opts);
 };
 
-/** Inventory levels below a threshold at one location. Shopify models inventory as NAMED quantities (available, committed, on_hand), so the threshold is applied in Go and a level with no `available` count reads as unknown rather than as a stockout. */
+/** Inventory levels below a threshold at one location. Shopify models inventory as NAMED quantities (available, committed, on_hand), so the threshold is applied in Go and a level with no `available` count reads as unknown rather than as a stockout. For the store's owner or a cluster owner; anybody else is refused before the mirror is read. */
 export interface CommerceStockArgs {
+  /** The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several. */
   storeId?: string;
   locationGid?: string;
   threshold?: number;
@@ -1685,7 +1689,7 @@ QueryClient.prototype.dataOrigins = function (this: QueryClient, args: DataOrigi
   return this.executeNamed("dataOrigins", buildDataOrigins(args), opts);
 };
 
-/** Discard one DEAD-lettered outbox entry: the operator has decided this change will never be delivered. The row survives as audit history carrying the reason. Refuses an entry that is not dead. */
+/** Discard one DEAD-lettered outbox entry: the operator has decided this change will never be delivered. The row survives as audit history carrying the reason. Refuses an entry that is not dead. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read. */
 export interface DatasyncDiscardOutboxEntryArgs {
   entryId: string;
   reason?: string;
@@ -1708,7 +1712,29 @@ QueryClient.prototype.datasyncDiscardOutboxEntry = function (this: QueryClient, 
   return this.executeNamed("datasyncDiscardOutboxEntry", buildDatasyncDiscardOutboxEntry(args), opts);
 };
 
-/** Return one DEAD-lettered outbox entry to the queue with its attempts reset. Refuses an entry that is not dead: a pending or failed one is still the drain worker's, and acting on it would race a delivery in flight. */
+/** Put the given-up inbound deliveries of one source back in line: every failed delivery of that source that used its four tries has its tries set back to none and is due now, so the retry pass tries it again within a minute. A delivery still waiting for its next try is left alone. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read. */
+export interface DatasyncRequeueInboundArgs {
+  /** The inbound source whose given-up deliveries go back in line, as the staged rows name it (for Shopify, shopify-<store>). */
+  source: string;
+}
+
+export function buildDatasyncRequeueInbound(args: DatasyncRequeueInboundArgs): string {
+  const parts: string[] = [];
+  parts.push("source: " + renderMemQLValue(args.source));
+  return "builtin datasyncRequeueInbound(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    datasyncRequeueInbound(args: DatasyncRequeueInboundArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.datasyncRequeueInbound = function (this: QueryClient, args: DatasyncRequeueInboundArgs = {} as DatasyncRequeueInboundArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("datasyncRequeueInbound", buildDatasyncRequeueInbound(args), opts);
+};
+
+/** Return one DEAD-lettered outbox entry to the queue with its attempts reset. Refuses an entry that is not dead: a pending or failed one is still the drain worker's, and acting on it would race a delivery in flight. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read. */
 export interface DatasyncRetryOutboxEntryArgs {
   entryId: string;
 }
@@ -1729,10 +1755,12 @@ QueryClient.prototype.datasyncRetryOutboxEntry = function (this: QueryClient, ar
   return this.executeNamed("datasyncRetryOutboxEntry", buildDatasyncRetryOutboxEntry(args), opts);
 };
 
-/** Pause or resume one domain: stops its backfill, its reconciliation and its outbox drain, without unregistering the connector or changing any declaration. */
+/** Pause or resume one domain: stops its backfill and its reconciliation, without unregistering the connector or changing any declaration. It does not hold changes waiting to be pushed to the origin: the outbound drain does not read the pause. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read. */
 export interface DatasyncSetSyncPausedArgs {
   connector: string;
   conceptId: string;
+  /** The one partition of a partitioned connector (one store) to pause or resume; its pause is its own. */
+  partitionKey?: string;
   paused: boolean;
 }
 
@@ -1740,6 +1768,7 @@ export function buildDatasyncSetSyncPaused(args: DatasyncSetSyncPausedArgs): str
   const parts: string[] = [];
   parts.push("connector: " + renderMemQLValue(args.connector));
   parts.push("conceptId: " + renderMemQLValue(args.conceptId));
+  if (args.partitionKey !== undefined) parts.push("partitionKey: " + renderMemQLValue(args.partitionKey));
   parts.push("paused: " + renderMemQLValue(args.paused));
   return "builtin datasyncSetSyncPaused(" + parts.join(", ") + ")";
 }
@@ -1754,16 +1783,22 @@ QueryClient.prototype.datasyncSetSyncPaused = function (this: QueryClient, args:
   return this.executeNamed("datasyncSetSyncPaused", buildDatasyncSetSyncPaused(args), opts);
 };
 
-/** Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. Operator-driven; nothing schedules it. */
+/** Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. With restart, start it again from nothing first. Operator-driven; nothing schedules it. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read. */
 export interface DatasyncStartBackfillArgs {
   connector: string;
   conceptId: string;
+  /** One partition of a partitioned connector (one store). Absent backfills every partition the connector names, each from its own cursor. */
+  partitionKey?: string;
+  /** Start the backfill again from nothing: reset its row to queued with an empty cursor, then run it. For a backfill whose cursor no longer leads anywhere, such as a failed one whose download link expired. Refused while the backfill is running, and for a partitioned connector without a partition. */
+  restart?: boolean;
 }
 
 export function buildDatasyncStartBackfill(args: DatasyncStartBackfillArgs): string {
   const parts: string[] = [];
   parts.push("connector: " + renderMemQLValue(args.connector));
   parts.push("conceptId: " + renderMemQLValue(args.conceptId));
+  if (args.partitionKey !== undefined) parts.push("partitionKey: " + renderMemQLValue(args.partitionKey));
+  if (args.restart !== undefined) parts.push("restart: " + renderMemQLValue(args.restart));
   return "builtin datasyncStartBackfill(" + parts.join(", ") + ")";
 }
 
@@ -6976,7 +7011,7 @@ QueryClient.prototype.shopifyConnectionProviderStatus = function (this: QueryCli
   return this.executeNamed("shopifyConnectionProviderStatus", buildShopifyConnectionProviderStatus(args), opts);
 };
 
-/** Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health. */
+/** Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health. For the scheduled automation or a cluster owner; anybody else is refused before anything runs. */
 export interface ShopifyEnsureSubscriptionsArgs {
 }
 
@@ -6995,8 +7030,9 @@ QueryClient.prototype.shopifyEnsureSubscriptions = function (this: QueryClient, 
   return this.executeNamed("shopifyEnsureSubscriptions", buildShopifyEnsureSubscriptions(args), opts);
 };
 
-/** Read a mirrored Shopify product by GID or handle. Answers from the mirror, so it costs no Admin API call and no cost points. Tokens never appear in the reply. */
+/** Read a mirrored Shopify product by GID or handle. Answers from the mirror, so it costs no Admin API call and no cost points. Tokens never appear in the reply. For the store's owner or a cluster owner; anybody else is refused before the mirror is read. */
 export interface ShopifyFetchProductArgs {
+  /** The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several. */
   storeId?: string;
   id?: string;
   handle?: string;
@@ -7020,7 +7056,7 @@ QueryClient.prototype.shopifyFetchProduct = function (this: QueryClient, args: S
   return this.executeNamed("shopifyFetchProduct", buildShopifyFetchProduct(args), opts);
 };
 
-/** Create or find one buyer's B2B account: a company stamped with the MemQL application id, its location, the buyer as a company contact, and an ACTIVE catalog with a price list. Idempotent -- a second call for one application finds the first company rather than making a twin. Refuses BEFORE creating anything when the store is below Plus and already holds its three company-location catalogs, answering {status: refused, reason} rather than an error so the caller can tell a ceiling from an outage. */
+/** Create or find one buyer's B2B account: a company stamped with the MemQL application id, its location, the buyer as a company contact, and an ACTIVE catalog with a price list. Idempotent -- a second call for one application finds the first company rather than making a twin. Refuses BEFORE creating anything when the store is below Plus and already holds its three company-location catalogs, answering {status: refused, reason} rather than an error so the caller can tell a ceiling from an outage. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked. */
 export interface ShopifyProvisionWholesaleArgs {
   /** The store to provision on. */
   storeId: string;
@@ -7063,7 +7099,7 @@ QueryClient.prototype.shopifyProvisionWholesale = function (this: QueryClient, a
   return this.executeNamed("shopifyProvisionWholesale", buildShopifyProvisionWholesale(args), opts);
 };
 
-/** End a B2B entitlement by setting its catalog to DRAFT. DELETES NOTHING: the company, its location, its contact, the price list and every order placed under them are untouched, because revoking trade terms is ending a discount rather than erasing a customer -- and deleting a company would take its order history's association with it. */
+/** End a B2B entitlement by setting its catalog to DRAFT. DELETES NOTHING: the company, its location, its contact, the price list and every order placed under them are untouched, because revoking trade terms is ending a discount rather than erasing a customer -- and deleting a company would take its order history's association with it. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked. */
 export interface ShopifyRevokeWholesaleArgs {
   /** The store. */
   storeId: string;
@@ -7088,7 +7124,7 @@ QueryClient.prototype.shopifyRevokeWholesale = function (this: QueryClient, args
   return this.executeNamed("shopifyRevokeWholesale", buildShopifyRevokeWholesale(args), opts);
 };
 
-/** Run the queued privacy jobs whose hold has elapsed: export a customer's data to the Library, scrub a redacted customer's PII across every version, purge a redacted shop's whole mirror. Every action is audited; shop/redact re-checks reachability first so a reverted uninstall does not cost the mirror. */
+/** Run the privacy jobs that are due: export what the mirror holds on a customer to the store owner's Library, erase a customer from every version of every row of the person and from the store's processed deliveries, purge a redacted shop's mirror with its sync state and its staged deliveries. Every erasure is made twice, an hour apart, and a job that fails is run again at every run until it is done. Every pass that ran is audited. A shop's purge reads the store as it is now and asks it first, and deletes only when the origin refuses the app outright, so a reverted uninstall does not cost the mirror. For the scheduled automation or a cluster owner; anybody else is refused before anything runs. */
 export interface ShopifyRunComplianceJobsArgs {
 }
 
@@ -7105,6 +7141,47 @@ declare module "./query.js" {
 
 QueryClient.prototype.shopifyRunComplianceJobs = function (this: QueryClient, args: ShopifyRunComplianceJobsArgs = {} as ShopifyRunComplianceJobsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("shopifyRunComplianceJobs", buildShopifyRunComplianceJobs(args), opts);
+};
+
+/** The alert wait: how many minutes a store needs attention, or is disconnected, before its owner is emailed. 30 when SHOPIFY_STORE_ALERT_MINUTES is unset, unreadable or out of range. */
+export interface ShopifyStoreAlertWaitArgs {
+}
+
+export function buildShopifyStoreAlertWait(args: ShopifyStoreAlertWaitArgs): string {
+  void args;
+  return "builtin shopifyStoreAlertWait()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStoreAlertWait(args?: ShopifyStoreAlertWaitArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStoreAlertWait = function (this: QueryClient, args: ShopifyStoreAlertWaitArgs = {} as ShopifyStoreAlertWaitArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStoreAlertWait", buildShopifyStoreAlertWait(args), opts);
+};
+
+/** Set the alert wait, from 1 to 1440 minutes, in the global variable SHOPIFY_STORE_ALERT_MINUTES. A cluster owner's; anybody else, and any value out of range, is refused before anything is read. */
+export interface ShopifyStoreAlertWaitSetArgs {
+  /** Minutes, from 1 to 1440. */
+  minutes: number;
+}
+
+export function buildShopifyStoreAlertWaitSet(args: ShopifyStoreAlertWaitSetArgs): string {
+  const parts: string[] = [];
+  parts.push("minutes: " + renderMemQLValue(args.minutes));
+  return "builtin shopifyStoreAlertWaitSet(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStoreAlertWaitSet(args: ShopifyStoreAlertWaitSetArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStoreAlertWaitSet = function (this: QueryClient, args: ShopifyStoreAlertWaitSetArgs = {} as ShopifyStoreAlertWaitSetArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStoreAlertWaitSet", buildShopifyStoreAlertWaitSet(args), opts);
 };
 
 /** Save the Shopify app's client ID and secret from a storefront's Store panel (design 12.3, D7).
@@ -7137,8 +7214,9 @@ QueryClient.prototype.shopifyStoreAppSave = function (this: QueryClient, args: S
   return this.executeNamed("shopifyStoreAppSave", buildShopifyStoreAppSave(args), opts);
 };
 
-/** Report every configured store's status, granted-versus-needed scopes, subscription reconcile time, cost-bucket state and per-domain sync state with drift counters. The read behind the portal's Stores page. */
+/** Report the status, granted-versus-needed scopes, subscription reconcile time, cost-bucket state and per-domain sync state with drift counters of each store the caller may read: every store for a cluster owner or a caller who may read stores, a store's owner their own, anybody else none. The read behind the portal's Stores page. */
 export interface ShopifyStoreHealthArgs {
+  /** One store. When omitted, every store the caller may read. */
   storeId?: string;
 }
 
@@ -7156,6 +7234,98 @@ declare module "./query.js" {
 
 QueryClient.prototype.shopifyStoreHealth = function (this: QueryClient, args: ShopifyStoreHealthArgs = {} as ShopifyStoreHealthArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("shopifyStoreHealth", buildShopifyStoreHealth(args), opts);
+};
+
+/** Register again: run the store's subscription pass now and record it on the store's health, as the daily pass does. For the store's owner or a cluster owner; anyone else is refused before Shopify is asked. */
+export interface ShopifyStoreRegisterEventsArgs {
+  /** The store whose subscriptions are registered again. */
+  storeId: string;
+}
+
+export function buildShopifyStoreRegisterEvents(args: ShopifyStoreRegisterEventsArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  return "builtin shopifyStoreRegisterEvents(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStoreRegisterEvents(args: ShopifyStoreRegisterEventsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStoreRegisterEvents = function (this: QueryClient, args: ShopifyStoreRegisterEventsArgs = {} as ShopifyStoreRegisterEventsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStoreRegisterEvents", buildShopifyStoreRegisterEvents(args), opts);
+};
+
+/** Try again: put the store's deliveries that used their four tries back in line, through datasyncRequeueInbound for the source shopify-<store>. For the store's owner or a cluster owner; anyone else is refused before anything is read. */
+export interface ShopifyStoreRetryDeliveriesArgs {
+  /** The store whose given-up deliveries are tried again. */
+  storeId: string;
+}
+
+export function buildShopifyStoreRetryDeliveries(args: ShopifyStoreRetryDeliveriesArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  return "builtin shopifyStoreRetryDeliveries(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStoreRetryDeliveries(args: ShopifyStoreRetryDeliveriesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStoreRetryDeliveries = function (this: QueryClient, args: ShopifyStoreRetryDeliveriesArgs = {} as ShopifyStoreRetryDeliveriesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStoreRetryDeliveries", buildShopifyStoreRetryDeliveries(args), opts);
+};
+
+/** Pause recording, or resume it: a store being recorded (configured, backfilling or live) moves to paused, and a paused one to live, through setStoreStatus written as the deployment, so a store's owner who is not a cluster owner may take the Store page's two acts without the store row's own gate being widened. Each pause and resume is audited under the caller. A store that is not connected (error, uninstalled, purged) is refused before anything is written, and asking for the state the store is in writes nothing. For the store's owner or a cluster owner; anyone else is refused before anything else is read. */
+export interface ShopifyStoreSetRecordingArgs {
+  /** The store. */
+  storeId: string;
+  /** True resumes recording; false pauses it. */
+  recording: boolean;
+}
+
+export function buildShopifyStoreSetRecording(args: ShopifyStoreSetRecordingArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("recording: " + renderMemQLValue(args.recording));
+  return "builtin shopifyStoreSetRecording(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStoreSetRecording(args: ShopifyStoreSetRecordingArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStoreSetRecording = function (this: QueryClient, args: ShopifyStoreSetRecordingArgs = {} as ShopifyStoreSetRecordingArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStoreSetRecording", buildShopifyStoreSetRecording(args), opts);
+};
+
+/** One store's verdict (U6): whether it is being recorded, and when it is not, why and the one act that fixes each reason. Computed in the engine from the store row, its sync state and its given-up deliveries, so a screen draws it without a copy of the rules.
+`state` is recording, starting, paused, needs attention or not connected, `since` when it began, `resumedAt` when the store last left paused or not connected (empty when it never has), and `connectedAt` when a connect last started its recording afresh (empty for a store connected before that was recorded). Each reason has a `code` (data_not_declared, approval_outdated, grant_lost, events_not_registered, check_failing, changes_not_recorded), one `sentence` for a person, and an `act` with its `actLabel` and `actUrl` (or none); `count` is a floor when `atLeast` is true. `outside` and `withheld` are plain words. `may.act` says whether the caller may take the acts. For the store's owner, a cluster owner, or a caller who may read stores; anyone else is refused before the store's state is read. */
+export interface ShopifyStoreVerdictArgs {
+  /** The store. */
+  storeId: string;
+}
+
+export function buildShopifyStoreVerdict(args: ShopifyStoreVerdictArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  return "builtin shopifyStoreVerdict(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStoreVerdict(args: ShopifyStoreVerdictArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStoreVerdict = function (this: QueryClient, args: ShopifyStoreVerdictArgs = {} as ShopifyStoreVerdictArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStoreVerdict", buildShopifyStoreVerdict(args), opts);
 };
 
 /** Use a pasted Storefront API token for a storefront's store, or clear the one it has (design 12.5, D8).
@@ -7184,7 +7354,7 @@ QueryClient.prototype.shopifyStorefrontTokenSet = function (this: QueryClient, a
   return this.executeNamed("shopifyStorefrontTokenSet", buildShopifyStorefrontTokenSet(args), opts);
 };
 
-/** The plan-independent grant: add one tag to the buyer's customer record. Writes the tag and NOTHING else -- what the tag does is the merchant's own automatic discount, which this connector deliberately does not create on their behalf. Refuses when no customer on the store has that email, because a tag on an account that does not exist entitles nobody. */
+/** The plan-independent grant: add one tag to the buyer's customer record. Writes the tag and NOTHING else -- what the tag does is the merchant's own automatic discount, which this connector deliberately does not create on their behalf. Refuses when no customer on the store has that email, because a tag on an account that does not exist entitles nobody. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked. */
 export interface ShopifyTagWholesaleCustomerArgs {
   /** The store. */
   storeId: string;
@@ -7212,7 +7382,7 @@ QueryClient.prototype.shopifyTagWholesaleCustomer = function (this: QueryClient,
   return this.executeNamed("shopifyTagWholesaleCustomer", buildShopifyTagWholesaleCustomer(args), opts);
 };
 
-/** The plan-independent revoke: remove that one tag from the buyer's customer record. */
+/** The plan-independent revoke: remove that one tag from the buyer's customer record. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked. */
 export interface ShopifyUntagWholesaleCustomerArgs {
   /** The store. */
   storeId: string;
@@ -7240,7 +7410,7 @@ QueryClient.prototype.shopifyUntagWholesaleCustomer = function (this: QueryClien
   return this.executeNamed("shopifyUntagWholesaleCustomer", buildShopifyUntagWholesaleCustomer(args), opts);
 };
 
-/** How many more company-location catalogs this store may hold: -1 on Plus, which is unlimited, and otherwise three minus what it already has. Since 2026-04-02 companies, payment terms, volume pricing and up to three catalogs are available BELOW Plus, so the ceiling is real and this is what lets an adapter REPORT it rather than discover it at the fourth grant, in a merchant's live store. */
+/** How many more company-location catalogs this store may hold: -1 on Plus, which is unlimited, and otherwise three minus what it already has. Since 2026-04-02 companies, payment terms, volume pricing and up to three catalogs are available BELOW Plus, so the ceiling is real and this is what lets an adapter REPORT it rather than discover it at the fourth grant, in a merchant's live store. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked. */
 export interface ShopifyWholesaleCatalogHeadroomArgs {
   /** The store to measure. */
   storeId: string;
@@ -7262,8 +7432,9 @@ QueryClient.prototype.shopifyWholesaleCatalogHeadroom = function (this: QueryCli
   return this.executeNamed("shopifyWholesaleCatalogHeadroom", buildShopifyWholesaleCatalogHeadroom(args), opts);
 };
 
-/** Run an ad-hoc ShopifyQL analytics query for questions the mirror cannot answer. Requires read_reports and protected-customer-data Level 2 approval; refused below that with a reason naming the level, which Shopify's own 403 does not. */
+/** Run an ad-hoc ShopifyQL analytics query for questions the mirror cannot answer. Requires read_reports and protected-customer-data Level 2 approval; refused below that with a reason naming the level, which Shopify's own 403 does not. For the store's owner or a cluster owner; anybody else is refused before Shopify is asked. */
 export interface ShopifyqlArgs {
+  /** The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several. */
   storeId?: string;
   query?: string;
 }
@@ -7975,7 +8146,7 @@ IT CREATES A CART, and saying so is part of the contract rather than a footnote.
 IT WRITES NOTHING. The observation rows these results become are written by `sitePreviewProbe`, which calls this and owns v1:platform:sitePreviewObservation. The split is the module taxonomy: the call to Shopify lives in the package this repository classifies as the one that talks to Shopify, and the rows live with the concept that declares them.
 The reply never carries the checkout URL -- only its host. An observation row is readable by every operator the composite tier admits, and a checkout URL is a live cart somebody else could pay from. */
 export interface StorefrontProbeArgs {
-  /** The store to ask. The only configured store when omitted. */
+  /** The store to ask. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several. */
   storeId?: string;
 }
 

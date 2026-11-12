@@ -3,12 +3,14 @@ package datasync
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 )
 
@@ -44,6 +46,16 @@ import (
 //     for an origin that publishes no version is the best available
 //     answer rather than a bug.
 //
+// A connector may also name DomainSpec.VersionSourceField, the payload
+// field it writes on every row to say where the version came from, and
+// ReadAtField, when the origin was read for it. A stored row without a
+// marker written by the same write as its read time holds no version
+// (memqlsync.StoredStamp): the Shopify connector stamped such rows with the
+// time it read them, a clock that would refuse every honest origin version.
+// Whether a record exists is judged by the read times, never the version
+// (memqlsync.Refuses). The rule lives in the contract, so a connector's own
+// sweep (which heals without the applier) asks the same function.
+//
 // A write that loses the comparison is RECORDED as stale and skipped,
 // never applied. Recorded rather than dropped because a mirror that
 // keeps rejecting stale writes is a webhook stream that is reordering,
@@ -58,6 +70,9 @@ type Applier struct {
 	store  *Store
 	writer MirrorWriter
 	now    func() time.Time
+	// retryWait is the pause before a write that lost its row-version fence
+	// is judged again (applyOne); a test replaces it so it does not sleep.
+	retryWait func(attempt int)
 }
 
 // MirrorWriter performs one write into a mirror. Narrow on purpose: the
@@ -68,15 +83,33 @@ type MirrorWriter interface {
 	// WriteMirror applies one write under the connector's actor and
 	// returns the version now stored for that row.
 	WriteMirror(ctx context.Context, connector string, w memqlsync.MirrorWrite) error
-	// StoredVersion returns the version MemQL currently holds for a row,
-	// and whether the row exists at all.
-	StoredVersion(ctx context.Context, spec memqlsync.DomainSpec, rowID string) (string, bool, error)
+	// StoredRow returns the row MemQL currently holds, read past any result
+	// cache: its payload, which the guard reads through memqlsync.StoredStamp,
+	// and its version, which the write the guard admits is fenced on.
+	StoredRow(ctx context.Context, spec memqlsync.DomainSpec, rowID string) (StoredMirrorRow, error)
+}
+
+// StoredMirrorRow is the row a mirror write is judged against.
+type StoredMirrorRow struct {
+	// Exists is false for a row MemQL does not hold.
+	Exists bool
+	// Payload is the row's fields.
+	Payload map[string]any
+	// Version is the stored version's time (the row's createdAt): the witness
+	// a write judged against this row is fenced on. Zero for a row that does
+	// not exist.
+	Version time.Time
 }
 
 // NewApplier builds the shared write path.
 func NewApplier(store *Store, writer MirrorWriter) *Applier {
-	return &Applier{store: store, writer: writer, now: time.Now}
+	return &Applier{store: store, writer: writer, now: time.Now,
+		retryWait: func(attempt int) { time.Sleep(retryWaitFor(attempt)) }}
 }
+
+// maxMirrorWriteTries bounds how often one mirror write is tried: once, and
+// again after each time the row moved under it (applyOne).
+const maxMirrorWriteTries = 5
 
 // ApplyResult is what one batch of mirror writes did.
 type ApplyResult struct {
@@ -99,80 +132,85 @@ func (a *Applier) Apply(
 ) (ApplyResult, error) {
 	var out ApplyResult
 	for _, w := range writes {
-		spec := specs[strings.TrimSpace(w.Concept)]
-		stale, err := a.isStale(ctx, spec, w)
+		applied, err := a.applyOne(ctx, connector, specs[strings.TrimSpace(w.Concept)], w)
 		if err != nil {
 			return out, err
 		}
-		if stale {
+		if applied {
+			out.Applied++
+		} else {
 			out.Stale++
-			continue
 		}
-		if err := a.writer.WriteMirror(ctx, connector, w); err != nil {
-			return out, fmt.Errorf("datasync: applying %s %q from %q: %w", w.Concept, w.RowId, connector, err)
-		}
-		out.Applied++
 	}
 	return out, nil
 }
 
-// isStale reports whether this write is older than what MemQL holds.
+// applyOne writes one MirrorWrite unless the row MemQL holds refuses it, and
+// reports whether it was written.
 //
-// A row MemQL does not have is never stale: a first delivery has nothing
-// to be older than, and refusing it would leave the mirror permanently
-// empty. Same for a write carrying no version -- a connector that cannot
-// say when a change happened gets last-write-wins, which is what it had
-// before the guard existed.
-func (a *Applier) isStale(ctx context.Context, spec memqlsync.DomainSpec, w memqlsync.MirrorWrite) (bool, error) {
-	incoming := strings.TrimSpace(w.Version)
-	if incoming == "" {
-		return false, nil
+// THE RULE is the contract's one (memqlsync.Refuses), which a connector's own
+// sweep asks too: whether a record exists is judged by when the origin was
+// read for each side, and which of two live states is newer by the origin's
+// version. A row MemQL does not have is never refused: a first delivery has
+// nothing to be older than, and refusing it would leave the mirror permanently
+// empty. Nor is a write over a row that holds no version, or one carrying
+// none -- a connector that cannot say when a change happened gets
+// last-write-wins, which is what it had before the guard existed.
+//
+// THE WRITE IS FENCED ON THE ROW THAT WAS JUDGED. The read and the write are
+// two statements, and a delivery, a backfill page and a sweep write one row at
+// once: a newer state another writer committed between the two would be
+// replaced by the older one this write was admitted against. So the write
+// carries the judged row's version (memql.ContextWithRowVersionFence; a row
+// that did not exist must still not exist), and the engine refuses it when the
+// row has moved. The row is then read and judged again: skipped as stale, or
+// written against the row as it is now.
+//
+// TRIED UP TO maxMirrorWriteTries TIMES IN ALL, each repeat after a short
+// jittered wait, as Store.PatchSyncState decides a health write again. A loss
+// is another writer's commit to the same row, and those come in bursts: the
+// origin sends several notices for one change, and their writes land within a
+// fraction of a second of each other. Given up at the first repeat, a write
+// that met such a burst would fail its batch -- and the batch of a backfill
+// page fails the backfill, which nothing starts again (Runner.backfillOne). A
+// write that loses every time is returned as the failure it then is: a
+// delivery is tried again, a backfill ends failed.
+func (a *Applier) applyOne(ctx context.Context, connector string, spec memqlsync.DomainSpec, w memqlsync.MirrorWrite) (bool, error) {
+	for try := 1; ; try++ {
+		stored, err := a.writer.StoredRow(ctx, spec, w.RowId)
+		if err != nil {
+			return false, err
+		}
+		if stored.Exists && memqlsync.Refuses(memqlsync.StoredStamp(spec, stored.Payload), memqlsync.WriteStamp(spec, w)) {
+			return false, nil
+		}
+		err = a.writer.WriteMirror(fencedOn(ctx, spec, w, stored), connector, w)
+		if err == nil {
+			return true, nil
+		}
+		if try < maxMirrorWriteTries && errors.Is(err, memql.ErrRowVersionChanged) {
+			if a.retryWait != nil {
+				a.retryWait(try)
+			}
+			continue
+		}
+		return false, fmt.Errorf("datasync: applying %s %q from %q: %w", w.Concept, w.RowId, connector, err)
 	}
-	stored, exists, err := a.writer.StoredVersion(ctx, spec, w.RowId)
-	if err != nil {
-		return false, err
-	}
-	if !exists || strings.TrimSpace(stored) == "" {
-		return false, nil
-	}
-	return compareVersions(incoming, stored) < 0, nil
 }
 
-// compareVersions orders two version strings.
+// fencedOn is ctx with the write fenced on the row it was judged against.
 //
-// RFC3339 timestamps are compared as INSTANTS, not as strings: the two
-// orders agree only while both sides use the same precision and offset,
-// and an origin that sends "+00:00" where MemQL stored "Z" would compare
-// wrong for every row. Anything that does not parse as a timestamp falls
-// back to a lexicographic compare, which is the right answer for a
-// zero-padded sequence and an honest guess for anything else.
-func compareVersions(a, b string) int {
-	ta, aok := parseVersionTime(a)
-	tb, bok := parseVersionTime(b)
-	if aok && bok {
-		switch {
-		case ta.Before(tb):
-			return -1
-		case ta.After(tb):
-			return 1
-		default:
-			return 0
-		}
+// Two writes are left unfenced, because for them a fence would refuse what it
+// should admit. One whose concept the connector declared no domain for was
+// never read at all. And an existing row whose read carried no version cannot
+// be fenced on it: a zero version on the fence means "this row must not
+// exist", and every write to it would lose for good.
+func fencedOn(ctx context.Context, spec memqlsync.DomainSpec, w memqlsync.MirrorWrite, stored StoredMirrorRow) context.Context {
+	concept := strings.TrimSpace(spec.Concept)
+	if concept == "" || (stored.Exists && stored.Version.IsZero()) {
+		return ctx
 	}
-	return strings.Compare(a, b)
-}
-
-func parseVersionTime(s string) (time.Time, bool) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return time.Time{}, false
-	}
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t.UTC(), true
-		}
-	}
-	return time.Time{}, false
+	return memql.ContextWithRowVersionFence(ctx, concept, w.RowId, stored.Version)
 }
 
 // Dispatcher routes a staged inbound request to its connector.
@@ -180,13 +218,17 @@ type Dispatcher struct {
 	store   *Store
 	applier *Applier
 	lookup  func(ctx context.Context, name string) (memqlsync.Connector, bool)
+	// claimed answers whether any bound connector claims a source, or that
+	// one could not tell (memqlsync.SourceClaimed); the retry pass asks it
+	// before it retires a row whose source nothing serves.
+	claimed func(ctx context.Context, name string) (memqlsync.Connector, bool, error)
 	now     func() time.Time
 	logger  *slog.Logger
 }
 
 // NewDispatcher builds the inbound router.
 func NewDispatcher(store *Store, applier *Applier) *Dispatcher {
-	return &Dispatcher{store: store, applier: applier, lookup: memqlsync.ConnectorForSource, now: time.Now}
+	return &Dispatcher{store: store, applier: applier, lookup: memqlsync.ConnectorForSource, claimed: memqlsync.SourceClaimed, now: time.Now}
 }
 
 // WithLogger gives the dispatcher somewhere to say that a health write was
@@ -201,10 +243,17 @@ func (d *Dispatcher) WithLogger(logger *slog.Logger) *Dispatcher {
 type DispatchResult struct {
 	// Handled is false when no connector serves this source. NOT an
 	// error: /inbound/{source} is a shared door and most of what comes
-	// through it belongs to something else.
+	// through it belongs to something else. It is false, with an error, for a
+	// delivery whose connector could not be told (place): that one is failed
+	// and due again, and no connector has seen it.
 	Handled bool
 	Applied int
 	Stale   int
+	// Held says the connector would not apply the delivery while its tenant's
+	// recording is paused (memqlsync.ErrRecordingPaused): nothing was written,
+	// the delivery is kept as it was, and it is neither a success nor a
+	// failure.
+	Held bool
 }
 
 // Dispatch works one staged inbound request.
@@ -219,12 +268,26 @@ type DispatchResult struct {
 // staged metadata cannot be read (DispatchStaged): it is stamped `failed`
 // once the connector has claimed it, and never before, so the no-op above
 // holds for every row of an unserved source whatever its metadata says.
+//
+// A delivery of a tenant whose recording is paused is HELD rather than
+// failed: stamped `failed` with the pause as its reason, no next try and the
+// try not counted, and put back in line when the tenant resumes (hold,
+// ReturnHeld).
+//
+// A delivery whose connector COULD NOT BE TOLD is neither: it is failed and
+// due again, its try not counted (place, unplaced).
 func (d *Dispatcher) Dispatch(ctx context.Context, req memqlsync.InboundRequest) (DispatchResult, error) {
-	connector, ok := d.connectorFor(ctx, req.Source)
+	connector, ok, err := d.place(ctx, req.Source)
+	if err != nil {
+		return DispatchResult{}, d.unplaced(ctx, strings.TrimSpace(req.RequestId), 0, err)
+	}
 	if !ok {
 		return DispatchResult{}, nil
 	}
-	return d.dispatchTo(ctx, connector, req)
+	// No try came before this one, so none of them answered nothing, whatever
+	// the request it was handed says.
+	req.AnsweredNothingBefore = false
+	return d.dispatchTo(ctx, connector, req, 0)
 }
 
 // StagedRequest is one staged row as the dispatcher read it
@@ -243,6 +306,17 @@ type StagedRequest struct {
 	// SignatureVerified is the receiver's verdict: false on a row staged by a
 	// source configured to verify nothing (scheme none).
 	SignatureVerified bool
+	// Attempts is how many times the dispatcher has tried the delivery; 0 on
+	// a row nobody has tried, or one an operator put back in line.
+	Attempts int
+	// Status is the row's handling status as read: `received` until the row
+	// is worked.
+	Status string
+	// LastError is the failure the last try recorded, "" for none.
+	LastError string
+	// Version is the stored version's time (row.createdAt), the witness the
+	// retry pass's claim is fenced on.
+	Version time.Time
 }
 
 // Staged reads one staged delivery by its row id, under the operator
@@ -261,8 +335,15 @@ func (d *Dispatcher) Staged(ctx context.Context, requestID string) (StagedReques
 // error, as Dispatch does with an apply failure: left `received`, it would say
 // nothing to the operator and, because @createOnly keeps the stored values,
 // re-fire identically on every re-stage.
+//
+// "No connector serves it" is said only when it is DEFINITE (place). A row
+// whose connector could not be told is stamped failed and due again, its try
+// not counted, and returned as an error (unplaced).
 func (d *Dispatcher) DispatchStaged(ctx context.Context, staged StagedRequest) (DispatchResult, error) {
-	connector, ok := d.connectorFor(ctx, staged.Source)
+	connector, ok, err := d.place(ctx, staged.Source)
+	if err != nil {
+		return DispatchResult{}, d.unplaced(ctx, strings.TrimSpace(staged.RequestId), staged.Attempts, err)
+	}
 	if !ok {
 		return DispatchResult{}, nil
 	}
@@ -278,7 +359,7 @@ func (d *Dispatcher) DispatchStaged(ctx context.Context, staged StagedRequest) (
 	if tier := strings.TrimSpace(staged.VerifiedBy); tier != "" && tier != memqlsync.VerifiedByConnector {
 		reason := fmt.Sprintf("source %q is served by connector %q, but this delivery was verified by the %s tier's secret, not the connector's; "+
 			"rename or remove the env or registered source that verified it", strings.TrimSpace(staged.Source), connector.Name(), tier)
-		d.stamp(OperatorContext(ctx), strings.TrimSpace(staged.RequestId), "failed", reason)
+		d.stampFailed(OperatorContext(ctx), strings.TrimSpace(staged.RequestId), staged.Attempts, reason, false)
 		return DispatchResult{Handled: true}, fmt.Errorf("datasync: %s", reason)
 	}
 	// THE RECEIVER'S VERDICT, OR NOTHING (epic memql#5477). The tier above says
@@ -294,15 +375,20 @@ func (d *Dispatcher) DispatchStaged(ctx context.Context, staged StagedRequest) (
 		reason := fmt.Sprintf("source %q is served by connector %q, but this delivery's signature was not verified; "+
 			"a connector applies only a delivery a secret verified, so its source must not be configured scheme none",
 			strings.TrimSpace(staged.Source), connector.Name())
-		d.stamp(OperatorContext(ctx), strings.TrimSpace(staged.RequestId), "failed", reason)
+		d.stampFailed(OperatorContext(ctx), strings.TrimSpace(staged.RequestId), staged.Attempts, reason, false)
 		return DispatchResult{Handled: true}, fmt.Errorf("datasync: %s", reason)
 	}
 	req, reason := staged.parse(d.now)
 	if reason != "" {
-		d.stamp(OperatorContext(ctx), req.RequestId, "failed", reason)
+		d.stampFailed(OperatorContext(ctx), req.RequestId, staged.Attempts, reason, false)
 		return DispatchResult{Handled: true}, fmt.Errorf("datasync: %s", reason)
 	}
-	return d.dispatchTo(ctx, connector, req)
+	// The previous try ended in a clean answer of nothing for a record the
+	// mirror holds: recognised by its stored text, which only
+	// memqlsync.ErrAnsweredNothing writes. A delivery an operator put back in
+	// line has no tries counted, and its count of answers starts again.
+	req.AnsweredNothingBefore = staged.Attempts > 0 && memqlsync.AnsweredNothingBefore(staged.LastError)
+	return d.dispatchTo(ctx, connector, req, staged.Attempts)
 }
 
 // parse turns the staged strings into the connector's InboundRequest, or
@@ -329,6 +415,66 @@ func (s StagedRequest) parse(now func() time.Time) (memqlsync.InboundRequest, st
 	return req, ""
 }
 
+// unplacedReason is the lastError of a delivery whose connector could not be
+// told when it was dispatched. A fixed sentence that names no source and no
+// store: it is read by whoever reads the delivery.
+const unplacedReason = "datasync: could not tell which connector serves this delivery's source; it is tried again"
+
+// errClaimedNotRouted is a source a connector claims and did not route: its
+// secret could not be resolved just now. The row is the connector's, and it
+// could not be handed over.
+var errClaimedNotRouted = errors.New("a connector claims the source and could not route it now")
+
+// place is the dispatcher's FIRST JUDGEMENT of a delivery: which connector
+// serves its source. It has three answers, as the retry pass's has (RetryDue):
+//
+//   - a connector: it serves the source, and the delivery is its to work;
+//   - nobody, said definitely (false, no error): no bound connector claims the
+//     source. /inbound/{source} is a shared door, and the row belongs to
+//     whatever does serve it;
+//   - COULD NOT TELL (an error): a connector could not say whether the source
+//     is its own -- it could not read its tenants -- or claims it and could
+//     not route it.
+//
+// The routing answer alone (connectorFor) is two-valued: a connector that
+// cannot read its tenants answers "not mine" there. Believed, that answer left
+// the row `received` with nothing recorded, and nothing reads a received row
+// again: a store's delivery staged during a moment its store list could not
+// be read was lost for good. So "not served" is checked against the
+// three-valued claim (memqlsync.SourceClaimed) before it is believed.
+func (d *Dispatcher) place(ctx context.Context, source string) (memqlsync.Connector, bool, error) {
+	if connector, ok := d.connectorFor(ctx, source); ok {
+		return connector, true, nil
+	}
+	unclaimed, err := d.unclaimed(ctx, strings.TrimSpace(source))
+	switch {
+	case err != nil:
+		return nil, false, err
+	case !unclaimed:
+		return nil, false, errClaimedNotRouted
+	}
+	return nil, false, nil
+}
+
+// unplaced records a delivery whose connector could not be told, and returns
+// the failure. The row is stamped `failed`, due again after the first retry's
+// wait, with unplacedReason as its lastError and ITS TRY NOT COUNTED: nothing
+// was tried. The count is written as it was, so the row is one the retry pass
+// reads (a row with no count is not due). That pass leaves it as it is while
+// nobody can tell, dispatches it when a connector serves it, and takes it out
+// of the retries when the source is definitely nobody's.
+//
+// The cause -- which may name the source -- goes into the returned error, for
+// the log and the automation's step, and never onto the row.
+func (d *Dispatcher) unplaced(ctx context.Context, requestID string, prior int, cause error) error {
+	failure := fmt.Errorf("%s: %w", unplacedReason, cause)
+	next := d.now().UTC().Add(inboundRetryAfter[0]).Format(time.RFC3339)
+	if err := d.stamp(OperatorContext(ctx), requestID, "failed", unplacedReason, arg{"attempts", prior}, arg{"nextAttemptAt", next}); err != nil {
+		return errors.Join(failure, fmt.Errorf("datasync: the delivery could not be stamped as waiting for its connector: %w", err))
+	}
+	return failure
+}
+
 // connectorFor resolves the connector serving a source, or reports none.
 func (d *Dispatcher) connectorFor(ctx context.Context, source string) (memqlsync.Connector, bool) {
 	source = strings.TrimSpace(source)
@@ -342,9 +488,13 @@ func (d *Dispatcher) connectorFor(ctx context.Context, source string) (memqlsync
 	return connector, true
 }
 
-// dispatchTo works a request its connector has already claimed.
-func (d *Dispatcher) dispatchTo(ctx context.Context, connector memqlsync.Connector, req memqlsync.InboundRequest) (DispatchResult, error) {
+// dispatchTo works a request its connector has already claimed. prior is how
+// many times it was tried before this one.
+func (d *Dispatcher) dispatchTo(ctx context.Context, connector memqlsync.Connector, req memqlsync.InboundRequest, prior int) (DispatchResult, error) {
 	out := DispatchResult{Handled: true}
+	// The connector is told which try this is: one that must hear an answer
+	// twice before acting on it reads it here.
+	req.Attempts = prior
 	source := strings.TrimSpace(req.Source)
 
 	specs := domainSpecsByConcept(connector)
@@ -358,8 +508,15 @@ func (d *Dispatcher) dispatchTo(ctx context.Context, connector memqlsync.Connect
 	opCtx := OperatorContext(ctx)
 
 	writes, err := connector.Apply(connCtx, req)
+	if memqlsync.IsRecordingPaused(err) {
+		if err := d.hold(connCtx, opCtx, connector, req); err != nil {
+			return out, fmt.Errorf("datasync: %q could not hold inbound request %q while recording is paused: %w", source, req.RequestId, err)
+		}
+		out.Held = true
+		return out, nil
+	}
 	if err != nil {
-		d.stamp(opCtx, req.RequestId, "failed", err.Error())
+		d.failed(connCtx, opCtx, connector, req, prior, err)
 		return out, fmt.Errorf("datasync: %q applying inbound request %q: %w", source, req.RequestId, err)
 	}
 	if len(writes) == 0 {
@@ -367,38 +524,121 @@ func (d *Dispatcher) dispatchTo(ctx context.Context, connector memqlsync.Connect
 		// `processed` rather than left alone: the row HAS been worked,
 		// and leaving it `received` makes the staged queue grow without
 		// bound and lose its meaning as a to-do list.
-		d.stamp(opCtx, req.RequestId, "processed", "")
+		d.stampProcessed(opCtx, req.RequestId, prior)
 		return out, nil
 	}
 
 	res, applyErr := d.applier.Apply(connCtx, connector.Name(), specs, writes)
 	out.Applied, out.Stale = res.Applied, res.Stale
 	if applyErr != nil {
-		d.stamp(opCtx, req.RequestId, "failed", applyErr.Error())
+		d.failed(connCtx, opCtx, connector, req, prior, applyErr)
 		return out, applyErr
 	}
-	d.stamp(opCtx, req.RequestId, "processed", "")
+	d.stampProcessed(opCtx, req.RequestId, prior)
 
 	d.recordInboundHealth(opCtx, connector, writes, req.ReceivedAt)
 	return out, nil
 }
 
-// stamp records the request's handling outcome. Best effort: a failure
-// to stamp must not turn a successful apply into a reported failure, and
-// the delivery is durable either way.
-func (d *Dispatcher) stamp(ctx context.Context, requestID, status, lastError string) {
-	if strings.TrimSpace(requestID) == "" {
-		return
+// failed records a try that failed, and when the failure is worth another try,
+// tells a connector with a short-circuit to forget the delivery
+// (memqlsync.InboundForgetter): the connector may have recorded it as handled
+// before the failure -- an applier failure comes after Apply returned -- and
+// would answer the retry "already seen".
+func (d *Dispatcher) failed(connCtx, opCtx context.Context, connector memqlsync.Connector, req memqlsync.InboundRequest, prior int, err error) {
+	retry := worthAnotherTry(err)
+	if forgetter, ok := connector.(memqlsync.InboundForgetter); ok && retry {
+		forgetter.ForgetInbound(connCtx, req)
 	}
-	_, _ = d.store.exec(ctx, call("mutation", "updateInboundRequestStatus",
-		arg{"requestId", requestID},
-		arg{"status", status},
-		arg{"lastError", truncateError(lastError)},
-		arg{"processedAt", d.now().UTC().Format(time.RFC3339)}))
+	d.stampFailed(opCtx, req.RequestId, prior, err.Error(), retry)
+}
+
+// hold keeps a delivery its connector would not apply while recording is
+// paused. A PAUSE HOLDS, IT DOES NOT LOSE: stamped `processed`, a delete notice
+// that arrived during a pause was gone for good, because the sweep after a
+// resume reads what changed and cannot see what was deleted.
+//
+// The row is written `failed` with no next try, its lastError EXACTLY the
+// sentinel's text and its try count left as it was. That is the shape of a
+// refusal no retry changes, and it is chosen for what does not read it: the
+// retry pass answers only rows with a next try, and the given-up read only
+// rows at four tries, so a held delivery is neither tried on a schedule nor
+// counted as a change that could not be recorded. The text is how it is found
+// again (Store.InboundRequestsHeld), which is why the try is not counted and
+// nothing is added to the sentence.
+//
+// The connector is told to forget the delivery, as for any try that will be
+// made again. The write's failure is returned: unlike the stamp of an outcome,
+// it IS the outcome.
+func (d *Dispatcher) hold(connCtx, opCtx context.Context, connector memqlsync.Connector, req memqlsync.InboundRequest) error {
+	if forgetter, ok := connector.(memqlsync.InboundForgetter); ok {
+		forgetter.ForgetInbound(connCtx, req)
+	}
+	return d.stamp(opCtx, req.RequestId, "failed", memqlsync.ErrRecordingPaused.Error(), arg{"nextAttemptAt", ""})
+}
+
+// worthAnotherTry reports whether a failure may go differently on a later try.
+// Everything is, except what the contract says will recur: a permanent
+// refusal, a grant that does not cover the domain, a domain the connector was
+// not asked for and a capability it does not have. A busy origin
+// (memqlsync.IsBusy) is worth another try like any other transient failure.
+// The refusals DispatchStaged makes before the connector is asked -- another
+// tier's secret, no verified signature, metadata that does not parse -- are
+// facts about the stored row, which no retry changes, and stamp no next try.
+func worthAnotherTry(err error) bool {
+	return !(memqlsync.IsPermanent(err) || memqlsync.IsNotGranted(err) ||
+		memqlsync.IsNotRequested(err) || memqlsync.IsNotImplemented(err))
+}
+
+// stampProcessed records a try that worked: the try is counted and no next
+// try is left on the row.
+func (d *Dispatcher) stampProcessed(ctx context.Context, requestID string, prior int) {
+	_ = d.stamp(ctx, requestID, "processed", "",
+		arg{"attempts", prior + 1}, arg{"nextAttemptAt", ""})
+}
+
+// stampFailed records a failed try: attempts is the try count, and
+// nextAttemptAt is when the next try is due -- inboundRetryAfter after this
+// one, while retry holds and fewer than maxInboundAttempts were made -- or ""
+// for none. A next time is always named, because the retry pass's claim may
+// have moved it forward and a stale one would make the row due again.
+// The engine stores "" as written, which is why inboundRequestsDueForRetry
+// requires a set nextAttemptAt as well as one at or before its asOf.
+func (d *Dispatcher) stampFailed(ctx context.Context, requestID string, prior int, reason string, retry bool) {
+	attempts := prior + 1
+	next := ""
+	if retry && attempts < maxInboundAttempts {
+		next = d.now().UTC().Add(inboundRetryAfter[attempts-1]).Format(time.RFC3339)
+	}
+	_ = d.stamp(ctx, requestID, "failed", reason, arg{"attempts", attempts}, arg{"nextAttemptAt", next})
+}
+
+// stamp records the request's handling outcome. For an outcome the write is
+// best effort, and its callers drop the error: a failure to stamp must not turn
+// a successful apply into a reported failure, and the delivery is durable
+// either way.
+//
+// It names only the fields it means to write: updateInboundRequestStatus keeps
+// every one it is not handed, so a stamp cannot reset what another writer of
+// the row recorded.
+func (d *Dispatcher) stamp(ctx context.Context, requestID, status, lastError string, fields ...arg) error {
+	if strings.TrimSpace(requestID) == "" {
+		return nil
+	}
+	args := append([]arg{
+		{"requestId", requestID},
+		{"status", status},
+		{"lastError", truncateError(lastError)},
+		{"processedAt", d.now().UTC().Format(time.RFC3339)},
+	}, fields...)
+	_, err := d.store.exec(ctx, call("mutation", "updateInboundRequestStatus", args...))
+	return err
 }
 
 // recordInboundHealth updates lastInboundAt and lagSeconds for every
-// domain this delivery touched.
+// domain this delivery touched -- the row of each write's own concept and
+// partition, so a delivery for one store of a partitioned connector moves
+// that store's row and no other.
 //
 // Lag is measured from the ORIGIN's version to now, not from when the
 // row was staged: staging latency is MemQL's own and is small, while the
@@ -411,19 +651,21 @@ func (d *Dispatcher) recordInboundHealth(
 	receivedAt time.Time,
 ) {
 	now := d.now().UTC()
-	seen := map[string]struct{}{}
+	seen := map[[2]string]struct{}{}
 	for _, w := range writes {
 		conceptID := strings.TrimSpace(w.Concept)
 		if conceptID == "" {
 			continue
 		}
-		if _, done := seen[conceptID]; done {
+		partition := strings.TrimSpace(w.Partition)
+		key := [2]string{conceptID, partition}
+		if _, done := seen[key]; done {
 			continue
 		}
-		seen[conceptID] = struct{}{}
+		seen[key] = struct{}{}
 
 		origin := receivedAt
-		if t, ok := parseVersionTime(w.Version); ok {
+		if t, ok := memqlsync.VersionTime(w.Version); ok {
 			origin = t
 		}
 		lag := 0
@@ -431,17 +673,14 @@ func (d *Dispatcher) recordInboundHealth(
 			lag = int(now.Sub(origin).Seconds())
 		}
 
-		st, err := d.store.SyncStateFor(ctx, conceptID, connector.Name(), string(memqlsync.DirectionInbound))
-		if err != nil {
-			continue
-		}
-		st.ConceptID, st.Connector, st.Direction = conceptID, connector.Name(), string(memqlsync.DirectionInbound)
-		st.LastInboundAt = now
-		st.LagSeconds = lag
-		st.LastError = ""
-		if err := d.store.WriteSyncState(ctx, st); err != nil && d.logger != nil {
+		// The dispatcher owns lastInboundAt and lagSeconds, and writes
+		// nothing else: a backfill or a sweep of the same domain may be
+		// writing its own fields at this moment.
+		patch := SyncPatch{"lastInboundAt": now, "lagSeconds": lag}
+		if err := d.store.PatchSyncState(ctx, conceptID, connector.Name(), string(memqlsync.DirectionInbound), partition,
+			func(SyncState) (SyncPatch, bool) { return patch, true }); err != nil && d.logger != nil {
 			d.logger.Warn("datasync: could not record a domain's inbound health",
-				"connector", connector.Name(), "concept", conceptID, "error", err)
+				"connector", connector.Name(), "concept", conceptID, "partition", partition, "error", err)
 		}
 	}
 }

@@ -18,6 +18,8 @@ import { fleetDeviceScenes } from "./fleetDeviceScenes";
 import { mapScenes } from "./mapScenes";
 import { deployableStatisticsScenes } from "./deployableStatisticsScenes";
 import { wholesaleScenes, WHOLESALE_CLICKS } from "./wholesaleScenes";
+import { storeVerdictScenes } from "./storeVerdictScenes";
+import { originsByStoreScenes } from "./originsByStoreScenes";
 import { emailOverviewScenes } from "./emailOverviewScenes";
 import { CONCEPT_PAGED_VIEWS } from "./conceptsPagedScene";
 import { NEXUS_PAGED_VIEWS } from "./nexusPagedScenes";
@@ -1063,6 +1065,10 @@ const VIEWS: Record<
   ...deployableStatisticsScenes(WindowBody),
   // A store's Wholesale section (wholesaleScenes.tsx).
   ...wholesaleScenes(WindowBody),
+  // The Store page saying whether a store is being recorded (storeVerdictScenes.tsx).
+  ...storeVerdictScenes(WindowBody),
+  // Cluster > Data, by store (originsByStoreScenes.tsx).
+  ...originsByStoreScenes(WindowBody),
   ...fleetEquipmentScenes(WindowBody),
   ...setupWizardScenes(WindowBody),
   // Your profile (memql#6220): `profile`, `profile-photo`, `profile-quiet`.

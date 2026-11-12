@@ -1,0 +1,1227 @@
+# What a customer's erasure (customers/redact) reaches in a store's mirror, and what it leaves.
+#
+# Rendered by TestTheErasurePolicyMatchesItsGolden from the generated model
+# (integrations/shopify/generated/model.go) and the policy (integrations/shopify/erasure_fields.go).
+# Never edited by hand: SHOPIFY_ERASURE_UPDATE_GOLDEN=1 go test ./integrations/shopify/ -run TestTheErasurePolicyMatchesItsGolden
+# rewrites it, and its diff is the review.
+#
+# REACH. The scope starts at the customer's row and the orders the request names, and grows to a fixed
+# point by these links and no other:
+#   child of X              the row hangs from an in-scope row of X by the model's parent link
+#   gid field F naming X    the row holds an in-scope row of X's gid as the whole value of its gid field F.
+#                           Every gid field is such a link unless its line below says NOT A LINK. One of
+#                           them is a link "from a deleted row only": it is followed from a row whose
+#                           newest version is a tombstone, and from no other
+#   the customer inside object F
+#                           the row holds an in-scope customer's gid as an id inside its object F, and F
+#                           is one of the few objects that say who a row is for. Her gid inside any other
+#                           object, or as a free value anywhere (a custom attribute, a note, a message in
+#                           that same object), is not a link: nothing is matched by value
+# A list of references is not a link, and neither is an object that only refers to the customer (a
+# metaobject's fields): in a row that is not in scope the entry that names her is taken out -- an entry
+# that holds her gid as a whole value anywhere inside it -- and nothing else in the row changes.
+#
+# A ROW IS DECIDED ON WHAT IT IS NOW. A row is in scope, with everything that hangs from it, when its
+# NEWEST version holds a link; the data request exports exactly those rows, each at its newest version.
+# An OLDER version that holds the customer's gid in a link field, on a row whose newest version does not
+# (an order since moved to another person), is scrubbed by itself: that version only, not the row's
+# newest version and not what hangs from the row.
+#
+# TWO THINGS AN ERASURE DOES NOT REACH, accepted in writing:
+#   - a row that carries the person only by an email address, with no customer on it: a guest's
+#     abandoned checkout
+#   - the buyer's message inside a gift card another person holds: the card is its holder's
+#
+# FIELDS. Every version of a row in scope is rewritten. The structural fields are never touched:
+#   storeId, gid, updatedAt, versionSource, syncedAt, versionReadAt, deleted, parentGid
+# Every other field, and any key the model does not know, is decided below:
+#   kept by kind            a gid, a list of references, an enum, or a scalar whose Admin type is one of:
+#                           BigInt (an integer), Boolean (a boolean), Date (a date),
+#                           DateTime (a date-time), Decimal (a decimal), Float (a float), ID (an ID),
+#                           Int (an integer), Money (a money amount),
+#                           UnsignedInt64 (an unsigned 64-bit number)
+#   kept by the list        on the keep-list of erasure_fields.go, with the reason it describes the sale
+#   scrubbed                everything else: a string of free text becomes "[redacted]", a list becomes [], and
+#                           the key of anything else is removed (an object, a number, a boolean, an enum, and a
+#                           string that is a date, a number or a reference), so a typed read answers null, a reader
+#                           of dates never meets the marker, and the mirror can write the row again
+#   scrubbed although kept by kind
+#                           the person's own, on a row that is not her customer row; each says why
+#   kept by the list; scrubbed on a custom item
+#                           the one decision that looks at a row's values: a line item (orderLineItem) with no
+#                           productGid is a custom item, whose titles and SKU are what a person typed. It is
+#                           decided version by version
+# The scalar Admin types the model holds that are not kept by kind:
+#   CountryCode, CurrencyCode, HTML, JSON, LanguageCode, OrderTransactionErrorCode,
+#   ShopifyPaymentsTransactionType, String, URL
+# The columns are the field, its kind, its Admin type and the decision. A kept object or list is followed by
+# what it holds.
+
+concept abandonedCheckout (AbandonedCheckout)
+  reach: gid field customerGid naming customer
+  abandonedCheckoutUrl                     scalar      URL                                scrubbed: becomes "[redacted]"
+  billingAddress                           object      MailingAddress                     scrubbed: the key is removed
+  completedAt                              scalar      DateTime                           kept by kind: a date-time
+  customAttributes                         objectList  Attribute                          scrubbed: becomes []
+  customerGid                              gid         Customer                           kept by kind: a reference to another row; a link: a row that names an in-scope customer here is in scope
+  defaultCursor                            scalar      String                             scrubbed: becomes "[redacted]"
+  discountCodes                            scalarList  String                             kept by the list: the discount codes used on the sale
+  name                                     scalar      String                             kept by the list: the checkout's number
+  note                                     scalar      String                             scrubbed: becomes "[redacted]"
+  shippingAddress                          object      MailingAddress                     scrubbed: the key is removed
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  subtotalPriceSet                         object      MoneyBag                           kept by the list: an amount of the sale
+  taxLines                                 objectList  TaxLine                            kept by the list: tax lines: titles, rates and amounts
+      holds { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title }
+  taxesIncluded                            scalar      Boolean                            kept by kind: a boolean
+  totalDiscountSet                         object      MoneyBag                           kept by the list: an amount of the sale
+  totalDutiesSet                           object      MoneyBag                           kept by the list: an amount of the sale
+  totalLineItemsPriceSet                   object      MoneyBag                           kept by the list: an amount of the sale
+  totalPriceSet                            object      MoneyBag                           kept by the list: an amount of the sale
+  totalTaxSet                              object      MoneyBag                           kept by the list: an amount of the sale
+
+concept article (Article)
+  reach: not reachable
+  author                                   object      ArticleAuthor                      scrubbed: the key is removed
+  blogGid                                  gid         Blog                               kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a blog
+  body                                     scalar      HTML                               scrubbed: becomes "[redacted]"
+  commentsCount                            object      Count                              scrubbed: the key is removed
+  defaultCursor                            scalar      String                             scrubbed: becomes "[redacted]"
+  handle                                   scalar      String                             scrubbed: becomes "[redacted]"
+  image                                    object      Image                              scrubbed: the key is removed
+  isPublished                              scalar      Boolean                            kept by kind: a boolean
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+  publishedAt                              scalar      DateTime                           kept by kind: a date-time
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  summary                                  scalar      HTML                               scrubbed: becomes "[redacted]"
+  tags                                     scalarList  String                             scrubbed: becomes []
+  templateSuffix                           scalar      String                             scrubbed: becomes "[redacted]"
+  title                                    scalar      String                             scrubbed: becomes "[redacted]"
+
+concept articleComment (Comment)
+  reach: not reachable
+  articleGid                               gid         Article                            kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a article
+  author                                   object      CommentAuthor                      scrubbed: the key is removed
+  body                                     scalar      String                             scrubbed: becomes "[redacted]"
+  bodyHtml                                 scalar      HTML                               scrubbed: becomes "[redacted]"
+  ip                                       scalar      String                             scrubbed: becomes "[redacted]"
+  isPublished                              scalar      Boolean                            kept by kind: a boolean
+  publishedAt                              scalar      DateTime                           kept by kind: a date-time
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  status                                   enum        CommentStatus                      kept by kind: an enum
+  userAgent                                scalar      String                             scrubbed: becomes "[redacted]"
+
+concept blog (Blog)
+  reach: not reachable
+  articlesCount                            object      Count                              scrubbed: the key is removed
+  commentPolicy                            enum        CommentPolicy                      kept by kind: an enum
+  feed                                     object      BlogFeed                           scrubbed: the key is removed
+  handle                                   scalar      String                             scrubbed: becomes "[redacted]"
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  tags                                     scalarList  String                             scrubbed: becomes []
+  templateSuffix                           scalar      String                             scrubbed: becomes "[redacted]"
+  title                                    scalar      String                             scrubbed: becomes "[redacted]"
+
+concept businessEntity (BusinessEntity)
+  reach: not reachable
+  address                                  object      BusinessEntityAddress              scrubbed: the key is removed
+  archived                                 scalar      Boolean                            kept by kind: a boolean
+  companyName                              scalar      String                             scrubbed: becomes "[redacted]"
+  displayName                              scalar      String                             scrubbed: becomes "[redacted]"
+  legalEntityId                            scalar      BigInt                             kept by kind: an integer
+  primary                                  scalar      Boolean                            kept by kind: a boolean
+  shopifyPaymentsAccount                   object      ShopifyPaymentsAccount             scrubbed: the key is removed
+
+concept catalog (Catalog)
+  reach: not reachable
+  operations                               objectList  ResourceOperation                  scrubbed: becomes []
+  priceListGid                             gid         PriceList                          kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a priceList
+  publicationGid                           gid         Publication                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a publication
+  status                                   enum        CatalogStatus                      kept by kind: an enum
+  title                                    scalar      String                             scrubbed: becomes "[redacted]"
+
+concept channel (Channel)
+  reach: not reachable
+  accountId                                scalar      String                             scrubbed: becomes "[redacted]"
+  accountName                              scalar      String                             scrubbed: becomes "[redacted]"
+  activeRegions                            scalarList  CountryCode                        scrubbed: becomes []
+  app                                      object      App                                scrubbed: the key is removed
+  handle                                   scalar      String                             scrubbed: becomes "[redacted]"
+  marketsCount                             object      Count                              scrubbed: the key is removed
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  productsCount                            object      Count                              scrubbed: the key is removed
+  resourceFeedback                         object      AppFeedback                        scrubbed: the key is removed
+  specificationHandle                      scalar      String                             scrubbed: becomes "[redacted]"
+  supportsFuturePublishing                 scalar      Boolean                            kept by kind: a boolean
+
+concept collection (Collection)
+  reach: not reachable
+  activeOperations                         object      CollectionOperations               scrubbed: the key is removed
+  availablePublicationsCount               object      Count                              scrubbed: the key is removed
+  description                              scalar      String                             scrubbed: becomes "[redacted]"
+  descriptionHtml                          scalar      HTML                               scrubbed: becomes "[redacted]"
+  feedback                                 object      ResourceFeedback                   scrubbed: the key is removed
+  handle                                   scalar      String                             scrubbed: becomes "[redacted]"
+  image                                    object      Image                              scrubbed: the key is removed
+  legacyResourceId                         scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+  productsCount                            object      Count                              scrubbed: the key is removed
+  productsGids                             refs        Product                            kept by kind: a list of references to other rows
+  resourcePublications                     objectList  ResourcePublication                scrubbed: becomes []
+  resourcePublicationsCount                object      Count                              scrubbed: the key is removed
+  seo                                      object      SEO                                scrubbed: the key is removed
+  sortOrder                                enum        CollectionSortOrder                kept by kind: an enum
+  sources                                  objectList  CollectionSource                   scrubbed: becomes []
+  subCollectionEligibility                 object      CollectionSubCollectionEligibility scrubbed: the key is removed
+  templateSuffix                           scalar      String                             scrubbed: becomes "[redacted]"
+  title                                    scalar      String                             scrubbed: becomes "[redacted]"
+
+concept company (Company)
+  reach: not reachable
+  contactsCount                            object      Count                              scrubbed: the key is removed
+  customerSince                            scalar      DateTime                           kept by kind: a date-time
+  defaultCursor                            scalar      String                             scrubbed: becomes "[redacted]"
+  defaultRole                              object      CompanyContactRole                 scrubbed: the key is removed
+  draftOrdersGids                          refs        DraftOrder                         kept by kind: a list of references to other rows
+  externalId                               scalar      String                             scrubbed: becomes "[redacted]"
+  hasTimelineComment                       scalar      Boolean                            kept by kind: a boolean
+  lifetimeDuration                         scalar      String                             scrubbed: becomes "[redacted]"
+  locationsCount                           object      Count                              scrubbed: the key is removed
+  mainContactGid                           gid         CompanyContact                     kept by kind: a reference to another row; NOT A LINK: the company points at one of its contacts; a company is not scrubbed because one contact was
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  note                                     scalar      String                             scrubbed: becomes "[redacted]"
+  ordersCount                              object      Count                              scrubbed: the key is removed
+  ordersGids                               refs        Order                              kept by kind: a list of references to other rows
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  totalSpent                               object      MoneyV2                            scrubbed: the key is removed
+
+concept companyContact (CompanyContact)
+  reach: gid field customerGid naming customer
+  companyGid                               gid         Company                            kept by kind: a reference to another row; NOT A LINK: it names the company the contact belongs to; followed, it would reach every colleague
+  customerGid                              gid         Customer                           kept by kind: a reference to another row; a link: a row that names an in-scope customer here is in scope
+  isMainContact                            scalar      Boolean                            kept by kind: a boolean
+  lifetimeDuration                         scalar      String                             scrubbed: becomes "[redacted]"
+  locale                                   scalar      String                             scrubbed: becomes "[redacted]"
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  title                                    scalar      String                             scrubbed: becomes "[redacted]"
+
+concept companyLocation (CompanyLocation)
+  reach: not reachable
+  billingAddress                           object      CompanyAddress                     scrubbed: the key is removed
+  buyerExperienceConfiguration             object      BuyerExperienceConfiguration       scrubbed: the key is removed
+  catalogsCount                            object      Count                              scrubbed: the key is removed
+  catalogsGids                             refs        Catalog                            kept by kind: a list of references to other rows
+  companyGid                               gid         Company                            kept by kind: a reference to another row; NOT A LINK: it names the company the location belongs to; followed, it would reach the company's addresses
+  currency                                 scalar      CurrencyCode                       scrubbed: becomes "[redacted]"
+  defaultCursor                            scalar      String                             scrubbed: becomes "[redacted]"
+  externalId                               scalar      String                             scrubbed: becomes "[redacted]"
+  hasTimelineComment                       scalar      Boolean                            kept by kind: a boolean
+  locale                                   scalar      String                             scrubbed: becomes "[redacted]"
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  note                                     scalar      String                             scrubbed: becomes "[redacted]"
+  ordersCount                              object      Count                              scrubbed: the key is removed
+  phone                                    scalar      String                             scrubbed: becomes "[redacted]"
+  shippingAddress                          object      CompanyAddress                     scrubbed: the key is removed
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  storeCreditAccountsGids                  refs        StoreCreditAccount                 kept by kind: a list of references to other rows
+  taxSettings                              object      CompanyLocationTaxSettings         scrubbed: the key is removed
+  totalSpent                               object      MoneyV2                            scrubbed: the key is removed
+
+concept customer (Customer)
+  reach: the customer's row; gid field lastOrderGid naming order, from a deleted row only
+  every customer row in scope is the person's own (the erased customer's, or an earlier record merged into it) and keeps nothing but its structural fields
+  amountSpent                              object      MoneyV2                            scrubbed: the key is removed
+  canDelete                                scalar      Boolean                            scrubbed: the key is removed
+  companyContactProfilesGids               refs        CompanyContact                     scrubbed: becomes []
+  dataSaleOptOut                           scalar      Boolean                            scrubbed: the key is removed
+  defaultAddress                           object      MailingAddress                     scrubbed: the key is removed
+  defaultEmailAddress                      object      CustomerEmailAddress               scrubbed: the key is removed
+  defaultPhoneNumber                       object      CustomerPhoneNumber                scrubbed: the key is removed
+  displayName                              scalar      String                             scrubbed: becomes "[redacted]"
+  firstName                                scalar      String                             scrubbed: becomes "[redacted]"
+  identityProviderSubjects                 objectList  IdentityProviderSubject            scrubbed: becomes []
+  image                                    object      Image                              scrubbed: the key is removed
+  lastName                                 scalar      String                             scrubbed: becomes "[redacted]"
+  lastOrderGid                             gid         Order                              scrubbed: the key is removed; NOT A LINK: another person's row can name an order that has since moved to the erased customer; a live customer row is another person; A LINK FROM A DELETED ROW: a deleted customer whose last order is in scope was merged into the erased one: the same person's earlier record
+  legacyResourceId                         scalar      UnsignedInt64                      scrubbed: the key is removed
+  lifetimeDuration                         scalar      String                             scrubbed: becomes "[redacted]"
+  locale                                   scalar      String                             scrubbed: becomes "[redacted]"
+  mergeable                                object      CustomerMergeable                  scrubbed: the key is removed
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+  multipassIdentifier                      scalar      String                             scrubbed: becomes "[redacted]"
+  note                                     scalar      String                             scrubbed: becomes "[redacted]"
+  numberOfOrders                           scalar      UnsignedInt64                      scrubbed: the key is removed
+  ordersGids                               refs        Order                              scrubbed: becomes []
+  productSubscriberStatus                  enum        CustomerProductSubscriberStatus    scrubbed: the key is removed
+  sourceCreatedAt                          scalar      DateTime                           scrubbed: the key is removed
+  state                                    enum        CustomerState                      scrubbed: the key is removed
+  statistics                               object      CustomerStatistics                 scrubbed: the key is removed
+  subscriptionContractsGids                refs        SubscriptionContract               scrubbed: becomes []
+  tags                                     scalarList  String                             scrubbed: becomes []
+  taxExempt                                scalar      Boolean                            scrubbed: the key is removed
+  taxExemptions                            scalarList  TaxExemption                       scrubbed: becomes []
+  taxSettings                              object      TaxSettings                        scrubbed: the key is removed
+  verifiedEmail                            scalar      Boolean                            scrubbed: the key is removed
+
+concept customerPaymentMethod (CustomerPaymentMethod)
+  reach: child of customer; gid field customerGid naming customer
+  customerGid                              gid         Customer                           kept by kind: a reference to another row; a link: a row that names an in-scope customer here is in scope
+  instrument                               object      CustomerPaymentInstrument          scrubbed: the key is removed
+  revokedAt                                scalar      DateTime                           kept by kind: a date-time
+  revokedReason                            enum        CustomerPaymentMethodRevocationReason kept by kind: an enum
+
+concept deliveryCarrierService (DeliveryCarrierService)
+  reach: not reachable
+  active                                   scalar      Boolean                            kept by kind: a boolean
+  callbackUrl                              scalar      URL                                scrubbed: becomes "[redacted]"
+  formattedName                            scalar      String                             scrubbed: becomes "[redacted]"
+  icon                                     object      Image                              scrubbed: the key is removed
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  supportsServiceDiscovery                 scalar      Boolean                            kept by kind: a boolean
+
+concept deliveryCustomization (DeliveryCustomization)
+  reach: not reachable
+  enabled                                  scalar      Boolean                            kept by kind: a boolean
+  errorHistory                             object      FunctionsErrorHistory              scrubbed: the key is removed
+  functionId                               scalar      String                             scrubbed: becomes "[redacted]"
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+  shopifyFunction                          object      ShopifyFunction                    scrubbed: the key is removed
+  title                                    scalar      String                             scrubbed: becomes "[redacted]"
+
+concept deliveryProfile (DeliveryProfile)
+  reach: not reachable
+  activeMethodDefinitionsCount             scalar      Int                                kept by kind: an integer
+  coversAllItems                           scalar      Boolean                            kept by kind: a boolean
+  locationsWithoutRatesCount               scalar      Int                                kept by kind: an integer
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  originLocationCount                      scalar      Int                                kept by kind: an integer
+  productVariantsCount                     object      Count                              scrubbed: the key is removed
+  profileLocationGroups                    objectList  DeliveryProfileLocationGroup       scrubbed: becomes []
+  sourceDefault                            scalar      Boolean                            kept by kind: a boolean
+  unassignedLocationsGids                  refs        Location                           kept by kind: a list of references to other rows
+  version                                  scalar      Int                                kept by kind: an integer
+  zoneCountryCount                         scalar      Int                                kept by kind: an integer
+
+concept discountNode (DiscountNode)
+  reach: not reachable
+  discount                                 object      Discount                           scrubbed: the key is removed
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+
+concept draftOrder (DraftOrder)
+  reach: gid field customerGid naming customer; gid field orderGid naming order; the customer inside object purchasingEntity
+  acceptAutomaticDiscounts                 scalar      Boolean                            kept by kind: a boolean
+  allVariantPricesOverridden               scalar      Boolean                            kept by kind: a boolean
+  allowDiscountCodesInCheckout             scalar      Boolean                            kept by kind: a boolean
+  amountDueLaterSet                        object      MoneyBag                           kept by the list: an amount of the sale
+  amountDueNowSet                          object      MoneyBag                           kept by the list: an amount of the sale
+  anyVariantPricesOverridden               scalar      Boolean                            kept by kind: a boolean
+  appliedDiscount                          object      DraftOrderAppliedDiscount          scrubbed: the key is removed
+  billingAddress                           object      MailingAddress                     scrubbed: the key is removed
+  billingAddressMatchesShippingAddress     scalar      Boolean                            kept by kind: a boolean
+  completedAt                              scalar      DateTime                           kept by kind: a date-time
+  currencyCode                             scalar      CurrencyCode                       kept by the list: the currency of the sale
+  customAttributes                         objectList  Attribute                          scrubbed: becomes []
+  customerGid                              gid         Customer                           kept by kind: a reference to another row; a link: a row that names an in-scope customer here is in scope
+  defaultCursor                            scalar      String                             scrubbed: becomes "[redacted]"
+  deposit                                  object      DepositConfiguration               scrubbed: the key is removed
+  discountCodes                            scalarList  String                             kept by the list: the discount codes used on the sale
+  email                                    scalar      String                             scrubbed: becomes "[redacted]"
+  hasTimelineComment                       scalar      Boolean                            kept by kind: a boolean
+  invoiceEmailTemplateSubject              scalar      String                             scrubbed: becomes "[redacted]"
+  invoiceSentAt                            scalar      DateTime                           kept by kind: a date-time
+  invoiceUrl                               scalar      URL                                scrubbed: becomes "[redacted]"
+  legacyResourceId                         scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
+  lineItemsSubtotalPrice                   object      MoneyBag                           kept by the list: an amount of the sale
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+  name                                     scalar      String                             kept by the list: the draft order's number
+  note2                                    scalar      String                             scrubbed: becomes "[redacted]"
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
+  paymentTerms                             object      PaymentTerms                       scrubbed: the key is removed
+  phone                                    scalar      String                             scrubbed: becomes "[redacted]"
+  platformDiscounts                        objectList  DraftOrderPlatformDiscount         kept by the list: the discounts the platform applied: titles, codes and amounts
+      holds { allocations { id quantity reductionAmount { amount currencyCode } reductionAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } automaticDiscount bxgyDiscount code discountClasses discountNode { id } id presentationLevel shortSummary summary title totalAmount { amount currencyCode } totalAmountPriceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } }
+  poNumber                                 scalar      String                             scrubbed: becomes "[redacted]"
+  presentmentCurrencyCode                  scalar      CurrencyCode                       kept by the list: the currency of the sale
+  purchasingEntity                         object      PurchasingEntity                   scrubbed: the key is removed; THE CUSTOMER'S GID INSIDE IT BRINGS THE ROW INTO SCOPE: who the draft is for: the draft is that buyer's
+  ready                                    scalar      Boolean                            kept by kind: a boolean
+  reserveInventoryUntil                    scalar      DateTime                           kept by kind: a date-time
+  shippingAddress                          object      MailingAddress                     scrubbed: the key is removed
+  shippingLine                             object      ShippingLine                       scrubbed: the key is removed
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  status                                   enum        DraftOrderStatus                   kept by kind: an enum
+  subtotalPriceSet                         object      MoneyBag                           kept by the list: an amount of the sale
+  tags                                     scalarList  String                             scrubbed: becomes []
+  taxExempt                                scalar      Boolean                            kept by kind: a boolean
+  taxLines                                 objectList  TaxLine                            kept by the list: tax lines: titles, rates and amounts
+      holds { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title }
+  taxesIncluded                            scalar      Boolean                            kept by kind: a boolean
+  totalDiscountsSet                        object      MoneyBag                           kept by the list: an amount of the sale
+  totalLineItemsPriceSet                   object      MoneyBag                           kept by the list: an amount of the sale
+  totalPriceSet                            object      MoneyBag                           kept by the list: an amount of the sale
+  totalQuantityOfLineItems                 scalar      Int                                kept by kind: an integer
+  totalShippingPriceSet                    object      MoneyBag                           kept by the list: an amount of the sale
+  totalTaxSet                              object      MoneyBag                           kept by the list: an amount of the sale
+  totalWeight                              scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
+  transformerFingerprint                   scalar      String                             scrubbed: becomes "[redacted]"
+  visibleToCustomer                        scalar      Boolean                            kept by kind: a boolean
+  warnings                                 objectList  DraftOrderWarning                  scrubbed: becomes []
+
+concept fulfillment (Fulfillment)
+  reach: child of order; gid field orderGid naming order
+  deliveredAt                              scalar      DateTime                           kept by kind: a date-time
+  displayStatus                            enum        FulfillmentDisplayStatus           kept by kind: an enum
+  estimatedDeliveryAt                      scalar      DateTime                           kept by kind: a date-time
+  fulfillmentOrdersGids                    refs        FulfillmentOrder                   kept by kind: a list of references to other rows
+  inTransitAt                              scalar      DateTime                           kept by kind: a date-time
+  legacyResourceId                         scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
+  locationGid                              gid         Location                           kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a location
+  name                                     scalar      String                             kept by the list: the fulfilment's number, made from the order's
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
+  originAddress                            object      FulfillmentOriginAddress           scrubbed: the key is removed
+  requiresShipping                         scalar      Boolean                            kept by kind: a boolean
+  service                                  object      FulfillmentService                 scrubbed: the key is removed
+  shippingLabel                            object      ShippingLabel                      scrubbed: the key is removed
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  status                                   enum        FulfillmentStatus                  kept by kind: an enum
+  totalQuantity                            scalar      Int                                kept by kind: an integer
+  trackingInfo                             objectList  FulfillmentTrackingInfo            scrubbed: becomes []
+
+concept fulfillmentOrder (FulfillmentOrder)
+  reach: gid field orderGid naming order
+  assignedLocation                         object      FulfillmentOrderAssignedLocation   scrubbed: the key is removed
+  deliveryMethod                           object      DeliveryMethod                     scrubbed: the key is removed
+  destination                              object      FulfillmentOrderDestination        scrubbed: the key is removed
+  fulfillAt                                scalar      DateTime                           kept by kind: a date-time
+  fulfillBy                                scalar      DateTime                           kept by kind: a date-time
+  fulfillmentHolds                         objectList  FulfillmentHold                    scrubbed: becomes []
+  fulfillmentsGids                         refs        Fulfillment                        kept by kind: a list of references to other rows
+  internationalDuties                      object      FulfillmentOrderInternationalDuties scrubbed: the key is removed
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
+  orderId                                  scalar      ID                                 kept by kind: an ID
+  orderName                                scalar      String                             kept by the list: the order's number
+  orderProcessedAt                         scalar      DateTime                           kept by kind: a date-time
+  remainingLineItemsWeight                 object      Weight                             scrubbed: the key is removed
+  requestStatus                            enum        FulfillmentOrderRequestStatus      kept by kind: an enum
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  status                                   enum        FulfillmentOrderStatus             kept by kind: an enum
+  supportedActions                         objectList  FulfillmentOrderSupportedAction    scrubbed: becomes []
+
+concept giftCard (GiftCard)
+  reach: gid field customerGid naming customer; the customer inside object recipientAttributes
+  balance                                  object      MoneyV2                            scrubbed: the key is removed
+  crossCurrencyRedemptionStrategy          enum        GiftCardCrossCurrencyRedemptionStrategy kept by kind: an enum
+  customerGid                              gid         Customer                           kept by kind: a reference to another row; a link: a row that names an in-scope customer here is in scope
+  deactivatedAt                            scalar      DateTime                           kept by kind: a date-time
+  enabled                                  scalar      Boolean                            kept by kind: a boolean
+  expiresOn                                scalar      Date                               kept by kind: a date
+  initialValue                             object      MoneyV2                            kept by the list: an amount of the sale: the value the card was sold with
+  isRedeemable                             scalar      Boolean                            kept by kind: a boolean
+  lastCharacters                           scalar      String                             scrubbed: becomes "[redacted]"
+  lineItemGid                              gid         LineItem                           kept by kind: a reference to another row; NOT A LINK: the card is its holder's, not its buyer's; the line it was bought on is the buyer's
+  maskedCode                               scalar      String                             scrubbed: becomes "[redacted]"
+  note                                     scalar      String                             scrubbed: becomes "[redacted]"
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; NOT A LINK: the card is its holder's, not its buyer's; the buyer's message inside a card somebody else holds stays
+  recipientAttributes                      object      GiftCardRecipient                  scrubbed: the key is removed; THE CUSTOMER'S GID INSIDE IT BRINGS THE ROW INTO SCOPE: who the card is sent to, with the message to her: the card is the recipient's
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  templateSuffix                           scalar      String                             scrubbed: becomes "[redacted]"
+
+concept inventoryItem (InventoryItem)
+  reach: not reachable
+  countryCodeOfOrigin                      scalar      CountryCode                        scrubbed: becomes "[redacted]"
+  duplicateSkuCount                        scalar      Int                                kept by kind: an integer
+  harmonizedSystemCode                     scalar      String                             scrubbed: becomes "[redacted]"
+  inventoryHistoryUrl                      scalar      URL                                scrubbed: becomes "[redacted]"
+  legacyResourceId                         scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
+  locationsCount                           object      Count                              scrubbed: the key is removed
+  measurement                              object      InventoryItemMeasurement           scrubbed: the key is removed
+  provinceCodeOfOrigin                     scalar      String                             scrubbed: becomes "[redacted]"
+  requiresShipping                         scalar      Boolean                            kept by kind: a boolean
+  sku                                      scalar      String                             scrubbed: becomes "[redacted]"
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  tracked                                  scalar      Boolean                            kept by kind: a boolean
+  trackedEditable                          object      EditableProperty                   scrubbed: the key is removed
+  unitCost                                 object      MoneyV2                            scrubbed: the key is removed
+  variantsGids                             refs        ProductVariant                     kept by kind: a list of references to other rows
+
+concept inventoryLevel (InventoryLevel)
+  reach: not reachable
+  canDeactivate                            scalar      Boolean                            kept by kind: a boolean
+  deactivationAlert                        scalar      String                             scrubbed: becomes "[redacted]"
+  isActive                                 scalar      Boolean                            kept by kind: a boolean
+  itemGid                                  gid         InventoryItem                      kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a inventoryItem
+  locationGid                              gid         Location                           kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a location
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+
+concept inventoryShipment (InventoryShipment)
+  reach: not reachable
+  barcode                                  scalar      String                             scrubbed: becomes "[redacted]"
+  dateCreated                              scalar      DateTime                           kept by kind: a date-time
+  dateReceived                             scalar      DateTime                           kept by kind: a date-time
+  dateShipped                              scalar      DateTime                           kept by kind: a date-time
+  lineItemTotalQuantity                    scalar      Int                                kept by kind: an integer
+  lineItemsCount                           object      Count                              scrubbed: the key is removed
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  status                                   enum        InventoryShipmentStatus            kept by kind: an enum
+  totalAcceptedQuantity                    scalar      Int                                kept by kind: an integer
+  totalReceivedQuantity                    scalar      Int                                kept by kind: an integer
+  totalRejectedQuantity                    scalar      Int                                kept by kind: an integer
+  tracking                                 object      InventoryShipmentTracking          scrubbed: the key is removed
+
+concept inventoryTransfer (InventoryTransfer)
+  reach: not reachable
+  dateCreated                              scalar      DateTime                           kept by kind: a date-time
+  destination                              object      LocationSnapshot                   scrubbed: the key is removed
+  hasTimelineComment                       scalar      Boolean                            kept by kind: a boolean
+  lineItemsCount                           object      Count                              scrubbed: the key is removed
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  note                                     scalar      String                             scrubbed: becomes "[redacted]"
+  origin                                   object      LocationSnapshot                   scrubbed: the key is removed
+  receivedQuantity                         scalar      Int                                kept by kind: an integer
+  referenceName                            scalar      String                             scrubbed: becomes "[redacted]"
+  status                                   enum        InventoryTransferStatus            kept by kind: an enum
+  tags                                     scalarList  String                             scrubbed: becomes []
+  totalQuantity                            scalar      Int                                kept by kind: an integer
+
+concept location (Location)
+  reach: not reachable
+  activatable                              scalar      Boolean                            kept by kind: a boolean
+  address                                  object      LocationAddress                    scrubbed: the key is removed
+  addressVerified                          scalar      Boolean                            kept by kind: a boolean
+  deactivatable                            scalar      Boolean                            kept by kind: a boolean
+  deactivatedAt                            scalar      String                             scrubbed: becomes "[redacted]"
+  deletable                                scalar      Boolean                            kept by kind: a boolean
+  fulfillmentService                       object      FulfillmentService                 scrubbed: the key is removed
+  fulfillsOnlineOrders                     scalar      Boolean                            kept by kind: a boolean
+  hasActiveInventory                       scalar      Boolean                            kept by kind: a boolean
+  hasUnfulfilledOrders                     scalar      Boolean                            kept by kind: a boolean
+  inventoryLevelsGids                      refs        InventoryLevel                     kept by kind: a list of references to other rows
+  isActive                                 scalar      Boolean                            kept by kind: a boolean
+  isFulfillmentService                     scalar      Boolean                            kept by kind: a boolean
+  legacyResourceId                         scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
+  localPickupSettingsV2                    object      DeliveryLocalPickupSettings        scrubbed: the key is removed
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  shipsInventory                           scalar      Boolean                            kept by kind: a boolean
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  suggestedAddresses                       objectList  LocationSuggestedAddress           scrubbed: becomes []
+
+concept market (Market)
+  reach: not reachable
+  catalogsCount                            object      Count                              scrubbed: the key is removed
+  conditions                               object      MarketConditions                   scrubbed: the key is removed
+  currencySettings                         object      MarketCurrencySettings             scrubbed: the key is removed
+  delivery                                 object      MarketDeliveryConfigurations       scrubbed: the key is removed
+  discountsCount                           object      Count                              scrubbed: the key is removed
+  handle                                   scalar      String                             scrubbed: becomes "[redacted]"
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  priceInclusions                          object      MarketPriceInclusions              scrubbed: the key is removed
+  sourceType                               enum        MarketType                         kept by kind: an enum
+  status                                   enum        MarketStatus                       kept by kind: an enum
+
+concept marketWebPresence (MarketWebPresence)
+  reach: not reachable
+  alternateLocales                         objectList  ShopLocale                         scrubbed: becomes []
+  defaultLocale                            object      ShopLocale                         scrubbed: the key is removed
+  domain                                   object      Domain                             scrubbed: the key is removed
+  rootUrls                                 objectList  MarketWebPresenceRootUrl           scrubbed: becomes []
+  subfolderSuffix                          scalar      String                             scrubbed: becomes "[redacted]"
+
+concept marketingActivity (MarketingActivity)
+  reach: not reachable
+  activityListUrl                          scalar      URL                                scrubbed: becomes "[redacted]"
+  adSpend                                  object      MoneyV2                            scrubbed: the key is removed
+  app                                      object      App                                scrubbed: the key is removed
+  appErrors                                object      MarketingActivityExtensionAppErrors scrubbed: the key is removed
+  budget                                   object      MarketingBudget                    scrubbed: the key is removed
+  formData                                 scalar      String                             scrubbed: becomes "[redacted]"
+  hierarchyLevel                           enum        MarketingActivityHierarchyLevel    kept by kind: an enum
+  inMainWorkflowVersion                    scalar      Boolean                            kept by kind: a boolean
+  isExternal                               scalar      Boolean                            kept by kind: a boolean
+  marketingChannelType                     enum        MarketingChannel                   kept by kind: an enum
+  marketingEventGid                        gid         MarketingEvent                     kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a marketingEvent
+  parentActivityId                         scalar      ID                                 kept by kind: an ID
+  parentRemoteId                           scalar      String                             scrubbed: becomes "[redacted]"
+  sourceAndMedium                          scalar      String                             scrubbed: becomes "[redacted]"
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  status                                   enum        MarketingActivityStatus            kept by kind: an enum
+  statusBadgeTypeV2                        enum        BadgeType                          kept by kind: an enum
+  statusLabel                              scalar      String                             scrubbed: becomes "[redacted]"
+  statusTransitionedAt                     scalar      DateTime                           kept by kind: a date-time
+  tactic                                   enum        MarketingTactic                    kept by kind: an enum
+  targetStatus                             enum        MarketingActivityStatus            kept by kind: an enum
+  title                                    scalar      String                             scrubbed: becomes "[redacted]"
+  urlParameterValue                        scalar      String                             scrubbed: becomes "[redacted]"
+  utmParameters                            object      UTMParameters                      scrubbed: the key is removed
+
+concept marketingEvent (MarketingEvent)
+  reach: not reachable
+  app                                      object      App                                scrubbed: the key is removed
+  channelHandle                            scalar      String                             scrubbed: becomes "[redacted]"
+  description                              scalar      String                             scrubbed: becomes "[redacted]"
+  endedAt                                  scalar      DateTime                           kept by kind: a date-time
+  legacyResourceId                         scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
+  manageUrl                                scalar      URL                                scrubbed: becomes "[redacted]"
+  marketingChannelType                     enum        MarketingChannel                   kept by kind: an enum
+  previewUrl                               scalar      URL                                scrubbed: becomes "[redacted]"
+  remoteId                                 scalar      String                             scrubbed: becomes "[redacted]"
+  scheduledToEndAt                         scalar      DateTime                           kept by kind: a date-time
+  sourceAndMedium                          scalar      String                             scrubbed: becomes "[redacted]"
+  sourceType                               enum        MarketingTactic                    kept by kind: an enum
+  startedAt                                scalar      DateTime                           kept by kind: a date-time
+  utmCampaign                              scalar      String                             scrubbed: becomes "[redacted]"
+  utmMedium                                scalar      String                             scrubbed: becomes "[redacted]"
+  utmSource                                scalar      String                             scrubbed: becomes "[redacted]"
+
+concept menu (Menu)
+  reach: not reachable
+  handle                                   scalar      String                             scrubbed: becomes "[redacted]"
+  isDefault                                scalar      Boolean                            kept by kind: a boolean
+  items                                    objectList  MenuItem                           scrubbed: becomes []
+  title                                    scalar      String                             scrubbed: becomes "[redacted]"
+
+concept metafieldDefinition (MetafieldDefinition)
+  reach: not reachable
+  access                                   object      MetafieldAccess                    scrubbed: the key is removed
+  capabilities                             object      MetafieldCapabilities              scrubbed: the key is removed
+  constraints                              object      MetafieldDefinitionConstraints     scrubbed: the key is removed
+  description                              scalar      String                             scrubbed: becomes "[redacted]"
+  key                                      scalar      String                             scrubbed: becomes "[redacted]"
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+  metafieldsCount                          scalar      Int                                kept by kind: an integer
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  namespace                                scalar      String                             scrubbed: becomes "[redacted]"
+  ownerType                                enum        MetafieldOwnerType                 kept by kind: an enum
+  pinnedPosition                           scalar      Int                                kept by kind: an integer
+  sourceType                               object      MetafieldDefinitionType            scrubbed: the key is removed
+  standardTemplate                         object      StandardMetafieldDefinitionTemplate scrubbed: the key is removed
+  useAsCollectionCondition                 scalar      Boolean                            kept by kind: a boolean
+  validationStatus                         enum        MetafieldDefinitionValidationStatus kept by kind: an enum
+  validations                              objectList  MetafieldDefinitionValidation      scrubbed: becomes []
+
+concept metaobject (Metaobject)
+  reach: not in scope; an entry that names the customer is taken out of fields, thumbnailField and nothing else in the row changes
+  capabilities                             object      MetaobjectCapabilityData           scrubbed: the key is removed
+  createdByApp                             object      App                                scrubbed: the key is removed
+  createdByStaffGid                        gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember
+  definitionGid                            gid         MetaobjectDefinition               kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a metaobjectDefinition
+  displayName                              scalar      String                             scrubbed: becomes "[redacted]"
+  fields                                   objectList  MetaobjectField                    scrubbed: becomes []; AN ENTRY THAT NAMES THE CUSTOMER IS TAKEN OUT, AND THE ROW IS LEFT: a merchant's own object with a field that refers to her: the object is the merchant's, the reference goes
+  handle                                   scalar      String                             scrubbed: becomes "[redacted]"
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  sourceCreatedBy                          object      App                                scrubbed: the key is removed
+  sourceType                               scalar      String                             scrubbed: becomes "[redacted]"
+  thumbnailField                           object      MetaobjectField                    scrubbed: the key is removed; AN ENTRY THAT NAMES THE CUSTOMER IS TAKEN OUT, AND THE ROW IS LEFT: the one field a metaobject shows for itself; when it refers to her it goes, and the object stays
+  values                                   scalar      JSON                               scrubbed: the key is removed
+
+concept metaobjectDefinition (MetaobjectDefinition)
+  reach: not reachable
+  access                                   object      MetaobjectAccess                   scrubbed: the key is removed
+  capabilities                             object      MetaobjectCapabilities             scrubbed: the key is removed
+  createdByApp                             object      App                                scrubbed: the key is removed
+  createdByStaffGid                        gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember
+  description                              scalar      String                             scrubbed: becomes "[redacted]"
+  displayNameKey                           scalar      String                             scrubbed: becomes "[redacted]"
+  fieldDefinitions                         objectList  MetaobjectFieldDefinition          scrubbed: becomes []
+  hasThumbnailField                        scalar      Boolean                            kept by kind: a boolean
+  metaobjectsCount                         scalar      Int                                kept by kind: an integer
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  sourceType                               scalar      String                             scrubbed: becomes "[redacted]"
+  standardTemplate                         object      StandardMetaobjectDefinitionTemplate scrubbed: the key is removed
+
+concept onlineStoreTheme (OnlineStoreTheme)
+  reach: not reachable
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  prefix                                   scalar      String                             scrubbed: becomes "[redacted]"
+  processing                               scalar      Boolean                            kept by kind: a boolean
+  processingFailed                         scalar      Boolean                            kept by kind: a boolean
+  role                                     enum        ThemeRole                          kept by kind: an enum
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  themeStoreId                             scalar      Int                                kept by kind: an integer
+
+concept order (Order)
+  reach: an order the request names; gid field customerGid naming customer; the customer inside object purchasingEntity
+  additionalFees                           objectList  AdditionalFee                      kept by the list: fees charged on the order: names, amounts and tax lines
+      holds { id name price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxLines { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title } }
+  agreementsGids                           refs        SalesAgreement                     kept by kind: a list of references to other rows
+  alerts                                   objectList  ResourceAlert                      scrubbed: becomes []
+  app                                      object      OrderApp                           scrubbed: the key is removed
+  attribution                              object      OrderAttribution                   scrubbed: the key is removed
+  billingAddress                           object      MailingAddress                     scrubbed: the key is removed
+  billingAddressMatchesShippingAddress     scalar      Boolean                            kept by kind: a boolean
+  canMarkAsPaid                            scalar      Boolean                            kept by kind: a boolean
+  canNotifyCustomer                        scalar      Boolean                            kept by kind: a boolean
+  cancelReason                             enum        OrderCancelReason                  kept by kind: an enum
+  cancellation                             object      OrderCancellation                  scrubbed: the key is removed
+  cancelledAt                              scalar      DateTime                           kept by kind: a date-time
+  capturable                               scalar      Boolean                            kept by kind: a boolean
+  cartDiscountAmountSet                    object      MoneyBag                           kept by the list: an amount of the sale
+  cartToken                                scalar      String                             scrubbed: becomes "[redacted]"
+  checkoutToken                            scalar      String                             scrubbed: becomes "[redacted]"
+  clientIp                                 scalar      String                             scrubbed: becomes "[redacted]"
+  closed                                   scalar      Boolean                            kept by kind: a boolean
+  closedAt                                 scalar      DateTime                           kept by kind: a date-time
+  confirmationNumber                       scalar      String                             scrubbed: becomes "[redacted]"
+  confirmed                                scalar      Boolean                            kept by kind: a boolean
+  currencyCode                             scalar      CurrencyCode                       kept by the list: the currency of the sale
+  currentCartDiscountAmountSet             object      MoneyBag                           kept by the list: an amount of the sale
+  currentShippingPriceSet                  object      MoneyBag                           kept by the list: an amount of the sale
+  currentSubtotalLineItemsQuantity         scalar      Int                                kept by kind: an integer
+  currentSubtotalPriceSet                  object      MoneyBag                           kept by the list: an amount of the sale
+  currentTaxLines                          objectList  TaxLine                            kept by the list: tax lines: titles, rates and amounts
+      holds { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title }
+  currentTotalAdditionalFeesSet            object      MoneyBag                           kept by the list: an amount of the sale
+  currentTotalDiscountsSet                 object      MoneyBag                           kept by the list: an amount of the sale
+  currentTotalDutiesSet                    object      MoneyBag                           kept by the list: an amount of the sale
+  currentTotalPriceSet                     object      MoneyBag                           kept by the list: an amount of the sale
+  currentTotalTaxSet                       object      MoneyBag                           kept by the list: an amount of the sale
+  currentTotalWeight                       scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
+  customAttributes                         objectList  Attribute                          scrubbed: becomes []
+  customerAcceptsMarketing                 scalar      Boolean                            scrubbed although kept by kind (the person's consent to marketing, as the order recorded it): the key is removed
+  customerGid                              gid         Customer                           kept by kind: a reference to another row; a link: a row that names an in-scope customer here is in scope
+  customerJourneySummary                   object      CustomerJourneySummary             scrubbed: the key is removed
+  customerLocale                           scalar      String                             scrubbed: becomes "[redacted]"
+  discountApplications                     objectList  DiscountApplication                kept by the list: how each discount was applied to the order, and its value
+      holds { nodes { __typename allocationMethod index targetSelection targetType value { __typename ... on MoneyV2 { amount currencyCode } ... on PricingPercentageValue { percentage } } } }
+  discountCode                             scalar      String                             kept by the list: the discount codes used on the sale
+  discountCodes                            scalarList  String                             kept by the list: the discount codes used on the sale
+  displayAddress                           object      MailingAddress                     scrubbed: the key is removed
+  displayFinancialStatus                   enum        OrderDisplayFinancialStatus        kept by kind: an enum
+  displayFulfillmentStatus                 enum        OrderDisplayFulfillmentStatus      kept by kind: an enum
+  disputes                                 objectList  OrderDisputeSummary                scrubbed: becomes []
+  dutiesIncluded                           scalar      Boolean                            kept by kind: a boolean
+  edited                                   scalar      Boolean                            kept by kind: a boolean
+  email                                    scalar      String                             scrubbed: becomes "[redacted]"
+  estimatedTaxes                           scalar      Boolean                            kept by kind: a boolean
+  fulfillable                              scalar      Boolean                            kept by kind: a boolean
+  fulfillmentOrdersGids                    refs        FulfillmentOrder                   kept by kind: a list of references to other rows
+  fulfillmentsCount                        object      Count                              scrubbed: the key is removed
+  fullyPaid                                scalar      Boolean                            kept by kind: a boolean
+  hasTimelineComment                       scalar      Boolean                            kept by kind: a boolean
+  legacyResourceId                         scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
+  merchantBusinessEntityGid                gid         BusinessEntity                     kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a businessEntity
+  merchantEditable                         scalar      Boolean                            kept by kind: a boolean
+  merchantEditableErrors                   scalarList  String                             scrubbed: becomes []
+  merchantOfRecordApp                      object      OrderApp                           scrubbed: the key is removed
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+  name                                     scalar      String                             kept by the list: the order's number
+  netPaymentSet                            object      MoneyBag                           kept by the list: an amount of the sale
+  note                                     scalar      String                             scrubbed: becomes "[redacted]"
+  number                                   scalar      Int                                kept by kind: an integer
+  originalTotalAdditionalFeesSet           object      MoneyBag                           kept by the list: an amount of the sale
+  originalTotalDutiesSet                   object      MoneyBag                           kept by the list: an amount of the sale
+  originalTotalPriceSet                    object      MoneyBag                           kept by the list: an amount of the sale
+  paymentCollectionDetails                 object      OrderPaymentCollectionDetails      scrubbed: the key is removed
+  paymentGatewayNames                      scalarList  String                             kept by the list: the names of the payment gateways
+  paymentTerms                             object      PaymentTerms                       scrubbed: the key is removed
+  phone                                    scalar      String                             scrubbed: becomes "[redacted]"
+  poNumber                                 scalar      String                             scrubbed: becomes "[redacted]"
+  presentmentCurrencyCode                  scalar      CurrencyCode                       kept by the list: the currency of the sale
+  processedAt                              scalar      DateTime                           kept by kind: a date-time
+  productNetwork                           scalar      Boolean                            kept by kind: a boolean
+  publicationGid                           gid         Publication                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a publication
+  purchasingEntity                         object      PurchasingEntity                   scrubbed: the key is removed; THE CUSTOMER'S GID INSIDE IT BRINGS THE ROW INTO SCOPE: who bought: the order is the buyer's, as its customer field says of it
+  refundDiscrepancySet                     object      MoneyBag                           kept by the list: an amount of the sale
+  refundable                               scalar      Boolean                            kept by kind: a boolean
+  registeredSourceUrl                      scalar      URL                                scrubbed: becomes "[redacted]"
+  requiresShipping                         scalar      Boolean                            kept by kind: a boolean
+  restockable                              scalar      Boolean                            kept by kind: a boolean
+  retailLocationGid                        gid         Location                           kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a location
+  returnStatus                             enum        OrderReturnStatus                  kept by kind: an enum
+  risk                                     object      OrderRiskSummary                   scrubbed: the key is removed
+  shippingAddress                          object      MailingAddress                     scrubbed: the key is removed
+  shippingLine                             object      ShippingLine                       scrubbed: the key is removed
+  shippingLinesGids                        refs        ShippingLine                       kept by kind: a list of references to other rows
+  shopifyProtect                           object      ShopifyProtectOrderSummary         scrubbed: the key is removed
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  sourceIdentifier                         scalar      String                             scrubbed: becomes "[redacted]"
+  sourceName                               scalar      String                             scrubbed: becomes "[redacted]"
+  staffMemberGid                           gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember
+  statusPageUrl                            scalar      URL                                scrubbed: becomes "[redacted]"
+  subtotalLineItemsQuantity                scalar      Int                                kept by kind: an integer
+  subtotalPriceSet                         object      MoneyBag                           kept by the list: an amount of the sale
+  suggestedRefund                          object      SuggestedRefund                    scrubbed: the key is removed
+  tags                                     scalarList  String                             scrubbed: becomes []
+  taxExempt                                scalar      Boolean                            kept by kind: a boolean
+  taxLines                                 objectList  TaxLine                            kept by the list: tax lines: titles, rates and amounts
+      holds { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title }
+  taxesIncluded                            scalar      Boolean                            kept by kind: a boolean
+  test                                     scalar      Boolean                            kept by kind: a boolean
+  totalCapturableSet                       object      MoneyBag                           kept by the list: an amount of the sale
+  totalCashRoundingAdjustment              object      CashRoundingAdjustment             kept by the list: amounts of the sale: the cash rounding of its payments and refunds
+      holds { paymentSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } refundSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } }
+  totalDiscountsSet                        object      MoneyBag                           kept by the list: an amount of the sale
+  totalOutstandingSet                      object      MoneyBag                           kept by the list: an amount of the sale
+  totalPriceSet                            object      MoneyBag                           kept by the list: an amount of the sale
+  totalReceivedSet                         object      MoneyBag                           kept by the list: an amount of the sale
+  totalRefundedSet                         object      MoneyBag                           kept by the list: an amount of the sale
+  totalRefundedShippingSet                 object      MoneyBag                           kept by the list: an amount of the sale
+  totalShippingPriceSet                    object      MoneyBag                           kept by the list: an amount of the sale
+  totalTaxSet                              object      MoneyBag                           kept by the list: an amount of the sale
+  totalTipReceivedSet                      object      MoneyBag                           kept by the list: an amount of the sale
+  totalWeight                              scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
+  transactionsCount                        object      Count                              scrubbed: the key is removed
+  unpaid                                   scalar      Boolean                            kept by kind: a boolean
+
+concept orderLineItem (LineItem)
+  reach: child of order
+  contractGid                              gid         SubscriptionContract               kept by kind: a reference to another row; NOT A LINK: a line belongs to its order and is reached with it; the subscription it bills is not what makes it hers
+  currentQuantity                          scalar      Int                                kept by kind: an integer
+  customAttributes                         objectList  Attribute                          scrubbed: becomes []
+  discountAllocations                      objectList  DiscountAllocation                 kept by the list: the amount each discount took off the line
+      holds { allocatedAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } discountApplication { __typename allocationMethod index targetSelection targetType } }
+  discountedTotalSet                       object      MoneyBag                           kept by the list: an amount of the sale
+  discountedUnitPriceAfterAllDiscountsSet  object      MoneyBag                           kept by the list: an amount of the sale
+  discountedUnitPriceSet                   object      MoneyBag                           kept by the list: an amount of the sale
+  duties                                   objectList  Duty                               kept by the list: duties on the goods: customs codes, amounts and tax lines
+      holds { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxLines { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title } }
+  image                                    object      Image                              scrubbed: the key is removed
+  isGiftCard                               scalar      Boolean                            kept by kind: a boolean
+  lineItemGroup                            object      LineItemGroup                      scrubbed: the key is removed
+  merchantEditable                         scalar      Boolean                            kept by kind: a boolean
+  name                                     scalar      String                             kept by the list: the product's and the variant's titles; scrubbed on a custom item (a line with no productGid): becomes "[redacted]"
+  nonFulfillableQuantity                   scalar      Int                                kept by kind: an integer
+  originalTotalSet                         object      MoneyBag                           kept by the list: an amount of the sale
+  originalUnitPriceSet                     object      MoneyBag                           kept by the list: an amount of the sale
+  priceAfterAllDiscountsBeforeTaxesSet     object      MoneyBag                           kept by the list: an amount of the sale
+  productGid                               gid         Product                            kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a product
+  quantity                                 scalar      Int                                kept by kind: an integer
+  refundableQuantity                       scalar      Int                                kept by kind: an integer
+  requiresShipping                         scalar      Boolean                            kept by kind: a boolean
+  restockable                              scalar      Boolean                            kept by kind: a boolean
+  sellingPlan                              object      LineItemSellingPlan                scrubbed: the key is removed
+  sku                                      scalar      String                             kept by the list: the variant's SKU; scrubbed on a custom item (a line with no productGid): becomes "[redacted]"
+  staffMemberGid                           gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember
+  taxLines                                 objectList  TaxLine                            kept by the list: tax lines: titles, rates and amounts
+      holds { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title }
+  taxable                                  scalar      Boolean                            kept by kind: a boolean
+  title                                    scalar      String                             kept by the list: the product's title; scrubbed on a custom item (a line with no productGid): becomes "[redacted]"
+  totalDiscountSet                         object      MoneyBag                           kept by the list: an amount of the sale
+  unfulfilledDiscountedTotalSet            object      MoneyBag                           kept by the list: an amount of the sale
+  unfulfilledOriginalTotalSet              object      MoneyBag                           kept by the list: an amount of the sale
+  unfulfilledQuantity                      scalar      Int                                kept by kind: an integer
+  variantGid                               gid         ProductVariant                     kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a productVariant
+  variantTitle                             scalar      String                             kept by the list: the variant's title; scrubbed on a custom item (a line with no productGid): becomes "[redacted]"
+  vendor                                   scalar      String                             scrubbed: becomes "[redacted]"
+  weight                                   object      Weight                             scrubbed: the key is removed
+
+concept orderTransaction (OrderTransaction)
+  reach: child of order; gid field orderGid naming order; gid field parentTransactionGid naming orderTransaction
+  accountNumber                            scalar      String                             scrubbed: becomes "[redacted]"
+  amountRoundingSet                        object      MoneyBag                           kept by the list: an amount of the sale
+  amountSet                                object      MoneyBag                           kept by the list: an amount of the sale
+  authorizationExpiresAt                   scalar      DateTime                           kept by kind: a date-time
+  currencyExchangeAdjustment               object      CurrencyExchangeAdjustment         kept by the list: amounts of the sale: the currency exchange adjustment
+      holds { adjustment { amount currencyCode } finalAmountSet { amount currencyCode } id originalAmountSet { amount currencyCode } }
+  device                                   object      PointOfSaleDevice                  scrubbed: the key is removed
+  errorCode                                scalar      OrderTransactionErrorCode          kept by the list: a status: the transaction's error code
+  fees                                     objectList  TransactionFee                     kept by the list: the transaction's fees: names, rates and amounts
+      holds { amount { amount currencyCode } flatFee { amount currencyCode } flatFeeName id rate rateName taxAmount { amount currencyCode } type }
+  formattedGateway                         scalar      String                             kept by the list: the payment gateway's name
+  gateway                                  scalar      String                             kept by the list: the payment gateway's name
+  kind                                     enum        OrderTransactionKind               kept by kind: an enum
+  locationGid                              gid         Location                           kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a location
+  manualPaymentGateway                     scalar      Boolean                            kept by kind: a boolean
+  manuallyCapturable                       scalar      Boolean                            kept by kind: a boolean
+  maximumRefundableV2                      object      MoneyV2                            kept by the list: an amount of the sale
+  multiCapturable                          scalar      Boolean                            kept by kind: a boolean
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
+  parentTransactionGid                     gid         OrderTransaction                   kept by kind: a reference to another row; a link: a row that names an in-scope orderTransaction here is in scope
+  paymentDetails                           object      PaymentDetails                     scrubbed: the key is removed
+  paymentIcon                              object      Image                              scrubbed: the key is removed
+  paymentId                                scalar      String                             scrubbed: becomes "[redacted]"
+  processedAt                              scalar      DateTime                           kept by kind: a date-time
+  receiptJson                              scalar      JSON                               scrubbed: the key is removed
+  settlementCurrency                       scalar      CurrencyCode                       kept by the list: the currency of the sale
+  settlementCurrencyRate                   scalar      Decimal                            kept by kind: a decimal
+  shopifyPaymentsSet                       object      ShopifyPaymentsTransactionSet      scrubbed: the key is removed
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  status                                   enum        OrderTransactionStatus             kept by kind: an enum
+  test                                     scalar      Boolean                            kept by kind: a boolean
+  totalUnsettledSet                        object      MoneyBag                           kept by the list: an amount of the sale
+  userGid                                  gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember
+
+concept page (Page)
+  reach: not reachable
+  body                                     scalar      HTML                               scrubbed: becomes "[redacted]"
+  bodySummary                              scalar      String                             scrubbed: becomes "[redacted]"
+  defaultCursor                            scalar      String                             scrubbed: becomes "[redacted]"
+  handle                                   scalar      String                             scrubbed: becomes "[redacted]"
+  isPublished                              scalar      Boolean                            kept by kind: a boolean
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+  publishedAt                              scalar      DateTime                           kept by kind: a date-time
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  templateSuffix                           scalar      String                             scrubbed: becomes "[redacted]"
+  title                                    scalar      String                             scrubbed: becomes "[redacted]"
+
+concept paymentTermsTemplate (PaymentTermsTemplate)
+  reach: not reachable
+  description                              scalar      String                             scrubbed: becomes "[redacted]"
+  dueInDays                                scalar      Int                                kept by kind: an integer
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  paymentTermsType                         enum        PaymentTermsType                   kept by kind: an enum
+  translatedName                           scalar      String                             scrubbed: becomes "[redacted]"
+
+concept priceList (PriceList)
+  reach: not reachable
+  catalogGid                               gid         Catalog                            kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a catalog
+  currency                                 scalar      CurrencyCode                       scrubbed: becomes "[redacted]"
+  fixedPricesCount                         scalar      Int                                kept by kind: an integer
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  parent                                   object      PriceListParent                    scrubbed: the key is removed
+
+concept priceListPrice (PriceListPrice)
+  reach: not reachable
+  compareAtPrice                           object      MoneyV2                            scrubbed: the key is removed
+  originType                               enum        PriceListPriceOriginType           kept by kind: an enum
+  price                                    object      MoneyV2                            scrubbed: the key is removed
+  variantGid                               gid         ProductVariant                     kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a productVariant
+
+concept product (Product)
+  reach: not reachable
+  availablePublicationsCount               object      Count                              scrubbed: the key is removed
+  bundleConsolidatedOptions                objectList  ComponentizedProductsBundleConsolidatedOption scrubbed: becomes []
+  category                                 object      TaxonomyCategory                   scrubbed: the key is removed
+  collectionsGids                          refs        Collection                         kept by kind: a list of references to other rows
+  combinedListing                          object      CombinedListing                    scrubbed: the key is removed
+  combinedListingRole                      enum        CombinedListingsRole               kept by kind: an enum
+  compareAtPriceRange                      object      ProductCompareAtPriceRange         scrubbed: the key is removed
+  defaultCursor                            scalar      String                             scrubbed: becomes "[redacted]"
+  description                              scalar      String                             scrubbed: becomes "[redacted]"
+  descriptionHtml                          scalar      HTML                               scrubbed: becomes "[redacted]"
+  featuredMedia                            object      Media                              scrubbed: the key is removed
+  feedback                                 object      ResourceFeedback                   scrubbed: the key is removed
+  giftCardSettings                         object      GiftCardProductSettings            scrubbed: the key is removed
+  giftCardTemplateSuffix                   scalar      String                             scrubbed: becomes "[redacted]"
+  handle                                   scalar      String                             scrubbed: becomes "[redacted]"
+  hasOnlyDefaultVariant                    scalar      Boolean                            kept by kind: a boolean
+  hasOutOfStockVariants                    scalar      Boolean                            kept by kind: a boolean
+  hasVariantsThatRequiresComponents        scalar      Boolean                            kept by kind: a boolean
+  isGiftCard                               scalar      Boolean                            kept by kind: a boolean
+  legacyResourceId                         scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
+  mediaCount                               object      Count                              scrubbed: the key is removed
+  mediaGids                                refs        Media                              kept by kind: a list of references to other rows
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+  onlineStorePreviewUrl                    scalar      URL                                scrubbed: becomes "[redacted]"
+  onlineStoreUrl                           scalar      URL                                scrubbed: becomes "[redacted]"
+  options                                  objectList  ProductOption                      scrubbed: becomes []
+  priceRangeV2                             object      ProductPriceRangeV2                scrubbed: the key is removed
+  productComponentsCount                   object      Count                              scrubbed: the key is removed
+  productType                              scalar      String                             scrubbed: becomes "[redacted]"
+  publishedAt                              scalar      DateTime                           kept by kind: a date-time
+  requiresSellingPlan                      scalar      Boolean                            kept by kind: a boolean
+  resourcePublications                     objectList  ResourcePublication                scrubbed: becomes []
+  resourcePublicationsCount                object      Count                              scrubbed: the key is removed
+  sellingPlanGroupsCount                   object      Count                              scrubbed: the key is removed
+  sellingPlanGroupsGids                    refs        SellingPlanGroup                   kept by kind: a list of references to other rows
+  seo                                      object      SEO                                scrubbed: the key is removed
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  status                                   enum        ProductStatus                      kept by kind: an enum
+  tags                                     scalarList  String                             scrubbed: becomes []
+  templateSuffix                           scalar      String                             scrubbed: becomes "[redacted]"
+  title                                    scalar      String                             scrubbed: becomes "[redacted]"
+  totalInventory                           scalar      Int                                kept by kind: an integer
+  tracksInventory                          scalar      Boolean                            kept by kind: a boolean
+  variantsCount                            object      Count                              scrubbed: the key is removed
+  vendor                                   scalar      String                             scrubbed: becomes "[redacted]"
+
+concept productFeed (ProductFeed)
+  reach: not reachable
+  channelId                                scalar      ID                                 kept by kind: an ID
+  country                                  scalar      CountryCode                        scrubbed: becomes "[redacted]"
+  language                                 scalar      LanguageCode                       scrubbed: becomes "[redacted]"
+  status                                   enum        ProductFeedStatus                  kept by kind: an enum
+
+concept productVariant (ProductVariant)
+  reach: not reachable
+  availableForSale                         scalar      Boolean                            kept by kind: a boolean
+  availablePublicationsCount               object      Count                              scrubbed: the key is removed
+  barcode                                  scalar      String                             scrubbed: becomes "[redacted]"
+  compareAtPrice                           scalar      Money                              kept by kind: a money amount
+  defaultCursor                            scalar      String                             scrubbed: becomes "[redacted]"
+  deliveryProfileGid                       gid         DeliveryProfile                    kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a deliveryProfile
+  displayName                              scalar      String                             scrubbed: becomes "[redacted]"
+  inventoryItemGid                         gid         InventoryItem                      kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a inventoryItem
+  inventoryPolicy                          enum        ProductVariantInventoryPolicy      kept by kind: an enum
+  inventoryQuantity                        scalar      Int                                kept by kind: an integer
+  legacyResourceId                         scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+  position                                 scalar      Int                                kept by kind: an integer
+  price                                    scalar      Money                              kept by kind: a money amount
+  productGid                               gid         Product                            kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a product
+  requiresComponents                       scalar      Boolean                            kept by kind: a boolean
+  resourcePublicationsCount                object      Count                              scrubbed: the key is removed
+  selectedOptions                          objectList  SelectedOption                     scrubbed: becomes []
+  sellableOnlineQuantity                   scalar      Int                                kept by kind: an integer
+  sellingPlanGroupsCount                   object      Count                              scrubbed: the key is removed
+  sellingPlanGroupsGids                    refs        SellingPlanGroup                   kept by kind: a list of references to other rows
+  showUnitPrice                            scalar      Boolean                            kept by kind: a boolean
+  sku                                      scalar      String                             scrubbed: becomes "[redacted]"
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  taxable                                  scalar      Boolean                            kept by kind: a boolean
+  title                                    scalar      String                             scrubbed: becomes "[redacted]"
+  unitPrice                                object      MoneyV2                            scrubbed: the key is removed
+  unitPriceMeasurement                     object      UnitPriceMeasurement               scrubbed: the key is removed
+
+concept publication (Publication)
+  reach: not reachable
+  autoPublish                              scalar      Boolean                            kept by kind: a boolean
+  catalogGid                               gid         Catalog                            kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a catalog
+  includedProductsCount                    object      Count                              scrubbed: the key is removed
+  operation                                object      PublicationOperation               scrubbed: the key is removed
+  supportsFuturePublishing                 scalar      Boolean                            kept by kind: a boolean
+
+concept quantityRule (QuantityRule)
+  reach: not reachable
+  increment                                scalar      Int                                kept by kind: an integer
+  isDefault                                scalar      Boolean                            kept by kind: a boolean
+  maximum                                  scalar      Int                                kept by kind: an integer
+  minimum                                  scalar      Int                                kept by kind: an integer
+  originType                               enum        QuantityRuleOriginType             kept by kind: an enum
+  productVariantGid                        gid         ProductVariant                     kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a productVariant
+
+concept refund (Refund)
+  reach: child of order; gid field orderGid naming order; gid field sourceReturnGid naming shopifyReturn
+  duties                                   objectList  RefundDuty                         kept by the list: refunded duties: amounts and the goods' customs codes
+      holds { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } originalDuty { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
+  legacyResourceId                         scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
+  note                                     scalar      String                             scrubbed: becomes "[redacted]"
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
+  processedAt                              scalar      DateTime                           kept by kind: a date-time
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  sourceReturnGid                          gid         Return                             kept by kind: a reference to another row; a link: a row that names an in-scope shopifyReturn here is in scope
+  staffMemberGid                           gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember
+  totalRefundedSet                         object      MoneyBag                           kept by the list: an amount of the sale
+
+concept reverseDelivery (ReverseDelivery)
+  reach: child of reverseFulfillmentOrder; gid field reverseFulfillmentOrderGid naming reverseFulfillmentOrder
+  deliverable                              object      ReverseDeliveryDeliverable         scrubbed: the key is removed
+  reverseFulfillmentOrderGid               gid         ReverseFulfillmentOrder            kept by kind: a reference to another row; a link: a row that names an in-scope reverseFulfillmentOrder here is in scope
+
+concept reverseFulfillmentOrder (ReverseFulfillmentOrder)
+  reach: child of shopifyReturn; gid field orderGid naming order
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
+  status                                   enum        ReverseFulfillmentOrderStatus      kept by kind: an enum
+  thirdPartyConfirmation                   object      ReverseFulfillmentOrderThirdPartyConfirmation scrubbed: the key is removed
+
+concept segment (Segment)
+  reach: not reachable
+  creationDate                             scalar      DateTime                           kept by kind: a date-time
+  lastEditDate                             scalar      DateTime                           kept by kind: a date-time
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  query                                    scalar      String                             scrubbed: becomes "[redacted]"
+
+concept sellingPlan (SellingPlan)
+  reach: not reachable
+  billingPolicy                            object      SellingPlanBillingPolicy           scrubbed: the key is removed
+  category                                 enum        SellingPlanCategory                kept by kind: an enum
+  deliveryPolicy                           object      SellingPlanDeliveryPolicy          scrubbed: the key is removed
+  description                              scalar      String                             scrubbed: becomes "[redacted]"
+  inventoryPolicy                          object      SellingPlanInventoryPolicy         scrubbed: the key is removed
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  options                                  scalarList  String                             scrubbed: becomes []
+  position                                 scalar      Int                                kept by kind: an integer
+  pricingPolicies                          objectList  SellingPlanPricingPolicy           scrubbed: becomes []
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+
+concept sellingPlanGroup (SellingPlanGroup)
+  reach: not reachable
+  appId                                    scalar      String                             scrubbed: becomes "[redacted]"
+  description                              scalar      String                             scrubbed: becomes "[redacted]"
+  merchantCode                             scalar      String                             scrubbed: becomes "[redacted]"
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  options                                  scalarList  String                             scrubbed: becomes []
+  position                                 scalar      Int                                kept by kind: an integer
+  productVariantsCount                     object      Count                              scrubbed: the key is removed
+  productVariantsGids                      refs        ProductVariant                     kept by kind: a list of references to other rows
+  productsCount                            object      Count                              scrubbed: the key is removed
+  productsGids                             refs        Product                            kept by kind: a list of references to other rows
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  summary                                  scalar      String                             scrubbed: becomes "[redacted]"
+
+concept shop (Shop)
+  reach: not reachable
+  accountOwnerGid                          gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember
+  alerts                                   objectList  ShopAlert                          scrubbed: becomes []
+  allProductCategoriesList                 objectList  TaxonomyCategory                   scrubbed: becomes []
+  checkoutApiSupported                     scalar      Boolean                            kept by kind: a boolean
+  contactEmail                             scalar      String                             scrubbed: becomes "[redacted]"
+  countriesInShippingZones                 object      CountriesInShippingZones           scrubbed: the key is removed
+  currencyCode                             scalar      CurrencyCode                       scrubbed: becomes "[redacted]"
+  currencyFormats                          object      CurrencyFormats                    scrubbed: the key is removed
+  customerAccounts                         enum        ShopCustomerAccountsSetting        kept by kind: an enum
+  customerAccountsV2                       object      CustomerAccountsV2                 scrubbed: the key is removed
+  description                              scalar      String                             scrubbed: becomes "[redacted]"
+  email                                    scalar      String                             scrubbed: becomes "[redacted]"
+  enabledPresentmentCurrencies             scalarList  CurrencyCode                       scrubbed: becomes []
+  entitlements                             object      EntitlementsType                   scrubbed: the key is removed
+  features                                 object      ShopFeatures                       scrubbed: the key is removed
+  fulfillmentServices                      objectList  FulfillmentService                 scrubbed: becomes []
+  ianaTimezone                             scalar      String                             scrubbed: becomes "[redacted]"
+  marketingSmsConsentEnabledAtCheckout     scalar      Boolean                            kept by kind: a boolean
+  merchantApprovalSignals                  object      MerchantApprovalSignals            scrubbed: the key is removed
+  metafields                               metafields  Metafield                          scrubbed: the key is removed
+  myshopifyDomain                          scalar      String                             scrubbed: becomes "[redacted]"
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  navigationSettings                       objectList  NavigationItem                     scrubbed: becomes []
+  orderNumberFormatPrefix                  scalar      String                             scrubbed: becomes "[redacted]"
+  orderNumberFormatSuffix                  scalar      String                             scrubbed: becomes "[redacted]"
+  paymentSettings                          object      PaymentSettings                    scrubbed: the key is removed
+  plan                                     object      ShopPlan                           scrubbed: the key is removed
+  primaryDomain                            object      Domain                             scrubbed: the key is removed
+  resourceLimits                           object      ShopResourceLimits                 scrubbed: the key is removed
+  richTextEditorUrl                        scalar      URL                                scrubbed: becomes "[redacted]"
+  searchFilters                            object      SearchFilterOptions                scrubbed: the key is removed
+  setupRequired                            scalar      Boolean                            kept by kind: a boolean
+  shipsToCountries                         scalarList  CountryCode                        scrubbed: becomes []
+  shopAddress                              object      ShopAddress                        scrubbed: the key is removed
+  shopOwnerName                            scalar      String                             scrubbed: becomes "[redacted]"
+  shopPoliciesGids                         refs        ShopPolicy                         kept by kind: a list of references to other rows
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  taxShipping                              scalar      Boolean                            kept by kind: a boolean
+  taxesIncluded                            scalar      Boolean                            kept by kind: a boolean
+  timezoneAbbreviation                     scalar      String                             scrubbed: becomes "[redacted]"
+  timezoneOffset                           scalar      String                             scrubbed: becomes "[redacted]"
+  timezoneOffsetMinutes                    scalar      Int                                kept by kind: an integer
+  transactionalSmsDisabled                 scalar      Boolean                            kept by kind: a boolean
+  unitSystem                               enum        UnitSystem                         kept by kind: an enum
+  url                                      scalar      URL                                scrubbed: becomes "[redacted]"
+  weightUnit                               enum        WeightUnit                         kept by kind: an enum
+
+concept shopLocale (ShopLocale)
+  reach: not reachable
+  locale                                   scalar      String                             scrubbed: becomes "[redacted]"
+  marketWebPresencesGids                   refs        MarketWebPresence                  kept by kind: a list of references to other rows
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  primary                                  scalar      Boolean                            kept by kind: a boolean
+  published                                scalar      Boolean                            kept by kind: a boolean
+
+concept shopPolicy (ShopPolicy)
+  reach: not reachable
+  body                                     scalar      HTML                               scrubbed: becomes "[redacted]"
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  sourceType                               enum        ShopPolicyType                     kept by kind: an enum
+  title                                    scalar      String                             scrubbed: becomes "[redacted]"
+  url                                      scalar      URL                                scrubbed: becomes "[redacted]"
+
+concept shopifyPaymentsBalanceTransaction (ShopifyPaymentsBalanceTransaction)
+  reach: not reachable
+  adjustmentReason                         scalar      String                             scrubbed: becomes "[redacted]"
+  adjustmentsOrders                        objectList  ShopifyPaymentsAdjustmentOrder     scrubbed: becomes []
+  amount                                   object      MoneyV2                            scrubbed: the key is removed
+  associatedOrder                          object      ShopifyPaymentsAssociatedOrder     scrubbed: the key is removed
+  associatedPayout                         object      ShopifyPaymentsBalanceTransactionAssociatedPayout scrubbed: the key is removed
+  fee                                      object      MoneyV2                            scrubbed: the key is removed
+  net                                      object      MoneyV2                            scrubbed: the key is removed
+  sourceId                                 scalar      BigInt                             kept by kind: an integer
+  sourceOrderTransactionId                 scalar      BigInt                             kept by kind: an integer
+  sourceType                               enum        ShopifyPaymentsSourceType          kept by kind: an enum
+  sourceTypeField                          scalar      ShopifyPaymentsTransactionType     scrubbed: becomes "[redacted]"
+  test                                     scalar      Boolean                            kept by kind: a boolean
+  transactionDate                          scalar      DateTime                           kept by kind: a date-time
+
+concept shopifyPaymentsDispute (ShopifyPaymentsDispute)
+  reach: gid field orderGid naming order
+  amount                                   object      MoneyV2                            kept by the list: an amount of the sale
+  disputeEvidence                          object      ShopifyPaymentsDisputeEvidence     scrubbed: the key is removed
+  evidenceDueBy                            scalar      DateTime                           kept by kind: a date-time
+  evidenceSentOn                           scalar      DateTime                           kept by kind: a date-time
+  finalizedOn                              scalar      DateTime                           kept by kind: a date-time
+  initiatedAt                              scalar      DateTime                           kept by kind: a date-time
+  legacyResourceId                         scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
+  reasonDetails                            object      ShopifyPaymentsDisputeReasonDetails scrubbed: the key is removed
+  sourceType                               enum        DisputeType                        kept by kind: an enum
+  status                                   enum        DisputeStatus                      kept by kind: an enum
+
+concept shopifyPaymentsPayout (ShopifyPaymentsPayout)
+  reach: not reachable
+  businessEntityGid                        gid         BusinessEntity                     kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a businessEntity
+  externalTraceId                          scalar      String                             scrubbed: becomes "[redacted]"
+  issuedAt                                 scalar      DateTime                           kept by kind: a date-time
+  legacyResourceId                         scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
+  net                                      object      MoneyV2                            scrubbed: the key is removed
+  status                                   enum        ShopifyPaymentsPayoutStatus        kept by kind: an enum
+  summary                                  object      ShopifyPaymentsPayoutSummary       scrubbed: the key is removed
+  transactionType                          enum        ShopifyPaymentsPayoutTransactionType kept by kind: an enum
+
+concept shopifyReturn (Return)
+  reach: child of order; gid field orderGid naming order
+  closedAt                                 scalar      DateTime                           kept by kind: a date-time
+  decline                                  object      ReturnDecline                      scrubbed: the key is removed
+  name                                     scalar      String                             kept by the list: the return's number, made from the order's
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
+  refundsGids                              refs        Refund                             kept by kind: a list of references to other rows
+  requestApprovedAt                        scalar      DateTime                           kept by kind: a date-time
+  returnShippingFees                       objectList  ReturnShippingFee                  kept by the list: amounts of the sale: the return's shipping fees
+      holds { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } id }
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  staffMemberGid                           gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember
+  status                                   enum        ReturnStatus                       kept by kind: an enum
+  totalQuantity                            scalar      Int                                kept by kind: an integer
+  transactionsGids                         refs        OrderTransaction                   kept by kind: a list of references to other rows
+
+concept staffMember (StaffMember)
+  reach: not reachable
+  accountType                              enum        AccountType                        kept by kind: an enum
+  active                                   scalar      Boolean                            kept by kind: a boolean
+  avatar                                   object      Image                              scrubbed: the key is removed
+  email                                    scalar      String                             scrubbed: becomes "[redacted]"
+  exists                                   scalar      Boolean                            kept by kind: a boolean
+  firstName                                scalar      String                             scrubbed: becomes "[redacted]"
+  initials                                 scalarList  String                             scrubbed: becomes []
+  isShopOwner                              scalar      Boolean                            kept by kind: a boolean
+  lastName                                 scalar      String                             scrubbed: becomes "[redacted]"
+  locale                                   scalar      String                             scrubbed: becomes "[redacted]"
+  name                                     scalar      String                             scrubbed: becomes "[redacted]"
+  phone                                    scalar      String                             scrubbed: becomes "[redacted]"
+  privateData                              object      StaffMemberPrivateData             scrubbed: the key is removed
+
+concept storeCreditAccount (StoreCreditAccount)
+  reach: child of customer
+  balance                                  object      MoneyV2                            scrubbed: the key is removed
+  owner                                    object      HasStoreCreditAccounts             scrubbed: the key is removed
+
+concept subscriptionContract (SubscriptionContract)
+  reach: gid field customerGid naming customer; gid field customerPaymentMethodGid naming customerPaymentMethod; gid field originOrderGid naming order
+  app                                      object      App                                scrubbed: the key is removed
+  appAdminUrl                              scalar      URL                                scrubbed: becomes "[redacted]"
+  billingPolicy                            object      SubscriptionBillingPolicy          scrubbed: the key is removed
+  currencyCode                             scalar      CurrencyCode                       kept by the list: the currency of the sale
+  customAttributes                         objectList  Attribute                          scrubbed: becomes []
+  customerGid                              gid         Customer                           kept by kind: a reference to another row; a link: a row that names an in-scope customer here is in scope
+  customerPaymentMethodGid                 gid         CustomerPaymentMethod              kept by kind: a reference to another row; a link: a row that names an in-scope customerPaymentMethod here is in scope
+  deliveryMethod                           object      SubscriptionDeliveryMethod         scrubbed: the key is removed
+  deliveryPolicy                           object      SubscriptionDeliveryPolicy         scrubbed: the key is removed
+  deliveryPrice                            object      MoneyV2                            kept by the list: an amount of the sale: the delivery price of the subscription
+  lastBillingAttemptErrorType              enum        SubscriptionContractLastBillingErrorType kept by kind: an enum
+  lastPaymentStatus                        enum        SubscriptionContractLastPaymentStatus kept by kind: an enum
+  linesCount                               object      Count                              scrubbed: the key is removed
+  nextBillingDate                          scalar      DateTime                           kept by kind: a date-time
+  note                                     scalar      String                             scrubbed: becomes "[redacted]"
+  originOrderGid                           gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
+  revisionId                               scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
+  sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
+  status                                   enum        SubscriptionContractSubscriptionStatus kept by kind: an enum
+
+concept tenderTransaction (TenderTransaction)
+  reach: gid field orderGid naming order
+  amount                                   object      MoneyV2                            kept by the list: an amount of the sale
+  orderGid                                 gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
+  paymentMethod                            scalar      String                             kept by the list: the name of the payment method, as a gateway's
+  processedAt                              scalar      DateTime                           kept by kind: a date-time
+  remoteReference                          scalar      String                             scrubbed: becomes "[redacted]"
+  test                                     scalar      Boolean                            kept by kind: a boolean
+  transactionDetails                       object      TenderTransactionDetails           scrubbed: the key is removed
+  userGid                                  gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember
+
+concept urlRedirect (UrlRedirect)
+  reach: not reachable
+  path                                     scalar      String                             scrubbed: becomes "[redacted]"
+  target                                   scalar      String                             scrubbed: becomes "[redacted]"

@@ -86,6 +86,16 @@ func (ps *PlanSet) selectionLines(p *TypePlan, indent string, nested bool, bulk 
 	if p.HasID {
 		lines = append(lines, indent+"id")
 	}
+	// The ORIGIN's version, which the apply guard compares (originVersion).
+	// Selection only: it is the row's updatedAt, never a payload field
+	// (planType keeps updatedAt out of Fields), so nothing else puts it in the
+	// document. Without it the connector stamped the time it read the object,
+	// or streamed a bulk line, and an older snapshot could replace a newer
+	// delivery. A type whose version is a field it also mirrors (createdAt)
+	// already selects it.
+	if p.VersionField != "" && !p.selectsField(p.VersionField, bulk) {
+		lines = append(lines, indent+p.VersionField)
+	}
 	for _, f := range p.Fields {
 		sel := f.Selection
 		if sel == "" {
@@ -132,13 +142,99 @@ func (ps *PlanSet) selectionLines(p *TypePlan, indent string, nested bool, bulk 
 			lines = append(lines, indent+"}")
 			continue
 		}
+		// A fetch reads the connection one page deep and says whether more
+		// follow: the page operation (pageOperation) reads the rest, so an
+		// order with more lines than one page holds keeps them all.
 		lines = append(lines, fmt.Sprintf("%s%s(first: %d) {", indent, ch.Connection, ch.Page))
+		lines = append(lines, indent+"  pageInfo { hasNextPage endCursor }")
 		lines = append(lines, indent+"  nodes {")
 		lines = append(lines, inner...)
 		lines = append(lines, indent+"  }")
 		lines = append(lines, indent+"}")
 	}
 	return lines
+}
+
+// selectsField reports whether the type's own field selections already ask
+// for `name` bare, in the document form given (bulk omits some fields).
+func (p *TypePlan) selectsField(name string, bulk bool) bool {
+	for _, f := range p.Fields {
+		if bulk && (f.Kind == KindRefs || f.OmitFromBulk) {
+			continue
+		}
+		sel := f.Selection
+		if bulk && f.SelectionBulk != "" {
+			sel = f.SelectionBulk
+		}
+		if sel == "" {
+			sel = f.GraphQL
+		}
+		if strings.TrimSpace(sel) == name {
+			return true
+		}
+	}
+	return false
+}
+
+// pageOpName names the operation that reads one further page of a paged
+// child connection: ShopifyPage<Concept><Connection>. Empty when the child
+// has none -- a plain list is never paged, and a parent node(id:) cannot
+// resolve has no id to read the page by.
+func pageOpName(p *TypePlan, ch ChildPlan) string {
+	if ch.List || !p.Fetchable() {
+		return ""
+	}
+	return "ShopifyPage" + title(p.Concept) + title(ch.Connection)
+}
+
+// pageOperation renders the operation pageOpName names: the parent by its
+// id (or the singleton), and that one connection from the `after` cursor
+// on, with the same page size and selection the fetch uses.
+func (ps *PlanSet) pageOperation(p *TypePlan, ch ChildPlan) string {
+	name := pageOpName(p, ch)
+	child := ps.byType[ch.Type]
+	if name == "" || child == nil {
+		return ""
+	}
+	var b strings.Builder
+	indent := "      "
+	if p.Entry.Singleton != "" {
+		fmt.Fprintf(&b, "query %s($after: String!) {\n", name)
+		fmt.Fprintf(&b, "  %s {\n", p.Entry.Singleton)
+		indent = "    "
+	} else {
+		fmt.Fprintf(&b, "query %s($id: ID!, $after: String!) {\n", name)
+		b.WriteString("  node(id: $id) {\n")
+		b.WriteString("    __typename\n")
+		fmt.Fprintf(&b, "    ... on %s {\n", p.GraphQLType)
+	}
+	fmt.Fprintf(&b, "%s%s(first: %d, after: $after) {\n", indent, ch.Connection, ch.Page)
+	fmt.Fprintf(&b, "%s  pageInfo { hasNextPage endCursor }\n", indent)
+	fmt.Fprintf(&b, "%s  nodes {\n", indent)
+	for _, l := range ps.selectionLines(child, indent+"    ", false, false) {
+		b.WriteString(l + "\n")
+	}
+	fmt.Fprintf(&b, "%s  }\n", indent)
+	fmt.Fprintf(&b, "%s}\n", indent)
+	if p.Entry.Singleton != "" {
+		b.WriteString("  }\n}\n")
+	} else {
+		b.WriteString("    }\n  }\n}\n")
+	}
+	return b.String()
+}
+
+// pageOperations renders every page operation of a type, each preceded by
+// a blank line, in child order.
+func (ps *PlanSet) pageOperations(p *TypePlan) string {
+	var b strings.Builder
+	for _, ch := range p.Children {
+		if op := ps.pageOperation(p, ch); op != "" {
+			b.WriteString("\n")
+			b.WriteString(op)
+		}
+	}
+	return b.String()
 }
 
 // stripFirstArgument removes a `(first: N)` argument list from a selection.
@@ -170,6 +266,7 @@ func (ps *PlanSet) EmitSelectionDocument(version string, p *TypePlan) string {
 			b.WriteString(strings.TrimPrefix(l, "  ") + "\n")
 		}
 		b.WriteString("  }\n}\n")
+		b.WriteString(ps.pageOperations(p))
 		return b.String()
 	}
 
@@ -201,6 +298,7 @@ func (ps *PlanSet) EmitSelectionDocument(version string, p *TypePlan) string {
 		}
 		b.WriteString("    }\n  }\n}\n")
 	}
+	b.WriteString(ps.pageOperations(p))
 	return b.String()
 }
 

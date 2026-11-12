@@ -9,6 +9,7 @@ query ShopifyBulkCollection($query: String) {
     edges {
       node {
         id
+        updatedAt
         activeOperations { duplicate { collectionRole } }
         availablePublicationsCount { count precision }
         description

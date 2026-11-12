@@ -17,11 +17,11 @@ marker on the Store icon indicates that setup remains.
 
 1. Open **Settings → Connections → Shopify**, or **Deployables → Settings → Shopify**.
    These surfaces use the same personal connections and controls.
-2. Use the plus button and continue to Shopify. Select the store and approve
+2. Press "Add Shopify store", then "Continue to Shopify". Select the store and approve
    access on Shopify. MemQL verifies Shopify's signed launch, completes
    authorization, and returns to the Settings surface that began the flow.
    Installing directly from Shopify opens global Settings → Connections.
-3. Open the storefront's **Store** panel. Choose **Testing** or **Production**,
+3. Open the storefront's **Store** page. Choose **Testing** or **Production**,
    select a saved store, review the selection, and connect it.
 
 Shopify authorizes an app separately for each store. Connecting one store does not
@@ -72,7 +72,7 @@ both; no candidate selection or promotion is needed for storefronts.
 When ready, change only Production to the client's store. Store selection does
 not copy products, customers, orders or credentials between stores. Product
 handles and collections needed by the storefront must exist in the selected store.
-Fylo keeps carts separate by store domain. A production-store label describes the
+The storefront keeps carts separate by store domain. A production-store label describes the
 store type, not payment readiness: verify products, payment configuration and
 checkout in Shopify before accepting orders.
 
@@ -96,7 +96,8 @@ expected deliverables are tracked in
 The shared storefront flow requests `unauthenticated_read_product_listings`,
 `unauthenticated_read_checkouts`, `unauthenticated_write_checkouts`,
 `unauthenticated_read_customers`, `write_products`, `read_inventory`,
-`read_locations`, and `read_orders`. Register those scopes on the app.
+`read_locations`, `read_orders`, `read_customers`, `write_customers`,
+`read_discounts`, and `read_returns`. Register those scopes on the app.
 It asks for `write_products` rather than `read_products` because product-content
 delivery writes product metafields; `write_products` includes the catalog reads.
 Only a missing Storefront scope refuses a connection, so a grant without

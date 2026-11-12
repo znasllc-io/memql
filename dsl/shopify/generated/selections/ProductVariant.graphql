@@ -9,6 +9,7 @@ query ShopifyFetchProductVariant($id: ID!) {
     __typename
     ... on ProductVariant {
       id
+      updatedAt
       availableForSale
       availablePublicationsCount { count precision }
       barcode
@@ -46,6 +47,7 @@ query ShopifyListProductVariant($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       availableForSale
       availablePublicationsCount { count precision }
       barcode

@@ -342,7 +342,11 @@ func (c *Connector) CommerceCompany(ctx context.Context, store Store, companyGID
 // stopped at 2,500 orders reads as a complete month, and a merchant acts on
 // it -- so a capped walk says so in the payload the agent reads back.
 func (c *Connector) walk(ctx context.Context, fn string, args map[string]any) ([]map[string]any, bool, error) {
-	base := connectorContext(ctx)
+	// operatorContext, not connectorContext: the generated mirror reads
+	// filter on actor.isClusterOwner, which a connector actor never is, so
+	// under its own identity the connector read none of the rows it wrote
+	// (F10). TestTheConnectorReadsBackTheMirrorRowsItWrote holds it.
+	base := operatorContext(ctx)
 	call := renderCall(fn, args)
 	var out []map[string]any
 	cursor := ""

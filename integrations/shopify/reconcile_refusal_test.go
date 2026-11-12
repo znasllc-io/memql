@@ -348,3 +348,73 @@ func TestANotGrantedDomainIsNotAnErrorOnTheStorePanel(t *testing.T) {
 		t.Errorf("phase = %q for a real failure", got)
 	}
 }
+
+func TestADomainOutsideTheConnectionIsNotRequestedAndNotAsked(t *testing.T) {
+	h := newHarness(t)
+	withManagedScopes(t, h, commerceSet...)
+
+	_, err := h.conn.Reconcile(context.Background(), "v1:shopify:blog", h.now)
+	if !memqlsync.IsNotRequested(err) {
+		t.Fatalf("blogs on a store whose connection never asks for read_content must be not requested, got %v", err)
+	}
+	if memqlsync.IsNotGranted(err) {
+		t.Errorf("a domain outside the connection reads as something to grant: %v", err)
+	}
+	if seen := h.admin.seen(); len(seen) != 0 {
+		t.Fatalf("the origin was asked %d times about a domain the connection never asks for", len(seen))
+	}
+}
+
+func TestARefusalNamingAnUnaskedScopeIsNotPartOfTheConnection(t *testing.T) {
+	// inventoryShipment reads under read_inventory in the allowlist, which
+	// the connection asks for; Shopify wants read_inventory_shipments, which
+	// it does not.
+	h := newHarness(t)
+	h.admin.reply("ShopifyListInventoryShipment", map[string]any{"inventoryShipments": nil})
+	h.admin.fail("ShopifyListInventoryShipment", GraphQLError{
+		Message:    "Access denied for inventoryShipments field. Required access: `read_inventory_shipments` access scope.",
+		Extensions: map[string]any{"code": "ACCESS_DENIED"},
+		Path:       []any{"inventoryShipments"},
+	})
+
+	_, err := h.conn.Reconcile(context.Background(), "v1:shopify:inventoryShipment", h.now)
+	if !memqlsync.IsNotRequested(err) {
+		t.Fatalf("a refusal naming a scope the connection never asks for must be not requested, got %v", err)
+	}
+}
+
+func TestARootRefusalThatNamesNoScopeAndNoCustomerDataIsNotPartOfTheConnection(t *testing.T) {
+	// Companies are a plan feature: a store without it is refused the root
+	// whatever the grant holds.
+	h := newHarness(t)
+	h.admin.reply("ShopifyListCompany", map[string]any{"companies": nil})
+	h.admin.fail("ShopifyListCompany", GraphQLError{
+		Message:    "Access denied for companies field.",
+		Extensions: map[string]any{"code": "ACCESS_DENIED"},
+		Path:       []any{"companies"},
+	})
+
+	_, err := h.conn.Reconcile(context.Background(), "v1:shopify:company", h.now)
+	if !memqlsync.IsNotRequested(err) {
+		t.Fatalf("a plan-gated root refusal must be not requested, got %v", err)
+	}
+}
+
+func TestAProtectedDataRefusalStaysNotGranted(t *testing.T) {
+	h := newHarness(t)
+	const message = "This app is not approved to access the Order object. See https://shopify.dev/docs/apps/launch/protected-customer-data for more details."
+	h.admin.reply("ShopifyListOrder", map[string]any{"orders": nil})
+	h.admin.fail("ShopifyListOrder", GraphQLError{
+		Message:    message,
+		Extensions: map[string]any{"code": "ACCESS_DENIED"},
+		Path:       []any{"orders"},
+	})
+
+	_, err := h.conn.Reconcile(context.Background(), "v1:shopify:order", h.now)
+	if !memqlsync.IsNotGranted(err) || memqlsync.IsNotRequested(err) {
+		t.Fatalf("a protected-data refusal is something an operator can fix; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "is not approved to access") {
+		t.Errorf("Shopify's own message was lost: %v", err)
+	}
+}

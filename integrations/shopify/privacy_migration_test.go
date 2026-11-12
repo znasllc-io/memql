@@ -173,7 +173,7 @@ func TestStoreHealthSaysWhenTheRefusalCountIsCapped(t *testing.T) {
 
 func privacyDeliveriesOf(t *testing.T, h *testHarness) map[string]any {
 	t.Helper()
-	nodes, err := NewIntegration(h.conn).handleStoreHealth(context.Background(), map[string]any{"storeId": "acme"}, 0)
+	nodes, err := NewIntegration(h.conn).handleStoreHealth(clusterOwnerCall(), map[string]any{"storeId": "acme"}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,9 +1,11 @@
 import { useCallback, useMemo, useState } from "react";
+import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useReading, type Reading } from "../../../cluster/reading";
 import { useOsConnection } from "../../../live/connection";
 import { readStoreHealth, type StoreHealth } from "./health";
 import { storeFromRow, type StoreRow } from "./rows";
+import { readStoreVerdict, type StoreVerdict } from "./verdict";
 
 // The reads and the writes a storefront deployable makes about its store.
 //
@@ -138,6 +140,27 @@ export function healthFor(all: StoreHealth[], storeId: string): StoreHealth | nu
   return all.find((h) => h.storeId === id) ?? null;
 }
 
+/**
+ * One store's verdict: whether it is being recorded, and what fixes it.
+ *
+ * ONE READ PER STORE, so a store bound to both destinations is read once and
+ * its reasons drawn once. A blank id reads nothing and stays `unread`; a
+ * reply that names no state (an engine with no Shopify connector) is null.
+ */
+export function useStoreVerdict(storeId: string): Reading<StoreVerdict | null> & { verdict: StoreVerdict | null } {
+  const connection = useOsConnection();
+  const id = storeId.trim();
+  const read = useMemo(() => {
+    if (connection === null || id === "") return null;
+    return async (signal: AbortSignal): Promise<StoreVerdict | null> => {
+      const result = await connection.query.shopifyStoreVerdict({ storeId: id }, { signal });
+      return readStoreVerdict(result.rows());
+    };
+  }, [connection, id]);
+  const reading = useReading<StoreVerdict | null>(connection === null || id === "" ? "no-store" : `verdict:${id}`, read);
+  return { ...reading, verdict: id === "" ? null : reading.value ?? null };
+}
+
 /** What `createStore` is given. Every optional field is a string the form holds. */
 export interface NewStore {
   storeId: string;
@@ -186,6 +209,16 @@ export interface StoreWrites {
   ensureSubscriptions: () => Promise<boolean>;
   /** Point this storefront at a store, or clear the binding with "". */
   bindSite: (siteId: string, storeId: string) => Promise<boolean>;
+  /** Register again: the store's subscription pass, now. Busy as "register". */
+  registerEvents: (storeId: string) => Promise<boolean>;
+  /** Try again: the store's given-up deliveries, back in line. Busy as "retry". */
+  retryDeliveries: (storeId: string) => Promise<boolean>;
+  /**
+   * Pause recording (false) or Resume (true), through the engine's
+   * `shopifyStoreSetRecording`, which asks who is calling and writes as the
+   * deployment. Busy as "recording".
+   */
+  setRecording: (storeId: string, recording: boolean) => Promise<boolean>;
 }
 
 function describe(err: unknown): string {
@@ -195,7 +228,9 @@ function describe(err: unknown): string {
 /**
  * The writes a storefront's Store panel owns.
  *
- * FOUR, AND THE SHORTNESS IS STILL THE POINT. Backfill, reconciliation and
+ * FOUR, AND THE SHORTNESS IS STILL THE POINT -- seven now, with the verdict's
+ * Register again and Try again and the Store page's pause and resume, which
+ * are this store's alone too. Backfill, reconciliation and
  * the per-domain pause switch belong to EVERY connector, so the data-origins
  * runtime owns them and Cluster > Data origins drives them. What is here is
  * what is Shopify's alone -- the store-wide pause and the subscription
@@ -287,6 +322,41 @@ export function useStoreWrites(onWritten: () => void): StoreWrites {
     [connection, run],
   );
 
+  // THE VERDICT'S TWO ACTS. What each did is read back in the verdict the
+  // write re-reads, in the engine's words, so neither leaves a note of its own.
+  // A pass that FAILS IS A REPLY, NOT A THROW: Register again answers
+  // `{status: "failed", detail}` when Shopify refused a topic, and either act
+  // answers `{status: "unconfigured"}` on an engine with no Shopify connector.
+  // Only the status each one names as done is done; anything else is shown as
+  // a refusal, the engine's detail when it gave one.
+  const registerEvents = useCallback(
+    (storeId: string) =>
+      run("register", async () => actDone("shopifyStoreRegisterEvents", "registered", await connection!.query.shopifyStoreRegisterEvents({ storeId })), ""),
+    [connection, run],
+  );
+
+  const retryDeliveries = useCallback(
+    (storeId: string) =>
+      run("retry", async () => actDone("shopifyStoreRetryDeliveries", "requeued", await connection!.query.shopifyStoreRetryDeliveries({ storeId })), ""),
+    [connection, run],
+  );
+
+  // PAUSE AND RESUME ARE THE ENGINE'S BUILTIN, NOT THE ROW'S MUTATION. The
+  // store row's write is a cluster owner's, so a store's owner who is not one
+  // was offered both and refused by the row; the builtin asks who is calling
+  // and writes as the deployment. Done is the status it names; the verdict the
+  // write re-reads says the rest.
+  const setRecording = useCallback(
+    (storeId: string, recording: boolean) =>
+      run(
+        "recording",
+        async () =>
+          actDone("shopifyStoreSetRecording", recording ? "live" : "paused", await connection!.query.shopifyStoreSetRecording({ storeId, recording })),
+        "",
+      ),
+    [connection, run],
+  );
+
   return {
     busy,
     error,
@@ -296,7 +366,23 @@ export function useStoreWrites(onWritten: () => void): StoreWrites {
     setStatus,
     ensureSubscriptions,
     bindSite,
+    registerEvents,
+    retryDeliveries,
+    setRecording,
   };
+}
+
+/**
+ * Throws unless an act's reply names the status that means it was done: the
+ * engine's `detail` when it gave one, else the builtin and the status it
+ * answered ("unconfigured" when the cluster has no Shopify connector).
+ */
+function actDone(builtin: string, done: string, result: { rows(): Row[] }): void {
+  const row = result.rows()[0] ?? null;
+  const status = rowString(row, "status");
+  if (status === done) return;
+  const detail = rowString(row, "detail").trim();
+  throw new Error(detail !== "" ? detail : `shopify: ${builtin} answered ${status === "" ? "nothing" : status}`);
 }
 
 function omitBlank(key: string, value: string): Record<string, string> {

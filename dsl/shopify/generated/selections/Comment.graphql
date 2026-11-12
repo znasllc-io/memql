@@ -9,6 +9,7 @@ query ShopifyFetchArticleComment($id: ID!) {
     __typename
     ... on Comment {
       id
+      updatedAt
       article { id }
       author { email name }
       body
@@ -28,6 +29,7 @@ query ShopifyListArticleComment($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       article { id }
       author { email name }
       body

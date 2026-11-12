@@ -142,7 +142,7 @@ func (c *Connector) applyUninstall(ctx context.Context, store Store, req memqlsy
 func (c *Connector) grantAnswers(ctx context.Context, store Store) bool {
 	var token string
 	var err error
-	if strings.HasSuffix(store.AdminTokenRef, "_OFFLINE_GRANT") {
+	if store.Managed() {
 		token, err = c.offlineAdminTokenLocked(ctx, store)
 	} else {
 		token, err = c.stores.AdminToken(ctx, store)

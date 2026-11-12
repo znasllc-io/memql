@@ -9,6 +9,7 @@ query ShopifyFetchRefund($id: ID!) {
     __typename
     ... on Refund {
       id
+      updatedAt
       duties { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } originalDuty { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
       legacyResourceId
       note

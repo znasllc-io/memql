@@ -40,6 +40,10 @@ type Store struct {
 	// this app uninstalled from it (memql#5638), and a verified reinstall
 	// clears it. See Ingests and applyUninstall.
 	UninstalledAt string
+	// ConnectedAt is when a connect last started the store's recording
+	// afresh: its first connect, or one after an uninstall, a purge or with
+	// no Admin token. Empty for a store connected before it was recorded.
+	ConnectedAt string
 	// IsDevelopment is v1:shopify:store.isDevelopment (epic memql#5530): the
 	// store a storefront is EXERCISED against rather than the one shoppers
 	// reach. It is attached and mirrored like any other, so nothing in this
@@ -84,6 +88,13 @@ func (s Store) Ingests() bool {
 		return false
 	}
 	return s.Status == StatusConfigured || s.Status == StatusBackfilling || s.Status == StatusLive
+}
+
+// Managed reports whether the store was connected through the shared app:
+// its Admin access is an offline grant the connector refreshes, sealed under
+// the store's _OFFLINE_GRANT secret, rather than a token of its own app.
+func (s Store) Managed() bool {
+	return strings.HasSuffix(s.AdminTokenRef, "_OFFLINE_GRANT")
 }
 
 // ProtectedLevelAtLeast reports whether the store's approval reaches a level.
@@ -303,6 +314,7 @@ func storeFromRow(p map[string]any) (Store, bool) {
 		OwnerUserID:          mapString(p, "ownerUserId"),
 		RedactedAt:           mapString(p, "redactedAt"),
 		UninstalledAt:        mapString(p, "uninstalledAt"),
+		ConnectedAt:          mapString(p, "connectedAt"),
 		ScopesGranted:        mapStringSlice(p, "scopesGranted"),
 		IsDevelopment:        mapBool(p, "isDevelopment"),
 		DevelopmentOfStoreID: shortID(mapString(p, "developmentOfStoreId")),

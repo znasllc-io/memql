@@ -185,6 +185,8 @@ concept inboundRequest {
   verifiedBy    enum("env", "registered", "connector") @description("Which tier's secret verified the delivery (memql#5795): an operator's env pin, a source the cluster registered for itself, or the connector that owns the source. The dispatcher applies a row whose source a connector claims only when this is 'connector', so a store connected between staging and dispatch never receives a body another secret verified as its own. Kept from the delivery that created the row. Absent on a row the mailbox reader staged and on rows staged before the field existed, which are dispatched as before: only server-side code can stage a row.")
   processedAt   datetime @description("When the product finished handling the row.")
   lastError     string  @description("Most recent product-side handling error, truncated to 4KB. Empty on success.")
+  attempts      int     @description("How many times a connector's dispatcher has tried this delivery, every try counted, the first included. A connector's source gets four at most: the first, then retries 1, 5 and 30 minutes after the try before. Absent on a row no connector has tried. A requeue sets it back to 0.")
+  nextAttemptAt datetime @description("When the retry pass may try this failed delivery again. Set only on a failed try worth another one, before the fourth; absent once a delivery is processed, refused for a reason no retry changes, or given up. While a pass works a row it is moved forward by the claim window, so a second pass leaves it alone.")
 }
 
 /// A web surface this cluster serves at a hostname -- a single-page app, a static website, or the
@@ -870,8 +872,9 @@ concept outboxEntry {
 /// be read from a page, not a grep over one replica's stdout.
 ///
 /// Written ONLY by the sync runtime -- the inbound dispatcher, the backfill and reconciliation
-/// runners, and the outbox drain worker. Deterministic id per (concept, connector, direction), so
-/// the append-only version history IS the health timeline.
+/// runners, and the outbox drain worker. Deterministic id per (concept, connector, direction), and
+/// per partition for a connector that serves many tenants, so the append-only version history IS
+/// the health timeline.
 ///
 /// clusterOwner for the same reason outboxEntry is: this is the deployment's operational state.
 @rowAuthz(clusterOwner)
@@ -880,16 +883,17 @@ concept syncState {
   conceptId        string!  @description("Canonical id of the concept this row reports on.")
   connector        string!  @description("Connector name on the other side.")
   direction        enum("inbound", "outbound")!  @description("inbound: MemQL mirrors this concept and the connector fills it. outbound: MemQL originates it and the connector drains the outbox. A concept can have a row in each direction.")
+  partitionKey     string   @description("The tenant this row reports on, for a connector that serves many (one store of the Shopify connector): each keeps its own cursor, watermark and error. Empty, or absent on a row written before partitions, for a connector with one.")
   backfillCursor   string   @description("Opaque connector cursor for a resumable backfill. Persisted after EVERY page, so a restart resumes rather than restarts.")
-  backfillStatus   enum("none", "running", "complete", "failed")  @description("Where the backfill stands. `none` is the default -- never run -- and is distinct from `complete`.")
+  backfillStatus   enum("none", "running", "complete", "failed", "queued")  @description("Where the backfill stands. `none` is the default -- never run -- and is distinct from `complete`. `queued`: asked for and not yet started.")
   lastInboundAt    datetime @description("When the last inbound delivery for this domain was applied.")
   lagSeconds       int      @description("Seconds between the origin's version of the last applied write and when MemQL applied it. A mirror's staleness, in the only unit an operator can act on.")
-  lastReconcileAt  datetime @description("When the last reconciliation sweep finished. The updated_at watermark the next sweep narrows on, so only a sweep that RAN moves it.")
-  lastAttemptAt    datetime @description("When a sweep last ran, was refused, or found the domain not granted. What the cadence is measured from when the last attempt did not finish, so a standing refusal waits its interval without moving the watermark.")
+  lastReconcileAt  datetime @description("When the last reconciliation sweep started, less two minutes. The updated_at watermark the next sweep narrows on, so only a sweep that RAN moves it; the schedule runs from lastAttemptAt, when the sweep ended.")
+  lastAttemptAt    datetime @description("When a sweep last ran, was refused, failed in a way that waits its cadence (rows the mirror could not write), or found the domain not granted. What the cadence is measured from when the last attempt did not finish, so a standing refusal waits its interval without moving the watermark.")
   driftCount       int      @description("Rows the last sweep found disagreeing with the origin. Zero after a clean sweep; non-zero is the number worth investigating even after healing, because repeated drift is a webhook that is not arriving.")
   outboxDepth      int      @description("Pending + failed entries for this (concept, connector). The number that says whether the drain is keeping up.")
   deadLetterCount  int      @description("Entries that exhausted their attempts and are waiting for an operator. Never decreases on its own.")
-  paused           bool     @description("Operator pause switch. Stops the backfill and reconciliation runners and the drain for this domain, without unregistering the connector or changing any declaration.")
+  paused           bool     @description("Operator pause switch. Stops the backfill and the periodic check (reconciliation) of this domain, without unregistering the connector or changing any declaration. It does not hold changes waiting to be pushed to the origin: the outbound drain does not read it.")
   lastError        string   @description("Truncated error from the last failure on this domain, whichever runner produced it.")
 }
 

@@ -180,17 +180,43 @@ mutation store markStoreReconnected {
   }
 }
 
+/// Record when a connect started the store's recording afresh: its first
+/// connect, or one after an uninstall, a purge, or with no Admin token. The
+/// verdict measures a late check from it.
+///
+/// Server-only, and actor.userId scoping is not the fix: the caller is Connect
+/// Shopify's verified callback writing as the deployment, and what the row
+/// asserts -- that Shopify approved a connect at this time -- is the callback's
+/// to say, never a person's. A client-callable version would let a caller move
+/// the clock a late check is measured from, and hide one.
+@serverOnly
+mutation store markStoreConnected {
+  args {
+    storeId      string!
+    connectedAt  datetime!
+  }
+  update {
+    accept { connectedAt }
+    stamp {
+      id:  args.storeId
+    }
+  }
+}
+
 /// Queue a Shopify privacy request. Server-only: the caller is the
 /// connector reacting to a verified webhook, so actor.userId names
 /// nobody -- and a client-callable version would let a caller queue a
 /// purge of a merchant's whole mirror.
 ///
-/// @createOnly on the lifecycle fields makes a redelivery idempotent: the
-/// id is derived from (store, topic, subject), so Shopify re-sending the
-/// same request lands on the same row without resetting a status the
-/// runner has already moved.
+/// It CREATES the job and changes nothing of one that exists: every field
+/// that says where a job stands, when it is due and which orders it names is
+/// @createOnly. The id is derived from (store, topic, subject), so a second
+/// request lands on the first one's row, and what it does there depends on
+/// how the row stands: the connector reads it and calls reopenComplianceJob
+/// or extendComplianceJob. Called blind on an existing row, this neither
+/// moves a hold nor drops an order.
 @serverOnly
-@createOnly("status", "outcome", "lastError")
+@createOnly("status", "outcome", "lastError", "dueAt", "orderGids", "requestedAt", "deliveryIds")
 mutation complianceJob queueComplianceJob {
   args {
     jobId        string!
@@ -199,9 +225,13 @@ mutation complianceJob queueComplianceJob {
     customerGid  string
     requestId    string
     shopDomain   string
+    orderGids    []string
     dueAt        datetime!
+    requestedAt  datetime
+    deliveryIds  []string
   }
   insert {
+    accept { requestedAt }
     stamp {
       id:          args.jobId
       storeId:     args.storeId
@@ -209,6 +239,8 @@ mutation complianceJob queueComplianceJob {
       customerGid: args.customerGid ?? ""
       requestId:   args.requestId ?? ""
       shopDomain:  args.shopDomain ?? ""
+      orderGids:   args.orderGids ?? []
+      deliveryIds: args.deliveryIds ?? []
       dueAt:       args.dueAt
       status:      "pending"
       outcome:     ""
@@ -217,7 +249,75 @@ mutation complianceJob queueComplianceJob {
   }
 }
 
-/// Record what a privacy job did.
+/// Open a privacy job that is done again, for both passes of its erasure.
+///
+/// A second request for the same erasure -- a customer who asks again, a shop
+/// uninstalled a second time -- lands on the row of the first, which is done.
+/// It is made due again: waiting, with no first pass recorded, after the hold
+/// of the new request (dueAt), naming the orders of both requests. The runner
+/// also calls it, without a dueAt, when a request reached a job while its last
+/// pass ran: the job is not done, and both passes are made again.
+///
+/// Server-only, and actor.userId scoping is not the fix: the caller is the
+/// connector reacting to a verified webhook, or its hourly runner, and
+/// neither has a user at all. `done` is a claim that a legal obligation was
+/// met; taking it back, and with it scheduling a shop's purge again, is for
+/// the code that heard Shopify ask again, never for a caller.
+@serverOnly
+mutation complianceJob reopenComplianceJob {
+  args {
+    jobId        string!
+    dueAt        datetime
+    orderGids    []string
+    requestedAt  datetime
+    deliveryIds  []string
+    outcome      string
+  }
+  update {
+    accept { dueAt, orderGids, requestedAt, deliveryIds, outcome }
+    stamp {
+      id:          args.jobId
+      status:      "pending"
+      scrubbedAt:  ""
+      lastError:   ""
+    }
+  }
+}
+
+/// Record a further request on a privacy job that is waiting or failed: the
+/// orders it names join the job's, and when it was requested is kept. dueAt
+/// is NOT an argument: a redelivery must not push an erasure back, least of
+/// all one waiting for its second pass.
+///
+/// Server-only, and actor.userId scoping is not the fix: the caller is the
+/// connector reacting to a verified webhook, so actor.userId names nobody,
+/// and a job's row belongs to a store and a legal obligation, not to a
+/// person. A client-callable version would let a caller name another
+/// person's orders into somebody's erasure.
+@serverOnly
+mutation complianceJob extendComplianceJob {
+  args {
+    jobId        string!
+    orderGids    []string!
+    requestedAt  datetime!
+    deliveryIds  []string
+  }
+  update {
+    accept { orderGids, requestedAt, deliveryIds }
+    stamp {
+      id:  args.jobId
+    }
+  }
+}
+
+/// Record what one run of a privacy job did.
+///
+/// The runner names only what the run changed, and a field it leaves out
+/// keeps its value. After the FIRST pass of an erasure: status pending,
+/// scrubbedAt, and a dueAt one hour on, for the second pass. When the job is
+/// done: status done and completedAt. When a run failed: status failed and
+/// lastError, with the outcome of an earlier pass and its scrubbedAt left as
+/// they are, so the next run takes the job up where it stands.
 ///
 /// Server-only, and actor.userId scoping is not the fix: the caller is the
 /// connector's hourly runner, which has no user at all -- a job row belongs
@@ -226,16 +326,19 @@ mutation complianceJob queueComplianceJob {
 @serverOnly
 mutation complianceJob recordComplianceJob {
   args {
-    jobId      string!
-    status     string!
-    outcome    string
-    lastError  string
+    jobId        string!
+    status       string!
+    outcome      string
+    lastError    string
+    scrubbedAt   datetime
+    dueAt        datetime
+    completedAt  datetime
+    exportId     string
   }
   update {
-    accept { status, outcome, lastError }
+    accept { status, outcome, lastError, scrubbedAt, dueAt, completedAt, exportId }
     stamp {
-      id:           args.jobId
-      completedAt:  now
+      id:  args.jobId
     }
   }
 }

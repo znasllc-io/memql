@@ -327,6 +327,65 @@ func TestMirroredTypesAreReferencedByGid(t *testing.T) {
 	}
 }
 
+// The DSL type flattens what a value IS: a timestamp, an amount and a name
+// are all `string`. The Admin type is carried beside it, for every kind of
+// field, so a reader of the model can tell a date from a name.
+func TestEveryFieldCarriesItsAdminType(t *testing.T) {
+	p := planFor(t, "thing")
+	for name, want := range map[string]string{
+		"title":           "String",
+		"count":           "Int",
+		"ratio":           "Float",
+		"live":            "Boolean",
+		"blob":            "JSON",
+		"sourceCreatedAt": "DateTime",
+		"state":           "SmallEnum",
+		"currency":        "BigEnum",
+		"price":           "MoneyV2",
+		"totalSet":        "MoneyBag",
+		"address":         "Address",
+		"addresses":       "Address",
+		"tagList":         "String",
+		"widgetGid":       "Widget",
+		"widgetsGids":     "Widget",
+		"tagsGids":        "Tag",
+		"stickerFeed":     "Sticker",
+		"sticky":          "Sticky",
+		"metafields":      "Metafield",
+	} {
+		if got := fieldByName(t, p, name).AdminType; got != want {
+			t.Errorf("%s: Admin type %q, want %q", name, got, want)
+		}
+	}
+	for _, f := range p.Fields {
+		if f.AdminType == "" {
+			t.Errorf("%s carries no Admin type", f.Name)
+		}
+	}
+}
+
+// A nested object that keeps the GID of a mirrored row is about that row. The
+// plan says which mirrored types an object's selection keeps the GID of, at
+// any depth it selects, so a reader of the model can tell without reading the
+// selection.
+func TestAnObjectSaysWhichMirroredRowsItKeepsTheGidOf(t *testing.T) {
+	p := planFor(t, "thing")
+	for name, want := range map[string]string{
+		"sticker":     "Widget", // a field of the nested type
+		"stickers":    "Widget", // the same, in a list
+		"stickerFeed": "Widget", // the same, through a connection of an id-less type
+		"sticky":      "Widget", // a member of a union
+		"address":     "",
+		"price":       "",
+		"widgetGid":   "", // a reference is not an object
+		"title":       "",
+	} {
+		if got := strings.Join(fieldByName(t, p, name).GidsInside, ","); got != want {
+			t.Errorf("%s: keeps the GIDs of %q, want %q", name, got, want)
+		}
+	}
+}
+
 func TestMetafieldsAreKeyedByNamespaceAndKey(t *testing.T) {
 	f := fieldByName(t, planFor(t, "thing"), "metafields")
 	if f.Kind != KindMetafields || f.DSLType != "object" {

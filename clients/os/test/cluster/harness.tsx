@@ -41,6 +41,8 @@ export interface FakeQuery {
   datasyncSetSyncPaused: ReturnType<typeof vi.fn>;
   datasyncRetryOutboxEntry: ReturnType<typeof vi.fn>;
   datasyncDiscardOutboxEntry: ReturnType<typeof vi.fn>;
+  inboundRequestsGivenUp: ReturnType<typeof vi.fn>;
+  datasyncRequeueInbound: ReturnType<typeof vi.fn>;
   allAgents: ReturnType<typeof vi.fn>;
   auditEventsBrowse: ReturnType<typeof vi.fn>;
   outboxDeadLettersBrowse: ReturnType<typeof vi.fn>;
@@ -217,6 +219,8 @@ export function fakeConnection(seed: QuerySeed = {}, modules: ModulesSeed = {}):
       datasyncSetSyncPaused: vi.fn(async () => rowsResult([])),
       datasyncRetryOutboxEntry: vi.fn(async () => rowsResult([])),
       datasyncDiscardOutboxEntry: vi.fn(async () => rowsResult([])),
+      inboundRequestsGivenUp: read("inboundRequestsGivenUp"),
+      datasyncRequeueInbound: vi.fn(async () => rowsResult([])),
       activeAgents: read("activeAgents"),
       agentAuthorizationsForSelf: read("agentAuthorizationsForSelf"),
       recentAuditEvents: read("recentAuditEvents"),
@@ -315,6 +319,33 @@ export function syncStateRow(
     direction: "inbound",
     ...over,
   };
+}
+
+/** A `v1:platform:inboundRequest` delivery that used its four tries, in the
+ *  `inboundRequestBrief` shape `inboundRequestsGivenUp` answers with. */
+export function inboundRequestRow(over: Partial<Row> & { id: string; source: string }): Row {
+  return {
+    status: "failed",
+    attempts: 4,
+    nextAttemptAt: "",
+    lastError: "the Admin API answered 503",
+    receivedAt: "2026-11-01T09:00:00Z",
+    headersJson: "{}",
+    createdAt: "2026-11-01T09:00:00Z",
+    ...over,
+  };
+}
+
+/** A read answered page by page: page `i` is returned for the cursor the page
+ *  before it handed back (`p1`, `p2`, ...), and the last page hands back none.
+ *  What a paginated query does, so a page that stops at the first answer is
+ *  caught. */
+export function pagedRead(pages: Row[][]) {
+  return vi.fn(async (_args: unknown, opts?: { cursor?: string }) => {
+    const at = opts?.cursor ? Number(opts.cursor.slice(1)) : 0;
+    const rows = pages[at] ?? [];
+    return rowsResult(rows, at + 1 < pages.length ? `p${at + 1}` : "");
+  });
 }
 
 /** A `v1:platform:outboxEntry` dead letter. */

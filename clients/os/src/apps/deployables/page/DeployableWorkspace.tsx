@@ -18,7 +18,8 @@ import { storeConnection, storeLabel } from "../store/rows";
 import type { PreviewReadiness } from "../preview/rows";
 import { PreviewSection } from "../preview/PreviewSection";
 import { NO_PARTS, type PartsHeld } from "../parts";
-import { useStore } from "../store/useStore";
+import { useStore, useStoreVerdict } from "../store/useStore";
+import { connectedStoreWord } from "../store/verdict";
 import { DeployTargetChoice, type DeployChoice } from "./DeployTargetChoice";
 
 export type WorkspaceDetail = "source" | "whatItIs" | "whereItLives" | "build" | "runtime" | "statistics" | "statisticsList" | "access" | "store" | "reviews" | "wholesale" | "visit" | "version";
@@ -126,11 +127,16 @@ function DomainPiece({ site, onClick }: { site: SiteRow; onClick: () => void }) 
  * labelled "Store" tells them only that a binding exists, which they can see
  * from the slot being drawn at all.
  *
- * FOUR STATES AND THEY ARE DIFFERENT ANSWERS. Nothing bound reads Not
+ * FOUR STATES AND THEY ARE DIFFERENT ANSWERS, and a connected store's is
+ * the verdict's word. Nothing bound reads Not
  * connected. Publication and Shopify connection are independent.
  * A read in flight says so. A store that reads back gets its domain and its
  * state. A store that does not read back is NOT drawn as unbound -- that
  * would hide a real misconfiguration behind a state that looks deliberate.
+ * It reads "Store unavailable", as the Store page and the Visit page do, and
+ * never "not on this cluster": the store row answers zero rows to a caller
+ * below developer (D3), so an empty read cannot tell a store that is gone from
+ * one this caller may not read.
  */
 function StorePiece({ storeId, testingId, siteId, onClick, readiness }: { storeId: string; testingId: string; siteId: string; onClick: () => void; readiness: PreviewReadiness | null }) {
   const bound = useStore(storeId);
@@ -142,18 +148,25 @@ function StorePiece({ storeId, testingId, siteId, onClick, readiness }: { storeI
   // until the engine has answered, and never Connected by default.
   const served = readiness === null ? null : storeId ? readiness.storeHasStorefrontToken : readiness.previewStoreHasStorefrontToken;
   const state = connection.store === null ? null : storeConnection(connection.store, served);
-  const word = state === "connected" ? "Connected" : state === "uninstalled" ? "Uninstalled" : state === "redacted" ? "Data removed" : state === "unknown" || state === null ? "" : "Setup needed";
+  // WHERE THE STORE IS CONNECTED, THE VERDICT SAYS WHETHER IT IS RECORDED
+  // (U7): Recording, Starting, Paused, Needs attention, or Not connected over a
+  // row that still reads connected; "Status unknown" when it could not be read
+  // or named no state. Never "Connected" (ruling 39).
+  const verdict = useStoreVerdict(storeId || testingId);
+  const connectedWord = connectedStoreWord(verdict.verdict, verdict.state);
+  const word = state === "connected" ? connectedWord : state === "uninstalled" ? "Uninstalled" : state === "redacted" ? "Data removed" : state === "unknown" || state === null ? "" : "Setup needed";
+  const pending = state === "unknown" || (state === "connected" && connectedWord === "");
   const detail =
     !storeId && !testingId
       ? "Not connected"
       : connection.state === "failed"
         ? "The store could not be read"
         : connection.store !== null
-          ? <>{[storeLabel(connection.store), storeId ? "" : "Testing", connection.store.isDevelopment ? "Sandbox" : "", word].filter((part) => part !== "").join(" \u00b7 ")}{state === "unknown" ?  <InlineSkeleton label="Loading store status" /> : null}</>
+          ? <>{[storeLabel(connection.store), storeId ? "" : "Testing", connection.store.isDevelopment ? "Sandbox" : "", word].filter((part) => part !== "").join(" \u00b7 ")}{pending ? <InlineSkeleton label="Loading store status" /> : null}</>
           : connection.state === "read"
-            ? "Names a store that is not on this cluster"
+            ? "Store unavailable"
             : <InlineSkeleton label="Loading store" />;
-  const needsSetup = (!storeId && !testingId) || connection.state === "failed" || (connection.state === "read" && state !== null && state !== "connected" && state !== "unknown");
+  const needsSetup = (!storeId && !testingId) || connection.state === "failed" || (connection.state === "read" && state !== null && state !== "connected" && state !== "unknown") || (state === "connected" && verdict.verdict?.state === "needs attention");
   return <ActivityTarget target={`deployables:${siteId}:store`}><button type="button" className="deployable-slot" onClick={onClick} data-os-setup={needsSetup ? "" : undefined}><ShoppingBag size={18} aria-hidden /><span><strong>Store</strong><small>{detail}</small></span><ChevronRight size={13} aria-hidden /></button></ActivityTarget>;
 }
 

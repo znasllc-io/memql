@@ -80,7 +80,7 @@ func TestAnUninstallDisconnectsAcrossNodesAndAReinstallRestoresTheStore(t *testi
 	storefront := newFakeStorefront(t)
 	conn := func(e *memql.MemQLEngine, db *sql.DB) *Connector {
 		c := NewConnector(e, nil, NewStoreRegistry(e, e.ResolveSystemSecret), NewAdminClient())
-		c.WithDatabase(func() *sql.DB { return db })
+		c.WithDatabase(func() *sql.DB { return db }).WithMaintenanceSession(privacySessionOf(db))
 		c.background = func(func()) {}
 		c.connectTokenURL = func(string) string { return token.URL }
 		c.admin.endpoint = func(Store) string { return admin.server.URL + "/graphql" }

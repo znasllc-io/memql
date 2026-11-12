@@ -2742,7 +2742,30 @@ func CompanyLocationNoteForBuild(args CompanyLocationNoteForArgs) string {
 	return b.String()
 }
 
-// ComplianceJobsDue -- Privacy jobs whose hold has elapsed. The read the hourly runner makes.
+// ComplianceJobById -- One privacy job by its row id, with the row's version. What the connector reads before it writes a job's row: a request that lands on a job, and the runner when it takes one.
+//
+// Bound concept: v1:shopify:complianceJob (machine-readable: BoundConcepts["complianceJobById"] in generated_concepts.go).
+type ComplianceJobByIdArgs struct {
+	JobId string
+}
+
+// ComplianceJobById calls the engine query complianceJobById.
+func (qc *QueryClient) ComplianceJobById(ctx context.Context, args ComplianceJobByIdArgs) (*Result, error) {
+	call := ComplianceJobByIdBuild(args)
+	return qc.executeNamed(ctx, "complianceJobById", call)
+}
+
+func ComplianceJobByIdBuild(args ComplianceJobByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query complianceJobById(")
+	b.WriteString("jobId: ")
+	b.WriteString(quoteMemQL(args.JobId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ComplianceJobsDue -- Privacy jobs that are due. The read the hourly runner makes, page by page.
+// Three kinds of job, all of them only once their dueAt has come: one that is waiting (for its hold, or for the second pass of its erasure); one that failed, which is run again at every run until it is done; and a customers/redact job that is done and carries no scrubbedAt. That last was recorded done by a version whose erasure left a customer's email address and phone number behind and never reached an order's children, so it is made again, once: its first pass under this version sets scrubbedAt.
 //
 // Bound concept: v1:shopify:complianceJob (machine-readable: BoundConcepts["complianceJobsDue"] in generated_concepts.go).
 type ComplianceJobsDueArgs struct {
@@ -2760,6 +2783,34 @@ func ComplianceJobsDueBuild(args ComplianceJobsDueArgs) string {
 	b.WriteString("query complianceJobsDue(")
 	b.WriteString("asOf: ")
 	b.WriteString(quoteMemQL(args.AsOf))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ComplianceJobsFailingForStore -- A store's privacy jobs that are failed and were due before a given time, oldest due first. The store's verdict reads its first page to say that a privacy request for the store could not be completed, how many, and since when; it asks for those due more than a day ago.
+//
+// Bound concept: v1:shopify:complianceJob (machine-readable: BoundConcepts["complianceJobsFailingForStore"] in generated_concepts.go).
+type ComplianceJobsFailingForStoreArgs struct {
+	StoreId   string
+	DueBefore string
+}
+
+// ComplianceJobsFailingForStore calls the engine query complianceJobsFailingForStore.
+func (qc *QueryClient) ComplianceJobsFailingForStore(ctx context.Context, args ComplianceJobsFailingForStoreArgs) (*Result, error) {
+	call := ComplianceJobsFailingForStoreBuild(args)
+	return qc.executeNamed(ctx, "complianceJobsFailingForStore", call)
+}
+
+func ComplianceJobsFailingForStoreBuild(args ComplianceJobsFailingForStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query complianceJobsFailingForStore(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("dueBefore: ")
+	b.WriteString(quoteMemQL(args.DueBefore))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2782,6 +2833,40 @@ func ComplianceJobsForStoreBuild(args ComplianceJobsForStoreArgs) string {
 	b.WriteString("query complianceJobsForStore(")
 	b.WriteString("storeId: ")
 	b.WriteString(quoteMemQL(args.StoreId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ComplianceJobsOfCustomer -- The privacy jobs of one topic for one customer of one store, newest first. A customer's erasure reads her data requests through it, to remove the exports they filed: each such job says what it filed (exportId).
+//
+// Bound concept: v1:shopify:complianceJob (machine-readable: BoundConcepts["complianceJobsOfCustomer"] in generated_concepts.go).
+type ComplianceJobsOfCustomerArgs struct {
+	StoreId     string
+	Topic       string
+	CustomerGid string
+}
+
+// ComplianceJobsOfCustomer calls the engine query complianceJobsOfCustomer.
+func (qc *QueryClient) ComplianceJobsOfCustomer(ctx context.Context, args ComplianceJobsOfCustomerArgs) (*Result, error) {
+	call := ComplianceJobsOfCustomerBuild(args)
+	return qc.executeNamed(ctx, "complianceJobsOfCustomer", call)
+}
+
+func ComplianceJobsOfCustomerBuild(args ComplianceJobsOfCustomerArgs) string {
+	var b strings.Builder
+	b.WriteString("query complianceJobsOfCustomer(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("topic: ")
+	b.WriteString(quoteMemQL(args.Topic))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("customerGid: ")
+	b.WriteString(quoteMemQL(args.CustomerGid))
 	b.WriteString(")")
 	return b.String()
 }
@@ -4872,6 +4957,81 @@ func InboundRequestsByStatusBuild(args InboundRequestsByStatusArgs) string {
 	b.WriteString("query inboundRequestsByStatus(")
 	b.WriteString("status: ")
 	b.WriteString(quoteMemQL(args.Status))
+	b.WriteString(")")
+	return b.String()
+}
+
+// InboundRequestsDueForRetry -- The failed deliveries whose next try has come, least recently written first (the sort is the latest version's creation time, which every claim and stamp moves): what the datasync retry pass (retryFailedInboundDeliveries) works each minute. A row with no nextAttemptAt -- refused for a reason no retry changes -- and a row at four tries are never answered. One bounded page; the next minute's pass takes the rest. The full shape, because a retry needs the body.
+// Read through the failed-delivery lookup (memory_nodes_inbound_failed_lookup_idx), which the `status == "failed"` conjunct engages: the read enumerates the deliveries that ever failed, never the inbox.
+//
+// Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["inboundRequestsDueForRetry"] in generated_concepts.go).
+type InboundRequestsDueForRetryArgs struct {
+	AsOf string
+}
+
+// InboundRequestsDueForRetry calls the engine query inboundRequestsDueForRetry.
+func (qc *QueryClient) InboundRequestsDueForRetry(ctx context.Context, args InboundRequestsDueForRetryArgs) (*Result, error) {
+	call := InboundRequestsDueForRetryBuild(args)
+	return qc.executeNamed(ctx, "inboundRequestsDueForRetry", call)
+}
+
+func InboundRequestsDueForRetryBuild(args InboundRequestsDueForRetryArgs) string {
+	var b strings.Builder
+	b.WriteString("query inboundRequestsDueForRetry(")
+	b.WriteString("asOf: ")
+	b.WriteString(quoteMemQL(args.AsOf))
+	b.WriteString(")")
+	return b.String()
+}
+
+// InboundRequestsGivenUp -- The failed deliveries that used their four tries, most recently written first, of one source when one is named: what an operator puts back in line with datasyncRequeueInbound. Without the body. Read through the failed-delivery lookup, as inboundRequestsDueForRetry is.
+//
+// Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["inboundRequestsGivenUp"] in generated_concepts.go).
+type InboundRequestsGivenUpArgs struct {
+	Source string
+}
+
+// InboundRequestsGivenUp calls the engine query inboundRequestsGivenUp.
+func (qc *QueryClient) InboundRequestsGivenUp(ctx context.Context, args InboundRequestsGivenUpArgs) (*Result, error) {
+	call := InboundRequestsGivenUpBuild(args)
+	return qc.executeNamed(ctx, "inboundRequestsGivenUp", call)
+}
+
+func InboundRequestsGivenUpBuild(args InboundRequestsGivenUpArgs) string {
+	var b strings.Builder
+	b.WriteString("query inboundRequestsGivenUp(")
+	if args.Source != "" {
+		b.WriteString("source: ")
+		b.WriteString(quoteMemQL(args.Source))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// InboundRequestsHeld -- The HELD deliveries of one source, least recently written first: failed, with no next try, and their lastError exactly the reason named. The reason is the connector contract's own sentence for a delivery of a store whose recording is paused; the datasync dispatcher writes it as it is, with the try not counted, and nothing else writes it. Such a row is answered by neither inboundRequestsDueForRetry (it has no next try) nor inboundRequestsGivenUp (its tries are below four): it waits, and datasyncReturnHeldInbound puts what this answers back in line when the store resumes. Without the body. Read through the failed-delivery lookup, as both of those are.
+//
+// Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["inboundRequestsHeld"] in generated_concepts.go).
+type InboundRequestsHeldArgs struct {
+	Source string
+	Reason string
+}
+
+// InboundRequestsHeld calls the engine query inboundRequestsHeld.
+func (qc *QueryClient) InboundRequestsHeld(ctx context.Context, args InboundRequestsHeldArgs) (*Result, error) {
+	call := InboundRequestsHeldBuild(args)
+	return qc.executeNamed(ctx, "inboundRequestsHeld", call)
+}
+
+func InboundRequestsHeldBuild(args InboundRequestsHeldArgs) string {
+	var b strings.Builder
+	b.WriteString("query inboundRequestsHeld(")
+	b.WriteString("source: ")
+	b.WriteString(quoteMemQL(args.Source))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("reason: ")
+	b.WriteString(quoteMemQL(args.Reason))
 	b.WriteString(")")
 	return b.String()
 }
@@ -14350,6 +14510,28 @@ func SurfacesForOwnerBuild(args SurfacesForOwnerArgs) string {
 	return "query surfacesForOwner()"
 }
 
+// SyncStateById -- One domain's health by its row id -- what the runtime reads. By id, not by its fields: the id is derived from (concept, connector, direction) and the partition, and a row written before partitions has no partitionKey, so matching an absent field against "" is not a rule to rely on.
+//
+// Bound concept: v1:platform:syncState (machine-readable: BoundConcepts["syncStateById"] in generated_concepts.go).
+type SyncStateByIdArgs struct {
+	StateId string
+}
+
+// SyncStateById calls the engine query syncStateById.
+func (qc *QueryClient) SyncStateById(ctx context.Context, args SyncStateByIdArgs) (*Result, error) {
+	call := SyncStateByIdBuild(args)
+	return qc.executeNamed(ctx, "syncStateById", call)
+}
+
+func SyncStateByIdBuild(args SyncStateByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query syncStateById(")
+	b.WriteString("stateId: ")
+	b.WriteString(quoteMemQL(args.StateId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SyncStateFor -- Health for one (concept, connector, direction). Sorted newest-first because the row id is deterministic per domain, so the append-only history IS the health timeline and the caller wants its tip.
 //
 // Bound concept: v1:platform:syncState (machine-readable: BoundConcepts["syncStateFor"] in generated_concepts.go).
@@ -14384,11 +14566,12 @@ func SyncStateForBuild(args SyncStateForArgs) string {
 	return b.String()
 }
 
-// SyncStatesAll -- Every domain's health -- the Data origins page's health half.
+// SyncStatesAll -- Every domain's health -- the Data origins page's health half. `partitionKey` narrows to one tenant of a partitioned connector when given.
 //
 // Bound concept: v1:platform:syncState (machine-readable: BoundConcepts["syncStatesAll"] in generated_concepts.go).
 type SyncStatesAllArgs struct {
-	Connector string
+	Connector    string
+	PartitionKey string
 }
 
 // SyncStatesAll calls the engine query syncStatesAll.
@@ -14403,6 +14586,13 @@ func SyncStatesAllBuild(args SyncStatesAllArgs) string {
 	if args.Connector != "" {
 		b.WriteString("connector: ")
 		b.WriteString(quoteMemQL(args.Connector))
+	}
+	if args.PartitionKey != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("partitionKey: ")
+		b.WriteString(quoteMemQL(args.PartitionKey))
 	}
 	b.WriteString(")")
 	return b.String()

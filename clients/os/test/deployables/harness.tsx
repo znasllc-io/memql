@@ -180,6 +180,38 @@ export interface FakeSeed {
   bindStoreError?: string;
   setStoreStatusError?: string;
   ensureSubscriptionsError?: string;
+  /**
+   * The `shopifyStoreVerdict` reply, keyed by store id (`storeVerdictRow`).
+   *
+   * ABSENT IS AN ENGINE WITH NO SHOPIFY CONNECTOR: a store with no entry is
+   * answered `{status: "unconfigured"}`, which is what the handler replies
+   * then, and which names no state.
+   */
+  storeVerdict?: Record<string, Row>;
+  /** Fails every `shopifyStoreVerdict` read with this server message. */
+  storeVerdictError?: string;
+  /**
+   * What `shopifyStoreRegisterEvents` answers instead of a clean pass: the
+   * handler REPLIES `{status: "failed", detail}` when Shopify refused a
+   * topic or the subscriptions could not be read, and `{status:
+   * "unconfigured"}` with no connector -- neither is thrown.
+   */
+  storeRegisterEventsReply?: Row;
+  /** What `shopifyStoreRetryDeliveries` answers instead of `requeued`. */
+  storeRetryDeliveriesReply?: Row;
+  /**
+   * Fails every `shopifyStoreSetRecording` -- the Store page's Pause recording
+   * and Resume -- with this server message. Absent, it answers as the handler
+   * does: `{status, storeId}`, live for a resume and paused for a pause.
+   */
+  storeSetRecordingError?: string;
+  /**
+   * What `shopifyStoreAlertWait` answers, and what `shopifyStoreAlertWaitSet`
+   * changes. Absent is the unset wait read by somebody who may not set it.
+   * A set is refused as the engine refuses it: anybody `maySet` is not true
+   * for, and any value that is not a whole number from 1 to 1440.
+   */
+  storeAlertWait?: Row;
   artifacts?: Row[];
   /** v1:platform:customDomain rows the domains feed seeds with. */
   domains?: Row[];
@@ -517,6 +549,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
     if (String(site["ownerUserId"] ?? "") === "") refuse("This deployable has no owner, so this access code opens nothing. Give it an owner and try again, or remove the code.");
   };
   const artifacts = seed.artifacts ?? [];
+  let alertWait: Row = seed.storeAlertWait ?? ({ minutes: 30, isDefault: true, maySet: false } as unknown as Row);
   const domains = seed.domains ?? [];
   const installationRows = (credentialId: string): Row[] => {
     const explicit = seed.sourceInstallations?.[credentialId]?.["installations"];
@@ -1010,6 +1043,47 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         if (seed.ensureSubscriptionsError !== undefined) throw new Error(seed.ensureSubscriptionsError);
         return builtinReply("shopifyEnsureSubscriptions", []);
       }
+      // THE VERDICT AND ITS ACTS (U7). The read answers what the seed holds for
+      // the store, and the two acts answer as the handlers do; what reached the
+      // wire is in `calls`, which is how a test counts them.
+      if (call.startsWith("builtin shopifyStoreVerdict(")) {
+        if (seed.storeVerdictError !== undefined) throw new Error(seed.storeVerdictError);
+        const id = /storeId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        return builtinReply("shopifyStoreVerdict", [seed.storeVerdict?.[id] ?? ({ status: "unconfigured" } as unknown as Row)]);
+      }
+      if (call.startsWith("builtin shopifyStoreRegisterEvents(")) {
+        const id = /storeId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        if (seed.storeRegisterEventsReply !== undefined) return builtinReply("shopifyStoreRegisterEvents", [seed.storeRegisterEventsReply]);
+        return builtinReply("shopifyStoreRegisterEvents", [{ status: "registered", detail: "", storeId: id, desired: 12, existing: 12, created: [], failed: [] } as unknown as Row]);
+      }
+      if (call.startsWith("builtin shopifyStoreRetryDeliveries(")) {
+        const id = /storeId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        if (seed.storeRetryDeliveriesReply !== undefined) return builtinReply("shopifyStoreRetryDeliveries", [seed.storeRetryDeliveriesReply]);
+        return builtinReply("shopifyStoreRetryDeliveries", [{ status: "requeued", storeId: id, source: `shopify-${id}` } as unknown as Row]);
+      }
+      if (call.startsWith("builtin shopifyStoreSetRecording(")) {
+        if (seed.storeSetRecordingError !== undefined) throw new Error(seed.storeSetRecordingError);
+        const id = /storeId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        // As the handler refuses: a store that neither ingests (configured,
+        // backfilling, live) nor is paused, or one uninstalled or purged.
+        const held = (seed.stores ?? []).find((row) => row["id"] === id);
+        const status = String(held?.["status"] ?? "");
+        if (held === undefined || held["uninstalledAt"] || held["redactedAt"] || !["configured", "backfilling", "live", "paused"].includes(status)) {
+          throw new Error("shopify: a store that is not connected cannot be paused or resumed");
+        }
+        const recording = /recording: (true|false)/.exec(call)?.[1] === "true";
+        return builtinReply("shopifyStoreSetRecording", [{ status: recording ? "live" : "paused", storeId: id } as unknown as Row]);
+      }
+      if (call.startsWith("builtin shopifyStoreAlertWait(")) {
+        return builtinReply("shopifyStoreAlertWait", [alertWait]);
+      }
+      if (call.startsWith("builtin shopifyStoreAlertWaitSet(")) {
+        if (alertWait["maySet"] !== true) throw new Error("shopify: shopifyStoreAlertWaitSet is reserved to a cluster owner");
+        const minutes = Number(/minutes: ([^,)]*)/.exec(call)?.[1] ?? "");
+        if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) throw new Error("shopify: the alert wait is a whole number of minutes from 1 to 1440");
+        alertWait = { minutes, isDefault: false, maySet: true } as unknown as Row;
+        return builtinReply("shopifyStoreAlertWaitSet", [alertWait]);
+      }
 
       if (call === "query sourceConnectionsMine()") {
         if (seed.sourceConnectionsError) throw new Error(seed.sourceConnectionsError);
@@ -1394,6 +1468,35 @@ export function storeHealthRow(over: Partial<Row> & { storeId: string }): Row {
     health: {},
     ...over,
   } as unknown as Row;
+}
+
+/**
+ * One store's `shopifyStoreVerdict` reply, with the keys the Go handler emits
+ * (`integrations/shopify/verdict_capabilities.go`, `verdictPayload` plus
+ * `alert` and `may`). A store being recorded, whose caller may act on it,
+ * with nothing listed: what each case changes is what it is about.
+ */
+export function storeVerdictRow(over: Partial<Row> & { storeId: string }): Row {
+  return {
+    domain: `${over.storeId}.myshopify.com`,
+    state: "recording",
+    since: "2026-11-10T08:00:00Z",
+    resumedAt: "",
+    connectedAt: "2026-11-01T08:00:00Z",
+    reasons: [],
+    recorded: [],
+    outside: [],
+    withheld: [],
+    ordersFrom: "",
+    alert: { state: "none", reason: "" },
+    may: { act: true },
+    ...over,
+  } as unknown as Row;
+}
+
+/** One reason of a verdict, as `verdictPayload` emits it. */
+export function verdictReasonRow(over: Partial<Row> & { code: string; sentence: string }): Row {
+  return { domain: "", detail: "", count: 0, atLeast: false, act: "", actLabel: "", actUrl: "", ...over } as unknown as Row;
 }
 
 /** One row of a store's per-domain sync table. */

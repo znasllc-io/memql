@@ -9,6 +9,7 @@ query ShopifyBulkInventoryItem($query: String) {
     edges {
       node {
         id
+        updatedAt
         countryCodeOfOrigin
         duplicateSkuCount
         harmonizedSystemCode
@@ -27,6 +28,7 @@ query ShopifyBulkInventoryItem($query: String) {
           edges {
             node {
             id
+            updatedAt
             canDeactivate
             deactivationAlert
             isActive

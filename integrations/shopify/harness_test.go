@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	stdsync "sync"
 	"testing"
@@ -14,6 +15,7 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/integrations/shopify/generated"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -151,6 +153,17 @@ type fakeAdmin struct {
 	status    map[string]int
 	throttle  ThrottleStatus
 	downloads map[string]string
+	// replyFns answers an operation from its variables, ahead of replies:
+	// a paged answer whose every page differs.
+	replyFns map[string]func(vars map[string]any) any
+	// bulkDocuments are the bulk queries the fake was asked to run, in order:
+	// what a download it serves answers.
+	bulkDocuments []string
+	// unselected is told of every version field a scripted reply or a served
+	// bulk line carried that the document did not select (answerSelected).
+	// It fails the test; TestTheFakeAdminRefusesAVersionTheDocumentDidNotSelect
+	// replaces it to watch it fire.
+	unselected func(message string)
 }
 
 type adminRequest struct {
@@ -171,6 +184,7 @@ func newFakeAdmin(t *testing.T) *fakeAdmin {
 		downloads: map[string]string{},
 		throttle:  ThrottleStatus{MaximumAvailable: 2000, CurrentlyAvailable: 1800, RestoreRate: 100},
 	}
+	f.unselected = func(message string) { t.Errorf("%s", message) }
 	mux := http.NewServeMux()
 	mux.HandleFunc("/graphql", f.serveGraphQL)
 	mux.HandleFunc("/download/", f.serveDownload)
@@ -197,7 +211,19 @@ func (f *fakeAdmin) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 		Operation: op, Query: body.Query, Variables: body.Variables,
 		Token: r.Header.Get("X-Shopify-Access-Token"),
 	})
+	fn := f.replyFns[op]
+	f.mu.Unlock()
+	// Called outside the lock, so an answer may itself call the origin: a
+	// delivery that lands while a sweep's page is out.
+	var fnReply any
+	if fn != nil {
+		fnReply = fn(body.Variables)
+	}
+	f.mu.Lock()
 	reply, hasReply := f.replies[op]
+	if fn != nil {
+		reply, hasReply = fnReply, true
+	}
 	errs := f.errors[op]
 	if queue := f.errorOnce[op]; len(queue) > 0 {
 		// One refused answer per queued entry, then the scripted reply:
@@ -217,9 +243,20 @@ func (f *fakeAdmin) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if op == "ShopifyBulkRun" {
+		if document, ok := body.Variables["query"].(string); ok {
+			f.bulkDocuments = append(f.bulkDocuments, document)
+		}
+	}
 	status := f.status[op]
 	throttle := f.throttle
+	unselected := f.unselected
 	f.mu.Unlock()
+	if hasReply {
+		reply = answerSelected(reply, []string{body.Query}, func(field string) {
+			unselected(fmt.Sprintf("fake Admin: the reply scripted for %s carries %s, which the document it was sent does not select", op, field))
+		})
+	}
 
 	if status != 0 && status != http.StatusOK {
 		w.WriteHeader(status)
@@ -248,12 +285,193 @@ func (f *fakeAdmin) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 func (f *fakeAdmin) serveDownload(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	body, ok := f.downloads[r.URL.Path]
+	documents := append([]string(nil), f.bulkDocuments...)
+	unselected := f.unselected
 	f.mu.Unlock()
 	if !ok {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	_, _ = w.Write([]byte(body))
+	if len(documents) == 0 {
+		// A test that resumes from a cursor naming the download never had the
+		// fake start its operation; the line answers the export the generated
+		// bulk documents would run.
+		for _, spec := range generated.Types {
+			if spec.BulkDocument != "" {
+				documents = append(documents, spec.BulkDocument)
+			}
+		}
+	}
+	var out strings.Builder
+	for _, line := range strings.Split(body, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var obj any
+		dec := json.NewDecoder(strings.NewReader(line))
+		dec.UseNumber()
+		if err := dec.Decode(&obj); err != nil {
+			out.WriteString(line + "\n")
+			continue
+		}
+		raw, _ := json.Marshal(answerSelected(obj, documents, func(field string) {
+			unselected(fmt.Sprintf("fake Admin: a bulk line served from %s carries %s, which no bulk document it was sent selects", r.URL.Path, field))
+		}))
+		out.Write(raw)
+		out.WriteByte('\n')
+	}
+	_, _ = w.Write([]byte(out.String()))
+}
+
+// versionFields are the Admin fields a mirrored type's version is read from.
+var versionFields = []string{"updatedAt", "createdAt"}
+
+// answerSelected is a reply as the origin would send it: a version field the
+// documents do not select AT THAT OBJECT'S PATH is not in it. A scripted reply
+// that carries one is told to `unselected`, once per field, because a fake
+// that answers what was never asked for is how the mirror stamped its own
+// clock for months with a green suite: every generated document left
+// updatedAt out, and every fake handed it back anyway.
+//
+// The path is the reply's keys from the root (an array adds nothing), read
+// against the document's selection sets (selectionSets). A bulk line carries
+// no path: a parent line (no __parentId) is checked against the sets of the
+// documents' top-level nodes, a child line against any nested set. That is
+// coarser than a fetch's check -- a child line is answered a version any
+// child of the export selects -- and TestEveryDocumentSelectsItsTypesVersionField
+// in cmd/shopifyschema is the guard that each type's own set selects its own.
+func answerSelected(reply any, documents []string, unselected func(field string)) any {
+	sets := map[string]map[string]bool{}
+	for _, document := range documents {
+		for path, fields := range selectionSets(document) {
+			if sets[path] == nil {
+				sets[path] = map[string]bool{}
+			}
+			for f := range fields {
+				sets[path][f] = true
+			}
+		}
+	}
+	told := map[string]bool{}
+	tell := func(field string) {
+		if !told[field] {
+			told[field] = true
+			unselected(field)
+		}
+	}
+	var strip func(v any, path string, selected func(path, field string) bool) any
+	strip = func(v any, path string, selected func(path, field string) bool) any {
+		switch x := v.(type) {
+		case map[string]any:
+			if x == nil {
+				return nil
+			}
+			out := make(map[string]any, len(x))
+			for k, item := range x {
+				if slices.Contains(versionFields, k) && !selected(path, k) {
+					tell(k)
+					continue
+				}
+				out[k] = strip(item, path+"/"+k, selected)
+			}
+			return out
+		case []any:
+			out := make([]any, len(x))
+			for i, item := range x {
+				out[i] = strip(item, path, selected)
+			}
+			return out
+		}
+		return v
+	}
+	exact := func(path, field string) bool { return sets[path][field] }
+	if line, ok := reply.(map[string]any); ok && isBulkLine(documents) {
+		_, child := line["__parentId"]
+		return strip(line, "", func(path, field string) bool {
+			if path != "" {
+				return false
+			}
+			for set, fields := range sets {
+				depth := strings.Count(set, "/")
+				if fields[field] && strings.HasSuffix(set, "/edges/node") && (depth == 3) != child {
+					return true
+				}
+				if fields[field] && child && depth > 3 {
+					return true
+				}
+			}
+			return false
+		})
+	}
+	return strip(reply, "", exact)
+}
+
+// isBulkLine reports whether the documents are bulk queries: their root
+// connection is read through edges, never pageInfo.
+func isBulkLine(documents []string) bool {
+	for _, d := range documents {
+		if !strings.Contains(d, "edges {") || strings.Contains(d, "pageInfo") {
+			return false
+		}
+	}
+	return len(documents) > 0
+}
+
+// selectionSets reads a document the generator emitted -- one field per line,
+// a set opened by a line ending in "{" and closed by a lone "}" -- into the
+// direct fields of each selection set, keyed by the path of field names from
+// the operation's root ("/node", "/orders/nodes", "/orders/edges/node"). An
+// inline fragment ("... on Order {") adds nothing to the path. A field with
+// its set on the same line is a field of its parent; its own set is not read.
+func selectionSets(document string) map[string]map[string]bool {
+	sets := map[string]map[string]bool{}
+	var stack []string // "" for an operation or a fragment
+	path := func() string {
+		var b strings.Builder
+		for _, name := range stack {
+			if name != "" {
+				b.WriteString("/" + name)
+			}
+		}
+		return b.String()
+	}
+	add := func(field string) {
+		key := path()
+		if sets[key] == nil {
+			sets[key] = map[string]bool{}
+		}
+		sets[key][field] = true
+	}
+	for _, raw := range strings.Split(document, "\n") {
+		line := strings.TrimSpace(raw)
+		switch {
+		case line == "" || strings.HasPrefix(line, "#"):
+		case line == "}":
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		case strings.HasSuffix(line, "{"):
+			opening := strings.TrimSpace(strings.TrimSuffix(line, "{"))
+			switch {
+			case len(stack) == 0, strings.HasPrefix(opening, "..."):
+				stack = append(stack, "")
+			default:
+				name := opening
+				if k := strings.IndexAny(name, "( "); k > 0 {
+					name = name[:k]
+				}
+				add(name)
+				stack = append(stack, name)
+			}
+		default:
+			name := line
+			if k := strings.IndexAny(name, "( {"); k > 0 {
+				name = name[:k]
+			}
+			add(name)
+		}
+	}
+	return sets
 }
 
 // failOnce answers the NEXT request for op with errs and no data, and the
@@ -284,6 +502,16 @@ func (f *fakeAdmin) denyField(op, field string, data any) {
 func (f *fakeAdmin) fail(op string, errs ...GraphQLError) {
 	f.mu.Lock()
 	f.errors[op] = errs
+	f.mu.Unlock()
+}
+
+// replyWith answers op from each request's variables.
+func (f *fakeAdmin) replyWith(op string, fn func(vars map[string]any) any) {
+	f.mu.Lock()
+	if f.replyFns == nil {
+		f.replyFns = map[string]func(map[string]any) any{}
+	}
+	f.replyFns[op] = fn
 	f.mu.Unlock()
 }
 

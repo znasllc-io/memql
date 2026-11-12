@@ -29,10 +29,19 @@ concept giftCard {
   gid        string!
   /// The ORIGIN's version. A write whose updatedAt is older than the stored one is refused as stale.
   updatedAt  datetime!
-  /// When MemQL last wrote a change to this row: a delivery, or a reconciliation pass that found it different. A pass that
+  /// Where updatedAt came from: "origin", Shopify's own version; "read", a time MemQL read Shopify -- for a row
+  /// Shopify publishes no version for, and for a tombstone MemQL concluded from its reads, whose standing is when it was
+  /// read (syncedAt), not a version; or "announced", a tombstone of a delete Shopify sent, whose standing is its receipt.
+  /// Counted only beside versionReadAt equal to syncedAt; otherwise the row was written before every write said, and the
+  /// guard reads it as holding no version.
+  versionSource string
+  /// When MemQL read Shopify for the write that last changed this row, on MemQL's clock: the fetch, the page, the start of a
+  /// relist's listing or of a bulk export, the receipt of a delete. Whether the record exists is judged by it. A pass that
   /// finds the row unchanged writes nothing, so this is not when it was last checked; the domain's sync state (lastReconcileAt) is.
   syncedAt   datetime!
-  /// Tombstone. A delete topic, or a fetch that finds nothing, sets it; the row and its history stay.
+  /// The syncedAt of the write that set versionSource, which that marker counts beside.
+  versionReadAt string
+  /// Tombstone. A delete topic, a clean fetch that finds nothing, or a relist that does not list the row sets it; the row and its history stay.
   deleted    bool
   /// Admin GraphQL balance. Money: {amount, currencyCode}.
   balance                    object

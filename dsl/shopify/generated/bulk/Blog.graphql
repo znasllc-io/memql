@@ -9,6 +9,7 @@ query ShopifyBulkBlog($query: String) {
     edges {
       node {
         id
+        updatedAt
         articlesCount { count precision }
         commentPolicy
         feed { location path }
@@ -22,6 +23,7 @@ query ShopifyBulkBlog($query: String) {
           edges {
             node {
             id
+            updatedAt
             author { name }
             blog { id }
             body

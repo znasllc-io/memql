@@ -106,7 +106,7 @@ func TestHandlerStillStagesABodyWithoutANul(t *testing.T) {
 //     includes NUL, and answers 400.
 //   - requestID    sha256 hex.
 //   - source name  must be a key of cfg.Sources, so operator-controlled.
-//   - receivedAt   RFC3339 from the clock.
+//   - receivedAt   RFC3339 (to the nanosecond) from the clock.
 //   - contentType  taken straight from the header with no gate in THIS package
 //     -- and unreachable anyway, because Go's HTTP server refuses a
 //     header value containing NUL before the handler runs.

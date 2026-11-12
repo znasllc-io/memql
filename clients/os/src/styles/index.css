@@ -11380,6 +11380,13 @@ a.os-button {
  * Data origins: the dead-letter band
  * ------------------------------------------------------------------------- */
 
+/* One store's domains, and its closed "Not part of this connection" line,
+   read as one group: space after it, never a rule, so the line does not read
+   as the next store's. */
+.os-cluster-partition + .os-cluster-partition {
+  margin-top: 16px;
+}
+
 .os-cluster-band {
   display: flex;
   flex-direction: column;

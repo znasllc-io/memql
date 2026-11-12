@@ -20,13 +20,54 @@ const managedClientID = "SHOPIFY_CONNECT_CLIENT_ID"
 const managedClientSecret = "SHOPIFY_CONNECT_CLIENT_SECRET"
 const managedInstallURL = "SHOPIFY_CONNECT_INSTALL_URL"
 
-// Shared storefront connections need commerce access, not the complete mirror's
-// finance, staff, payment-method and historical-order permissions.
-// Product-content delivery writes product metafields; write_products includes
-// catalog reads and is the only Admin write scope this connection requests.
+// Shared storefront connections ask for the commerce set, not the complete
+// mirror's finance, staff, payment-method and historical-order permissions
+// (read_all_orders is not requested: a store's history begins with the
+// window read_orders reaches). Product-content delivery writes product
+// metafields, so the catalog is write_products, which includes its reads.
+// write_customers is used only for the wholesale pack's customer tag and for
+// creating a customer; asking for it now means one approval by the store
+// rather than two. A fresh copy on every call, so a caller cannot edit it.
 func managedConnectScopes() []string {
 	scopes := append([]string(nil), StorefrontScopes...)
-	return append(scopes, "write_products", "read_inventory", "read_locations", "read_orders")
+	return append(scopes,
+		"write_products", "read_inventory", "read_locations", "read_orders",
+		"read_customers", "write_customers", "read_discounts", "read_returns")
+}
+
+// connectionScopes is what this store's own connection asks Shopify for: the
+// commerce set for a store connected through the shared app, the full Connect
+// list for a store connected with its own app. Everything a store's coverage
+// is measured against starts here -- a scope the connection never asks for is
+// not missing, it was never requested.
+func connectionScopes(store Store) []string {
+	if store.Managed() {
+		return managedConnectScopes()
+	}
+	return ConnectScopes()
+}
+
+// scopesNotApproved is what the store's connection asks for and its recorded
+// grant does not reach (a write scope reaches its read, grantIncludes), sorted.
+// Nil when no grant is recorded: nothing is known to be missing, and the
+// origin's own answer decides.
+//
+// Reported rather than enforced: a missing scope makes Shopify return null
+// for the fields it covers, so the mirror is quietly incomplete rather than
+// broken. Naming the gap is the difference between "the customer has no
+// phone number" and "we were never allowed to see it".
+func scopesNotApproved(store Store) []string {
+	if len(store.ScopesGranted) == 0 {
+		return nil
+	}
+	have := grantIncludes(store.ScopesGranted)
+	var missing []string
+	for _, s := range connectionScopes(store) {
+		if !have[s] {
+			missing = append(missing, s)
+		}
+	}
+	return uniqueSorted(missing)
 }
 
 // Operator configuration is never an ordinary-user form. Both values are

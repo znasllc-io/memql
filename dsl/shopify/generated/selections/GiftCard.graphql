@@ -9,6 +9,7 @@ query ShopifyFetchGiftCard($id: ID!) {
     __typename
     ... on GiftCard {
       id
+      updatedAt
       balance { amount currencyCode }
       crossCurrencyRedemptionStrategy
       customer { id }
@@ -34,6 +35,7 @@ query ShopifyListGiftCard($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       balance { amount currencyCode }
       crossCurrencyRedemptionStrategy
       customer { id }

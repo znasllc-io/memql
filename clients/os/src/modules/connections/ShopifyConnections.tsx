@@ -1,7 +1,7 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Store } from "lucide-react";
 import { renderMemQLValue, rowString } from "@znasllc-io/memql-sdk-core/client";
-import { Button, EmptyState, Fact, Facts, Head, Notice, Panel, RecordList, RecordListSkeleton, RecordRow, Subhead } from "../../kit";
+import { Button, EmptyState, Fact, Facts, FormRow, Head, Input, Notice, Panel, RecordList, RecordListSkeleton, RecordRow, Subhead } from "../../kit";
 import { AddButton } from "../../kit/AddButton";
 import { ActionBar, type Act } from "../../kit/ActionBar";
 import { Wizard } from "../../kit/Wizard";
@@ -51,6 +51,58 @@ export function ShopifyConnections({ header, appId, result }: { header: ReactNod
       {feed.snapshot.state === "live" && !stores.length ? <EmptyState icon={Store} title="No Shopify stores connected">Use the plus button to connect a store.</EmptyState> : null}
       {feed.snapshot.error ? <Notice sentence="Shopify connections could not be read."><Button onClick={feed.reseed}>Try again</Button></Notice> : null}
     </section>
+    <AlertWait />
+  </section>;
+}
+
+interface AlertWaitReply { minutes: number; isDefault: boolean; maySet: boolean }
+
+function alertWaitFrom(rows: readonly Record<string, unknown>[]): AlertWaitReply {
+  const row = rows[0] ?? {};
+  const minutes = row["minutes"];
+  return { minutes: typeof minutes === "number" && Number.isFinite(minutes) ? minutes : 30, isDefault: row["isDefault"] === true, maySet: row["maySet"] === true };
+}
+
+/**
+ * How long a store goes unrecorded before its owner is emailed (U7).
+ *
+ * A CLUSTER OWNER'S, AND THE ENGINE SAYS WHOSE: `maySet` decides whether the
+ * panel is drawn at all, and the value is sent as typed -- the engine refuses
+ * anything but a whole number from 1 to 1440, in its own words.
+ */
+function AlertWait() {
+  const connection = useOsConnection();
+  const read = useMemo(() => connection ? async (signal: AbortSignal) => alertWaitFrom((await connection.query.shopifyStoreAlertWait({}, { signal })).rows()) : null, [connection]);
+  const wait = useReading("shopify-alert-wait", read);
+  const [minutes, setMinutes] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState("");
+  const held = wait.value?.minutes;
+  useEffect(() => { if (held !== undefined) setMinutes(String(held)); }, [held]);
+  if (!wait.value?.maySet || connection === null) return null;
+  const save = async () => {
+    if (busy) return;
+    setBusy(true);
+    setRefusal("");
+    try {
+      const saved = alertWaitFrom((await connection.query.shopifyStoreAlertWaitSet({ minutes: Number(minutes.trim()) })).rows());
+      setMinutes(String(saved.minutes));
+      wait.reread();
+    } catch (err: unknown) {
+      setRefusal(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <section className="os-field-group" aria-label="Store alerts">
+    <Subhead>Store alerts</Subhead>
+    <FormRow>
+      <span>Email a store's owner after</span>
+      <span><Input id="shopify-alert-wait" label="Minutes without recording" value={minutes} onChange={setMinutes} onEnter={() => void save()} /></span>
+      <span>minutes without recording</span>
+      <Button busy={busy} onClick={() => void save()}>Save</Button>
+    </FormRow>
+    {refusal ? <Notice tone="error" sentence={refusal} /> : null}
   </section>;
 }
 

@@ -64,6 +64,12 @@ var payloadLookups = []payloadLookup{
 	{index: "memory_nodes_access_tokenhash_lookup_idx", field: "tokenHash", concepts: []string{"v1:platform:siteAccessSession"}},
 	{index: "memory_nodes_access_codeid_lookup_idx", field: "codeId", concepts: []string{"v1:platform:siteAccessSession"}},
 	{index: "memory_nodes_access_codehash_lookup_idx", field: "codeHash", concepts: []string{"v1:platform:siteAccessCode"}},
+	// The datasync retry pass (inboundRequestsDueForRetry, every minute) and
+	// the given-up list read the FAILED deliveries; partial on that status, so
+	// the range is the deliveries that ever failed and never the inbox, whose
+	// every row carries its body.
+	{index: "memory_nodes_inbound_failed_lookup_idx", field: "status", concepts: []string{"v1:platform:inboundRequest"},
+		partial: []payloadEquality{{"status", "failed"}}},
 }
 
 // payloadLookupFor returns the lookup index serving term on concept for a read

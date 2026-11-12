@@ -1625,8 +1625,9 @@ func ClusterStorageStatusBuild(args ClusterStorageStatusArgs) string {
 	return "builtin clusterStorageStatus()"
 }
 
-// CommerceCompany -- One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both.
+// CommerceCompany -- One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.
 type CommerceCompanyArgs struct {
+	// The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.
 	StoreId    string
 	CompanyGid string
 	From       string
@@ -1671,8 +1672,9 @@ func CommerceCompanyBuild(args CommerceCompanyArgs) string {
 	return b.String()
 }
 
-// CommerceCustomers -- Repeat-customer and refund rates for a window, from the mirror. Repeat rate is customers with more than one order over customers with any; refund rate is refunds over orders.
+// CommerceCustomers -- Repeat-customer and refund rates for a window, from the mirror. Repeat rate is customers with more than one order over customers with any; refund rate is refunds over orders. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.
 type CommerceCustomersArgs struct {
+	// The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.
 	StoreId string
 	From    string
 	To      string
@@ -1709,8 +1711,9 @@ func CommerceCustomersBuild(args CommerceCustomersArgs) string {
 	return b.String()
 }
 
-// CommerceSold -- What sold in a window, grouped by product or by variant, read entirely from the mirror -- no Admin API call and no cost points. Reports units and orders per line, and reports truncated=true when the walk hit its page cap rather than returning a smaller number and letting the caller believe it.
+// CommerceSold -- What sold in a window, grouped by product or by variant, read entirely from the mirror -- no Admin API call and no cost points. Reports units and orders per line, and reports truncated=true when the walk hit its page cap rather than returning a smaller number and letting the caller believe it. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.
 type CommerceSoldArgs struct {
+	// The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.
 	StoreId string
 	From    string
 	To      string
@@ -1755,8 +1758,9 @@ func CommerceSoldBuild(args CommerceSoldArgs) string {
 	return b.String()
 }
 
-// CommerceStock -- Inventory levels below a threshold at one location. Shopify models inventory as NAMED quantities (available, committed, on_hand), so the threshold is applied in Go and a level with no `available` count reads as unknown rather than as a stockout.
+// CommerceStock -- Inventory levels below a threshold at one location. Shopify models inventory as NAMED quantities (available, committed, on_hand), so the threshold is applied in Go and a level with no `available` count reads as unknown rather than as a stockout. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.
 type CommerceStockArgs struct {
+	// The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.
 	StoreId     string
 	LocationGid string
 	Threshold   int
@@ -2288,7 +2292,7 @@ func DataOriginsBuild(args DataOriginsArgs) string {
 	return "builtin dataOrigins()"
 }
 
-// DatasyncDiscardOutboxEntry -- Discard one DEAD-lettered outbox entry: the operator has decided this change will never be delivered. The row survives as audit history carrying the reason. Refuses an entry that is not dead.
+// DatasyncDiscardOutboxEntry -- Discard one DEAD-lettered outbox entry: the operator has decided this change will never be delivered. The row survives as audit history carrying the reason. Refuses an entry that is not dead. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.
 type DatasyncDiscardOutboxEntryArgs struct {
 	EntryId string
 	Reason  string
@@ -2316,7 +2320,28 @@ func DatasyncDiscardOutboxEntryBuild(args DatasyncDiscardOutboxEntryArgs) string
 	return b.String()
 }
 
-// DatasyncRetryOutboxEntry -- Return one DEAD-lettered outbox entry to the queue with its attempts reset. Refuses an entry that is not dead: a pending or failed one is still the drain worker's, and acting on it would race a delivery in flight.
+// DatasyncRequeueInbound -- Put the given-up inbound deliveries of one source back in line: every failed delivery of that source that used its four tries has its tries set back to none and is due now, so the retry pass tries it again within a minute. A delivery still waiting for its next try is left alone. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.
+type DatasyncRequeueInboundArgs struct {
+	// The inbound source whose given-up deliveries go back in line, as the staged rows name it (for Shopify, shopify-<store>).
+	Source string
+}
+
+// DatasyncRequeueInbound calls the engine builtin datasyncRequeueInbound.
+func (qc *QueryClient) DatasyncRequeueInbound(ctx context.Context, args DatasyncRequeueInboundArgs) (*Result, error) {
+	call := DatasyncRequeueInboundBuild(args)
+	return qc.executeNamed(ctx, "datasyncRequeueInbound", call)
+}
+
+func DatasyncRequeueInboundBuild(args DatasyncRequeueInboundArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin datasyncRequeueInbound(")
+	b.WriteString("source: ")
+	b.WriteString(quoteMemQL(args.Source))
+	b.WriteString(")")
+	return b.String()
+}
+
+// DatasyncRetryOutboxEntry -- Return one DEAD-lettered outbox entry to the queue with its attempts reset. Refuses an entry that is not dead: a pending or failed one is still the drain worker's, and acting on it would race a delivery in flight. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.
 type DatasyncRetryOutboxEntryArgs struct {
 	EntryId string
 }
@@ -2336,11 +2361,13 @@ func DatasyncRetryOutboxEntryBuild(args DatasyncRetryOutboxEntryArgs) string {
 	return b.String()
 }
 
-// DatasyncSetSyncPaused -- Pause or resume one domain: stops its backfill, its reconciliation and its outbox drain, without unregistering the connector or changing any declaration.
+// DatasyncSetSyncPaused -- Pause or resume one domain: stops its backfill and its reconciliation, without unregistering the connector or changing any declaration. It does not hold changes waiting to be pushed to the origin: the outbound drain does not read the pause. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.
 type DatasyncSetSyncPausedArgs struct {
 	Connector string
 	ConceptId string
-	Paused    bool
+	// The one partition of a partitioned connector (one store) to pause or resume; its pause is its own.
+	PartitionKey string
+	Paused       bool
 }
 
 // DatasyncSetSyncPaused calls the engine builtin datasyncSetSyncPaused.
@@ -2359,6 +2386,13 @@ func DatasyncSetSyncPausedBuild(args DatasyncSetSyncPausedArgs) string {
 	}
 	b.WriteString("conceptId: ")
 	b.WriteString(quoteMemQL(args.ConceptId))
+	if args.PartitionKey != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("partitionKey: ")
+		b.WriteString(quoteMemQL(args.PartitionKey))
+	}
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
@@ -2368,10 +2402,15 @@ func DatasyncSetSyncPausedBuild(args DatasyncSetSyncPausedArgs) string {
 	return b.String()
 }
 
-// DatasyncStartBackfill -- Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. Operator-driven; nothing schedules it.
+// DatasyncStartBackfill -- Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. With restart, start it again from nothing first. Operator-driven; nothing schedules it. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.
 type DatasyncStartBackfillArgs struct {
 	Connector string
 	ConceptId string
+	// One partition of a partitioned connector (one store). Absent backfills every partition the connector names, each from its own cursor.
+	PartitionKey string
+	// Start the backfill again from nothing: reset its row to queued with an empty cursor, then run it. For a backfill whose cursor no longer leads anywhere, such as a failed one whose download link expired. Refused while the backfill is running, and for a partitioned connector without a partition.
+	Restart    bool
+	RestartSet bool // set true to send restart; required because zero-value bool is ambiguous
 }
 
 // DatasyncStartBackfill calls the engine builtin datasyncStartBackfill.
@@ -2390,6 +2429,20 @@ func DatasyncStartBackfillBuild(args DatasyncStartBackfillArgs) string {
 	}
 	b.WriteString("conceptId: ")
 	b.WriteString(quoteMemQL(args.ConceptId))
+	if args.PartitionKey != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("partitionKey: ")
+		b.WriteString(quoteMemQL(args.PartitionKey))
+	}
+	if args.RestartSet {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("restart: ")
+		b.WriteString(fmt.Sprintf("%v", args.Restart))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -9107,7 +9160,7 @@ func ShopifyConnectionProviderStatusBuild(args ShopifyConnectionProviderStatusAr
 	return "builtin shopifyConnectionProviderStatus()"
 }
 
-// ShopifyEnsureSubscriptions -- Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health.
+// ShopifyEnsureSubscriptions -- Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health. For the scheduled automation or a cluster owner; anybody else is refused before anything runs.
 type ShopifyEnsureSubscriptionsArgs struct {
 }
 
@@ -9122,8 +9175,9 @@ func ShopifyEnsureSubscriptionsBuild(args ShopifyEnsureSubscriptionsArgs) string
 	return "builtin shopifyEnsureSubscriptions()"
 }
 
-// ShopifyFetchProduct -- Read a mirrored Shopify product by GID or handle. Answers from the mirror, so it costs no Admin API call and no cost points. Tokens never appear in the reply.
+// ShopifyFetchProduct -- Read a mirrored Shopify product by GID or handle. Answers from the mirror, so it costs no Admin API call and no cost points. Tokens never appear in the reply. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.
 type ShopifyFetchProductArgs struct {
+	// The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.
 	StoreId string
 	Id      string
 	Handle  string
@@ -9160,7 +9214,7 @@ func ShopifyFetchProductBuild(args ShopifyFetchProductArgs) string {
 	return b.String()
 }
 
-// ShopifyProvisionWholesale -- Create or find one buyer's B2B account: a company stamped with the MemQL application id, its location, the buyer as a company contact, and an ACTIVE catalog with a price list. Idempotent -- a second call for one application finds the first company rather than making a twin. Refuses BEFORE creating anything when the store is below Plus and already holds its three company-location catalogs, answering {status: refused, reason} rather than an error so the caller can tell a ceiling from an outage.
+// ShopifyProvisionWholesale -- Create or find one buyer's B2B account: a company stamped with the MemQL application id, its location, the buyer as a company contact, and an ACTIVE catalog with a price list. Idempotent -- a second call for one application finds the first company rather than making a twin. Refuses BEFORE creating anything when the store is below Plus and already holds its three company-location catalogs, answering {status: refused, reason} rather than an error so the caller can tell a ceiling from an outage. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked.
 type ShopifyProvisionWholesaleArgs struct {
 	// The store to provision on.
 	StoreId string
@@ -9238,7 +9292,7 @@ func ShopifyProvisionWholesaleBuild(args ShopifyProvisionWholesaleArgs) string {
 	return b.String()
 }
 
-// ShopifyRevokeWholesale -- End a B2B entitlement by setting its catalog to DRAFT. DELETES NOTHING: the company, its location, its contact, the price list and every order placed under them are untouched, because revoking trade terms is ending a discount rather than erasing a customer -- and deleting a company would take its order history's association with it.
+// ShopifyRevokeWholesale -- End a B2B entitlement by setting its catalog to DRAFT. DELETES NOTHING: the company, its location, its contact, the price list and every order placed under them are untouched, because revoking trade terms is ending a discount rather than erasing a customer -- and deleting a company would take its order history's association with it. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked.
 type ShopifyRevokeWholesaleArgs struct {
 	// The store.
 	StoreId string
@@ -9266,7 +9320,7 @@ func ShopifyRevokeWholesaleBuild(args ShopifyRevokeWholesaleArgs) string {
 	return b.String()
 }
 
-// ShopifyRunComplianceJobs -- Run the queued privacy jobs whose hold has elapsed: export a customer's data to the Library, scrub a redacted customer's PII across every version, purge a redacted shop's whole mirror. Every action is audited; shop/redact re-checks reachability first so a reverted uninstall does not cost the mirror.
+// ShopifyRunComplianceJobs -- Run the privacy jobs that are due: export what the mirror holds on a customer to the store owner's Library, erase a customer from every version of every row of the person and from the store's processed deliveries, purge a redacted shop's mirror with its sync state and its staged deliveries. Every erasure is made twice, an hour apart, and a job that fails is run again at every run until it is done. Every pass that ran is audited. A shop's purge reads the store as it is now and asks it first, and deletes only when the origin refuses the app outright, so a reverted uninstall does not cost the mirror. For the scheduled automation or a cluster owner; anybody else is refused before anything runs.
 type ShopifyRunComplianceJobsArgs struct {
 }
 
@@ -9279,6 +9333,42 @@ func (qc *QueryClient) ShopifyRunComplianceJobs(ctx context.Context, args Shopif
 func ShopifyRunComplianceJobsBuild(args ShopifyRunComplianceJobsArgs) string {
 	_ = args
 	return "builtin shopifyRunComplianceJobs()"
+}
+
+// ShopifyStoreAlertWait -- The alert wait: how many minutes a store needs attention, or is disconnected, before its owner is emailed. 30 when SHOPIFY_STORE_ALERT_MINUTES is unset, unreadable or out of range.
+type ShopifyStoreAlertWaitArgs struct {
+}
+
+// ShopifyStoreAlertWait calls the engine builtin shopifyStoreAlertWait.
+func (qc *QueryClient) ShopifyStoreAlertWait(ctx context.Context, args ShopifyStoreAlertWaitArgs) (*Result, error) {
+	call := ShopifyStoreAlertWaitBuild(args)
+	return qc.executeNamed(ctx, "shopifyStoreAlertWait", call)
+}
+
+func ShopifyStoreAlertWaitBuild(args ShopifyStoreAlertWaitArgs) string {
+	_ = args
+	return "builtin shopifyStoreAlertWait()"
+}
+
+// ShopifyStoreAlertWaitSet -- Set the alert wait, from 1 to 1440 minutes, in the global variable SHOPIFY_STORE_ALERT_MINUTES. A cluster owner's; anybody else, and any value out of range, is refused before anything is read.
+type ShopifyStoreAlertWaitSetArgs struct {
+	// Minutes, from 1 to 1440.
+	Minutes int
+}
+
+// ShopifyStoreAlertWaitSet calls the engine builtin shopifyStoreAlertWaitSet.
+func (qc *QueryClient) ShopifyStoreAlertWaitSet(ctx context.Context, args ShopifyStoreAlertWaitSetArgs) (*Result, error) {
+	call := ShopifyStoreAlertWaitSetBuild(args)
+	return qc.executeNamed(ctx, "shopifyStoreAlertWaitSet", call)
+}
+
+func ShopifyStoreAlertWaitSetBuild(args ShopifyStoreAlertWaitSetArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyStoreAlertWaitSet(")
+	b.WriteString("minutes: ")
+	b.WriteString(fmt.Sprintf("%v", args.Minutes))
+	b.WriteString(")")
+	return b.String()
 }
 
 // ShopifyStoreAppSave -- Save the Shopify app's client ID and secret from a storefront's Store panel (design 12.3, D7).
@@ -9318,8 +9408,9 @@ func ShopifyStoreAppSaveBuild(args ShopifyStoreAppSaveArgs) string {
 	return b.String()
 }
 
-// ShopifyStoreHealth -- Report every configured store's status, granted-versus-needed scopes, subscription reconcile time, cost-bucket state and per-domain sync state with drift counters. The read behind the portal's Stores page.
+// ShopifyStoreHealth -- Report the status, granted-versus-needed scopes, subscription reconcile time, cost-bucket state and per-domain sync state with drift counters of each store the caller may read: every store for a cluster owner or a caller who may read stores, a store's owner their own, anybody else none. The read behind the portal's Stores page.
 type ShopifyStoreHealthArgs struct {
+	// One store. When omitted, every store the caller may read.
 	StoreId string
 }
 
@@ -9336,6 +9427,98 @@ func ShopifyStoreHealthBuild(args ShopifyStoreHealthArgs) string {
 		b.WriteString("storeId: ")
 		b.WriteString(quoteMemQL(args.StoreId))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyStoreRegisterEvents -- Register again: run the store's subscription pass now and record it on the store's health, as the daily pass does. For the store's owner or a cluster owner; anyone else is refused before Shopify is asked.
+type ShopifyStoreRegisterEventsArgs struct {
+	// The store whose subscriptions are registered again.
+	StoreId string
+}
+
+// ShopifyStoreRegisterEvents calls the engine builtin shopifyStoreRegisterEvents.
+func (qc *QueryClient) ShopifyStoreRegisterEvents(ctx context.Context, args ShopifyStoreRegisterEventsArgs) (*Result, error) {
+	call := ShopifyStoreRegisterEventsBuild(args)
+	return qc.executeNamed(ctx, "shopifyStoreRegisterEvents", call)
+}
+
+func ShopifyStoreRegisterEventsBuild(args ShopifyStoreRegisterEventsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyStoreRegisterEvents(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyStoreRetryDeliveries -- Try again: put the store's deliveries that used their four tries back in line, through datasyncRequeueInbound for the source shopify-<store>. For the store's owner or a cluster owner; anyone else is refused before anything is read.
+type ShopifyStoreRetryDeliveriesArgs struct {
+	// The store whose given-up deliveries are tried again.
+	StoreId string
+}
+
+// ShopifyStoreRetryDeliveries calls the engine builtin shopifyStoreRetryDeliveries.
+func (qc *QueryClient) ShopifyStoreRetryDeliveries(ctx context.Context, args ShopifyStoreRetryDeliveriesArgs) (*Result, error) {
+	call := ShopifyStoreRetryDeliveriesBuild(args)
+	return qc.executeNamed(ctx, "shopifyStoreRetryDeliveries", call)
+}
+
+func ShopifyStoreRetryDeliveriesBuild(args ShopifyStoreRetryDeliveriesArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyStoreRetryDeliveries(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyStoreSetRecording -- Pause recording, or resume it: a store being recorded (configured, backfilling or live) moves to paused, and a paused one to live, through setStoreStatus written as the deployment, so a store's owner who is not a cluster owner may take the Store page's two acts without the store row's own gate being widened. Each pause and resume is audited under the caller. A store that is not connected (error, uninstalled, purged) is refused before anything is written, and asking for the state the store is in writes nothing. For the store's owner or a cluster owner; anyone else is refused before anything else is read.
+type ShopifyStoreSetRecordingArgs struct {
+	// The store.
+	StoreId string
+	// True resumes recording; false pauses it.
+	Recording bool
+}
+
+// ShopifyStoreSetRecording calls the engine builtin shopifyStoreSetRecording.
+func (qc *QueryClient) ShopifyStoreSetRecording(ctx context.Context, args ShopifyStoreSetRecordingArgs) (*Result, error) {
+	call := ShopifyStoreSetRecordingBuild(args)
+	return qc.executeNamed(ctx, "shopifyStoreSetRecording", call)
+}
+
+func ShopifyStoreSetRecordingBuild(args ShopifyStoreSetRecordingArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyStoreSetRecording(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("recording: ")
+	b.WriteString(fmt.Sprintf("%v", args.Recording))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyStoreVerdict -- One store's verdict (U6): whether it is being recorded, and when it is not, why and the one act that fixes each reason. Computed in the engine from the store row, its sync state and its given-up deliveries, so a screen draws it without a copy of the rules.
+// `state` is recording, starting, paused, needs attention or not connected, `since` when it began, `resumedAt` when the store last left paused or not connected (empty when it never has), and `connectedAt` when a connect last started its recording afresh (empty for a store connected before that was recorded). Each reason has a `code` (data_not_declared, approval_outdated, grant_lost, events_not_registered, check_failing, changes_not_recorded), one `sentence` for a person, and an `act` with its `actLabel` and `actUrl` (or none); `count` is a floor when `atLeast` is true. `outside` and `withheld` are plain words. `may.act` says whether the caller may take the acts. For the store's owner, a cluster owner, or a caller who may read stores; anyone else is refused before the store's state is read.
+type ShopifyStoreVerdictArgs struct {
+	// The store.
+	StoreId string
+}
+
+// ShopifyStoreVerdict calls the engine builtin shopifyStoreVerdict.
+func (qc *QueryClient) ShopifyStoreVerdict(ctx context.Context, args ShopifyStoreVerdictArgs) (*Result, error) {
+	call := ShopifyStoreVerdictBuild(args)
+	return qc.executeNamed(ctx, "shopifyStoreVerdict", call)
+}
+
+func ShopifyStoreVerdictBuild(args ShopifyStoreVerdictArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyStoreVerdict(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -9371,7 +9554,7 @@ func ShopifyStorefrontTokenSetBuild(args ShopifyStorefrontTokenSetArgs) string {
 	return b.String()
 }
 
-// ShopifyTagWholesaleCustomer -- The plan-independent grant: add one tag to the buyer's customer record. Writes the tag and NOTHING else -- what the tag does is the merchant's own automatic discount, which this connector deliberately does not create on their behalf. Refuses when no customer on the store has that email, because a tag on an account that does not exist entitles nobody.
+// ShopifyTagWholesaleCustomer -- The plan-independent grant: add one tag to the buyer's customer record. Writes the tag and NOTHING else -- what the tag does is the merchant's own automatic discount, which this connector deliberately does not create on their behalf. Refuses when no customer on the store has that email, because a tag on an account that does not exist entitles nobody. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked.
 type ShopifyTagWholesaleCustomerArgs struct {
 	// The store.
 	StoreId string
@@ -9408,7 +9591,7 @@ func ShopifyTagWholesaleCustomerBuild(args ShopifyTagWholesaleCustomerArgs) stri
 	return b.String()
 }
 
-// ShopifyUntagWholesaleCustomer -- The plan-independent revoke: remove that one tag from the buyer's customer record.
+// ShopifyUntagWholesaleCustomer -- The plan-independent revoke: remove that one tag from the buyer's customer record. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked.
 type ShopifyUntagWholesaleCustomerArgs struct {
 	// The store.
 	StoreId string
@@ -9445,7 +9628,7 @@ func ShopifyUntagWholesaleCustomerBuild(args ShopifyUntagWholesaleCustomerArgs) 
 	return b.String()
 }
 
-// ShopifyWholesaleCatalogHeadroom -- How many more company-location catalogs this store may hold: -1 on Plus, which is unlimited, and otherwise three minus what it already has. Since 2026-04-02 companies, payment terms, volume pricing and up to three catalogs are available BELOW Plus, so the ceiling is real and this is what lets an adapter REPORT it rather than discover it at the fourth grant, in a merchant's live store.
+// ShopifyWholesaleCatalogHeadroom -- How many more company-location catalogs this store may hold: -1 on Plus, which is unlimited, and otherwise three minus what it already has. Since 2026-04-02 companies, payment terms, volume pricing and up to three catalogs are available BELOW Plus, so the ceiling is real and this is what lets an adapter REPORT it rather than discover it at the fourth grant, in a merchant's live store. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked.
 type ShopifyWholesaleCatalogHeadroomArgs struct {
 	// The store to measure.
 	StoreId string
@@ -9466,8 +9649,9 @@ func ShopifyWholesaleCatalogHeadroomBuild(args ShopifyWholesaleCatalogHeadroomAr
 	return b.String()
 }
 
-// Shopifyql -- Run an ad-hoc ShopifyQL analytics query for questions the mirror cannot answer. Requires read_reports and protected-customer-data Level 2 approval; refused below that with a reason naming the level, which Shopify's own 403 does not.
+// Shopifyql -- Run an ad-hoc ShopifyQL analytics query for questions the mirror cannot answer. Requires read_reports and protected-customer-data Level 2 approval; refused below that with a reason naming the level, which Shopify's own 403 does not. For the store's owner or a cluster owner; anybody else is refused before Shopify is asked.
 type ShopifyqlArgs struct {
+	// The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.
 	StoreId string
 	Query   string
 }
@@ -10291,7 +10475,7 @@ func SourceRepositoriesBuild(args SourceRepositoriesArgs) string {
 // IT WRITES NOTHING. The observation rows these results become are written by `sitePreviewProbe`, which calls this and owns v1:platform:sitePreviewObservation. The split is the module taxonomy: the call to Shopify lives in the package this repository classifies as the one that talks to Shopify, and the rows live with the concept that declares them.
 // The reply never carries the checkout URL -- only its host. An observation row is readable by every operator the composite tier admits, and a checkout URL is a live cart somebody else could pay from.
 type StorefrontProbeArgs struct {
-	// The store to ask. The only configured store when omitted.
+	// The store to ask. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.
 	StoreId string
 }
 
