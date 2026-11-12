@@ -92,8 +92,8 @@ export function RankedList({
   control?: ReactNode;
   /** The read has not answered: with no rows yet, the list's shape is drawn. */
   loading?: boolean;
-  /** What an empty answer says. */
-  empty?: string;
+  /** What an empty answer says: a sentence, or what the page draws for a list it was not given. */
+  empty?: ReactNode;
 }) {
   const shown = rows.slice(0, Math.max(0, limit));
   const largest = Math.max(0, ...shown.map((row) => (Number.isFinite(row.value) ? row.value : 0)));
