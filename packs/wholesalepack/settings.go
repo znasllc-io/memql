@@ -630,14 +630,17 @@ func routeName(name string) (string, error) {
 	return name, nil
 }
 
-// validStaffEmail admits one address or none.
+// validStaffEmail admits one address or none, by the pack's one rule of what an
+// address is: the applicant's (memql.IsEmailAddress). Only a write is judged; a
+// stored address is read as it is.
 func validStaffEmail(email string) error {
 	if email == "" {
 		return nil
 	}
-	if len(email) > maxStaffEmail || strings.Count(email, "@") != 1 {
-		return fmt.Errorf("wholesale: the staff address must be one address -- at most %d characters with "+
-			"exactly one @ -- or empty for none; %q is not", maxStaffEmail, email)
+	if !memql.IsEmailAddress(email) {
+		return fmt.Errorf("wholesale: the staff address must be one address -- at most %d characters, "+
+			"exactly one @ with something on each side and no whitespace -- or empty for none; %q is not",
+			maxStaffEmail, email)
 	}
 	return nil
 }

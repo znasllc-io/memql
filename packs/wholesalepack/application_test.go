@@ -607,6 +607,41 @@ func TestAStaffAddressWithoutAnAtIsRefused(t *testing.T) {
 	}
 }
 
+// A STAFF ADDRESS IS AN ADDRESS BY THE PACK'S ONE RULE (ruling 54), the
+// applicant's: nothing before or after the @, or whitespace inside, is refused
+// and nothing is written; a well-formed address is written as before, trimmed.
+func TestAStaffAddressIsHeldToTheApplicantsRule(t *testing.T) {
+	newProvider := func() (*Provider, *fakeWriter) {
+		writer := &fakeWriter{}
+		return &Provider{writer: writer, reader: &fixtureReader{sites: []map[string]any{settingsSite()},
+			settings: map[string][]map[string]any{"store-live": {{"storeId": "store-live", "ownerUserId": "merchant-1",
+				"applicationsOpen": true, "createdAt": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}}}}}, writer
+	}
+	for _, bad := range []string{"desk@", "@example.com", "desk @example.com", "desk@exam ple.com", "desk@example.com\tdesk"} {
+		p, writer := newProvider()
+		if _, err := p.updateSettings(staffCtx("staff-1"), map[string]any{"siteId": "site-1", "storeId": "store-live",
+			"staffEmail": bad}, 0); err == nil {
+			t.Errorf("the staff address %q was accepted", bad)
+		}
+		if len(writer.writes) != 0 {
+			t.Errorf("the refused address %q was written: %+v", bad, writer.writes)
+		}
+	}
+	for given, stored := range map[string]string{
+		"desk@example.com": "desk@example.com", "first.last+tag@example.com": "first.last+tag@example.com",
+		"  desk@example.com ": "desk@example.com",
+	} {
+		p, writer := newProvider()
+		if _, err := p.updateSettings(staffCtx("staff-1"), map[string]any{"siteId": "site-1", "storeId": "store-live",
+			"staffEmail": given}, 0); err != nil {
+			t.Fatalf("the staff address %q was refused: %v", given, err)
+		}
+		if got := writer.only(t, "putWholesaleSettingsRow")["staffEmail"]; got != stored {
+			t.Fatalf("the staff address %q was written as %v, want %q", given, got, stored)
+		}
+	}
+}
+
 // THE SETTINGS OWNER IS READ AT THE ID THE WRITE GOES TO. Two store ids that slug
 // alike share one row id, so a lookup by the storeId field would miss the row
 // the write then replaces, and hand it to somebody else. Since ruling 36 the row
