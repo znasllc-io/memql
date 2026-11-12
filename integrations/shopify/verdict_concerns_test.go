@@ -145,14 +145,13 @@ func TestEveryReasonIsBuiltWithAReasonConstant(t *testing.T) {
 			if f, ok := decl.(*ast.FuncDecl); ok {
 				fn = f.Name.Name
 			}
-			ast.Inspect(decl, func(n ast.Node) bool {
-				lit, ok := n.(*ast.CompositeLit)
-				if !ok {
-					return true
-				}
-				if ident, ok := lit.Type.(*ast.Ident); !ok || ident.Name != "VerdictReason" {
-					return true
-				}
+			isConstant := func(e ast.Expr) bool {
+				value, ok := e.(*ast.Ident)
+				return ok && constants[value.Name] != ""
+			}
+			// reasonLiteral checks one VerdictReason literal, its type
+			// written or elided.
+			reasonLiteral := func(lit *ast.CompositeLit) {
 				for _, elt := range lit.Elts {
 					kv, ok := elt.(*ast.KeyValueExpr)
 					if !ok {
@@ -163,8 +162,53 @@ func TestEveryReasonIsBuiltWithAReasonConstant(t *testing.T) {
 						continue
 					}
 					built++
-					if value, ok := kv.Value.(*ast.Ident); !ok || constants[value.Name] == "" {
+					if !isConstant(kv.Value) {
 						t.Errorf("%s: a VerdictReason's Code is not a Reason* constant", fset.Position(kv.Value.Pos()))
+					}
+				}
+			}
+			ast.Inspect(decl, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.CompositeLit:
+					if isReasonType(n.Type) {
+						reasonLiteral(n)
+						return true
+					}
+					// A slice, array or map of reasons: its elements may
+					// leave the type out.
+					var elem ast.Expr
+					switch typ := n.Type.(type) {
+					case *ast.ArrayType:
+						elem = typ.Elt
+					case *ast.MapType:
+						elem = typ.Value
+					}
+					if !isReasonType(elem) {
+						return true
+					}
+					for _, elt := range n.Elts {
+						if kv, ok := elt.(*ast.KeyValueExpr); ok {
+							elt = kv.Value
+						}
+						if u, ok := elt.(*ast.UnaryExpr); ok && u.Op == token.AND {
+							elt = u.X
+						}
+						if inner, ok := elt.(*ast.CompositeLit); ok && inner.Type == nil {
+							reasonLiteral(inner)
+						}
+					}
+				case *ast.AssignStmt:
+					// An assignment to a Code field. Read by syntax: no type
+					// of the package other than VerdictReason assigns a Code
+					// field, and one that ever does is named here.
+					for i, lhs := range n.Lhs {
+						sel, ok := lhs.(*ast.SelectorExpr)
+						if !ok || sel.Sel.Name != "Code" || fn == "VerdictReasonFromPayload" {
+							continue
+						}
+						if len(n.Rhs) != len(n.Lhs) || !isConstant(n.Rhs[i]) {
+							t.Errorf("%s: an assignment to a Code field that is not a Reason* constant", fset.Position(n.Pos()))
+						}
 					}
 				}
 				return true
@@ -174,6 +218,16 @@ func TestEveryReasonIsBuiltWithAReasonConstant(t *testing.T) {
 	if built == 0 {
 		t.Fatal("no VerdictReason literal with a Code found: the check is reading the wrong files")
 	}
+}
+
+// isReasonType reports whether a type expression is VerdictReason or a
+// pointer to one.
+func isReasonType(e ast.Expr) bool {
+	if star, ok := e.(*ast.StarExpr); ok {
+		e = star.X
+	}
+	ident, ok := e.(*ast.Ident)
+	return ok && ident.Name == "VerdictReason"
 }
 
 // checkReasonKind holds one reason computeVerdict answered to the
@@ -808,10 +862,11 @@ func TestARowTheOriginRefusesRaisesTheApprovalByItself(t *testing.T) {
 		if r.Concerns != ConcernsConcepts || !slices.Equal(r.Concepts, []string{"order"}) || !r.StandsInTheWayOf(statisticsWalk) {
 			t.Errorf("%s: %+v; want concepts [order], in the way of the walk", name, r)
 		}
-		// The managed store's sentence and act, as for a grant lacking a
-		// scope; with no scope known to be missing, the detail names what the
-		// origin refuses instead of an empty list.
-		if r.Sentence != "This store approved an older list of permissions." || r.Act != ActApprove ||
+		// The managed store's act, as for a grant lacking a scope. With no
+		// scope known to be missing, the sentence does not guess at an older
+		// list (ledger ruling 18), and the detail names what the origin
+		// refuses instead of an empty list.
+		if r.Sentence != "Shopify does not allow everything MemQL records for this store." || r.Act != ActApprove ||
 			r.ActURL != "https://acme-widgets.myshopify.com/admin/apps" {
 			t.Errorf("%s: %+v; want the approval's sentence and act", name, r)
 		}
@@ -871,5 +926,117 @@ func TestARefusalThatIsNotTheGrantsRaisesNoApproval(t *testing.T) {
 	})
 	if codes := reasonCodes(computeVerdict(verdictInputOf(store, rows))); len(codes) != 0 {
 		t.Errorf("not requested: reasons %v; want none", codes)
+	}
+}
+
+func TestTheApprovalsSentenceIsTheOneThatApplies(t *testing.T) {
+	managedSentence := map[bool]string{
+		true:  "This store approved an older list of permissions.",
+		false: "Shopify does not allow everything MemQL records for this store.",
+	}
+	ownSentence := "This store's own app does not allow everything MemQL records."
+	own := func(granted []string) Store {
+		return Store{ID: testStoreID, Domain: "acme-widgets.myshopify.com", AdminTokenRef: "ACME_ADMIN", Status: StatusLive, ScopesGranted: granted}
+	}
+	managed := func(granted []string) Store {
+		s := managedStore(granted...)
+		s.Domain = "acme-widgets.myshopify.com"
+		return s
+	}
+	for _, c := range []struct {
+		name    string
+		store   Store
+		refused bool // the order row refused as not granted
+		lacks   bool // the recorded grant lacks a scope
+	}{
+		{"shared app, the grant lacks a scope", managed(oldManagedList), false, true},
+		{"shared app, the grant holds everything, a row refused", managed(commerceSet), true, false},
+		{"shared app, no grant recorded, a row refused", managed(nil), true, false},
+		{"own app, the grant lacks a scope", own(without(ConnectScopes(), "read_customers")), false, true},
+		{"own app, the grant holds everything, a row refused", own(ConnectScopes()), true, false},
+		{"own app, no grant recorded, a row refused", own(nil), true, false},
+	} {
+		rows := cleanRows(c.store)
+		if c.refused {
+			rows = refusedAtTheOrigin(rows, "order", "read_orders")
+		}
+		if lacks := len(scopesNotApproved(c.store)) > 0; lacks != c.lacks {
+			t.Fatalf("%s: the fixture's grant lacks a scope: %v", c.name, lacks)
+		}
+		r := reasonNamed(t, computeVerdict(verdictInputOf(c.store, rows)), ReasonApprovalOutdated)
+		want := ownSentence
+		if c.store.Managed() {
+			want = managedSentence[c.lacks]
+			if r.Act != ActApprove {
+				t.Errorf("%s: act %q; approving is still the act", c.name, r.Act)
+			}
+		} else if r.Act != "" {
+			t.Errorf("%s: act %q; a store on its own app is offered none", c.name, r.Act)
+		}
+		if r.Sentence != want {
+			t.Errorf("%s: sentence %q, want %q", c.name, r.Sentence, want)
+		}
+	}
+}
+
+func TestAConceptTheModelDoesNotKnowIsNeverClear(t *testing.T) {
+	unknown := "orderTypo"
+	if generated.Types[unknown] != nil {
+		t.Fatalf("%s is a generated concept", unknown)
+	}
+	reason := VerdictReason{Code: ReasonCheckFailing, Concerns: ConcernsConcepts, Concepts: []string{"product"}}
+	if !reason.StandsInTheWayOf([]string{"shop", unknown}) {
+		t.Error("a reason about products stands clear of a walk naming a concept the model does not know")
+	}
+	store := verdictStore()
+	reply := replyOf(t, computeVerdict(verdictInputOf(store, cleanRows(store))))
+	if outside, known := OutsideWhatTheStoreRecords(reply, []string{unknown}); !outside || !known {
+		t.Errorf("%s: outside %v, known %v; a concept the model does not know is outside", unknown, outside, known)
+	}
+	if outside, _ := OutsideWhatTheStoreRecords(reply, []string{"v1:shopify:" + unknown}); !outside {
+		t.Errorf("%s by id reads clear", unknown)
+	}
+}
+
+func TestAMixedListInAReplyIsNotTakenAsKnown(t *testing.T) {
+	store := verdictStore()
+	reply := replyOf(t, computeVerdict(verdictInputOf(store, cleanRows(store))))
+	reply["outsideConcepts"] = []any{5}
+	if outside, known := OutsideWhatTheStoreRecords(reply, statisticsWalk); known || !outside {
+		t.Errorf("outsideConcepts [5]: outside %v, known %v; want unknown", outside, known)
+	}
+	reply["outsideConcepts"] = []any{"customer", 5}
+	if outside, known := OutsideWhatTheStoreRecords(reply, statisticsWalk); known || !outside {
+		t.Errorf("outsideConcepts [customer 5]: outside %v, known %v; want unknown", outside, known)
+	}
+	for name, m := range map[string]map[string]any{
+		"concepts [product 5]":             {"code": ReasonCheckFailing, "concerns": ConcernsConcepts, "concepts": []any{"product", 5}},
+		"noRecording beside concepts [5]":  {"code": ReasonApprovalOutdated, "concerns": ConcernsNoRecording, "concepts": []any{5}},
+		"wholeStore beside concepts {x:1}": {"code": ReasonChangesNotRecorded, "concerns": ConcernsWholeStore, "concepts": map[string]any{"x": 1}},
+	} {
+		if r := VerdictReasonFromPayload(m); !r.StandsInTheWayOf([]string{"shop"}) {
+			t.Errorf("%s: read back as %+v, clear of the shop; a malformed list stands in the way", name, r)
+		}
+	}
+}
+
+func TestOneRefusalIsOneNotice(t *testing.T) {
+	store := verdictStore()
+	// A failed backfill the origin refused as not granted: the approval's
+	// reason, and no failing check beside it.
+	rows := setRow(cleanRows(store), "customer", func(r map[string]any) {
+		r["backfillStatus"] = "failed"
+		r["lastError"] = backfillRefusedPrefix + memqlsync.NotGranted(ConnectorName, "read_customers").Error()
+	})
+	if codes := reasonCodes(computeVerdict(verdictInputOf(store, rows))); !slices.Equal(codes, []string{ReasonApprovalOutdated}) {
+		t.Errorf("a refused backfill: reasons %v; want approval_outdated alone", codes)
+	}
+	// A failed backfill that is not a refusal is a failing check, as before.
+	rows = setRow(cleanRows(store), "customer", func(r map[string]any) {
+		r["backfillStatus"] = "failed"
+		r["lastError"] = "backfill failed: shopify: bulk operation FAILED"
+	})
+	if codes := reasonCodes(computeVerdict(verdictInputOf(store, rows))); !slices.Equal(codes, []string{ReasonCheckFailing}) {
+		t.Errorf("a failed backfill: reasons %v; want check_failing alone", codes)
 	}
 }

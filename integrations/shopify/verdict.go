@@ -145,6 +145,11 @@ func heldBy(named, concepts []string) bool {
 		set[generated.ConceptFromID(strings.TrimSpace(c))] = true
 	}
 	for _, c := range concepts {
+		if generated.Types[generated.ConceptFromID(strings.TrimSpace(c))] == nil {
+			// A concept the generated model does not know -- misspelled, or
+			// renamed -- is never clear.
+			return true
+		}
 		for _, held := range recordedThrough(c) {
 			if set[held] {
 				return true
@@ -180,7 +185,13 @@ func recordedThrough(concept string) []string {
 // concepts). For a reader of the builtin's answer in another package.
 func VerdictReasonFromPayload(m map[string]any) VerdictReason {
 	r := VerdictReason{Code: mapString(m, "code"), Concerns: mapString(m, "concerns")}
-	r.Concepts, _ = payloadStrings(m["concepts"])
+	concepts, ok := payloadStrings(m["concepts"])
+	if _, present := m["concepts"]; present && !ok {
+		// A concepts value that is not a list of strings: the reason is
+		// read as unclassified, which stands in the way whatever it says.
+		r.Concerns = ""
+	}
+	r.Concepts = concepts
 	return r
 }
 
@@ -200,16 +211,19 @@ func OutsideWhatTheStoreRecords(verdict map[string]any, concepts []string) (outs
 }
 
 // payloadStrings reads a list of strings from a reply: []any after JSON, or
-// []string from the reply's own map. ok is false when it is not a list.
+// []string from the reply's own map. ok is false when it is not a list, or
+// when any element is not a string: a malformed list is not known.
 func payloadStrings(v any) (out []string, ok bool) {
 	switch list := v.(type) {
 	case []string:
 		return append([]string(nil), list...), true
 	case []any:
 		for _, c := range list {
-			if s, ok := c.(string); ok {
-				out = append(out, s)
+			s, ok := c.(string)
+			if !ok {
+				return nil, false
 			}
+			out = append(out, s)
 		}
 		return out, true
 	}
@@ -505,7 +519,12 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from, fromNeverC
 		}
 		reason.Concerns, reason.Concepts = approvalConcerns(store, rows)
 		if store.Managed() {
-			reason.Sentence = "This store approved an older list of permissions."
+			// With no scope known to be missing, an older list is a guess:
+			// the sentence says only what is known.
+			reason.Sentence = "Shopify does not allow everything MemQL records for this store."
+			if len(missing) > 0 {
+				reason.Sentence = "This store approved an older list of permissions."
+			}
 			reason.Act, reason.ActLabel = ActApprove, "Open MemQL OS from the store's Shopify admin and approve"
 			reason.ActURL = "https://" + store.Domain + "/admin/apps"
 		}
@@ -664,7 +683,9 @@ func checkFailing(concept string, row map[string]any, interval time.Duration, fr
 		return VerdictReason{}, false
 	}
 	lastError := mapString(row, "lastError")
-	if grantLost(lastError) || isNotGranted(lastError) || isNotRequested(lastError) {
+	// A refusal is the approval's notice (or data_not_declared's), the
+	// prefixed form of a refused backfill included: one refusal, one notice.
+	if grantLost(lastError) || isNotGranted(refusalOf(row)) || isNotRequested(lastError) {
 		return VerdictReason{}, false
 	}
 	word := plainDomain(concept)
