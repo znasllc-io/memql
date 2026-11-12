@@ -34,6 +34,21 @@ package memql
 //  6. Nothing decides: a `shared` concept's row stays cluster-provided
 //     (SHARED); any other row gets the primary account.
 //
+// Between rules 1 and 2: a row whose conflict an owner LEFT OUT
+// (account_assignment_conflict.left_out_at) stays in no account for good,
+// whatever the rules below would now say, and its conflict is not reopened.
+// That is a decision a person made about the row; a guess here would undo it.
+//
+// A conflict records its CANDIDATES, the accounts the row could belong to, so
+// "does a conflict name this account" is a lookup (ConflictsNaming): the
+// accounts of the sites binding a store, or the account the rules chose for a
+// row the Library fence refused.
+//
+// The same judgment answers the export's question, without writing
+// (AccountRowsStillAssignable in account_assignment_api.go), which is why the
+// reads below go through an AccountQuerier: the export asks inside its one
+// snapshot, the job inside its batch's transaction.
+//
 // One conversion runs before the rules, on v1:shopify:channel: rows written
 // before the field was renamed hold Shopify's own account id in `accountId`.
 // A value that is not one of this cluster's accounts is moved to
@@ -51,6 +66,7 @@ package memql
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -58,7 +74,6 @@ import (
 	"time"
 
 	"github.com/lib/pq"
-	"github.com/uptrace/bun"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	coreid "github.com/znasllc-io/memql/core/id"
@@ -88,6 +103,8 @@ const (
 	outcomeShared
 	outcomeWaiting
 	outcomeConflict
+	// outcomeLeftOut: an owner decided the row stays in no account.
+	outcomeLeftOut
 )
 
 // assignmentDecision is the judgment of one row.
@@ -97,6 +114,8 @@ type assignmentDecision struct {
 	account string // outcomeAssigned
 	kind    string // outcomeConflict
 	detail  string // outcomeConflict
+	// candidates are the accounts the row could belong to (outcomeConflict).
+	candidates []string
 	// moveChannelAccount: rewrite the old Shopify value into sourceAccountId
 	// before anything else is written to the row.
 	moveChannelAccount bool
@@ -108,12 +127,17 @@ type assignmentDecision struct {
 //
 // staged-data: MUST-NOT-GATE -- the job judges every row of the concept, staged
 // or not (assignmentBatchIdsFor).
-func readNewestVersions(ctx context.Context, tx bun.Tx, concept string, ids []string) ([]assignmentRow, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT ON (id) id, "createdAt", payload FROM "MemoryNodes"
-		WHERE concept = ? AND id = ANY(?::text[]) ORDER BY id, "createdAt" DESC`, concept, pq.Array(ids))
+func readNewestVersions(ctx context.Context, q AccountQuerier, concept string, ids []string) ([]assignmentRow, error) {
+	rows, err := q.QueryContext(ctx, `SELECT DISTINCT ON (id) id, "createdAt", payload FROM "MemoryNodes"
+		WHERE concept = $1 AND id = ANY($2::text[]) ORDER BY id, "createdAt" DESC`, concept, pq.Array(ids))
 	if err != nil {
 		return nil, fmt.Errorf("account assignment: reading the rows of %s: %w", concept, err)
 	}
+	return scanAssignmentRows(rows)
+}
+
+// scanAssignmentRows reads (id, "createdAt", payload) rows and closes them.
+func scanAssignmentRows(rows *sql.Rows) ([]assignmentRow, error) {
 	defer rows.Close()
 	var out []assignmentRow
 	for rows.Next() {
@@ -133,7 +157,7 @@ func readNewestVersions(ctx context.Context, tx bun.Tx, concept string, ids []st
 // assignmentLookups holds what a batch's judgments read, each once per batch.
 type assignmentLookups struct {
 	e   *MemQLEngine
-	tx  bun.Tx
+	q   AccountQuerier
 	ctx context.Context
 	// owners memoizes accountOfUser by bare user id; the context it reads
 	// under carries the request memos, so a batch of one person's rows costs
@@ -147,28 +171,47 @@ type assignmentLookups struct {
 	storeAccounts map[string][]string
 	// accounts is every account's bare id, loaded on the first channel row.
 	accounts map[string]bool
+	// conflicts is the recorded conflicts of the batch's rows, by stored id.
+	conflicts map[string]recordedConflict
+}
+
+// recordedConflict is what account_assignment_conflict holds about one row:
+// whether a conflict of it is still open, and whether an owner left it out.
+type recordedConflict struct {
+	open, leftOut bool
 }
 
 // judgeAssignmentBatch decides every row of one batch.
-func (e *MemQLEngine) judgeAssignmentBatch(ctx context.Context, tx bun.Tx, meta *memorynodes.Concept, rows []assignmentRow) ([]assignmentDecision, error) {
+func (e *MemQLEngine) judgeAssignmentBatch(ctx context.Context, q AccountQuerier, meta *memorynodes.Concept, rows []assignmentRow) ([]assignmentDecision, error) {
+	_, out, err := e.judgeAssignmentRows(ctx, q, meta, rows)
+	return out, err
+}
+
+// judgeAssignmentRows is judgeAssignmentBatch that also hands back the lookups
+// it read, for a caller that asks more of the same rows (the export's judge
+// asks whether a waiting row's parent can still get an account).
+func (e *MemQLEngine) judgeAssignmentRows(ctx context.Context, q AccountQuerier, meta *memorynodes.Concept, rows []assignmentRow) (*assignmentLookups, []assignmentDecision, error) {
 	lk := &assignmentLookups{
 		e:      e,
-		tx:     tx,
+		q:      q,
 		ctx:    contextWithPersonRoleMemo(contextWithAccountScopeMemo(ctx, e)),
 		owners: map[string]string{},
 	}
 	if err := lk.loadParents(meta, rows); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	if err := lk.loadConflicts(meta, rows); err != nil {
+		return nil, nil, err
 	}
 	out := make([]assignmentDecision, 0, len(rows))
 	for _, row := range rows {
 		d, err := lk.judge(meta, row)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		out = append(out, d)
 	}
-	return out, nil
+	return lk, out, nil
 }
 
 func (lk *assignmentLookups) judge(meta *memorynodes.Concept, row assignmentRow) (assignmentDecision, error) {
@@ -198,6 +241,12 @@ func (lk *assignmentLookups) judge(meta *memorynodes.Concept, row assignmentRow)
 	// Rule 1.
 	if bareAccount(row.Payload[accountField]) != "" {
 		d.outcome = outcomeKept
+		return d, nil
+	}
+
+	// Left out by an owner (file header).
+	if lk.conflicts[row.ID].leftOut {
+		d.outcome = outcomeLeftOut
 		return d, nil
 	}
 
@@ -248,6 +297,7 @@ func (lk *assignmentLookups) judge(meta *memorynodes.Concept, row assignmentRow)
 		default:
 			d.outcome, d.kind = outcomeConflict, conflictStoreBoundTwice
 			d.detail = "bound by sites of accounts " + strings.Join(accounts, ", ")
+			d.candidates = accounts
 			return d, nil
 		}
 	}
@@ -321,8 +371,8 @@ func (lk *assignmentLookups) loadParents(meta *memorynodes.Concept, rows []assig
 	}
 	lk.parents = make(map[string]map[string]string, len(wanted))
 	for concept, ids := range wanted {
-		result, err := lk.tx.QueryContext(lk.ctx, `SELECT DISTINCT ON (id) id, payload FROM "MemoryNodes"
-			WHERE concept = ? AND id = ANY(?::text[]) ORDER BY id, "createdAt" DESC`, concept, pq.Array(distinctIds(ids)))
+		result, err := lk.q.QueryContext(lk.ctx, `SELECT DISTINCT ON (id) id, payload FROM "MemoryNodes"
+			WHERE concept = $1 AND id = ANY($2::text[]) ORDER BY id, "createdAt" DESC`, concept, pq.Array(distinctIds(ids)))
 		if err != nil {
 			return fmt.Errorf("account assignment: reading parents in %s: %w", concept, err)
 		}
@@ -349,6 +399,41 @@ func (lk *assignmentLookups) loadParents(meta *memorynodes.Concept, rows []assig
 		lk.parents[concept] = byID
 	}
 	return nil
+}
+
+// loadConflicts reads the recorded conflicts of the batch's rows: the ones still
+// open and the ones an owner left out. A resolved conflict says nothing.
+func (lk *assignmentLookups) loadConflicts(meta *memorynodes.Concept, rows []assignmentRow) error {
+	lk.conflicts = map[string]recordedConflict{}
+	if len(rows) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	result, err := lk.q.QueryContext(lk.ctx, `SELECT row_id, left_out_at IS NOT NULL FROM account_assignment_conflict
+		WHERE concept = $1 AND row_id = ANY($2::text[]) AND (resolved_at IS NULL OR left_out_at IS NOT NULL)`,
+		meta.Name, pq.Array(ids))
+	if err != nil {
+		return fmt.Errorf("account assignment: reading the conflicts of %s: %w", meta.Name, err)
+	}
+	defer result.Close()
+	for result.Next() {
+		var id string
+		var leftOut bool
+		if err := result.Scan(&id, &leftOut); err != nil {
+			return err
+		}
+		c := lk.conflicts[id]
+		if leftOut {
+			c.leftOut = true
+		} else {
+			c.open = true
+		}
+		lk.conflicts[id] = c
+	}
+	return result.Err()
 }
 
 // ownerAccount is the account of the row's owner, or "" when the concept names
@@ -416,8 +501,8 @@ func (lk *assignmentLookups) placeableTags(meta *memorynodes.Concept, row assign
 func (lk *assignmentLookups) sitesBinding(storeID string) ([]string, error) {
 	if lk.storeAccounts == nil {
 		lk.storeAccounts = map[string][]string{}
-		result, err := lk.tx.QueryContext(lk.ctx, `SELECT DISTINCT ON (id) payload FROM "MemoryNodes"
-			WHERE concept = ? ORDER BY id, "createdAt" DESC`, conceptPlatformSite)
+		result, err := lk.q.QueryContext(lk.ctx, `SELECT DISTINCT ON (id) payload FROM "MemoryNodes"
+			WHERE concept = $1 ORDER BY id, "createdAt" DESC`, conceptPlatformSite)
 		if err != nil {
 			return nil, fmt.Errorf("account assignment: reading sites: %w", err)
 		}
@@ -473,7 +558,7 @@ func (lk *assignmentLookups) sitesBinding(storeID string) ([]string, error) {
 func (lk *assignmentLookups) isAccount(id string) (bool, error) {
 	if lk.accounts == nil {
 		lk.accounts = map[string]bool{primaryAccountBareId(): true}
-		result, err := lk.tx.QueryContext(lk.ctx, `SELECT DISTINCT id FROM "MemoryNodes" WHERE concept = ?`, conceptAccountsAccount)
+		result, err := lk.q.QueryContext(lk.ctx, `SELECT DISTINCT id FROM "MemoryNodes" WHERE concept = $1`, conceptAccountsAccount)
 		if err != nil {
 			return false, fmt.Errorf("account assignment: reading accounts: %w", err)
 		}

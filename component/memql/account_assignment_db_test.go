@@ -14,6 +14,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 )
 
@@ -366,6 +367,8 @@ func TestAccountAssignmentRecordsALibraryFenceRefusal(t *testing.T) {
 	var kind string
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT kind FROM account_assignment_conflict WHERE row_id = ?`, retired).Scan(&kind))
 	require.Equal(t, conflictLibraryFenceRefused, kind)
+	require.Equal(t, []string{"self"}, conflictOf(t, db, retired, conflictLibraryFenceRefused).candidates,
+		"a refused row records the account the rules chose")
 }
 
 func TestAccountAssignmentIndexHasItsDefinition(t *testing.T) {
@@ -482,6 +485,282 @@ func TestAccountAssignmentRewalksOnlyWhileRowsWait(t *testing.T) {
 		require.True(t, assignmentProgressOf(t, db, grant).passFull, "rows were waiting, so the pass should be full")
 		require.Equal(t, "rewalk-acct", newestPayload(t, db, child)["accountId"])
 	})
+}
+
+// makeDue makes concepts claimable now.
+func makeDue(t *testing.T, db *bun.DB, concepts ...string) {
+	t.Helper()
+	_, err := db.ExecContext(context.Background(), `UPDATE account_assignment_progress SET next_at = clock_timestamp()
+		WHERE concept = ANY(?::text[])`, pq.Array(concepts))
+	require.NoError(t, err)
+}
+
+// A row written without an account inside a transaction that stays open across
+// a later pass is invisible to that pass. The pass must not then advance past
+// the start of that transaction, or the pass after the commit would begin
+// beyond the row and never see it. The slack is set to zero so the test does
+// not have to hold the transaction open for longer than the slack.
+func TestAccountAssignmentCatchesALateCommit(t *testing.T) {
+	engine, db, _ := readMergeTestEngine(t)
+	ctx := context.Background()
+	s := uniqueSuffix(t.Name())
+	const todo = "v1:todos:todo"
+	seedPrincipal(t, engine, "late-owner-"+s, auth.RoleOwner)
+	saved := assignmentLateCommitSlack
+	assignmentLateCommitSlack = 0
+	t.Cleanup(func() { assignmentLateCommitSlack = saved })
+
+	_, order, err := assignmentConcepts()
+	require.NoError(t, err)
+	require.NoError(t, ensureAssignmentProgressRows(ctx, db, order))
+	makeDue(t, db, todo)
+	runOnePassOf(t, engine, db, todo)
+
+	late := todo + ":late-" + s
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	var createdAt time.Time
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&createdAt))
+	_, err = tx.NewInsert().Model(&memorynodes.MemoryNode{
+		ID: late, Concept: todo, CreatedBy: "assignment-test", CreatedAt: createdAt.UTC(),
+		Payload:    json.RawMessage(`{"ownerUserId":"late-owner-` + s + `","title":"late"}`),
+		Provenance: json.RawMessage(`{"kind":"direct","name":"late-commit-test"}`),
+	}).Exec(ctx)
+	require.NoError(t, err)
+	time.Sleep(20 * time.Millisecond)
+
+	makeDue(t, db, todo)
+	runOnePassOf(t, engine, db, todo)
+	require.NoError(t, tx.Commit())
+
+	makeDue(t, db, todo)
+	runOnePassOf(t, engine, db, todo)
+	require.Equal(t, "self", newestPayload(t, db, late)["accountId"], "the row whose transaction committed late was never assigned")
+}
+
+// A full pass asked for is the next pass of that concept, whatever its last
+// full pass's age; a concept nobody asked about keeps its schedule; and a
+// requested pass of a concept waits for the requested pass of the concept it
+// takes its account from, as a first pass does.
+func TestAccountAssignmentFullPassOnRequest(t *testing.T) {
+	engine, db, _ := readMergeTestEngine(t)
+	ctx := context.Background()
+	s := uniqueSuffix(t.Name())
+	const todo, grant = "v1:todos:todo", "v1:platform:sitePreviewGrant"
+	seedPrincipal(t, engine, "request-owner-"+s, auth.RoleOwner)
+	site := conceptPlatformSite + ":request-site-" + s
+	seedRawRow(t, ctx, db, conceptPlatformSite, site, time.Now().Add(-time.Hour), "assignment-test",
+		map[string]any{"ownerUserId": "request-owner-" + s})
+	child := grant + ":request-grant-" + s
+	seedRawRow(t, ctx, db, grant, child, time.Now().Add(-time.Hour), "assignment-test",
+		map[string]any{"siteId": "request-site-" + s})
+
+	resetAssignmentProgress(t, db)
+	runAssignmentUntilSettled(t, engine, db, forceFullPasses(t, db).Add(-time.Hour))
+	require.Positive(t, assignmentProgressOf(t, db, grant).waiting)
+	_, err := db.ExecContext(ctx, `UPDATE "MemoryNodes" SET payload = jsonb_set(payload, '{accountId}', '"request-acct"')
+		WHERE id = ?`, site)
+	require.NoError(t, err)
+
+	// Both have rows waiting and a full pass an hour old: neither is due a
+	// full pass by the schedule alone.
+	_, err = db.ExecContext(ctx, `UPDATE account_assignment_progress
+		SET full_pass_at = clock_timestamp() - interval '1 hour', next_at = clock_timestamp(),
+		    waiting = GREATEST(waiting, 1) WHERE concept = ANY(?::text[])`, pq.Array([]string{grant, todo}))
+	require.NoError(t, err)
+	require.NoError(t, RequestAccountFullPass(ctx, db, []string{grant}))
+
+	runOnePassOf(t, engine, db, grant)
+	require.True(t, assignmentProgressOf(t, db, grant).passFull, "the requested pass was not full")
+	require.Equal(t, "request-acct", newestPayload(t, db, child)["accountId"])
+
+	runOnePassOf(t, engine, db, todo)
+	require.False(t, assignmentProgressOf(t, db, todo).passFull, "a concept nobody asked about was walked in full")
+
+	makeDue(t, db, grant)
+	runOnePassOf(t, engine, db, grant)
+	require.False(t, assignmentProgressOf(t, db, grant).passFull, "a request already honored was honored again")
+
+	t.Run("parents first", func(t *testing.T) {
+		const goal, run = "v1:work:goal", "v1:work:run"
+		require.NoError(t, RequestAccountFullPass(ctx, db, []string{goal, run}))
+		managed, order, err := assignmentConcepts()
+		require.NoError(t, err)
+		candidates, err := assignmentCandidates(ctx, db, managed, order)
+		require.NoError(t, err)
+		require.Contains(t, candidates, goal)
+		require.NotContains(t, candidates, run, "a child's requested pass started before its parent's")
+
+		runOnePassOf(t, engine, db, goal)
+		candidates, err = assignmentCandidates(ctx, db, managed, order)
+		require.NoError(t, err)
+		require.Contains(t, candidates, run)
+		runOnePassOf(t, engine, db, run)
+		require.True(t, assignmentProgressOf(t, db, run).passFull)
+	})
+}
+
+// conflictOf reads one conflict row of a test.
+type conflictRow struct {
+	candidates []string
+	resolved   bool
+	leftOut    bool
+}
+
+func conflictOf(t *testing.T, db *bun.DB, rowID, kind string) conflictRow {
+	t.Helper()
+	var r conflictRow
+	require.NoError(t, db.QueryRowContext(context.Background(), `SELECT candidates, resolved_at IS NOT NULL, left_out_at IS NOT NULL
+		FROM account_assignment_conflict WHERE row_id = ? AND kind = ?`, rowID, kind).
+		Scan(pq.Array(&r.candidates), &r.resolved, &r.leftOut))
+	return r
+}
+
+// A conflict records the accounts its row could belong to; one recorded before
+// candidates existed gains them on the next pass; one found again takes the
+// candidates found; and one an owner left out is never reopened, even when the
+// row would now be assigned.
+func TestAccountAssignmentConflictsRecordTheirCandidates(t *testing.T) {
+	engine, db, _ := readMergeTestEngine(t)
+	ctx := context.Background()
+	f := newAssignmentFixture(t, engine, db, t.Name())
+	const store = "v1:shopify:store"
+	resetAssignmentProgress(t, db)
+	runAssignmentUntilSettled(t, engine, db, forceFullPasses(t, db).Add(-time.Hour))
+
+	require.Equal(t, []string{f.acme, f.beta}, conflictOf(t, db, f.store2, conflictStoreBoundTwice).candidates)
+	n, err := ConflictsNaming(ctx, db.DB, f.beta)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, n)
+	n, err = ConflictsNaming(ctx, db.DB, "v1:accounts:account:"+f.acme)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, n, "the canonical spelling of an account names it too")
+
+	t.Run("a conflict recorded before candidates gains them on a later pass", func(t *testing.T) {
+		_, err := db.ExecContext(ctx, `UPDATE account_assignment_conflict SET candidates = '{}' WHERE row_id = ?`, f.store2)
+		require.NoError(t, err)
+		makeDue(t, db, store)
+		runOnePassOf(t, engine, db, store)
+		require.False(t, assignmentProgressOf(t, db, store).passFull)
+		require.Equal(t, []string{f.acme, f.beta}, conflictOf(t, db, f.store2, conflictStoreBoundTwice).candidates)
+	})
+
+	gamma := "gamma-" + f.suffix
+	t.Run("a conflict found again takes the candidates found", func(t *testing.T) {
+		seedRawRow(t, ctx, db, conceptPlatformSite, conceptPlatformSite+":site3-"+f.suffix, time.Now().Add(-time.Hour), "assignment-test",
+			map[string]any{"ownerUserId": f.bob, "accountId": gamma, "binding": map[string]any{"storeId": "store2-" + f.suffix}})
+		require.NoError(t, RequestAccountFullPass(ctx, db, []string{store}))
+		runOnePassOf(t, engine, db, store)
+		require.Equal(t, []string{f.acme, f.beta, gamma}, conflictOf(t, db, f.store2, conflictStoreBoundTwice).candidates)
+		n, err := ConflictsNaming(ctx, db.DB, gamma)
+		require.NoError(t, err)
+		require.EqualValues(t, 1, n)
+	})
+
+	t.Run("a conflict left out is not reopened", func(t *testing.T) {
+		_, err := db.ExecContext(ctx, `UPDATE account_assignment_conflict
+			SET left_out_at = clock_timestamp(), left_out_by = 'an-owner', resolved_at = clock_timestamp() WHERE row_id = ?`, f.store2)
+		require.NoError(t, err)
+		// What made the store ambiguous goes away: only acme's site binds it now.
+		_, err = db.ExecContext(ctx, `UPDATE "MemoryNodes" SET payload = payload - 'binding'
+			WHERE id = ANY(?::text[])`, pq.Array([]string{conceptPlatformSite + ":site2-" + f.suffix, conceptPlatformSite + ":site3-" + f.suffix}))
+		require.NoError(t, err)
+		require.NoError(t, RequestAccountFullPass(ctx, db, []string{store}))
+		runOnePassOf(t, engine, db, store)
+
+		c := conflictOf(t, db, f.store2, conflictStoreBoundTwice)
+		require.True(t, c.leftOut)
+		require.True(t, c.resolved, "a conflict left out was reopened")
+		_, has := newestPayload(t, db, f.store2)["accountId"]
+		require.False(t, has, "a row left out of every account was assigned")
+		n, err := ConflictsNaming(ctx, db.DB, gamma)
+		require.NoError(t, err)
+		require.Zero(t, n, "a conflict left out still names its candidates")
+	})
+}
+
+// The export's judge counts, without writing, the recent rows the job would
+// still assign or would leave waiting on a parent that can still get one, and
+// leaves out the rows the job leaves alone on purpose.
+func TestAccountAssignmentRowsStillAssignable(t *testing.T) {
+	engine, db, _ := readMergeTestEngine(t)
+	ctx := context.Background()
+	s := uniqueSuffix(t.Name())
+	const goal, run, todo, grant, skill = "v1:work:goal", "v1:work:run", "v1:todos:todo", "v1:platform:sitePreviewGrant", "v1:skills:skill"
+	owner := "judge-owner-" + s
+	seedPrincipal(t, engine, owner, auth.RoleOwner)
+
+	var since time.Time
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&since))
+	at := since.Add(time.Second)
+	raw := func(concept, id string, payload map[string]any) string {
+		full := concept + ":" + id
+		seedRawRow(t, ctx, db, concept, full, at, "assignment-test", payload)
+		return full
+	}
+	// A goal the owner rule assigns, and a run waiting on it: the goal can
+	// still get an account, so the run counts.
+	g := raw(goal, "judge-goal-"+s, map[string]any{"ownerUserId": owner, "title": "g"})
+	raw(run, "judge-run-"+s, map[string]any{"ownerUserId": owner, "goalId": g})
+	// A grant following a site that states no account: left alone.
+	raw(conceptPlatformSite, "judge-site-"+s, map[string]any{"ownerUserId": owner})
+	raw(grant, "judge-grant-"+s, map[string]any{"siteId": "judge-site-" + s})
+	// A cluster-provided row of a shared kind: left alone.
+	raw(skill, "judge-skill-"+s, map[string]any{"ownerUserId": "", "slug": "judge-skill-" + s})
+	// Two to-dos the owner rule would assign, one of them with a recorded
+	// conflict: only the other counts.
+	raw(todo, "judge-todo-"+s, map[string]any{"ownerUserId": owner, "title": "t"})
+	conflicted := raw(todo, "judge-todo-conflicted-"+s, map[string]any{"ownerUserId": owner, "title": "c"})
+	_, err := db.ExecContext(ctx, `INSERT INTO account_assignment_conflict (concept, row_id, kind, detail, candidates)
+		VALUES (?, ?, 'store_bound_twice', 'test', '{self}')`, todo, conflicted)
+	require.NoError(t, err)
+
+	counts, err := engine.AccountRowsStillAssignable(ctx, db.DB, since, []string{goal, run, todo, grant, skill, conceptPlatformSite})
+	require.NoError(t, err)
+	require.Equal(t, map[string]int64{goal: 1, run: 1, todo: 1}, counts)
+	_, has := newestPayload(t, db, g)["accountId"]
+	require.False(t, has, "the judge wrote")
+
+	t.Run("an assigned row is no longer counted", func(t *testing.T) {
+		_, err := db.ExecContext(ctx, `UPDATE "MemoryNodes" SET payload = jsonb_set(payload, '{accountId}', '"self"')
+			WHERE id = ANY(?::text[])`, pq.Array([]string{g, todo + ":judge-todo-" + s}))
+		require.NoError(t, err)
+		counts, err := engine.AccountRowsStillAssignable(ctx, db.DB, since, []string{goal, run, todo})
+		require.NoError(t, err)
+		require.Equal(t, map[string]int64{run: 1}, counts, "the run now takes its goal's account")
+	})
+}
+
+func TestAccountAssignmentStates(t *testing.T) {
+	engine, db, _ := readMergeTestEngine(t)
+	ctx := context.Background()
+	_, order, err := assignmentConcepts()
+	require.NoError(t, err)
+
+	resetAssignmentProgress(t, db)
+	states, err := engine.AccountAssignmentStates(ctx, db.DB)
+	require.NoError(t, err)
+	require.Len(t, states, len(order))
+	for i, st := range states {
+		require.Equal(t, order[i], st.Concept, "the states are in assignment order")
+		require.False(t, st.FirstPassFinished, "%s has no progress row and reads finished", st.Concept)
+		require.True(t, st.VerifiedThrough.IsZero())
+	}
+
+	start := forceFullPasses(t, db).Add(-time.Hour)
+	runAssignmentUntilSettled(t, engine, db, start)
+	_, err = db.ExecContext(ctx, `UPDATE account_assignment_progress SET waiting = 3 WHERE concept = 'v1:todos:todo'`)
+	require.NoError(t, err)
+	states, err = engine.AccountAssignmentStates(ctx, db.DB)
+	require.NoError(t, err)
+	for _, st := range states {
+		require.True(t, st.FirstPassFinished, st.Concept)
+		require.False(t, st.VerifiedThrough.IsZero(), st.Concept)
+		if st.Concept == "v1:todos:todo" {
+			require.EqualValues(t, 3, st.Waiting)
+		}
+	}
 }
 
 // A batch that fails halves its concept's batch size and steps it back, so the

@@ -2,7 +2,8 @@ package memql
 
 // account_assignment_write.go -- the statements the assignment of existing rows
 // writes with (account_assignment.go): the account stamped into a row's newest
-// version in place, the channel conversion, and the conflicts recorded.
+// version in place, the channel conversion, and the conflicts recorded with
+// their candidates.
 //
 // # In place, guarded, and silent
 //
@@ -23,7 +24,8 @@ package memql
 // would abort the whole batch, so the batch runs under a savepoint: on that
 // error it is rolled back and retried one row at a time, each under its own
 // savepoint, and the refused rows are left without an account and recorded as
-// library_fence_refused conflicts. Any other error fails the batch.
+// library_fence_refused conflicts, each naming the account the rules chose as
+// its candidate. Any other error fails the batch.
 
 import (
 	"context"
@@ -56,6 +58,8 @@ type assignmentWrite struct {
 
 type assignmentConflict struct {
 	ID, Kind, Detail string
+	// Candidates are the accounts the row could belong to, bare.
+	Candidates []string
 }
 
 // applyAssignmentPlan writes a batch's decisions and returns its counts and
@@ -75,7 +79,7 @@ func applyAssignmentPlan(ctx context.Context, tx bun.Tx, meta *memorynodes.Conce
 		case outcomeWaiting:
 			counts.waiting++
 		case outcomeConflict:
-			conflicts = append(conflicts, assignmentConflict{ID: d.row.ID, Kind: d.kind, Detail: d.detail})
+			conflicts = append(conflicts, assignmentConflict{ID: d.row.ID, Kind: d.kind, Detail: d.detail, Candidates: d.candidates})
 		}
 		if d.outcome == outcomeAssigned || d.moveChannelAccount {
 			writes = append(writes, assignmentWrite{
@@ -93,8 +97,11 @@ func applyAssignmentPlan(ctx context.Context, tx bun.Tx, meta *memorynodes.Conce
 			for _, w := range writes {
 				one, err := writeAssignmentsGuarded(ctx, tx, meta.Name, []assignmentWrite{w})
 				if isLibraryFenceRefusal(err) {
+					// The candidate is the account the rules chose: placing the
+					// row there is what the job would have done.
 					conflicts = append(conflicts, assignmentConflict{ID: w.ID, Kind: conflictLibraryFenceRefused,
-						Detail: "the Library retirement fence refused the update: the file's bytes were permanently retired"})
+						Detail:     "the Library retirement fence refused the update: the file's bytes were permanently retired",
+						Candidates: []string{w.Account}})
 					continue
 				}
 				if err != nil {
@@ -207,15 +214,24 @@ func writeAssignments(ctx context.Context, tx bun.Tx, concept string, writes []a
 	return changed, nil
 }
 
-// recordAssignmentConflicts records rows the job will not guess at. A conflict
-// found again keeps the time it was first found and is reopened if it had been
-// marked resolved.
+// recordAssignmentConflicts records rows the job will not guess at, with their
+// candidates. A conflict found again keeps the time it was first found, takes
+// the candidates found now, and is reopened if it had been marked resolved --
+// unless an owner left it out, a decision the job never undoes. (The rules
+// already leave such a row alone; the guard holds should a left-out row's
+// conflict be of another kind than the one found now.)
 func recordAssignmentConflicts(ctx context.Context, tx bun.Tx, concept string, conflicts []assignmentConflict) error {
 	for _, c := range conflicts {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO account_assignment_conflict (concept, row_id, kind, detail)
-			VALUES (?, ?, ?, ?)
-			ON CONFLICT (concept, row_id, kind) DO UPDATE SET detail = EXCLUDED.detail, resolved_at = NULL`,
-			concept, c.ID, c.Kind, c.Detail); err != nil {
+		candidates := c.Candidates
+		if candidates == nil {
+			candidates = []string{} // the column is NOT NULL, and a nil array is NULL
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO account_assignment_conflict (concept, row_id, kind, detail, candidates)
+			VALUES (?, ?, ?, ?, ?::text[])
+			ON CONFLICT (concept, row_id, kind) DO UPDATE
+			   SET detail = EXCLUDED.detail, candidates = EXCLUDED.candidates, resolved_at = NULL
+			 WHERE account_assignment_conflict.left_out_at IS NULL`,
+			concept, c.ID, c.Kind, c.Detail, pq.Array(candidates)); err != nil {
 			return fmt.Errorf("account assignment: recording a conflict on %s: %w", c.ID, err)
 		}
 	}
