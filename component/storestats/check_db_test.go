@@ -1012,3 +1012,52 @@ func TestTheCheckRunDeadlineIsBelowTheHour(t *testing.T) {
 		t.Errorf("the check run's deadline is %s and what a run can take %s; want the deadline at or above it and under an hour", checkRunDeadline, b)
 	}
 }
+
+// ==== fix round 1 ====
+
+// A ROW WHOSE NEWEST VERSION CANNOT BE READ STILL ANSWERS FOR ITS FACT: an
+// order, a line and a refund each folded readable and then rewritten to a
+// version the rules refuse. The walk keeps the fact of the last readable
+// version and records the row; a whole pass, whose one read hands only the
+// unreadable version (the floor is an hour back), keeps both and counts
+// nothing.
+func TestAFactWhoseRowsNewestVersionIsUnreadableIsKeptByAPass(t *testing.T) {
+	for _, c := range []struct {
+		source, concept, gid string
+		unread               []any
+		facts                func(*testing.T, string) map[string]map[string]any
+	}{
+		{sourceOrder, orderConcept, theOrder, []any{"currencyCode", ""}, orderFactsOf},
+		{sourceLine, "v1:shopify:orderLineItem", lineTwo, []any{"parentGid", ""}, lineFactsOf},
+		{sourceRefund, "v1:shopify:refund", theRefund, []any{"parentGid", ""}, refundFactsOf},
+	} {
+		t.Run(c.source, func(t *testing.T) {
+			floorAt(t, time.Now().Add(-time.Hour))
+			i, id := runStore(t)
+			mirrorThreeLines(t, id)
+			settle(t, i, id)
+			before := c.facts(t, id)[c.gid]
+			if before == nil {
+				t.Fatal("no fact after the first fill")
+			}
+			mirror(t, c.concept, id, c.gid, map[string]any{c.unread[0].(string): c.unread[1]})
+			if _, err := run(t, i); err != nil {
+				t.Fatal(err)
+			}
+			if recordsOf(t, id)[c.source+"/"+c.gid] == nil {
+				t.Fatalf("the unreadable newest version has no record: %v", recordsOf(t, id))
+			}
+			row := checkThrough(t, i, id, wholesaleState{})
+			if row.PassStartedAt.Valid {
+				t.Fatal("the pass did not end")
+			}
+			if c.facts(t, id)[c.gid] == nil {
+				t.Errorf("the pass deleted the fact of a %s whose row exists and is unreadable", c.source)
+			}
+			wantCounts(t, "an unreadable newest version", row, 0, 0)
+			if recordsOf(t, id)[c.source+"/"+c.gid] == nil {
+				t.Errorf("the pass removed the record of a row it met that is still unreadable")
+			}
+		})
+	}
+}

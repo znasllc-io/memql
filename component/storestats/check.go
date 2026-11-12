@@ -79,7 +79,9 @@ import (
 // fact holds the marker for its title. Every order page re-derives its
 // orders, so a derived column is recomputed once a pass whatever differed.
 // Every fact a page names is marked checked_at = pass_started_at, and so is
-// the record of every row it met that could not be read.
+// the stored fact and the record of every row it met that could not be read:
+// that row exists, and the walk keeps its fact from its last readable
+// version.
 //
 // # The end of a pass
 //
@@ -731,9 +733,20 @@ func checkPage(ctx context.Context, tx bun.Tx, storeID string, p checkedPage) (c
 			return checkResult{}, err
 		}
 	}
-	if len(named) > 0 {
+	// Every row the page met answers for its fact, a row whose newest version
+	// cannot be read included: the walk keeps that row's fact from its last
+	// readable version, and it is marked here, neither compared nor written,
+	// so the end of the pass does not take it for a fact no row answers for.
+	// A row with no gid has no fact to keep.
+	seen := append([]string(nil), named...)
+	for _, u := range p.facts.unreadable {
+		if u.gid != "" {
+			seen = append(seen, u.gid)
+		}
+	}
+	if len(seen) > 0 {
 		if _, err := tx.NewUpdate().TableExpr(table).Set("checked_at = ?", p.started).
-			Where("store_id = ? AND ? IN (?)", storeID, bun.Ident(gidColumn), bun.In(named)).Exec(ctx); err != nil {
+			Where("store_id = ? AND ? IN (?)", storeID, bun.Ident(gidColumn), bun.In(seen)).Exec(ctx); err != nil {
 			return checkResult{}, fmt.Errorf("mark the facts the page names: %w", err)
 		}
 	}
