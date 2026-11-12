@@ -39,10 +39,6 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/librarykey"
 	"github.com/znasllc-io/memql/integrations/azureblob"
-
-	// The two hand-overs a node registers, so the file holds their members.
-	_ "github.com/znasllc-io/memql/component/campaigns"
-	_ "github.com/znasllc-io/memql/component/sitetraffic"
 )
 
 // vaultConcept is a kind of the fixture's own with a @secret field: no kind
@@ -1325,4 +1321,53 @@ func TestExportRunListsNoReferenceToACarriedRowWhateverItsKind(t *testing.T) {
 	res, err := f.run(t, f.export(acme, false), "")
 	require.NoError(t, err)
 	require.NotContains(t, refsByID(t, members(t, f.store.committed[res.ObjectKey])), noteID)
+}
+
+// ---------------------------------------------------------------------------
+// The hand-over the run is tested against
+
+// The real hand-overs live in components of the root module
+// (component/sitetraffic, component/campaigns), which this module cannot
+// import. The run is tested here against a stand-in registered under the same
+// name and of the same shape: the daily statistics of the sites the file
+// carries. The real ones have their own tests beside them, and
+// app/account_export_handovers_test.go checks that every binary links them.
+func init() {
+	accountexport.RegisterHandOver("site-statistics", func(ctx context.Context, q accountexport.Querier, in accountexport.HandOverInput, out accountexport.HandOverSink) error {
+		sites := in.RowIDs("v1:platform:site")
+		if len(sites) == 0 {
+			return nil
+		}
+		ids, err := json.Marshal(sites)
+		if err != nil {
+			return err
+		}
+		rows, err := q.QueryContext(ctx, `SELECT to_jsonb(t)::text FROM edge_stats_daily t
+ WHERE t.site_id IN (SELECT jsonb_array_elements_text($1::jsonb))
+ ORDER BY t.site_id, t.day`, string(ids))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		var part accountexport.LineSink
+		for rows.Next() {
+			var line string
+			if err := rows.Scan(&line); err != nil {
+				return err
+			}
+			if part == nil {
+				part = out.Parted("site-statistics/edge_stats_daily")
+			}
+			if err := part.Write(json.RawMessage(line)); err != nil {
+				return err
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if part == nil {
+			return nil
+		}
+		return part.Close()
+	})
 }

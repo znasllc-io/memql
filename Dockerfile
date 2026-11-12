@@ -57,6 +57,7 @@ COPY go.mod go.sum ./
 # COPY whose named source does not exist. Add a line per module as each tier
 # lands (#3242..#3244).
 COPY cockpit/go.* ./cockpit/
+COPY component/accountexport/go.* ./component/accountexport/
 COPY component/actions/go.* ./component/actions/
 COPY component/architecture/go.* ./component/architecture/
 COPY component/auth/go.* ./component/auth/

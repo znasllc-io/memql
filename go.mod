@@ -5,7 +5,6 @@ go 1.26.8
 toolchain go1.27.4
 
 require (
-	filippo.io/age v1.3.2
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.8.2
 	github.com/a-h/templ v0.3.1070
 	github.com/google/go-containerregistry v0.22.1
@@ -32,6 +31,7 @@ require (
 )
 
 require (
+	filippo.io/age v1.3.2 // indirect
 	filippo.io/hpke v0.4.0 // indirect
 	github.com/oschwald/maxminddb-golang/v2 v2.1.1 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
@@ -180,6 +180,7 @@ require (
 	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
+	github.com/znasllc-io/memql/component/accountexport v0.0.0
 	github.com/znasllc-io/memql/component/actions v0.0.0
 	github.com/znasllc-io/memql/component/architecture v0.0.0
 	github.com/znasllc-io/memql/component/auth v0.0.0
@@ -301,6 +302,8 @@ replace github.com/znasllc-io/memql/docs => ./docs
 replace github.com/znasllc-io/memql/component/envregistry => ./component/envregistry
 
 replace github.com/znasllc-io/memql/dsl => ./dsl
+
+replace github.com/znasllc-io/memql/component/accountexport => ./component/accountexport
 
 replace github.com/znasllc-io/memql/component/actions => ./component/actions
 

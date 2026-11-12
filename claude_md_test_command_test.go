@@ -84,7 +84,7 @@ func TestFrontDoorDocsDoNotTeachSingleModuleTestSweep(t *testing.T) {
 // # The defect this closes
 //
 // CLAUDE.md said "go test ./..." in three places. This is a multi-module
-// workspace -- go.work lists 51 modules -- and a relative pattern resolves
+// workspace -- go.work lists 55 modules -- and a relative pattern resolves
 // inside whichever module owns the directory it is rooted at, so `./...` never
 // leaves the root module. Measured at the time of the fix: 64 packages, of which
 // `component/memql`, `component/database` and `component/language` -- the engine,

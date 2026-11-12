@@ -492,6 +492,24 @@ readonly DB_GATED_TREES=(
 # `component/pipelinerun`, the engine side, is a root-module package and is
 # covered by the root pattern like any other.
 #
+# The account export (design record
+# docs/superpowers/specs/2026-11-12-account-export-design.md) added
+# `component/accountexport`: the export file's format, as a writer, a checker
+# and the registry of hand-overs. It is a module for procedure's reason and no
+# other: `integrations/accounts` writes a file and lives in the `integrations`
+# module, which cannot import a root-module package with GOWORK=off. Its one
+# require is the age encryption library. What the complement now means,
+# MEASURED:
+#
+#	go list github.com/znasllc-io/memql/... | grep -cE 'component/accountexport$'
+#	  1
+#	scripts/ci/db-gated-packages.sh --complement | grep -cE 'component/accountexport$'
+#	  1
+#
+# It is enumerated in workspace mode and sits in the complement, so its tests
+# run in THIS lane. It is NOT db-gated and must not join DB_GATED_TREES: it
+# reads and writes bytes and reaches no database.
+#
 # Cockpit is a separate release module already included by go.work. Its
 # packages remain in the non-DB complement: the generic Go lanes own unit
 # tests/build/vet, as memql-package.yaml declares. The separate Cockpit lanes
@@ -500,6 +518,7 @@ readonly DB_GATED_TREES=(
 readonly KNOWN_GO_MOD_DIRS=(
 	"."
 	"cockpit"
+	"component/accountexport"
 	"component/actions"
 	"component/architecture"
 	"component/auth"

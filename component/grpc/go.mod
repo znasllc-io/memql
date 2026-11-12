@@ -101,6 +101,8 @@ require (
 	nhooyr.io/websocket v1.8.17 // indirect
 )
 
+replace github.com/znasllc-io/memql/component/accountexport => ../accountexport
+
 replace github.com/znasllc-io/memql/component/actions => ../actions
 
 replace github.com/znasllc-io/memql/component/auth => ../auth

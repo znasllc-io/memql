@@ -60,6 +60,8 @@ require (
 )
 
 require (
+	filippo.io/age v1.3.2 // indirect
+	filippo.io/hpke v0.4.0 // indirect
 	github.com/docker/cli v29.7.2+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.9.3 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
@@ -113,7 +115,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/kljensen/snowball v0.10.0 // indirect
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728 // indirect
-	github.com/lib/pq v1.12.3 // indirect
+	github.com/lib/pq v1.12.3
 	github.com/lithammer/shortuuid/v4 v4.2.0 // indirect
 	github.com/livekit/mageutil v0.0.0-20250511045019-0f1ff63f7731 // indirect
 	github.com/livekit/mediatransportutil v0.0.0-20260821083140-f234b534b095 // indirect
@@ -166,6 +168,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
+	github.com/znasllc-io/memql/component/accountexport v0.0.0
 	github.com/znasllc-io/memql/component/actions v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/bus v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/bus/gen v0.0.0 // indirect
@@ -173,9 +176,10 @@ require (
 	github.com/znasllc-io/memql/component/envregistry v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/annotations v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/dslclause v0.0.0 // indirect
-	github.com/znasllc-io/memql/component/metrics v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/metrics v0.0.0
 	github.com/znasllc-io/memql/component/provenance v0.0.0 // indirect
 	github.com/znasllc-io/memql/docs v0.0.0 // indirect
+	github.com/znasllc-io/memql/integrations/email v0.0.0
 	go.opentelemetry.io/otel v1.45.0 // indirect
 	go.opentelemetry.io/otel/trace v1.45.0 // indirect
 	go.uber.org/atomic v1.12.0 // indirect
@@ -194,6 +198,8 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260803160001-6ac0973c030d // indirect
 	mellium.im/sasl v0.3.2 // indirect
 )
+
+replace github.com/znasllc-io/memql/component/accountexport => ../component/accountexport
 
 replace github.com/znasllc-io/memql/component/actions => ../component/actions
 
@@ -260,6 +266,8 @@ replace github.com/znasllc-io/memql/core => ../core
 replace github.com/znasllc-io/memql/docs => ../docs
 
 replace github.com/znasllc-io/memql/dsl => ../dsl
+
+replace github.com/znasllc-io/memql/integrations/email => ./email
 
 replace github.com/znasllc-io/memql/integrations/openai => ./openai
 
