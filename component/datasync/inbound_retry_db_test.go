@@ -5,11 +5,16 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	languageparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
+	"github.com/znasllc-io/memql/integrations/shopify"
 )
 
 // inbound_retry_db_test.go -- the retry pass through a real engine. db-gated,
@@ -327,5 +332,83 @@ func TestOfTwoClaimersOfOneDueRowExactlyOneWins(t *testing.T) {
 	}
 	if r := f.row(id); intField(r, "attempts") != 2 || !timeField(r, "nextAttemptAt").Equal(at.Add(inboundRetryClaim)) {
 		t.Fatalf("after the claims the row is %v, want its two tries and the winner's window", r)
+	}
+}
+
+// A STORE'S OWNER WHO IS NOT A CLUSTER OWNER STILL GETS "TRY AGAIN". The Store
+// page's act asks its own question (the store's owner, or a cluster owner) and
+// then reaches datasyncRequeueInbound as the operator, with internal origin --
+// which is what the requeue's own gate admits. The same person calling the
+// requeue builtin directly is refused, in the gate's words, and nothing moves.
+// Through a real engine, with both integrations registered on it.
+func TestAStoresRequeueStillRunsThroughTheConnector(t *testing.T) {
+	eng, db := healthEngine(t)
+	if eng == nil {
+		return
+	}
+	nanos := time.Now().UnixNano()
+	storeID := fmt.Sprintf("dbtest-requeue-store-%d", nanos)
+	source := shopify.ConnectorName + "-" + storeID
+	storeOwner := fmt.Sprintf("dbtest-store-owner-%d", nanos)
+	cleanInbound(t, db, source)
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept = 'v1:shopify:store' AND id = $1`, "v1:shopify:store:"+storeID)
+	})
+
+	claims := map[string]any{"sub": "dbtest-owner", "role": "owner"}
+	clusterOwner := auth.ContextWithClaims(context.Background(), claims)
+	clusterOwner = auth.ContextWithToken(clusterOwner, auth.BuildTokenInfo(claims))
+	clusterOwner = auth.ContextWithAccess(clusterOwner, &auth.AccessContext{UserId: "dbtest-owner", Role: auth.RoleOwner})
+	if _, err := eng.Execute(clusterOwner, fmt.Sprintf(`mutation createStore(storeId: %s, domain: "acme-widgets.myshopify.com", adminTokenRef: "test-admin", apiVersion: "2026-07", ownerUserId: %s)`,
+		languageparser.QuoteString(storeID), languageparser.QuoteString(storeOwner))); err != nil {
+		t.Fatalf("write the test store: %v", err)
+	}
+
+	// One delivery of the store's source that used its four tries.
+	f := newRetryFixture(t, engineSeam{eng}, source)
+	at := time.Now().UTC().Truncate(time.Second)
+	f.clock = at.Add(-5 * time.Hour)
+	givenUp := f.stage("given-up")
+	for i := 4; i > 0; i-- {
+		f.try(givenUp, at.Add(-time.Duration(i)*time.Hour), errors.New("origin timed out"))
+	}
+	if r := f.row(givenUp); intField(r, "attempts") != 4 {
+		t.Fatalf("the delivery was not given up: %v", r)
+	}
+
+	logger := slog.New(slog.DiscardHandler)
+	if err := eng.RegisterIntegration(NewIntegration(engineSeam{eng}, logger)); err != nil {
+		t.Fatalf("register the sync runtime: %v", err)
+	}
+	stores := shopify.NewStoreRegistry(eng, func(context.Context, string) (string, error) { return "test-only-admin-token", nil })
+	var tryAgain func(context.Context, map[string]any, int) ([]memorynodes.MemoryNode, error)
+	for _, c := range shopify.NewIntegration(shopify.NewConnector(eng, logger, stores, shopify.NewAdminClient())).Capabilities() {
+		if c.Name == "storeRetryDeliveries" {
+			tryAgain = c.Handler
+		}
+	}
+	if tryAgain == nil {
+		t.Fatal("the Shopify integration has no storeRetryDeliveries")
+	}
+
+	// The store's owner, a writer: not a cluster owner.
+	ownerClaims := map[string]any{"sub": storeOwner, "role": "writer"}
+	writer := auth.ContextWithClaims(context.Background(), ownerClaims)
+	writer = auth.ContextWithToken(writer, auth.BuildTokenInfo(ownerClaims))
+	writer = auth.ContextWithAccess(writer, &auth.AccessContext{UserId: storeOwner, Role: auth.RoleWriter})
+
+	direct := `builtin datasyncRequeueInbound(source: ` + languageparser.QuoteString(source) + `)`
+	if _, err := eng.Execute(writer, direct); err == nil || !strings.Contains(err.Error(), "datasync: requeueInbound is for a cluster owner") {
+		t.Fatalf("the store's owner called the requeue directly and got %v, want the gate's refusal", err)
+	}
+	if r := f.row(givenUp); intField(r, "attempts") != 4 {
+		t.Fatalf("a refused requeue moved the delivery: %v", r)
+	}
+
+	if _, err := tryAgain(writer, map[string]any{"storeId": storeID}, 0); err != nil {
+		t.Fatalf("Try again refused the store's owner: %v", err)
+	}
+	if r := f.row(givenUp); stringField(r, "status") != "failed" || intField(r, "attempts") != 0 || timeField(r, "nextAttemptAt").IsZero() {
+		t.Fatalf("after Try again the delivery is %v, want failed with no tries counted and a next time", r)
 	}
 }

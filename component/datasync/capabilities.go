@@ -91,7 +91,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "startBackfill",
-			Description: "Drive one domain's backfill page by page from its stored cursor, persisting progress after every page so a restart resumes; with restart, start it again from nothing first. Operator-driven; nothing schedules it.",
+			Description: "Drive one domain's backfill page by page from its stored cursor, persisting progress after every page so a restart resumes; with restart, start it again from nothing first. Operator-driven; nothing schedules it. For a cluster owner or the engine's own call (internal origin); anybody else is refused before anything is read.",
 			Handler:     i.handleStartBackfill,
 			ArgsSchema: map[string]string{
 				"connector":    "string - connector name",
@@ -123,19 +123,19 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "requeueInbound",
-			Description: "Put one source's given-up inbound deliveries -- failed, their four tries spent -- back in line: no tries counted, due now. Admits a cluster owner or internal origin and refuses anybody else.",
+			Description: "Put one source's given-up inbound deliveries -- failed, their four tries spent -- back in line: no tries counted, due now. For a cluster owner or the engine's own call (internal origin); anybody else is refused before anything is read.",
 			Handler:     i.handleRequeueInbound,
 			ArgsSchema:  map[string]string{"source": "string (required) - the inbound source whose given-up deliveries go back in line"},
 		},
 		{
 			Name:        "retryOutboxEntry",
-			Description: "Return one dead-lettered entry to the queue. Attempts reset to zero, because the operator has presumably fixed what was wrong and carrying the old count forward would dead-letter it again on the first hiccup.",
+			Description: "Return one dead-lettered entry to the queue. Attempts reset to zero, because the operator has presumably fixed what was wrong and carrying the old count forward would dead-letter it again on the first hiccup. For a cluster owner or the engine's own call (internal origin); anybody else is refused before anything is read.",
 			Handler:     i.handleRetryOutboxEntry,
 			ArgsSchema:  map[string]string{"entryId": "string - the dead entry's row id"},
 		},
 		{
 			Name:        "discardOutboxEntry",
-			Description: "Discard one dead-lettered entry: the operator has decided this change will never be delivered. The row survives as audit history carrying the reason.",
+			Description: "Discard one dead-lettered entry: the operator has decided this change will never be delivered. The row survives as audit history carrying the reason. For a cluster owner or the engine's own call (internal origin); anybody else is refused before anything is read.",
 			Handler:     i.handleDiscardOutboxEntry,
 			ArgsSchema: map[string]string{
 				"entryId": "string - the dead entry's row id",
@@ -144,7 +144,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "setSyncPaused",
-			Description: "Pause or resume one domain: stops its backfill, its reconciliation and its drain without unregistering the connector or changing any declaration.",
+			Description: "Pause or resume one domain: stops its backfill, its reconciliation and its drain without unregistering the connector or changing any declaration. For a cluster owner or the engine's own call (internal origin); anybody else is refused before anything is read.",
 			Handler:     i.handleSetPaused,
 			ArgsSchema: map[string]string{
 				"connector":    "string - connector name",
@@ -172,6 +172,28 @@ func requireInternalOrigin(ctx context.Context, name string) error {
 		return fmt.Errorf("datasync: %s is driven by the engine's own automations and refuses a client-origin call", name)
 	}
 	return nil
+}
+
+// requireOperator is the gate of the operator's sync acts -- the five
+// builtins behind Cluster > Data's buttons (startBackfill, setSyncPaused,
+// retryOutboxEntry, discardOutboxEntry, requeueInbound) -- checked FIRST,
+// before any argument is read into a read or a write. Each is @sdk with no
+// @requiresCapability, and a builtin with neither has no rank floor: every
+// signed-in caller of any role reaches its handler, and the page's part only
+// hides the buttons. So the handler asks: a call with internal origin (a
+// connector acting as the operator, an automation), or a cluster owner -- the
+// tier the sync rows are read at -- and nobody else.
+//
+// Internal origin is read from the context the engine hands the handler,
+// which a client cannot set; no argument is consulted for authority.
+func requireOperator(ctx context.Context, name string) error {
+	if auth.OriginFromContext(ctx).IsInternal() {
+		return nil
+	}
+	if access, ok := auth.AccessFromContext(ctx); ok && access != nil && access.IsClusterOwner() {
+		return nil
+	}
+	return fmt.Errorf("datasync: %s is for a cluster owner", name)
 }
 
 // handleDispatchInbound is HANDED A ROW ID AND NOTHING ELSE (epic memql#5477).
@@ -240,13 +262,12 @@ func (i *Integration) handleRetryInbound(ctx context.Context, _ map[string]any, 
 }
 
 // handleRequeueInbound is an operator putting given-up deliveries back in
-// line. A builtin takes no @serverOnly, so the gate is here, before anything is
-// read: the engine's own call, or a cluster owner -- the tier the inbound rows
-// are read at -- and nobody else.
+// line. The Store page's Try again reaches it through the Shopify connector,
+// which asks its own question (the store's owner or a cluster owner) and calls
+// it as the operator, with internal origin.
 func (i *Integration) handleRequeueInbound(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	access, _ := auth.AccessFromContext(ctx)
-	if !auth.OriginFromContext(ctx).IsInternal() && (access == nil || !access.IsClusterOwner()) {
-		return nil, fmt.Errorf("datasync: requeueInbound is a cluster owner's to call")
+	if err := requireOperator(ctx, "requeueInbound"); err != nil {
+		return nil, err
 	}
 	source := strings.TrimSpace(argString(args, "source"))
 	n, err := i.dispatcher.Requeue(ctx, source)
@@ -332,6 +353,9 @@ func (i *Integration) lookupConnector(name string) (memqlsync.Connector, bool) {
 }
 
 func (i *Integration) handleStartBackfill(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireOperator(ctx, "startBackfill"); err != nil {
+		return nil, err
+	}
 	connector := strings.TrimSpace(argString(args, "connector"))
 	conceptID := strings.TrimSpace(argString(args, "conceptId"))
 	partition := strings.TrimSpace(argString(args, "partitionKey"))
@@ -398,14 +422,17 @@ func (i *Integration) handleContinueBackfills(ctx context.Context, _ map[string]
 // operator's two answers to a dead letter, and they exist as
 // CAPABILITIES rather than as directly-callable mutations because the
 // mutations are @serverOnly: an engine delivery queue is not a surface a
-// client drives row by row. The capability is the door, and the owner /
-// admin gate sits at the console that opens it.
+// client drives row by row. The capability is the door, and requireOperator
+// is its lock: the console that opens it only hides the buttons.
 //
 // Both refuse an entry that is not DEAD. A `pending` entry is already
 // the worker's, and a retry that raced the worker would deliver twice --
 // which the receiver's idempotency key would probably absorb, and
 // "probably" is not the standard for a button an operator presses.
 func (i *Integration) handleRetryOutboxEntry(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireOperator(ctx, "retryOutboxEntry"); err != nil {
+		return nil, err
+	}
 	entry, err := i.requireDeadEntry(ctx, argString(args, "entryId"))
 	if err != nil {
 		return nil, err
@@ -420,6 +447,9 @@ func (i *Integration) handleRetryOutboxEntry(ctx context.Context, args map[strin
 }
 
 func (i *Integration) handleDiscardOutboxEntry(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireOperator(ctx, "discardOutboxEntry"); err != nil {
+		return nil, err
+	}
 	entry, err := i.requireDeadEntry(ctx, argString(args, "entryId"))
 	if err != nil {
 		return nil, err
@@ -464,6 +494,9 @@ func (i *Integration) requireDeadEntry(ctx context.Context, entryID string) (Out
 }
 
 func (i *Integration) handleSetPaused(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireOperator(ctx, "setSyncPaused"); err != nil {
+		return nil, err
+	}
 	connector := strings.TrimSpace(argString(args, "connector"))
 	conceptID := strings.TrimSpace(argString(args, "conceptId"))
 	if connector == "" || conceptID == "" {

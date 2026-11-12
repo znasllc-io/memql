@@ -1686,7 +1686,7 @@ QueryClient.prototype.dataOrigins = function (this: QueryClient, args: DataOrigi
   return this.executeNamed("dataOrigins", buildDataOrigins(args), opts);
 };
 
-/** Discard one DEAD-lettered outbox entry: the operator has decided this change will never be delivered. The row survives as audit history carrying the reason. Refuses an entry that is not dead. */
+/** Discard one DEAD-lettered outbox entry: the operator has decided this change will never be delivered. The row survives as audit history carrying the reason. Refuses an entry that is not dead. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read. */
 export interface DatasyncDiscardOutboxEntryArgs {
   entryId: string;
   reason?: string;
@@ -1709,7 +1709,7 @@ QueryClient.prototype.datasyncDiscardOutboxEntry = function (this: QueryClient, 
   return this.executeNamed("datasyncDiscardOutboxEntry", buildDatasyncDiscardOutboxEntry(args), opts);
 };
 
-/** Put the given-up inbound deliveries of one source back in line: every failed delivery of that source that used its four tries has its tries set back to none and is due now, so the retry pass tries it again within a minute. A delivery still waiting for its next try is left alone. Admits a cluster owner or the engine's own call and refuses anybody else. */
+/** Put the given-up inbound deliveries of one source back in line: every failed delivery of that source that used its four tries has its tries set back to none and is due now, so the retry pass tries it again within a minute. A delivery still waiting for its next try is left alone. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read. */
 export interface DatasyncRequeueInboundArgs {
   /** The inbound source whose given-up deliveries go back in line, as the staged rows name it (for Shopify, shopify-<store>). */
   source: string;
@@ -1731,7 +1731,7 @@ QueryClient.prototype.datasyncRequeueInbound = function (this: QueryClient, args
   return this.executeNamed("datasyncRequeueInbound", buildDatasyncRequeueInbound(args), opts);
 };
 
-/** Return one DEAD-lettered outbox entry to the queue with its attempts reset. Refuses an entry that is not dead: a pending or failed one is still the drain worker's, and acting on it would race a delivery in flight. */
+/** Return one DEAD-lettered outbox entry to the queue with its attempts reset. Refuses an entry that is not dead: a pending or failed one is still the drain worker's, and acting on it would race a delivery in flight. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read. */
 export interface DatasyncRetryOutboxEntryArgs {
   entryId: string;
 }
@@ -1752,7 +1752,7 @@ QueryClient.prototype.datasyncRetryOutboxEntry = function (this: QueryClient, ar
   return this.executeNamed("datasyncRetryOutboxEntry", buildDatasyncRetryOutboxEntry(args), opts);
 };
 
-/** Pause or resume one domain: stops its backfill, its reconciliation and its outbox drain, without unregistering the connector or changing any declaration. */
+/** Pause or resume one domain: stops its backfill, its reconciliation and its outbox drain, without unregistering the connector or changing any declaration. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read. */
 export interface DatasyncSetSyncPausedArgs {
   connector: string;
   conceptId: string;
@@ -1780,7 +1780,7 @@ QueryClient.prototype.datasyncSetSyncPaused = function (this: QueryClient, args:
   return this.executeNamed("datasyncSetSyncPaused", buildDatasyncSetSyncPaused(args), opts);
 };
 
-/** Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. With restart, start it again from nothing first. Operator-driven; nothing schedules it. */
+/** Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. With restart, start it again from nothing first. Operator-driven; nothing schedules it. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read. */
 export interface DatasyncStartBackfillArgs {
   connector: string;
   conceptId: string;

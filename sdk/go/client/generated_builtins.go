@@ -2283,7 +2283,7 @@ func DataOriginsBuild(args DataOriginsArgs) string {
 	return "builtin dataOrigins()"
 }
 
-// DatasyncDiscardOutboxEntry -- Discard one DEAD-lettered outbox entry: the operator has decided this change will never be delivered. The row survives as audit history carrying the reason. Refuses an entry that is not dead.
+// DatasyncDiscardOutboxEntry -- Discard one DEAD-lettered outbox entry: the operator has decided this change will never be delivered. The row survives as audit history carrying the reason. Refuses an entry that is not dead. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.
 type DatasyncDiscardOutboxEntryArgs struct {
 	EntryId string
 	Reason  string
@@ -2311,7 +2311,7 @@ func DatasyncDiscardOutboxEntryBuild(args DatasyncDiscardOutboxEntryArgs) string
 	return b.String()
 }
 
-// DatasyncRequeueInbound -- Put the given-up inbound deliveries of one source back in line: every failed delivery of that source that used its four tries has its tries set back to none and is due now, so the retry pass tries it again within a minute. A delivery still waiting for its next try is left alone. Admits a cluster owner or the engine's own call and refuses anybody else.
+// DatasyncRequeueInbound -- Put the given-up inbound deliveries of one source back in line: every failed delivery of that source that used its four tries has its tries set back to none and is due now, so the retry pass tries it again within a minute. A delivery still waiting for its next try is left alone. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.
 type DatasyncRequeueInboundArgs struct {
 	// The inbound source whose given-up deliveries go back in line, as the staged rows name it (for Shopify, shopify-<store>).
 	Source string
@@ -2332,7 +2332,7 @@ func DatasyncRequeueInboundBuild(args DatasyncRequeueInboundArgs) string {
 	return b.String()
 }
 
-// DatasyncRetryOutboxEntry -- Return one DEAD-lettered outbox entry to the queue with its attempts reset. Refuses an entry that is not dead: a pending or failed one is still the drain worker's, and acting on it would race a delivery in flight.
+// DatasyncRetryOutboxEntry -- Return one DEAD-lettered outbox entry to the queue with its attempts reset. Refuses an entry that is not dead: a pending or failed one is still the drain worker's, and acting on it would race a delivery in flight. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.
 type DatasyncRetryOutboxEntryArgs struct {
 	EntryId string
 }
@@ -2352,7 +2352,7 @@ func DatasyncRetryOutboxEntryBuild(args DatasyncRetryOutboxEntryArgs) string {
 	return b.String()
 }
 
-// DatasyncSetSyncPaused -- Pause or resume one domain: stops its backfill, its reconciliation and its outbox drain, without unregistering the connector or changing any declaration.
+// DatasyncSetSyncPaused -- Pause or resume one domain: stops its backfill, its reconciliation and its outbox drain, without unregistering the connector or changing any declaration. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.
 type DatasyncSetSyncPausedArgs struct {
 	Connector string
 	ConceptId string
@@ -2393,7 +2393,7 @@ func DatasyncSetSyncPausedBuild(args DatasyncSetSyncPausedArgs) string {
 	return b.String()
 }
 
-// DatasyncStartBackfill -- Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. With restart, start it again from nothing first. Operator-driven; nothing schedules it.
+// DatasyncStartBackfill -- Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. With restart, start it again from nothing first. Operator-driven; nothing schedules it. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.
 type DatasyncStartBackfillArgs struct {
 	Connector string
 	ConceptId string

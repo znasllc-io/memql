@@ -1082,7 +1082,7 @@ func TestAnOperatorStartOnABusyStoreEndsQueuedNotFailed(t *testing.T) {
 	r := stateRunner(engine, c)
 	i := &Integration{runner: r, logger: discardLogger()}
 
-	nodes, err := i.handleStartBackfill(context.Background(), map[string]any{"connector": "shopify", "conceptId": testMirrorConcept}, 0)
+	nodes, err := i.handleStartBackfill(clusterOwnerCtx(), map[string]any{"connector": "shopify", "conceptId": testMirrorConcept}, 0)
 	if err != nil {
 		t.Fatalf("a busy store failed the operator's start: %v", err)
 	}
@@ -1510,7 +1510,7 @@ func TestTwoInvocationsOnOneQueuedDomainOnlyOneProceeds(t *testing.T) {
 	i := &Integration{runner: r, logger: discardLogger()}
 	writeKept(t, engine, SyncState{BackfillStatus: "running", BackfillCursor: "c-5"})
 	c.duringBackfill = func(string) { writeKept(t, engine, SyncState{BackfillStatus: "running", BackfillCursor: "c-6"}) }
-	nodes, err := i.handleStartBackfill(context.Background(), map[string]any{"connector": "shopify", "conceptId": testMirrorConcept}, 0)
+	nodes, err := i.handleStartBackfill(clusterOwnerCtx(), map[string]any{"connector": "shopify", "conceptId": testMirrorConcept}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1634,7 +1634,7 @@ func TestStartingFromTheStartClearsAFailedBackfillsCursor(t *testing.T) {
 	})
 
 	args := map[string]any{"connector": "shopify", "conceptId": testMirrorConcept, "restart": true}
-	if _, err := i.handleStartBackfill(context.Background(), args, 0); err != nil {
+	if _, err := i.handleStartBackfill(clusterOwnerCtx(), args, 0); err != nil {
 		t.Fatalf("startBackfill with restart: %v", err)
 	}
 	if len(c.backfillSeen) == 0 || c.backfillSeen[0] != "" {
@@ -1714,7 +1714,7 @@ func TestAnOrdinaryStartStillContinuesFromTheCursor(t *testing.T) {
 	writeKept(t, engine, SyncState{BackfillStatus: "failed", BackfillCursor: "c-9", LastError: "backfill failed: shopify admin: HTTP 502"})
 
 	args := map[string]any{"connector": "shopify", "conceptId": testMirrorConcept}
-	if _, err := i.handleStartBackfill(context.Background(), args, 0); err != nil {
+	if _, err := i.handleStartBackfill(clusterOwnerCtx(), args, 0); err != nil {
 		t.Fatal(err)
 	}
 	if len(c.backfillSeen) != 1 || c.backfillSeen[0] != "c-9" {
@@ -1723,7 +1723,7 @@ func TestAnOrdinaryStartStillContinuesFromTheCursor(t *testing.T) {
 	args["restart"] = false
 	writeKept(t, engine, SyncState{BackfillStatus: "failed", BackfillCursor: "c-9"})
 	c.backfillPages = []memqlsync.BackfillPage{{Done: true}}
-	if _, err := i.handleStartBackfill(context.Background(), args, 0); err != nil {
+	if _, err := i.handleStartBackfill(clusterOwnerCtx(), args, 0); err != nil {
 		t.Fatal(err)
 	}
 	if len(c.backfillSeen) != 2 || c.backfillSeen[1] != "c-9" {

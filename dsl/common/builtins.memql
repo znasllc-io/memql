@@ -740,9 +740,13 @@ builtin datasyncContinueBackfills { }
 @description("Try again the failed inbound deliveries whose next try has come: one page of inboundRequestsDueForRetry, each row claimed behind its row version (a second pass that claims it first leaves it alone) and dispatched as dispatchInbound dispatches a staged row. A delivery gets four tries, 1, 5 and 30 minutes apart; a refusal no retry changes is not tried again. Refuses a call without internal origin.")
 builtin datasyncRetryInbound { }
 
+// The five below are the operator's sync acts, behind Cluster > Data's buttons.
+// They are @sdk with no @requiresCapability, so nothing ranks a caller before
+// the handler runs: each handler admits a cluster owner or internal origin (a
+// connector acting as the operator, an automation) and refuses anybody else.
 @sdk
 @executor("integration.datasync.startBackfill")
-@description("Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. With restart, start it again from nothing first. Operator-driven; nothing schedules it.")
+@description("Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. With restart, start it again from nothing first. Operator-driven; nothing schedules it. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.")
 builtin datasyncStartBackfill {
   connector     string!
   conceptId     string!
@@ -752,7 +756,7 @@ builtin datasyncStartBackfill {
 
 @sdk
 @executor("integration.datasync.setSyncPaused")
-@description("Pause or resume one domain: stops its backfill, its reconciliation and its outbox drain, without unregistering the connector or changing any declaration.")
+@description("Pause or resume one domain: stops its backfill, its reconciliation and its outbox drain, without unregistering the connector or changing any declaration. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.")
 builtin datasyncSetSyncPaused {
   connector     string!
   conceptId     string!
@@ -762,14 +766,14 @@ builtin datasyncSetSyncPaused {
 
 @sdk
 @executor("integration.datasync.retryOutboxEntry")
-@description("Return one DEAD-lettered outbox entry to the queue with its attempts reset. Refuses an entry that is not dead: a pending or failed one is still the drain worker's, and acting on it would race a delivery in flight.")
+@description("Return one DEAD-lettered outbox entry to the queue with its attempts reset. Refuses an entry that is not dead: a pending or failed one is still the drain worker's, and acting on it would race a delivery in flight. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.")
 builtin datasyncRetryOutboxEntry {
   entryId  string!
 }
 
 @sdk
 @executor("integration.datasync.discardOutboxEntry")
-@description("Discard one DEAD-lettered outbox entry: the operator has decided this change will never be delivered. The row survives as audit history carrying the reason. Refuses an entry that is not dead.")
+@description("Discard one DEAD-lettered outbox entry: the operator has decided this change will never be delivered. The row survives as audit history carrying the reason. Refuses an entry that is not dead. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.")
 builtin datasyncDiscardOutboxEntry {
   entryId  string!
   reason   string
@@ -777,7 +781,7 @@ builtin datasyncDiscardOutboxEntry {
 
 @sdk
 @executor("integration.datasync.requeueInbound")
-@description("Put the given-up inbound deliveries of one source back in line: every failed delivery of that source that used its four tries has its tries set back to none and is due now, so the retry pass tries it again within a minute. A delivery still waiting for its next try is left alone. Admits a cluster owner or the engine's own call and refuses anybody else.")
+@description("Put the given-up inbound deliveries of one source back in line: every failed delivery of that source that used its four tries has its tries set back to none and is due now, so the retry pass tries it again within a minute. A delivery still waiting for its next try is left alone. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.")
 builtin datasyncRequeueInbound {
   source  string!  @description("The inbound source whose given-up deliveries go back in line, as the staged rows name it (for Shopify, shopify-<store>).")
 }
