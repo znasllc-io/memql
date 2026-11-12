@@ -100,6 +100,9 @@ func backdate(t *testing.T, concept, storeID, gid string, at time.Time) {
 			Scan(&newest); err != nil {
 			return err
 		}
+		// The table keeps microseconds: an instant within the newest
+		// version's own microsecond is that version's, and moves nothing.
+		at = at.UTC().Truncate(time.Microsecond)
 		if newest.Equal(at) {
 			return nil
 		}
@@ -680,5 +683,29 @@ func TestBackdateMovesAVersionAcrossAChunkBoundary(t *testing.T) {
 	}
 	if got := writtenAt(t, orderConcept, storeID, gid); versions != 1 || !got.Equal(at) || !strings.Contains(payload, gid) {
 		t.Errorf("after a move of eight days: %d versions, the newest at %v; want one at %v with its payload", versions, got, at)
+	}
+}
+
+// BACKDATE TO THE NEWEST VERSION'S OWN MICROSECOND MOVES NOTHING. The node
+// table keeps microseconds: an instant a hundred nanoseconds after the newest
+// version is that version's own instant, so the version is left as it is, and
+// is not written again and deleted with its copy.
+func TestBackdateWithinTheNewestVersionsMicrosecondKeepsIt(t *testing.T) {
+	storeID := newStore(t)
+	gid := fmt.Sprintf("gid://shopify/Order/%d", time.Now().UnixNano())
+	mirror(t, orderConcept, storeID, gid, orderPayload())
+	newest := writtenAt(t, orderConcept, storeID, gid)
+	backdate(t, orderConcept, storeID, gid, newest.Add(100*time.Nanosecond))
+	_, db := statsEngine(t)
+	var versions int
+	if err := db.QueryRowContext(context.Background(), `SELECT count(*) FROM "MemoryNodes" WHERE concept = ? AND id = ?`,
+		orderConcept, orderConcept+":"+shopify.MirrorRowID(storeID, gid)).Scan(&versions); err != nil {
+		t.Fatal(err)
+	}
+	if versions != 1 {
+		t.Fatalf("after a move within the newest version's microsecond the row has %d versions, want its one", versions)
+	}
+	if got := writtenAt(t, orderConcept, storeID, gid); !got.Equal(newest) {
+		t.Errorf("the version moved from %v to %v", newest, got)
 	}
 }

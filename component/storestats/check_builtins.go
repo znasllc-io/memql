@@ -45,13 +45,16 @@ func admitsTheCheck(ctx context.Context) bool {
 
 // admitsAPersonWhoIsAClusterOwner is the one place handleRebuild and
 // handleCheckState admit their caller: a cluster owner who is a person, not
-// the engine acting -- a synthetic actor, which auth.SystemActor and
-// auth.MaintenanceActor both mark, or a maintenance principal's id; each is a
-// cluster owner too. Neither builtin is in the generated clients, and each
-// can be called by name by any signed-in user, so this is the gate.
+// the engine acting. "Acts for no person" is the engine's own test,
+// auth.ActsForNoPerson: a synthetic actor (auth.SystemActor and
+// auth.MaintenanceActor both mark one), a system or maintenance principal's
+// id, one of the cluster's own named principals -- the operator credential's
+// stream among them -- a connector and the anonymous actor; several of those
+// are cluster owners too. Neither builtin is in the generated clients, and
+// each can be called by name by any signed-in user, so this is the gate.
 func admitsAPersonWhoIsAClusterOwner(ctx context.Context) bool {
 	actor, ok := auth.AccessFromContext(ctx)
-	return ok && actor != nil && actor.IsClusterOwner() && !actor.Synthetic && !strings.HasPrefix(actor.UserId, maintenancePrefix)
+	return ok && actor != nil && actor.IsClusterOwner() && !auth.ActsForNoPerson(ctx, actor.UserId)
 }
 
 // storeArg is the call's storeId, bare: "<id>" and "v1:shopify:store:<id>"

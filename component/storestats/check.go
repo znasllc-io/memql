@@ -110,11 +110,6 @@ import (
 // (auth.MaintenanceActor("storeStatisticsCheckSweep")).
 const checkPrincipal = "system:maintenance:storeStatisticsCheckSweep"
 
-// maintenancePrefix is what every maintenance principal's user id begins
-// with (component/auth, maintenanceUserIdPrefix): a caller whose id begins so
-// is the engine acting, not a person.
-const maintenancePrefix = "system:maintenance:"
-
 // The concepts of the nodes the three builtins answer with. Not DSL concepts:
 // nothing stores them, as with the rollup's report.
 const (
