@@ -32,21 +32,25 @@ import (
 
 // backfillCursor is the resume point. Serialised as JSON into syncState's
 // opaque cursor field, so the shape can change without a migration.
+//
+// IT NAMES THE OPERATION AND NEVER ITS DOWNLOAD LINK. The link opens a store's
+// whole export for a week, and the cursor is a field of the domain's health
+// row, which the cluster owner's queries hand to a browser. So each step asks
+// the origin for the operation's link and uses it for that step alone
+// (BackfillStore). A cursor an earlier build stored may still hold one, under
+// "url": it is not read, and it is gone from the row at the cursor's next
+// write.
 type backfillCursor struct {
 	// OperationID is the running (or completed) bulk operation.
 	OperationID string `json:"op,omitempty"`
 	// OpIndex is which of a multi-part domain's operations this is.
 	OpIndex int `json:"i,omitempty"`
 	// Line is how many JSONL lines have already been applied. Resuming
-	// re-downloads and skips: the signed URL is valid for a week and
-	// re-reading a prefix is cheaper than any bookkeeping that would let
-	// us seek.
+	// re-downloads and skips: re-reading a prefix is cheaper than any
+	// bookkeeping that would let us seek.
 	Line int `json:"line,omitempty"`
-	// URL is the signed download, remembered so a resume does not have to
-	// re-poll a completed operation.
-	URL string `json:"url,omitempty"`
 	// Restarts counts the operations this backfill started again because the
-	// origin refused a download as gone (bulkDownloadGone) or ended the
+	// origin's download was gone (bulkDownloadGone) or the origin ended the
 	// operation (EXPIRED, CANCELED, FAILED). It is the backfill's, not one
 	// operation's: it is carried across the parts of a multi-part domain and
 	// bounded by maxDownloadRestarts.
@@ -77,19 +81,24 @@ func backfillReadUnderRule(cursor string) bool {
 }
 
 // maxDownloadRestarts is how many times one backfill starts an operation again,
-// in all: after its download was refused as gone, or after the origin reported
-// the operation EXPIRED, CANCELED or FAILED. The next of either fails the
+// in all: after its download was gone, or after the origin reported the
+// operation EXPIRED, CANCELED or FAILED. The next of either fails the
 // backfill: a fault that survives fresh operations is not a passing one, and
 // starting again for ever would hide it.
 const maxDownloadRestarts = 2
 
-// bulkDownloadGone is a bulk download the origin refused as no longer there
-// (400, 403, 404 or 410): the signed link has expired, or the file with it.
-// Only a fresh operation recovers from it. Any other failure of the download
-// -- a 5xx, a 429, a broken connection -- is not this error.
+// bulkDownloadGone is a bulk download that is no longer there: the origin
+// refused it (Status 400, 403, 404 or 410 -- the signed link has expired, or
+// the file with it), or gives no link for it (Status 0) -- for an operation
+// whose file was already being read, or one it no longer knows. Only a fresh
+// operation recovers from it. Any other failure of the download -- a 5xx, a
+// 429, a broken connection -- is not this error.
 type bulkDownloadGone struct{ Status int }
 
 func (e bulkDownloadGone) Error() string {
+	if e.Status == 0 {
+		return "shopify: the origin no longer gives the bulk download's link (a signed URL expires after one week; restart the operation)"
+	}
 	return fmt.Sprintf("shopify: bulk download HTTP %d (a signed URL expires after one week; restart the operation)", e.Status)
 }
 
@@ -225,62 +234,62 @@ func (c *Connector) BackfillStore(ctx context.Context, store Store, concept, cur
 		cur.At = memqlsync.ReadTime(startedAt)
 		cur.OperationID = op.ID
 		cur.Line = 0
-		cur.URL = ""
 		return memqlsync.BackfillPage{NextCursor: cur.encode()}, nil
 	}
 
-	// 2. No download URL yet: poll.
-	if cur.URL == "" {
-		op, err := c.bulkStatus(ctx, store, cur.OperationID)
-		if err != nil {
-			return memqlsync.BackfillPage{}, err
+	// 2. Ask the origin for the operation: whether it is done and, once it is,
+	// the link its file is read from. The link is asked for at EVERY step and
+	// used for this step alone; the cursor never keeps it (backfillCursor).
+	op, err := c.bulkStatus(ctx, store, cur.OperationID)
+	if errors.Is(err, errBulkOperationUnknown) {
+		// The origin no longer knows the operation, so it has no link to give
+		// for it: gone, as a download it refuses is.
+		return c.downloadGone(store, spec, cur, bulkDownloadGone{})
+	}
+	if err != nil {
+		return memqlsync.BackfillPage{}, err
+	}
+	switch op.Status {
+	case "COMPLETED":
+		if op.URL == "" && cur.Line == 0 {
+			// A completed operation with no link, and nothing read from it:
+			// the query matched nothing. That is a legitimate empty domain and
+			// the step is done, not stuck.
+			return c.advanceOperation(cur, spec, "no rows")
 		}
-		switch op.Status {
-		case "COMPLETED":
-			if op.URL == "" {
-				// A completed operation with no URL means the query
-				// matched nothing. That is a legitimate empty domain and
-				// the step is done, not stuck.
-				return c.advanceOperation(cur, spec, "no rows")
+	case "CREATED", "RUNNING":
+		return memqlsync.BackfillPage{NextCursor: cur.encode()}, nil
+	case "EXPIRED", "CANCELED", "FAILED":
+		// A bulk operation must finish within ten days and its file
+		// expires a week after that. Restarting is the only recovery,
+		// and it is safe: every write is idempotent on the row id. It
+		// counts toward the same bound as a gone download: an origin
+		// that fails the export every time is not asked for ever.
+		if cur.Restarts >= maxDownloadRestarts {
+			code := op.ErrorCode
+			if code == "" {
+				code = "none"
 			}
-			cur.URL = op.URL
-			cur.Line = 0
-		case "CREATED", "RUNNING":
-			return memqlsync.BackfillPage{NextCursor: cur.encode()}, nil
-		case "EXPIRED", "CANCELED", "FAILED":
-			// A bulk operation must finish within ten days and its file
-			// expires a week after that. Restarting is the only recovery,
-			// and it is safe: every write is idempotent on the row id. It
-			// counts toward the same bound as a gone download: an origin
-			// that fails the export every time is not asked for ever.
-			if cur.Restarts >= maxDownloadRestarts {
-				code := op.ErrorCode
-				if code == "" {
-					code = "none"
-				}
-				return memqlsync.BackfillPage{}, fmt.Errorf("shopify: the bulk operation of %s for store %s ended %s (errorCode %s) after %d restarts of this backfill; it is not started again",
-					spec.Concept, store.ID, op.Status, code, cur.Restarts)
-			}
-			c.logger.Warn("shopify: restarting bulk operation", "store", store.ID, "concept", spec.Concept, "status", op.Status, "errorCode", op.ErrorCode, "restart", cur.Restarts+1)
-			return memqlsync.BackfillPage{NextCursor: backfillCursor{OpIndex: cur.OpIndex, Restarts: cur.Restarts + 1, Rule: cur.Rule}.encode()}, nil
-		default:
-			return memqlsync.BackfillPage{NextCursor: cur.encode()}, nil
+			return memqlsync.BackfillPage{}, fmt.Errorf("shopify: the bulk operation of %s for store %s ended %s (errorCode %s) after %d restarts of this backfill; it is not started again",
+				spec.Concept, store.ID, op.Status, code, cur.Restarts)
 		}
+		c.logger.Warn("shopify: restarting bulk operation", "store", store.ID, "concept", spec.Concept, "status", op.Status, "errorCode", op.ErrorCode, "restart", cur.Restarts+1)
+		return memqlsync.BackfillPage{NextCursor: backfillCursor{OpIndex: cur.OpIndex, Restarts: cur.Restarts + 1, Rule: cur.Rule}.encode()}, nil
+	default:
+		return memqlsync.BackfillPage{NextCursor: cur.encode()}, nil
 	}
 
-	// 3. Stream the next batch of lines.
+	// 3. Stream the next batch of lines, from the link the origin just gave.
+	// No link for an operation whose file was already being read is the file
+	// gone, as a refused download is.
+	if op.URL == "" {
+		return c.downloadGone(store, spec, cur, bulkDownloadGone{})
+	}
 	startedAt, _ := memqlsync.VersionTime(cur.At)
-	writes, consumed, eof, err := c.streamBulk(ctx, store, spec, cur.URL, cur.Line, backfillBatchLines, startedAt)
+	writes, consumed, eof, err := c.streamBulk(ctx, store, spec, op.URL, cur.Line, backfillBatchLines, startedAt)
 	var gone bulkDownloadGone
-	if errors.As(err, &gone) && cur.Restarts < maxDownloadRestarts {
-		// The link outlived its week (a backfill paused or stopped past it),
-		// or the file went with it. The operation and its link are dropped and
-		// the SAME part starts again on the next step, from its first line:
-		// every write is idempotent on the row id, so re-reading what was
-		// already applied changes nothing.
-		c.logger.Warn("shopify: the bulk download is gone; starting the operation again",
-			"store", store.ID, "concept", spec.Concept, "status", gone.Status, "restart", cur.Restarts+1)
-		return memqlsync.BackfillPage{NextCursor: backfillCursor{OpIndex: cur.OpIndex, Restarts: cur.Restarts + 1, Rule: cur.Rule}.encode()}, nil
+	if errors.As(err, &gone) {
+		return c.downloadGone(store, spec, cur, gone)
 	}
 	if err != nil {
 		return memqlsync.BackfillPage{}, err
@@ -295,6 +304,23 @@ func (c *Connector) BackfillStore(ctx context.Context, store Store, concept, cur
 	}
 	next.Writes = writes
 	return next, nil
+}
+
+// downloadGone is a step's answer when its download is gone: the link
+// outlived its week (a backfill paused or stopped past it), the file went
+// with it, or the origin no longer gives a link for the operation at all.
+// The operation is dropped and the SAME part starts again on the next step,
+// from its first line: every write is idempotent on the row id, so re-reading
+// what was already applied changes nothing. Once the backfill's restarts are
+// spent (maxDownloadRestarts) it is the error instead, which fails the
+// backfill.
+func (c *Connector) downloadGone(store Store, spec *generated.TypeSpec, cur backfillCursor, gone bulkDownloadGone) (memqlsync.BackfillPage, error) {
+	if cur.Restarts >= maxDownloadRestarts {
+		return memqlsync.BackfillPage{}, gone
+	}
+	c.logger.Warn("shopify: the bulk download is gone; starting the operation again",
+		"store", store.ID, "concept", spec.Concept, "status", gone.Status, "restart", cur.Restarts+1)
+	return memqlsync.BackfillPage{NextCursor: backfillCursor{OpIndex: cur.OpIndex, Restarts: cur.Restarts + 1, Rule: cur.Rule}.encode()}, nil
 }
 
 // advanceOperation moves to the next bulk operation of a multi-part domain,
@@ -358,6 +384,13 @@ func (c *Connector) startBulkOperation(ctx context.Context, store Store, spec *g
 	return decoded.BulkOperationRunQuery.BulkOperation, nil
 }
 
+// errBulkOperationUnknown is the origin answering that it knows no bulk
+// operation by the id asked for.
+var errBulkOperationUnknown = errors.New("shopify: the origin knows no such bulk operation")
+
+// bulkStatus asks the origin for one bulk operation: its state and, once it
+// is complete, the link of its file. An operation the origin does not know is
+// errBulkOperationUnknown.
 func (c *Connector) bulkStatus(ctx context.Context, store Store, id string) (bulkOperation, error) {
 	resp, err := c.adminCall(ctx, store, bulkStatusQuery, "ShopifyBulkStatus", map[string]any{"id": id})
 	if err != nil {
@@ -370,7 +403,7 @@ func (c *Connector) bulkStatus(ctx context.Context, store Store, id string) (bul
 		return bulkOperation{}, err
 	}
 	if decoded.Node.ID == "" {
-		return bulkOperation{}, fmt.Errorf("shopify: bulk operation %s not found", id)
+		return bulkOperation{}, fmt.Errorf("%w: %s", errBulkOperationUnknown, id)
 	}
 	return decoded.Node, nil
 }

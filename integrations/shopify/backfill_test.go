@@ -57,6 +57,13 @@ func operationStatus(id, status, url string) map[string]any {
 	}}
 }
 
+// completedAt scripts the origin's answer for an operation: complete, its
+// file at link. A cursor never holds the link, so a test that resumes mid-file
+// says where the origin would send the step.
+func completedAt(h *testHarness, id, link string) {
+	h.admin.reply("ShopifyBulkStatus", operationStatus(id, "COMPLETED", link))
+}
+
 func TestBackfillStartsPollsThenStreams(t *testing.T) {
 	h := newHarness(t)
 	store := h.store(t)
@@ -87,10 +94,10 @@ func TestBackfillStartsPollsThenStreams(t *testing.T) {
 		map[string]any{"id": "gid://shopify/ProductVariant/9", "title": "M", "__parentId": "gid://shopify/Product/1", "updatedAt": "2026-08-23T10:00:00Z"},
 		map[string]any{"id": "gid://shopify/Product/2", "title": "Hat", "updatedAt": "2026-08-23T10:00:00Z"},
 	))
-	// 3. Completed -> the same step remembers the URL and streams it. One
-	// step rather than two on purpose: a poll that found a finished
+	// 3. Completed -> the same step is handed the link and streams from it.
+	// One step rather than two on purpose: a poll that found a finished
 	// operation and then returned without reading it would cost a whole
-	// runner tick for nothing.
+	// round of the pass for nothing.
 	h.admin.reply("ShopifyBulkStatus", operationStatus("gid://shopify/BulkOperation/1", "COMPLETED", url))
 	page, err = h.conn.BackfillStore(ctx, store, "v1:shopify:product", page.NextCursor)
 	if err != nil {
@@ -136,7 +143,8 @@ func TestBackfillResumesFromTheLineOffset(t *testing.T) {
 	}
 	url := h.admin.serveJSONL("/download/five.jsonl", bulkLines(lines...))
 
-	cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: url, Line: 3, Rule: originVersionRule, At: exportStartedAt}
+	completedAt(h, "gid://shopify/BulkOperation/1", url)
+	cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", Line: 3, Rule: originVersionRule, At: exportStartedAt}
 	page, err := h.conn.BackfillStore(ctx, store, "v1:shopify:product", cur.encode())
 	if err != nil {
 		t.Fatal(err)
@@ -155,7 +163,8 @@ func TestBackfillResumesFromTheLineOffset(t *testing.T) {
 // zero.
 func TestAnExpiredDownloadIsAnErrorNotAnEmptyPage(t *testing.T) {
 	h := newHarness(t)
-	cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: h.admin.server.URL + "/download/gone.jsonl", Restarts: maxDownloadRestarts}
+	completedAt(h, "gid://shopify/BulkOperation/1", h.admin.server.URL+"/download/gone.jsonl")
+	cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", Restarts: maxDownloadRestarts}
 	_, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", inFlight(cur))
 	if err == nil || !strings.Contains(err.Error(), "one week") {
 		t.Fatalf("err = %v, want an expiry explanation", err)
@@ -308,7 +317,8 @@ func TestADownloadTheOriginNoLongerKeepsStartsTheOperationAgain(t *testing.T) {
 			gone := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) }))
 			t.Cleanup(gone.Close)
 
-			cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", OpIndex: 1, Line: 1500, URL: gone.URL + "/download/old.jsonl"}
+			completedAt(h, "gid://shopify/BulkOperation/1", gone.URL+"/download/old.jsonl")
+			cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", OpIndex: 1, Line: 1500}
 			page, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", inFlight(cur))
 			if err != nil {
 				t.Fatalf("a download the origin no longer keeps failed the backfill: %v", err)
@@ -319,7 +329,7 @@ func TestADownloadTheOriginNoLongerKeepsStartsTheOperationAgain(t *testing.T) {
 			next := decodeBackfillCursor(page.NextCursor)
 			want := backfillCursor{OpIndex: 1, Restarts: 1, Rule: originVersionRule}
 			if next != want {
-				t.Errorf("next cursor = %+v, want %+v: no operation, no link, line 0, the same part, one restart", next, want)
+				t.Errorf("next cursor = %+v, want %+v: no operation, line 0, the same part, one restart", next, want)
 			}
 			if got := decodeBackfillCursor(next.encode()); got != next {
 				t.Errorf("the restart count did not survive the cursor's encode and decode: %+v", got)
@@ -339,7 +349,8 @@ func TestAThirdGoneDownloadFailsTheBackfill(t *testing.T) {
 	gone := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusForbidden) }))
 	t.Cleanup(gone.Close)
 
-	cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/3", URL: gone.URL + "/download/old.jsonl", Restarts: maxDownloadRestarts}
+	completedAt(h, "gid://shopify/BulkOperation/3", gone.URL+"/download/old.jsonl")
+	cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/3", Restarts: maxDownloadRestarts}
 	_, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", inFlight(cur))
 	if err == nil {
 		t.Fatal("a third refused download did not fail the backfill: the restarts would never end")
@@ -373,7 +384,8 @@ func TestAServerErrorOnTheDownloadIsNotARestart(t *testing.T) {
 			srv := httptest.NewServer(down)
 			t.Cleanup(srv.Close)
 
-			cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: srv.URL + "/download/file.jsonl", Restarts: 1}
+			completedAt(h, "gid://shopify/BulkOperation/1", srv.URL+"/download/file.jsonl")
+			cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", Restarts: 1}
 			page, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", inFlight(cur))
 			if err == nil {
 				t.Fatal("a failing download returned no error")
@@ -394,7 +406,7 @@ func TestAServerErrorOnTheDownloadIsNotARestart(t *testing.T) {
 			// above counted none.
 			gonePath := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusForbidden) }))
 			t.Cleanup(gonePath.Close)
-			cur.URL = gonePath.URL + "/download/file.jsonl"
+			completedAt(h, "gid://shopify/BulkOperation/1", gonePath.URL+"/download/file.jsonl")
 			page, err = h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", inFlight(cur))
 			if err != nil {
 				t.Fatalf("the restart left after the failure was not there: %v", err)
@@ -434,7 +446,8 @@ func TestATransportFailureOnTheDownloadNeverCarriesTheLink(t *testing.T) {
 		link := srv.URL + signedLinkPath + signedLinkQuery
 		srv.Close() // nothing listens there now
 
-		cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: link}
+		completedAt(h, "gid://shopify/BulkOperation/1", link)
+		cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1"}
 		_, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", inFlight(cur))
 		if err == nil {
 			t.Fatal("a refused connection returned no error")
@@ -461,7 +474,8 @@ func TestATransportFailureOnTheDownloadNeverCarriesTheLink(t *testing.T) {
 		h.conn.admin.http = &http.Client{Timeout: 50 * time.Millisecond}
 		link := srv.URL + signedLinkPath + signedLinkQuery
 
-		cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: link}
+		completedAt(h, "gid://shopify/BulkOperation/1", link)
+		cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1"}
 		_, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", inFlight(cur))
 		if err == nil {
 			t.Fatal("a download that timed out returned no error")
@@ -474,7 +488,8 @@ func TestATransportFailureOnTheDownloadNeverCarriesTheLink(t *testing.T) {
 	t.Run("an unparseable link", func(t *testing.T) {
 		h := newHarness(t)
 		link := "https://files.example.test" + signedLinkPath + "%zz" + signedLinkQuery
-		cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: link}
+		completedAt(h, "gid://shopify/BulkOperation/1", link)
+		cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1"}
 		_, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", inFlight(cur))
 		if err == nil {
 			t.Fatal("an unparseable link returned no error")
@@ -535,15 +550,15 @@ func TestAGoneLinkAndAFailedOperationShareTheRestarts(t *testing.T) {
 			ctx := context.Background()
 			gone := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusForbidden) }))
 			t.Cleanup(gone.Close)
-			h.admin.reply("ShopifyBulkStatus", operationStatus("gid://shopify/BulkOperation/2", "CANCELED", ""))
-
 			// One gone link: the first restart.
+			completedAt(h, "gid://shopify/BulkOperation/1", gone.URL+"/download/a.jsonl")
 			page, err := h.conn.BackfillStore(ctx, h.store(t), "v1:shopify:product",
-				inFlight(backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: gone.URL + "/download/a.jsonl"}))
+				inFlight(backfillCursor{OperationID: "gid://shopify/BulkOperation/1"}))
 			if err != nil {
 				t.Fatal(err)
 			}
 			// One failed operation: the second.
+			h.admin.reply("ShopifyBulkStatus", operationStatus("gid://shopify/BulkOperation/2", "CANCELED", ""))
 			next := decodeBackfillCursor(page.NextCursor)
 			next.OperationID = "gid://shopify/BulkOperation/2"
 			page, err = h.conn.BackfillStore(ctx, h.store(t), "v1:shopify:product", inFlight(next))
@@ -557,11 +572,200 @@ func TestAGoneLinkAndAFailedOperationShareTheRestarts(t *testing.T) {
 			// The next of either kind fails the backfill.
 			next.OperationID = "gid://shopify/BulkOperation/2"
 			if last == "gone link" {
-				next.URL = gone.URL + "/download/b.jsonl"
+				completedAt(h, "gid://shopify/BulkOperation/2", gone.URL+"/download/b.jsonl")
 			}
 			if _, err := h.conn.BackfillStore(ctx, h.store(t), "v1:shopify:product", inFlight(next)); err == nil {
 				t.Fatalf("a third restart (%s) was allowed", last)
 			}
 		})
+	}
+}
+
+// ---- a download link is never stored (ruling 72) ----
+
+// manyProducts is a bulk file of n product lines.
+func manyProducts(n int) string {
+	lines := make([]map[string]any, 0, n)
+	for i := 1; i <= n; i++ {
+		lines = append(lines, map[string]any{"id": "gid://shopify/Product/" + strconv.Itoa(i), "title": "P", "updatedAt": "2026-08-23T10:00:00Z"})
+	}
+	return bulkLines(lines...)
+}
+
+// assertCursorHoldsNoLink fails when a cursor carries a download link, or any
+// part of this one.
+func assertCursorHoldsNoLink(t *testing.T, cursor, link string) {
+	t.Helper()
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(cursor), &fields); err != nil {
+		t.Fatalf("the cursor %q is not JSON: %v", cursor, err)
+	}
+	if _, ok := fields["url"]; ok {
+		t.Errorf("the cursor holds a link: %s", cursor)
+	}
+	for _, v := range fields {
+		if s, ok := v.(string); ok && (strings.Contains(s, "://") && !strings.HasPrefix(s, "gid://")) {
+			t.Errorf("the cursor holds an address: %s", cursor)
+		}
+	}
+	if carriesLink(cursor, link) {
+		t.Errorf("the cursor carries a part of the download link %s: %s", link, cursor)
+	}
+}
+
+func TestTheStoredCursorNeverHoldsTheDownloadLink(t *testing.T) {
+	h := newHarness(t)
+	store := h.store(t)
+	ctx := context.Background()
+	link := h.admin.serveJSONL("/download/bulk-7781-products.jsonl", manyProducts(backfillBatchLines+100))
+
+	h.admin.reply("ShopifyBulkRun", startedOperation("gid://shopify/BulkOperation/1"))
+	page, err := h.conn.BackfillStore(ctx, store, "v1:shopify:product", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCursorHoldsNoLink(t, page.NextCursor, link)
+
+	// The export is ready: this step is handed the link and reads the first
+	// batch from it. The file has not ended, so the cursor it leaves is the one
+	// the domain's health row keeps.
+	h.admin.reply("ShopifyBulkStatus", operationStatus("gid://shopify/BulkOperation/1", "COMPLETED", link))
+	page, err = h.conn.BackfillStore(ctx, store, "v1:shopify:product", page.NextCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Done || len(page.Writes) != backfillBatchLines {
+		t.Fatalf("the first batch = %d writes, done %t; want %d and a file not yet ended", len(page.Writes), page.Done, backfillBatchLines)
+	}
+	assertCursorHoldsNoLink(t, page.NextCursor, link)
+	mid := decodeBackfillCursor(page.NextCursor)
+	if mid.OperationID != "gid://shopify/BulkOperation/1" || mid.Line != backfillBatchLines {
+		t.Fatalf("the cursor after the first batch = %+v, want the operation and the line reached", mid)
+	}
+
+	// The next step asks the origin for the link again and reads on.
+	asked := h.admin.countOp("ShopifyBulkStatus")
+	page, err = h.conn.BackfillStore(ctx, store, "v1:shopify:product", page.NextCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !page.Done || len(page.Writes) != 100 {
+		t.Fatalf("the second batch = %d writes, done %t; want the last 100 and the end", len(page.Writes), page.Done)
+	}
+	if n := h.admin.countOp("ShopifyBulkStatus") - asked; n != 1 {
+		t.Errorf("the step asked the origin for the operation %d times, want once: the link is asked for at every step", n)
+	}
+	assertCursorHoldsNoLink(t, page.NextCursor, link)
+}
+
+func TestAResumeFromACursorWithNoLinkAsksTheOriginAndContinuesAtTheStoredLine(t *testing.T) {
+	h := newHarness(t)
+	link := h.admin.serveJSONL("/download/five.jsonl", manyProducts(5))
+	h.admin.reply("ShopifyBulkStatus", operationStatus("gid://shopify/BulkOperation/1", "COMPLETED", link))
+
+	cur := inFlight(backfillCursor{OperationID: "gid://shopify/BulkOperation/1", Line: 3})
+	page, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", cur)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Writes) != 2 || !page.Done {
+		t.Fatalf("resumed with %d writes, done %t; want the two lines after the stored line, and the end", len(page.Writes), page.Done)
+	}
+	if got := page.Writes[0].Payload["gid"]; got != "gid://shopify/Product/4" {
+		t.Errorf("the first line read after the resume is %v, want the fourth", got)
+	}
+	if n := h.admin.countOp("ShopifyBulkStatus"); n != 1 {
+		t.Errorf("the origin was asked for the operation %d times, want once", n)
+	}
+}
+
+func TestAnOlderCursorThatHoldsALinkContinuesAndLosesIt(t *testing.T) {
+	h := newHarness(t)
+	link := h.admin.serveJSONL("/download/now.jsonl", manyProducts(backfillBatchLines+10))
+	h.admin.reply("ShopifyBulkStatus", operationStatus("gid://shopify/BulkOperation/1", "COMPLETED", link))
+
+	// The cursor an earlier build stored: its link, under "url", is one the
+	// origin no longer serves. Followed, it would be refused as gone.
+	stale := h.admin.server.URL + "/download/stale-link.jsonl"
+	old := `{"op":"gid://shopify/BulkOperation/1","line":3,"url":"` + stale + `","v":1,"at":"` + exportStartedAt + `"}`
+	page, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Writes) != backfillBatchLines {
+		t.Fatalf("an older cursor read %d lines, want a batch of %d from the line it had reached", len(page.Writes), backfillBatchLines)
+	}
+	if got := page.Writes[0].Payload["gid"]; got != "gid://shopify/Product/4" {
+		t.Errorf("the first line read is %v, want the fourth: the cursor's line is kept", got)
+	}
+	next := decodeBackfillCursor(page.NextCursor)
+	if next.OperationID != "gid://shopify/BulkOperation/1" || next.Line != 3+backfillBatchLines || next.Restarts != 0 {
+		t.Errorf("the cursor it leaves = %+v, want the same operation, %d lines on, and no restart", next, backfillBatchLines)
+	}
+	assertCursorHoldsNoLink(t, page.NextCursor, stale)
+	assertCursorHoldsNoLink(t, page.NextCursor, link)
+}
+
+func TestALinkTheOriginNoLongerGivesStartsTheOperationAgainWithinTheTwoRestarts(t *testing.T) {
+	twoPartProduct(t)
+	h := newHarness(t)
+	// Complete, 1500 lines of its file applied, and the origin no longer says
+	// where the file is.
+	h.admin.reply("ShopifyBulkStatus", operationStatus("gid://shopify/BulkOperation/1", "COMPLETED", ""))
+	cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", OpIndex: 1, Line: 1500}
+	page, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", inFlight(cur))
+	if err != nil {
+		t.Fatalf("a link the origin no longer gives failed the backfill: %v", err)
+	}
+	if page.Done || len(page.Writes) != 0 {
+		t.Fatalf("page = %+v, want a step that starts the operation again", page)
+	}
+	if next, want := decodeBackfillCursor(page.NextCursor), (backfillCursor{OpIndex: 1, Restarts: 1, Rule: originVersionRule}); next != want {
+		t.Errorf("next cursor = %+v, want %+v: no operation, line 0, the same part, one restart", next, want)
+	}
+
+	// The third time, the backfill fails: with the reason, and as a gone
+	// download does.
+	cur.Restarts = maxDownloadRestarts
+	_, err = h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", inFlight(cur))
+	if err == nil {
+		t.Fatal("a third link the origin no longer gives was started again: the restarts would never end")
+	}
+	var gone bulkDownloadGone
+	if !errors.As(err, &gone) || !strings.Contains(err.Error(), "one week") {
+		t.Errorf("err = %v, want a gone download naming the week a link lasts", err)
+	}
+
+	// Nothing read from it yet, and no link: the export matched nothing.
+	page, err = h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product",
+		inFlight(backfillCursor{OperationID: "gid://shopify/BulkOperation/1", OpIndex: 1}))
+	if err != nil || !page.Done {
+		t.Errorf("an export with no file and nothing read = %+v, %v; want the domain done", page, err)
+	}
+}
+
+// An operation the origin no longer knows has no link to give either. Before
+// the link stopped being stored, a backfill resumed long after its export
+// went straight to the link it kept, was refused, and started the operation
+// again; asking the origin first must not turn that into a failure.
+func TestAnOperationTheOriginNoLongerKnowsStartsAgainAsAGoneDownloadDoes(t *testing.T) {
+	for _, line := range []int{0, 1500} {
+		h := newHarness(t)
+		h.admin.reply("ShopifyBulkStatus", map[string]any{"node": nil})
+		cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", Line: line}
+		page, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", inFlight(cur))
+		if err != nil {
+			t.Fatalf("line %d: an operation the origin no longer knows failed the backfill: %v", line, err)
+		}
+		if next, want := decodeBackfillCursor(page.NextCursor), (backfillCursor{Restarts: 1, Rule: originVersionRule}); page.Done || next != want {
+			t.Errorf("line %d: page done %t, next cursor %+v; want a step that starts the operation again, %+v", line, page.Done, next, want)
+		}
+
+		cur.Restarts = maxDownloadRestarts
+		_, err = h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", inFlight(cur))
+		var gone bulkDownloadGone
+		if !errors.As(err, &gone) {
+			t.Errorf("line %d: after the two restarts, err = %v; want the backfill failed as a gone download fails it", line, err)
+		}
 	}
 }

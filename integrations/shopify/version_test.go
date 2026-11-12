@@ -395,7 +395,8 @@ func TestAChildWithNoVersionOfItsOwnTakesItsParents(t *testing.T) {
 	t.Run("bulk, resumed between the order and its line", func(t *testing.T) {
 		r := newMirrorRig(t)
 		url := r.admin.serveJSONL("/download/resumed.jsonl", bulkLines(orderLines(origin, 1)...))
-		cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: url, Line: 1, Rule: originVersionRule, At: exportStartedAt}
+		r.admin.reply("ShopifyBulkStatus", operationStatus("gid://shopify/BulkOperation/1", "COMPLETED", url))
+		cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", Line: 1, Rule: originVersionRule, At: exportStartedAt}
 		page, err := r.conn.BackfillStore(context.Background(), r.store(t), generated.ConceptID("order"), cur.encode())
 		if err != nil {
 			t.Fatal(err)
@@ -845,7 +846,8 @@ func TestVersionsOfDifferentKindsAreNeverCompared(t *testing.T) {
 			map[string]any{"id": "gid://shopify/Order/2", "name": "#1002", "updatedAt": "2026-08-23T09:00:00Z"},
 			map[string]any{"id": "gid://shopify/LineItem/1", "name": "Tee", "quantity": 1, "__parentId": "gid://shopify/Order/1"},
 		))
-		cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: url, Line: 1, Rule: originVersionRule, At: memqlsync.ReadTime(at("09:59:00"))}
+		r.admin.reply("ShopifyBulkStatus", operationStatus("gid://shopify/BulkOperation/1", "COMPLETED", url))
+		cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", Line: 1, Rule: originVersionRule, At: memqlsync.ReadTime(at("09:59:00"))}
 		page, err := r.conn.BackfillStore(context.Background(), r.store(t), generated.ConceptID("order"), cur.encode())
 		if err != nil {
 			t.Fatal(err)
