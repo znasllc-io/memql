@@ -80,16 +80,17 @@ func TestLiveE2E_AReviewIsShownOnlyOnceAStorePersonPublishesIt(t *testing.T) {
 	store := "store-reviews-pub-" + n
 	site := "site-reviews-pub-" + n
 	handle := "boot-" + n
+	declareShopperSurface(t)
+	seedOwnerUser(t, eng, merchant)
 	seedSite(t, eng, site, merchant, store)
 	grantReviewsPart(t, eng, merchant)
 
-	// A shopper's review, exactly as the bff writes one.
-	call := `submitReview(body: "Great boots", productHandle: ` + quote(handle) +
-		`, rating: 5, siteId: "site-reviews-e2e", storeId: ` + quote(store) +
-		`, submissionId: ` + quote("sub-pub-"+n) + `)`
-	if _, err := eng.Execute(asMerchant(merchant), call); err != nil {
-		t.Fatalf("submitReview: %v", err)
-	}
+	// From here the merchant is who a deployed cluster says they are: the
+	// canonical id their token carries, which is also the site's stored owner.
+	merchant = siteOwnerOf(t, site)
+
+	// A buyer's review, through their link and the real form route.
+	reviewThroughLink(t, eng, site, store, merchant, "request-pub-"+n, handle, "Great boots")
 
 	// The store's settings, set up by an operator who is also the site owner
 	// (the production shape: the deployable's owner is a cluster operator).
@@ -151,8 +152,8 @@ func TestLiveE2E_AReviewIsShownOnlyOnceAStorePersonPublishesIt(t *testing.T) {
 		t.Fatalf("the public read's createdAt %v is not ISO text a browser parses: %v", first["createdAt"], err)
 	}
 	summary, _ := shown["summary"].(map[string]any)
-	if summary == nil || summary["average"] != float64(5) || summary["reviewCount"] != float64(1) {
-		t.Fatalf("summary = %v, want average 5 over 1 review", shown["summary"])
+	if summary == nil || summary["average"] != float64(4) || summary["reviewCount"] != float64(1) {
+		t.Fatalf("summary = %v, want average 4 over 1 review", shown["summary"])
 	}
 
 	log := rowsOf(t, eng, asPerson(merchant, auth.Role("user")),
@@ -165,7 +166,7 @@ func TestLiveE2E_AReviewIsShownOnlyOnceAStorePersonPublishesIt(t *testing.T) {
 
 // THE WRITE MUTATIONS CANNOT BE CALLED AROUND THE BUILTINS THAT JUDGE THEM.
 // A signed-in client -- here the store's own owner, the person with the most
-// right to the rows -- calls each settings and decision writer directly. None
+// right to the rows -- calls the settings and the decision writer directly. None
 // may write: settings change only through reviewsUpdateSettings and
 // reviewsSetPublicDisplay (which merge the row and judge who may change
 // what), and a decision is recorded only through reviewsDecide.
@@ -176,8 +177,6 @@ func TestLiveE2E_NoClientWritesSettingsOrDecisionsDirectly(t *testing.T) {
 	store := "store-reviews-direct-" + n
 	client := asPerson(merchant, auth.Role("user"))
 
-	_, _ = eng.Execute(client, `setReviewDisplay(settingsId: `+quote("settings-direct-"+n)+
-		`, storeId: `+quote(store)+`, publicDisplay: true)`)
 	_, _ = eng.Execute(client, `putReviewSettings(settingsId: `+quote("settings-direct2-"+n)+
 		`, ownerUserId: `+quote(merchant)+`, storeId: `+quote(store)+`, publicDisplay: true)`)
 	if rows := rowsOf(t, eng, client, `query reviewSettingsForStore(storeId: `+quote(store)+`)`); len(rows) != 0 {

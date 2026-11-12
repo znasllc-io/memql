@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/znasllc-io/memql/component/edge/visit"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -100,11 +101,13 @@ const (
 	ShopperSiteHeader  = memql.ShopperSiteHeader
 	ShopperStoreHeader = memql.ShopperStoreHeader
 	ShopperOwnerHeader = memql.ShopperOwnerHeader
+	// ShopperClientHeader is the address this edge saw the request come from.
+	ShopperClientHeader = memql.ShopperClientHeader
 )
 
 // shopperStampHeaders is every header this file controls. Used to STRIP
 // before setting, so a client cannot supply its own.
-var shopperStampHeaders = []string{ShopperSiteHeader, ShopperStoreHeader, ShopperOwnerHeader}
+var shopperStampHeaders = []string{ShopperSiteHeader, ShopperStoreHeader, ShopperOwnerHeader, ShopperClientHeader}
 
 func shopperMaxBytes() int64 {
 	raw := strings.TrimSpace(os.Getenv(shopperMaxBytesEnv))
@@ -283,6 +286,17 @@ func shopperClientAddress(r *http.Request) string {
 	return host
 }
 
+// shopperEvidenceAddress is the address the bff hands an Evidence form: the
+// one visit.ClientAddress attributes the request to, in its canonical spelling
+// (an IPv4-mapped address as IPv4), or "" when the request yields no address.
+func shopperEvidenceAddress(r *http.Request) string {
+	addr, ok := visit.ClientAddress(r)
+	if !ok {
+		return ""
+	}
+	return addr.Unmap().String()
+}
+
 // shopperRoute is the (pack, name) a request addresses, parsed out of the
 // path.
 type shopperRoute struct {
@@ -409,6 +423,15 @@ func (h *Handler) proxyShopperRequest(w http.ResponseWriter, r *http.Request, si
 		}
 		pr.Out.Header.Set(ShopperSiteHeader, site.ID)
 		pr.Out.Header.Set(ShopperOwnerHeader, owner)
+		// THE ADDRESS AN ACCEPTANCE RECORDS AS EVIDENCE (ruling 51), by the
+		// rule the visit statistics use and NOT the rate limit's: the right-most
+		// X-Forwarded-For entry, the one the ingress appended, else the peer --
+		// and only an IP address. The leftmost entry the rate limit keys on is
+		// the caller's own to write, and evidence must not be. Nothing that is
+		// not an address is recorded: the header is then not set.
+		if addr := shopperEvidenceAddress(r); addr != "" {
+			pr.Out.Header.Set(ShopperClientHeader, addr)
+		}
 		if storeID != "" {
 			pr.Out.Header.Set(ShopperStoreHeader, storeID)
 		}

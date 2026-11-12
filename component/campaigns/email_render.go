@@ -135,6 +135,11 @@ func (w *Worker) handleRenderEmail(ctx context.Context, args map[string]any, _ i
 	if err != nil {
 		return nil, err
 	}
+	// The purpose judges the email as a save of it would (ruling 40).
+	purpose := argString(args, "purpose")
+	if !validPurpose(purpose, false) {
+		return nil, errTemplatePurpose
+	}
 
 	accounts, err := w.store.rows(ctx, call("query", "clientAccountById", arg{"accountId", accountID}))
 	if err != nil {
@@ -165,7 +170,7 @@ func (w *Worker) handleRenderEmail(ctx context.Context, args map[string]any, _ i
 		}
 	}
 	result, err := emaildoc.Render(ctx, doc, &pictureReads{inner: artifactImages{w}, left: maxPictureReads},
-		emaildoc.RenderOptions{Preview: true, Sample: sample})
+		emaildoc.RenderOptions{Preview: true, Sample: sample, Transactional: purpose == purposeTransactional})
 	if err != nil {
 		if errors.Is(err, emaildoc.ErrTooLarge) {
 			return nil, errPreviewTooLarge

@@ -257,6 +257,80 @@ describe("a template's page", () => {
     expect(deadButtons()).toEqual([]);
   });
 
+  it("offers the purpose as a choice and saves transactional", async () => {
+    const welcome = templateRow({ id: "t1", name: "Welcome 2", createdAt: "2026-10-01T08:00:00Z" });
+    const conn = fakeConnection({ templates: [welcome], templateContent: { t1: { document: DOCUMENT } }, render: RENDERED });
+    mount(conn);
+    await openPage("Welcome 2");
+
+    // A template that says nothing is marketing, and the page says whose judgment the choice is.
+    const details = screen.getByRole("region", { name: "Template details" });
+    const purpose = within(details).getByRole("radiogroup", { name: "Purpose" });
+    expect(within(purpose).getAllByRole("radio").map((radio) => [radio.textContent, radio.getAttribute("aria-checked")])).toEqual([
+      ["Marketing", "true"],
+      ["About one person's own request: no unsubscribe", "false"],
+    ]);
+    expect(within(details).getByText("Whether a message counts as transactional where you trade is your judgment of its words.")).toBeTruthy();
+    await waitFor(() => expect(conn.query.templateById).toHaveBeenCalled());
+    // Nothing is said about drafts before anything is changed.
+    expect(screen.queryByText("Saving changes makes this template a draft again.")).toBeNull();
+
+    // Choosing is a change to save, on the one bar; a published template says what saving does to it.
+    fireEvent.click(within(purpose).getByRole("radio", { name: "About one person's own request: no unsubscribe" }));
+    expect(barActs()).toEqual([["Discard", "text"], ["Save", "primary"]]);
+    expect(screen.getByText("Saving changes makes this template a draft again.")).toBeTruthy();
+    // The preview judges the email as the purpose chosen.
+    await waitFor(() => expect(conn.query.emailRender).toHaveBeenLastCalledWith({ document: DOCUMENT, accountId: "self", purpose: "transactional" }, expect.anything()));
+    await readTheBar();
+    press("Discard");
+    expect(within(purpose).getByRole("radio", { name: "Marketing" }).getAttribute("aria-checked")).toBe("true");
+    expect(barActs()).toEqual([["Archive", "text"], ["Open in editor", "primary"]]);
+    expect(screen.queryByText("Saving changes makes this template a draft again.")).toBeNull();
+
+    fireEvent.click(within(purpose).getByRole("radio", { name: "About one person's own request: no unsubscribe" }));
+    await readTheBar();
+    press("Save");
+    await waitFor(() => expect(conn.query.campaignSaveTemplate).toHaveBeenCalledTimes(1));
+    // A change of purpose is an act of its own: the id, the purpose and the revision on screen, and no content.
+    expect(conn.query.campaignSaveTemplate.mock.calls[0]![0]).toEqual({
+      templateId: "t1",
+      name: "Welcome 2",
+      accountId: "self",
+      expectedRevision: "2026-10-01T08:00:00Z",
+      content: {},
+      action: "classify",
+      purpose: "transactional",
+    });
+    act(() => conn.subscriptions.emit(TEMPLATE, { ...welcome, status: "draft", purpose: "transactional", createdAt: "2026-10-02T08:00:00Z" }));
+    await waitFor(() => expect(barActs()).toEqual([["Archive", "text"], ["Open in editor", "primary"]]));
+    expect(within(purpose).getByRole("radio", { name: "About one person's own request: no unsubscribe" }).getAttribute("aria-checked")).toBe("true");
+    expect(deadButtons()).toEqual([]);
+  });
+
+  // The row on screen can be newer than the email shown, while the email is read
+  // again: a change of purpose then still sends no content, so it cannot put the
+  // older email back over the newer one.
+  it("changes the purpose of the revision on screen without sending the email shown", async () => {
+    const welcome = templateRow({ id: "t1", name: "Welcome 2", createdAt: "2026-10-01T08:00:00Z" });
+    const conn = fakeConnection({ templates: [welcome], templateContent: { t1: { document: DOCUMENT } }, render: RENDERED });
+    mount(conn);
+    await openPage("Welcome 2");
+    await waitFor(() => expect(conn.query.templateById).toHaveBeenCalled());
+    // Somebody saves a newer email; its read never comes back.
+    conn.query.templateById.mockImplementation(() => new Promise(() => {}));
+    act(() => conn.subscriptions.emit(TEMPLATE, { ...welcome, subject: "Newer words", createdAt: "2026-10-03T08:00:00Z" }));
+    await waitFor(() => expect(within(screen.getByRole("region", { name: "Template details" })).getByText("Newer words")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("radio", { name: "About one person's own request: no unsubscribe" }));
+    await readTheBar();
+    press("Save");
+    await waitFor(() => expect(conn.query.campaignSaveTemplate).toHaveBeenCalledTimes(1));
+    const sent = conn.query.campaignSaveTemplate.mock.calls[0]![0] as Record<string, unknown>;
+    expect(sent.content).toEqual({});
+    expect(sent.expectedRevision).toBe("2026-10-03T08:00:00Z");
+    expect(sent.action).toBe("classify");
+  });
+
   it("archives a published template after asking, and restores", async () => {
     const welcome = templateRow({ id: "t1", name: "Welcome 2", createdAt: "2026-10-01T08:00:00Z" });
     const conn = fakeConnection({ templates: [welcome], templateContent: { t1: { document: DOCUMENT } } });

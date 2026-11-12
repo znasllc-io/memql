@@ -16,6 +16,7 @@ import (
 
 	nethtml "golang.org/x/net/html"
 
+	"github.com/znasllc-io/memql/component/compose/emaildoc"
 	"github.com/znasllc-io/memql/integrations/email"
 )
 
@@ -184,6 +185,45 @@ type RenderOptions struct {
 	// caller without a delivery row in hand must pass -- there is no
 	// engagement to attribute a hit to.
 	Tracking TrackingRender
+
+	// Transactional renders a message about one person's own request (the row
+	// lane, send_row.go): it has no unsubscribe, so Links.Unsubscribe is not
+	// required, no List-Unsubscribe pair is set and no footer is appended. A
+	// template that still carries {{unsubscribeUrl}}, {{preferencesUrl}},
+	// {{viewUrl}} or {{confirmUrl}} (one published before the save-time check
+	// existed) is refused rather than sent with an empty link. Only the row lane sets it, and the author's test send
+	// of a transactional template, which is tested as the lane sends it;
+	// RequireUnsubscribe is not consulted on either path.
+	Transactional bool
+}
+
+// errListLinkInTransactional refuses a transactional template that still
+// carries the unsubscribe or preferences tag and no other engine link. The
+// sentence is the save-time check's (emaildoc.UnsubscribePresentMessage);
+// transactionalLinkFault is the refusal for any of the engine's links.
+const errListLinkInTransactional = templateFault(emaildoc.UnsubscribePresentMessage)
+
+// transactionalLinkFaults are the sentences of the engine links the template's
+// subject, preheader or either body carries that a transactional message
+// cannot: the save-time check's (emaildoc.TransactionalLinkIssues), one per
+// kind, in its order. None is a template the row lane may send.
+func transactionalLinkFaults(t Template) []string {
+	var out []string
+	for _, issue := range emaildoc.TransactionalLinkIssues(t.Subject, t.Preheader, t.TextBody, t.HTMLBody) {
+		out = append(out, issue.Message)
+	}
+	return out
+}
+
+// transactionalLinkFault refuses a transactional template that still carries
+// an engine link (one published before the save-time check), saying each kind
+// it carries; nil when it carries none.
+func transactionalLinkFault(t Template) error {
+	faults := transactionalLinkFaults(t)
+	if len(faults) == 0 {
+		return nil
+	}
+	return templateFault(strings.Join(faults, " "))
 }
 
 // mergeTagPrefix and mergeTagSuffix delimit a merge tag. Named because the
@@ -572,6 +612,12 @@ func renderMessage(c Campaign, t Template, r Recipient, opts RenderOptions) (ema
 	if err := validateRecipientLinkLocations(t); err != nil {
 		return email.Message{}, err
 	}
+	if opts.Transactional {
+		if err := transactionalLinkFault(t); err != nil {
+			return email.Message{}, err
+		}
+		return renderTransactional(c, t, r, opts)
+	}
 	if strings.TrimSpace(opts.Links.Unsubscribe) == "" {
 		return email.Message{}, errNoUnsubscribeLink
 	}
@@ -622,6 +668,34 @@ func renderMessage(c Campaign, t Template, r Recipient, opts RenderOptions) (ema
 	// c.ReplyTo is for a caller passing zero options -- a test, or a path
 	// with no identity in scope -- and keeps that caller's behaviour exactly
 	// what it was.
+	replyTo := strings.TrimSpace(opts.ReplyTo)
+	if replyTo == "" {
+		replyTo = strings.TrimSpace(c.ReplyTo)
+	}
+	if replyTo != "" {
+		msg.Headers["Reply-To"] = replyTo
+	}
+	return msg, nil
+}
+
+// renderTransactional is renderMessage for a message about one person's own
+// request: the same substitution and Reply-To, and nothing appended -- no footer,
+// no List-Unsubscribe pair, no pixel. The links it carries are the template's
+// own, filled; none of them is rewritten for tracking.
+func renderTransactional(c Campaign, t Template, r Recipient, opts RenderOptions) (email.Message, error) {
+	subst, substHTML := mergeReplacers(c, r, opts.AccountName, opts.Links)
+	msg := email.Message{
+		To:       r.Email,
+		Subject:  opts.SubjectPrefix + subst.Replace(t.Subject),
+		TextBody: subst.Replace(t.TextBody),
+		Headers:  map[string]string{},
+	}
+	if strings.TrimSpace(c.ID) != "" {
+		msg.Headers[headerCampaignID] = c.ID
+	}
+	if strings.TrimSpace(t.HTMLBody) != "" {
+		msg.HTMLBody = substHTML.Replace(t.HTMLBody)
+	}
 	replyTo := strings.TrimSpace(opts.ReplyTo)
 	if replyTo == "" {
 		replyTo = strings.TrimSpace(c.ReplyTo)

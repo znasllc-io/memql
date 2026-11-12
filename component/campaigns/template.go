@@ -137,11 +137,26 @@ var (
 	errUnsavedTemplate    = errors.New("save and review this revision before publishing")
 	errTemplateOrgMoved   = errors.New("a template cannot move between organizations; create a copy instead")
 	errTemplateNoRevision = errors.New("template has no readable revision")
+	errTemplatePurpose    = errors.New("choose the template's purpose: marketing or transactional")
+
+	// errTransactionalTemplate refuses a template about one person's own request
+	// wherever a send could reach more than that one person: a campaign started
+	// or scheduled (and again at its time), a journey step saved or turned on, a
+	// single send to a list's member, an event rule's operational email.
+	errTransactionalTemplate = errors.New("This template is about one person's own request and has no unsubscribe, so it cannot be sent to a list.")
+)
+
+// The two purposes a template has; none at all is marketing.
+const (
+	purposeMarketing     = "marketing"
+	purposeTransactional = "transactional"
 )
 
 // templateStatus is the status each action leaves a template in: editing always
 // returns it to draft, and so does restoring it.
-var templateStatus = map[string]string{"save": "draft", "publish": "ready", "archive": "archived", "restore": "draft"}
+// A change of purpose (classify) returns it to draft too: what makes a template
+// publishable depends on its purpose.
+var templateStatus = map[string]string{"save": "draft", "publish": "ready", "archive": "archived", "restore": "draft", "classify": "draft"}
 
 // templateRequest is a call to campaignSaveTemplate once its arguments have been
 // read: the ids are bare and the action is one of the four.
@@ -152,13 +167,21 @@ type templateRequest struct {
 	name       string
 	expected   string // the revision the caller read, or empty when creating
 	action     string
-	document   emaildoc.Document // the parsed content; read only for save and publish
+	purpose    string            // marketing, transactional, or empty to keep the template's
+	document   emaildoc.Document // the parsed content for save and publish; the stored one for classify
+	// storedPurpose is the template's purpose as it was read before the locks,
+	// for a save that names none: the email is judged by it. A change of it
+	// since moves the revision, which the save is then refused on.
+	storedPurpose string
 }
 
 // templateContent is what a template holds and a write replaces: the rendering
 // a send uses and the document it was made from.
 type templateContent struct {
 	name, subject, textBody, htmlBody, preheader, layoutID, sourceArtifactID string
+	// purpose is marketing or transactional, or empty for none: a write that
+	// leaves it empty does not name it, so the stored one stays.
+	purpose string
 	// document is the email document as a JSON object, or nil for a template
 	// saved before documents existed, which is written back without one.
 	document map[string]any
@@ -178,6 +201,7 @@ func (w *Worker) handleSaveTemplate(ctx context.Context, args map[string]any, _ 
 		name:       strings.TrimSpace(argString(args, "name")),
 		expected:   argString(args, "expectedRevision"),
 		action:     argString(args, "action"),
+		purpose:    argString(args, "purpose"),
 	}
 	if req.action == "" {
 		req.action = "save"
@@ -197,6 +221,12 @@ func (w *Worker) handleSaveTemplate(ctx context.Context, args map[string]any, _ 
 	}
 	if _, known := templateStatus[req.action]; !known {
 		return nil, errUnknownAction
+	}
+	// A purpose is one of the two or none; a change of purpose names one.
+	// Archive and restore do not read it, as they do not read the content.
+	classifying := req.action == "classify"
+	if (writing || classifying) && !validPurpose(req.purpose, classifying) {
+		return nil, errTemplatePurpose
 	}
 	if writing {
 		// Measured as the file it is, as a preview measures it: an email that is
@@ -219,12 +249,35 @@ func (w *Worker) handleSaveTemplate(ctx context.Context, args map[string]any, _ 
 	// document is rendered as the caller reads pictures; archive and restore render
 	// nothing.
 	var rendered *renderedTemplate
-	if writing {
+	if writing || classifying {
 		if err := w.requireOrganization(ctx, req.accountID); err != nil {
 			return nil, err
 		}
 		if !w.mayWriteTemplates(ctx, req.accountID) {
 			return nil, errTemplateNeedsWrite
+		}
+		// What judges the email: the purpose named, else the stored one; and for
+		// a change of purpose, the email the engine holds, at the revision the
+		// caller read. Whatever content the call carries is never read for it.
+		if classifying || req.purpose == "" {
+			row, err := w.storedForRequest(ctx, req)
+			if err != nil {
+				return nil, err
+			}
+			if classifying {
+				if row == nil {
+					return nil, errTemplateNotFound
+				}
+				wanted, parseErr := time.Parse(time.RFC3339Nano, req.expected)
+				if prior := templateTime(row["createdAt"]); parseErr != nil || prior.IsZero() || !prior.Equal(wanted) {
+					return nil, errTemplateChanged
+				}
+				if req.document, err = storedDocument(row); err != nil {
+					return nil, err
+				}
+			} else if row != nil {
+				req.storedPurpose = str(row, "purpose")
+			}
 		}
 		var err error
 		if rendered, err = w.renderTemplate(ctx, req); err != nil {
@@ -376,6 +429,19 @@ func (w *Worker) changeTemplate(ctx context.Context, req templateRequest, row ma
 		same    bool
 	)
 	switch req.action {
+	case "classify":
+		// The purpose and nothing else: the email the engine holds is written
+		// back as it is, and the issues are its own under the new purpose. A
+		// template that already has it answers with the receipt it has. A put
+		// away template stays put away.
+		content, issues = storedTemplate(row), rendered.issues
+		if purposeOf(content.purpose) == req.purpose {
+			return templateReceipt(req.templateID, prior, current, issues)
+		}
+		content.purpose = req.purpose
+		if current == "archived" {
+			target = current
+		}
 	case "archive", "restore":
 		// An uncertain response can be retried without writing another version:
 		// what was asked is already so, whatever revision the retry carries. A
@@ -396,9 +462,13 @@ func (w *Worker) changeTemplate(ctx context.Context, req templateRequest, row ma
 				return nil, unknownTagRefusal(unknown)
 			}
 		}
-		// A call that names no file keeps the one the template has.
+		// A call that names no file keeps the one the template has, and one that
+		// names no purpose keeps its purpose (an editor's save names none).
 		if content.sourceArtifactID == "" {
 			content.sourceArtifactID = bare(str(row, "sourceArtifactId"))
+		}
+		if content.purpose == "" {
+			content.purpose = str(row, "purpose")
 		}
 		// A save does not touch the composition: the stored one is written back
 		// explicitly, not left to an omitted argument. Except that a person's
@@ -469,7 +539,11 @@ func (w *Worker) renderTemplate(ctx context.Context, req templateRequest) (*rend
 // for the work around the render (a composition's submit, which reads its
 // material in the same slot), so that one call never holds two.
 func (w *Worker) renderInSlot(ctx context.Context, req templateRequest) (*renderedTemplate, error) {
-	result, err := emaildoc.Render(ctx, req.document, &pictureReads{inner: artifactImages{w}, left: maxPictureReads}, emaildoc.RenderOptions{})
+	judged := req.purpose
+	if judged == "" {
+		judged = req.storedPurpose
+	}
+	result, err := emaildoc.Render(ctx, req.document, &pictureReads{inner: artifactImages{w}, left: maxPictureReads}, emaildoc.RenderOptions{Transactional: judged == purposeTransactional})
 	if err != nil {
 		if errors.Is(err, emaildoc.ErrTooLarge) {
 			return nil, errPreviewTooLarge
@@ -483,7 +557,7 @@ func (w *Worker) renderInSlot(ctx context.Context, req templateRequest) (*render
 	content := templateContent{
 		name: req.name, subject: req.document.Subject, textBody: result.Text, htmlBody: result.HTML,
 		preheader: req.document.Preheader, layoutID: req.document.Layout, sourceArtifactID: req.sourceID,
-		document: document,
+		document: document, purpose: req.purpose,
 	}
 	// An email past what a send takes can never be sent, and its HTML can be 8 MiB:
 	// the row, and every answer that carries it, would weigh that for nothing. Such
@@ -504,6 +578,7 @@ func storedTemplate(row map[string]any) templateContent {
 	content := templateContent{
 		name: str(row, "name"), subject: str(row, "subject"), textBody: str(row, "textBody"), htmlBody: str(row, "htmlBody"),
 		preheader: str(row, "preheader"), layoutID: str(row, "layoutId"), sourceArtifactID: bare(str(row, "sourceArtifactId")),
+		purpose: str(row, "purpose"),
 	}
 	if document, ok := row["document"].(map[string]any); ok && len(document) > 0 {
 		content.document = document
@@ -530,14 +605,69 @@ func (c templateContent) values(templateID string, revision time.Time) map[strin
 	if c.composition != nil {
 		values["composition"] = c.composition
 	}
+	if c.purpose != "" {
+		values["purpose"] = c.purpose
+	}
 	return values
 }
 
+// validPurpose says whether a call's purpose is one it may name: marketing or
+// transactional, or none, except for a change of purpose, which names one.
+func validPurpose(purpose string, required bool) bool {
+	return purpose == purposeMarketing || purpose == purposeTransactional || (purpose == "" && !required)
+}
+
+// storedForRequest reads the template a call is about before the locks: the
+// one its file has when it names a file, else the one it names. Nil when there
+// is none the caller can see.
+func (w *Worker) storedForRequest(ctx context.Context, req templateRequest) (map[string]any, error) {
+	id := req.templateID
+	if req.sourceID != "" {
+		found, ok, err := w.store.TemplateForSource(ctx, req.accountID, req.sourceID)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			id = bare(str(found, "id"))
+		}
+	}
+	if id == "" {
+		return nil, nil
+	}
+	rows, err := w.store.rows(ctx, call("query", "templateById", arg{"templateId", id}))
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	return rows[0], nil
+}
+
+// storedDocument is the email a stored template holds, as a document: its own,
+// or for a template saved before documents existed the custom email its parts
+// make (as sameTemplate reads it).
+func storedDocument(row map[string]any) (emaildoc.Document, error) {
+	if document := storedTemplate(row).document; document != nil {
+		encoded, err := plainJSON(document)
+		if err != nil {
+			return emaildoc.Document{}, err
+		}
+		return emaildoc.Parse(encoded)
+	}
+	return emaildoc.Document{Subject: str(row, "subject"), Preheader: str(row, "preheader"), TextBody: str(row, "textBody"), HTMLBody: str(row, "htmlBody")}, nil
+}
+
+// purposeOf is the purpose a template has: none is marketing.
+func purposeOf(purpose string) string {
+	if purpose == "" {
+		return purposeMarketing
+	}
+	return purpose
+}
+
 // sameTemplate reports whether saving the content would write what is already
-// stored: the name, the three parts, the preheader, the layout, the file and the
-// document. The documents are compared as the JSON they are, which sorts object
-// keys and reads numbers the same whichever way they came (from a client, or
-// back out of the database). The file counts, so that saving a template from
+// stored: the name, the three parts, the preheader, the layout, the file, the
+// purpose and the document. The documents are compared as the JSON they are,
+// which sorts object keys and reads numbers the same whichever way they came
+// (from a client, or back out of the database). The file counts, so that saving a template from
 // another file moves it there instead of answering that nothing changed.
 //
 // A template saved before documents existed has no document. It is a custom
@@ -550,6 +680,11 @@ func sameTemplate(row map[string]any, c templateContent) bool {
 		return false
 	}
 	if c.sourceArtifactID != bare(str(row, "sourceArtifactId")) {
+		return false
+	}
+	// None is marketing, so naming marketing over a template that has no
+	// purpose changes nothing.
+	if purposeOf(c.purpose) != purposeOf(str(row, "purpose")) {
 		return false
 	}
 	stored := storedTemplate(row).document

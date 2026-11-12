@@ -680,6 +680,25 @@ export interface TemplateRow {
   createdAt: string;
   /** An email MemQL is writing into this template, or null when none was asked for. */
   composition?: Composition | null;
+  /** What it is for; a row that says nothing is marketing (templatePurpose), and so is an absent one. */
+  purpose?: TemplatePurpose;
+}
+
+/**
+ * What a template is for. `transactional` is a message about one person's own
+ * request: it has no unsubscribe, so nothing that sends to a list or fires
+ * from a rule offers it (the engine refuses it there too). Every template saved
+ * before purposes existed says nothing, and nothing is marketing.
+ */
+export type TemplatePurpose = "marketing" | "transactional";
+
+export function templatePurpose(row: Row): TemplatePurpose {
+  return rowString(flatten(row), "purpose") === "transactional" ? "transactional" : "marketing";
+}
+
+/** Whether a template is about one person's own request, and so is never a list's. */
+export function isTransactional(template: TemplateRow): boolean {
+  return template.purpose === "transactional";
 }
 
 /** MemQL writing an email into a draft template: writing, then done or failed. */
@@ -746,6 +765,7 @@ export function templateFromRow(row: Row): TemplateRow {
     sourceArtifactId: rowString(flat, "sourceArtifactId"),
     createdAt: rowString(flat, "createdAt"),
     composition: compositionFromRow(flat),
+    purpose: templatePurpose(row),
   };
 }
 
@@ -809,6 +829,7 @@ export function templateFingerprint(template: TemplateRow): string {
     template.createdAt,
     template.composition?.state ?? "",
     template.composition?.error ?? "",
+    template.purpose ?? "marketing",
   ].join("|");
 }
 

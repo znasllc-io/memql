@@ -2,6 +2,7 @@ package campaigns
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -235,4 +236,60 @@ func TestJourneyAcrossIndependentReplicas(t *testing.T) {
 		t.Fatalf("archived journey reopened: %v", got)
 	}
 
+}
+
+// TestAJourneyStepRefusesATransactionalTemplate: a journey mails everybody who
+// joins an audience, so no step of it may send a template about one person's
+// own request (X10). A save naming one is refused and writes nothing; a journey
+// saved while its template was marketing cannot be turned on once the template
+// is transactional, nor saved again until the step names another.
+func TestAJourneyStepRefusesATransactionalTemplate(t *testing.T) {
+	f := newDigestFixture(t)
+	n := f.newEmptyNewsletter(t, "journey-purpose")
+	n.worker.journeyGate = NewWorker(n.worker.store.engine, nil, nil, quietLogger(), gatePoolFor(t)).journeyGate
+	template := n.suffix + "-tpl"
+	setPurpose := func(purpose string) {
+		t.Helper()
+		rows, err := n.store.rows(memql.ContextWithFreshRead(n.owner), call("query", "templateById", arg{"templateId", template}))
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("template: %v %v", rows, err)
+		}
+		if err = n.worker.newsletterWrite(n.owner, "updateTemplate", map[string]any{"templateId": template, "name": "Hello", "subject": "Hello", "textBody": "Hello there.", "htmlBody": "<p>Hello there.</p>", "status": "ready", "purpose": purpose, "versionTime": memql.VersionTimeAfter(templateTime(rows[0]["createdAt"]), time.Now()).Format(time.RFC3339Nano)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	args := func(id, name string) map[string]any {
+		return map[string]any{"journeyId": id, "accountId": n.org, "name": name, "trigger": map[string]any{"kind": "confirmed", "audienceId": n.audience}, "steps": []map[string]any{
+			{"id": "hello", "kind": "send", "templateId": template, "senderIdentityId": n.suffix + "-sender"},
+		}}
+	}
+
+	setPurpose("transactional")
+	fresh := n.suffix + "-fresh"
+	if _, err := n.worker.handleSaveJourney(n.owner, args(fresh, "Hello"), 0); !errors.Is(err, errTransactionalTemplate) {
+		t.Fatalf("saving a journey with a transactional step: err = %v", err)
+	}
+	if row, err := n.worker.newsletterRow(n.owner, "journeyById", "journeyId", fresh); err != nil || row != nil {
+		t.Fatalf("a refused journey was written: %v %v", row, err)
+	}
+
+	setPurpose("marketing")
+	saved := n.suffix + "-saved"
+	nodes, err := n.worker.handleSaveJourney(n.owner, args(saved, "Hello"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := decodeResult(t, nodes)
+	if issues := receipt["issues"].([]any); len(issues) != 0 {
+		t.Fatalf("issues=%v", issues)
+	}
+	setPurpose("transactional")
+	if _, err := n.worker.handleSetJourneyState(n.owner, map[string]any{"journeyId": saved, "action": "activate", "expectedRevision": receipt["revision"]}, 0); !errors.Is(err, errTransactionalTemplate) {
+		t.Fatalf("turning on a journey whose step became transactional: err = %v", err)
+	}
+	renamed := args(saved, "Hello again")
+	renamed["expectedRevision"] = receipt["revision"]
+	if _, err := n.worker.handleSaveJourney(n.owner, renamed, 0); !errors.Is(err, errTransactionalTemplate) {
+		t.Fatalf("saving a journey whose step became transactional: err = %v", err)
+	}
 }

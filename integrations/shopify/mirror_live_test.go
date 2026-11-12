@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 	"github.com/znasllc-io/memql/integrations/shopify/generated"
+	"github.com/znasllc-io/memql/integrations/shopify/shopifylive"
 )
 
 // mirror_live_test.go -- the mirror against a real development store.
@@ -27,7 +27,9 @@ import (
 // consume order numbers, move inventory, notify staff and read the
 // merchant's orders. Every test therefore asks shop.plan.partnerDevelopment
 // before its first mutation and fails, having created nothing, unless the
-// store says it is a development store (liveRequireDevelopmentStore).
+// store says it is a development store (liveRequireDevelopmentStore, which is
+// shopifylive.RequireDevelopmentStore: the one refusal every live test that
+// writes makes, wholesale_live_test.go's and the wholesale pack's included).
 //
 // Every other test in this package talks to the fake Admin in
 // harness_test.go, which checks the connector's half of each conversation.
@@ -37,7 +39,9 @@ import (
 //
 // THE VARIABLES ARE TEST INPUTS, NOT A PRODUCT CONFIGURATION PATH, read here
 // the way integrations/openai/asr_live_test.go reads its own: nothing outside
-// this file reads these names and no manifest registers them. Without the
+// the live tests reads these names (the first pair is shopifylive's, shared
+// with wholesale_live_test.go and the wholesale pack's live test) and no
+// manifest registers them. Without the
 // first pair every test skips, naming the variable; the two-store test also
 // skips without the second pair. No CI lane sets them.
 //
@@ -87,8 +91,8 @@ import (
 // The queries were validated field by field.
 
 const (
-	envLiveDomain  = "MEMQL_TEST_SHOPIFY_STORE_DOMAIN"
-	envLiveToken   = "MEMQL_TEST_SHOPIFY_ADMIN_TOKEN"
+	envLiveDomain  = shopifylive.EnvStoreDomain
+	envLiveToken   = shopifylive.EnvAdminToken
 	envLiveDomain2 = "MEMQL_TEST_SHOPIFY_STORE_DOMAIN_2"
 	envLiveToken2  = "MEMQL_TEST_SHOPIFY_ADMIN_TOKEN_2"
 
@@ -124,14 +128,14 @@ type liveCredentials struct {
 // endpoint, shop host included.
 func liveEnv(t *testing.T, domainVar, tokenVar string) liveCredentials {
 	t.Helper()
-	domain := strings.TrimSpace(os.Getenv(domainVar))
-	if domain == "" {
-		t.Skipf("%s not set; skipping the live mirror test against a development store", domainVar)
-	}
-	token := strings.TrimSpace(os.Getenv(tokenVar))
-	if token == "" {
-		t.Skipf("%s not set; skipping the live mirror test against a development store", tokenVar)
-	}
+	return liveEnvFor(t, "the live mirror test", domainVar, tokenVar)
+}
+
+// liveEnvFor is liveEnv for the test what names in its skip line.
+func liveEnvFor(t *testing.T, what, domainVar, tokenVar string) liveCredentials {
+	t.Helper()
+	domain := shopifylive.Env(t, domainVar, what)
+	token := shopifylive.Env(t, tokenVar, what)
 	if _, err := NormalizeShopDomain(domain); err != nil {
 		t.Fatalf("%s is not a bare <shop>.myshopify.com host; no request was sent", domainVar)
 	}
@@ -328,12 +332,6 @@ const liveAccessScopesDoc = `query LiveTestAccessScopes {
   }
 }`
 
-const liveShopPlanDoc = `query LiveTestShopPlan {
-  shop {
-    plan { partnerDevelopment }
-  }
-}`
-
 const liveFirstVariantDoc = `query LiveTestFirstVariant {
   productVariants(first: 1) {
     nodes { id }
@@ -468,20 +466,9 @@ func (h *liveHarness) liveRequireDevelopmentStore(t *testing.T, store Store) {
 	if h.developmentChecked[store.ID] {
 		return
 	}
-	name := h.vars[store.ID]
-	data, err := h.liveCall(h.ctx, store, liveShopPlanDoc, "LiveTestShopPlan", nil)
-	if err != nil {
-		t.Fatalf("could not read whether the store named by %s is a development store, so nothing was created: %v", name, err)
-	}
-	shop, _ := data["shop"].(map[string]any)
-	plan, _ := shop["plan"].(map[string]any)
-	dev, ok := plan["partnerDevelopment"].(bool)
-	if !ok {
-		t.Fatalf("could not read whether the store named by %s is a development store (shop.plan.partnerDevelopment was absent), so nothing was created", name)
-	}
-	if !dev {
-		t.Fatalf("the store named by %s is not a partner development store (shop.plan.partnerDevelopment is false); this test runs only against a development store reserved for it, and nothing was created", name)
-	}
+	shopifylive.RequireDevelopmentStore(t, h.vars[store.ID], func(document, operation string) (map[string]any, error) {
+		return h.liveCall(h.ctx, store, document, operation, nil)
+	})
 	h.developmentChecked[store.ID] = true
 }
 

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { refusalSentence } from "@znasllc-io/memql-sdk-core/client";
 
 import { useSession } from "../../../chrome/access";
-import { Button, Fact, Facts, Head, Notice, Panel } from "../../../kit";
+import { Button, Caption, ChoiceRow, Fact, Facts, Field, Head, Notice, Panel } from "../../../kit";
 import { ActionBar, type ActionBarTone } from "../../../kit/ActionBar";
 import { InlineSkeleton } from "../../../kit/ContentSkeleton";
 import { openHandoff, VSCODE_NO_ANSWER_MESSAGE } from "../../../items/vscode";
@@ -11,7 +11,7 @@ import { useCancelComposition, useRetryComposition, useTemplateLifecycle } from 
 import { toKitActs, type ActSpec } from "../acts";
 import { useLanding } from "../campaigns/landing";
 import { organizationName } from "../organizations";
-import { compositionFailed, isPublished, isWriting, layoutName, templateIsArchived, templateName, type TemplateRow } from "../rows";
+import { compositionFailed, isPublished, isWriting, layoutName, templateIsArchived, templateName, type TemplatePurpose, type TemplateRow } from "../rows";
 import { useEmailRender, useTemplateRecord, type EmailLayouts } from "../useEmail";
 import { browserZone, elapsedWords, momentWords } from "../when";
 import { WORDS, templateState } from "../words";
@@ -33,13 +33,14 @@ import { lifecycleContent, templateActs, templateEditorURL } from "./templateAct
 // restores and nothing else. An archived template stays on its page with
 // Restore right there, whatever the list is showing.
 
-type Lifecycle = "archive" | "restore" | "cancel" | "retry";
+type Lifecycle = "archive" | "restore" | "cancel" | "retry" | "purpose";
 
 const REFUSED: Record<Lifecycle, string> = {
   archive: "The template wasn't archived.",
   restore: "The template wasn't restored.",
   cancel: "The writing wasn't stopped.",
   retry: "The email wasn't started again.",
+  purpose: "The purpose wasn't saved.",
 };
 
 const LOST: Record<Lifecycle, string> = {
@@ -47,7 +48,22 @@ const LOST: Record<Lifecycle, string> = {
   restore: "Couldn't confirm that it was restored.",
   cancel: "Couldn't confirm that it was stopped.",
   retry: "Couldn't confirm that it was started again.",
+  purpose: "Couldn't confirm that the purpose was saved.",
 };
+
+// WHAT THE TEMPLATE IS FOR (X10): a message about one person's own request has
+// no unsubscribe, and campaigns and automations do not offer it. Choosing is a
+// change the bar saves as an act of its own (classify, like archive and
+// restore): the engine changes the purpose of the email it holds and nothing
+// else, and a published template is a draft after it, which the page says
+// before it is saved. The preview judges the email as the purpose chosen.
+const PURPOSES: readonly { value: TemplatePurpose; label: string }[] = [
+  { value: "marketing", label: "Marketing" },
+  { value: "transactional", label: "About one person's own request: no unsubscribe" },
+];
+const PURPOSE_JUDGMENT = "Whether a message counts as transactional where you trade is your judgment of its words.";
+const DISCARD: ActSpec = { id: "discard-purpose", label: "Discard", text: true };
+const SAVE: ActSpec = { id: "save-purpose", label: "Save", tone: "primary" };
 
 /** The active automations that send a template: series hold their emails while it is a draft; event automations send none. */
 export interface SendingAutomations {
@@ -92,7 +108,11 @@ export function TemplatePage({ template, layouts, automations = NO_AUTOMATIONS, 
   // ---- the email, as it is sent -------------------------------------------
   const record = useTemplateRecord(template.id, template.createdAt);
   const content = useMemo(() => (record.value === null ? null : lifecycleContent(record.value)), [record.value]);
-  const render = useEmailRender(content, template.accountId);
+  // The purpose chosen and not yet saved; null when it is the template's own.
+  const [purpose, setPurpose] = useState<TemplatePurpose | null>(null);
+  const ownPurpose: TemplatePurpose = template.purpose ?? "marketing";
+  const shownPurpose = purpose ?? ownPurpose;
+  const render = useEmailRender(content, template.accountId, shownPurpose);
 
   // ---- the bar -------------------------------------------------------------
   const lifecycle = useTemplateLifecycle();
@@ -123,7 +143,18 @@ export function TemplatePage({ template, layouts, automations = NO_AUTOMATIONS, 
   const stopListening = useRef<() => void>(() => {});
   useEffect(() => () => stopListening.current(), []);
 
-  const specs = landing !== null ? [landing.spec] : templateActs(template, askingNow, viewer);
+  const purposeChanged = purpose !== null && purpose !== ownPurpose;
+  useEffect(() => {
+    if (purpose !== null && purpose === ownPurpose) setPurpose(null);
+  }, [purpose, ownPurpose]);
+  // It can be chosen while the template is one a person edits: not put away,
+  // and not being written by MemQL.
+  const purposeEditable = !templateIsArchived(template) && !isWriting(template);
+
+  const specs =
+    landing !== null ? [landing.spec]
+    : purposeChanged && purposeEditable ? [DISCARD, SAVE]
+    : templateActs(template, askingNow, viewer);
 
   async function change(spec: ActSpec, act: Lifecycle) {
     // One change at a time: a second press while the first is on its way is the same press.
@@ -138,6 +169,7 @@ export function TemplatePage({ template, layouts, automations = NO_AUTOMATIONS, 
       const done =
         act === "archive" ? await lifecycle.archive(template)
         : act === "restore" ? await lifecycle.restore(template)
+        : act === "purpose" ? purpose !== null && (await lifecycle.setPurpose(template, purpose))
         : act === "cancel" ? await cancelling.run(template.id)
         : await retrying.run(template.id);
       if (done) {
@@ -172,6 +204,13 @@ export function TemplatePage({ template, layouts, automations = NO_AUTOMATIONS, 
       case "restore":
         void change(spec, "restore");
         return;
+      case "discard-purpose":
+        setOutcome(null);
+        setPurpose(null);
+        return;
+      case "save-purpose":
+        void change(spec, "purpose");
+        return;
       case "cancel-composition":
         void change(spec, "cancel");
         return;
@@ -191,9 +230,10 @@ export function TemplatePage({ template, layouts, automations = NO_AUTOMATIONS, 
   const archived = templateIsArchived(template);
   const writing = isWriting(template);
   const failed = compositionFailed(template);
-  const tone: ActionBarTone = landing !== null || writing ? "busy" : failed ? "paused" : isPublished(template) ? "live" : "none";
+  const tone: ActionBarTone = landing !== null || writing ? "busy" : failed || (purposeChanged && purposeEditable) ? "paused" : isPublished(template) ? "live" : "none";
   const word =
-    landing !== null ? WORDS.changing[landing.act]
+    landing !== null ? (landing.act === "purpose" ? "Saving" : WORDS.changing[landing.act])
+    : purposeChanged && purposeEditable ? "Unsaved changes"
     : writing ? WORDS.composition.writingBar
     : failed ? WORDS.composition.failed
     : templateState(template.status);
@@ -274,7 +314,7 @@ export function TemplatePage({ template, layouts, automations = NO_AUTOMATIONS, 
     <div className="os-action-pane" data-os-dividers="none" data-os-page-context={JSON.stringify({ page: "Template", name, id: template.id })}>
       <div className="os-action-body os-app-stack">
         <Head navigationKey={`template:${template.id}`} title={name} back={{ label: "Templates", onSelect: onBack }} />
-        {automations.held.length + automations.unsent.length > 0 && !archived ? <Notice tone="warn" sentence={holdWarning(automations)} /> : null}
+        {(automations.held.length + automations.unsent.length > 0 && !archived) || (purposeChanged && purposeEditable && isPublished(template)) ? <Notice tone="warn" sentence={holdWarning(automations)} /> : null}
         {editorSilent ? <Notice tone="warn" sentence={VSCODE_NO_ANSWER_MESSAGE} /> : null}
         {outcomeNotice()}
         <Panel label="Template details">
@@ -284,7 +324,14 @@ export function TemplatePage({ template, layouts, automations = NO_AUTOMATIONS, 
             <Fact label="Subject" value={template.subject} />
             {template.preheader === "" ? null : <Fact label="Preheader" value={template.preheader} />}
             <Fact label={WORDS.changed} value={template.createdAt === "" ? "" : momentWords(template.createdAt, zone)} />
+            {purposeEditable ? null : <Fact label="Purpose" value={PURPOSES.find((p) => p.value === ownPurpose)?.label ?? ""} />}
           </Facts>
+          {purposeEditable ? (
+            <Field label="Purpose">
+              <ChoiceRow label="Purpose" value={shownPurpose} onChange={(next) => setPurpose(next as TemplatePurpose)} options={PURPOSES} />
+              <Caption>{PURPOSE_JUDGMENT}</Caption>
+            </Field>
+          ) : null}
         </Panel>
         {notes.length === 0 ? null : <Notice tone="info" sentence={notes.join(" ")} />}
         {preview()}

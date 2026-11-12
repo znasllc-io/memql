@@ -1,9 +1,16 @@
 package memql
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
+
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // shopper_extension.go -- HOW A CLIENT'S OWN FIELDS REACH A CLIENT'S OWN
@@ -87,6 +94,17 @@ type ShopperExtension struct {
 	Fields []ShopperField
 	// Description is what the module inventory and the pack guide show.
 	Description string
+	// AcceptsAccount is true when the extension's mutation declares an
+	// accountId argument, and only then is the site's organization stamped
+	// into its arguments. An extension that declares none is handed none
+	// and still writes, so a client mutation written before organizations
+	// reached the shopper path keeps working unchanged. Set by the loader;
+	// accountId is never offered to a shopper either way.
+	AcceptsAccount bool
+	// Concept is the concept the extension's mutation writes, its row at the
+	// submission's id. Set by the loader from the mutation's binding; it is how
+	// a pack shows the row back to the store's people (ShopperExtensionRow).
+	Concept string
 }
 
 // shopperExtensions is keyed by the EXTENDED route, not by the declaring
@@ -238,4 +256,158 @@ func ResetShopperExtensions() {
 	shopperMu.Lock()
 	defer shopperMu.Unlock()
 	shopperExtensions = map[string]ShopperExtension{}
+}
+
+// SHOWING A CLIENT'S OWN FIELDS BACK TO THE STORE'S PEOPLE (X14).
+//
+// A client's extension writes its own concept's row at the submission's id,
+// the id the pack wrote its own row at. The pack that declared the form shows
+// that row to whoever reads the pack's row, and has no way to name the
+// client's concept or its fields: a pack may not know its clients. So the
+// engine answers it here, from the extension registry and the concept's own
+// declaration -- every declared field but the stamped names, each labelled by
+// its own name in plain words, and the two facts the concept's @displayCard
+// names first.
+//
+// THE ROW IS READ UNDER THE CALLER'S CONTEXT through the ordinary query planner,
+// so the row tier decides exactly as it does for any named query: a caller who
+// cannot read the client's row is answered nothing. MemQL has no generic row
+// read; like the concept browser's, this one builds a request-local query bound
+// to the concept, which registers nothing in the shared registry.
+
+// ExtensionField is one field of a client extension's row, as a person reads it.
+type ExtensionField struct {
+	Name  string
+	Label string
+	Value any
+}
+
+// ExtensionRow is a client extension's row: its concept, the values of the two
+// fields its display card names, and every field a person is shown.
+type ExtensionRow struct {
+	Concept, Primary, Secondary string
+	Fields                      []ExtensionField
+}
+
+// ShopperExtensionRow reads the row the extension of pack/form wrote at rowID,
+// under ctx. It answers false, with no error, when no extension is attached to
+// the form or ctx reads no row there.
+func (e *MemQLEngine) ShopperExtensionRow(ctx context.Context, pack, form, rowID string) (ExtensionRow, bool, error) {
+	ext := ShopperExtensionFor(pack, form)
+	if ext == nil || strings.TrimSpace(ext.Concept) == "" || strings.TrimSpace(rowID) == "" {
+		return ExtensionRow{}, false, nil
+	}
+	if e == nil || e.concepts == nil {
+		return ExtensionRow{}, false, fmt.Errorf("shopper extension: the engine has no concept registry")
+	}
+	concept, err := e.concepts.Get(ext.Concept)
+	if err != nil || concept == nil {
+		return ExtensionRow{}, false, fmt.Errorf("shopper extension: %s/%s writes %q, which is not a loaded concept", pack, form, ext.Concept)
+	}
+	// The stored id is canonical; either form of rowID names it.
+	want := concept.Name + ":" + BareShortId(rowID)
+	root := &LogicalExpression{Op: LogicalAnd,
+		Left:  &ComparisonExpression{Field: FieldReference{Raw: "concept", Parts: []string{"concept"}}, Operator: OpEq, Value: concept.Name},
+		Right: &ComparisonExpression{Field: FieldReference{Raw: "id", Parts: []string{"id"}}, Operator: OpEq, Value: want},
+	}
+	sum := sha256.Sum256([]byte(concept.Name + "\x00" + want))
+	name := "shopperExtensionRow" + hex.EncodeToString(sum[:8])
+	functions := newFunctionRegistry()
+	if err := functions.add(&Function{Name: name, Expr: root, ExprSource: canonicalExpression(root),
+		BoundConcept: concept.Name, FunctionKind: "query", Enabled: true, CacheTTL: "0"}); err != nil {
+		return ExtensionRow{}, false, err
+	}
+	result, err := e.executeWith(ctx, "query "+name+"()", functions, nil, false)
+	if err != nil {
+		return ExtensionRow{}, false, fmt.Errorf("shopper extension: reading %s: %w", want, err)
+	}
+	if result == nil || result.Bundle == nil {
+		return ExtensionRow{}, false, nil
+	}
+	for _, node := range result.Bundle.GetNodes() {
+		if node.GetConcept() != concept.Name || BareShortId(node.GetId()) != BareShortId(rowID) {
+			continue
+		}
+		raw, err := node.GetPayload().MarshalJSON()
+		if err != nil {
+			return ExtensionRow{}, false, err
+		}
+		payload := map[string]any{}
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return ExtensionRow{}, false, err
+		}
+		return extensionRowOf(concept, payload), true, nil
+	}
+	return ExtensionRow{}, false, nil
+}
+
+// extensionRowOf shows one payload of concept: every declared field a shape may
+// project, but the stamped names and the concept's secrets, in name order.
+func extensionRowOf(concept *memorynodes.Concept, payload map[string]any) ExtensionRow {
+	row := ExtensionRow{Concept: concept.Name}
+	shown := map[string]bool{}
+	secret := map[string]bool{}
+	for _, name := range concept.SecretFields() {
+		secret[name] = true
+	}
+	for _, name := range concept.ProjectableFields() {
+		if _, stamped := reservedShopperFieldNames[name]; stamped || secret[name] {
+			continue
+		}
+		shown[name] = true
+		row.Fields = append(row.Fields, ExtensionField{Name: name, Label: extensionFieldLabel(name), Value: payload[name]})
+	}
+	// A display card naming a field that is not shown shows nothing of it.
+	fact := func(field string) string {
+		v, ok := payload[strings.TrimSpace(field)]
+		if !ok || v == nil || !shown[strings.TrimSpace(field)] {
+			return ""
+		}
+		if s, ok := v.(string); ok {
+			return s
+		}
+		return fmt.Sprint(v)
+	}
+	if card := concept.DisplayCard; card != nil {
+		row.Primary, row.Secondary = fact(card.Primary), fact(card.Secondary)
+	}
+	return row
+}
+
+// extensionFieldLabel is a field name in plain words: split at its case
+// boundaries (an acronym is one word) and at digits, lower-cased, the first
+// word capitalised -- taxNumber is "Tax number".
+func extensionFieldLabel(name string) string {
+	runes := []rune(strings.TrimSpace(name))
+	var words []string
+	var cur []rune
+	flush := func() {
+		if len(cur) > 0 {
+			words = append(words, strings.ToLower(string(cur)))
+			cur = nil
+		}
+	}
+	for i, r := range runes {
+		switch {
+		case r == '_' || r == '-' || unicode.IsSpace(r):
+			flush()
+			continue
+		case i > 0 && len(cur) > 0:
+			prev := runes[i-1]
+			nextLower := i+1 < len(runes) && unicode.IsLower(runes[i+1])
+			if unicode.IsUpper(r) && (unicode.IsLower(prev) || unicode.IsDigit(prev) || (unicode.IsUpper(prev) && nextLower)) ||
+				unicode.IsDigit(r) != unicode.IsDigit(prev) {
+				flush()
+			}
+		}
+		cur = append(cur, r)
+	}
+	flush()
+	if len(words) == 0 {
+		return ""
+	}
+	first := []rune(words[0])
+	first[0] = unicode.ToUpper(first[0])
+	words[0] = string(first)
+	return strings.Join(words, " ")
 }

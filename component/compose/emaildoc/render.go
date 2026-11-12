@@ -2,7 +2,9 @@ package emaildoc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -16,6 +18,12 @@ type RenderOptions struct {
 	Preview        bool              // data-block attributes
 	Sample         map[string]string // "displayName", "email", "accountName", "campaignName", "fields.<key>"
 	RequireConfirm bool              // report confirm_missing when {{confirmUrl}} is absent
+	// Transactional judges a message about one person's own request: it has no
+	// unsubscribe, so a layout is not asked for the link (no unsubscribe_missing),
+	// and the engine's links it cannot carry are issues wherever they are
+	// (TransactionalLinkIssues): unsubscribe_present, view_link_present and
+	// confirm_link_present.
+	Transactional bool
 }
 
 // Issue is something about a document that keeps it from being sent as it is.
@@ -37,13 +45,16 @@ type Result struct {
 
 // The issue codes.
 const (
-	IssueImageMissing       = "image_missing"       // an image block without a picture
-	IssueImageUnavailable   = "image_unavailable"   // a picture that cannot be read or sent
-	IssueImagesLimit        = "images_limit"        // more than MaxImages pictures or MaxImageBytes bytes of them
-	IssueLinkMissing        = "link_missing"        // a button, a social link or a footer link without an address
-	IssueUnsubscribeMissing = "unsubscribe_missing" // a layout without a {{unsubscribeUrl}} link
-	IssueConfirmMissing     = "confirm_missing"     // no {{confirmUrl}} link, when RequireConfirm
-	IssueEmailTooLarge      = "email_too_large"     // more HTML than sending takes, its pictures embedded
+	IssueImageMissing       = "image_missing"        // an image block without a picture
+	IssueImageUnavailable   = "image_unavailable"    // a picture that cannot be read or sent
+	IssueImagesLimit        = "images_limit"         // more than MaxImages pictures or MaxImageBytes bytes of them
+	IssueLinkMissing        = "link_missing"         // a button, a social link or a footer link without an address
+	IssueUnsubscribeMissing = "unsubscribe_missing"  // a layout without a {{unsubscribeUrl}} link
+	IssueConfirmMissing     = "confirm_missing"      // no {{confirmUrl}} link, when RequireConfirm
+	IssueEmailTooLarge      = "email_too_large"      // more HTML than sending takes, its pictures embedded
+	IssueUnsubscribePresent = "unsubscribe_present"  // {{unsubscribeUrl}} or {{preferencesUrl}} in a transactional email
+	IssueViewLinkPresent    = "view_link_present"    // {{viewUrl}} in a transactional email
+	IssueConfirmLinkPresent = "confirm_link_present" // {{confirmUrl}} in a transactional email
 )
 
 // MaxRenderBytes is the most a render returns of each part: the subject, the
@@ -121,8 +132,8 @@ func Render(ctx context.Context, d Document, images ImageResolver, opts RenderOp
 		// ceiling the HTML was written within bounds the text part too.
 		plain = layoutText(d.Blocks)
 		// Only a layout must carry the link: sending appends a footer with
-		// one to custom HTML that has none.
-		if !r.linked[TagUnsubscribeURL] {
+		// one to custom HTML that has none. A transactional email has none.
+		if !opts.Transactional && !r.linked[TagUnsubscribeURL] {
 			r.issue(IssueUnsubscribeMissing, "", "Add an unsubscribe link ("+TagUnsubscribeURL+") to the footer.")
 		}
 	} else {
@@ -130,6 +141,11 @@ func Render(ctx context.Context, d Document, images ImageResolver, opts RenderOp
 			return Result{}, err
 		}
 		plain = d.TextBody
+	}
+	if opts.Transactional {
+		for _, issue := range transactionalDocumentIssues(d, markup, plain) {
+			r.issue(issue.Code, "", issue.Message)
+		}
 	}
 	confirmable := r.linked[TagConfirmURL]
 	if d.Mode() == ModeCustom && d.HTMLBody == "" {
@@ -151,6 +167,62 @@ func Render(ctx context.Context, d Document, images ImageResolver, opts RenderOp
 		}
 	}
 	return result, nil
+}
+
+// The sentences of the issues a transactional email has for an engine link it
+// cannot carry.
+const (
+	// UnsubscribePresentMessage is the unsubscribe_present issue's sentence.
+	UnsubscribePresentMessage = "A message about one person's own request carries no unsubscribe link. Remove it."
+	// ViewLinkPresentMessage is the view_link_present issue's sentence.
+	ViewLinkPresentMessage = "A message about one person's own request has no web copy. Remove the view-in-browser link."
+	// ConfirmLinkPresentMessage is the confirm_link_present issue's sentence.
+	ConfirmLinkPresentMessage = "A message about one person's own request has nothing to confirm. Remove the confirmation link."
+)
+
+// transactionalLinks are the engine's links a message about one person's own
+// request cannot carry, in the order their issues are told: it is sent to no
+// list (so nothing to unsubscribe from or manage), keeps no web copy and asks
+// nothing to be confirmed. Each tag allows spaces inside the braces: a tag a
+// person wrote is a tag they meant, filled or not.
+var transactionalLinks = []struct {
+	code, message string
+	tag           *regexp.Regexp
+}{
+	{IssueUnsubscribePresent, UnsubscribePresentMessage, regexp.MustCompile(`\{\{\s*(unsubscribeUrl|preferencesUrl)\s*\}\}`)},
+	{IssueViewLinkPresent, ViewLinkPresentMessage, regexp.MustCompile(`\{\{\s*viewUrl\s*\}\}`)},
+	{IssueConfirmLinkPresent, ConfirmLinkPresentMessage, regexp.MustCompile(`\{\{\s*confirmUrl\s*\}\}`)},
+}
+
+// TransactionalLinkIssues answers, for a message about one person's own
+// request, an issue for each kind of engine link it cannot carry that is in any
+// of parts: at most one per kind, always in the same order. It is the one
+// judgment of which links those are and what is said of each: a save, a
+// preview and every send of such a message ask it.
+func TransactionalLinkIssues(parts ...string) []Issue {
+	var out []Issue
+	for _, link := range transactionalLinks {
+		for _, part := range parts {
+			if link.tag.MatchString(part) {
+				out = append(out, Issue{Code: link.code, Message: link.message})
+				break
+			}
+		}
+	}
+	return out
+}
+
+// transactionalDocumentIssues is TransactionalLinkIssues over everything in
+// the email: the subject, the preheader, either body as written, the parts as
+// rendered, and the layout's blocks (a word in a footer line included).
+func transactionalDocumentIssues(d Document, markup, plain string) []Issue {
+	parts := []string{d.Subject, d.Preheader, d.HTMLBody, d.TextBody, markup, plain}
+	if len(d.Blocks) > 0 {
+		if blocks, err := json.Marshal(d.Blocks); err == nil {
+			parts = append(parts, string(blocks))
+		}
+	}
+	return TransactionalLinkIssues(parts...)
 }
 
 // fill fills the merge tags of s, refusing a result past MaxRenderBytes as it

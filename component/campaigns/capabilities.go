@@ -202,6 +202,42 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 				"senderIdentityId": "string (optional) - an identity in the organization; omission resolves its configured sender",
 			},
 		},
+		{
+			Name: "sendRowMessage",
+			Description: "Send ONE message about one person's own request to the person a pack's row names (the row lane): the address, the organization " +
+				"and the fields come from the resolver the row's concept registered in Go, never from an argument; a published transactional template; " +
+				"no unsubscribe; a bounce, a complaint or a block skips it, an unsubscribe does not. A send that is refused or that fails answers a code " +
+				"and a sentence a person reads, and nothing of the lane's own error. Trusted jobs only (internal origin).",
+			Handler: w.handleSendRowMessage,
+			ArgsSchema: map[string]string{
+				"rowConcept":       "string (required) - a concept registered for the row lane",
+				"rowId":            "string (required) - the row whose person is mailed",
+				"accountId":        "string (required) - the row's organization; the template, the sender and the resolver's answer must be its",
+				"kind":             "string (required) - which message about the row; handed to the resolver",
+				"templateId":       "string (required) - a published transactional template",
+				"requestId":        "string (required) - stable identifier for this one message; a retry returns its receipt",
+				"senderIdentityId": "string (optional) - an identity in the organization; omission resolves its configured sender",
+			},
+		},
+		{
+			Name:        "rowSender",
+			Description: "The sender a row lane message for one organization would go out as: {ready, fromName, address, reason, code, readFailed, noneChosen}, resolved as the send resolves it; code, readFailed and noneChosen say in fields what the sentence says, for a caller to decide on. Trusted jobs only (internal origin).",
+			Handler:     w.handleRowSender,
+			ArgsSchema: map[string]string{
+				"accountId":        "string (required) - the organization the messages are sent for",
+				"senderIdentityId": "string (optional) - the identity chosen; empty is resolved as a send with none named is",
+			},
+		},
+		{
+			Name:          "rowMessageStatus",
+			Description:   "The outcome of row lane messages, one row per request id: {requestId, status, skipReason, skipSentence, providerStatus, sentAt}; skipSentence is a skip's reason as a person reads it. Trusted jobs only (internal origin).",
+			Handler:       w.handleRowMessageStatus,
+			PreserveOrder: true,
+			ArgsSchema: map[string]string{
+				"requestIds": "list (required) - the request ids the messages were sent under",
+				"accountId":  "string (required) - the organization the messages were sent for; another organization's request ids answer nothing",
+			},
+		},
 	}, workflowhost.ScopedCapabilities(ops)...)
 }
 
@@ -449,6 +485,12 @@ func (w *Worker) preflightAudienceWith(ctx context.Context, op string, campaign 
 	}
 	if err := w.validateCampaignOrganization(ctx, campaign, tmpl); err != nil {
 		return 0, Template{}, fmt.Errorf("campaigns.%s: %w", op, err)
+	}
+	// A template about one person's own request has no unsubscribe, so no list
+	// is sent it, whatever its status: publishing it would not make the send
+	// legal, so this is said before "not ready" (X10).
+	if tmpl.Transactional() {
+		return 0, Template{}, errTransactionalTemplate
 	}
 	// `ready` is an operator asserting the copy is finished. Refusing a
 	// draft is the cheapest guard there is against the single most

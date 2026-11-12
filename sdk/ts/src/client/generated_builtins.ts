@@ -1257,8 +1257,10 @@ export interface CampaignSaveTemplateArgs {
   sourceArtifactId?: string;
   /** Exact createdAt from templateById or templateForSource; empty only when creating. */
   expectedRevision: string;
-  /** save (default), publish, archive or restore. Publishing is an explicit human action. */
+  /** save (default), publish, archive, restore or classify. Publishing is an explicit human action. classify changes the template's purpose and nothing else: it needs the exact revision and the purpose, ignores the content, returns a published template to draft and answers the issues the template has under its new purpose. */
   action?: string;
+  /** marketing or transactional. For a save or a publish, empty keeps the template's purpose (none is marketing); classify needs one. A transactional template is about one person's own request and has no unsubscribe: no campaign, journey step or event email rule may send it, a layout needs no unsubscribe link, and {{unsubscribeUrl}} or {{preferencesUrl}} (unsubscribe_present), {{viewUrl}} (view_link_present) or {{confirmUrl}} (confirm_link_present) anywhere in it is an issue that keeps it from being published. Archive and restore ignore it. Anything else is refused. */
+  purpose?: string;
 }
 
 export function buildCampaignSaveTemplate(args: CampaignSaveTemplateArgs): string {
@@ -1270,6 +1272,7 @@ export function buildCampaignSaveTemplate(args: CampaignSaveTemplateArgs): strin
   if (args.sourceArtifactId !== undefined) parts.push("sourceArtifactId: " + renderMemQLValue(args.sourceArtifactId));
   parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
   if (args.action !== undefined) parts.push("action: " + renderMemQLValue(args.action));
+  if (args.purpose !== undefined) parts.push("purpose: " + renderMemQLValue(args.purpose));
   return "builtin campaignSaveTemplate(" + parts.join(", ") + ")";
 }
 
@@ -1459,7 +1462,7 @@ QueryClient.prototype.campaignTestAudienceSend = function (this: QueryClient, ar
   return this.executeNamed("campaignTestAudienceSend", buildCampaignTestAudienceSend(args), opts);
 };
 
-/** Send one test copy of a campaign to a named address (memql#4822). Renders the campaign's template against a synthetic recipient -- display name 'Test Recipient', the address you name, and the `fields` of the audience's first real recipient when one exists, so {{fields.*}} show the shape they will actually have. The subject is prefixed '[Test] ', the message goes through the campaign's resolved sending identity, and the unsubscribe footer and the four link tags ({{unsubscribeUrl}}, {{preferencesUrl}}, {{viewUrl}}, {{confirmUrl}}) carry an obviously-inert token, so every link renders and none of them does anything. It writes NO delivery row and touches NO counter, so a test send can never make a campaign look partly sent; it does consume the ordinary send-rate token bucket, because a test is a real message to a real mailbox. Returns the list of merge tags it could not resolve -- the check that catches a typo'd {{fields.compnay}} before the whole audience gets it. `to` is REQUIRED and never defaults to the caller's own address: a builtin that mails somewhere you did not name is one you have to remember the default of. */
+/** Send one test copy of a campaign to a named address (memql#4822). Renders the campaign's template against a synthetic recipient -- display name 'Test Recipient', the address you name, and the `fields` of the audience's first real recipient when one exists, so {{fields.*}} show the shape they will actually have. The subject is prefixed '[Test] ', the message goes through the campaign's resolved sending identity, and the unsubscribe footer and the four link tags ({{unsubscribeUrl}}, {{preferencesUrl}}, {{viewUrl}}, {{confirmUrl}}) carry an obviously-inert token, so every link renders and none of them does anything. A transactional template is tested as the row lane sends it: no footer, no List-Unsubscribe header and none of the four link tags; one that still carries any of them is refused with the lane's sentence and nothing is sent. It writes NO delivery row and touches NO counter, so a test send can never make a campaign look partly sent; it does consume the ordinary send-rate token bucket, because a test is a real message to a real mailbox. Returns the list of merge tags it could not resolve -- the check that catches a typo'd {{fields.compnay}} before the whole audience gets it. `to` is REQUIRED and never defaults to the caller's own address: a builtin that mails somewhere you did not name is one you have to remember the default of. */
 export interface CampaignTestSendArgs {
   /** The campaign to render. The caller must be able to read it. */
   campaignId: string;
@@ -2423,6 +2426,8 @@ export interface EmailRenderArgs {
   accountId: string;
   /** Sample values: displayName, email, accountName, campaignName, and fields (an object of column values). */
   sample?: Record<string, unknown>;
+  /** marketing (the default) or transactional: the issues are the ones a save of the email with this purpose would answer. */
+  purpose?: string;
 }
 
 export function buildEmailRender(args: EmailRenderArgs): string {
@@ -2430,6 +2435,7 @@ export function buildEmailRender(args: EmailRenderArgs): string {
   parts.push("document: " + renderMemQLValue(args.document));
   parts.push("accountId: " + renderMemQLValue(args.accountId));
   if (args.sample !== undefined) parts.push("sample: " + renderMemQLValue(args.sample));
+  if (args.purpose !== undefined) parts.push("purpose: " + renderMemQLValue(args.purpose));
   return "builtin emailRender(" + parts.join(", ") + ")";
 }
 
@@ -7441,7 +7447,7 @@ QueryClient.prototype.shopifyFetchProduct = function (this: QueryClient, args: S
   return this.executeNamed("shopifyFetchProduct", buildShopifyFetchProduct(args), opts);
 };
 
-/** Create or find one buyer's B2B account: a company stamped with the MemQL application id, its location, the buyer as a company contact, and an ACTIVE catalog with a price list. Idempotent -- a second call for one application finds the first company rather than making a twin. Refuses BEFORE creating anything when the store is below Plus and already holds its three company-location catalogs, answering {status: refused, reason} rather than an error so the caller can tell a ceiling from an outage. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked. */
+/** Create or find one buyer's B2B account: a company stamped with the MemQL application id, its location, the buyer as a company contact, and an ACTIVE catalog with a price list. Idempotent -- a second call for one application finds the first company rather than making a twin. Refuses BEFORE creating anything when the store is below Plus and already holds its three company-location catalogs, answering {status: refused, code: plan_ceiling, reason} rather than an error so the caller can tell a ceiling from an outage; a store whose grant does not reach its customers answers code scope_missing, and one that refuses to create the buyer's customer customer_refused. The company is looked for under the application id it is given and under that id's bare form, so a store first provisioned under either finds its one company; a new company is made under the id given. Called by the wholesale pack alone: the call must carry internal origin AND the wholesale pack's mark, which only the pack's Go sets, on its one call, after its own checks. Any other call -- a client's, or a registered automation's step, which carries internal origin and no mark -- is refused before the store is read or Shopify is asked. */
 export interface ShopifyProvisionWholesaleArgs {
   /** The store to provision on. */
   storeId: string;
@@ -7484,7 +7490,7 @@ QueryClient.prototype.shopifyProvisionWholesale = function (this: QueryClient, a
   return this.executeNamed("shopifyProvisionWholesale", buildShopifyProvisionWholesale(args), opts);
 };
 
-/** End a B2B entitlement by setting its catalog to DRAFT. DELETES NOTHING: the company, its location, its contact, the price list and every order placed under them are untouched, because revoking trade terms is ending a discount rather than erasing a customer -- and deleting a company would take its order history's association with it. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked. */
+/** End a B2B entitlement by setting its catalog to DRAFT. DELETES NOTHING: the company, its location, its contact, the price list and every order placed under them are untouched, because revoking trade terms is ending a discount rather than erasing a customer -- and deleting a company would take its order history's association with it. A reference that names no catalog is a success that sends nothing, since there is no catalog it can name to draft; a B2B grant that failed partway can still have left an active catalog, which the merchant drafts in the Shopify admin. Called by the wholesale pack alone: the call must carry internal origin AND the wholesale pack's mark, which only the pack's Go sets, on its one call, after its own checks. Any other call -- a client's, or a registered automation's step, which carries internal origin and no mark -- is refused before the store is read or Shopify is asked. */
 export interface ShopifyRevokeWholesaleArgs {
   /** The store. */
   storeId: string;
@@ -7739,12 +7745,14 @@ QueryClient.prototype.shopifyStorefrontTokenSet = function (this: QueryClient, a
   return this.executeNamed("shopifyStorefrontTokenSet", buildShopifyStorefrontTokenSet(args), opts);
 };
 
-/** The plan-independent grant: add one tag to the buyer's customer record. Writes the tag and NOTHING else -- what the tag does is the merchant's own automatic discount, which this connector deliberately does not create on their behalf. Refuses when no customer on the store has that email, because a tag on an account that does not exist entitles nobody. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked. */
+/** The plan-independent grant: add one tag to the buyer's customer record. A buyer with no customer on the store gets one created (the address and the name, no marketing consent) and tagged; a create refused because the address was taken a moment ago reads the customer again and tags it. Writes the customer and the tag and NOTHING else -- what the tag does is the merchant's own automatic discount, which this connector deliberately does not create on their behalf. A tag the customer already carries is not sent again. Answers {status: ok, reference, customerId, customerCreated, detail}, or {status: refused, code, reason} with code customer_refused (the store refused to create the customer) or scope_missing (the store refused access to its customers: the permissions are not approved, or the app is not approved for protected customer data); any other failure is an error, an outage the pack retries. Called by the wholesale pack alone: the call must carry internal origin AND the wholesale pack's mark, which only the pack's Go sets, on its one call, after its own checks. Any other call -- a client's, or a registered automation's step, which carries internal origin and no mark -- is refused before the store is read or Shopify is asked. */
 export interface ShopifyTagWholesaleCustomerArgs {
   /** The store. */
   storeId: string;
-  /** The customer to tag. */
+  /** The customer to tag, compared trimmed and lower-cased. Created when the store has none; when the store has two, the one Shopify lists first is tagged and the detail says so. */
   buyerEmail: string;
+  /** The applicant's name, for a customer created here: split on the last space into the two fields Shopify wants. */
+  buyerName?: string;
   /** Defaults to memql-wholesale. Prefixed with ours so this connector never removes a tag somebody else put there. */
   tag?: string;
 }
@@ -7753,6 +7761,7 @@ export function buildShopifyTagWholesaleCustomer(args: ShopifyTagWholesaleCustom
   const parts: string[] = [];
   parts.push("storeId: " + renderMemQLValue(args.storeId));
   parts.push("buyerEmail: " + renderMemQLValue(args.buyerEmail));
+  if (args.buyerName !== undefined) parts.push("buyerName: " + renderMemQLValue(args.buyerName));
   if (args.tag !== undefined) parts.push("tag: " + renderMemQLValue(args.tag));
   return "builtin shopifyTagWholesaleCustomer(" + parts.join(", ") + ")";
 }
@@ -7767,14 +7776,16 @@ QueryClient.prototype.shopifyTagWholesaleCustomer = function (this: QueryClient,
   return this.executeNamed("shopifyTagWholesaleCustomer", buildShopifyTagWholesaleCustomer(args), opts);
 };
 
-/** The plan-independent revoke: remove that one tag from the buyer's customer record. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked. */
+/** The plan-independent revoke: remove that one tag from the customer the grant recorded (customerId), read by id, when it carries it -- so a buyer who changed their address in the store's admin, or an address two customers hold, still loses the tag from the customer that got it. A customer that no longer exists or no longer carries the tag is a success that sends nothing more. Only when no customer is named (a first grant that failed) is the address used, and then the tag comes off every customer holding the address that carries it; an address nobody holds sends nothing but the read. Called by the wholesale pack alone: the call must carry internal origin AND the wholesale pack's mark, which only the pack's Go sets, on its one call, after its own checks. Any other call -- a client's, or a registered automation's step, which carries internal origin and no mark -- is refused before the store is read or Shopify is asked. */
 export interface ShopifyUntagWholesaleCustomerArgs {
   /** The store. */
   storeId: string;
-  /** The customer to untag. */
+  /** The buyer's address, used only when customerId names no customer. */
   buyerEmail: string;
   /** Defaults to memql-wholesale. */
   tag?: string;
+  /** The customer the grant recorded, from the entitlement's reference. When set, that customer is the one untagged, whatever its address is now. */
+  customerId?: string;
 }
 
 export function buildShopifyUntagWholesaleCustomer(args: ShopifyUntagWholesaleCustomerArgs): string {
@@ -7782,6 +7793,7 @@ export function buildShopifyUntagWholesaleCustomer(args: ShopifyUntagWholesaleCu
   parts.push("storeId: " + renderMemQLValue(args.storeId));
   parts.push("buyerEmail: " + renderMemQLValue(args.buyerEmail));
   if (args.tag !== undefined) parts.push("tag: " + renderMemQLValue(args.tag));
+  if (args.customerId !== undefined) parts.push("customerId: " + renderMemQLValue(args.customerId));
   return "builtin shopifyUntagWholesaleCustomer(" + parts.join(", ") + ")";
 }
 
@@ -7795,7 +7807,7 @@ QueryClient.prototype.shopifyUntagWholesaleCustomer = function (this: QueryClien
   return this.executeNamed("shopifyUntagWholesaleCustomer", buildShopifyUntagWholesaleCustomer(args), opts);
 };
 
-/** How many more company-location catalogs this store may hold: -1 on Plus, which is unlimited, and otherwise three minus what it already has. Since 2026-04-02 companies, payment terms, volume pricing and up to three catalogs are available BELOW Plus, so the ceiling is real and this is what lets an adapter REPORT it rather than discover it at the fourth grant, in a merchant's live store. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked. */
+/** How many more company-location catalogs this store may hold: -1 on Plus, which is unlimited, and otherwise three minus what it already has. Since 2026-04-02 companies, payment terms, volume pricing and up to three catalogs are available BELOW Plus, so the ceiling is real and this is what lets an adapter REPORT it rather than discover it at the fourth grant, in a merchant's live store. Called by the wholesale pack alone: the call must carry internal origin AND the wholesale pack's mark, which only the pack's Go sets, on its one call, after its own checks. Any other call -- a client's, or a registered automation's step, which carries internal origin and no mark -- is refused before the store is read or Shopify is asked. */
 export interface ShopifyWholesaleCatalogHeadroomArgs {
   /** The store to measure. */
   storeId: string;

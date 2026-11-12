@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -125,10 +127,14 @@ type ShopperSite struct {
 	StoreID        string
 	PreviewStoreID string
 	// AccountID is the account the site belongs to, as the site row records
-	// it, or "" for a site with none. It is never answered to anybody: its one
-	// use is to say which account a declared construct acts in (shopperContext),
-	// so what a shopper submits is recorded in the account of the storefront
-	// they submitted it on.
+	// it, or "" for a site with none, which is a legitimate state. It is never
+	// answered to anybody. It has two uses. It says which account a declared
+	// construct acts in (shopperContext), so what a shopper submits is
+	// recorded in the account of the storefront they submitted it on. And it
+	// is handed, as the argument memql.ShopperAccountIDArg, to the construct
+	// of a form that asks for it and to an extension whose mutation declares
+	// it, so the rows they write carry the organization whose people may read
+	// them; a site with none writes those rows with none.
 	AccountID string
 }
 
@@ -330,6 +336,14 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 	args["storeId"] = stamp.storeID
 	args["siteId"] = site.ID
 	args[memql.ShopperSubmissionIDArg] = submissionID
+	// THE ACCOUNT ONLY FOR A FORM THAT ASKED FOR IT, as an extension is handed
+	// it only when its mutation declares it. The name is reserved, so for a
+	// form that did not ask nothing posted and nothing stamped puts an
+	// accountId among its construct's arguments; the account the construct
+	// acts in is on the context below either way.
+	if form.AcceptsAccount {
+		args[memql.ShopperAccountIDArg] = site.AccountID
+	}
 
 	call, err := dslCall(memql.ShopperCallPrefix(form.Kind)+form.Construct, args)
 	if err != nil {
@@ -345,6 +359,19 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 	// form, which is the opposite of what a narrowly declared surface means.
 	// And in the site's account, which shopperContext reads off the row.
 	ctx := shopperContext(r.Context(), stamp.owner, site)
+	// EVIDENCE ONLY FOR A FORM THAT ASKED FOR IT (X20), on the context and never
+	// in the arguments, so nothing posted can stand in for it: the address the
+	// edge saw, and the browser's User-Agent cut to its bound.
+	if form.Evidence {
+		ctx = memql.ContextWithShopperEvidence(ctx, memql.ShopperEvidence{
+			ClientAddress: evidenceAddress(r.Header.Get(memql.ShopperClientHeader)),
+			UserAgent:     cutUTF8(r.UserAgent(), shopperUserAgentMaxBytes),
+		})
+	}
+	// THE OUTCOME, for a construct that accepts a post and writes nothing
+	// (memql.ShopperOutcome): the poster is answered as for any accepted post,
+	// and no extension row is written about a submission that does not exist.
+	ctx, outcome := memql.ContextWithShopperOutcome(ctx)
 	if _, err := h.engine.Execute(ctx, call); err != nil {
 		h.logger.Warn("shopper surface: the write was refused",
 			"component", "server", "pack", pack, "form", name,
@@ -364,8 +391,9 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 	// succeeded. A refusal above ends the request: the pack holds the gate
 	// -- wholesale's applicationsOpen lives inside its construct -- so a
 	// client row written past a refusal would be a row about an application
-	// that does not exist.
-	if ext != nil {
+	// that does not exist. So would one written past a post the construct
+	// accepted and did not write; the poster's answer is the same either way.
+	if ext != nil && !outcome.Unwritten() {
 		h.runExtension(ctx, ext, extArgs, stamp, site, submissionID)
 	}
 	h.redirect(w, r, form.RedirectOK, "")
@@ -379,9 +407,11 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 // application it can act on with its client fields visibly blank, and a
 // person emails the applicant for the missing one. The alternative sends
 // somebody who has just typed seventeen fields to an error page, from
-// which they resubmit -- and the pack has no dedupe on applications, so one
-// business becomes two rows, one with fields and one without. That is a
-// worse outcome from the same fault.
+// which they resubmit -- and a pack with no dedupe on its rows turns one
+// business into two, one with fields and one without. That is a worse
+// outcome from the same fault. (A pack that declines such a resubmission
+// answers it as accepted with no row through memql.ShopperOutcome, and then no
+// extension row follows it either.)
 //
 // It is also the stance the pack itself already takes one level up: when
 // entitlement provisioning fails, "the application STAYS APPROVED -- an
@@ -403,6 +433,11 @@ func (h *ShopperHandler) runExtension(ctx context.Context, ext *memql.ShopperExt
 	extArgs["storeId"] = stamp.storeID
 	extArgs["siteId"] = site.ID
 	extArgs[memql.ShopperSubmissionIDArg] = submissionID
+	// THE ORGANIZATION ONLY WHEN THE MUTATION ASKS FOR IT. One that declares
+	// no accountId argument is handed none and still writes.
+	if ext.AcceptsAccount {
+		extArgs[memql.ShopperAccountIDArg] = site.AccountID
+	}
 
 	call, err := dslCall(ext.Construct, extArgs)
 	if err != nil {
@@ -507,6 +542,32 @@ func (h *ShopperHandler) serveRead(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"data": rows})
 }
 
+// shopperUserAgentMaxBytes bounds the User-Agent an Evidence form is handed.
+const shopperUserAgentMaxBytes = 512
+
+// evidenceAddress is the edge's address header as an IP address in its
+// canonical spelling, or "" when it is not one: the edge sets only an address,
+// and anything else is recorded as nothing rather than as text.
+func evidenceAddress(raw string) string {
+	addr, err := netip.ParseAddr(strings.TrimSpace(raw))
+	if err != nil || addr.Zone() != "" {
+		return ""
+	}
+	return addr.Unmap().String()
+}
+
+// cutUTF8 is s cut to at most max bytes, at the start of the character the
+// bound falls in, so the cut never leaves half of one.
+func cutUTF8(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	for max > 0 && !utf8.RuneStart(s[max]) {
+		max--
+	}
+	return s[:max]
+}
+
 // shopperArgs validates the declared fields against a value source and
 // builds the construct's arguments.
 //
@@ -530,6 +591,9 @@ func shopperArgs(fields []memql.ShopperField, get func(string) string) (map[stri
 			return nil, f.Name
 		}
 		if len(f.Enum) > 0 && !containsString(f.Enum, raw) {
+			return nil, f.Name
+		}
+		if !f.MatchesFormat(raw) {
 			return nil, f.Name
 		}
 		if f.Numeric {

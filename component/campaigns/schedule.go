@@ -235,6 +235,10 @@ func (w *Worker) fireTimePreflight(ownerCtx context.Context, campaign Campaign, 
 	if !found {
 		return fmt.Sprintf("template %q is no longer readable", campaign.TemplateID), true
 	}
+	// The template as it is now, as well as the copy queued: a template made
+	// transactional after the schedule is refused at its time, and that is an
+	// authoring problem (X10).
+	transactional := tmpl.Transactional()
 	if len(snapshots) > 0 && snapshots[0] != nil {
 		tmpl = *snapshots[0]
 		if tmpl.ID != campaign.TemplateID || tmpl.Subject == "" || tmpl.TextBody == "" {
@@ -243,6 +247,9 @@ func (w *Worker) fireTimePreflight(ownerCtx context.Context, campaign Campaign, 
 	}
 	if err := w.validateCampaignOrganization(ownerCtx, campaign, tmpl); err != nil {
 		return err.Error(), true
+	}
+	if transactional || tmpl.Transactional() {
+		return errTransactionalTemplate.Error(), true
 	}
 	if tmpl.Status != "ready" {
 		return fmt.Sprintf("template %q is %q rather than \"ready\"; it was un-readied after the campaign was scheduled", tmpl.ID, tmpl.Status), true

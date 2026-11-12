@@ -1,9 +1,12 @@
 package campaigns
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/znasllc-io/memql/component/compose/emaildoc"
 )
 
 // test_send_test.go -- the one-address preview (memql#4822, design D11).
@@ -382,4 +385,113 @@ func TestTestSendStillSendsAPlainTextEmail(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The author's own test send of a transactional template is the message the
+// row lane sends, with "[Test] " before its subject: no appended footer, no
+// List-Unsubscribe pair, and no question of whether unsubscribe is configured,
+// since the message carries none. It still goes to the one address the author
+// names. A transactional template that still carries the unsubscribe or
+// preferences tag is held on the lane, and the test send says so in the lane's
+// words and sends nothing. A marketing template's test send is unchanged.
+func TestATestSendOfATransactionalTemplateCarriesNoUnsubscribe(t *testing.T) {
+	send := func(t *testing.T, change func(*fakeEngine, *Worker)) (*recordingSender, map[string]any, error) {
+		t.Helper()
+		engine := testSendFixture()
+		engine.template["name"] = "Application received"
+		w, sender := testSendWorker(t, engine)
+		change(engine, w)
+		nodes, err := w.handleTestSend(importCtx(), map[string]any{"campaignId": testCampaign, "to": "author@example.test"}, 0)
+		if err != nil {
+			return sender, nil, err
+		}
+		return sender, decodeResult(t, nodes), nil
+	}
+
+	t.Run("transactional", func(t *testing.T) {
+		sender, got, err := send(t, func(e *fakeEngine, w *Worker) {
+			e.template["purpose"] = "transactional"
+			// The lane does not ask: a message with no unsubscribe needs none configured.
+			w.cfg.UnsubscribeSecret = ""
+		})
+		if err != nil {
+			t.Fatalf("testSend: %v", err)
+		}
+		if sender.count() != 1 {
+			t.Fatalf("expected one message, got %d", sender.count())
+		}
+		msg := sender.sent[0]
+		if msg.To != "author@example.test" {
+			t.Errorf("To = %q, want the address the author named", msg.To)
+		}
+		if msg.Subject != "[Test] Hello Test Recipient" {
+			t.Errorf("Subject = %q", msg.Subject)
+		}
+		if want := "Hi Test Recipient at Acme. Your plan is {{fields.plan}}."; msg.TextBody != want {
+			t.Errorf("TextBody = %q, want %q: nothing appended, and the merge fields as every test send fills them", msg.TextBody, want)
+		}
+		if want := "<p>Hi Test Recipient at Acme.</p>"; msg.HTMLBody != want {
+			t.Errorf("HTMLBody = %q, want %q", msg.HTMLBody, want)
+		}
+		for _, header := range []string{headerListUnsubscribe, headerListUnsubscribePost} {
+			if value, set := msg.Headers[header]; set {
+				t.Errorf("%s = %q on a message with no unsubscribe", header, value)
+			}
+		}
+		if tags := textsOf(got["unresolvedTags"]); !slices.Equal(tags, []string{"{{fields.plan}}"}) {
+			t.Errorf("unresolvedTags = %q", tags)
+		}
+	})
+
+	t.Run("transactional with an engine link", func(t *testing.T) {
+		for tag, sentence := range map[string]string{
+			"{{unsubscribeUrl}}":   emaildoc.UnsubscribePresentMessage,
+			"{{ preferencesUrl }}": emaildoc.UnsubscribePresentMessage,
+			"{{viewUrl}}":          "A message about one person's own request has no web copy. Remove the view-in-browser link.",
+			"{{ confirmUrl }}":     "A message about one person's own request has nothing to confirm. Remove the confirmation link.",
+		} {
+			sender, _, err := send(t, func(e *fakeEngine, _ *Worker) {
+				e.template["purpose"] = "transactional"
+				e.template["textBody"] = "Hi. Open: " + tag
+			})
+			want := "“Application received” cannot be sent. " + sentence
+			if err == nil || err.Error() != want {
+				t.Errorf("%s: err = %v, want the lane's sentence %q", tag, err, want)
+			}
+			if sender.count() != 0 {
+				t.Errorf("%s: a message the lane would hold was sent", tag)
+			}
+		}
+	})
+
+	t.Run("marketing", func(t *testing.T) {
+		for _, purpose := range []string{"", "marketing"} {
+			sender, _, err := send(t, func(e *fakeEngine, _ *Worker) {
+				if purpose != "" {
+					e.template["purpose"] = purpose
+				}
+			})
+			if err != nil {
+				t.Fatalf("%q: testSend: %v", purpose, err)
+			}
+			if sender.count() != 1 {
+				t.Fatalf("%q: expected one message, got %d", purpose, sender.count())
+			}
+			msg := sender.sent[0]
+			if !strings.Contains(msg.TextBody, "Unsubscribe: https://example.test"+UnsubscribePath+"?token="+inertUnsubscribeToken) ||
+				msg.Headers[headerListUnsubscribe] != "<https://example.test"+UnsubscribePath+"?token="+inertUnsubscribeToken+">" ||
+				msg.Headers[headerListUnsubscribePost] == "" {
+				t.Errorf("%q: the marketing test send lost its footer or header: %q %v", purpose, msg.TextBody, msg.Headers)
+			}
+			// Unsubscribe not configured still refuses a marketing test send.
+			if _, _, err := send(t, func(e *fakeEngine, w *Worker) {
+				if purpose != "" {
+					e.template["purpose"] = purpose
+				}
+				w.cfg.UnsubscribeSecret = ""
+			}); err == nil || !strings.Contains(err.Error(), "MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET") {
+				t.Errorf("%q: a marketing test send without unsubscribe configured: err = %v", purpose, err)
+			}
+		}
+	})
 }

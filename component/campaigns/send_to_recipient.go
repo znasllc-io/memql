@@ -55,6 +55,20 @@ import (
 
 var errCampaignRateLimited = errors.New("campaigns.sendToRecipient: the send-rate limit is exhausted; try again shortly")
 
+// errNoEmailSender is a single send on a node with no email sender registered.
+// One value, so a caller that answers a refusal by what it is (the row lane's
+// code for it, send_row.go) reads it without reading its text.
+var errNoEmailSender = errors.New("campaigns.sendToRecipient: no email sender is registered on this node")
+
+// templateUnreadable is a single send whose template its caller cannot read:
+// it does not exist, or it is not theirs. A type, for the same reason; its text
+// is what the send has always said.
+type templateUnreadable struct{ id string }
+
+func (e templateUnreadable) Error() string {
+	return fmt.Sprintf("campaigns.sendToRecipient: template %q is not readable", e.id)
+}
+
 // undecidedSend is an error that says nothing about the message. Something the
 // send needed -- a read, the record that an attempt began -- failed, or was cut
 // short, before the attempt began: the database was slow, a statement timed out, a
@@ -95,6 +109,18 @@ type sendHeld struct{ reason string }
 
 func (h sendHeld) Error() string { return h.reason }
 
+// HeldReason reports whether err is a held send (sendHeld) and answers its
+// sentence. A pack that records what the row lane answered reads a hold
+// through here -- the type is this package's own -- so it can tell the store's
+// people "publish the template" apart from a send that failed.
+func HeldReason(err error) (string, bool) {
+	var held sendHeld
+	if errors.As(err, &held) {
+		return held.reason, true
+	}
+	return "", false
+}
+
 // templateHeld is the hold of a send whose template is not published. It names the
 // template, by its name or else its subject, or calls it "this template".
 func templateHeld(t Template) error {
@@ -129,6 +155,17 @@ type uncertainSend struct {
 
 func (e uncertainSend) Unwrap() error { return e.error }
 
+// UncertainSend reports whether err is an uncertain hand-over (uncertainSend):
+// the provider may have accepted the message, and nothing submits it again
+// until the provider's record says it did not. A pack that records what the row
+// lane answered reads one through here -- the type is this package's own -- so
+// it can tell the store's people "not known yet" apart from a send that failed.
+// The error's text is the transport's and is not for them.
+func UncertainSend(err error) bool {
+	var u uncertainSend
+	return errors.As(err, &u)
+}
+
 // uncertain is err, a send whose receipt keeps saying an attempt began, as an
 // uncertainSend that says whether its transport keeps a record to ask.
 func (w *Worker) uncertain(ctx context.Context, receipt *singleSendReceipt, err error) error {
@@ -151,11 +188,13 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	if ownerUserID == "" {
 		return nil, errors.New("campaigns.sendToRecipient: no caller identity; a send is always made by somebody")
 	}
-	if reason := w.cfg.RequireUnsubscribe(); reason != "" {
+	// A row lane send carries no unsubscribe, so whether one is configured is not
+	// its question (send_row.go).
+	if reason := w.cfg.RequireUnsubscribe(); reason != "" && opts.rowSend == nil {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: %s", reason)
 	}
 	if w.resolveSender() == nil {
-		return nil, errors.New("campaigns.sendToRecipient: no email sender is registered on this node")
+		return nil, errNoEmailSender
 	}
 
 	// Resolve both resources under the caller's identity. After checking that
@@ -166,13 +205,33 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		return nil, undecided(fmt.Errorf("campaigns.sendToRecipient: %w", err))
 	}
 	if !found {
-		return nil, fmt.Errorf("campaigns.sendToRecipient: template %q is not readable", templateID)
+		return nil, templateUnreadable{id: templateID}
 	}
+	// Every send to a list's member comes through here (a journey's step, an
+	// event rule's marketing lane, a signup's welcome, an order message and the
+	// replay of each), so a template about one person's own request is held
+	// here, as it is now and as it was captured (X10). Held: the automation
+	// keeps the step until the template is changed, and nothing is attempted.
+	transactional := tmpl.Transactional()
 	if opts.snapshot != nil {
 		if bare(opts.snapshot.ID) != bare(tmpl.ID) || !sameOrganization(opts.snapshot.AccountID, tmpl.AccountID) || opts.snapshot.Status != "ready" {
 			return nil, errors.New("campaigns.sendToRecipient: reviewed welcome snapshot does not match its template")
 		}
 		tmpl = *opts.snapshot
+	}
+	// THE ROW LANE IS THE ONE WAY PAST THE HOLD BELOW, and the reverse holds too:
+	// a row send carries only a published transactional template. opts.rowSend is
+	// set only by Go inside this package (handleSendRowMessage, and the replay of a
+	// deferred row send from the ledger fields the server wrote); no wire argument
+	// reaches it.
+	if opts.rowSend != nil {
+		if !transactional || opts.snapshot != nil || tmpl.Status != "ready" {
+			return nil, rowTemplateHeld(tmpl)
+		}
+		return w.sendRow(ctx, args, receipt, opts, tmpl, ownerUserID)
+	}
+	if transactional || tmpl.Transactional() {
+		return nil, sendHeld{reason: errTransactionalTemplate.Error()}
 	}
 	if tmpl.Status != "ready" {
 		return nil, templateHeld(tmpl)
@@ -282,7 +341,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 			}
 		}
 		return detachedWrite(ctx, func(write context.Context) error {
-			return w.recordLoneDelivery(write, args, campaign, recipient, emailRuleID, outcome)
+			return w.recordLoneDelivery(write, args, campaign, recipient, emailRuleID, opts.ledgerRow(outcome))
 		})
 	}
 	if sup, suppressed, err := w.store.SuppressionForSend(w.systemActorContext(ctx), campaign.AccountID, digest); err != nil {
@@ -340,6 +399,13 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	}
 
 	if !w.allowSend() {
+		// AN ORDER MESSAGE IS NOT QUEUED. Its fields and its sender are the
+		// caller's arguments and are kept nowhere a replay could read them, so the
+		// caller is told it was limited -- an answer, not a failure -- and sends it
+		// again. Nothing is recorded: the receipt says no attempt began.
+		if opts.orderRecipient != nil {
+			return resultNode("campaignRecipientSend", map[string]any{"sent": false, "skipped": false, "limited": true, "reason": orderLimitedReason, "recipientId": recipient.ID, "emailRuleId": emailRuleID})
+		}
 		if opts.deferWhenLimited && receipt != nil {
 			if err := recordOutcome(Delivery{Status: "pending", NextAttemptAt: w.nowUTC().Add(time.Minute)}); err != nil {
 				return nil, undecided(err)
@@ -348,6 +414,16 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		}
 		return nil, errCampaignRateLimited
 	}
+	return w.handOver(ctx, args, receipt, opts, campaign, recipient, emailRuleID, identity, msg, recordOutcome)
+}
+
+// orderLimitedReason is what an order message that met the send-rate limit says.
+const orderLimitedReason = "The send-rate limit is reached; this email was not queued. Send it again later."
+
+// handOver is the last part of every single send: the attempt is recorded, the
+// message handed to the transport, and the outcome ledgered. Everything that can
+// refuse the message has already run.
+func (w *Worker) handOver(ctx context.Context, args map[string]any, receipt *singleSendReceipt, opts singleSend, campaign Campaign, recipient Recipient, emailRuleID string, identity resolvedIdentity, msg email.Message, recordOutcome func(Delivery) error) ([]memorynodes.MemoryNode, error) {
 	// Record the attempt before contacting the transport. After this point a
 	// timeout or a node loss is uncertain, and replay must never send it again.
 	//

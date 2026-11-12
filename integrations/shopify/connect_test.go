@@ -608,12 +608,15 @@ func TestTheConnectScopeListIsPinned(t *testing.T) {
 	all := ConnectScopes()
 	admin := append([]string(nil), generated.Scopes...)
 	for idx, scope := range admin {
-		if scope == "read_products" {
+		switch scope {
+		case "read_products":
 			admin[idx] = "write_products"
+		case "read_customers":
+			admin[idx] = "write_customers"
 		}
 	}
 	if !reflect.DeepEqual(all[:len(want)], want) || !reflect.DeepEqual(all[len(want):], admin) {
-		t.Fatalf("ConnectScopes = %v, want the Storefront scopes then mirror scopes with product write access", all)
+		t.Fatalf("ConnectScopes = %v, want the Storefront scopes then mirror scopes with product and customer write access", all)
 	}
 	// A copy: a caller appending to it must not change the list.
 	all[0] = "mutated"

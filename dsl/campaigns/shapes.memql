@@ -61,6 +61,7 @@ shape template templateSummary {
   preheader
   sourceArtifactId
   composition
+  purpose
   row.createdAt
 }
 
@@ -90,6 +91,7 @@ shape template templateFull {
   preheader
   sourceArtifactId
   composition
+  purpose
   row.createdAt
 }
 
@@ -169,6 +171,9 @@ shape delivery deliveryFull {
   requestId
   templateId
   senderIdentityId
+  rowConcept
+  rowId
+  rowKind
   row.createdAt
 }
 
@@ -438,8 +443,25 @@ shape delivery deferredSendRef {
  templateId
  senderIdentityId
  requestId
+ rowConcept
+ rowId
+ rowKind
  attempts
  nextAttemptAt
+ row.createdAt
+}
+
+/// Internal projection for the row lane's status read. Owner and organization
+/// identify its durable receipt; the status API returns neither field.
+@row
+shape delivery rowMessageStatusRef {
+ ownerUserId
+ accountId
+ requestId
+ status
+ skipReason
+ providerStatus
+ sentAt
  row.createdAt
 }
 

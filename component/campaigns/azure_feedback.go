@@ -83,6 +83,13 @@ func (w *Worker) ApplyAzureDelivery(ctx context.Context, report email.AzureDeliv
 			}
 			if prior == nil {
 				values := map[string]any{"eventId": eventID, "emailDigest": digest, "accountId": report.AccountID, "recipientId": str(delivery, "recipientId"), "campaignId": str(delivery, "campaignId"), "occurredAt": report.OccurredAt.UTC().Format(time.RFC3339Nano)}
+				if str(delivery, "rowConcept") != "" {
+					// A row lane or order message went to a person with no recipient
+					// row: its recipient id was minted for that one send and names no
+					// audience membership, which is all this field is for. The digest
+					// is the subscriber identity; the audit names no membership.
+					values["recipientId"] = ""
+				}
 				if err := write(func(commit context.Context) error {
 					// This ONE mandatory historical audit retains the receiver's
 					// operator authority, with attribution borrowed from its fresh,

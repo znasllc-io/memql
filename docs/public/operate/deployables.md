@@ -794,6 +794,32 @@ email is in [the Shopify connector](shopify-connector.md#operating-it).
 
 ---
 
+### The Wholesale section
+
+A storefront's Wholesale section operates the program of its bound store.
+It has four tabs: **Applications** for review and the applicant's email
+attempts, **Buyers** for approved buyers and their access, **Documents** for
+published Terms, MAP policy and Price sheet versions, and **Settings** for
+the program, emails and record export.
+
+The store must first be set up by a cluster operator and tied to the site's
+organization. Give the store's group `execute app:deployables/wholesale` in
+**Users > Groups**. The engine admits each read or act for that organization;
+opening a section is not permission to decide another store's applications.
+Operators can inspect and configure the program and retry recorded access,
+but the store's people approve, reject, add and remove buyers.
+
+**Add buyer** and **Publish a new version** use wizards. Adding records an
+application and follows the same terms and approval rules as a shopper's
+application. Publishing keeps earlier document versions intact. When a write's
+answer is lost, the wizard checks whether it was recorded before offering
+another write; an unreadable check offers **Check again** and preserves the
+entered answers. An email's **Resend** appears with its attempt and explains
+when a second copy may arrive. Export results appear in Settings > Records.
+
+See [Consuming the wholesale pack](../build/consuming-the-wholesale-pack.md)
+for setup, stages, private links, access failures and client event wiring.
+
 ## TLS
 
 A freshly deployed site is live over TLS with no operator step, provided the

@@ -18,23 +18,25 @@
 
 @executor("integration.wholesale.submitApplication")
 @args(profile="object")
-@description("THE SHOPPER WRITE PATH: a business applies for trade terms on one store. Refused when that store's applicationsOpen is false, and ABSENT SETTINGS ARE CLOSED -- a merchant who has never touched their wholesale settings has not asked the internet for their customers' business details. It derives the row id, because the caller is a member of the public posting a plain HTML form and a shopper who could choose a row id could overwrite another applicant's. storeId and siteId arrive STAMPED from the binding the post arrived through, never submitted.")
+@description("THE SHOPPER WRITE PATH: a business applies for trade terms on one store. Refused when that store's applicationsOpen is false, and ABSENT SETTINGS ARE CLOSED -- a merchant who has never touched their wholesale settings has not asked the internet for their customers' business details. Refused the same way when the store requires its terms (termsRequired) and the terms, the MAP policy or the price sheet has no published version; and when the post did not arrive through a site the store admits -- the store is not set up (no settings row, or one tied to no organization), or the site is of another organization or of none -- or does not carry that site's organization (accountId), or the caller is not that site's owner, whose authority the shopper path borrows. An absent accountId is not a pass. Nothing is written. ONE OPEN APPLICATION PER ADDRESS ON A STORE: a post from an address -- compared trimmed and lower-cased, the rule wholesaleAddBuyer refuses a duplicate by -- that has a submitted or approved application on the store writes nothing, no extension row either, and is answered exactly as an accepted post, so nobody posting the form learns who the store's buyers are; the store's people see one log line naming the store and the open application, never the address. A rejected or revoked application blocks nothing. It derives the row id, because the caller is a member of the public posting a plain HTML form and a shopper who could choose a row id could overwrite another applicant's. storeId and siteId arrive STAMPED from the binding the post arrived through, never submitted.")
 builtin wholesaleSubmitApplication {
   storeId         string!  @description("Stamped server-side from the binding in effect -- the serving binding, or the PREVIEW binding when the submission was made while exercising a candidate version.")
   companyName     string!  @description("The business applying.")
   applicantName   string!  @description("The person applying. Data, never an identity.")
   applicantEmail  string!  @description("Unverified. How a decision reaches them, and how an adapter finds the Shopify customer to entitle.")
-  siteId          string  @description("The deployable the post arrived on. Provenance; the row is scoped by storeId.")
+  siteId          string  @description("Stamped server-side: the deployable the post arrived on, and the site the store admits the application by -- it must serve the store and be of the organization the store's program is tied to. A call naming none is refused as a closed store.")
+  accountId       string  @description("Stamped server-side from the organization of the site the post arrived on, and refused unless it is that site's -- absent included: a site of no organization is not admitted.")
 }
 
 @executor("integration.wholesale.recordDecision")
 @args(profile="object")
-@description("Append one decision to an application's log. principalKind must be client; a Provider operator is refused on the write path exactly as reviewspack refuses one. storeId is read off the application being decided rather than supplied, so a decision can never be scoped to a store its subject is not on -- and the read runs under the CALLER'S own actor, so a caller who cannot read an application cannot decide it. The transition is checked against the FOLDED LOG rather than against an argument: approve and reject are legal from submitted, revoke only from approved, and nothing leads out of rejected or revoked because re-deciding in place would overwrite why the first decision was made.")
+@description("Append one decision to an application's log. A PERSON ON THE STORE'S SIDE DECIDES: the caller holds the wholesale part in the application's organization (the organization gate judges it), is signed in, and is not one of the cluster's operators, who read every store's applications and decide none. The decider recorded is always the caller; principalKind and decidedBy are accepted for old callers and ignored. storeId, the merchant and the organization are read off the application being decided rather than supplied, so a decision can never be scoped to a store its subject is not on -- and the read runs under the CALLER'S own actor, so a caller who cannot read an application cannot decide it. The transition is checked against the FOLDED LOG rather than against an argument: approve and reject are legal from submitted, revoke only from approved, and nothing leads out of rejected or revoked because re-deciding in place would overwrite why the first decision was made. While the store requires its terms (termsRequired), an approve of an application that has not accepted them is refused: \"This application has not accepted the terms yet.\" An approve is refused while ANOTHER application of the same address (the same rule) on the store is approved, naming it: \"Application <id> of this address is already approved on this store. Remove that buyer before approving this application, or reject this one.\" A reject or a revoke is never refused by it.")
+@requiresCapability("execute", "app:deployables/wholesale")
 builtin wholesaleRecordDecision {
-  applicationId  string!  @description("The application being decided.")
+  applicationId  string!  @description("The application being decided. The organization gate judges the call against its organization.")
   transition     string!  @description("approve, reject or revoke.")
-  principalKind  string!  @description("Must be client. provider is inexpressible.")
-  decidedBy      string!  @description("Client principal user id.")
+  principalKind  string  @description("Ignored. The decider is the caller, and the cluster's operators are refused.")
+  decidedBy      string  @description("Ignored. The decider recorded is always the caller, because a decider named by an argument on an append-only log would attribute somebody else's decision to them for ever.")
   note           string  @description("The reason. Append-only storage is only worth having if this survives the next decision.")
 }
 
@@ -45,11 +47,50 @@ builtin wholesaleApplicationState {
   applicationId  string!  @description("The application to fold.")
 }
 
+@executor("integration.wholesale.retryAccess")
+@args(profile="object")
+@description("Try a buyer's access again after it did not land: an APPROVED application is provisioned again through the store's route, and a REVOKED one whose access is still on (its entitlement row is not revoked) is revoked again through the route that granted it. Anything else is refused by name. The caller holds the wholesale part in the application's organization (the organization gate judges it) and reads the application under their own actor; the attempt then runs as provisioning does -- read as the deployment, the route called and the entitlement written as the application's merchant -- and a failed attempt is recorded on the row rather than returned, so a granted row is never lost to a retry that could not reach a route.")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesaleRetryAccess {
+  applicationId  string!  @description("The application whose access to try again. The organization gate judges the call against its organization.")
+}
+
+@executor("integration.wholesale.storeSettings")
+@args(profile="object")
+@description("One store's wholesale settings as the Deployables app shows them: whether the store is set up, whether applications are open, the route (entitlementAdapter, empty for none), the intro text and the staff address, whether applicants must accept the terms (termsRequired), how many days a link stays usable (linkLifetimeDays), the sentence an applicant accepts with (acceptanceText) -- each its effective value -- the current version of each document (documents: terms, map and priceSheet, each {label, sha256} or null), whether the cluster's outbound email allowlist admits the staff address (staffEmailAdmitted), the sender (senderIdentityId) and the sender as a person reads it (sender: {ready, fromName, address, reason}, resolved by the row lane as a send resolves it, read AS THE PERSON A SEND OF THE STORE RUNS AS -- the store's merchant, who is THE CURRENT OWNER OF THE SITE THAT SERVES THE STORE (the one site that serves it; where several do, the owner they share, or else the owner of the one the store's settings name), whoever is reading, and never the owner the settings row or an application names -- the chosen identity, or what a send with none chosen goes out as; for the installation's own organization with none chosen, ready is true and reason is \"The installation's default sender.\"; when ready is false, fromName and address are empty and reason says why in a sentence -- the lane's hold sentence, \"No sender is chosen for this organization.\", \"The chosen sender belongs to another organization.\", \"The sender could not be read just now.\", or one of the pack's own sentences, each saying who can put it right: when the store's merchant does not hold what a send requires, \"The owner of the site that serves this store does not have write permission in the store's organization, so its emails cannot be sent. An administrator of the organization, or the cluster's operators, can give them that permission.\" (said on the lane's code for it, never in the lane's words); and when there is nobody to send as, \"More than one site serves this store, under different owners, and the store's wholesale settings name none of them, so there is nobody its emails can be sent as. The cluster's operators leave one site serving the store, or say in its wholesale settings which of them its program belongs to.\" or \"The site that serves this store names no owner, so there is nobody its emails can be sent as. The cluster's operators serve the store from a site that a person owns.\"; the address is the store's own sender's), whether each of the four emails would be sent now for an application in the right state (emailsWouldSend: {terms, approved, rejected, revoked}, each {wouldSend, reason}; reason is the one sentence why not, a whole sentence, empty when it would be sent, computed by the checks every send makes of the store, asked as the same person a send asks as, in order: terms required for the terms email (\"Terms are not required on this store.\"), a template chosen (\"No approved email template is chosen.\"), somebody to send as who holds what a send requires, and a sender the row lane resolves -- \"No sender is chosen for this store's emails; the cluster's operators choose it.\" only when none is chosen, and otherwise the sender line's own sentence; what it says is what a send then does, and a resend of a kind is offered and accepted only while its reason is empty; a chosen template that is no longer published is not known here and is found by the lane's hold at the send), the four email templates (termsTemplateId, approvedTemplateId, rejectedTemplateId, revokedTemplateId), the templates one may choose (templates: [{id, name}], the published transactional templates of the store's organization the caller reads -- so a person the organization has not granted the Email app is offered none), the routes this engine has, and what the caller may do -- may.setUp is true only for a cluster operator on a store that is not set up, may.update for a person holding the wholesale part or a cluster operator on a store that is, may.setSender for a cluster operator, may.publish and may.export for a caller whom wholesalePublishDocument and wholesaleExportStore would not refuse -- each the builtin's own check, called. A STORE THAT IS NOT SET UP -- no settings row, or a row tied to no organization -- is answered exists false with every setting at its default, every document null, the sender not ready (\"The store is not set up, so it has no sender.\"), may.update, may.publish and may.export false, and nothing of the store. The caller holds the part in the site's organization (the organization gate judges it), and the site must serve the store.")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesaleStoreSettings {
+  siteId   string!  @description("The store's site: the organization gate judges the read against its organization, and the store must be bound to it.")
+  storeId  string!  @description("The store whose settings to read.")
+}
+
+@executor("integration.wholesale.updateSettings")
+@args(profile="object")
+@description("Change a store's wholesale settings once the cluster's operators have set it up: a store with no settings row is refused (\"This store's wholesale program is not set up yet. The cluster's operators set it up.\"). The change MERGES into the row: a field not named keeps its value, and the row's owner, organization and site stay its own. An unknown route is refused by name; an empty route and none both mean none. The staff address is one address (at most 320 characters, exactly one @ with something on each side and no whitespace -- the rule an applicant's address meets) or empty; a stored address is not judged again until it is written. linkLifetimeDays is 1 to 365; an empty acceptanceText means the pack's default sentence. With applications open, termsRequired cannot be on unless the terms, the MAP policy and the price sheet each have a published version (\"Publish the terms, the MAP policy and the price sheet first.\"), judged on the row as it would be after the change. A template must be one of the templates wholesaleStoreSettings lists to this caller, or empty; a new sender is refused for anybody but a cluster operator (\"Only the cluster's operators choose the sender.\"). The caller holds the wholesale part in the site's organization, or is a cluster operator holding it (the organization gate judges it), and the site must serve the store.")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesaleUpdateSettings {
+  siteId              string!  @description("The store's site: the organization gate judges the change against its organization, and the store must be bound to it.")
+  storeId             string!  @description("The store whose settings change.")
+  applicationsOpen    bool  @description("Whether the shopper form accepts posts for this store.")
+  entitlementAdapter  string  @description("The route: shopifyB2B or customerTag as this pack ships. Empty or none means none.")
+  introText           string  @description("Client-authored copy the storefront shows above its form.")
+  staffEmail          string  @description("The address the store's people are told at, or empty for none.")
+  termsRequired       bool  @description("Whether an applicant must accept the store's published terms before the application is reviewed.")
+  linkLifetimeDays    int  @description("How many days a link the store sends an applicant stays usable: 1 to 365.")
+  acceptanceText      string  @description("The sentence an applicant accepts the terms with; empty for the pack's default.")
+  senderIdentityId    string  @description("The sender identity of the store's organization the applicant's emails go out from, or empty for the organization's configured sender. The cluster's operators alone choose it: anybody else naming another value is refused.")
+  termsTemplateId     string  @description("The terms email's template: one of the published transactional templates wholesaleStoreSettings lists, or empty for none.")
+  approvedTemplateId  string  @description("The approval email's template: one of the listed templates, or empty for none.")
+  rejectedTemplateId  string  @description("The rejection email's template: one of the listed templates, or empty for none.")
+  revokedTemplateId   string  @description("The removal email's template: one of the listed templates, or empty for none.")
+}
+
 @executor("integration.wholesale.setWholesaleSettings")
 @args(profile="object")
-@description("Write one store's wholesale settings. DATA, NOT SOURCE -- a client opens or closes applications, changes what the storefront says and switches entitlement adapter without a deploy or a .memql edit. One row per store at a derived id, so a merchant can take applications on their live store while they are closed on the development store a candidate is being exercised against. An UNKNOWN adapter name is refused HERE rather than at approval time, so a merchant who typed it wrong learns now.")
+@description("Write one store's wholesale settings -- SETTING A STORE UP. THE CLUSTER'S OPERATORS (or trusted server code) ONLY, never the wholesale part: every other caller, the store's own merchant and its people included, is refused before anything is read; once a store is set up its people change it through wholesaleUpdateSettings. THE SET-UP ALWAYS TIES THE STORE TO AN ORGANIZATION: the row is the named site's (siteId) -- the site must serve the store, and a new row takes its owner, and every write its organization and id -- or, with none named, the one site bound to the store's; when it cannot tell which site the program belongs to (no siteId and not exactly one site bound) it is refused (\"Name the site this store's wholesale program belongs to.\"), and so is a site of no organization. An existing row keeps its owner, and is tied only to a site of that owner (\"That site belongs to another owner than this store's wholesale program.\"); one tied to no organization is tied by this write and keeps every setting it holds -- whether it is open, its route and its intro text -- whatever the call names, and the receipt says the stored values. DATA, NOT SOURCE -- a client opens or closes applications, changes what the storefront says and switches entitlement adapter without a deploy or a .memql edit. One row per store at a derived id, so a merchant can take applications on their live store while they are closed on the development store a candidate is being exercised against. An UNKNOWN adapter name is refused HERE rather than at approval time, so a merchant who typed it wrong learns now. Opening applications on a store whose settings require its terms is refused until the terms, the MAP policy and the price sheet each have a published version.")
 builtin wholesaleSetSettings {
   storeId             string!  @description("The store these settings govern.")
+  siteId              string  @description("The store's site the settings are made for. It must serve the store; the row takes its organization and id, and a new row its owner.")
   applicationsOpen    bool!  @description("Whether the shopper form accepts posts for this store.")
   entitlementAdapter  string  @description("shopifyB2B or customerTag as this pack ships. Empty means none configured, and provisioning then refuses by name rather than silently doing nothing.")
   introText           string  @description("Client-authored copy the storefront shows above its form. The only presentation this pack carries.")
@@ -57,14 +98,221 @@ builtin wholesaleSetSettings {
 
 @executor("integration.wholesale.provisionEntitlement")
 @args(profile="object")
-@description("Grant wholesale prices through this store's chosen adapter. Only an APPROVED application has an entitlement to provision, and the decision log decides that rather than an argument. A FAILED PUSH LEAVES THE APPLICATION APPROVED and writes the entitlement `pending` carrying the error -- an approval is a decision somebody made, and a push that failed is not a reason to undo it. An adapter REFUSAL (a plan ceiling, a buyer with no customer account) writes `failed` instead, because it will fail identically for ever and retrying it is how a queue stops draining.")
+@description("Grant wholesale prices through this store's chosen adapter. CALLED BY THE STORE'S AUTOMATION, on an approve decision: it refuses any call without internal origin before it reads anything, reads as the deployment (the automation's own actor owns nothing), and grants and records the entitlement as the application's merchant. Only an APPROVED application has an entitlement to provision, and the decision log decides that rather than an argument. A buyer with no customer on the store gets one created and tagged by the customer-tag route. A FAILED PUSH (an outage) LEAVES THE APPLICATION APPROVED and writes the entitlement `pending` carrying the error -- an approval is a decision somebody made, and a push that failed is not a reason to undo it -- and Retry access in the OS (wholesaleRetryAccess) tries it again. An adapter REFUSAL (a plan ceiling, a store that refuses to create the buyer's customer, a grant that does not reach customers) writes `failed` with its code (plan_ceiling, customer_refused, scope_missing) instead, because it will fail identically for ever and retrying it is how a queue stops draining.")
 builtin wholesaleProvisionEntitlement {
   applicationId  string!  @description("The approved application to provision against.")
 }
 
 @executor("integration.wholesale.revokeEntitlement")
 @args(profile="object")
-@description("Take an entitlement back, through the adapter that GRANTED it rather than whatever the settings name today -- a merchant who switches adapters must still be able to undo what the old one gave. Requires a revoke decision to have been recorded first, so the pack's state and its history agree.")
+@description("Take an entitlement back. CALLED BY THE STORE'S AUTOMATION: it refuses any call without internal origin before it reads anything, reads as the deployment, and takes the entitlement back and records it as the application's merchant -- through the adapter that GRANTED it rather than whatever the settings name today -- a merchant who switches adapters must still be able to undo what the old one gave. Requires a revoke decision to have been recorded first, so the pack's state and its history agree.")
 builtin wholesaleRevokeEntitlement {
   applicationId  string!  @description("The revoked application whose entitlement to take back.")
+}
+
+@executor("integration.wholesale.backfillAccounts")
+@args(profile="object")
+@description("TIE EVERY ROW WRITTEN BEFORE ORGANIZATIONS REACHED THIS PACK to the organization of its site (U5, X19). THE CLUSTER'S OPERATORS (or trusted server code) ONLY, refused before anything is read: its writes run at internal origin, which the row gate does not owner-check. It reads as the system and writes each row as the application's merchant. An application's organization is its siteId site's; with no siteId, the one site whose serving or preview binding is the application's store. It ties the application, then its decisions (naming their merchant, changing no decision field), its entitlement and the store's settings. A row already tied is counted and never rewritten, so it is safe to run again; each write is fenced on the version it read, so a change that lands meanwhile is kept and tied. One row that cannot be tied is reported and the run goes on. A TIE IS A NEW VERSION OF THE ROW: the engine publishes graph.node.created for it with firstVersion false, so a client automation that must run once per row -- a grant on an approve decision, a review opened on an application -- filters on args.firstVersion == true, and a client package carries that filter before this is run. That filter is right for triggers on application and applicationDecision only, whose rows are written once and never again by the pack: an entitlement and a wholesaleSettings are single rows whose later versions are real changes that must fire, so a trigger on either cannot use it, and sees a backfill's tie as an ordinary later version of the row. Answers {tied, alreadyTied, untied: [{id, reason}]}, where a reason is \"no site serves this store\", \"two sites serve this store\" or \"its site has no organization\", \"its site does not serve this store\" or \"it names no merchant\": the operator fixes the site and runs it again. A store's settings are tied once, at the row every read uses, whichever spelling of the store id its applications hold; any other settings row of the store (held under the other spelling of its id) is listed with its own id and the reason \"a second settings row for this store\", and is neither tied, merged nor deleted: the operator removes the second row.")
+builtin wholesaleBackfillAccounts {
+  storeId  string  @description("Only this store's rows. Empty: every store's.")
+}
+
+@executor("integration.wholesale.list")
+@args(profile="object")
+@description("The Wholesale section's list: one store's applications as the caller reads them, each with its stage, and every stage's count. stage is waitingForTerms, readyToReview (the default), approved, rejected, revoked or all; readyToReview is oldest first, every other stage newest first. search is a case-insensitive part of the company, the applicant or the email. It answers {rows, counts, next, truncated, operator}: operator is whether the caller is one of the cluster's operators, by the rule wholesaleGet answers it by. Each row is {applicationId, companyName, applicantName, applicantEmail, stage, primary, secondary, createdAt}: createdAt is when the application was submitted (its submittedAt, or for a row written before that field the row's write time), which the list is ordered by; primary and secondary are the two facts a client's own fields show first (their concept's display card), empty when there are none. A stage is folded from the application's whole decision log, read as the deployment once the caller has been admitted; the applications themselves are read under the caller, so an application they cannot read is not listed and not counted. A store id is matched in every form it is held in (bare or v1:shopify:store:<id>). At most a thousand applications are read per call, the NEWEST thousand: truncated is true when the store has more, and then its OLDEST applications are neither listed nor counted -- which, the queue being oldest first, are the ones that have waited longest. The caller holds the wholesale part in the site's organization, or is a cluster operator (the organization gate judges it), and the site must serve the store.")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesaleList {
+  siteId   string!  @description("The store's site: the organization gate judges the read against its organization, and the store must be bound to it.")
+  storeId  string!  @description("The store whose applications to list.")
+  stage    string  @description("waitingForTerms, readyToReview (the default), approved, rejected, revoked or all.")
+  search   string  @description("A case-insensitive part of the company, the applicant's name or the email.")
+  limit    int  @description("Rows per page: 50 when omitted, at most 200.")
+  after    string  @description("The cursor the previous page answered as next.")
+}
+
+@executor("integration.wholesale.get")
+@args(profile="object")
+@description("One application as the Wholesale section opens it: the application, its state and stage, the client's own fields (details: shown with its fields for a row the caller reads; none for an application the store's people added, a store with no client fields, or an application with no row of them; unreadable when the caller cannot read the client's row), every decision newest first with the decider's name, the entitlement (null when there is none), the acceptance of the terms (acceptance: {signedName, acceptedAt, termsLabel, termsSha256, mapLabel, mapSha256, clientAddress, userAgent}, or null when there is none), the terms link's dates (termsLink: {expiresAt, expired}, or null when none was sent; expired by the engine's clock now), the emails of the applicant newest first (emails: [{kind, attempt, state, reason, sentAt, requestedBy, delivery, deliveryUnreadable}], every attempt recorded -- one the store's own checks declined when it was due among them, skipped with the check's sentence -- each as the lane now says it stands: where delivery, the lane's own record {status, skipReason, skipSentence, providerStatus, sentAt}, has a status, the state, reason and sentAt are the lane's -- a deferred email the lane later sent reads sent at the lane's time -- except that an uncertain email stays uncertain (\"We could not confirm this email was sent. It may have been delivered.\", always that sentence) until the lane reports it sent or the provider reports on it: AN EMAIL THE PROVIDER REPORTS ON WAS HANDED OVER, so it then reads sent, with the report beside it (delivery.providerStatus), whether the report is of delivery or of non-delivery. STATE IS WHAT THE SEND REACHED: sent means handed to the email service, and whether it arrived is delivery.providerStatus beside it, which a later report of non-delivery fills while the state stays sent. REASON IS ALWAYS A WHOLE SENTENCE WRITTEN FOR A PERSON, never a code and never the text of an error: a skipped email's is the lane's sentence for why (skipSentence; the lane's code stays in delivery.skipReason); a failed email's is the lane's sentence for what it refused or what failed, or the pack's own (\"The email could not be sent. Send it again; if it is still not sent, the cluster's operators can say why.\" when nothing gave one) -- it names no function, quotes no provider's message and carries no address. An attempt recorded and never settled is read through the lane first, at any age: one the lane still holds reads deferred and is not sent again, one it sent reads sent, and one its record says failed reads UNCERTAIN, with the uncertain sentence (the lane writes failed before it decides a hand-over had no answer, and this attempt's own outcome was never written); with nothing of it in the lane's record it reads deferred (\"The email is being handed to the email service.\") and uncertain after fifteen minutes; when the lane's record could not be read it stays deferred. delivery is null when the lane has none to read, and deliveryUnreadable is true when the lane's record could not be read), whether the caller is one of the cluster's operators, and the acts open to the caller (reject, approve, remove, retryAccess, resendTerms, resendApproved, resendRejected, resendRevoked). A RESEND ACT IS OFFERED EXACTLY WHEN wholesaleResendEmail WOULD NOT REFUSE IT: the store would send the kind now (the checks behind wholesaleStoreSettings' emailsWouldSend, asked as the person a send of THIS application runs as: the owner of the site it came through while that site still serves the store, else of the one site that does), no attempt of it is on its way, and the application is in the state for it; entitlement.error is why access is not on, as a sentence written for a person -- the one wholesaleBuyers and the export answer: a cause the route names (no settings, no route, the store's permissions, its plan) reads as the route's own sentence, with no prefix; a refusal of the store's whose cause the route does not name reads \"The store refused this change. Its answer was: \" and the store's words as the route recorded them (without the Shopify connector's own package name, which the pack's two routes' answers begin with); and anything else (an outage, an answer nobody could read) reads \"This change could not be confirmed with the store, so it is not recorded as done. Retry access; if it still does not go through, the cluster's operators can say why.\", never an error's text. While the store requires its terms, a submitted application that has not accepted them is in stage waitingForTerms. The application is read under the caller, so a caller who cannot read it is answered nothing; its decisions and entitlement are then read as the deployment, so the state is judged against the whole log. The caller holds the wholesale part in the application's organization (the organization gate judges it).")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesaleGet {
+  applicationId  string!  @description("The application to open, bare or canonical. The organization gate judges the call against its organization.")
+}
+
+@executor("integration.wholesale.decisionLog")
+@args(profile="object")
+@description("One store's decision log, newest first: {applicationId, companyName, transition, decidedBy, decidedByName, note, createdAt} for each decision on an application the caller reads, read under the caller. createdAt is when the decision was made (its decidedAt, or for a row written before that field the row's write time), which the log is ordered by. search is a case-insensitive part of the company, the applicant, the email, the decider's name or the note. A store id is matched in every form it is held in. One call scans a bounded number of decisions, so a page may carry fewer rows than limit -- or none -- together with a next to go on from; the log ends only when next is empty. The caller holds the wholesale part in the site's organization, or is a cluster operator, and the site must serve the store.")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesaleDecisionLog {
+  siteId   string!  @description("The store's site: the organization gate judges the read against its organization, and the store must be bound to it.")
+  storeId  string!  @description("The store whose decisions to list.")
+  search   string  @description("A case-insensitive part of the company, the applicant, the email, the decider's name or the note.")
+  limit    int  @description("Rows per page: 50 when omitted, at most 200.")
+  after    string  @description("The cursor the previous page answered as next.")
+}
+
+@executor("integration.wholesale.buyers")
+@args(profile="object")
+@description("One store's buyers: every application the caller reads whose state is approved, newest first, as {applicationId, companyName, applicantEmail, accessState, errorCode, error, grantedAt, shopifyCustomerId}, and operator (whether the caller is one of the cluster's operators, by the rule wholesaleGet answers it by). accessState is the entitlement's state, or none when nothing was granted; error is why the buyer's access is not on, as a sentence written for a person -- the one the application's page shows (wholesaleGet's entitlement.error, which says how it reads), never the access record's own error text -- empty when it has none; grantedAt is when trade prices went on for a granted entitlement (its grantedAt, or for a row written before that field the row's write time). The state and the entitlement are read as the deployment once the caller has been admitted. A store id is matched in every form it is held in. At most a thousand applications are read per call, the NEWEST thousand: truncated is true when the store has more, and then the buyers among its oldest applications are left out. The caller holds the wholesale part in the site's organization, or is a cluster operator, and the site must serve the store.")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesaleBuyers {
+  siteId   string!  @description("The store's site: the organization gate judges the read against its organization, and the store must be bound to it.")
+  storeId  string!  @description("The store whose buyers to list.")
+  search   string  @description("A case-insensitive part of the company, the applicant's name or the email.")
+  limit    int  @description("Rows per page: 50 when omitted, at most 200.")
+  after    string  @description("The cursor the previous page answered as next.")
+}
+
+@executor("integration.wholesale.exportStore")
+@args(profile="object")
+@description("One store's wholesale record as one JSON file, {fileName, json}: every application the caller reads, each with the client's own fields, their decisions, entitlements (each one's error is why its access is not on, as the application's page says it: wholesaleGet's entitlement.error) and acceptances of the terms (acceptances) and every email attempt (emailSends, each as the lane's status read says it stands, as wholesaleGet shows it, with the lane's delivery; when the lane's record cannot be read the export is still produced and each such attempt carries deliveryUnreadable true), read as the deployment once the caller has been admitted, the store's settings at their effective values (a setting the store never named is exported as the default it runs on), and every version of the store's documents (documentVersions). Every decision and entitlement names its application by the application's own id. Document bodies are carried newest first, across every kind, until 4 MiB of body text in all: a version past that is exported with every other field, its fingerprint included, no body and bodyOmitted true, documentBodiesOmitted counts them (0 when none), and a body left out is read with wholesaleDocuments and its versionId. It reads EVERYTHING -- every application in every form of the store id, and each one's whole log -- with no cap, so it can be slow for a store with a long history. It never carries a token hash. The file is named wholesale-<store>-<YYYYMMDD>.json. The caller holds the wholesale part in the site's organization, or is a cluster operator, and the site must serve the store.")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesaleExportStore {
+  siteId   string!  @description("The store's site: the organization gate judges the read against its organization, and the store must be bound to it.")
+  storeId  string!  @description("The store whose record to export.")
+}
+
+@executor("integration.wholesale.publishDocument")
+@args(profile="object")
+@description("Publish a new version of one of a store's documents: its terms (terms), its MAP policy (map) or its price sheet (priceSheet). APPEND-ONLY: every call writes a new version and none is ever changed, so what an applicant accepted stays readable; the newest version of a kind is its current one. The label is trimmed and 1 to 120 characters; the body is Markdown text of 1 to 204800 bytes, stored exactly as given, and sha256 is the lowercase hex digest of its UTF-8 bytes. The version is owned by the site's owner (the store's merchant) and tied to the site's organization, published by the caller at the engine's clock, and written as the merchant. Answers {documentVersionId, sha256}. The caller holds the wholesale part in the site's organization, or is a cluster operator holding it (the organization gate judges it), and the site must serve the store.")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesalePublishDocument {
+  siteId   string!  @description("The store's site: the organization gate judges the act against its organization, and the store must be bound to it.")
+  storeId  string!  @description("The store whose document this is.")
+  kind     string!  @description("terms, map or priceSheet.")
+  label    string!  @description("The version's name, 1 to 120 characters once trimmed.")
+  body     string!  @description("The document's Markdown text, 1 to 204800 bytes, stored as given.")
+}
+
+@executor("integration.wholesale.documents")
+@args(profile="object")
+@description("A store's documents: {kinds: [{kind, current, history}]} for terms, map and priceSheet in that order, where current is the newest version {id, label, publishedAt, publishedBy, publishedByName, sha256, body} or null when the kind has none, and history is every version newest first, without its body. With versionId it answers that one version of this store, body included, as {version}; a version of another store is answered as an unknown one. A store id is matched in every form it is held in. The caller holds the wholesale part in the site's organization, or is a cluster operator holding it (the organization gate judges it), and the site must serve the store.")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesaleDocuments {
+  siteId     string!  @description("The store's site: the organization gate judges the read against its organization, and the store must be bound to it.")
+  storeId    string!  @description("The store whose documents to read.")
+  versionId  string  @description("One version to answer, body included.")
+}
+
+@executor("integration.wholesale.addBuyer")
+@args(profile="object")
+@description("A PERSON OF THE STORE ADDS A BUYER BY HAND, and the buyer skips nothing: it writes one submitted application on the buyer's behalf, which then goes through the same steps as an applicant's -- while the store requires its terms it waits for the acceptance before it can be approved, and nothing here approves or grants. It works whether applications are open or closed (closed is the public form). The three fields are trimmed and held to the application form's rules: each required, the company at most 200 bytes, the name 120, the email 320 and one address (exactly one @ with something on each side, no whitespace). Refused when the store is not set up (\"This store's wholesale program is not set up yet. The cluster's operators set it up.\"), and while the store requires its terms and the terms, the MAP policy or the price sheet has no published version (\"Publish the terms, the MAP policy and the price sheet first.\"), and for an address -- compared trimmed and lower-cased, in every form the store id is held in -- that has a submitted or approved application on the store (\"This address already has an application on this store.\"); a rejected or removed one blocks nothing. The application is written once at wholesale-staff-<id>, owned by the site's owner (the store's merchant), tied to the site's organization and the site, with source staff and addedBy the caller; the client's own automation sends the first email on its node.created, as for anyone. Answers {applicationId}. The caller holds the wholesale part in the site's organization (the organization gate judges it) and is not one of the cluster's operators, who add nobody; the site must serve the store.")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesaleAddBuyer {
+  siteId          string!  @description("The store's site: the organization gate judges the act against its organization, and the store must be bound to it.")
+  storeId         string!  @description("The store the buyer is added to.")
+  companyName     string!  @description("The business.")
+  applicantName   string!  @description("The person. Data, never an identity.")
+  applicantEmail  string!  @description("How the terms and the decision reach them. Unverified.")
+}
+
+@executor("integration.wholesale.removeBuyer")
+@args(profile="object")
+@description("A PERSON OF THE STORE REMOVES A BUYER: a revoke decision on an approved application, recorded by the caller with the note, through the same write as wholesaleRecordDecision's. An application that is not approved is refused (\"wholesale: only an approved buyer can be removed\"). The tag comes off through the client's revoke automation, or wholesaleRetryAccess where that automation is not wired. The caller holds the wholesale part in the application's organization (the organization gate judges it), reads the application under their own actor -- one they cannot read is answered as one that does not exist -- and is not one of the cluster's operators, who remove nobody; the state is folded from the whole log as the deployment. Answers the decision receipt wholesaleRecordDecision answers.")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesaleRemoveBuyer {
+  applicationId  string!  @description("The approved buyer's application, bare or canonical.")
+  note           string  @description("The reason, kept on the decision.")
+}
+
+// # The store gate (ruling 55)
+//
+// Every builtin above that names a siteId and a storeId acts on the store only
+// once the store is SET UP -- its settings row exists and is tied to an
+// organization -- and only through a site of that organization. A store that is
+// not set up refuses every one of them with "This store's wholesale program is
+// not set up yet. The cluster's operators set it up." (wholesaleStoreSettings
+// answers not set up instead); the set-up, wholesaleSetSettings, is the one act
+// that works on it.
+
+// # The private links (U8)
+//
+// THE TOKEN IS THE AUTHORITY. These three carry no capability, as the reviews
+// pack's link builtins do: the shopper who holds a link is nobody to MemQL. So
+// each does nothing and reveals nothing until the token has been verified
+// against a link of the store it was called with, and a token of another store
+// is refused exactly as an unknown one is. storeId and siteId are stamped by
+// the shopper handler from the binding the request arrived through.
+
+@executor("integration.wholesale.termsForLink")
+@args(profile="object")
+@description("THE TERMS LINK'S READ: the store's current terms and MAP policy for the applicant whose link this is, {companyName, documents: [{kind, label, body, sha256}] (terms, then map), statement, statementSha256, expiresAt}, where statement is the sentence they accept with and statementSha256 the lowercase hex SHA-256 of its UTF-8 bytes. Never an email, an id or a token hash. Refused by name: link_invalid (no link of this store carries the token, or the token was replaced), link_expired, link_used (the terms were accepted -- an acceptance exists, whatever the link says -- or the application was decided).")
+builtin wholesaleTermsForLink {
+  requestToken  string!  @description("The link's token.")
+  storeId       string!  @description("Stamped by the shopper handler from the binding the request arrived through.")
+  siteId        string   @description("Stamped by the shopper handler.")
+}
+
+@executor("integration.wholesale.acceptTerms")
+@args(profile="object")
+@description("THE ACCEPTANCE FORM'S CONSTRUCT: an applicant accepts the store's terms and MAP policy through their terms link. The link is verified as the read verifies it; an application that has accepted already is link_used; both boxes must arrive as on, the trimmed name must not be empty and each of the three fingerprints must be 64 hex characters, else invalid (through the storefront the form's own rules refuse these first). The current terms and MAP versions are read again, and a fingerprint that is not the current version's -- or a statementSha256 that is not the current acceptance sentence's -- is terms_changed: nothing is written, the link stays usable, and the applicant reads the current texts again. The acceptance records the versions, their fingerprints, the store's acceptance sentence, the name typed, and the address and browser the storefront's edge saw -- empty for a call that did not arrive through the storefront -- and is written once: of two posts at once, one is recorded and the other is link_used. The link is then marked used.")
+builtin wholesaleAcceptTerms {
+  requestToken  string!  @description("The link's token.")
+  acceptTerms   string!  @description("The terms box: on.")
+  acceptMap     string!  @description("The MAP policy box: on.")
+  signedName    string!  @description("The name the applicant types to accept.")
+  termsSha256   string!  @description("The fingerprint of the terms version the page showed, as the terms read answered it.")
+  mapSha256     string!  @description("The fingerprint of the MAP policy version the page showed, as the terms read answered it.")
+  statementSha256  string!  @description("The fingerprint of the acceptance sentence the page showed, as the terms read answered it.")
+  storeId       string!  @description("Stamped by the shopper handler from the binding the post arrived through.")
+  siteId        string   @description("Stamped by the shopper handler.")
+}
+
+@executor("integration.wholesale.priceSheetForLink")
+@args(profile="object")
+@description("THE PRICE-SHEET LINK'S READ: the store's current price sheet for an approved buyer, {companyName, document: {label, body, sha256, publishedAt}}. Never an email, an id or a token hash. Refused by name: link_invalid (no link of this store carries the token, or the token was replaced), link_used (the application is not approved, or its access is not granted).")
+builtin wholesalePriceSheetForLink {
+  requestToken  string!  @description("The link's token.")
+  storeId       string!  @description("Stamped by the shopper handler from the binding the request arrived through.")
+  siteId        string   @description("Stamped by the shopper handler.")
+}
+
+// # The applicant's emails and the staff notices (U9)
+//
+// A CLIENT'S PACKAGE WIRES THESE WITH ITS OWN AUTOMATIONS: the pack ships none.
+// The applicant's four emails go through the engine's transactional row lane
+// (campaignSendRowMessage), which never takes an address: the pack registers,
+// in Go, the resolver that answers the applicant's address and the message's
+// fields, and the lane asks it only when it is about to hand the message to
+// the provider -- so the private link in the terms and approval emails is
+// minted then, and never stored. Each email is sent ONCE: the send builtins
+// answer an attempt already recorded and call nothing, and the lane sends once
+// per request id. What the lane answered is recorded as the email's ROW, and
+// every recorded attempt is answered as a reply that says whether it went out:
+// the application's emails (wholesaleGet) say why not, as the lane now says it
+// stands. An email that was due and that the store's own checks declined is a
+// row too, so nothing that should have been sent goes missing without a word.
+
+@executor("integration.wholesale.sendTermsEmail")
+@args(profile="object")
+@description("Send the applicant the terms email, with their private terms link: the store's automation calls it on a new application. CALLED BY THE STORE'S AUTOMATION: a call without internal origin is refused before anything is read. It is attempt 1, MADE AT MOST ONCE, AND IT READS ITS ATTEMPTS FIRST: when any attempt of the kind is already recorded -- attempt 1 in any state, sent or not, or a later one a person sent -- it is answered (attempt 1's row when there is one), whatever the store and the application are now, and nothing else is read and the lane is not called, so a re-delivered event, the engine running a failed automation again, and anything after a person's resend send nothing. Then, IS THE EMAIL DUE: it is not, and nothing is sent or recorded (the reply says recorded false), while the store requires no terms (\"Terms are not required on this store.\") or the application is not waiting for terms (\"The application is not waiting for terms.\"). A DUE EMAIL THAT THE STORE'S OWN CHECKS DECLINE IS RECORDED: with no terms template chosen (\"No terms email template is chosen.\"), no sender chosen, so the lane resolves none (\"No sender is chosen for this store's emails; the cluster's operators choose it.\"), nobody to send as (no site serves the store, or several do under different owners and nothing names one: a sentence that says so and who can put it right), or the person a send runs as without write permission in the store's organization (\"The owner of the site that serves this store does not have write permission in the store's organization, so its emails cannot be sent. An administrator of the organization, or the cluster's operators, can give them that permission.\"), the attempt is written through the same fenced write as any other -- attempt 1, skipped, with that sentence, the lane not asked -- and answered as that row with sent false; the application's emails list it and a person sends it again once the store is ready (wholesaleResendEmail). Otherwise the attempt is RECORDED first (state sending, fenced on no row at its id -- the record that admits the one hand-over, so two callers at once hand over once), then handed to the row lane as the store's merchant -- THE PERSON WHO OWNS THE STORE'S SITE NOW (the site the application came through while it still serves the store, else the one site that does), resolved at that moment and never the owner the application or the settings row names; the person its sender was read as -- with the store's terms template and sender, then SETTLED with what came back (v1:wholesale:emailSend): sent; skipped with the lane's sentence for the row's withdrawal or for an address the email service no longer sends to (the sentence, never the lane's code); held for configuration the store can fix (an unpublished template, a sender turned off), the lane's sentence kept on the row; uncertain for a hand-over with no answer (\"We could not confirm this email was sent. It may have been delivered.\"); deferred for the send-rate limit; failed for anything else the lane refused or that failed, with a sentence written for a person on the row -- the lane's sentence for its code, or the pack's own -- and never the text of an error. Answers a reply in every case -- {sent, state, reason, attempt, ...}, sent true only when it went out -- never an error for an attempt that was recorded; a held or failed attempt's reason in the reply is the pack's own fixed sentence, which names no template, sender or transport. A person of the store sends it again with wholesaleResendEmail.")
+builtin wholesaleSendTermsEmail {
+  applicationId  string!  @description("The application whose applicant is sent the terms link.")
+}
+
+@executor("integration.wholesale.sendBuyerEmail")
+@args(profile="object")
+@description("Send the applicant the approval, rejection or removal email: the store's automation calls it on a decision, or for approved on a granted entitlement version. CALLED BY THE STORE'S AUTOMATION: a call without internal origin is refused before anything is read. WHEN IT IS DUE: approved needs the application approved (\"The application is not approved.\") AND its access granted (\"Access is not granted yet.\"), so an automation that calls it on the approve decision waits for the grant; an access record written before the pack sent emails (an entitlement version with no attempt, such as one the account backfill re-wrote) is mailed nothing (\"This access record predates the pack's emails and notices, so nothing is sent for it.\"); rejected and revoked need that state (\"The application is not rejected.\", \"The application is not revoked.\"). An email that is not due sends nothing and records nothing. ONE THAT IS DUE AND THAT THE STORE'S OWN CHECKS DECLINE IS RECORDED, as wholesaleSendTermsEmail records it -- attempt 1, skipped, with the check's sentence, the lane not asked: a kind with no template chosen (\"No approved email template is chosen.\"), a store with no sender chosen (\"No sender is chosen for this store's emails; the cluster's operators choose it.\"). Attempt 1, made once and read first, recorded and answered as wholesaleSendTermsEmail records and answers it: a second granted version of the same grant, a version the backfill re-wrote, and two nodes at once send one email. The approval email carries the buyer's private price-sheet link, minted when the lane hands it over.")
+builtin wholesaleSendBuyerEmail {
+  applicationId  string!  @description("The application whose applicant is told.")
+  kind           string!  @description("approved, rejected or revoked.")
+}
+
+@executor("integration.wholesale.resendEmail")
+@args(profile="object")
+@description("A PERSON OF THE STORE SENDS AN EMAIL AGAIN, as a new attempt. IT IS ACCEPTED EXACTLY WHEN THE APPLICATION'S PAGE OFFERS IT (wholesaleGet's acts ask the same one question): the store would send the kind now -- the checks every send makes of the store, the settings' emailsWouldSend; otherwise it is refused with that check's sentence, such as \"No sender is chosen for this store's emails; the cluster's operators choose it.\" --, no attempt of the kind is on its way (waiting to be sent by the email service, or recorded and still held by it), and the application is in the state for it: the terms email while it waits for its terms, whatever came of the attempts before; the approval email while it is approved, its access granted and the automation's attempt 1 is recorded; the rejection or removal email only while the application is still rejected or removed AND the last attempt of it did not reach the applicant, as the lane's status read says it stands -- skipped (one the store's own checks declined among them), held, uncertain or failed, or sent and since reported not delivered by the provider (bounced, suppressed, quarantined, filtered as spam or failed). A rejection or removal that reached the applicant is never sent twice, and neither is one whose record at the email service cannot be read. The attempt is the highest recorded plus one, the person is recorded as having asked (requestedBy), and the lane mints a new link for it, which ends the one before (the old link then opens nothing). A resend to an address the email service no longer sends to is recorded as skipped with the service's sentence. Refused with a sentence for any other kind or state, and for the cluster's operators, who send nothing on a store's behalf; EVERY REFUSAL IS A WHOLE SENTENCE for the person who asked, with no prefix. The caller holds the wholesale part in the application's organization (the organization gate judges it) and reads the application under their own actor. Answers the new attempt as a reply, recorded and handed over as wholesaleSendTermsEmail does, with the row's own reason; when the last attempt was uncertain the reply carries note: \"The last attempt may have been delivered, so the applicant may receive this email twice.\"")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesaleResendEmail {
+  applicationId  string!  @description("The application whose applicant is sent the email again. The organization gate judges the call against its organization.")
+  kind           string!  @description("terms, approved, rejected or revoked.")
+}
+
+@executor("integration.wholesale.notifyStaff")
+@args(profile="object")
+@description("Tell the store's own people about one of their applications, at the store's staff address (staffEmail), through the transactional outbox: the store's automation calls it. CALLED BY THE STORE'S AUTOMATION: a call without internal origin is refused before anything is read. event is readyToReview (the application is ready to review), approved, rejected or revoked (a decision, named by decisionId, which must be that transition on this application), accessNotGranted (the entitlement row's attempt was a grant and is pending or failed) or accessNotRemoved (its attempt was a removal and is not revoked); an event that does not match the application or its entitlement is refused with a sentence, and a row written before entitlements said which way they went is told apart by its state where it can be and refused where it cannot. A store that names no address stages nothing (\"The store names no address.\"), and neither does an access event for an access record written before the pack sent notices, one with no attempt (\"This access record predates the pack's emails and notices, so nothing is sent for it.\"). The default texts say only what holds for every application they cover, carry a decision's note as its own paragraph when it has one, and end with a line naming MemQL OS's address only when the cluster has one. subject and body default to the event's own; in either, {{companyName}}, {{applicantName}}, {{applicantEmail}}, {{state}} (the stage, as the store's people read it: Removed for revoked), {{decidedBy}} (the decider's name), {{note}} and {{adminUrl}} (MemQL OS's address, empty when the cluster names none; there is no address for one application) are filled, and anything else in braces is left as written -- nothing of a client's own fields is reachable. One notice per event: the request id is made from the event, the application and the decision (wholesale-staff-<event>-<application>-<decision>), or for the two access events the entitlement's attempt (wholesale-staff-<event>-<application>-attempt-<n>), never the row's version, so a re-delivered event and a version the backfill re-writes stage nothing new, and a retry that fails again tells them again. Answers {status: staged or skipped, requestId, reason}.")
+builtin wholesaleNotifyStaff {
+  applicationId  string!  @description("The application the notice is about.")
+  event          string!  @description("readyToReview, approved, rejected, revoked, accessNotGranted or accessNotRemoved.")
+  subject        string   @description("The notice's subject, with the placeholders above; empty for the event's own.")
+  body           string   @description("The notice's text, with the placeholders above; empty for the event's own.")
+  decisionId     string   @description("The decision an approved, rejected or revoked notice is about.")
 }

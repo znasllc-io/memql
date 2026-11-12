@@ -2,7 +2,9 @@ package shopify
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -27,16 +29,56 @@ import (
 // Customers
 // ---------------------------------------------------------------------------
 
-// customerByEmail finds a customer, or returns "" when there is none.
+// wholesaleCustomer is a customer the email read found: its id and tags, and
+// how many customers the origin answered for the address (matches).
+type wholesaleCustomer struct {
+	id      string
+	tags    []string
+	matches int
+}
+
+// hasTag reports whether the customer carries tag, compared as Shopify
+// compares tags: case-insensitively.
+func (c wholesaleCustomer) hasTag(tag string) bool {
+	for _, t := range c.tags {
+		if strings.EqualFold(strings.TrimSpace(t), tag) {
+			return true
+		}
+	}
+	return false
+}
+
+// customerEmail is an address as the origin compares it: trimmed and
+// lower-cased.
+func customerEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+// customerByEmail finds a customer, or answers one with no id when there is
+// none.
 //
-// "" IS NOT AN ERROR. Both callers want to know whether the customer
-// exists, and they want opposite things when the answer is no: the B2B path
-// creates one, the tag path refuses. Encoding "not found" as an error would
-// make both of them parse it back out.
-func (c *Connector) customerByEmail(ctx context.Context, store Store, email string) (string, error) {
-	clean := strings.TrimSpace(email)
+// NO CUSTOMER IS NOT AN ERROR. The grant creates one and the revoke has nothing
+// to remove; encoding "not found" as an error would make both parse it back
+// out.
+//
+// TWO CUSTOMERS FOR ONE ADDRESS: the one the origin lists first, with matches
+// saying how many there were, so the reply can say so without failing.
+func (c *Connector) customerByEmail(ctx context.Context, store Store, email string) (wholesaleCustomer, error) {
+	all, err := c.customersByEmail(ctx, store, email)
+	if err != nil || len(all) == 0 {
+		return wholesaleCustomer{}, err
+	}
+	first := all[0]
+	first.matches = len(all)
+	return first, nil
+}
+
+// customersByEmail is every customer holding the address, in the order the
+// origin lists them.
+func (c *Connector) customersByEmail(ctx context.Context, store Store, email string) ([]wholesaleCustomer, error) {
+	clean := customerEmail(email)
 	if clean == "" {
-		return "", fmt.Errorf("shopify: a buyer email is required to find a customer")
+		return nil, fmt.Errorf("shopify: a buyer email is required to find a customer")
 	}
 	resp, err := c.adminCall(ctx, store, customerSearchQuery, "ShopifyCustomerByEmail",
 		// QUOTED AS A LITERAL rather than interpolated into the query
@@ -45,42 +87,123 @@ func (c *Connector) customerByEmail(ctx context.Context, store Store, email stri
 		// otherwise change what is being asked.
 		map[string]any{"query": "email:" + strconv.Quote(clean)})
 	if err != nil {
-		return "", err
+		return nil, customerScopeRefusal(store, err)
 	}
 	var decoded struct {
 		Customers struct {
 			Nodes []struct {
-				ID    string `json:"id"`
-				Email string `json:"email"`
+				ID    string   `json:"id"`
+				Email string   `json:"email"`
+				Tags  []string `json:"tags"`
 			} `json:"nodes"`
+			PageInfo struct {
+				HasNextPage bool `json:"hasNextPage"`
+			} `json:"pageInfo"`
 		} `json:"customers"`
 	}
 	if err := resp.DecodeInto(&decoded); err != nil {
-		return "", err
+		return nil, err
 	}
+	if decoded.Customers.PageInfo.HasNextPage {
+		// MORE THAN ONE PAGE OF CANDIDATES: an error, never a guess. The
+		// entitlement stays pending and is retried, and no customer is tagged
+		// or untagged on a partial answer that might have missed the right one.
+		return nil, fmt.Errorf("shopify: the customer search on %s answered more than %d candidates for the buyer's address; nothing was changed",
+			store.Domain, customerSearchPage)
+	}
+	var found []wholesaleCustomer
 	for _, node := range decoded.Customers.Nodes {
 		// EXACT MATCH REQUIRED. Shopify's email: search is a prefix and
 		// token search, so "email:\"sam@example.com\"" can answer with
 		// sam@example.com.au. Entitling the wrong customer is the one
 		// mistake here nobody would notice until a stranger got trade
 		// prices.
-		if strings.EqualFold(strings.TrimSpace(node.Email), clean) {
-			return node.ID, nil
+		if customerEmail(node.Email) != clean {
+			continue
 		}
+		found = append(found, wholesaleCustomer{id: node.ID, tags: node.Tags})
 	}
-	return "", nil
+	return found, nil
 }
 
+// customerSearchPage is how many candidates the email read asks for. Past it,
+// the read is an error (customersByEmail), never a guess.
+const customerSearchPage = 50
+
 const customerSearchQuery = `query ShopifyCustomerByEmail($query: String!) {
-  customers(first: 10, query: $query) {
-    nodes { id email }
+  customers(first: 50, query: $query) {
+    nodes { id email tags }
+    pageInfo { hasNextPage }
   }
 }`
 
-// createCustomer makes the account the B2B contact will be.
+// customerByID reads the customer a grant recorded, or answers one with no id
+// when it no longer exists.
+func (c *Connector) customerByID(ctx context.Context, store Store, gid string) (wholesaleCustomer, error) {
+	resp, err := c.adminCall(ctx, store, customerByIDQuery, "ShopifyCustomerById", map[string]any{"id": gid})
+	if err != nil {
+		return wholesaleCustomer{}, customerScopeRefusal(store, err)
+	}
+	var decoded struct {
+		Customer *struct {
+			ID   string   `json:"id"`
+			Tags []string `json:"tags"`
+		} `json:"customer"`
+	}
+	if err := resp.DecodeInto(&decoded); err != nil {
+		return wholesaleCustomer{}, err
+	}
+	if decoded.Customer == nil {
+		return wholesaleCustomer{}, nil
+	}
+	return wholesaleCustomer{id: decoded.Customer.ID, tags: decoded.Customer.Tags, matches: 1}, nil
+}
+
+const customerByIDQuery = `query ShopifyCustomerById($id: ID!) {
+  customer(id: $id) { id tags }
+}`
+
+// findOrCreateCustomer is the buyer's customer: the one the store has for the
+// address, or one created for it.
+func (c *Connector) findOrCreateCustomer(ctx context.Context, store Store, email, name string) (gid string, created bool, err error) {
+	customer, created, err := c.findOrCreate(ctx, store, email, name)
+	return customer.id, created, err
+}
+
+// findOrCreate is findOrCreateCustomer with what the read found.
+//
+// A CREATE REFUSED BECAUSE THE ADDRESS IS TAKEN reads again and continues: two
+// grants for one buyer at once, the other one's create landing first.
+func (c *Connector) findOrCreate(ctx context.Context, store Store, email, name string) (wholesaleCustomer, bool, error) {
+	customer, err := c.customerByEmail(ctx, store, email)
+	if err != nil || customer.id != "" {
+		return customer, false, err
+	}
+	id, err := c.createCustomer(ctx, store, name, email)
+	if errors.Is(err, errEmailTaken) {
+		customer, err = c.customerByEmail(ctx, store, email)
+		if err == nil && customer.id == "" {
+			// The store says the address is taken and its read does not find
+			// it yet: an outage of its search, retried, never a refusal.
+			err = fmt.Errorf("shopify: customerCreate on %s says the buyer's address is taken, and the customer read does not find it yet", store.Domain)
+		}
+		return customer, false, err
+	}
+	if err != nil {
+		return wholesaleCustomer{}, false, err
+	}
+	return wholesaleCustomer{id: id, matches: 1}, true, nil
+}
+
+// errEmailTaken is customerCreate refusing an address another customer has.
+var errEmailTaken = errors.New("shopify: customerCreate: the address is taken")
+
+// createCustomer makes the buyer's customer: the address, the name split by
+// splitName, and NO MARKETING CONSENT -- a wholesale grant is not a
+// subscription, and consent is the buyer's to give.
 func (c *Connector) createCustomer(ctx context.Context, store Store, name, email string) (string, error) {
 	first, last := splitName(name)
-	input := map[string]any{"email": strings.TrimSpace(email)}
+	input := map[string]any{"email": customerEmail(email)}
 	if first != "" {
 		input["firstName"] = first
 	}
@@ -90,22 +213,34 @@ func (c *Connector) createCustomer(ctx context.Context, store Store, name, email
 	resp, err := c.adminCall(ctx, store, customerCreateMutation, "ShopifyCustomerCreate",
 		map[string]any{"input": input})
 	if err != nil {
-		return "", err
-	}
-	if ueErr := userErrorsFrom(resp, "customerCreate"); ueErr != nil {
-		return "", ueErr
+		return "", customerScopeRefusal(store, err)
 	}
 	var decoded struct {
 		CustomerCreate struct {
-			Customer struct {
+			Customer *struct {
 				ID string `json:"id"`
 			} `json:"customer"`
+			UserErrors []struct {
+				Field   []string `json:"field"`
+				Message string   `json:"message"`
+			} `json:"userErrors"`
 		} `json:"customerCreate"`
 	}
 	if err := resp.DecodeInto(&decoded); err != nil {
 		return "", err
 	}
-	if decoded.CustomerCreate.Customer.ID == "" {
+	if ues := decoded.CustomerCreate.UserErrors; len(ues) > 0 {
+		messages := make([]string, 0, len(ues))
+		for _, ue := range ues {
+			if slices.Contains(ue.Field, "email") && strings.Contains(strings.ToLower(ue.Message), "taken") {
+				return "", errEmailTaken
+			}
+			messages = append(messages, ue.Message)
+		}
+		return "", &wholesaleRefusal{code: RefusalCustomerRefused, reason: fmt.Sprintf(
+			"shopify: %s refused to create the buyer's customer: %s", store.Domain, strings.Join(messages, "; "))}
+	}
+	if decoded.CustomerCreate.Customer == nil || decoded.CustomerCreate.Customer.ID == "" {
 		return "", fmt.Errorf("shopify: customerCreate returned no customer")
 	}
 	return decoded.CustomerCreate.Customer.ID, nil
@@ -117,6 +252,24 @@ const customerCreateMutation = `mutation ShopifyCustomerCreate($input: CustomerI
     userErrors { field message }
   }
 }`
+
+// customerScopeRefusal turns Shopify's access denied on a customer call into
+// the scope_missing refusal, and answers every other error as it is.
+//
+// The read, the create and the two tag writes all need the customer scopes; a
+// store whose grant does not reach them is refused the same way tomorrow, so
+// it is a refusal the pack records failed, not an outage it retries.
+func customerScopeRefusal(store Store, err error) error {
+	var ae *AdminError
+	if errors.As(err, &ae) && ae.DeniedOnly() {
+		return &wholesaleRefusal{code: RefusalScopeMissing, reason: fmt.Sprintf(
+			"shopify: %s refused access to its customers, so the buyer's customer cannot be found, created or "+
+				"tagged: either the store has not approved the customer permissions (read_customers and "+
+				"write_customers) on its connection, or the app has not been approved for protected customer "+
+				"data; fix whichever it is, then retry access", store.Domain)}
+	}
+	return err
+}
 
 // splitName divides a submitted name into the two fields Shopify wants.
 //

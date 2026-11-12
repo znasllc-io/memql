@@ -157,5 +157,5 @@ func (s *Store) TemplateAtRevision(ctx context.Context, templateID, revision str
 		return Template{}, false, err
 	}
 	r := rows[0]
-	return Template{Revision: templateTime(r["createdAt"]).Format(time.RFC3339Nano), Name: str(r, "name"), AccountID: bare(str(r, "accountId")), ID: bare(str(r, "id")), Subject: str(r, "subject"), TextBody: str(r, "textBody"), HTMLBody: str(r, "htmlBody"), Status: str(r, "status")}, true, nil
+	return Template{Revision: templateTime(r["createdAt"]).Format(time.RFC3339Nano), Name: str(r, "name"), AccountID: bare(str(r, "accountId")), ID: bare(str(r, "id")), Subject: str(r, "subject"), TextBody: str(r, "textBody"), HTMLBody: str(r, "htmlBody"), Status: str(r, "status"), Purpose: str(r, "purpose")}, true, nil
 }

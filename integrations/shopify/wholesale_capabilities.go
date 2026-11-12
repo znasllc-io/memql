@@ -3,6 +3,7 @@ package shopify
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -42,12 +43,14 @@ import (
 //
 // The declarations carry no @requiresCapability, and a builtin without one
 // has no rank floor: every signed-in caller of any role reaches the handler.
-// So each handler asks, before it reads anything but the store row and before
-// it sends anything to Shopify (wholesaleStore): the engine's own call, the
-// store's owner, or a cluster owner. Nobody else is told whether the store
-// exists. A caller who is none of the three gets an error, not a refused
-// reply: the pack records that as a push that has not landed, which is what
-// it is.
+// So the FIRST STATEMENT of each handler is requireWholesaleCaller: the call
+// must carry internal origin and the wholesale pack's mark, which the pack's
+// engineCaller sets on its one call AFTER the pack's own checks have decided
+// who the caller is and what they may do. Everybody else -- the store's owner,
+// a cluster owner and a registered automation's step included -- is refused before the store is read or Shopify is asked, and
+// reaches a grant through the pack (an approval, Retry access), never around
+// it. A refusal here is an error, not a refused reply: nothing was decided
+// about the store.
 
 // wholesaleCapabilities is appended to the connector's DSL-callable
 // surface by Capabilities().
@@ -78,7 +81,10 @@ func (i *Integration) wholesaleCapabilities() []memql.IntegrationCapability {
 			Description: "End a B2B entitlement by setting its catalog to DRAFT. DELETES " +
 				"NOTHING: the company, its location, its contact, the price list and every " +
 				"order placed under them are untouched, because revoking trade terms is " +
-				"ending a discount rather than erasing a customer. " + wholesaleCallers,
+				"ending a discount rather than erasing a customer. A reference that names no " +
+				"catalog is a success that sends nothing, since there is no catalog it can name to " +
+				"draft; a B2B grant that failed partway can still have left an active catalog, which " +
+				"the merchant drafts in the Shopify admin. " + wholesaleCallers,
 			Handler: i.handleRevokeWholesale,
 			ArgsSchema: map[string]string{
 				"storeId":   "string - the store",
@@ -88,23 +94,31 @@ func (i *Integration) wholesaleCapabilities() []memql.IntegrationCapability {
 		{
 			Name: "tagWholesaleCustomer",
 			Description: "The plan-independent grant: add one tag to the buyer's customer " +
-				"record. Writes the tag and nothing else -- what the tag DOES is the " +
-				"merchant's own automatic discount, which this connector deliberately does " +
-				"not create on their behalf. " + wholesaleCallers,
+				"record, creating the customer (the address and the name, no marketing consent) " +
+				"when the store has none for the address. Writes the customer and the tag and " +
+				"nothing else -- what the tag DOES is the merchant's own automatic discount, " +
+				"which this connector deliberately does not create on their behalf. A tag the " +
+				"customer already carries is not sent again. " + wholesaleCallers,
 			Handler: i.handleTagWholesaleCustomer,
 			ArgsSchema: map[string]string{
 				"storeId":    "string - the store",
-				"buyerEmail": "string - the customer to tag",
+				"buyerEmail": "string - the customer to tag; created when the store has none",
+				"buyerName":  "string (optional) - the applicant, for a customer created here",
 				"tag":        "string (optional) - defaults to memql-wholesale",
 			},
 		},
 		{
-			Name:        "untagWholesaleCustomer",
-			Description: "The plan-independent revoke: remove that one tag. " + wholesaleCallers,
-			Handler:     i.handleUntagWholesaleCustomer,
+			Name: "untagWholesaleCustomer",
+			Description: "The plan-independent revoke: remove that one tag from the customer the " +
+				"grant recorded (customerId), read by id, when it carries it. Only when no customer " +
+				"is named is the address used, and then the tag comes off every customer holding the " +
+				"address that carries it. A customer that no longer exists or no longer carries the " +
+				"tag, or an address nobody holds, is a success that sends nothing more. " + wholesaleCallers,
+			Handler: i.handleUntagWholesaleCustomer,
 			ArgsSchema: map[string]string{
 				"storeId":    "string - the store",
-				"buyerEmail": "string - the customer to untag",
+				"customerId": "string (optional) - the customer the grant recorded",
+				"buyerEmail": "string - the address, used only when no customerId is named",
 				"tag":        "string (optional) - defaults to memql-wholesale",
 			},
 		},
@@ -124,38 +138,46 @@ func (i *Integration) wholesaleCapabilities() []memql.IntegrationCapability {
 
 // wholesaleCallers is who may call a wholesale builtin, as each description
 // says it.
-const wholesaleCallers = "For the engine's own call (internal origin), the store's owner or a cluster owner; " +
-	"anybody else is refused before the store is read or Shopify is asked."
+const wholesaleCallers = "Called by the wholesale pack alone: the call must carry internal origin AND the " +
+	"wholesale pack's mark, which only the pack's Go sets, on its one call, after its own checks. Any other call -- " +
+	"a client's, or a registered automation's step, which carries internal origin and no mark -- is refused " +
+	"before the store is read or Shopify is asked."
 
-// wholesaleStore resolves the store a wholesale builtin names, FOR A CALLER
-// WHO MAY REACH IT, and is the first thing each of the five handlers does:
-// nothing but the store row is read before it answers, and nothing is sent to
-// Shopify.
+// wholesalePackCaller is the pack whose mark these builtins admit
+// (auth.ContextWithPackCaller).
+const wholesalePackCaller = "wholesale"
+
+// requireWholesaleCaller is the rule for all five wholesale builtins and the
+// first statement of each handler: internal origin AND the wholesale pack's
+// mark, or the refusal. Nothing is read before it answers -- not the store row
+// -- and nothing is sent to Shopify.
 //
-//   - A call with INTERNAL ORIGIN is the engine's own: a trusted automation's
-//     step, whose actor is a reader. It is admitted first and resolved as it
-//     always was, a missing store named.
-//   - Anybody else must be THE STORE'S OWNER OR A CLUSTER OWNER
-//     (storeForCaller, mayActOnStore), and a caller who is neither is told the
-//     same thing whether or not the store exists.
+// INTERNAL ORIGIN ALONE IS NOT THE PACK (ruling 57). The automation executor
+// stamps it on every step of every registered automation, a client package's
+// deployed domain included, so an automation of any package could otherwise
+// tag any customer of any store the connector holds, around the pack's checks.
+// The mark is a context value only Go sets (a root test allowlists who), so a
+// DSL step cannot carry it; and it is no authority without internal origin.
 //
-// The wholesale pack reaches these under whatever context its own caller has,
-// so a person approving an application who neither owns the store nor the
-// cluster is refused here. ONE FUNCTION, so that narrowing the engine's arm to
-// the pack's own stamped call is a change to this function alone.
-func (c *Connector) wholesaleStore(ctx context.Context, storeID, builtin string) (Store, error) {
-	if auth.OriginFromContext(ctx).IsInternal() {
-		return c.resolveStoreArg(ctx, storeID)
+// ONE FUNCTION, so the rule is in one place, and THE ONLY READER OF THE MARK:
+// the root gate fails if anything else reads it, so nothing these handlers
+// call can treat the mark as authority.
+func requireWholesaleCaller(ctx context.Context, construct string) error {
+	if auth.OriginFromContext(ctx).IsInternal() && auth.PackCallerFromContext(ctx) == wholesalePackCaller {
+		return nil
 	}
-	return c.storeForCaller(ctx, storeID, builtin, actRefusal, func(s Store) bool { return c.mayActOnStore(ctx, s) })
+	return fmt.Errorf("shopify: %s is called by the wholesale pack, never by a client", construct)
 }
 
 func (i *Integration) handleProvisionWholesale(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireWholesaleCaller(ctx, "shopifyProvisionWholesale"); err != nil {
+		return nil, err
+	}
 	c := i.connector
 	if c == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
-	store, err := c.wholesaleStore(ctx, argString(args, "storeId"), "shopifyProvisionWholesale")
+	store, err := c.resolveStoreArg(ctx, argString(args, "storeId"))
 	if err != nil {
 		return nil, err
 	}
@@ -184,11 +206,14 @@ func (i *Integration) handleProvisionWholesale(ctx context.Context, args map[str
 }
 
 func (i *Integration) handleRevokeWholesale(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireWholesaleCaller(ctx, "shopifyRevokeWholesale"); err != nil {
+		return nil, err
+	}
 	c := i.connector
 	if c == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
-	store, err := c.wholesaleStore(ctx, argString(args, "storeId"), "shopifyRevokeWholesale")
+	store, err := c.resolveStoreArg(ctx, argString(args, "storeId"))
 	if err != nil {
 		return nil, err
 	}
@@ -200,30 +225,49 @@ func (i *Integration) handleRevokeWholesale(ctx context.Context, args map[string
 		}
 		return nil, err
 	}
+	detail := "catalog " + refs.CatalogGID + " set to DRAFT; nothing was deleted"
+	if strings.TrimSpace(refs.CatalogGID) == "" {
+		detail = "this entitlement names no catalog on " + store.Domain + ", so nothing was drafted; a grant that " +
+			"failed partway may have left a catalog, which is drafted in the Shopify admin"
+	}
 	return resultNode("shopify", map[string]any{
 		"status":    "ok",
 		"storeId":   store.ID,
 		"reference": reference,
-		"detail":    "catalog " + refs.CatalogGID + " set to DRAFT; nothing was deleted",
+		"detail":    detail,
 	})
 }
 
 func (i *Integration) handleTagWholesaleCustomer(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireWholesaleCaller(ctx, "shopifyTagWholesaleCustomer"); err != nil {
+		return nil, err
+	}
 	c := i.connector
 	if c == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
-	store, err := c.wholesaleStore(ctx, argString(args, "storeId"), "shopifyTagWholesaleCustomer")
+	store, err := c.resolveStoreArg(ctx, argString(args, "storeId"))
 	if err != nil {
 		return nil, err
 	}
 	tag := normaliseTag(argString(args, "tag"))
-	customerGID, err := c.TagWholesaleCustomer(ctx, store, argString(args, "buyerEmail"), tag)
+	res, err := c.tagWholesaleCustomer(ctx, store, argString(args, "buyerEmail"), argString(args, "buyerName"), tag)
 	if err != nil {
 		if node, refused := refusalNode(err); refused {
 			return node, nil
 		}
 		return nil, err
+	}
+	detail := "tagged " + tag + " on " + store.Domain
+	switch {
+	case res.created:
+		detail = "created the buyer's customer and tagged " + tag + " on " + store.Domain
+	case !res.tagged:
+		detail = "the buyer's customer already carries " + tag + " on " + store.Domain
+	}
+	if res.customer.matches > 1 {
+		detail += fmt.Sprintf("; %d customers on the store have this address, and the one Shopify lists first was used",
+			res.customer.matches)
 	}
 	return resultNode("shopify", map[string]any{
 		"status":  "ok",
@@ -232,22 +276,27 @@ func (i *Integration) handleTagWholesaleCustomer(ctx context.Context, args map[s
 		// tag was written as well as to whom: a merchant who changed the
 		// tag in settings after granting would otherwise have this
 		// entitlement revoke the new tag off a customer who never had it.
-		"reference": "customer=" + customerGID + ";tag=" + tag,
-		"detail":    "tagged " + tag + " on " + store.Domain,
+		"reference":       "customer=" + res.customer.id + ";tag=" + tag,
+		"customerId":      res.customer.id,
+		"customerCreated": res.created,
+		"detail":          detail,
 	})
 }
 
 func (i *Integration) handleUntagWholesaleCustomer(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireWholesaleCaller(ctx, "shopifyUntagWholesaleCustomer"); err != nil {
+		return nil, err
+	}
 	c := i.connector
 	if c == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
-	store, err := c.wholesaleStore(ctx, argString(args, "storeId"), "shopifyUntagWholesaleCustomer")
+	store, err := c.resolveStoreArg(ctx, argString(args, "storeId"))
 	if err != nil {
 		return nil, err
 	}
 	tag := normaliseTag(argString(args, "tag"))
-	if err := c.UntagWholesaleCustomer(ctx, store, argString(args, "buyerEmail"), tag); err != nil {
+	if err := c.UntagWholesaleCustomer(ctx, store, argString(args, "customerId"), argString(args, "buyerEmail"), tag); err != nil {
 		if node, refused := refusalNode(err); refused {
 			return node, nil
 		}
@@ -256,16 +305,20 @@ func (i *Integration) handleUntagWholesaleCustomer(ctx context.Context, args map
 	return resultNode("shopify", map[string]any{
 		"status":  "ok",
 		"storeId": store.ID,
-		"detail":  "removed " + tag + " on " + store.Domain,
+		"detail":  tag + " is off the buyer's customer on " + store.Domain,
+		// customerId is not echoed: the pack keeps the reference it sent.
 	})
 }
 
 func (i *Integration) handleWholesaleCatalogHeadroom(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireWholesaleCaller(ctx, "shopifyWholesaleCatalogHeadroom"); err != nil {
+		return nil, err
+	}
 	c := i.connector
 	if c == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
-	store, err := c.wholesaleStore(ctx, argString(args, "storeId"), "shopifyWholesaleCatalogHeadroom")
+	store, err := c.resolveStoreArg(ctx, argString(args, "storeId"))
 	if err != nil {
 		return nil, err
 	}
@@ -291,6 +344,12 @@ type refusedError interface {
 	Refused() bool
 }
 
+// codedRefusal is a refusal that names its cause for the pack's entitlement
+// row: customer_refused, scope_missing or plan_ceiling.
+type codedRefusal interface {
+	RefusalCode() string
+}
+
 // refusalNode turns a permanent refusal into a reply the pack can record.
 //
 // A REFUSAL IS NOT AN ERROR TO THE CALLER. The pack has to tell "this store
@@ -303,10 +362,14 @@ func refusalNode(err error) ([]memorynodes.MemoryNode, bool) {
 	if !asRefused(err, &refused) {
 		return nil, false
 	}
-	node, buildErr := resultNode("shopify", map[string]any{
+	reply := map[string]any{
 		"status": "refused",
 		"reason": refused.Error(),
-	})
+	}
+	if coded, ok := refused.(codedRefusal); ok && coded.RefusalCode() != "" {
+		reply["code"] = coded.RefusalCode()
+	}
+	node, buildErr := resultNode("shopify", reply)
 	if buildErr != nil {
 		return nil, false
 	}

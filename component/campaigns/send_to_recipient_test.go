@@ -702,3 +702,31 @@ func TestASendWithNoRequestKeepsItsRuleKeyedRow(t *testing.T) {
 		t.Errorf("a send that named no sender stamped one: %s", written[0])
 	}
 }
+
+// TestASingleSendRefusesATransactionalTemplate: every send to a list's member
+// goes through this one primitive -- a journey's step, an event rule's marketing
+// lane, a signup's welcome, an order message and the deferred replay of each --
+// so a template about one person's own request is held here, with nothing
+// mailed and nothing ledgered as attempted (X10). It is a hold, not a failure:
+// the automation keeps the step until the template is changed.
+func TestASingleSendRefusesATransactionalTemplate(t *testing.T) {
+	for _, status := range []string{"ready", "draft"} {
+		engine := recipientSendEngine()
+		engine.template["purpose"] = "transactional"
+		engine.template["status"] = status
+		sender := &recordingSender{}
+		w := newTestWorker(t, engine, sender)
+
+		_, err := w.handleSendToRecipient(importCtx(), sendToRecipientArgs(), 0)
+		var held sendHeld
+		if !errors.As(err, &held) || err.Error() != errTransactionalTemplate.Error() {
+			t.Fatalf("%s template: err = %v, want the transactional refusal as a hold", status, err)
+		}
+		if sender.count() != 0 {
+			t.Errorf("%s template: %d messages left", status, sender.count())
+		}
+		if calls := callsWithPrefix(engine, "mutation recordCampaignDelivery"); len(calls) != 0 {
+			t.Errorf("%s template: a delivery was ledgered: %v", status, calls)
+		}
+	}
+}

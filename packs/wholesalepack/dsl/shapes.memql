@@ -18,7 +18,8 @@
 // client needs it, it is an addition here rather than a rewrite, because
 // reach is declared per route.
 
-use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings }
+use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings, documentVersion }
+use wholesale.concepts.{ privateLink, acceptance, emailSend }
 use shopify.overlay.concepts.{ store }
 
 // THE PACK'S ONE CROSS-DOMAIN READ, AND IT IS DELIBERATELY THREE FIELDS.
@@ -59,6 +60,10 @@ shape application applicationFull {
   companyName
   applicantName
   applicantEmail
+  accountId
+  source
+  addedBy
+  submittedAt
   row.createdAt
 }
 
@@ -67,15 +72,18 @@ shape application applicationFull {
 shape applicationDecision applicationDecisionFull {
   row.id
   applicationId
+  ownerUserId
   storeId
   transition
   decidedBy
   principalKind
   note
+  accountId
+  decidedAt
   row.createdAt
 }
 
-@description("An entitlement, whole. row.createdAt is the version clock, so on a revoked row it is WHEN it was revoked -- which is why the concept carries no revokedAt of its own.")
+@description("An entitlement, whole. row.createdAt is the version clock: the time of the newest version, which any write of the row moves. When the attempt was made, when trade prices went on and when they came off are attemptedAt, grantedAt and revokedAt.")
 @row
 shape entitlement entitlementFull {
   row.id
@@ -87,6 +95,15 @@ shape entitlement entitlementFull {
   state
   reference
   error
+  errorCode
+  shopifyCustomerId
+  customerCreated
+  accountId
+  direction
+  attempt
+  attemptedAt
+  grantedAt
+  revokedAt
   row.createdAt
 }
 
@@ -99,5 +116,121 @@ shape wholesaleSettings wholesaleSettingsFull {
   applicationsOpen
   entitlementAdapter
   introText
+  accountId
+  siteId
+  staffEmail
+  termsRequired
+  linkLifetimeDays
+  acceptanceText
+  senderIdentityId
+  termsTemplateId
+  approvedTemplateId
+  rejectedTemplateId
+  revokedTemplateId
+  row.createdAt
+}
+
+@description("A document version, whole: its body and the fingerprint of it. Append-only, so a row is a version and this is all of it.")
+@row
+shape documentVersion documentVersionFull {
+  row.id
+  ownerUserId
+  storeId
+  accountId
+  kind
+  label
+  body
+  sha256
+  publishedBy
+  publishedAt
+  row.createdAt
+}
+
+@description("A document version WITHOUT its body: what tells whether a kind has a version, which is the newest, and what a history lists. The reads that run on every settings read and every shopper submission to a store that requires its terms read through this, and never carry a body of up to 200 KB they do not show.")
+@row
+shape documentVersion wholesaleDocumentVersionBrief {
+  row.id
+  ownerUserId
+  storeId
+  accountId
+  kind
+  label
+  sha256
+  publishedBy
+  publishedAt
+  row.createdAt
+}
+
+@description("A private link, whole, its token hash included. NO READ PROJECTS IT: the token lookup and the application's link read both project privateLinkPublic, so a token hash leaves no read. The whole row, as a reader of the concept would name it.")
+@row
+shape privateLink privateLinkFull {
+  row.id
+  ownerUserId
+  storeId
+  accountId
+  siteId
+  applicationId
+  purpose
+  tokenHash
+  issuedAt
+  expiresAt
+  usedAt
+  row.createdAt
+}
+
+@description("A private link WITHOUT its token hash: what the token lookup answers, so the read that a shopper's token reaches never carries a hash back.")
+@row
+shape privateLink privateLinkPublic {
+  row.id
+  ownerUserId
+  storeId
+  accountId
+  siteId
+  applicationId
+  purpose
+  issuedAt
+  expiresAt
+  usedAt
+  row.createdAt
+}
+
+@description("An acceptance, whole: its evidence and the versions it names. Written once, so a row is an acceptance and this is all of it.")
+@row
+shape acceptance acceptanceFull {
+  row.id
+  ownerUserId
+  storeId
+  accountId
+  applicationId
+  applicantEmail
+  signedName
+  acceptedAt
+  termsVersionId
+  termsSha256
+  mapVersionId
+  mapSha256
+  statement
+  clientAddress
+  userAgent
+  linkIssuedAt
+  row.createdAt
+}
+
+@description("An email's record, whole: which email, which attempt, the lane's request id and what came of it. It carries no address, no field of the message and no token, because the row holds none.")
+@row
+shape emailSend emailSendFull {
+  row.id
+  ownerUserId
+  storeId
+  accountId
+  applicationId
+  kind
+  attempt
+  requestId
+  templateId
+  state
+  reason
+  sentAt
+  requestedBy
   row.createdAt
 }

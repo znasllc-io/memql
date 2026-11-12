@@ -216,6 +216,17 @@ type Template struct {
 	HTMLBody  string `json:"htmlBody"`
 	Status    string `json:"status"`
 	Revision  string `json:"revision"`
+	// Purpose is "transactional" for a template about one person's own
+	// request, which carries no unsubscribe and is never sent to a list;
+	// "marketing", or nothing at all (every template saved before purposes
+	// existed), is marketing (X10).
+	Purpose string `json:"purpose,omitempty"`
+
+	// Preheader is the hidden line an inbox shows after the subject. It is
+	// already written into HTMLBody; it is kept here so a send can judge every
+	// part the person sees (transactionalLinkFaults). Never written into a send job's
+	// copy of the template.
+	Preheader string `json:"-"`
 
 	// ExpectsHTML says the template was written to have an HTML part: it is a
 	// layout email, or custom HTML. Its HTMLBody is then empty only when it was
@@ -463,9 +474,18 @@ func (s *Store) TemplateByID(ctx context.Context, templateID string) (Template, 
 		TextBody:  str(r, "textBody"),
 		HTMLBody:  str(r, "htmlBody"),
 		Status:    str(r, "status"),
+		Purpose:   str(r, "purpose"),
+		Preheader: str(r, "preheader"),
 
 		ExpectsHTML: templateExpectsHTML(r),
 	}, true, nil
+}
+
+// Transactional says the template is about one person's own request: it has no
+// unsubscribe, so nothing that sends to a list or fires from a rule may use it.
+// A template with no purpose is marketing.
+func (t Template) Transactional() bool {
+	return t.Purpose == purposeTransactional
 }
 
 // lacksItsHTML says that the template was written to have an HTML part and has
@@ -923,6 +943,16 @@ type Delivery struct {
 	RequestID        string
 	TemplateID       string
 	SenderIdentityID string
+
+	// RowConcept, RowID and RowKind say which row a message is about when the
+	// person it went to has no recipient row: a pack's row for the row lane
+	// (send_row.go), or the mirrored order for an order message (send_order.go).
+	// Set only by the server, from the send's own options, never from a caller's
+	// argument; the replay of a deferred row send is rebuilt from them. A message's
+	// fields are never kept on the row. Each is rendered only when set.
+	RowConcept string
+	RowID      string
+	RowKind    string
 }
 
 // RecordDelivery writes the ledger row. OWNED tier: issue under the
@@ -971,6 +1001,12 @@ func (s *Store) RecordDelivery(ctx context.Context, d Delivery) error {
 	}
 	if d.AccountID != "" {
 		args = append(args, arg{"accountId", d.AccountID})
+	}
+	if d.RowConcept != "" {
+		args = append(args, arg{"rowConcept", d.RowConcept}, arg{"rowId", d.RowID})
+	}
+	if d.RowKind != "" {
+		args = append(args, arg{"rowKind", d.RowKind})
 	}
 	return s.execServerOnly(ctx, call("mutation", "recordCampaignDelivery", args...))
 }
@@ -1035,7 +1071,23 @@ func (s *Store) SetCampaignStatus(ctx context.Context, mutationName, campaignID 
 
 // RecordSuppression adds an address's digest to the cluster-wide list.
 // clusterOwner-tier. The plaintext address never reaches the engine.
+//
+// A block is never weakened by a later unsubscribe (ruling 43): the row is
+// overwritten in place, so an unsubscribe written over a bounce, a complaint or
+// an operator's block would leave the address reading merely unsubscribed, and
+// the row lane, which ignores an unsubscribe, would mail it. So an unsubscribe
+// over a blocking reason writes nothing, and the row keeps its reason. A
+// blocking reason over anything replaces it, as it always has.
 func (s *Store) RecordSuppression(ctx context.Context, digest, reason, domain, sourceCampaignID, note string) error {
+	if reason == "unsubscribed" {
+		stored, found, err := s.SuppressionByDigest(ctx, digest)
+		if err != nil {
+			return err
+		}
+		if found && blocksATransactionalMessage(stored.Reason) {
+			return nil
+		}
+	}
 	args := []arg{
 		{"emailDigest", digest},
 		{"reason", reason},

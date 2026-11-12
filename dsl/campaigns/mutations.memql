@@ -177,11 +177,12 @@ mutation template createTemplate {
     sourceArtifactId string
     document object
     composition object
+    purpose string
     accountId string!
     versionTime datetime!
   }
   insert {
-    accept { name, subject, textBody, htmlBody, preheader, layoutId, sourceArtifactId, document, composition, accountId }
+    accept { name, subject, textBody, htmlBody, preheader, layoutId, sourceArtifactId, document, composition, accountId, purpose }
     stamp {
       id: args.templateId
       createdAt: args.versionTime
@@ -208,11 +209,12 @@ mutation template updateTemplate {
     sourceArtifactId string
     document object
     composition object
+    purpose string
     status string!
     versionTime datetime!
   }
   update {
-    accept { name, subject, textBody, htmlBody, preheader, layoutId, sourceArtifactId, document, composition, status }
+    accept { name, subject, textBody, htmlBody, preheader, layoutId, sourceArtifactId, document, composition, status, purpose }
     stamp {
       id: args.templateId
       createdAt: args.versionTime
@@ -592,9 +594,12 @@ mutation delivery recordCampaignDelivery {
     requestId          string @pattern("^[A-Za-z0-9_-]{8,160}$")
     templateId         string
     senderIdentityId   string
+    rowConcept         string
+    rowId              string
+    rowKind            string
   }
   insert {
-    accept { providerCountersPending, campaignId, recipientId, email, status, skipReason, lastError, sentAt, nextAttemptAt, outboundRequestId, emailRuleId, requestId, templateId, senderIdentityId }
+    accept { providerCountersPending, campaignId, recipientId, email, status, skipReason, lastError, sentAt, nextAttemptAt, outboundRequestId, emailRuleId, requestId, templateId, senderIdentityId, rowConcept, rowId, rowKind }
     stamp {
       createdAt: args.versionTime ?? now
       // A single send is keyed by its request; a campaign delivery and a send with no request

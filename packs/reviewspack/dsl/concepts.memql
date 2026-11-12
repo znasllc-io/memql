@@ -18,6 +18,22 @@
 // and is refused as a form field, which is the half of D9 that cannot be
 // expressed in a schema.
 //
+// NO CLIENT WRITES A ROW HERE EXCEPT THROUGH THE PACK. Every concept below is
+// @serverWritten: the engine refuses any write of it without internal origin,
+// the public insert() included, which never consults a mutation's
+// @serverOnly. The pack's own writer (writer.go's engineWriter) stamps
+// internal origin, inline on its one call, after the builtin in front of it
+// has judged the caller -- and that judgement is the only gate, because the
+// stamp skips the row gate. Without this the store's own people could write a
+// decision that publishes, a link carrying a token they chose, a review in a
+// buyer's name or settings naming another address around every check the
+// builtins make (server_written_db_test.go).
+//
+// The engine's own code still writes these rows, and the annotation does not
+// change that: a step of an automation in the loaded DSL tree and a DSL seed
+// (both at internal origin), the identity integration's ownership transfer
+// (a cluster owner's act), and the pack's erasure by direct SQL.
+//
 // STOREFRONT PACK CONVENTION: concepts, mutations, tools, builtins and
 // queries -- NO automations and NO logic. A client's process attaches from
 // its own repository with `use reviews.concepts.{ review }` and
@@ -28,12 +44,13 @@
 @version("1.2.0")
 @description("A storefront product review. Merchandising stays on the store; this row is the review body plus optional image attachment ids. Images export as files (bytes), not URLs. Whether it is shown is NOT a field: it is derived from the append-only reviewDecision log against the revision the row holds now.")
 @displayCard(primary="title", secondary="body", tertiary="productHandle")
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @belongsTo(account, stated)
 concept review {
-  ownerUserId         string!   @description("v1:identity:user.id of the MERCHANT this review belongs to -- the owner of the deployable it was submitted through, NOT its author. A shopper is nobody to MemQL: they have no user row, no session and no actor, so a review's author is authorName and authorEmail below and nothing else (epic memql#5532, issue memql#5550). This is the single most important sentence in the pack. On the shopper path it is stamped from actor.userId under the site owner's BORROWED authority -- the campaigns precedent, where the drain worker runs everything owned under a userId copied off a row the starting caller had already read. On the authenticated path it is the calling user, which is what an operator or an importing job writes as.")
+  ownerUserId         string!   @description("v1:identity:user.id of the MERCHANT this review belongs to -- the owner of the deployable it was submitted through, NOT its author. A shopper is nobody to MemQL: they have no user row, no session and no actor, so a review's author is authorName and authorEmail below and nothing else (epic memql#5532, issue memql#5550). This is the single most important sentence in the pack. It is stamped from actor.userId under the site owner's BORROWED authority -- the campaigns precedent, where the drain worker runs everything owned under a userId copied off a row the starting caller had already read. A row written before the pack wrote every review itself may name the operator or importing job that created it through the authenticated path, since removed.")
   storeId             string!   @description("The v1:shopify:store this review was written against (design D9). Stamped server-side from the binding the write arrived through -- the serving binding, or the PREVIEW binding when the submission was made while exercising a candidate version -- and never accepted from a form: component/memql/shopper_surface.go refuses a declared field with this name, and the bff stamps it after the declared fields so a form-supplied copy cannot win. Every storefront read filters on it, which is what keeps a review written under preview out of the live storefront.")
-  siteId              string    @description("The v1:platform:site this review was submitted through. Provenance rather than scope: storeId above is what reads filter on, because two deployables may serve one store. Empty on a review written through the authenticated path, which arrived through no site at all.")
+  siteId              string    @description("The v1:platform:site this review was submitted through. Provenance rather than scope: storeId above is what reads filter on, because two deployables may serve one store. Every review is written through a buyer's link on a site; empty only on a row written before that, through the authenticated path since removed, which arrived through no site at all.")
   productHandle       string!   @description("Storefront product handle this review is about.")
   productId           string    @description("Optional Shopify product GID when the thin index is present.")
   title               string    @description("Optional short title.")
@@ -44,7 +61,7 @@ concept review {
   imageAttachmentIds  []string  @description("v1:common:attachment ids for review images. Export resolves these to bytes, never to a remote URL as the payload.")
   createdAtClient     datetime  @description("Client-supplied authored-at watermark. The row intrinsic createdAt remains the version clock.")
   accountId           string    @description("The v1:accounts:account organization the store's deployable belongs to, copied from the site the review arrived through. The account grant: the people of that organization read and moderate the store's reviews without owning them. Empty on a row written before organizations reached reviews, which stays its owner's and the operators'.")
-  requestId           string    @description("The v1:reviews:reviewRequest this review was written through -- the buyer's link. Empty on the authenticated path (an operator or an import), which no link vouches for.")
+  requestId           string    @description("The v1:reviews:reviewRequest this review was written through -- the buyer's link. Every review is written through one; empty only on a row written before that, by an operator or an import through the authenticated path since removed, which no link vouches for.")
   verifiedBuyer       bool      @description("True only when the review was written through a buyer's link minted from a paid order line. Stamped server-side, never accepted from a form. A storefront shows 'Verified Buyer' for exactly this.")
   revision            int       @description("1 for the first submission through a link, one more for each edit through the same link while it is open. Each edit is a new VERSION of this row; a decision covers the revision it was made on and no other. Absent on older rows, which read as 1.")
   erasedAt            datetime  @description("When the writer's data was erased on request: name, email, title and body blanked in every saved version. An erased review is never shown again.")
@@ -53,6 +70,7 @@ concept review {
 @version("1.1.0")
 @description("Append-only moderation decision for a review. A new row is a new decision; there is no in-place update and no undo-by-overwrite. decidedBy is a Client principal -- a Provider operator cannot author one. Criterion is a closed enum: no other, no sentiment.")
 @displayCard(primary="criterion", secondary="reviewId", tertiary="decidedBy")
+@serverWritten
 @rowAuthz(owner="decidedBy", clusterOwner)
 @belongsTo(account, via="reviewId", parent="v1:reviews:review")
 concept moderationAction {
@@ -68,6 +86,7 @@ concept moderationAction {
 @version("1.0.0")
 @description("One moderation decision on one review, append-only: a new row is a new decision, there is no update and no undo-by-overwrite. A review's state (waiting, published, declined, removed, erased) is DERIVED from these rows against the revision the review holds now. decidedBy is a person on the store's side; the cluster's operators are refused on the write path.")
 @displayCard(primary="action", secondary="reviewId", tertiary="decidedBy")
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @belongsTo(account, stated)
 concept reviewDecision {
@@ -86,6 +105,7 @@ concept reviewDecision {
 @version("1.0.0")
 @description("One buyer's review link: a product line of a paid order, at an id derived from (store, order, product) so a line is one link. The link is /reviews/write?product=<handle>&t=<token> on the store's own site; the token is never stored, only its SHA-256. A review written through it is verified. The link closes when its review is published, removed or erased -- read off the review's state, so publishing writes nothing here -- and at expiresAt.")
 @displayCard(primary="productHandle", secondary="orderName", tertiary="expiresAt")
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @belongsTo(account, stated)
 concept reviewRequest {
@@ -109,6 +129,7 @@ concept reviewRequest {
 @version("1.2.0")
 @description("Runtime reviews settings for one store. The public display toggle lives here as data so a client can hide or show reviews without a deploy or .memql edit.")
 @displayCard(primary="publicDisplay", secondary="storeId")
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @belongsTo(account, stated)
 concept reviewSettings {

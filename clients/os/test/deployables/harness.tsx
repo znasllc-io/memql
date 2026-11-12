@@ -280,6 +280,61 @@ export interface FakeSeed {
     /** Fails the next settings save with this server message. */
     settingsError?: string;
   };
+  /**
+   * The wholesale pack's answers (packs/wholesalepack): `wholesaleList` keyed
+   * by the stage asked, `wholesaleGet` keyed by the application id as the
+   * list gave it, and the store's settings. ABSENT IS EMPTY: a store nobody
+   * has applied to, and one that is not set up. THE SETTINGS ARE THE STORE
+   * ITSELF: setting a store up and saving its settings write to them, so a
+   * read after the write answers what was written.
+   */
+  wholesale?: {
+    list?: Record<string, Row>;
+    get?: Record<string, Row>;
+    settings?: Row;
+    /** Fails every `wholesaleList` read with this server message, until removed. */
+    listError?: string;
+    /** Fails every `wholesaleStoreSettings` read with this server message, until removed. */
+    settingsReadError?: string;
+    /** Fails every decision with this server message, until removed. */
+    decideError?: string;
+    /** Fails every retry with this server message, until removed. */
+    retryError?: string;
+    /** Fails every settings save with this server message, until removed. */
+    settingsError?: string;
+    /** What `wholesaleBuyers` answers: `{rows, next, truncated}`, paged by offset here. */
+    buyers?: Row;
+    /** Fails every `wholesaleBuyers` read with this server message, until removed. */
+    buyersError?: string;
+    /** What `wholesaleDocuments` answers without a versionId: `{kinds}`. */
+    documents?: Row;
+    /** What `wholesaleDocuments` answers with a versionId: the version, body included, by its id. */
+    versions?: Record<string, Row>;
+    /** Fails every `wholesaleDocuments` read with this server message, until removed. */
+    documentsError?: string;
+    /** The id `wholesaleAddBuyer` answers. */
+    addedId?: string;
+    /** Fails every add with this server message, until removed. */
+    addError?: string;
+    /** Fails every publish with this server message, until removed. */
+    publishError?: string;
+    /** Fails every resend with this server message, until removed. */
+    resendError?: string;
+    /** Fails every removal with this server message, until removed. */
+    removeError?: string;
+    /** What `wholesaleExportStore` answers: `{fileName, json}`. */
+    exportFile?: Row;
+    /** Fails every export with this server message, until removed. */
+    exportError?: string;
+    /**
+     * A lost answer, for the QA scenes: the add or the publish loses its reply,
+     * after it landed or before it left, and the wizard's re-read of the store
+     * then answers, never answers (`hold`), or fails.
+     */
+    lose?: { write: "add" | "publish"; landed: boolean; check: "answer" | "hold" | "fail" };
+    /** Set once an answer was lost: the re-reads after it follow `lose.check`. */
+    lost?: boolean;
+  };
   /** v1:platform:package rows `packagesAll` answers with. */
   packages?: Row[];
   registerSourceError?: string;
@@ -617,6 +672,120 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       }
       if (call.startsWith("builtin reviewsExportStore(")) {
         return builtinReply("reviewsExportStore", [{ fileName: "reviews-store-live-2026-11-04.json", json: "{\"format\":\"memql.reviews.export/v1\"}" } as unknown as Row]);
+      }
+      // ---- wholesale (packs/wholesalepack) ----
+      if (call.startsWith("builtin wholesaleList(")) {
+        if (seed.wholesale?.listError !== undefined) throw new Error(seed.wholesale.listError);
+        const args = parseCall(call).args;
+        if (seed.wholesale?.lost && args.stage === "all") {
+          if (seed.wholesale.lose?.check === "hold") return new Promise<never>(() => {});
+          if (seed.wholesale.lose?.check === "fail") throw new Error("wholesale: the store could not be read just now");
+        }
+        const stage = String(args.stage ?? "readyToReview");
+        const held = seed.wholesale?.list?.[stage] ?? { rows: [], counts: {}, next: "", truncated: false };
+        const query = String(args.search ?? "").toLowerCase();
+        const rows = ((held.rows ?? []) as Record<string, unknown>[]).filter(row => !query || [row.companyName, row.applicantName, row.applicantEmail].join(" ").toLowerCase().includes(query));
+        const offset = Number(args.after ?? 0), limit = Number(args.limit ?? 50);
+        return builtinReply("wholesaleList", [{ ...held, rows: rows.slice(offset, offset + limit), next: offset + limit < rows.length ? String(offset + limit) : "" }]);
+      }
+      if (call.startsWith("builtin wholesaleGet(")) {
+        const id = String(parseCall(call).args.applicationId ?? "");
+        const answer = seed.wholesale?.get?.[id];
+        if (answer === undefined) throw new Error(`wholesale: application "${id}" is not readable by this caller`);
+        return builtinReply("wholesaleGet", [answer]);
+      }
+      if (call.startsWith("builtin wholesaleStoreSettings(")) {
+        if (seed.wholesale?.settingsReadError !== undefined) throw new Error(seed.wholesale.settingsReadError);
+        return builtinReply("wholesaleStoreSettings", [seed.wholesale?.settings ?? ({ exists: false, applicationsOpen: false, entitlementAdapter: "", adapters: ["customerTag", "shopifyB2B"], may: { setUp: false, update: false } } as unknown as Row)]);
+      }
+      if (call.startsWith("builtin wholesaleRecordDecision(")) {
+        if (seed.wholesale?.decideError !== undefined) throw new Error(seed.wholesale.decideError);
+        const args = parseCall(call).args;
+        return builtinReply("wholesaleRecordDecision", [{ applicationId: String(args.applicationId ?? ""), transition: String(args.transition ?? "") } as unknown as Row]);
+      }
+      if (call.startsWith("builtin wholesaleRetryAccess(")) {
+        if (seed.wholesale?.retryError !== undefined) throw new Error(seed.wholesale.retryError);
+        return builtinReply("wholesaleRetryAccess", [{ applicationId: String(parseCall(call).args.applicationId ?? "") } as unknown as Row]);
+      }
+      if (call.startsWith("builtin wholesaleUpdateSettings(")) {
+        if (seed.wholesale?.settingsError !== undefined) throw new Error(seed.wholesale.settingsError);
+        const { siteId: _site, storeId: _store, ...changes } = parseCall(call).args;
+        const held = (seed.wholesale ??= {});
+        held.settings = { ...(held.settings ?? {}), ...changes } as Row;
+        return builtinReply("wholesaleUpdateSettings", [changes as Row]);
+      }
+      if (call.startsWith("builtin wholesaleSetSettings(")) {
+        const args = parseCall(call).args;
+        const held = (seed.wholesale ??= {});
+        held.settings = { exists: true, applicationsOpen: args.applicationsOpen === true, entitlementAdapter: String(args.entitlementAdapter ?? ""), adapters: ["customerTag", "shopifyB2B"], may: { setUp: false, update: true } } as unknown as Row;
+        return builtinReply("wholesaleSetSettings", [{ storeId: String(args.storeId ?? "") } as unknown as Row]);
+      }
+      if (call.startsWith("builtin wholesaleBuyers(")) {
+        if (seed.wholesale?.buyersError !== undefined) throw new Error(seed.wholesale.buyersError);
+        const args = parseCall(call).args;
+        const held = seed.wholesale?.buyers ?? { rows: [], next: "", truncated: false };
+        const rows = (held.rows ?? []) as Record<string, unknown>[];
+        const offset = Number(args.after ?? 0), limit = Number(args.limit ?? 50);
+        return builtinReply("wholesaleBuyers", [{ ...held, rows: rows.slice(offset, offset + limit), next: offset + limit < rows.length ? String(offset + limit) : "" } as unknown as Row]);
+      }
+      if (call.startsWith("builtin wholesaleDocuments(")) {
+        if (seed.wholesale?.documentsError !== undefined) throw new Error(seed.wholesale.documentsError);
+        const versionId = String(parseCall(call).args.versionId ?? "");
+        if (seed.wholesale?.lost && versionId === "") {
+          if (seed.wholesale.lose?.check === "hold") return new Promise<never>(() => {});
+          if (seed.wholesale.lose?.check === "fail") throw new Error("wholesale: the documents could not be read just now");
+        }
+        if (versionId !== "") {
+          const version = seed.wholesale?.versions?.[versionId];
+          if (version === undefined) throw new Error(`wholesale: there is no document version "${versionId}" of this store`);
+          return builtinReply("wholesaleDocuments", [{ version } as unknown as Row]);
+        }
+        const empty = { kinds: ["terms", "map", "priceSheet"].map((kind) => ({ kind, current: null, history: [] })) };
+        return builtinReply("wholesaleDocuments", [(seed.wholesale?.documents ?? empty) as unknown as Row]);
+      }
+      if (call.startsWith("builtin wholesaleAddBuyer(")) {
+        if (seed.wholesale?.addError !== undefined) throw new Error(seed.wholesale.addError);
+        if (seed.wholesale?.lose?.write === "add") {
+          const args = parseCall(call).args;
+          const held = seed.wholesale;
+          if (held.lose!.landed) {
+            const row = { applicationId: held.addedId ?? "wholesale-staff-new", companyName: String(args.companyName ?? ""), applicantName: String(args.applicantName ?? ""), applicantEmail: String(args.applicantEmail ?? ""), stage: "waitingForTerms", primary: "", secondary: "", createdAt: new Date().toISOString() };
+            held.list = { ...held.list, all: { rows: [row], counts: {}, next: "", truncated: false } as unknown as Row };
+          }
+          held.lost = true;
+          throw droppedSocket();
+        }
+        return builtinReply("wholesaleAddBuyer", [{ applicationId: seed.wholesale?.addedId ?? "wholesale-staff-new" } as unknown as Row]);
+      }
+      if (call.startsWith("builtin wholesaleRemoveBuyer(")) {
+        if (seed.wholesale?.removeError !== undefined) throw new Error(seed.wholesale.removeError);
+        const args = parseCall(call).args;
+        return builtinReply("wholesaleRemoveBuyer", [{ applicationId: String(args.applicationId ?? ""), transition: "revoke" } as unknown as Row]);
+      }
+      if (call.startsWith("builtin wholesaleResendEmail(")) {
+        if (seed.wholesale?.resendError !== undefined) throw new Error(seed.wholesale.resendError);
+        const args = parseCall(call).args;
+        return builtinReply("wholesaleResendEmail", [{ applicationId: String(args.applicationId ?? ""), kind: String(args.kind ?? ""), state: "sent" } as unknown as Row]);
+      }
+      if (call.startsWith("builtin wholesalePublishDocument(")) {
+        if (seed.wholesale?.publishError !== undefined) throw new Error(seed.wholesale.publishError);
+        if (seed.wholesale?.lose?.write === "publish") {
+          const args = parseCall(call).args;
+          const held = seed.wholesale;
+          if (held.lose!.landed) {
+            const kinds = ((held.documents as unknown as { kinds?: Record<string, unknown>[] })?.kinds ?? []).map((k) => (k.kind === args.kind
+              ? { ...k, current: { id: "doc-new", label: String(args.label ?? ""), body: String(args.body ?? ""), publishedAt: new Date().toISOString(), publishedBy: "", publishedByName: "", sha256: "0".repeat(64) } }
+              : k));
+            held.documents = { kinds } as unknown as Row;
+          }
+          held.lost = true;
+          throw droppedSocket();
+        }
+        return builtinReply("wholesalePublishDocument", [{ documentVersionId: "doc-new", sha256: "0".repeat(64) } as unknown as Row]);
+      }
+      if (call.startsWith("builtin wholesaleExportStore(")) {
+        if (seed.wholesale?.exportError !== undefined) throw new Error(seed.wholesale.exportError);
+        return builtinReply("wholesaleExportStore", [seed.wholesale?.exportFile ?? ({ fileName: "wholesale-store-live-20261111.json", json: "{\"applications\":[]}" } as unknown as Row)]);
       }
 
       // ---- pipelines (epic memql#5479) ----

@@ -597,8 +597,7 @@ means `@belongsTo(account)`; `via F` means `@belongsTo(account, via="F")`.
 | shopify (generated) | all 65 mirror concepts | via storeId, parent `v1:shopify:store` | Emitted by `cmd/shopifyschema` |
 | pack: reviews | review, reviewDecision, reviewRequest, reviewSettings | account, stated | Already copy the account from the site a review arrived through |
 | pack: reviews | moderationAction | via reviewId, parent `v1:reviews:review` | A decision about one review |
-| pack: wholesale | application, wholesaleSettings | via storeId, parent `v1:shopify:store` | Arrive through one store |
-| pack: wholesale | applicationDecision, entitlement | via applicationId, parent `v1:wholesale:application` | Follow one application |
+| pack: wholesale | application, applicationDecision, entitlement, wholesaleSettings, documentVersion, privateLink, acceptance | account, stated | Copy the account from the site an application arrived through, as the reviews pack does. When this record was written the pack had four concepts and none carried an account, so they followed their store or their application; the wholesale end-to-end work (design record 2026-11-11) gave every row of the pack its own `accountId`, read by its row tier, and R13 makes such a concept `stated` |
 | fleet bundle (`deploy/fleet/dsl`) | subscriber | account | A subscriber is one account's |
 | fleet bundle | subscription | via subscriberId, parent `v1:fleet:subscriber` | One subscriber's subscription |
 | fleet bundle | instance, usageMeter | via subscriptionId, parent `v1:fleet:subscription` | Belong to one subscription |
@@ -615,6 +614,10 @@ concepts. 89 are cluster-wide. 195 belong to accounts: 39 state their own accoun
 parent (the 65 generated mirror concepts among them), 39 take the call's account
 and 4 are `shared`. 91 hand-written concepts gained the `accountId` field, and
 the 65 generated ones gained it through the generator.
+
+These counts are as of this record's writing. Since then the wholesale pack's
+four concepts moved from following a parent to `stated`, and the pack gained
+three more that are `stated` from the start (see its row above).
 
 ## J. Refusals and signals
 

@@ -1017,6 +1017,26 @@ query delivery deferredSingleSendById {
  shape deferredSendRef
 }
 
+/// The row lane's status read (campaignRowMessageStatus): the ledger rows of the row sends and order
+/// sends made under these request ids for one organization, named in both of the spellings a ledger
+/// row's accountId is written in (bare, and canonical). Reached only from that builtin, which refuses a call without
+/// internal origin and reads under the system actor; the cluster tier keeps it from anyone else.
+/// actor.userId scoping is not the fix: the trusted job asks about messages sent as several owners,
+/// and the answer must come back after a sender loses membership.
+@actor
+@serverOnly
+@cache(0)
+query delivery deliveriesByRequestIds {
+  args {
+    requestIds  list!
+    accountIds  list!
+  }
+  filter row => actor.isClusterOwner == true && row.rowConcept != nil && row.rowConcept != "" && row.requestId in args.requestIds && row.accountId in args.accountIds
+  sort "row.createdAt", "asc"
+  paginate 100
+  shape rowMessageStatusRef
+}
+
 /// Internal provider correlation after authentication. actor.userId scoping cannot represent a report after the sender loses membership; original row attribution is preserved.
 @actor
 @serverOnly

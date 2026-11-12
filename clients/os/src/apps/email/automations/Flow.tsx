@@ -7,6 +7,7 @@ import { useWide } from "../../../kit/useWide";
 import { DURATION_UNITS, durationIn, type DurationUnit } from "../../../kit/durationUnit";
 import { isOperatorOrganization } from "../organizations";
 import type { SenderIdentityRow, TemplateRow } from "../rows";
+import { stepTemplates } from "./addModel";
 import type { Issue } from "./issues";
 import { insertStep, moveStep, newStep, removeStep, splitMinutes, stepSentence, updateStep, waitMinutes, type FlowStep, type StepKind } from "./flowModel";
 
@@ -45,7 +46,7 @@ export function Flow({ trigger, triggerDetail, steps, accountId, templates, send
     if (next >= 0) { event.preventDefault(); focus(tabs[next]!); }
   }
   const attrs = (id: string) => ({ "data-node": id, tabIndex: activeTab === id ? 0 : -1, onFocus: () => setFocused(id), onKeyDown: (e: KeyboardEvent) => key(e, id) });
-  const options = templates.filter(t => t.accountId === accountId && t.status !== "archived");
+  const options = stepTemplates(templates, accountId);
   const identities = senders.filter(s => s.accountId === accountId && s.status !== "disabled");
   const fields = inspector ? inspector(selected) : !target ? <><Field label="Name"><Input id="email-flow-name" label="Name" value={name} onChange={onName ?? (() => {})} /></Field><Field label="Description"><Input id="email-flow-description" label="Description" value={description} onChange={onDescription ?? (() => {})} /></Field></> : target.kind === "wait" ? <>
     <WaitFields key={target.id} step={target} patch={patch} />

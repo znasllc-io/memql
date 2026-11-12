@@ -34,7 +34,7 @@ import { EMAIL_COPY } from "./emailCopy.js";
 import { addedBlockId, editEmail, findBlock, isLayoutEmail, minimalEdit, readEmail, sameEmail, sampleKeys, writeEmail, type EmailDocument, type EmailEdit } from "./emailDocument.js";
 import { emailPage } from "./emailPage.js";
 import {
-  chooseOrganization, editorBar, EmailPublisher, issuesOf, PublishBlocked, resolveOrganization, templateFor,
+  chooseOrganization, editorBar, EmailPublisher, issuesOf, previewPurpose, PublishBlocked, resolveOrganization, templateFor,
   type Bar, type EmailIssue, type EmailTarget, type Organization, type PublishPorts, type TemplateState,
 } from "./emailPublish.js";
 import { reportProblem, UserInputError } from "./problems.js";
@@ -411,7 +411,10 @@ class EmailPanel {
       }
     }
     if (stale()) return;
+    // The render asked for above names the purpose known then; a Library file's template is found only now.
+    const judged = previewPurpose(this.templateState());
     this.template = template;
+    if (previewPurpose(this.templateState()) !== judged) void this.render();
     this.known = key;
     this.composition = this.opened?.resource.kind === "templates" ? this.opened.composition : undefined;
     this.watching();
@@ -541,7 +544,9 @@ class EmailPanel {
   /** The template the email has been published as: a template resource's own, a Library file's as the cluster said. */
   private templateState(): TemplateState | undefined {
     const opened = this.opened;
-    if (opened?.resource.kind === "templates" && opened.template) return { templateId: opened.sourceId, status: opened.template.status, revision: opened.revision ?? "" };
+    if (opened?.resource.kind === "templates" && opened.template) {
+      return { templateId: opened.sourceId, status: opened.template.status, revision: opened.revision ?? "", ...(opened.template.purpose ? { purpose: opened.template.purpose } : {}) };
+    }
     return this.template;
   }
 
@@ -621,9 +626,11 @@ class EmailPanel {
     const lease = this.lease(), organization = this.organization, email = this.email();
     if (this.disposed || !lease || !organization || !email) return;
     const seq = ++this.seq, sample = this.sample(email);
+    // Judged as a save of it would be: by its template's purpose.
+    const purpose = previewPurpose(this.templateState());
     let message: Record<string, unknown>;
     try {
-      const rows = await this.host.api.execute(lease, "emailRender", buildEmailRender({ document: email as unknown as Record<string, unknown>, accountId: organization.id, ...(sample ? { sample } : {}) }));
+      const rows = await this.host.api.execute(lease, "emailRender", buildEmailRender({ document: email as unknown as Record<string, unknown>, accountId: organization.id, ...(sample ? { sample } : {}), ...(purpose ? { purpose } : {}) }));
       if (this.disposed || !current()) return;
       const row = rows[0] ?? {};
       this.rendered = { issues: issuesOf(row.issues), refused: false };
@@ -812,7 +819,11 @@ class EmailPanel {
         opened.template.status = result.status;
         // A person's publish ends a failed composition, as the cluster does.
         this.endFailure();
-      } else this.template = result;
+      } else {
+        // A publish keeps the template's purpose (it names none), and its receipt does not say it.
+        const purpose = this.template?.templateId === result.templateId ? this.template.purpose : undefined;
+        this.template = { ...result, ...(purpose ? { purpose } : {}) };
+      }
       this.failed = undefined;
     } catch (error) {
       const failed = { version: this.document.version, issues: error instanceof PublishBlocked ? [...error.issues] : [], settling: true };

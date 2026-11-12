@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // wholesale.go -- THE B2B WRITES THE PUSH CHANNEL ANTICIPATED (epic
@@ -225,25 +227,19 @@ func (c *Connector) ProvisionWholesaleAccount(ctx context.Context, store Store,
 		return refs, &WholesaleCeilingError{StoreID: store.ID, Plan: store.Plan, Limit: maxCatalogsBelowPlus}
 	}
 
-	customerGID, err := c.customerByEmail(ctx, store, in.BuyerEmail)
+	customerGID, _, err := c.findOrCreateCustomer(ctx, store, in.BuyerEmail, in.BuyerName)
 	if err != nil {
 		return refs, err
 	}
-	if customerGID == "" {
-		customerGID, err = c.createCustomer(ctx, store, in.BuyerName, in.BuyerEmail)
-		if err != nil {
-			return refs, err
-		}
-	}
 	refs.CustomerGID = customerGID
 
-	externalID := wholesaleExternalIDPrefix + in.ApplicationID
-	company, location, err := c.companyByExternalID(ctx, store, externalID)
+	company, location, err := c.companyForApplication(ctx, store, in.ApplicationID)
 	if err != nil {
 		return refs, err
 	}
 	if company == "" {
-		company, location, err = c.createCompany(ctx, store, in, externalID)
+		// A NEW COMPANY IS MADE UNDER THE ID IT WAS GIVEN.
+		company, location, err = c.createCompany(ctx, store, in, wholesaleExternalIDPrefix+in.ApplicationID)
 		if err != nil {
 			return refs, err
 		}
@@ -276,6 +272,27 @@ func (c *Connector) ProvisionWholesaleAccount(ctx context.Context, store Store,
 	return refs, nil
 }
 
+// companyForApplication finds the company a previous provision made for this
+// application, under EITHER FORM OF ITS ID (ruling 28).
+//
+// The pack hands every adapter the canonical application id, and a store first
+// provisioned by an older build was stamped with the bare one. Looking under
+// the id given and then under its bare form, before anything is created, keeps
+// one company for one application whichever form came first.
+func (c *Connector) companyForApplication(ctx context.Context, store Store, applicationID string) (company, location string, err error) {
+	forms := []string{strings.TrimSpace(applicationID)}
+	if bare := memql.BareShortId(applicationID); bare != "" && bare != forms[0] {
+		forms = append(forms, bare)
+	}
+	for _, form := range forms {
+		company, location, err = c.companyByExternalID(ctx, store, wholesaleExternalIDPrefix+form)
+		if err != nil || company != "" {
+			return company, location, err
+		}
+	}
+	return "", "", nil
+}
+
 // RevokeWholesaleAccount ends the entitlement WITHOUT deleting anything.
 //
 // The catalog goes to DRAFT and that is the whole act. A draft catalog
@@ -288,7 +305,13 @@ func (c *Connector) ProvisionWholesaleAccount(ctx context.Context, store Store,
 func (c *Connector) RevokeWholesaleAccount(ctx context.Context, store Store,
 	refs WholesaleAccountRefs) error {
 	if strings.TrimSpace(refs.CatalogGID) == "" {
-		return fmt.Errorf("shopify: this entitlement holds no catalog reference, so there is nothing to draft; revoke it in the Shopify admin and record the decision in MemQL")
+		// NO CATALOG IS NAMED, SO NONE IS DRAFTED, and nothing is sent. That
+		// does not prove nothing was granted: a B2B grant that failed partway
+		// can leave an active catalog the reference does not name, because the
+		// handler keeps no refs from a failed provision. The pack's B2B adapter
+		// therefore refuses a revoke with no reference before it gets here, and
+		// tells the merchant to draft the catalog in the Shopify admin.
+		return nil
 	}
 	resp, err := c.adminCall(ctx, store, catalogDraftMutation, "ShopifyCatalogDraft",
 		map[string]any{"id": refs.CatalogGID, "input": map[string]any{"status": "DRAFT"}})
@@ -298,42 +321,97 @@ func (c *Connector) RevokeWholesaleAccount(ctx context.Context, store Store,
 	return userErrorsFrom(resp, "catalogUpdate")
 }
 
-// TagWholesaleCustomer is the plan-independent grant: one tag, one call.
+// TagWholesaleCustomer is the plan-independent grant: the buyer's customer,
+// found or created, carries the tag.
 //
-// IT WRITES A TAG AND NOTHING ELSE. What the tag DOES is the merchant's own
-// automatic discount, which this connector deliberately does not create --
-// a discount is a price change and creating one on a merchant's behalf from
-// an approval is a much larger act than the approval was.
+// IT WRITES A TAG AND NOTHING ELSE besides the customer a buyer with none
+// needs. What the tag DOES is the merchant's own automatic discount, which this
+// connector deliberately does not create -- a discount is a price change and
+// creating one on a merchant's behalf from an approval is a much larger act
+// than the approval was.
 func (c *Connector) TagWholesaleCustomer(ctx context.Context, store Store,
-	email, tag string) (string, error) {
-	customerGID, err := c.requireCustomer(ctx, store, email)
-	if err != nil {
-		return "", err
-	}
-	resp, err := c.adminCall(ctx, store, tagsAddMutation, "ShopifyTagsAdd",
-		map[string]any{"id": customerGID, "tags": []string{normaliseTag(tag)}})
-	if err != nil {
-		return "", err
-	}
-	if ueErr := userErrorsFrom(resp, "tagsAdd"); ueErr != nil {
-		return "", ueErr
-	}
-	return customerGID, nil
+	email, name, tag string) (gid string, created bool, err error) {
+	res, err := c.tagWholesaleCustomer(ctx, store, email, name, tag)
+	return res.customer.id, res.created, err
 }
 
-// UntagWholesaleCustomer is the plan-independent revoke.
+// wholesaleTag is what one grant found and did, for the handler's reply.
+type wholesaleTag struct {
+	customer wholesaleCustomer
+	created  bool
+	// tagged is whether a tagsAdd was sent: false when the customer already
+	// carried the tag.
+	tagged bool
+}
+
+func (c *Connector) tagWholesaleCustomer(ctx context.Context, store Store,
+	email, name, tag string) (wholesaleTag, error) {
+	customer, created, err := c.findOrCreate(ctx, store, email, name)
+	if err != nil {
+		return wholesaleTag{}, err
+	}
+	tag = normaliseTag(tag)
+	res := wholesaleTag{customer: customer, created: created}
+	// ADDED ONLY IF ABSENT: a second grant for the same buyer sends nothing.
+	if customer.hasTag(tag) {
+		return res, nil
+	}
+	resp, err := c.adminCall(ctx, store, tagsAddMutation, "ShopifyTagsAdd",
+		map[string]any{"id": customer.id, "tags": []string{tag}})
+	if err != nil {
+		return wholesaleTag{}, customerScopeRefusal(store, err)
+	}
+	if ueErr := userErrorsFrom(resp, "tagsAdd"); ueErr != nil {
+		return wholesaleTag{}, ueErr
+	}
+	res.tagged = true
+	return res, nil
+}
+
+// UntagWholesaleCustomer is the plan-independent revoke, ON THE CUSTOMER THE
+// GRANT RECORDED (ruling 58).
+//
+// customerGID is the customer the entitlement's reference names, read by id:
+// a buyer who changed their address in the store's admin, or an address two
+// customers hold, still has the tag taken off the customer that got it. A
+// customer that no longer exists or no longer carries the tag is a clean
+// success -- there is nothing left to revoke.
+//
+// THE ADDRESS ONLY WHEN THE REFERENCE NAMES NO CUSTOMER (a first grant that
+// failed, X17): the tag comes off every customer holding the address that
+// carries it, and an address nobody holds sends nothing but the read.
 func (c *Connector) UntagWholesaleCustomer(ctx context.Context, store Store,
-	email, tag string) error {
-	customerGID, err := c.requireCustomer(ctx, store, email)
-	if err != nil {
-		return err
+	customerGID, email, tag string) error {
+	tag = normaliseTag(tag)
+	var holders []wholesaleCustomer
+	if id := strings.TrimSpace(customerGID); id != "" {
+		customer, err := c.customerByID(ctx, store, id)
+		if err != nil {
+			return err
+		}
+		holders = []wholesaleCustomer{customer}
+	} else {
+		all, err := c.customersByEmail(ctx, store, email)
+		if err != nil {
+			return err
+		}
+		holders = all
 	}
-	resp, err := c.adminCall(ctx, store, tagsRemoveMutation, "ShopifyTagsRemove",
-		map[string]any{"id": customerGID, "tags": []string{normaliseTag(tag)}})
-	if err != nil {
-		return err
+	for _, customer := range holders {
+		// REMOVED ONLY IF PRESENT.
+		if customer.id == "" || !customer.hasTag(tag) {
+			continue
+		}
+		resp, err := c.adminCall(ctx, store, tagsRemoveMutation, "ShopifyTagsRemove",
+			map[string]any{"id": customer.id, "tags": []string{tag}})
+		if err != nil {
+			return customerScopeRefusal(store, err)
+		}
+		if ueErr := userErrorsFrom(resp, "tagsRemove"); ueErr != nil {
+			return ueErr
+		}
 	}
-	return userErrorsFrom(resp, "tagsRemove")
+	return nil
 }
 
 // normaliseTag bounds what this connector will write as a tag.
@@ -348,24 +426,6 @@ func normaliseTag(tag string) string {
 		return WholesaleTagDefault
 	}
 	return t
-}
-
-// requireCustomer resolves an email to a Shopify customer, or refuses.
-//
-// REFUSED RATHER THAN CREATED, unlike the B2B path. A tag on a customer
-// that did not exist a moment ago entitles nobody: the buyer has not
-// shopped here, so there is no account for the tag to attach to and no
-// checkout for a discount to apply at. The merchant is told to invite them.
-func (c *Connector) requireCustomer(ctx context.Context, store Store, email string) (string, error) {
-	gid, err := c.customerByEmail(ctx, store, email)
-	if err != nil {
-		return "", err
-	}
-	if gid == "" {
-		return "", fmt.Errorf("shopify: no customer on %s has the email %q, so there is no account to entitle -- invite them to create one, then provision again",
-			store.Domain, email)
-	}
-	return gid, nil
 }
 
 // WholesaleCeilingError is the refusal a store below Plus gets at its
@@ -394,3 +454,31 @@ func (e *WholesaleCeilingError) Error() string {
 
 // Refused reports that this will fail identically for ever.
 func (e *WholesaleCeilingError) Refused() bool { return true }
+
+// RefusalCode names the cause for the pack's entitlement row.
+func (e *WholesaleCeilingError) RefusalCode() string { return RefusalPlanCeiling }
+
+// The codes a wholesale refusal carries (codedRefusal): the pack records each
+// on the entitlement row as it is. Any other Admin failure is an error -- an
+// outage the pack records pending and retries -- never a refusal with a code
+// of its own.
+const (
+	RefusalCustomerRefused = "customer_refused"
+	RefusalScopeMissing    = "scope_missing"
+	RefusalPlanCeiling     = "plan_ceiling"
+)
+
+// wholesaleRefusal is a refusal of the buyer's customer record: the store
+// refused to create it, or the store's grant does not reach customers.
+type wholesaleRefusal struct {
+	code   string
+	reason string
+}
+
+func (e *wholesaleRefusal) Error() string { return e.reason }
+
+// Refused reports that this will fail identically for ever.
+func (e *wholesaleRefusal) Refused() bool { return true }
+
+// RefusalCode names the cause for the pack's entitlement row.
+func (e *wholesaleRefusal) RefusalCode() string { return e.code }

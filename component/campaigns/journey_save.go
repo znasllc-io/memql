@@ -185,6 +185,12 @@ func (w *Worker) journeyIssues(ctx context.Context, accountID string, d journeyD
 			if !ok || !sameOrganization(accountID, t.AccountID) {
 				add(step.ID, "Choose a template in this organization.")
 			} else {
+				// A journey mails everybody who joins its audience: a template
+				// about one person's own request refuses the save itself, not a
+				// line among its issues (X10).
+				if t.Transactional() {
+					return nil, errTransactionalTemplate
+				}
 				name := t.Name
 				if name == "" {
 					name = t.Subject

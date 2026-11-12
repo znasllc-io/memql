@@ -39,7 +39,11 @@ package wholesalepack_test
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -61,6 +65,9 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 	memqldsl "github.com/znasllc-io/memql/dsl"
+	"github.com/znasllc-io/memql/integrations/shopify"
+	"github.com/znasllc-io/memql/integrations/shopify/generated"
+	"github.com/znasllc-io/memql/integrations/shopify/shopifylive"
 	wholesalepack "github.com/znasllc-io/memql/packs/wholesalepack"
 )
 
@@ -92,6 +99,11 @@ func liveWholesaleEngine(t *testing.T, disabled ...string) *memql.MemQLEngine {
 		t.Fatalf("NewMemoryNodesDatabase: %v", err)
 	}
 	mnd.Start(context.Background())
+	// EACH TEST'S POOLS ARE HANDED BACK when it ends, or the package's engines
+	// hold their connections to the end of the run and a long tree exhausts
+	// the server's clients. Registered first, so it runs after every cleanup
+	// that may still use the engine.
+	t.Cleanup(func() { mnd.ClosePool(context.Background()) })
 	select {
 	case <-mnd.Ready():
 	case <-time.After(60 * time.Second):
@@ -132,6 +144,12 @@ func liveWholesaleEngine(t *testing.T, disabled ...string) *memql.MemQLEngine {
 	if err := eng.Init(memoryNodes.DefaultRegistry()); err != nil {
 		t.Fatalf("engine.Init: %v", err)
 	}
+	// GRANTS ARE READ ONLY THROUGH AN INSTALLED SOURCE, which an engine that
+	// never Starts must install itself -- or the wholesale part a store's
+	// person is granted would be held by nobody (packs/reviewspack's live
+	// harness does the same).
+	eng.InstallGrantResolution()
+	t.Cleanup(func() { auth.SetGrantSource(nil); auth.SetMembershipSource(nil) })
 
 	// MATERIALIZE THE GO HALF, which app.materializePlugins does at boot and
 	// which reviewspack's own live harness never needed: that pack's live
@@ -160,11 +178,46 @@ func liveWholesaleEngine(t *testing.T, disabled ...string) *memql.MemQLEngine {
 
 // asSiteOwner is the borrowed authority the bff applies on the shopper path:
 // the SITE OWNER'S actor, exactly as auth.ContextWithUserActor builds it.
+//
+// IN THE FORM A REAL ACTOR CARRIES: a signed-in person's actor.userId is the
+// canonical v1:identity:user:<id> (component/auth/identity_resolver.go), and
+// the owner the edge stamps is the site row's stored, canonical owner. The
+// read predicate compares ownerUserId with actor.userId as written, so a test
+// actor in any other form would read rows no real one does.
 func asSiteOwner(userID string) context.Context {
-	return auth.ContextWithUserActor(context.Background(), userID)
+	return auth.ContextWithUserActor(context.Background(), userRef(userID))
+}
+
+// userRef is a person's id in canonical form.
+func userRef(userID string) string {
+	if strings.HasPrefix(userID, "v1:identity:user:") {
+		return userID
+	}
+	return "v1:identity:user:" + userID
 }
 
 func wsQuote(s string) string { return `"` + s + `"` }
+
+// asDecider is the store's own person deciding: the merchant, signed in as
+// themselves and granted the wholesale part the way a store's person is granted
+// it. A decision is gated by the part, and the cluster's operators decide none.
+func asDecider(t *testing.T, eng *memql.MemQLEngine, userID string) context.Context {
+	t.Helper()
+	grantWholesalePart(t, eng, userID)
+	return signedIn(userID)
+}
+
+// grantWholesalePart gives one person the wholesale part, at the id the grant
+// writer derives.
+func grantWholesalePart(t *testing.T, eng *memql.MemQLEngine, userID string) {
+	t.Helper()
+	call := `writeGrant(grantId: ` + quote(auth.GrantRowID(auth.SubjectKindUser, userRef(userID), "execute", "app:deployables/wholesale")) +
+		`, subjectKind: "user", subjectId: ` + quote(userRef(userID)) +
+		`, verb: "execute", resourceType: "app:deployables/wholesale", effect: "allow", grantedBy: "wholesale-e2e-seeder")`
+	if _, err := eng.Execute(seedCtx(), call); err != nil {
+		t.Fatalf("grant the wholesale part: %v", err)
+	}
+}
 
 func wsRows(t *testing.T, eng *memql.MemQLEngine, ctx context.Context, q string) []map[string]any {
 	t.Helper()
@@ -182,10 +235,57 @@ func wsExec(t *testing.T, eng *memql.MemQLEngine, ctx context.Context, call stri
 	}
 }
 
+// openApplications sets a store's settings as trusted server code acting as
+// ctx's actor: wholesaleSetSettings admits internal origin or an operator.
+//
+// A SET-UP ALWAYS TIES THE STORE TO AN ORGANIZATION (ruling 55), through the
+// one site bound to the store or a site named. A store a test bound to its own
+// site is set up through it; a store with no site bound is given one here --
+// owned by ctx's actor, the store's merchant, and of an organization of its own
+// in which the merchant holds the wholesale part -- and set up naming it, so
+// the row is the merchant's, as it was before.
 func openApplications(t *testing.T, eng *memql.MemQLEngine, ctx context.Context, storeID, adapter string) {
 	t.Helper()
-	wsExec(t, eng, ctx, `builtin wholesaleSetSettings(applicationsOpen: true, `+
-		`entitlementAdapter: `+wsQuote(adapter)+`, storeId: `+wsQuote(storeID)+`)`)
+	call := func(site string) error {
+		named := ""
+		if site != "" {
+			named = `, siteId: ` + wsQuote(site)
+		}
+		_, err := eng.Execute(auth.ContextWithInternalOrigin(ctx), `builtin wholesaleSetSettings(applicationsOpen: true, `+
+			`entitlementAdapter: `+wsQuote(adapter)+`, storeId: `+wsQuote(storeID)+named+`)`)
+		return err
+	}
+	err := call("")
+	if err != nil && strings.Contains(err.Error(), wholesalepack.NameTheSiteSentence) {
+		ac, _ := auth.AccessFromContext(ctx)
+		owner := strings.TrimPrefix(ac.UserId, "v1:identity:user:")
+		site, account := "site-of-"+storeID, "acct-of-"+storeID
+		// THE MERCHANT IS THE STORE'S PERSON in its organization, holding the
+		// part: applications are written tied to the site's organization
+		// (ruling 56), so deciding them is judged there.
+		group := seedOrganization(t, eng, account)
+		grantGroup(t, eng, group, "read", "app:deployables")
+		grantGroup(t, eng, group, "execute", "app:deployables/wholesale")
+		seedPersonIn(t, eng, owner, owner, "writer", true, group, account, "added")
+		seedSiteIn(t, eng, site, owner, storeID, account)
+		err = call(site)
+	}
+	if err != nil {
+		t.Fatalf("set up %s: %v", storeID, err)
+	}
+}
+
+// storeSiteArgs is the one site bound to store, as the call arguments the shopper
+// handler would have stamped: siteId and the site's accountId. A store takes
+// applications only through its admitted site, carrying that site's
+// organization (ruling 56), so a direct submission names both.
+func storeSiteArgs(t *testing.T, eng *memql.MemQLEngine, storeID string) string {
+	t.Helper()
+	rows := wsRows(t, eng, asOperator("operator-"+storeID), `query sitesBoundToStore(storeIds: [`+wsQuote(storeID)+`])`)
+	if len(rows) != 1 {
+		t.Fatalf("store %s has %d sites bound, want one", storeID, len(rows))
+	}
+	return `siteId: ` + wsQuote(bareID(asString(rows[0]["id"]))) + `, accountId: ` + wsQuote(asString(rows[0]["accountId"]))
 }
 
 // submit stands in for component/server/shopper_handler.go: the pack's
@@ -199,7 +299,7 @@ func submit(t *testing.T, eng *memql.MemQLEngine, ctx context.Context, storeID, 
 	submissionID := "sub-" + id.NewShortId()
 	wsExec(t, eng, ctx, `builtin wholesaleSubmitApplication(applicantEmail: `+wsQuote(email)+
 		`, applicantName: "Sam Rivers", companyName: `+wsQuote(company)+
-		`, siteId: "site-wholesale-e2e", storeId: `+wsQuote(storeID)+
+		`, `+storeSiteArgs(t, eng, storeID)+`, storeId: `+wsQuote(storeID)+
 		`, submissionId: `+wsQuote(submissionID)+`)`)
 	return submissionID
 }
@@ -248,7 +348,7 @@ func TestLiveE2E_TheApplicationLifecycle(t *testing.T) {
 	}
 
 	// ---- PROOF 6: ownerUserId is the MERCHANT --------------------------
-	if got, _ := live[0]["ownerUserId"].(string); got != merchant {
+	if got, _ := live[0]["ownerUserId"].(string); got != userRef(merchant) {
 		t.Fatalf("ownerUserId = %q, want the site owner %q -- the applicant is "+
 			"applicantName and applicantEmail, never an identity", got, merchant)
 	}
@@ -279,7 +379,8 @@ func TestLiveE2E_TheApplicationLifecycle(t *testing.T) {
 	if state != wholesalepack.StateSubmitted {
 		t.Fatalf("a fresh application is %q, want %q", state, wholesalepack.StateSubmitted)
 	}
-	decide(t, eng, ctx, appID, wholesalepack.TransitionReject, merchant, "no trading history")
+	decider := asDecider(t, eng, merchant)
+	decide(t, eng, decider, appID, wholesalepack.TransitionReject, merchant, "no trading history")
 	if state = stateOf(t, eng, ctx, appID); state != wholesalepack.StateRejected {
 		t.Fatalf("after a reject the state is %q, want %q", state, wholesalepack.StateRejected)
 	}
@@ -288,7 +389,7 @@ func TestLiveE2E_TheApplicationLifecycle(t *testing.T) {
 	//
 	// Nothing leads out of rejected. A caller that could say what state it
 	// believed the application was in would be the one deciding.
-	if _, err := eng.Execute(ctx, `builtin wholesaleRecordDecision(applicationId: `+
+	if _, err := eng.Execute(decider, `builtin wholesaleRecordDecision(applicationId: `+
 		wsQuote(appID)+`, decidedBy: `+wsQuote(merchant)+
 		`, principalKind: "client", transition: "approve")`); err == nil {
 		t.Fatal("approving a REJECTED application was allowed; nothing leads out of " +
@@ -296,12 +397,12 @@ func TestLiveE2E_TheApplicationLifecycle(t *testing.T) {
 			"decision was made")
 	}
 
-	// A PROVIDER OPERATOR IS INEXPRESSIBLE on this path, through the real
-	// engine and not just the Go guard.
-	if _, err := eng.Execute(ctx, `builtin wholesaleRecordDecision(applicationId: `+
-		wsQuote(appID)+`, decidedBy: `+wsQuote(merchant)+
-		`, principalKind: "provider", transition: "approve")`); err == nil {
-		t.Fatal("a Provider principal recorded a decision")
+	// THE CLUSTER'S OPERATORS DECIDE NONE (X4), through the real engine and
+	// not just the Go guard -- whatever principalKind the call names.
+	if _, err := eng.Execute(asOperator("operator-"+merchant), `builtin wholesaleRecordDecision(applicationId: `+
+		wsQuote(appID)+`, principalKind: "client", transition: "reject")`); err == nil ||
+		!strings.Contains(err.Error(), "do not decide them") {
+		t.Fatalf("a cluster operator's decision was not refused as one: %v", err)
 	}
 
 	// The reason for the refusal is STILL READABLE, which is the property
@@ -339,14 +440,19 @@ func TestLiveE2E_ApprovalProvisionsAndAFailedPushKeepsTheApproval(t *testing.T) 
 	}
 	appID, _ := rows[0]["id"].(string)
 
+	// THE PROVISIONING BUILTINS ARE THE STORE'S AUTOMATION'S, which calls
+	// with internal origin; a direct call here arrives the same way.
+	automation := auth.ContextWithInternalOrigin(ctx)
+
 	// PROVISIONING AN UNAPPROVED APPLICATION IS REFUSED. The decision log
 	// decides, not an argument.
-	if _, err := eng.Execute(ctx, `builtin wholesaleProvisionEntitlement(applicationId: `+
+	if _, err := eng.Execute(automation, `builtin wholesaleProvisionEntitlement(applicationId: `+
 		wsQuote(appID)+`)`); err == nil {
 		t.Fatal("an application nobody approved was provisioned")
 	}
 
-	decide(t, eng, ctx, appID, wholesalepack.TransitionApprove, merchant, "vouched for")
+	decider := asDecider(t, eng, merchant)
+	decide(t, eng, decider, appID, wholesalepack.TransitionApprove, merchant, "vouched for")
 	if got := stateOf(t, eng, ctx, appID); got != wholesalepack.StateApproved {
 		t.Fatalf("state = %q, want %q", got, wholesalepack.StateApproved)
 	}
@@ -355,7 +461,7 @@ func TestLiveE2E_ApprovalProvisionsAndAFailedPushKeepsTheApproval(t *testing.T) 
 	// engine. That is the case worth measuring, because it is the one the
 	// design speaks to -- "a provisioning failure leaves the application
 	// approved and the entitlement pending with its error".
-	wsExec(t, eng, ctx, `builtin wholesaleProvisionEntitlement(applicationId: `+wsQuote(appID)+`)`)
+	wsExec(t, eng, automation, `builtin wholesaleProvisionEntitlement(applicationId: `+wsQuote(appID)+`)`)
 
 	ents := wsRows(t, eng, ctx,
 		`query entitlementForApplication(applicationId: `+wsQuote(appID)+`)`)
@@ -387,11 +493,11 @@ func TestLiveE2E_ApprovalProvisionsAndAFailedPushKeepsTheApproval(t *testing.T) 
 	}
 
 	// A REVOKE NEEDS ITS DECISION FIRST, so the state and the history agree.
-	if _, err := eng.Execute(ctx, `builtin wholesaleRevokeEntitlement(applicationId: `+
+	if _, err := eng.Execute(automation, `builtin wholesaleRevokeEntitlement(applicationId: `+
 		wsQuote(appID)+`)`); err == nil {
 		t.Fatal("an entitlement was revoked with no revoke decision behind it")
 	}
-	decide(t, eng, ctx, appID, wholesalepack.TransitionRevoke, merchant, "account closed")
+	decide(t, eng, decider, appID, wholesalepack.TransitionRevoke, merchant, "account closed")
 	if got := stateOf(t, eng, ctx, appID); got != wholesalepack.StateRevoked {
 		t.Fatalf("state = %q, want %q", got, wholesalepack.StateRevoked)
 	}
@@ -522,5 +628,323 @@ func TestLiveE2E_BothFixtureClientsBootOverTheUneditedPack(t *testing.T) {
 		if _, err := memoryNodes.DefaultRegistry().Get(id); err != nil {
 			t.Fatalf("%q must be registered after a boot with both clients: %v", id, err)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// THE CLIENT'S GRANT AUTOMATION ON A DEVELOPMENT STORE (U4, step 6).
+//
+// TestAClientGrantAutomationProvisionsAnApprovedApplication proves the
+// automation reaches the pack's builtin, through a test adapter that reaches no
+// store. This runs the same automation over the customer-tag adapter, with the
+// Shopify integration registered against a real development store: the
+// merchant approves, contoso's automation fires, the pack's engineCaller calls
+// shopifyTagWholesaleCustomer with its mark, and the buyer's customer on the
+// store carries the tag.
+//
+// It skips without shopifylive's two variables, naming the one it needs, and
+// refuses a store that is not a partner development store before anything is
+// written to it (shopifylive.RequireDevelopmentStore, the refusal every live
+// Shopify test makes). The buyer is the run's own invented address
+// (wholesale-live-<random>@example.com); the customer the grant created is
+// deleted by the id the entitlement recorded, in a cleanup that runs when the
+// test fails too. Terms are not required, so the approval grants at once.
+//
+// The one command for this task's live tests, this one and the connector's:
+//
+//	MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN=... \
+//	MEMQL_TEST_SHOPIFY_STORE_DOMAIN=<shop>.myshopify.com MEMQL_TEST_SHOPIFY_ADMIN_TOKEN=... MEMQL_TEST_SHOPIFY_ADMIN_TOKEN_NO_CUSTOMERS=... \
+//	  go test -count=1 -p 1 -timeout 30m ./integrations/shopify/ ./packs/wholesalepack/ -v \
+//	  -run 'TestLive(AGrantWithoutWriteCustomers|AMissingCustomerIsCreated|ASecondProvisionCreatesNothing|RevokeRemovesTheTag|ProvisionAgainReTags|ASignedInNonOwnerCannotTag|AnEmailTakenAnswer|ACompanyIsFoundByAnExternalId)|TestLiveE2E_AClientGrantAutomationTagsTheBuyerOnADevelopmentStore'
+//
+// MEMQL_REQUIRE_DB=1 matters: without a reachable database the gate test and
+// the pack's live test skip, and a mostly green run would read as a pass.
+// The wider -run 'TestLive' also runs the store mirror's live tests
+// (mirror_live_test.go), which create, edit, refund and cancel orders in the
+// development store.
+
+// liveTagTest names this test in a skip line.
+const liveTagTest = "the wholesale pack's live tag test"
+
+// liveGrantWait is how long the approval has to reach a granted entitlement:
+// the automation, then three Admin calls to the real store.
+const liveGrantWait = 90 * time.Second
+
+// tagRouteOnly is the Shopify integration with only the two capabilities the
+// customer-tag adapter calls. The scheduler this test runs loads every
+// automation in the tree, the Shopify overlay's scheduled ones included, and
+// with the whole integration registered one of them (the daily webhook
+// reconcile) would write subscriptions to the development store; with these
+// two alone, a scheduled call finds no handler and the store is asked nothing
+// but the grant.
+type tagRouteOnly struct{ inner *shopify.Integration }
+
+func (p tagRouteOnly) IntegrationName() string { return p.inner.IntegrationName() }
+
+func (p tagRouteOnly) Capabilities() []memql.IntegrationCapability {
+	var out []memql.IntegrationCapability
+	for _, c := range p.inner.Capabilities() {
+		if c.Name == "tagWholesaleCustomer" || c.Name == "untagWholesaleCustomer" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// Adapted from integrations/shopify/wholesale_calls.go's customerSearchQuery,
+// selecting defaultEmailAddress where that one selects the deprecated email.
+const liveTagCustomersDoc = `query WholesaleLiveCustomers($query: String!) {
+  customers(first: 5, query: $query) { nodes { id defaultEmailAddress { emailAddress } } }
+}`
+
+// Copied from integrations/shopify/wholesale_live_test.go's liveCustomerDoc.
+const liveTagCustomerDoc = `query WholesaleLiveCustomer($id: ID!) {
+  customer(id: $id) {
+    id
+    tags
+    defaultEmailAddress { emailAddress }
+  }
+}`
+
+// Copied from integrations/shopify/mirror_live_test.go's liveCustomerDeleteDoc.
+const liveTagCustomerDeleteDoc = `mutation WholesaleLiveCustomerDelete($input: CustomerDeleteInput!) {
+  customerDelete(input: $input) {
+    deletedCustomerId
+    userErrors { field message }
+  }
+}`
+
+// liveShop is the development store as this test's own Admin calls reach it.
+type liveShop struct {
+	admin *shopify.AdminClient
+	store shopify.Store
+	token string
+}
+
+// ask runs one document against the store, bounded, and answers its data.
+func (s liveShop) ask(ctx context.Context, document, operation string, vars map[string]any) (map[string]any, error) {
+	callCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	resp, err := s.admin.Do(callCtx, s.store, s.token, document, operation, vars)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", operation, err)
+	}
+	return resp.DataMap()
+}
+
+// holders is every customer id the store lists for exactly the address.
+func (s liveShop) holders(ctx context.Context, email string) ([]string, error) {
+	data, err := s.ask(ctx, liveTagCustomersDoc, "WholesaleLiveCustomers", map[string]any{"query": "email:" + strconv.Quote(email)})
+	if err != nil {
+		return nil, err
+	}
+	customers, _ := data["customers"].(map[string]any)
+	nodes, _ := customers["nodes"].([]any)
+	var out []string
+	for _, n := range nodes {
+		m, _ := n.(map[string]any)
+		address, _ := m["defaultEmailAddress"].(map[string]any)
+		if got, _ := address["emailAddress"].(string); strings.EqualFold(got, email) {
+			if gid, _ := m["id"].(string); gid != "" {
+				out = append(out, gid)
+			}
+		}
+	}
+	return out, nil
+}
+
+// liveFindTries and liveFindWait bound the search for a customer whose id the
+// test never heard: as long as the connector's live tests wait for the
+// customer search to catch up after a create (mirror_live_test.go's
+// livePollTries and livePollWait).
+const (
+	liveFindTries = 6
+	liveFindWait  = 2500 * time.Millisecond
+)
+
+// remove deletes the customer the run made for its address: the id the
+// entitlement recorded, or, when it recorded none (an entitlement that failed
+// after its create), whatever the search finds for the run's own address,
+// which only this run can have used, waiting as long as the search takes to
+// catch up. When it finds nothing it says so in a line a person can act on.
+func (s liveShop) remove(t *testing.T, email string, recorded func() string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	ids := []string{}
+	if id := recorded(); id != "" {
+		ids = append(ids, id)
+	} else {
+		var err error
+		for try := 0; try < liveFindTries && len(ids) == 0; try++ {
+			if try > 0 {
+				time.Sleep(liveFindWait)
+			}
+			ids, err = s.holders(ctx, email)
+		}
+		if len(ids) == 0 {
+			reason := fmt.Sprintf("the search found none within %s", liveFindTries*liveFindWait)
+			if err != nil {
+				reason = fmt.Sprintf("the search failed: %v", err)
+			}
+			t.Logf("LEFT IN THE STORE, perhaps: a customer for %s; the entitlement recorded no customer id, and %s; look for it in the Shopify admin and delete it", email, reason)
+			return
+		}
+	}
+	for _, id := range ids {
+		data, err := s.ask(ctx, liveTagCustomerDeleteDoc, "WholesaleLiveCustomerDelete", map[string]any{"input": map[string]any{"id": id}})
+		if err == nil {
+			payload, _ := data["customerDelete"].(map[string]any)
+			if errs, _ := payload["userErrors"].([]any); len(errs) > 0 {
+				err = fmt.Errorf("customerDelete refused: %v", errs)
+			} else if payload["deletedCustomerId"] != id {
+				err = fmt.Errorf("customerDelete answered deletedCustomerId %v", payload["deletedCustomerId"])
+			}
+		}
+		if err != nil {
+			t.Logf("LEFT IN THE STORE: customer %s (the invented buyer %s) was not confirmed deleted; delete it in the Shopify admin: %v", id, email, err)
+			continue
+		}
+		t.Logf("deleted customer %s, the invented buyer %s", id, email)
+	}
+}
+
+func TestLiveE2E_AClientGrantAutomationTagsTheBuyerOnADevelopmentStore(t *testing.T) {
+	domain := shopifylive.Env(t, shopifylive.EnvStoreDomain, liveTagTest)
+	token := shopifylive.Env(t, shopifylive.EnvAdminToken, liveTagTest)
+	shop, err := shopify.NormalizeShopDomain(domain)
+	if err != nil {
+		t.Fatalf("%s is not a bare <shop>.myshopify.com host; no request was sent", shopifylive.EnvStoreDomain)
+	}
+	admin := shopify.NewAdminClient()
+	live := liveShop{admin: admin, token: token, store: shopify.Store{ID: "wholesale-live", Domain: shop, APIVersion: generated.APIVersion}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	t.Cleanup(cancel)
+	// BEFORE ANYTHING IS WRITTEN, to the store or to the database.
+	shopifylive.RequireDevelopmentStore(t, shopifylive.EnvStoreDomain, func(document, operation string) (map[string]any, error) {
+		return live.ask(ctx, document, operation, nil)
+	})
+
+	// THE RUN'S OWN BUYER, removed by the id the grant records. REGISTERED
+	// BEFORE THE ENGINE IS BUILT: cleanups run last in, first out, so this one
+	// runs after the scheduler is stopped, and no retry of the grant can
+	// create the customer after it has looked. It looks only once the address
+	// is known to be held by nobody (armed), so it never touches a customer
+	// the run did not make.
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		t.Fatalf("no randomness for the run's own address: %v", err)
+	}
+	email := "wholesale-live-" + hex.EncodeToString(suffix) + "@example.com"
+	var recordedMu sync.Mutex
+	recorded, armed := "", false
+	t.Cleanup(func() {
+		recordedMu.Lock()
+		ready := armed
+		recordedMu.Unlock()
+		if !ready {
+			return
+		}
+		live.remove(t, email, func() string {
+			recordedMu.Lock()
+			defer recordedMu.Unlock()
+			return recorded
+		})
+	})
+
+	eng := automatedWholesaleEngine(t)
+	merchant, storeID, _ := wholesaleScope()
+	owner := asSiteOwner(merchant)
+	// The store set up as the pack requires: a settings row tied to an
+	// organization, through a site of it bound to the store.
+	openApplications(t, eng, owner, storeID, wholesalepack.AdapterCustomerTag)
+
+	// THE CONNECTOR'S ROW FOR THE STORE, over the one the set-up seeded: the
+	// development store's domain and a reference to its token, which the
+	// registry below answers. The token is never written to the database.
+	tokenRef := "wholesale-live-admin-token-" + storeID
+	row, _ := json.Marshal(map[string]any{
+		"domain": shop, "name": "Wholesale live test store", "adminTokenRef": tokenRef,
+		"apiVersion": generated.APIVersion, "status": "live",
+	})
+	if _, err := eng.Execute(seedCtx(), `insert(`+quote("v1:shopify:store")+`, id=`+quote(storeID)+`, payload=`+string(row)+`)`); err != nil {
+		t.Fatalf("seed the connector's store row: %v", err)
+	}
+	registry := shopify.NewStoreRegistry(eng, func(_ context.Context, name string) (string, error) {
+		if name == tokenRef {
+			return token, nil
+		}
+		return "", fmt.Errorf("no such secret %q", name)
+	})
+	conn := shopify.NewConnector(eng, slog.New(slog.DiscardHandler), registry, admin)
+	if err := eng.RegisterIntegration(tagRouteOnly{inner: shopify.NewIntegration(conn)}); err != nil {
+		t.Fatalf("register the Shopify tag route: %v", err)
+	}
+
+	if held, err := live.holders(ctx, email); err != nil || len(held) != 0 {
+		t.Fatalf("the invented address %s must be held by nobody before the test (held by %v, %v); nothing was created", email, held, err)
+	}
+	recordedMu.Lock()
+	armed = true
+	recordedMu.Unlock()
+
+	appID := submit(t, eng, owner, storeID, "Live Tag Trading", email)
+	decide(t, eng, asDecider(t, eng, merchant), appID, wholesalepack.TransitionApprove, merchant, "approved on a development store")
+
+	var ent map[string]any
+	deadline := time.Now().Add(liveGrantWait)
+	for time.Now().Before(deadline) {
+		rows := wsRows(t, eng, owner, `query entitlementForApplication(applicationId: `+quote("v1:wholesale:application:"+appID)+`)`)
+		if len(rows) > 0 {
+			if id := asString(rows[0]["shopifyCustomerId"]); id != "" {
+				recordedMu.Lock()
+				recorded = id
+				recordedMu.Unlock()
+			}
+			if state := rows[0]["state"]; state == wholesalepack.EntitlementGranted || state == wholesalepack.EntitlementFailed {
+				ent = rows[0]
+				break
+			}
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if ent == nil {
+		t.Fatalf("within %s of the approval no entitlement was granted or failed; the client's automation did not provision it", liveGrantWait)
+	}
+	if ent["state"] != wholesalepack.EntitlementGranted {
+		t.Fatalf("the entitlement is %v with code %v: %v", ent["state"], ent["errorCode"], ent["error"])
+	}
+	if got := asString(ent["adapter"]); got != wholesalepack.AdapterCustomerTag {
+		t.Fatalf("adapter = %q, want %s", got, wholesalepack.AdapterCustomerTag)
+	}
+	customerID := asString(ent["shopifyCustomerId"])
+	if customerID == "" || ent["customerCreated"] != true {
+		t.Fatalf("the granted entitlement records customer %q, created %v; want the customer the grant created for a buyer the store had none for", customerID, ent["customerCreated"])
+	}
+	if ref := asString(ent["reference"]); ref != "customer="+customerID+";tag="+wholesalepack.DefaultWholesaleTag {
+		t.Fatalf("reference = %q, want customer=%s;tag=%s", ref, customerID, wholesalepack.DefaultWholesaleTag)
+	}
+
+	// AND THE STORE SAYS SO: the customer holds the address and carries the tag.
+	data, err := live.ask(ctx, liveTagCustomerDoc, "WholesaleLiveCustomer", map[string]any{"id": customerID})
+	if err != nil {
+		t.Fatalf("read customer %s back: %v", customerID, err)
+	}
+	customer, _ := data["customer"].(map[string]any)
+	if customer == nil {
+		t.Fatalf("customer %s, which the entitlement records, is not on the store", customerID)
+	}
+	address, _ := customer["defaultEmailAddress"].(map[string]any)
+	if got, _ := address["emailAddress"].(string); !strings.EqualFold(got, email) {
+		t.Fatalf("customer %s holds %q, want the invented address %s", customerID, got, email)
+	}
+	tags, _ := customer["tags"].([]any)
+	carried := 0
+	for _, tag := range tags {
+		if strings.EqualFold(fmt.Sprint(tag), wholesalepack.DefaultWholesaleTag) {
+			carried++
+		}
+	}
+	if carried != 1 {
+		t.Fatalf("customer %s carries %s %d times (tags %v), want once", customerID, wholesalepack.DefaultWholesaleTag, carried, tags)
 	}
 }

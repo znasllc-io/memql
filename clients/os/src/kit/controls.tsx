@@ -120,7 +120,8 @@ export function Input({
   invalid = false,
   describedBy,
 }: {
-  type?: "text" | "password";
+  /** `email` asks for an address: a phone offers its address keyboard. */
+  type?: "text" | "password" | "email";
   value: string;
   onChange: (next: string) => void;
   /** Explicit confirmation, including choosing the current value. Dismissal does not commit. */

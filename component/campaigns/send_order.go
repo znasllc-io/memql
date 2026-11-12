@@ -112,7 +112,9 @@ func (w *Worker) handleSendOrderMessage(ctx context.Context, args map[string]any
 	// leave from the installation's sender; the identity read decides whether
 	// the one named is that sender, and anything else stays refused.
 	installation, _ := args["installationSender"].(bool)
-	return w.sendToRecipientOnce(ctx, send, singleSend{deferWhenLimited: true, orderRecipient: &recipient, installationSender: installation})
+	// NOT deferWhenLimited: an order message that meets the rate limit is answered
+	// as limited and the caller sends it again (send_to_recipient.go).
+	return w.sendToRecipientOnce(ctx, send, singleSend{orderRecipient: &recipient, orderGid: orderGid, installationSender: installation})
 }
 
 // orderRecipientID is the stable id of the recipient one order entitles: per

@@ -9,7 +9,9 @@ import { describe, expect, it } from "vitest";
 // saved from a finished email in the editor. The OS reads templates, previews
 // them, and puts them away or brings them back -- and that is all. So the
 // template save appears in exactly one place, the lifecycle hook in
-// apps/email/actions.ts, and every action it passes is archive or restore. The
+// apps/email/actions.ts, and every action it passes is archive, restore or
+// classify (a change of purpose, X10, which the engine makes on the email it
+// holds) -- none of them carries a subject, a body or a document. The
 // layout save appears nowhere: the OS has no layout lifecycle at all (the
 // Layouts view is gone, and a layout is only ever read, to name the one a
 // template was made from). A placeholder draft ("Your subject", "Your message")
@@ -95,8 +97,11 @@ function offences(files: readonly Source[]): string[] {
       if (match[1] === undefined) continue;
       const args = argumentsFrom(file.text, file.text.indexOf("(", at));
       const actions = [...args.matchAll(/\baction\s*:\s*([^,}\n]+)/g)].map((found) => found[1]!.trim());
-      if (actions.length !== 1 || !/^["'](archive|restore)["']$/.test(actions[0]!)) {
+      if (actions.length !== 1 || !/^["'](archive|restore|classify)["']$/.test(actions[0]!)) {
         out.push(`${where}: ${name} with action ${actions.join(", ") || "(none)"}`);
+      } else if (/\b(subject|textBody|htmlBody|document|blocks|preheader)\s*:/.test(args) || /\bcontent\s*:\s*(?!\{\s*\})/.test(args)) {
+        // The OS sends no content of a template: what is saved is the engine's.
+        out.push(`${where}: ${name} with content`);
       }
     }
   }
@@ -108,14 +113,14 @@ describe("templates and layouts are made in the editor", () => {
     const tree = sources();
     expect(offences(tree)).toEqual([]);
 
-    // The scan reaches the hook's own calls: one archive and one restore.
+    // The scan reaches the hook's own calls: one archive, one restore and one classify.
     const actions = tree.find((file) => file.path === "apps/email/actions.ts")!.text;
     for (const [name, { hook }] of Object.entries(ALLOWED)) {
       const span = hookSpan(actions, hook);
       expect(span, hook).not.toBeNull();
       const body = actions.slice(span![0], span![1]);
       const calls = [...body.matchAll(new RegExp(`\\b${name}\\s*\\(`, "g"))].map((found) => argumentsFrom(body, body.indexOf("(", found.index ?? 0)));
-      expect(calls.map((args) => /action\s*:\s*["'](\w+)["']/.exec(args)?.[1])).toEqual(["archive", "restore"]);
+      expect(calls.map((args) => /action\s*:\s*["'](\w+)["']/.exec(args)?.[1])).toEqual(["archive", "restore", "classify"]);
     }
   });
 
@@ -128,6 +133,12 @@ describe("templates and layouts are made in the editor", () => {
     const inHook = actions.text.replace(/(\nexport function useTemplateLifecycle\b[^\n]*\n)/, '$1  void query.campaignSaveTemplate({ action: "save" });\n');
     expect(inHook).not.toBe(actions.text);
     expect(offences([{ ...actions, text: inHook }])).toEqual([expect.stringMatching(/campaignSaveTemplate with action "save"$/)]);
+
+    // A change of purpose that carries the email shown, in any spelling.
+    for (const planted of ["content: record", 'content: { subject: "x" }', "document: shown", 'subject: "x"']) {
+      const carrying = actions.text.replace(/(\nexport function useTemplateLifecycle\b[^\n]*\n)/, `$1  void query.campaignSaveTemplate({ ${planted}, action: "classify", purpose });\n`);
+      expect(offences([{ ...actions, text: carrying }]), planted).toEqual([expect.stringMatching(/campaignSaveTemplate with content$/)]);
+    }
 
     // A template whose action is decided at run time.
     const decided = actions.text.replace(/(\nexport function useTemplateLifecycle\b[^\n]*\n)/, "$1  void query.campaignSaveTemplate({ templateId, action: chosen });\n");

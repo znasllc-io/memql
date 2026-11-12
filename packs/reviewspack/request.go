@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -42,6 +43,11 @@ const (
 	RefusalLinkExpired = "link_expired"
 	RefusalLinkUsed    = "link_used"
 )
+
+// NotThisSitesLink is the one answer the form's construct gives a caller who
+// is not the owner of the site it names, or who names a site the pack does not
+// admit for the store: link_invalid, before the token is judged.
+const NotThisSitesLink = "the link cannot be used through this site"
 
 // LinkRefusals is every code the link path may refuse with.
 var LinkRefusals = []string{RefusalLinkExpired, RefusalLinkUsed, RefusalLinkInvalid}
@@ -228,6 +234,17 @@ func (p *Provider) openLink(ctx context.Context, storeID, token, productHandle s
 // edited, through the buyer's link.
 func (p *Provider) submitFromLink(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	storeID := strings.TrimSpace(asString(args["storeId"]))
+	siteID := strings.TrimSpace(asString(args["siteId"]))
+	// THE SITE FIRST, and before the token: the construct writes as the owner
+	// of the site the post arrived through, so it is for that site's owner and
+	// for a site the pack admits for the store. The shopper handler runs it so,
+	// as the site's owner; a caller naming it directly gets the same one answer
+	// for every other site and every other caller, which says nothing about the
+	// token.
+	site, err := p.sitePostedThrough(ctx, siteID, storeID)
+	if err != nil {
+		return nil, err
+	}
 	lk, err := p.openLink(ctx, storeID, asString(args["requestToken"]), asString(args["productHandle"]))
 	if err != nil {
 		return nil, err
@@ -245,7 +262,6 @@ func (p *Provider) submitFromLink(ctx context.Context, args map[string]any, _ in
 		"verifiedBuyer": true,
 		"revision":      revision,
 	}
-	siteID := strings.TrimSpace(asString(args["siteId"]))
 	setIfPresent(write, "siteId", siteID)
 	setIfPresent(write, "title", strings.TrimSpace(asString(args["title"])))
 	setIfPresent(write, "authorName", strings.TrimSpace(asString(args["authorName"])))
@@ -254,15 +270,41 @@ func (p *Provider) submitFromLink(ctx context.Context, args map[string]any, _ in
 		write["rating"] = rating
 	}
 	// THE ORGANIZATION IS THE SITE'S, copied onto the row so the store's
-	// people read and moderate it (the account grant). A site that cannot be
-	// read leaves the row untied: its owner's and the operators'.
-	if site := p.siteRow(ctx, siteID); site != nil {
-		setIfPresent(write, "accountId", strings.TrimSpace(asString(site["accountId"])))
-	}
+	// people read and moderate it (the account grant). A site of no
+	// organization leaves the row untied: its owner's and the operators'.
+	setIfPresent(write, "accountId", strings.TrimSpace(asString(site["accountId"])))
 	if err := p.writer.Write(ctx, "putReview", write); err != nil {
 		return nil, err
 	}
 	return receipt("v1:reviews:submitted", lk.reviewID, map[string]any{"reviewId": lk.reviewID, "revision": revision})
+}
+
+// sitePostedThrough is the site a form post names, once the caller is its
+// owner and the pack admits it for the store (siteForStore): a site that serves
+// the store and belongs to the store's organization. Every other case -- no
+// site, no such site, a site of another store or organization, a caller who is
+// not its owner, no session -- is one refusal, NotThisSitesLink. A read that
+// fails is returned as the fault it is.
+func (p *Provider) sitePostedThrough(ctx context.Context, siteID, storeID string) (map[string]any, error) {
+	notThis := refuse(RefusalLinkInvalid, NotThisSitesLink)
+	access, ok := auth.AccessFromContext(ctx)
+	if !ok || access == nil || access.IsAnonymousActor() || strings.TrimSpace(access.UserId) == "" {
+		return nil, notThis
+	}
+	site, err := p.siteForStore(ctx, siteID, storeID)
+	if errors.Is(err, errSiteNotAdmitted) {
+		return nil, notThis
+	}
+	// A FAULT IS NOT A REFUSAL: it goes back as it is, and the shopper handler
+	// tells the shopper its general failure. It depends on nothing about which
+	// site was named or whose it is, so it reveals neither.
+	if err != nil {
+		return nil, err
+	}
+	if !sameUser(asString(site["ownerUserId"]), access.UserId) {
+		return nil, notThis
+	}
+	return site, nil
 }
 
 // draftForLink answers what the buyer wrote through their link, so reopening
@@ -293,16 +335,30 @@ func (p *Provider) draftForLink(ctx context.Context, args map[string]any, _ int)
 	return receipt("v1:reviews:draft", lk.reviewID, body)
 }
 
-// siteRow reads one site under the caller's actor; nil when it cannot.
+// siteRow reads one site under the caller's actor; nil when it cannot, a
+// failed read included. For a caller that refuses on nil (reviewsIssueRequest).
 func (p *Provider) siteRow(ctx context.Context, siteID string) map[string]any {
-	if siteID == "" {
+	site, err := p.siteRowErr(ctx, siteID)
+	if err != nil {
 		return nil
+	}
+	return site
+}
+
+// siteRowErr reads one site under the caller's actor: nil and no error when no
+// such site is readable, and the read's own error when the read failed.
+func (p *Provider) siteRowErr(ctx context.Context, siteID string) (map[string]any, error) {
+	if siteID == "" {
+		return nil, nil
 	}
 	rows, err := p.rowsFor(ctx, "siteById", map[string]string{"siteId": siteID})
-	if err != nil || len(rows) == 0 {
-		return nil
+	if err != nil {
+		return nil, fmt.Errorf("reviews: reading site %q: %w", siteID, err)
 	}
-	return rows[0]
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return rows[0], nil
 }
 
 // ---------------------------------------------------------------- issuing

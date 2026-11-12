@@ -196,6 +196,8 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "campaigns/queries.memql", Name: "providerConsentById"}:              true,
 		{Path: "campaigns/mutations.memql", Name: "recordProviderDelivery"}:         true,
 		{Path: "campaigns/mutations.memql", Name: "recordProviderBounce"}:           true,
+		// The row lane's status read; reached only from campaignRowMessageStatus, which refuses a call without internal origin.
+		{Path: "campaigns/queries.memql", Name: "deliveriesByRequestIds"}: true,
 		// Durable email automation coordination; public callers use gated capabilities.
 		{Path: "campaigns/queries.memql", Name: "deferredSingleSendById"}:         true,
 		{Path: "campaigns/mutations.memql", Name: "settleDeferredSingleSend"}:     true,

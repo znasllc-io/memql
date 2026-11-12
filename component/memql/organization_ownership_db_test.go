@@ -478,3 +478,74 @@ func TestOrganizationDecisionsForAPersonAreTheirsNotTheCallers(t *testing.T) {
 		t.Fatalf("the person's resolution replaced the caller's own scope on the caller's request: %+v", scope)
 	}
 }
+
+// A lane's ledger row is about a person a pack's row (or an order) names, and
+// that person has no recipient row: the recipient reference is waived for it
+// when, and only when, the row says which row it is about (rowConcept and
+// rowId, which only server code writes). Every other reference and the
+// organization itself are still held.
+func TestALaneLedgerRowIsExemptFromTheRecipientReferenceAndFromNothingElse(t *testing.T) {
+	engine, _, _ := sharedReadMergeEngine(t)
+	previousGrants, previousMembers := auth.InstalledGrantSource(), auth.InstalledMembershipSource()
+	engine.InstallGrantResolution()
+	t.Cleanup(func() { auth.SetGrantSource(previousGrants); auth.SetMembershipSource(previousMembers) })
+	suffix := uniqueSuffix("lane")
+	acme, beta := "acme-"+suffix, "beta-"+suffix
+	merchant, other := "merchant-"+suffix, "other-"+suffix
+	seedPrincipal(t, engine, merchant, auth.RoleWriter)
+	seedPrincipal(t, engine, other, auth.RoleWriter)
+	for _, account := range []string{acme, beta} {
+		if err := organizationInsert(t, engine, groupSeedCtx(), conceptAccountsAccount, account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"}); err != nil {
+			t.Fatal(err)
+		}
+		seedGroup(t, engine, "g-"+account, account, "account", account)
+	}
+	seedMembership(t, engine, "g-"+acme, merchant, "active")
+	seedMembership(t, engine, "g-"+beta, other, "active")
+	// The borrowed merchant: a real person of the organization, not synthetic,
+	// writing through the server's own origin as a trusted job does.
+	job := auth.ContextWithInternalOrigin(rankActorCtx(merchant, auth.RoleWriter))
+	template := func(ctx context.Context, id, account string) {
+		t.Helper()
+		if _, err := engine.Execute(ctx, fmt.Sprintf(`mutation createTemplate(templateId: %s, accountId: %s, name: "Lane", subject: "Subject", textBody: "Hello", versionTime: "2029-01-01T00:00:00Z")`, langparser.QuoteString(id), langparser.QuoteString(account))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	template(job, "tpl-"+suffix, acme)
+	template(auth.ContextWithInternalOrigin(rankActorCtx(other, auth.RoleWriter)), "tpl-beta-"+suffix, beta)
+
+	delivery := func(ctx context.Context, request, templateID string, row map[string]string) error {
+		args := fmt.Sprintf(`recipientId: %s, email: "person@example.com", status: "sent", attempts: 1, accountId: %s, requestId: %s, templateId: %s`,
+			langparser.QuoteString("row-"+request), langparser.QuoteString(acme), langparser.QuoteString(request), langparser.QuoteString(templateID))
+		for _, key := range []string{"rowConcept", "rowId", "rowKind"} {
+			if v, ok := row[key]; ok {
+				args += ", " + key + ": " + langparser.QuoteString(v)
+			}
+		}
+		_, err := engine.Execute(ctx, "mutation recordCampaignDelivery("+args+")")
+		return err
+	}
+	lane := map[string]string{"rowConcept": "v1:test:laneRow", "rowId": "lane-row-" + suffix, "rowKind": "approved"}
+
+	if err := delivery(job, "lane-sent-"+suffix, "tpl-"+suffix, lane); err != nil {
+		t.Fatalf("a lane's ledger row was refused: %v", err)
+	}
+	if err := delivery(job, "lane-foreign-"+suffix, "tpl-beta-"+suffix, lane); err == nil || !strings.Contains(err.Error(), "organization_mismatch: templateId must belong to the same organization") {
+		t.Fatalf("a lane's ledger row naming another organization's template: %v", err)
+	}
+	if err := delivery(job, "lane-norow-"+suffix, "tpl-"+suffix, map[string]string{"rowConcept": "v1:test:laneRow", "rowId": ""}); err == nil || !strings.Contains(err.Error(), "organization_reference: recipientId is unavailable") {
+		t.Fatalf("a ledger row with a concept and no row id: %v", err)
+	}
+	if err := delivery(job, "lane-plain-"+suffix, "tpl-"+suffix, nil); err == nil || !strings.Contains(err.Error(), "organization_reference: recipientId is unavailable") {
+		t.Fatalf("a ledger row naming no recipient row and no lane row: %v", err)
+	}
+	if err := delivery(rankActorCtx(merchant, auth.RoleWriter), "lane-client-"+suffix, "tpl-"+suffix, lane); err == nil {
+		t.Fatal("a client wrote a delivery through the server's mutation")
+	}
+	raw := map[string]any{"recipientId": "row-raw", "email": "person@example.com", "status": "pending", "accountId": acme, "requestId": "lane-raw-" + suffix,
+		"templateId": "tpl-" + suffix, "rowConcept": "v1:test:laneRow", "rowId": "lane-row-" + suffix, "ownerUserId": merchant}
+	if err := organizationInsert(t, engine, rankActorCtx(merchant, auth.RoleWriter), "v1:campaigns:delivery", "raw-"+suffix, raw); err == nil ||
+		!strings.Contains(err.Error(), "v1:campaigns:delivery: @serverWritten requires internal origin") {
+		t.Fatalf("a client's raw insert of a lane's ledger row was not refused as server-written: %v", err)
+	}
+}

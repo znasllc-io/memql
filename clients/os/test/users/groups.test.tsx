@@ -271,6 +271,7 @@ describe("an organization's apps on its group page", () => {
     grantRow("owner", "read", "app:email"),
     grantRow("owner", "read", "app:deployables"),
     grantRow("owner", "execute", "app:deployables/reviews"),
+    grantRow("owner", "execute", "app:deployables/wholesale"),
     grantRow("owner", "execute", "app:deployables/deploy"),
     grantRow("owner", "read", "app:files"),
     grantRow("owner", "read", "app:logs"),
@@ -285,6 +286,7 @@ describe("an organization's apps on its group page", () => {
         "group:g-acme": [
           groupAccessRow("g-acme", "acct-acme", "read", "app:deployables"),
           groupAccessRow("g-acme", "acct-acme", "execute", "app:deployables/reviews"),
+          groupAccessRow("g-acme", "acct-acme", "execute", "app:deployables/wholesale"),
           // A deny is not an app its people can open: Settings > Access shows it.
           groupAccessRow("g-acme", "acct-acme", "read", "app:logs", false),
         ],
@@ -293,6 +295,7 @@ describe("an organization's apps on its group page", () => {
         "group:g-acme": [
           subjectGrantRow({ id: "grant-door", subjectKind: "group", subjectId: "g-acme", verb: "read", resourceType: "app:deployables" }),
           subjectGrantRow({ id: "grant-reviews", subjectKind: "group", subjectId: "g-acme", verb: "execute", resourceType: "app:deployables/reviews" }),
+          subjectGrantRow({ id: "grant-wholesale", subjectKind: "group", subjectId: "g-acme", verb: "execute", resourceType: "app:deployables/wholesale" }),
           subjectGrantRow({ id: "grant-logs", subjectKind: "group", subjectId: "g-acme", verb: "read", resourceType: "app:logs", effect: "deny" }),
         ],
       },
@@ -343,8 +346,8 @@ describe("an organization's apps on its group page", () => {
     const view = await openAcmeInShell(connection);
     const list = await screen.findByRole("list", { name: "Apps its people can open" });
     expect(connection.query.effectiveAccessForSubject.mock.calls[0]?.[0]).toEqual({ subjectKind: "group", subjectId: "g-acme" });
-    // Deployables, and the reviews part beneath it; the denied Logs is not here.
-    expect(appRows(list)).toEqual(["Deployables | Remove", "  reviews | Remove"]);
+    // Deployables, and the reviews and wholesale parts beneath it; the denied Logs is not here.
+    expect(appRows(list)).toEqual(["Deployables | Remove", "  reviews | Remove", "  wholesale | Remove"]);
 
     // ADD AN APP: the catalog's apps the group does not already allow.
     await click(screen.getByRole("button", { name: "Add an app" }));
@@ -358,7 +361,7 @@ describe("an organization's apps on its group page", () => {
     await waitFor(() => expect(connection.query.grantSet).toHaveBeenCalledTimes(1));
     expect(connection.query.grantSet.mock.calls[0]?.[0]).toEqual({ subjectKind: "group", subjectId: "g-acme", verb: "read", resourceType: "app:email", effect: "allow" });
     // What the cluster holds is read again, and is the list.
-    await waitFor(() => expect(appRows(screen.getByRole("list", { name: "Apps its people can open" }))).toEqual(["Email | Remove", "Deployables | Remove", "  reviews | Remove"]));
+    await waitFor(() => expect(appRows(screen.getByRole("list", { name: "Apps its people can open" }))).toEqual(["Email | Remove", "Deployables | Remove", "  reviews | Remove", "  wholesale | Remove"]));
     expect(screen.queryByRole("listbox", { name: "Apps to add" })).toBeNull();
     // The keyboard is back on the control the picker was opened from.
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Add an app" }));
@@ -367,7 +370,7 @@ describe("an organization's apps on its group page", () => {
     const reviews = within(screen.getByRole("list", { name: "Apps its people can open" })).getAllByRole("listitem")[2]!;
     await click(within(reviews).getByRole("button", { name: "Remove reviews from Acme" }));
     await waitFor(() => expect(connection.query.grantRevoke).toHaveBeenCalledWith({ grantId: "grant-reviews" }));
-    await waitFor(() => expect(appRows(screen.getByRole("list", { name: "Apps its people can open" }))).toEqual(["Email | Remove", "Deployables | Remove"]));
+    await waitFor(() => expect(appRows(screen.getByRole("list", { name: "Apps its people can open" }))).toEqual(["Email | Remove", "Deployables | Remove", "  wholesale | Remove"]));
     view.unmount();
   });
 
@@ -392,7 +395,7 @@ describe("an organization's apps on its group page", () => {
     // which every grant write takes: the acts are absent, never disabled.
     const view = await openAcmeInShell(acmeSeed(), ownerWithout("update", "principal"));
     const list = await screen.findByRole("list", { name: "Apps its people can open" });
-    expect(appRows(list)).toEqual(["Deployables", "  reviews"]);
+    expect(appRows(list)).toEqual(["Deployables", "  reviews", "  wholesale"]);
     expect(screen.queryByRole("button", { name: "Add an app" })).toBeNull();
     view.unmount();
   });

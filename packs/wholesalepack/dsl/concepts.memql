@@ -58,6 +58,16 @@
 // through and is refused as a form field, which is the half of D9 that
 // cannot be expressed in a schema.
 //
+// # EVERY ROW HERE IS WRITTEN BY THE PACK, AND ONLY BY THE PACK (ruling 50)
+//
+// Every concept below is @serverWritten: the engine refuses any write of it
+// without internal origin, the public insert() included, which never consults a
+// mutation's @serverOnly. The pack's own writer (reader.go's engineWriter) is
+// the one place that stamps internal origin, inline on its one call, after the
+// builtin in front of it has judged the caller. Without this a client could
+// write an acceptance, a link carrying a token it chose, a decision or a terms
+// version around every check the builtins make.
+//
 // # STOREFRONT PACK CONVENTION
 //
 // Concepts, mutations, queries, shapes, tools and builtins -- NO
@@ -67,41 +77,50 @@
 // lets a client lay its own process over the pack: there is no process
 // here to disagree with.
 
-@version("1.0.0")
+@version("1.2.0")
 @description("A wholesale application: somebody asking one store for trade terms. Its STATES are submitted, approved, rejected and revoked, and they are DERIVED from the append-only decision log rather than stored here -- v1:wholesale:applicationDecision carries each transition and the wholesaleApplicationState builtin folds them. There is deliberately no mutable state field: an application whose state was overwritten would lose why it was refused the moment somebody approved it, which is the one thing a trade desk needs to look back at.")
 @displayCard(primary="companyName", secondary="applicantEmail", tertiary="storeId")
-@rowAuthz(owner="ownerUserId", clusterOwner)
-@belongsTo(account, via="storeId", parent="v1:shopify:store")
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept application {
   ownerUserId    string!   @description("v1:identity:user.id of the MERCHANT this application belongs to -- the owner of the deployable it was submitted through, NOT the applicant. A shopper is nobody to MemQL: they have no user row, no session and no actor (epic memql#5532, issue memql#5550), so the applicant is applicantName and applicantEmail below and nothing else. On the shopper path this stamps from actor.userId under the site owner's BORROWED authority; on the authenticated path it is the calling user, which is what an operator or an importing job writes as.")
   storeId        string!   @description("The v1:shopify:store this application was made against (design D9). Stamped server-side from the binding the write arrived through -- the serving binding, or the PREVIEW binding when the submission was made while exercising a candidate version -- and never accepted from a form: component/memql/shopper_surface.go refuses a declared field with this name, and the bff stamps it after the declared fields so a form-supplied copy cannot win. Every storefront read filters on it.")
-  siteId         string    @description("The v1:platform:site this application was submitted through. Provenance rather than scope: storeId above is what reads filter on, because two deployables may serve one store. Empty on an application written through the authenticated path, which arrived through no site at all.")
+  siteId         string    @description("The v1:platform:site this application was submitted through: the site the store admitted it by (a site of the organization its program is tied to). Reads still filter on storeId above, because two deployables may serve one store. Empty on an application written through the authenticated path, which arrived through no site at all.")
   companyName    string!   @description("The business applying. PART OF THE MINIMUM: a wholesale application with no business is a consumer signup, and the native-B2B adapter has nothing to name the company it creates. Data, never verified.")
   applicantName  string!   @description("The person applying, as they typed it. DATA, never an identity: nothing authenticates it and no read is scoped by it.")
   applicantEmail string!   @description("The applicant's email, unverified. DATA, never an identity. It is how a decision reaches them and how an entitlement adapter finds the Shopify customer to entitle, and it is why the public-facing reads of this pack project nothing at all -- an application is somebody's business contact details and there is no storefront read that returns one.")
-  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
+  accountId      string    @description("The v1:accounts:account organization of the site this application arrived on, stamped server-side from that site and never accepted from a form (it is a reserved shopper name). The tier's account arm: the people of that organization read the application without owning it. Every application written now carries it: a store takes applications only through a site of its program's organization. Older rows can hold it empty -- one written before this version, until wholesaleBackfillAccounts ties it, or one from a site with no organization, which no store admits any longer -- and those stay their owner's and the operators', as before.")
+  source         enum("storefront", "staff")  @description("How the application arrived: storefront for a shopper's form post, staff for one a person of the store added. Absent reads as storefront, which is what every row written before this field was.")
+  addedBy        string    @description("v1:identity:user.id of the person who added it, for source staff. Empty for a storefront application.")
+  submittedAt    datetime  @description("When the application arrived -- the shopper's post, or a person of the store adding the buyer -- by the engine's clock. Written once, with the row, and carried by every later write of it, so it is when the application was made however often the row is written again. A row written before this field holds none and reads by its own write time, until wholesaleBackfillAccounts carries that time into it.")
 }
 
-@version("1.0.0")
-@description("An append-only decision on a wholesale application, in the manner of v1:reviews:moderationAction. A new row is a new decision; there is no in-place update and no undo-by-overwrite, so WHY an application was refused survives the next decision. decidedBy is a Client principal -- a Provider operator is refused on the write path exactly as reviewspack's ClientMayModerate refuses one. WHO may approve, in what order and against what threshold is deliberately NOT here: dsl/commerce already ships approvalChain for a client that wants one, and a client that does not must not have to edit this pack to say so.")
+@version("1.2.0")
+@description("An append-only decision on a wholesale application, in the manner of v1:reviews:moderationAction. A new row is a new decision; there is no in-place update and no undo-by-overwrite, so WHY an application was refused survives the next decision. decidedBy is the person on the store's side who called -- the cluster's own operators are refused on the write path exactly as the reviews pack refuses their moderation. The row belongs to the application's merchant and its organization, so the merchant and the store's people read every decision whoever made it. WHO may approve, in what order and against what threshold is deliberately NOT here: dsl/commerce already ships approvalChain for a client that wants one, and a client that does not must not have to edit this pack to say so.")
 @displayCard(primary="transition", secondary="applicationId", tertiary="decidedBy")
-@rowAuthz(owner="decidedBy", clusterOwner)
-@belongsTo(account, via="applicationId", parent="v1:wholesale:application")
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept applicationDecision {
   applicationId string!  @description("v1:wholesale:application.id this decision applies to.")
   storeId       string!  @description("The store the decided application belongs to (design D9), copied from that application by the Go capability rather than supplied. A decision scoped to a store its subject is not on would be a decision against somebody else's trade desk.")
   transition    enum("approve", "reject", "revoke")!  @description("The act, not the resulting state. approve and reject are legal from submitted; revoke is legal only from approved. The Go capability folds the decision log to find the current state and refuses an illegal transition by name -- a cross-row read no mutation body can make.")
-  decidedBy     string!  @description("v1:identity:user.id of the Client principal that authored this decision. Provider operators are refused on the write path.")
+  decidedBy     string!  @description("v1:identity:user.id of the person who authored this decision: always the caller, stamped from the actor and never taken from an argument. The cluster's own operators are refused on the write path.")
+  ownerUserId   string   @description("The application's merchant, copied off it. The tier's owner arm: the merchant reads every decision on their applications, whoever decided. Empty on a row written before this version, until wholesaleBackfillAccounts names it.")
+  accountId     string   @description("The application's organization, copied off it, never supplied. Empty for a decision on an untied application.")
   principalKind enum("client")!  @description("The only expressible principal kind is client. provider is inexpressible -- the enum does not contain it.")
   note          string   @description("Optional client-visible reason. THE ONE FREE-TEXT FIELD IN THE PACK, and it earns its place: append-only storage is only worth having if the reason a decision was made is still there after the next one.")
   accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
+  decidedAt     datetime  @description("When the decision was made, by the engine's clock. Written once, with the row, and carried by every later write of it: the log is ordered by it, newest first, and a decision's date is it. A row written before this field holds none and reads by its own write time, until wholesaleBackfillAccounts carries that time into it.")
 }
 
-@version("1.0.0")
-@description("What this pack granted, to whom, against which store, and through which adapter. STATE THE PACK OWNS, never inferred from Shopify: a company that exists over there says nothing about whether THIS pack granted it, and reading entitlement back out of somebody else's system would make an operator's own record of what they granted depend on an API call that can fail. ONE ROW PER APPLICATION at the derived id wholesale:entitlement:<applicationId>, so a re-provision is a new VERSION of one logical row rather than a second row a read would have to choose between -- and 'revoked when' is that version's own createdAt.")
+@version("1.2.0")
+@description("What this pack granted, to whom, against which store, and through which adapter. STATE THE PACK OWNS, never inferred from Shopify: a company that exists over there says nothing about whether THIS pack granted it, and reading entitlement back out of somebody else's system would make an operator's own record of what they granted depend on an API call that can fail. ONE ROW PER APPLICATION at the derived id wholesale-entitlement-<the application's bare id, as a slug> (EntitlementRowID), the same whichever form of the application id the caller named -- and a row written at another id before that rule keeps being written at its own -- so a re-provision is a new VERSION of one logical row rather than a second row a read would have to choose between. WHEN each thing happened is a field of the row (attemptedAt, grantedAt, revokedAt), never the version's write time, which any later write of the row moves.")
 @displayCard(primary="state", secondary="buyerEmail", tertiary="adapter")
-@rowAuthz(owner="ownerUserId", clusterOwner)
-@belongsTo(account, via="applicationId", parent="v1:wholesale:application")
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept entitlement {
   ownerUserId   string!  @description("v1:identity:user.id of the merchant who granted this. Same owner as the application it came from.")
   applicationId string!  @description("v1:wholesale:application.id this entitlement was granted against. One entitlement per application.")
@@ -111,19 +130,120 @@ concept entitlement {
   state         enum("pending", "granted", "failed", "revoked")!  @description("pending means the approval happened and the push has not succeeded yet. granted means the adapter reported success. failed means it reported an error, and the application STAYS APPROVED -- an approval is a decision somebody made, and a push that failed is not a reason to undo it (issue memql#5557). revoked means a later decision took it back.")
   reference     string   @description("What the adapter has to name to undo itself: the Shopify company GID for the native-B2B adapter, the tag it wrote for the plan-independent one. Opaque to the pack, which never parses it.")
   error         string   @description("Why provisioning failed, in the adapter's own words. Set with state failed and cleared on a later success, so a granted entitlement never carries the error of the attempt before it.")
-  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
+  errorCode         string  @description("Why nothing was granted, as a code a screen can show and offer a retry for: no_settings, no_route, scope_missing, plan_ceiling, customer_refused or shopify_error. Empty on a success; every write passes it, so a version never inherits the attempt before it.")
+  shopifyCustomerId string  @description("The Shopify customer GID the grant landed on, when the integration reported one.")
+  customerCreated   bool    @description("True when the grant had to create the Shopify customer rather than find it.")
+  accountId         string  @description("The application's organization, copied off it, so the people who read the application read what was granted. Empty for an untied application.")
+  direction         enum("grant", "revoke")  @description("Which way the attempt that wrote this version went: grant for a provision (the automation's, or Retry access on an approved application), revoke for a removal (the automation's, or Retry access on a revoked one). Written by the pack on every version it writes, and carried forward unchanged by wholesaleBackfillAccounts, which never invents one. A row written before this field has none: its state, and the application's, tell the two apart where they can (wholesaleNotifyStaff).")
+  attempt           int     @description("How many attempts, grant and removal together, have written this row: 1 for the first, and one more for each later provision, removal or retry. A version that is not an attempt -- the backfill's tie -- carries it forward unchanged, so the store's people are told once per attempt that did not land, never once per version. Absent on a row written before this field.")
+  attemptedAt       datetime  @description("When the attempt that wrote this version was made, by the engine's clock: what the application's page dates the access by. Each attempt writes it; a version that is not an attempt -- the backfill's tie -- carries it unchanged. A row written before this field holds none and reads by its own write time, until wholesaleBackfillAccounts carries that time into it.")
+  grantedAt         datetime  @description("When trade prices went on: the attempt that first left the row granted, carried by every later version while it stays granted -- the buyers list's since. A row written before this field holds none and, while granted, reads by its own write time, until wholesaleBackfillAccounts carries that time into it.")
+  revokedAt         datetime  @description("When trade prices were taken away: the attempt that first left the row revoked. A row written before this field holds none and, while revoked, reads by its own write time, until wholesaleBackfillAccounts carries that time into it.")
 }
 
-@version("1.0.0")
+@version("1.1.0")
 @description("Runtime wholesale settings for one store. Held as DATA in the manner of v1:reviews:reviewSettings, so a client opens or closes applications, changes what the storefront says and switches entitlement adapter without a deploy or a .memql edit.")
 @displayCard(primary="applicationsOpen", secondary="entitlementAdapter", tertiary="storeId")
-@rowAuthz(owner="ownerUserId", clusterOwner)
-@belongsTo(account, via="storeId", parent="v1:shopify:store")
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept wholesaleSettings {
   ownerUserId        string!  @description("v1:identity:user.id of the Client that owns this storefront's wholesale settings.")
   storeId            string!  @description("The store these settings govern (design D9). ONE ROW PER STORE, at the derived id wholesale:settings:<storeId>, because a merchant with a live store and a development store must be able to take applications on one while they are closed on the other -- which is the whole of what previewing a storefront means.")
   applicationsOpen   bool!    @description("When false the shopper write path refuses a new application for this store. Flipped at runtime. ABSENT SETTINGS ARE CLOSED, which is the fail-closed reading: a merchant who has never touched this has not asked the internet for their customers' business details.")
   entitlementAdapter string   @description("The named adapter approval provisions through -- shopifyB2B or customerTag as this pack ships. EMPTY MEANS NONE CONFIGURED, and provisioning then refuses by name rather than silently doing nothing: a merchant who approves an application and sees no wholesale prices appear is owed the reason.")
   introText          string   @description("Optional client-authored copy the storefront shows above its application form. Data, not source. It is the only presentation this pack carries, and it carries it for the same reason reviewSettings.criteriaText does: the alternative is a client editing the pack to change a sentence.")
-  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
+  accountId          string   @description("The organization of the store's site, so its people read the store's settings. Empty on a row written before this version, until wholesaleBackfillAccounts ties it.")
+  siteId             string   @description("The v1:platform:site these settings were made for, which the organization gate judges an act on them against. Empty on a row written before this version, until the backfill.")
+  staffEmail         string   @description("The address the store's own people are told at about their wholesale program. One address or none: at most 320 characters, exactly one @ with something on each side and no whitespace (checked when it is written), or empty, which means the store names no address.")
+  termsRequired      bool     @description("Whether an applicant must accept the store's published terms before the application is reviewed. ABSENT IS FALSE. It cannot be on while applications are open unless the terms, the MAP policy and the price sheet each have a published version (v1:wholesale:documentVersion).")
+  linkLifetimeDays   int      @description("How many days a link the store sends an applicant stays usable: 1 to 365. Absent or zero reads as 30.")
+  acceptanceText     string   @description("The sentence an applicant accepts the terms with. Empty reads as the pack's default: I have read and accept the Wholesale Terms and Conditions and the MAP Policy shown above.")
+  senderIdentityId   string   @description("The v1:campaigns:senderIdentity the applicant's emails go out from, an identity of the store's organization. Chosen by the cluster's operators alone. Empty sends from the organization's configured sender.")
+  termsTemplateId    string   @description("The published transactional v1:campaigns:template of the store's organization that carries the terms link to an applicant. Empty means no terms email is sent.")
+  approvedTemplateId string   @description("The published transactional template that tells an approved buyer their trade prices are on, with the price-sheet link. Empty means none is sent.")
+  rejectedTemplateId string   @description("The published transactional template that tells an applicant their application was rejected. Empty means none is sent.")
+  revokedTemplateId  string   @description("The published transactional template that tells a buyer they were removed. Empty means none is sent.")
+}
+
+@version("1.0.0")
+@description("One published version of a document a store shows its wholesale applicants: its terms (terms), its MAP policy (map) or its price sheet (priceSheet). APPEND-ONLY: a new version is a new row and a version is never updated, so what an applicant accepted is still readable after the store publishes the next one. The current version of a kind is its newest. The body is Markdown text held as given, and sha256 is the lowercase hex digest of its UTF-8 bytes, so an acceptance can name exactly what was shown. Written by wholesalePublishDocument as the store's merchant, never by a client.")
+@displayCard(primary="label", secondary="kind", tertiary="storeId")
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
+concept documentVersion {
+  ownerUserId  string!  @description("v1:identity:user.id of the store's merchant: the owner of the site the version was published through. The tier's owner arm.")
+  storeId      string!  @description("The store this document belongs to (design D9), in the bare form the pack writes its new rows in. A reader asks every form of the store id.")
+  accountId    string   @description("The organization of the site the version was published through, so the store's people read it. Empty for a site with no organization.")
+  kind         enum("terms", "map", "priceSheet")!  @description("Which document this is a version of: the terms, the MAP policy or the price sheet.")
+  label        string!  @description("The version's name as the store's people gave it, trimmed: 1 to 120 characters.")
+  body         string!  @description("The document's Markdown text, exactly as published: 1 to 204800 bytes. No file upload; the text is the document.")
+  sha256       string!  @description("The lowercase hex SHA-256 digest of the body's UTF-8 bytes.")
+  publishedBy  string!  @description("v1:identity:user.id of the person who published this version: always the caller, never an argument of the builtin.")
+  publishedAt  datetime!  @description("When this version was published, by the engine's clock.")
+}
+
+@version("1.0.0")
+@description("A private link the store sends one applicant: terms, on which they read the store's current terms and MAP policy and accept them, or priceSheet, on which an approved buyer reads the current price sheet. THE TOKEN IS NEVER STORED, only tokenHash, the hex SHA-256 of it, so no read of this row yields a working link. ONE ROW PER APPLICATION AND PURPOSE at the derived id wholesale-link-<purpose>-<the application's bare id, as a slug> (PrivateLinkRowID): a link sent again is a new VERSION of that row with a new token, which is what makes the token before it refused. Written by the pack as the application's merchant, never by a client. A new version publishes graph.node.created again with firstVersion false.")
+@displayCard(primary="purpose", secondary="applicationId", tertiary="expiresAt")
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
+concept privateLink {
+  ownerUserId    string!    @description("v1:identity:user.id of the application's merchant, copied off the application in canonical form. The shopper path reads the link under the site owner's borrowed authority, which is this person.")
+  storeId        string!    @description("The store the application belongs to (design D9), in the bare form the pack writes its new rows in. A token is looked up only within the store the request arrived for, so a token of another store finds nothing.")
+  accountId      string     @description("The application's organization, copied off it, so the store's people read the link's dates.")
+  siteId         string     @description("The site the application arrived on, copied off it. Provenance.")
+  applicationId  string!    @description("v1:wholesale:application.id this link is for, in canonical form.")
+  purpose        enum("terms", "priceSheet")!  @description("What the link opens: terms, the terms and the MAP policy to read and accept, or priceSheet, the current price sheet for an approved buyer.")
+  tokenHash      string!    @description("The lowercase hex SHA-256 of the link's token. The token itself is never stored, logged or answered to the store's people.")
+  issuedAt       datetime!  @description("When this version of the link was made, by the engine's clock.")
+  expiresAt      datetime   @description("When a terms link stops working: issuedAt plus the store's linkLifetimeDays. A price-sheet link has none: it opens while the buyer stays approved and their access granted.")
+  usedAt         datetime   @description("When the terms were accepted through this link; a terms link that has been used is refused as link_used. Never set on a price-sheet link.")
+}
+
+@version("1.0.0")
+@description("One applicant's acceptance of a store's terms and MAP policy, and its evidence: who typed their name, when, against exactly which versions (each named by its id and the SHA-256 of its body), with which sentence, and from which address and browser as the storefront's edge saw them. WRITTEN ONCE, at the derived id wholesale-acceptance-<the application's bare id, as a slug> (AcceptanceRowID), and fenced on that row being absent, so of two posts at once one is recorded and the other is told the link is used. Written by the pack as the application's merchant, never by a client.")
+@displayCard(primary="signedName", secondary="applicationId", tertiary="acceptedAt")
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
+concept acceptance {
+  ownerUserId     string!    @description("v1:identity:user.id of the application's merchant, copied off the application in canonical form.")
+  storeId         string!    @description("The store the application belongs to (design D9), in the bare form the pack writes its new rows in.")
+  accountId       string     @description("The application's organization, copied off it, so the store's people read the acceptance.")
+  applicationId   string!    @description("v1:wholesale:application.id that accepted, in canonical form.")
+  applicantEmail  string!    @description("The applicant's email, copied off the application when they accepted. Unverified data, never an identity.")
+  signedName      string!    @description("The name the applicant typed to accept, trimmed and otherwise as typed.")
+  acceptedAt      datetime!  @description("When the acceptance was recorded, by the engine's clock.")
+  termsVersionId  string!    @description("v1:wholesale:documentVersion.id of the terms version accepted: the store's current one when the acceptance was written.")
+  termsSha256     string!    @description("The SHA-256 of that terms version's body, which the applicant's post named and the pack checked equal to the current version's.")
+  mapVersionId    string!    @description("v1:wholesale:documentVersion.id of the MAP policy version accepted.")
+  mapSha256       string!    @description("The SHA-256 of that MAP policy version's body, checked as termsSha256 is.")
+  statement       string!    @description("The sentence the applicant accepted with: the store's acceptanceText, or the pack's default, as it was when they accepted.")
+  clientAddress   string     @description("The address the storefront's edge saw the post come from, at most 64 bytes. Empty when the acceptance did not arrive through the storefront.")
+  userAgent       string     @description("The browser's User-Agent as the post carried it, at most 512 bytes. Empty when the acceptance did not arrive through the storefront.")
+  linkIssuedAt    datetime   @description("When the link the applicant accepted through was made.")
+}
+
+@version("1.0.0")
+@description("One email the pack sent, or tried to send, to one applicant: its kind (terms, approved, rejected or revoked), which attempt of that kind it was (1 for the store's automation's send, one more for each resend), the request id the transactional row lane received it under, and what came of it: sent, skipped (the store's own checks declined it when it was due -- no template or no sender chosen -- or the row withdrew it, or the address is one the email service no longer sends to), held (configuration the store can fix, such as an unpublished template; nothing was attempted), uncertain (the hand-over had no answer, and the provider may have the message), failed (with the lane's words) or deferred (the send-rate limit; the lane replays it). The lane's own record of the delivery, read through its status read, is what the application's page and the export show where it has one. ONE ROW PER APPLICATION, KIND AND ATTEMPT at the derived id wholesale-email-<kind>-<the application's bare id, as a slug>-<attempt> (EmailSendRowID). It never carries the address, the message's fields or a link's token: the lane mints the link when it hands the message over, and keeps no copy. Written by the pack as the application's merchant, never by a client.")
+@displayCard(primary="kind", secondary="state", tertiary="applicationId")
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
+concept emailSend {
+  ownerUserId    string!  @description("v1:identity:user.id of the application's merchant, copied off the application in canonical form.")
+  storeId        string   @description("The store the application belongs to (design D9), copied off it.")
+  accountId      string   @description("The application's organization, copied off it, so the store's people read what was sent.")
+  applicationId  string!  @description("v1:wholesale:application.id the email is about, in canonical form.")
+  kind           enum("terms", "approved", "rejected", "revoked")!  @description("Which email: the terms link, the approval with the price-sheet link, the rejection, or the removal.")
+  attempt        int!     @description("1 for the send the store's automation asks for; each resend is the highest attempt recorded plus one.")
+  requestId      string!  @description("The request id the transactional row lane received this email under (LaneRequestID): wholesale-<kind>-<the application's bare id, as a slug>-<attempt>. The lane sends once per request id.")
+  templateId     string   @description("The v1:campaigns:template the email was sent with.")
+  state          enum("sending", "sent", "skipped", "held", "uncertain", "failed", "deferred", "pending")!  @description("The attempt: sending (recorded before the lane is asked -- the record that admits the one hand-over -- and not settled yet; read as on its way, and as uncertain once fifteen minutes pass unsettled), then what the lane answered: sent (handed to the email service; whether it arrived is the lane's delivery record's to say); skipped (reason says why in a sentence; nothing will be sent for this attempt -- also the state an attempt is recorded in, with the lane never asked, when the email was due and the store's own checks declined it); held (reason is the lane's sentence naming what to fix; nothing was attempted); uncertain (the hand-over had no answer; the provider may have it: \"We could not confirm this email was sent. It may have been delivered.\"); failed (reason carries the lane's words); or deferred (the send-rate limit; the lane replays it). The store's automation makes each attempt at most once, whatever its state. Only sent means the email went out. A person of the store sends an email that did not reach the applicant again as a new attempt (wholesaleResendEmail). pending is the first build's word for a deferral or an uncertain answer: no longer written, and read as deferred.")
+  reason         string   @description("Why the email was skipped, held, failed, uncertain or deferred, in a whole sentence the store's people read. Never an address, never a token and never a code.")
+  sentAt         datetime @description("When the lane answered that it handed the email over, by the engine's clock. Empty unless state is sent.")
+  requestedBy    string   @description("v1:identity:user.id of the person who asked for a resend. Empty for the store's automation's send.")
 }

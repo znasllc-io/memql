@@ -344,6 +344,75 @@ test("a render the cluster refuses is shown in its words and counts as an issue"
   assert.deepEqual(f.lastBar().acts, ["publish"]);
 });
 
+// The preview judges an email as a save of it would: by its template's stored purpose. The cluster here answers as
+// emailRender does: a layout with no unsubscribe link has the missing-unsubscribe issue unless the purpose is transactional.
+const unsubscribeMissing = { code: "unsubscribe_missing", message: "Add an unsubscribe link ({{unsubscribeUrl}}) to the footer." };
+const judged = (call: string): Rows => [{ subject: "Received", html: rendered, text: "Hi", issues: /purpose: "transactional"/.test(call) ? [] : [unsubscribeMissing] }];
+const received = { subject: "Received", theme, blocks: [
+  { id: "headline", type: "heading", text: "We have your application" },
+  { id: "foot", type: "footer", links: [], lines: ["Acme"] },
+] } as unknown as EmailDocument;
+const receivedText = writeEmail(received);
+function purposed(purpose?: string): OpenDocument {
+  const opened = templateDocument("client-org");
+  opened.content = new TextEncoder().encode(receivedText);
+  opened.template!.status = "draft";
+  if (purpose !== undefined) opened.template!.purpose = purpose;
+  return opened;
+}
+
+test("previews a transactional template with no missing-unsubscribe issue, and offers Publish", async t => {
+  const f = await open(t, { uri: "memql-file://client.example/templates/t9/Welcome.email.json", text: receivedText, opened: purposed("transactional"), answers: { emailRender: judged } });
+  assert.deepEqual(f.renders().map(call => call.call), [buildEmailRender({ document: received as unknown as Record<string, unknown>, accountId: "client-org", purpose: "transactional" })],
+    "the render names the template's purpose");
+  assert.deepEqual(f.of("render").at(-1).issues, []);
+  assert.deepEqual(f.lastBar(), { type: "bar", state: C.draft, acts: ["publish"] });
+
+  // A Library file published as a transactional template is judged by that template once it is found.
+  const g = await open(t, { text: receivedText, opened: fileDocument({ content: new TextEncoder().encode(receivedText) }), answers: {
+    emailRender: judged,
+    templateForSource: () => [{ id: "t1", createdAt: "r1" }],
+    templateById: () => [{ id: "t1", status: "draft", createdAt: "r1", document: received, purpose: "transactional" }],
+  } });
+  assert.match(g.renders().at(-1)!.call, /purpose: "transactional"/);
+  assert.deepEqual(g.of("render").at(-1).issues, []);
+  assert.deepEqual(g.lastBar(), { type: "bar", state: C.draft, acts: ["publish"] });
+  // An edit renders with the purpose too.
+  g.calls.length = 0;
+  g.change(writeEmail({ ...received, subject: "Received, thank you" } as EmailDocument));
+  await g.tick(300);
+  assert.match(g.renders()[0].call, /purpose: "transactional"/);
+  assert.deepEqual(g.lastBar(), { type: "bar", state: C.unsaved, acts: ["publish"] });
+  // Publishing keeps the template's purpose: the next edit is judged as before.
+  g.answer("campaignSaveTemplate", call => [{ templateId: "t1", revision: /action: "publish"/.test(call) ? "r3" : "r2", status: /action: "publish"/.test(call) ? "ready" : "draft", saved: true, issues: [] }]);
+  await g.send({ type: "act", act: "publish" });
+  assert.equal(g.lastBar().state, fill(C.published, { organization: "Client" }));
+  g.calls.length = 0;
+  g.change(writeEmail({ ...received, subject: "Received, with thanks" } as EmailDocument));
+  await g.tick(300);
+  assert.match(g.renders()[0].call, /purpose: "transactional"/);
+});
+
+test("previews a marketing template exactly as before", async t => {
+  for (const purpose of [undefined, "", "marketing"]) {
+    const f = await open(t, { uri: "memql-file://client.example/templates/t9/Welcome.email.json", text: receivedText, opened: purposed(purpose), answers: { emailRender: judged } });
+    assert.deepEqual(f.renders().map(call => call.call), [buildEmailRender({ document: received as unknown as Record<string, unknown>, accountId: "client-org" })],
+      `a template whose purpose is ${JSON.stringify(purpose)} renders as it always has, naming none`);
+    assert.deepEqual(f.of("render").at(-1).issues, [unsubscribeMissing]);
+    assert.deepEqual(f.lastBar(), { type: "bar", state: C.issuesOne, acts: [] });
+  }
+  // A Library file not yet published, and one published as a marketing template, name none either.
+  for (const published of [[], [{ id: "t1", status: "draft", createdAt: "r1", document: received, purpose: "marketing" }]]) {
+    const g = await open(t, { text: receivedText, opened: fileDocument({ content: new TextEncoder().encode(receivedText) }), answers: {
+      emailRender: judged,
+      templateForSource: () => published.length ? [{ id: "t1", createdAt: "r1" }] : [],
+      templateById: () => published,
+    } });
+    assert.deepEqual(g.renders().map(call => call.call), [buildEmailRender({ document: received as unknown as Record<string, unknown>, accountId: "client-org" })]);
+    assert.deepEqual(g.lastBar(), { type: "bar", state: C.issuesOne, acts: [] });
+  }
+});
+
 test("seq stays monotonic for the panel's life, across a reload of the page", async t => {
   const f = await open(t);
   await f.send({ type: "ready" });

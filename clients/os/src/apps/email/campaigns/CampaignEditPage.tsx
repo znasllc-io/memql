@@ -33,7 +33,7 @@ import { browserZone, instantToLocal, localToInstant } from "../when";
 import { WORDS } from "../words";
 import { confirmSentence, repeatSentence } from "./campaignActs";
 import { useLanding } from "./landing";
-import type { When } from "./wizardModel";
+import { campaignTemplates, type When } from "./wizardModel";
 
 // A CAMPAIGN'S EDIT PAGE (memql#6033, Ruling 7): a draft's fields, or the fields
 // of a draft a series repeats from, and one bar.
@@ -158,9 +158,7 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
   // Put-away records are not offered -- except the one the campaign already
   // names, which an edit must never silently re-point.
   const audiences = allAudiences.filter((a) => a.accountId === accountId && (!audienceIsArchived(a) || a.id === draft.audienceId));
-  const templates = allTemplates
-    .filter((t) => t.accountId === accountId && (!templateIsArchived(t) || t.id === draft.templateId))
-    .sort((a, b) => Number(isPublished(b)) - Number(isPublished(a)));
+  const templates = campaignTemplates(allTemplates, accountId, draft.templateId);
   const senders = allSenders.filter((s) => s.accountId === accountId && (!senderIsRetired(s) || s.id === draft.senderIdentityId));
   const audience = audiences.find((a) => a.id === draft.audienceId);
   const senderChosen = draft.senderIdentityId === "" ? operator : senders.some((s) => s.id === draft.senderIdentityId);

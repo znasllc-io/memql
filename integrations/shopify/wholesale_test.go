@@ -170,6 +170,7 @@ func TestTheWholesaleWritePathDeletesNothing(t *testing.T) {
 		"catalogsCountQuery":  catalogsCountQuery,
 		"companySearchQuery":  companySearchQuery,
 		"customerSearchQuery": customerSearchQuery,
+		"customerByIDQuery":   customerByIDQuery,
 	} {
 		lower := strings.ToLower(document)
 		for _, banned := range []string{"delete", "destroy"} {
@@ -215,6 +216,7 @@ func TestWholesaleDocumentsAreWellFormed(t *testing.T) {
 		"tagsAdd":         {tagsAddMutation, "ShopifyTagsAdd", true},
 		"tagsRemove":      {tagsRemoveMutation, "ShopifyTagsRemove", true},
 		"customerSearch":  {customerSearchQuery, "ShopifyCustomerByEmail", false},
+		"customerById":    {customerByIDQuery, "ShopifyCustomerById", false},
 		"companySearch":   {companySearchQuery, "ShopifyCompanyByExternalID", false},
 		"catalogsCount":   {catalogsCountQuery, "ShopifyCatalogsCount", false},
 	} {

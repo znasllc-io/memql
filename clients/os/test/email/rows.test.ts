@@ -203,6 +203,8 @@ describe("the other four cues", () => {
     expect(row).toEqual({
       id: "t1", ownerUserId: "v1:identity:user:me", name: "August copy", subject: "What we shipped", status: "ready", accountId: "self",
       layoutId: "builtin:letter", preheader: "Why we started", sourceArtifactId: "", createdAt: "2026-08-01T00:00:00Z", composition: null,
+      // A row that says nothing about its purpose is marketing (X10).
+      purpose: "marketing",
     });
   });
 

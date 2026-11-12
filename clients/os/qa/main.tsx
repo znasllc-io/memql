@@ -17,6 +17,7 @@ import { profileScenes } from "./profileScenes";
 import { fleetDeviceScenes } from "./fleetDeviceScenes";
 import { mapScenes } from "./mapScenes";
 import { deployableStatisticsScenes } from "./deployableStatisticsScenes";
+import { QA_DOCUMENT, wholesaleScenes, WHOLESALE_CLICKS } from "./wholesaleScenes";
 import { storeVerdictScenes } from "./storeVerdictScenes";
 import { originsByStoreScenes } from "./originsByStoreScenes";
 import { emailOverviewScenes } from "./emailOverviewScenes";
@@ -1062,6 +1063,8 @@ const VIEWS: Record<
   ...mapScenes(WindowBody),
   // A deployable's Statistics and the Overview's Websites (deployableStatisticsScenes.tsx).
   ...deployableStatisticsScenes(WindowBody),
+  // A store's Wholesale section (wholesaleScenes.tsx).
+  ...wholesaleScenes(WindowBody),
   // The Store page saying whether a store is being recorded (storeVerdictScenes.tsx).
   ...storeVerdictScenes(WindowBody),
   // Cluster > Data, by store (originsByStoreScenes.tsx).
@@ -2402,7 +2405,7 @@ if (new URLSearchParams(window.location.search).get("open") === "1") {
 // `?click=A|B` presses the first control whose text (or accessible name) is A
 // once the reads have landed, then B a beat later. `element.click()` is a real
 // click event, which React's root listener handles like a person's.
-const clicks = (new URLSearchParams(window.location.search).get("click") ?? NEXUS_APPROVAL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? EMAIL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? ACCESS_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? REVIEWS_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? "").split("|").filter((c) => c !== "");
+const clicks = (new URLSearchParams(window.location.search).get("click") ?? NEXUS_APPROVAL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? EMAIL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? ACCESS_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? REVIEWS_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? WHOLESALE_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? "").split("|").filter((c) => c !== "");
 clicks.forEach((label, i) => {
   window.setTimeout(() => {
     // A choice card and a record row answer to their names: a card's note ("1,204
@@ -2418,6 +2421,12 @@ clicks.forEach((label, i) => {
       const field = label.slice(6);
       const target = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")).find(el => el.getAttribute("aria-label") === field || Array.from(el.labels ?? []).some(l => l.textContent?.trim() === field));
       target?.focus();
+      return;
+    }
+    // `file:document` chooses a store document's Markdown in the page's file input.
+    if (label === "file:document") {
+      const target = document.querySelector<HTMLInputElement>('input[type="file"]');
+      if (target) { const data = new DataTransfer(); data.items.add(new File([QA_DOCUMENT], "trade-terms.md", { type: "text/markdown" })); target.files = data.files; target.dispatchEvent(new Event("change", { bubbles: true })); }
       return;
     }
     if (label === "file:people") {

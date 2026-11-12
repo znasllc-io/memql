@@ -9,6 +9,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"reflect"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -2911,5 +2912,118 @@ func TestAButtonToARecipientLinkIsALinkInOutlookToo(t *testing.T) {
 		if !strings.Contains(r.HTML, want) {
 			t.Errorf("a button to an ordinary address lost its Outlook shape: no %q", want)
 		}
+	}
+}
+
+// A message about one person's own request carries no unsubscribe (X10): with
+// Transactional a layout is not asked for the link, and the link's tags,
+// {{unsubscribeUrl}} and {{preferencesUrl}}, anywhere in the email are a
+// blocking issue, for a layout and custom HTML alike. Without it nothing
+// changes.
+func TestATransactionalEmailCarriesNoUnsubscribeLink(t *testing.T) {
+	const sentence = "A message about one person's own request carries no unsubscribe link. Remove it."
+	without := Document{Subject: "Hello", Theme: neutral(), Blocks: []Block{{ID: "h", Type: "heading", Text: "Hi"}}}
+	if r := mustRender(t, without, nil, RenderOptions{Transactional: true}); len(r.Issues) != 0 {
+		t.Fatalf("a transactional layout without the link: %+v", r.Issues)
+	}
+	if r := mustRender(t, without, nil, RenderOptions{}); !hasIssue(r.Issues, IssueUnsubscribeMissing) {
+		t.Fatalf("a marketing layout without the link must still be told: %+v", r.Issues)
+	}
+	for _, c := range []struct {
+		name string
+		doc  Document
+	}{
+		{"a footer link", Document{Subject: "x", Theme: neutral(), Blocks: []Block{{ID: "f", Type: "footer", Links: []Link{{Label: "Leave", Href: TagUnsubscribeURL}}}}}},
+		{"a preferences link", Document{Subject: "x", Theme: neutral(), Blocks: []Block{{ID: "t", Type: "text", Text: "[Settings](" + TagPreferencesURL + ")"}}}},
+		{"a footer line", Document{Subject: "x", Theme: neutral(), Blocks: []Block{{ID: "f", Type: "footer", Lines: []string{"Leave: " + TagUnsubscribeURL}}}}},
+		{"the subject", Document{Subject: "Leave " + TagUnsubscribeURL, Theme: neutral(), Blocks: []Block{{ID: "h", Type: "heading", Text: "Hi"}}}},
+		{"the preheader", Document{Subject: "x", Preheader: "{{ preferencesUrl }}", Theme: neutral(), Blocks: []Block{{ID: "h", Type: "heading", Text: "Hi"}}}},
+		{"custom HTML", Document{Subject: "x", HTMLBody: `<p><a href="` + TagUnsubscribeURL + `">Leave</a></p>`, TextBody: "Hello."}},
+		{"a custom text body", Document{Subject: "x", HTMLBody: "<p>Hello.</p>", TextBody: "Settings: " + TagPreferencesURL}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := mustRender(t, c.doc, nil, RenderOptions{Transactional: true})
+			want := Issue{Code: IssueUnsubscribePresent, Message: sentence}
+			if len(r.Issues) != 1 || r.Issues[0] != want {
+				t.Fatalf("want only %+v, got %+v", want, r.Issues)
+			}
+			if m := mustRender(t, c.doc, nil, RenderOptions{}); hasIssue(m.Issues, IssueUnsubscribePresent) {
+				t.Fatalf("a marketing email was told to remove its link: %+v", m.Issues)
+			}
+		})
+	}
+}
+
+// A message about one person's own request has no web copy and nothing to
+// confirm (ruling 45): with Transactional, {{viewUrl}} anywhere the list-link
+// check looks is view_link_present and {{confirmUrl}} is confirm_link_present,
+// each with its own sentence, for a layout and custom HTML alike. An email that
+// carries several of the engine's links is told each, in one order. Without
+// Transactional nothing changes.
+func TestATransactionalEmailCarriesNoViewOrConfirmLink(t *testing.T) {
+	const (
+		view    = "A message about one person's own request has no web copy. Remove the view-in-browser link."
+		confirm = "A message about one person's own request has nothing to confirm. Remove the confirmation link."
+	)
+	heading := []Block{{ID: "h", Type: "heading", Text: "Hi"}}
+	for _, link := range []struct {
+		tag, code, message string
+	}{
+		{TagViewURL, "view_link_present", view},
+		{TagConfirmURL, "confirm_link_present", confirm},
+	} {
+		spaced := strings.Replace(strings.Replace(link.tag, "{{", "{{ ", 1), "}}", " }}", 1)
+		for _, c := range []struct {
+			name string
+			doc  Document
+		}{
+			{"a footer link", Document{Subject: "x", Theme: neutral(), Blocks: []Block{{ID: "f", Type: "footer", Links: []Link{{Label: "Open", Href: link.tag}}}}}},
+			{"a button", Document{Subject: "x", Theme: neutral(), Blocks: []Block{{ID: "b", Type: "button", Label: "Open", Href: link.tag}}}},
+			{"a text link", Document{Subject: "x", Theme: neutral(), Blocks: []Block{{ID: "t", Type: "text", Text: "[Open](" + link.tag + ")"}}}},
+			{"a footer line", Document{Subject: "x", Theme: neutral(), Blocks: []Block{{ID: "f", Type: "footer", Lines: []string{"Open: " + link.tag}}}}},
+			{"the subject", Document{Subject: "Open " + link.tag, Theme: neutral(), Blocks: heading}},
+			{"the preheader", Document{Subject: "x", Preheader: spaced, Theme: neutral(), Blocks: heading}},
+			{"custom HTML", Document{Subject: "x", HTMLBody: `<p><a href="` + link.tag + `">Open</a></p>`, TextBody: "Hello."}},
+			{"a custom text body", Document{Subject: "x", HTMLBody: "<p>Hello.</p>", TextBody: "Open: " + spaced}},
+		} {
+			t.Run(link.code+"/"+c.name, func(t *testing.T) {
+				r := mustRender(t, c.doc, nil, RenderOptions{Transactional: true})
+				want := Issue{Code: link.code, Message: link.message}
+				if len(r.Issues) != 1 || r.Issues[0] != want {
+					t.Fatalf("want only %+v, got %+v", want, r.Issues)
+				}
+				m := mustRender(t, c.doc, nil, RenderOptions{})
+				if hasIssue(m.Issues, "view_link_present") || hasIssue(m.Issues, "confirm_link_present") {
+					t.Fatalf("a marketing email was told to remove its link: %+v", m.Issues)
+				}
+			})
+		}
+	}
+
+	// None of them: no issue.
+	plain := Document{Subject: "Received", Theme: neutral(), Blocks: []Block{{ID: "h", Type: "heading", Text: "We have it"}, {ID: "b", Type: "button", Label: "Track it", Href: "https://example.com/track"}}}
+	if r := mustRender(t, plain, nil, RenderOptions{Transactional: true}); len(r.Issues) != 0 {
+		t.Fatalf("a transactional email with none of the links: %+v", r.Issues)
+	}
+	// All four: each told once, in the same order wherever they are.
+	all := Document{Subject: "x", Theme: neutral(), Blocks: []Block{
+		{ID: "b", Type: "button", Label: "Confirm", Href: TagConfirmURL},
+		{ID: "f", Type: "footer", Links: []Link{{Label: "View", Href: TagViewURL}, {Label: "Settings", Href: TagPreferencesURL}, {Label: "Leave", Href: TagUnsubscribeURL}}},
+	}}
+	got := mustRender(t, all, nil, RenderOptions{Transactional: true}).Issues
+	want := []Issue{
+		{Code: IssueUnsubscribePresent, Message: UnsubscribePresentMessage},
+		{Code: "view_link_present", Message: view},
+		{Code: "confirm_link_present", Message: confirm},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("issues = %+v, want %+v", got, want)
+	}
+	if got := TransactionalLinkIssues("Hi " + TagConfirmURL + " and " + TagUnsubscribeURL); !reflect.DeepEqual(got, []Issue{want[0], want[2]}) {
+		t.Fatalf("TransactionalLinkIssues = %+v", got)
+	}
+	// A marketing email with a view link raises neither new issue.
+	if r := mustRender(t, all, nil, RenderOptions{}); hasIssue(r.Issues, "view_link_present") || hasIssue(r.Issues, "confirm_link_present") || hasIssue(r.Issues, IssueUnsubscribePresent) {
+		t.Fatalf("a marketing email: %+v", r.Issues)
 	}
 }

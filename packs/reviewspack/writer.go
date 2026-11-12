@@ -29,9 +29,35 @@ import (
 // straight through its mutation would skip the checks that make it a decision
 // -- above all that the cluster's own operators never record one -- so a
 // client-originated call to it is refused by the engine. The builtin stamps
-// internal origin for exactly that one call, and the CALLER'S OWN ACTOR still
-// runs it, so the row gate still decides whether this caller may write this
-// row.
+// internal origin for exactly that one call.
+//
+// # The stamp skips the row gate, so the builtin's check is the gate
+//
+// A write at internal origin is not owner-checked
+// (component/memql/rowauthz_write_guard.go). The caller's actor still runs the
+// mutation and stamps what it stamps, but nothing in the engine asks whether
+// this caller may write this row. So the check of who may write is the pack's
+// own, made BEFORE the stamp, in each builtin: the part's organization gate,
+// the reads it makes under the caller, and its own refusals. That is why the
+// stamp is put on one call, inline as the argument to its Execute, and never
+// carried in a context (server_written_db_test.go,
+// TestEachWritingBuiltinRefusesBeforeItWritesAndWritesNothing).
+//
+// # The only way in for a client
+//
+// Every concept the pack declares is @serverWritten (dsl/concepts.memql): a
+// write of any of its rows without internal origin -- the public insert()
+// included, which never consults a mutation's @serverOnly -- is refused by the
+// engine. So no client writes them except through a builtin that judged it.
+//
+// Not the only writer in the engine. @serverWritten closes every way a CLIENT
+// can reach these rows. The engine's own code still can, and four writers of
+// them exist outside this file: a step of an automation in the loaded DSL tree
+// (it runs with internal origin, for any store); a DSL seed, materialized as
+// the system actor; the identity integration's ownership transfer
+// (transferRowOwnership, a cluster owner's act), which rewrites a row's owner;
+// and this pack's erasure (erase.go), which rewrites stored versions by direct
+// SQL.
 
 type rowWriter interface {
 	Write(ctx context.Context, mutation string, args map[string]any) error

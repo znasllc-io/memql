@@ -1,8 +1,12 @@
 package memql
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 func validForm() ShopperForm {
@@ -178,5 +182,194 @@ func TestAFieldWithNoBoundStillHasOne(t *testing.T) {
 	}
 	if (ShopperField{Name: "body", MaxLength: 10}).EffectiveMaxLength() != 10 {
 		t.Fatal("a declared bound must be honoured")
+	}
+}
+
+// accountId IS STAMPED FROM THE SITE'S ORGANIZATION, never posted. A form that
+// could declare it could tie a row to an organization the site is not in, and
+// the row tier would then admit that organization's people to it. It is refused
+// as a declared form field and as an extension's field, exactly as storeId is,
+// and the guide lists it among the stamped names.
+func TestAccountIdIsAReservedShopperName(t *testing.T) {
+	t.Cleanup(ResetShopperSurfaceForTest)
+	t.Cleanup(ResetShopperExtensions)
+	f := validForm()
+	f.Fields = []ShopperField{{Name: "accountId"}}
+	expectPanic(t, "stamped server-side", func() { RegisterShopperForm(f) })
+
+	RegisterShopperForm(validForm())
+	err := RegisterShopperExtension(ShopperExtension{Domain: "fylo", Pack: "reviews", Form: "review",
+		Construct: "recordFyloReviewDetail", Fields: []ShopperField{{Name: "accountId"}}})
+	if err == nil || !strings.Contains(err.Error(), "stamped server-side") {
+		t.Fatalf("an extension declaring accountId as a field was not refused as stamped: %v", err)
+	}
+
+	listed := false
+	for _, name := range ReservedShopperFieldNames() {
+		listed = listed || name == "accountId"
+	}
+	if !listed {
+		t.Fatalf("accountId is not among the reserved shopper names: %v", ReservedShopperFieldNames())
+	}
+}
+
+// AN EXTENSION ROW IS SHOWN BY ITS FIELD NAMES IN PLAIN WORDS (X14): every
+// declared field but the stamped names, labelled by its name split at its case
+// boundaries, and the concept's display card picks the two facts a list shows.
+func TestAnExtensionRowIsLabelledByItsFieldNamesInPlainWords(t *testing.T) {
+	src := `@version("1.0.0")
+@description("A client's own fields on an application.")
+@displayCard(primary="taxNumber", secondary="tradeName")
+concept acmeDetail {
+  ownerUserId    string!
+  storeId        string!
+  submissionId   string
+  accountId      string
+  applicationId  string!
+  taxNumber      string!
+  tradeName      string
+}
+`
+	file, err := langparser.ParseFile(src)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	var concept *memoryNodes.Concept
+	for _, def := range file.Definitions {
+		if decl, ok := def.(*langparser.ConceptDecl); ok {
+			if concept, err = memoryNodes.BuildConceptFromDecl(decl, "v1:acme:acmeDetail"); err != nil {
+				t.Fatalf("build: %v", err)
+			}
+		}
+	}
+	if concept == nil {
+		t.Fatal("no concept in the source")
+	}
+	row := extensionRowOf(concept, map[string]any{
+		"ownerUserId": "v1:identity:user:u1", "storeId": "store-1", "submissionId": "sub-1", "accountId": "acct-1",
+		"applicationId": "sub-1", "taxNumber": "12-3456789", "tradeName": "Acme Trade",
+	})
+	if row.Concept != "v1:acme:acmeDetail" || row.Primary != "12-3456789" || row.Secondary != "Acme Trade" {
+		t.Fatalf("row = %+v, want the concept and its display card's two facts", row)
+	}
+	labels := map[string]string{}
+	for _, f := range row.Fields {
+		labels[f.Name] = f.Label
+	}
+	for _, stamped := range []string{"storeId", "submissionId", "ownerUserId", "accountId"} {
+		if _, shown := labels[stamped]; shown {
+			t.Errorf("%s is a stamped name and is shown: %+v", stamped, row.Fields)
+		}
+	}
+	for name, want := range map[string]string{"taxNumber": "Tax number", "tradeName": "Trade name", "applicationId": "Application id"} {
+		if labels[name] != want {
+			t.Errorf("%s is labelled %q, want %q", name, labels[name], want)
+		}
+	}
+	for name, want := range map[string]string{"ein": "Ein", "shopifyCustomerID": "Shopify customer id", "vatNumber2": "Vat number 2"} {
+		if got := extensionFieldLabel(name); got != want {
+			t.Errorf("extensionFieldLabel(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+// THE EVIDENCE AN ACCEPTANCE RECORDS IS STAMPED, NEVER POSTED: a form that
+// could declare clientAddress or userAgent would let a shopper write their own.
+func TestClientAddressAndUserAgentAreReservedShopperNames(t *testing.T) {
+	for _, name := range []string{"clientAddress", "userAgent"} {
+		t.Run(name, func(t *testing.T) {
+			t.Cleanup(ResetShopperSurfaceForTest)
+			f := validForm()
+			f.Fields = []ShopperField{{Name: name}}
+			expectPanic(t, "stamped server-side", func() { RegisterShopperForm(f) })
+			r := ShopperRead{Pack: "reviews", Name: "draft", Construct: "x", Kind: ShopperReadKindBuiltin,
+				Fields: []ShopperField{{Name: name}}}
+			expectPanic(t, "stamped server-side", func() { RegisterShopperRead(r) })
+		})
+	}
+	names := strings.Join(ReservedShopperFieldNames(), ",")
+	if !strings.Contains(names, "clientAddress") || !strings.Contains(names, "userAgent") {
+		t.Fatalf("the reserved names %s leave out the evidence", names)
+	}
+}
+
+// THE EVIDENCE RIDES THE CONTEXT, so only server code can set it: a context
+// with none answers false, and the value set is the value read.
+func TestShopperEvidenceRidesTheContext(t *testing.T) {
+	if _, ok := ShopperEvidenceFrom(context.Background()); ok {
+		t.Fatal("a bare context carries evidence")
+	}
+	ev := ShopperEvidence{ClientAddress: "198.51.100.7", UserAgent: "Example Browser/1.0"}
+	got, ok := ShopperEvidenceFrom(ContextWithShopperEvidence(context.Background(), ev))
+	if !ok || got != ev {
+		t.Fatalf("the context carries %+v (%v), want %+v", got, ok, ev)
+	}
+	if ShopperClientHeader != "X-Memql-Shopper-Client" {
+		t.Fatalf("ShopperClientHeader = %q", ShopperClientHeader)
+	}
+}
+
+// THE email FORMAT ACCEPTS ONE ADDRESS (ruling 54): after trimming, exactly one
+// @ with something on each side, no whitespace, at most 320 bytes -- and nothing
+// more is judged.
+func TestTheEmailFormatAcceptsOneAddress(t *testing.T) {
+	f := ShopperField{Name: "applicantEmail", Format: ShopperFormatEmail}
+	for value, want := range map[string]bool{
+		"a@b.co":                     true,
+		"first.last+tag@example.com": true,
+		"  a@b.co ":                  true,
+		strings.Repeat("a", 308) + "@example.com": true,
+		strings.Repeat("a", 309) + "@example.com": false,
+		"":                false,
+		"not an address":  false,
+		"example.com":     false,
+		"a@b@example.com": false,
+		"a b@example.com": false,
+		"a@exam\tple.com": false,
+		"a@exam\nple.com": false,
+		"@example.com":    false,
+		"a@":              false,
+		"@":               false,
+	} {
+		if got := f.MatchesFormat(value); got != want {
+			t.Errorf("MatchesFormat(%q) = %v, want %v", value, got, want)
+		}
+		if got := IsEmailAddress(value); got != want {
+			t.Errorf("IsEmailAddress(%q) = %v, want %v", value, got, want)
+		}
+	}
+	t.Cleanup(ResetShopperSurfaceForTest)
+	form := validForm()
+	form.Fields = []ShopperField{{Name: "email", Required: true, MaxLength: 320, Format: ShopperFormatEmail}}
+	RegisterShopperForm(form)
+}
+
+// A FIELD'S FORMAT IS A NAMED RULE (ruling 53): sha256 accepts exactly 64
+// hexadecimal characters of either case and nothing else, an unknown format is
+// refused at registration, and a format does not combine with Numeric or Enum.
+func TestAFieldFormatIsANamedRule(t *testing.T) {
+	f := ShopperField{Name: "termsSha256", Format: ShopperFormatSHA256}
+	for value, want := range map[string]bool{
+		strings.Repeat("a", 64): true, strings.Repeat("A", 64): true, strings.Repeat("0", 64): true,
+		strings.Repeat("a", 63): false, strings.Repeat("a", 65): false, strings.Repeat("g", 64): false, "": false,
+	} {
+		if got := f.MatchesFormat(value); got != want {
+			t.Errorf("MatchesFormat(%q) = %v, want %v", value, got, want)
+		}
+	}
+	if !(ShopperField{Name: "free"}).MatchesFormat("anything") {
+		t.Error("a field with no format refuses a value")
+	}
+	for name, field := range map[string]ShopperField{
+		"unknown": {Name: "x", Format: "uuid"},
+		"numeric": {Name: "x", Format: ShopperFormatSHA256, Numeric: true},
+		"enum":    {Name: "x", Format: ShopperFormatSHA256, Enum: []string{"a"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Cleanup(ResetShopperSurfaceForTest)
+			form := validForm()
+			form.Fields = []ShopperField{field}
+			expectPanic(t, "format", func() { RegisterShopperForm(form) })
+		})
 	}
 }

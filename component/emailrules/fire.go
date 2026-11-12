@@ -164,6 +164,21 @@ func (f *Firer) Fire(ctx context.Context, ruleID, nodeID string, event map[strin
 		return out, nil
 	}
 
+	// A TEMPLATE ABOUT ONE PERSON'S OWN REQUEST IS NEVER A RULE'S (X10). It
+	// carries no unsubscribe, and a rule mails whoever its trigger and its
+	// recipients name. Arming refuses one (verifyReadable); a template made
+	// transactional after the rule was armed is refused here, on every lane,
+	// before a row is claimed or anybody is read to mail. The firing is recorded
+	// with the reason, as any firing that failed is.
+	tmpl, readable, err := f.store.TemplateByID(ctx, rule.TemplateID)
+	if err == nil && readable && transactionalTemplate(tmpl) {
+		err = errTransactionalTemplate
+	}
+	if err != nil {
+		_ = f.recordFiring(ctx, ruleID, truncate(err.Error(), 4096))
+		return out, err
+	}
+
 	// A ROW-ADDRESS RULE LOOKS AT THE MAILBOX BEFORE IT CLAIMS THE ROW (below). The
 	// claim is the row's one chance, and a firing that ends in a refusal -- "could not
 	// tell yet", or a read that failed and will be retried -- has not used it: claimed

@@ -91,6 +91,7 @@ var (
 // the call began.
 type composingTemplate struct {
 	id, accountID, name string
+	purpose             string // the template's, which judges the composed email
 	composition         composition
 }
 
@@ -129,7 +130,7 @@ func (w *Worker) composingTemplate(ctx context.Context, args map[string]any) (co
 	if c.State != compositionWriting || !sameGoal(c.GoalID, goalID) {
 		return composingTemplate{}, errCompositionNotWriting
 	}
-	return composingTemplate{id: id, accountID: accountID, name: str(rows[0], "name"), composition: c}, nil
+	return composingTemplate{id: id, accountID: accountID, name: str(rows[0], "name"), purpose: str(rows[0], "purpose"), composition: c}, nil
 }
 
 // sameGoal reports whether a composition's goal and a call's are one goal,
@@ -188,8 +189,9 @@ func (w *Worker) handleComposeRender(ctx context.Context, args map[string]any, _
 	}
 	// In the slot the material was read in. The composed email holds data:
 	// pictures only (the kit's and the material's), so the render reads nothing
-	// from the Library.
-	result, err := emaildoc.Render(ctx, doc, nil, emaildoc.RenderOptions{Preview: true})
+	// from the Library. It is judged by the template's purpose, as the submit
+	// judges it (renderComposed).
+	result, err := emaildoc.Render(ctx, doc, nil, emaildoc.RenderOptions{Preview: true, Transactional: t.purpose == purposeTransactional})
 	if err != nil {
 		if errors.Is(err, emaildoc.ErrTooLarge) {
 			return nil, errPreviewTooLarge
@@ -249,7 +251,7 @@ func (w *Worker) renderComposed(ctx context.Context, t composingTemplate, c emai
 	if err != nil {
 		return nil, nil, err
 	}
-	rendered, err := w.renderInSlot(ctx, templateRequest{templateID: t.id, accountID: t.accountID, name: t.name, action: "save", document: doc})
+	rendered, err := w.renderInSlot(ctx, templateRequest{templateID: t.id, accountID: t.accountID, name: t.name, action: "save", document: doc, storedPurpose: t.purpose})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -311,6 +313,7 @@ func (w *Worker) saveComposed(ctx context.Context, t composingTemplate, rendered
 		content.sourceArtifactID = bare(str(row, "sourceArtifactId"))
 	}
 	content.composition = object
+	content.purpose = str(row, "purpose")
 	revision := w.templateRevision(prior)
 	values := content.values(t.id, revision)
 	values["status"] = templateStatus["save"] // a draft, whatever its issues
@@ -349,6 +352,7 @@ func (w *Worker) saveComposedCopy(ctx context.Context, t composingTemplate, row 
 	copied := renderedTemplate{content: rendered.content, issues: rendered.issues}
 	// A copy is no Library file's template: one file has one template.
 	copied.content.name, copied.content.sourceArtifactID, copied.content.composition = name, "", object
+	copied.content.purpose = str(row, "purpose")
 	revision, err := w.insertTemplate(ctx, templateRequest{templateID: copyID, accountID: t.accountID, name: name, action: "save"}, &copied)
 	if err != nil {
 		return "", time.Time{}, err

@@ -12,7 +12,7 @@ import (
 
 func organizationDeployableCapability(resource string) bool {
 	switch resource {
-	case "app:deployables/deploy", "app:deployables/publish", "app:deployables/retire", "app:pipelines/repositories", "app:deployables/preview", "app:deployables/store", "app:deployables/access", "app:deployables/reviews":
+	case "app:deployables/deploy", "app:deployables/publish", "app:deployables/retire", "app:pipelines/repositories", "app:deployables/preview", "app:deployables/store", "app:deployables/access", "app:deployables/reviews", "app:deployables/wholesale":
 		return true
 	}
 	return false
@@ -79,6 +79,20 @@ func organizationCapabilityTarget(fn *Function) (concept, argument string) {
 		case "reviewsDecide", "reviewsEraseReviewer", "reviewsGet":
 			return "v1:reviews:review", "reviewId"
 		case "reviewsList", "reviewsDecisionLog", "reviewsSettings", "reviewsUpdateSettings", "reviewsSetPublicDisplay", "reviewsIssueRequest", "reviewsExportStore", "reviewsPeople":
+			return "v1:platform:site", "siteId"
+		// Wholesale applications (the wholesale pack), on the reviews pattern.
+		// An act or read on one application -- deciding it, reading it,
+		// retrying or removing a buyer's access, resending its mail -- is asked
+		// about the APPLICATION, whose accountId was copied off its site when it
+		// was submitted; one on a store's program as a whole -- the list, the
+		// decision log, the buyers, the settings, the documents, adding a buyer,
+		// the export -- is asked about the SITE the store is served through,
+		// which the pack checks is bound to that store. Some of these names are
+		// declared by later tasks; a case no tree declares matches nothing.
+		case "wholesaleRecordDecision", "wholesaleGet", "wholesaleRetryAccess", "wholesaleRemoveBuyer", "wholesaleResendEmail":
+			return "v1:wholesale:application", "applicationId"
+		case "wholesaleList", "wholesaleDecisionLog", "wholesaleBuyers", "wholesaleStoreSettings", "wholesaleUpdateSettings",
+			"wholesaleDocuments", "wholesalePublishDocument", "wholesaleAddBuyer", "wholesaleExportStore":
 			return "v1:platform:site", "siteId"
 		}
 	}

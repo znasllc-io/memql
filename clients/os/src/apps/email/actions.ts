@@ -11,6 +11,7 @@ import {
   type AudienceRow,
   type CampaignRow,
   type RecipientMode,
+  type TemplatePurpose,
   type TemplateRow,
 } from "./rows";
 
@@ -862,16 +863,23 @@ export interface TemplateLifecycle extends LifecycleState {
   archive: (template: TemplateRow) => Promise<boolean>;
   /** Bring an archived template back, as a draft. */
   restore: (template: TemplateRow) => Promise<boolean>;
+  /**
+   * Say what the template is for (classify): the engine changes the purpose of
+   * the email it holds, at the revision this row was read at, and nothing else;
+   * a published template is a draft after it.
+   */
+  setPurpose: (template: TemplateRow, purpose: TemplatePurpose) => Promise<boolean>;
 }
 
 /**
- * Archiving and restoring a template. The revision is the one the page was
- * showing (the list row's `createdAt`), so a template saved somewhere else
- * since is refused in the engine's words rather than archived unseen; the
- * content is empty, as the engine reads none for these two.
+ * Archiving, restoring and changing the purpose of a template. The revision is
+ * the one the page was showing (the list row's `createdAt`), so a template
+ * saved somewhere else since is refused in the engine's words rather than
+ * changed unseen; the content is empty, as the engine reads none for these
+ * three.
  */
 export function useTemplateLifecycle(): TemplateLifecycle {
-  const write = useWrite(async (query, template: TemplateRow, action: "archive" | "restore") => {
+  const write = useWrite(async (query, template: TemplateRow, action: "archive" | "restore" | "classify", purpose?: TemplatePurpose) => {
     const base = {
       templateId: template.id,
       name: template.name,
@@ -882,7 +890,9 @@ export function useTemplateLifecycle(): TemplateLifecycle {
     const result =
       action === "archive"
         ? await query.campaignSaveTemplate({ ...base, action: "archive" })
-        : await query.campaignSaveTemplate({ ...base, action: "restore" });
+        : action === "restore"
+          ? await query.campaignSaveTemplate({ ...base, action: "restore" })
+          : await query.campaignSaveTemplate({ ...base, action: "classify", purpose: purpose ?? "marketing" });
     if (!result.rows().map(flatten).some((row) => row.saved === true && typeof row.revision === "string" && row.revision !== "")) {
       throw new Error("The cluster did not confirm the template change.");
     }
@@ -895,6 +905,7 @@ export function useTemplateLifecycle(): TemplateLifecycle {
     reset: write.reset,
     archive: (template) => write.call(template, "archive"),
     restore: (template) => write.call(template, "restore"),
+    setPurpose: (template, purpose) => write.call(template, "classify", purpose),
   };
 }
 

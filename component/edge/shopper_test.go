@@ -452,3 +452,76 @@ func TestEveryRefusalPageIsUnindexableAndScriptless(t *testing.T) {
 		}
 	}
 }
+
+// THE EDGE SAYS WHERE A POST CAME FROM, and only the edge: an inbound copy of
+// X-Memql-Shopper-Client is dropped and the address the edge itself saw is set.
+func TestTheEdgeSetsTheShopperClientHeaderAndDropsAnInboundCopy(t *testing.T) {
+	var got []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Values(ShopperClientHeader)
+		w.WriteHeader(http.StatusSeeOther)
+	}))
+	t.Cleanup(upstream.Close)
+	h := shopperHandler(t, shopperSite(nil), upstream.URL)
+
+	req := httptest.NewRequest(http.MethodPost, "/_memql/forms/wholesale/acceptance", strings.NewReader("signedName=Ada"))
+	req.Host = "shop.example.com"
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set(ShopperClientHeader, "203.0.113.250")
+	req.RemoteAddr = "198.51.100.7:40000"
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	if len(got) != 1 || got[0] != "198.51.100.7" {
+		t.Fatalf("the bff received %s = %q, want only the address the edge saw", ShopperClientHeader, got)
+	}
+	for _, name := range shopperStampHeaders {
+		if name == ShopperClientHeader {
+			return
+		}
+	}
+	t.Fatalf("%s is not among the headers the edge strips: %v", ShopperClientHeader, shopperStampHeaders)
+}
+
+// clientHeaderFor is what the bff receives as X-Memql-Shopper-Client for one
+// post with the given X-Forwarded-For (none when empty) from peer.
+func clientHeaderFor(t *testing.T, forwarded, peer string) []string {
+	t.Helper()
+	var got []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Values(ShopperClientHeader)
+		w.WriteHeader(http.StatusSeeOther)
+	}))
+	t.Cleanup(upstream.Close)
+	h := shopperHandler(t, shopperSite(nil), upstream.URL)
+	req := httptest.NewRequest(http.MethodPost, "/_memql/forms/wholesale/acceptance", strings.NewReader("signedName=Ada"))
+	req.Host = "shop.example.com"
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if forwarded != "" {
+		req.Header.Set("X-Forwarded-For", forwarded)
+	}
+	req.RemoteAddr = peer
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	return got
+}
+
+// THE RECORDED ADDRESS IS NOT THE CALLER'S CLAIM (ruling 51): of an
+// X-Forwarded-For the caller began and the ingress extended, the address the
+// ingress appended is recorded, by the rule the visit statistics use.
+func TestACallerSuppliedForwardedForDoesNotChooseTheRecordedAddress(t *testing.T) {
+	got := clientHeaderFor(t, "203.0.113.250, 198.51.100.7", "10.0.0.9:40000")
+	if len(got) != 1 || got[0] != "198.51.100.7" {
+		t.Fatalf("recorded %q, want the address the ingress appended", got)
+	}
+}
+
+// TEXT THAT IS NOT AN ADDRESS RECORDS NOTHING: not as text, and not the caller's
+// claim from further left.
+func TestTextThatIsNotAnAddressRecordsNothing(t *testing.T) {
+	if got := clientHeaderFor(t, "203.0.113.250, any text the caller likes", "not-an-address"); len(got) != 0 && got[0] != "" {
+		t.Fatalf("recorded %q from text that is not an address", got)
+	}
+	// Text in the forwarded header with a real peer records the peer.
+	if got := clientHeaderFor(t, "any text the caller likes", "198.51.100.8:40000"); len(got) != 1 || got[0] != "198.51.100.8" {
+		t.Fatalf("recorded %q, want the peer", got)
+	}
+}

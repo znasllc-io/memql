@@ -170,6 +170,16 @@ const createdCampaign = (conn: Conn) => conn.query.createCampaign.mock.calls[0]!
 // ---------------------------------------------------------------------------
 
 describe("Add a campaign", () => {
+  it("leaves transactional templates out of the campaign wizard's picker", async () => {
+    // A template about one person's own request has no unsubscribe: no list is sent it (X10).
+    const conn = seed({ templates: [...TEMPLATES, templateRow({ id: "t-own", name: "Application received", purpose: "transactional" }), templateRow({ id: "t-says", name: "Spring news", purpose: "marketing" })] });
+    mountWindow(conn);
+    await openWizard();
+    choose(/^Newsletter/);
+    expect(openStep()).toBe("Template");
+    expect(optionNames()).toEqual(["August copy", "Spring news", "Autumn draft"]);
+  });
+
   it("uses the account's saved sender and still permits an explicit change", async () => {
     const conn = seed({ accounts: [{ id: "self", name: "Studio", status: "active", domains: ["acme.com"], defaultDomain: "acme.com", defaultSenderIdentityId: "s1" }] });
     mountWindow(conn); await openWizard();

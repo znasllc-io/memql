@@ -14,9 +14,13 @@
 // their own applications, a cluster owner reads every merchant's, and
 // nobody else reads any.
 
-use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings }
-use wholesale.shapes.{ applicationFull, applicationDecisionFull, entitlementFull, wholesaleSettingsFull }
+use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings, documentVersion }
+use wholesale.shapes.{ applicationFull, applicationDecisionFull, entitlementFull, wholesaleSettingsFull, documentVersionFull, wholesaleDocumentVersionBrief }
 use wholesale.shapes.{ wholesaleStorePlan }
+use wholesale.concepts.{ privateLink, acceptance }
+use wholesale.shapes.{ privateLinkPublic, acceptanceFull }
+use wholesale.concepts.{ emailSend }
+use wholesale.shapes.{ emailSendFull }
 use shopify.overlay.concepts.{ store }
 
 @description("One application by id. The read a decision resolves its subject through, so a caller who cannot read an application cannot record a decision against it either -- which is the same narrowing reviewspack's moderation path carries, and for the same reason: a decision naming an application nobody can read would be a row scoped to no store.")
@@ -30,26 +34,29 @@ query application applicationById {
   shape   applicationFull
 }
 
-@description("This store's applications, newest first -- the merchant's queue. A bounded first page with a keyset cursor, because a trade desk's inbox is the one list here that grows without limit.")
+@description("This store's applications, newest submitted first -- the merchant's queue. A bounded first page with a keyset cursor, because a trade desk's inbox is the one list here that grows without limit. A store id is held in more than one form (bare, or v1:shopify:store:<id>): storeIds, when given, names every form to match beside storeId, so one stream answers the store whichever form each row holds. Ordered by submittedAt, and a row written before that field (which holds none) sorts after every row that holds one: dated yes answers only the rows that hold it, and dated no only those that do not -- ordered by their write time, which is when they were submitted until a later write -- so a reader merges the two in the order the applications arrived.")
 @actor
 query application applicationsForStore {
   args {
-    storeId  string!
+    storeId   string!
+    storeIds  array
+    dated     string
   }
-  filter  row => row.storeId == args.storeId
-  sort    "row.createdAt", "desc"
+  filter  row => (row.storeId == args.storeId || (args.storeIds != nil && row.storeId in args.storeIds))
+    && (args.dated == nil || (args.dated == "yes" && row.submittedAt != nil && row.submittedAt != "") || (args.dated == "no" && (row.submittedAt == nil || row.submittedAt == "")))
+  sort    "submittedAt", "desc", "row.createdAt", "desc"
   paginate 50
   shape   applicationFull
 }
 
-@description("Every decision recorded against one application, newest first. Append-only, so this IS the history -- there is no undo-by-overwrite to reconstruct, and the reason an application was refused is still here after it was approved.")
+@description("Every decision recorded against one application, newest first. Append-only, so this IS the history -- there is no undo-by-overwrite to reconstruct, and the reason an application was refused is still here after it was approved. A decision row holds the CANONICAL application id (v1:wholesale:application:<id>) and this query matches the id as written, so ask it with the canonical id.")
 @actor
 query applicationDecision decisionsForApplication {
   args {
     applicationId  string!
   }
   filter  row => row.applicationId == args.applicationId
-  sort    "row.createdAt", "desc"
+  sort    "decidedAt", "desc", "row.createdAt", "desc"
   shape   applicationDecisionFull
 }
 
@@ -61,18 +68,57 @@ query applicationDecision decisionsForApplications {
     applicationIds  []string!
   }
   filter  row => row.storeId == args.storeId && row.applicationId in args.applicationIds
-  sort    "row.createdAt", "desc"
+  sort    "decidedAt", "desc", "row.createdAt", "desc"
   shape   applicationDecisionFull
 }
 
-@description("The entitlement granted against one application. One row per application at a derived id, so this answers at most one -- newest version first, which is the current state.")
+@description("This store's decisions, newest decided first -- the Wholesale section's decision log. A bounded page with a keyset cursor, because a log is append-only and only grows. A decision names its application in whichever form its writer used (bare or v1:wholesale:application:<id>), so a reader joins it to its application by the bare id; storeIds, when given, names every form of the store id to match beside storeId. Read under the caller's own actor: wholesaleDecisionLog shows a line only for an application the caller reads. Ordered by decidedAt, and a row written before that field (which holds none) sorts after every row that holds one: dated yes answers only the rows that hold it, and dated no only those that do not -- ordered by their write time, which is when they were decided until a later write -- so a reader merges the two in the order the decisions were made.")
+@actor
+query applicationDecision decisionsForStore {
+  args {
+    storeId   string!
+    storeIds  array
+    dated     string
+  }
+  filter  row => (row.storeId == args.storeId || (args.storeIds != nil && row.storeId in args.storeIds))
+    && (args.dated == nil || (args.dated == "yes" && row.decidedAt != nil && row.decidedAt != "") || (args.dated == "no" && (row.decidedAt == nil || row.decidedAt == "")))
+  sort    "decidedAt", "desc", "row.createdAt", "desc"
+  paginate 50
+  shape   applicationDecisionFull
+}
+
+@description("Every decision on a list of applications, newest first, paged to its end by the caller. THE STATE FOLD READS THIS, so a reader pages it to its last page rather than folding the first: a short answer is an application shown as submitted after somebody decided it. Matched as written, so the list names every form of each application id; not narrowed by store, because the ids name their applications already.")
+@actor
+query applicationDecision decisionsForApplicationIds {
+  args {
+    applicationIds  []string!
+  }
+  filter  row => row.applicationId in args.applicationIds
+  sort    "decidedAt", "desc", "row.createdAt", "desc"
+  paginate 200
+  shape   applicationDecisionFull
+}
+
+@description("Every entitlement row on a list of applications, newest version first, paged to its end by the caller -- the export's batch read. Matched as written, so the list names every form of each application id.")
+@actor
+query entitlement entitlementsForApplicationIds {
+  args {
+    applicationIds  []string!
+  }
+  filter  row => row.applicationId in args.applicationIds
+  sort    "attemptedAt", "desc", "row.createdAt", "desc"
+  paginate 200
+  shape   entitlementFull
+}
+
+@description("The entitlement granted against one application. One row per application at a derived id, so this answers at most one -- newest version first, which is the current state. An entitlement row holds the CANONICAL application id (v1:wholesale:application:<id>) and this query matches the id as written, so ask it with the canonical id.")
 @actor
 query entitlement entitlementForApplication {
   args {
     applicationId  string!
   }
   filter  row => row.applicationId == args.applicationId
-  sort    "row.createdAt", "desc"
+  sort    "attemptedAt", "desc", "row.createdAt", "desc"
   shape   entitlementFull
 }
 
@@ -83,7 +129,7 @@ query entitlement entitlementsForStore {
     storeId  string!
   }
   filter  row => row.storeId == args.storeId
-  sort    "row.createdAt", "desc"
+  sort    "attemptedAt", "desc", "row.createdAt", "desc"
   paginate 50
   shape   entitlementFull
 }
@@ -99,6 +145,65 @@ query wholesaleSettings wholesaleSettingsForStore {
   shape   wholesaleSettingsFull
 }
 
+@description("One store's wholesale settings by their derived id (SettingsRowID). The read that decides whose a settings row is before a write at that id: two store ids that slug alike share the id, so a read by the storeId field could miss the very row the write then replaces.")
+@unbounded("settings by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+query wholesaleSettings wholesaleSettingsById {
+  args {
+    settingsId  string!
+  }
+  filter  row => row.id == args.settingsId
+  shape   wholesaleSettingsFull
+}
+
+@description("Every version of one of a store's documents (terms, map or priceSheet), newest first, paged to its end by the caller: the first row is the current version. A version is append-only, so this IS the document's history. Matched as written, so a reader asks every form of the store id (bare, or v1:shopify:store:<id>).")
+@actor
+query documentVersion documentVersionsForStore {
+  args {
+    storeId  string!
+    kind     string!
+  }
+  filter  row => row.storeId == args.storeId && row.kind == args.kind
+  sort    "row.createdAt", "desc"
+  paginate 200
+  shape   documentVersionFull
+}
+
+@description("The versions of one of a store's documents WITHOUT their bodies, newest first. Its first page is the head a reader takes the current version from; a history pages it to its end. Matched as written, so a reader asks every form of the store id.")
+@actor
+query documentVersion documentVersionBriefsForStore {
+  args {
+    storeId  string!
+    kind     string!
+  }
+  filter  row => row.storeId == args.storeId && row.kind == args.kind
+  sort    "row.createdAt", "desc"
+  paginate 50
+  shape   wholesaleDocumentVersionBrief
+}
+
+@description("One document version by id, body included: the one body a reader of the current version or of one named version needs.")
+@unbounded("document version by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+query documentVersion wholesaleDocumentVersionById {
+  args {
+    documentVersionId  string!
+  }
+  filter  row => row.id == args.documentVersionId
+  shape   documentVersionFull
+}
+
+@description("One document version by id WITHOUT its body: what a reader that shows a version's label or fingerprint needs, and nothing of a body of up to 200 KB.")
+@unbounded("document version by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+query documentVersion wholesaleDocumentVersionBriefById {
+  args {
+    documentVersionId  string!
+  }
+  filter  row => row.id == args.documentVersionId
+  shape   wholesaleDocumentVersionBrief
+}
+
 @description("The bound store's plan, through the pack's own narrow projection. THIS READ ANSWERING NOTHING IS ORDINARY: v1:shopify:store is readable by a cluster owner or a developer only (its read floor is developer), so a merchant reads no rows here. What an unknown plan MEANS is each adapter's to say -- shopifyB2B refuses, because it cannot establish the catalog ceiling it has to respect; customerTag proceeds, because it needs no plan at all. That difference is what plan-independence is.")
 @unbounded("store by id -- bounded to a single row (id is the row's own primary key)")
 @actor
@@ -108,4 +213,88 @@ query store storePlanById {
   }
   filter  row => row.id == args.storeId
   shape   wholesaleStorePlan
+}
+
+@description("THE BACKFILL'S WALK (U5, X19): every application of the named store (in any form its id is stored in), or of the cluster when none is named, TIED OR NOT, whoever owns it -- oldest version first, one window at a time from the createdAt named by after (inclusive; the walk skips what it has seen). It answers the tied ones on purpose: a run that stopped after tying an application and before its decisions is finished by the next, and a second run counts what the first tied rather than finding nothing. SERVER ONLY, read as the system by wholesaleBackfillAccounts once it has admitted an operator; no client reads it.")
+@serverOnly
+@actor
+query application applicationsForBackfill {
+  args {
+    storeIds  array
+    after     string
+  }
+  filter  row => (args.storeIds == nil || row.storeId in args.storeIds) && (args.after == nil || row.createdAt >= args.after)
+  sort    "row.createdAt", "asc"
+  paginate 200
+  shape   applicationFull
+}
+
+@description("The link a token belongs to, on one store: the shopper path's only way in to a private link. Matched by the token's hash and the store as written (the bare form the pack writes links in), so a token of another store, or a token a later version of its link replaced, finds nothing. Projects no token hash.")
+@unbounded("one link by its token hash -- a token hash is one link")
+@actor
+query privateLink privateLinkByTokenHash {
+  args {
+    storeId    string!
+    tokenHash  string!
+  }
+  filter  row => row.storeId == args.storeId && row.tokenHash == args.tokenHash
+  shape   privateLinkPublic
+}
+
+@description("One application's link of one purpose (terms or priceSheet), without its token hash. One row per application and purpose at a derived id, so this answers at most one. A link row holds the CANONICAL application id and this query matches it as written, so a reader asks both forms.")
+@actor
+query privateLink privateLinkForApplication {
+  args {
+    applicationId  string!
+    purpose        string!
+  }
+  filter  row => row.applicationId == args.applicationId && row.purpose == args.purpose
+  sort    "row.createdAt", "desc"
+  shape   privateLinkPublic
+}
+
+@description("One application's acceptance of the terms. Written once at a derived id, so this answers at most one. An acceptance holds the CANONICAL application id and this query matches it as written, so a reader asks both forms.")
+@actor
+query acceptance acceptanceForApplication {
+  args {
+    applicationId  string!
+  }
+  filter  row => row.applicationId == args.applicationId
+  sort    "row.createdAt", "desc"
+  shape   acceptanceFull
+}
+
+@description("The acceptances of a list of applications, paged to its end by the caller: the list's and the export's batch read, so a store's list reads one batch per fifty applications rather than one read per application. Matched as written, so the list names every form of each application id.")
+@actor
+query acceptance acceptancesForApplicationIds {
+  args {
+    applicationIds  []string!
+  }
+  filter  row => row.applicationId in args.applicationIds
+  sort    "row.createdAt", "desc"
+  paginate 200
+  shape   acceptanceFull
+}
+
+@description("Every email the pack sent, or tried to send, to one application's applicant, newest first: one row per kind and attempt at a derived id, so this answers each attempt's current record. An email's row holds the CANONICAL application id and this query matches it as written, so a reader asks both forms.")
+@actor
+query emailSend emailSendsForApplication {
+  args {
+    applicationId  string!
+  }
+  filter  row => row.applicationId == args.applicationId
+  sort    "row.createdAt", "desc"
+  shape   emailSendFull
+}
+
+@description("The emails of a list of applications, newest first, paged to its end by the caller: the export's batch read. Matched as written, so the list names every form of each application id.")
+@actor
+query emailSend emailSendsForApplicationIds {
+  args {
+    applicationIds  []string!
+  }
+  filter  row => row.applicationId in args.applicationIds
+  sort    "row.createdAt", "desc"
+  paginate 200
+  shape   emailSendFull
 }

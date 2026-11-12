@@ -555,6 +555,7 @@ describe("by person: what they can open, in words", () => {
         "group:g-acme": [
           accessRow({ resource: "app:deployables", held: true, source: "group", sourceId: "g-acme", accountId: "acct-7f3a" }),
           accessRow({ resource: "app:deployables/reviews", verb: "execute", held: true, source: "group", sourceId: "g-acme", accountId: "acct-7f3a" }),
+          accessRow({ resource: "app:deployables/wholesale", verb: "execute", held: true, source: "group", sourceId: "g-acme", accountId: "acct-7f3a" }),
           accessRow({ resource: "app:logs", held: false, source: "group", sourceId: "g-acme", accountId: "acct-7f3a" }),
         ],
       },
@@ -563,6 +564,7 @@ describe("by person: what they can open, in words", () => {
     await pickSubject("Acme");
     await waitFor(() => expect(answersOf("app:deployables")).toEqual(["Granted"]));
     expect(answersOf("app:deployables/reviews")).toEqual(["Granted"]);
+    expect(answersOf("app:deployables/wholesale")).toEqual(["Granted"]);
     expect(answersOf("app:logs")).toEqual(["Denied"]);
     expect(answersOf("app:files")).toEqual(["Not granted by this group"]);
     expect(state.calls.find((c) => c.name === "effectiveAccessForSubject")?.call).toContain('subjectKind: "group", subjectId: "g-acme"');

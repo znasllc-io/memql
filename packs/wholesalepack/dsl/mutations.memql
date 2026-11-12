@@ -15,43 +15,100 @@
 // store accepting applications, what store is this application on, what
 // does the decision log fold to, is this transition legal -- and then
 // calls the matching mutation here through the engine, under the caller's
-// own actor.
+// own actor (or, from the store's automation, the application's merchant).
 //
-// That split is not a workaround; it is the right seam. `stamp {
-// ownerUserId: actor.userId }` is the ENGINE's way of saying who owns a
-// row, and every concept in this pack is @rowAuthz(owner="ownerUserId",
-// clusterOwner) -- so a row written any other way is owned by nobody and
-// invisible to the merchant who just made it. Letting the mutation stamp
-// it means the pack's Go never has to know how an actor becomes an owner.
+// # Every one of these is @serverOnly
 //
-// # None of these is the shopper's entry point
+// Each is reached ONLY from the builtin that judges it, through reader.go's
+// engineWriter, which stamps internal origin for that one call. A client
+// calling one directly would write around the check that makes the write
+// legal -- a decision appended past the legality fold, an entitlement
+// nobody approved -- so the engine refuses it.
 //
-// The declared shopper form names the BUILTIN, so the gate cannot be
-// skipped from outside. These are reachable by an authenticated caller on
-// their own store, which is the operator and import path -- exactly the
-// asymmetry reviewspack draws between createReview and submitReview.
+// THE STAMP ESCAPES THE ROW GATE: a write at internal origin is not
+// owner-checked, so the @rowAuthz tiers below do not protect these rows from
+// the builtins. Each builtin authorizes its caller itself before it writes:
+//
+//   - wholesaleSubmitApplication: the store's applicationsOpen gate; then the
+//     store gate's judgement of the named site (the store set up, the site of
+//     its organization), the accountId the site's organization and the caller
+//     the site's owner, unconditionally -- else refused as a closed store; then
+//     the id established absent (read as the system) and the write fenced on
+//     "row absent", so no application is ever written over;
+//   - wholesaleRecordDecision: the wholesale part, judged by the organization
+//     gate against the APPLICATION's organization; then a signed-in person
+//     who is not one of the cluster's operators (the decider is always the
+//     caller); then the application read under the CALLER, so a caller who
+//     cannot read it cannot decide it; then the legality fold over the
+//     WHOLE log, read as the system (X27);
+//   - wholesaleRetryAccess: the part against the application's organization,
+//     the application read under the caller, then the decision log and the
+//     entitlement row decide whether there is access to retry;
+//   - wholesaleUpdateSettings: the part against the SITE's organization, then
+//     the store gate (siteForStore): the store is set up -- its settings row
+//     tied to an organization -- and the site is of it; it merges into the row
+//     the operators set up;
+//   - wholesaleSetSettings: internal origin or a cluster operator only, never
+//     the part. The row is always tied to an organization: the named site's,
+//     or the one bound site's, else refused. An existing row keeps its owner
+//     and is tied only to a site of that owner; a NEW ROW'S OWNER is the
+//     site's owner;
+//   - wholesaleProvisionEntitlement / wholesaleRevokeEntitlement: internal
+//     origin only (the store's automation), then the decision log.
+//   - wholesaleBackfillAccounts: internal origin or a cluster operator
+//     only, refusing everyone else before it reads; a row already tied is
+//     never rewritten;
+//   - wholesaleAcceptTerms: no capability -- the token is the authority. The
+//     token's hash must match a link of the store the call names, read under
+//     the caller, unused, unexpired and of a submitted application, before
+//     anything else is read; an existing acceptance refuses; the acceptance is
+//     fenced on row-absent at its derived id, so none is ever written over, and
+//     only then is the link the token named written again with its usedAt;
+//   - the private link itself: written by mintLink, which only the resolver
+//     that mails the link calls, as the application's merchant.
+//
+// # ownerUserId is an ARGUMENT, accepted
+//
+// Every concept in this pack is @rowAuthz(owner="ownerUserId",
+// clusterOwner), so a row's owner is the merchant it belongs to. The Go
+// names that merchant -- the borrowed site owner on submission, the
+// application's ownerUserId on a decision and an entitlement -- because
+// the actor running a write is not always that merchant: provisioning from
+// the store's automation reads as the deployment, and a row stamped from a
+// system actor is owned by nobody.
 
-use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings }
+use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings, documentVersion }
+use wholesale.concepts.{ privateLink, acceptance, emailSend }
 
 /// Write one application. IT NAMES NO ROW ID: on the shopper path the
 /// caller is a member of the public, `id` is a name the shopper surface
 /// refuses outright, and a shopper who could choose a row id could
 /// overwrite another applicant's. The engine derives one.
+/// ownerUserId is the site owner whose authority the shopper handler
+/// borrowed, which is the calling actor. accountId is the site's
+/// organization, stamped by the handler; source says how it arrived.
+/// submittedAt is the engine's clock when the builtin wrote it, never a
+/// caller's value.
+@serverOnly
 @actor
 mutation application createApplicationRow {
   args {
     applicationId   string!
+    ownerUserId     string!
     storeId         string!
     siteId          string
     companyName     string!  @maxLength(200)
     applicantName   string!  @maxLength(120)
     applicantEmail  string!  @maxLength(320)
+    accountId       string
+    source          string   @enum("storefront", "staff")
+    addedBy         string
+    submittedAt     datetime!
   }
   insert {
-    accept { storeId, siteId, companyName, applicantName, applicantEmail }
+    accept { ownerUserId, storeId, siteId, companyName, applicantName, applicantEmail, accountId, source, addedBy, submittedAt }
     stamp {
       id: args.applicationId
-      ownerUserId: actor.userId
     }
   }
 }
@@ -67,17 +124,23 @@ mutation application createApplicationRow {
 /// because a caller-supplied decider on an APPEND-ONLY log is a way to
 /// attribute somebody else's approval to them permanently, with no later
 /// write able to correct it. When the two disagree the actor wins, which
-/// is the only one of them that cannot be forged.
+/// is the only one of them that cannot be forged. ownerUserId is the
+/// application's merchant, copied off it by the builtin. decidedAt is the
+/// engine's clock when the builtin wrote it.
+@serverOnly
 @actor
 mutation applicationDecision appendApplicationDecision {
   args {
     applicationId  string!
+    ownerUserId    string
     storeId        string!
     transition     string!  @enum("approve", "reject", "revoke")
     note           string   @maxLength(2000)
+    accountId      string
+    decidedAt      datetime!
   }
   insert {
-    accept { applicationId, storeId, transition, note }
+    accept { applicationId, ownerUserId, storeId, transition, note, accountId, decidedAt }
     stamp {
       decidedBy: actor.userId
       principalKind: "client"
@@ -88,32 +151,112 @@ mutation applicationDecision appendApplicationDecision {
 /// Write one store's settings. NAMES ITS ID, derived from the store, so
 /// there is exactly one row per store and a second write is a new VERSION
 /// of it rather than a second row a read would have to choose between.
+/// ownerUserId is the store's merchant, which the builtin resolves: an
+/// existing row keeps its owner, so an operator's change never takes it.
+@serverOnly
 @actor
 mutation wholesaleSettings setWholesaleSettingsRow {
   args {
     settingsId          string!
+    ownerUserId         string!
     storeId             string!
     applicationsOpen    bool!
     entitlementAdapter  string
     introText           string   @maxLength(2000)
+    accountId           string
+    siteId              string
+    staffEmail          string   @maxLength(320)
+    termsRequired       bool
+    linkLifetimeDays    int
+    acceptanceText      string   @maxLength(2000)
+    senderIdentityId    string
+    termsTemplateId     string
+    approvedTemplateId  string
+    rejectedTemplateId  string
+    revokedTemplateId   string
   }
   insert {
-    accept { storeId, applicationsOpen, entitlementAdapter, introText }
+    accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText, accountId, siteId, staffEmail, termsRequired, linkLifetimeDays, acceptanceText, senderIdentityId, termsTemplateId, approvedTemplateId, rejectedTemplateId, revokedTemplateId }
     stamp {
       id: args.settingsId
-      ownerUserId: actor.userId
     }
+  }
+}
+
+/// Write one store's settings WHOLE: every field, the empty and false ones
+/// included, at the derived id. wholesaleUpdateSettings merges a change into
+/// the row it read and writes the result here, so a field the caller did not
+/// name keeps the value it held. The owner, organization and site are the
+/// row's own, never the caller's.
+@serverOnly
+@actor
+mutation wholesaleSettings putWholesaleSettingsRow {
+  args {
+    settingsId          string!
+    ownerUserId         string!
+    storeId             string!
+    applicationsOpen    bool!
+    entitlementAdapter  string
+    introText           string   @maxLength(2000)
+    staffEmail          string   @maxLength(320)
+    accountId           string
+    siteId              string
+    termsRequired       bool
+    linkLifetimeDays    int
+    acceptanceText      string   @maxLength(2000)
+    senderIdentityId    string
+    termsTemplateId     string
+    approvedTemplateId  string
+    rejectedTemplateId  string
+    revokedTemplateId   string
+  }
+  insert {
+    accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText, staffEmail, accountId, siteId, termsRequired, linkLifetimeDays, acceptanceText, senderIdentityId, termsTemplateId, approvedTemplateId, rejectedTemplateId, revokedTemplateId }
+    stamp {
+      id: args.settingsId
+    }
+  }
+}
+
+/// Append one version of a store's document. IT NAMES NO ID: a version is a
+/// new row every time, and an id the caller chose would let a second version
+/// overwrite the first -- the one an applicant may already have accepted.
+/// EVERY ARGUMENT IS ACCEPTED AND NOTHING IS STAMPED: wholesalePublishDocument
+/// names the merchant, the publisher (the caller), the clock and the body's
+/// digest, and runs the write as the store's merchant. Versions are never
+/// updated, so there is no mutation that writes one at an existing id.
+@serverOnly
+@actor
+mutation documentVersion appendWholesaleDocumentVersion {
+  args {
+    ownerUserId  string!
+    storeId      string!
+    accountId    string
+    kind         string!  @enum("terms", "map", "priceSheet")
+    label        string!  @maxLength(120)
+    body         string!  @maxLength(204800)
+    sha256       string!
+    publishedBy  string!
+    publishedAt  datetime!
+  }
+  insert {
+    accept { ownerUserId, storeId, accountId, kind, label, body, sha256, publishedBy, publishedAt }
   }
 }
 
 /// Write one application's entitlement. NAMES ITS ID, derived from the
 /// application, so a re-provision after a failure is a new version of one
-/// logical row -- and "revoked when" is that version's own createdAt,
-/// which is why the concept carries no revokedAt.
+/// logical row. attemptedAt is when this attempt was made; grantedAt and
+/// revokedAt are when trade prices went on and came off, written by the
+/// attempt that made it so and carried by the versions after it. ownerUserId
+/// is the application's merchant: the write runs as that merchant, and a row owned
+/// by anybody else is invisible to the merchant who granted it.
+@serverOnly
 @actor
 mutation entitlement writeEntitlementRow {
   args {
     entitlementId  string!
+    ownerUserId    string!
     applicationId  string!
     storeId        string!
     buyerEmail     string!
@@ -121,12 +264,250 @@ mutation entitlement writeEntitlementRow {
     state          string!  @enum("pending", "granted", "failed", "revoked")
     reference      string
     error          string   @maxLength(4000)
+    errorCode          string
+    shopifyCustomerId  string
+    customerCreated    bool
+    accountId          string
+    direction          string   @enum("grant", "revoke")
+    attempt            int
+    attemptedAt        datetime!
+    grantedAt          datetime
+    revokedAt          datetime
   }
   insert {
-    accept { applicationId, storeId, buyerEmail, adapter, state, reference, error }
+    accept { ownerUserId, applicationId, storeId, buyerEmail, adapter, state, reference, error, errorCode, shopifyCustomerId, customerCreated, accountId, direction, attempt, attemptedAt, grantedAt, revokedAt }
     stamp {
       id: args.entitlementId
-      ownerUserId: actor.userId
+    }
+  }
+}
+
+// # The backfill (U5, X19)
+//
+// Rows written before organizations reached this pack carry no accountId, so
+// the tiers' account arm admits nobody to them. wholesaleBackfillAccounts
+// ties each one, and these are its writes: ONE PER CONCEPT, each at the row's
+// OWN id with every field the row held plus the ones it lacked. The engine
+// merges a write at an existing id into the row's current version, so a field
+// named here with the value it already held changes nothing; what the write
+// adds is the tie -- and, for a row written before the pack recorded when
+// things happened, that time: the row's own write time as it stood before the
+// tie, carried into the field in the same write, and never over a value the
+// field holds. The builtin admits internal origin or a cluster operator
+// and nobody else, before it reads, because these writes run at internal
+// origin and the row gate does not owner-check them.
+
+/// Tie one application to its site's organization. source and addedBy are
+/// not here: no row written before this version holds either, and a field
+/// the write omits keeps its value.
+@serverOnly
+@actor
+mutation application backfillApplicationRow {
+  args {
+    applicationId   string!
+    ownerUserId     string!
+    storeId         string!
+    siteId          string
+    companyName     string!
+    applicantName   string!
+    applicantEmail  string!
+    accountId       string!
+    submittedAt     datetime
+  }
+  insert {
+    accept { ownerUserId, storeId, siteId, companyName, applicantName, applicantEmail, accountId, submittedAt }
+    stamp {
+      id: args.applicationId
+    }
+  }
+}
+
+/// Tie one decision to its application's organization and name its merchant.
+///
+/// decidedBy AND principalKind ARE ARGUMENTS HERE, and stamp nothing from the
+/// actor (X5): this rewrites a decision somebody else made, and stamping the
+/// actor would attribute it to whoever ran the backfill. The builtin passes
+/// the values the row already held, so the backfill changes no decision
+/// field. It runs as the application's merchant.
+@serverOnly
+@actor
+mutation applicationDecision backfillDecisionRow {
+  args {
+    decisionId     string!
+    applicationId  string!
+    ownerUserId    string!
+    storeId        string!
+    transition     string!  @enum("approve", "reject", "revoke")
+    decidedBy      string!
+    principalKind  string!  @enum("client")
+    note           string
+    accountId      string!
+    decidedAt      datetime
+  }
+  insert {
+    accept { applicationId, ownerUserId, storeId, transition, decidedBy, principalKind, note, accountId, decidedAt }
+    stamp {
+      id: args.decisionId
+    }
+  }
+}
+
+/// Tie one entitlement to its application's organization, with every field
+/// the row held, the empty and false ones included.
+@serverOnly
+@actor
+mutation entitlement backfillEntitlementRow {
+  args {
+    entitlementId      string!
+    ownerUserId        string!
+    applicationId      string!
+    storeId            string!
+    buyerEmail         string!
+    adapter            string!
+    state              string!  @enum("pending", "granted", "failed", "revoked")
+    reference          string
+    error              string
+    errorCode          string
+    shopifyCustomerId  string
+    customerCreated    bool
+    accountId          string!
+    direction          string   @enum("grant", "revoke")
+    attempt            int
+    attemptedAt        datetime
+    grantedAt          datetime
+    revokedAt          datetime
+  }
+  insert {
+    accept { ownerUserId, applicationId, storeId, buyerEmail, adapter, state, reference, error, errorCode, shopifyCustomerId, customerCreated, accountId, direction, attempt, attemptedAt, grantedAt, revokedAt }
+    stamp {
+      id: args.entitlementId
+    }
+  }
+}
+
+/// Tie one store's settings to its site's organization and name the site.
+@serverOnly
+@actor
+mutation wholesaleSettings backfillSettingsRow {
+  args {
+    settingsId          string!
+    ownerUserId         string!
+    storeId             string!
+    applicationsOpen    bool!
+    entitlementAdapter  string
+    introText           string
+    accountId           string!
+    siteId              string
+  }
+  insert {
+    accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText, accountId, siteId }
+    stamp {
+      id: args.settingsId
+    }
+  }
+}
+
+// # The private links and the acceptance (U8)
+
+/// Write one application's link of one purpose WHOLE, at its derived id
+/// (PrivateLinkRowID): every field passed, the empty ones included, because a
+/// write at an existing id merges into the current version. A link sent again
+/// is a new version with a new token hash, which is what refuses the token
+/// before it; marking the link used is a new version with usedAt. EVERY
+/// ARGUMENT IS ACCEPTED AND NOTHING IS STAMPED: the pack names the merchant,
+/// the organization and the clock, and writes as the application's merchant.
+@serverOnly
+@actor
+mutation privateLink putPrivateLinkRow {
+  args {
+    linkId         string!
+    ownerUserId    string!
+    storeId        string!
+    accountId      string
+    siteId         string
+    applicationId  string!
+    purpose        string!  @enum("terms", "priceSheet")
+    tokenHash      string!
+    issuedAt       datetime!
+    expiresAt      datetime
+    usedAt         datetime
+  }
+  insert {
+    accept { ownerUserId, storeId, accountId, siteId, applicationId, purpose, tokenHash, issuedAt, expiresAt, usedAt }
+    stamp {
+      id: args.linkId
+    }
+  }
+}
+
+/// Write one application's acceptance at its derived id (AcceptanceRowID).
+/// WRITTEN ONCE: wholesaleAcceptTerms fences the write on the row being
+/// absent, so a second acceptance is refused rather than written over the
+/// first. Every argument is accepted and nothing is stamped.
+@serverOnly
+@actor
+mutation acceptance putAcceptanceRow {
+  args {
+    acceptanceId    string!
+    ownerUserId     string!
+    storeId         string!
+    accountId       string
+    applicationId   string!
+    applicantEmail  string!  @maxLength(320)
+    signedName      string!  @maxLength(120)
+    acceptedAt      datetime!
+    termsVersionId  string!
+    termsSha256     string!
+    mapVersionId    string!
+    mapSha256       string!
+    statement       string!  @maxLength(2000)
+    clientAddress   string   @maxLength(64)
+    userAgent       string   @maxLength(512)
+    linkIssuedAt    datetime
+  }
+  insert {
+    accept { ownerUserId, storeId, accountId, applicationId, applicantEmail, signedName, acceptedAt, termsVersionId, termsSha256, mapVersionId, mapSha256, statement, clientAddress, userAgent, linkIssuedAt }
+    stamp {
+      id: args.acceptanceId
+    }
+  }
+}
+
+// # The applicant's emails (U9)
+
+/// Write one email's record WHOLE at its derived id (EmailSendRowID): every
+/// field passed, the empty ones included, because a write at an existing id
+/// merges into the current version. The send builtins write it twice for an
+/// attempt handed to the lane -- its record before the hand-over, fenced on no
+/// row at its id, so of two nodes sending at once the second hands over nothing
+/// and answers the first's row; then what the lane answered, fenced on that
+/// record -- and once for a due email the store's own checks declined, which is
+/// recorded as skipped and never handed over. EVERY ARGUMENT IS ACCEPTED AND
+/// NOTHING IS STAMPED: the pack names the merchant, the organization, the person
+/// who asked and the clock, and writes as the application's merchant. It never
+/// carries an address, a field of the message or a link's token.
+@serverOnly
+@actor
+mutation emailSend putEmailSendRow {
+  args {
+    emailSendId    string!
+    ownerUserId    string!
+    storeId        string
+    accountId      string
+    applicationId  string!
+    kind           string!  @enum("terms", "approved", "rejected", "revoked")
+    attempt        int!
+    requestId      string!
+    templateId     string
+    state          string!  @enum("sending", "sent", "skipped", "held", "uncertain", "failed", "deferred")
+    reason         string   @maxLength(2000)
+    sentAt         datetime
+    requestedBy    string
+  }
+  insert {
+    accept { ownerUserId, storeId, accountId, applicationId, kind, attempt, requestId, templateId, state, reason, sentAt, requestedBy }
+    stamp {
+      id: args.emailSendId
     }
   }
 }

@@ -1,12 +1,14 @@
 package memql
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
+	"unicode"
 )
 
 // shopper_surface.go -- THE WHOLE OF WHAT A SHOPPER CAN REACH (epic
@@ -106,6 +108,11 @@ const (
 	// user who does not own that site reads zero rows, so a forged owner
 	// refuses itself without any comparison being written down.
 	ShopperOwnerHeader = "X-Memql-Shopper-Owner"
+	// ShopperClientHeader names the address the edge saw a request come from
+	// (X20). DATA, NOT A POINTER: the bff hands it, unchecked, to a form that
+	// asks for evidence (ShopperForm.Evidence) and to nothing else, and the edge
+	// deletes an inbound copy before it sets its own, as it does the three above.
+	ShopperClientHeader = "X-Memql-Shopper-Client"
 
 	// ShopperSubmissionIDArg is the argument name the bff stamps one
 	// freshly-minted id into, on BOTH the pack's construct and the client
@@ -118,6 +125,20 @@ const (
 	// in its args block and uses it as the row id it creates, which is what
 	// gives a client extension something to relate to.
 	ShopperSubmissionIDArg = "submissionId"
+
+	// ShopperAccountIDArg is the argument name the bff stamps the
+	// organization of the site the request arrived on into: into the
+	// construct of a form that asks for it (ShopperForm.AcceptsAccount), and
+	// into a client extension's mutation when that mutation declares it
+	// (ShopperExtension.AcceptsAccount). A construct that does not ask is
+	// handed no such argument; the account it acts in is on its context
+	// either way (auth.ContextWithCallAccount).
+	//
+	// RESERVED, like the store: a form that could supply its own would tie a
+	// row to an organization the site is not in, and a row tier with an
+	// account arm would then admit that organization's people to it. Empty
+	// for a site with no organization, which is a legitimate state.
+	ShopperAccountIDArg = "accountId"
 )
 
 // shopperFieldDefaultMaxLength bounds a declared field that names no bound
@@ -158,6 +179,7 @@ const (
 var reservedShopperFieldNames = map[string]string{
 	"storeId":     "stamped from the binding the request arrived through (design D9)",
 	"siteId":      "stamped from the site the request arrived on",
+	"accountId":   "stamped from the organization of the site the request arrived on, for a form that asks for it",
 	"ownerUserId": "stamped from the site owner, whose authority the write borrows",
 	"id":          "the row id, derived server-side",
 	"concept":     "a row intrinsic",
@@ -166,6 +188,10 @@ var reservedShopperFieldNames = map[string]string{
 	"submittedAt": "stamped from the server clock, never the shopper's",
 	"submissionId": "minted per POST by the bff and stamped into both constructs, so one " +
 		"submission has one id (design record 2026-09-21, D4)",
+	"clientAddress": "the address the edge saw the request come from, handed to an Evidence form " +
+		"on its context (ShopperEvidence), never posted",
+	"userAgent": "the browser's User-Agent, handed to an Evidence form on its context " +
+		"(ShopperEvidence), never posted",
 	"actor":     "a reserved engine root",
 	"now":       "a reserved engine root",
 	"partition": "a reserved engine root",
@@ -195,8 +221,63 @@ type ShopperField struct {
 	// Numeric parses the value as an integer before it reaches the
 	// construct, so a rating arrives as a number rather than a string.
 	Numeric bool
+	// Format, when set, is a named rule the value must meet, checked by the
+	// handler before the construct runs and refused as the surface's own
+	// invalid. ShopperFormatSHA256 and ShopperFormatEmail are the ones there
+	// are.
+	Format string
 	// Description is what the pack guide and the module inventory show.
 	Description string
+}
+
+// ShopperFormatSHA256 accepts exactly 64 hexadecimal characters, of either
+// case: a SHA-256 fingerprint as hex.
+const ShopperFormatSHA256 = "sha256"
+
+// ShopperFormatEmail accepts one email address, judged by IsEmailAddress.
+const ShopperFormatEmail = "email"
+
+// maxEmailAddress is the longest address IsEmailAddress accepts, in bytes.
+const maxEmailAddress = 320
+
+// IsEmailAddress reports whether value, trimmed, is one email address: at most
+// 320 bytes, exactly one @ with something on each side, and no whitespace.
+// Nothing more is judged -- no DNS, no list of domains: the rule is that a value
+// is shaped like an address, so a link or a customer lookup is never sent to
+// text that is not one.
+func IsEmailAddress(value string) bool {
+	v := strings.TrimSpace(value)
+	if v == "" || len(v) > maxEmailAddress || strings.Count(v, "@") != 1 {
+		return false
+	}
+	if strings.IndexFunc(v, unicode.IsSpace) >= 0 {
+		return false
+	}
+	at := strings.IndexByte(v, '@')
+	return at > 0 && at < len(v)-1
+}
+
+// MatchesFormat reports whether value meets the field's Format; a field with
+// none accepts every value.
+func (f ShopperField) MatchesFormat(value string) bool {
+	switch f.Format {
+	case "":
+		return true
+	case ShopperFormatSHA256:
+		if len(value) != 64 {
+			return false
+		}
+		for i := 0; i < len(value); i++ {
+			c := value[i]
+			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+				return false
+			}
+		}
+		return true
+	case ShopperFormatEmail:
+		return IsEmailAddress(value)
+	}
+	return false
 }
 
 // EffectiveMaxLength resolves the declared bound. Exported because the
@@ -246,8 +327,97 @@ type ShopperForm struct {
 	// anything else, so a pack cannot put an arbitrary error on the
 	// merchant's page -- only a code the merchant's page was written for.
 	Refusals []string
+	// AcceptsAccount asks the handler to hand the construct the account of the
+	// site the form was posted on, as the argument ShopperAccountIDArg,
+	// stamped after the declared fields the way the store and the site are.
+	// For a construct that writes rows whose own field records that account.
+	// A form that does not ask is handed none, and since the name is reserved
+	// no field a shopper posts can stand in for it: no argument of that name
+	// reaches its construct at all.
+	AcceptsAccount bool
+	// Evidence asks the handler to put what the request itself says about where
+	// it came from on the context the construct runs under (ShopperEvidence):
+	// the address the edge saw and the browser's User-Agent. For a construct
+	// that records a person's assent, which is evidence of it. A form that does
+	// not ask is given none.
+	Evidence bool
 	// Description is what the pack guide and the module inventory show.
 	Description string
+}
+
+// ShopperEvidence is what a shopper's request says about where it came from:
+// the address the edge saw it come from (ShopperClientHeader) and the
+// browser's User-Agent, cut to 512 bytes by the handler.
+//
+// A CONTEXT VALUE, NEVER AN ARGUMENT. Nothing a request posts and nothing a
+// DSL caller writes can set it, so a construct that reads it knows the value
+// came from the shopper handler; a direct call of the construct carries none.
+type ShopperEvidence struct {
+	ClientAddress, UserAgent string
+}
+
+type shopperEvidenceKey struct{}
+
+// ContextWithShopperEvidence is ctx carrying ev. The shopper handler is its
+// one caller, for a form that declares Evidence.
+func ContextWithShopperEvidence(ctx context.Context, ev ShopperEvidence) context.Context {
+	return context.WithValue(ctx, shopperEvidenceKey{}, ev)
+}
+
+// ShopperEvidenceFrom is the evidence ctx carries, and false when it carries
+// none.
+func ShopperEvidenceFrom(ctx context.Context) (ShopperEvidence, bool) {
+	ev, ok := ctx.Value(shopperEvidenceKey{}).(ShopperEvidence)
+	return ev, ok
+}
+
+// ShopperOutcome is what a form's construct tells the shopper handler beyond
+// its answer: that it accepted the submission and WROTE NOTHING.
+//
+// A construct may accept a post and write nothing, when telling the poster the
+// post was declined would itself reveal something (for example, that somebody
+// else's details are already on file). It answers exactly as it answers an
+// accepted post, and marks this. The handler then answers the success page as
+// for any accepted post, and does not write the client extension's row, which
+// would otherwise point at a submission that was never written.
+//
+// A CONTEXT VALUE, NEVER AN ARGUMENT, like ShopperEvidence: nothing posted and
+// nothing a DSL caller writes can set it, and a direct call of the construct
+// carries none, so marking it changes nothing for that caller.
+type ShopperOutcome struct {
+	mu        sync.Mutex
+	unwritten bool
+}
+
+type shopperOutcomeKey struct{}
+
+// ContextWithShopperOutcome is ctx carrying a fresh outcome for one form post.
+// The shopper handler is its one caller.
+func ContextWithShopperOutcome(ctx context.Context) (context.Context, *ShopperOutcome) {
+	o := &ShopperOutcome{}
+	return context.WithValue(ctx, shopperOutcomeKey{}, o), o
+}
+
+// MarkShopperSubmissionUnwritten records, on the outcome ctx carries, that the
+// construct accepted the post and wrote nothing. A ctx with no outcome -- a
+// direct call -- is left as it is.
+func MarkShopperSubmissionUnwritten(ctx context.Context) {
+	if o, ok := ctx.Value(shopperOutcomeKey{}).(*ShopperOutcome); ok && o != nil {
+		o.mu.Lock()
+		o.unwritten = true
+		o.mu.Unlock()
+	}
+}
+
+// Unwritten reports whether the construct marked the post accepted and not
+// written.
+func (o *ShopperOutcome) Unwritten() bool {
+	if o == nil {
+		return false
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.unwritten
 }
 
 // CallPrefix is the keyword a construct invocation carries, or "" for a
@@ -415,6 +585,14 @@ func validateShopperRoute(pack, name, construct string, fields []ShopperField) e
 		seen[fname] = struct{}{}
 		if f.MaxLength < 0 {
 			return fmt.Errorf("%s/%s declares a negative MaxLength on %q", pack, name, fname)
+		}
+		if f.Format != "" && f.Format != ShopperFormatSHA256 && f.Format != ShopperFormatEmail {
+			return fmt.Errorf("%s/%s declares %q with the format %q; the formats there are %q and %q",
+				pack, name, fname, f.Format, ShopperFormatSHA256, ShopperFormatEmail)
+		}
+		if f.Format != "" && (f.Numeric || len(f.Enum) > 0) {
+			return fmt.Errorf("%s/%s declares %q with a format and Numeric or an Enum; a format is a rule "+
+				"of its own", pack, name, fname)
 		}
 		if f.Numeric && len(f.Enum) > 0 {
 			return fmt.Errorf("%s/%s declares %q as both Numeric and an Enum; Enum members "+

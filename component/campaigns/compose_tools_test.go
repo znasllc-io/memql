@@ -591,6 +591,42 @@ func TestComposeRenderReturnsIssues(t *testing.T) {
 	}
 }
 
+// The preview tool judges the composed email by the template's purpose, as the
+// submit does: the issues the composer is shown are the ones its submit will
+// answer. Every layout's brand footer carries {{unsubscribeUrl}} (a kit without
+// one is refused), so a composed transactional email always names the link it
+// may not carry, and a marketing one never does.
+func TestThePreviewToolJudgesATemplateByItsPurpose(t *testing.T) {
+	codes := func(v any) []string {
+		var out []string
+		for _, item := range listOf(v) {
+			out = append(out, fmt.Sprint(item.(map[string]any)["code"]))
+		}
+		return out
+	}
+	for _, purpose := range []string{"", "marketing", "transactional"} {
+		cw := newComposeWorld(t)
+		cw.withKit()
+		hero := previewPNG(t, 6, 4)
+		id := cw.start("builtin:article", []string{cw.addFile("hero.png", "image/png", hero)}, "")
+		if purpose != "" {
+			cw.engine.edit(id, func(row map[string]any) { row["purpose"] = purpose })
+		}
+		c := articleComposition(compose.EmailAssetHandle(hero))
+		preview := codes(cw.must("render", id, c)["issues"])
+		submitted := codes(cw.must("submit", id, c)["issues"])
+		if present := slices.Contains(preview, emaildoc.IssueUnsubscribePresent); present != (purpose == "transactional") {
+			t.Errorf("purpose %q: the preview's issues are %q", purpose, preview)
+		}
+		if slices.Contains(preview, emaildoc.IssueUnsubscribeMissing) {
+			t.Errorf("purpose %q: the preview misses the brand footer's link: %q", purpose, preview)
+		}
+		if !slices.Equal(preview, submitted) {
+			t.Errorf("purpose %q: the preview says %q, the submit %q", purpose, preview, submitted)
+		}
+	}
+}
+
 func TestComposeSubmitSavesDraftAndMarksDone(t *testing.T) {
 	cw := newComposeWorld(t)
 	kit := cw.withKit()

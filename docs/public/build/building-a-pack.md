@@ -325,13 +325,16 @@ apply to both.
 
 ```go
 memql.RegisterShopperForm(memql.ShopperForm{
-    Pack: Domain, Name: "review", Construct: "submitReview",
+    Pack: Domain, Name: "review", Construct: "reviewsSubmitFromLink",
+    Kind: memql.ShopperReadKindBuiltin,
     Fields: []memql.ShopperField{
+        {Name: "requestToken", Required: true, MaxLength: 200},
         {Name: "productHandle", Required: true, MaxLength: 200},
         {Name: "body", Required: true, MaxLength: 4000},
         {Name: "rating", Numeric: true, MaxLength: 2},
     },
     RedirectOK: "/reviews/thank-you", RedirectError: "/reviews/problem",
+    Refusals: LinkRefusals,
 })
 ```
 
@@ -361,7 +364,28 @@ what is written through their storefront; the shopper is data on the row --
 their name and email are fields, never an identity. This is the campaigns
 pattern (`auth.ContextWithUserActor`), and it means a pack's shopper mutation
 is an ordinary `@actor` mutation. A `@serverOnly` construct is deliberately out
-of reach.
+of reach, and so is a write to a `@serverWritten` concept: the construct runs
+**without internal origin**.
+
+**A pack whose rows only it may write names a builtin.** When a write must be
+judged against other rows first -- the reviews form finds the buyer's link by
+its token and refuses a closed one by name -- the construct is the pack's own
+Go (`Kind: memql.ShopperReadKindBuiltin`). It makes its checks under the
+borrowed authority and then writes through its own `@serverOnly` mutation with
+internal origin stamped for that one call. Internal origin skips the row
+gate, so the builtin's own check, made before the stamp, is the only check
+the write gets; that is why the stamp goes on the one call and nowhere else.
+
+**What `@serverWritten` guarantees, and its limit.** A concept that declares
+it refuses every write that does not carry internal origin, the public
+`insert()` included, which never consults a mutation's `@serverOnly`. So no
+client -- signed in or not, whatever the row tier would admit -- writes its
+rows except through the pack's own Go. The reviews pack declares it on every
+concept. It does not stop the engine's own trusted writers, which run with
+internal origin: a step of an automation in the loaded DSL tree, a DSL seed,
+the identity integration's ownership transfer (a cluster owner's act), and
+anything a pack's own Go writes, the reviews erasure's direct SQL among them.
+An automation a client package attaches to a pack's concept is one of these.
 
 **The owner header is self-checking.** The bff re-reads the site row *under*
 the named user, and `v1:platform:site` is composite-owner tier, so a user who
@@ -732,7 +756,9 @@ packs worth reading as real worked examples:
   mutation writes": a review is shown only once a person on the store's side
   publishes it, its state is DERIVED from an append-only `reviewDecision` log
   against the revision the review holds, and the judging builtins write
-  through `@serverOnly` mutations no client can call around them.
+  through `@serverOnly` mutations no client can call around them. Every one
+  of its concepts is `@serverWritten`, so a raw insert cannot write around
+  them either.
 - `examples/shopifypack` (memql#4138) -- the Shopify product feature (console
   views for shop, secrets, sync), layered on the `integrations/shopify`
   integration. The pair is the canonical worked example of the

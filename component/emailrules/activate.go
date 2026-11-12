@@ -276,15 +276,29 @@ func (a *Activator) Retire(ctx context.Context, owner, ruleID string) (Result, e
 	return res, a.record(ctx, rule.ID, "paused", "", "", "")
 }
 
+// errTransactionalTemplate is the refusal of a rule whose template is about one
+// person's own request: such a template has no unsubscribe, and a rule mails
+// whoever its trigger names. The same sentence as component/campaigns' own,
+// which this package does not import.
+var errTransactionalTemplate = errors.New("This template is about one person's own request and has no unsubscribe, so it cannot be sent to a list.")
+
+// transactionalTemplate says a template row is about one person's own request.
+// A row with no purpose is marketing.
+func transactionalTemplate(row map[string]any) bool {
+	return str(row, "purpose") == "transactional"
+}
+
 // verifyReadable re-reads everything the rule will need, under the caller's own
 // actor. It is deliberately not a null check on the ids: an id that is present
 // and unreadable is exactly the case that looks correct on the form and fails
 // at fire time.
 func (a *Activator) verifyReadable(ctx context.Context, rule Rule) error {
-	if _, ok, err := a.store.TemplateByID(ctx, rule.TemplateID); err != nil {
+	if tmpl, ok, err := a.store.TemplateByID(ctx, rule.TemplateID); err != nil {
 		return fmt.Errorf("emailrules: could not read template %q: %w", rule.TemplateID, err)
 	} else if !ok {
 		return fmt.Errorf("emailrules: template %q is not readable by this rule's author, so the rule would fire and mail nobody", rule.TemplateID)
+	} else if transactionalTemplate(tmpl) {
+		return errTransactionalTemplate
 	}
 	if LaneFor(rule.RecipientMode) == "marketing" {
 		if ok, err := a.store.AudienceByID(ctx, rule.AudienceID); err != nil {

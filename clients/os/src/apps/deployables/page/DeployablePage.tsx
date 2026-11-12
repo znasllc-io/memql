@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
-import { ChartLine, Lock, MessageSquareText } from "lucide-react";
+import { ChartLine, Handshake, Lock, MessageSquareText } from "lucide-react";
 
 import { Button, Caption, Chip, Chips, Head, Input, Panel, useLiveView } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
@@ -16,6 +16,7 @@ import { deployedByLabel, deployerOf, type NameOf } from "../people";
 import { usePackageDeployments } from "../packages/usePackages";
 import { boundStoreId, ownerLabel, siteName, type SiteRow } from "../rows";
 import { ReviewsSection } from "../reviews/ReviewsSection";
+import { WholesaleSection } from "../wholesale/WholesaleSection";
 import type { CredentialRow } from "../sources/rows";
 import { confirmationWordFor } from "../words";
 import { actsFor, candidateBlockedReason, candidateTargetOffered, runForApp, siblingRunInFlight, type ActName } from "./acts";
@@ -459,6 +460,18 @@ export function DeployablePage({
       back={{ label: name, onSelect: toOverview }} />;
   }
 
+  // WHOLESALE TAKES THE PANE, for the Reviews reason: the applications, one
+  // application with its decisions and its acts, and the store's settings are
+  // pages under this one's trail. Absent without the wholesale part, and for a
+  // deployable that fronts no store -- the same store Reviews is drawn for.
+  if (detail === "wholesale" && can.wholesale && reviewsStore !== "") {
+    const toOverview = () => setDetail(null);
+    return <WholesaleSection
+      site={site} storeId={reviewsStore}
+      trail={[{ label: backLabel, onSelect: onBack }, { label: name, onSelect: toOverview }]}
+      back={{ label: name, onSelect: toOverview }} />;
+  }
+
   // EVERY OTHER DETAIL CHANGES THE PAGE TOO (the owner's rule, 2026-11-03).
   // Traffic (now Statistics), Access codes and each stop's detail used to open
   // a dialog over the page; now each takes the page's place under its own
@@ -469,7 +482,7 @@ export function DeployablePage({
   // opens the Logs app. A version's page needs the version it is about, so
   // without one the overview stands; a whole statistics list needs its list,
   // so without one Statistics stands.
-  const inPage = detail === null || detail === "whereItLives" || detail === "store" || detail === "reviews" || (detail === "version" && chosenVersion === null) ? null
+  const inPage = detail === null || detail === "whereItLives" || detail === "store" || detail === "reviews" || detail === "wholesale" || (detail === "version" && chosenVersion === null) ? null
     : detail === "statisticsList" && listDimension === null ? "statistics" : detail;
   // WHAT THE OPEN VERSION IS NOW, read from the live row rather than kept
   // from the click: one that has become the one serving has served.
@@ -550,6 +563,8 @@ export function DeployablePage({
             {can.access && !site.systemOwned && site.packageDeployableName ? <IconButton label="Access codes" onClick={() => setDetail("access")}><Lock size={16} aria-hidden /></IconButton> : null}
             {/* A store's reviews, for whoever holds the reviews part. */}
             {can.reviews && reviewsStore !== "" ? <IconButton label="Reviews" onClick={() => setDetail("reviews")}><MessageSquareText size={16} aria-hidden /></IconButton> : null}
+            {/* A store's wholesale applications, for whoever holds the wholesale part. */}
+            {can.wholesale && reviewsStore !== "" ? <IconButton label="Wholesale" onClick={() => setDetail("wholesale")}><Handshake size={16} aria-hidden /></IconButton> : null}
           </Head>
 
           <Chips label="Deployable facts">
@@ -770,5 +785,5 @@ function newestFirst(rows: DeploymentRow[]): DeploymentRow[] {
 // Each detail's title, as its page's Head and the trail name it. A whole
 // statistics list is named by its list ("Pages"), Statistics without one.
 function detailTitle(detail: WorkspaceDetail, dimension: Dimension | null): string {
-  return { source: "Source", whatItIs: "App and deployment plan", whereItLives: "Addresses and client", build: "Build", runtime: "App values", statistics: "Statistics", statisticsList: dimension === null ? "Statistics" : LIST_TITLES[dimension], access: "Access codes", store: "Store", reviews: "Reviews", visit: "Visit", version: "Version" }[detail];
+  return { source: "Source", whatItIs: "App and deployment plan", whereItLives: "Addresses and client", build: "Build", runtime: "App values", statistics: "Statistics", statisticsList: dimension === null ? "Statistics" : LIST_TITLES[dimension], access: "Access codes", store: "Store", reviews: "Reviews", wholesale: "Wholesale", visit: "Visit", version: "Version" }[detail];
 }

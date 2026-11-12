@@ -115,7 +115,9 @@ func (a *customerTagAdapter) Provision(ctx context.Context, call Caller, g Grant
 	reply, err := call.Call(ctx, "shopifyTagWholesaleCustomer", map[string]any{
 		"storeId":    g.StoreID,
 		"buyerEmail": g.BuyerEmail,
-		"tag":        a.tag,
+		// A buyer with no customer on the store gets one, with this name.
+		"buyerName": g.BuyerName,
+		"tag":       a.tag,
 	})
 	if err != nil {
 		return Outcome{}, err
@@ -139,7 +141,13 @@ func (a *customerTagAdapter) Revoke(ctx context.Context, call Caller, g Grant) (
 		return Outcome{}, fmt.Errorf("wholesale: the %s adapter has no caller", AdapterCustomerTag)
 	}
 	reply, err := call.Call(ctx, "shopifyUntagWholesaleCustomer", map[string]any{
-		"storeId":    g.StoreID,
+		"storeId": g.StoreID,
+		// THE CUSTOMER THE GRANT RECORDED (ruling 58), read off the
+		// reference: a buyer who changed their address in the store's admin,
+		// or an address two customers hold, must still lose the tag from the
+		// customer that got it. The address is used only when the reference
+		// names no customer (a first grant that failed).
+		"customerId": referenceValue(g.Reference, "customer"),
 		"buyerEmail": g.BuyerEmail,
 		// THE TAG THAT WAS GRANTED, read back off the reference, not the
 		// one this adapter is configured with today. An operator who
@@ -162,11 +170,20 @@ func (a *customerTagAdapter) Revoke(ctx context.Context, call Caller, g Grant) (
 // tag -- removing the likely tag is better than removing none, and the
 // alternative is an entitlement nobody can revoke through the pack.
 func tagFromReference(reference, fallback string) string {
+	if tag := referenceValue(reference, "tag"); tag != "" {
+		return tag
+	}
+	return fallback
+}
+
+// referenceValue reads one key of a "customer=<gid>;tag=<tag>" reference, or
+// "" when it is absent.
+func referenceValue(reference, key string) string {
 	for _, part := range strings.Split(reference, ";") {
-		key, value, found := strings.Cut(strings.TrimSpace(part), "=")
-		if found && key == "tag" && strings.TrimSpace(value) != "" {
+		k, value, found := strings.Cut(strings.TrimSpace(part), "=")
+		if found && k == key && strings.TrimSpace(value) != "" {
 			return strings.TrimSpace(value)
 		}
 	}
-	return fallback
+	return ""
 }

@@ -3,11 +3,15 @@ package wholesalepack
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // application.go -- THE APPLICATION, ITS STATES AND ITS TRANSITIONS (epic
@@ -36,13 +40,14 @@ import (
 //
 // dsl/commerce already ships approvalChain for a client that wants a
 // threshold and an order, and a client that does NOT must not have to edit
-// this pack to say so (design record, section 7). So this pack refuses a
-// Provider operator, refuses an illegal transition and refuses a decision
-// on an unreadable application -- and takes no view at all on which of the
-// merchant's own people may make one, in what order, or who is told
-// afterwards. A client attaches that from its own repository with
-// @trigger over v1:wholesale:applicationDecision. memql#5560 is the test
-// that two clients really can.
+// this pack to say so (design record, section 7). So this pack admits a
+// person holding the wholesale part in the application's organization (the
+// organization gate's), refuses the cluster's own operators, refuses an
+// illegal transition and refuses a decision on an unreadable application --
+// and takes no view at all on which of the store's own people may make one,
+// in what order, or who is told afterwards. A client attaches that from its
+// own repository with @trigger over v1:wholesale:applicationDecision.
+// memql#5560 is the test that two clients really can.
 //
 // # State is DERIVED, never stored
 //
@@ -71,8 +76,25 @@ const (
 	TransitionRevoke  = "revoke"
 )
 
-// PrincipalClient is the only expressible decidedBy kind.
+// PrincipalClient is the only principalKind a decision row carries. The
+// builtin's principalKind argument is ignored: the decider is the caller.
 const PrincipalClient = "client"
+
+// The stages an application is shown in. Both are of state submitted: an
+// application waits for its terms while the store requires them and they are
+// not accepted, and is ready to review otherwise. Every other state is its own
+// stage.
+const (
+	StageWaitingForTerms = "waitingForTerms"
+	StageReadyToReview   = "readyToReview"
+)
+
+// How an application arrived: a shopper's form post, or a person of the store
+// adding it. An application that names neither arrived on the storefront.
+const (
+	SourceStorefront = "storefront"
+	SourceStaff      = "staff"
+)
 
 // Transitions is the closed set, in the order a reader meets them.
 var Transitions = []string{TransitionApprove, TransitionReject, TransitionRevoke}
@@ -100,19 +122,37 @@ var stateAfter = map[string]string{
 	TransitionRevoke:  StateRevoked,
 }
 
-// ClientMayDecide reports whether principalKind may author a decision.
-//
-// Provider operators are inexpressible: only "client" is admitted, which is
-// the write-path half of what reviewspack's ClientMayModerate refuses. A
-// Provider operator running a cluster can READ every merchant's
-// applications -- that is what makes an operator surface possible at all --
-// and cannot decide one.
-func ClientMayDecide(principalKind string) error {
-	if strings.TrimSpace(principalKind) != PrincipalClient {
-		return fmt.Errorf("wholesale: decidedBy must be a Client principal; a Provider " +
-			"operator cannot decide a merchant's application")
+// StageOf is the stage an application in state is shown in. termsRequired is
+// whether the store requires its terms accepted, accepted whether this
+// application has accepted them.
+func StageOf(state string, termsRequired, accepted bool) string {
+	if state != StateSubmitted {
+		return state
 	}
-	return nil
+	if termsRequired && !accepted {
+		return StageWaitingForTerms
+	}
+	return StageReadyToReview
+}
+
+// deciderOf is the person a decision is recorded for: the calling user.
+//
+// A PERSON ON THE STORE'S SIDE DECIDES (X4). The cluster's own operators --
+// the people who host the store's applications and read every one of them --
+// never record a decision: the store holds the decision, and the people who run
+// the platform must not be able to make it for them. A call with no signed-in
+// person, or one acting as a synthetic actor, decides nothing either. The same
+// rule, in the same words, as packs/reviewspack/decide.go's moderatorOf.
+func deciderOf(ctx context.Context) (string, error) {
+	ac, ok := auth.AccessFromContext(ctx)
+	if !ok || ac.Synthetic || strings.TrimSpace(ac.UserId) == "" {
+		return "", errors.New("wholesale: a decision needs a signed-in person")
+	}
+	if auth.IsClusterOperator(ac.Role) {
+		return "", errors.New("wholesale: the cluster's operators host the store's applications and do not " +
+			"decide them; a person on the store's side decides")
+	}
+	return strings.TrimSpace(ac.UserId), nil
 }
 
 // ValidTransition reports whether transition is in the closed set.
@@ -156,13 +196,68 @@ func LegalTransition(state, transition string) error {
 // StateAfter is the state a legal transition leaves behind.
 func StateAfter(transition string) string { return stateAfter[strings.TrimSpace(transition)] }
 
+// The fields that say WHEN a thing happened (Task 14b). A row's write time is
+// the time of its newest version, and any later write of the row moves it, so
+// it is never what a view dates a happening by or orders happenings by: each
+// is a field of the row, written once by the pack's own builtin at the moment
+// it happens and carried by every later write.
+const (
+	fieldSubmittedAt = "submittedAt" // application: when it arrived
+	fieldDecidedAt   = "decidedAt"   // applicationDecision: when it was made
+	fieldAttemptedAt = "attemptedAt" // entitlement: when this version's attempt was made
+	fieldGrantedAt   = "grantedAt"   // entitlement: when trade prices went on
+	fieldRevokedAt   = "revokedAt"   // entitlement: when trade prices came off
+)
+
+// happenedAt is when the thing row records happened: the row's field, or,
+// for a row written before the field, the row's own write time -- so a row
+// nobody has backfilled reads exactly as it did. A field that is set is never
+// second-guessed by the write time.
+func happenedAt(row map[string]any, field string) time.Time {
+	if at := rowTime(row[field]); !at.IsZero() {
+		return at
+	}
+	return rowTime(row["createdAt"])
+}
+
+// newestHappenedFirst orders rows by when they happened, newest first, with
+// the row's write time as the tie-break and nothing more.
+func newestHappenedFirst(rows []map[string]any, field string) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		if a, b := happenedAt(rows[i], field), happenedAt(rows[j], field); !a.Equal(b) {
+			return a.After(b)
+		}
+		return rowTime(rows[i]["createdAt"]).After(rowTime(rows[j]["createdAt"]))
+	})
+}
+
+// happenedField is the field each read keyed by an application orders its rows
+// by. A read not named here orders by write time, which for its rows -- an
+// acceptance, an email attempt -- is the time they were written once.
+var happenedField = map[string]string{
+	"decisionsForApplication":       fieldDecidedAt,
+	"decisionsForApplicationIds":    fieldDecidedAt,
+	"entitlementForApplication":     fieldAttemptedAt,
+	"entitlementsForApplicationIds": fieldAttemptedAt,
+}
+
+// happenedStamp is a time as a happened field holds it: UTC with every
+// fractional digit, so the text sorts as the time does -- the queries order
+// by the field's text. IT IS THE ONLY WRITER of these fields' text: every
+// builtin and the backfill format through it, so two times that differ only
+// past the second never sort as text in the wrong order.
+func happenedStamp(at time.Time) string {
+	return at.UTC().Format("2006-01-02T15:04:05.000000000Z")
+}
+
 // FoldState reduces an application's decisions, NEWEST FIRST, to its state.
 //
-// The queries that feed this sort "row.createdAt", "desc", so the first row
-// is the last decision. A row whose transition this pack does not recognise
-// is SKIPPED rather than treated as final: the alternative is a payload
-// nobody can parse silently pinning an application into a state no
-// transition leads out of.
+// The reads that feed this order a log by when each decision was made
+// (decidedAt, newestHappenedFirst), so the first row is the last decision --
+// however often a row of the log has been written since. A row whose
+// transition this pack does not recognise is SKIPPED rather than treated as
+// final: the alternative is a payload nobody can parse silently pinning an
+// application into a state no transition leads out of.
 func FoldState(decisionsNewestFirst []map[string]any) string {
 	for _, row := range decisionsNewestFirst {
 		if s := StateAfter(trimmed(row["transition"])); s != "" {
@@ -170,16 +265,6 @@ func FoldState(decisionsNewestFirst []map[string]any) string {
 		}
 	}
 	return StateSubmitted
-}
-
-// SettingsRowID derives the one settings row id for a store.
-//
-// DERIVED RATHER THAN GENERATED, so the row is a singleton per store and a
-// second write is a new VERSION of one logical row rather than a second row
-// the read would have to choose between. reviewspack.SettingsRowID is the
-// same decision for the same reason.
-func SettingsRowID(storeID string) string {
-	return "wholesale-settings-" + slugOf(storeID)
 }
 
 // --------------------------------------------------------------------------
@@ -199,60 +284,288 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 		return nil, fmt.Errorf("wholesale: storeId is required; it is stamped from the " +
 			"binding the submission arrived through")
 	}
-	company := trimmed(args["companyName"])
-	name := trimmed(args["applicantName"])
-	email := trimmed(args["applicantEmail"])
-	if company == "" || name == "" || email == "" {
-		return nil, fmt.Errorf("wholesale: companyName, applicantName and applicantEmail " +
-			"are the minimum an application needs to be one")
+	company, name, email, err := applicationContactOf(args)
+	if err != nil {
+		return nil, err
 	}
 	// THE GATE, AND IT IS FAIL-CLOSED. A merchant who has never touched
 	// their wholesale settings has not asked the internet for their
 	// customers' business details, so absent settings refuse.
-	open, err := p.applicationsOpen(ctx, storeID)
+	settings, err := p.settingsRowAt(ctx, storeID)
 	if err != nil {
 		return nil, err
 	}
-	if !open {
-		return nil, fmt.Errorf("wholesale: this store is not accepting applications")
+	s := EffectiveSettings(settings)
+	if !s.ApplicationsOpen {
+		return nil, errNotAccepting
 	}
 	// THE BUILTIN DECIDED; THE MUTATION WRITES. A builtin's returned nodes
 	// are the expression's VALUE and are never persisted, so the row is
-	// written through the pack's own mutation -- which also stamps
-	// ownerUserId from the actor, the engine's own way of saying who owns a
-	// row. Every concept here is @rowAuthz(owner="ownerUserId",
-	// clusterOwner), so a row written any other way is owned by nobody.
+	// written through the pack's own mutation. ownerUserId is the CALLING
+	// ACTOR -- on the shopper path the site owner whose authority the handler
+	// borrowed -- passed explicitly, because every concept here is
+	// @rowAuthz(owner="ownerUserId", clusterOwner) and a row owned by nobody
+	// is invisible to the merchant it was submitted to.
 	// THE ROW ID IS THE SUBMISSION ID THE BFF MINTED (design record
 	// 2026-09-21, D4). It was derived by the engine until this seam
 	// existed, which left the new row's id known to nobody -- and a client
 	// extension has to relate its own row to THIS application. It travels
-	// DOWN from the handler into both constructs rather than back out of
-	// this one, so `confirm` below still answers a receipt and still
-	// carries no row id.
+	// DOWN from the handler into both constructs. The receipt names it back,
+	// which tells the caller nothing it did not send.
+	//
+	// ANY CALLER WHO REACHES THIS BUILTIN CAN NAME IT. The shopper handler
+	// stamps it after the declared fields, but the builtin's object args
+	// profile admits it from any signed-in caller too -- and the write runs
+	// at internal origin, which the row gate does not owner-check. So the
+	// id is established ABSENT before the write, and the write is fenced on
+	// "row absent", or one caller could write over another's application.
 	applicationID := trimmed(args["submissionId"])
 	if applicationID == "" {
 		return nil, fmt.Errorf("wholesale: submissionId is required; it is minted per " +
 			"submission and stamped by the bff, and it is the id this application is written at")
 	}
-	if err := p.write(ctx, "createApplicationRow", map[string]any{
+	owner := ""
+	if ac, ok := auth.AccessFromContext(ctx); ok {
+		// CANONICAL, like every other owner this pack writes (userRef).
+		owner = userRef(ac.UserId)
+	}
+	if owner == "" {
+		return nil, fmt.Errorf("wholesale: an application is written as the site owner, and " +
+			"this call carries no actor")
+	}
+	// A STORE TAKES APPLICATIONS ONLY AS THE SHOPPER PATH BRINGS THEM (ruling
+	// 56): through a site the store gate admits,
+	// carrying that site's organization, from that site's owner -- whose
+	// authority the handler borrows. This builtin carries no capability, so any
+	// signed-in caller reaches it; every other call is refused exactly as a
+	// closed store refuses it, before anything is written.
+	account := trimmed(args["accountId"])
+	if err := p.storefrontAdmits(ctx, trimmed(args["siteId"]), storeID, account, owner); err != nil {
+		return nil, err
+	}
+	taken, err := p.applicationIDTaken(ctx, applicationID)
+	if err != nil {
+		return nil, err
+	}
+	if taken {
+		return p.existingSubmission(ctx, applicationID)
+	}
+	// A STORE THAT REQUIRES ITS TERMS TAKES NO APPLICATION UNTIL THEY EXIST,
+	// judged at write time. The shopper is refused exactly as a closed store
+	// refuses them -- the same words, so the same redirect: the sentence that
+	// names the missing documents is for the store's people, never for a member
+	// of the public.
+	if err := p.termsRuleRefusal(ctx, storeID, s.ApplicationsOpen, s.TermsRequired); err != nil {
+		if errors.Is(err, errTermsFirst) {
+			return nil, errNotAccepting
+		}
+		return nil, err
+	}
+	// ONE OPEN APPLICATION PER ADDRESS ON A STORE (ruling 59), by the staff
+	// add's own rule (openApplicationOf). Judged after every refusal above, so a
+	// store that would refuse a first post refuses this one too, and before any
+	// write. A post from an address with a submitted or approved application
+	// WRITES NOTHING and is ANSWERED EXACTLY AS AN ACCEPTED ONE: the same receipt
+	// -- the id the caller named, the store, the company it sent -- and, through
+	// the shopper outcome, the same success page with no extension row. A
+	// refusal would tell anybody posting somebody else's address who the store's
+	// buyers are. The store's people see it in the one line below, which names
+	// the store and the open application and never the address. Timing is not
+	// equalized: this answer returns before a write a first post makes.
+	open, err := p.openApplicationOf(ctx, storeID, email)
+	if err != nil {
+		return nil, err
+	}
+	if open != "" {
+		p.log().Info(OpenApplicationNotWrittenLine,
+			"component", "wholesale", "storeId", storeID, "openApplicationId", bareID(open))
+		memql.MarkShopperSubmissionUnwritten(ctx)
+		return acceptedReceipt(applicationID, storeID, company)
+	}
+	fenced := memql.ContextWithRowVersionFence(ctx, applicationConcept, applicationID, time.Time{})
+	// accountId IS THE ADMITTED SITE'S ORGANIZATION, which is the organization
+	// the store's program is tied to, and the owner is that site's owner:
+	// storefrontAdmits refused every call where either is not so, an absent
+	// accountId included.
+	if err := p.write(fenced, "createApplicationRow", map[string]any{
 		"applicationId":  applicationID,
+		"ownerUserId":    owner,
 		"storeId":        storeID,
 		"siteId":         trimmed(args["siteId"]),
 		"companyName":    company,
 		"applicantName":  name,
 		"applicantEmail": email,
+		"accountId":      account,
+		"source":         SourceStorefront,
+		"submittedAt":    happenedStamp(p.clock()),
 	}); err != nil {
+		// THE FENCE'S LOSER: another write landed at this id between the
+		// check above and this one. Answered exactly as a taken id is.
+		if errors.Is(err, memql.ErrRowVersionChanged) {
+			return p.existingSubmission(ctx, applicationID)
+		}
 		return nil, err
 	}
+	return acceptedReceipt(applicationID, storeID, company)
+}
+
+// acceptedReceipt answers a storefront submission that was accepted: the id
+// the caller named, the store and the company it sent. A post written and a
+// post from an address with an open application (not written) are answered
+// with it alike, so the two cannot be told apart.
+func acceptedReceipt(applicationID, storeID, company string) ([]memorynodes.MemoryNode, error) {
 	return confirm("wholesale:application:accepted", map[string]any{
-		"storeId":     storeID,
-		"companyName": company,
+		"applicationId": applicationID,
+		"storeId":       storeID,
+		"companyName":   company,
+	})
+}
+
+// applicationContactOf is an application's company, applicant and email, each
+// trimmed, held to the application form's own rules (applicationFields): every
+// one is required, none is longer than the form admits, and one that declares a
+// format meets it (the address is an address, memql.IsEmailAddress). The shopper's post
+// and a person of the store adding a buyer meet the same rules here.
+func applicationContactOf(args map[string]any) (company, name, email string, err error) {
+	values := map[string]string{}
+	for _, f := range applicationFields() {
+		v := trimmed(args[f.Name])
+		if v == "" && f.Required {
+			return "", "", "", fmt.Errorf("wholesale: companyName, applicantName and applicantEmail " +
+				"are the minimum an application needs to be one")
+		}
+		if len(v) > f.EffectiveMaxLength() {
+			return "", "", "", fmt.Errorf("wholesale: %s is at most %d bytes; this one is %d",
+				f.Name, f.EffectiveMaxLength(), len(v))
+		}
+		if v != "" && !f.MatchesFormat(v) {
+			return "", "", "", fmt.Errorf("wholesale: %s is not %s", f.Name, formatNoun(f.Format))
+		}
+		values[f.Name] = v
+	}
+	return values["companyName"], values["applicantName"], values["applicantEmail"], nil
+}
+
+// formatNoun names what a value of a shopper format is, for a refusal.
+func formatNoun(format string) string {
+	if format == memql.ShopperFormatEmail {
+		return "an email address"
+	}
+	return "in the format " + format
+}
+
+// RefusalApplicationsClosed is the application form's one refusal by name: the
+// store takes no application through this site now (ruling 62). It is answered
+// alike for every reason -- the switch is off, the store is not set up, the
+// site is not one the store admits, or the store requires its terms and a
+// document is missing -- so a visitor cannot tell one from another.
+const RefusalApplicationsClosed = "applications_closed"
+
+// ApplicationRefusals is every code the application form may refuse with.
+var ApplicationRefusals = []string{RefusalApplicationsClosed}
+
+// errNotAccepting is a shopper's refusal by a store that takes no application
+// now: closed, requiring terms it has not published, not set up, or reached
+// through a site that is not of its program's organization. One value, so none
+// of them can be told from another; the shopper surface reads it as
+// applications_closed.
+var errNotAccepting error = &notAccepting{}
+
+// notAccepting is errNotAccepting's type: its text is the pack's, and it
+// unwraps to the named refusal the shopper handler forwards on ?reason=.
+type notAccepting struct{}
+
+func (*notAccepting) Error() string { return "wholesale: this store is not accepting applications" }
+
+// Unwrap is the refusal as the shopper surface reads it.
+func (*notAccepting) Unwrap() error {
+	return memql.NewShopperRefusal(RefusalApplicationsClosed, "the store is not accepting applications")
+}
+
+// storefrontAdmits refuses a submission, as a store that is not accepting
+// applications refuses it, unless all of these hold, UNCONDITIONALLY:
+//
+//   - it names a site that serves the store, and the store gate admits that
+//     site (storeAdmitsSite): the store is set up, and the site is of the
+//     organization its program is tied to;
+//   - the accountId it carries IS that site's organization -- an absent one is
+//     not a pass, or a direct caller could write an application of no
+//     organization into the store;
+//   - the caller IS that site's owner, the authority the shopper handler
+//     borrows.
+//
+// The site is read as the system: the judgement is of the site, not of who can
+// read it.
+func (p *Provider) storefrontAdmits(ctx context.Context, siteID, storeID, account, caller string) error {
+	if siteID == "" {
+		return errNotAccepting
+	}
+	rows, err := p.rowsFor(auth.ContextWithSystemActor(ctx, storeLookupActor), "siteById", map[string]string{"siteId": siteID})
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 || !servesStore(rows[0], bareID(storeID)) {
+		return errNotAccepting
+	}
+	site := rows[0]
+	if err := p.storeAdmitsSite(ctx, site, siteID, storeID); err != nil {
+		if errors.Is(err, errNotSetUp) || errors.Is(err, errAnotherOrganization) {
+			return errNotAccepting
+		}
+		return err
+	}
+	if bareID(account) == "" || bareID(account) != bareID(trimmed(site["accountId"])) ||
+		userRef(trimmed(site["ownerUserId"])) != userRef(caller) {
+		return errNotAccepting
+	}
+	return nil
+}
+
+// applicationConcept is the application's concept id, for its row fence.
+const applicationConcept = "v1:wholesale:application"
+
+// idCheckActor is the system actor that asks whether an application id is
+// taken. It sees every row, and answers only yes or no.
+const idCheckActor = "wholesale-id-check"
+
+// applicationIDTaken reports whether any application exists at id, whoever
+// owns it.
+func (p *Provider) applicationIDTaken(ctx context.Context, applicationID string) (bool, error) {
+	rows, err := p.rowsFor(auth.ContextWithSystemActor(ctx, idCheckActor), "applicationById",
+		map[string]string{"applicationId": applicationID})
+	if err != nil {
+		return false, err
+	}
+	return len(rows) > 0, nil
+}
+
+// existingSubmission answers a submission at an id that is already taken.
+//
+// A REPEAT IS THE SAME POST AGAIN, so the caller who can read the row is
+// answered its id and nothing is written. A caller who cannot read it is
+// told only that the id is taken: nothing about whose it is or what it says.
+func (p *Provider) existingSubmission(ctx context.Context, applicationID string) ([]memorynodes.MemoryNode, error) {
+	rows, err := p.rowsFor(ctx, "applicationById", map[string]string{"applicationId": applicationID})
+	if err != nil || len(rows) == 0 {
+		return nil, fmt.Errorf("wholesale: application id %q is already taken", applicationID)
+	}
+	return confirm("wholesale:application:accepted", map[string]any{
+		"applicationId": applicationID,
+		"storeId":       trimmed(rows[0]["storeId"]),
+		"existing":      true,
 	})
 }
 
 // recordDecision appends one decision to an application's log.
+//
+// THE ORGANIZATION GATE ADMITTED THE CALLER before this runs: they hold the
+// wholesale part in the application's organization. Then, before anything is
+// read, the caller must be a person who is not one of the cluster's operators
+// (deciderOf). The principalKind and decidedBy arguments are declared for old
+// callers and ignored.
 func (p *Provider) recordDecision(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	if err := ClientMayDecide(asString(args["principalKind"])); err != nil {
+	decider, err := deciderOf(ctx)
+	if err != nil {
 		return nil, err
 	}
 	transition := trimmed(args["transition"])
@@ -260,9 +573,8 @@ func (p *Provider) recordDecision(ctx context.Context, args map[string]any, _ in
 		return nil, err
 	}
 	applicationID := trimmed(args["applicationId"])
-	decidedBy := trimmed(args["decidedBy"])
-	if applicationID == "" || decidedBy == "" {
-		return nil, fmt.Errorf("wholesale: applicationId and decidedBy are required")
+	if applicationID == "" {
+		return nil, fmt.Errorf("wholesale: applicationId is required")
 	}
 	// THE STORE IS READ OFF THE APPLICATION, never supplied (design D9).
 	// The read runs under the CALLER'S own actor, so a caller who cannot
@@ -274,40 +586,105 @@ func (p *Provider) recordDecision(ctx context.Context, args map[string]any, _ in
 	if err != nil {
 		return nil, err
 	}
-	storeID := trimmed(app["storeId"])
-	if storeID == "" {
-		return nil, fmt.Errorf("wholesale: application %q carries no storeId", applicationID)
-	}
-	// LEGALITY IS CHECKED AGAINST THE LOG, not against an argument. The
-	// caller does not say what state it believes the application is in,
-	// because a caller that could would be the one deciding.
-	state, err := p.stateOf(ctx, applicationID)
+	// LEGALITY IS CHECKED AGAINST THE WHOLE LOG, not against an argument and
+	// not against the part of it the caller can read (X27). The caller's own
+	// read of the application admitted them; the log is then folded as the
+	// system, because a decision written before the account tie names no
+	// merchant and the store's side cannot read it -- and an approve judged
+	// against the readable part would re-decide a rejected application.
+	sys := auth.ContextWithSystemActor(ctx, provisionActor)
+	state, err := p.stateOf(sys, applicationID)
 	if err != nil {
 		return nil, err
 	}
 	if err := LegalTransition(state, transition); err != nil {
 		return nil, err
 	}
-	// decidedBy IS NOT PASSED ON. The capability requires it -- a caller
-	// must say who is deciding, and refusing a Provider principal is what
-	// that argument is FOR -- but the row records the ACTOR, because a
-	// caller-supplied decider on an append-only log is a way to attribute
-	// somebody else's approval to them permanently. mutations.memql says
-	// the same thing from the other side.
-	if err := p.write(ctx, "appendApplicationDecision", map[string]any{
-		"applicationId": applicationID,
-		"storeId":       storeID,
-		"transition":    transition,
-		"note":          asString(args["note"]),
-	}); err != nil {
+	// AN APPROVAL WAITS FOR THE ACCEPTANCE while the store requires its terms
+	// (7.2), judged as the deployment like the log.
+	termsRequired, accepted, err := p.acceptanceStanding(sys, app)
+	if err != nil {
 		return nil, err
 	}
+	if transition == TransitionApprove && termsRequired && !accepted {
+		return nil, errors.New(NotAcceptedSentence)
+	}
+	// ONE APPROVED APPLICATION PER ADDRESS ON A STORE (ruling 61). Two posts in
+	// one instant both pass the storefront's check, as do rows written before
+	// it; two approved applications of one buyer would let a revoke of either
+	// take the store-wide tag off while the other still reads granted. So an
+	// approve is refused here, naming the other, by the same address rule
+	// (applicationOfAddress), read as the system. A reject or a revoke is never
+	// refused by it.
+	if transition == TransitionApprove {
+		other, err := p.applicationOfAddress(ctx, trimmed(app["storeId"]), asString(app["applicantEmail"]),
+			trimmed(app["id"]), StateApproved)
+		if err != nil {
+			return nil, err
+		}
+		if other != "" {
+			return nil, errors.New(AnotherApprovedSentence(other))
+		}
+	}
+	if err := p.appendDecision(ctx, app, transition, asString(args["note"])); err != nil {
+		return nil, err
+	}
+	return decisionReceipt(applicationID, app, transition, decider, termsRequired, accepted)
+}
+
+// decisionReceipt answers a decision just recorded on app, named as the caller
+// named it: its store, the act, the decider, and the state and stage it leaves.
+func decisionReceipt(applicationID string, app map[string]any, transition, decider string,
+	termsRequired, accepted bool) ([]memorynodes.MemoryNode, error) {
+	after := StateAfter(transition)
 	return confirm("wholesale:decision:recorded", map[string]any{
 		"applicationId": applicationID,
+		"storeId":       trimmed(app["storeId"]),
+		"transition":    transition,
+		// The value the row holds: the actor's id, in canonical form.
+		"decidedBy": userRef(decider),
+		"state":     after,
+		"stage":     StageOf(after, termsRequired, accepted),
+	})
+}
+
+// appendDecision is THE ONE WRITE PATH OF A DECISION: one new row in the
+// application's log, as ctx's actor, whom the row stamps as its decider.
+//
+// Its callers have established who ctx is and that the transition is legal.
+// What the row is ABOUT is copied off the application, never supplied:
+// storeId, so a decision is scoped to its subject's store (design D9);
+// ownerUserId, the application's merchant, so the merchant reads every
+// decision whoever made it; accountId, the application's organization, so the
+// people who read the application read what was decided about it.
+//
+// decidedBy IS NOT PASSED ON. The row records the ACTOR, because a
+// caller-supplied decider on an append-only log is a way to attribute
+// somebody else's approval to them permanently. mutations.memql says the same
+// thing from the other side.
+//
+// THE ROW NAMES ITS APPLICATION IN CANONICAL FORM (applicationRef). The engine
+// compares the field as written and does not join a bare id with a canonical
+// one, so a log written in whichever form each caller used would split; every
+// read keyed by an application id asks both forms (rowsForApplication), so the
+// rows written before this version are found too.
+func (p *Provider) appendDecision(ctx context.Context, app map[string]any, transition, note string) error {
+	applicationID := applicationRef(trimmed(app["id"]))
+	storeID := trimmed(app["storeId"])
+	if applicationID == "" {
+		return fmt.Errorf("wholesale: the application being decided carries no id")
+	}
+	if storeID == "" {
+		return fmt.Errorf("wholesale: application %q carries no storeId", applicationID)
+	}
+	return p.write(ctx, "appendApplicationDecision", map[string]any{
+		"applicationId": applicationID,
+		"ownerUserId":   userRef(trimmed(app["ownerUserId"])),
+		"accountId":     trimmed(app["accountId"]),
 		"storeId":       storeID,
 		"transition":    transition,
-		"claimedBy":     decidedBy,
-		"state":         StateAfter(transition),
+		"note":          note,
+		"decidedAt":     happenedStamp(p.clock()),
 	})
 }
 
@@ -317,13 +694,29 @@ func (p *Provider) applicationState(ctx context.Context, args map[string]any, _ 
 	if applicationID == "" {
 		return nil, fmt.Errorf("wholesale: applicationId is required")
 	}
-	state, err := p.stateOf(ctx, applicationID)
+	// THE CALLER READS THE APPLICATION FIRST. One who cannot is answered what
+	// an id nobody can see answers -- submitted -- and nothing is read as the
+	// system for them, so a foreign id is not told from a missing one. One who
+	// can is answered the WHOLE log's fold (X27), read as the system.
+	state := StateSubmitted
+	termsRequired, accepted := false, false
+	rows, err := p.rowsFor(ctx, "applicationById", map[string]string{"applicationId": applicationID})
 	if err != nil {
 		return nil, err
+	}
+	if len(rows) > 0 {
+		sys := auth.ContextWithSystemActor(ctx, provisionActor)
+		if state, err = p.stateOf(sys, applicationID); err != nil {
+			return nil, err
+		}
+		if termsRequired, accepted, err = p.acceptanceStanding(sys, rows[0]); err != nil {
+			return nil, err
+		}
 	}
 	payload, err := json.Marshal(map[string]any{
 		"applicationId": applicationID,
 		"state":         state,
+		"stage":         StageOf(state, termsRequired, accepted),
 		"legalNext":     legalFrom[state],
 	})
 	if err != nil {
@@ -338,40 +731,12 @@ func (p *Provider) applicationState(ctx context.Context, args map[string]any, _ 
 	}}, nil
 }
 
-// setWholesaleSettings writes one store's settings row.
-func (p *Provider) setWholesaleSettings(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	storeID := trimmed(args["storeId"])
-	if storeID == "" {
-		return nil, fmt.Errorf("wholesale: storeId is required; settings are per store")
+// bareID is an id without its concept prefix: the part after the last colon.
+func bareID(id string) string {
+	if i := strings.LastIndex(id, ":"); i >= 0 {
+		return id[i+1:]
 	}
-	open, ok := args["applicationsOpen"].(bool)
-	if !ok {
-		return nil, fmt.Errorf("wholesale: applicationsOpen must be a bool")
-	}
-	adapter := trimmed(args["entitlementAdapter"])
-	// AN UNKNOWN ADAPTER IS REFUSED AT SETTINGS TIME, not at approval time.
-	// A merchant who typed it wrong learns now, rather than when the first
-	// approved application fails to provision -- which is the moment they
-	// are least able to act on it.
-	if adapter != "" {
-		if _, err := AdapterByName(adapter); err != nil {
-			return nil, err
-		}
-	}
-	if err := p.write(ctx, "setWholesaleSettingsRow", map[string]any{
-		"settingsId":         SettingsRowID(storeID),
-		"storeId":            storeID,
-		"applicationsOpen":   open,
-		"entitlementAdapter": adapter,
-		"introText":          asString(args["introText"]),
-	}); err != nil {
-		return nil, err
-	}
-	return confirm("wholesale:settings:written", map[string]any{
-		"storeId":            storeID,
-		"applicationsOpen":   open,
-		"entitlementAdapter": adapter,
-	})
+	return id
 }
 
 // --------------------------------------------------------------------------
@@ -391,41 +756,25 @@ func (p *Provider) applicationRow(ctx context.Context, applicationID string) (ma
 	return rows[0], nil
 }
 
+// acceptanceStanding answers whether app's store requires its terms and, when it
+// does, whether app has accepted them, read through sys. A store that requires
+// none needs no acceptance read.
+func (p *Provider) acceptanceStanding(sys context.Context, app map[string]any) (termsRequired, accepted bool, err error) {
+	if termsRequired, err = p.termsRequiredAt(sys, trimmed(app["storeId"])); err != nil || !termsRequired {
+		return termsRequired, false, err
+	}
+	acceptance, err := p.acceptanceOf(sys, trimmed(app["id"]))
+	if err != nil {
+		return false, false, err
+	}
+	return true, acceptance != nil, nil
+}
+
 // stateOf folds one application's decision log.
 func (p *Provider) stateOf(ctx context.Context, applicationID string) (string, error) {
-	rows, err := p.rowsFor(ctx, "decisionsForApplication",
-		map[string]string{"applicationId": applicationID})
+	rows, err := p.rowsForApplication(ctx, "decisionsForApplication", applicationID)
 	if err != nil {
 		return "", err
 	}
 	return FoldState(rows), nil
-}
-
-// applicationsOpen reads this store's gate.
-//
-// ABSENT IS CLOSED. A store whose merchant has never touched the setting
-// has not asked for applications, and a missing row must not open a public
-// write endpoint that collects somebody's business contact details.
-func (p *Provider) applicationsOpen(ctx context.Context, storeID string) (bool, error) {
-	settings, err := p.settingsRow(ctx, storeID)
-	if err != nil {
-		return false, err
-	}
-	if settings == nil {
-		return false, nil
-	}
-	open, _ := settings["applicationsOpen"].(bool)
-	return open, nil
-}
-
-// settingsRow reads one store's settings, or nil when there are none.
-func (p *Provider) settingsRow(ctx context.Context, storeID string) (map[string]any, error) {
-	rows, err := p.rowsFor(ctx, "wholesaleSettingsForStore", map[string]string{"storeId": storeID})
-	if err != nil {
-		return nil, err
-	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	return rows[0], nil
 }

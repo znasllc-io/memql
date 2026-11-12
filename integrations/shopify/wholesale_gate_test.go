@@ -11,12 +11,14 @@ import (
 // wholesale_gate_test.go -- who may reach the B2B writes.
 //
 // The five wholesale builtins carry no @requiresCapability, and a builtin
-// without one has no rank floor: every signed-in caller of any role reached
-// their handlers, which resolved any store and checked nobody. While a
-// managed store's grant held no customer scope, Shopify refused the tag
-// itself. The managed grant now holds write_customers, so the handler is the
-// only thing between any signed-in account and a wholesale price on any
-// customer of any store.
+// without one has no rank floor: every signed-in caller of any role reaches
+// their handlers. The managed grant holds write_customers, so the handler is
+// the only thing between any signed-in account and a wholesale price on any
+// customer of any store. Each handler therefore admits the wholesale pack's
+// own call alone -- internal origin, which engineCaller stamps after the
+// pack's checks -- and refuses everyone else before anything is read: the
+// store's owner and a cluster owner included, who reach a grant through the
+// pack (wholesaleRetryAccess), never around it.
 
 // wholesaleBuiltins is the five, by the name a caller writes, with the
 // arguments a real call carries beside the store.
@@ -46,42 +48,42 @@ func onStore(args map[string]any, storeID string) map[string]any {
 	return out
 }
 
-func TestTheWholesaleBuiltinsRefuseACallerWhoIsNotTheStoresOwner(t *testing.T) {
+func TestTheWholesaleBuiltinsRefuseACallerWhoIsNotThePack(t *testing.T) {
 	for n := range wholesaleBuiltins(&Integration{}) {
 		// A signed-in writer and a developer, neither the store's owner: the
 		// same refusal for a store that exists and one that does not, and
-		// nothing read but the store row.
+		// nothing read, not even the store row.
 		for _, who := range []context.Context{actorCtx("user-2", auth.RoleWriter), actorCtx("user-2", auth.RoleDeveloper), context.Background()} {
 			for _, storeID := range []string{testStoreID, "no-such-store"} {
 				h := newHarness(t)
 				withStoreRow(h, nil)
 				b := wholesaleBuiltins(NewIntegration(h.conn))[n]
 				nodes, err := b.handle(who, onStore(b.args, storeID), 0)
-				if want := "shopify: " + b.builtin + " " + actRefusal; err == nil || err.Error() != want {
+				if want := "shopify: " + b.builtin + " is called by the wholesale pack, never by a client"; err == nil || err.Error() != want {
 					t.Errorf("%s on %q: nodes %v, err %v; want %q", b.builtin, storeID, nodes, err, want)
 				}
 				onlyTheStoreRowWasRead(t, h, "a refused "+b.builtin+" on "+storeID)
+				if calls := h.engine.calls(); len(calls) != 0 {
+					t.Errorf("%s on %q: the store row was read before the refusal: %v", b.builtin, storeID, calls)
+				}
 			}
 		}
 	}
 }
 
-func TestTheWholesaleBuiltinsAdmitTheStoresOwnerAClusterOwnerAndTheEngine(t *testing.T) {
-	// The engine's own call: internal origin, whoever its actor is -- an
-	// automation's is a reader.
-	automation := auth.ContextWithInternalOrigin(actorCtx("system:automation", auth.RoleReader))
+func TestTheWholesaleBuiltinsAdmitThePacksCallAndRefuseTheStoresOwnerAndAClusterOwner(t *testing.T) {
+	// The pack's own call: internal origin and the pack's mark, whoever its
+	// actor is.
 	for n := range wholesaleBuiltins(&Integration{}) {
 		for name, who := range map[string]context.Context{
-			"the store's owner":           actorCtx("user-1", auth.RoleWriter),
-			"a cluster owner":             actorCtx("user-9", auth.RoleOwner),
-			"internal origin":             auth.ContextWithInternalOrigin(context.Background()),
-			"an automation's reader step": automation,
+			"the pack's call":           pack(),
+			"the pack's call, no actor": auth.ContextWithPackCaller(auth.ContextWithInternalOrigin(context.Background()), "wholesale"),
 		} {
 			h := newHarness(t)
 			withStoreRow(h, map[string]any{"plan": "Shopify Plus"})
 			b := wholesaleBuiltins(NewIntegration(h.conn))[n]
 			_, err := b.handle(who, onStore(b.args, testStoreID), 0)
-			if err != nil && strings.Contains(err.Error(), actRefusal) {
+			if err != nil && strings.Contains(err.Error(), "never by a client") {
 				t.Errorf("%s: %s was refused: %v", b.builtin, name, err)
 			}
 			// Past the gate, the handler asks Shopify -- except the headroom
@@ -90,20 +92,43 @@ func TestTheWholesaleBuiltinsAdmitTheStoresOwnerAClusterOwnerAndTheEngine(t *tes
 				t.Errorf("%s: %s was admitted and Shopify was never asked (err %v)", b.builtin, name, err)
 			}
 		}
+		// The interim rule admitted these three; the pack's rule does not. An
+		// automation's step carries internal origin, but the executor stamps
+		// that on every step of every package's automation, so it would let
+		// one client's package grant wholesale prices in another client's
+		// store (ruling 57): only the pack's mark admits a call.
+		for name, who := range map[string]context.Context{
+			"the store's owner":           actorCtx("user-1", auth.RoleWriter),
+			"a cluster owner":             actorCtx("user-9", auth.RoleOwner),
+			"an automation's reader step": automationStep(),
+		} {
+			h := newHarness(t)
+			withStoreRow(h, map[string]any{"plan": "Shopify Plus"})
+			b := wholesaleBuiltins(NewIntegration(h.conn))[n]
+			_, err := b.handle(who, onStore(b.args, testStoreID), 0)
+			if want := "shopify: " + b.builtin + " is called by the wholesale pack, never by a client"; err == nil || err.Error() != want {
+				t.Errorf("%s: %s: err %v, want %q", b.builtin, name, err, want)
+			}
+			if got := len(h.admin.seen()); got != 0 {
+				t.Errorf("%s: %s was refused and Shopify was still asked %d times", b.builtin, name, got)
+			}
+		}
 	}
 }
 
-// A store that does not exist: the engine's own call and a cluster owner are
-// told so, as before; nobody else can tell it from a store they do not own.
-func TestOnlyTheEngineAndAClusterOwnerAreToldAWholesaleStoreDoesNotExist(t *testing.T) {
+// A store that does not exist: the pack's own call is told so, as before; a
+// cluster owner is refused like anybody else, without the store being read.
+func TestOnlyThePacksCallIsToldAWholesaleStoreDoesNotExist(t *testing.T) {
 	for n := range wholesaleBuiltins(&Integration{}) {
-		for _, who := range []context.Context{auth.ContextWithInternalOrigin(context.Background()), actorCtx("user-9", auth.RoleOwner)} {
-			h := newHarness(t)
-			b := wholesaleBuiltins(NewIntegration(h.conn))[n]
-			_, err := b.handle(who, onStore(b.args, "no-such-store"), 0)
-			if want := `shopify: store "no-such-store" is not configured`; err == nil || err.Error() != want {
-				t.Errorf("%s: err = %v, want %q", b.builtin, err, want)
-			}
+		h := newHarness(t)
+		b := wholesaleBuiltins(NewIntegration(h.conn))[n]
+		_, err := b.handle(pack(), onStore(b.args, "no-such-store"), 0)
+		if want := `shopify: store "no-such-store" is not configured`; err == nil || err.Error() != want {
+			t.Errorf("%s: err = %v, want %q", b.builtin, err, want)
+		}
+		_, err = b.handle(actorCtx("user-9", auth.RoleOwner), onStore(b.args, "no-such-store"), 0)
+		if want := "shopify: " + b.builtin + " is called by the wholesale pack, never by a client"; err == nil || err.Error() != want {
+			t.Errorf("%s: a cluster owner: err = %v, want %q", b.builtin, err, want)
 		}
 	}
 }
@@ -112,7 +137,9 @@ func TestOnlyTheEngineAndAClusterOwnerAreToldAWholesaleStoreDoesNotExist(t *test
 // the declaration a caller reads.
 func TestTheWholesaleBuiltinsSayWhoMayCallThem(t *testing.T) {
 	said := func(text string) bool {
-		return strings.Contains(text, "the store's owner") && strings.Contains(text, "a cluster owner") && strings.Contains(text, "internal origin")
+		return strings.Contains(text, "the wholesale pack") && strings.Contains(text, "internal origin") &&
+			strings.Contains(text, "automation") &&
+			!strings.Contains(text, "the store's owner") && !strings.Contains(text, "a cluster owner")
 	}
 	executors := map[string]string{}
 	for _, c := range NewIntegration(nil).Capabilities() {

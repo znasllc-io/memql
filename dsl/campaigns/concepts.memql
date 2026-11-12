@@ -135,6 +135,7 @@ concept recipient {
 /// separate from the campaign so one piece of content can be sent to several audiences without being
 /// retyped, and so editing copy is a different action (and a different authorization decision, later)
 /// from scheduling a send. Per-row authz: owned.
+@version("1.1.0")
 @displayCard(primary="name", secondary="subject", tertiary="ownerUserId", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @belongsTo(account, stated)
@@ -151,6 +152,7 @@ concept template {
   preheader         string  @description("The hidden line an inbox shows after the subject, from the document. It is already written into htmlBody; kept here so an editor can show it.")
   sourceArtifactId  string  @description("The Library file the template was published from. There is one template per organization and file: publishing the same file again updates this template (templateForSource). Empty for templates not made from a file.")
   composition       object  @description("The state of an AI composition of this template, when one has been asked for: {goalId, state: writing|done|failed, startedAt, finishedAt, error, request: {layoutId, name, description, fileIds, referenceFileId, requestedBy}, baseRevision, notes}. request.requestedBy is the bare user id of the person who asked, the only person who may retry it. error is one short fixed sentence. notes lists, in plain sentences, each file left out and why. Absent on a template nobody asked to have written. Written only by the campaigns capabilities; campaignSaveTemplate leaves it as stored, except that a person's save or publish of a template whose composition failed ends the failure (state done, with the request, error and notes kept).")
+  purpose           enum("marketing", "transactional")  @description("What the message is for. 'transactional' is a message about one person's own request (an application received, approved, rejected): it carries no unsubscribe and is sent only to the person a row names, never to a list, so a campaign, a journey step and an event email rule each refuse it. 'marketing' is everything else. Absent on templates saved before purposes existed, and absent reads as marketing. Whether a message counts as transactional where the client trades is the client's judgment of its words.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
@@ -317,6 +319,8 @@ concept campaign {
 /// routing campaigns through it would either refuse every send or force that allowlist wide open and
 /// weaken the transactional egress control it exists to provide. The field stays on the schema
 /// because a future queued transport would populate it.
+@version("1.1.0")
+@serverWritten
 @displayCard(primary="email", secondary="campaignId", tertiary="sentAt", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @belongsTo(account, stated)
@@ -340,6 +344,9 @@ concept delivery {
   requestId          string   @description("The single-send request this row records (memql#6022, F7): the stable requestId an automation, a welcome or a journey step supplied for ONE intended message. It is the LEDGER KEY of a send that has no campaign -- the row id derives from (requestId, recipientId), so each message to a person has a row of its own. A request id never contains a colon, which is what keeps it from aliasing a canonical campaign id in that derivation. Empty on every campaign delivery and on a send made without a requestId, which keeps the (rule, recipient) row it always had.")
   templateId         string   @description("v1:campaigns:template.id of the message a single send carried (memql#6022, F7), so a row answers 'what was this person sent' after the rule or journey that sent it has been edited. Empty on a campaign delivery, whose template is its campaign's.")
   senderIdentityId   string   @description("v1:campaigns:senderIdentity.id a single send went out as (memql#6022, F7). Empty when the send named no identity -- it went out as the configured default -- and on a campaign delivery, whose sender is its campaign's.")
+  rowConcept         string   @description("The concept of the row this message is about, when the person it went to has no recipient row: a pack's row for the row lane (campaignSendRowMessage), or v1:shopify:order for a message an order entitles. Written only by the server. With rowId it is what a deferred row send is replayed from, and it is why recipientId names no recipient row. Empty on every campaign delivery and every send to a list's member.")
+  rowId              string   @description("The id of the row this message is about, beside rowConcept: the pack's row, or the order's gid. Written only by the server.")
+  rowKind            string   @description("Which message about the row this was (the kind the row lane handed its resolver). Empty for an order message. The message's fields are never kept here or anywhere on this row: a replay asks the row's resolver for them again.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="campaignId", target=campaign, direction="outgoing")

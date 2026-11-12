@@ -2,11 +2,14 @@ package wholesalepack
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -81,6 +84,10 @@ type Outcome struct {
 	// Detail is one human sentence for an operator reading the row. Never
 	// a credential and never a token.
 	Detail string
+	// CustomerID is the Shopify customer the grant landed on, when the
+	// integration says; CustomerCreated is whether the grant had to create it.
+	CustomerID      string
+	CustomerCreated bool
 }
 
 // Caller is the ONLY thing an adapter may do besides compute.
@@ -126,6 +133,37 @@ const (
 	AdapterShopifyB2B  = "shopifyB2B"
 	AdapterCustomerTag = "customerTag"
 )
+
+// AdapterNone is what an entitlement row names when no adapter was ever
+// reached: the store had no settings or no route, so nothing was called.
+const AdapterNone = "none"
+
+// The causes an entitlement row names when it grants nothing (U2).
+const (
+	ErrorNoSettings      = "no_settings"
+	ErrorNoRoute         = "no_route"
+	ErrorScopeMissing    = "scope_missing"
+	ErrorPlanCeiling     = "plan_ceiling"
+	ErrorCustomerRefused = "customer_refused"
+	ErrorShopifyError    = "shopify_error"
+)
+
+// The two directions an entitlement version's attempt went, matching the
+// concept's enum: a provision is a grant, a removal a revoke.
+const (
+	DirectionGrant  = "grant"
+	DirectionRevoke = "revoke"
+)
+
+// attemptOf is an entitlement row's attempt, 0 for a row written before the
+// field.
+func attemptOf(row map[string]any) int {
+	n, _ := intArg(row["attempt"])
+	if n < 0 {
+		return 0
+	}
+	return n
+}
 
 // The four entitlement states, matching the concept's enum.
 const (
@@ -204,30 +242,113 @@ func AdapterNames() []string {
 //
 // ONE PER APPLICATION, so a re-provision after a failure is a new VERSION
 // of one logical row rather than a second row a read would have to choose
-// between -- and "revoked when" is that version's own createdAt, which is
-// why the concept carries no revokedAt.
+// between. When each attempt was made, and when trade prices went on and came
+// off, are fields of the row (entitlementTimes), never a version's write time.
+//
+// DERIVED FROM THE BARE ID, whichever form the caller named the application
+// by: the engine does not join the two forms, and an id derived from each would
+// be two rows for one application -- a provision under one and a retry under
+// the other.
 func EntitlementRowID(applicationID string) string {
-	return "wholesale-entitlement-" + slugOf(applicationID)
+	return "wholesale-entitlement-" + slugOf(bareID(strings.TrimSpace(applicationID)))
 }
 
+// provisionActor is the system actor provisioning READS as.
+//
+// The automation that calls these builtins runs as the scheduler's own
+// synthetic reader, which owns nothing a merchant's row is readable by -- so
+// read under it, the application answers "not readable by this caller" and no
+// row is written. The deployment reads instead, by name, and the writes go
+// out as the application's merchant (asMerchant), because a row written as a
+// system actor is owned by nobody.
+const provisionActor = "wholesale-provision"
+
 // provisionEntitlement grants through the store's chosen adapter.
+//
+// FOR THE STORE'S AUTOMATION ONLY. It reads as the deployment and acts as the
+// application's merchant, so a client that could call it could provision any
+// application it can name; the refusal comes before anything is read.
 func (p *Provider) provisionEntitlement(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireInternal(ctx, "wholesaleProvisionEntitlement"); err != nil {
+		return nil, err
+	}
 	return p.applyEntitlement(ctx, args, false)
 }
 
-// revokeEntitlement takes one back through the adapter that granted it.
+// revokeEntitlement takes one back through the adapter that granted it. For
+// the store's automation only, for the reason provisionEntitlement gives.
 func (p *Provider) revokeEntitlement(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireInternal(ctx, "wholesaleRevokeEntitlement"); err != nil {
+		return nil, err
+	}
 	return p.applyEntitlement(ctx, args, true)
+}
+
+// retryAccess tries a buyer's access again after it did not land.
+//
+// FOR A PERSON OF THE STORE, NOT THE AUTOMATION. The organization gate admitted
+// the caller (the wholesale part, in the application's organization), and the
+// application is read under the caller's own actor, so a caller who cannot read
+// it retries nothing. What is retried is the decision log's, not the caller's:
+// an approved application is provisioned again, and a revoked one whose access
+// is still on (its entitlement row exists and is not revoked) is revoked again.
+// Anything else is refused by name before any route is called.
+//
+// A RETRY DECIDES NOTHING (X26): the decision log already says approved or
+// revoked, and this only makes the store say the same, so X4's refusal of the
+// cluster's operators does not apply and an operator holding the part may retry.
+//
+// It runs applyEntitlement under the same identities the automation's call
+// does -- read as the deployment, the route called and the row written as the
+// application's merchant -- and stamps no internal origin of its own.
+func (p *Provider) retryAccess(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	applicationID := trimmed(args["applicationId"])
+	if applicationID == "" {
+		return nil, fmt.Errorf("wholesale: applicationId is required")
+	}
+	rows, err := p.rowsFor(ctx, "applicationById", map[string]string{"applicationId": applicationID})
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("wholesale: application %q is not readable by this caller, so its access "+
+			"cannot be retried", applicationID)
+	}
+	sys := auth.ContextWithSystemActor(ctx, provisionActor)
+	state, err := p.stateOf(sys, applicationID)
+	if err != nil {
+		return nil, err
+	}
+	switch state {
+	case StateApproved:
+		return p.applyEntitlement(ctx, args, false)
+	case StateRevoked:
+		ent, err := p.entitlementRow(sys, applicationID)
+		if err != nil {
+			return nil, err
+		}
+		if ent != nil && trimmed(ent["state"]) != EntitlementRevoked {
+			return p.applyEntitlement(ctx, args, true)
+		}
+	}
+	return nil, fmt.Errorf("wholesale: there is no access to retry for an application that is %s", state)
 }
 
 // applyEntitlement is both directions, because they differ in three lines
 // and sharing them keeps the state machine in one place.
+//
+// IT CHECKS NO ORIGIN, and that is deliberate: the three capabilities above
+// decide who may reach it -- the automation's two at internal origin, and
+// wholesaleRetryAccess for a person of the store past the organization gate. It reads the application, its decisions, the
+// settings and the store's plan as the deployment, and calls the adapter and
+// writes the entitlement as the application's merchant.
 func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, revoking bool) ([]memorynodes.MemoryNode, error) {
 	applicationID := trimmed(args["applicationId"])
 	if applicationID == "" {
 		return nil, fmt.Errorf("wholesale: applicationId is required")
 	}
-	app, err := p.applicationRow(ctx, applicationID)
+	sys := auth.ContextWithSystemActor(ctx, provisionActor)
+	app, err := p.applicationRow(sys, applicationID)
 	if err != nil {
 		return nil, err
 	}
@@ -235,12 +356,16 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 	if storeID == "" {
 		return nil, fmt.Errorf("wholesale: application %q carries no storeId", applicationID)
 	}
+	merchant, err := p.asMerchant(ctx, app)
+	if err != nil {
+		return nil, err
+	}
 
 	// THE DECISION LOG DECIDES WHETHER THIS IS ALLOWED, not an argument.
 	// Provisioning an application nobody approved would grant trade terms
 	// on the strength of a caller's say-so; revoking one nobody revoked
 	// would leave the pack's state disagreeing with its own history.
-	state, err := p.stateOf(ctx, applicationID)
+	state, err := p.stateOf(sys, applicationID)
 	if err != nil {
 		return nil, err
 	}
@@ -254,51 +379,113 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 			"application has an entitlement to provision", applicationID, state)
 	}
 
-	adapterName, err := p.adapterFor(ctx, storeID)
-	if err != nil {
-		return nil, err
-	}
-	adapter, err := AdapterByName(adapterName)
-	if err != nil {
-		return nil, err
-	}
-
 	grant := Grant{
-		StoreID:       storeID,
-		ApplicationID: applicationID,
+		StoreID: storeID,
+		// THE CANONICAL ID, whichever form the caller named the application
+		// by (ruling 28): the B2B route makes it the company's idempotency
+		// key, so an adapter handed two forms would make two companies. The
+		// canonical form is the one the pack's queries and events hand a
+		// client, so it is the form the first provision normally used.
+		ApplicationID: applicationRef(applicationID),
 		CompanyName:   trimmed(app["companyName"]),
 		BuyerName:     trimmed(app["applicantName"]),
 		BuyerEmail:    trimmed(app["applicantEmail"]),
 	}
-	// THE PLAN IS READ, NOT ASKED FOR. A caller that supplied its own would
-	// be the one deciding whether an adapter is available, which is the
-	// check's whole content.
-	grant.Plan = p.storePlan(ctx, storeID)
-
+	owner := userRef(trimmed(app["ownerUserId"]))
+	account := trimmed(app["accountId"])
+	prior, err := p.entitlementRow(sys, applicationID)
+	if err != nil {
+		return nil, err
+	}
+	// ONE ROW PER APPLICATION: a prior row is written at its own id, so a row
+	// written before ids were derived from the bare form stays the one row.
+	rowID := EntitlementRowID(applicationID)
+	if prior != nil {
+		if id := bareID(trimmed(prior["id"])); id != "" {
+			rowID = id
+		}
+	}
+	// EVERY VERSION THIS WRITES IS AN ATTEMPT, and says which way it went and
+	// which attempt it is: the staff notice of an attempt that did not land is
+	// keyed by the attempt, so a retry that fails again tells the store's people
+	// again and nothing else does (wholesaleNotifyStaff).
+	direction := DirectionGrant
 	if revoking {
-		prior, err := p.entitlementRow(ctx, applicationID)
-		if err != nil {
-			return nil, err
+		direction = DirectionRevoke
+	}
+	attempt := 1
+	if prior != nil {
+		attempt = attemptOf(prior) + 1
+	}
+	write := func(adapterName, state string, res Outcome, code, text string) ([]memorynodes.MemoryNode, error) {
+		return p.writeEntitlement(merchant, rowID, applicationRef(applicationID), storeID, owner, account, grant,
+			adapterName, state, res, code, text, direction, attempt, entitlementTimes(prior, state, p.clock()))
+	}
+	var priorAdapter, priorRef, priorCustomerID string
+	var priorCreated bool
+	if prior != nil {
+		priorAdapter = trimmed(prior["adapter"])
+		priorRef = trimmed(prior["reference"])
+		priorCustomerID = trimmed(prior["shopifyCustomerId"])
+		priorCreated, _ = prior["customerCreated"].(bool)
+	}
+	priorGranted := prior != nil && trimmed(prior["state"]) == EntitlementGranted
+	// WHAT THE GRANT RECORDED IS NEVER LOST. A revoke, and a provision over a
+	// row that is already granted, write the prior adapter, reference and
+	// customer back whenever the attempt does not replace them, so a later
+	// revoke always finds the adapter that put the access on.
+	keep := revoking || priorGranted
+	kept := Outcome{Reference: priorRef, CustomerID: priorCustomerID, CustomerCreated: priorCreated}
+
+	var adapter Adapter
+	adapterName := ""
+	if revoking {
+		grant.Reference = priorRef
+		// NO ROW, A ROW THAT NEVER REACHED A STORE, OR ONE NAMING NO ADAPTER
+		// (X17). An approval that granted nothing has nothing to take back,
+		// and the decision log already says revoked; the row says so too, and
+		// no adapter is called against a store nobody was ever entitled on.
+		if priorAdapter == "" || priorAdapter == AdapterNone {
+			return write(AdapterNone, EntitlementRevoked,
+				Outcome{CustomerID: priorCustomerID, CustomerCreated: priorCreated}, "", "")
 		}
-		if prior == nil {
-			return nil, fmt.Errorf("wholesale: application %q has no entitlement to revoke",
-				applicationID)
-		}
-		grant.Reference = trimmed(prior["reference"])
 		// REVOKED THROUGH THE ADAPTER THAT GRANTED IT, read off the row --
 		// not through whatever the settings say TODAY. A merchant who
 		// switches adapters must still be able to take back what the old
 		// one gave, and the settings value has already moved on.
-		if was := trimmed(prior["adapter"]); was != "" && was != adapterName {
-			adapter, err = AdapterByName(was)
-			if err != nil {
-				return nil, fmt.Errorf("wholesale: entitlement for %q was granted by %q, "+
-					"which this build no longer registers, so it cannot be revoked through "+
-					"the pack: %w", applicationID, was, err)
+		var err error
+		adapter, err = AdapterByName(priorAdapter)
+		if err != nil {
+			// NOT CLAIMED REVOKED. An adapter this engine no longer has
+			// cannot take the grant back, so the row stays pending (the
+			// un-grant has not landed) naming no_route, with its adapter,
+			// reference and customer kept. A row, not an error, for the
+			// reason routeFor gives (spec N3).
+			return write(priorAdapter, EntitlementPending, kept, ErrorNoRoute,
+				unknownRouteSentence(priorAdapter))
+		}
+		adapterName = priorAdapter
+	} else {
+		var fail *routeFailure
+		adapter, adapterName, fail, err = p.routeFor(sys, storeID)
+		if err != nil {
+			return nil, err
+		}
+		if fail != nil {
+			if priorGranted {
+				// A FAILED RE-PROVISION CANNOT ERASE A GRANT. The attempt
+				// reached no adapter, so the granted row is left exactly as
+				// it is and answered as it stands.
+				return confirmRow(prior)
 			}
-			adapterName = was
+			return write(AdapterNone, EntitlementFailed, Outcome{}, fail.code, fail.text)
 		}
 	}
+
+	// THE PLAN IS READ, NOT ASKED FOR. A caller that supplied its own would
+	// be the one deciding whether an adapter is available, which is the
+	// check's whole content.
+	grant.Plan = p.storePlan(sys, storeID)
 
 	// AVAILABILITY IS PART OF THE ATTEMPT, NOT A GUARD IN FRONT OF IT, and
 	// the difference is a row. An earlier version returned this refusal
@@ -315,9 +502,9 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 	var result Outcome
 	if applyErr == nil {
 		if revoking {
-			result, applyErr = adapter.Revoke(ctx, p.caller, grant)
+			result, applyErr = adapter.Revoke(merchant, p.caller, grant)
 		} else {
-			result, applyErr = adapter.Provision(ctx, p.caller, grant)
+			result, applyErr = adapter.Provision(merchant, p.caller, grant)
 		}
 	}
 
@@ -325,14 +512,18 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 	if revoking {
 		entState = EntitlementRevoked
 	}
-	errText := ""
+	errText, errCode := "", ""
 	if applyErr != nil {
 		// PENDING, NOT FAILED, BY DEFAULT. The decision stands and the push
 		// is what is outstanding, so the row says what is true: somebody
-		// decided this and the push has not landed yet. `failed` is for an
-		// adapter that REFUSED rather than errored -- a ceiling, a buyer
-		// with no customer account, a plan nobody can read -- which will
-		// fail identically for ever, and which AdapterRefusal marks.
+		// decided this and the push has not landed yet, and Retry access in
+		// the OS (wholesaleRetryAccess) tries it again. `failed` is for an
+		// adapter that REFUSED rather than errored -- a ceiling, a store
+		// that refused to create the buyer's customer, a grant that does not
+		// reach customers, a plan nobody can read -- which will fail
+		// identically for ever, and which AdapterRefusal marks with its code.
+		// A buyer with no customer is not a refusal: the customer-tag route
+		// creates one and tags it.
 		//
 		// On a REVOKE a `pending` row means the un-grant has not landed.
 		// The application is already revoked in the decision log either
@@ -342,40 +533,117 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 			entState = EntitlementFailed
 		}
 		errText = applyErr.Error()
+		errCode = errorCodeOf(applyErr)
+		result = Outcome{}
+		if keep {
+			// The attempt that failed replaced nothing; keep the adapter
+			// that put the access on along with its reference and customer.
+			result = kept
+			if priorAdapter != "" && priorAdapter != AdapterNone {
+				adapterName = priorAdapter
+			}
+		}
+	} else if keep && result.CustomerID == "" {
+		result.CustomerID, result.CustomerCreated = priorCustomerID, priorCreated
 	}
 
-	node, err := p.writeEntitlement(ctx, applicationID, storeID, grant, adapterName, entState, result, errText)
-	if err != nil {
-		return nil, err
-	}
 	// THE ROW IS WRITTEN EITHER WAY AND THE ERROR IS NOT RETURNED. A
 	// builtin that returned the error would leave no row at all, and the
 	// merchant would have an approved application with nothing anywhere
 	// saying a push had been attempted and failed. The row carries it.
-	return node, nil
+	return write(adapterName, entState, result, errCode, errText)
 }
 
-// adapterFor reads the store's chosen adapter name.
-func (p *Provider) adapterFor(ctx context.Context, storeID string) (string, error) {
-	settings, err := p.settingsRow(ctx, storeID)
+// routeFailure is a store whose settings leave no adapter to call.
+type routeFailure struct{ code, text string }
+
+// routeFor resolves the store's route: the adapter and its name, or the
+// ready failure decision when there is none to call.
+//
+// A RETURNED ERROR LEAVES NO ROW SAYING WHY NOTHING HAPPENED (spec N3), so a
+// store with no settings, settings naming no route, or a route this engine
+// does not have is a failure the caller writes as a row on adapter "none"
+// and answers with a nil error. The merchant's screen reads the row.
+func (p *Provider) routeFor(ctx context.Context, storeID string) (Adapter, string, *routeFailure, error) {
+	settings, err := p.settingsRowAt(ctx, storeID)
 	if err != nil {
-		return "", err
+		return nil, "", nil, err
 	}
 	if settings == nil {
-		return "", fmt.Errorf("wholesale: store %q has no wholesale settings, so no "+
-			"entitlement adapter is chosen", storeID)
+		return nil, "", &routeFailure{ErrorNoSettings,
+			fmt.Sprintf("wholesale: store %q has no wholesale settings, so no entitlement "+
+				"adapter is chosen", storeID)}, nil
 	}
 	name := trimmed(settings["entitlementAdapter"])
 	if name == "" {
-		// NAMED REFUSAL RATHER THAN A SILENT NO-OP. A merchant who approves
-		// an application and sees no wholesale prices appear is owed the
-		// reason, and "no adapter is configured" is a reason they can act
-		// on in one setting.
-		return "", fmt.Errorf("wholesale: store %q has no entitlement adapter configured; "+
-			"set entitlementAdapter in this store's wholesale settings to one of %s",
-			storeID, strings.Join(AdapterNames(), ", "))
+		return nil, "", &routeFailure{ErrorNoRoute,
+			fmt.Sprintf("wholesale: store %q has no entitlement adapter configured; "+
+				"set entitlementAdapter in this store's wholesale settings to one of %s",
+				storeID, strings.Join(AdapterNames(), ", "))}, nil
 	}
-	return name, nil
+	adapter, err := AdapterByName(name)
+	if err != nil {
+		return nil, "", &routeFailure{ErrorNoRoute, unknownRouteSentence(name)}, nil
+	}
+	return adapter, name, nil, nil
+}
+
+// confirmRow answers an existing entitlement row without writing a version.
+func confirmRow(row map[string]any) ([]memorynodes.MemoryNode, error) {
+	return confirm("wholesale:entitlement:written", map[string]any{
+		"applicationId": trimmed(row["applicationId"]),
+		"storeId":       trimmed(row["storeId"]),
+		"adapter":       trimmed(row["adapter"]),
+		"state":         trimmed(row["state"]),
+		"reference":     trimmed(row["reference"]),
+		"errorCode":     trimmed(row["errorCode"]),
+		"error":         trimmed(row["error"]),
+		"detail":        "",
+	})
+}
+
+// unknownRouteSentence says which route a store's settings name that this
+// engine does not have registered.
+func unknownRouteSentence(name string) string {
+	return fmt.Sprintf("wholesale: the store's settings name the route %q, which this engine "+
+		"does not have; this build has %s", name, strings.Join(AdapterNames(), ", "))
+}
+
+// errorCodeOf names the cause of an adapter error for the entitlement row.
+// A refusal carries its own code; a refusal with none is the buyer's
+// customer record being refused; anything else is Shopify failing.
+func errorCodeOf(err error) string {
+	var r *AdapterRefusal
+	if errors.As(err, &r) {
+		switch c := strings.TrimSpace(r.Code); c {
+		case ErrorNoSettings, ErrorNoRoute, ErrorScopeMissing, ErrorPlanCeiling,
+			ErrorCustomerRefused, ErrorShopifyError:
+			return c
+		}
+		// A code that is not one of the six is recorded as the buyer's
+		// customer record being refused; the reply's reason stays in error.
+		return ErrorCustomerRefused
+	}
+	if isAdapterRefusal(err) {
+		return ErrorCustomerRefused
+	}
+	return ErrorShopifyError
+}
+
+// asMerchant is ctx acting as the application's merchant: its ownerUserId,
+// the owner of the deployable it was submitted through.
+//
+// REFUSED WHEN THE APPLICATION NAMES NONE, because auth.ContextWithUserActor
+// returns ctx unchanged for a blank id, and the write would then go out as
+// whoever the context happened to carry -- for an automation, a system actor
+// whose rows nobody owns.
+func (p *Provider) asMerchant(ctx context.Context, app map[string]any) (context.Context, error) {
+	owner := trimmed(app["ownerUserId"])
+	if owner == "" {
+		return nil, fmt.Errorf("wholesale: application %q names no ownerUserId, so there is no "+
+			"merchant to act as", trimmed(app["id"]))
+	}
+	return auth.ContextWithUserActor(ctx, owner), nil
 }
 
 // storePlan reads v1:shopify:store.plan, or "" when this caller cannot.
@@ -394,8 +662,8 @@ func (p *Provider) storePlan(ctx context.Context, storeID string) string {
 
 // entitlementRow reads the current entitlement for an application.
 func (p *Provider) entitlementRow(ctx context.Context, applicationID string) (map[string]any, error) {
-	rows, err := p.rowsFor(ctx, "entitlementForApplication",
-		map[string]string{"applicationId": applicationID})
+	// Both forms of the id, newest first (rowsForApplication).
+	rows, err := p.rowsForApplication(ctx, "entitlementForApplication", applicationID)
 	if err != nil {
 		return nil, err
 	}
@@ -409,11 +677,16 @@ func (p *Provider) entitlementRow(ctx context.Context, applicationID string) (ma
 //
 // THROUGH THE MUTATION, for the reason mutations.memql gives at length: a
 // builtin's returned nodes are the expression's value and are never
-// persisted, and the mutation is also what stamps ownerUserId from the
-// actor. A row written any other way is owned by nobody and invisible to
-// the merchant who granted it.
-func (p *Provider) writeEntitlement(ctx context.Context, applicationID, storeID string, g Grant,
-	adapterName, state string, result Outcome, errText string) ([]memorynodes.MemoryNode, error) {
+// persisted. ownerUserId is the application's merchant, passed explicitly
+// and written as that merchant: a row owned by anybody else is invisible to
+// the merchant who granted it. accountId is the application's organization,
+// copied off it, so the people who read the application read what was granted.
+//
+// rowID is the row's id (EntitlementRowID, or a prior row's own); applicationID
+// is written in canonical form, as a decision's is.
+func (p *Provider) writeEntitlement(ctx context.Context, rowID, applicationID, storeID, ownerUserID, accountID string, g Grant,
+	adapterName, state string, result Outcome, errCode, errText, direction string, attempt int,
+	times map[string]any) ([]memorynodes.MemoryNode, error) {
 	reference := result.Reference
 	if reference == "" {
 		// KEEP THE PRIOR REFERENCE ON A FAILURE. An adapter that errored
@@ -421,16 +694,30 @@ func (p *Provider) writeEntitlement(ctx context.Context, applicationID, storeID 
 		// it had told us last time would leave nothing to revoke.
 		reference = g.Reference
 	}
-	if err := p.write(ctx, "writeEntitlementRow", map[string]any{
-		"entitlementId": EntitlementRowID(applicationID),
+	args := map[string]any{
+		"entitlementId": rowID,
+		"ownerUserId":   ownerUserID,
+		"accountId":     accountID,
 		"applicationId": applicationID,
 		"storeId":       storeID,
 		"buyerEmail":    g.BuyerEmail,
 		"adapter":       adapterName,
 		"state":         state,
 		"reference":     reference,
+		"errorCode":     errCode,
 		"error":         errText,
-	}); err != nil {
+		// EVERY FIELD EXPLICIT, empty and false included: a write at an
+		// existing id merges into the current version, so an omitted field
+		// would carry the attempt before it.
+		"shopifyCustomerId": result.CustomerID,
+		"customerCreated":   result.CustomerCreated,
+		"direction":         direction,
+		"attempt":           attempt,
+	}
+	for k, v := range times {
+		args[k] = v
+	}
+	if err := p.write(ctx, "writeEntitlementRow", args); err != nil {
 		return nil, err
 	}
 	return confirm("wholesale:entitlement:written", map[string]any{
@@ -439,9 +726,36 @@ func (p *Provider) writeEntitlement(ctx context.Context, applicationID, storeID 
 		"adapter":       adapterName,
 		"state":         state,
 		"reference":     reference,
+		"errorCode":     errCode,
 		"error":         errText,
 		"detail":        result.Detail,
 	})
+}
+
+// entitlementTimes is when the attempt writing a version in state happened,
+// at now: attemptedAt always; grantedAt when the version is granted, and
+// revokedAt when it is revoked. A version that stays granted (or revoked)
+// carries the time the prior version says trade prices went on (came off) --
+// its field, or for a row written before the field its own write time, which
+// is what that row read by -- so a re-provision over a grant does not move
+// "since". A version in another state names neither, and the write keeps
+// whatever the row held.
+func entitlementTimes(prior map[string]any, state string, now time.Time) map[string]any {
+	out := map[string]any{fieldAttemptedAt: happenedStamp(now)}
+	stays := prior != nil && trimmed(prior["state"]) == state
+	switch state {
+	case EntitlementGranted:
+		out[fieldGrantedAt] = happenedStamp(now)
+		if stays {
+			out[fieldGrantedAt] = happenedStamp(happenedAt(prior, fieldGrantedAt))
+		}
+	case EntitlementRevoked:
+		out[fieldRevokedAt] = happenedStamp(now)
+		if stays {
+			out[fieldRevokedAt] = happenedStamp(happenedAt(prior, fieldRevokedAt))
+		}
+	}
+	return out
 }
 
 // AdapterRefusal is a failure that will repeat identically for ever.
@@ -456,6 +770,9 @@ func (p *Provider) writeEntitlement(ctx context.Context, applicationID, storeID 
 type AdapterRefusal struct {
 	Adapter string
 	Reason  string
+	// Code is the cause the entitlement row names (one of the Error*
+	// constants); empty means the buyer's customer record was refused.
+	Code string
 }
 
 func (e *AdapterRefusal) Error() string {
@@ -482,7 +799,21 @@ func isAdapterRefusal(err error) bool {
 }
 
 // engineCaller is the production Caller: it renders a construct call and
-// runs it through the engine under the caller's own actor.
+// runs it through the engine under the caller's own actor, AT INTERNAL ORIGIN
+// AND MARKED AS THIS PACK'S CALL (auth.ContextWithPackCaller).
+//
+// The Shopify wholesale builtins admit the pack's call alone (internal
+// origin and the pack's mark), so a person's act -- an approval reaching the automation, a staff
+// member pressing Retry access -- reaches them only through here. The stamp
+// comes AFTER the pack's own checks, which are the authority: every path to a
+// Call has decided who the caller is and what they may do first
+// (wholesaleProvisionEntitlement and wholesaleRevokeEntitlement admit only a
+// caller already at internal origin; wholesaleRetryAccess is gated by the
+// wholesale part in the application's organization and reads the application
+// under the caller), and applyEntitlement then lets the decision log decide
+// whether there is anything to grant or take back. It is INLINE on the one
+// Execute, so it escapes nothing else: no read or write around the call
+// carries it.
 type engineCaller struct {
 	engine memql.IntegrationEngineAccess
 }
@@ -496,7 +827,12 @@ func (e *engineCaller) Call(ctx context.Context, construct string, args map[stri
 	if e == nil || e.engine == nil {
 		return nil, fmt.Errorf("wholesale: the pack has no engine handle, so %q cannot be called", construct)
 	}
-	result, err := e.engine.Execute(ctx, renderBuiltinCall(construct, args))
+	// INLINE, so the internal stamp and the pack's mark die with this one
+	// builtin call. The mark names this pack (ruling 57): the Shopify
+	// wholesale builtins admit internal origin only beside it, because the
+	// automation executor stamps internal origin on every package's steps.
+	result, err := e.engine.Execute(auth.ContextWithPackCaller(auth.ContextWithInternalOrigin(ctx), integrationName),
+		renderBuiltinCall(construct, args))
 	if err != nil {
 		return nil, fmt.Errorf("wholesale: %s: %w", construct, err)
 	}
@@ -505,6 +841,26 @@ func (e *engineCaller) Call(ctx context.Context, construct string, args map[stri
 		return nil, fmt.Errorf("wholesale: %s answered no rows", construct)
 	}
 	return rows[0], nil
+}
+
+// CallRows runs one named BUILTIN that answers rows -- the row lane's status
+// read, one row per request id, and its sender read, one row -- and answers
+// every row.
+//
+// ONE INLINE STAMP OF INTERNAL ORIGIN, on its one Execute: the lane's status
+// read is a trusted job's and refuses a call without it. It carries NO pack
+// mark -- that is Call's alone, for the Shopify wholesale builtins -- because
+// neither lane read asks for one. Its callers are listed with the stamp's
+// reason in call_origin_conformance_test.go: each has admitted its caller first.
+func (e *engineCaller) CallRows(ctx context.Context, construct string, args map[string]any) ([]map[string]any, error) {
+	if e == nil || e.engine == nil {
+		return nil, fmt.Errorf("wholesale: the pack has no engine handle, so %q cannot be called", construct)
+	}
+	result, err := e.engine.Execute(auth.ContextWithInternalOrigin(ctx), renderBuiltinCall(construct, args))
+	if err != nil {
+		return nil, fmt.Errorf("wholesale: %s: %w", construct, err)
+	}
+	return memql.MaterializeRows(result), nil
 }
 
 // renderBuiltinCall writes the invocation an adapter's construct becomes.

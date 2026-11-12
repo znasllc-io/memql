@@ -2,6 +2,7 @@ package campaigns
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -364,5 +365,77 @@ func TestScheduleSendRunsTheSamePreflightAsStart(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `not "ready"`) {
 		t.Errorf("refusal = %q, want the template readiness reason", err)
+	}
+}
+
+// TestACampaignRefusesATransactionalTemplate: a template about one person's own
+// request carries no unsubscribe, so no campaign may send it to a list (X10).
+// Starting and scheduling are refused while the operator is looking, before
+// anything is written, and a scheduled campaign whose template became
+// transactional after it was scheduled fails at its time with the same
+// sentence on the campaign row. The words win over "not ready": publishing
+// would not make the send legal.
+func TestACampaignRefusesATransactionalTemplate(t *testing.T) {
+	const sentence = "This template is about one person's own request and has no unsubscribe, so it cannot be sent to a list."
+	if errTransactionalTemplate.Error() != sentence {
+		t.Fatalf("the refusal reads %q", errTransactionalTemplate)
+	}
+	for _, status := range []string{"ready", "draft"} {
+		engine := schedulingEngine()
+		engine.template["purpose"] = "transactional"
+		engine.template["status"] = status
+		w := newTestWorker(t, engine, &recordingSender{})
+		atClock(w, time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC))
+
+		_, err := w.handleStartSend(schedulingCtx(), map[string]any{"campaignId": testCampaign}, 0)
+		if !errors.Is(err, errTransactionalTemplate) {
+			t.Errorf("%s template: startSend err = %v, want the transactional refusal", status, err)
+		}
+		_, err = w.handleScheduleSend(schedulingCtx(), map[string]any{"campaignId": testCampaign, "scheduledAt": "2026-08-14T09:00:00Z"}, 0)
+		if !errors.Is(err, errTransactionalTemplate) {
+			t.Errorf("%s template: scheduleSend err = %v, want the transactional refusal", status, err)
+		}
+		if n := len(engine.mutations("enqueueCampaignSend")) + len(engine.mutations("startCampaign")) + len(engine.mutations("scheduleCampaign")); n != 0 {
+			t.Errorf("%s template: %d writes despite the refusal", status, n)
+		}
+	}
+
+	// The same refusal for each send that shares the preflight: a signup's
+	// welcome, a series and the test audience.
+	engine := schedulingEngine()
+	engine.template["purpose"] = "transactional"
+	w := newTestWorker(t, engine, &recordingSender{})
+	campaign, _, err := w.store.CampaignByID(schedulingCtx(), testCampaign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range []string{"newsletter", "configureSeries", "recurringSend", "testAudienceSend"} {
+		if _, _, err := w.preflightAudience(schedulingCtx(), op, campaign, true); !errors.Is(err, errTransactionalTemplate) {
+			t.Errorf("%s: err = %v, want the transactional refusal", op, err)
+		}
+	}
+
+	// At its time: the template turned transactional after the schedule.
+	due := time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC)
+	engine = scheduleEngine(due, due)
+	engine.template = templateRow()
+	engine.template["purpose"] = "transactional"
+	w = newTestWorker(t, engine, &recordingSender{})
+	atClock(w, due.Add(time.Minute))
+
+	w.promoteDueSchedules(context.Background(), w.systemActorContext(context.Background()))
+
+	if n := len(engine.mutations("startCampaign")); n != 0 {
+		t.Fatalf("a campaign with a transactional template was sent (%d starts)", n)
+	}
+	progress := engine.mutations("updateCampaignProgress")
+	if len(progress) != 1 {
+		t.Fatalf("want the refusal recorded on the campaign row, got %d writes", len(progress))
+	}
+	if got := argOf(progress[0].query, "status"); got != "failed" {
+		t.Errorf("campaign status = %q, want failed: a transactional template is an authoring problem", got)
+	}
+	if !strings.Contains(progress[0].query, "has no unsubscribe, so it cannot be sent to a list") {
+		t.Errorf("lastError does not say why: %s", progress[0].query)
 	}
 }

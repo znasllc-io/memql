@@ -20,6 +20,18 @@ import { absentSentence } from "./measure";
 // column of numbers for the one that is missing has to be able to SEE the
 // gap. `.os-figure-absent` is the muted ink, not the disabled one.
 
+/**
+ * THE DASH, with its reason as the title: the kit's one spelling of "no
+ * answer", for an absent figure and for any value the engine left empty.
+ */
+export function Absent({ reason }: { reason: string }) {
+  return (
+    <span className="os-figure-absent" title={reason}>
+      &mdash;
+    </span>
+  );
+}
+
 export function Measure({
   figure,
   format,
@@ -31,13 +43,7 @@ export function Measure({
   /** Unit, appended to a measured value only. An absent figure has no unit. */
   suffix?: string;
 }) {
-  if (figure.kind === "absent") {
-    return (
-      <span className="os-figure-absent" title={absentSentence(figure)}>
-        &mdash;
-      </span>
-    );
-  }
+  if (figure.kind === "absent") return <Absent reason={absentSentence(figure)} />;
   const text = format ? format(figure.value) : String(figure.value);
   return (
     <span className="os-figure">

@@ -183,6 +183,9 @@ func (e *MemQLEngine) validateOrganizationReferences(ctx context.Context, concep
 		if strings.TrimSpace(id) == "" {
 			continue
 		}
+		if field == "recipientId" && laneLedgerRow(concept, payload) {
+			continue
+		}
 		var rows []memorynodes.MemoryNode
 		err := e.database().NewSelect().Model(&rows).Where("concept = ?", parentConcept).
 			Where("id IN (?)", bun.In([]string{id, BareShortId(id), parentConcept + ":" + BareShortId(id)})).
@@ -200,6 +203,22 @@ func (e *MemQLEngine) validateOrganizationReferences(ctx context.Context, concep
 		}
 	}
 	return nil
+}
+
+// laneLedgerRow says a delivery is about a person a row names -- a pack's row
+// for the campaigns row lane, or a mirrored order -- who has no recipient row:
+// its recipientId is an id minted for that one send, and the row says which row
+// it is about in rowConcept and rowId. Only server code writes those two fields
+// (recordCampaignDelivery is @serverOnly and the concept is @serverWritten), so
+// this waives the recipient reference for the lane's own rows and for nothing
+// else: the template, the sender, the rule and the organization are still held.
+func laneLedgerRow(concept string, payload map[string]any) bool {
+	if concept != "v1:campaigns:delivery" {
+		return false
+	}
+	rowConcept, _ := payload["rowConcept"].(string)
+	rowID, _ := payload["rowId"].(string)
+	return strings.TrimSpace(rowConcept) != "" && strings.TrimSpace(rowID) != ""
 }
 
 func organizationAccountsAgree(account, parent string) bool {

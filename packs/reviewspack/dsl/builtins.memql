@@ -1,17 +1,6 @@
 // reviews pack builtins -- Go-backed write/export/read (memql#4139, epic
 // memql#5532).
 
-@executor("integration.reviews.recordModerationAction")
-@args(profile="object")
-@description("Append a moderation decision. principalKind must be client; a Provider operator is refused. criterion is a closed enum. Tokens and operator identity never become a criterion. storeId is read off the review being moderated rather than supplied, so a decision can never be scoped to a store its subject is not on.")
-builtin reviewsRecordModerationAction {
-  reviewId        string  @required  @description("Review id to moderate.")
-  criterion       string  @required  @description("Closed criterion: spam, profanity, harassment, off_topic, illegal, copyright.")
-  principalKind   string  @required  @description("Must be client. provider is inexpressible.")
-  decidedBy       string  @required  @description("Client principal user id.")
-  note            string  @description("Optional client note.")
-}
-
 @executor("integration.reviews.exportReview")
 @args(profile="object")
 @description("Export a review including image FILES (bytes + filename). A URL-only image is refused -- export is bytes, not a link.")
@@ -87,7 +76,7 @@ builtin reviewsList {
 
 @executor("integration.reviews.submitFromLink")
 @args(profile="object")
-@description("THE SHOPPER FORM'S CONSTRUCT: a review written, or edited, through a buyer's link. Checks the link -- its store, its product, its expiry, and whether its review can still change -- and refuses by name: link_invalid, link_expired, link_used. A review through a link is verified; an edit is the next revision of the same row and waits again.")
+@description("THE SHOPPER FORM'S CONSTRUCT: a review written, or edited, through a buyer's link. Checks the link -- its store, its product, its expiry, and whether its review can still change -- and refuses by name: link_invalid, link_expired, link_used. It is for the owner of the site it names, which is how the shopper handler calls it: a caller who is not that site's owner, or a site the pack does not admit for the store, is refused as link_invalid before the token is judged. A review through a link is verified; an edit is the next revision of the same row and waits again.")
 builtin reviewsSubmitFromLink {
   requestToken   string   @required  @description("The link's token, from its t parameter.")
   productHandle  string   @required  @description("The product the link names.")

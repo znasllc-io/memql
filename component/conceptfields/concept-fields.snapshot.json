@@ -897,6 +897,9 @@
         "providerStatus",
         "recipientId",
         "requestId",
+        "rowConcept",
+        "rowId",
+        "rowKind",
         "senderIdentityId",
         "sentAt",
         "skipReason",
@@ -1364,6 +1367,7 @@
         "name",
         "ownerUserId",
         "preheader",
+        "purpose",
         "sourceArtifactId",
         "status",
         "subject",
@@ -1376,6 +1380,10 @@
         "textBody"
       ],
       "enums": {
+        "purpose": [
+          "marketing",
+          "transactional"
+        ],
         "status": [
           "archived",
           "draft",
@@ -8927,16 +8935,53 @@
       }
     },
     {
+      "concept": "v1:wholesale:acceptance",
+      "file": "packs/wholesalepack/dsl/concepts.memql",
+      "fields": [
+        "acceptedAt",
+        "accountId",
+        "applicantEmail",
+        "applicationId",
+        "clientAddress",
+        "linkIssuedAt",
+        "mapSha256",
+        "mapVersionId",
+        "ownerUserId",
+        "signedName",
+        "statement",
+        "storeId",
+        "termsSha256",
+        "termsVersionId",
+        "userAgent"
+      ],
+      "required": [
+        "acceptedAt",
+        "applicantEmail",
+        "applicationId",
+        "mapSha256",
+        "mapVersionId",
+        "ownerUserId",
+        "signedName",
+        "statement",
+        "storeId",
+        "termsSha256",
+        "termsVersionId"
+      ]
+    },
+    {
       "concept": "v1:wholesale:application",
       "file": "packs/wholesalepack/dsl/concepts.memql",
       "fields": [
         "accountId",
+        "addedBy",
         "applicantEmail",
         "applicantName",
         "companyName",
         "ownerUserId",
         "siteId",
-        "storeId"
+        "source",
+        "storeId",
+        "submittedAt"
       ],
       "required": [
         "applicantEmail",
@@ -8944,7 +8989,13 @@
         "companyName",
         "ownerUserId",
         "storeId"
-      ]
+      ],
+      "enums": {
+        "source": [
+          "staff",
+          "storefront"
+        ]
+      }
     },
     {
       "concept": "v1:wholesale:applicationDecision",
@@ -8952,8 +9003,10 @@
       "fields": [
         "accountId",
         "applicationId",
+        "decidedAt",
         "decidedBy",
         "note",
+        "ownerUserId",
         "principalKind",
         "storeId",
         "transition"
@@ -8977,16 +9030,100 @@
       }
     },
     {
+      "concept": "v1:wholesale:documentVersion",
+      "file": "packs/wholesalepack/dsl/concepts.memql",
+      "fields": [
+        "accountId",
+        "body",
+        "kind",
+        "label",
+        "ownerUserId",
+        "publishedAt",
+        "publishedBy",
+        "sha256",
+        "storeId"
+      ],
+      "required": [
+        "body",
+        "kind",
+        "label",
+        "ownerUserId",
+        "publishedAt",
+        "publishedBy",
+        "sha256",
+        "storeId"
+      ],
+      "enums": {
+        "kind": [
+          "map",
+          "priceSheet",
+          "terms"
+        ]
+      }
+    },
+    {
+      "concept": "v1:wholesale:emailSend",
+      "file": "packs/wholesalepack/dsl/concepts.memql",
+      "fields": [
+        "accountId",
+        "applicationId",
+        "attempt",
+        "kind",
+        "ownerUserId",
+        "reason",
+        "requestId",
+        "requestedBy",
+        "sentAt",
+        "state",
+        "storeId",
+        "templateId"
+      ],
+      "required": [
+        "applicationId",
+        "attempt",
+        "kind",
+        "ownerUserId",
+        "requestId",
+        "state"
+      ],
+      "enums": {
+        "kind": [
+          "approved",
+          "rejected",
+          "revoked",
+          "terms"
+        ],
+        "state": [
+          "deferred",
+          "failed",
+          "held",
+          "pending",
+          "sending",
+          "sent",
+          "skipped",
+          "uncertain"
+        ]
+      }
+    },
+    {
       "concept": "v1:wholesale:entitlement",
       "file": "packs/wholesalepack/dsl/concepts.memql",
       "fields": [
         "accountId",
         "adapter",
         "applicationId",
+        "attempt",
+        "attemptedAt",
         "buyerEmail",
+        "customerCreated",
+        "direction",
         "error",
+        "errorCode",
+        "grantedAt",
         "ownerUserId",
         "reference",
+        "revokedAt",
+        "shopifyCustomerId",
         "state",
         "storeId"
       ],
@@ -8999,6 +9136,10 @@
         "storeId"
       ],
       "enums": {
+        "direction": [
+          "grant",
+          "revoke"
+        ],
         "state": [
           "failed",
           "granted",
@@ -9008,15 +9149,55 @@
       }
     },
     {
-      "concept": "v1:wholesale:wholesaleSettings",
+      "concept": "v1:wholesale:privateLink",
       "file": "packs/wholesalepack/dsl/concepts.memql",
       "fields": [
         "accountId",
+        "applicationId",
+        "expiresAt",
+        "issuedAt",
+        "ownerUserId",
+        "purpose",
+        "siteId",
+        "storeId",
+        "tokenHash",
+        "usedAt"
+      ],
+      "required": [
+        "applicationId",
+        "issuedAt",
+        "ownerUserId",
+        "purpose",
+        "storeId",
+        "tokenHash"
+      ],
+      "enums": {
+        "purpose": [
+          "priceSheet",
+          "terms"
+        ]
+      }
+    },
+    {
+      "concept": "v1:wholesale:wholesaleSettings",
+      "file": "packs/wholesalepack/dsl/concepts.memql",
+      "fields": [
+        "acceptanceText",
+        "accountId",
         "applicationsOpen",
+        "approvedTemplateId",
         "entitlementAdapter",
         "introText",
+        "linkLifetimeDays",
         "ownerUserId",
-        "storeId"
+        "rejectedTemplateId",
+        "revokedTemplateId",
+        "senderIdentityId",
+        "siteId",
+        "staffEmail",
+        "storeId",
+        "termsRequired",
+        "termsTemplateId"
       ],
       "required": [
         "applicationsOpen",

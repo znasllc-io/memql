@@ -9,7 +9,7 @@ vi.mock("../../src/live/connection", () => ({
   bridgePathFor: () => "/_memql/ws",
 }));
 
-import { canManagePersonalSources } from "../../src/apps/deployables/parts";
+import { ALL_PARTS, DEPLOYABLE_PARTS, NO_PARTS, canManagePersonalSources, heldParts, partResource } from "../../src/apps/deployables/parts";
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { OS_REGISTRY } from "../../src/apps/registry";
@@ -104,6 +104,29 @@ describe("a missing part hides its control", () => {
       expect(document.querySelector("[data-os-livelist]")?.getAttribute("data-state")).toBe("live"),
     );
     expect(screen.queryByRole("button", { name: /Add a deployable/ })).toBeNull();
+  });
+});
+
+describe("the wholesale part", () => {
+  it("is named beside reviews, held by the seeded developer, and hides its control when withheld", async () => {
+    expect(DEPLOYABLE_PARTS).toContain("wholesale");
+    expect(partResource("wholesale")).toBe("app:deployables/wholesale");
+    expect(NO_PARTS.wholesale).toBe(false);
+    expect(ALL_PARTS.wholesale).toBe(true);
+    setEffectiveCapabilities(seededAccessWithout("developer"));
+    expect(heldParts().wholesale).toBe(true);
+    setEffectiveCapabilities(seededAccessWithout("developer", "app:deployables/wholesale"));
+    expect(heldParts().wholesale).toBe(false);
+    expect(heldParts().reviews).toBe(true);
+
+    const store = siteRow({ id: "site-store", hostname: "store.memql.example.com", status: "live", kind: "shopify_storefront", binding: { storeId: "store-live" } });
+    const held = mount(fakeConnection({ sites: [store] }), seededAccessWithout("developer"));
+    expect(within(await open("store.memql.example.com")).getByRole("button", { name: "Wholesale" })).toBeTruthy();
+    held.unmount();
+    mount(fakeConnection({ sites: [store] }), seededAccessWithout("developer", "app:deployables/wholesale"));
+    const page = await open("store.memql.example.com");
+    expect(within(page).getByRole("button", { name: "Reviews" })).toBeTruthy();
+    expect(within(page).queryByRole("button", { name: "Wholesale" })).toBeNull();
   });
 });
 
