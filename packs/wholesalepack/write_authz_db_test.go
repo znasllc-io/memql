@@ -198,7 +198,7 @@ func TestLiveE2E_ACallerWhoCannotReadAnApplicationCannotDecideIt(t *testing.T) {
 	openApplications(t, eng, asSiteOwner(merchant), storeLive, wholesalepack.AdapterCustomerTag)
 	appID := "old-" + id.NewShortId()
 	wsExec(t, eng, seedCtx(), `createApplicationRow(applicationId: `+wsQuote(appID)+`, ownerUserId: `+wsQuote(userRef(merchant))+
-		`, storeId: `+wsQuote(storeLive)+`, companyName: "Not Yours", applicantName: "Sam Rivers", applicantEmail: "buyer@notyours.example")`)
+		`, storeId: `+wsQuote(storeLive)+`, companyName: "Not Yours", applicantName: "Sam Rivers", applicantEmail: "buyer@notyours.example", submittedAt: `+happenedNow()+`)`)
 
 	stranger := asDecider(t, eng, merchant+"-stranger")
 	_, err := eng.Execute(stranger, `builtin wholesaleRecordDecision(applicationId: `+wsQuote(appID)+

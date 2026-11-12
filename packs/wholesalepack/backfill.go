@@ -20,8 +20,9 @@ import (
 // before this version carries none, so it stays its owner's and the
 // operators' -- readable exactly as before, and invisible to the store's own
 // staff. This is the one operator call that ties them, run once at rollout
-// and safe to run again: a row already tied is counted and never rewritten,
-// and two runs at once write identical versions.
+// and safe to run again: a row already tied, and holding every time it
+// records, is counted and never rewritten, and two runs at once write
+// identical versions.
 //
 // THE WRITES ESCAPE THE ROW GATE. They go through engineWriter at internal
 // origin, which the engine does not owner-check, so the builtin admits
@@ -31,6 +32,17 @@ import (
 // EACH WRITE IS FENCED ON THE VERSION IT READ, so a provision or a settings
 // change that lands between the read and the write is never reverted: the
 // loser re-reads and ties the fresh version.
+//
+// WHEN EACH THING HAPPENED IS CARRIED ACROSS (Task 14b). A row's write time is
+// the time of its newest version, and a tie is a new version, so a row written
+// before the pack recorded when its thing happened -- an application's
+// submittedAt, a decision's decidedAt, an entitlement's attemptedAt and, as its
+// state says, grantedAt or revokedAt -- gets that field in the same write as
+// its tie, set to its write time as it stood before the write: the time every
+// read took in its place. A field that is set is never written over. A row
+// already tied that still lacks a field is written for the field alone, from
+// its write time then -- the best that is known of it. So after a run every
+// state, order and date the pack answers is what it answered before.
 //
 // A WRITE HERE IS A NEW VERSION OF A ROW A CLIENT TRIGGERS ON. The engine
 // publishes graph.node.created for every version, with firstVersion false on
@@ -207,9 +219,10 @@ func (r *backfillRun) leave(appID, reason string) {
 }
 
 // tie ties one application, then its decisions, its entitlement and its
-// store's settings. An application already tied is counted, never rewritten,
-// and its rows are tied to its account; one that cannot be tied is reported
-// and nothing of it is written.
+// store's settings. An application already tied, and holding its
+// submittedAt, is counted, never rewritten, and its rows are tied to its
+// account; one already tied without it is written for that field alone; one
+// that cannot be tied is reported and nothing of it is written.
 func (r *backfillRun) tie(app map[string]any) {
 	appID := bareID(trimmed(app["id"]))
 	storeID := trimmed(app["storeId"])
@@ -222,9 +235,7 @@ func (r *backfillRun) tie(app map[string]any) {
 	}
 	merchant := auth.ContextWithUserActor(r.ctx, owner)
 	failed := func(err error) { r.leave(appID, "it could not be tied: "+err.Error()) }
-	if account != "" {
-		r.alreadyTied++
-	} else {
+	if account == "" {
 		sites, err := r.sitesFor(app)
 		if err != nil {
 			failed(err)
@@ -239,6 +250,10 @@ func (r *backfillRun) tie(app map[string]any) {
 		if siteID == "" {
 			siteID = bareID(trimmed(site["id"]))
 		}
+	}
+	if r.done(applicationConcept, app) {
+		r.alreadyTied++
+	} else {
 		fresh, err := r.tieRow(merchant, applicationConcept, appID, app, account,
 			func() (map[string]any, error) { return r.one("applicationById", "applicationId", appID) },
 			func(row map[string]any) (string, map[string]any) {
@@ -275,15 +290,25 @@ func (r *backfillRun) tie(app map[string]any) {
 	}
 }
 
-// tieRow writes one row's tie, fenced on the version read. A write that loses
-// the fence re-reads the row: a fresh version that already carries an account
+// tieRow writes one row's tie, fenced on the version read, with every time the
+// row lacks (missingTimes) carried from that version's write time. A write
+// that loses the fence re-reads the row: a fresh version that is already done
 // counts as tied, and any other is tied again from the fresh read, a bounded
 // number of times. It answers the row as last read.
+//
+// A ROW ALREADY TIED KEEPS ITS OWN ORGANIZATION: it is written for its times
+// alone.
 func (r *backfillRun) tieRow(merchant context.Context, concept, rowID string, row map[string]any, account string,
 	reread func() (map[string]any, error), build func(map[string]any) (string, map[string]any)) (map[string]any, error) {
 	for attempt := 1; ; attempt++ {
 		mutation, args := build(row)
 		args["accountId"] = account
+		if own := trimmed(row["accountId"]); own != "" {
+			args["accountId"] = own
+		}
+		for field, at := range missingTimes(concept, row) {
+			args[field] = at
+		}
 		fenced := memql.ContextWithRowVersionFence(merchant, concept, rowID, rowTime(row["createdAt"]))
 		err := r.p.write(fenced, mutation, args)
 		if err == nil {
@@ -300,12 +325,49 @@ func (r *backfillRun) tieRow(merchant context.Context, concept, rowID string, ro
 		if fresh == nil {
 			return nil, fmt.Errorf("%s %s is gone", concept, rowID)
 		}
-		if trimmed(fresh["accountId"]) != "" {
+		if r.done(concept, fresh) {
 			r.tied++
 			return fresh, nil
 		}
 		row = fresh
 	}
+}
+
+// done reports whether a row needs no write: it is tied, and holds every time
+// it records.
+func (r *backfillRun) done(concept string, row map[string]any) bool {
+	return trimmed(row["accountId"]) != "" && len(missingTimes(concept, row)) == 0
+}
+
+// missingTimes is each field of when-it-happened the row should hold and does
+// not, set to the row's write time as read: what every read takes in the
+// field's place. A field that is set is never named. An entitlement records
+// when trade prices went on only while it is granted, and when they came off
+// only while it is revoked: its write time is that moment only then.
+func missingTimes(concept string, row map[string]any) map[string]any {
+	var fields []string
+	switch concept {
+	case applicationConcept:
+		fields = []string{fieldSubmittedAt}
+	case decisionConcept:
+		fields = []string{fieldDecidedAt}
+	case entitlementConcept:
+		fields = []string{fieldAttemptedAt}
+		switch trimmed(row["state"]) {
+		case EntitlementGranted:
+			fields = append(fields, fieldGrantedAt)
+		case EntitlementRevoked:
+			fields = append(fields, fieldRevokedAt)
+		}
+	}
+	written := rowTime(row["createdAt"])
+	out := map[string]any{}
+	for _, f := range fields {
+		if rowTime(row[f]).IsZero() && !written.IsZero() {
+			out[f] = happenedStamp(written)
+		}
+	}
+	return out
 }
 
 // one reads one row by a single argument as the system, or nil.
@@ -317,10 +379,12 @@ func (r *backfillRun) one(query, arg, value string) (map[string]any, error) {
 	return rows[0], nil
 }
 
-// tieDecisions ties each decision on the application and names its merchant.
-// X5: every other field is written back exactly as the row held it --
-// decidedBy and principalKind included, as arguments -- so the backfill
-// changes no decision field.
+// tieDecisions ties each decision on the application and names its merchant,
+// OLDEST FIRST. X5: every other field is written back exactly as the row held
+// it -- decidedBy and principalKind included, as arguments -- so the backfill
+// changes no decision field. Each carries its decidedAt in the same write
+// (tieRow), so the log keeps its order however the run goes: a run that stops
+// between two decisions leaves each dated as it was.
 func (r *backfillRun) tieDecisions(merchant context.Context, app map[string]any, account string) error {
 	appID := bareID(trimmed(app["id"]))
 	owner := userRef(trimmed(app["ownerUserId"]))
@@ -328,8 +392,9 @@ func (r *backfillRun) tieDecisions(merchant context.Context, app map[string]any,
 	if err != nil {
 		return err
 	}
-	for _, d := range decisions {
-		if trimmed(d["accountId"]) != "" {
+	for i := len(decisions) - 1; i >= 0; i-- {
+		d := decisions[i]
+		if r.done(decisionConcept, d) {
 			r.alreadyTied++
 			continue
 		}
@@ -369,7 +434,7 @@ func (r *backfillRun) tieEntitlement(merchant context.Context, appID, account st
 	if err != nil || ent == nil {
 		return err
 	}
-	if trimmed(ent["accountId"]) != "" {
+	if r.done(entitlementConcept, ent) {
 		r.alreadyTied++
 		return nil
 	}

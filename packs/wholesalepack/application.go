@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -195,13 +196,68 @@ func LegalTransition(state, transition string) error {
 // StateAfter is the state a legal transition leaves behind.
 func StateAfter(transition string) string { return stateAfter[strings.TrimSpace(transition)] }
 
+// The fields that say WHEN a thing happened (Task 14b). A row's write time is
+// the time of its newest version, and any later write of the row moves it, so
+// it is never what a view dates a happening by or orders happenings by: each
+// is a field of the row, written once by the pack's own builtin at the moment
+// it happens and carried by every later write.
+const (
+	fieldSubmittedAt = "submittedAt" // application: when it arrived
+	fieldDecidedAt   = "decidedAt"   // applicationDecision: when it was made
+	fieldAttemptedAt = "attemptedAt" // entitlement: when this version's attempt was made
+	fieldGrantedAt   = "grantedAt"   // entitlement: when trade prices went on
+	fieldRevokedAt   = "revokedAt"   // entitlement: when trade prices came off
+)
+
+// happenedAt is when the thing row records happened: the row's field, or,
+// for a row written before the field, the row's own write time -- so a row
+// nobody has backfilled reads exactly as it did. A field that is set is never
+// second-guessed by the write time.
+func happenedAt(row map[string]any, field string) time.Time {
+	if at := rowTime(row[field]); !at.IsZero() {
+		return at
+	}
+	return rowTime(row["createdAt"])
+}
+
+// newestHappenedFirst orders rows by when they happened, newest first, with
+// the row's write time as the tie-break and nothing more.
+func newestHappenedFirst(rows []map[string]any, field string) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		if a, b := happenedAt(rows[i], field), happenedAt(rows[j], field); !a.Equal(b) {
+			return a.After(b)
+		}
+		return rowTime(rows[i]["createdAt"]).After(rowTime(rows[j]["createdAt"]))
+	})
+}
+
+// happenedField is the field each read keyed by an application orders its rows
+// by. A read not named here orders by write time, which for its rows -- an
+// acceptance, an email attempt -- is the time they were written once.
+var happenedField = map[string]string{
+	"decisionsForApplication":       fieldDecidedAt,
+	"decisionsForApplicationIds":    fieldDecidedAt,
+	"entitlementForApplication":     fieldAttemptedAt,
+	"entitlementsForApplicationIds": fieldAttemptedAt,
+}
+
+// happenedStamp is a time as a happened field holds it: UTC with every
+// fractional digit, so the text sorts as the time does -- the queries order
+// by the field's text. IT IS THE ONLY WRITER of these fields' text: every
+// builtin and the backfill format through it, so two times that differ only
+// past the second never sort as text in the wrong order.
+func happenedStamp(at time.Time) string {
+	return at.UTC().Format("2006-01-02T15:04:05.000000000Z")
+}
+
 // FoldState reduces an application's decisions, NEWEST FIRST, to its state.
 //
-// The queries that feed this sort "row.createdAt", "desc", so the first row
-// is the last decision. A row whose transition this pack does not recognise
-// is SKIPPED rather than treated as final: the alternative is a payload
-// nobody can parse silently pinning an application into a state no
-// transition leads out of.
+// The reads that feed this order a log by when each decision was made
+// (decidedAt, newestHappenedFirst), so the first row is the last decision --
+// however often a row of the log has been written since. A row whose
+// transition this pack does not recognise is SKIPPED rather than treated as
+// final: the alternative is a payload nobody can parse silently pinning an
+// application into a state no transition leads out of.
 func FoldState(decisionsNewestFirst []map[string]any) string {
 	for _, row := range decisionsNewestFirst {
 		if s := StateAfter(trimmed(row["transition"])); s != "" {
@@ -341,6 +397,7 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 		"applicantEmail": email,
 		"accountId":      account,
 		"source":         SourceStorefront,
+		"submittedAt":    happenedStamp(p.clock()),
 	}); err != nil {
 		// THE FENCE'S LOSER: another write landed at this id between the
 		// check above and this one. Answered exactly as a taken id is.
@@ -627,6 +684,7 @@ func (p *Provider) appendDecision(ctx context.Context, app map[string]any, trans
 		"storeId":       storeID,
 		"transition":    transition,
 		"note":          note,
+		"decidedAt":     happenedStamp(p.clock()),
 	})
 }
 

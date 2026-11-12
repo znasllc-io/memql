@@ -77,7 +77,7 @@
 // lets a client lay its own process over the pack: there is no process
 // here to disagree with.
 
-@version("1.1.0")
+@version("1.2.0")
 @description("A wholesale application: somebody asking one store for trade terms. Its STATES are submitted, approved, rejected and revoked, and they are DERIVED from the append-only decision log rather than stored here -- v1:wholesale:applicationDecision carries each transition and the wholesaleApplicationState builtin folds them. There is deliberately no mutable state field: an application whose state was overwritten would lose why it was refused the moment somebody approved it, which is the one thing a trade desk needs to look back at.")
 @displayCard(primary="companyName", secondary="applicantEmail", tertiary="storeId")
 @serverWritten
@@ -93,9 +93,10 @@ concept application {
   accountId      string    @description("The v1:accounts:account organization of the site this application arrived on, stamped server-side from that site and never accepted from a form (it is a reserved shopper name). The tier's account arm: the people of that organization read the application without owning it. Every application written now carries it: a store takes applications only through a site of its program's organization. Older rows can hold it empty -- one written before this version, until wholesaleBackfillAccounts ties it, or one from a site with no organization, which no store admits any longer -- and those stay their owner's and the operators', as before.")
   source         enum("storefront", "staff")  @description("How the application arrived: storefront for a shopper's form post, staff for one a person of the store added. Absent reads as storefront, which is what every row written before this field was.")
   addedBy        string    @description("v1:identity:user.id of the person who added it, for source staff. Empty for a storefront application.")
+  submittedAt    datetime  @description("When the application arrived -- the shopper's post, or a person of the store adding the buyer -- by the engine's clock. Written once, with the row, and carried by every later write of it, so it is when the application was made however often the row is written again. A row written before this field holds none and reads by its own write time, until wholesaleBackfillAccounts carries that time into it.")
 }
 
-@version("1.1.0")
+@version("1.2.0")
 @description("An append-only decision on a wholesale application, in the manner of v1:reviews:moderationAction. A new row is a new decision; there is no in-place update and no undo-by-overwrite, so WHY an application was refused survives the next decision. decidedBy is the person on the store's side who called -- the cluster's own operators are refused on the write path exactly as the reviews pack refuses their moderation. The row belongs to the application's merchant and its organization, so the merchant and the store's people read every decision whoever made it. WHO may approve, in what order and against what threshold is deliberately NOT here: dsl/commerce already ships approvalChain for a client that wants one, and a client that does not must not have to edit this pack to say so.")
 @displayCard(primary="transition", secondary="applicationId", tertiary="decidedBy")
 @serverWritten
@@ -111,10 +112,11 @@ concept applicationDecision {
   principalKind enum("client")!  @description("The only expressible principal kind is client. provider is inexpressible -- the enum does not contain it.")
   note          string   @description("Optional client-visible reason. THE ONE FREE-TEXT FIELD IN THE PACK, and it earns its place: append-only storage is only worth having if the reason a decision was made is still there after the next one.")
   accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
+  decidedAt     datetime  @description("When the decision was made, by the engine's clock. Written once, with the row, and carried by every later write of it: the log is ordered by it, newest first, and a decision's date is it. A row written before this field holds none and reads by its own write time, until wholesaleBackfillAccounts carries that time into it.")
 }
 
-@version("1.1.0")
-@description("What this pack granted, to whom, against which store, and through which adapter. STATE THE PACK OWNS, never inferred from Shopify: a company that exists over there says nothing about whether THIS pack granted it, and reading entitlement back out of somebody else's system would make an operator's own record of what they granted depend on an API call that can fail. ONE ROW PER APPLICATION at the derived id wholesale-entitlement-<the application's bare id, as a slug> (EntitlementRowID), the same whichever form of the application id the caller named -- and a row written at another id before that rule keeps being written at its own -- so a re-provision is a new VERSION of one logical row rather than a second row a read would have to choose between -- and 'revoked when' is that version's own createdAt.")
+@version("1.2.0")
+@description("What this pack granted, to whom, against which store, and through which adapter. STATE THE PACK OWNS, never inferred from Shopify: a company that exists over there says nothing about whether THIS pack granted it, and reading entitlement back out of somebody else's system would make an operator's own record of what they granted depend on an API call that can fail. ONE ROW PER APPLICATION at the derived id wholesale-entitlement-<the application's bare id, as a slug> (EntitlementRowID), the same whichever form of the application id the caller named -- and a row written at another id before that rule keeps being written at its own -- so a re-provision is a new VERSION of one logical row rather than a second row a read would have to choose between. WHEN each thing happened is a field of the row (attemptedAt, grantedAt, revokedAt), never the version's write time, which any later write of the row moves.")
 @displayCard(primary="state", secondary="buyerEmail", tertiary="adapter")
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
@@ -134,6 +136,9 @@ concept entitlement {
   accountId         string  @description("The application's organization, copied off it, so the people who read the application read what was granted. Empty for an untied application.")
   direction         enum("grant", "revoke")  @description("Which way the attempt that wrote this version went: grant for a provision (the automation's, or Retry access on an approved application), revoke for a removal (the automation's, or Retry access on a revoked one). Written by the pack on every version it writes, and carried forward unchanged by wholesaleBackfillAccounts, which never invents one. A row written before this field has none: its state, and the application's, tell the two apart where they can (wholesaleNotifyStaff).")
   attempt           int     @description("How many attempts, grant and removal together, have written this row: 1 for the first, and one more for each later provision, removal or retry. A version that is not an attempt -- the backfill's tie -- carries it forward unchanged, so the store's people are told once per attempt that did not land, never once per version. Absent on a row written before this field.")
+  attemptedAt       datetime  @description("When the attempt that wrote this version was made, by the engine's clock: what the application's page dates the access by. Each attempt writes it; a version that is not an attempt -- the backfill's tie -- carries it unchanged. A row written before this field holds none and reads by its own write time, until wholesaleBackfillAccounts carries that time into it.")
+  grantedAt         datetime  @description("When trade prices went on: the attempt that first left the row granted, carried by every later version while it stays granted -- the buyers list's since. A row written before this field holds none and, while granted, reads by its own write time, until wholesaleBackfillAccounts carries that time into it.")
+  revokedAt         datetime  @description("When trade prices were taken away: the attempt that first left the row revoked. A row written before this field holds none and, while revoked, reads by its own write time, until wholesaleBackfillAccounts carries that time into it.")
 }
 
 @version("1.1.0")

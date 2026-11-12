@@ -127,6 +127,13 @@ func (f *storeFake) byApplication(ctx context.Context, rows []map[string]any, ap
 // no page size, saying nothing about the rest.
 const engineCap = 500
 
+// inHalf is the queries' dated argument: yes is a row that holds field, no
+// one that does not, and none is every row. These rows hold none.
+func inHalf(row map[string]any, field, dated string) bool {
+	held := row[field] != nil && row[field] != ""
+	return dated == "" || (dated == "yes") == held
+}
+
 func newestFirst(rows []map[string]any) []map[string]any {
 	sort.SliceStable(rows, func(i, j int) bool { return rowTime(rows[i]["createdAt"]).After(rowTime(rows[j]["createdAt"])) })
 	return rows
@@ -183,14 +190,14 @@ func (f *storeFake) RowsPageWithList(ctx context.Context, query string, args map
 			rows = append(append([]map[string]any{}, f.apps...), f.hidden...)
 		}
 		for _, app := range rows {
-			if inStore(app, args["storeId"], list) {
+			if inStore(app, args["storeId"], list) && inHalf(app, "submittedAt", args["dated"]) {
 				all = append(all, app)
 			}
 		}
 		all = newestFirst(all)
 	case "decisionsForStore":
 		for _, d := range f.decisions {
-			if visible(ctx, d) && inStore(d, args["storeId"], list) {
+			if visible(ctx, d) && inStore(d, args["storeId"], list) && inHalf(d, "decidedAt", args["dated"]) {
 				all = append(all, d)
 			}
 		}
@@ -415,8 +422,10 @@ func TestTheListReadsPastTheFirstPageAndStopsAtAThousand(t *testing.T) {
 	if counts[StageReadyToReview] != float64(1000) || got["truncated"] != true {
 		t.Fatalf("counts %v, truncated %v; want 1000 read and truncated", counts, got["truncated"])
 	}
-	if f.pages["applicationsForStore"] != 20 {
-		t.Fatalf("read %d pages, want 20", f.pages["applicationsForStore"])
+	// Twenty pages of the applications written before submittedAt, and the one
+	// empty page of those that hold it: the list reads both halves.
+	if f.pages["applicationsForStore"] != 21 {
+		t.Fatalf("read %d pages, want 21", f.pages["applicationsForStore"])
 	}
 	first := rowsOf(t, got)
 	// THE NEWEST THOUSAND ARE KEPT: the twenty oldest (0 to 19) are left out,

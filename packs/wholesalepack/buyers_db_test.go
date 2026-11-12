@@ -173,7 +173,7 @@ func TestTheDuplicateCheckOfAnAddedBuyerFindsTheOtherSpellingOfTheStoreId(t *tes
 	seeded := "seeded-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	wsExec(t, eng, seedCtx(), `createApplicationRow(applicationId: `+quote(seeded)+`, ownerUserId: `+quote(s.owner)+
 		`, storeId: `+quote(canonical)+`, siteId: `+quote(s.site)+`, accountId: `+quote(s.account)+
-		`, companyName: "Plover Cycles", applicantName: "Ida Example", applicantEmail: "ida@plover.example.com")`)
+		`, companyName: "Plover Cycles", applicantName: "Ida Example", applicantEmail: "ida@plover.example.com", submittedAt: `+happenedNow()+`)`)
 	for _, store := range []string{s.store, canonical} {
 		_, err := eng.Execute(signedIn(s.staff), addBuyerCall(s.site, store, "Plover Cycles", "Ida Example", "Ida@Plover.example.com"))
 		if err == nil || !strings.Contains(err.Error(), "This address already has an application on this store.") {

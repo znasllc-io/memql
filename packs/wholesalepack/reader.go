@@ -397,7 +397,9 @@ func applicationRef(id string) string {
 }
 
 // rowsForApplication runs a query keyed by applicationId under BOTH forms of
-// the id, bare and canonical, and answers the rows of both, newest first.
+// the id, bare and canonical, and answers the rows of both, newest first: by
+// when each happened, for a read that names a field for it (happenedField),
+// else by write time.
 //
 // THE ENGINE DOES NOT JOIN THE TWO FORMS: a decision or an entitlement written
 // naming the bare id is not found by a read naming the canonical one, and the
@@ -423,7 +425,7 @@ func (p *Provider) rowsForApplication(ctx context.Context, query, applicationID 
 			out = append(out, row)
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool { return rowTime(out[i]["createdAt"]).After(rowTime(out[j]["createdAt"])) })
+	newestHappenedFirst(out, happenedField[query])
 	return out, nil
 }
 
@@ -432,7 +434,7 @@ func (p *Provider) rowsForApplication(ctx context.Context, query, applicationID 
 // with BOTH forms of every id and PAGED TO ITS END -- a fold over a short
 // answer would show an application as submitted after somebody decided it --
 // its rows without repeats, grouped by the application's bare id, each group
-// newest first. Fifty applications per read, so a store's list is a read per
+// newest first by when each happened (happenedField). Fifty applications per read, so a store's list is a read per
 // fifty applications rather than two per application.
 func (p *Provider) rowsForApplications(ctx context.Context, query string, applicationIDs []string) (map[string][]map[string]any, error) {
 	out := map[string][]map[string]any{}
@@ -462,7 +464,7 @@ func (p *Provider) rowsForApplications(ctx context.Context, query string, applic
 	}
 	for key := range out {
 		group := out[key]
-		sort.SliceStable(group, func(i, j int) bool { return rowTime(group[i]["createdAt"]).After(rowTime(group[j]["createdAt"])) })
+		newestHappenedFirst(group, happenedField[query])
 	}
 	return out, nil
 }
@@ -552,4 +554,137 @@ func confirm(kind string, fields map[string]any) ([]memorynodes.MemoryNode, erro
 		CreatedAt: now,
 		Payload:   payload,
 	}}, nil
+}
+
+// THE STORE-WIDE READS IN THE ORDER THINGS HAPPENED (Task 14b).
+//
+// A store-wide list is read a page at a time, in the order the engine sorts
+// it, and the engine sorts a datetime field by its text and puts a row that
+// holds none LAST. One read sorted by the field would so put every row written
+// before the field after every row written since -- right while a store holds
+// only one kind, and wrong once some of its old rows are backfilled and others
+// are not (an application no site can be found for, a run that stopped). So
+// the read is two: the rows that hold the field, by it, and the rows written
+// before it, by their write time -- each in the order things happened -- and
+// they are merged a row at a time, newest first (happenedAt).
+
+// happenedHalves names the two halves, in the order happenedPages holds them:
+// the query's dated argument for each.
+var happenedHalves = [2]string{"yes", "no"}
+
+// happenedHalf is where one half of the read stands: the page being read and
+// how many of its rows were taken, or done once its last page is spent. It is
+// what a page cursor carries.
+type happenedHalf struct {
+	Page   string `json:"p,omitempty"`
+	Offset int    `json:"o,omitempty"`
+	Done   bool   `json:"d,omitempty"`
+
+	rows   []map[string]any
+	next   string
+	loaded bool
+}
+
+// happenedPages merges the two halves of one paginated store-wide query, read
+// under ctx with args and one list argument. budget bounds how many pages it
+// reads (0 is no bound); short says it stopped at the bound with rows left.
+type happenedPages struct {
+	p        *Provider
+	ctx      context.Context
+	query    string
+	args     map[string]string
+	listName string
+	list     []string
+	field    string
+	halves   [2]happenedHalf
+	budget   int
+	pages    int
+	short    bool
+}
+
+// head is the next row of half i, reading its next page when the one in hand
+// is spent, or nil when the half is done or the budget is.
+func (h *happenedPages) head(i int) (map[string]any, error) {
+	half := &h.halves[i]
+	for !half.Done {
+		if !half.loaded {
+			if h.budget > 0 && h.pages >= h.budget {
+				h.short = true
+				return nil, nil
+			}
+			args := map[string]string{"dated": happenedHalves[i]}
+			for k, v := range h.args {
+				args[k] = v
+			}
+			rows, next, err := h.p.rowsPageWithList(h.ctx, h.query, args, h.listName, h.list, half.Page)
+			if err != nil {
+				return nil, err
+			}
+			h.pages++
+			half.rows, half.next, half.loaded = rows, next, true
+		}
+		if half.Offset < len(half.rows) {
+			return half.rows[half.Offset], nil
+		}
+		if half.next == "" {
+			half.Done = true
+			break
+		}
+		half.Page, half.Offset, half.loaded = half.next, 0, false
+	}
+	return nil, nil
+}
+
+// take answers the row that happened newest of the two halves' next rows, and
+// moves past it; nil at the end of both, or at the budget.
+func (h *happenedPages) take() (map[string]any, error) {
+	dated, err := h.head(0)
+	if err != nil {
+		return nil, err
+	}
+	undated, err := h.head(1)
+	if err != nil {
+		return nil, err
+	}
+	// AT THE BUDGET the half not read cannot be weighed against the other, so
+	// the read stops there rather than take a row out of its order.
+	if h.short {
+		return nil, nil
+	}
+	pick := 0
+	switch {
+	case dated == nil && undated == nil:
+		return nil, nil
+	case dated == nil:
+		pick = 1
+	case undated != nil:
+		pair := []map[string]any{dated, undated}
+		newestHappenedFirst(pair, h.field)
+		if pair[0]["id"] != dated["id"] {
+			pick = 1
+		}
+	}
+	row := h.halves[pick].rows[h.halves[pick].Offset]
+	h.halves[pick].Offset++
+	return row, nil
+}
+
+// more reports whether either half may hold a row not yet taken, without
+// reading a page.
+func (h *happenedPages) more() bool {
+	for _, half := range h.halves {
+		if !half.Done && (!half.loaded || half.Offset < len(half.rows) || half.next != "") {
+			return true
+		}
+	}
+	return false
+}
+
+// position is where the read stands, for a page cursor.
+func (h *happenedPages) position() [2]happenedHalf {
+	out := h.halves
+	for i := range out {
+		out[i].rows, out[i].next, out[i].loaded = nil, "", false
+	}
+	return out
 }

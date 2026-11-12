@@ -500,7 +500,7 @@ func TestABackfillSetsOffNoClientAutomation(t *testing.T) {
 	appID := "sub-" + id.NewShortId()
 	wsExec(t, eng, seedCtx(), `createApplicationRow(applicationId: `+quote(appID)+`, ownerUserId: `+quote(userRef(merchant))+
 		`, storeId: `+quote(store)+`, siteId: `+quote(site)+`, companyName: "Quiet Trading", applicantName: "Sam Rivers"`+
-		`, applicantEmail: "buyer@quiet.example.com")`)
+		`, applicantEmail: "buyer@quiet.example.com", submittedAt: `+happenedNow()+`)`)
 	decide(t, eng, asDecider(t, eng, merchant), appID, wholesalepack.TransitionApprove, merchant, "approved")
 
 	deadline := time.Now().Add(10 * time.Second)
@@ -545,7 +545,7 @@ func TestABackfillWriteThatLosesItsFenceKeepsTheConcurrentWrite(t *testing.T) {
 			wsExec(t, eng, writer, `writeEntitlementRow(entitlementId: `+quote(wholesalepack.EntitlementRowID(r.appID))+
 				`, ownerUserId: `+quote(userRef(merchant))+`, applicationId: `+quote(r.appID)+`, storeId: `+quote(store)+
 				`, buyerEmail: "pat@old.example.com", adapter: "customerTag", state: "granted", reference: "concurrent-ref"`+
-				`, error: "", errorCode: "", shopifyCustomerId: "", customerCreated: false, accountId: "")`)
+				`, error: "", errorCode: "", shopifyCustomerId: "", customerCreated: false, accountId: "", attemptedAt: `+happenedNow()+`)`)
 		case "backfillSettingsRow":
 			wsExec(t, eng, writer, `setWholesaleSettingsRow(settingsId: `+quote(wholesalepack.SettingsRowID(store))+
 				`, ownerUserId: `+quote(userRef(merchant))+`, storeId: `+quote(store)+`, applicationsOpen: true`+

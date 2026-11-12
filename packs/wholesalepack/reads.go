@@ -51,10 +51,11 @@ import (
 const (
 	defaultReadLimit = 50
 	maxReadLimit     = 200
-	// maxStorePages bounds a read over a store's applications: twenty pages of
-	// applicationsForStore's fifty, a thousand applications. Past it a reply
-	// says truncated.
+	// maxStorePages bounds how many pages one call reads of a store-wide log.
 	maxStorePages = 20
+	// maxStoreApplications bounds a read over a store's applications: twenty
+	// pages of applicationsForStore's fifty. Past it a reply says truncated.
+	maxStoreApplications = maxStorePages * 50
 	// stageAll lists every stage.
 	stageAll = "all"
 	// AccessNone is a buyer's access when nothing was ever granted.
@@ -296,35 +297,36 @@ type staged struct {
 	row          map[string]any
 	id           string // the row's own id, as the engine answers it
 	state, stage string
-	at           time.Time
+	at           time.Time // when it was submitted (happenedAt), which the lists order by
 }
 
-// storeApplications reads the store's applications under ctx, newest first,
-// in every form a store id is held in, at most maxStorePages pages, and says
-// whether it stopped short -- in which case the OLDEST are left out. limited
-// false reads every page.
+// storeApplications reads the store's applications under ctx, newest submitted
+// first (happenedPages), in every form a store id is held in, at most
+// maxStoreApplications of them, and says whether it stopped short -- in which
+// case the OLDEST are left out. limited false reads them all.
 func (p *Provider) storeApplications(ctx context.Context, storeID string, limited bool) ([]map[string]any, bool, error) {
 	var out []map[string]any
 	seen := map[string]bool{}
-	cursor := ""
-	for page := 0; !limited || page < maxStorePages; page++ {
-		rows, next, err := p.rowsPageWithList(ctx, "applicationsForStore", map[string]string{"storeId": storeID},
-			"storeIds", storeIDForms(storeID), cursor)
+	read := &happenedPages{p: p, ctx: ctx, query: "applicationsForStore", args: map[string]string{"storeId": storeID},
+		listName: "storeIds", list: storeIDForms(storeID), field: fieldSubmittedAt}
+	for {
+		row, err := read.take()
 		if err != nil {
 			return nil, false, err
 		}
-		for _, row := range rows {
-			if id := trimmed(row["id"]); id != "" && !seen[id] {
-				seen[id] = true
-				out = append(out, row)
-			}
-		}
-		if next == "" {
+		if row == nil {
 			return out, false, nil
 		}
-		cursor = next
+		id := trimmed(row["id"])
+		if id != "" && seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, row)
+		if limited && len(out) == maxStoreApplications {
+			return out, read.more(), nil
+		}
 	}
-	return out, true, nil
 }
 
 // storeIDForms is every form a store id is held in, each once.
@@ -368,7 +370,7 @@ func (p *Provider) stagedApplications(ctx context.Context, storeID string) ([]st
 		}
 		state := FoldState(logs[bareID(id)])
 		stage := StageOf(state, required, len(accepted[bareID(id)]) > 0)
-		out = append(out, staged{row: app, id: id, state: state, stage: stage, at: rowTime(app["createdAt"])})
+		out = append(out, staged{row: app, id: id, state: state, stage: stage, at: happenedAt(app, fieldSubmittedAt)})
 	}
 	return out, truncated, nil
 }
@@ -442,7 +444,7 @@ func (p *Provider) list(ctx context.Context, args map[string]any, _ int) ([]memo
 			"stage":          a.stage,
 			"primary":        primary,
 			"secondary":      secondary,
-			"createdAt":      timeText(a.row["createdAt"]),
+			"createdAt":      timeText(a.at),
 		})
 	}
 	return confirm("wholesale:list", map[string]any{"rows": rows, "counts": counts, "next": next, "truncated": truncated,
@@ -510,7 +512,7 @@ func (p *Provider) get(ctx context.Context, args map[string]any, _ int) ([]memor
 			"decidedBy":     trimmed(d["decidedBy"]),
 			"decidedByName": people.name(trimmed(d["decidedBy"])),
 			"note":          asString(d["note"]),
-			"createdAt":     timeText(d["createdAt"]),
+			"createdAt":     timeText(happenedAt(d, fieldDecidedAt)),
 		})
 	}
 	details, err := p.details(ctx, app)
@@ -529,7 +531,7 @@ func (p *Provider) get(ctx context.Context, args map[string]any, _ int) ([]memor
 			"adapter":           trimmed(ent["adapter"]),
 			"shopifyCustomerId": trimmed(ent["shopifyCustomerId"]),
 			"customerCreated":   customerCreated,
-			"updatedAt":         timeText(ent["createdAt"]),
+			"updatedAt":         timeText(happenedAt(ent, fieldAttemptedAt)),
 		}
 	}
 	operator := isClusterOperator(ctx)
@@ -546,7 +548,7 @@ func (p *Provider) get(ctx context.Context, args map[string]any, _ int) ([]memor
 			"source":         sourceOf(app),
 			"addedBy":        addedBy,
 			"addedByName":    people.name(addedBy),
-			"createdAt":      timeText(app["createdAt"]),
+			"createdAt":      timeText(happenedAt(app, fieldSubmittedAt)),
 		},
 		"state":       state,
 		"stage":       stage,
@@ -563,13 +565,13 @@ func (p *Provider) get(ctx context.Context, args map[string]any, _ int) ([]memor
 	})
 }
 
-// logCursor is where the decision log's next page starts: a page of
-// decisionsForStore and how many of its rows were already shown.
+// logCursor is where the decision log's next page starts: where each half of
+// decisionsForStore stands (happenedPages), the decisions that hold their
+// decidedAt and those written before it.
 type logCursor struct {
-	Version int    `json:"v"`
-	Key     string `json:"key"`
-	Page    string `json:"page"`
-	Offset  int    `json:"offset"`
+	Version int             `json:"v"`
+	Key     string          `json:"key"`
+	Halves  [2]happenedHalf `json:"halves"`
 }
 
 // decisionLog answers wholesaleDecisionLog.
@@ -581,10 +583,11 @@ func (p *Provider) decisionLog(ctx context.Context, args map[string]any, _ int) 
 	search := searchOf(args)
 	limit := limitOf(args)
 	key := readKey("decisionLog", storeID, siteID, "", search)
-	at := logCursor{Version: 1, Key: key}
+	at := logCursor{Version: 2, Key: key}
 	if after := trimmed(args["after"]); after != "" {
 		raw, err := base64.RawURLEncoding.DecodeString(after)
-		if err != nil || len(after) > 4096 || json.Unmarshal(raw, &at) != nil || at.Version != 1 || at.Key != key || at.Offset < 0 {
+		if err != nil || len(after) > 4096 || json.Unmarshal(raw, &at) != nil || at.Version != 2 || at.Key != key ||
+			at.Halves[0].Offset < 0 || at.Halves[1].Offset < 0 {
 			return nil, fmt.Errorf("wholesale: this page cursor does not match the decision log")
 		}
 	}
@@ -610,56 +613,46 @@ func (p *Provider) decisionLog(ctx context.Context, args map[string]any, _ int) 
 	people := p.people(ctx)
 	rows := []map[string]any{}
 	next := ""
-	for page := 0; ; page++ {
-		if page == maxStorePages {
-			next = encodeLogCursor(at)
-			break
-		}
-		decisions, following, err := p.rowsPageWithList(ctx, "decisionsForStore", map[string]string{"storeId": storeID},
-			"storeIds", storeIDForms(storeID), at.Page)
+	// NEWEST DECIDED FIRST (happenedPages), at most maxStorePages pages a call.
+	read := &happenedPages{p: p, ctx: ctx, query: "decisionsForStore", args: map[string]string{"storeId": storeID},
+		listName: "storeIds", list: storeIDForms(storeID), field: fieldDecidedAt, halves: at.Halves, budget: maxStorePages}
+	for {
+		here := read.position()
+		d, err := read.take()
 		if err != nil {
 			return nil, err
 		}
-		full := false
-		for i := at.Offset; i < len(decisions); i++ {
-			if len(rows) == limit {
-				next, full = encodeLogCursor(logCursor{Version: 1, Key: key, Page: at.Page, Offset: i}), true
-				break
+		if d == nil {
+			if read.short {
+				next = encodeLogCursor(logCursor{Version: 2, Key: key, Halves: here})
 			}
-			d := decisions[i]
-			app, err := appOf(trimmed(d["applicationId"]))
-			if err != nil {
-				return nil, err
-			}
-			if app == nil {
-				continue
-			}
-			decider := trimmed(d["decidedBy"])
-			name := people.name(decider)
-			if !searchMatches(search, app["companyName"], app["applicantName"], app["applicantEmail"], name, d["note"]) {
-				continue
-			}
-			rows = append(rows, map[string]any{
-				"applicationId": trimmed(app["id"]),
-				"companyName":   asString(app["companyName"]),
-				"transition":    trimmed(d["transition"]),
-				"decidedBy":     decider,
-				"decidedByName": name,
-				"note":          asString(d["note"]),
-				"createdAt":     timeText(d["createdAt"]),
-			})
-		}
-		if full {
 			break
 		}
-		if following == "" {
-			break
-		}
-		at = logCursor{Version: 1, Key: key, Page: following}
 		if len(rows) == limit {
-			next = encodeLogCursor(at)
+			next = encodeLogCursor(logCursor{Version: 2, Key: key, Halves: here})
 			break
 		}
+		app, err := appOf(trimmed(d["applicationId"]))
+		if err != nil {
+			return nil, err
+		}
+		if app == nil {
+			continue
+		}
+		decider := trimmed(d["decidedBy"])
+		name := people.name(decider)
+		if !searchMatches(search, app["companyName"], app["applicantName"], app["applicantEmail"], name, d["note"]) {
+			continue
+		}
+		rows = append(rows, map[string]any{
+			"applicationId": trimmed(app["id"]),
+			"companyName":   asString(app["companyName"]),
+			"transition":    trimmed(d["transition"]),
+			"decidedBy":     decider,
+			"decidedByName": name,
+			"note":          asString(d["note"]),
+			"createdAt":     timeText(happenedAt(d, fieldDecidedAt)),
+		})
 	}
 	return confirm("wholesale:decisionLog", map[string]any{"rows": rows, "next": next})
 }
@@ -706,7 +699,7 @@ func (p *Provider) buyers(ctx context.Context, args map[string]any, _ int) ([]me
 			access, code, customer = trimmed(ent["state"]), trimmed(ent["errorCode"]), trimmed(ent["shopifyCustomerId"])
 			reason = accessReason(ent)
 			if access == EntitlementGranted {
-				grantedAt = timeText(ent["createdAt"])
+				grantedAt = timeText(happenedAt(ent, fieldGrantedAt))
 			}
 		}
 		rows = append(rows, map[string]any{

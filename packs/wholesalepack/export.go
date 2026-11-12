@@ -126,7 +126,7 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 		if err != nil {
 			return nil, err
 		}
-		out := withoutTokenHash(app)
+		out := happenedRow(app, fieldSubmittedAt)
 		out["details"] = details
 		out["state"] = FoldState(log)
 		out["stage"] = StageOf(FoldState(log), termsRequired, len(accs[bareID(id)]) > 0)
@@ -134,12 +134,12 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 		// ONE FORM OF THE APPLICATION'S ID throughout the file: the row's own,
 		// whichever form an older decision or entitlement was written under.
 		for _, d := range log {
-			row := withoutTokenHash(d)
+			row := happenedRow(d, fieldDecidedAt)
 			row["applicationId"] = id
 			decisions = append(decisions, row)
 		}
 		if versions := ents[bareID(id)]; len(versions) > 0 {
-			row := withoutTokenHash(versions[0])
+			row := happenedEntitlementRow(versions[0])
 			row["applicationId"] = id
 			// WHY ACCESS IS NOT ON, as the application's page and the buyers list say
 			// it: a sentence for a person (accessReason), never the record's own text.
@@ -257,6 +257,35 @@ func effectiveSettingsRow(row map[string]any) map[string]any {
 	out["termsRequired"] = s.TermsRequired
 	out["linkLifetimeDays"] = s.LinkLifetimeDays
 	out["acceptanceText"] = s.AcceptanceText
+	return out
+}
+
+// happenedRow is row as the export holds it, without its token hash: its
+// createdAt and its field answer when the row's thing happened (happenedAt),
+// never the write time of its newest version, which any later write moves.
+func happenedRow(row map[string]any, field string) map[string]any {
+	out := withoutTokenHash(row)
+	at := timeText(happenedAt(row, field))
+	out["createdAt"], out[field] = at, at
+	return out
+}
+
+// happenedEntitlementRow is an entitlement as the export holds it: dated by its
+// attempt (happenedRow), with the times of its CURRENT spell only -- grantedAt
+// while it is granted (the start of the unbroken granted period), revokedAt
+// while it is revoked -- each as the row holds it, or, on a row written before
+// those fields, its write time. A time from a spell that is over (a removal
+// before a grant again, a grant before a failure) is left out, as the buyers
+// list and the page leave it out.
+func happenedEntitlementRow(row map[string]any) map[string]any {
+	out := happenedRow(row, fieldAttemptedAt)
+	for field, state := range map[string]string{fieldGrantedAt: EntitlementGranted, fieldRevokedAt: EntitlementRevoked} {
+		if trimmed(row["state"]) != state {
+			delete(out, field)
+			continue
+		}
+		out[field] = timeText(happenedAt(row, field))
+	}
 	return out
 }
 

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -241,8 +242,8 @@ func AdapterNames() []string {
 //
 // ONE PER APPLICATION, so a re-provision after a failure is a new VERSION
 // of one logical row rather than a second row a read would have to choose
-// between -- and "revoked when" is that version's own createdAt, which is
-// why the concept carries no revokedAt.
+// between. When each attempt was made, and when trade prices went on and came
+// off, are fields of the row (entitlementTimes), never a version's write time.
 //
 // DERIVED FROM THE BARE ID, whichever form the caller named the application
 // by: the engine does not join the two forms, and an id derived from each would
@@ -418,7 +419,7 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 	}
 	write := func(adapterName, state string, res Outcome, code, text string) ([]memorynodes.MemoryNode, error) {
 		return p.writeEntitlement(merchant, rowID, applicationRef(applicationID), storeID, owner, account, grant,
-			adapterName, state, res, code, text, direction, attempt)
+			adapterName, state, res, code, text, direction, attempt, entitlementTimes(prior, state, p.clock()))
 	}
 	var priorAdapter, priorRef, priorCustomerID string
 	var priorCreated bool
@@ -684,7 +685,8 @@ func (p *Provider) entitlementRow(ctx context.Context, applicationID string) (ma
 // rowID is the row's id (EntitlementRowID, or a prior row's own); applicationID
 // is written in canonical form, as a decision's is.
 func (p *Provider) writeEntitlement(ctx context.Context, rowID, applicationID, storeID, ownerUserID, accountID string, g Grant,
-	adapterName, state string, result Outcome, errCode, errText, direction string, attempt int) ([]memorynodes.MemoryNode, error) {
+	adapterName, state string, result Outcome, errCode, errText, direction string, attempt int,
+	times map[string]any) ([]memorynodes.MemoryNode, error) {
 	reference := result.Reference
 	if reference == "" {
 		// KEEP THE PRIOR REFERENCE ON A FAILURE. An adapter that errored
@@ -692,7 +694,7 @@ func (p *Provider) writeEntitlement(ctx context.Context, rowID, applicationID, s
 		// it had told us last time would leave nothing to revoke.
 		reference = g.Reference
 	}
-	if err := p.write(ctx, "writeEntitlementRow", map[string]any{
+	args := map[string]any{
 		"entitlementId": rowID,
 		"ownerUserId":   ownerUserID,
 		"accountId":     accountID,
@@ -711,7 +713,11 @@ func (p *Provider) writeEntitlement(ctx context.Context, rowID, applicationID, s
 		"customerCreated":   result.CustomerCreated,
 		"direction":         direction,
 		"attempt":           attempt,
-	}); err != nil {
+	}
+	for k, v := range times {
+		args[k] = v
+	}
+	if err := p.write(ctx, "writeEntitlementRow", args); err != nil {
 		return nil, err
 	}
 	return confirm("wholesale:entitlement:written", map[string]any{
@@ -724,6 +730,32 @@ func (p *Provider) writeEntitlement(ctx context.Context, rowID, applicationID, s
 		"error":         errText,
 		"detail":        result.Detail,
 	})
+}
+
+// entitlementTimes is when the attempt writing a version in state happened,
+// at now: attemptedAt always; grantedAt when the version is granted, and
+// revokedAt when it is revoked. A version that stays granted (or revoked)
+// carries the time the prior version says trade prices went on (came off) --
+// its field, or for a row written before the field its own write time, which
+// is what that row read by -- so a re-provision over a grant does not move
+// "since". A version in another state names neither, and the write keeps
+// whatever the row held.
+func entitlementTimes(prior map[string]any, state string, now time.Time) map[string]any {
+	out := map[string]any{fieldAttemptedAt: happenedStamp(now)}
+	stays := prior != nil && trimmed(prior["state"]) == state
+	switch state {
+	case EntitlementGranted:
+		out[fieldGrantedAt] = happenedStamp(now)
+		if stays {
+			out[fieldGrantedAt] = happenedStamp(happenedAt(prior, fieldGrantedAt))
+		}
+	case EntitlementRevoked:
+		out[fieldRevokedAt] = happenedStamp(now)
+		if stays {
+			out[fieldRevokedAt] = happenedStamp(happenedAt(prior, fieldRevokedAt))
+		}
+	}
+	return out
 }
 
 // AdapterRefusal is a failure that will repeat identically for ever.
