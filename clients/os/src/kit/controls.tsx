@@ -1474,17 +1474,20 @@ export function CopyValue({
   presentation?: "truncate" | "row";
 }) {
   const textId = useId();
-  const [state, setState] = useState<"idle" | "copied" | "refused" | "unavailable">("idle");
+  // WHAT THE LAST COPY SAID, AND OF WHICH VALUE. A value that has changed since
+  // reads as idle in the very render that shows it, so no effect resets this.
+  // An effect runs when React gets to it: for a list that has just mounted, that
+  // can be after a copy that already finished, and a reset there erased the
+  // confirmation the copy had earned.
+  const [outcome, setOutcome] = useState<{ value: string; state: "copied" | "refused" | "unavailable" } | null>(null);
+  const state = outcome !== null && outcome.value === value ? outcome.state : "idle";
   const decay = useRef<number | null>(null);
   const attempt = useRef(0);
 
-  useEffect(() => {
-    setState("idle");
-    return () => {
-      attempt.current++;
-      if (decay.current !== null) window.clearTimeout(decay.current);
-    };
-  }, [value]);
+  useEffect(() => () => {
+    attempt.current++;
+    if (decay.current !== null) window.clearTimeout(decay.current);
+  }, []);
 
   // A blank value has nothing to copy, so it reads as the em dash every absent
   // value in this shell reads as -- never a button that announces itself to a
@@ -1496,17 +1499,17 @@ export function CopyValue({
     if (decay.current !== null) window.clearTimeout(decay.current);
     const clipboard = globalThis.navigator?.clipboard;
     if (!clipboard) {
-      setState("unavailable");
+      setOutcome({ value, state: "unavailable" });
       return;
     }
     try {
       await clipboard.writeText(value);
       if (attempt.current !== current) return;
-      setState("copied");
-      decay.current = window.setTimeout(() => setState("idle"), 2000);
+      setOutcome({ value, state: "copied" });
+      decay.current = window.setTimeout(() => setOutcome(null), 2000);
     } catch {
       if (attempt.current !== current) return;
-      setState("refused");
+      setOutcome({ value, state: "refused" });
     }
   }
 
@@ -1549,34 +1552,34 @@ export function CopyField({
   id?: string;
   mono?: boolean;
 }) {
-  const [state, setState] = useState<"idle" | "copied" | "refused" | "unavailable">("idle");
+  // What the last copy said, and of which value -- never reset from an effect,
+  // for the reason CopyValue gives.
+  const [outcome, setOutcome] = useState<{ value: string; state: "copied" | "refused" | "unavailable" } | null>(null);
+  const state = outcome !== null && outcome.value === value ? outcome.state : "idle";
   const decay = useRef<number | null>(null);
   const attempt = useRef(0);
 
-  useEffect(() => {
-    setState("idle");
-    return () => {
-      attempt.current++;
-      if (decay.current !== null) window.clearTimeout(decay.current);
-    };
-  }, [value]);
+  useEffect(() => () => {
+    attempt.current++;
+    if (decay.current !== null) window.clearTimeout(decay.current);
+  }, []);
 
   async function copy(): Promise<void> {
     const current = ++attempt.current;
     if (decay.current !== null) window.clearTimeout(decay.current);
     const clipboard = globalThis.navigator?.clipboard;
     if (!clipboard) {
-      setState("unavailable");
+      setOutcome({ value, state: "unavailable" });
       return;
     }
     try {
       await clipboard.writeText(value);
       if (attempt.current !== current) return;
-      setState("copied");
-      decay.current = window.setTimeout(() => setState("idle"), 2000);
+      setOutcome({ value, state: "copied" });
+      decay.current = window.setTimeout(() => setOutcome(null), 2000);
     } catch {
       if (attempt.current !== current) return;
-      setState("refused");
+      setOutcome({ value, state: "refused" });
     }
   }
 
