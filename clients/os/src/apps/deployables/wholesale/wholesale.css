@@ -1,0 +1,35 @@
+/* A store document's text, drawn from its Markdown as elements (DocumentText):
+   a readable measure, in ink, its headings a step above the body. No rule
+   between rows or sections: the no-dividers rule holds inside a document too,
+   so a table's rows stand apart by their padding. */
+.os-wholesale-document {
+  max-width: 72ch;
+  color: var(--os-ink);
+  font-size: var(--os-text-base);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.os-wholesale-document > :first-child { margin-top: 0; }
+.os-wholesale-document > :last-child { margin-bottom: 0; }
+.os-wholesale-document p { margin-block: 0.65em; }
+.os-wholesale-document :is(h1, h2) { font-size: var(--os-text-md); font-weight: 600; margin-block: 1em 0.4em; }
+.os-wholesale-document :is(h3, h4, h5, h6) { font-size: 1em; font-weight: 600; margin-block: 1em 0.4em; }
+.os-wholesale-document :is(ul, ol) { padding-left: 1.5em; margin-block: 0.6em; }
+.os-wholesale-document li + li { margin-top: 0.3em; }
+.os-wholesale-document blockquote { margin: 0.75em 0; padding-left: 1em; color: var(--os-dim); }
+.os-wholesale-document pre { max-width: 100%; overflow: auto; padding: 0.75em; background: var(--os-raised); border-radius: var(--os-radius-xs); white-space: pre; }
+.os-wholesale-document code { font-size: 0.9em; }
+.os-wholesale-document table { display: block; max-width: 100%; overflow: auto; border-collapse: collapse; margin-block: 0.75em; }
+.os-wholesale-document :is(th, td) { text-align: left; padding: 0.35em 0.75em; }
+
+/* A fingerprint beside a document's label, in the identifier's face. */
+.os-wholesale-fingerprint { margin-left: 8px; color: var(--os-muted); }
+
+/* A section's one sentence where its facts would start -- the terms accepted,
+   a document not published -- on the first fact's line, so it meets the
+   section heading beside it. */
+.os-wholesale-line { margin: 0; padding-block: 7px; font-size: var(--os-text-sm); line-height: 1.6; color: var(--os-ink); }
+
+/* A setting's checkbox stands on the control line, so its words meet the
+   setting's muted name beside it as a field's value does. */
+.os-reviews .os-setting-value > .os-check { padding-top: 7px; }

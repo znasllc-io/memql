@@ -6,7 +6,7 @@ import { ActionBar } from "../../../kit/ActionBar";
 import { LoadMore } from "../../../kit/LoadMore";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { ReviewsPane } from "../reviews/ReviewsPane";
-import { countFor, dayWords, emptyWords, REFINE_STAGES, stageWords, waitedWords, type WholesaleFilter, type WholesaleRow } from "./model";
+import { countFor, dayWords, emptyWords, isNotSetUp, NOT_SET_UP, refineStages, stageWords, waitedWords, type WholesaleFilter, type WholesaleRow } from "./model";
 import { useWholesaleList, type WholesaleScope, type WholesaleWrites } from "./useWholesale";
 
 // THE STORE'S APPLICATIONS, one stage at a time. Ready to review is the
@@ -18,7 +18,7 @@ import { useWholesaleList, type WholesaleScope, type WholesaleWrites } from "./u
 // 2), never a tab: every stage is the same kind of thing. A row says its stage
 // only under All, the one view that mixes them.
 
-export function ApplicationsTab({ scope, heading, writes, operator, stage, onStage, search, onSearch, onOpen }: {
+export function ApplicationsTab({ scope, heading, writes, operator, termsRequired, stage, onStage, search, onSearch, onOpen }: {
   scope: WholesaleScope;
   /** What the list is asked, kept by the section so a visit to one application keeps it. */
   stage: WholesaleFilter;
@@ -30,6 +30,8 @@ export function ApplicationsTab({ scope, heading, writes, operator, stage, onSta
   writes: WholesaleWrites;
   /** One of the cluster's operators, who read the applications and decide none. */
   operator: boolean;
+  /** Whether the store requires its terms, as its settings answer: only then does an application wait for them. */
+  termsRequired: boolean;
   onOpen: (applicationId: string, name: string) => void;
 }) {
   const list = useWholesaleList(scope, stage, search, writes.revision);
@@ -45,8 +47,18 @@ export function ApplicationsTab({ scope, heading, writes, operator, stage, onSta
   const chips: RefineChip[] = stage === "readyToReview" ? [] : [{ id: "stage", label: stageWords(stage), onRemove: () => onStage("readyToReview") }];
   const refine = <Refine label="Refine applications" placeholder="Search applications" search={search} onSearch={onSearch} chips={chips}>
     <ChoiceRow label="Stage" value={stage} onChange={(next) => onStage(next as WholesaleFilter)}
-      options={REFINE_STAGES.map((s) => ({ value: s, label: stageWords(s) }))} />
+      options={[...refineStages(termsRequired), ...(refineStages(termsRequired).includes(stage) ? [] : [stage])].map((s) => ({ value: s, label: stageWords(s) }))} />
   </Refine>;
+
+  // A STORE THAT IS NOT SET UP IS A STATE, not a failed read: nothing here can
+  // be tried again until the cluster's operators set it up.
+  if (list.state === "failed" && isNotSetUp(list.error)) {
+    return (
+      <ReviewsPane heading={heading(null)} bar={<ActionBar state="Not set up" tone="none" />} context={{ page: "Wholesale", view: "Applications", siteId: scope.siteId, storeId: scope.storeId }}>
+        <Notice sentence={NOT_SET_UP} />
+      </ReviewsPane>
+    );
+  }
 
   const bar = <ActionBar
     state={count === undefined ? "" : count === 0 ? emptyWords(stage) : `${count} ${stage === "all" ? (count === 1 ? "application" : "applications") : stageWords(stage).toLowerCase()}`}
@@ -63,7 +75,11 @@ export function ApplicationsTab({ scope, heading, writes, operator, stage, onSta
         list.state === "failed" ? null :
         <RecordListSkeleton label="Reading applications" rows={3} />
       ) : rows.length === 0 ? (
-        <EmptyState title={search ? "No matching applications" : emptyWords(stage)} icon={Building2}>{null}</EmptyState>
+        <EmptyState title={search ? "No matching applications" : emptyWords(stage)} icon={Building2}>
+          {/* While the store requires its terms, an application waits for them
+              before it is ready: the empty queue says where they are. */}
+          {queue && termsRequired && !search ? "Applications appear here once the applicant has accepted the terms." : null}
+        </EmptyState>
       ) : (
         <>
           <RecordList as="ul" label="Applications">

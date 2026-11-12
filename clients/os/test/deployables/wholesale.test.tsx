@@ -176,12 +176,17 @@ describe("the applications", () => {
     expect(await screen.findByRole("region", { name: "Nothing approved" })).toBeTruthy();
   });
 
-  it("offers no Waiting for terms under Refine", async () => {
+  it("offers Waiting for terms under Refine only while the store requires its terms", async () => {
+    await openWholesale(wholesaleSeed({ settings: { ...SET_UP, termsRequired: true } as unknown as Row }));
+    await click(screen.getByRole("button", { name: "Refine applications" }));
+    const required = within(screen.getByRole("radiogroup", { name: "Stage" })).getAllByRole("radio").map((r) => r.textContent);
+    expect(required).toEqual(["Ready to review", "Waiting for terms", "Approved", "Rejected", "Removed", "All"]);
+    cleanup();
+    // No application waits for terms on a store that requires none.
     await openWholesale();
     await click(screen.getByRole("button", { name: "Refine applications" }));
     const stages = within(screen.getByRole("radiogroup", { name: "Stage" })).getAllByRole("radio").map((r) => r.textContent);
     expect(stages).toEqual(["Ready to review", "Approved", "Rejected", "Removed", "All"]);
-    expect(screen.queryByText("Waiting for terms")).toBeNull();
   });
 
   it("draws the extension's two display facts as plain text, with no badge", async () => {
@@ -251,7 +256,7 @@ describe("one application", () => {
   });
 
   it("draws no button for an act it does not know", async () => {
-    await open(wholesaleSeed({ get: { [KESTREL_ID]: detail(KESTREL, { acts: ["reject", "resendTerms", "approve", "resendApproved"] }) } }));
+    await open(wholesaleSeed({ get: { [KESTREL_ID]: detail(KESTREL, { acts: ["reject", "inviteToLunch", "approve", "sendFlowers"] }) } }));
     expect(barButtons()).toEqual(["Reject", "Approve"]);
   });
 
@@ -312,7 +317,7 @@ describe("one application", () => {
     expect(connection.callsNamed("wholesaleRetryAccess")[0]).toBe(`builtin wholesaleRetryAccess(applicationId: "${KESTREL_ID}")`);
   });
 
-  it("asks in place before removing a buyer, and removes them as a revoke", async () => {
+  it("asks in place before removing a buyer, and removes them through wholesaleRemoveBuyer", async () => {
     const approved = detail(KESTREL, { state: "approved", stage: "approved", entitlement: { state: "granted", errorCode: "", error: "" }, acts: ["remove"] });
     const connection = await open(wholesaleSeed({ get: { [KESTREL_ID]: approved } }));
     await readTheBar();
@@ -320,8 +325,9 @@ describe("one application", () => {
     expect(barButtons()).toEqual(["Keep them", "Remove them"]);
     await readTheBar();
     await click(within(bar()).getByRole("button", { name: "Remove them" }));
-    await waitFor(() => expect(connection.callsNamed("wholesaleRecordDecision")).toHaveLength(1));
-    expect(connection.callsNamed("wholesaleRecordDecision")[0]).toContain('transition: "revoke"');
+    await waitFor(() => expect(connection.callsNamed("wholesaleRemoveBuyer")).toHaveLength(1));
+    expect(connection.callsNamed("wholesaleRemoveBuyer")[0]).toBe(`builtin wholesaleRemoveBuyer(applicationId: "${KESTREL_ID}", note: "")`);
+    expect(connection.callsNamed("wholesaleRecordDecision")).toHaveLength(0);
   });
 
   it("draws Retry access on a removed application only while the tag is still on", async () => {
@@ -379,7 +385,7 @@ describe("the settings", () => {
     return connection;
   }
 
-  it("saves the route and draws no staff address", async () => {
+  it("saves the route, beside the staff address", async () => {
     const connection = await openSettings();
     const route = within(await waitFor(() => settingRow("Route"))).getByRole("radiogroup", { name: "Route" });
     expect(within(route).getAllByRole("radio").map((r) => r.textContent)).toEqual(["Customer tag", "Shopify B2B", "None"]);
@@ -390,9 +396,8 @@ describe("the settings", () => {
     await click(within(bar()).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(connection.callsNamed("wholesaleUpdateSettings")).toHaveLength(1));
     expect(connection.callsNamed("wholesaleUpdateSettings")[0]).toBe('builtin wholesaleUpdateSettings(storeId: "store-live", siteId: "site-shop", entitlementAdapter: "customerTag")');
-    // Nobody is told anything in this release, so nothing asks where.
-    expect(screen.queryByText(/staff/i)).toBeNull();
-    expect(document.querySelector(".os-review-settings input, .os-wholesale-settings input")).toBeNull();
+    // The store's people are told at the staff address, which stands beside it.
+    expect(within(settingRow("Staff address")).getByRole("textbox")).toBeTruthy();
     await waitFor(() => expect(bar().textContent).toContain("Saved"));
   });
 

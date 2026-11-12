@@ -7,7 +7,8 @@ import type { Breadcrumb } from "../../../kit/Breadcrumbs";
 import { formatMoment } from "../../../kit/format";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { ReviewsPane } from "../reviews/ReviewsPane";
-import { accessWords, actLabel, dayWords, stageWords, transitionWords, waitedWords, type WholesaleApplication, type WholesaleDecision } from "./model";
+import { ExtensionDetails } from "./ExtensionDetails";
+import { accessWords, actLabel, dayWords, emailWords, fingerprint, latestEmails, stageWords, termsWords, transitionWords, waitedWords, type WholesaleAcceptance, type WholesaleApplication, type WholesaleDecision } from "./model";
 import { useWholesaleApplication, type WholesaleWrites } from "./useWholesale";
 
 // ONE APPLICATION: who applied, the client's own fields, where the buyer's
@@ -18,15 +19,21 @@ import { useWholesaleApplication, type WholesaleWrites } from "./useWholesale";
 // has a word for and nothing else, an act from a newer engine included. Its
 // one button is the last act, the primary one; every other act is a text label
 // beside it. Reject and Remove ask in place, in the bar, with an optional note
-// in the page; Approve and Retry access are sent at once. After any write the
-// page reads again, and a refusal stands above the bar in the engine's words.
+// in the page; Approve, Retry access and the two resends are sent at once.
+// Remove is its own act (wholesaleRemoveBuyer). After any write the page reads
+// again, and a refusal stands above the bar in the engine's words.
+//
+// THE TERMS AND THE EMAILS ARE THE ENGINE'S RECORD: who accepted which
+// versions (eight characters of each fingerprint), or when the link expires;
+// and each email's newest attempt -- delivered, bounced, sent, or not sent and
+// the engine's reason why, never a reason this page wrote.
 
 /** The ask an act opens, when it opens one. */
 type Ask = "reject" | "remove";
 
-const ASKS: Readonly<Record<Ask, { question: string; yes: string; no: string; transition: "reject" | "revoke" }>> = {
-  reject: { question: "Reject this application?", yes: "Reject it", no: "Keep it", transition: "reject" },
-  remove: { question: "Remove this buyer's trade access?", yes: "Remove them", no: "Keep them", transition: "revoke" },
+const ASKS: Readonly<Record<Ask, { question: string; yes: string; no: string }>> = {
+  reject: { question: "Reject this application?", yes: "Reject it", no: "Keep it" },
+  remove: { question: "Remove this buyer's trade access?", yes: "Remove them", no: "Keep them" },
 };
 
 /** The acts that move an application on are the bar's button; the rest are labels. */
@@ -84,10 +91,12 @@ export function ApplicationPage({ applicationId, listedName, writes, trail, back
   async function send(act: string) {
     if (act === "approve") await writes.decide(applicationId, "approve", "");
     else if (act === "retryAccess") await writes.retryAccess(applicationId);
+    else if (act === "resendTerms") await writes.resendEmail(applicationId, "terms");
+    else if (act === "resendApproved") await writes.resendEmail(applicationId, "approved");
   }
 
   async function answer(open: Ask) {
-    const outcome = await writes.decide(applicationId, ASKS[open].transition, note);
+    const outcome = open === "reject" ? await writes.decide(applicationId, "reject", note) : await writes.removeBuyer(applicationId, note);
     if (outcome !== "refused") close();
   }
 
@@ -146,22 +155,14 @@ function ApplicationDetails({ value }: { value: WholesaleApplication }) {
           <Fact label="Applied" value={dayWords(application.createdAt)} copyValue={application.createdAt} />
         </Facts>
       </DetailsSection>
-      <DetailsSection title="Their details">
-        {details.state === "unreadable" ? (
-          <Caption>These details are not readable to you</Caption>
-        ) : details.fields.length === 0 ? (
-          <Caption>No further details</Caption>
-        ) : (
-          <Facts>
-            {details.fields.map((f, i) => <Fact key={`${f.label}:${i}`} label={f.label} value={f.value} copyValue={f.value || undefined} />)}
-          </Facts>
-        )}
-      </DetailsSection>
+      <ExtensionDetails details={details} />
+      <TermsSection acceptance={value.acceptance} link={value.termsLink} />
       <DetailsSection title="Access">
         <Facts>
           <Fact label="State" value={accessWords(value.entitlement)} />
         </Facts>
       </DetailsSection>
+      <EmailsSection value={value} />
       <DetailsSection title="Decisions">
         {value.decisions.length > 0 ? (
           <RecordList as="ul" label="Decisions on this application">
@@ -184,5 +185,46 @@ function DecisionRow({ decision }: { decision: WholesaleDecision }) {
       trailing={<span className="os-caption">{formatMoment(decision.createdAt)}</span>}>
       {decision.decidedByName ? <span>by {decision.decidedByName}</span> : null}
     </RecordRow>
+  );
+}
+
+/**
+ * The terms: who accepted which versions, and from where -- or, before that,
+ * when the link the applicant was sent expires. Absent while there is neither
+ * (a store that requires no terms, a link not sent yet).
+ */
+function TermsSection({ acceptance, link }: { acceptance: WholesaleAcceptance | null; link: { expiresAt: string; expired: boolean } | null }) {
+  const said = termsWords(acceptance, link);
+  if (said === "") return null;
+  return (
+    <DetailsSection title="Terms">
+      <p className="os-wholesale-line">{said}</p>
+      {acceptance !== null ? (
+        <Facts>
+          <Fact label="Terms" value={<Signed label={acceptance.termsLabel} sha256={acceptance.termsSha256} />} copyValue={acceptance.termsSha256 || undefined} />
+          <Fact label="MAP policy" value={<Signed label={acceptance.mapLabel} sha256={acceptance.mapSha256} />} copyValue={acceptance.mapSha256 || undefined} />
+          <Fact label="Address" value={acceptance.clientAddress} copyValue={acceptance.clientAddress || undefined} />
+          <Fact label="Browser" value={acceptance.userAgent} copyValue={acceptance.userAgent || undefined} />
+        </Facts>
+      ) : null}
+    </DetailsSection>
+  );
+}
+
+/** A version an applicant accepted: its label, and eight characters of its fingerprint. */
+function Signed({ label, sha256 }: { label: string; sha256: string }) {
+  return <><span>{label}</span>{sha256 ? <span className="os-mono os-wholesale-fingerprint">{fingerprint(sha256)}</span> : null}</>;
+}
+
+/** One line per email kind the applicant was sent, its newest attempt. Absent while none was. */
+function EmailsSection({ value }: { value: WholesaleApplication }) {
+  const emails = latestEmails(value.emails);
+  if (emails.length === 0) return null;
+  return (
+    <DetailsSection title="Emails">
+      <Facts>
+        {emails.map(({ kind, name, email }) => <Fact key={kind} label={name} value={emailWords(email)} />)}
+      </Facts>
+    </DetailsSection>
   );
 }

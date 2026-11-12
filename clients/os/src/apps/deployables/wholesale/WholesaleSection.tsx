@@ -5,31 +5,50 @@ import type { Breadcrumb } from "../../../kit/Breadcrumbs";
 import { LocalTabs } from "../../../kit/LocalTabs";
 import { useSessionIfPresent } from "../../../chrome/access";
 import type { SiteRow } from "../rows";
+import { AddBuyerPage } from "./AddBuyerPage";
 import { ApplicationsTab } from "./ApplicationsTab";
 import { ApplicationPage } from "./ApplicationPage";
-import type { WholesaleFilter } from "./model";
+import { BuyersTab } from "./BuyersTab";
+import { DocumentsTab } from "./DocumentsTab";
+import { DocumentVersionPage } from "./DocumentVersionPage";
+import { documentKindWords, type DocumentKind, type WholesaleFilter } from "./model";
+import { PublishDocumentPage } from "./PublishDocumentPage";
 import { WholesaleSettingsPage } from "./WholesaleSettingsPage";
 import { useWholesaleSettings, useWholesaleWrites, type WholesaleScope } from "./useWholesale";
+import "./wholesale.css";
 
-// A STORE'S WHOLESALE APPLICATIONS, as a section of its deployable's page,
-// mounted the way Reviews is: the heading, then `LocalTabs`, then the view.
-// Applications is what the store's people decide; Settings is how the store
-// takes them. One application is a page of its own under the Applications
-// tab, so the row's Back and the browser's Back both step out of it.
+// A STORE'S WHOLESALE PROGRAM, as a section of its deployable's page, mounted
+// the way Reviews is: the heading, then `LocalTabs`, then the view. The tabs
+// are the program's nouns: the Applications the store's people decide, the
+// Buyers they approved, the Documents an applicant accepts, and the Settings
+// the store takes them by. One application, a new buyer, a new version of a
+// document and an earlier version are each a page of their own under the tab
+// they were opened from, so the row's Back and the browser's Back both step
+// out of them.
 //
 // THE CLUSTER'S OPERATORS READ EVERY STORE'S APPLICATIONS AND DECIDE NONE.
 // The list says so once (an operator is the staff-wide reader the session
-// names, `everyAccount`, as the Users app reads it); one application draws
-// only the acts the engine answers, and an operator is answered no decision.
+// names, `everyAccount`, as the Users app reads it: the list and the buyers
+// answer no operator flag); one application draws only the acts the engine
+// answers, and an operator is answered no decision and adds no buyer.
 
-type Tab = "applications" | "settings";
+type Tab = "applications" | "buyers" | "documents" | "settings";
 
 const TABS: readonly (readonly [Tab, string])[] = [
   ["applications", "Applications"],
+  ["buyers", "Buyers"],
+  ["documents", "Documents"],
   ["settings", "Settings"],
 ];
 
 const tabName = (tab: Tab): string => TABS.find(([id]) => id === tab)?.[1] ?? "";
+
+/** A page opened from a tab: it stands in the tab's place under the trail. */
+type Page =
+  | { kind: "application"; id: string; name: string }
+  | { kind: "addBuyer" }
+  | { kind: "publish"; document: DocumentKind }
+  | { kind: "version"; id: string; name: string };
 
 export interface WholesaleSectionProps {
   site: SiteRow;
@@ -43,7 +62,7 @@ export interface WholesaleSectionProps {
 export function WholesaleSection({ site, storeId, trail, back }: WholesaleSectionProps) {
   const scope: WholesaleScope = { siteId: site.id, storeId };
   const [tab, setTab] = useState<Tab>("applications");
-  const [open, setOpen] = useState<{ id: string; name: string } | null>(null);
+  const [page, setPage] = useState<Page | null>(null);
   // What the list is asked survives a visit to one application and back.
   const [stage, setStage] = useState<WholesaleFilter>("readyToReview");
   const [search, setSearch] = useState("");
@@ -58,38 +77,69 @@ export function WholesaleSection({ site, storeId, trail, back }: WholesaleSectio
 
   const show = (next: Tab) => {
     writes.clearRefusal();
-    setOpen(null);
+    setPage(null);
     setTab(next);
   };
-  const toList = () => {
+  const toTab = () => {
     writes.clearRefusal();
-    setOpen(null);
+    setPage(null);
+  };
+  const open = (next: Page) => {
+    writes.clearRefusal();
+    setPage(next);
   };
 
-  if (open !== null) {
+  // The trail down to the tab a page was opened from.
+  const tabTrail: Breadcrumb[] = [...trail, { label: "Wholesale", onSelect: () => show("applications") }, { label: tabName(tab), onSelect: toTab }];
+  const toTabBack = { label: tabName(tab), onSelect: toTab };
+
+  if (page?.kind === "application") {
     return <ApplicationPage
-      key={open.id}
-      applicationId={open.id}
-      listedName={open.name}
+      key={page.id}
+      applicationId={page.id}
+      listedName={page.name}
       writes={writes}
-      trail={[...trail, { label: "Wholesale", onSelect: () => show("applications") }, { label: tabName(tab), onSelect: toList }]}
-      back={{ label: tabName(tab), onSelect: toList }} />;
+      trail={tabTrail}
+      back={toTabBack} />;
+  }
+  if (page?.kind === "addBuyer") {
+    return <AddBuyerPage writes={writes} trail={tabTrail} back={toTabBack}
+      onAdded={(id, name) => open({ kind: "application", id, name })} />;
+  }
+  if (page?.kind === "publish") {
+    return <PublishDocumentPage kind={page.document} kindName={documentKindWords(page.document)} writes={writes} trail={tabTrail} back={toTabBack}
+      onPublished={toTab} />;
+  }
+  if (page?.kind === "version") {
+    return <DocumentVersionPage scope={scope} versionId={page.id} listedName={page.name} trail={tabTrail} back={toTabBack} />;
   }
 
   // A store that is not set up is not "closed": Settings says it is not set up.
   const closed = settings.value !== null && settings.value.exists && !settings.value.applicationsOpen;
+  const termsRequired = settings.value?.termsRequired === true;
   // The deployable's crumb leads back to it; the Wholesale crumb leads to the
-  // first view, and stays plain while that view is the page.
-  const heading = (actions?: ReactNode) => <>
+  // first view, and stays plain while that view is the page. `add` is the
+  // Head's one creation control; `actions` stand beside the tabs.
+  const heading = (actions?: ReactNode, add?: ReactNode) => <>
     <Head navigationKey={`wholesale:${site.id}:${tab}`} title="Wholesale"
       meta={closed ? "Closed to new applications" : undefined}
       breadcrumbs={[...trail, { label: "Wholesale", onSelect: tab === "applications" ? undefined : () => show("applications") }, { label: tabName(tab) }]}
-      back={back} />
+      back={back}>{add}</Head>
     <LocalTabs label="Wholesale views" value={tab} onChange={show} options={TABS} actions={actions} />
   </>;
+  const openApplication = (id: string, name: string) => open({ kind: "application", id, name });
 
-  return tab === "applications"
-    ? <ApplicationsTab scope={scope} heading={heading} writes={writes} operator={operator}
-        stage={stage} onStage={setStage} search={search} onSearch={setSearch} onOpen={(id, name) => setOpen({ id, name })} />
-    : <WholesaleSettingsPage heading={heading()} settings={settings} writes={writes} onWritten={readAgain} />;
+  switch (tab) {
+    case "applications":
+      return <ApplicationsTab scope={scope} heading={heading} writes={writes} operator={operator} termsRequired={termsRequired}
+        stage={stage} onStage={setStage} search={search} onSearch={setSearch} onOpen={openApplication} />;
+    case "buyers":
+      return <BuyersTab scope={scope} heading={heading} writes={writes} settings={settings.value} operator={operator}
+        onOpen={openApplication} onAdd={() => open({ kind: "addBuyer" })} />;
+    case "documents":
+      return <DocumentsTab scope={scope} heading={heading()} writes={writes} settings={settings.value}
+        onPublish={(document) => open({ kind: "publish", document })} onOpenVersion={(id, name) => open({ kind: "version", id, name })} />;
+    default:
+      return <WholesaleSettingsPage heading={heading()} settings={settings} writes={writes} onWritten={readAgain} />;
+  }
 }

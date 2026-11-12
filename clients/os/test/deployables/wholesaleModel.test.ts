@@ -31,8 +31,9 @@ describe("the wholesale words", () => {
     expect(actLabel("approve")).toBe("Approve");
     expect(actLabel("remove")).toBe("Remove");
     expect(actLabel("retryAccess")).toBe("Retry access");
-    expect(actLabel("resendTerms")).toBeNull();
-    expect(actLabel("resendApproved")).toBeNull();
+    expect(actLabel("resendTerms")).toBe("Resend terms email");
+    expect(actLabel("resendApproved")).toBe("Resend approval email");
+    expect(actLabel("sendFlowers")).toBeNull();
     expect(actLabel("toString")).toBeNull();
   });
 });
