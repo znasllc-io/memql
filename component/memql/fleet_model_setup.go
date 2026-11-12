@@ -3,12 +3,15 @@ package memql
 import (
 	"context"
 	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/uptrace/bun"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -279,47 +282,24 @@ func (e *MemQLEngine) evaluateFleetModelSetup(ctx context.Context, args map[stri
 		}
 		entries = append(entries, map[string]any{"modelId": p.ModelId, "category": p.Category, "runtime": p.Runtime, "purposes": profilePurposes(p), "memoryBytes": p.MemoryNeedBytes, "sizeBytes": p.SizeBytes, "contextWindow": p.ContextWindow, "installed": installed, "blocked": blocked, "installBlocked": installBlocked, "recommended": len(p.RecommendedFor) > 0 && blocked == "", "source": p.Source, "reviewedAt": p.ReviewedAt, "notes": p.Notes})
 	}
-	// These installation-wide records are owner-writable. This projection
-	// exposes only the public model evidence and enabled flag after own-machine
-	// admission; the research owner's identity never leaves this read scope.
-	researchCtx := auth.ContextWithAccess(ContextWithFreshRead(ctx), auth.MaintenanceActor(auth.AutomationOriginEngine, "weeklyModelCatalogResearch"))
-	researchSummary, researchAt := "", ""
-	reviews, err := e.Execute(researchCtx, "latestModelCatalogReview()")
+	// The installation's catalog research, as much of it as this view shows
+	// (readCatalogResearch): read after the caller was admitted to their own
+	// machine above, and under nobody's identity.
+	research, err := e.readCatalogResearch(ctx)
 	if err != nil {
 		return nil, err
 	}
-	for _, review := range modelPullRows(reviews.OutputPayload()) {
-		researchSummary, researchAt = mapString(review, "summary"), mapString(review, "reviewedAt")
-		known := map[string]bool{}
-		for _, p := range catalog {
-			known[p.ModelId] = true
+	known := map[string]bool{}
+	for _, p := range catalog {
+		known[p.ModelId] = true
+	}
+	for _, c := range research.candidates {
+		if c.modelId == "" || known[c.modelId] {
+			continue
 		}
-		findings, _ := review["findings"].([]any)
-		for _, value := range findings {
-			finding, ok := value.(map[string]any)
-			if !ok {
-				continue
-			}
-			model := mapString(finding, "modelId")
-			if model == "" || known[model] {
-				continue
-			}
-			sources := stringListField(finding, "sources")
-			source := ""
-			if len(sources) > 0 {
-				source = sources[0]
-			}
-			entries = append(entries, map[string]any{"modelId": model, "category": mapString(finding, "category"), "runtime": mapString(finding, "runtime"), "purposes": []string{}, "memoryBytes": 0, "sizeBytes": 0, "installed": false, "blocked": "Research candidate · needs verification", "installBlocked": "Needs verification before installation", "recommended": false, "source": source, "notes": mapString(finding, "summary")})
-		}
+		entries = append(entries, map[string]any{"modelId": c.modelId, "category": c.category, "runtime": c.runtime, "purposes": []string{}, "memoryBytes": 0, "sizeBytes": 0, "installed": false, "blocked": "Research candidate · needs verification", "installBlocked": "Needs verification before installation", "recommended": false, "source": c.source, "notes": c.summary})
 	}
-	researchEnabled := false
-	settings, err := e.Execute(researchCtx, "modelCatalogResearchSettings()")
-	if err != nil {
-		return nil, err
-	}
-	for _, setting := range modelPullRows(settings.OutputPayload()) {
-		researchEnabled = boolField(setting, "enabled", false)
-	}
+	researchSummary, researchAt, researchEnabled := research.summary, research.reviewedAt, research.enabled
 	bound, err := e.setupBoundEmbedder(ctx, labels)
 	if err != nil {
 		return nil, err
@@ -334,6 +314,118 @@ func (e *MemQLEngine) evaluateFleetModelSetup(ctx context.Context, args map[stri
 		warning = validation.Error()
 	}
 	return singleVirtualRow("v1:worker:modelSetupView", registration, map[string]any{"revision": setup.Revision, "choices": setup.Choices, "catalog": entries, "usableBytes": UsableBytes(hw), "diskFreeBytes": hw.DiskFreeBytes, "usedBytes": used, "contextLimit": ModelSetupContextLimit, "warning": warning, "researchSummary": researchSummary, "researchAt": researchAt, "researchEnabled": researchEnabled, "suggestedChoices": suggested, "boundEmbeddingModel": bound})
+}
+
+// The installation's catalog research records (dsl/models/concepts.memql).
+const (
+	conceptModelsCatalogReview           = "v1:models:catalogReview"
+	conceptModelsCatalogResearchSettings = "v1:models:catalogResearchSettings"
+	// catalogResearchSettingsRow is the installation's one settings row
+	// (dsl/models/seeds.memql).
+	catalogResearchSettingsRow = conceptModelsCatalogResearchSettings + ":weekly"
+)
+
+// catalogResearch is what the model setup view shows of the installation's
+// catalog research, and all of it: the latest review's summary and date, its
+// candidates' public fields, and whether weekly research is on.
+type catalogResearch struct {
+	summary    string
+	reviewedAt string
+	candidates []catalogResearchCandidate
+	enabled    bool
+}
+
+// catalogResearchCandidate is one finding of a review, as the view shows it.
+type catalogResearchCandidate struct {
+	modelId, category, runtime, source, summary string
+}
+
+// readCatalogResearch reads the installation's catalog research for the model
+// setup view.
+//
+// THE HANDLER READS THESE ROWS ITSELF, UNDER NOBODY'S IDENTITY. Both concepts
+// are the installation's own records and their tier admits a cluster owner
+// alone, while the view belongs to whoever owns the machine. The caller's own
+// authority does not reach the rows; and the cluster's maintenance principal is
+// an automation's, granted by where the automation was loaded from, so a
+// handler a person's request reaches does not take it. The read is therefore
+// not a construct called under an identity at all: it is pinned here to two
+// concepts, it runs after the caller has been admitted to their own machine
+// (modelSetupRow), and only the fields below leave this function -- not the
+// research owner's identity, not a review's run, and no other field of a
+// finding.
+//
+// It selects what latestModelCatalogReview and modelCatalogResearchSettings
+// select (dsl/models/queries.memql): the newest version of each row that is
+// not deleted, the review latest by reviewedAt, and the one settings row.
+//
+// staged-data: INDIFFERENT -- the read is pinned to v1:models:catalogReview
+// and v1:models:catalogResearchSettings, core concepts that are never
+// promoted, so no row it can return is staged data and the gate has nothing
+// to withhold.
+func (e *MemQLEngine) readCatalogResearch(ctx context.Context) (catalogResearch, error) {
+	db := e.database()
+	if db == nil {
+		return catalogResearch{}, fmt.Errorf("fleetModelSetup: no database")
+	}
+	var nodes []memorynodes.MemoryNode
+	if err := db.NewSelect().
+		Model(&nodes).
+		DistinctOn("id").
+		Where("concept IN (?)", bun.In([]string{conceptModelsCatalogReview, conceptModelsCatalogResearchSettings})).
+		OrderExpr(`id ASC, "createdAt" DESC`).
+		Scan(ctx); err != nil {
+		return catalogResearch{}, fmt.Errorf("fleetModelSetup: read the catalog research: %w", err)
+	}
+	var out catalogResearch
+	var latest map[string]any
+	for _, node := range nodes {
+		var row map[string]any
+		if err := json.Unmarshal(node.Payload, &row); err != nil {
+			return catalogResearch{}, fmt.Errorf("fleetModelSetup: decode %s: %w", node.Concept, err)
+		}
+		if boolField(row, "deleted", false) {
+			continue
+		}
+		switch node.Concept {
+		case conceptModelsCatalogResearchSettings:
+			if node.ID == catalogResearchSettingsRow {
+				out.enabled = boolField(row, "enabled", false)
+			}
+		case conceptModelsCatalogReview:
+			if latest == nil || reviewedLater(mapString(row, "reviewedAt"), mapString(latest, "reviewedAt")) {
+				latest = row
+			}
+		}
+	}
+	if latest == nil {
+		return out, nil
+	}
+	out.summary, out.reviewedAt = mapString(latest, "summary"), mapString(latest, "reviewedAt")
+	findings, _ := latest["findings"].([]any)
+	for _, value := range findings {
+		finding, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		c := catalogResearchCandidate{modelId: mapString(finding, "modelId"), category: mapString(finding, "category"), runtime: mapString(finding, "runtime"), summary: mapString(finding, "summary")}
+		if sources := stringListField(finding, "sources"); len(sources) > 0 {
+			c.source = sources[0]
+		}
+		out.candidates = append(out.candidates, c)
+	}
+	return out, nil
+}
+
+// reviewedLater reports whether review date a is after b: as instants when
+// both read as one, as text otherwise.
+func reviewedLater(a, b string) bool {
+	at, aErr := time.Parse(time.RFC3339Nano, a)
+	bt, bErr := time.Parse(time.RFC3339Nano, b)
+	if aErr == nil && bErr == nil {
+		return at.After(bt)
+	}
+	return a > b
 }
 
 // Preserve an installed model that currently owns the corpus vector space.
