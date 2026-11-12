@@ -17,7 +17,7 @@ import { profileScenes } from "./profileScenes";
 import { fleetDeviceScenes } from "./fleetDeviceScenes";
 import { mapScenes } from "./mapScenes";
 import { deployableStatisticsScenes } from "./deployableStatisticsScenes";
-import { wholesaleScenes, WHOLESALE_CLICKS } from "./wholesaleScenes";
+import { QA_DOCUMENT, wholesaleScenes, WHOLESALE_CLICKS } from "./wholesaleScenes";
 import { storeVerdictScenes } from "./storeVerdictScenes";
 import { originsByStoreScenes } from "./originsByStoreScenes";
 import { emailOverviewScenes } from "./emailOverviewScenes";
@@ -2421,6 +2421,12 @@ clicks.forEach((label, i) => {
       const field = label.slice(6);
       const target = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")).find(el => el.getAttribute("aria-label") === field || Array.from(el.labels ?? []).some(l => l.textContent?.trim() === field));
       target?.focus();
+      return;
+    }
+    // `file:document` chooses a store document's Markdown in the page's file input.
+    if (label === "file:document") {
+      const target = document.querySelector<HTMLInputElement>('input[type="file"]');
+      if (target) { const data = new DataTransfer(); data.items.add(new File([QA_DOCUMENT], "trade-terms.md", { type: "text/markdown" })); target.files = data.files; target.dispatchEvent(new Event("change", { bubbles: true })); }
       return;
     }
     if (label === "file:people") {
