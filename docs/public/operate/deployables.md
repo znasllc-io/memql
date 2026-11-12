@@ -910,18 +910,27 @@ reason is a hover away:
 | Figure | Absent, or a floor, when | Its reason |
 |---|---|---|
 | every money figure | the store's currency is not recorded | "The store's currency has not been recorded yet." |
-| Refunds, Net sales, Total sales, Units sold | a refund in the period has not had its detail read from Shopify | "1 refund is still being read from Shopify." (or "N refunds are ...") |
+| Refunds, Net sales, Total sales, Units sold | a refund in the period has not had its detail read from Shopify, whatever its order's currency | "1 refund is still being read from Shopify." (or "N refunds are ...") |
 | Units sold | a refund in the period holds a full page of lines, so it may hold more | "A refund in this period has more lines than were recorded." |
 | Average order value | the period has no order in the store's currency | "No orders in this period." when Orders is zero |
 | Gross sales, Discounts, Net sales, Total sales, Average order value, Units sold | an order in the period has fewer lines recorded than it holds | none: shown with "or more", a floor and not an exact sum |
 
-A refund not read leaves both lists of products absent too, and a refund with
-a full page of lines the list by units. A figure can be below zero: a day on
-which more was refunded than sold hangs below the chart's zero line.
+A refund not read is counted whatever its order's currency, so one on an order
+in another currency also blanks the store-currency Refunds, Net sales and
+Total sales until its detail is read: the cautious side, on purpose. A refund
+not read, and a refund with a full page of lines, also leave both lists of
+products, the count of products and the line about refunds that name no
+product absent. A refund with a full page of lines leaves every money figure
+and the wholesale split as they are; a refund not read blanks the Net sales of
+its order's side of the split. A figure
+can be below zero: a day on which more was refunded than sold hangs below the
+chart's zero line.
 
 **Records that could not be read.** A mirrored row the statistics cannot make
-a figure from -- an amount that is not an amount, a missing date -- is
-counted and left out of every figure, and the notice says so in every state:
+a figure from -- an amount that is not an amount, a missing date -- makes no
+new figure. If an earlier version of it was read, that version stays in the
+figures until a readable version arrives; if none was, the row is in no
+figure. Either way it is counted, and the notice says how many in every state:
 "1 record of this store could not be read and is left out of these figures."
 (or "N records ... are left out of these figures.").
 
@@ -933,9 +942,8 @@ but the average draws it over the period. Then:
   which opens the whole list the engine answers, the leading 25, under the same
   trail and the same notice. Its footer says "The 8 best-selling of N
   products." when there are more, and, when they apply, "Refunds of" an amount
-  "name no product, so they are in Net sales and not here.", "N orders have
-  more lines than were recorded, so these are floors." and "N refunds have more
-  lines than were recorded, so units are not exact."
+  "name no product, so they are in Net sales and not here." and "N orders have
+  more lines than were recorded, so these are floors."
 - **Buyers**: New, Returning and "No customer recorded".
 - **Wholesale and retail**, by Net sales or by Orders, only when the wholesale
   pack is enabled and set up for the store. An order is wholesale when its
@@ -945,7 +953,9 @@ but the average draws it over the period. Then:
 A list sent empty says "No orders in this period." when Orders is zero, and
 "Nothing to list for this period." otherwise. Orders in a currency other than
 the store's are counted, never summed, and named under the lists, as in "2
-orders in USD are not in these sums." The page's help says in short what each
+orders in USD are not in these sums." A refund of such an order whose detail
+has not been read still blanks the store-currency Refunds, Net sales and Total
+sales until it is read. The page's help says in short what each
 figure means and where it differs from Shopify's own reports.
 
 ---

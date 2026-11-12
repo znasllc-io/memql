@@ -1270,10 +1270,13 @@ twice, or by two nodes at once, changes nothing.
   can bring it back. A deleted fact counts nowhere, and neither do the lines
   and refunds of a deleted order.
 - **A row the statistics cannot read** -- an amount that is not one, a missing
-  date, amounts in two currencies -- makes no fact. It is counted, logged with
-  its id and the name of the field and never a value, left out of every
-  figure, and named in the page's notice. Its record goes once a check pass
-  no longer meets the row.
+  date, amounts in two currencies -- makes no new fact. If an earlier version
+  of the row was read, that version's fact stays in the figures, and the walk
+  and the check both keep it, until a readable version arrives; if none was,
+  the row is in no figure. Either way it is recorded, logged with its id and
+  the name of the field and never a value, and the page's notice says how many
+  records are in that state. A record goes once a readable version of its row
+  is read, or once a whole check pass no longer meets the row.
 - **The verdict.** Each turn reads the store's verdict
   ([the Store page](#the-storefronts-store-page)) and keeps it. When a reason
   of it concerns orders, lines, refunds or the shop, or the store is paused or
@@ -1301,7 +1304,10 @@ twice, or by two nodes at once, changes nothing.
   currency and for their refunds. An order in another currency is counted in
   Orders and Units sold and named on the page, never summed: no rate between
   two currencies is known to the engine. A store that changed its currency
-  sums only its orders in the new one.
+  sums only its orders in the new one. A refund whose detail has not been read
+  is counted whatever its order's currency, so one on an order in another
+  currency blanks the store-currency Refunds, Net sales and Total sales until
+  it is read: the cautious side, on purpose.
 
 ### The figures
 
@@ -1320,7 +1326,7 @@ the period's counted orders and the counted refunds made in the period:
 | **Orders** | the counted orders placed in the period, in every currency | cancelled, deleted and (outside a development store) test orders |
 | **Average order value** | Gross sales less Discounts, over the period's orders in the store's currency. Absent when there is none | Refunds |
 | **Units sold** | the units sold on the lines of the period's orders, less the units on the refund lines of the period's refunds, in every currency. Below zero in a period with more returned than sold | gift cards; a refund line naming a line the store has since deleted |
-| **Products** | per product -- a line with no product by its title -- the lines' gross less their discounts less its refund lines' subtotals (by net sales, in the store's currency), or its units sold less those returned (by units). Labelled by the title of its newest line. The leading 25 | gift cards. The part of Refunds that names no product is in Net sales and in no product, and the page says how much |
+| **Products** | per product -- a line with no product by its title -- the lines' gross less their discounts less its refund lines' subtotals (by net sales, in the store's currency), or its units sold less those returned (by units). Labelled by the title of its newest line sold in the period; a refund of an older line never renames it, and a product the period holds only through refunds takes the title of the line of its latest refund. The leading 25 | gift cards. The part of Refunds that names no product is in Net sales and in no product, and the page says how much |
 | **Buyers** | each Shopify customer of the period's orders: new when their first counted order the statistics hold is in the period, returning when they have one before it. Orders with no customer are counted apart | anything about the person. History begins where the mirror's does, so "new" means new since then |
 | **Wholesale and retail** | Orders and Net sales, split: an order is wholesale when its email, trimmed and in lower case, is the buyer email of a `granted` wholesale entitlement of the same store now. A refund is on its order's side | everything, when the wholesale pack is off on the node or has no settings row for the store: the block is absent |
 | **By day** | each figure but the average, per hour over 24 hours, per store day over 7 to 90 days, per store month over 12 months | |
@@ -1388,10 +1394,17 @@ From the mirror's side:
   [Step 4](#step-4----what-happens-next)) makes Refunds, Net sales, Total sales
   and Units sold absent for every period it falls in, with "N refunds are still
   being read from Shopify.", until its order is read again. Its money total is
-  known; how much of it was shipping or tax is not.
-- **A refund holding a full page of lines (50)** may hold more, so Units sold
-  is absent for its periods. Refunds stays exact, because it starts from the
-  money that went back.
+  known; how much of it was shipping or tax is not. Such a refund is counted
+  whatever its order's currency, so one on an order in another currency blanks
+  the store-currency Refunds, Net sales and Total sales too, until its detail
+  is read: the cautious side, on purpose. It also leaves both lists of
+  products, the count of products and the refunds that name no product
+  absent, and the Net sales of its order's side of the wholesale split.
+- **A refund holding a full page of lines (50)** may hold more, and lines past
+  the page are on no product. So Units sold, both lists of products, the count
+  of products and the refunds that name no product are absent for its
+  periods. Refunds, Net sales, Total sales and the wholesale split stay exact,
+  because Refunds starts from the money that went back.
 - **An order whose recorded lines hold fewer units than the order says it
   has** makes Gross sales, Discounts, Net sales, Total sales, Average order
   value and Units sold floors for its period, shown with "or more".
@@ -1405,13 +1418,20 @@ which keeps its write time (a customer's erasure does that), and a fact that
 was lost or changed by hand. So the check reads each store's orders, lines and
 refunds again from the start of its history, recomputes each fact from the row
 in hand, and compares it by version and by content. A fact that differs, or is
-missing, is written again from its row. When a pass has read all three to the
-present, the facts no mirrored row answered for are deleted in batches, and the
-pass ends.
+missing, is written again from its row. An order's wholesale side is the one
+exception: it is judged only when the check holds the granted set the store
+keeps -- the store enabled in both, the same set its orders were last judged
+with, and no wholesale pass under way. Otherwise the side is left as the walk
+and the wholesale pass wrote it, and judged at a later run. A row that cannot
+be read keeps the fact of its last readable version through the check as well.
+When a pass has read all three to the present, the facts no mirrored row
+answered for are deleted in batches, and the pass ends.
 
-A run carries each store's pass on by at most 40 pages of each of the three, so
-a small store's pass ends within one run and a larger store's is carried over
-several hourly runs. A store is checked only when its walk is within ten
+A run carries each store's pass on by at most 40 pages of each of the three. A
+run has thirty minutes in all and each store a turn of thirty seconds within
+it, so a small store's pass ends within one run unless its turn or the run's
+time runs out first, and a larger store's is carried over several hourly runs.
+A store is checked only when its walk is within ten
 minutes of the present and it is not being rebuilt, not having its facts
 deleted, and not in the middle of judging its wholesale orders again. A row
 written in the five minutes before a pass began is the walk's to fold, not the
@@ -1446,7 +1466,7 @@ builtin storeStatisticsCheckState(storeId: "<storeId>")
 
 `storeId` is the store's bare id or `v1:shopify:store:<id>`. Neither this
 builtin nor the rebuild is in the generated clients. Each admits only a person
-who is a cluster owner, not one of the engine's maintenance principals, and
+who is a cluster owner, and nobody acting for the engine, and
 refuses anyone else with "store statistics check state is for a cluster
 owner"; a store the statistics hold no row for is refused with "Store
 statistics has no store with that id."
@@ -1455,11 +1475,16 @@ statistics has no store with that id."
 
 A customer's erasure ([Step 5](#step-5----the-compliance-topics)) rewrites the
 customer's mirror rows in place and keeps their write times, so the walk does
-not see it. The check does: the next pass that reaches the store's rows finds
-each changed fact and writes it again. On a store whose walk has caught up and
-whose pass ends within one run, that is the next hourly run. After it:
+not see it. The check does: the next pass that reaches the store's rows after
+the erasure finds each changed fact and writes it again. An erasure that lands
+while a page of the pass is being checked is compared by what the page read
+before it, so it waits for the following pass. No hour is promised: a pass
+needs the store's walk caught up, and may be carried over several runs
+(above). After the pass that reaches it:
 
-- the order, whose email was scrubbed, is retail;
+- the order, whose email was scrubbed, is retail -- at the first such pass that
+  holds the store's granted set ([The check](#the-check)); until then its side
+  stands as it was;
 - a custom item (a line with no product), whose title a person typed and the
   erasure scrubbed, holds the erasure's marker as its title and product, and
   is listed under it;
@@ -1515,13 +1540,16 @@ group only after, for the store their storefront fronts:
   run.
 - **How fast a store's rows may arrive.** A run reads at most 40 pages of each
   of the three for a store, and the next run reads again the five minutes
-  behind where it stopped. When a page is read in well under a second, that is
-  far above any one store's rate. With pages that take several seconds, a
-  store whose rows arrive at about half the rate its pages can be read stays a
-  few minutes behind, within the five minutes the walk reads again, and one at
-  nine tenths of it falls further behind at every run. Behind is not lost:
-  every run moves forward and reports the store behind.
-- **Orders in another currency** are counted and named, never summed.
+  behind where it stopped; that re-read is what limits how fast a store's
+  rows may arrive. When a page is read in well under a second, the limit is
+  far above any one store's rate. With pages near the statement timeout, a
+  store whose rows arrive at half the rate its pages can be read stays at most
+  a few minutes behind, and one at nine tenths of it falls further behind at
+  every run. Behind is not lost: every run moves forward and reports the
+  store behind.
+- **Orders in another currency** are counted and named, never summed; a refund
+  of one whose detail has not been read still blanks the store-currency
+  Refunds, Net sales and Total sales until it is read.
 - **Refunds, edits and cancellations of orders placed more than 60 days ago
   are not recorded** on a store whose grant lacks `read_all_orders`, which is
   every store on the shared app ([What the mirror cannot do](#what-the-mirror-cannot-do)).
@@ -1531,10 +1559,11 @@ group only after, for the store their storefront fronts:
 - **A refund of an order Shopify no longer shows** never gets its detail, so
   Refunds, Net sales, Total sales and Units sold stay absent for good for the
   periods it falls in.
-- **A refund line naming a line the store has since deleted** stays in
-  Refunds, and in the refunds that name no product, whatever kind of line it
-  was: once the line is gone the statistics cannot tell. Its units are not
-  taken from Units sold.
+- **A refund line naming a line the store has since deleted** is taken for no
+  item return: its amount stays in Refunds, and in the refunds that name no
+  product, whatever kind of line it was -- a deleted gift-card line included,
+  since once the line is gone the statistics cannot tell -- and its units are
+  not taken from Units sold.
 - **An order deleted in the store** leaves every figure, with its lines and
   refunds, for good, and the check ends clean over it.
 - **A write the walk missed** by more than its five minutes is found by the
