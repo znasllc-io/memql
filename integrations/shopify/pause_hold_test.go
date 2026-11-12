@@ -22,8 +22,12 @@ import (
 // stamped processed. The sweep after a resume reads what changed, but a
 // domain swept by its last-changed time cannot see a deletion, so a record
 // deleted during a pause stayed in the mirror for good. The connector now
-// answers such a delivery as paused, the runtime holds it, and a resume
-// returns what was held and queues the backfills the store never started.
+// answers such a delivery as paused and the runtime holds it. What is held
+// comes back BY STATE: every pass of the store watch returns the held
+// deliveries of every store that ingests, whatever resumed the store and
+// however the last return ended. The act that resumes a store returns one page
+// before it answers, and the pass that sees a store leave its pause queues the
+// backfills the store never started.
 
 // pauseEngine is the harness engine with what a pause and a resume read back
 // kept: each domain's sync state by its id (a queued backfill reads as
@@ -208,8 +212,10 @@ func TestAStoreThatIsNotConnectedStillDropsItsDeliveries(t *testing.T) {
 }
 
 // A resume through the Store page: the status is written, and then what the
-// resume owes the store is done as the operator -- its held deliveries are
-// put back in line, and the backfills it never started are queued.
+// resume owes the store is done as the operator -- ONE PAGE of its held
+// deliveries is put back in line, so the person is answered at once, and the
+// backfills it never started are queued. The rest of what is held is the
+// watch's.
 func TestResumingAStoreReturnsItsHeldDeliveriesAndQueuesWhatItNeverRead(t *testing.T) {
 	h, e := pauseHarness(t, StatusPaused, nil)
 	// The customers were never backfilled: the store was paused before the
@@ -226,8 +232,8 @@ func TestResumingAStoreReturnsItsHeldDeliveriesAndQueuesWhatItNeverRead(t *testi
 	if len(returns) != 1 {
 		t.Fatalf("the held deliveries were returned %d times, want once: %v", len(returns), returns)
 	}
-	if want := `builtin datasyncReturnHeldInbound(source: "shopify-` + testStoreID + `")`; returns[0].query != want {
-		t.Errorf("the return = %s, want %s", returns[0].query, want)
+	if want := `builtin datasyncReturnHeldInbound(limit: 50, source: "shopify-` + testStoreID + `")`; returns[0].query != want {
+		t.Errorf("the return = %s, want %s: one page, and no more before the act answers", returns[0].query, want)
 	}
 	if !returns[0].internal || !auth.IsSystemActorId(returns[0].userId) {
 		t.Errorf("the return ran as %q (internal %t), want the operator: the builtin admits nobody else but a cluster owner", returns[0].userId, returns[0].internal)
@@ -248,10 +254,7 @@ func TestResumingAStoreReturnsItsHeldDeliveriesAndQueuesWhatItNeverRead(t *testi
 	}
 
 	// Done twice, it does nothing twice: the queued domains read as queued.
-	store := h.store(t)
-	if err := h.conn.resumeStore(context.Background(), store); err != nil {
-		t.Fatalf("a second resume: %v", err)
-	}
+	h.conn.resumeStore(context.Background(), h.store(t))
 	if got := strings.Join(e.queued(), ","); got != "customer,product" {
 		t.Errorf("a second resume queued again: %q", got)
 	}
@@ -279,92 +282,179 @@ func TestOnlyAResumeThatWasWrittenReturnsHeldDeliveries(t *testing.T) {
 	}
 }
 
-// A return that fails does not undo the resume: the store is recording, the
-// person is told so, and the watch returns what is still held.
+// THE ACT NEVER FAILS FOR WHAT IT OWES. A return that fails, or a backfill that
+// cannot be queued, does not undo the resume or fail the act: the store is
+// recording, the person is told so, and the watch does the rest.
 func TestAFailedReturnDoesNotUndoTheResume(t *testing.T) {
-	h, e := pauseHarness(t, StatusPaused, nil)
-	h.engine.fail["datasyncReturnHeldInbound"] = errString("the database is away")
-	reply := invoke(t, actorCtx("user-1", auth.RoleWriter), NewIntegration(h.conn).handleStoreSetRecording, map[string]any{"storeId": testStoreID, "recording": true})
-	if reply["status"] != StatusLive || e.row["status"] != StatusLive {
-		t.Fatalf("reply %v, stored status %v; want the resume to stand", reply, e.row["status"])
-	}
-	if n := len(e.callsNamed("createAuditEvent")); n != 1 {
-		t.Errorf("the resume was audited %d times, want once", n)
+	for _, failing := range []string{"datasyncReturnHeldInbound", "datasyncQueueBackfill"} {
+		h, e := pauseHarness(t, StatusPaused, nil)
+		delete(e.states, memqlsync.StateID(generated.ConceptID("customer"), ConnectorName, string(memqlsync.DirectionInbound), testStoreID))
+		h.engine.fail[failing] = errString("the database is away")
+		reply := invoke(t, actorCtx("user-1", auth.RoleWriter), NewIntegration(h.conn).handleStoreSetRecording, map[string]any{"storeId": testStoreID, "recording": true})
+		if reply["status"] != StatusLive || e.row["status"] != StatusLive {
+			t.Fatalf("%s failing: reply %v, stored status %v; want the resume to stand", failing, reply, e.row["status"])
+		}
+		if n := len(e.callsNamed("createAuditEvent")); n != 1 {
+			t.Errorf("%s failing: the resume was audited %d times, want once", failing, n)
+		}
 	}
 }
 
-// THE WATCH RETURNS WHAT THE ACT COULD NOT. A store resumed by a raw status
-// change never ran the act, and an act's return can fail half-way. The pass
-// that records that the store left its pause returns its held deliveries; a
-// pass whose return failed does not record the resume, so the next pass sees
-// the store leaving its pause again and returns what is left. Once recorded,
-// no later pass returns anything.
-func TestTheWatchReturnsHeldDeliveriesWhenItRecordsThatAStoreResumed(t *testing.T) {
-	paused := verdictIn(VerdictPaused, watchNow.Add(-2*time.Hour))
-	h, e := pauseHarness(t, StatusLive, map[string]any{"verdict": recordedAs(paused)})
-	recorded := func() string {
-		v, _ := e.row["health"].(map[string]any)["verdict"].(map[string]any)
-		return mapString(v, "state")
+// watchPass is one pass of the store watch at `at`.
+func watchPass(t *testing.T, h *testHarness, at time.Time) {
+	t.Helper()
+	h.now = at
+	if err := h.conn.WatchStores(context.Background()); err != nil {
+		t.Fatalf("the pass: %v", err)
 	}
-	pass := func() {
-		t.Helper()
-		if err := h.conn.WatchStores(context.Background()); err != nil {
-			t.Fatalf("the pass: %v", err)
+}
+
+// recordedState is the state of the verdict the watch last recorded.
+func recordedState(e *pauseEngine) string {
+	v, _ := e.row["health"].(map[string]any)["verdict"].(map[string]any)
+	return mapString(v, "state")
+}
+
+// EVERY PASS RETURNS, BY STATE. A store that ingests is asked for its held
+// deliveries on every pass of the watch, whatever the watch last recorded of
+// it: a store paused and resumed by two direct status writes between two
+// passes was never seen paused, and a return that stopped at its bound has
+// more to give. The call names no bound -- the runtime's own -- and runs as
+// the operator. When nothing is held it is one read.
+func TestEveryWatchPassReturnsTheHeldDeliveriesOfAStoreThatIngests(t *testing.T) {
+	for name, previous := range map[string]map[string]any{
+		"recording, as last recorded":                 recordedAs(verdictIn(VerdictRecording, watchNow.Add(-time.Hour))),
+		"never watched":                               nil,
+		"recorded as paused, resumed since that pass": recordedAs(verdictIn(VerdictPaused, watchNow.Add(-2*time.Hour))),
+	} {
+		var health map[string]any
+		if previous != nil {
+			health = map[string]any{"verdict": previous}
+		}
+		h, e := pauseHarness(t, StatusLive, health)
+		for pass := 1; pass <= 3; pass++ {
+			watchPass(t, h, watchNow.Add(time.Duration(pass-1)*5*time.Minute))
+			returns := e.callsNamed("datasyncReturnHeldInbound")
+			if len(returns) != pass {
+				t.Fatalf("%s: after %d passes the held deliveries were asked for %d times, want once a pass", name, pass, len(returns))
+			}
+			last := returns[len(returns)-1]
+			if want := `builtin datasyncReturnHeldInbound(source: "shopify-` + testStoreID + `")`; last.query != want {
+				t.Errorf("%s: the return = %s, want %s: the store's own source and the runtime's own bound", name, last.query, want)
+			}
+			if !last.internal || !auth.IsSystemActorId(last.userId) {
+				t.Errorf("%s: the return ran as %q (internal %t), want the operator", name, last.userId, last.internal)
+			}
 		}
 	}
+}
+
+// A STORE THAT DOES NOT INGEST IS NEVER ASKED: its deliveries stay held, or
+// are nobody's to return. A paused store is not resumed by being watched.
+func TestAWatchPassAsksNothingOfAStoreThatDoesNotIngest(t *testing.T) {
+	recording := recordedAs(verdictIn(VerdictRecording, watchNow.Add(-time.Hour)))
+	for name, tc := range map[string]struct {
+		status string
+		over   map[string]any
+	}{
+		"still paused":               {StatusPaused, nil},
+		"paused since the last pass": {StatusPaused, nil},
+		"uninstalled":                {StatusLive, map[string]any{"uninstalledAt": "2026-11-10T10:00:00Z"}},
+		"purged":                     {StatusPaused, map[string]any{"redactedAt": "2026-11-10T10:00:00Z"}},
+		"in error":                   {StatusError, nil},
+	} {
+		previous := recording
+		if name == "still paused" {
+			previous = recordedAs(verdictIn(VerdictPaused, watchNow.Add(-time.Hour)))
+		}
+		h, e := pauseHarness(t, tc.status, map[string]any{"verdict": previous})
+		for k, v := range tc.over {
+			e.row[k] = v
+		}
+		for pass := 0; pass < 2; pass++ {
+			watchPass(t, h, watchNow.Add(time.Duration(pass)*5*time.Minute))
+		}
+		if n := len(e.callsNamed("datasyncReturnHeldInbound")); n != 0 {
+			t.Errorf("%s: held deliveries were asked for %d times", name, n)
+		}
+		if got := e.queued(); len(got) != 0 {
+			t.Errorf("%s: queued %v", name, got)
+		}
+	}
+}
+
+// A FAILED RETURN HOLDS NOTHING BACK. The pass records the store as it is --
+// here, that it left its pause -- whether or not the return worked, and the
+// next pass asks again, because it asks by state.
+func TestAFailedReturnDoesNotStopThePassRecordingTheVerdict(t *testing.T) {
+	h, e := pauseHarness(t, StatusLive, map[string]any{"verdict": recordedAs(verdictIn(VerdictPaused, watchNow.Add(-2*time.Hour)))})
 	returns := func() int { return len(e.callsNamed("datasyncReturnHeldInbound")) }
 
-	// The return fails: the resume is not recorded.
 	h.engine.fail["datasyncReturnHeldInbound"] = errString("the database is away")
-	pass()
-	if returns() != 1 || recorded() != VerdictPaused {
-		t.Fatalf("after a pass whose return failed: %d returns, recorded %q; want one try and the store still recorded as paused", returns(), recorded())
-	}
-
-	// The next pass tries again, succeeds, and records the store as it is.
-	delete(h.engine.fail, "datasyncReturnHeldInbound")
-	h.now = watchNow.Add(5 * time.Minute)
-	pass()
-	if returns() != 2 || recorded() == VerdictPaused {
-		t.Fatalf("after the next pass: %d returns, recorded %q; want a second try and the resume recorded", returns(), recorded())
+	watchPass(t, h, watchNow)
+	if returns() != 1 || recordedState(e) == VerdictPaused {
+		t.Fatalf("after a pass whose return failed: %d returns, recorded %q; want one try and the resume recorded all the same", returns(), recordedState(e))
 	}
 	if resumed := mapString(e.row["health"].(map[string]any)["verdict"].(map[string]any), "resumedAt"); resumed == "" {
 		t.Error("the recorded verdict carries no resumedAt")
 	}
 
-	// Recorded: later passes return nothing.
-	for i := 2; i < 4; i++ {
-		h.now = watchNow.Add(time.Duration(i) * 5 * time.Minute)
-		pass()
-	}
+	delete(h.engine.fail, "datasyncReturnHeldInbound")
+	watchPass(t, h, watchNow.Add(5*time.Minute))
 	if returns() != 2 {
-		t.Errorf("passes after the resume was recorded returned held deliveries %d more times", returns()-2)
+		t.Fatalf("the pass after a failed return asked %d times in all, want a second try", returns())
 	}
 }
 
-// A store the watch never saw paused has nothing held to return, and a store
-// still paused is not resumed by being watched.
-func TestTheWatchReturnsNothingForAStoreThatDidNotResume(t *testing.T) {
-	recording := verdictIn(VerdictRecording, watchNow.Add(-time.Hour))
-	for name, tc := range map[string]struct {
-		status   string
-		previous map[string]any
-	}{
-		"recording, as last recorded": {StatusLive, recordedAs(recording)},
-		"never watched":               {StatusLive, nil},
-		"still paused":                {StatusPaused, recordedAs(verdictIn(VerdictPaused, watchNow.Add(-time.Hour)))},
-		"paused since the last pass":  {StatusPaused, recordedAs(recording)},
-	} {
-		var health map[string]any
-		if tc.previous != nil {
-			health = map[string]any{"verdict": tc.previous}
-		}
-		h, e := pauseHarness(t, tc.status, health)
-		if err := h.conn.WatchStores(context.Background()); err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		if n := len(e.callsNamed("datasyncReturnHeldInbound")); n != 0 {
-			t.Errorf("%s: held deliveries were returned %d times", name, n)
-		}
+// THE EDGE KEEPS ONE JOB: the pass that sees a store leave its pause queues
+// the backfills the store never started, once. A pass after the resume was
+// recorded queues nothing, even for a domain that reads as never backfilled:
+// that is the boot pass's to find, not every pass's.
+func TestTheWatchQueuesAResumedStoresUnstartedBackfillsOnce(t *testing.T) {
+	h, e := pauseHarness(t, StatusLive, map[string]any{"verdict": recordedAs(verdictIn(VerdictPaused, watchNow.Add(-2*time.Hour)))})
+	customers := memqlsync.StateID(generated.ConceptID("customer"), ConnectorName, string(memqlsync.DirectionInbound), testStoreID)
+	delete(e.states, customers)
+
+	watchPass(t, h, watchNow)
+	if got := strings.Join(e.queued(), ","); got != "customer" {
+		t.Fatalf("the pass that saw the store resume queued %q, want the one domain no backfill ever read", got)
+	}
+	if recordedState(e) == VerdictPaused {
+		t.Fatal("the resume was not recorded")
+	}
+
+	e.mu.Lock()
+	delete(e.states, customers)
+	e.mu.Unlock()
+	for pass := 1; pass <= 2; pass++ {
+		watchPass(t, h, watchNow.Add(time.Duration(pass)*5*time.Minute))
+	}
+	if got := strings.Join(e.queued(), ","); got != "customer" {
+		t.Errorf("passes after the resume was recorded queued again: %q", got)
+	}
+}
+
+// A RESUME WHOSE BACKFILLS COULD NOT BE QUEUED IS NOT RECORDED, so the next
+// pass still sees the store leaving its pause and queues them then.
+func TestAResumeWhoseBackfillsCouldNotBeQueuedIsSeenAgainByTheNextPass(t *testing.T) {
+	h, e := pauseHarness(t, StatusLive, map[string]any{"verdict": recordedAs(verdictIn(VerdictPaused, watchNow.Add(-2*time.Hour)))})
+	customers := memqlsync.StateID(generated.ConceptID("customer"), ConnectorName, string(memqlsync.DirectionInbound), testStoreID)
+	delete(e.states, customers)
+	queued := func() bool {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		return e.states[customers] != nil
+	}
+
+	h.engine.fail["datasyncQueueBackfill"] = errString("the database is away")
+	watchPass(t, h, watchNow)
+	if queued() || recordedState(e) != VerdictPaused {
+		t.Fatalf("a pass that could not queue the store's backfills: queued %t, recorded %q; want the store still recorded as paused", queued(), recordedState(e))
+	}
+
+	delete(h.engine.fail, "datasyncQueueBackfill")
+	watchPass(t, h, watchNow.Add(5*time.Minute))
+	if !queued() || recordedState(e) == VerdictPaused {
+		t.Fatalf("the next pass: queued %t, recorded %q; want the customers queued and the resume recorded", queued(), recordedState(e))
 	}
 }

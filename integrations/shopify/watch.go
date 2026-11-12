@@ -488,6 +488,13 @@ func (c *Connector) outboundOutcome(ctx context.Context, requestID string) (outb
 // verdict cannot be computed or recorded is logged by its id and the pass
 // goes on; the pass fails only when it cannot list the stores, and stops,
 // with the context's error, when its context is done.
+//
+// THE PASS ALSO RETURNS WHAT IS HELD, BY STATE (resume.go). For every store
+// that ingests, the runtime is asked to put its held deliveries back in line:
+// not because the store was seen to resume, but because it ingests and may
+// hold some. A return that fails is logged and stops nothing -- the verdict is
+// still computed and recorded -- and the next pass asks again. A store that
+// does not ingest is not asked.
 func (c *Connector) WatchStores(ctx context.Context) error {
 	stores, err := c.stores.Stores(memql.ContextWithFreshRead(ctx))
 	if err != nil {
@@ -497,6 +504,12 @@ func (c *Connector) WatchStores(ctx context.Context) error {
 	for _, store := range stores {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if store.Ingests() {
+			if err := c.returnHeld(ctx, store, 0); err != nil {
+				c.logger.Warn("shopify: the store watch could not return a store's held deliveries; the next pass asks again",
+					"store", store.ID, "error", scrubAddresses(err.Error(), ""))
+			}
 		}
 		v, err := c.storeVerdict(ctx, store)
 		if err == nil {
@@ -560,7 +573,8 @@ func (c *Connector) watchStoreVerdict(ctx context.Context, store Store, v Verdic
 	}
 
 	if err := c.resumeSeenByWatch(ctx, store, previous, v); err != nil {
-		// Not recorded: the next pass still sees the store resume (resume.go).
+		// The backfills of a store that resumed could not all be queued. Not
+		// recorded: the next pass still sees the store resume (resume.go).
 		return errors.Join(append(errs, err)...)
 	}
 	if verdictRecordChanged(previous, rec) {

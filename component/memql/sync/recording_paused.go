@@ -18,9 +18,11 @@ import (
 // So a pause HOLDS, it does not lose. The connector answers this error for a
 // paused tenant's delivery instead of "nothing to write", the dispatcher keeps
 // the delivery as it is -- failed, with no next try, and the try not counted
-// -- and the connector puts its tenant's held deliveries back in line when the
-// tenant resumes. Only a pause a person chose is answered this way: a tenant
-// the origin has cut off is not waiting for anybody.
+// -- and the connector puts its tenant's held deliveries back in line once the
+// tenant records again. It asks for them by state, not on the event of a
+// resume: whatever resumed the tenant, a delivery held for one that records
+// does not stay held. Only a pause a person chose is answered this way: a
+// tenant the origin has cut off is not waiting for anybody.
 
 // ErrRecordingPaused is a connector's answer for a delivery of a tenant whose
 // recording a person paused. It is not a failure of the delivery and it is not

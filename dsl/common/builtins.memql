@@ -740,13 +740,15 @@ builtin datasyncContinueBackfills { }
 @description("Try again the failed inbound deliveries whose next try has come: one page of inboundRequestsDueForRetry, each row claimed behind its row version (a second pass that claims it first leaves it alone) and dispatched as dispatchInbound dispatches a staged row. A delivery gets four tries, 1, 5 and 30 minutes apart; a refusal no retry changes is not tried again. Refuses a call without internal origin.")
 builtin datasyncRetryInbound { }
 
-// A connector drives this one, as the operator and with internal origin, when
-// one of its stores resumes; it carries no @sdk. Its handler admits that call
-// and a cluster owner, and refuses anybody else.
+// A connector drives this one, as the operator and with internal origin: one
+// page when a person resumes one of its stores, and on every pass of its watch
+// for every store that ingests. It carries no @sdk. Its handler admits that
+// call and a cluster owner, and refuses anybody else.
 @executor("integration.datasync.returnHeldInbound")
-@description("Put the held inbound deliveries of one source back in line: every delivery of that source a connector would not apply while its store's recording was paused -- failed, with no next try and the pause as its reason -- has its tries set to none and is due now, so the retry pass works it within a minute. A delivery whose store is still paused is held again. One call returns at most five thousand and answers an error when more remain. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.")
+@description("Put the held inbound deliveries of one source back in line: a delivery of that source a connector would not apply while its store's recording was paused -- failed, with no next try and the pause as its reason -- has its tries set to none and is due now, so the retry pass works it within a minute. A delivery whose store is still paused is held again. One call moves at most `limit` deliveries, five thousand when no limit is named, and answers how many it moved and whether it stopped at that bound; with nothing held it is one read and no write. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.")
 builtin datasyncReturnHeldInbound {
   source  string!  @description("The inbound source whose held deliveries go back in line, as the staged rows name it (for Shopify, shopify-<store>).")
+  limit   int      @description("The most deliveries this call moves, from 1 to 5000. Left out, 5000.")
 }
 
 // The five below are the operator's sync acts, behind Cluster > Data's buttons.

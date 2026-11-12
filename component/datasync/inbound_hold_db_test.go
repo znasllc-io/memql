@@ -127,7 +127,7 @@ func TestTheHeldReadAnswersOnlyTheHeldDeliveriesOfOneSource(t *testing.T) {
 	// The return: both back in line, due now and with no tries counted; and
 	// nothing else moved.
 	f.clock = at
-	n, err := f.d.ReturnHeld(f.ctx, mine)
+	n, _, err := f.d.ReturnHeld(f.ctx, mine, 0)
 	if err != nil || n != 2 {
 		t.Fatalf("ReturnHeld = %d, %v; want the two held deliveries", n, err)
 	}
@@ -152,7 +152,7 @@ func TestTheHeldReadAnswersOnlyTheHeldDeliveriesOfOneSource(t *testing.T) {
 		t.Fatalf("after the return the held read still answers %v", got)
 	}
 	// A second return finds nothing, and moves nothing.
-	if n, err := f.d.ReturnHeld(f.ctx, mine); err != nil || n != 0 {
+	if n, _, err := f.d.ReturnHeld(f.ctx, mine, 0); err != nil || n != 0 {
 		t.Fatalf("a second ReturnHeld = %d, %v; want 0", n, err)
 	}
 
@@ -167,7 +167,7 @@ func TestTheHeldReadAnswersOnlyTheHeldDeliveriesOfOneSource(t *testing.T) {
 	}
 
 	// The store has resumed: returned once more, they are worked.
-	if n, err := f.d.ReturnHeld(f.ctx, mine); err != nil || n != 2 {
+	if n, _, err := f.d.ReturnHeld(f.ctx, mine, 0); err != nil || n != 2 {
 		t.Fatalf("ReturnHeld after the second hold = %d, %v; want 2", n, err)
 	}
 	f.drain(at, nil)

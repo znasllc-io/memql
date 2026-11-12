@@ -3,6 +3,7 @@ package shopify
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -108,14 +109,19 @@ func (c *Connector) queueUnstartedBackfills(ctx context.Context) {
 	}
 	for _, store := range stores {
 		if store.Ingests() {
-			c.queueUnstartedBackfillsOf(ctx, store)
+			// Each domain that could not be queued is logged where it failed;
+			// the next boot, or the store's next resume, queues it.
+			_ = c.queueUnstartedBackfillsOf(ctx, store)
 		}
 	}
 }
 
 // queueUnstartedBackfillsOf queues, for one store, every bulk domain of its
 // connection that was never backfilled. The boot pass asks it of every store
-// that ingests, and a resume of the store that resumed.
+// that ingests, and a resume of the store that resumed. A domain whose row
+// could not be read or whose backfill could not be queued is logged and does
+// not stop the rest; the error says how many were left, so a caller that can
+// ask again (the store watch) knows to.
 //
 // Never backfilled is no row of that store's own, OR a row no backfill ever
 // wrote: no status or `none`, no cursor, and no refusal on it. A sweep or a
@@ -141,7 +147,8 @@ func (c *Connector) queueUnstartedBackfills(ctx context.Context) {
 //
 // Each domain's row is read BY ID (memqlsync.StateID), as store health reads
 // it, never by walking syncStatesAll: those rows are the append-only history.
-func (c *Connector) queueUnstartedBackfillsOf(ctx context.Context, store Store) {
+func (c *Connector) queueUnstartedBackfillsOf(ctx context.Context, store Store) error {
+	left := 0
 	for _, concept := range generated.ApplyOrder {
 		spec := generated.Types[concept]
 		if !bulkDomain(spec) || !domainInConnection(store, spec) {
@@ -151,6 +158,7 @@ func (c *Connector) queueUnstartedBackfillsOf(ctx context.Context, store Store) 
 		res, err := c.engine.Execute(operatorContext(ctx), renderCall("syncStateById", map[string]any{"stateId": stateID}))
 		if err != nil {
 			c.logger.Warn("shopify: could not read a domain's sync state; its backfill is not queued", "store", store.ID, "concept", concept, "error", err.Error())
+			left++
 			continue
 		}
 		if rows := memql.MaterializeRows(res); len(rows) > 0 && mapString(rows[0], "conceptId") != "" &&
@@ -159,12 +167,17 @@ func (c *Connector) queueUnstartedBackfillsOf(ctx context.Context, store Store) 
 		}
 		if err := c.queueBackfill(ctx, store.ID, concept, false); err != nil {
 			c.logger.Warn("shopify: could not queue a backfill", "store", store.ID, "concept", concept, "error", err.Error())
+			left++
 			continue
 		}
 		if concept == "order" {
 			c.stampOrdersFrom(ctx, store, false)
 		}
 	}
+	if left > 0 {
+		return fmt.Errorf("shopify: %d of the domains of store %q could not be read or queued for their backfill", left, store.ID)
+	}
+	return nil
 }
 
 // readBeforeOriginVersions reports whether a domain's sync-state row records a

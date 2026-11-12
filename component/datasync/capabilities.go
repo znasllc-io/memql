@@ -11,6 +11,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // capabilities.go -- the DSL-callable surface of the sync runtime.
@@ -38,7 +39,9 @@ import (
 //	requeueInbound   OPERATOR-DRIVEN. A cluster owner putting one source's
 //	                 given-up deliveries back in line.
 //	returnHeldInbound ENGINE-DRIVEN. A connector putting back in line the
-//	                 deliveries held while one of its tenants was paused.
+//	                 deliveries held while one of its tenants was paused: a
+//	                 page when the tenant is resumed, and on every pass of
+//	                 the connector's watch for every tenant that ingests.
 //
 // The scheduled and event-driven ones are no-ops on a node whose build has no
 // connector bound,
@@ -132,9 +135,12 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "returnHeldInbound",
-			Description: "Put one source's held inbound deliveries -- the ones a connector would not apply while its tenant's recording was paused -- back in line: no tries counted, due now. A connector calls it when the tenant resumes; a delivery whose tenant is still paused is held again. Answers an error when it stopped at its bound with deliveries still held. For a cluster owner or the engine's own call (internal origin); anybody else is refused before anything is read.",
+			Description: "Put one source's held inbound deliveries -- the ones a connector would not apply while its tenant's recording was paused -- back in line: no tries counted, due now. A connector calls it for a tenant that ingests: one page when a person resumes the tenant, and on every pass of its watch; a delivery whose tenant is still paused is held again. Moves at most `limit` deliveries, five thousand when no limit is named, and answers how many it moved and whether it stopped at that bound. With nothing held it is one read and no write. For a cluster owner or the engine's own call (internal origin); anybody else is refused before anything is read.",
 			Handler:     i.handleReturnHeldInbound,
-			ArgsSchema:  map[string]string{"source": "string (required) - the inbound source whose held deliveries go back in line"},
+			ArgsSchema: map[string]string{
+				"source": "string (required) - the inbound source whose held deliveries go back in line",
+				"limit":  "int (optional) - the most deliveries this call moves, from 1 to 5000; 5000 when left out",
+			},
 		},
 		{
 			Name:        "retryOutboxEntry",
@@ -293,21 +299,66 @@ func (i *Integration) handleRequeueInbound(ctx context.Context, args map[string]
 
 // handleReturnHeldInbound is a connector returning the deliveries held while
 // one of its tenants was paused: the Shopify connector, as the operator and
-// with internal origin, when a store resumes. A cluster owner may run it too;
-// nobody else reaches the read.
+// with internal origin -- one page when a person resumes a store, and its
+// watch on every pass for every store that ingests. A cluster owner may run it
+// too; nobody else reaches the read.
+//
+// `limit` is the most deliveries this call moves: left out, the runtime's own
+// bound; named, a whole number from one to that bound, refused otherwise
+// before anything is read. The reply says how many went back in line and
+// whether the call stopped at its bound, with deliveries possibly still held.
 func (i *Integration) handleReturnHeldInbound(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if err := requireOperator(ctx, "returnHeldInbound"); err != nil {
 		return nil, err
 	}
+	limit, err := returnLimit(args)
+	if err != nil {
+		return nil, err
+	}
 	source := strings.TrimSpace(argString(args, "source"))
-	n, err := i.dispatcher.ReturnHeld(ctx, source)
+	n, more, err := i.dispatcher.ReturnHeld(ctx, source, limit)
 	if n > 0 {
-		i.logger.Info("datasync: held inbound deliveries were put back in line", "source", source, "returned", n)
+		i.logger.Info("datasync: held inbound deliveries were put back in line", "source", source, "returned", n, "more", more)
 	}
 	if err != nil {
 		return nil, err
 	}
-	return resultNode("returned", fmt.Sprintf("source=%s returned=%d", source, n))
+	return resultNode("returned", fmt.Sprintf("source=%s returned=%d more=%t", source, n, more))
+}
+
+// returnLimit reads returnHeldInbound's optional bound: 0 for one left out,
+// else a whole number from 1 to maxBackInLine. Anything else is refused.
+func returnLimit(args map[string]any) (int, error) {
+	raw, named := args["limit"]
+	if !named || raw == nil {
+		return 0, nil
+	}
+	refused := fmt.Errorf("datasync: returnHeldInbound's limit is a whole number from 1 to %d, or left out", maxBackInLine)
+	var n int64
+	switch v := raw.(type) {
+	case int:
+		n = int64(v)
+	case int64:
+		n = v
+	case float64:
+		whole, ok := num.WholeInt64(v)
+		if !ok {
+			return 0, refused
+		}
+		n = whole
+	case json.Number:
+		whole, err := v.Int64()
+		if err != nil {
+			return 0, refused
+		}
+		n = whole
+	default:
+		return 0, refused
+	}
+	if n < 1 || n > maxBackInLine {
+		return 0, refused
+	}
+	return int(n), nil
 }
 
 // handleReconcileDomains is the scheduled sweep. A connector that

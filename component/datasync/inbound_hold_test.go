@@ -159,12 +159,12 @@ func TestReturnHeldPutsOneSourcesHeldDeliveriesBackInLine(t *testing.T) {
 	})
 	engine.lose["req-taken"] = true
 
-	n, err := d.ReturnHeld(context.Background(), "shopify-store-1")
+	n, more, err := d.ReturnHeld(context.Background(), "shopify-store-1", 0)
 	if err != nil {
 		t.Fatalf("ReturnHeld: %v", err)
 	}
-	if n != 2 {
-		t.Fatalf("ReturnHeld put %d deliveries back in line, want the two it won", n)
+	if n != 2 || more {
+		t.Fatalf("ReturnHeld put %d deliveries back in line (more %t), want the two it won and no more to do", n, more)
 	}
 	reads := engine.callsContaining("query inboundRequestsHeld(")
 	if len(reads) == 0 {
@@ -193,7 +193,7 @@ func TestReturnHeldPutsOneSourcesHeldDeliveriesBackInLine(t *testing.T) {
 			t.Errorf("the requeue of %s carried no row-version fence: a second return could move a row a pass has claimed", id)
 		}
 	}
-	if _, err := d.ReturnHeld(context.Background(), " "); err == nil {
+	if _, _, err := d.ReturnHeld(context.Background(), " ", 0); err == nil {
 		t.Fatal("a return naming no source was accepted")
 	}
 }
@@ -223,19 +223,111 @@ func (f *freshHeldEngine) Execute(ctx context.Context, q string) (any, error) {
 	return rows, nil
 }
 
-// ONE CALL IS BOUNDED, AND SAYS SO. A return that stopped at its bound with
-// deliveries still held is not a return: it answers an error, so whoever
-// asked for it asks again rather than believing the store's held deliveries
-// are all back in line.
-func TestReturnHeldSaysWhenMoreRemain(t *testing.T) {
-	engine := &freshHeldEngine{fakeEngine: newFakeEngine()}
-	d := retryDispatcher(engine, newFakeWriter(), pausedConnector())
-	n, err := d.ReturnHeld(context.Background(), "shopify-store-1")
-	if n != maxRequeuePages*50 {
-		t.Fatalf("one call put %d deliveries back in line, want its bound of %d", n, maxRequeuePages*50)
+// ONE CALL IS BOUNDED BY WHAT ITS CALLER NAMES, AND SAYS WHEN IT STOPPED THERE.
+// The act that resumes a store returns one page before it answers and leaves
+// the rest to the watch; the watch names nothing and gets the runtime's own
+// bound. Stopping at the bound is not a failure: the next pass returns what is
+// still held, because it asks by state.
+func TestReturnHeldStopsAtTheBoundItsCallerNames(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		limit     int
+		want      int
+		wantReads int
+	}{
+		{"one page, as the act that resumes a store asks", 50, 50, 1},
+		{"fewer than a page", 20, 20, 1},
+		{"a page and a half", 75, 75, 2},
+		{"no bound named: the runtime's own", 0, maxBackInLine, maxBackInLine / 50},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := &freshHeldEngine{fakeEngine: newFakeEngine()}
+			d := retryDispatcher(engine, newFakeWriter(), pausedConnector())
+			n, more, err := d.ReturnHeld(context.Background(), "shopify-store-1", tc.limit)
+			if err != nil {
+				t.Fatalf("a return that stopped at its bound failed: %v", err)
+			}
+			if n != tc.want || !more {
+				t.Fatalf("returned %d (more %t), want %d and more left", n, more, tc.want)
+			}
+			if reads := engine.countContaining("query inboundRequestsHeld("); reads != tc.wantReads {
+				t.Errorf("the held deliveries were read %d times, want %d: nothing is read past the bound", reads, tc.wantReads)
+			}
+			if writes := engine.countContaining("mutation requeueInboundRequest("); writes != tc.want {
+				t.Errorf("%d deliveries were written, want %d", writes, tc.want)
+			}
+		})
 	}
-	if err == nil || !strings.Contains(err.Error(), "more remain") {
-		t.Fatalf("err = %v, want it to say more remain", err)
+}
+
+// A RETURN OF NOTHING IS ONE READ AND NO WRITE. The store watch asks for every
+// store that ingests on every pass, and nearly always nothing is held.
+func TestAReturnOfNothingIsOneReadAndNoWrite(t *testing.T) {
+	engine := newFakeEngine()
+	d := retryDispatcher(engine, newFakeWriter(), pausedConnector())
+	n, more, err := d.ReturnHeld(context.Background(), "shopify-store-1", 0)
+	if err != nil || n != 0 || more {
+		t.Fatalf("ReturnHeld = %d, more %t, %v; want nothing returned and nothing left", n, more, err)
+	}
+	calls := engine.callsContaining("")
+	if len(calls) != 1 || !strings.HasPrefix(calls[0], "query inboundRequestsHeld(") {
+		t.Fatalf("a return of nothing made %v, want one read of the held deliveries and nothing else", calls)
+	}
+}
+
+// THE BOUND IS AN ARGUMENT OF THE BUILTIN, VALIDATED BEFORE ANYTHING IS READ.
+// Left out, the runtime's own bound; named, a whole number from one to that
+// bound. The reply says how many went back and whether the call stopped at
+// its bound.
+func TestTheReturnsBoundIsValidatedInTheHandler(t *testing.T) {
+	internal := auth.ContextWithInternalOrigin(context.Background())
+	for name, limit := range map[string]any{
+		"zero": 0, "negative": -1, "past the runtime's bound": maxBackInLine + 1,
+		"not whole": 1.5, "not a number": "fifty",
+	} {
+		t.Run("refused: "+name, func(t *testing.T) {
+			engine := newFakeEngine()
+			i := &Integration{dispatcher: testDispatcher(engine, newFakeWriter(), &fakeConnector{name: "shopify"}), logger: discardLogger()}
+			_, err := i.handleReturnHeldInbound(internal, map[string]any{"source": "shopify-store-1", "limit": limit}, 0)
+			if err == nil || !strings.Contains(err.Error(), "limit") {
+				t.Fatalf("err = %v, want the limit refused", err)
+			}
+			if n := len(engine.callsContaining("")); n != 0 {
+				t.Fatalf("a refused limit reached the engine %d times", n)
+			}
+		})
+	}
+	for name, tc := range map[string]struct {
+		limit any
+		want  string
+	}{
+		"left out":              {nil, fmt.Sprintf("source=shopify-store-1 returned=%d more=true", maxBackInLine)},
+		"one page":              {50, "source=shopify-store-1 returned=50 more=true"},
+		"as the engine decodes": {float64(50), "source=shopify-store-1 returned=50 more=true"},
+		"as an int64":           {int64(20), "source=shopify-store-1 returned=20 more=true"},
+	} {
+		t.Run("admitted: "+name, func(t *testing.T) {
+			engine := &freshHeldEngine{fakeEngine: newFakeEngine()}
+			i := &Integration{dispatcher: retryDispatcher(engine, newFakeWriter(), pausedConnector()), logger: discardLogger()}
+			args := map[string]any{"source": "shopify-store-1"}
+			if tc.limit != nil {
+				args["limit"] = tc.limit
+			}
+			nodes, err := i.handleReturnHeldInbound(internal, args, 0)
+			if err != nil {
+				t.Fatalf("refused: %v", err)
+			}
+			if len(nodes) != 1 || !strings.Contains(string(nodes[0].Payload), `"outcome":"returned"`) || !strings.Contains(string(nodes[0].Payload), tc.want) {
+				t.Fatalf("reply %s, want returned with %q", nodes[0].Payload, tc.want)
+			}
+		})
+	}
+	// Nothing held: the reply says nothing is left.
+	engine := newFakeEngine()
+	i := &Integration{dispatcher: testDispatcher(engine, newFakeWriter(), &fakeConnector{name: "shopify"}), logger: discardLogger()}
+	nodes, err := i.handleReturnHeldInbound(internal, map[string]any{"source": "shopify-store-1"}, 0)
+	if err != nil || len(nodes) != 1 || !strings.Contains(string(nodes[0].Payload), "returned=0 more=false") {
+		t.Fatalf("a return of nothing answered %v, %v", nodes, err)
 	}
 }
 

@@ -35,6 +35,9 @@ const inboundRetryClaim = 10 * time.Minute
 // maxRequeuePages bounds one Requeue or ReturnHeld call: fifty rows a page.
 const maxRequeuePages = 100
 
+// maxBackInLine is that bound in deliveries: the most one call moves.
+const maxBackInLine = maxRequeuePages * 50
+
 // RetryResult is what one retry pass did.
 type RetryResult struct {
 	// Tried counts the deliveries this pass claimed and dispatched.
@@ -177,30 +180,36 @@ func (d *Dispatcher) unclaimed(ctx context.Context, source string) (bool, error)
 // given up and is left as it is. A call that stops at its bound returns what it
 // did; an operator presses again for the rest.
 func (d *Dispatcher) Requeue(ctx context.Context, source string) (int, error) {
-	n, _, err := d.backInLine(ctx, source, "requeueInbound", "given-up", d.store.InboundRequestsGivenUp)
+	n, _, err := d.backInLine(ctx, source, "requeueInbound", "given-up", maxBackInLine, d.store.InboundRequestsGivenUp)
 	return n, err
 }
 
-// ReturnHeld puts every HELD delivery of one source back in line -- the ones a
+// ReturnHeld puts the HELD deliveries of one source back in line -- the ones a
 // connector would not apply while its tenant's recording was paused (hold) --
-// and returns how many. A connector calls it when the tenant resumes. Like a
-// requeued delivery, each has its tries set to none and is due now, and the
-// retry pass works it; one whose tenant is still paused is held again.
+// at most `limit` of them, and returns how many it moved and whether it
+// stopped at that bound. Like a requeued delivery, each has its tries set to
+// none and is due now, and the retry pass works it; one whose tenant is still
+// paused is held again.
 //
-// A return that stopped at its bound with deliveries still held answers an
-// error beside the count. Nobody presses this one again: its caller must know
-// the job is not done, or the rest would stay held until the next resume.
-func (d *Dispatcher) ReturnHeld(ctx context.Context, source string) (int, error) {
-	n, more, err := d.backInLine(ctx, source, "returnHeldInbound", "held", d.store.InboundRequestsHeld)
-	if err == nil && more {
-		err = fmt.Errorf("datasync: %d held deliveries of %q were put back in line and more remain; it is to be run again", n, strings.TrimSpace(source))
+// THE CALLER NAMES THE BOUND. A limit of zero or less is the runtime's own,
+// maxBackInLine. The act that resumes a tenant names one page, so a person is
+// answered at once; the connector's watch names nothing and asks again on
+// every pass for every tenant that ingests, which is what makes stopping at
+// the bound no failure: whatever is still held is returned by state, not
+// because somebody remembered there was more.
+//
+// With nothing held, a call is one read and no write.
+func (d *Dispatcher) ReturnHeld(ctx context.Context, source string, limit int) (int, bool, error) {
+	if limit <= 0 || limit > maxBackInLine {
+		limit = maxBackInLine
 	}
-	return n, err
+	return d.backInLine(ctx, source, "returnHeldInbound", "held", limit, d.store.InboundRequestsHeld)
 }
 
 // backInLine puts the deliveries `page` answers for one source back in line:
-// no tries counted, due now. It returns how many, and whether it stopped at
-// its bound of maxRequeuePages reads with the last one still answering rows.
+// no tries counted, due now. It moves at most `limit` of them and reads at
+// most maxRequeuePages pages, and returns how many it won and whether it
+// stopped at a bound, with deliveries possibly left.
 //
 // The page is read again until it holds nothing this call has not already
 // moved, so a write that did not take cannot keep the call reading. Each write
@@ -209,7 +218,7 @@ func (d *Dispatcher) ReturnHeld(ctx context.Context, source string) (int, error)
 // pass's claim of a row the first call put back -- is left to that writer and
 // not counted. Without the fence a second call could make due again a row a
 // pass is working, and the delivery would be dispatched from two places.
-func (d *Dispatcher) backInLine(ctx context.Context, source, builtin, what string, page func(context.Context, string) ([]StagedRequest, error)) (int, bool, error) {
+func (d *Dispatcher) backInLine(ctx context.Context, source, builtin, what string, limit int, page func(context.Context, string) ([]StagedRequest, error)) (int, bool, error) {
 	source = strings.TrimSpace(source)
 	if source == "" {
 		return 0, false, fmt.Errorf("datasync: %s needs the source whose %s deliveries go back in line", builtin, what)
@@ -218,7 +227,7 @@ func (d *Dispatcher) backInLine(ctx context.Context, source, builtin, what strin
 	at := d.now().UTC()
 	seen := map[string]bool{}
 	moved := 0
-	for read := 0; read < maxRequeuePages; read++ {
+	for read := 0; read < maxRequeuePages && len(seen) < limit; read++ {
 		if err := ctx.Err(); err != nil {
 			return moved, true, err
 		}
@@ -230,6 +239,11 @@ func (d *Dispatcher) backInLine(ctx context.Context, source, builtin, what strin
 		for _, r := range rows {
 			if seen[r.RequestId] || strings.TrimSpace(r.Source) != source {
 				continue
+			}
+			if len(seen) >= limit {
+				// The bound falls inside this page: what is left of it is
+				// left held.
+				return moved, true, nil
 			}
 			seen[r.RequestId] = true
 			progressed = true
