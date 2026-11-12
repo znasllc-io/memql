@@ -95,10 +95,18 @@ func readFigures(ctx context.Context, tx bun.Tx, s *Statistics) error {
 		starts = append(starts, e.At)
 	}
 
-	period, err := readSums(ctx, tx, scope, starts, from, until)
+	// The previous period, when it is answered, is read in the same two
+	// statements as a leading bucket: it ends where this period starts.
+	comparable := s.comparable()
+	readFrom, readStarts, lead := from, starts, 0
+	if comparable {
+		readFrom, readStarts, lead = b.PrevStart, append([]time.Time{b.PrevStart}, starts...), 1
+	}
+	both, err := readSums(ctx, tx, scope, readStarts, readFrom, until)
 	if err != nil {
 		return err
 	}
+	period, prev := both.split(lead)
 	all := period.total()
 	s.Figures = scope.figures(all, true)
 	s.IncompleteOrders, s.IncompleteRefunds, s.RefundsNotRead = countOf(all.incompleteOrders), countOf(all.incompleteRefunds), countOf(all.notRead)
@@ -129,11 +137,7 @@ func readFigures(ctx context.Context, tx bun.Tx, s *Statistics) error {
 		return err
 	}
 
-	if s.comparable() {
-		prev, err := readSums(ctx, tx, scope, []time.Time{b.PrevStart}, b.PrevStart, b.PrevEnd)
-		if err != nil {
-			return err
-		}
+	if comparable {
 		f := scope.figures(prev.total(), true)
 		s.Previous = &f
 	}
@@ -260,6 +264,20 @@ func (p periodSums) total() sums {
 		t = t.add(s)
 	}
 	return t
+}
+
+// split is the sums of the period's own buckets, renumbered from 1, and of
+// the lead buckets before them.
+func (p periodSums) split(lead int) (period, before periodSums) {
+	period, before = periodSums{}, periodSums{}
+	for k, v := range p {
+		if k.bucket <= lead {
+			before[k] = v
+			continue
+		}
+		period[sideKey{k.bucket - lead, k.wholesale}] = v
+	}
+	return period, before
 }
 
 func (p periodSums) bucket(i int) sums {
@@ -473,25 +491,27 @@ func readBuyers(ctx context.Context, tx bun.Tx, c figureScope, from, until time.
 	counted, countedArgs := c.countedOrder()
 	args := append(append([]any{}, countedArgs...), from.UTC(), until.UTC())
 	args = append(args, countedArgs...)
-	args = append(args, from.UTC(), from.UTC())
+	args = append(args, from.UTC())
 	var row struct {
-		New       int64 `bun:"new"`
+		Everyone  int64 `bun:"everyone"`
 		Returning int64 `bun:"returning"`
 		Unknown   int64 `bun:"unknown"`
 	}
+	// A buyer of the period is returning when they hold a counted order
+	// before it: one probe of the buyer index each, not a scan of their
+	// history.
 	if err := tx.NewSelect().TableExpr(`(WITH p AS (
 			SELECT o.buyer_key FROM store_sales_order_fact o WHERE `+counted+` AND o.ordered_at >= ? AND o.ordered_at < ?
-		), firsts AS (
-			SELECT o.buyer_key, min(o.ordered_at) AS first FROM store_sales_order_fact o
-			WHERE `+counted+` AND o.buyer_key IN (SELECT buyer_key FROM p WHERE buyer_key <> '')
-			GROUP BY o.buyer_key
+		), buyers AS (
+			SELECT DISTINCT buyer_key FROM p WHERE buyer_key <> ''
 		)
-		SELECT count(*) FILTER (WHERE first >= ?) AS new, count(*) FILTER (WHERE first < ?) AS returning,
-			(SELECT count(*) FROM p WHERE buyer_key = '') AS unknown
-		FROM firsts) AS f`, args...).ColumnExpr("f.*").Scan(ctx, &row); err != nil {
+		SELECT (SELECT count(*) FROM buyers) AS everyone,
+			(SELECT count(*) FROM buyers b WHERE EXISTS (SELECT 1 FROM store_sales_order_fact o
+				WHERE `+counted+` AND o.buyer_key = b.buyer_key AND o.ordered_at < ?)) AS returning,
+			(SELECT count(*) FROM p WHERE buyer_key = '') AS unknown) AS f`, args...).ColumnExpr("f.*").Scan(ctx, &row); err != nil {
 		return nil, fmt.Errorf("count the buyers of store %s: %w", c.storeID, err)
 	}
-	b.New, b.Returning, b.Unknown = row.New, row.Returning, row.Unknown
+	b.New, b.Returning, b.Unknown = row.Everyone-row.Returning, row.Returning, row.Unknown
 	return b, nil
 }
 
@@ -511,7 +531,9 @@ type productRow struct {
 // discounts less the refund lines' subtotals, in the store's currency only;
 // by units, the units sold less those returned, in every currency. A line
 // with no product is grouped by its title (its fact's key). A product's title
-// is that of its newest line in the period. productCount is how many products
+// is that of its newest line in the period: the line of the latest order (or,
+// for a line reached only through a refund, the latest refund), then the
+// newest version of the line, then the greatest title. productCount is how many products
 // the period has, the list by units' whole length.
 //
 // A list is null when a figure it is made of is not measured: by sales with
@@ -525,32 +547,40 @@ func readProducts(ctx context.Context, tx bun.Tx, c figureScope, from, until tim
 		return nil
 	}
 	counted, countedArgs := c.countedOrder()
-	args := append([]any{c.currency}, countedArgs...)
-	args = append(args, from.UTC(), until.UTC(), c.currency, c.storeID)
+	args := append([]any{c.currency, c.currency}, countedArgs...)
+	args = append(args, from.UTC(), until.UTC(), c.currency, c.currency, c.currency, c.storeID)
 	args = append(args, countedArgs...)
 	args = append(args, from.UTC(), until.UTC(), topRows, topRows)
 	var rows []productRow
+	// Each branch is summed by product as it is read, by hash, so the lines
+	// are never kept or sorted; a product's newest line is the greatest of
+	// newestKey, its title what follows the key's two instants.
 	if err := tx.NewSelect().TableExpr(`(WITH sold AS (
-			SELECT l.product_key, l.title, o.ordered_at AS at, l.line_version, l.sold_quantity AS units,
-				CASE WHEN o.currency = ? THEN l.gross - l.discounts END AS sales, false AS returned
+			SELECT l.product_key, sum(l.sold_quantity) AS units,
+				sum(CASE WHEN o.currency = ? THEN l.gross - l.discounts END) AS sales,
+				count(*) FILTER (WHERE o.currency = ?) AS priced, 0::numeric AS returned,
+				max(`+newestKey("o.ordered_at")+`) AS newest
 			FROM store_sales_order_fact o
 			JOIN store_sales_line_fact l ON l.store_id = o.store_id AND l.order_gid = o.order_gid
 			WHERE `+counted+` AND o.ordered_at >= ? AND o.ordered_at < ? AND NOT l.deleted AND NOT l.gift_card
+			GROUP BY l.product_key
 		), back AS (
-			SELECT l.product_key, l.title, r.refunded_at AS at, l.line_version, -rl.quantity AS units,
-				CASE WHEN o.currency = ? THEN -rl.subtotal END AS sales, true AS returned
+			SELECT l.product_key, -sum(rl.quantity) AS units,
+				-sum(CASE WHEN o.currency = ? THEN rl.subtotal END) AS sales,
+				count(*) FILTER (WHERE o.currency = ?) AS priced,
+				COALESCE(sum(CASE WHEN o.currency = ? THEN rl.subtotal END), 0) AS returned,
+				max(`+newestKey("r.refunded_at")+`) AS newest
 			FROM store_sales_refund_fact r
 			JOIN store_sales_order_fact o ON o.store_id = r.store_id AND o.order_gid = r.order_gid
 			JOIN store_sales_refund_line_fact rl ON rl.store_id = r.store_id AND rl.refund_gid = r.refund_gid
 			JOIN store_sales_line_fact l ON l.store_id = rl.store_id AND l.line_gid = rl.line_gid
 			WHERE r.store_id = ? AND NOT r.deleted AND `+counted+` AND r.refunded_at >= ? AND r.refunded_at < ?
 				AND NOT l.deleted AND NOT l.gift_card
-		), every AS (
-			SELECT * FROM sold UNION ALL SELECT * FROM back
+			GROUP BY l.product_key
 		), per AS (
-			SELECT product_key, (array_agg(title ORDER BY at DESC, line_version DESC, title))[1] AS title,
-				sum(units)::bigint AS units, sum(sales) AS sales, count(sales) AS priced
-			FROM every GROUP BY product_key
+			SELECT product_key, substr(max(newest), 41) AS title, sum(units)::bigint AS units, sum(sales) AS sales,
+				sum(priced) AS priced, sum(returned) AS returned
+			FROM (SELECT * FROM sold UNION ALL SELECT * FROM back) AS every GROUP BY product_key
 		)
 		(SELECT 'sales' AS list, product_key, title, units, sales::text AS sales FROM per WHERE priced > 0
 			ORDER BY per.sales DESC, title, product_key LIMIT ?)
@@ -559,7 +589,7 @@ func readProducts(ctx context.Context, tx bun.Tx, c figureScope, from, until tim
 		UNION ALL
 		SELECT 'count', '', '', count(*), NULL FROM per
 		UNION ALL
-		SELECT 'returned', '', '', 0, COALESCE(-sum(sales), 0)::text FROM every WHERE returned
+		SELECT 'returned', '', '', 0, COALESCE(sum(returned), 0)::text FROM per
 		) AS f`, args...).ColumnExpr("f.*").Scan(ctx, &rows); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("list the products of store %s: %w", c.storeID, err)
 	}
@@ -605,3 +635,11 @@ func readProducts(ctx context.Context, tx bun.Tx, c figureScope, from, until tim
 }
 
 func countOf(n int64) *int64 { return &n }
+
+// newestKey is a text that sorts as (at, the line's version, its title): two
+// instants as fixed-width microseconds since the epoch, then the title from
+// its 41st character, so max over a product's lines is its newest line.
+func newestKey(at string) string {
+	return "lpad((extract(epoch FROM " + at + ") * 1000000)::bigint::text, 20, '0') || " +
+		"lpad((extract(epoch FROM l.line_version) * 1000000)::bigint::text, 20, '0') || l.title"
+}
