@@ -1211,7 +1211,7 @@ func TestAQuietStoreCostsOneLockedTransactionARun(t *testing.T) {
 	}
 	queries := storeSalesQueries(t)
 	rep := RollupReport{Rows: map[string]int{}}
-	if err := i.rollStore(sweepCtx(t), db, store, time.Now(), wholesaleState{}, &rep); err != nil {
+	if err := i.rollStore(sweepCtx(t), db, store, time.Now(), wholesaleState{}, true, &rep); err != nil {
 		t.Fatal(err)
 	}
 	locks := 0
