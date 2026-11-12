@@ -23,6 +23,10 @@ func (a *App) transportBFF() {
 	// user-facing surface the portal dials, and it reuses the same blob client
 	// for the same reason the bundle endpoint above does.
 	a.mountLibraryArtifactEndpoints(uploader, container)
+	// The account export download (GET /accounts/exports/{id}/content,
+	// account export design section G). Bff-only, a signed-in person's
+	// download; the bytes come through the accounts plug-in.
+	a.mountAccountExportDownload()
 	// The Materializer's collaborators (epic memql#4977). NOT a mount --
 	// it adds no route -- but it belongs here because it takes the SAME
 	// blob client and container the two mounts above take, and a
