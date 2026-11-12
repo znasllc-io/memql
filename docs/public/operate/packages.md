@@ -262,6 +262,14 @@ The analysis runs **offline**, before anything is fetched to a workbench or
 written to storage, and it runs **the same gates a node runs at boot**. "This
 DSL would refuse boot" is an answer you get here, not a crashlooping pod later.
 
+A package's DSL runs as what a package is, never as the engine. In
+particular the cluster's maintenance principal -- the synthetic cluster owner
+a short, compiled-in list of the engine's own housekeeping automations runs
+as -- is granted by where an automation was loaded from: only the engine's own
+tree. An automation in a package runs as the ordinary system actor whatever it
+is named, and the analysis refuses a package automation that takes the name of
+one of the engine's (`dsl_automation_name_taken`).
+
 Every refusal is a stable machine-readable code
 (`component/packages/refusal.go`). The OS renders its own sentence for the ones
 it knows and the server's own sentence verbatim for the rest -- inventing a
@@ -279,6 +287,7 @@ somebody's mistake.
 | `deployable_binding_missing` | A storefront whose `binding` names no store. A manifest fact, decided offline |
 | `deployable_hostname_unchosen` | A never-deployed app whose placement names no hostname. Split out of `deployable_binding_missing`, because its repair is choosing an address rather than editing the tree |
 | `dsl_domain_reserved` | A `dsl/<domain>/` whose name the engine already owns |
+| `dsl_automation_name_taken` | A package automation whose name another DSL domain on the cluster already declares -- one of the engine's own automations, or another installed domain's. Automations are found by their name alone across the whole cluster, so a name belongs to one automation. A node that finds a package automation holding the name of one of the engine's own leaves the package's out and logs it; it does not refuse to start. Scoped to the declaring file |
 | `dsl_refuses_boot` | The package's DSL does not survive the Init-grade gates; carries the construct-level errors |
 | `dsl_access_gate_foreign_deployable` | A construct gated with `@accessGate` names a deployable the manifest does not declare. A site opens a gate only for the deployable name its own package gave it, so the construct could only ever answer 404, and a name that happens to match another product's deployable must not reach into that product. Scoped to the construct's file |
 | `dsl_access_gate_foreign_domain` | A gated construct is bound to a concept of a DSL domain the package does not ship -- an engine concept, or another package's. A site opens a gate only when its package ships that domain, which a deploy that serves visitors records on the package after its DSL is staged and its roll requested (`dslDomains`, spelled as a concept id spells it, so a `namespace.pin` is recorded as the pin, and a pin with no concept behind it ships nothing; a run with every app skipped that carries DSL records it too, and a run that publishes only candidates records nothing), so the construct could only ever answer 404. Scoped to the construct's file |
