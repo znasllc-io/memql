@@ -22,6 +22,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/driver/pgdriver"
+
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/campaigns"
 	"github.com/znasllc-io/memql/component/database"
@@ -364,9 +368,82 @@ func TestAPriceSheetLinkStopsOpeningOnceTheBuyerIsRemoved(t *testing.T) {
 		len(s.mail.messages()) != 2 {
 		t.Fatalf("a second resend of a sent removal email answered %v after %d messages", err, len(s.mail.messages()))
 	}
+
+	// THE PROVIDER LATER REPORTS IT BOUNCED (its report lands on the lane's own
+	// record of the delivery): the email stays sent -- handed to the email
+	// service -- with the report beside it, and since it did not reach the buyer
+	// the page offers to send it again.
+	second := wholesalepack.LaneRequestID(wholesalepack.EmailRevoked, s.appID, 2)
+	ledgerID, ledger := laneDelivery(t, second)
+	ledger["providerStatus"] = "bounced"
+	wsExec(t, eng, seedCtx(), rawInsert("v1:campaigns:delivery", ledgerID, ledger))
+	application = answerOf(t, eng, signedIn(s.staff), `builtin wholesaleGet(applicationId: `+quote(s.appID)+`)`)
+	bounced := emailOf(t, application, wholesalepack.EmailRevoked, 2)
+	if d, _ := bounced["delivery"].(map[string]any); bounced["state"] != wholesalepack.SendSent || d["providerStatus"] != "bounced" {
+		t.Fatalf("a removal email the provider reported bounced shows %v, want it sent with the report beside it", bounced)
+	}
+	if acts, _ := json.Marshal(application["acts"]); !strings.Contains(string(acts), `"resendRevoked"`) {
+		t.Fatalf("a bounced removal email offers acts %s", acts)
+	}
+	// THE ADDRESS IS NOW ONE THE EMAIL SERVICE DOES NOT SEND TO for this
+	// organization: the resend is the next attempt, recorded skipped, and its
+	// reason is the lane's sentence -- on the reply, on the row and on the page --
+	// with the lane's code beside it in the delivery, never in the reason.
+	if err := campaigns.NewStore(campaignsEngine{eng}).RecordOrganizationSuppression(seedCtx(), s.account,
+		campaigns.EmailDigest("sam@mail-sheet.example.com"), "manual", "example.com", "", ""); err != nil {
+		t.Fatalf("block the address: %v", err)
+	}
+	sentence := campaigns.SkipSentence("manual")
+	third := answerOf(t, eng, signedIn(s.staff), `builtin wholesaleResendEmail(applicationId: `+quote(s.appID)+`, kind: "revoked")`)
+	if third["attempt"] != float64(3) || third["state"] != wholesalepack.SendSkipped || third["sent"] != false ||
+		third["reason"] != sentence || len(s.mail.messages()) != 2 {
+		t.Fatalf("the resend to a blocked address answered %v after %d messages, want attempt 3 skipped with %q", third, len(s.mail.messages()), sentence)
+	}
+	if row := latestPayload(t, "v1:wholesale:emailSend", wholesalepack.EmailSendRowID("revoked", s.appID, 3)); row["reason"] != sentence {
+		t.Fatalf("the skipped email's row is %v", row)
+	}
+	application = answerOf(t, eng, signedIn(s.staff), `builtin wholesaleGet(applicationId: `+quote(s.appID)+`)`)
+	skipped := emailOf(t, application, wholesalepack.EmailRevoked, 3)
+	if d, _ := skipped["delivery"].(map[string]any); skipped["state"] != wholesalepack.SendSkipped || skipped["reason"] != sentence ||
+		d["skipReason"] != "manual" || d["skipSentence"] != sentence {
+		t.Fatalf("the skipped email shows %v, want the lane's sentence as its reason and the code beside it", skipped)
+	}
 	if lines := s.logs.lines("sam@"); lines != "" {
 		t.Fatalf("a log line carries the applicant's address:\n%s", lines)
 	}
+}
+
+// emailOf is the application's email of kind and attempt, as wholesaleGet shows it.
+func emailOf(t *testing.T, application map[string]any, kind string, attempt int) map[string]any {
+	t.Helper()
+	emails, _ := application["emails"].([]any)
+	for _, e := range emails {
+		if m, _ := e.(map[string]any); m["kind"] == kind && m["attempt"] == float64(attempt) {
+			return m
+		}
+	}
+	t.Fatalf("the application shows no %s email attempt %d: %v", kind, attempt, application["emails"])
+	return nil
+}
+
+// laneDelivery is the row lane's own record of the message sent under
+// requestID, newest version: its row id and its payload, read straight from
+// the table.
+func laneDelivery(t *testing.T, requestID string) (string, map[string]any) {
+	t.Helper()
+	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()))), pgdialect.New())
+	defer db.Close()
+	var id string
+	var raw []byte
+	if err := db.NewRaw(`SELECT id, payload FROM "MemoryNodes" WHERE concept = 'v1:campaigns:delivery' AND payload->>'requestId' = ? `+
+		`ORDER BY "createdAt" DESC LIMIT 1`, requestID).Scan(context.Background(), &id, &raw); err != nil {
+		t.Fatalf("read the lane's delivery of %s: %v", requestID, err)
+	}
+	out := map[string]any{}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode the lane's delivery of %s: %v", requestID, err)
+	}
+	return bareID(id), out
 }
 
 // A STAFF NOTICE IS STAGED ONCE IN THE REAL OUTBOX: the server staging, at the
@@ -592,11 +669,67 @@ func TestTheSettingsAnswerTheSenderAndWhatTheCallerMayPublishAndExport(t *testin
 		`, transition: "reject", note: "not a trade buyer")`); err != nil {
 		t.Fatalf("reject: %v", err)
 	}
-	if got := automationCall(t, eng, s.sendCall("wholesaleSendBuyerEmail", "rejected")); got["state"] != wholesalepack.SendSkipped ||
-		got["recorded"] != false || got["reason"] != wholesalepack.NoSenderChosenReason || len(s.mail.messages()) != 0 {
-		t.Fatalf("a rejection with no sender chosen answered %v after %d messages", got, len(s.mail.messages()))
+	// THE REJECTION IS DUE AND THE STORE DECLINES IT: it is RECORDED -- attempt 1,
+	// skipped, with the sentence, the lane not asked -- and of four calls at once
+	// one row is written, which every call answers.
+	rejectedRow := wholesalepack.EmailSendRowID(wholesalepack.EmailRejected, s.appID, 1)
+	var wg sync.WaitGroup
+	answers := make([]map[string]any, 4)
+	for i := range answers {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			result, err := eng.Execute(auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(context.Background(), "automation-runner")),
+				s.sendCall("wholesaleSendBuyerEmail", "rejected"))
+			if err != nil {
+				t.Errorf("send %d: %v", i, err)
+				return
+			}
+			if rows := memql.MaterializeRows(result); len(rows) == 1 {
+				answers[i] = rows[0]
+			}
+		}(i)
 	}
-	if n := versionCount(t, "v1:wholesale:emailSend", wholesalepack.EmailSendRowID(wholesalepack.EmailRejected, s.appID, 1)); n != 0 {
-		t.Fatalf("%d email rows written for a store with no sender", n)
+	wg.Wait()
+	for i, got := range answers {
+		if got["state"] != wholesalepack.SendSkipped || got["recorded"] != true || got["sent"] != false || got["attempt"] != float64(1) ||
+			got["reason"] != wholesalepack.NoSenderChosenReason {
+			t.Fatalf("call %d for a rejection with no sender chosen answered %v", i, got)
+		}
+	}
+	if n := versionCount(t, "v1:wholesale:emailSend", rejectedRow); n != 1 || len(s.mail.messages()) != 0 {
+		t.Fatalf("%d versions of the declined attempt and %d messages, want one version and no message", n, len(s.mail.messages()))
+	}
+	// THE PAGE LISTS IT, and offers no resend while no sender is chosen; one asked
+	// for is refused with the sentence.
+	application := answerOf(t, eng, signedIn(s.staff), `builtin wholesaleGet(applicationId: `+quote(s.appID)+`)`)
+	if e := emailOf(t, application, wholesalepack.EmailRejected, 1); e["state"] != wholesalepack.SendSkipped ||
+		e["reason"] != wholesalepack.NoSenderChosenReason {
+		t.Fatalf("the page shows the declined rejection as %v", e)
+	}
+	if acts, _ := json.Marshal(application["acts"]); strings.Contains(string(acts), "resendRejected") {
+		t.Fatalf("with no sender chosen the page offers %s", acts)
+	}
+	resend := `builtin wholesaleResendEmail(applicationId: ` + quote(s.appID) + `, kind: "rejected")`
+	if _, err := eng.Execute(signedIn(s.staff), resend); err == nil || !strings.Contains(err.Error(), wholesalepack.NoSenderChosenReason) {
+		t.Fatalf("a resend with no sender chosen answered %v", err)
+	}
+	// THE OPERATORS CHOOSE THE SENDER AGAIN: the act is offered, a person's resend
+	// is attempt 2 and sends, and the automatic call made again sends nothing.
+	wsExec(t, eng, auth.ContextWithInternalOrigin(asOperator("operator-"+s.site)),
+		`builtin wholesaleUpdateSettings(`+store+`, senderIdentityId: `+quote("sender-"+s.site)+`)`)
+	application = answerOf(t, eng, signedIn(s.staff), `builtin wholesaleGet(applicationId: `+quote(s.appID)+`)`)
+	if acts, _ := json.Marshal(application["acts"]); string(acts) != `["resendRejected"]` {
+		t.Fatalf("once a sender is chosen the page offers %s, want resendRejected", acts)
+	}
+	resent := answerOf(t, eng, signedIn(s.staff), resend)
+	if resent["state"] != wholesalepack.SendSent || resent["attempt"] != float64(2) || len(s.mail.messages()) != 1 ||
+		s.mail.messages()[0].To != "sam@mail-may.example.com" {
+		t.Fatalf("the resend answered %v after %d messages", resent, len(s.mail.messages()))
+	}
+	again := automationCall(t, eng, s.sendCall("wholesaleSendBuyerEmail", "rejected"))
+	if again["attempt"] != float64(1) || again["state"] != wholesalepack.SendSkipped || len(s.mail.messages()) != 1 ||
+		versionCount(t, "v1:wholesale:emailSend", rejectedRow) != 1 {
+		t.Fatalf("the automatic call after the resend answered %v after %d messages", again, len(s.mail.messages()))
 	}
 }

@@ -50,7 +50,7 @@ var StaffEvents = []string{StaffEventReadyToReview, StaffEventApproved, StaffEve
 
 // NoStaffAddressReason is the skip of a notice for a store that names no
 // address.
-const NoStaffAddressReason = "the store names no address"
+const NoStaffAddressReason = "The store names no address."
 
 const (
 	notifyStaffActor = "wholesale-notify-staff"

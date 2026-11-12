@@ -150,7 +150,7 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 		}
 		for _, send := range sends[bareID(id)] {
 			d := deliveries[trimmed(send["requestId"])]
-			row := withoutTokenHash(p.effectiveSend(send, d))
+			row := withoutTokenHash(p.effectiveSend(send, d, !unreadable[trimmed(send["requestId"])]))
 			row["applicationId"] = id
 			row["deliveryUnreadable"] = unreadable[trimmed(send["requestId"])]
 			if d != nil {

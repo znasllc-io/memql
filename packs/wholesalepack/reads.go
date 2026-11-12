@@ -92,16 +92,10 @@ type extensionReader interface {
 type ActsInput struct {
 	Stage, AccessState          string
 	EntitlementExists, Operator bool
-	// TermsRequired and TermsTemplateChosen are the store's: whether it requires
-	// its terms, and whether it chose a template for the terms email.
-	TermsRequired, TermsTemplateChosen bool
-	// ApprovedEmailSent is whether the store's automation has sent the approval
-	// email (an approved emailSend row exists).
-	ApprovedEmailSent bool
-	// LatestRejectedEmail and LatestRevokedEmail are the state of the last
-	// attempt of the rejection and the removal email, as the lane says it stands
-	// (effectiveSend), "" when none was recorded.
-	LatestRejectedEmail, LatestRevokedEmail string
+	// Emails is where each of the applicant's emails stands, by kind
+	// (EmailStanding): what a resend of it is judged on. A kind it says nothing
+	// of is not offered.
+	Emails map[string]EmailStanding
 }
 
 // ActsFor is the acts open on one application.
@@ -114,12 +108,12 @@ type ActsInput struct {
 // (ruling 30): a retry is not a decision (X26).
 //
 // A person of the store also sends an email again (U9): the terms email on an
-// application waiting for its terms, while the store requires them and chose a
-// template for it, after reject; the approval email to a buyer whose access is
-// granted once the store's automation has sent it, after remove; and the
-// rejection or removal email while the application is still rejected or
-// removed and the last attempt of it did not reach the provider (held,
-// uncertain or failed). An operator sends none.
+// application waiting for its terms, after reject; the approval email to a
+// buyer whose access is granted, after remove; the rejection or the removal
+// email on a rejected or removed application. EACH IS OFFERED EXACTLY WHEN THE
+// RESEND WOULD NOT BE REFUSED: the one function wholesaleResendEmail refuses
+// by (resendRefusal) is asked here, of the standing the input carries for the
+// kind. An operator sends none.
 func ActsFor(in ActsInput) []string {
 	retry := (in.Stage == StateApproved && in.AccessState != EntitlementGranted) ||
 		(in.Stage == StateRevoked && in.EntitlementExists && in.AccessState != EntitlementRevoked)
@@ -130,10 +124,14 @@ func ActsFor(in ActsInput) []string {
 		}
 		return acts
 	}
+	resend := func(kind string) bool {
+		standing, judged := in.Emails[kind]
+		return judged && resendRefusal(kind, in.Stage, in.AccessState, standing) == ""
+	}
 	switch in.Stage {
 	case StageWaitingForTerms:
 		acts = append(acts, ActReject)
-		if in.TermsRequired && in.TermsTemplateChosen {
+		if resend(EmailTerms) {
 			acts = append(acts, ActResendTerms)
 		}
 	case StageReadyToReview:
@@ -142,23 +140,54 @@ func ActsFor(in ActsInput) []string {
 		acts = append(acts, ActRemove)
 		if retry {
 			acts = append(acts, ActRetryAccess)
-		} else if in.AccessState == EntitlementGranted && in.ApprovedEmailSent {
+		}
+		if resend(EmailApproved) {
 			acts = append(acts, ActResendApproved)
 		}
 	case StateRejected:
-		if notReachedProvider(in.LatestRejectedEmail) {
+		if resend(EmailRejected) {
 			acts = append(acts, ActResendRejected)
 		}
 	case StateRevoked:
 		if retry {
 			acts = append(acts, ActRetryAccess)
 		}
-		if notReachedProvider(in.LatestRevokedEmail) {
+		if resend(EmailRevoked) {
 			acts = append(acts, ActResendRevoked)
 		}
 	}
 	return acts
 }
+
+// resendKindOf is the email a person could send again on an application in
+// each stage; a stage it does not name has none.
+var resendKindOf = map[string]string{StageWaitingForTerms: EmailTerms, StateApproved: EmailApproved,
+	StateRejected: EmailRejected, StateRevoked: EmailRevoked}
+
+// resendStandings is ActsInput.Emails for one application: the standing of the
+// one email its stage could send again, read off its emails as the page shows
+// them. An operator sends none, so nothing is read for one.
+//
+// THE STORE'S READINESS IS ASKED LAST, and only when everything else admits the
+// resend: it is a read of the lane (emailBlocker), made as the store's merchant.
+func (p *Provider) resendStandings(ctx context.Context, settings Settings, stage, access string, operator bool,
+	emails []map[string]any) map[string]EmailStanding {
+	kind := resendKindOf[stage]
+	if operator || kind == "" {
+		return nil
+	}
+	standing := emailStandingOf(emails, kind)
+	if resendRefusal(kind, stage, access, standing) == "" {
+		standing.Blocker, _ = p.emailBlocker(ctx, settings, kind)
+	}
+	return map[string]EmailStanding{kind: standing}
+}
+
+// accessReason is why an application's access is not on, as a person reads it:
+// the access record's own error -- what the route answered, which a route
+// writes as an error's text -- as a whole sentence (wholeSentence). The buyers
+// list and the application's page both answer it, so they say one thing.
+func accessReason(ent map[string]any) string { return wholeSentence(asString(ent["error"])) }
 
 // staged is one application the caller reads, with the state its whole log
 // gives it.
@@ -395,7 +424,7 @@ func (p *Provider) get(ctx context.Context, args map[string]any, _ int) ([]memor
 		entitlement = map[string]any{
 			"state":             access,
 			"errorCode":         trimmed(ent["errorCode"]),
-			"error":             asString(ent["error"]),
+			"error":             accessReason(ent),
 			"adapter":           trimmed(ent["adapter"]),
 			"shopifyCustomerId": trimmed(ent["shopifyCustomerId"]),
 			"customerCreated":   customerCreated,
@@ -427,11 +456,9 @@ func (p *Provider) get(ctx context.Context, args map[string]any, _ int) ([]memor
 		"termsLink":   termsLink,
 		"emails":      emails,
 		"operator":    operator,
+		// EACH RESEND IS OFFERED EXACTLY WHEN IT WOULD NOT BE REFUSED (resendRefusal).
 		"acts": ActsFor(ActsInput{Stage: stage, AccessState: access, EntitlementExists: ent != nil, Operator: operator,
-			TermsRequired: termsRequired, TermsTemplateChosen: settings.TermsTemplateID != "",
-			ApprovedEmailSent:   highestAttempt(sends, EmailApproved) > 0,
-			LatestRejectedEmail: trimmed(latestSend(emails, EmailRejected)["state"]),
-			LatestRevokedEmail:  trimmed(latestSend(emails, EmailRevoked)["state"])}),
+			Emails: p.resendStandings(ctx, settings, stage, access, operator, emails)}),
 	})
 }
 
@@ -572,11 +599,11 @@ func (p *Provider) buyers(ctx context.Context, args map[string]any, _ int) ([]me
 			return nil, err
 		}
 		// WHY ACCESS IS NOT ON is the entitlement's own sentence, the one the
-		// application's page shows (wholesaleGet's entitlement.error).
+		// application's page shows (wholesaleGet's entitlement.error): accessReason.
 		access, code, reason, grantedAt, customer := AccessNone, "", "", "", ""
 		if ent != nil {
 			access, code, customer = trimmed(ent["state"]), trimmed(ent["errorCode"]), trimmed(ent["shopifyCustomerId"])
-			reason = asString(ent["error"])
+			reason = accessReason(ent)
 			if access == EntitlementGranted {
 				grantedAt = timeText(ent["createdAt"])
 			}

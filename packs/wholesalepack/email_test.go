@@ -5,11 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/campaigns"
@@ -52,12 +59,35 @@ type fakeLane struct {
 	senderActors []string
 	// statusErr, when set, fails every status read.
 	statusErr error
+	// unauthorized is the people without the send's authority in the
+	// organization: the sender read answers one as the real lane answers an
+	// organization it shows nothing of, and a send made as one is refused.
+	unauthorized map[string]bool
+	// sendActors is who each send was made as.
+	sendActors []string
+	// duringSender runs inside a sender read, before it answers: another node's
+	// call.
+	duringSender func()
+	// reply, when set, answers a send in place of handing it over.
+	reply map[string]any
 }
+
+// The row lane's own sentences, as the campaigns package answers them.
+const (
+	laneNoneChosen  = "No sender is chosen for this organization."
+	laneSenderGone  = "The sender of this email no longer exists. Choose another sender to send it."
+	laneNoAuthority = "No sender can be read for this organization."
+	laneReadFailed  = "The sender could not be read just now."
+)
 
 func (l *fakeLane) SendRowMessage(ctx context.Context, args map[string]any) (map[string]any, error) {
 	l.calls = append(l.calls, args)
+	l.sendActors = append(l.sendActors, actorOf(ctx))
 	if l.during != nil {
 		l.during()
+	}
+	if l.unauthorized[actorOf(ctx)] {
+		return nil, errors.New("wholesale: campaignSendRowMessage: campaign send requires write permission in this organization")
 	}
 	request := asString(args["requestId"])
 	if reply, ok := l.receipts[request]; ok {
@@ -65,7 +95,15 @@ func (l *fakeLane) SendRowMessage(ctx context.Context, args map[string]any) (map
 		out["replayed"] = true
 		return out, nil
 	}
+	if l.reply != nil {
+		return copyRow(l.reply), nil
+	}
 	switch l.outcome {
+	case "suppressed":
+		// THE ADDRESS IS ONE THE EMAIL SERVICE NO LONGER SENDS TO: the reason is the
+		// lane's code, and beside it the sentence a person reads.
+		return map[string]any{"sent": false, "skipped": true, "reason": "hard_bounce",
+			"skipSentence": campaigns.SkipSentence("hard_bounce")}, nil
 	case "busy":
 		return nil, fmt.Errorf("wholesale: campaignSendRowMessage: %w: the wait for the lock was over", memql.ErrWriteGateBusy)
 	case "hold":
@@ -83,7 +121,8 @@ func (l *fakeLane) SendRowMessage(ctx context.Context, args map[string]any) (map
 		RowID: asString(args["rowId"]), AccountID: asString(args["accountId"]), Kind: asString(args["kind"]), RequestID: request})
 	var withdrawn campaigns.RowWithdrawn
 	if errors.As(err, &withdrawn) {
-		reply := map[string]any{"sent": false, "skipped": true, "reason": withdrawn.Reason}
+		// A WITHDRAWAL'S SENTENCE IS THE ROW'S OWN, as the lane answers it.
+		reply := map[string]any{"sent": false, "skipped": true, "reason": withdrawn.Reason, "skipSentence": withdrawn.Reason}
 		return reply, nil
 	}
 	if err != nil {
@@ -114,17 +153,34 @@ func (l *fakeLane) RowMessageStatus(_ context.Context, accountID string, request
 func (l *fakeLane) RowSender(ctx context.Context, accountID, senderID string) (map[string]any, error) {
 	l.sendersAsked = append(l.sendersAsked, accountID+"/"+senderID)
 	l.senderActors = append(l.senderActors, actorOf(ctx))
+	if l.duringSender != nil {
+		l.duringSender()
+	}
 	if l.senderErr != nil {
 		return nil, l.senderErr
 	}
+	refused := func(reason string, noneChosen bool) (map[string]any, error) {
+		return map[string]any{"ready": false, "fromName": "", "address": "", "reason": reason,
+			"readFailed": false, "noneChosen": noneChosen}, nil
+	}
+	if l.unauthorized[actorOf(ctx)] {
+		// WITHOUT THE SEND'S AUTHORITY: as for an organization that does not exist.
+		return refused(laneNoAuthority, false)
+	}
 	if l.senders == nil {
 		// A WORLD THAT SCRIPTS NO SENDER sends as the store's one.
-		return map[string]any{"ready": true, "fromName": "Kestrel Trade", "address": "trade@example.com", "reason": ""}, nil
+		return map[string]any{"ready": true, "fromName": "Kestrel Trade", "address": "trade@example.com", "reason": "",
+			"readFailed": false, "noneChosen": false}, nil
 	}
 	if answer, ok := l.senders[senderID]; ok {
 		return answer, nil
 	}
-	return map[string]any{"ready": false, "fromName": "", "address": "", "reason": "choose a sending identity belonging to this organization"}, nil
+	// AS THE REAL LANE ANSWERS: none chosen says so in its field; a sender named
+	// that it does not have is one that no longer exists.
+	if senderID == "" {
+		return refused(laneNoneChosen, true)
+	}
+	return refused(laneSenderGone, false)
 }
 
 // testHold and testUncertain stand in for the row lane's own hold and uncertain
@@ -171,11 +227,16 @@ type emailWorld struct {
 	stagedReadsFresh []bool
 	// stageErr, when set, refuses every stage with this error.
 	stageErr error
-	site     map[string]any
-	names    map[string]string
-	tick     int
-	lane     *fakeLane
-	caller   *fakeCaller
+	// onSendsRead runs after each read of the application's email rows has been
+	// answered, with how many such reads there have been: a test lands another
+	// node's attempt between one of this node's reads and its write.
+	onSendsRead func(n int)
+	sendsReads  int
+	site        map[string]any
+	names       map[string]string
+	tick        int
+	lane        *fakeLane
+	caller      *fakeCaller
 }
 
 func newEmailWorld() *emailWorld {
@@ -221,6 +282,10 @@ func (w *emailWorld) Rows(ctx context.Context, query string, args map[string]str
 				w.seen[id] = w.versions[id]
 				out = append(out, copyRow(row))
 			}
+		}
+		w.sendsReads++
+		if w.onSendsRead != nil {
+			w.onSendsRead(w.sendsReads)
 		}
 		return newestFirst(out), nil
 	case "siteById":
@@ -445,31 +510,6 @@ func (w *emailWorld) requireNoToken(t *testing.T, token string) {
 // The sends
 // ---------------------------------------------------------------------------
 
-// A KIND WITH NO TEMPLATE CHOSEN SENDS NOTHING, records nothing, and calls no
-// lane: the same call once a template is chosen sends.
-func TestNoTemplateMeansNoSend(t *testing.T) {
-	w := newEmailWorld()
-	w.settings["termsTemplateId"] = ""
-	p := w.provider()
-	got := w.sendTerms(t, p)
-	if got["state"] != SendSkipped || got["reason"] != "no terms email template is chosen" || got["recorded"] != false {
-		t.Fatalf("the terms send answered %v", got)
-	}
-	w.decisions = append(w.decisions, map[string]any{"id": "dec-r", "applicationId": applicationConcept + ":" + linkApp,
-		"transition": TransitionReject, "createdAt": w.next()})
-	w.settings["rejectedTemplateId"] = ""
-	if got := w.sendBuyer(t, p, EmailRejected); got["state"] != SendSkipped || got["reason"] != "no rejected email template is chosen" {
-		t.Fatalf("the rejection send answered %v", got)
-	}
-	if len(w.lane.calls) != 0 || len(w.sends) != 0 || w.count("putPrivateLinkRow") != 0 {
-		t.Fatalf("%d lane calls, %d rows, %d links: a kind with no template sends nothing", len(w.lane.calls), len(w.sends), w.count("putPrivateLinkRow"))
-	}
-	w.settings["rejectedTemplateId"] = "tpl-rejected"
-	if got := w.sendBuyer(t, p, EmailRejected); got["state"] != SendSent || len(w.lane.calls) != 1 {
-		t.Fatalf("once a template is chosen the send answered %v after %d lane calls", got, len(w.lane.calls))
-	}
-}
-
 // THE APPROVAL EMAIL WAITS FOR GRANTED ACCESS (W3): while the entitlement is
 // pending nothing is sent, recorded or asked of the lane; once a granted
 // version lands the same call sends.
@@ -658,7 +698,9 @@ func TestALaneFailureIsRecordedAndNotTriedAgainAutomatically(t *testing.T) {
 		t.Fatalf("a failure answered %v", got)
 	}
 	row := w.sends[EmailSendRowID(EmailTerms, linkApp, 1)]
-	if row == nil || row["state"] != SendFailed || row["reason"] != "campaigns.sendRowMessage: the template must belong to the row's organization" {
+	// THE LANE'S WORDS, AS A WHOLE SENTENCE: a capital first and a full stop last,
+	// as every reason is answered.
+	if row == nil || row["state"] != SendFailed || row["reason"] != "Campaigns.sendRowMessage: the template must belong to the row's organization." {
 		t.Fatalf("the failure's row is %v", row)
 	}
 	w.lane.outcome = ""
@@ -1153,7 +1195,7 @@ func TestTheResolverWithdrawsATermsEmailForARejectedApplication(t *testing.T) {
 		"transition": TransitionReject, "createdAt": w.next()})
 	_, err := w.resolve(t, p, EmailTerms)
 	var withdrawn campaigns.RowWithdrawn
-	if !errors.As(err, &withdrawn) || withdrawn.Reason != "the application is no longer waiting for terms" {
+	if !errors.As(err, &withdrawn) || withdrawn.Reason != "The application is no longer waiting for terms." {
 		t.Fatalf("the resolver answered %v", err)
 	}
 	if w.count("putPrivateLinkRow") != 0 {
@@ -1163,7 +1205,7 @@ func TestTheResolverWithdrawsATermsEmailForARejectedApplication(t *testing.T) {
 	w2 := newEmailWorld()
 	p2 := w2.provider()
 	w2.approveAndGrant(EntitlementFailed)
-	if _, err := w2.resolve(t, p2, EmailApproved); !errors.As(err, &withdrawn) || withdrawn.Reason != "access is not granted" {
+	if _, err := w2.resolve(t, p2, EmailApproved); !errors.As(err, &withdrawn) || withdrawn.Reason != "Access is not granted." {
 		t.Fatalf("the approval resolver answered %v", err)
 	}
 }
@@ -1263,30 +1305,70 @@ func TestTheApplicationShowsItsEmailsAndTheResendActs(t *testing.T) {
 	}
 }
 
+// THE RESENDS ARE OFFERED ONLY WHEN THEY ARE DUE. A kind the input says
+// nothing of is not offered; the terms email while the application waits for
+// its terms, whatever its last attempt came to; the approval email to a buyer
+// whose access is granted once the automation's attempt is recorded; the
+// rejection and removal emails while the application is still rejected or
+// removed and the last attempt did not reach the applicant -- skipped, held,
+// uncertain or failed, or sent and since reported not delivered. None while
+// an attempt is on its way, none while the store would not send it now, and
+// none to an operator.
 func TestActsOfferTheResendsOnlyWhenTheyAreDue(t *testing.T) {
+	one := func(kind string, s EmailStanding) map[string]EmailStanding { return map[string]EmailStanding{kind: s} }
+	granted := ActsInput{Stage: StateApproved, AccessState: EntitlementGranted, EntitlementExists: true}
+	with := func(in ActsInput, emails map[string]EmailStanding) ActsInput {
+		in.Emails = emails
+		return in
+	}
 	for _, c := range []struct {
 		in   ActsInput
 		want string
 	}{
-		{ActsInput{Stage: StageWaitingForTerms, TermsRequired: true, TermsTemplateChosen: true}, "[reject resendTerms]"},
-		{ActsInput{Stage: StageWaitingForTerms, TermsRequired: true}, "[reject]"},
-		{ActsInput{Stage: StateApproved, AccessState: EntitlementGranted, EntitlementExists: true, ApprovedEmailSent: true}, "[remove resendApproved]"},
-		{ActsInput{Stage: StateApproved, AccessState: EntitlementGranted, EntitlementExists: true}, "[remove]"},
-		{ActsInput{Stage: StateApproved, AccessState: EntitlementPending, EntitlementExists: true, ApprovedEmailSent: true}, "[remove retryAccess]"},
-		{ActsInput{Stage: StateApproved, AccessState: EntitlementGranted, EntitlementExists: true, ApprovedEmailSent: true, Operator: true}, "[]"},
-		{ActsInput{Stage: StageWaitingForTerms, TermsRequired: true, TermsTemplateChosen: true, Operator: true}, "[]"},
-		{ActsInput{Stage: StateRejected, LatestRejectedEmail: SendHeld}, "[resendRejected]"},
-		{ActsInput{Stage: StateRejected, LatestRejectedEmail: SendUncertain}, "[resendRejected]"},
-		{ActsInput{Stage: StateRejected, LatestRejectedEmail: SendFailed}, "[resendRejected]"},
-		{ActsInput{Stage: StateRejected, LatestRejectedEmail: SendSent}, "[]"},
-		{ActsInput{Stage: StateRejected, LatestRejectedEmail: SendDeferred}, "[]"},
-		{ActsInput{Stage: StateRejected, LatestRejectedEmail: SendSkipped}, "[]"},
+		// THE TERMS EMAIL.
+		{ActsInput{Stage: StageWaitingForTerms, Emails: one(EmailTerms, EmailStanding{})}, "[reject resendTerms]"},
+		{ActsInput{Stage: StageWaitingForTerms, Emails: one(EmailTerms, EmailStanding{FirstRecorded: true, LastState: SendSent})}, "[reject resendTerms]"},
+		{ActsInput{Stage: StageWaitingForTerms, Emails: one(EmailTerms, EmailStanding{FirstRecorded: true, LastState: SendSkipped})}, "[reject resendTerms]"},
+		{ActsInput{Stage: StageWaitingForTerms}, "[reject]"},
+		{ActsInput{Stage: StageWaitingForTerms, Emails: one(EmailTerms, EmailStanding{Blocker: noTemplateReason(EmailTerms)})}, "[reject]"},
+		{ActsInput{Stage: StageWaitingForTerms, Emails: one(EmailTerms, EmailStanding{Blocker: NoSenderChosenReason})}, "[reject]"},
+		{ActsInput{Stage: StageWaitingForTerms, Emails: one(EmailTerms, EmailStanding{FirstRecorded: true, LastState: SendDeferred, OnItsWay: true})}, "[reject]"},
+		{ActsInput{Stage: StageWaitingForTerms, Operator: true, Emails: one(EmailTerms, EmailStanding{})}, "[]"},
+		{ActsInput{Stage: StageReadyToReview, Emails: one(EmailTerms, EmailStanding{})}, "[reject approve]"},
+		// THE APPROVAL EMAIL.
+		{with(granted, one(EmailApproved, EmailStanding{FirstRecorded: true, LastState: SendSent})), "[remove resendApproved]"},
+		{with(granted, one(EmailApproved, EmailStanding{FirstRecorded: true, LastState: SendSkipped})), "[remove resendApproved]"},
+		{with(granted, one(EmailApproved, EmailStanding{})), "[remove]"},
+		{granted, "[remove]"},
+		{with(granted, one(EmailApproved, EmailStanding{FirstRecorded: true, LastState: SendSent, Blocker: NoSenderChosenReason})), "[remove]"},
+		{with(granted, one(EmailApproved, EmailStanding{FirstRecorded: true, LastState: SendDeferred, OnItsWay: true})), "[remove]"},
+		{ActsInput{Stage: StateApproved, AccessState: EntitlementPending, EntitlementExists: true,
+			Emails: one(EmailApproved, EmailStanding{FirstRecorded: true, LastState: SendSent})}, "[remove retryAccess]"},
+		{ActsInput{Stage: StateApproved, AccessState: EntitlementGranted, EntitlementExists: true, Operator: true,
+			Emails: one(EmailApproved, EmailStanding{FirstRecorded: true, LastState: SendSent})}, "[]"},
+		{with(granted, one(EmailRejected, EmailStanding{FirstRecorded: true, LastState: SendHeld})), "[remove]"},
+		// THE REJECTION EMAIL.
+		{ActsInput{Stage: StateRejected, Emails: one(EmailRejected, EmailStanding{FirstRecorded: true, LastState: SendHeld})}, "[resendRejected]"},
+		{ActsInput{Stage: StateRejected, Emails: one(EmailRejected, EmailStanding{FirstRecorded: true, LastState: SendUncertain})}, "[resendRejected]"},
+		{ActsInput{Stage: StateRejected, Emails: one(EmailRejected, EmailStanding{FirstRecorded: true, LastState: SendFailed})}, "[resendRejected]"},
+		{ActsInput{Stage: StateRejected, Emails: one(EmailRejected, EmailStanding{FirstRecorded: true, LastState: SendSkipped})}, "[resendRejected]"},
+		{ActsInput{Stage: StateRejected, Emails: one(EmailRejected, EmailStanding{FirstRecorded: true, LastState: SendSent, LastBounced: true})}, "[resendRejected]"},
+		{ActsInput{Stage: StateRejected, Emails: one(EmailRejected, EmailStanding{FirstRecorded: true, LastState: SendSent})}, "[]"},
+		{ActsInput{Stage: StateRejected, Emails: one(EmailRejected, EmailStanding{FirstRecorded: true, LastState: SendDeferred, OnItsWay: true})}, "[]"},
+		{ActsInput{Stage: StateRejected, Emails: one(EmailRejected, EmailStanding{})}, "[]"},
 		{ActsInput{Stage: StateRejected}, "[]"},
-		{ActsInput{Stage: StateRejected, LatestRejectedEmail: SendHeld, Operator: true}, "[]"},
-		{ActsInput{Stage: StateRevoked, AccessState: EntitlementRevoked, EntitlementExists: true, LatestRevokedEmail: SendHeld}, "[resendRevoked]"},
-		{ActsInput{Stage: StateRevoked, AccessState: EntitlementPending, EntitlementExists: true, LatestRevokedEmail: SendFailed}, "[retryAccess resendRevoked]"},
-		{ActsInput{Stage: StateRevoked, AccessState: EntitlementRevoked, EntitlementExists: true, LatestRevokedEmail: SendSent}, "[]"},
-		{ActsInput{Stage: StateApproved, AccessState: EntitlementGranted, EntitlementExists: true, LatestRejectedEmail: SendHeld}, "[remove]"},
+		{ActsInput{Stage: StateRejected, Emails: one(EmailRejected, EmailStanding{FirstRecorded: true, LastState: SendHeld, Blocker: noTemplateReason(EmailRejected)})}, "[]"},
+		{ActsInput{Stage: StateRejected, Emails: one(EmailRejected, EmailStanding{FirstRecorded: true, LastState: SendHeld, Unreadable: true})}, "[]"},
+		{ActsInput{Stage: StateRejected, Operator: true, Emails: one(EmailRejected, EmailStanding{FirstRecorded: true, LastState: SendHeld})}, "[]"},
+		// THE REMOVAL EMAIL.
+		{ActsInput{Stage: StateRevoked, AccessState: EntitlementRevoked, EntitlementExists: true,
+			Emails: one(EmailRevoked, EmailStanding{FirstRecorded: true, LastState: SendHeld})}, "[resendRevoked]"},
+		{ActsInput{Stage: StateRevoked, AccessState: EntitlementPending, EntitlementExists: true,
+			Emails: one(EmailRevoked, EmailStanding{FirstRecorded: true, LastState: SendFailed})}, "[retryAccess resendRevoked]"},
+		{ActsInput{Stage: StateRevoked, AccessState: EntitlementRevoked, EntitlementExists: true,
+			Emails: one(EmailRevoked, EmailStanding{FirstRecorded: true, LastState: SendSent})}, "[]"},
+		{ActsInput{Stage: StateRevoked, AccessState: EntitlementRevoked, EntitlementExists: true,
+			Emails: one(EmailRevoked, EmailStanding{FirstRecorded: true, LastState: SendSent, LastBounced: true})}, "[resendRevoked]"},
 	} {
 		if got := fmt.Sprint(ActsFor(c.in)); got != c.want {
 			t.Errorf("ActsFor(%+v) = %s, want %s", c.in, got, c.want)
@@ -1359,7 +1441,7 @@ func TestTheSettingsAnswerTheSenderAsTheEmailsGoOutAs(t *testing.T) {
 		t.Fatalf("the lane was asked %v, want the store's organization and its sender", w.lane.sendersAsked)
 	}
 	w.settings["senderIdentityId"] = ""
-	if got := sender(); got["ready"] != false || got["address"] != "" || got["reason"] != "choose a sending identity belonging to this organization" {
+	if got := sender(); got["ready"] != false || got["address"] != "" || got["reason"] != laneNoneChosen {
 		t.Fatalf("no sender chosen reads %v", got)
 	}
 	for _, actor := range w.lane.senderActors {
@@ -1394,45 +1476,6 @@ func TestMayPublishAndMayExportAgreeWithTheBuiltins(t *testing.T) {
 		if may["publish"] != (publishErr == nil) || may["export"] != (exportErr == nil) {
 			t.Fatalf("%s: may %v, publish %v, export %v", who, may, publishErr, exportErr)
 		}
-	}
-}
-
-// A STORE WITH NO SENDER CHOSEN DECLINES EVERY EMAIL BEFORE THE LANE IS ASKED,
-// as a kind with no template chosen does: each of the four kinds, sent by the
-// automation or again by a person, is declined with the sentence that says no
-// sender is chosen and who chooses it; nothing reaches the lane, and no row is
-// written.
-func TestNoSenderChosenDeclinesEveryEmailBeforeTheLane(t *testing.T) {
-	for _, kind := range EmailKinds {
-		t.Run(kind, func(t *testing.T) {
-			w := newEmailWorld()
-			p := w.provider()
-			w.lane.senders = map[string]map[string]any{} // the lane resolves no sender for an empty one
-			switch kind {
-			case EmailApproved:
-				w.approveAndGrant(EntitlementGranted)
-			case EmailRejected:
-				w.decide(TransitionReject)
-			case EmailRevoked:
-				w.approveAndGrant(EntitlementGranted)
-				w.decide(TransitionRevoke)
-			}
-			var got map[string]any
-			if kind == EmailTerms {
-				got = w.sendTerms(t, p)
-			} else {
-				got = w.sendBuyer(t, p, kind)
-			}
-			if got["state"] != SendSkipped || got["recorded"] != false || got["reason"] != NoSenderChosenReason {
-				t.Fatalf("the automatic %s email answered %v", kind, got)
-			}
-			if _, err := w.resend(t, p, kind); err == nil || err.Error() != "wholesale: "+NoSenderChosenReason {
-				t.Fatalf("the %s resend answered %v", kind, err)
-			}
-			if len(w.lane.calls) != 0 || len(w.sends) != 0 {
-				t.Fatalf("%d lane calls and %d rows for a store with no sender", len(w.lane.calls), len(w.sends))
-			}
-		})
 	}
 }
 
@@ -1556,7 +1599,7 @@ func TestAStaffNoticeWithNoAddressIsSkipped(t *testing.T) {
 	w.settings["staffEmail"] = ""
 	p := w.provider()
 	got := w.notify(t, p, map[string]any{"event": StaffEventReadyToReview})
-	if got["status"] != "skipped" || got["reason"] != "the store names no address" || w.stages != 0 {
+	if got["status"] != "skipped" || got["reason"] != "The store names no address." || w.stages != 0 {
 		t.Fatalf("answered %v with %d stages", got, w.stages)
 	}
 }
@@ -1733,7 +1776,7 @@ func TestTheDefaultNoticesSayOnlyWhatIsTrue(t *testing.T) {
 		t.Fatalf("the access notice reads %q", notOn)
 	}
 	// THE APPROVAL EMAIL OF AN APPLICATION THAT IS NOT APPROVED is not "not granted yet".
-	if got := w2.sendBuyer(t, p2, EmailApproved); got["reason"] != "the application is not approved" {
+	if got := w2.sendBuyer(t, p2, EmailApproved); got["reason"] != "The application is not approved." {
 		t.Fatalf("the approval email of a removed application declined with %v", got["reason"])
 	}
 }
@@ -1866,5 +1909,884 @@ func TestTheStatusReadStampsInternalOriginOnItsOneCallAndNoMark(t *testing.T) {
 	want := `builtin campaignRowMessageStatus(accountId: "acct-links", requestIds: ["wholesale-terms-app-1-1", "wholesale-terms-app-1-2"])`
 	if eng.calls[0] != want {
 		t.Fatalf("rendered %s, want %s", eng.calls[0], want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// An email that was due and was not sent is recorded (ruling 79)
+// ---------------------------------------------------------------------------
+
+// resendActOf is the act that sends each kind again.
+var resendActOf = map[string]string{EmailTerms: ActResendTerms, EmailApproved: ActResendApproved,
+	EmailRejected: ActResendRejected, EmailRevoked: ActResendRevoked}
+
+// templateSetting is the setting that holds each kind's template.
+var templateSetting = map[string]string{EmailTerms: "termsTemplateId", EmailApproved: "approvedTemplateId",
+	EmailRejected: "rejectedTemplateId", EmailRevoked: "revokedTemplateId"}
+
+// offers reports whether the application's page offers act to the store's person.
+func (w *emailWorld) offers(t *testing.T, p *Provider, act string) bool {
+	t.Helper()
+	acts, _ := w.application(t, p)["acts"].([]any)
+	for _, a := range acts {
+		if a == act {
+			return true
+		}
+	}
+	return false
+}
+
+// noSender leaves the store with no sender chosen, as the lane then resolves none.
+func (w *emailWorld) noSender() { w.lane.senders = map[string]map[string]any{} }
+
+// AN EMAIL THAT WAS DUE AND THAT THE STORE'S OWN CHECKS DECLINE IS RECORDED.
+// For each of the four emails -- the terms email of a store that requires its
+// terms, the approval, the rejection and the removal -- and for each check that
+// declines it (no sender chosen, no template chosen): when its moment arrives
+// one attempt is recorded, skipped, with the check's own sentence, and the lane
+// is not asked; the application's page lists it; no resend is offered, and one
+// asked for is refused with that sentence, while the store would still decline
+// it; once the store is put right the act is offered, a person's resend is
+// attempt 2 and sends, and the automatic call made again sends nothing.
+func TestADueEmailTheStoreDeclinesIsRecordedAndAPersonSendsItOnceTheStoreIsReady(t *testing.T) {
+	for _, d := range []struct {
+		name           string
+		reason         func(kind string) string
+		unready, ready func(w *emailWorld, kind string)
+	}{
+		{"no sender chosen", func(string) string { return NoSenderChosenReason },
+			func(w *emailWorld, _ string) { w.noSender() },
+			func(w *emailWorld, _ string) { w.lane.senders = nil }},
+		{"no template chosen", noTemplateReason,
+			func(w *emailWorld, kind string) { w.settings[templateSetting[kind]] = "" },
+			func(w *emailWorld, kind string) { w.settings[templateSetting[kind]] = "tpl-" + kind }},
+	} {
+		for _, kind := range EmailKinds {
+			t.Run(d.name+"/"+kind, func(t *testing.T) {
+				w, p := worldIn(kind)
+				d.unready(w, kind)
+				want := d.reason(kind)
+				got := w.automatic(t, p, kind)
+				if got["state"] != SendSkipped || got["sent"] != false || got["recorded"] != true || got["attempt"] != float64(1) || got["reason"] != want {
+					t.Fatalf("the declined %s email answered %v, want attempt 1 recorded as skipped with %q", kind, got, want)
+				}
+				row := w.sends[EmailSendRowID(kind, linkApp, 1)]
+				if len(w.sends) != 1 || row == nil || row["state"] != SendSkipped || row["reason"] != want || len(w.lane.calls) != 0 {
+					t.Fatalf("%d rows, the attempt's is %v, and %d lane calls; want one skipped row and the lane not asked", len(w.sends), row, len(w.lane.calls))
+				}
+				if e := emailShown(t, w.application(t, p), kind, 1); e["state"] != SendSkipped || e["reason"] != want || e["delivery"] != nil {
+					t.Fatalf("the page shows the declined email as %v", e)
+				}
+				if w.offers(t, p, resendActOf[kind]) {
+					t.Fatalf("%s is offered while the store declines the email", resendActOf[kind])
+				}
+				if _, err := w.resend(t, p, kind); err == nil || err.Error() != "wholesale: "+want || len(w.sends) != 1 || len(w.lane.calls) != 0 {
+					t.Fatalf("a resend while the store declines answered %v with %d rows and %d lane calls; want the check's sentence and nothing done",
+						err, len(w.sends), len(w.lane.calls))
+				}
+				d.ready(w, kind)
+				if !w.offers(t, p, resendActOf[kind]) {
+					t.Fatalf("%s is not offered once the store would send the email: %v", resendActOf[kind], w.application(t, p)["acts"])
+				}
+				resent, err := w.resend(t, p, kind)
+				if err != nil || resent["state"] != SendSent || resent["attempt"] != float64(2) || len(w.lane.sent) != 1 {
+					t.Fatalf("the resend answered %v, %v after %d emails handed over", resent, err, len(w.lane.sent))
+				}
+				again := w.automatic(t, p, kind)
+				if again["attempt"] != float64(1) || again["state"] != SendSkipped || again["sent"] != false || len(w.lane.calls) != 1 || len(w.lane.sent) != 1 {
+					t.Fatalf("the automatic call after the resend answered %v after %d lane calls and %d emails", again, len(w.lane.calls), len(w.lane.sent))
+				}
+			})
+		}
+	}
+}
+
+// AN EMAIL THAT IS NOT DUE RECORDS NOTHING, however the store stands: the
+// terms email of a store that requires no terms, and an email whose
+// application is not in the state for it. No act is offered for either.
+func TestAnEmailThatIsNotDueRecordsNothing(t *testing.T) {
+	w := newEmailWorld()
+	w.settings["termsRequired"] = false
+	p := w.provider()
+	for _, unready := range []func(){func() {}, func() { w.settings["termsTemplateId"] = "" }, w.noSender} {
+		unready()
+		got := w.sendTerms(t, p)
+		if got["state"] != SendSkipped || got["recorded"] != false || got["reason"] != ReasonTermsNotRequired || len(w.sends) != 0 || len(w.lane.calls) != 0 {
+			t.Fatalf("the terms email of a store that requires no terms answered %v with %d rows", got, len(w.sends))
+		}
+	}
+	if w.offers(t, p, ActResendTerms) {
+		t.Fatal("resendTerms is offered on a store that requires no terms")
+	}
+	if _, err := w.resend(t, p, EmailTerms); err == nil || len(w.sends) != 0 {
+		t.Fatalf("a terms resend on a store that requires no terms answered %v with %d rows", err, len(w.sends))
+	}
+
+	// AN APPLICATION THAT IS NOT IN THE STATE FOR THE EMAIL, on a store that
+	// would decline it: not due, so nothing is recorded.
+	for kind, want := range map[string]string{EmailTerms: ReasonNotWaiting, EmailApproved: notInStateReason(StateApproved),
+		EmailRevoked: notInStateReason(StateRevoked)} {
+		w, p := worldIn(EmailRejected) // rejected: waiting for nothing, approved by nobody
+		w.settings[templateSetting[kind]] = ""
+		w.noSender()
+		got := w.automatic(t, p, kind)
+		if got["recorded"] != false || got["reason"] != want || len(w.sends) != 0 || len(w.lane.calls) != 0 {
+			t.Fatalf("the %s email of a rejected application answered %v with %d rows, want %q and nothing recorded", kind, got, len(w.sends), want)
+		}
+	}
+}
+
+// AN ACCESS FROM BEFORE THE PACK SENT EMAIL RECORDS NO ATTEMPT, whatever the
+// store's readiness: the account backfill still mails nobody and leaves no
+// record, on a store that would decline the approval email too.
+func TestAnAccessFromBeforeEmailsRecordsNoAttemptOnAStoreThatWouldDecline(t *testing.T) {
+	w := newEmailWorld()
+	p := w.provider()
+	w.decide(TransitionApprove)
+	w.ents = append(w.ents, map[string]any{"id": "v1:wholesale:entitlement:" + EntitlementRowID(linkApp),
+		"applicationId": applicationConcept + ":" + linkApp, "storeId": linkStore, "state": EntitlementGranted,
+		"adapter": AdapterCustomerTag, "ownerUserId": linkMerchant, "accountId": "acct-links", "createdAt": w.next()})
+	for name, unready := range map[string]func(){"no sender": w.noSender, "no template": func() { w.settings["approvedTemplateId"] = "" }} {
+		unready()
+		got := w.sendBuyer(t, p, EmailApproved)
+		if got["recorded"] != false || got["reason"] != ReasonAccessPredatesEmail || len(w.sends) != 0 || len(w.lane.calls) != 0 {
+			t.Fatalf("with %s the approval email of an access from before emails answered %v with %d rows", name, got, len(w.sends))
+		}
+	}
+}
+
+// TWO AUTOMATIC CALLS AT ONCE FOR A DECLINED EMAIL RECORD ONE ROW: the record
+// goes through the fenced write every attempt goes through. The other node's
+// call lands after this node's first read of the rows, and again after its
+// last read before the write; either way one version of one row is written and
+// both calls answer it.
+func TestTwoAutomaticCallsAtOnceForADeclinedEmailRecordOneRow(t *testing.T) {
+	for name, unready := range map[string]func(w *emailWorld){
+		"no template chosen": func(w *emailWorld) { w.settings["rejectedTemplateId"] = "" },
+		"no sender chosen":   func(w *emailWorld) { w.noSender() },
+	} {
+		for _, at := range []int{1, 2} {
+			t.Run(fmt.Sprintf("%s/the other lands after read %d", name, at), func(t *testing.T) {
+				w, p := worldIn(EmailRejected)
+				unready(w)
+				rowID := EmailSendRowID(EmailRejected, linkApp, 1)
+				var other map[string]any
+				w.onSendsRead = func(n int) {
+					if n == at {
+						other = w.automatic(t, p, EmailRejected)
+					}
+				}
+				got := w.automatic(t, p, EmailRejected)
+				if w.versions[rowID] != 1 || len(w.sends) != 1 || len(w.lane.calls) != 0 {
+					t.Fatalf("%d versions of the attempt in %d rows after %d lane calls, want one version of one row", w.versions[rowID], len(w.sends), len(w.lane.calls))
+				}
+				for who, answer := range map[string]map[string]any{"this node": got, "the other node": other} {
+					if answer["attempt"] != float64(1) || answer["state"] != SendSkipped || answer["recorded"] != true || answer["sent"] != false {
+						t.Fatalf("%s answered %v, want attempt 1's skipped row", who, answer)
+					}
+				}
+			})
+		}
+	}
+}
+
+// A REPEAT CALL READS THE ATTEMPTS FIRST: an automatic call for a kind that
+// already has an attempt answers that attempt whatever the store and the
+// application are now -- the sender or the template cleared, the terms
+// accepted or no longer required, the buyer removed -- and asks the lane
+// nothing, its sender included.
+func TestARepeatedAutomaticCallAnswersItsAttemptWhateverTheStoreAndTheApplicationAreNow(t *testing.T) {
+	for _, c := range []struct {
+		kind, name string
+		change     func(t *testing.T, w *emailWorld, p *Provider)
+	}{
+		{EmailRejected, "the sender is cleared", func(_ *testing.T, w *emailWorld, _ *Provider) { w.noSender() }},
+		{EmailRejected, "the template is cleared", func(_ *testing.T, w *emailWorld, _ *Provider) { w.settings["rejectedTemplateId"] = "" }},
+		{EmailTerms, "the store no longer requires its terms", func(_ *testing.T, w *emailWorld, _ *Provider) { w.settings["termsRequired"] = false }},
+		{EmailTerms, "the terms are accepted", func(t *testing.T, w *emailWorld, p *Provider) {
+			if _, err := p.acceptTerms(shopper(), w.acceptArgs(tokenIn(w.lane.sent[0].Fields["termsUrl"])), 0); err != nil {
+				t.Fatalf("accept: %v", err)
+			}
+		}},
+		{EmailApproved, "the buyer is removed", func(_ *testing.T, w *emailWorld, _ *Provider) { w.decide(TransitionRevoke) }},
+	} {
+		t.Run(c.kind+"/"+c.name, func(t *testing.T) {
+			w, p := worldIn(c.kind)
+			if first := w.automatic(t, p, c.kind); first["state"] != SendSent {
+				t.Fatalf("the first call answered %v", first)
+			}
+			c.change(t, w, p)
+			senderReads := len(w.lane.sendersAsked)
+			again := w.automatic(t, p, c.kind)
+			if again["attempt"] != float64(1) || again["state"] != SendSent || again["sent"] != true || again["recorded"] != true {
+				t.Fatalf("after %s the repeat call answered %v, want attempt 1's sent row", c.name, again)
+			}
+			if len(w.lane.calls) != 1 || len(w.lane.sendersAsked) != senderReads {
+				t.Fatalf("the repeat call made %d lane sends in all and %d sender reads, want one and none",
+					len(w.lane.calls), len(w.lane.sendersAsked)-senderReads)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A resend is offered exactly when it would not be refused
+// ---------------------------------------------------------------------------
+
+// A RESEND IS OFFERED EXACTLY WHEN IT WOULD NOT BE REFUSED. For every email,
+// every way its last attempt can stand and every way the store can stand, the
+// page offers the act if and only if the resend then goes through: ActsFor and
+// wholesaleResendEmail ask one question.
+func TestAResendIsOfferedExactlyWhenItWouldNotBeRefused(t *testing.T) {
+	useTestLaneReaders(t)
+	lasts := attemptScenarios()
+	stores := storeScenarios()
+	moved := map[string]func(w *emailWorld, kind string){
+		"in the state for it": func(*emailWorld, string) {},
+		"moved on": func(w *emailWorld, kind string) {
+			switch kind {
+			case EmailTerms:
+				w.decide(TransitionReject)
+			case EmailApproved:
+				w.decide(TransitionRevoke)
+			case EmailRejected, EmailRevoked:
+				// Nothing leads out of rejected or removed; the access of a removed
+				// buyer is the one thing left to change, and the email does not wait
+				// on it.
+			}
+		},
+	}
+	offered, refused := 0, 0
+	for _, kind := range EmailKinds {
+		for last, makeLast := range lasts {
+			for store, makeStore := range stores {
+				for where, move := range moved {
+					name := kind + "/last attempt " + last + "/" + store + "/" + where
+					w, p := worldIn(kind)
+					makeLast(t, w, p, kind)
+					w.lane.outcome = ""
+					makeStore(w, kind)
+					move(w, kind)
+					offer := w.offers(t, p, resendActOf[kind])
+					before := len(w.sends)
+					_, err := w.resend(t, p, kind)
+					if offer != (err == nil) {
+						t.Errorf("%s: the act offered is %v, and the resend answered %v", name, offer, err)
+					}
+					if err != nil && len(w.sends) != before {
+						t.Errorf("%s: a refused resend recorded an attempt", name)
+					}
+					if offer {
+						offered++
+					} else {
+						refused++
+					}
+				}
+			}
+		}
+	}
+	// THE SWEEP SAW BOTH ANSWERS, many times: it is not agreeing on nothing.
+	if offered < 20 || refused < 20 {
+		t.Fatalf("the sweep saw %d offers and %d refusals; it should see many of each", offered, refused)
+	}
+}
+
+// attemptScenarios is every way the last attempt of an email can come to
+// stand, each as a function that leaves a world's application so.
+func attemptScenarios() map[string]func(t *testing.T, w *emailWorld, p *Provider, kind string) {
+	return map[string]func(t *testing.T, w *emailWorld, p *Provider, kind string){
+		"none": func(*testing.T, *emailWorld, *Provider, string) {},
+		"sent": func(t *testing.T, w *emailWorld, p *Provider, kind string) { w.automatic(t, p, kind) },
+		"failed": func(t *testing.T, w *emailWorld, p *Provider, kind string) {
+			w.lane.outcome = "fail"
+			w.automatic(t, p, kind)
+		},
+		"held": func(t *testing.T, w *emailWorld, p *Provider, kind string) {
+			w.lane.outcome = "hold"
+			w.automatic(t, p, kind)
+		},
+		"uncertain": func(t *testing.T, w *emailWorld, p *Provider, kind string) {
+			w.lane.outcome = "uncertain"
+			w.automatic(t, p, kind)
+		},
+		"deferred": func(t *testing.T, w *emailWorld, p *Provider, kind string) {
+			w.lane.outcome = "defer"
+			w.automatic(t, p, kind)
+		},
+		"skipped by the address": func(t *testing.T, w *emailWorld, p *Provider, kind string) {
+			w.lane.outcome = "suppressed"
+			w.automatic(t, p, kind)
+		},
+		"declined for no template": func(t *testing.T, w *emailWorld, p *Provider, kind string) {
+			w.settings[templateSetting[kind]] = ""
+			w.automatic(t, p, kind)
+			w.settings[templateSetting[kind]] = "tpl-" + kind
+		},
+		"sent and bounced": func(t *testing.T, w *emailWorld, p *Provider, kind string) {
+			w.automatic(t, p, kind)
+			w.lane.statuses = []map[string]any{{"requestId": LaneRequestID(kind, linkApp, 1), "status": "sent", "providerStatus": "bounced"}}
+		},
+		"sent and delivered": func(t *testing.T, w *emailWorld, p *Provider, kind string) {
+			w.automatic(t, p, kind)
+			w.lane.statuses = []map[string]any{{"requestId": LaneRequestID(kind, linkApp, 1), "status": "sent", "providerStatus": "delivered"}}
+		},
+		"the lane's record unreadable": func(t *testing.T, w *emailWorld, p *Provider, kind string) {
+			w.lane.outcome = "fail"
+			w.automatic(t, p, kind)
+			w.lane.statusErr = errors.New("campaigns.rowMessageStatus: the read timed out")
+		},
+	}
+}
+
+// storeScenarios is every way a store can stand towards sending an email.
+func storeScenarios() map[string]func(w *emailWorld, kind string) {
+	return map[string]func(w *emailWorld, kind string){
+		"ready":       func(*emailWorld, string) {},
+		"no sender":   func(w *emailWorld, _ string) { w.noSender() },
+		"no template": func(w *emailWorld, kind string) { w.settings[templateSetting[kind]] = "" },
+		"the sender cannot be read just now": func(w *emailWorld, _ string) {
+			w.lane.senderErr = errors.New("campaigns.rowSender: the read timed out")
+		},
+		"the chosen sender is turned off": func(w *emailWorld, _ string) {
+			w.settings["senderIdentityId"] = "sender-1"
+			w.lane.senders = map[string]map[string]any{"sender-1": {"ready": false, "fromName": "", "address": "",
+				"reason": "The sender trade@example.com is turned off. Turn it on to send this email.", "readFailed": false, "noneChosen": false}}
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A bounce (ruling 80)
+// ---------------------------------------------------------------------------
+
+// exportedEmails is the store's export's emailSends.
+func (w *emailWorld) exportedEmails(t *testing.T, p *Provider) []map[string]any {
+	t.Helper()
+	nodes, err := p.exportStore(staffCtx(emailStaff), map[string]any{"siteId": linkSite, "storeId": linkStore}, 0)
+	var doc struct {
+		EmailSends []map[string]any `json:"emailSends"`
+	}
+	if err := json.Unmarshal([]byte(asString(reply(t, nodes, err)["json"])), &doc); err != nil {
+		t.Fatalf("the export: %v", err)
+	}
+	return doc.EmailSends
+}
+
+// A SENT EMAIL THE PROVIDER LATER REPORTS AS NOT DELIVERED STAYS SENT -- sent
+// means handed to the email service -- with the provider's report beside it, on
+// the application's page and in the export; and since it did not reach the
+// applicant a person may send it again: the act is offered and the resend
+// records the next attempt. One reported delivered offers no resend.
+func TestASentEmailReportedBouncedStaysSentAndMayBeSentAgain(t *testing.T) {
+	for _, kind := range []string{EmailRejected, EmailRevoked} {
+		t.Run(kind, func(t *testing.T) {
+			w, p := worldIn(kind)
+			if got := w.automatic(t, p, kind); got["state"] != SendSent {
+				t.Fatalf("the %s email answered %v", kind, got)
+			}
+			id := LaneRequestID(kind, linkApp, 1)
+			w.lane.statuses = []map[string]any{{"requestId": id, "status": "sent", "providerStatus": "delivered"}}
+			if w.offers(t, p, resendActOf[kind]) {
+				t.Fatalf("a delivered %s email offers %s", kind, resendActOf[kind])
+			}
+			if _, err := w.resend(t, p, kind); err == nil || len(w.lane.calls) != 1 {
+				t.Fatalf("a resend of a delivered %s email answered %v after %d lane calls", kind, err, len(w.lane.calls))
+			}
+			for _, report := range []string{"bounced", "suppressed", "quarantined", "filtered-spam", "failed"} {
+				w.lane.statuses[0]["providerStatus"] = report
+				shown := emailShown(t, w.application(t, p), kind, 1)
+				d, _ := shown["delivery"].(map[string]any)
+				if shown["state"] != SendSent || d["providerStatus"] != report {
+					t.Fatalf("the page shows an email reported %s as %v, want it sent with the provider's report beside it", report, shown)
+				}
+				exported := w.exportedEmails(t, p)
+				ed, _ := exported[0]["delivery"].(map[string]any)
+				if len(exported) != 1 || exported[0]["state"] != SendSent || ed["providerStatus"] != report {
+					t.Fatalf("the export shows an email reported %s as %v", report, exported)
+				}
+				if !w.offers(t, p, resendActOf[kind]) {
+					t.Fatalf("an email reported %s does not offer %s: %v", report, resendActOf[kind], w.application(t, p)["acts"])
+				}
+			}
+			// THE ADDRESS IS ONE THE EMAIL SERVICE NO LONGER SENDS TO: the resend is
+			// the next attempt, recorded skipped with the service's sentence.
+			w.lane.outcome = "suppressed"
+			resent, err := w.resend(t, p, kind)
+			if err != nil || resent["attempt"] != float64(2) || resent["state"] != SendSkipped || resent["sent"] != false ||
+				resent["reason"] != campaigns.SkipSentence("hard_bounce") {
+				t.Fatalf("the resend to a bounced address answered %v, %v; want attempt 2 skipped with the service's sentence", resent, err)
+			}
+			if row := w.sends[EmailSendRowID(kind, linkApp, 2)]; row == nil || row["state"] != SendSkipped {
+				t.Fatalf("the resend's row is %v", row)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// An unsettled attempt is read through the lane first
+// ---------------------------------------------------------------------------
+
+// unsettled leaves attempt 1 of kind recorded and never settled, age old: the
+// node that recorded it handed it over and could not write what came of it.
+func (w *emailWorld) unsettled(kind string, age time.Duration) {
+	id := EmailSendRowID(kind, linkApp, 1)
+	w.putSend(id, map[string]any{"emailSendId": id, "ownerUserId": linkMerchant, "storeId": linkStore, "accountId": "acct-links",
+		"applicationId": applicationConcept + ":" + linkApp, "kind": kind, "attempt": 1, "requestId": LaneRequestID(kind, linkApp, 1),
+		"templateId": "tpl-" + kind, "state": sendSending, "reason": reasonSending, "sentAt": "", "requestedBy": ""})
+	w.sends[id]["createdAt"] = w.clock.Add(-age)
+}
+
+// AN UNSETTLED ATTEMPT IS READ THROUGH THE LANE FIRST, at any age. Where the
+// lane has a record of the attempt, the lane decides: one it still holds to
+// send is on its way and is not sent again -- the lane's replay would make two
+// emails; one it failed is failed, not "may have been delivered"; one it sent
+// is sent. Only an attempt the lane has no record of turns uncertain once the
+// window has passed, and one whose record cannot be read stays on its way.
+func TestAnUnsettledAttemptIsReadThroughTheLaneFirst(t *testing.T) {
+	old := sendingWindow + 45*time.Minute
+	for _, kind := range []string{EmailTerms, EmailRejected} {
+		t.Run(kind, func(t *testing.T) {
+			w, p := worldIn(kind)
+			w.unsettled(kind, old)
+			id := LaneRequestID(kind, linkApp, 1)
+			shown := func() map[string]any { return emailShown(t, w.application(t, p), kind, 1) }
+
+			// THE LANE HOLDS IT TO SEND LATER.
+			w.lane.statuses = []map[string]any{{"requestId": id, "status": "pending"}}
+			if e := shown(); e["state"] != SendDeferred || e["reason"] != reasonLaneWaiting {
+				t.Fatalf("an unsettled attempt the lane holds reads %v, want it on its way", e)
+			}
+			if w.offers(t, p, resendActOf[kind]) {
+				t.Fatalf("%s is offered for an attempt the lane still holds", resendActOf[kind])
+			}
+			if _, err := w.resend(t, p, kind); err == nil || !strings.Contains(err.Error(), "waiting to be sent") || len(w.lane.calls) != 0 {
+				t.Fatalf("a resend over an attempt the lane still holds answered %v after %d lane calls", err, len(w.lane.calls))
+			}
+			if again := w.automatic(t, p, kind); again["state"] != SendDeferred || again["attempt"] != float64(1) || len(w.lane.calls) != 0 {
+				t.Fatalf("the automatic call answered %v after %d lane calls", again, len(w.lane.calls))
+			}
+
+			// THE LANE FAILED IT.
+			w.lane.statuses[0]["status"] = "failed"
+			if e := shown(); e["state"] != SendFailed || e["reason"] != reasonLaneFailed || strings.Contains(asString(e["reason"]), "may have been delivered") {
+				t.Fatalf("an unsettled attempt the lane failed reads %v, want it failed", e)
+			}
+
+			// THE LANE SENT IT.
+			sentAt := w.clock.Add(-old + time.Minute).UTC().Format(time.RFC3339Nano)
+			w.lane.statuses[0]["status"], w.lane.statuses[0]["sentAt"] = "sent", sentAt
+			if e := shown(); e["state"] != SendSent || e["sentAt"] != sentAt {
+				t.Fatalf("an unsettled attempt the lane sent reads %v", e)
+			}
+
+			// THE LANE HAS NO RECORD OF IT: uncertain once the window has passed, on
+			// its way before.
+			w.lane.statuses = nil
+			if e := shown(); e["state"] != SendUncertain || e["reason"] != ReasonUncertain {
+				t.Fatalf("an old unsettled attempt the lane has no record of reads %v, want it uncertain", e)
+			}
+			w.sends[EmailSendRowID(kind, linkApp, 1)]["createdAt"] = w.clock.Add(-time.Minute)
+			if e := shown(); e["state"] != SendDeferred || e["reason"] != reasonSending {
+				t.Fatalf("a young unsettled attempt reads %v, want it on its way", e)
+			}
+
+			// THE LANE'S RECORD CANNOT BE READ: nothing says the lane has no record of
+			// it, so it does not turn uncertain, and it is not sent again.
+			w.sends[EmailSendRowID(kind, linkApp, 1)]["createdAt"] = w.clock.Add(-old)
+			w.lane.statusErr = errors.New("campaigns.rowMessageStatus: the read timed out")
+			if e := shown(); e["state"] != SendDeferred || e["deliveryUnreadable"] != true || e["reason"] != reasonLaneUnread {
+				t.Fatalf("an old unsettled attempt whose record cannot be read reads %v, want it on its way and unread", e)
+			}
+			if _, err := w.resend(t, p, kind); err == nil || len(w.lane.calls) != 0 {
+				t.Fatalf("a resend over an unsettled attempt whose record cannot be read answered %v after %d lane calls", err, len(w.lane.calls))
+			}
+		})
+	}
+}
+
+// THE WINDOW SITS WELL ABOVE THE LANE'S OWN BOUND ON A HAND-OVER: at least ten
+// times the default of the send timeout the lane gives one message.
+func TestTheSendingWindowIsAtLeastTenTimesTheLanesSendTimeout(t *testing.T) {
+	if sendingWindow < 10*campaigns.DefaultSendTimeout || campaigns.DefaultSendTimeout <= 0 {
+		t.Fatalf("the window is %s and the lane's default send timeout %s; want the window at least ten times it",
+			sendingWindow, campaigns.DefaultSendTimeout)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The settings and a send give one answer
+// ---------------------------------------------------------------------------
+
+// wouldSend is what the settings say of kind: whether it would be sent, and why not.
+func (w *emailWorld) wouldSend(t *testing.T, p *Provider, kind string) (bool, string) {
+	t.Helper()
+	nodes, err := p.storeSettings(staffCtx(emailStaff), map[string]any{"siteId": linkSite, "storeId": linkStore}, 0)
+	all, _ := reply(t, nodes, err)["emailsWouldSend"].(map[string]any)
+	one, _ := all[kind].(map[string]any)
+	would, _ := one["wouldSend"].(bool)
+	return would, asString(one["reason"])
+}
+
+// THE SETTINGS AND A SEND GIVE ONE ANSWER, because both ask as one person: the
+// store's merchant, the owner its settings name. A store whose settings belong
+// to one person and whose applications to another: when the store's merchant
+// holds the send's authority and the application's owner does not, the settings
+// say the email would be sent and the send sends it, as the store's merchant;
+// the other way round the settings say it would not be, in the lane's own
+// sentence -- never "no sender is chosen", which is for a store with none
+// chosen -- and the send sends nothing.
+func TestTheSettingsAndASendGiveOneAnswerWhoeverOwnsTheApplication(t *testing.T) {
+	const storeMerchant = "v1:identity:user:merchant-of-the-store"
+	for _, kind := range EmailKinds {
+		for name, c := range map[string]struct {
+			unauthorized string
+			would        bool
+		}{
+			"the store's merchant may send, the application's owner may not": {linkMerchant, true},
+			"the application's owner may send, the store's merchant may not": {storeMerchant, false},
+		} {
+			t.Run(kind+"/"+name, func(t *testing.T) {
+				w, p := worldIn(kind)
+				w.settings["ownerUserId"] = storeMerchant
+				w.lane.unauthorized = map[string]bool{c.unauthorized: true}
+				would, reason := w.wouldSend(t, p, kind)
+				if would != c.would {
+					t.Fatalf("the settings say the %s email would be sent: %v (%q), want %v", kind, would, reason, c.would)
+				}
+				if !would && (reason != laneNoAuthority || reason == NoSenderChosenReason) {
+					t.Fatalf("the settings say why not as %q, want the lane's sentence %q", reason, laneNoAuthority)
+				}
+				for _, actor := range w.lane.senderActors {
+					if actor != storeMerchant {
+						t.Fatalf("the settings read the sender as %v, want the store's merchant", w.lane.senderActors)
+					}
+				}
+				got := w.automatic(t, p, kind)
+				if (got["sent"] == true) != would || (len(w.lane.sent) == 1) != would {
+					t.Fatalf("the settings said would send %v; the send answered %v and handed over %d emails", would, got, len(w.lane.sent))
+				}
+				for _, actor := range append(append([]string{}, w.lane.senderActors...), w.lane.sendActors...) {
+					if actor != storeMerchant {
+						t.Fatalf("the send asked the lane as %v and %v, want the store's merchant throughout", w.lane.senderActors, w.lane.sendActors)
+					}
+				}
+				if got["reason"] == NoSenderChosenReason || strings.Contains(fmt.Sprint(w.sends), NoSenderChosenReason) {
+					t.Fatalf("a send whose person may not read the sender was told no sender is chosen: %v", got)
+				}
+			})
+		}
+	}
+}
+
+// A STORE WHOSE SETTINGS NAME NO OWNER HAS NOBODY TO SEND AS: the settings say
+// so of the sender and of every email, and a due email is recorded as skipped
+// with that sentence -- it is not sent as whoever happens to be calling.
+func TestAStoreWhoseSettingsNameNoOwnerSendsAsNobody(t *testing.T) {
+	w, p := worldIn(EmailRejected)
+	w.settings["ownerUserId"] = ""
+	nodes, err := p.storeSettings(staffCtx(emailStaff), map[string]any{"siteId": linkSite, "storeId": linkStore}, 0)
+	settings := reply(t, nodes, err)
+	if sender, _ := settings["sender"].(map[string]any); sender["ready"] != false || sender["reason"] != NoStoreOwnerSentence {
+		t.Fatalf("the sender reads %v", settings["sender"])
+	}
+	if would, reason := w.wouldSend(t, p, EmailRejected); would || reason != NoStoreOwnerSentence {
+		t.Fatalf("the settings say the rejection email would be sent: %v (%q)", would, reason)
+	}
+	got := w.automatic(t, p, EmailRejected)
+	if got["state"] != SendSkipped || got["recorded"] != true || got["reason"] != NoStoreOwnerSentence || len(w.lane.calls) != 0 || len(w.lane.sendersAsked) != 0 {
+		t.Fatalf("the send answered %v after %d lane sends and %d sender reads", got, len(w.lane.calls), len(w.lane.sendersAsked))
+	}
+}
+
+// THE PACK DECIDES ON THE LANE'S FIELDS, NEVER ON ITS SENTENCES. The lane says
+// "could not be read just now" and "none is chosen" in fields of their own;
+// whatever words it puts beside them, the pack's decision does not move: a
+// sender that could not be read declines nothing (the send goes to the lane),
+// and one the lane says is not chosen is declined, recorded, with the pack's
+// own sentence.
+func TestThePackDecidesOnTheLanesFieldsNotItsSentences(t *testing.T) {
+	for _, words := range []string{laneReadFailed, laneNoneChosen, "Reworded since: nothing could be said of the sender."} {
+		// COULD NOT BE READ JUST NOW, in whatever words.
+		w, p := worldIn(EmailRejected)
+		w.lane.senders = map[string]map[string]any{"": {"ready": false, "fromName": "", "address": "", "reason": words,
+			"readFailed": true, "noneChosen": false}}
+		if would, reason := w.wouldSend(t, p, EmailRejected); would || reason != SenderUnreadableSentence {
+			t.Fatalf("with the lane's sentence %q the settings say %v, %q; want not ready, in the pack's own sentence", words, would, reason)
+		}
+		if got := w.automatic(t, p, EmailRejected); got["state"] != SendSent || len(w.lane.calls) != 1 {
+			t.Fatalf("with the lane's sentence %q a sender that could not be read answered %v after %d lane calls; want the lane to decide",
+				words, got, len(w.lane.calls))
+		}
+
+		// NONE IS CHOSEN, in whatever words.
+		w, p = worldIn(EmailRejected)
+		w.lane.senders = map[string]map[string]any{"": {"ready": false, "fromName": "", "address": "", "reason": words,
+			"readFailed": false, "noneChosen": true}}
+		if would, reason := w.wouldSend(t, p, EmailRejected); would || reason != NoSenderChosenReason {
+			t.Fatalf("with the lane's sentence %q the settings say %v, %q; want the pack's no-sender sentence", words, would, reason)
+		}
+		if got := w.automatic(t, p, EmailRejected); got["state"] != SendSkipped || got["reason"] != NoSenderChosenReason || len(w.lane.calls) != 0 {
+			t.Fatalf("with the lane's sentence %q a store with no sender answered %v after %d lane calls", words, got, len(w.lane.calls))
+		}
+
+		// NEITHER FIELD: the lane's own sentence, and the lane decides.
+		w, p = worldIn(EmailRejected)
+		w.lane.senders = map[string]map[string]any{"": {"ready": false, "fromName": "", "address": "", "reason": words,
+			"readFailed": false, "noneChosen": false}}
+		if would, reason := w.wouldSend(t, p, EmailRejected); would || reason != words {
+			t.Fatalf("with neither field the settings say %v, %q; want the lane's sentence %q", would, reason, words)
+		}
+		if got := w.automatic(t, p, EmailRejected); len(w.lane.calls) != 1 || got["reason"] == NoSenderChosenReason {
+			t.Fatalf("with neither field the send answered %v after %d lane calls; want the lane to decide", got, len(w.lane.calls))
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The sentences
+// ---------------------------------------------------------------------------
+
+// A SKIPPED SEND'S REASON IS A SENTENCE, NEVER THE LANE'S CODE: the lane says
+// why in a sentence of its own beside the code, at the send and in its status
+// read, and the pack answers and records that sentence. The code stays where
+// the lane's own record is shown, beside it.
+func TestASkippedSendsReasonIsTheLanesSentenceNeverItsCode(t *testing.T) {
+	w, p := worldIn(EmailRejected)
+	w.lane.outcome = "suppressed"
+	bounced := campaigns.SkipSentence("hard_bounce")
+	got := w.automatic(t, p, EmailRejected)
+	if got["state"] != SendSkipped || got["reason"] != bounced {
+		t.Fatalf("a send to an address the email service no longer sends to answered %v, want the sentence %q", got, bounced)
+	}
+	if row := w.sends[EmailSendRowID(EmailRejected, linkApp, 1)]; row["reason"] != bounced {
+		t.Fatalf("the row's reason is %q", row["reason"])
+	}
+	id := LaneRequestID(EmailRejected, linkApp, 1)
+	for code, sentence := range map[string]string{
+		"hard_bounce": bounced,
+		"complaint":   campaigns.SkipSentence("complaint"),
+		"manual":      campaigns.SkipSentence("manual"),
+	} {
+		// THE LANE'S STATUS READ, with its sentence; and one that carries the code
+		// alone, which is read as the lane's own words for it.
+		for _, status := range []map[string]any{
+			{"requestId": id, "status": "skipped", "skipReason": code, "skipSentence": sentence},
+			{"requestId": id, "status": "skipped", "skipReason": code},
+		} {
+			w.lane.statuses = []map[string]any{status}
+			shown := emailShown(t, w.application(t, p), EmailRejected, 1)
+			d, _ := shown["delivery"].(map[string]any)
+			if shown["state"] != SendSkipped || shown["reason"] != sentence || shown["reason"] == code || d["skipReason"] != code {
+				t.Fatalf("a %s skip shows %v, want the sentence %q and the code beside it in the delivery", code, shown, sentence)
+			}
+			if exported := w.exportedEmails(t, p); exported[0]["reason"] != sentence {
+				t.Fatalf("the export gives a %s skip the reason %q", code, exported[0]["reason"])
+			}
+			if again := w.automatic(t, p, EmailRejected); again["reason"] != sentence {
+				t.Fatalf("the automatic answer gives a %s skip the reason %q", code, again["reason"])
+			}
+		}
+	}
+	// A WITHDRAWAL IS THE ROW'S OWN SENTENCE, as it was given.
+	w.lane.statuses = []map[string]any{{"requestId": id, "status": "skipped", "skipReason": notInStateReason(StateRejected),
+		"skipSentence": notInStateReason(StateRejected)}}
+	if shown := emailShown(t, w.application(t, p), EmailRejected, 1); shown["reason"] != "The application is not rejected." {
+		t.Fatalf("a withdrawn email shows %v", shown)
+	}
+}
+
+// AN UNCERTAIN ATTEMPT ALWAYS CARRIES THE UNCERTAIN SENTENCE, on its row and on
+// the application's page: whether the lane's reply said nothing of why or said
+// it in words of its own, the reason is exactly the ruled sentence -- never
+// empty, never the lane's words.
+func TestAnUncertainAttemptAlwaysCarriesTheUncertainSentence(t *testing.T) {
+	const ruled = "We could not confirm this email was sent. It may have been delivered."
+	for name, laneReply := range map[string]map[string]any{
+		"the lane's reply has no reason": {"sent": false, "skipped": false, "uncertain": true, "replayed": true},
+		"the lane's reply has a reason of its own": {"sent": false, "skipped": false, "uncertain": true, "replayed": true,
+			"reason": "The previous send may have reached the provider. It is not sent again until the provider says whether it accepted it."},
+		"the lane's reply has a blank reason": {"sent": false, "skipped": false, "uncertain": true, "reason": "  "},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w, p := worldIn(EmailRejected)
+			w.lane.reply = laneReply
+			got := w.automatic(t, p, EmailRejected)
+			if got["state"] != SendUncertain || got["reason"] != ruled {
+				t.Fatalf("the uncertain attempt answered %v", got)
+			}
+			if row := w.sends[EmailSendRowID(EmailRejected, linkApp, 1)]; row["state"] != SendUncertain || row["reason"] != ruled {
+				t.Fatalf("the uncertain attempt's row is %v", row)
+			}
+			if shown := emailShown(t, w.application(t, p), EmailRejected, 1); shown["state"] != SendUncertain || shown["reason"] != ruled {
+				t.Fatalf("the page shows the uncertain attempt as %v", shown)
+			}
+			if exported := w.exportedEmails(t, p); exported[0]["state"] != SendUncertain || exported[0]["reason"] != ruled {
+				t.Fatalf("the export shows the uncertain attempt as %v", exported[0])
+			}
+		})
+	}
+	// A ROW AN EARLIER BUILD RECORDED UNCERTAIN WITH THE LANE'S WORDS, OR WITH
+	// NONE, is answered with the ruled sentence too.
+	for _, stored := range []string{"", "campaigns.sendToRecipient: the connection to the provider closed"} {
+		w, p := worldIn(EmailRejected)
+		id := EmailSendRowID(EmailRejected, linkApp, 1)
+		w.putSend(id, map[string]any{"emailSendId": id, "ownerUserId": linkMerchant, "storeId": linkStore, "accountId": "acct-links",
+			"applicationId": applicationConcept + ":" + linkApp, "kind": EmailRejected, "attempt": 1,
+			"requestId": LaneRequestID(EmailRejected, linkApp, 1), "state": SendUncertain, "reason": stored})
+		if shown := emailShown(t, w.application(t, p), EmailRejected, 1); shown["reason"] != ruled {
+			t.Fatalf("a row recorded uncertain with the reason %q shows %v", stored, shown)
+		}
+	}
+}
+
+// EVERY REASON IS A WHOLE SENTENCE: a capital first, a full stop last. Walked
+// here: every reason constant of the pack, read from its source so one added
+// later is held to the rule too; every sentence the pack composes; and every
+// reason the application's emails, the store's settings and the buyers list
+// answer, across every way an attempt and a store can stand -- the lane's own
+// words and a route's error text among them, which are answered as whole
+// sentences whatever form they arrived in. (The account backfill's report says
+// why a row was left untied in fragments of its own; it is none of these three
+// and is not walked.)
+func TestEveryReasonIsAWholeSentence(t *testing.T) {
+	useTestLaneReaders(t)
+	whole := func(s string) bool {
+		first, _ := utf8.DecodeRuneInString(s)
+		return s != "" && unicode.IsUpper(first) && strings.HasSuffix(s, ".") && s == strings.TrimSpace(s)
+	}
+	// 1. EVERY REASON CONSTANT, from the source.
+	files, err := parser.ParseDir(token.NewFileSet(), ".", func(f fs.FileInfo) bool { return !strings.HasSuffix(f.Name(), "_test.go") }, 0)
+	if err != nil {
+		t.Fatalf("parse the pack: %v", err)
+	}
+	isReason := func(name string) bool {
+		return strings.Contains(strings.ToLower(name), "reason") || strings.HasSuffix(name, "Sentence") ||
+			strings.HasPrefix(name, "withdrawn") || strings.HasPrefix(name, "Note")
+	}
+	walked := 0
+	for _, pkg := range files {
+		for _, file := range pkg.Files {
+			for _, decl := range file.Decls {
+				gen, ok := decl.(*ast.GenDecl)
+				if !ok || gen.Tok != token.CONST {
+					continue
+				}
+				for _, spec := range gen.Specs {
+					values := spec.(*ast.ValueSpec)
+					for i, name := range values.Names {
+						if i >= len(values.Values) || !isReason(name.Name) {
+							continue
+						}
+						lit, ok := values.Values[i].(*ast.BasicLit)
+						if !ok || lit.Kind != token.STRING {
+							continue
+						}
+						text, err := strconv.Unquote(lit.Value)
+						if err != nil {
+							t.Fatalf("%s: %v", name.Name, err)
+						}
+						walked++
+						if !whole(text) {
+							t.Errorf("the constant %s is %q, want a whole sentence", name.Name, text)
+						}
+					}
+				}
+			}
+		}
+	}
+	if walked < 30 {
+		t.Fatalf("the walk found %d reason constants; it should find the pack's thirty and more", walked)
+	}
+	// 2. EVERY SENTENCE THE PACK COMPOSES.
+	for _, kind := range EmailKinds {
+		if got := noTemplateReason(kind); !whole(got) {
+			t.Errorf("noTemplateReason(%s) is %q", kind, got)
+		}
+	}
+	for _, state := range []string{StateApproved, StateRejected, StateRevoked} {
+		if got := notInStateReason(state); !whole(got) {
+			t.Errorf("notInStateReason(%s) is %q", state, got)
+		}
+	}
+	// 3. EVERY REASON THE THREE SURFACES ANSWER.
+	said := func(where, reason string) {
+		t.Helper()
+		if reason != "" && !whole(reason) {
+			t.Errorf("%s answers the reason %q, want a whole sentence", where, reason)
+		}
+	}
+	seen := 0
+	for _, kind := range EmailKinds {
+		for last, makeLast := range attemptScenarios() {
+			for store, makeStore := range storeScenarios() {
+				w, p := worldIn(kind)
+				makeLast(t, w, p, kind)
+				w.lane.outcome = ""
+				makeStore(w, kind)
+				where := kind + "/" + last + "/" + store
+				// THE EMAILS VIEW, the send's own answers and the export.
+				emails, _ := w.application(t, p)["emails"].([]any)
+				for _, e := range emails {
+					said("the emails view of "+where, asString(e.(map[string]any)["reason"]))
+					seen++
+				}
+				for _, e := range w.exportedEmails(t, p) {
+					said("the export of "+where, asString(e["reason"]))
+				}
+				said("the automatic answer of "+where, asString(w.automatic(t, p, kind)["reason"]))
+				if resent, err := w.resend(t, p, kind); err == nil {
+					said("the resend's answer of "+where, asString(resent["reason"]))
+				}
+				for _, row := range w.sends {
+					said("the row recorded for "+where, asString(row["reason"]))
+				}
+				// THE SETTINGS: the sender line, and each email's.
+				nodes, err := p.storeSettings(staffCtx(emailStaff), map[string]any{"siteId": linkSite, "storeId": linkStore}, 0)
+				settings := reply(t, nodes, err)
+				sender, _ := settings["sender"].(map[string]any)
+				said("the sender line of "+where, asString(sender["reason"]))
+				would, _ := settings["emailsWouldSend"].(map[string]any)
+				for k, v := range would {
+					said("emailsWouldSend."+k+" of "+where, asString(v.(map[string]any)["reason"]))
+					seen++
+				}
+			}
+		}
+	}
+	if seen < 500 {
+		t.Fatalf("the walk read %d reasons; it should read hundreds", seen)
+	}
+	// WORDS THAT ARE NOT THE PACK'S are answered as whole sentences too: the
+	// lane's error text on a failed attempt, a sentence of the lane's with no
+	// capital or stop, and a store that is not set up.
+	w, p := worldIn(EmailRejected)
+	w.lane.outcome = "fail"
+	w.automatic(t, p, EmailRejected)
+	if e := emailShown(t, w.application(t, p), EmailRejected, 1); e["reason"] != "Campaigns.sendRowMessage: the template must belong to the row's organization." {
+		t.Errorf("the lane's error text is shown as %q", e["reason"])
+	}
+	w.settings["senderIdentityId"] = "sender-1"
+	w.lane.senders = map[string]map[string]any{"sender-1": {"ready": false, "reason": "choose a sending identity belonging to this organization"}}
+	if would, reason := w.wouldSend(t, p, EmailRejected); would || reason != "Choose a sending identity belonging to this organization." {
+		t.Errorf("a lane sentence with no capital or stop is answered as %q", reason)
+	}
+	for _, v := range notSetUpEmails() {
+		said("a store that is not set up", asString(v.(map[string]any)["reason"]))
+	}
+	said("the sender of a store that is not set up", NotSetUpSenderSentence)
+
+	// THE BUYERS LIST: why access is not on is the access record's own text,
+	// which a route wrote as an error. It is answered as a whole sentence, the
+	// same one the application's page shows.
+	w, p = worldIn(EmailApproved)
+	w.ents[len(w.ents)-1]["state"] = EntitlementFailed
+	w.ents[len(w.ents)-1]["errorCode"] = ErrorCustomerRefused
+	w.ents[len(w.ents)-1]["error"] = "wholesale: customerTag refused: the store said no"
+	nodes, err := p.buyers(staffCtx(emailStaff), map[string]any{"siteId": linkSite, "storeId": linkStore}, 0)
+	rows := rowsOf(t, reply(t, nodes, err))
+	ent, _ := w.application(t, p)["entitlement"].(map[string]any)
+	if len(rows) != 1 || rows[0]["error"] != "Wholesale: customerTag refused: the store said no." || ent["error"] != rows[0]["error"] {
+		t.Errorf("the buyers row says %v and the application's page %q; want one whole sentence on both", rows, ent["error"])
 	}
 }

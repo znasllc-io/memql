@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -42,33 +43,51 @@ import (
 //     ID. That write is what admits the hand-over: of two callers for one
 //     attempt, the one whose write loses the fence hands over nothing and
 //     answers the row the other wrote.
-//  2. HAND OVER. The winner calls the row lane as the application's merchant;
-//     the lane asks the pack's resolver for the address and mints the link.
+//  2. HAND OVER. The winner calls the row lane as the store's merchant
+//     (asStoreMerchant); the lane asks the pack's resolver for the address and
+//     mints the link.
 //  3. SETTLE. What the lane answered is written over the row, fenced on the
 //     version recorded in step 1.
 //
-// THE AUTOMATIC PATH MAKES ITS ATTEMPT AT MOST ONCE. Before step 1 it reads
-// the application's rows of the kind, fresh: if ANY exists -- attempt 1 in any
-// state, sent or not, or a later attempt a person sent -- it hands over
-// nothing and answers that row (attempt 1's when there is one). So a
-// re-delivered event, a second granted version, a version the backfill
-// re-wrote and the engine running a failed automation again all send nothing,
-// and nothing automatic follows a person's resend.
+// THE AUTOMATIC PATH MAKES ITS ATTEMPT AT MOST ONCE, AND READS ITS ATTEMPTS
+// FIRST. Before anything else it reads the application's rows of the kind,
+// fresh: if ANY exists -- attempt 1 in any state, sent or not, or a later
+// attempt a person sent -- it hands over nothing and answers that row (attempt
+// 1's when there is one), whatever the store and the application are now. So a
+// re-delivered event, a second granted version, a version the backfill re-wrote
+// and the engine running a failed automation again all send nothing, and
+// nothing automatic follows a person's resend.
+//
+// # An email that was due and was not sent is recorded
+//
+// An email is DUE when the automatic call for its kind arrives for an
+// application in the state for it and the kind applies to the store (the terms
+// email of a store that requires no terms is never due). An email that is not
+// due is declined and nothing is recorded. An email that is due and that THE
+// STORE'S OWN CHECKS decline -- no template chosen, no sender chosen
+// (emailBlocker) -- is recorded all the same: attempt 1, skipped, with the
+// check's own sentence, through step 1's fenced write and with the lane not
+// asked. It is then an attempt like any other: the application's page lists
+// it, the automatic path answers it and never sends after it, and a person
+// sends it again once the store is ready. Without the record such an email
+// could never be sent and nothing would say so: the automatic call comes once.
 //
 // # What happened is a row, in the lane's words
 //
 // What the lane answered is recorded on the email's row: sent; skipped with the
-// lane's sentence (the row withdrew it, or the address is suppressed); held
-// with the lane's sentence (configuration the store can fix, such as an
-// unpublished template: nothing was attempted); uncertain (the hand-over had no
-// answer, and the provider may have the message); failed with the lane's words;
-// or deferred (the send-rate limit: the lane replays it). Every outcome is
-// ANSWERED AS A REPLY -- sent true or false, with its reason -- and never as an
-// error that would make the engine run the automation again; only a fault that
-// kept anything from being recorded is an error. The automation's reply
-// carries the pack's own fixed sentences for a hold and a failure: the lane's
-// words, which can name the store's template, its sender or a transport's
-// text, stay on the row for the store's people.
+// lane's sentence (the row withdrew it, or the address is one the email service
+// no longer sends to -- the lane's sentence for it, never its code); held with
+// the lane's sentence (configuration the store can fix, such as an unpublished
+// template: nothing was attempted); uncertain (the hand-over had no answer, and
+// the provider may have the message -- always with the one uncertain sentence,
+// never the lane's words); failed with the lane's words; or deferred (the
+// send-rate limit: the lane replays it). Every outcome is ANSWERED AS A REPLY --
+// sent true or false, with its reason -- and never as an error that would make
+// the engine run the automation again; only a fault that kept anything from
+// being recorded is an error. The automation's reply carries the pack's own
+// fixed sentences for a hold and a failure: the lane's words, which can name
+// the store's template, its sender or a transport's text, stay on the row for
+// the store's people. Every reason answered is a whole sentence (wholeSentence).
 //
 // # The lane's status is the truth, except its early word on an uncertain one
 //
@@ -79,16 +98,33 @@ import (
 // attempt recorded UNCERTAIN stays uncertain until the lane says something
 // definite -- sent, or a provider report of delivery or a bounce -- because the
 // lane writes failed in its ledger before it decides a hand-over was uncertain.
+// An attempt recorded and NEVER SETTLED is read through the lane first, at any
+// age; only one the lane has no record of turns uncertain, once sendingWindow
+// has passed. SENT MEANS HANDED TO THE EMAIL SERVICE: whether it arrived is the
+// delivery's to say (its providerStatus, answered beside the state).
 //
 // # Sent again by a person
 //
 // A person of the store sends an email again as a new attempt
-// (wholesaleResendEmail): the terms and approval emails as before, and a
-// rejection or removal only while the application is still rejected or
-// removed and its last attempt did not reach the provider (held, uncertain or
-// failed) -- one that was sent is never sent twice. Nothing is sent again while
-// the last attempt is on its way, and the answer to a resend over an uncertain
-// attempt says the applicant may receive it twice.
+// (wholesaleResendEmail). ONE FUNCTION DECIDES IT (resendRefusal), for the
+// resend and for the act the application's page offers, so a resend is offered
+// exactly when it would not be refused: the store would send the email now, no
+// attempt of the kind is on its way, and the application is in the state for
+// it -- the terms email while it waits for its terms, the approval email while
+// its access is granted and the automation's attempt is recorded, and a
+// rejection or removal only while it is still rejected or removed and the last
+// attempt did not reach the applicant (skipped, held, uncertain or failed, or
+// sent and since reported not delivered). The answer to a resend over an
+// uncertain attempt says the applicant may receive it twice.
+//
+// # One person sends for a store
+//
+// The lane is asked -- which sender, and the send itself -- as the store's
+// merchant, the owner the store's settings name (asStoreMerchant): the sends,
+// the resend, the acts and the settings all resolve that person through the one
+// function, so what the settings say would be sent is what a send then does.
+// The email's row, and the link the resolver mints, stay the application's
+// merchant's, as every row of an application is.
 
 // The applicant's four emails, matching the emailSend concept's kind enum.
 const (
@@ -110,8 +146,9 @@ const (
 	SendFailed    = "failed"
 	SendDeferred  = "deferred"
 	// sendSending is an attempt recorded and not yet settled: the lane is being
-	// asked. It is read as deferred while it is young (on its way) and as
-	// uncertain once sendingWindow has passed with nothing settled (recordedState).
+	// asked. It is read through the lane first (effectiveSend); with nothing of
+	// it in the lane's record it is on its way while it is young, and uncertain
+	// once sendingWindow has passed (recordedState).
 	sendSending = "sending"
 	// sendPendingRecorded is the first build's word for a deferral or an
 	// uncertain answer, which the concept still accepts for rows it wrote. It is
@@ -119,11 +156,21 @@ const (
 	sendPendingRecorded = "pending"
 )
 
-// sendingWindow is how long an attempt may stay recorded and unsettled before
-// it is read as uncertain: well past any hand-over the lane would still be in.
+// sendingWindow is how long an attempt may stay recorded and unsettled, WITH
+// NOTHING OF IT IN THE LANE'S OWN RECORD, before it is read as uncertain.
+//
+// IT SITS ABOVE THE ONE BOUND A HAND-OVER HAS. The lane gives one message's
+// hand-over to the provider its send timeout (campaigns Config.SendTimeout,
+// thirty seconds unless the installation sets another:
+// campaigns.DefaultSendTimeout), after which the lane has answered and the
+// attempt is settled. Fifteen minutes is thirty times that default: room for a
+// configured timeout several times longer, a slow database and a busy node. A
+// test holds the window at ten times the default or more
+// (TestTheSendingWindowIsAtLeastTenTimesTheLanesSendTimeout).
 const sendingWindow = 15 * time.Minute
 
-// recordedState is a row's state, and its reason, as this build reads it.
+// recordedState is a row's state, and its reason, as this build reads it from
+// the row alone. effectiveSend reads the lane's record over it.
 func (p *Provider) recordedState(row map[string]any) (string, string) {
 	state, reason := trimmed(row["state"]), asString(row["reason"])
 	switch state {
@@ -147,18 +194,29 @@ var (
 	laneUncertain  = campaigns.UncertainSend
 )
 
-// The sentences a send that the builtin itself declines answers. Nothing is
-// recorded for these: the attempt stays open, so the same call made once the
-// store is ready (a template chosen, the access granted) sends.
+// The sentences a send answers for an email that is NOT DUE: the kind does not
+// apply to the store, or the application is not in the state for it. Nothing is
+// recorded for these, so the same call made once the application is there
+// sends. (An email that is due and that the store's own checks decline is
+// recorded: emailBlocker.) Each is a whole sentence, as every reason the pack
+// answers is.
 const (
-	ReasonTermsNotRequired = "terms are not required on this store"
-	ReasonNotWaiting       = "the application is not waiting for terms"
-	ReasonAccessNotGranted = "access is not granted yet"
+	ReasonTermsNotRequired = "Terms are not required on this store."
+	ReasonNotWaiting       = "The application is not waiting for terms."
+	ReasonAccessNotGranted = "Access is not granted yet."
 	// ReasonAccessPredatesEmail declines the approval email and the access
 	// notices for an access record written before the pack sent either.
-	ReasonAccessPredatesEmail = "this access record predates the pack's emails and notices, so nothing is sent for it"
-	ReasonNoOrganization      = "the application belongs to no organization, so no email can be sent for it"
-	reasonUnreadableAnswer    = "the row lane answered nothing this pack can read"
+	ReasonAccessPredatesEmail = "This access record predates the pack's emails and notices, so nothing is sent for it."
+)
+
+// The sentences of an attempt that was recorded, the resolver's withdrawals,
+// and what this file calls the lane's constructs and the email's row.
+const (
+	// An attempt that could not be handed to the lane, or whose answer could not
+	// be read, is recorded failed with one of these.
+	ReasonNoOrganization   = "The application belongs to no organization, so no email can be sent for it."
+	reasonUnreadableAnswer = "The row lane answered nothing this pack can read."
+	reasonNoLane           = "The pack has no row lane, so no email can be sent."
 	// reasonSending is an attempt recorded while the lane is being asked.
 	reasonSending = "The email is being handed to the email service."
 	// reasonFailedForAutomation is a failed attempt as the automation that asked
@@ -169,10 +227,12 @@ const (
 	reasonLaneFailed = "The email service recorded this email as failed."
 	// reasonLaneWaiting is a delivery the lane holds to send later, when the
 	// row carries no sentence of its own for it.
-	reasonLaneWaiting       = "The email service is waiting to send this email."
-	withdrawnTerms          = "the application is no longer waiting for terms"
-	withdrawnAccess         = "access is not granted"
-	withdrawnGone           = "the application no longer exists"
+	reasonLaneWaiting = "The email service is waiting to send this email."
+	// The resolver's withdrawals: the lane ledgers each as the skip's reason and
+	// answers it, word for word, as the sentence a person reads.
+	withdrawnTerms          = "The application is no longer waiting for terms."
+	withdrawnAccess         = "Access is not granted."
+	withdrawnGone           = "The application no longer exists."
 	emailSendConcept        = "v1:wholesale:emailSend"
 	emailActor              = "wholesale-email"
 	maxEmailReason          = 2000
@@ -184,11 +244,33 @@ const (
 )
 
 // noTemplateReason is the sentence of a kind with no template chosen.
-func noTemplateReason(kind string) string { return "no " + kind + " email template is chosen" }
+func noTemplateReason(kind string) string { return "No " + kind + " email template is chosen." }
 
-// notInStateReason is the sentence of a rejection or removal email for an
-// application that is not in that state.
-func notInStateReason(state string) string { return "the application is not " + state }
+// notInStateReason is the sentence of an email for an application that is not
+// in the state it is sent in.
+func notInStateReason(state string) string { return "The application is not " + state + "." }
+
+// wholeSentence is text as a sentence a person reads: a capital first, a full
+// stop last. Every sentence the pack writes is one already; this is for words
+// that are not the pack's -- the lane's error text on a failed attempt, a
+// route's error on an access record, a row an earlier build recorded -- so that
+// every reason answered is a whole sentence whatever form it arrived in. A
+// first character that is not a small letter (the quotation mark before a
+// template's name) is left as it is, and so is a sentence that already ends.
+func wholeSentence(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	if first, size := utf8.DecodeRuneInString(text); unicode.IsLower(first) {
+		text = string(unicode.ToUpper(first)) + text[size:]
+	}
+	switch last, _ := utf8.DecodeLastRuneInString(text); last {
+	case '.', '!', '?':
+		return text
+	}
+	return text + "."
+}
 
 // EmailSendRowID derives the one emailSend row of an application, kind and
 // attempt, from the application's bare id whichever spelling the caller named.
@@ -243,70 +325,158 @@ func (l *engineLane) RowSender(ctx context.Context, accountID, senderIdentityID 
 	return rows[0], nil
 }
 
+// blockEffect is what a blocker does to an email that is due.
+type blockEffect int
+
+const (
+	// blockNothing: nothing blocks the email; the reason is empty.
+	blockNothing blockEffect = iota
+	// blockNotDue: the kind does not apply to the store -- the terms email of a
+	// store that requires no terms. Nothing is sent and nothing is recorded.
+	blockNotDue
+	// blockDeclined: one of the store's own checks declines the email -- no
+	// template chosen, no sender chosen, nobody to send as. The lane is not
+	// asked, and A DUE EMAIL IS RECORDED as a skipped attempt with the reason,
+	// so the application's page shows it and a person sends it again once the
+	// store is ready.
+	blockDeclined
+	// blockLaneDecides: the lane would hold or refuse the email, or could not say
+	// just now. An automatic send goes to the lane, whose answer is the
+	// attempt's record.
+	blockLaneDecides
+)
+
 // emailBlocker is the one sentence why the store's email of kind would not be
 // sent now, for an application in the right state, or "" when it would --
 // THE CHECKS EVERY SEND MAKES OF THE STORE, in order, before the lane is asked:
 //
 //   - the terms email needs the store to require its terms;
 //   - a template must be chosen for the kind;
-//   - the lane must resolve a sender (campaignRowSender, as a send resolves it).
+//   - the lane must resolve a sender for the store's merchant
+//     (campaignRowSender, as a send resolves it).
 //
-// declines says whether a send declines on it -- recording nothing, so the
-// same call once the store is ready sends. Terms not required, no template and
-// NO SENDER CHOSEN decline. A sender that IS chosen and that the lane will not
-// send as (turned off, gone, another organization's) is answered with the
-// lane's sentence but does not decline: the lane holds the send, the row says
-// held, and a person sends it again once it is fixed. A sender read that fails
-// declines nothing either: the lane decides at the send.
+// ONE FUNCTION, FOUR CALLERS, so they cannot disagree: the automatic sends, a
+// person's resend, the resend acts the application's page offers, and the
+// settings' emailsWouldSend. A resend is refused, and its act not offered,
+// whenever the reason is not empty.
+//
+// The effect says what an AUTOMATIC send of a due email does about it:
+//
+//   - blockNotDue (terms not required): nothing is sent and nothing recorded;
+//   - blockDeclined (no template chosen, no sender chosen, a store whose
+//     settings name no owner): the lane is not asked and the attempt is
+//     RECORDED, skipped, with the reason. It used to record nothing, "so the
+//     same call once the store is ready sends" -- but that call never comes: a
+//     client's automation runs on a row's first version, so an email declined
+//     that way was lost with nothing to say so. The record is what a person's
+//     resend, and the act that offers it, start from;
+//   - blockLaneDecides: a sender that IS chosen and that the lane will not
+//     send as (turned off, gone, another organization's), one the store's
+//     merchant may not read, or one that could not be read just now. The lane
+//     is asked and its answer recorded: held with its sentence, or failed.
+//
+// WHICH OF THESE A SENDER'S ANSWER IS, IS READ FROM THE LANE'S FIELDS, never
+// from its sentence (readSender): "no sender is chosen" is said only of a
+// store with none chosen, by the lane's own word that none is.
 //
 // What it cannot know without sending: whether the chosen template is still a
 // published transactional template. The pack reads the store's templates only
 // under the caller (the Email app's own read), so a template it cannot see may
 // be unpublished or merely hidden from the caller; the lane's hold is what
 // finds an unpublished one.
-func (p *Provider) emailBlocker(merchant context.Context, s Settings, kind string) (string, bool) {
+func (p *Provider) emailBlocker(ctx context.Context, s Settings, kind string) (string, blockEffect) {
+	return blockerGiven(s, kind, func() senderLine { return p.readSender(ctx, s) })
+}
+
+// blockerGiven is emailBlocker over the store's sender line, read only when the
+// checks before it pass. emailBlocker reads the line from the lane; the
+// settings, which answer the line itself beside all four kinds, read it once
+// and ask of that one reading.
+func blockerGiven(s Settings, kind string, senderOf func() senderLine) (string, blockEffect) {
 	if kind == EmailTerms && !s.TermsRequired {
-		return ReasonTermsNotRequired, true
+		return ReasonTermsNotRequired, blockNotDue
 	}
 	if s.TemplateFor(kind) == "" {
-		return noTemplateReason(kind), true
+		return noTemplateReason(kind), blockDeclined
 	}
-	sender := p.senderView(merchant, s)
-	if ready, _ := sender["ready"].(bool); ready {
-		return "", false
+	sender := senderOf()
+	switch {
+	case sender.ready:
+		return "", blockNothing
+	case sender.noMerchant:
+		return NoStoreOwnerSentence, blockDeclined
+	case sender.readFailed:
+		return SenderUnreadableSentence, blockLaneDecides
+	case sender.noneChosen:
+		return NoSenderChosenReason, blockDeclined
 	}
-	if asString(sender["reason"]) == SenderUnreadableSentence {
-		return SenderUnreadableSentence, false
-	}
-	if s.SenderIdentityID == "" {
-		return NoSenderChosenReason, true
-	}
-	return asString(sender["reason"]), false
+	return sender.reason, blockLaneDecides
 }
 
 // emailsWouldSend is, for each of the four kinds, whether an email of it would
 // be sent now for an application in the right state, and the one sentence why
-// not (emailBlocker).
-func (p *Provider) emailsWouldSend(merchant context.Context, s Settings) map[string]any {
+// not: emailBlocker's checks, over the sender line the settings read.
+func emailsWouldSend(s Settings, sender senderLine) map[string]any {
 	out := map[string]any{}
 	for _, kind := range EmailKinds {
-		reason, _ := p.emailBlocker(merchant, s, kind)
+		reason, _ := blockerGiven(s, kind, func() senderLine { return sender })
 		out[kind] = map[string]any{"wouldSend": reason == "", "reason": reason}
 	}
 	return out
 }
 
-// senderView is the store's sender as a person reads it: the name and address
-// its emails go out as, resolved by the lane as a send resolves it (the chosen
-// identity, or what a send with none chosen goes out as), or why there is none,
-// in a sentence. The address is the store's own sender's, never an applicant's.
+// asStoreMerchant is ctx acting as THE PERSON A SEND OF THE STORE RUNS AS: the
+// store's merchant, the owner its settings row names.
 //
-// AS THE MERCHANT: the lane answers a caller holding what a send requires of
-// it, and the pack sends as the store's merchant. The installation's own
-// organization with no sender chosen sends as the installation's default
-// mailbox, which has no name or address the lane can show: it says so.
-func (p *Provider) senderView(merchant context.Context, s Settings) map[string]any {
-	unread := map[string]any{"ready": false, "fromName": "", "address": "", "reason": SenderUnreadableSentence}
+// ONE FUNCTION FOR EVERY ASKER. The lane answers which sender a store's emails
+// go out as only to a person holding what a send requires, and makes the send
+// as the person who asks. The automatic sends, a person's resend, the acts and
+// the settings all resolve that person here, so what the settings say would be
+// sent is what a send then does -- whoever owns the application, and whoever
+// is reading the settings. False when the settings name no owner: there is
+// nobody to send as, and nothing is asked of the lane as anybody else.
+func (p *Provider) asStoreMerchant(ctx context.Context, s Settings) (context.Context, bool) {
+	if s.OwnerUserID == "" {
+		return ctx, false
+	}
+	return auth.ContextWithUserActor(ctx, s.OwnerUserID), true
+}
+
+// senderLine is the store's sender as the lane resolves it for the store's
+// merchant: the name and address its emails go out as, or why there is none,
+// in a sentence.
+type senderLine struct {
+	ready                     bool
+	fromName, address, reason string
+	// What a decision is made on, read from the lane's own fields and never from
+	// its sentence. readFailed: the lane could not be asked, or could not read
+	// the sender just now -- nothing is known of it. noneChosen: the lane resolves
+	// none because the organization has none chosen. noMerchant: the store's
+	// settings name no owner, so nobody was asked for.
+	readFailed, noneChosen, noMerchant bool
+}
+
+// view is the line as wholesaleStoreSettings answers it. The address is the
+// store's own sender's, never an applicant's.
+func (l senderLine) view() map[string]any {
+	return map[string]any{"ready": l.ready, "fromName": l.fromName, "address": l.address, "reason": l.reason}
+}
+
+// readSender reads the store's sender line, as a send resolves it (the chosen
+// identity, or what a send with none chosen goes out as).
+//
+// AS THE STORE'S MERCHANT (asStoreMerchant): the lane answers a caller holding
+// what a send requires of it, and the pack sends as that person. One who may
+// not read the sender is answered the lane's own sentence for that, never "no
+// sender is chosen". The installation's own organization with no sender chosen
+// sends as the installation's default mailbox, which has no name or address the
+// lane can show: it says so.
+func (p *Provider) readSender(ctx context.Context, s Settings) senderLine {
+	unread := senderLine{reason: SenderUnreadableSentence, readFailed: true}
+	merchant, ok := p.asStoreMerchant(ctx, s)
+	if !ok {
+		return senderLine{reason: NoStoreOwnerSentence, noMerchant: true}
+	}
 	account := bareID(s.AccountID)
 	if account == "" || p.lane == nil {
 		return unread
@@ -315,19 +485,25 @@ func (p *Provider) senderView(merchant context.Context, s Settings) map[string]a
 	if err != nil {
 		return unread
 	}
-	ready, _ := got["ready"].(bool)
-	view := map[string]any{"ready": ready, "fromName": asString(got["fromName"]), "address": trimmed(got["address"]),
-		"reason": asString(got["reason"])}
-	if ready && trimmed(got["address"]) == "" {
-		view["fromName"], view["reason"] = "", InstallationDefaultSenderSentence
-	}
-	if !ready {
-		view["fromName"], view["address"] = "", ""
-		if strings.TrimSpace(asString(got["reason"])) == "" {
-			view["reason"] = SenderUnreadableSentence
+	if ready, _ := got["ready"].(bool); ready {
+		line := senderLine{ready: true, fromName: asString(got["fromName"]), address: trimmed(got["address"])}
+		if line.address == "" {
+			line.fromName, line.reason = "", InstallationDefaultSenderSentence
 		}
+		return line
 	}
-	return view
+	// THE LANE'S FIELDS DECIDE. One that could not be read just now is said in the
+	// pack's own sentence, whatever words the lane put beside the field.
+	if failed, _ := got["readFailed"].(bool); failed {
+		return unread
+	}
+	line := senderLine{reason: wholeSentence(asString(got["reason"]))}
+	line.noneChosen, _ = got["noneChosen"].(bool)
+	if line.reason == "" {
+		// NOT READY, AND NO WORD WHY: nothing is known of the sender.
+		return unread
+	}
+	return line
 }
 
 // sendTermsEmail answers wholesaleSendTermsEmail.
@@ -339,22 +515,7 @@ func (p *Provider) sendTermsEmail(ctx context.Context, args map[string]any, _ in
 	if err != nil {
 		return nil, err
 	}
-	merchant, err := p.asMerchant(ctx, app)
-	if err != nil {
-		return nil, err
-	}
-	if reason, declines := p.emailBlocker(merchant, settings, EmailTerms); declines {
-		return declined(app, EmailTerms, reason)
-	}
-	template := settings.TermsTemplateID
-	waiting, err := p.waitingForTerms(sys, app)
-	if err != nil {
-		return nil, err
-	}
-	if !waiting {
-		return declined(app, EmailTerms, ReasonNotWaiting)
-	}
-	return p.sendEmail(ctx, sys, app, EmailTerms, 1, template, settings.SenderIdentityID, "", true, "")
+	return p.automaticEmail(ctx, sys, app, settings, EmailTerms)
 }
 
 // sendBuyerEmail answers wholesaleSendBuyerEmail.
@@ -370,9 +531,63 @@ func (p *Provider) sendBuyerEmail(ctx context.Context, args map[string]any, _ in
 	if err != nil {
 		return nil, err
 	}
-	state, err := p.stateOf(sys, trimmed(app["id"]))
+	return p.automaticEmail(ctx, sys, app, settings, kind)
+}
+
+// automaticEmail is the store's automation's send of kind: attempt 1, made at
+// most once. In order:
+//
+//  1. THE ATTEMPTS ARE READ FIRST, fresh. Any attempt of the kind already
+//     recorded is answered, whatever the store and the application are now, and
+//     nothing else is read: not the application's state, not the lane's sender.
+//  2. IS IT DUE (notDueReason). An email that is not due is declined and
+//     nothing is recorded.
+//  3. THE STORE'S OWN CHECKS (emailBlocker). One that declines a due email is
+//     recorded as the attempt, skipped, with the check's sentence, and the lane
+//     is not asked. Otherwise the attempt is made (sendEmail).
+func (p *Provider) automaticEmail(ctx, sys context.Context, app map[string]any, settings Settings, kind string) ([]memorynodes.MemoryNode, error) {
+	sends, err := p.emailSendsOf(memql.ContextWithFreshRead(sys), trimmed(app["id"]))
 	if err != nil {
 		return nil, err
+	}
+	if row := automaticAnswerRow(sends, kind); row != nil {
+		return p.answerRecorded(ctx, app, row, false, "")
+	}
+	notDue, err := p.notDueReason(sys, app, settings, kind)
+	if err != nil {
+		return nil, err
+	}
+	if notDue != "" {
+		return declined(app, kind, notDue)
+	}
+	attempt := emailAttempt{kind: kind, number: 1, templateID: settings.TemplateFor(kind), automatic: true}
+	switch reason, effect := p.emailBlocker(ctx, settings, kind); effect {
+	case blockNotDue:
+		return declined(app, kind, reason)
+	case blockDeclined:
+		attempt.declined = reason
+	}
+	return p.sendEmail(ctx, sys, app, settings, attempt)
+}
+
+// notDueReason is why the email of kind is not due for app, or "" when it is:
+// the kind does not apply to the store, or the application is not in the state
+// the email is sent in. Read as sys.
+func (p *Provider) notDueReason(sys context.Context, app map[string]any, settings Settings, kind string) (string, error) {
+	applicationID := trimmed(app["id"])
+	if kind == EmailTerms {
+		if !settings.TermsRequired {
+			return ReasonTermsNotRequired, nil
+		}
+		waiting, err := p.waitingForTerms(sys, app)
+		if err != nil || waiting {
+			return "", err
+		}
+		return ReasonNotWaiting, nil
+	}
+	state, err := p.stateOf(sys, applicationID)
+	if err != nil {
+		return "", err
 	}
 	switch kind {
 	case EmailApproved:
@@ -382,44 +597,34 @@ func (p *Provider) sendBuyerEmail(ctx context.Context, args map[string]any, _ in
 		// THE REASON IS TRUE OF THE APPLICATION: "not granted yet" only of one that
 		// is approved, and so may yet be granted.
 		if state != StateApproved {
-			return declined(app, kind, notInStateReason(StateApproved))
+			return notInStateReason(StateApproved), nil
 		}
-		granted, err := p.accessGranted(sys, app, state)
+		ent, err := p.entitlementRow(sys, applicationID)
 		if err != nil {
-			return nil, err
+			return "", err
 		}
-		if !granted {
-			return declined(app, kind, ReasonAccessNotGranted)
+		if ent == nil || trimmed(ent["state"]) != EntitlementGranted {
+			return ReasonAccessNotGranted, nil
 		}
-		// NOTHING IS MAILED FOR WHAT HAPPENED BEFORE THIS RELEASE. Every version
-		// the pack writes now carries its attempt, and the backfill carries one
-		// forward only when the row holds it, so a granted row with none is an
-		// access granted before the pack sent emails -- re-written, perhaps, by the
-		// backfill, which a client's automation sees as any other granted version.
-		ent, err := p.entitlementRow(sys, trimmed(app["id"]))
-		if err != nil {
-			return nil, err
-		}
+		// NOTHING IS MAILED FOR WHAT HAPPENED BEFORE THIS RELEASE, AND NOTHING
+		// RECORDED. Every version the pack writes now carries its attempt, and the
+		// backfill carries one forward only when the row holds it, so a granted row
+		// with none is an access granted before the pack sent emails -- re-written,
+		// perhaps, by the backfill, which a client's automation sees as any other
+		// granted version.
 		if attemptOf(ent) == 0 {
-			return declined(app, kind, ReasonAccessPredatesEmail)
+			return ReasonAccessPredatesEmail, nil
 		}
 	case EmailRejected:
 		if state != StateRejected {
-			return declined(app, kind, notInStateReason(StateRejected))
+			return notInStateReason(StateRejected), nil
 		}
 	case EmailRevoked:
 		if state != StateRevoked {
-			return declined(app, kind, notInStateReason(StateRevoked))
+			return notInStateReason(StateRevoked), nil
 		}
 	}
-	merchant, err := p.asMerchant(ctx, app)
-	if err != nil {
-		return nil, err
-	}
-	if reason, declines := p.emailBlocker(merchant, settings, kind); declines {
-		return declined(app, kind, reason)
-	}
-	return p.sendEmail(ctx, sys, app, kind, 1, settings.TemplateFor(kind), settings.SenderIdentityID, "", true, "")
+	return "", nil
 }
 
 // resendEmail answers wholesaleResendEmail: a person of the store sends one of
@@ -429,6 +634,10 @@ func (p *Provider) sendBuyerEmail(ctx context.Context, args map[string]any, _ in
 // organization). Before anything is read the caller must be a signed-in person
 // who is not one of the cluster's operators; then the application is read
 // under the caller, so one they cannot read is not resent.
+//
+// WHETHER IT IS SENT IS resendRefusal's, the one function the application's
+// page offers the act by: the store would send the email now, no attempt of
+// the kind is on its way, and the application is in the state for it.
 func (p *Provider) resendEmail(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	requester, err := resenderOf(ctx)
 	if err != nil {
@@ -456,78 +665,172 @@ func (p *Provider) resendEmail(ctx context.Context, args map[string]any, _ int) 
 		return nil, err
 	}
 	settings := EffectiveSettings(settingsRow)
-	// THE STORE'S OWN READINESS FIRST, the checks a send makes (emailBlocker):
-	// an email the store's automation would decline is not sent again either.
-	merchant, err := p.asMerchant(ctx, app)
+	stage, access, err := p.stageAndAccess(sys, app, settings)
 	if err != nil {
 		return nil, err
 	}
-	if reason, declines := p.emailBlocker(merchant, settings, kind); declines {
-		return nil, errors.New("wholesale: " + reason)
-	}
-	sends, err := p.emailSendsOf(sys, trimmed(app["id"]))
+	sends, err := p.emailSendsOf(memql.ContextWithFreshRead(sys), trimmed(app["id"]))
 	if err != nil {
 		return nil, err
 	}
-	// WHAT THE LANE SAYS OF THE LAST ATTEMPT. For a rejection or removal the
-	// answer decides whether anything is sent, so a status that cannot be read
-	// refuses the resend; for the other two it only says whether the last attempt
-	// is still on its way, and the row's own record answers when it cannot.
-	latest := latestSend(sends, kind)
-	if latest != nil {
-		deliveries, err := p.laneDeliveries(ctx, app, []string{trimmed(latest["requestId"])})
-		if err != nil && (kind == EmailRejected || kind == EmailRevoked) {
-			return nil, fmt.Errorf("wholesale: the email service's record of the last %s could not be read, so it is not "+
-				"sent again now", emailNouns[kind])
+	// EACH ATTEMPT AS THE LANE NOW SAYS IT STANDS, the reading the application's
+	// page shows and offers its acts by; then the store's own readiness.
+	standing := emailStandingOf(p.emailsView(ctx, app, sends), kind)
+	standing.Blocker, _ = p.emailBlocker(ctx, settings, kind)
+	if refusal := resendRefusal(kind, stage, access, standing); refusal != "" {
+		return nil, errors.New("wholesale: " + refusal)
+	}
+	// A RESEND OVER AN ATTEMPT THAT MAY HAVE BEEN DELIVERED says so in its answer.
+	note := ""
+	if standing.LastState == SendUncertain {
+		note = NoteMaybeSecondCopy
+	}
+	return p.sendEmail(ctx, sys, app, settings, emailAttempt{kind: kind, number: highestAttempt(sends, kind) + 1,
+		templateID: settings.TemplateFor(kind), requestedBy: userRef(requester), note: note})
+}
+
+// stageAndAccess is an application's stage and its access, as wholesaleGet
+// answers them: the stage its whole log and its acceptance give it, and its
+// entitlement's state (AccessNone when it has none). Read as sys.
+func (p *Provider) stageAndAccess(sys context.Context, app map[string]any, settings Settings) (stage, access string, err error) {
+	applicationID := trimmed(app["id"])
+	state, err := p.stateOf(sys, applicationID)
+	if err != nil {
+		return "", "", err
+	}
+	accepted := false
+	if settings.TermsRequired && state == StateSubmitted {
+		acceptance, err := p.acceptanceOf(sys, applicationID)
+		if err != nil {
+			return "", "", err
 		}
-		latest = p.effectiveSend(latest, deliveries[trimmed(latest["requestId"])])
-		if trimmed(latest["state"]) == SendDeferred {
-			return nil, fmt.Errorf("wholesale: the last %s is waiting to be sent by the email service, so it is not sent again", emailNouns[kind])
+		accepted = acceptance != nil
+	}
+	ent, err := p.entitlementRow(sys, applicationID)
+	if err != nil {
+		return "", "", err
+	}
+	access = AccessNone
+	if ent != nil {
+		access = trimmed(ent["state"])
+	}
+	return StageOf(state, settings.TermsRequired, accepted), access, nil
+}
+
+// EmailStanding is where one kind of email stands on one application, as a
+// resend of it is judged: its attempts as the lane says they stand, and the
+// store's readiness to send it.
+type EmailStanding struct {
+	// FirstRecorded is whether attempt 1, the store's automation's, is recorded.
+	FirstRecorded bool
+	// LastState is the last attempt's state as the lane says it stands, "" when
+	// none is recorded; LastBounced whether it was sent and the provider has
+	// since reported it not delivered.
+	LastState   string
+	LastBounced bool
+	// OnItsWay is whether an attempt of the kind is still on its way.
+	OnItsWay bool
+	// Unreadable is whether the lane's record of the kind's attempts could not
+	// be read.
+	Unreadable bool
+	// Blocker is why the store would not send the kind now, "" when it would
+	// (emailBlocker).
+	Blocker string
+}
+
+// emailStandingOf reads kind's standing off an application's emails as
+// wholesaleGet shows them (emailsView). Its Blocker is the caller's to fill.
+func emailStandingOf(emails []map[string]any, kind string) EmailStanding {
+	var s EmailStanding
+	last := 0
+	for _, e := range emails {
+		if trimmed(e["kind"]) != kind {
+			continue
 		}
+		n, _ := intArg(e["attempt"])
+		state := trimmed(e["state"])
+		if n == 1 {
+			s.FirstRecorded = true
+		}
+		if state == SendDeferred {
+			s.OnItsWay = true
+		}
+		if unread, _ := e["deliveryUnreadable"].(bool); unread {
+			s.Unreadable = true
+		}
+		if n >= last {
+			delivery, _ := e["delivery"].(map[string]any)
+			last, s.LastState = n, state
+			s.LastBounced = state == SendSent && bouncedReports[trimmed(delivery["providerStatus"])]
+		}
+	}
+	return s
+}
+
+// notReached reports whether an attempt, as the lane says it stands, did not
+// reach the applicant: it was skipped, held, uncertain or failed -- or it was
+// sent, handed to the email service, and the provider has since reported it
+// not delivered. One still on its way is neither.
+func notReached(state string, bounced bool) bool {
+	switch state {
+	case SendSkipped, SendHeld, SendUncertain, SendFailed:
+		return true
+	}
+	return state == SendSent && bounced
+}
+
+// resendRefusal is why a person's resend of kind is refused now, on an
+// application in stage whose access is access, or "" when it is not refused.
+//
+// THE ONE QUESTION BEHIND THE RESEND AND ITS ACT: wholesaleResendEmail refuses
+// with this sentence, and ActsFor offers the act exactly when it is empty. In
+// order:
+//
+//   - the store would send the email now (the standing's Blocker, the checks a
+//     send makes of the store: emailBlocker);
+//   - for a rejection or a removal, the lane's record could be read: it is
+//     what says whether the last attempt reached the applicant;
+//   - no attempt of the kind is on its way;
+//   - the application is in the state for it: the terms email while it waits
+//     for its terms, whatever came of the attempts before; the approval email
+//     while it is approved, its access granted and the automation's attempt
+//     recorded; a rejection or a removal while it is still rejected or removed
+//     and the last attempt did not reach the applicant (notReached) -- one that
+//     reached them is never sent twice.
+func resendRefusal(kind, stage, access string, s EmailStanding) string {
+	noun := emailNouns[kind]
+	if s.Blocker != "" {
+		return s.Blocker
+	}
+	if (kind == EmailRejected || kind == EmailRevoked) && s.Unreadable {
+		return "the email service's record of the last " + noun + " could not be read, so it is not sent again now"
+	}
+	if s.OnItsWay {
+		return "the last " + noun + " is waiting to be sent by the email service, so it is not sent again"
 	}
 	switch kind {
 	case EmailTerms:
-		waiting, err := p.waitingForTerms(sys, app)
-		if err != nil {
-			return nil, err
-		}
-		if !settings.TermsRequired || !waiting {
-			return nil, errors.New("wholesale: the terms email is sent again only while the application waits for its terms")
+		if stage != StageWaitingForTerms {
+			return "the terms email is sent again only while the application waits for its terms"
 		}
 	case EmailApproved:
-		state, err := p.stateOf(sys, trimmed(app["id"]))
-		if err != nil {
-			return nil, err
-		}
-		granted, err := p.accessGranted(sys, app, state)
-		if err != nil {
-			return nil, err
-		}
-		if !granted || !hasAttempt(sends, EmailApproved, 1) {
-			return nil, errors.New("wholesale: the approval email is sent again only to a buyer whose access is granted, " +
-				"once the store's automation has sent it")
+		if stage != StateApproved || access != EntitlementGranted || !s.FirstRecorded {
+			return "the approval email is sent again only to a buyer whose access is granted, " +
+				"once the store's automation has sent it"
 		}
 	case EmailRejected, EmailRevoked:
 		want := StateRejected
 		if kind == EmailRevoked {
 			want = StateRevoked
 		}
-		state, err := p.stateOf(sys, trimmed(app["id"]))
-		if err != nil {
-			return nil, err
+		if stage != want || !notReached(s.LastState, s.LastBounced) {
+			return "the " + noun + " is sent again only while the application is " + strings.ToLower(staffWords[want]) +
+				" and its last attempt did not reach the applicant"
 		}
-		if state != want || latest == nil || !notReachedProvider(trimmed(latest["state"])) {
-			return nil, fmt.Errorf("wholesale: the %s is sent again only while the application is %s and its last "+
-				"attempt did not reach the email service", emailNouns[kind], strings.ToLower(staffWords[want]))
-		}
+	default:
+		return "that is not one of the applicant's emails"
 	}
-	// A RESEND OVER AN ATTEMPT THAT MAY HAVE BEEN DELIVERED says so in its answer.
-	note := ""
-	if latest != nil && trimmed(latest["state"]) == SendUncertain {
-		note = NoteMaybeSecondCopy
-	}
-	return p.sendEmail(ctx, sys, app, kind, highestAttempt(sends, kind)+1, settings.TemplateFor(kind), settings.SenderIdentityID,
-		userRef(requester), false, note)
+	return ""
 }
 
 // resenderOf is the person a resend is recorded for: the calling user, never
@@ -593,14 +896,31 @@ func (p *Provider) accessGranted(sys context.Context, app map[string]any, state 
 	return ent != nil && trimmed(ent["state"]) == EntitlementGranted, nil
 }
 
+// emailAttempt is one attempt of one email, as sendEmail makes it.
+type emailAttempt struct {
+	kind   string
+	number int
+	// templateID is the store's template for the kind; requestedBy the person
+	// who asked for a resend, empty for the store's automation.
+	templateID, requestedBy string
+	// automatic is the store's automation's attempt 1, which is made at most
+	// once.
+	automatic bool
+	// declined, when not empty, is the sentence of the store's own check that
+	// declines a due email: the attempt is recorded as skipped with it, and the
+	// lane is not asked.
+	declined string
+	// note is carried by a person's resend answer.
+	note string
+}
+
 // sendEmail is ONE ATTEMPT OF ONE EMAIL: record, hand over, settle (the file
-// note). automatic is the store's automation's attempt 1, which is made at
-// most once; note is carried by a person's resend answer.
-func (p *Provider) sendEmail(ctx, sys context.Context, app map[string]any, kind string, attempt int,
-	templateID, senderID, requestedBy string, automatic bool, note string) ([]memorynodes.MemoryNode, error) {
+// note). An attempt the store's own check declined is recorded and goes no
+// further.
+func (p *Provider) sendEmail(ctx, sys context.Context, app map[string]any, settings Settings, a emailAttempt) ([]memorynodes.MemoryNode, error) {
 	applicationID := trimmed(app["id"])
-	rowID := EmailSendRowID(kind, applicationID, attempt)
-	requestID := LaneRequestID(kind, applicationID, attempt)
+	rowID := EmailSendRowID(a.kind, applicationID, a.number)
+	requestID := LaneRequestID(a.kind, applicationID, a.number)
 	fresh := memql.ContextWithFreshRead(sys)
 	sends, err := p.emailSendsOf(fresh, applicationID)
 	if err != nil {
@@ -609,16 +929,18 @@ func (p *Provider) sendEmail(ctx, sys context.Context, app map[string]any, kind 
 	// THE AUTOMATIC PATH, AT MOST ONCE: any row of the kind -- this attempt in
 	// any state, or a later one a person sent -- is answered, and nothing is
 	// handed over.
-	if automatic {
-		if row := automaticAnswerRow(sends, kind); row != nil {
+	if a.automatic {
+		if row := automaticAnswerRow(sends, a.kind); row != nil {
 			return p.answerRecorded(ctx, app, row, false, "")
 		}
 	}
 	for _, row := range sends {
 		if bareID(trimmed(row["id"])) == rowID {
-			return p.answerRecorded(ctx, app, row, !automatic, note)
+			return p.answerRecorded(ctx, app, row, !a.automatic, a.note)
 		}
 	}
+	// THE ROW IS THE APPLICATION'S MERCHANT'S, written as them, like every row of
+	// an application.
 	merchant, err := p.asMerchant(ctx, app)
 	if err != nil {
 		return nil, err
@@ -629,14 +951,25 @@ func (p *Provider) sendEmail(ctx, sys context.Context, app map[string]any, kind 
 		"storeId":       trimmed(app["storeId"]),
 		"accountId":     trimmed(app["accountId"]),
 		"applicationId": applicationRef(applicationID),
-		"kind":          kind,
-		"attempt":       attempt,
+		"kind":          a.kind,
+		"attempt":       a.number,
 		"requestId":     requestID,
-		"templateId":    templateID,
+		"templateId":    a.templateID,
 		"state":         sendSending,
 		"reason":        reasonSending,
 		"sentAt":        "",
-		"requestedBy":   requestedBy,
+		"requestedBy":   a.requestedBy,
+	}
+	if a.declined != "" {
+		// THE STORE'S OWN CHECK DECLINED A DUE EMAIL: the attempt is recorded as
+		// what it came to, and the lane is not asked.
+		row["state"], row["reason"] = SendSkipped, clipRunes(a.declined, maxEmailReason)
+	}
+	written := map[string]any{"id": emailSendConcept + ":" + rowID}
+	for k, v := range row {
+		if k != "emailSendId" {
+			written[k] = v
+		}
 	}
 	// 1. RECORD, fenced on no row at this attempt's id: the write that wins is
 	// the one caller that hands over.
@@ -651,28 +984,36 @@ func (p *Provider) sendEmail(ctx, sys context.Context, app map[string]any, kind 
 		if current == nil {
 			return nil, fmt.Errorf("wholesale: the email's record changed while it was sent and cannot be read")
 		}
-		return p.answerRecorded(ctx, app, current, !automatic, note)
+		return p.answerRecorded(ctx, app, current, !a.automatic, a.note)
+	}
+	if a.declined != "" {
+		return p.answerOutcome(written, !a.automatic, a.note)
 	}
 	recorded, recordErr := p.emailSendRow(memql.ContextWithFreshRead(sys), applicationID, rowID)
 
-	// 2. HAND OVER.
+	// 2. HAND OVER, as the store's merchant: the person the store's sender was
+	// read as (emailBlocker), so the lane answers the send as it answered that.
 	state, reason, sentAt := SendFailed, ReasonNoOrganization, ""
 	if account := bareID(trimmed(app["accountId"])); account != "" {
-		if p.lane == nil {
-			state, reason = SendFailed, "the pack has no row lane, so no email can be sent"
-		} else {
+		sender, hasMerchant := p.asStoreMerchant(ctx, settings)
+		switch {
+		case p.lane == nil:
+			state, reason = SendFailed, reasonNoLane
+		case !hasMerchant:
+			state, reason = SendFailed, NoStoreOwnerSentence
+		default:
 			laneArgs := map[string]any{
 				"rowConcept": applicationConcept,
 				"rowId":      bareID(applicationID),
 				"accountId":  account,
-				"kind":       kind,
-				"templateId": templateID,
+				"kind":       a.kind,
+				"templateId": a.templateID,
 				"requestId":  requestID,
 			}
-			if senderID != "" {
-				laneArgs["senderIdentityId"] = senderID
+			if settings.SenderIdentityID != "" {
+				laneArgs["senderIdentityId"] = settings.SenderIdentityID
 			}
-			reply, sendErr := p.lane.SendRowMessage(merchant, laneArgs)
+			reply, sendErr := p.lane.SendRowMessage(sender, laneArgs)
 			if memql.IsWriteGateBusy(sendErr) {
 				// ANOTHER HOLDER OF THE LANE'S RECEIPT LOCK FOR THIS REQUEST is handing it
 				// over (or the wait for the lock ran out): what became of it is not known
@@ -689,15 +1030,10 @@ func (p *Provider) sendEmail(ctx, sys context.Context, app map[string]any, kind 
 
 	// 3. SETTLE, fenced on the version recorded in step 1.
 	row["state"], row["reason"], row["sentAt"] = state, clipRunes(reason, maxEmailReason), sentAt
+	written["state"], written["reason"], written["sentAt"] = row["state"], row["reason"], row["sentAt"]
 	settle := merchant
 	if recordErr == nil && recorded != nil {
 		settle = memql.ContextWithRowVersionFence(merchant, emailSendConcept, rowID, rowTime(recorded["createdAt"]))
-	}
-	written := map[string]any{"id": emailSendConcept + ":" + rowID}
-	for k, v := range row {
-		if k != "emailSendId" {
-			written[k] = v
-		}
 	}
 	if err := p.write(settle, "putEmailSendRow", row); err != nil {
 		// THE ATTEMPT IS RECORDED (sending) and was handed over; only its outcome
@@ -705,10 +1041,10 @@ func (p *Provider) sendEmail(ctx, sys context.Context, app map[string]any, kind 
 		// would make the engine run the automation again; the lane's status read
 		// says what became of it.
 		p.log().Warn("wholesale: an email's outcome could not be recorded", "component", "wholesale",
-			"applicationId", applicationID, "kind", kind, "attempt", attempt, "state", state)
+			"applicationId", applicationID, "kind", a.kind, "attempt", a.number, "state", state)
 		written["state"], written["reason"], written["sentAt"] = sendSending, reasonSending, ""
 	}
-	return p.answerOutcome(written, !automatic, note)
+	return p.answerOutcome(written, !a.automatic, a.note)
 }
 
 // automaticAnswerRow is the row the automatic path answers for kind instead of
@@ -721,13 +1057,6 @@ func automaticAnswerRow(sends []map[string]any, kind string) map[string]any {
 		}
 	}
 	return latestSend(sends, kind)
-}
-
-// notReachedProvider reports whether an attempt in state did not reach the
-// provider, so a rejection or removal may be sent again: held, uncertain or
-// failed.
-func notReachedProvider(state string) bool {
-	return state == SendHeld || state == SendUncertain || state == SendFailed
 }
 
 // emailNouns is each kind as a sentence names it.
@@ -744,10 +1073,7 @@ var emailNouns = map[string]string{
 func (p *Provider) answerRecorded(ctx context.Context, app, row map[string]any, forStaff bool, note string) ([]memorynodes.MemoryNode, error) {
 	id := trimmed(row["requestId"])
 	deliveries, err := p.laneDeliveries(ctx, app, []string{id})
-	if err != nil {
-		deliveries = nil
-	}
-	return p.answerOutcome(p.effectiveSend(row, deliveries[id]), forStaff, note)
+	return p.answerOutcome(p.effectiveSend(row, deliveries[id], err == nil), forStaff, note)
 }
 
 // answerOutcome answers one attempt as a reply: sent true only when it went
@@ -769,18 +1095,19 @@ func (p *Provider) answerOutcome(row map[string]any, forStaff bool, note string)
 		reason = reasonLaneWaiting
 	}
 	answer := copyMap(row)
-	answer["state"], answer["reason"] = state, reason
+	answer["state"], answer["reason"] = state, wholeSentence(reason)
 	return answerSend(answer, note)
 }
 
 // laneOutcome reads what the row lane answered as an emailSend state and its
 // sentence: a hold is held, and a skip skipped, each with the lane's sentence;
-// an uncertain hand-over is uncertain; a deferral deferred; any other error is
-// failed with the lane's words.
+// an uncertain hand-over is uncertain, with the one uncertain sentence whatever
+// the lane said of it; a deferral deferred; any other error is failed with the
+// lane's words.
 func laneOutcome(reply map[string]any, err error) (string, string) {
 	if err != nil {
 		if reason, held := laneHeldReason(err); held {
-			return SendHeld, reason
+			return SendHeld, wholeSentence(reason)
 		}
 		if laneUncertain(err) {
 			return SendUncertain, ReasonUncertain
@@ -791,19 +1118,41 @@ func laneOutcome(reply map[string]any, err error) (string, string) {
 	case reply["sent"] == true:
 		return SendSent, ""
 	case reply["skipped"] == true:
-		return SendSkipped, trimmed(reply["reason"])
+		return SendSkipped, skipSentenceOf(reply["skipSentence"], reply["reason"])
 	case reply["uncertain"] == true:
+		// THE LANE'S OWN WORDS FOR AN UNCERTAIN HAND-OVER ARE NOT THE REASON: every
+		// uncertain attempt carries the one sentence, never an empty one.
 		return SendUncertain, ReasonUncertain
 	case reply["deferred"] == true:
-		return SendDeferred, trimmed(reply["reason"])
+		return SendDeferred, wholeSentence(trimmed(reply["reason"]))
 	}
 	return SendFailed, reasonUnreadableAnswer
 }
 
-// effectiveSend is one attempt's row as the lane now says it stands. The row's
-// state is first read as this build reads it (recordedState). Then, where the
-// lane has recorded a delivery for the attempt's request id:
+// skipSentenceOf is why the lane skipped a send, in a sentence: the lane's own
+// (its skipSentence), and where it gave none, its words for the reason it gave
+// (campaigns.SkipSentence). NEVER THE REASON ITSELF, which for an address the
+// email service no longer sends to is a code.
+func skipSentenceOf(sentence, reason any) string {
+	if said := wholeSentence(asString(sentence)); said != "" {
+		return said
+	}
+	return campaigns.SkipSentence(trimmed(reason))
+}
+
+// effectiveSend is one attempt's row as the lane now says it stands. laneRead
+// is whether the lane's record could be read at all; delivery is its record of
+// the attempt's request id, nil when it has none. The row's state is first
+// read as this build reads it from the row alone (recordedState). Then:
 //
+//   - an attempt recorded and NEVER SETTLED is read THROUGH THE LANE FIRST, at
+//     any age: where the lane has a record of it, the lane's status decides (one
+//     it still holds to send is on its way, and is not sent again; one it
+//     failed is failed; one it sent is sent). Only when the lane was read and
+//     has no record of it does the row's age decide -- on its way while it is
+//     young, uncertain once sendingWindow has passed. When the lane's record
+//     could not be read, nothing says the lane has none, so it does not turn
+//     uncertain: it stays on its way;
 //   - an UNCERTAIN attempt stays uncertain, with ReasonUncertain, unless the
 //     lane says something definite: sent, or a provider report of delivery
 //     (sent) or of a bounce (failed, reasonBounced). The lane writes failed in
@@ -813,12 +1162,34 @@ func laneOutcome(reply map[string]any, err error) (string, string) {
 //     failed, skipped with the lane's sentence, pending as deferred; the row's
 //     own sentence is kept only when the row already said the same.
 //
-// A row the lane has recorded nothing for (a hold, an attempt the lane never
-// reached) is answered as it stands.
-func (p *Provider) effectiveSend(row, delivery map[string]any) map[string]any {
+// THE STATE IS WHAT THE SEND REACHED. sent means HANDED TO THE EMAIL SERVICE:
+// whether it arrived is the delivery's to say, and a provider's later report
+// that a sent email was not delivered leaves it sent, with the report beside it
+// (delivery.providerStatus), which is where a page words it from. Such an email
+// did not reach the applicant, and a person may send it again (notReached).
+//
+// A row the lane has recorded nothing for (a hold, an attempt the store's own
+// check declined, one the lane never reached) is answered as it stands. The
+// reason answered is always a whole sentence.
+func (p *Provider) effectiveSend(row, delivery map[string]any, laneRead bool) map[string]any {
 	state, reason := p.recordedState(row)
 	sentAt := timeText(row["sentAt"])
 	status, provider := trimmed(delivery["status"]), trimmed(delivery["providerStatus"])
+	known := status == "sent" || status == "failed" || status == "skipped" || status == "pending"
+	if trimmed(row["state"]) == sendSending {
+		switch {
+		case known:
+			// THE LANE HAS A RECORD OF IT, and decides: none of the row's own reading
+			// is kept.
+			state, reason = "", ""
+		case !laneRead:
+			old := state == SendUncertain
+			state, reason = SendDeferred, reasonSending
+			if old {
+				reason = reasonLaneUnread
+			}
+		}
+	}
 	if state == SendUncertain {
 		switch {
 		case status == "sent" || provider == "delivered":
@@ -842,7 +1213,7 @@ func (p *Provider) effectiveSend(row, delivery map[string]any) map[string]any {
 			}
 			state, sentAt = SendFailed, ""
 		case "skipped":
-			state, reason, sentAt = SendSkipped, asString(delivery["skipReason"]), ""
+			state, reason, sentAt = SendSkipped, skipSentenceOf(delivery["skipSentence"], delivery["skipReason"]), ""
 		case "pending":
 			if state != SendDeferred {
 				reason = reasonLaneWaiting
@@ -851,7 +1222,7 @@ func (p *Provider) effectiveSend(row, delivery map[string]any) map[string]any {
 		}
 	}
 	out := copyMap(row)
-	out["state"], out["reason"], out["sentAt"] = state, reason, sentAt
+	out["state"], out["reason"], out["sentAt"] = state, wholeSentence(reason), sentAt
 	return out
 }
 
@@ -910,8 +1281,11 @@ func (p *Provider) laneDeliveries(ctx context.Context, app map[string]any, reque
 		for _, s := range status {
 			if trimmed(s["status"]) != "" {
 				out[trimmed(s["requestId"])] = map[string]any{
-					"status":         trimmed(s["status"]),
-					"skipReason":     asString(s["skipReason"]),
+					"status":     trimmed(s["status"]),
+					"skipReason": asString(s["skipReason"]),
+					// WHY IT WAS SKIPPED, AS A PERSON READS IT: the lane's sentence, or
+					// its words for the reason when the answer carries the reason alone.
+					"skipSentence":   skipSentenceIfSkipped(s),
 					"providerStatus": trimmed(s["providerStatus"]),
 					"sentAt":         timeText(s["sentAt"]),
 				}
@@ -921,16 +1295,26 @@ func (p *Provider) laneDeliveries(ctx context.Context, app map[string]any, reque
 	return out, nil
 }
 
-// laneWords is the lane's error as the store's people read it: without the
-// pack's own prefix for the call. The lane's errors never carry an address
-// (campaigns/send_row.go), and the call carries none to quote.
-func laneWords(err error) string {
-	text := strings.TrimSpace(err.Error())
-	return strings.TrimPrefix(text, "wholesale: "+laneSendConstruct+": ")
+// skipSentenceIfSkipped is the sentence of one status answer's skip, "" for a
+// message that was not skipped.
+func skipSentenceIfSkipped(status map[string]any) string {
+	if trimmed(status["status"]) != "skipped" {
+		return ""
+	}
+	return skipSentenceOf(status["skipSentence"], status["skipReason"])
 }
 
-// declined answers a send the builtin itself declined, recording nothing: the
-// attempt stays open for the call that finds the store ready.
+// laneWords is the lane's error as the store's people read it: without the
+// pack's own prefix for the call, as a whole sentence. The lane's errors never
+// carry an address (campaigns/send_row.go), and the call carries none to quote.
+func laneWords(err error) string {
+	text := strings.TrimSpace(err.Error())
+	return wholeSentence(strings.TrimPrefix(text, "wholesale: "+laneSendConstruct+": "))
+}
+
+// declined answers a send of an email that is NOT DUE, recording nothing: the
+// kind does not apply to the store, or the application is not in the state for
+// it. (A due email the store's own checks decline is recorded: sendEmail.)
 func declined(app map[string]any, kind, reason string) ([]memorynodes.MemoryNode, error) {
 	return confirm("wholesale:email", map[string]any{
 		"applicationId": trimmed(app["id"]),
@@ -1007,16 +1391,6 @@ func highestAttempt(sends []map[string]any, kind string) int {
 		}
 	}
 	return high
-}
-
-// hasAttempt reports whether attempt of kind is recorded.
-func hasAttempt(sends []map[string]any, kind string, attempt int) bool {
-	for _, row := range sends {
-		if n, _ := intArg(row["attempt"]); trimmed(row["kind"]) == kind && n == attempt {
-			return true
-		}
-	}
-	return false
 }
 
 // resolveRowMessage is the row lane's resolver for an application: the
@@ -1163,7 +1537,7 @@ func (p *Provider) emailsView(ctx context.Context, app map[string]any, sends []m
 		if ok {
 			delivery = d
 		}
-		row = p.effectiveSend(row, d)
+		row = p.effectiveSend(row, d, !unreadable)
 		out = append(out, map[string]any{
 			"kind":        trimmed(row["kind"]),
 			"attempt":     attempt,
@@ -1221,7 +1595,7 @@ func (p *Provider) emailTemplates(ctx context.Context, account string) ([]emailT
 
 // NoSenderChosenReason declines every email of a store whose sender the lane
 // cannot resolve because none is chosen.
-const NoSenderChosenReason = "no sender is chosen for this store's emails; the cluster's operators choose it"
+const NoSenderChosenReason = "No sender is chosen for this store's emails; the cluster's operators choose it."
 
 // ReasonUncertain is an attempt whose hand-over the provider never answered:
 // it may have been delivered.
@@ -1238,6 +1612,14 @@ const NoteMaybeSecondCopy = "The last attempt may have been delivered, so the ap
 
 // reasonBounced is an attempt the provider reported it could not deliver.
 const reasonBounced = "The email service reports this email could not be delivered."
+
+// reasonLaneUnread is an attempt recorded and never settled whose record at the
+// email service could not be read: nothing says what became of it.
+const reasonLaneUnread = "The email service could not say just now what became of this email."
+
+// NoStoreOwnerSentence is the sender, and every email, of a store whose
+// settings name no owner: there is nobody a send of it would run as.
+const NoStoreOwnerSentence = "This store's settings name no owner, so no email can be sent for it. The cluster's operators set the store up again."
 
 // SenderUnreadableSentence is the store's sender when the email service could
 // not be asked which one its emails go out as.

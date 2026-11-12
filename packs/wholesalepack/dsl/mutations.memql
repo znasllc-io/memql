@@ -460,13 +460,15 @@ mutation acceptance putAcceptanceRow {
 
 /// Write one email's record WHOLE at its derived id (EmailSendRowID): every
 /// field passed, the empty ones included, because a write at an existing id
-/// merges into the current version. The send builtins write it once the lane
-/// has answered, fenced on the version they read before they called it, so of
-/// two nodes sending at once the second answers the first's row. EVERY
-/// ARGUMENT IS ACCEPTED AND NOTHING IS STAMPED: the pack names the merchant, the
-/// organization, the person who asked and the clock, and writes as the
-/// application's merchant. It never carries an address, a field of the message
-/// or a link's token.
+/// merges into the current version. The send builtins write it twice for an
+/// attempt handed to the lane -- its record before the hand-over, fenced on no
+/// row at its id, so of two nodes sending at once the second hands over nothing
+/// and answers the first's row; then what the lane answered, fenced on that
+/// record -- and once for a due email the store's own checks declined, which is
+/// recorded as skipped and never handed over. EVERY ARGUMENT IS ACCEPTED AND
+/// NOTHING IS STAMPED: the pack names the merchant, the organization, the person
+/// who asked and the clock, and writes as the application's merchant. It never
+/// carries an address, a field of the message or a link's token.
 @serverOnly
 @actor
 mutation emailSend putEmailSendRow {

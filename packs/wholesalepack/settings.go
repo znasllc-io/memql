@@ -161,6 +161,9 @@ func (p *Provider) storeSettingsRows(ctx context.Context, storeID string) ([]map
 type Settings struct {
 	Exists, ApplicationsOpen                                     bool
 	EntitlementAdapter, IntroText, StaffEmail, AccountID, SiteID string
+	// OwnerUserID is the store's merchant: the owner the settings row names, and
+	// the person every send of the store runs as (asStoreMerchant).
+	OwnerUserID string
 	// TermsRequired absent is false.
 	TermsRequired bool
 	// LinkLifetimeDays is the row's, or DefaultLinkLifetimeDays when it names
@@ -266,6 +269,7 @@ func EffectiveSettings(row map[string]any) Settings {
 		StaffEmail:         trimmed(row["staffEmail"]),
 		AccountID:          trimmed(row["accountId"]),
 		SiteID:             trimmed(row["siteId"]),
+		OwnerUserID:        trimmed(row["ownerUserId"]),
 		TermsRequired:      held.termsRequired,
 		LinkLifetimeDays:   days,
 		AcceptanceText:     text,
@@ -575,12 +579,6 @@ func (p *Provider) storeSettings(ctx context.Context, args map[string]any, _ int
 		return nil, err
 	}
 	s := EffectiveSettings(row)
-	// THE SENDER IS READ AS THE STORE'S MERCHANT, the settings row's owner, as a
-	// send reads it (senderView).
-	merchant := ctx
-	if owner := trimmed(row["ownerUserId"]); owner != "" {
-		merchant = auth.ContextWithUserActor(ctx, owner)
-	}
 	documents, err := p.documentsSummary(ctx, storeID)
 	if err != nil {
 		return nil, err
@@ -596,6 +594,11 @@ func (p *Provider) storeSettings(ctx context.Context, args map[string]any, _ int
 	publishAllowed := publishErr == nil
 	_, exportErr := p.exportAdmission(ctx, args)
 	exportAllowed := exportErr == nil
+	// THE SENDER, AND WHETHER EACH EMAIL WOULD BE SENT, ARE ASKED AS A SEND OF THE
+	// STORE ASKS: as the store's merchant, resolved by the one function a send
+	// resolves that person by (asStoreMerchant), never as whoever is reading. One
+	// reading of the lane answers the line and all four kinds.
+	sender := p.readSender(ctx, s)
 	choices := make([]map[string]any, 0, len(templates))
 	for _, t := range templates {
 		choices = append(choices, map[string]any{"id": t.id, "name": t.name})
@@ -611,8 +614,8 @@ func (p *Provider) storeSettings(ctx context.Context, args map[string]any, _ int
 		"linkLifetimeDays":   s.LinkLifetimeDays,
 		"acceptanceText":     s.AcceptanceText,
 		"senderIdentityId":   s.SenderIdentityID,
-		"sender":             p.senderView(merchant, s),
-		"emailsWouldSend":    p.emailsWouldSend(merchant, s),
+		"sender":             sender.view(),
+		"emailsWouldSend":    emailsWouldSend(s, sender),
 		"termsTemplateId":    s.TermsTemplateID,
 		"approvedTemplateId": s.ApprovedTemplateID,
 		"rejectedTemplateId": s.RejectedTemplateID,
