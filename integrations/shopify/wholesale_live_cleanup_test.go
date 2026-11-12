@@ -171,3 +171,90 @@ func TestTheLiveCleanupLeavesARefusedCreateAlone(t *testing.T) {
 		t.Fatalf("the cleanup said %v for a test that created nothing", logs.lines)
 	}
 }
+
+// A 200 that carries GraphQL errors and no payload is as ambiguous as a 5xx:
+// the origin may have committed the create. The cleanup finds the customer by
+// its address and deletes it.
+func TestTheLiveCleanupFindsACreateAnsweredWithAnInternalError(t *testing.T) {
+	h := newHarness(t)
+	fc := customersOn(h)
+	deletableCustomers(h, fc)
+	create := h.admin.replyFns["ShopifyCustomerCreate"]
+	h.admin.replyWith("ShopifyCustomerCreate", func(vars map[string]any) any {
+		create(vars) // committed
+		return map[string]any{"customerCreate": nil}
+	})
+	h.admin.graphQLError("ShopifyCustomerCreate", "INTERNAL_SERVER_ERROR", "Internal error. Looks like something went wrong on our end.")
+	logs := &liveLogs{}
+	t.Run("the test", func(t *testing.T) {
+		w := liveWholesaleOnFake(t, h, logs)
+		if _, err := w.h.conn.createCustomer(w.h.ctx, w.store, liveBuyerName, "wholesale-live-internal@example.com"); err == nil {
+			t.Fatal("a create answered INTERNAL_SERVER_ERROR was not an error")
+		}
+		if fc.count() != 1 {
+			t.Fatalf("the fake committed %d customers, want 1", fc.count())
+		}
+	})
+	if n := fc.count(); n != 0 {
+		t.Fatalf("the cleanup left %d customers behind (said %v)", n, logs.lines)
+	}
+	if !logs.said("deleted customer gid://shopify/Customer/101") {
+		t.Fatalf("the cleanup did not say what it deleted: %v", logs.lines)
+	}
+}
+
+// A create refused for access at status 200 (ACCESS_DENIED, no payload) is
+// looked for by the run's own address like any unanswered create; finding
+// nothing is the expected outcome, said calmly, not an alarm.
+func TestTheLiveCleanupIsCalmAboutACreateRefusedForAccess(t *testing.T) {
+	h := newHarness(t)
+	customersOn(h)
+	h.admin.replyWith("ShopifyCustomerCreate", func(map[string]any) any { return map[string]any{"customerCreate": nil} })
+	h.admin.graphQLError("ShopifyCustomerCreate", "ACCESS_DENIED", "Access denied for customerCreate field. Required access: `write_customers` access scope.")
+	logs := &liveLogs{}
+	t.Run("the test", func(t *testing.T) {
+		w := liveWholesaleOnFake(t, h, logs)
+		_, _ = w.h.conn.createCustomer(w.h.ctx, w.store, liveBuyerName, "wholesale-live-denied@example.com")
+	})
+	if logs.said("LEFT IN THE STORE") {
+		t.Fatalf("a create refused for access was reported as left behind: %v", logs.lines)
+	}
+	if !logs.said("refused for access") {
+		t.Fatalf("the cleanup did not say the refused create was looked for and not found: %v", logs.lines)
+	}
+}
+
+// A lost create that carried no key is never searched for: the search for an
+// empty external id would answer somebody else's company with none.
+func TestTheLiveCleanupNeverSearchesForALostCreateWithNoKey(t *testing.T) {
+	h := newHarness(t)
+	customersOn(h)
+	h.admin.httpStatus("ShopifyCompanyCreate", 502)
+	h.admin.httpStatus("ShopifyCustomerCreate", 502)
+	// The store holds somebody else's company with no external id.
+	h.admin.reply("ShopifyCompanyByExternalID", map[string]any{"companies": map[string]any{"nodes": []any{
+		map[string]any{"id": "gid://shopify/Company/7", "externalId": "", "locations": map[string]any{"nodes": []any{map[string]any{"id": "gid://shopify/CompanyLocation/7"}}}},
+	}}})
+	deletes := 0
+	h.admin.replyWith("LiveTestCompanyDelete", func(map[string]any) any {
+		deletes++
+		return map[string]any{"companyDelete": map[string]any{"deletedCompanyId": "gid://shopify/Company/7", "userErrors": []any{}}}
+	})
+	logs := &liveLogs{}
+	t.Run("the test", func(t *testing.T) {
+		w := liveWholesaleOnFake(t, h, logs)
+		_, _, _ = w.h.conn.createCompany(w.h.ctx, w.store, WholesaleAccountInput{ApplicationID: "app-nokey", CompanyName: "No key"}, "")
+		_, _ = w.h.conn.createCustomer(w.h.ctx, w.store, liveBuyerName, "")
+	})
+	if deletes != 0 || h.admin.countOp("ShopifyCompanyByExternalID") != 0 {
+		t.Fatalf("the cleanup searched for an empty external id (%d searches) and deleted %d companies", h.admin.countOp("ShopifyCompanyByExternalID"), deletes)
+	}
+	for _, want := range []string{
+		"LEFT IN THE STORE, perhaps: a company create carried no external id, so it could not be looked up",
+		"LEFT IN THE STORE, perhaps: a customer create carried no address, so it could not be looked up",
+	} {
+		if !logs.said(want) {
+			t.Errorf("the cleanup did not say %q: %v", want, logs.lines)
+		}
+	}
+}

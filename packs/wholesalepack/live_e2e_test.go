@@ -645,8 +645,18 @@ func TestLiveE2E_BothFixtureClientsBootOverTheUneditedPack(t *testing.T) {
 // deleted by the id the entitlement recorded, in a cleanup that runs when the
 // test fails too. Terms are not required, so the approval grants at once.
 //
-//	MEMQL_DATABASE_DSN=... MEMQL_TEST_SHOPIFY_STORE_DOMAIN=... MEMQL_TEST_SHOPIFY_ADMIN_TOKEN=... \
-//	  go test -count=1 -timeout 30m ./packs/wholesalepack/ -run 'TestLiveE2E_AClientGrantAutomationTagsTheBuyerOnADevelopmentStore' -v
+// The one command for this task's live tests, this one and the connector's:
+//
+//	MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN=... \
+//	MEMQL_TEST_SHOPIFY_STORE_DOMAIN=<shop>.myshopify.com MEMQL_TEST_SHOPIFY_ADMIN_TOKEN=... MEMQL_TEST_SHOPIFY_ADMIN_TOKEN_NO_CUSTOMERS=... \
+//	  go test -count=1 -p 1 -timeout 30m ./integrations/shopify/ ./packs/wholesalepack/ -v \
+//	  -run 'TestLive(AGrantWithoutWriteCustomers|AMissingCustomerIsCreated|ASecondProvisionCreatesNothing|RevokeRemovesTheTag|ProvisionAgainReTags|ASignedInNonOwnerCannotTag|AnEmailTakenAnswer|ACompanyIsFoundByAnExternalId)|TestLiveE2E_AClientGrantAutomationTagsTheBuyerOnADevelopmentStore'
+//
+// MEMQL_REQUIRE_DB=1 matters: without a reachable database the gate test and
+// the pack's live test skip, and a mostly green run would read as a pass.
+// The wider -run 'TestLive' also runs the store mirror's live tests
+// (mirror_live_test.go), which create, edit, refund and cancel orders in the
+// development store.
 
 // liveTagTest names this test in a skip line.
 const liveTagTest = "the wholesale pack's live tag test"

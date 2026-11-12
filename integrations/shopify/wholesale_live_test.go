@@ -65,9 +65,16 @@ import (
 // also skips without the third. The token is never printed, nor any header;
 // the store domain may be.
 //
-//	MEMQL_DATABASE_DSN=... MEMQL_TEST_SHOPIFY_STORE_DOMAIN=... MEMQL_TEST_SHOPIFY_ADMIN_TOKEN=... \
-//	MEMQL_TEST_SHOPIFY_ADMIN_TOKEN_NO_CUSTOMERS=... \
-//	  go test -count=1 -timeout 30m ./integrations/shopify/ ./packs/wholesalepack/ -run 'TestLive' -v
+//	MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN=... \
+//	MEMQL_TEST_SHOPIFY_STORE_DOMAIN=<shop>.myshopify.com MEMQL_TEST_SHOPIFY_ADMIN_TOKEN=... MEMQL_TEST_SHOPIFY_ADMIN_TOKEN_NO_CUSTOMERS=... \
+//	  go test -count=1 -p 1 -timeout 30m ./integrations/shopify/ ./packs/wholesalepack/ -v \
+//	  -run 'TestLive(AGrantWithoutWriteCustomers|AMissingCustomerIsCreated|ASecondProvisionCreatesNothing|RevokeRemovesTheTag|ProvisionAgainReTags|ASignedInNonOwnerCannotTag|AnEmailTakenAnswer|ACompanyIsFoundByAnExternalId)|TestLiveE2E_AClientGrantAutomationTagsTheBuyerOnADevelopmentStore'
+//
+// MEMQL_REQUIRE_DB=1 matters: without a reachable database the gate test and
+// the pack's live test skip, and a mostly green run would read as a pass.
+// The wider -run 'TestLive' also runs the store mirror's live tests
+// (mirror_live_test.go), which create, edit, refund and cancel orders in the
+// development store.
 //
 // NOT VALIDATED against the recorded schema (cmd/shopifyschema/testdata),
 // which holds no Mutation type: customerDelete (the mirror's document) and
@@ -106,6 +113,9 @@ type liveCreate struct {
 	key     string
 	id      string
 	lost    bool
+	// denied is a lost create the origin answered with ACCESS_DENIED alone:
+	// almost certainly nothing was created, but it is looked for all the same.
+	denied bool
 }
 
 // The two creates whose answers the transport reads.
@@ -161,11 +171,13 @@ func (c *liveAdminCounter) RoundTrip(req *http.Request) (*http.Response, error) 
 	return c.next.RoundTrip(req)
 }
 
-// readCreate sends a create and keeps what the origin answered. A create the
-// origin refused (userErrors, a GraphQL refusal with no data, a 4xx) created
-// nothing and is not kept; a create whose answer cannot be read -- no
-// response, a body that cannot be read, a 5xx, a body that is not the
-// document's answer -- may have been committed, and is kept as lost.
+// readCreate sends a create and keeps what the origin answered. Only two
+// answers are refusals that created nothing and are not kept: the document's
+// own userErrors, and a 4xx. Every other answer that names no id may have been
+// committed and is kept as lost: no response, a body that cannot be read, a
+// 5xx, and a 200 with GraphQL errors and no payload, which is how Shopify
+// answers INTERNAL_SERVER_ERROR and TIMEOUT (and ACCESS_DENIED, kept as lost
+// but marked denied, so the cleanup's search finding nothing is said calmly).
 func (c *liveAdminCounter) readCreate(req *http.Request, create liveCreate) (*http.Response, error) {
 	keep := func(cr liveCreate) {
 		c.mu.Lock()
@@ -195,15 +207,16 @@ func (c *liveAdminCounter) readCreate(req *http.Request, create liveCreate) (*ht
 		return resp, nil
 	}
 	var answer struct {
-		Data map[string]struct {
+		Data map[string]*struct {
 			Customer *struct {
 				ID string `json:"id"`
 			} `json:"customer"`
 			Company *struct {
 				ID string `json:"id"`
 			} `json:"company"`
+			UserErrors []any `json:"userErrors"`
 		} `json:"data"`
-		Errors []any `json:"errors"`
+		Errors []GraphQLError `json:"errors"`
 	}
 	if json.Unmarshal(body, &answer) != nil {
 		create.lost = true
@@ -214,17 +227,24 @@ func (c *liveAdminCounter) readCreate(req *http.Request, create liveCreate) (*ht
 	if create.company {
 		field = "companyCreate"
 	}
-	payload, answered := answer.Data[field]
+	payload := answer.Data[field]
 	switch {
-	case !create.company && payload.Customer != nil && payload.Customer.ID != "":
+	case payload != nil && !create.company && payload.Customer != nil && payload.Customer.ID != "":
 		create.id = payload.Customer.ID
 		keep(create)
-	case create.company && payload.Company != nil && payload.Company.ID != "":
+	case payload != nil && create.company && payload.Company != nil && payload.Company.ID != "":
 		create.id = payload.Company.ID
 		keep(create)
-	case !answered && len(answer.Errors) == 0:
-		// A 200 that is neither the answer nor a refusal.
+	case payload != nil && len(payload.UserErrors) > 0:
+		// The document's own refusal: nothing was created.
+	default:
 		create.lost = true
+		create.denied = len(answer.Errors) > 0
+		for _, e := range answer.Errors {
+			if e.Code() != "ACCESS_DENIED" {
+				create.denied = false
+			}
+		}
 		keep(create)
 	}
 	return resp, nil
@@ -543,6 +563,16 @@ func (w *liveWholesale) removeCreated() {
 		w.deleteCompany(ctx, id, deleted)
 	}
 	for _, cr := range lost {
+		if strings.TrimSpace(cr.key) == "" {
+			// NEVER SEARCHED FOR: the search for an empty address or external
+			// id would answer somebody else's customer or company with none.
+			what := "a customer create carried no address"
+			if cr.company {
+				what = "a company create carried no external id"
+			}
+			w.logf("LEFT IN THE STORE, perhaps: %s, so it could not be looked up; its answer was lost, so look for what this test created in the Shopify admin", what)
+			continue
+		}
 		what := "a customer for " + cr.key
 		find := func() ([]string, error) {
 			all, err := w.h.conn.customersByEmail(ctx, w.store, cr.key)
@@ -563,6 +593,10 @@ func (w *liveWholesale) removeCreated() {
 			}
 		}
 		ids, err := w.findLost(ctx, find)
+		if len(ids) == 0 && cr.denied && err == nil {
+			w.logf("the create of %s was refused for access (ACCESS_DENIED), and the search of the test's own key finds nothing, as expected", what)
+			continue
+		}
 		if len(ids) == 0 {
 			reason := fmt.Sprintf("the search found none within %s", time.Duration(w.findTries)*w.findWait)
 			if err != nil {
@@ -657,11 +691,17 @@ func TestLiveAGrantWithoutWriteCustomersAnswersScopeMissing(t *testing.T) {
 	if n := w.calls.countSince(mark, "ShopifyTagsAdd"); n != 0 {
 		t.Fatalf("a refused grant sent %d tagsAdd", n)
 	}
-	// The transport saw every create of the test, and none answered a
-	// customer (the search would not show one this soon after).
+	// The transport saw every create of the test (the search would not show
+	// one this soon after). A refusal for scope is userErrors or a 4xx, which
+	// it does not keep, or a 200 with ACCESS_DENIED alone, which it keeps as
+	// denied; anything else may have created a customer.
 	for _, cr := range w.calls.created() {
-		if !cr.company {
-			t.Fatalf("a refused grant's customerCreate answered %+v; the cleanup deletes it", cr)
+		switch {
+		case cr.company || cr.denied:
+		case cr.id != "":
+			t.Fatalf("a refused grant's customerCreate created customer %s; the cleanup deletes it", cr.id)
+		default:
+			t.Fatalf("a refused grant's customerCreate got an answer that was neither a refusal for scope nor readable, so it may have created a customer for %s; the cleanup looks for it", cr.key)
 		}
 	}
 }
