@@ -222,6 +222,7 @@ mutation complianceJob queueComplianceJob {
     customerGid  string
     requestId    string
     shopDomain   string
+    orderGids    []string
     dueAt        datetime!
   }
   insert {
@@ -232,6 +233,7 @@ mutation complianceJob queueComplianceJob {
       customerGid: args.customerGid ?? ""
       requestId:   args.requestId ?? ""
       shopDomain:  args.shopDomain ?? ""
+      orderGids:   args.orderGids ?? []
       dueAt:       args.dueAt
       status:      "pending"
       outcome:     ""

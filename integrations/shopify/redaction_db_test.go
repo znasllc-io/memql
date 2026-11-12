@@ -29,8 +29,12 @@ import (
 // The second claim is what SURVIVES. Redaction keeps the commercial facts --
 // quantities, totals, dates -- because the merchant's books are not the
 // customer's personal data and destroying them is a different compliance
-// failure. That is a property of the jsonb_set list, and it is asserted here
-// rather than trusted.
+// failure. That is a property of the policy (erasure_fields.go), and it is
+// asserted here rather than trusted.
+//
+// These rows are seeded by SQL, with a history at times of the test's own
+// choosing. The erasure against rows the mirror itself wrote, and everything
+// about what it reaches, is erasure_db_test.go.
 
 const redactTestStore = "dbtest-acme"
 
@@ -130,9 +134,7 @@ func TestRedactCustomerScrubsEveryVersionAndKeepsTheCommercialFacts(t *testing.T
 
 	h := newHarness(t)
 	h.conn.WithDatabase(func() *sql.DB { return db })
-	store := Store{ID: redactTestStore, Domain: "acme.myshopify.com"}
-
-	if _, err := h.conn.RedactCustomer(context.Background(), store, customerGID); err != nil {
+	if _, err := h.conn.RedactCustomer(context.Background(), redactTestStore, customerGID, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -141,10 +143,19 @@ func TestRedactCustomerScrubsEveryVersionAndKeepsTheCommercialFacts(t *testing.T
 		t.Fatalf("redaction changed the version count to %d -- it rewrites history, it does not delete it", len(after))
 	}
 	for i, payload := range after {
-		for _, field := range []string{"email", "phone", "name", "billingAddress"} {
+		for _, field := range []string{"email", "phone"} {
 			if got := payload[field]; got != RedactionMarker {
 				t.Errorf("version %d kept %s = %v, want %q", i, field, got, RedactionMarker)
 			}
+		}
+		// An object is not left holding a string: its key is removed, and a
+		// typed read answers null for it (ruling 81).
+		if got, present := payload["billingAddress"]; present {
+			t.Errorf("version %d kept billingAddress = %v, want the key removed", i, got)
+		}
+		// The order's number is the sale's, not the person's.
+		if got := payload["name"]; got != "#1001" {
+			t.Errorf("version %d lost the order's number: %v", i, got)
 		}
 		// WHAT SURVIVES. The opaque GID stays so the row is still
 		// attributable to a customer record Shopify has itself redacted,
@@ -164,10 +175,10 @@ func TestRedactCustomerScrubsEveryVersionAndKeepsTheCommercialFacts(t *testing.T
 	}
 }
 
-// A field the concept does not carry must be left ALONE rather than invented.
-// create_missing=false on every jsonb_set is what makes that true, and
-// without it a redaction would add a dozen "[redacted]" keys to every row of
-// every concept it touched.
+// A field the row does not carry must be left ALONE rather than invented. The
+// scrub rebuilds a payload from the keys it already has, so it can take a key
+// away and never add one; a redaction that set every scrubbed field would add
+// a dozen "[redacted]" keys to every row it touched.
 func TestRedactionInventsNoFields(t *testing.T) {
 	db := openTestDB(t, "customers/redact invents no fields (memql#4395)")
 	if db == nil {
@@ -180,7 +191,7 @@ func TestRedactionInventsNoFields(t *testing.T) {
 	before := payloadsFor(t, db, rowID)
 	h := newHarness(t)
 	h.conn.WithDatabase(func() *sql.DB { return db })
-	if _, err := h.conn.RedactCustomer(context.Background(), Store{ID: redactTestStore}, customerGID); err != nil {
+	if _, err := h.conn.RedactCustomer(context.Background(), redactTestStore, customerGID, nil); err != nil {
 		t.Fatal(err)
 	}
 	after := payloadsFor(t, db, rowID)
@@ -194,9 +205,9 @@ func TestRedactionInventsNoFields(t *testing.T) {
 	}
 }
 
-// A customer the row does not mention must not be scrubbed by somebody
-// else's request. The LIKE on the whole payload is what scopes it, and this
-// is the test that keeps that scoping honest.
+// A customer the row does not name must not be scrubbed by somebody else's
+// request. The scope is what holds that (erasureScopeOf), and this is the
+// test that keeps it honest.
 func TestRedactionLeavesAnotherCustomersRowsAlone(t *testing.T) {
 	db := openTestDB(t, "customers/redact is scoped to one customer (memql#4395)")
 	if db == nil {
@@ -207,7 +218,7 @@ func TestRedactionLeavesAnotherCustomersRowsAlone(t *testing.T) {
 
 	h := newHarness(t)
 	h.conn.WithDatabase(func() *sql.DB { return db })
-	if _, err := h.conn.RedactCustomer(context.Background(), Store{ID: redactTestStore}, "gid://shopify/Customer/OTHER"); err != nil {
+	if _, err := h.conn.RedactCustomer(context.Background(), redactTestStore, "gid://shopify/Customer/OTHER", nil); err != nil {
 		t.Fatal(err)
 	}
 	for i, payload := range payloadsFor(t, db, rowID) {

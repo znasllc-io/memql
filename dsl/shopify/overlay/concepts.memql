@@ -141,6 +141,10 @@ concept complianceJob {
   topic        string!
   /// The customer, for the two customer topics.
   customerGid  string
+  /// The orders the request names (orders_to_redact, orders_requested), as
+  /// gids. They are in the request's scope whether or not they name the
+  /// customer.
+  orderGids    []string
   /// Shopify's own request id, recorded with the export it produces.
   requestId    string
   /// The shop domain as delivered, kept because a store row can be

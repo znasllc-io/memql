@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -48,25 +47,6 @@ const (
 // store came back is the difference between compliance and data loss.
 const ShopRedactHold = 48 * time.Hour
 
-// PII field names scrubbed by customers/redact.
-//
-// A DENYLIST, and it is worth being honest about why rather than pretending
-// it is a schema-derived set. The mirror is generated from Shopify's schema,
-// which carries no PII marking, so there is nothing to derive from. What
-// makes the list adequate is its scope: it is applied to rows REFERENCING ONE
-// CUSTOMER, so a name field that is missed leaves one person's name behind
-// rather than everyone's -- and the list is checked against the generated
-// concepts by TestRedactionCoversEveryCustomerNameField, which fails when a
-// regeneration introduces a field that looks like PII and is not here.
-var piiFieldNames = []string{
-	"email", "phone", "firstName", "lastName", "displayName", "name",
-	"note", "billingAddress", "shippingAddress", "defaultAddress",
-	"addresses", "addressesV2", "customerLocale", "clientIp",
-	"emailMarketingConsent", "smsMarketingConsent", "whatsAppMarketingConsent",
-	"contactEmail", "verifiedEmail", "multipassIdentifier", "taxExemptions",
-	"unsubscribeUrl", "customerJourneySummary",
-}
-
 // RedactionMarker replaces a scrubbed value. A marker rather than an empty
 // string, so a reader can tell "redacted" from "never had one" -- which is
 // the difference between a compliant record and a corrupted one.
@@ -105,6 +85,7 @@ func (c *Connector) enqueueComplianceJob(ctx context.Context, store Store, topic
 		"customerGid": job.CustomerGID,
 		"requestId":   job.RequestID,
 		"shopDomain":  job.ShopDomain,
+		"orderGids":   append([]string{}, job.OrderGIDs...),
 		"dueAt":       job.DueAt.UTC().Format(time.RFC3339),
 	})
 	if _, err := c.engine.Execute(operatorContext(ctx), call); err != nil {
@@ -135,19 +116,7 @@ func (c *Connector) RunDueComplianceJobs(ctx context.Context) (int, error) {
 	}
 	ran := 0
 	for _, row := range memql.MaterializeRows(res) {
-		job := ComplianceJob{
-			ID:          mapString(row, "id"),
-			Topic:       mapString(row, "topic"),
-			StoreID:     mapString(row, "storeId"),
-			CustomerGID: mapString(row, "customerGid"),
-			RequestID:   mapString(row, "requestId"),
-			ShopDomain:  mapString(row, "shopDomain"),
-		}
-		if job.ID == "" {
-			// The default projection is payload-only, so the row id is
-			// not in it; recompute it from the fields that derived it.
-			job.ID = ComplianceJobID(job.StoreID, job.Topic, job.CustomerGID+"\x00"+job.RequestID)
-		}
+		job := complianceJobOf(row)
 		store, ok := c.stores.ByID(ctx, job.StoreID)
 		if !ok {
 			c.recordJob(ctx, job.ID, "failed", "", "store "+job.StoreID+" is no longer configured")
@@ -178,7 +147,7 @@ func (c *Connector) recordJob(ctx context.Context, jobID, status, outcome, lastE
 func (c *Connector) runComplianceJob(ctx context.Context, store Store, job ComplianceJob) (string, error) {
 	switch job.Topic {
 	case TopicDataRequest:
-		export, err := c.ExportCustomerData(ctx, store, job.CustomerGID)
+		export, err := c.ExportCustomerData(ctx, store, job.CustomerGID, job.OrderGIDs)
 		if err != nil {
 			return "", err
 		}
@@ -192,12 +161,12 @@ func (c *Connector) runComplianceJob(ctx context.Context, store Store, job Compl
 		return fmt.Sprintf("exported %d bytes", len(artifact)), c.auditCompliance(ctx, store, "shopify_data_request_exported", job)
 
 	case TopicRedact:
-		rows, err := c.RedactCustomer(ctx, store, job.CustomerGID)
+		erased, err := c.RedactCustomer(ctx, store.ID, job.CustomerGID, job.OrderGIDs)
 		if err != nil {
 			return "", err
 		}
 		// The scrub ran, and is audited as run whatever the restart answers.
-		outcome, err := c.afterErasure(ctx, store, fmt.Sprintf("scrubbed %d row version(s)", rows))
+		outcome, err := c.afterErasure(ctx, store, fmt.Sprintf("scrubbed %d row version(s)", erased.Versions))
 		if auditErr := c.auditCompliance(ctx, store, "shopify_customer_redacted", job); err == nil {
 			err = auditErr
 		}
@@ -395,9 +364,21 @@ func parseComplianceJob(topic string, store Store, req memqlsync.InboundRequest,
 	if hasDataRequest {
 		job.RequestID = firstString(dataRequest, "id")
 	}
-	if raw, ok := obj["orders_requested"].([]any); ok {
+	// The orders the request names: orders_to_redact for an erasure,
+	// orders_requested for a data request. They are kept on the job, and are in
+	// the request's scope whether or not they name the customer
+	// (erasureScopeOf). An id arrives as a number, decoded without a float in
+	// between (decodeJSONObject), so a long one keeps every digit.
+	named := "orders_requested"
+	if job.Topic == TopicRedact {
+		named = "orders_to_redact"
+	}
+	if raw, ok := obj[named].([]any); ok && job.Topic != TopicShopRedact {
 		for _, v := range raw {
-			if s := fmt.Sprintf("%v", v); s != "" {
+			if v == nil {
+				continue
+			}
+			if s := strings.TrimSpace(fmt.Sprintf("%v", v)); s != "" {
 				job.OrderGIDs = append(job.OrderGIDs, "gid://shopify/Order/"+strings.TrimPrefix(s, "gid://shopify/Order/"))
 			}
 		}
@@ -428,39 +409,385 @@ func complianceAuditAction(topic string) string {
 	return "shopify_compliance"
 }
 
-// ExportCustomerData collects every mirror row referencing a customer.
-//
-// Its completeness comes from the generated model rather than from a
-// hand-written list of places customers appear: every mirrored concept is
-// walked, and a row counts when any of its fields carries the customer's GID.
-// A hand-written list would be correct on the day it was written and wrong
-// after the next allowlist change, which for a legal obligation is the wrong
-// kind of wrong.
-func (c *Connector) ExportCustomerData(ctx context.Context, store Store, customerGID string) (map[string]any, error) {
-	if customerGID == "" {
-		return nil, fmt.Errorf("shopify: data request carried no customer id")
+// erasedRow is one row a customer's erasure reaches.
+type erasedRow struct {
+	// ID is the row's id as the table holds it; GID the origin's.
+	ID, GID string
+	// Own is the erased customer's own row, which keeps nothing.
+	Own bool
+}
+
+// erasureScope is what one customer's erasure covers in one store: the rows
+// it scrubs, which are the rows a data request exports, and the rows outside
+// them that only list the customer among their references.
+type erasureScope struct {
+	// Rows are the rows in scope, by concept, in the order they were found.
+	Rows map[string][]erasedRow
+	// Listed are the ids of rows OUTSIDE the scope that hold the customer's
+	// gid in a list of references, by concept. The gid is taken out of the
+	// list; nothing else in such a row is about the customer.
+	Listed map[string][]string
+}
+
+// count is how many rows the scope holds.
+func (s *erasureScope) count() int {
+	n := 0
+	for _, rows := range s.Rows {
+		n += len(rows)
 	}
-	actorCtx := connectorContext(ctx)
-	collected := map[string]any{}
-	concepts := append([]string(nil), generated.ApplyOrder...)
-	sort.Strings(concepts)
-	for _, concept := range concepts {
+	return n
+}
+
+// erasureBatch is how many gids or row ids one statement of the scope or the
+// scrub names. They travel as one JSON array parameter, of half a megabyte or
+// so at this size; a smaller batch is another read of the concept's rows.
+const erasureBatch = 10000
+
+// complianceDB is the raw handle the privacy jobs work through, or the reason
+// there is none.
+func (c *Connector) complianceDB(what string) (*sql.DB, error) {
+	if c.db == nil {
+		return nil, fmt.Errorf("shopify: %s needs a database handle", what)
+	}
+	db := c.db()
+	if db == nil {
+		return nil, fmt.Errorf("shopify: %s needs a database handle", what)
+	}
+	return db, nil
+}
+
+// erasureScopeOf finds what the erasure of one customer covers in one store
+// (rulings 78 and 83). It is the ONE function the erasure and the data request
+// both use, so an export and an erasure cannot disagree about what MemQL
+// holds on a person.
+//
+// THE SCOPE starts at the customer's own row and the orders the request names
+// (orders_to_redact, orders_requested), and grows to a fixed point by three
+// links and no other:
+//
+//   - a row that hangs from an in-scope row by the model's parent link (its
+//     parentGid is that row's gid): an order's lines, transactions, refunds,
+//     fulfilments and returns, a return's reverse fulfilment orders, the
+//     customer's own payment methods;
+//   - a row that holds an in-scope row's gid as the WHOLE value of one of its
+//     gid fields: every row "of" the customer (orders, checkouts, contacts),
+//     and every row of an order that does not hang from it (a fulfilment
+//     order, a tender transaction, a payments dispute);
+//   - a row that holds the CUSTOMER's gid anywhere inside an object or a list
+//     of objects: the object is about the person.
+//
+// A LIST OF REFERENCES IS NOT A LINK. A row that holds the customer's gid only
+// in one is not about that person; it is answered in Listed, and the erasure
+// takes the gid out of the list. An in-scope order's gid in somebody else's
+// list of references is left where it is. A metafield is not an object of the
+// model either: a merchant's reference to a customer on a product does not
+// make the product hers.
+//
+// A gid is matched as a whole value, never as the beginning of a longer one:
+// the scrub this replaces matched a substring of the row's text, so erasing
+// customer 123 scrubbed every row of customer 1234.
+//
+// A ROW IS IN SCOPE WHEN ANY OF ITS VERSIONS HOLDS THE LINK. MemoryNodes is
+// keyed (id, createdAt), and an order the origin has since taken the customer
+// off still names her in the versions before; those versions are what a
+// point-in-time read answers.
+//
+// It reads the table and not the engine, and every row of the store, a
+// tombstoned one included: the paged read the export used answered the first
+// hundred rows of a concept.
+//
+// staged-data: MUST-NOT-GATE -- a staged row left out of the scope KEEPS ITS
+// PII and is missing from a data request's export. The obligation is that the
+// person's data is found wherever it sits, and a visibility gate would leave
+// out the one copy nobody can see.
+func (c *Connector) erasureScopeOf(ctx context.Context, db *sql.DB, storeID, customerGID string, orderGIDs []string) (*erasureScope, error) {
+	scope := &erasureScope{Rows: map[string][]erasedRow{}, Listed: map[string][]string{}}
+	known := map[string]bool{}
+	add := func(concept, id, gid string) bool {
+		if id == "" || known[id] {
+			return false
+		}
+		known[id] = true
+		scope.Rows[concept] = append(scope.Rows[concept], erasedRow{ID: id, GID: gid, Own: concept == erasedConcept && gid == customerGID})
+		return true
+	}
+
+	// The frontier: the gids whose holders and children are still to be
+	// found, by the concept of the row each is the gid of. It starts with the
+	// customer's gid and the orders the request names, whether or not the
+	// mirror holds a row of either.
+	seen := map[string]bool{}
+	frontier := map[string][]string{}
+	reach := func(concept, gid string) {
+		if gid != "" && !seen[gid] {
+			seen[gid] = true
+			frontier[concept] = append(frontier[concept], gid)
+		}
+	}
+	reach(erasedConcept, customerGID)
+	for _, gid := range orderGIDs {
+		reach(requestedConcept, gid)
+	}
+
+	// The rows the request names: the customer's own, and the orders.
+	for _, seed := range []struct {
+		concept string
+		gids    []string
+	}{{erasedConcept, []string{customerGID}}, {requestedConcept, orderGIDs}} {
+		for _, batch := range batches(seed.gids) {
+			rows, err := queryRows(ctx, db,
+				`SELECT id, max(payload->>'gid') FROM "MemoryNodes"
+				  WHERE concept = $1 AND payload->>'storeId' = $2
+				    AND payload->>'gid' IN (SELECT jsonb_array_elements_text($3::jsonb))
+				  GROUP BY id`,
+				generated.ConceptID(seed.concept), storeID, jsonArray(batch))
+			if err != nil {
+				return nil, fmt.Errorf("shopify: read the %s rows a privacy request names: %w", seed.concept, err)
+			}
+			for _, row := range rows {
+				add(seed.concept, row[0], row[1])
+			}
+		}
+	}
+
+	// The customer's gid inside an object, or in a list of references. Only
+	// versions whose text holds the gid as a whole JSON string are looked at.
+	listed := map[string][]string{}
+	whole := `%"` + likeEscape(customerGID) + `"%`
+	inside := jsonObject(map[string]any{"g": customerGID})
+	for _, concept := range generated.ApplyOrder {
 		spec := generated.Types[concept]
 		if spec == nil {
 			continue
 		}
-		res, err := c.engine.Execute(actorCtx, renderCall(spec.ForStoreFn, map[string]any{"storeId": store.ID}))
-		if err != nil {
-			return nil, fmt.Errorf("shopify: export %s: %w", concept, err)
-		}
-		var matched []map[string]any
-		for _, row := range memql.MaterializeRows(res) {
-			if rowMentions(row, customerGID) {
-				matched = append(matched, row)
+		var objects, lists []string
+		for _, f := range spec.Fields {
+			switch f.Kind {
+			case generated.KindObject, generated.KindObjectList:
+				objects = append(objects, fmt.Sprintf(`jsonb_path_exists(payload->%s, '$.** ? (@ == $g)', $4::jsonb)`, sqlText(f.Name)))
+			case generated.KindRefs:
+				lists = append(lists, fmt.Sprintf(`(jsonb_typeof(payload->%s) = 'array' AND jsonb_exists(payload->%s, $5))`, sqlText(f.Name), sqlText(f.Name)))
 			}
 		}
-		if len(matched) > 0 {
-			collected[concept] = matched
+		if len(objects) == 0 && len(lists) == 0 {
+			continue
+		}
+		// The last line of the WHERE names both parameters whether or not the
+		// concept has fields of the kind that reads them: a parameter no part
+		// of a statement reads has no type, and the statement is refused.
+		rows, err := queryRows(ctx, db, fmt.Sprintf(
+			`SELECT id, max(payload->>'gid'),
+			        COALESCE(bool_or(%s), false)::text, COALESCE(bool_or(%s), false)::text
+			   FROM "MemoryNodes"
+			  WHERE concept = $1 AND payload->>'storeId' = $2 AND payload::text LIKE $3
+			    AND $4::jsonb IS NOT NULL AND $5::text IS NOT NULL
+			  GROUP BY id`, anyOf(objects), anyOf(lists)),
+			generated.ConceptID(concept), storeID, whole, inside, customerGID)
+		if err != nil {
+			return nil, fmt.Errorf("shopify: look for the customer in the %s rows: %w", concept, err)
+		}
+		for _, row := range rows {
+			if row[2] == "true" && add(concept, row[0], row[1]) {
+				reach(concept, row[1])
+			}
+			if row[3] == "true" {
+				listed[concept] = append(listed[concept], row[0])
+			}
+		}
+	}
+
+	// The fixed point: the children and the holders of every gid reached.
+	//
+	// A concept's rows are read in a round only for the gids they can hold. A
+	// gid field names rows of one mirrored type (generated.FieldSpec.AdminType)
+	// and a parent link rows of the parent's concept, so a line item's gid is
+	// asked of the one concept that can name a line item and not of all of
+	// them. For a customer with thousands of orders that is the difference
+	// between a few reads of each table and a few hundred.
+	conceptsOf := map[string][]string{}
+	for concept, spec := range generated.Types {
+		conceptsOf[spec.GraphQLType] = append(conceptsOf[spec.GraphQLType], concept)
+	}
+	for len(frontier) > 0 {
+		round := frontier
+		frontier = map[string][]string{}
+		for _, concept := range generated.ApplyOrder {
+			spec := generated.Types[concept]
+			if spec == nil {
+				continue
+			}
+			var links []string
+			named := map[string]bool{}
+			every := false
+			if spec.Parent != "" {
+				links = append(links, `payload->>'parentGid' IN (SELECT gid FROM reached)`)
+				named[spec.Parent] = true
+			}
+			for _, f := range spec.Fields {
+				if f.Kind != generated.KindGid {
+					continue
+				}
+				links = append(links, fmt.Sprintf(`payload->>%s IN (SELECT gid FROM reached)`, sqlText(f.Name)))
+				targets := conceptsOf[f.AdminType]
+				if len(targets) == 0 {
+					// A reference the model cannot place is asked every gid.
+					every = true
+				}
+				for _, target := range targets {
+					named[target] = true
+				}
+			}
+			if len(links) == 0 {
+				continue
+			}
+			var gids []string
+			for target, reached := range round {
+				if every || named[target] {
+					gids = append(gids, reached...)
+				}
+			}
+			for _, batch := range batches(gids) {
+				rows, err := queryRows(ctx, db, fmt.Sprintf(
+					`WITH reached AS (SELECT jsonb_array_elements_text($3::jsonb) AS gid)
+					 SELECT id, max(payload->>'gid') FROM "MemoryNodes"
+					  WHERE concept = $1 AND payload->>'storeId' = $2 AND (%s)
+					  GROUP BY id`, strings.Join(links, " OR ")),
+					generated.ConceptID(concept), storeID, jsonArray(batch))
+				if err != nil {
+					return nil, fmt.Errorf("shopify: follow an erasure's links into the %s rows: %w", concept, err)
+				}
+				for _, row := range rows {
+					if add(concept, row[0], row[1]) {
+						reach(concept, row[1])
+					}
+				}
+			}
+		}
+	}
+
+	for concept, ids := range listed {
+		for _, id := range ids {
+			if !known[id] {
+				scope.Listed[concept] = append(scope.Listed[concept], id)
+			}
+		}
+	}
+	return scope, nil
+}
+
+// queryRows runs a read whose every column is text, or NULL read as "".
+func queryRows(ctx context.Context, db *sql.DB, query string, args ...any) ([][]string, error) {
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	var out [][]string
+	for rows.Next() {
+		cells := make([]sql.NullString, len(cols))
+		into := make([]any, len(cols))
+		for i := range cells {
+			into[i] = &cells[i]
+		}
+		if err := rows.Scan(into...); err != nil {
+			return nil, err
+		}
+		row := make([]string, len(cols))
+		for i, cell := range cells {
+			row[i] = cell.String
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// batches cuts a list into statements' worth.
+func batches(items []string) [][]string {
+	var out [][]string
+	for len(items) > erasureBatch {
+		out = append(out, items[:erasureBatch])
+		items = items[erasureBatch:]
+	}
+	if len(items) > 0 {
+		out = append(out, items)
+	}
+	return out
+}
+
+// jsonArray is a list of strings as the one text parameter a statement takes
+// it in. A gid holds colons and slashes, which an array literal would need
+// quoted; JSON has no such trouble.
+func jsonArray(items []string) string {
+	if items == nil {
+		items = []string{}
+	}
+	raw, _ := json.Marshal(items)
+	return string(raw)
+}
+
+func jsonObject(v map[string]any) string {
+	raw, _ := json.Marshal(v)
+	return string(raw)
+}
+
+// sqlText is a field's name as a SQL string literal. The names come from the
+// generated model, never from a request, and are quoted all the same.
+func sqlText(name string) string { return "'" + strings.ReplaceAll(name, "'", "''") + "'" }
+
+// anyOf joins conditions with OR, false for none.
+func anyOf(conditions []string) string {
+	if len(conditions) == 0 {
+		return "false"
+	}
+	return strings.Join(conditions, " OR ")
+}
+
+// likeEscape makes a value match itself in a LIKE pattern.
+func likeEscape(value string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value)
+}
+
+// ExportCustomerData collects every mirror row a customer's erasure would
+// scrub, for the store's owner to answer a data request with: the rows of
+// erasureScopeOf, each at its newest version.
+func (c *Connector) ExportCustomerData(ctx context.Context, store Store, customerGID string, orderGIDs []string) (map[string]any, error) {
+	if customerGID == "" {
+		return nil, fmt.Errorf("shopify: data request carried no customer id")
+	}
+	db, err := c.complianceDB("customers/data_request")
+	if err != nil {
+		return nil, err
+	}
+	scope, err := c.erasureScopeOf(ctx, db, store.ID, customerGID, orderGIDs)
+	if err != nil {
+		return nil, err
+	}
+	collected := map[string]any{}
+	for concept, rows := range scope.Rows {
+		var exported []map[string]any
+		for _, batch := range batches(rowIDs(rows)) {
+			found, err := queryRows(ctx, db,
+				`SELECT DISTINCT ON (id) payload::text FROM "MemoryNodes"
+				  WHERE concept = $1 AND id IN (SELECT jsonb_array_elements_text($2::jsonb))
+				  ORDER BY id, "createdAt" DESC`,
+				generated.ConceptID(concept), jsonArray(batch))
+			if err != nil {
+				return nil, fmt.Errorf("shopify: export %s: %w", concept, err)
+			}
+			for _, row := range found {
+				payload, err := decodeJSONObject(row[0])
+				if err != nil {
+					return nil, fmt.Errorf("shopify: export %s: a stored row is not JSON", concept)
+				}
+				exported = append(exported, payload)
+			}
+		}
+		if len(exported) > 0 {
+			collected[concept] = exported
 		}
 	}
 	return map[string]any{
@@ -472,92 +799,173 @@ func (c *Connector) ExportCustomerData(ctx context.Context, store Store, custome
 	}, nil
 }
 
-// rowMentions reports whether any value anywhere in a row equals the GID.
-// Deep rather than top-level: a customer appears on an order as customerGid,
-// inside a nested billingAddress, and inside a metafield value, and a
-// shallow check would miss two of the three.
-func rowMentions(v any, gid string) bool {
-	switch val := v.(type) {
-	case string:
-		return val == gid
-	case map[string]any:
-		for _, item := range val {
-			if rowMentions(item, gid) {
-				return true
-			}
-		}
-	case []any:
-		for _, item := range val {
-			if rowMentions(item, gid) {
-				return true
-			}
-		}
+func rowIDs(rows []erasedRow) []string {
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.ID)
 	}
-	return false
+	return out
 }
 
-// RedactCustomer scrubs a customer's PII from every version of every mirror
-// row that references them, keeping the opaque GID and the commercial facts.
+// ErasureResult is what one pass of a customer's erasure did.
+type ErasureResult struct {
+	// Rows is how many rows the erasure's scope held.
+	Rows int
+	// Versions is how many row versions the pass changed. A second pass over
+	// rows nothing has written since changes none.
+	Versions int64
+	// Unlisted is how many versions of rows OUTSIDE the scope had the
+	// customer's gid taken out of a list of references.
+	Unlisted int64
+}
+
+// RedactCustomer erases one customer from a store's mirror: it finds the scope
+// (erasureScopeOf) and rewrites every version of every row in it by the policy
+// of erasure_fields.go, keeping the opaque gids and the facts of the sale.
 //
 // WHAT SURVIVES IS THE POINT. An order's total, its line quantities and its
 // dates stay: the merchant's books are not the customer's personal data, and
-// destroying them would be a different compliance failure. What goes is the
-// name, the addresses, the contact details and the consent records.
-func (c *Connector) RedactCustomer(ctx context.Context, store Store, customerGID string) (int64, error) {
-	if c.db == nil {
-		return 0, fmt.Errorf("shopify: customers/redact needs a database handle")
+// destroying them would be a different compliance failure. What goes is
+// everything that is not shown to be about the sale.
+//
+// It runs by the STORE'S ID and needs no store row: the mirror's rows can
+// outlive the row that configured them. It is safe to run twice, and every
+// erasure is (ErasureSecondPassAfter): a version the pass leaves as it should
+// be is not written, so what a second pass changes is what was written
+// between the two.
+func (c *Connector) RedactCustomer(ctx context.Context, storeID, customerGID string, orderGIDs []string) (ErasureResult, error) {
+	db, err := c.complianceDB("customers/redact")
+	if err != nil {
+		return ErasureResult{}, err
 	}
 	if customerGID == "" {
-		return 0, fmt.Errorf("shopify: redact carried no customer id")
+		return ErasureResult{}, fmt.Errorf("shopify: redact carried no customer id")
 	}
-	db := c.db()
-	if db == nil {
-		return 0, fmt.Errorf("shopify: customers/redact needs a database handle")
+	scope, err := c.erasureScopeOf(ctx, db, storeID, customerGID, orderGIDs)
+	if err != nil {
+		return ErasureResult{}, err
 	}
-	var total int64
+	res := ErasureResult{Rows: scope.count()}
 	for _, concept := range generated.ApplyOrder {
-		n, err := redactConcept(ctx, db, generated.ConceptID(concept), store.ID, customerGID)
-		if err != nil {
-			return total, err
+		spec := generated.Types[concept]
+		if spec == nil {
+			continue
 		}
-		total += n
+		var own, others []string
+		for _, row := range scope.Rows[concept] {
+			if row.Own {
+				own = append(own, row.ID)
+			} else {
+				others = append(others, row.ID)
+			}
+		}
+		for _, part := range []struct {
+			ids  []string
+			plan erasurePlan
+		}{{own, erasurePlanFor(spec, true)}, {others, erasurePlanFor(spec, false)}} {
+			for _, batch := range batches(part.ids) {
+				n, err := scrubRows(ctx, db, generated.ConceptID(concept), part.plan, batch)
+				if err != nil {
+					return res, fmt.Errorf("shopify: redact %s: %w", concept, err)
+				}
+				res.Versions += n
+			}
+		}
+		var lists []string
+		for _, f := range spec.Fields {
+			if f.Kind == generated.KindRefs {
+				lists = append(lists, f.Name)
+			}
+		}
+		for _, batch := range batches(scope.Listed[concept]) {
+			n, err := unlistGID(ctx, db, generated.ConceptID(concept), lists, customerGID, batch)
+			if err != nil {
+				return res, fmt.Errorf("shopify: take the customer out of the references of %s: %w", concept, err)
+			}
+			res.Unlisted += n
+		}
 	}
-	return total, nil
+	return res, nil
 }
 
-// redactConcept rewrites the PII fields of every VERSION of every row of one
-// concept that mentions the customer.
+// scrubRows rewrites every VERSION of the given rows of one concept by a plan,
+// and answers how many versions it changed.
 //
-// staged-data: MUST-NOT-GATE -- a staged row skipped here KEEPS ITS PII. This
-// is customers/redact: the obligation is that the person's data is scrubbed
-// wherever it sits, and a visibility gate would leave the one copy nobody can
-// see -- which is the copy that turns up in a subject-access request later.
+// A key the plan keeps is left; a string it marks becomes the marker; a list
+// it empties becomes []; and EVERY OTHER KEY IS REMOVED, a key the model does
+// not know included. That last is default deny in the one place it has to
+// hold: a payload is rebuilt from what may stay, not edited by a list of what
+// must go.
+//
+// The values are ones the concept's schema accepts (erasureScrubFate), which
+// is what lets the mirror write the row again. Whatever a field holds now is
+// rewritten, a value an earlier erasure left included: that one put the
+// string marker in objects, lists and booleans, and a row it touched is
+// writable again after this.
 //
 // Every version, and that is the requirement rather than thoroughness for its
 // own sake: MemoryNodes is keyed (id, createdAt), so scrubbing the newest
 // version alone leaves the customer's name in the row's history, where a
-// point-in-time read still returns it.
-func redactConcept(ctx context.Context, db *sql.DB, concept, storeID, customerGID string) (int64, error) {
-	sets := make([]string, 0, len(piiFieldNames))
-	args := []any{concept, storeID, customerGID}
-	for i, field := range piiFieldNames {
-		sets = append(sets, fmt.Sprintf("jsonb_set(payload, $%d::text[], to_jsonb($%d::text), false)", 2*i+4, 2*i+5))
-		args = append(args, "{"+field+"}", RedactionMarker)
+// point-in-time read still returns it. A version already as the plan leaves it
+// is not written.
+//
+// staged-data: MUST-NOT-GATE -- a staged row skipped here KEEPS ITS PII.
+func scrubRows(ctx context.Context, db *sql.DB, concept string, plan erasurePlan, ids []string) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
 	}
-	// Applied left to right: each jsonb_set wraps the previous, and
-	// create_missing=false means a field the concept does not carry is left
-	// alone rather than invented.
-	expr := "payload"
-	for _, s := range sets {
-		expr = strings.Replace(s, "payload", expr, 1)
-	}
-	stmt := fmt.Sprintf(`UPDATE "MemoryNodes" SET payload = %s
-	  WHERE concept = $1
-	    AND payload->>'storeId' = $2
-	    AND payload::text LIKE '%%' || $3 || '%%'`, expr)
-	res, err := db.ExecContext(ctx, stmt, args...)
+	res, err := db.ExecContext(ctx,
+		`WITH scrubbed AS (
+		   SELECT m.id, m."createdAt",
+		          COALESCE((SELECT jsonb_object_agg(e.key, CASE
+		                      WHEN e.key IN (SELECT jsonb_array_elements_text($4::jsonb)) THEN to_jsonb($7::text)
+		                      WHEN e.key IN (SELECT jsonb_array_elements_text($6::jsonb)) AND COALESCE(m.payload->>$8, '') = '' THEN to_jsonb($7::text)
+		                      WHEN e.key IN (SELECT jsonb_array_elements_text($5::jsonb)) THEN '[]'::jsonb
+		                      ELSE e.value END)
+		                      FROM jsonb_each(m.payload) e
+		                     WHERE e.key IN (SELECT jsonb_array_elements_text($3::jsonb))
+		                        OR e.key IN (SELECT jsonb_array_elements_text($4::jsonb))
+		                        OR e.key IN (SELECT jsonb_array_elements_text($5::jsonb))
+		                        OR e.key IN (SELECT jsonb_array_elements_text($6::jsonb))), '{}'::jsonb) AS payload
+		     FROM "MemoryNodes" m
+		    WHERE m.concept = $1 AND m.id IN (SELECT jsonb_array_elements_text($2::jsonb))
+		 )
+		 UPDATE "MemoryNodes" m SET payload = s.payload
+		   FROM scrubbed s
+		  WHERE m.concept = $1 AND m.id = s.id AND m."createdAt" = s."createdAt"
+		    AND m.payload IS DISTINCT FROM s.payload`,
+		concept, jsonArray(ids), jsonArray(plan.Keep), jsonArray(plan.Mark), jsonArray(plan.Empty),
+		jsonArray(plan.MarkOnCustomItem), RedactionMarker, plan.CustomItemReference)
 	if err != nil {
-		return 0, fmt.Errorf("shopify: redact %s: %w", concept, err)
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+// unlistGID takes one gid out of the lists of references of the given rows,
+// in every version that holds it, and changes nothing else in them.
+func unlistGID(ctx context.Context, db *sql.DB, concept string, lists []string, gid string, ids []string) (int64, error) {
+	if len(ids) == 0 || len(lists) == 0 {
+		return 0, nil
+	}
+	res, err := db.ExecContext(ctx,
+		`WITH unlisted AS (
+		   SELECT m.id, m."createdAt",
+		          (SELECT jsonb_object_agg(e.key, CASE
+		                    WHEN e.key IN (SELECT jsonb_array_elements_text($3::jsonb)) AND jsonb_typeof(e.value) = 'array' THEN e.value - $4::text
+		                    ELSE e.value END)
+		             FROM jsonb_each(m.payload) e) AS payload
+		     FROM "MemoryNodes" m
+		    WHERE m.concept = $1 AND m.id IN (SELECT jsonb_array_elements_text($2::jsonb))
+		 )
+		 UPDATE "MemoryNodes" m SET payload = u.payload
+		   FROM unlisted u
+		  WHERE m.concept = $1 AND m.id = u.id AND m."createdAt" = u."createdAt"
+		    AND u.payload IS NOT NULL AND m.payload IS DISTINCT FROM u.payload`,
+		concept, jsonArray(ids), jsonArray(lists), gid)
+	if err != nil {
+		return 0, err
 	}
 	n, _ := res.RowsAffected()
 	return n, nil
@@ -648,4 +1056,24 @@ func (c *Connector) auditCompliance(ctx context.Context, store Store, action str
 		return nil
 	}
 	return nil
+}
+
+// complianceJobOf is a job as its row holds it.
+func complianceJobOf(row map[string]any) ComplianceJob {
+	job := ComplianceJob{
+		ID:          mapString(row, "id"),
+		Topic:       mapString(row, "topic"),
+		StoreID:     mapString(row, "storeId"),
+		CustomerGID: mapString(row, "customerGid"),
+		RequestID:   mapString(row, "requestId"),
+		ShopDomain:  mapString(row, "shopDomain"),
+		OrderGIDs:   mapStringSlice(row, "orderGids"),
+		DueAt:       rowTime(row, "dueAt"),
+	}
+	if job.ID == "" {
+		// The default projection is payload-only, so the row id is not in
+		// it; recompute it from the fields that derived it.
+		job.ID = ComplianceJobID(job.StoreID, job.Topic, job.CustomerGID+"\x00"+job.RequestID)
+	}
+	return job
 }

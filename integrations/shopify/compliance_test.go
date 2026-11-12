@@ -8,7 +8,6 @@ import (
 	"time"
 
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
-	"github.com/znasllc-io/memql/integrations/shopify/generated"
 )
 
 // compliance_test.go -- the three privacy topics (#4395).
@@ -83,66 +82,6 @@ func TestTheHoldsAreTheRegulatedOnes(t *testing.T) {
 	}
 }
 
-// Completeness comes from the GENERATED model rather than a hand-written list
-// of places customers appear: a hand-written list is correct the day it is
-// written and wrong after the next allowlist change, which for a legal
-// obligation is the wrong kind of wrong.
-func TestTheExportWalksEveryMirroredConcept(t *testing.T) {
-	h := newHarness(t)
-	gid := "gid://shopify/Customer/991"
-	h.engine.setRows("shopifyOrderForStore", []map[string]any{
-		{"id": "shp1", "gid": "gid://shopify/Order/1", "customerGid": gid, "totalPriceSet": map[string]any{"shopMoney": map[string]any{"amount": "42.00"}}},
-		{"id": "shp2", "gid": "gid://shopify/Order/2", "customerGid": "gid://shopify/Customer/other"},
-	})
-	h.engine.setRows("shopifyCustomerForStore", []map[string]any{
-		{"id": "shp3", "gid": gid, "email": "a@example.com"},
-	})
-
-	export, err := h.conn.ExportCustomerData(context.Background(), h.store(t), gid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rows, _ := export["rows"].(map[string]any)
-	orders, _ := rows["order"].([]map[string]any)
-	if len(orders) != 1 {
-		t.Fatalf("exported %d orders, want only the customer's own", len(orders))
-	}
-	if _, ok := rows["customer"]; !ok {
-		t.Error("the customer's own row is missing from the export")
-	}
-	// Every mirrored concept was asked, not a curated few.
-	if got := len(h.engine.callsTo("shopifyGiftCardForStore")); got == 0 {
-		t.Error("a mirrored concept was not walked")
-	}
-	if export["customerGid"] != gid || export["apiVersion"] != generated.APIVersion {
-		t.Errorf("export header = %v", export)
-	}
-}
-
-// A customer appears on an order as customerGid, inside a nested
-// billingAddress and inside a metafield value. A shallow check would miss two
-// of the three.
-func TestRowMentionsIsDeep(t *testing.T) {
-	gid := "gid://shopify/Customer/991"
-	cases := []struct {
-		name string
-		row  any
-		want bool
-	}{
-		{"top level", map[string]any{"customerGid": gid}, true},
-		{"nested object", map[string]any{"billingAddress": map[string]any{"ownerGid": gid}}, true},
-		{"inside an array", map[string]any{"refs": []any{"other", gid}}, true},
-		{"absent", map[string]any{"customerGid": "gid://shopify/Customer/1"}, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := rowMentions(tc.row, gid); got != tc.want {
-				t.Errorf("got %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestTheExportIsRefusedWhenTheStoreHasNoOwner(t *testing.T) {
 	h := newHarness(t)
 	store := h.store(t)
@@ -168,26 +107,10 @@ func TestTheExportIsFiledUnderTheStoreOwner(t *testing.T) {
 	}
 }
 
-func TestRedactionKeepsTheCommercialFactsAndLosesThePii(t *testing.T) {
-	// The field list is a denylist because the mirror is generated from a
-	// schema that carries no PII marking. What makes it adequate is its
-	// SCOPE: it is applied to rows referencing ONE customer.
-	pii := map[string]bool{}
-	for _, f := range piiFieldNames {
-		pii[f] = true
-	}
-	for _, want := range []string{"email", "phone", "firstName", "lastName", "billingAddress", "shippingAddress"} {
-		if !pii[want] {
-			t.Errorf("%q is not scrubbed", want)
-		}
-	}
-	// The merchant's books are not the customer's personal data, and
-	// destroying them would be a different compliance failure.
-	for _, keep := range []string{"totalPriceSet", "currentQuantity", "gid", "storeId", "createdAt", "lineItems"} {
-		if pii[keep] {
-			t.Errorf("%q is scrubbed, but it is a commercial fact", keep)
-		}
-	}
+// A scrubbed string is marked rather than emptied, so a reader can tell
+// "redacted" from "never had one". What is kept and what is lost is the
+// policy's (erasure_fields_test.go and its golden).
+func TestAScrubbedStringIsMarked(t *testing.T) {
 	if RedactionMarker == "" {
 		t.Error("a scrubbed field must be marked, so a reader can tell redacted from never-had-one")
 	}
@@ -195,11 +118,15 @@ func TestRedactionKeepsTheCommercialFactsAndLosesThePii(t *testing.T) {
 
 func TestRedactionAndPurgeRefuseWithoutADatabase(t *testing.T) {
 	h := newHarness(t)
-	if _, err := h.conn.RedactCustomer(context.Background(), h.store(t), "gid://shopify/Customer/1"); err == nil {
+	if _, err := h.conn.RedactCustomer(context.Background(), testStoreID, "gid://shopify/Customer/1", nil); err == nil {
 		t.Error("redaction ran with no database handle")
 	}
 	if _, err := h.conn.PurgeStore(context.Background(), h.store(t)); err == nil {
 		t.Error("the purge ran with no database handle")
+	}
+	// The export reads the rows the erasure would scrub, from the same table.
+	if _, err := h.conn.ExportCustomerData(context.Background(), h.store(t), "gid://shopify/Customer/1", nil); err == nil {
+		t.Error("the export ran with no database handle")
 	}
 }
 
@@ -300,5 +227,55 @@ func TestARedactBodyWithoutOrdersToRedactIsStillARedaction(t *testing.T) {
 				t.Fatalf("the redact body replayed as %s queued %d jobs (err=%v)", topic, len(queued), err)
 			}
 		})
+	}
+}
+
+// The orders a request names are kept on its job (ruling 78): an erasure
+// scrubs them whether or not they name the customer, and a data request
+// exports them. The request's own list of orders used to be read, for the
+// data request only, and then dropped.
+func TestTheOrdersARequestNamesAreKeptOnItsJob(t *testing.T) {
+	const shop = "acme-widgets.myshopify.com"
+	for topic, body := range map[string]map[string]any{
+		// Ids are numbers in Shopify's body, and one beyond what a float holds
+		// exactly has to arrive with every digit.
+		TopicRedact:      {"shop_domain": shop, "customer": map[string]any{"id": 991}, "orders_to_redact": []any{299938, 9007199254740993}},
+		TopicDataRequest: {"shop_domain": shop, "customer": map[string]any{"id": 991}, "data_request": map[string]any{"id": 42}, "orders_requested": []any{299938, 9007199254740993}},
+	} {
+		t.Run(topic, func(t *testing.T) {
+			h := newHarness(t)
+			if _, err := h.conn.Apply(context.Background(), complianceDelivery(topic, body)); err != nil {
+				t.Fatal(err)
+			}
+			queued := h.engine.callsTo("queueComplianceJob")
+			if len(queued) != 1 {
+				t.Fatalf("queued %d jobs", len(queued))
+			}
+			if want := `orderGids: ["gid://shopify/Order/299938", "gid://shopify/Order/9007199254740993"]`; !strings.Contains(queued[0], want) {
+				t.Errorf("the job does not keep the orders its request names:\n  %s\nwant it to hold\n  %s", queued[0], want)
+			}
+		})
+	}
+	// A shop's erasure names no order, and its job says so with an empty list.
+	h := newHarness(t)
+	if _, err := h.conn.Apply(context.Background(), complianceDelivery(TopicShopRedact, map[string]any{"shop_domain": shop, "shop_id": 954889})); err != nil {
+		t.Fatal(err)
+	}
+	if queued := h.engine.callsTo("queueComplianceJob"); len(queued) != 1 || !strings.Contains(queued[0], "orderGids: []") {
+		t.Errorf("a shop's erasure queued %v, want one job that names no order", queued)
+	}
+}
+
+// The runner reads the orders back from the job's row.
+func TestTheRunnerReadsTheOrdersAJobNames(t *testing.T) {
+	job := complianceJobOf(map[string]any{
+		"id": "shpcj1", "storeId": testStoreID, "topic": TopicRedact, "customerGid": "gid://shopify/Customer/991",
+		"orderGids": []any{"gid://shopify/Order/299938", "gid://shopify/Order/280263"}, "dueAt": "2026-08-24T12:00:00Z",
+	})
+	if strings.Join(job.OrderGIDs, ",") != "gid://shopify/Order/299938,gid://shopify/Order/280263" {
+		t.Errorf("the job read from its row names the orders %v", job.OrderGIDs)
+	}
+	if job.ID != "shpcj1" || job.Topic != TopicRedact || job.CustomerGID != "gid://shopify/Customer/991" || job.DueAt.IsZero() {
+		t.Errorf("the job read from its row is %+v", job)
 	}
 }
