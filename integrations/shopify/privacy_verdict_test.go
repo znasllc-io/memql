@@ -185,3 +185,48 @@ func TestTheWatchMailsTheOwnerAboutAFailingPrivacyRequest(t *testing.T) {
 		t.Errorf("the mail's copy changed, or it names a customer:\n%s", body)
 	}
 }
+
+// When a failing privacy request is the ONLY reason a store needs attention,
+// the mail does not say the store is not being recorded: it is recording
+// everything, and that first line would be false. With any other reason
+// present the first line is as it was, and the subject is the same either way.
+func TestTheMailForAFailingPrivacyRequestAloneDoesNotSayTheStoreIsNotRecorded(t *testing.T) {
+	const episode = "2026-11-10T07:30:00Z"
+	const since = "Tue, 10 Nov 2026 07:30:00 UTC"
+	store := verdictStore()
+
+	in := verdictInputOf(store, cleanRows(store))
+	in.Privacy = failingSince(25 * time.Hour)
+	alone := computeVerdict(in)
+	if strings.Join(reasonCodes(alone), ",") != ReasonPrivacyRequestFailing {
+		t.Fatalf("the fixture store lists %v, want the privacy reason alone", reasonCodes(alone))
+	}
+	subject, body := alertEmail(alone, episode, "https://os.example.test")
+	first, _, _ := strings.Cut(body, "\n")
+	if want := store.Domain + " needs attention in MemQL, since " + since + "."; first != want {
+		t.Errorf("with the privacy reason alone the mail begins\n  %q\nwant\n  %q", first, want)
+	}
+	if subject != store.Domain+" needs attention" {
+		t.Errorf("subject %q", subject)
+	}
+	if !strings.Contains(body, "\n"+privacySentence+"\n") {
+		t.Errorf("the mail lost the reason's sentence:\n%s", body)
+	}
+
+	rows := cleanRows(store)
+	setRow(rows, "customer", func(r map[string]any) { r["lastError"] = "shopify admin: HTTP 401" })
+	in = verdictInputOf(store, rows)
+	in.Privacy = failingSince(25 * time.Hour)
+	both := computeVerdict(in)
+	if len(both.Reasons) < 2 {
+		t.Fatalf("the fixture store lists %v, want another reason beside the privacy one", reasonCodes(both))
+	}
+	subject, body = alertEmail(both, episode, "https://os.example.test")
+	first, _, _ = strings.Cut(body, "\n")
+	if want := "MemQL is not recording everything from " + store.Domain + ", since " + since + "."; first != want {
+		t.Errorf("with another reason beside it the mail begins\n  %q\nwant it as it was:\n  %q", first, want)
+	}
+	if subject != store.Domain+" needs attention" {
+		t.Errorf("subject %q", subject)
+	}
+}

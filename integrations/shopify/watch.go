@@ -389,6 +389,10 @@ func alertEmail(v Verdict, episode string, osBase string) (string, string) {
 	if v.State == VerdictNeedsAttention {
 		subject = v.Domain + " needs attention"
 		opening = "MemQL is not recording everything from " + v.Domain + ", since " + stampRFC1123(episode) + "."
+		if len(v.Reasons) == 1 && v.Reasons[0].Code == ReasonPrivacyRequestFailing {
+			// The store is recording everything; only a privacy request is failing.
+			opening = v.Domain + " needs attention in MemQL, since " + stampRFC1123(episode) + "."
+		}
 	}
 	var b strings.Builder
 	b.WriteString(opening + "\n\n")
