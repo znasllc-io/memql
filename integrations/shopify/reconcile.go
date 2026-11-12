@@ -288,9 +288,11 @@ func (c *Connector) reconcileStore(ctx context.Context, store Store, spec *gener
 //
 // Tombstoning is NOT part of this mode, and that is not an oversight: an
 // `updated_at:>` filter cannot express "and tell me what you deleted". A
-// deletion is carried by the delete topic and, when that is lost, by the
-// domain's periodic full re-list -- which is why every updated_at domain
-// that can be deleted also carries delete topics.
+// deletion is carried by the delete topic, which is why every updated_at
+// domain that can be deleted carries delete topics. When that notice is
+// lost nothing in this mode finds it: a domain checked by last change is
+// never re-listed in full, so the record stays in the mirror as it was. It
+// is a stated limit of the mirror, not something a later sweep repairs.
 //
 // A SWEEP IN WHICH A WRITE FAILED IS NOT A CLEAN SWEEP (unwritten). Every row
 // is still healed that can be -- one row's failure does not stop the rest --
