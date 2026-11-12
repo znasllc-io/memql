@@ -216,12 +216,15 @@ func TestARowCommittedBehindTheWatermarkIsReadByTheNextRun(t *testing.T) {
 
 	floor := time.Now().UTC().Add(-time.Hour)
 	var p pages
-	w, _, err := walkSource(walkCtx(t), e, "storeStatisticsOrdersChanged", storeID, floor, walkWindow{}, time.Now, maxPagesPerRun, p.visit)
+	w, caughtUp, err := walkSource(walkCtx(t), e, "storeStatisticsOrdersChanged", storeID, floor, walkWindow{}, time.Now, maxPagesPerRun, p.visit)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !w.Through.Equal(writtenAt(t, orderConcept, storeID, first)) {
-		t.Fatalf("the first run stands at %v, want the order's write time", w.Through)
+	// The order was written a moment before the read: its page reaches the
+	// overlap, and the walk stands at that page's asking time less the
+	// overlap, behind the order (walk.go, "Where a read leaves the walk").
+	if want := caughtUp.Add(-watermarkOverlap); !w.Through.Equal(want) || !w.Through.Before(writtenAt(t, orderConcept, storeID, first)) {
+		t.Fatalf("the first run stands at %v, want its page's asking time less the overlap, %v, behind the order", w.Through, want)
 	}
 
 	late := fmt.Sprintf("gid://shopify/Order/%d-2", suffix)

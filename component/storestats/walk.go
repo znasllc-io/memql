@@ -64,12 +64,10 @@ import (
 //   - When until is within the overlap of the clock, the read is to the clock.
 //     Its pages move Through to the newest createdAt read, never back and never
 //     past the clock, and its last page is caught up at the clock that page
-//     was asked by. That page also moves Through to at least that clock less
-//     the overlap, and Width back to defaultWindow: every row written before
-//     then that was visible was read, and one that was not yet visible was
-//     written within the overlap of it (the bound below). So a quiet store's
-//     next run reads twice the overlap and the time since, not the weeks since
-//     its newest row. The walk ends there.
+//     was asked by. That page also moves Through to the call's bound (see
+//     "Where a read leaves the walk"), and Width back to defaultWindow. So a
+//     quiet store's next run reads twice the overlap and the time since, not
+//     the weeks since its newest row. The walk ends there.
 //   - Otherwise the window is past, and read as of its end (asOf, the form the
 //     email walk's walkQuery writes), so the engine collapses only the versions
 //     written up to it. Its last page sets Through to until and doubles Width
@@ -107,18 +105,57 @@ import (
 //     runInWriteTx) a session can sit idle between statements up to the
 //     idle-in-transaction bound, 60 s by default (database.go,
 //     defaultIdleInTxTimeoutMs; 15 s when fenced);
-//   - and, with no bound the engine sets, the wait for a pool connection under
-//     the caller's context, a pause of the writer's process, and the skew
-//     between the writer's clock and the reader's.
+//   - and, with no bound the engine sets: the wait for a pool connection under
+//     the caller's context; a pause of the writer's process; the skew between
+//     the writer's clock and the reader's; a write transaction that runs
+//     several statements after its write time is taken, each statement and
+//     each idle gap with a bound of its own and no transaction timeout set;
+//     the statement timeout or the idle-in-transaction bound switched off
+//     (MEMQL_DB_STATEMENT_TIMEOUT_MS or MEMQL_DB_IDLE_IN_TX_TIMEOUT_MS at 0);
+//     and either raised by an operator, which, above half the overlap, is the
+//     same as switching it off -- the test reads only the defaults.
 //
-// The overlap is five minutes because the bounded parts sum to 68 s, under
-// half of it: TestTheOverlapHoldsTheEnginesOwnBoundsOnALateCommit reads both
-// defaults from the engine's code and fails when they reach half the overlap.
-// An installation that switches the statement timeout off (0) configures a
-// lateness the walk cannot bound, as do the unbounded parts. What a walk
+// The overlap is five minutes because one statement and one idle gap at the
+// defaults sum to 68 s, under half of it:
+// TestTheOverlapHoldsTheEnginesOwnBoundsOnALateCommit reads both defaults from
+// the engine's code and fails when they reach half the overlap. The parts
+// listed above that no bound holds are a lateness the walk cannot bound. What a walk
 // misses by more than the overlap is found by the periodic check (a later task
 // of the store statistics design), which re-reads a store's rows from its
 // floor.
+//
+// # Where a read leaves the walk
+//
+// A read of several pages is asked over time, and a row written in the range
+// an early page covered that becomes visible only after that page was asked
+// is not in that read. So within one call the walk finds the FIRST page whose
+// newest row is within the overlap of that page's own asking time -- WITHIN
+// IS INCLUSIVE: a newest row exactly the overlap before the asking time counts
+// -- or, when no page does, the first empty page, or else the last page of a
+// read that reached the clock. Call its asking time T. After the call the walk
+// never stands later than T less the overlap (nor earlier than where the call
+// began). A call none of whose pages qualifies -- a backlog read stopped by
+// its budget, its read limit or a timeout -- stands where it otherwise would:
+// at its newest row.
+//
+// Why that is enough. A row this read missed belongs to the range some page j
+// covered and was not yet visible when page j was asked; by the overlap's
+// assumption it was written after page j's asking time less the overlap; and
+// it is at or before page j's newest row; so page j's newest row is within the
+// overlap of its asking time. Hence no row can be missed behind a page that
+// does not reach the overlap, and every row missed behind a page that does was
+// written after that page's asking time less the overlap, which is at or after
+// T less the overlap; since is inclusive. (An empty page of a past window, and
+// a past window's last page, hide nothing: the window ends more than the
+// overlap before the clock its pages were asked by. The last page of a read to
+// the clock may hide rows past its newest one, so it counts.)
+//
+// What it costs. A backlog's pages are older than the overlap at their own
+// asking time, so they do not pull the bound back to the call's start, and a
+// store whose rows arrive at any rate below its read rate still reaches the
+// clock (TestAStoreWhoseReadsTakeLongerThanTheOverlapStillCatchesUp). A bound
+// taken at the call's first page instead re-reads everything a call read, and
+// a store whose rows arrive at half its read rate or more never catches up.
 //
 // # Bounded work
 //
@@ -301,6 +338,29 @@ func keepFloor(ctx context.Context, tx bun.Tx, storeID string, floor time.Time) 
 	return kept.UTC(), nil
 }
 
+// walkBound is the latest the walk may stand after a call, from the asking
+// times of the pages that bound it so far (see "Where a read leaves the
+// walk"): the first page that reached the overlap, else the first empty page,
+// else the last page of a read to the clock, less the overlap, and never before
+// where the call began. bounded is false while no page has set one.
+func walkBound(reachedAt, emptyAt, lastAt, began time.Time) (bound time.Time, bounded bool) {
+	t := reachedAt
+	if t.IsZero() {
+		t = emptyAt
+	}
+	if t.IsZero() {
+		t = lastAt
+	}
+	if t.IsZero() {
+		return time.Time{}, false
+	}
+	bound = t.Add(-watermarkOverlap)
+	if began.After(bound) {
+		bound = began
+	}
+	return bound, true
+}
+
 // windowWidth is a width the walk reads with: zero is defaultWindow, and any
 // other is kept between minWindow and maxWindow.
 func windowWidth(d time.Duration) time.Duration {
@@ -340,6 +400,9 @@ func walkSource(ctx context.Context, engine Engine, query, storeID string, floor
 	w.Width = windowWidth(w.Width)
 	began := w.Through
 	reads, counted := 0, 0
+	// The asking times that bound where the call leaves the walk: see "Where a
+	// read leaves the walk". Each is set by the first page that meets it.
+	var reachedAt, emptyAt, lastAt time.Time
 
 	// Each window: bounded by maxReadsPerRun, since every page of every
 	// window is a read, and a window moves Through on at its last page.
@@ -418,10 +481,20 @@ func walkSource(ctx context.Context, engine Engine, query, storeID string, floor
 				page.Through = start
 			}
 			last := more == ""
+			if reachedAt.IsZero() && len(page.Rows) > 0 && !newest.Before(askedAt.Add(-watermarkOverlap)) {
+				reachedAt = askedAt
+			}
+			if emptyAt.IsZero() && len(page.Rows) == 0 {
+				emptyAt = askedAt
+			}
+			if last && toClock {
+				lastAt = askedAt
+			}
+			bound, bounded := walkBound(reachedAt, emptyAt, lastAt, began)
 			if last && toClock {
 				page.CaughtUp = askedAt
-				if caught := askedAt.Add(-watermarkOverlap); caught.After(page.Through) {
-					page.Through = caught
+				if bounded && bound.After(page.Through) {
+					page.Through = bound
 				}
 				page.Width = defaultWindow
 			}
@@ -430,6 +503,10 @@ func walkSource(ctx context.Context, engine Engine, query, storeID string, floor
 					page.Through = until
 				}
 				page.Width = windowWidth(2 * w.Width)
+			}
+			capped := bounded && page.Through.After(bound)
+			if capped {
+				page.Through = bound
 			}
 			if len(page.Rows) > 0 && (began.IsZero() || newest.After(began)) {
 				counted++
@@ -440,6 +517,11 @@ func walkSource(ctx context.Context, engine Engine, query, storeID string, floor
 			w = walkWindow{Through: page.Through, Width: page.Width}
 			if last && toClock {
 				return w, page.CaughtUp, nil
+			}
+			if last && capped {
+				// The window ended past the bound: the next window could not
+				// move the walk this call, so the next run carries on.
+				return w, time.Time{}, nil
 			}
 			if last {
 				break
