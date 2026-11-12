@@ -719,25 +719,38 @@ what its last run did (`outcome`) and, after a failed run, what failed
 (`lastError`, one sentence that names no customer).
 
 - **`customers/data_request`** is run at the next run of the privacy jobs. It
-  collects the rows an erasure of the same customer would scrub (below), each
-  as its newest version, and files them as one JSON document in the Library of
-  the store's owner, with Shopify's request id. The document is the owner's,
-  and only the owner can read it. Audited as `shopify_data_request_exported`.
+  collects the rows an erasure of the same customer reaches (below), each as
+  its newest version, and files them as one JSON document in the Library of
+  the store's owner, with Shopify's request id. What an erasure scrubs beyond
+  those rows -- older versions of rows that moved to somebody else, a deleted
+  customer's record scrubbed by itself, an entry taken out of a metaobject --
+  is not in it. The document is the owner's, and only the owner can read it.
+  Audited as `shopify_data_request_exported`. Three cases come first, in this
+  order:
+  - **the customer has been erased** in that store (her erasure has made its
+    first pass): nothing is filed, any export of hers still in the owner's
+    Library is removed, the request's deliveries are deleted, and the job ends
+    with "the customer has been erased, so nothing is filed";
+  - **the request was answered before**: the same request delivered again
+    files nothing again;
+  - **the store's row is gone**: the job ends with "the store is no longer
+    configured; nothing to export".
+
   A store with no owner **fails** the request, and says so before a row of the
   person is read, rather than filing one merchant's customer data in a
-  stranger's library. A store whose row is gone ends the job with "the store
-  is no longer configured; nothing to export". A request is answered once: the
-  same request delivered again after it was answered files nothing again.
+  stranger's library.
 - **`customers/redact`** is due a day after it arrives, so a merchant's own
   grace period applies, and scrubs the customer from the store's mirror, by
-  the store's id even when the store's row is gone. Audited as `shopify_customer_redacted`, and its second pass as
+  the store's id even when the store's row is gone. Audited as
+  `shopify_customer_redacted`, and its second pass as
   `shopify_customer_redacted_second_pass`.
 - **`shop/redact`** is due 48 hours after it arrives, and purges the store:
   every mirror row of the store, its sync state and every staged delivery of
   its own source, every version, then pauses the store row and stamps
   `redactedAt`. Audited as `shopify_shop_redacted` (its second pass
-  `shopify_shop_redacted_second_pass`), or `shopify_shop_redact_skipped` when
-  the store answered. A purged store is served as unavailable, like an
+  `shopify_shop_redacted_second_pass`), or, when the store answered,
+  `shopify_shop_redact_skipped` (on the second pass
+  `shopify_shop_redact_second_pass_skipped`). A purged store is served as unavailable, like an
   uninstalled one, until a verified reinstall clears it (see
   [app/uninstalled](#appuninstalled)).
 
@@ -764,7 +777,8 @@ say whose a row is:
   phone numbers, addresses, notes, custom attributes, the shopper's IP address,
   payment details, tracking, metafields and her consent to marketing as the
   order recorded it go. A **custom line item** -- one with no product -- loses
-  its title and SKU as well, because a person typed them.
+  its name, its title, its variant title and its SKU as well, because a person
+  typed them.
 - **A company is not emptied because one of its contacts was erased**: her own
   contact record is scrubbed, and the company, its other contacts and its
   locations stay as they were. A merchant's metaobject that refers to her
@@ -809,8 +823,12 @@ move the job's time.
 uninstall, Shopify is asked whether the app is still installed. Only a clear
 refusal counts as gone: the Admin API answering 401 or 404, or Shopify
 refusing to renew the store's grant as one that no longer exists (401 with
-`invalid_request`). A store that answers is not purged ("skipped: the store is
-reachable again"). Anything else -- a timeout, a 5xx, a network error -- fails
+`invalid_request`). A store that answers is not purged, and the store's
+backfills that had not started are queued: the outcome is "skipped: the store
+is reachable again", or on the second pass "second pass: the store is
+reachable again and was not purged a second time; its reconnect reads
+everything again", followed by "; queued N backfill(s) of the store that had
+not started" when there were any. Anything else -- a timeout, a 5xx, a network error -- fails
 the job with "the store did not say whether the app is still installed, so
 nothing was deleted", and the next run asks again. A store that is connected
 again while it is being purged is left connected, not marked redacted, and its
@@ -835,15 +853,16 @@ backfill took before an erasure would write the erased fields back as it is
 read. So an erasure, right after its first scrub or purge, starts every
 backfill of the store that is queued or under way again from nothing, and a
 failed backfill loses the export its cursor named, so "Backfill now" starts a
-new one; the job's outcome ends "; started N backfill(s) again from nothing".
+new one; the job's outcome then says "; started N backfill(s) again from
+nothing".
 What a download already in flight writes after the first pass, the second
 pass scrubs. When a download cannot be started again the job fails with "the
 erasure ran, but a backfill in flight could not be started again", and is run
 again.
 
 **When a request keeps failing.** A job that fails is tried again at every
-run, every hour. Once one has been failing for more than a day, the store's
-Store page says "A privacy request for this store could not be completed."
+run, every hour. Once a job has failed and was due more than a day ago, the
+store's Store page says "A privacy request for this store could not be completed."
 ([the reasons](#the-storefronts-store-page)). Three cases fail every time
 until somebody looks, each with "the store did not say whether the app is
 still installed, so nothing was deleted": a shop's erasure for a store whose
@@ -1097,7 +1116,11 @@ These are limits of this connector, as it is built today.
   another person holds stays: the card is its holder's. An order that moved to
   another customer keeps that customer's current state, and loses only the
   erased person's older versions of it. A line item whose product was deleted
-  reads as a custom item, and loses its title and SKU as one does.
+  reads as a custom item, and loses its name, titles and SKU as one does.
+- **A failing shop erasure on a store that is not connected sends no email of
+  its own** ([the owner's email](#when-a-store-stops-being-recorded-the-owners-email)):
+  it is seen on the Store page, as its "A privacy request for this store could
+  not be completed." notice.
 - **A frozen or locked store that was connected again** is not purged by a
   shop's erasure while Shopify answers neither that the app is installed nor
   that it is not: its job fails and is run again every hour.
@@ -1452,8 +1475,9 @@ attention from" the episode's start "to" now.
 A failing privacy request on a store that is **paused** or **not connected**
 sends no email of its own: a paused store is never mailed, and a store that is
 not connected is already in its episode, which is mailed once, after the wait,
-if it is owed an email at all. The reason is seen on the Store page, by the store's owner, a cluster owner and a
-developer who may read store rows.
+if it is owed an email at all. The reason is seen on the Store page, by the
+store's owner, a cluster owner, and anyone the cluster lets read stores,
+whatever their role.
 
 A store the watch sees for the first time already not connected -- uninstalled
 or its data removed before the watch first looked at it -- is never mailed
@@ -1600,8 +1624,9 @@ returns changes what an installation holds. Before you roll it out:
   rules of [Step 5](#step-5----the-compliance-topics), twice as every erasure
   is: the earlier release left the customer's email and phone, never reached
   an order's transactions, fulfilments or refunds, and could leave rows the
-  mirror cannot write. At the first of them on each store, what the earlier
-  release left is repaired once: those rows are made writable again, the
+  mirror cannot write. At the first pass of the first customer erasure made
+  on each store after the upgrade, new or repeated, what the earlier release
+  left is repaired, once, and the store records that it ran: those rows are made writable again, the
   kinds of the rows of other people it had wrongly scrubbed are read again
   from Shopify, and the store's older privacy and uninstall deliveries are
   deleted. Nothing is asked of you. Each job's `outcome` says what it did (for

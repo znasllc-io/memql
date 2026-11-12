@@ -300,8 +300,9 @@ the list was not read to its end) and the latest error, each with "Try
 again", which runs `datasyncRequeueInbound` for that source. "Try again" is
 drawn only for a cluster owner; anybody else who may open the page sees the
 list and no button. With nothing given up it says "No change has used all four
-tries." A refused requeue says "The cluster refused, and nothing changed.",
-with the reason.
+tries." A requeue works in pages and can fail after some deliveries went back
+in line, so a failed one says "The cluster did not finish this.", that the list
+is read again, and the reason.
 
 **A source no connector serves.** When a due delivery's source is served by no
 connector on the node -- its store was removed, or the node binds no

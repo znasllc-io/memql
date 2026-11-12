@@ -43,7 +43,9 @@ disconnected. Websites connected to it show the store as unavailable instead of
 serving a catalog, the store stops mirroring, and it leaves your list of
 connected stores. Its mirrored data stays until Shopify's `shop/redact` request,
 which Shopify sends 48 hours after the uninstall; MemQL purges the store 48 hours
-after that request arrives, unless the store has been connected again.
+after that request arrives. A store connected again meanwhile is asked first: if
+Shopify says the app is installed there, nothing is purged, and if Shopify answers
+neither yes nor no, nothing is purged and the job is tried again.
 
 To reconnect, add the store again from **Settings → Connections → Shopify**. The
 store's staff approve the app in Shopify, and MemQL restores the store, including
