@@ -42,7 +42,8 @@ func verdictIn(state string, since time.Time) Verdict {
 // recording, before the pass a test is about: a store's first sighting is
 // its own case (TestAStoreFirstSeenAlreadyNotConnectedIsNeverMailed).
 func watchedBefore(v Verdict) map[string]any {
-	return map[string]any{"state": VerdictRecording, "since": verdictStamp(v.Since.Add(-24 * time.Hour))}
+	known := verdictStamp(v.Since.Add(-24 * time.Hour))
+	return map[string]any{"state": VerdictRecording, "since": known, "firstRecordedAt": known}
 }
 
 // recordedAs is health.verdict as a pass recorded it for v, a store the watch
@@ -618,18 +619,22 @@ func TestAnUnchangedVerdictIsNotWrittenAgain(t *testing.T) {
 	}
 	// What does count: the state, a reason, since, resumedAt, the mail fields.
 	for name, edit := range map[string]func(map[string]any){
-		"state":        func(r map[string]any) { r["state"] = VerdictStarting },
-		"reasons":      func(r map[string]any) { r["reasons"] = []any{ReasonGrantLost} },
-		"since":        func(r map[string]any) { r["since"] = watchNow.Format(time.RFC3339) },
-		"resumedAt":    func(r map[string]any) { r["resumedAt"] = watchNow.Format(time.RFC3339) },
-		"mailedFor":    func(r map[string]any) { r["mailedFor"] = verdictStamp(since) },
-		"recoveredFor": func(r map[string]any) { r["recoveredFor"] = verdictStamp(since) },
-		"alert":        func(r map[string]any) { r["alert"] = map[string]any{"state": AlertSent, "reason": ""} },
-		"episode":      func(r map[string]any) { r["episode"] = watchNow.Format(time.RFC3339) },
+		"state":           func(r map[string]any) { r["state"] = VerdictStarting },
+		"reasons":         func(r map[string]any) { r["reasons"] = []any{ReasonGrantLost} },
+		"since":           func(r map[string]any) { r["since"] = watchNow.Format(time.RFC3339) },
+		"resumedAt":       func(r map[string]any) { r["resumedAt"] = watchNow.Format(time.RFC3339) },
+		"mailedFor":       func(r map[string]any) { r["mailedFor"] = verdictStamp(since) },
+		"recoveredFor":    func(r map[string]any) { r["recoveredFor"] = verdictStamp(since) },
+		"alert":           func(r map[string]any) { r["alert"] = map[string]any{"state": AlertSent, "reason": ""} },
+		"episode":         func(r map[string]any) { r["episode"] = watchNow.Format(time.RFC3339) },
+		"firstRecordedAt": func(r map[string]any) { r["firstRecordedAt"] = watchNow.Format(time.RFC3339) },
 	} {
-		if !verdictRecordChanged(recordedAs(v, edit), recordOf(v, nil)) {
+		if !verdictRecordChanged(recordedAs(v, edit), recordOf(v, watchedBefore(v))) {
 			t.Errorf("a different %s does not count as changed", name)
 		}
+	}
+	if verdictRecordChanged(recordedAs(v), recordOf(v, watchedBefore(v))) {
+		t.Error("the same record counts as changed, so the loop above proves nothing")
 	}
 	if !verdictRecordChanged(nil, recordOf(v, nil)) {
 		t.Error("a store with no verdict recorded counts as unchanged")
@@ -655,7 +660,7 @@ func TestAnUnchangedVerdictIsNotWrittenAgain(t *testing.T) {
 	for _, want := range []string{
 		`"ordersFrom": "2026-09-12"`, `"state": "needs attention"`, `"reasons": ["events_not_registered", "changes_not_recorded"]`,
 		`"since": "2026-11-11T11:50:00Z"`, `"episode": "2026-11-11T11:50:00Z"`, `"resumedAt": ""`, `"mailedFor": ""`, `"recoveredFor": ""`,
-		`"alert": {"reason": "", "state": "none"}`,
+		`"alert": {"reason": "", "state": "none"}`, `"firstRecordedAt": "2026-11-11T12:00:00Z"`,
 	} {
 		if !strings.Contains(w[0], want) {
 			t.Errorf("the first write lacks %s:\n%s", want, w[0])

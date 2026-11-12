@@ -69,9 +69,11 @@ type backfillCursor struct {
 // originVersionRule is the write rule under which every bulk line carries the
 // origin's own version and the time its export was started. Before it, a
 // line was stamped with the time it was streamed, and a snapshot older than a
-// delivery could replace what the delivery recorded; a domain read whole
-// under the earlier rule is read once more (queueUnstartedBackfills), and one
-// being read when this build started begins again (BackfillStore).
+// delivery could replace what the delivery recorded. A domain read whole
+// under the earlier rule is read once more: the boot pass queues it
+// (queueUnstartedBackfills). One being read when this build started is not
+// carried to its end first: it begins again at its next step, from nothing
+// and under the rule (BackfillStore).
 const originVersionRule = 1
 
 // backfillReadUnderRule reports whether a domain's stored cursor says its

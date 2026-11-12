@@ -109,9 +109,14 @@ type BackfillResult struct {
 // StartBackfill drives Connector.Backfill for one domain, resuming from
 // whatever cursor syncState holds.
 //
-// Idempotent by construction: the cursor is the resume point, so calling
-// this again after a completed backfill starts from the stored cursor
-// and the connector reports Done immediately.
+// The cursor is the resume point, so a backfill stopped part-way continues
+// from where it stopped. Called again after a COMPLETED backfill, it hands the
+// connector the cursor that backfill ended with, and what happens next is the
+// connector's to say: one whose final cursor still names the end reports Done
+// at once, while the Shopify connector, whose completed cursor names no
+// export, starts a new one and reads the domain again. That is safe -- every
+// mirror write is idempotent on the row id and version-guarded -- and it is a
+// re-read, not a no-op.
 //
 // With a partition, the connector must implement memqlsync.Partitioned and
 // is asked through BackfillPartition, from that partition's own cursor. A

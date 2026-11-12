@@ -141,7 +141,8 @@ func computeVerdict(in verdictInput) Verdict {
 	}
 	v.ResumedAt = resumedAtOf(in.Previous, v.State == "", in.Now)
 	if v.State == "" {
-		v.Reasons = reasonsOf(in, rows, lateFrom(in.ConnectedAt, v.ResumedAt))
+		from := lateFrom(in.ConnectedAt, v.ResumedAt)
+		v.Reasons = reasonsOf(in, rows, from, neverCleanFrom(in, from))
 		switch {
 		case len(v.Reasons) > 0:
 			v.State = VerdictNeedsAttention
@@ -223,7 +224,11 @@ func askedDomains(store Store) []string {
 	return sweptDomains(func(spec *generated.TypeSpec) bool { return domainInConnection(store, spec) })
 }
 
-func reasonsOf(in verdictInput, rows map[string]map[string]any, from time.Time) []VerdictReason {
+// reasonsOf is every reason the store needs attention, in the order they are
+// listed. from is the store's own part of a late check's baseline (lateFrom),
+// and fromNeverClean the same for a domain that was never swept clean
+// (neverCleanFrom).
+func reasonsOf(in verdictInput, rows map[string]map[string]any, from, fromNeverClean time.Time) []VerdictReason {
 	store := in.Store
 	var out []VerdictReason
 
@@ -248,13 +253,25 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from time.Time) 
 	}
 
 	if missing := scopesNotApproved(store); len(missing) > 0 {
-		out = append(out, VerdictReason{
+		// The grant lacks something the store's connection asks for. WHO CAN
+		// GIVE IT depends on how the store is connected (Store.Managed: the
+		// Admin token it holds is the shared app's offline grant, or a token
+		// of its own app). Through the shared app, the store's owner approves
+		// the app's current list from the store's admin. A store on its own
+		// app has nothing to approve in MemQL OS: what its token allows is
+		// that app's own configuration, so the reason says so and offers no
+		// act.
+		reason := VerdictReason{
 			Code:     ReasonApprovalOutdated,
-			Sentence: "This store approved an older list of permissions.",
+			Sentence: "This store's own app does not allow everything MemQL records.",
 			Detail:   strings.Join(missing, ", "),
-			Act:      ActApprove, ActLabel: "Open MemQL OS from the store's Shopify admin and approve",
-			ActURL: "https://" + store.Domain + "/admin/apps",
-		})
+		}
+		if store.Managed() {
+			reason.Sentence = "This store approved an older list of permissions."
+			reason.Act, reason.ActLabel = ActApprove, "Open MemQL OS from the store's Shopify admin and approve"
+			reason.ActURL = "https://" + store.Domain + "/admin/apps"
+		}
+		out = append(out, reason)
 	}
 
 	for _, concept := range inside {
@@ -275,7 +292,11 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from time.Time) 
 	}
 
 	for _, concept := range inside {
-		if r, ok := checkFailing(concept, rows[concept], intervalOf(in.Intervals, concept), from, in.Now); ok {
+		since := from
+		if rowTime(rows[concept], "lastReconcileAt").IsZero() {
+			since = fromNeverClean
+		}
+		if r, ok := checkFailing(concept, rows[concept], intervalOf(in.Intervals, concept), since, in.Now); ok {
 			out = append(out, r)
 		}
 	}
@@ -376,9 +397,11 @@ func eventsNotRegistered(store Store) (string, bool) {
 // connection (from) and its last return from paused or not connected
 // (from). Measured from the clean sweep alone, a store resumed after a long
 // pause read late until its first sweep, and a domain never yet swept clean
-// was late at its first error. With no baseline at all -- no clean sweep, no
-// connection time, never resumed -- an attempted domain with no clean sweep
-// is late, as nothing says how long it has been waiting.
+// was late at its first error. A store connected before its connection time
+// was recorded has none, so a domain of it never swept clean is measured from
+// when the store's verdict was first recorded (neverCleanFrom). With no
+// baseline at all, an attempted domain with no clean sweep is late, as nothing
+// says how long it has been waiting.
 //
 // An error about the grant is its own reason and never this one, and a domain
 // an operator paused is not failing.
@@ -405,7 +428,7 @@ func checkFailing(concept string, row map[string]any, interval time.Duration, fr
 		}
 		return r, true
 	}
-	if paused, _ := rowValue(row, "paused").(bool); paused {
+	if domainPaused(row) {
 		return VerdictReason{}, false
 	}
 	clean := rowTime(row, "lastReconcileAt")
@@ -495,10 +518,16 @@ func topicHeaderOf(delivery map[string]any) string {
 }
 
 // starting is a domain of the connection whose backfill is queued or
-// running, or a swept domain of it never attempted.
+// running, or a swept domain of it never attempted. A domain an operator
+// paused is neither: its backfill and its sweep wait on the operator, not on
+// the origin, and would hold the store at starting for as long as the pause
+// lasts.
 func starting(store Store, rows map[string]map[string]any) bool {
 	for concept, row := range rows {
 		if spec := generated.Types[generated.ConceptFromID(concept)]; spec == nil || !domainInConnection(store, spec) {
+			continue
+		}
+		if domainPaused(row) {
 			continue
 		}
 		if s := mapString(row, "backfillStatus"); s == "queued" || s == "running" {
@@ -507,11 +536,20 @@ func starting(store Store, rows map[string]map[string]any) bool {
 	}
 	for _, concept := range askedDomains(store) {
 		row := rows[concept]
+		if domainPaused(row) {
+			continue
+		}
 		if row == nil || (mapString(row, "lastAttemptAt") == "" && mapString(row, "lastReconcileAt") == "") {
 			return true
 		}
 	}
 	return false
+}
+
+// domainPaused reports whether an operator paused the domain's row.
+func domainPaused(row map[string]any) bool {
+	paused, _ := rowValue(row, "paused").(bool)
+	return paused
 }
 
 // baselineOf is the later of a domain's clean sweep and the store's own
@@ -535,6 +573,34 @@ func lateFrom(connectedAt, resumedAt time.Time) time.Time {
 		return resumedAt
 	}
 	return connectedAt
+}
+
+// neverCleanFrom is the store's part of the baseline for a domain that was
+// never swept clean. It is `from` (lateFrom) for a store that has a connection
+// time. One connected before that time was recorded has none, and such a
+// domain then had no baseline at all, so a single failed first sweep read as a
+// failing check at once. For that store it is the later of `from` and when its
+// verdict was first recorded (firstRecordedOf).
+func neverCleanFrom(in verdictInput, from time.Time) time.Time {
+	if !in.ConnectedAt.IsZero() {
+		return from
+	}
+	if first := firstRecordedOf(in.Previous, in.Now); first.After(from) {
+		return first
+	}
+	return from
+}
+
+// firstRecordedOf is when a verdict was first recorded for the store: what
+// the watch wrote once on the record (firstRecordedAt), or now when the
+// record carries none -- no verdict was recorded yet, or one was before the
+// time was kept -- because the next record, which the watch writes at its
+// next pass, is then the first to carry it.
+func firstRecordedOf(previous map[string]any, now time.Time) time.Time {
+	if at := rowTime(previous, "firstRecordedAt"); !at.IsZero() {
+		return at
+	}
+	return now.UTC()
 }
 
 // resumedAtOf is when the store last left paused or not connected: now, when

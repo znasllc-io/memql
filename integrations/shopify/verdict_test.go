@@ -880,19 +880,180 @@ func TestTheConnectTimeIsTheStoreRowsConnectedAt(t *testing.T) {
 	}
 }
 
-// A store connected before connectedAt existed, with no clean sweep and never
-// resumed, is judged as it was before the baseline: an attempted domain with
-// no clean sweep is late.
-func TestAStoreWithNoBaselineIsJudgedAsBefore(t *testing.T) {
+// A store connected before connectedAt existed has no connection time. A
+// domain of it that was never swept clean either had no baseline at all, so
+// one failed first sweep read as a failing check at once. Its baseline is
+// when the verdict was first recorded for the store, which the watch writes
+// once (firstRecordedAt): inside twice the interval from then it reads as a
+// newly connected store does, and beyond it the check is failing.
+func TestAStoreWithNoConnectionTimeCountsFromWhenItsVerdictWasFirstRecorded(t *testing.T) {
 	store := verdictStore()
-	rows := setRow(cleanRows(store), "order", func(r map[string]any) {
-		r["lastError"] = "shopify admin: HTTP 503"
-		delete(r, "lastReconcileAt")
-		delete(r, "lastAttemptAt")
-	})
-	r := reasonNamed(t, computeVerdict(verdictInputOf(store, rows)), ReasonCheckFailing)
+	// Orders: one sweep, a minute ago, and it failed. Never swept clean.
+	oneFailedSweep := func() []map[string]any {
+		return setRow(cleanRows(store), "order", func(r map[string]any) {
+			r["lastError"] = "shopify admin: HTTP 503"
+			delete(r, "lastReconcileAt")
+			r["lastAttemptAt"] = verdictNow.Add(-time.Minute).Format(time.RFC3339)
+		})
+	}
+	recordedSince := func(first time.Time) map[string]any {
+		return map[string]any{"state": VerdictRecording, "since": first.Format(time.RFC3339), "firstRecordedAt": first.Format(time.RFC3339)}
+	}
+
+	// Inside the grace -- orders sweep hourly, so two hours -- it reads as a
+	// store connected at that same time does.
+	first := verdictNow.Add(-30 * time.Minute)
+	before := verdictInputOf(store, oneFailedSweep())
+	before.Previous = recordedSince(first)
+	connected := verdictInputOf(store, oneFailedSweep())
+	connected.ConnectedAt = first
+	connected.Previous = map[string]any{"state": VerdictRecording, "since": first.Format(time.RFC3339)}
+	got, want := computeVerdict(before), computeVerdict(connected)
+	if len(failingDomains(got)) != 0 || got.State != want.State || fmt.Sprint(reasonCodes(got)) != fmt.Sprint(reasonCodes(want)) {
+		t.Errorf("thirty minutes after its verdict was first recorded: state %q, reasons %v; want what a store connected then reads, %q %v",
+			got.State, reasonCodes(got), want.State, reasonCodes(want))
+	}
+
+	// Beyond it, the check is failing.
+	before.Previous = recordedSince(verdictNow.Add(-3 * time.Hour))
+	r := reasonNamed(t, computeVerdict(before), ReasonCheckFailing)
 	if r.Domain != "orders" || !strings.Contains(r.Detail, "HTTP 503") {
-		t.Errorf("reason = %+v", r)
+		t.Errorf("three hours after its verdict was first recorded: reason = %+v; want orders failing, with the error", r)
+	}
+
+	// The first computation of all: no verdict is recorded, so the first
+	// record is this one and nothing is late yet.
+	never := verdictInputOf(store, oneFailedSweep())
+	if failing := failingDomains(computeVerdict(never)); len(failing) != 0 {
+		t.Errorf("with no verdict recorded yet: check_failing for %v; a single passing error is not a failure", failing)
+	}
+
+	// A domain that WAS swept clean is measured from that sweep, whenever the
+	// verdict was first recorded: a recent first record hides no late check.
+	lateRows := setRow(cleanRows(store), "order", func(r map[string]any) {
+		r["lastError"] = "shopify admin: HTTP 503"
+		r["lastReconcileAt"] = verdictNow.Add(-3 * time.Hour).Format(time.RFC3339)
+		r["lastAttemptAt"] = verdictNow.Add(-time.Minute).Format(time.RFC3339)
+	})
+	late := verdictInputOf(store, lateRows)
+	late.Previous = recordedSince(verdictNow.Add(-10 * time.Minute))
+	if failing := failingDomains(computeVerdict(late)); len(failing) != 1 || failing[0] != "orders" {
+		t.Errorf("a domain last swept clean three hours ago: check_failing for %v; want orders, whatever the first record says", failing)
+	}
+
+	// And a store that has a connection time is measured from it.
+	old := verdictInputOf(store, oneFailedSweep())
+	old.ConnectedAt = verdictNow.Add(-3 * time.Hour)
+	old.Previous = recordedSince(verdictNow.Add(-10 * time.Minute))
+	if failing := failingDomains(computeVerdict(old)); len(failing) != 1 || failing[0] != "orders" {
+		t.Errorf("connected three hours ago: check_failing for %v; want orders, measured from the connection", failing)
+	}
+}
+
+// firstRecordedAt is written once, at the first record of a store's verdict,
+// and carried by every record after it, whatever the store goes through.
+func TestTheFirstRecordedTimeIsWrittenOnceAndNeverMoved(t *testing.T) {
+	first := planWatch(nil, verdictIn(VerdictStarting, watchNow), defaultStoreAlertWait, watchNow)
+	if got := first.Record.FirstRecordedAt; got != verdictStamp(watchNow) {
+		t.Fatalf("the first record's firstRecordedAt = %q, want the time of that pass, %s", got, verdictStamp(watchNow))
+	}
+	if got := first.Record.payload()["firstRecordedAt"]; got != verdictStamp(watchNow) {
+		t.Fatalf("the written record carries firstRecordedAt = %v", got)
+	}
+	recorded := first.Record.payload()
+	at := watchNow
+	for _, state := range []string{VerdictRecording, VerdictNeedsAttention, VerdictPaused, VerdictRecording, VerdictNotConnected, VerdictStarting} {
+		at = at.Add(3 * time.Hour)
+		plan, next := passAt(t, recorded, state, at, at)
+		if got := plan.Record.FirstRecordedAt; got != verdictStamp(watchNow) {
+			t.Fatalf("after %s: firstRecordedAt = %q, want it unmoved at %s", state, got, verdictStamp(watchNow))
+		}
+		recorded = next
+	}
+	// What the next computation reads.
+	if got := rowTime(recorded, "firstRecordedAt"); !got.Equal(watchNow) {
+		t.Errorf("the recorded time reads back as %v, want %v", got, watchNow)
+	}
+	// A record written before the field existed gets it at the next pass, and
+	// that counts as a change to write.
+	older := recordedAs(verdictIn(VerdictRecording, watchNow), func(r map[string]any) { delete(r, "firstRecordedAt") })
+	plan := planWatch(older, verdictIn(VerdictRecording, watchNow), defaultStoreAlertWait, watchNow.Add(5*time.Minute))
+	if got := plan.Record.FirstRecordedAt; got != verdictStamp(watchNow.Add(5*time.Minute)) || !verdictRecordChanged(older, plan.Record) {
+		t.Errorf("a record with no firstRecordedAt: planned %q, changed %t; want it written at this pass", got, verdictRecordChanged(older, plan.Record))
+	}
+}
+
+// A store connected with its own app has nobody to approve a list in MemQL
+// OS: what it allows is its own app's configuration. Told apart by the Admin
+// token it holds (Store.Managed): the shared app's offline grant, or a token
+// of its own.
+func TestAStoreOnItsOwnAppIsNotToldToApproveInMemQLOS(t *testing.T) {
+	own := Store{
+		ID: testStoreID, Domain: "acme-widgets.myshopify.com", AdminTokenRef: "ACME_ADMIN", Status: StatusLive,
+		ScopesGranted: []string{"read_products", "read_orders"},
+	}
+	if own.Managed() {
+		t.Fatal("the fixture is a managed store")
+	}
+	v := computeVerdict(verdictInputOf(own, cleanRows(own)))
+	if codes := reasonCodes(v); len(codes) != 1 || codes[0] != ReasonApprovalOutdated {
+		t.Fatalf("reasons = %v; want the one reason that its grant lacks what its connection asks for", codes)
+	}
+	r := v.Reasons[0]
+	if r.Sentence != "This store's own app does not allow everything MemQL records." {
+		t.Errorf("sentence = %q", r.Sentence)
+	}
+	if r.Act != "" || r.ActLabel != "" || r.ActURL != "" {
+		t.Errorf("act = %q %q %q; a store on its own app is offered no approval in MemQL OS", r.Act, r.ActLabel, r.ActURL)
+	}
+	for _, scope := range []string{"read_customers", "read_discounts", "read_inventory"} {
+		if !strings.Contains(r.Detail, scope) {
+			t.Errorf("detail %q does not name %s, which the store's app does not allow", r.Detail, scope)
+		}
+	}
+	if strings.Contains(r.Detail, "read_orders") {
+		t.Errorf("detail %q names a permission the store's app does allow", r.Detail)
+	}
+
+	// The same grant on a store connected through the shared app is the
+	// approval its owner can give.
+	managed := managedStore("read_products", "read_orders")
+	managed.Domain = "acme-widgets.myshopify.com"
+	m := reasonNamed(t, computeVerdict(verdictInputOf(managed, cleanRows(managed))), ReasonApprovalOutdated)
+	if m.Sentence != "This store approved an older list of permissions." || m.Act != ActApprove ||
+		m.ActLabel != "Open MemQL OS from the store's Shopify admin and approve" || m.ActURL != "https://acme-widgets.myshopify.com/admin/apps" {
+		t.Errorf("a managed store's reason = %+v; want the approval and its act", m)
+	}
+}
+
+// A domain an operator paused is not on its way: its queued backfill, or its
+// first sweep, waits on the operator and holds nobody at starting.
+func TestAPausedDomainDoesNotHoldTheStoreAtStarting(t *testing.T) {
+	store := verdictStore()
+	for _, status := range []string{"queued", "running"} {
+		rows := setRow(cleanRows(store), "order", func(r map[string]any) {
+			r["backfillStatus"] = status
+			r["paused"] = true
+		})
+		if v := computeVerdict(verdictInputOf(store, rows)); v.State != VerdictRecording || len(v.Reasons) != 0 {
+			t.Errorf("a paused domain with a %s backfill: state = %q, reasons = %v; want recording", status, v.State, reasonCodes(v))
+		}
+	}
+	rows := setRow(cleanRows(store), "customer", func(r map[string]any) {
+		delete(r, "lastAttemptAt")
+		delete(r, "lastReconcileAt")
+		r["paused"] = true
+	})
+	if v := computeVerdict(verdictInputOf(store, rows)); v.State != VerdictRecording {
+		t.Errorf("a paused domain never swept: state = %q; want recording", v.State)
+	}
+	// Not paused, the same rows are a store that is starting.
+	rows = setRow(cleanRows(store), "order", func(r map[string]any) {
+		r["backfillStatus"] = "queued"
+		r["paused"] = false
+	})
+	if v := computeVerdict(verdictInputOf(store, rows)); v.State != VerdictStarting {
+		t.Errorf("a domain with a queued backfill and no pause: state = %q; want starting", v.State)
 	}
 }
 

@@ -32,7 +32,10 @@ automation dispatchInboundToConnector {
 /// Sweep mirrored domains whose interval says they are due. Every 10 minutes, because the interval
 /// that matters is the DOMAIN's -- this only decides how often the runtime asks the question, and a
 /// domain reconciling every 6 hours is not swept 36 times in between.
+/// single: a sweep that outlasts ten minutes -- a domain's first one reads it from the beginning --
+/// is not overlapped by the next one in this process.
 @trigger(schedule="0 */10 * * * *")
+@mode(single)
 automation reconcileMirroredDomains {
   sweep := builtin datasyncReconcileDomains()
 }

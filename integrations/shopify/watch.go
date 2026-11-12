@@ -113,9 +113,10 @@ func (c *Connector) alertWaitSetting(ctx context.Context) (time.Duration, bool) 
 }
 
 // recordedVerdict is health.verdict: what the next computation reads
-// (state, since, resumedAt -- computeVerdict's Previous) and what the watch
-// and the page need (reasons by code, the episode's start, the mailed and
-// recovered episodes, the alert). Episode is empty outside an episode.
+// (state, since, resumedAt, firstRecordedAt -- computeVerdict's Previous) and
+// what the watch and the page need (reasons by code, the episode's start, the
+// mailed and recovered episodes, the alert). Episode is empty outside an
+// episode.
 type recordedVerdict struct {
 	State        string
 	Reasons      []string
@@ -126,6 +127,11 @@ type recordedVerdict struct {
 	RecoveredFor string
 	AlertState   string
 	AlertReason  string
+	// FirstRecordedAt is when a verdict was first recorded for the store. It
+	// is written once, by the pass that records the first one, and carried by
+	// every record after it: a store with no connection time measures a late
+	// first check from it (firstRecordedOf).
+	FirstRecordedAt string
 }
 
 // verdictStamp is a time as the record writes it: RFC 3339 in UTC, to the
@@ -160,6 +166,8 @@ func readRecorded(previous map[string]any) recordedVerdict {
 		MailedFor:    mapString(previous, "mailedFor"),
 		RecoveredFor: mapString(previous, "recoveredFor"),
 		AlertState:   AlertNone,
+
+		FirstRecordedAt: mapString(previous, "firstRecordedAt"),
 	}
 	if alert, ok := previous["alert"].(map[string]any); ok {
 		if s := mapString(alert, "state"); s != "" {
@@ -184,10 +192,11 @@ func alertable(state string) bool {
 // recordOf is what a pass records for v: its state, reasons, since and
 // resumedAt; the episode's start, carried while the store stays in an
 // episode and begun at since when one starts; and the mailed and recovered
-// episodes and the alert, carried from the verdict last recorded (nil for
-// none). When a new episode begins, the alert goes back to none: it
-// describes the episode it was written for. It is not cleared when the store
-// records, so the read-back of a staged alert still finishes.
+// episodes, the alert and the time of the first record, carried from the
+// verdict last recorded (nil for none). When a new episode begins, the alert
+// goes back to none: it describes the episode it was written for. It is not
+// cleared when the store records, so the read-back of a staged alert still
+// finishes.
 //
 // A STORE FIRST SEEN ALREADY NOT CONNECTED IS NOT NEWS. With no verdict
 // recorded on its row, the watch has never looked at the store, and one it
@@ -228,7 +237,8 @@ func (r recordedVerdict) payload() map[string]any {
 	return map[string]any{
 		"state": r.State, "reasons": toAny(r.Reasons), "since": r.Since, "episode": r.Episode, "resumedAt": r.ResumedAt,
 		"mailedFor": r.MailedFor, "recoveredFor": r.RecoveredFor,
-		"alert": map[string]any{"state": r.AlertState, "reason": r.AlertReason},
+		"alert":           map[string]any{"state": r.AlertState, "reason": r.AlertReason},
+		"firstRecordedAt": r.FirstRecordedAt,
 	}
 }
 
@@ -300,7 +310,8 @@ func verdictRecordChanged(previous map[string]any, rec recordedVerdict) bool {
 	return was.State != rec.State || !slices.Equal(was.Reasons, rec.Reasons) || was.Since != rec.Since ||
 		mapString(previous, "episode") != rec.Episode ||
 		was.ResumedAt != rec.ResumedAt || was.MailedFor != rec.MailedFor || was.RecoveredFor != rec.RecoveredFor ||
-		was.AlertState != rec.AlertState || was.AlertReason != rec.AlertReason
+		was.AlertState != rec.AlertState || was.AlertReason != rec.AlertReason ||
+		was.FirstRecordedAt != rec.FirstRecordedAt
 }
 
 // watchPlan is what one pass does for one store.
@@ -328,8 +339,14 @@ type watchPlan struct {
 // keeps mailedFor and is told when it records. A recovery is mailed even when
 // the outbox gave up on the alert: it names the whole stretch and stands by
 // itself.
+//
+// THE FIRST RECORD is stamped with its own time (firstRecordedAt), once: a
+// record that carries one keeps it whatever the store goes through after.
 func planWatch(previous map[string]any, v Verdict, wait time.Duration, now time.Time) watchPlan {
 	rec := recordOf(v, previous)
+	if rec.FirstRecordedAt == "" {
+		rec.FirstRecordedAt = verdictStamp(now)
+	}
 	plan := watchPlan{Record: rec, ReadBack: rec.AlertState == AlertStaged && rec.MailedFor != ""}
 	switch v.State {
 	case VerdictNeedsAttention, VerdictNotConnected:
