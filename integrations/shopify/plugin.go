@@ -73,8 +73,9 @@ func init() {
 
 // Bootstrap runs the connector's start-up work: seed the first store from
 // the environment if there is one and no store exists, bring every store's
-// subscriptions in line, then queue the backfills of the domains no backfill
-// ever reached.
+// subscriptions in line, queue the backfills of the domains no backfill
+// ever reached, then read the shop of each store that ingests and has no shop
+// row (refreshShops; a store that has its row is asked nothing).
 //
 // Called from the node's boot sequence rather than from the plug-in
 // factory, because both steps talk to the network and to the database,
@@ -100,6 +101,7 @@ func Bootstrap(ctx context.Context, i *Integration, logger *slog.Logger) {
 		logger.Warn("shopify: subscription reconcile at boot failed", "error", err)
 	}
 	c.queueUnstartedBackfills(ctx)
+	c.refreshShops(ctx, true)
 }
 
 // queueUnstartedBackfills is how a store connected before backfills were

@@ -196,6 +196,17 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 	}
 	c.queueConnectBackfills(ctx, prior, found, written)
 
+	// 12d. The store's shop (shop.go): a singleton no backfill reads, which
+	// carries the currency and the time zone. A store created here is
+	// configured (createStore); one that existed keeps its status, so a paused
+	// store's reconnect reads nothing. A failure is logged, never the
+	// connect's.
+	shopOf := written
+	if !found {
+		shopOf.Status = StatusConfigured
+	}
+	c.refreshShopLogged(opCtx, shopOf)
+
 	// 13. A Storefront token for a store with none -- or with one the store
 	// now refuses (memql#5638). An uninstall may have revoked the token Connect
 	// minted, and a reconnect that kept it unchecked left the storefront

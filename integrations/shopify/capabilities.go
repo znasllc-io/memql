@@ -157,7 +157,12 @@ func (i *Integration) handleEnsureSubscriptions(ctx context.Context, _ map[strin
 	if i.connector == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
-	if err := i.connector.EnsureSubscriptions(ctx); err != nil {
+	err := i.connector.EnsureSubscriptions(ctx)
+	// Every store's shop is read again, whatever the subscription pass
+	// answered, so a SHOP_UPDATE that was lost is healed within a day. One
+	// store's failure is logged and fails nothing (refreshShops).
+	i.connector.refreshShops(ctx, false)
+	if err != nil {
 		return nil, err
 	}
 	return resultNode("shopify", map[string]any{"status": "reconciled"})
