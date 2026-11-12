@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -361,4 +362,280 @@ func TestARecomputedOrderKeepsItsWholesaleSide(t *testing.T) {
 	exec(t, `DELETE FROM store_sales_order_fact WHERE store_id = ? AND order_gid = ?`, id, theOrder)
 	checkThrough(t, i, id, granted)
 	want(t, "the recomputed order", orderFactsOf(t, id)[theOrder], "wholesale", "true")
+}
+
+// ---- the end of a pass ----
+
+// A FACT NO MIRRORED ROW ANSWERS FOR IS DELETED at the end of a pass: an
+// order fact, a line fact and a refund fact with its lines, each counted as
+// mismatched and repaired, and the order whose line and refund went is
+// derived again.
+func TestAFactWithNoMirroredRowIsDeleted(t *testing.T) {
+	i, id := runStore(t)
+	mirrorThreeLines(t, id)
+	settle(t, i, id)
+	before := factsWithoutCheck(t, id)
+	orderFact(t, id, "gid://shopify/Order/9001", time.Now().Add(-time.Hour), false)
+	lineFact(t, id, "gid://shopify/LineItem/9001", theOrder)
+	exec(t, `INSERT INTO store_sales_refund_fact (store_id, refund_gid, order_gid, refund_version, recorded_at, refunded_at,
+		money_refunded, detail_fetched, lines_complete) VALUES (?, 'gid://shopify/Refund/9001', ?, now(), now(), now(), 19.99, true, true)`, id, theOrder)
+	exec(t, `INSERT INTO store_sales_refund_line_fact (store_id, refund_gid, position, order_gid, line_gid, quantity, subtotal, tax)
+		VALUES (?, 'gid://shopify/Refund/9001', 0, ?, ?, 1, 19.99, 0)`, id, theOrder, lineTwo)
+	exec(t, `UPDATE store_sales_line_fact SET refunded_quantity = 1 WHERE store_id = ? AND line_gid = ?`, id, lineTwo)
+	row := checkThrough(t, i, id, wholesaleState{})
+	if after := factsWithoutCheck(t, id); after != before {
+		t.Errorf("the facts no row answers for were not all deleted, or their order not derived again:\nbefore %s\nafter  %s", before, after)
+	}
+	wantCounts(t, "three facts no row answers for", row, 3, 3)
+}
+
+// THE DELETE RUNS IN BATCHES: five order facts no row answers for and a
+// batch of two are three batches that delete, and the pass ends only after a
+// fourth that deletes nothing.
+func TestTheDeleteOfFactsNoRowAnswersForRunsInBatches(t *testing.T) {
+	lower(t, &deleteBatch, 2)
+	i, id := runStore(t)
+	mirrorThreeLines(t, id)
+	settle(t, i, id)
+	for n := range 5 {
+		orderFact(t, id, "gid://shopify/Order/"+strconv.Itoa(9001+n), time.Now().Add(-time.Hour), false)
+	}
+	queries := storeSalesQueries(t)
+	row := checkThrough(t, i, id, wholesaleState{})
+	batches, ended := 0, -1
+	for _, q := range queries() {
+		if strings.HasPrefix(q, "DELETE FROM store_sales_order_fact") && strings.Contains(q, "checked_at IS NULL") {
+			batches++
+		}
+		if strings.HasPrefix(q, "UPDATE store_sales_check") && strings.Contains(q, "last_started_at") {
+			if ended >= 0 {
+				t.Errorf("the pass ended twice")
+			}
+			ended = batches
+		}
+	}
+	if batches != 4 || ended != 4 {
+		t.Errorf("the delete took %d batches and the pass ended after %d, want four and after the fourth", batches, ended)
+	}
+	if n := len(orderFactsOf(t, id)); n != 1 {
+		t.Errorf("the store keeps %d order facts, want its one mirrored order", n)
+	}
+	wantCounts(t, "five facts no row answers for", row, 5, 5)
+}
+
+// A DELETED ORDER COSTS A PASS NOTHING (Review Focus): an order folded live
+// and then retired. Each of two passes, whose first window reads the live
+// version again, ends with nothing mismatched and clean, and the fact is
+// still deleted.
+func TestACheckOverAStoreWithADeletedOrderEndsCleanWithNothingMismatched(t *testing.T) {
+	now := time.Now().UTC()
+	floorAt(t, now.Add(-time.Hour))
+	i, id := runStore(t)
+	mirrorOrder(t, id, theOrder)
+	backdate(t, orderConcept, id, theOrder, now.Add(-55*time.Minute))
+	settle(t, i, id)
+	want(t, "the order folded live", orderFactsOf(t, id)[theOrder], "deleted", "false")
+	mirror(t, orderConcept, id, theOrder, map[string]any{"deleted": true})
+	if _, err := run(t, i); err != nil {
+		t.Fatal(err)
+	}
+	want(t, "the retired order", orderFactsOf(t, id)[theOrder], "deleted", "true")
+	for pass, at := range []time.Time{now.Add(checkAhead), now.Add(checkAhead + time.Minute)} {
+		exec(t, `INSERT INTO store_sales_check (store_id, pass_started_at, order_window_seconds) VALUES (?, ?, 600)
+			ON CONFLICT (store_id) DO UPDATE SET pass_started_at = EXCLUDED.pass_started_at, order_cursor = '', line_cursor = '',
+				refund_cursor = '', order_window_seconds = 600, compared = 0, mismatched = 0, repaired = 0`, id, at)
+		row := checkThroughAt(t, i, id, wholesaleState{}, at)
+		if row.PassStartedAt.Valid || row.LastMismatched != 0 || !row.CleanAt.Valid || !row.CleanAt.Time.Equal(micro(at)) {
+			t.Errorf("pass %d: under way %v, mismatched %d, clean at %v; want it ended clean at %v", pass+1, row.PassStartedAt.Valid,
+				row.LastMismatched, row.CleanAt, at)
+		}
+		want(t, "the retired order", orderFactsOf(t, id)[theOrder], "deleted", "true")
+	}
+}
+
+// A DELETED FACT IS NEVER DELETED AS ONE NO ROW ANSWERS FOR: its mirror row
+// removed by hand, it is still there, deleted, after a pass.
+func TestADeletedFactIsNeverDeletedAsAnOrphan(t *testing.T) {
+	i, id := runStore(t)
+	mirrorOrder(t, id, theOrder)
+	settle(t, i, id)
+	mirror(t, orderConcept, id, theOrder, map[string]any{"deleted": true})
+	if _, err := run(t, i); err != nil {
+		t.Fatal(err)
+	}
+	exec(t, `DELETE FROM "MemoryNodes" WHERE concept = ? AND id = ?`, orderConcept, orderConcept+":"+shopify.MirrorRowID(id, theOrder))
+	row := checkThrough(t, i, id, wholesaleState{})
+	want(t, "the deleted fact", orderFactsOf(t, id)[theOrder], "deleted", "true")
+	wantCounts(t, "a deleted fact with no row", row, 0, 0)
+}
+
+// A ROW WRITTEN AFTER THE PASS BEGAN is the walk's to fold, not a mismatch:
+// an order written a second before the pass, with no fact yet.
+func TestARowWrittenAfterThePassBeganIsNotAMismatch(t *testing.T) {
+	i, id := runStore(t)
+	mirrorThreeLines(t, id)
+	settle(t, i, id)
+	const late = "gid://shopify/Order/1002"
+	mirrorOrder(t, id, late)
+	time.Sleep(time.Second)
+	row := checkThroughAt(t, i, id, wholesaleState{}, time.Now())
+	if row.PassStartedAt.Valid || row.LastMismatched != 0 || !row.CleanAt.Valid {
+		t.Errorf("a row written after the pass began: under way %v, mismatched %d, clean at %v; want it ended clean",
+			row.PassStartedAt.Valid, row.LastMismatched, row.CleanAt)
+	}
+	if orderFactsOf(t, id)[late] != nil {
+		t.Errorf("the check folded a row written after its pass began")
+	}
+}
+
+// A PASS THAT STOPPED AT ITS BUDGET CARRIES ON AND FINISHES: a budget of one
+// page and 600 orders take several calls, and nothing no row answers for is
+// deleted before the last page has been read.
+func TestAPassThatStoppedAtItsBudgetCarriesOnAndFinishes(t *testing.T) {
+	i, id := runStore(t)
+	for n := range 600 {
+		mirror(t, orderConcept, id, "gid://shopify/Order/"+strconv.Itoa(20000+n), orderPayload())
+	}
+	settle(t, i, id)
+	const orphan = "gid://shopify/Order/9001"
+	orderFact(t, id, orphan, time.Now().Add(-time.Hour), false)
+	at := time.Now().Add(checkAhead)
+	calls := 0
+	for {
+		calls++
+		if calls > 20 {
+			t.Fatal("the pass did not end in 20 calls")
+		}
+		finished, err := checkStore(checkCtx(t), i, id, at, 1, wholesaleState{}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if finished {
+			break
+		}
+		if orderFactsOf(t, id)[orphan] == nil {
+			t.Fatalf("call %d deleted a fact no row answers for before the pass had read every order", calls)
+		}
+	}
+	if calls < 3 {
+		t.Errorf("the pass ended in %d calls; a page a call over 600 orders takes three or more", calls)
+	}
+	row, _ := checkRowOf(t, id)
+	if orderFactsOf(t, id)[orphan] != nil || row.LastCompared < 600 || row.LastMismatched != 1 {
+		t.Errorf("the ended pass: orphan kept %v, compared %d, mismatched %d; want it deleted, 600 or more compared, one mismatched",
+			orderFactsOf(t, id)[orphan] != nil, row.LastCompared, row.LastMismatched)
+	}
+}
+
+// A CLEAN PASS SAYS SO AND A DIRTY ONE DOES NOT: clean_at is set only when
+// nothing was mismatched and is kept from an earlier clean pass, and the last
+// pass's start, end and counts are the ended pass's.
+func TestACleanPassSaysSoAndADirtyOneDoesNot(t *testing.T) {
+	i, id := runStore(t)
+	mirrorThreeLines(t, id)
+	settle(t, i, id)
+	first := time.Now().Add(checkAhead).UTC()
+	clean := checkThroughAt(t, i, id, wholesaleState{}, first)
+	if !clean.CleanAt.Valid || !clean.CleanAt.Time.Equal(micro(first)) || clean.LastMismatched != 0 {
+		t.Fatalf("a clean pass: clean at %v, mismatched %d; want clean at %v", clean.CleanAt, clean.LastMismatched, first)
+	}
+	exec(t, `DELETE FROM store_sales_line_fact WHERE store_id = ? AND line_gid = ?`, id, lineTwo)
+	second := first.Add(time.Minute)
+	dirty := checkThroughAt(t, i, id, wholesaleState{}, second)
+	if !dirty.CleanAt.Time.Equal(clean.CleanAt.Time) {
+		t.Errorf("a dirty pass moved clean_at to %v, want it kept at %v", dirty.CleanAt.Time, clean.CleanAt.Time)
+	}
+	if !dirty.LastStartedAt.Time.Equal(micro(second)) || !dirty.LastFinishedAt.Time.Equal(micro(second)) {
+		t.Errorf("the dirty pass: started %v, finished %v; want both %v", dirty.LastStartedAt.Time, dirty.LastFinishedAt.Time, second)
+	}
+	if dirty.LastMismatched != 1 || dirty.LastRepaired != 1 || dirty.LastCompared < 5 || dirty.LastDisagreeing != 1 {
+		t.Errorf("the dirty pass: compared %d, mismatched %d, repaired %d, disagreeing %d; want 5 or more, 1, 1 and 1",
+			dirty.LastCompared, dirty.LastMismatched, dirty.LastRepaired, dirty.LastDisagreeing)
+	}
+	if dirty.PassStartedAt.Valid || dirty.Compared != 0 || dirty.OrderCursor != "" {
+		t.Errorf("the ended pass left its own columns: %+v", dirty)
+	}
+}
+
+// AN ORDER WHOSE REFUNDS DO NOT ADD UP TO SHOPIFY'S TOTAL DISAGREES (D14): an
+// order whose totals the facts add up to, and then a refund its total does not
+// count.
+func TestAnOrderWhoseRefundsDoNotAddUpToShopifysTotalDisagrees(t *testing.T) {
+	i, id := runStore(t)
+	mirrorOrder(t, id, theOrder, "subtotalLineItemsQuantity", float64(1), "currentSubtotalPriceSet", set("40.00", "EUR"),
+		"totalDiscountsSet", set("0.00", "EUR"), "totalRefundedSet", set("0.0", "EUR"))
+	mirrorLine(t, id, lineOne, theOrder, "quantity", float64(1), "currentQuantity", float64(1),
+		"originalUnitPriceSet", set("40.00", "EUR"), "discountAllocations", []any{})
+	settle(t, i, id)
+	if row := checkThrough(t, i, id, wholesaleState{}); row.LastDisagreeing != 0 {
+		t.Fatalf("an order whose totals add up: disagreeing %d, want 0", row.LastDisagreeing)
+	}
+	mirrorRefund(t, id, theRefund, theOrder, "totalRefundedSet", set("10.00", "EUR"), "refundLineItems", []any{})
+	if _, err := run(t, i); err != nil {
+		t.Fatal(err)
+	}
+	if row := checkThroughAt(t, i, id, wholesaleState{}, time.Now().Add(checkAhead+time.Minute)); row.LastDisagreeing != 1 {
+		t.Errorf("an order whose refunds do not add up to its total: disagreeing %d, want 1", row.LastDisagreeing)
+	}
+}
+
+// TWO CHECKS AT ONCE LEAVE ONE ANSWER: two calls carry the same store's pass
+// on together; one ends it, the other leaves the store, and the pass counts
+// the one fact deleted by hand once.
+func TestTwoChecksAtOnceLeaveOneAnswer(t *testing.T) {
+	i, id := runStore(t)
+	mirrorThreeLines(t, id)
+	settle(t, i, id)
+	exec(t, `DELETE FROM store_sales_line_fact WHERE store_id = ? AND line_gid = ?`, id, lineOne)
+	at := time.Now().Add(checkAhead)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	ended := 0
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			finished, err := checkStore(checkCtx(t), i, id, at, checkPagesPerRun, wholesaleState{}, nil)
+			if err != nil {
+				t.Error(err)
+			}
+			if finished {
+				mu.Lock()
+				ended++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	row, _ := checkRowOf(t, id)
+	if ended != 1 || row.PassStartedAt.Valid || row.LastMismatched != 1 || row.LastRepaired != 1 {
+		t.Errorf("two checks at once: %d ended the pass, under way %v, mismatched %d, repaired %d; want one, ended, 1 and 1",
+			ended, row.PassStartedAt.Valid, row.LastMismatched, row.LastRepaired)
+	}
+	if lineFactsOf(t, id)[lineOne] == nil {
+		t.Error("the line deleted by hand was not restored")
+	}
+}
+
+// A RECORD OF A ROW THAT COULD NOT BE READ whose mirror row was removed by
+// hand has none after a pass; one whose row is still unreadable keeps it.
+func TestAnUnreadableRowsRecordGoesWithItsRowAndStaysWhileItIsUnreadable(t *testing.T) {
+	const unreadable = "gid://shopify/Order/1003"
+	for _, removed := range []bool{true, false} {
+		i, id := runStore(t)
+		mirrorThreeLines(t, id)
+		mirrorOrder(t, id, unreadable, "currencyCode", "")
+		settle(t, i, id)
+		if recordsOf(t, id)[sourceOrder+"/"+unreadable] == nil {
+			t.Fatalf("the unreadable order has no record: %v", recordsOf(t, id))
+		}
+		if removed {
+			exec(t, `DELETE FROM "MemoryNodes" WHERE concept = ? AND id = ?`, orderConcept, orderConcept+":"+shopify.MirrorRowID(id, unreadable))
+		}
+		checkThrough(t, i, id, wholesaleState{})
+		kept := recordsOf(t, id)[sourceOrder+"/"+unreadable] != nil
+		if kept == removed {
+			t.Errorf("row removed %v: record kept %v after a pass", removed, kept)
+		}
+	}
 }
