@@ -662,40 +662,49 @@ export function emailLines(emails: readonly WholesaleEmail[]): { kind: string; n
 }
 
 /**
- * One attempt's line, in the ruled words, the engine's sentence wherever it
- * gives one:
- *   on its way (the lane has it waiting)        "On its way", and its sentence
- *   held, uncertain, failed, skipped            "Not sent: " and the sentence
- *   handed over, no report yet                  "Sent on <day>"
- *   delivered                                   "Delivered on <day>"
- *   bounced or suppressed                       "Bounced: the address does not accept mail"
- *   delayed                                     "Sent on <day>; delivery is delayed"
- *   marked as spam by the recipient             "Delivered on <day>; the recipient marked it as spam"
- * The day is the lane's hand-over, the one time the engine answers.
+ * One attempt's line, in the ruled words (ruling 78), from the attempt's
+ * state and the lane's provider report -- the seven statuses the row lane
+ * really records (campaigns stats.go), and nothing guessed for any other:
+ *   on its way (pending, deferred, sending)   "On its way", and the engine's sentence
+ *   uncertain                                 the engine's sentence alone
+ *   failed, held, skipped                     "Not sent: " and the engine's sentence
+ *   sent, no report yet                       "Sent on <day>"
+ *   delivered                                 "Sent on <day>; delivered"
+ *   expanded                                  "Sent on <day>; passed on to a mailing list"
+ *   bounced                                   "Bounced: the address does not accept mail"
+ *   suppressed                                "Not delivered: the provider no longer sends to this address"
+ *   quarantined                               "Sent on <day>; the recipient's mail system quarantined it"
+ *   filtered-spam                             "Sent on <day>; the recipient's mail system filtered it as spam"
+ *   failed                                    "Sent on <day>; the provider could not deliver it"
+ * The day is the lane's hand-over, the one time the engine answers, so it is
+ * always said as the day it was sent, never as the day it arrived.
  */
 export function emailWords(email: WholesaleEmail): string {
   const reason = email.reason.trim();
-  if (email.state === "deferred") return reason ? `On its way: ${reason}` : "On its way";
+  if (email.state === "deferred" || email.state === "pending" || email.state === "sending") return reason ? `On its way: ${reason}` : "On its way";
+  // THE ENGINE'S SENTENCE FOR AN UNCERTAIN HAND-OVER says it may have been
+  // delivered: "Not sent" before it would contradict it.
+  if (email.state === "uncertain") return reason || "Not sent";
   if (email.state !== "sent") return reason ? `Not sent: ${reason}` : "Not sent";
   const day = dayWords(email.delivery?.sentAt || email.sentAt);
-  const on = (word: string) => (day ? `${word} on ${day}` : word);
+  const sent = day ? `Sent on ${day}` : "Sent";
   switch (email.delivery?.providerStatus ?? "") {
     case "delivered":
+      return `${sent}; delivered`;
     case "expanded":
-      return on("Delivered");
+      return `${sent}; passed on to a mailing list`;
     case "bounced":
-    case "suppressed":
       return "Bounced: the address does not accept mail";
-    case "delayed":
-      return `${on("Sent")}; delivery is delayed`;
-    case "complained":
-      return `${on("Delivered")}; the recipient marked it as spam`;
+    case "suppressed":
+      return "Not delivered: the provider no longer sends to this address";
     case "quarantined":
+      return `${sent}; the recipient's mail system quarantined it`;
     case "filtered-spam":
+      return `${sent}; the recipient's mail system filtered it as spam`;
     case "failed":
-      return `${on("Sent")}; the provider did not deliver it`;
+      return `${sent}; the provider could not deliver it`;
     default:
-      return on("Sent");
+      return sent;
   }
 }
 

@@ -63,18 +63,30 @@ describe("an email's line", () => {
     expect(emailWords(email({ delivery: delivered("") }))).toBe(`Sent on ${day}`);
   });
 
-  it("names each provider report in the ruled words", () => {
-    expect(emailWords(email({ delivery: delivered("delivered") }))).toBe(`Delivered on ${day}`);
+  it("names each of the lane's seven provider reports in the ruled words", () => {
+    expect(emailWords(email({ delivery: delivered("delivered") }))).toBe(`Sent on ${day}; delivered`);
+    expect(emailWords(email({ delivery: delivered("expanded") }))).toBe(`Sent on ${day}; passed on to a mailing list`);
     expect(emailWords(email({ delivery: delivered("bounced") }))).toBe("Bounced: the address does not accept mail");
-    expect(emailWords(email({ delivery: delivered("suppressed") }))).toBe("Bounced: the address does not accept mail");
-    expect(emailWords(email({ delivery: delivered("delayed") }))).toBe(`Sent on ${day}; delivery is delayed`);
-    expect(emailWords(email({ delivery: delivered("complained") }))).toBe(`Delivered on ${day}; the recipient marked it as spam`);
+    expect(emailWords(email({ delivery: delivered("suppressed") }))).toBe("Not delivered: the provider no longer sends to this address");
+    expect(emailWords(email({ delivery: delivered("quarantined") }))).toBe(`Sent on ${day}; the recipient's mail system quarantined it`);
+    expect(emailWords(email({ delivery: delivered("filtered-spam") }))).toBe(`Sent on ${day}; the recipient's mail system filtered it as spam`);
+    expect(emailWords(email({ delivery: delivered("failed") }))).toBe(`Sent on ${day}; the provider could not deliver it`);
   });
 
-  it("says not sent and the engine's sentence for a failed, held or uncertain attempt", () => {
-    for (const state of ["failed", "held", "uncertain"]) {
+  it("guesses nothing for a provider report it does not know", () => {
+    for (const status of ["delayed", "complained", "opened"]) {
+      expect(emailWords(email({ delivery: delivered(status) }))).toBe(`Sent on ${day}`);
+    }
+  });
+
+  it("says not sent and the engine's sentence for a failed, held or skipped attempt", () => {
+    for (const state of ["failed", "held", "skipped"]) {
       expect(emailWords(email({ state, sentAt: "", reason: "The engine's sentence." }))).toBe("Not sent: The engine's sentence.");
     }
+  });
+
+  it("says the engine's sentence alone for an uncertain attempt", () => {
+    expect(emailWords(email({ state: "uncertain", sentAt: "", reason: "It may have been delivered." }))).toBe("It may have been delivered.");
   });
 
   it("draws one line per attempt, each kind's newest first", () => {
