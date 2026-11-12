@@ -653,9 +653,9 @@ func (f *erasureFixture) leftByTheOldErasure(customer string) {
 	}
 }
 
-// Every version of a row in scope is scrubbed, and a row is in scope when ANY
-// of its versions holds the link: an order the origin has since taken the
-// customer off still holds her in the versions before.
+// Every version of a row in scope is scrubbed: MemoryNodes is keyed (id,
+// createdAt), and the versions before the newest are what a point-in-time
+// read answers.
 func TestEveryVersionOfARowInScopeIsScrubbed(t *testing.T) {
 	f := newErasureFixture(t)
 	if f == nil {
@@ -666,13 +666,9 @@ func TestEveryVersionOfARowInScopeIsScrubbed(t *testing.T) {
 	second := bikeOrder("5601", customer, "2026-10-02T10:00:00Z")
 	second["note"] = "Ada asked for the afternoon"
 	f.write("order", second, seen.Add(24*time.Hour))
-	// The newest version no longer names her, and still holds her words.
-	third := bikeOrder("5601", "", "2026-10-03T10:00:00Z")
-	third["customer"] = nil
-	f.write("order", third, seen.Add(48*time.Hour))
-	before := f.versions("order", order)
-	if len(before) != 3 || before[2]["customerGid"] != "" || before[0]["customerGid"] != customer {
-		t.Fatalf("the fixture is %d version(s), want three of which only the first two name her", len(before))
+	f.write("order", bikeOrder("5601", customer, "2026-10-03T10:00:00Z"), seen.Add(48*time.Hour))
+	if before := f.versions("order", order); len(before) != 3 || before[2]["customerGid"] != customer {
+		t.Fatalf("the fixture is %d version(s), want three that name her", len(before))
 	}
 
 	res := f.erase(customer)
@@ -688,6 +684,86 @@ func TestEveryVersionOfARowInScopeIsScrubbed(t *testing.T) {
 	// Made again, it changes nothing: every erasure is run twice.
 	if again := f.erase(customer); again.Versions != 0 || again.Rows != res.Rows {
 		t.Errorf("the erasure made again changed %d version(s) of %d row(s), want none of the same %d", again.Versions, again.Rows, res.Rows)
+	}
+}
+
+// A row is decided on what it is NOW (ruling 94). An order that was the
+// erased customer's and has since been moved to another person is that
+// person's order: its newest version, and everything that hangs from it, is
+// theirs and is left byte for byte. What was hers is the version from when it
+// named her, and that version is scrubbed by itself. And her export does not
+// hold the order: exported at its newest version, it would hand the other
+// person's order to her.
+func TestAnOrderThatMovedToAnotherPersonKeepsTheirStateAndLosesHers(t *testing.T) {
+	f := newErasureFixture(t)
+	if f == nil {
+		return
+	}
+	a, b, order := eraCustomerGID("611"), eraCustomerGID("612"), eraOrderGID("5611")
+	f.write("customer", adaCustomer("611", "2026-10-01T10:00:00Z"), seen)
+	f.write("order", bikeOrder("5611", a, "2026-10-01T10:00:00Z"), seen)
+	// The merchant moves the order to Bob.
+	bobs := bikeOrder("5611", b, "2026-10-05T10:00:00Z")
+	bobs["email"], bobs["note"] = "bob@example.com", "Bob collects it on Saturday"
+	f.write("order", bobs, seen.Add(96*time.Hour))
+	// An order the origin took her off and gave to nobody is decided the same
+	// way: it names no customer now.
+	f.write("order", bikeOrder("5612", a, "2026-10-01T10:00:00Z"), seen)
+	guest := bikeOrder("5612", "", "2026-10-05T10:00:00Z")
+	guest["customer"] = nil
+	f.write("order", guest, seen.Add(96*time.Hour))
+
+	versions := f.texts("order", order)
+	if len(versions) != 2 || !strings.Contains(versions[0], a) || !strings.Contains(versions[1], "bob@example.com") || strings.Contains(versions[1], a) {
+		t.Fatalf("the fixture's order is %d version(s), want the first hers and the second Bob's", len(versions))
+	}
+	before := f.allTexts()
+	transaction := "orderTransaction " + childGID("OrderTransaction", "5611")
+	if before[transaction] == "" {
+		t.Fatal("the fixture's order has no transaction")
+	}
+	export, err := f.conn.ExportCustomerData(context.Background(), Store{ID: f.store, Domain: "bicycles.example.com"}, a, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := json.Marshal(export["rows"]); strings.Contains(string(raw), order) || strings.Contains(string(raw), "bob@example.com") || strings.Contains(string(raw), eraOrderGID("5612")) {
+		t.Errorf("her export holds an order that is no longer hers: %s", raw)
+	} else if !strings.Contains(string(raw), adaEmail) {
+		t.Fatalf("her export does not hold her own row: %s", raw)
+	}
+
+	res := f.erase(a)
+
+	after := f.texts("order", order)
+	if after[1] != versions[1] {
+		t.Errorf("the order's newest version is Bob's and was changed by her erasure:\n  before: %s\n  after:  %s", versions[1], after[1])
+	}
+	earlier := f.versions("order", order)[0]
+	if earlier["email"] != RedactionMarker || earlier["note"] != RedactionMarker || earlier["customerGid"] != a || earlier["currencyCode"] != "EUR" {
+		t.Errorf("the version from when the order was hers is %v, want it scrubbed as an order of hers is: the person gone, the sale kept", earlier)
+	}
+	if _, present := earlier["billingAddress"]; present {
+		t.Errorf("the version from when the order was hers keeps her billing address: %v", earlier["billingAddress"])
+	}
+	for key, text := range f.allTexts() {
+		if strings.HasPrefix(key, "order ") || strings.HasPrefix(key, "customer ") {
+			continue
+		}
+		if text != before[key] {
+			t.Errorf("%s hangs from an order that is no longer hers and was changed:\n  before: %s\n  after:  %s", key, before[key], text)
+		}
+	}
+	if res.Earlier != 2 {
+		t.Errorf("the erasure says it scrubbed %d earlier version(s) of rows no longer hers, want the two orders' one each", res.Earlier)
+	}
+	// The order nobody holds now: its newest version is left, its older one scrubbed.
+	nobodys := f.versions("order", eraOrderGID("5612"))
+	if nobodys[0]["email"] != RedactionMarker || nobodys[1]["email"] != adaEmail {
+		t.Errorf("an order the origin took her off reads %v then %v, want its older version scrubbed and its newest left", nobodys[0]["email"], nobodys[1]["email"])
+	}
+	// Made again, it changes nothing.
+	if again := f.erase(a); again.Versions != 0 || again.Earlier != 2 {
+		t.Errorf("the erasure made again changed %d version(s) and found %d earlier one(s), want none changed of the same two", again.Versions, again.Earlier)
 	}
 }
 

@@ -186,8 +186,13 @@ func erasureGoldenHeader() string {
 		"#                           that same object), is not a link: nothing is matched by value\n" +
 		"# A list of references is not a link, and neither is an object that only refers to the customer (a\n" +
 		"# metaobject's fields): in a row that is not in scope the entry that names her is taken out -- an entry\n" +
-		"# that holds her gid as a whole value anywhere inside it -- and nothing else in the row changes. A row is\n" +
-		"# in scope when any of its versions holds a link. The data request exports exactly the rows in scope.\n" +
+		"# that holds her gid as a whole value anywhere inside it -- and nothing else in the row changes.\n" +
+		"#\n" +
+		"# A ROW IS DECIDED ON WHAT IT IS NOW. A row is in scope, with everything that hangs from it, when its\n" +
+		"# NEWEST version holds a link; the data request exports exactly those rows, each at its newest version.\n" +
+		"# An OLDER version that holds the customer's gid in a link field, on a row whose newest version does not\n" +
+		"# (an order since moved to another person), is scrubbed by itself: that version only, not the row's\n" +
+		"# newest version and not what hangs from the row.\n" +
 		"#\n" +
 		"# TWO THINGS AN ERASURE DOES NOT REACH, accepted in writing:\n" +
 		"#   - a row that carries the person only by an email address, with no customer on it: a guest's\n" +

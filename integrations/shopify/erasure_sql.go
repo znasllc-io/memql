@@ -36,10 +36,21 @@ type erasureScope struct {
 	// customer's, whether or not the mirror holds its row, and those of the
 	// earlier records merged into it.
 	Customers []string
+	// Earlier are versions of rows OUTSIDE the scope that hold one of
+	// Customers in a link field, by concept: the row was hers once and is
+	// not now. Each is scrubbed by itself, and nothing else of its row.
+	Earlier map[string][]rowVersion
 	// TakenFrom are the ids of rows OUTSIDE the scope that name one of
 	// Customers in a field an entry is taken out of (erasureTakeOutsOf), by
 	// concept. The entry goes; nothing else in such a row is about her.
 	TakenFrom map[string][]string
+}
+
+// rowVersion names one version of one row: the row's id and the version's
+// time, as the table spells it.
+type rowVersion struct {
+	ID string `json:"id"`
+	At string `json:"at"`
 }
 
 // count is how many rows the scope holds.
@@ -190,10 +201,19 @@ var (
 // the scrub this replaces matched a substring of the row's text, so erasing
 // customer 123 scrubbed every row of customer 1234.
 //
-// A ROW IS IN SCOPE WHEN ANY OF ITS VERSIONS HOLDS THE LINK. MemoryNodes is
-// keyed (id, createdAt), and an order the origin has since taken the customer
-// off still names her in the versions before; those versions are what a
-// point-in-time read answers.
+// A ROW IS DECIDED ON WHAT IT IS NOW (ruling 94). It is in scope, with
+// everything that hangs from it, when its NEWEST version holds the link. An
+// order that was hers and has since been moved to another person is that
+// person's: with the scope decided on any version, her erasure scrubbed the
+// other person's current order and its transaction, and her export, which
+// answers each row at its newest version, handed it to her.
+//
+// AN OLDER VERSION THAT HOLDS HER IS SCRUBBED BY ITSELF. MemoryNodes is keyed
+// (id, createdAt), and the versions from when such a row named her are what a
+// point-in-time read answers. A version that holds an in-scope customer's gid
+// in a link field, on a row whose newest version does not, is answered in
+// Earlier: that version is scrubbed, and not the row's newest version, and
+// not its dependents.
 //
 // It reads the table and not the engine, and every row of the store, a
 // tombstoned one included: the paged read the export used answered the first
@@ -215,7 +235,7 @@ func erasureScopeOf(ctx context.Context, s *privacySession, storeID, customerGID
 			return nil, fmt.Errorf("shopify: an order's id is not an order's gid")
 		}
 	}
-	scope := &erasureScope{Rows: map[string][]erasedRow{}, TakenFrom: map[string][]string{}}
+	scope := &erasureScope{Rows: map[string][]erasedRow{}, Earlier: map[string][]rowVersion{}, TakenFrom: map[string][]string{}}
 	known := map[string]bool{}
 	add := func(concept, id, gid string) bool {
 		if id == "" || known[id] {
@@ -314,6 +334,32 @@ func erasureScopeOf(ctx context.Context, s *privacySession, storeID, customerGID
 		}
 	}
 
+	// The versions from when a row that is not hers now was hers: the links
+	// that name a customer, asked of the customers in scope.
+	hers := reachedBatches(map[string][]string{erasedConcept: scope.Customers}, []string{erasedConcept})
+	for _, concept := range generated.ApplyOrder {
+		var links []string
+		for _, link := range erasureLinksOf(generated.Types[concept]) {
+			if link.Names == erasedConcept {
+				links = append(links, linkCondition(link))
+			}
+		}
+		if len(links) == 0 {
+			continue
+		}
+		for _, batch := range hers {
+			rows, err := s.rows(ctx, earlierStatement(links), generated.ConceptID(concept), storeID, batch)
+			if err != nil {
+				return nil, fmt.Errorf("shopify: look for the versions of %s rows that were the customer's: %w", concept, err)
+			}
+			for _, row := range rows {
+				if !known[row[0]] {
+					scope.Earlier[concept] = append(scope.Earlier[concept], rowVersion{ID: row[0], At: row[1]})
+				}
+			}
+		}
+	}
+
 	// The rows outside the scope that only refer to her.
 	for _, concept := range generated.ApplyOrder {
 		fields := erasureTakeOutsOf(generated.Types[concept])
@@ -352,31 +398,48 @@ func linkCondition(link erasureLink) string {
 	return fmt.Sprintf("m.payload->>%s IN %s", sqlText(link.Field), of)
 }
 
+// reachedRelation is what a round reached, as a relation: c the concept a gid
+// is of, g the gid ($3, a JSON array of {c, g}).
+const reachedRelation = `WITH reached AS (SELECT r.c, r.g FROM jsonb_to_recordset($3::jsonb) AS r(c text, g text))`
+
+// aNewerVersion is true of a version m of a row of the concept $1 when the
+// row has a version after it: m is not what the row is now.
+//
+// staged-data: MUST-NOT-GATE -- with a staged newer version not seen here, an
+// older version would read as what the row is now, and a row that is no
+// longer the customer's would be scrubbed whole and exported as hers.
+const aNewerVersion = `EXISTS (SELECT 1 FROM "MemoryNodes" n WHERE n.concept = $1 AND n.id = m.id AND n."createdAt" > m."createdAt")`
+
 // linkStatement reads the rows of one concept ($1) of one store ($2) that a
-// link brings into scope, given what a round reached ($3, a JSON array of
-// {c, g}). A row is found when any of its versions holds a link; a link that
-// holds from a deleted row only also needs the row's newest version to be a
-// tombstone.
+// link brings into scope, given what a round reached ($3). A row is found
+// when its NEWEST version holds a link (ruling 94); a link that holds from a
+// deleted row only also needs that version to be a tombstone.
 //
 // staged-data: MUST-NOT-GATE -- a staged row a link leads to and this read
 // did not see KEEPS ITS PII, and is missing from the person's export.
 func linkStatement(always, whenDeleted []string) string {
-	const reached = `WITH reached AS (SELECT r.c, r.g FROM jsonb_to_recordset($3::jsonb) AS r(c text, g text))`
-	if len(whenDeleted) == 0 {
-		return reached + `
-		SELECT m.id, max(m.payload->>'gid') FROM "MemoryNodes" m
-		 WHERE m.concept = $1 AND m.payload->>'storeId' = $2 AND (` + anyOf(always) + `)
-		 GROUP BY m.id`
+	links := append([]string{}, always...)
+	for _, link := range whenDeleted {
+		links = append(links, "("+link+" AND m.payload->>'deleted' = 'true')")
 	}
-	return reached + `, hit AS (
-		SELECT m.id, max(m.payload->>'gid') AS gid, COALESCE(bool_or(` + anyOf(always) + `), false) AS always
-		  FROM "MemoryNodes" m
-		 WHERE m.concept = $1 AND m.payload->>'storeId' = $2 AND (` + anyOf(append(append([]string{}, always...), whenDeleted...)) + `)
-		 GROUP BY m.id)
-		SELECT h.id, h.gid FROM hit h
-		 WHERE h.always
-		    OR (SELECT n.payload->>'deleted' FROM "MemoryNodes" n
-		         WHERE n.concept = $1 AND n.id = h.id ORDER BY n."createdAt" DESC LIMIT 1) = 'true'`
+	return reachedRelation + `
+		SELECT m.id, m.payload->>'gid' FROM "MemoryNodes" m
+		 WHERE m.concept = $1 AND m.payload->>'storeId' = $2 AND (` + anyOf(links) + `)
+		   AND NOT ` + aNewerVersion
+}
+
+// earlierStatement reads the versions of rows of one concept ($1) of one
+// store ($2) that hold a link to a customer the scope holds ($3) and are NOT
+// their row's newest version: the id and the time of each. The caller leaves
+// out those of rows in scope, whose every version is scrubbed anyway.
+//
+// staged-data: MUST-NOT-GATE -- a staged version from when a row was the
+// customer's, not seen here, keeps her name and address after her erasure.
+func earlierStatement(links []string) string {
+	return reachedRelation + `
+		SELECT m.id, m."createdAt"::text FROM "MemoryNodes" m
+		 WHERE m.concept = $1 AND m.payload->>'storeId' = $2 AND (` + anyOf(links) + `)
+		   AND ` + aNewerVersion
 }
 
 // reachedBatches is what a round reached of the named concepts, as the JSON
@@ -586,6 +649,10 @@ type ErasureResult struct {
 	// Versions is how many row versions the pass changed. A second pass over
 	// rows nothing has written since changes none.
 	Versions int64
+	// Earlier is how many versions of rows that are no longer the customer's
+	// held her in a link field and were scrubbed by themselves (ruling 94).
+	// They are counted in Versions when the pass changed them.
+	Earlier int64
 	// Unlisted is how many versions of rows OUTSIDE the scope had an entry
 	// that names the customer taken out of them: a field of a merchant's
 	// metaobject, her gid in a list of references.
@@ -642,6 +709,16 @@ func redactCustomer(ctx context.Context, s *privacySession, storeID, customerGID
 			}
 			res.Versions += n
 		}
+		for earlier := scope.Earlier[concept]; len(earlier) > 0; {
+			n := min(len(earlier), erasureBatch)
+			changed, err := scrubVersions(ctx, s, generated.ConceptID(concept), plan, earlier[:n])
+			if err != nil {
+				return res, scope, fmt.Errorf("shopify: redact the versions of %s rows that were the customer's: %w", concept, err)
+			}
+			res.Versions += changed
+			res.Earlier += int64(n)
+			earlier = earlier[n:]
+		}
 		fields := erasureTakeOutsOf(spec)
 		for _, batch := range batches(scope.TakenFrom[concept]) {
 			for _, customer := range scope.Customers {
@@ -682,6 +759,25 @@ func scrubRows(ctx context.Context, s *privacySession, concept string, plan eras
 	if len(ids) == 0 {
 		return 0, nil
 	}
+	return scrub(ctx, s, concept, plan, `m.id IN (SELECT jsonb_array_elements_text($2::jsonb))`, jsonArray(ids))
+}
+
+// scrubVersions rewrites the given versions, and no other version of their
+// rows, by a plan: the versions from when a row that is not the customer's
+// now was hers (erasureScope.Earlier).
+func scrubVersions(ctx context.Context, s *privacySession, concept string, plan erasurePlan, versions []rowVersion) (int64, error) {
+	if len(versions) == 0 {
+		return 0, nil
+	}
+	raw, _ := json.Marshal(versions)
+	return scrub(ctx, s, concept, plan,
+		`(m.id, m."createdAt") IN (SELECT v.id, v.at::timestamptz FROM jsonb_to_recordset($2::jsonb) AS v(id text, at text))`, string(raw))
+}
+
+// scrub is the one rewrite both make: which names the versions, by $2.
+//
+// staged-data: MUST-NOT-GATE -- a staged version skipped here KEEPS ITS PII.
+func scrub(ctx context.Context, s *privacySession, concept string, plan erasurePlan, which, named string) (int64, error) {
 	return s.exec(ctx,
 		`WITH scrubbed AS (
 		   SELECT m.id, m."createdAt",
@@ -696,13 +792,13 @@ func scrubRows(ctx context.Context, s *privacySession, concept string, plan eras
 		                        OR e.key IN (SELECT jsonb_array_elements_text($5::jsonb))
 		                        OR e.key IN (SELECT jsonb_array_elements_text($6::jsonb))), '{}'::jsonb) AS payload
 		     FROM "MemoryNodes" m
-		    WHERE m.concept = $1 AND m.id IN (SELECT jsonb_array_elements_text($2::jsonb))
+		    WHERE m.concept = $1 AND `+which+`
 		 )
 		 UPDATE "MemoryNodes" m SET payload = s.payload
 		   FROM scrubbed s
 		  WHERE m.concept = $1 AND m.id = s.id AND m."createdAt" = s."createdAt"
 		    AND m.payload IS DISTINCT FROM s.payload`,
-		concept, jsonArray(ids), jsonArray(plan.Keep), jsonArray(plan.Mark), jsonArray(plan.Empty),
+		concept, named, jsonArray(plan.Keep), jsonArray(plan.Mark), jsonArray(plan.Empty),
 		jsonArray(plan.MarkOnCustomItem), RedactionMarker, plan.CustomItemReference)
 }
 

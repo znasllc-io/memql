@@ -727,6 +727,9 @@ func (r *privacyRun) customerErasure(ctx context.Context, store Store, found boo
 		return jobStep{}, failedJob(failScrub, err)
 	}
 	what := fmt.Sprintf("scrubbed %d row version(s) of %d row(s)", erased.Versions, erased.Rows)
+	if erased.Earlier > 0 {
+		what += fmt.Sprintf(", among them %d earlier version(s) of rows that are no longer hers", erased.Earlier)
+	}
 	if erased.Unlisted > 0 {
 		what += fmt.Sprintf(", and took the customer out of %d version(s) of rows that referred to her", erased.Unlisted)
 	}
