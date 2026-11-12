@@ -158,8 +158,8 @@ func TestAPastWindowIsReadAsOfItsEndAndTheNextStartsThere(t *testing.T) {
 	if at, _ := instantOf(second.Rows[0]["createdAt"]); !at.Equal(now.Add(-time.Hour)) {
 		t.Errorf("the read to the clock handed on the version written at %v, want the rewrite an hour ago", at)
 	}
-	if want := caughtUp.Add(-watermarkOverlap); !next.Through.Equal(want) {
-		t.Errorf("caught up at %v, the walk stands at %v, want the clock it asked by less the overlap, %v", caughtUp, next.Through, want)
+	if want := caughtUp; !next.Through.Equal(want) {
+		t.Errorf("caught up at %v, the walk stands at %v, want the clock it asked by, %v", caughtUp, next.Through, want)
 	}
 }
 
@@ -221,10 +221,10 @@ func TestARowCommittedBehindTheWatermarkIsReadByTheNextRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The order was written a moment before the read: its page reaches the
-	// overlap, and the walk stands at that page's asking time less the
-	// overlap, behind the order (walk.go, "Where a read leaves the walk").
-	if want := caughtUp.Add(-watermarkOverlap); !w.Through.Equal(want) || !w.Through.Before(writtenAt(t, orderConcept, storeID, first)) {
-		t.Fatalf("the first run stands at %v, want its page's asking time less the overlap, %v, behind the order", w.Through, want)
+	// overlap, and the walk stands at that page's asking time (walk.go,
+	// "Where a read leaves the walk").
+	if want := caughtUp; !w.Through.Equal(want) || !w.Through.After(writtenAt(t, orderConcept, storeID, first)) {
+		t.Fatalf("the first run stands at %v, want its page's asking time, %v, after the order", w.Through, want)
 	}
 
 	late := fmt.Sprintf("gid://shopify/Order/%d-2", suffix)
