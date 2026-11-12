@@ -6231,6 +6231,7 @@
         "orderGids",
         "outcome",
         "requestId",
+        "requestedAt",
         "scrubbedAt",
         "shopDomain",
         "status",

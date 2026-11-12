@@ -2742,6 +2742,28 @@ func CompanyLocationNoteForBuild(args CompanyLocationNoteForArgs) string {
 	return b.String()
 }
 
+// ComplianceJobById -- One privacy job by its row id, with the row's version. What the connector reads before it writes a job's row: a request that lands on a job, and the runner when it takes one.
+//
+// Bound concept: v1:shopify:complianceJob (machine-readable: BoundConcepts["complianceJobById"] in generated_concepts.go).
+type ComplianceJobByIdArgs struct {
+	JobId string
+}
+
+// ComplianceJobById calls the engine query complianceJobById.
+func (qc *QueryClient) ComplianceJobById(ctx context.Context, args ComplianceJobByIdArgs) (*Result, error) {
+	call := ComplianceJobByIdBuild(args)
+	return qc.executeNamed(ctx, "complianceJobById", call)
+}
+
+func ComplianceJobByIdBuild(args ComplianceJobByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query complianceJobById(")
+	b.WriteString("jobId: ")
+	b.WriteString(quoteMemQL(args.JobId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ComplianceJobsDue -- Privacy jobs that are due. The read the hourly runner makes, page by page.
 // Three kinds of job, all of them only once their dueAt has come: one that is waiting (for its hold, or for the second pass of its erasure); one that failed, which is run again at every run until it is done; and a customers/redact job that is done and carries no scrubbedAt. That last was recorded done by a version whose erasure left a customer's email address and phone number behind and never reached an order's children, so it is made again, once: its first pass under this version sets scrubbedAt.
 //

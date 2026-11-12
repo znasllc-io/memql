@@ -429,6 +429,7 @@ var BoundConcepts = map[string]string{
 	"codeMetricsInWindow":                              "v1:observability:codeMetric",
 	"companyLocationNoteFor":                           "v1:commerce:companyLocationNote",
 	"completeTodo":                                     "v1:todos:todo",
+	"complianceJobById":                                "v1:shopify:complianceJob",
 	"complianceJobsDue":                                "v1:shopify:complianceJob",
 	"complianceJobsFailingForStore":                    "v1:shopify:complianceJob",
 	"complianceJobsForStore":                           "v1:shopify:complianceJob",

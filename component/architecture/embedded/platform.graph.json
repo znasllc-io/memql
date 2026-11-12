@@ -174,7 +174,7 @@
 {"id":"automation:routingRuleProposalWorkflow","kind":"automation","label":"routingRuleProposalWorkflow","attrs":{"origin":"router/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:runGoalEvaluation","kind":"automation","label":"runGoalEvaluation","attrs":{"origin":"bench/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:runPipelineStages","kind":"automation","label":"runPipelineStages","attrs":{"origin":"pipelines/automations.memql","stratum":"0","template":"true"}},
-{"id":"automation:runShopifyComplianceJobs","kind":"automation","label":"runShopifyComplianceJobs","attrs":{"origin":"shopify/overlay/automations.memql","schedule":"0 5 * * * *","stratum":"0"}},
+{"id":"automation:runShopifyComplianceJobs","kind":"automation","label":"runShopifyComplianceJobs","attrs":{"mode":"single","origin":"shopify/overlay/automations.memql","schedule":"0 7 * * * *","stratum":"0"}},
 {"id":"automation:schedulePipelines","kind":"automation","label":"schedulePipelines","attrs":{"origin":"pipelines/automations.memql","schedule":"0 30 3 * * *","stratum":"0"}},
 {"id":"automation:seedSelfAccount","kind":"automation","label":"seedSelfAccount","attrs":{"origin":"accounts/automations.memql","stratum":"0","trigger":"system.startup","writes":"v1:accounts:account"}},
 {"id":"automation:siteStatisticsRollupSweep","kind":"automation","label":"siteStatisticsRollupSweep","attrs":{"origin":"platform/automations.memql","schedule":"0 */5 * * * *","stratum":"0"}},
