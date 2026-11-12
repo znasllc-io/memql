@@ -181,6 +181,10 @@ func (w *Worker) handleConfigureNewsletter(ctx context.Context, args map[string]
 	}
 	// Turning on the shared public-form carrier is an explicit part of Enable.
 	// Disabling this newsletter leaves other declared forms on the site alone.
+	// The switch is written as the person saving, so on a site whose forms are
+	// off it asks the publish part like any other change to what visitors get
+	// (siteFieldParts, component/memql/organization_action_capabilities.go);
+	// it is refused before the newsletter row is written, so nothing half-saves.
 	if enabled && !booleanOr(site, "shopperForms", false) {
 		if err = w.store.exec(ctx, call("mutation", "updateSiteShopperForms", arg{"siteId", siteID}, arg{"shopperForms", true})); err != nil {
 			return nil, err

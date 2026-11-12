@@ -836,6 +836,16 @@ which is what makes removing a setting expressible -- a merge would make
 every "delete this one" silently re-save the value already there. The OS
 editor sends the map it shows for the same reason.
 
+**Changing them on an existing deployable asks the `publish` part**, and so
+does every other field that changes what visitors get: `storeSettings`,
+`shopperForms`, `resolutionTail`, `kind`, `hostname`, `apiProxy`,
+`extensionRuntimePath`, `systemOwned` and `ownerUserId`. Edit on Data is not
+enough, because a member of the deployable's organization holding only that
+could otherwise empty a live storefront's settings or switch its forms off with
+one plain write. A label (`title`, `notes`) asks no part. Every field's answer
+is `siteFieldParts` in `component/memql/organization_action_capabilities.go`,
+and `TestEverySiteFieldHasAPart` fails the build on a field it does not list.
+
 ### Not a place for a secret
 
 Every value here is served to **every visitor**, unauthenticated, in a

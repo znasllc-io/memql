@@ -387,7 +387,8 @@ deployable's **own origin**, and four things stand in front of them:
 1. **`site.shopperForms`**, off by default and off on every row written before
    the field existed. A site that did not ask for a public endpoint does not
    have one, and asking for one gets a 404 rather than a 403 -- the absence is
-   the answer.
+   the answer. Switching it on an existing deployable, either way, asks the
+   `publish` part (deployables.md, Runtime settings).
 2. **A rate limit** per address per site, and a **size cap**, both refusing at
    the edge before the request reaches the bff.
 3. **No front-door rule.** The bff route is classified

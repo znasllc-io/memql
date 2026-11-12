@@ -161,6 +161,43 @@ func (e *MemQLEngine) refuseOrganizationActionCapability(ctx context.Context, fn
 	return true, nil
 }
 
+// siteFieldParts is EVERY v1:platform:site field and the deployable part a
+// change to it asks on an EXISTING site; a create is judged by the rules in
+// validateOrganizationSensitiveChanges alone (an empty draft is ordinary data).
+//
+// WHY IT LISTS EVERY FIELD. The boundary used to ask only for the fields with a
+// rule of their own, so every other field was ordinary data: a member of the
+// site's organization holding Edit on Data and no part could switch a live
+// storefront's shopper forms off (its reviews and signups answer 404), replace
+// its runtime settings (no API version, so no products), or change its kind,
+// hostname or resolution tail, with one plain write. memQL OS already drew that
+// editor only for a publish holder (DeployablePage's RuntimeSettingsPanel); the
+// engine now agrees. TestEverySiteFieldHasAPart fails the build when a field is
+// added to the concept and not here, so a new field is a decision, not a gap.
+//
+// No parts: judged by its own rule in the guard (status, deleted, bundleRef,
+// candidateRef, binding, previewBinding), a label (title, notes), or the
+// organization itself, whose move is judged by membership in both
+// organizations. "deploy" or "publish": which version, artifact or package a
+// deploy came from. "publish": what visitors get, or whose authority the site's
+// shopper forms borrow (ownerUserId). Saving a newsletter connection on a site
+// whose forms are off turns them on as the person saving it, so that now asks
+// publish too (component/campaigns/newsletter.go).
+//
+// Regression test: TestASiteFieldThatChangesWhatVisitorsGetAsksPublish.
+var siteFieldParts = []struct {
+	field string
+	parts []string
+}{
+	{"status", nil}, {"deleted", nil}, {"bundleRef", nil}, {"candidateRef", nil}, {"binding", nil}, {"previewBinding", nil},
+	{"title", nil}, {"notes", nil}, {"accountId", nil},
+	{"artifactId", []string{"deploy", "publish"}}, {"packageId", []string{"deploy", "publish"}}, {"packageDeployableName", []string{"deploy", "publish"}},
+	{"hostname", []string{"publish"}}, {"kind", []string{"publish"}}, {"resolutionTail", []string{"publish"}},
+	{"apiProxy", []string{"publish"}}, {"shopperForms", []string{"publish"}}, {"systemOwned", []string{"publish"}},
+	{"extensionRuntimePath", []string{"publish"}}, {"settings", []string{"publish"}}, {"storeSettings", []string{"publish"}},
+	{"ownerUserId", []string{"publish"}},
+}
+
 // Sensitive deployable changes meet the same capability regardless of whether
 // they arrived through a named action or raw upsert. Empty draft creation is
 // ordinary data creation; serving bytes or arming deployment is not.
@@ -223,6 +260,20 @@ func (e *MemQLEngine) validateOrganizationSensitiveChanges(ctx context.Context, 
 			newBinding, _ := next[field].(map[string]any)
 			if BareShortId(stringFromAny(oldBinding[bindingStoreIdKey])) != BareShortId(stringFromAny(newBinding[bindingStoreIdKey])) {
 				require("store")
+			}
+		}
+		if !creating {
+			for _, f := range siteFieldParts {
+				moved := changed(f.field)
+				if f.field == "ownerUserId" || f.field == "artifactId" || f.field == "packageId" {
+					// An id is stored canonical and often written bare: the same
+					// person or row either way, as the bindings above compare.
+					// TestAccountGrantAdmitsAWriteToATiedRow writes the owner bare.
+					moved = BareShortId(stringFromAny(prior[f.field])) != BareShortId(stringFromAny(next[f.field]))
+				}
+				if len(f.parts) > 0 && moved {
+					require(f.parts...)
+				}
 			}
 		}
 	} else {

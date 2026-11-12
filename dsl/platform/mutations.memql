@@ -747,8 +747,12 @@ mutation site updateSiteAccount {
 /// keys. NOT A PLACE FOR A SECRET: the document is served to every visitor.
 ///
 /// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, as on updateSiteBundle:
-/// the row's owner, or a cluster owner through the explicit escape. A systemOwned row is refused for
-/// both, because the seed re-writes it at every boot.
+/// the row's owner, a member of its organization (the tier's account arm), or a cluster owner
+/// through the explicit escape -- and on an existing site the organization boundary asks the
+/// `publish` part (siteFieldParts, component/memql/organization_action_capabilities.go), because
+/// these values change what every visitor gets: a member holding Edit on Data alone could otherwise
+/// empty a live storefront's settings. memQL OS draws the editor only for a publish holder. A
+/// systemOwned row is refused for all of them, because the seed re-writes it at every boot.
 mutation site updateSiteSettings {
   args {
     siteId    string!
@@ -776,11 +780,10 @@ mutation site updateSiteSettings {
 /// (component/memql/platform_site_settings_guard.go), because a mutation body cannot see an
 /// object's keys. NOT A PLACE FOR A SECRET: every value is served to every visitor.
 ///
-/// AUTHORIZATION is updateSiteSettings' exactly: the concept's composite tier plus
-/// guardRowAuthzWrite -- the row's owner, or a cluster owner through the explicit escape -- and no
-/// capability part, because these are runtime settings like `settings`, not a store binding. Which
-/// store a site is bound to stays the `store` part's (updateSiteStoreBinding); an entry for a store
-/// the site is not bound to is never served.
+/// AUTHORIZATION is updateSiteSettings' exactly, the `publish` part on an existing site included,
+/// because these are runtime settings like `settings`, not a store binding. Which store a site is
+/// bound to stays the `store` part's (updateSiteStoreBinding); an entry for a store the site is not
+/// bound to is never served.
 mutation site updateSiteStoreSettings {
   args {
     siteId         string!
@@ -809,9 +812,10 @@ mutation site updateSiteStoreSettings {
 /// both directions and "off" must be expressible as a write rather than only as an omission --
 /// updateSiteSettings' clearing problem, in boolean.
 ///
-/// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, exactly as on
-/// updateSiteBundle and updateSiteSettings: the row's owner, or a cluster owner through the
-/// explicit escape, and a systemOwned row refused for both. A cluster-owned site cannot usefully
+/// AUTHORIZATION is updateSiteSettings' exactly, the `publish` part on an existing site included:
+/// off takes a live storefront's reviews and signups to 404, and on publishes forms the site's
+/// owner may not have asked for. Saving a newsletter connection turns it on as the person saving
+/// it (component/campaigns/newsletter.go), so that asks publish too. A cluster-owned site cannot usefully
 /// turn it on either way -- the shopper write borrows the row's ownerUserId and an empty one has
 /// no authority to borrow -- but the refusal for that lives at the edge, where the answer can be a
 /// page rather than a write error nobody sees.
@@ -843,9 +847,8 @@ mutation site updateSiteShopperForms {
 /// the store binding, the storefront block in its runtime document and the policy that admits
 /// Shopify. Neither tail is right for every storefront, so the SITE says which it is.
 ///
-/// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, exactly as on
-/// updateSiteBundle and updateSiteSettings: the row's owner, or a cluster owner through the
-/// explicit escape, and a systemOwned row refused for both.
+/// AUTHORIZATION is updateSiteSettings' exactly, the `publish` part on an existing site included,
+/// because the tail decides what every visitor gets for a missed path.
 mutation site updateSiteResolutionTail {
   args {
     siteId          string!
