@@ -24,14 +24,19 @@ import (
 // is null or empty until then.
 type Statistics struct {
 	StoreID, SiteID string
-	// Destination is "production", "testing" or "both": which of the site's
-	// bindings names the store.
+	// Destination is "binding", "previewBinding" or "both": the name of the
+	// field of the site's row that names the store, or both when the two
+	// name the one store.
 	Destination string
 
 	StoreName, StoreDomain, Currency *string
-	// Timezone is the store's zone when it loads; nil when the store has none
-	// or one the Go runtime cannot load, and the period is then cut in UTC.
-	Timezone                                                 *string
+	// Timezone is the zone the store recorded, as recorded, whether or not it
+	// loads; nil when it recorded none.
+	Timezone *string
+	// PeriodZone is the zone the period was cut in: the store's zone when it
+	// loads, otherwise "UTC"; "" for a store the walk holds no row for. A
+	// recorded Timezone with PeriodZone "UTC" is a zone that did not load.
+	PeriodZone                                               string
 	Development, TaxesIncluded, OlderOrderChangesNotRecorded *bool
 
 	Period statsperiod.Period
@@ -69,14 +74,17 @@ type Statistics struct {
 // Recording is the store's verdict as the walk kept it in store_sales_store.
 type Recording struct {
 	// State is the verdict's word as stored: recording, starting, paused,
-	// needs attention, not connected, or "" when the walk could not read it.
+	// needs attention, not connected, or "" when the walk could not read it;
+	// or the frame's own, purging or rebuilding, while the store's facts are
+	// being deleted or walked again, whatever the verdict says.
 	State string
 	// Reasons is every reason the verdict gave, those that freeze nothing
 	// included, each its code and its sentence.
 	Reasons []Reason
 	Since   *time.Time
 	// Blocked is true while the figures are as of AsOf, or none can be given:
-	// recording_blocked, or a paused or not-connected store.
+	// recording_blocked, a paused or not-connected store, or a store purging
+	// or rebuilding.
 	Blocked bool
 }
 
@@ -183,6 +191,10 @@ func (s Statistics) Payload() map[string]any {
 	for _, c := range s.OtherCurrencies {
 		others = append(others, map[string]any{"currency": c.Currency, "orders": c.Orders})
 	}
+	var periodZone any
+	if s.PeriodZone != "" {
+		periodZone = s.PeriodZone
+	}
 	var rebuilding any
 	if s.Rebuilding != nil {
 		rebuilding = *s.Rebuilding
@@ -194,6 +206,7 @@ func (s Statistics) Payload() map[string]any {
 		"olderOrderChangesNotRecorded": flag(s.OlderOrderChangesNotRecorded),
 		"period":                       string(s.Period), "bucket": bucket, "start": start, "end": end, "prevStart": prevStart,
 		"historySince": moment(s.HistorySince), "lastChangeAt": moment(s.LastChangeAt), "asOf": moment(s.AsOf),
+		"periodZone": periodZone,
 		"recording": map[string]any{
 			"state": s.Recording.State, "reasons": reasons, "since": moment(s.Recording.Since), "blocked": s.Recording.Blocked,
 		},

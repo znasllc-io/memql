@@ -748,3 +748,31 @@ func TestAMonthStepLandsOnTheLocalFirstWhenThatMidnightIsSkipped(t *testing.T) {
 		t.Errorf("End = %s, want 2024-02-01T03:00Z", b.End.UTC())
 	}
 }
+
+// A bad period is quoted, and at most 32 characters of it: a megabyte sent as
+// a period must not come back as a megabyte of error. A short bad value reads
+// as it always has.
+func TestABadPeriodIsQuotedAtMost32Characters(t *testing.T) {
+	_, err := Parse("1w")
+	if err == nil || err.Error() != `period must be one of 24h, 7d, 30d, 90d or 12m; got "1w"` {
+		t.Errorf("a short bad period reads %q", err)
+	}
+	exactly := strings.Repeat("é", 32)
+	_, err = Parse(exactly)
+	if err == nil || !strings.HasSuffix(err.Error(), `got "`+exactly+`"`) {
+		t.Errorf("a 32-character bad period reads %q, want it whole", err)
+	}
+	long := strings.Repeat("ü", 1<<20)
+	_, err = Parse(long)
+	if err == nil {
+		t.Fatal("a megabyte of period was accepted")
+	}
+	want := `period must be one of 24h, 7d, 30d, 90d or 12m; got "` + strings.Repeat("ü", 32) + `" and more`
+	if err.Error() != want {
+		n := len(err.Error())
+		if n > 200 {
+			t.Fatalf("a megabyte of period reads %d bytes of error", n)
+		}
+		t.Errorf("a long bad period reads %q, want %q", err, want)
+	}
+}

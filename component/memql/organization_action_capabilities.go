@@ -89,6 +89,40 @@ func organizationCapabilityTarget(fn *Function) (concept, argument string) {
 	return "", ""
 }
 
+// RequirementHeldFor answers whether the caller on ctx holds required for a
+// target that belongs to account: the judgement this file's gate makes once it
+// knows a construct's requirement and its target's account, exported so a
+// handler that must hold the same gate itself (component/storestats, for a
+// construct of another source bound to its executor) asks it and nothing of
+// its own.
+//
+// For an organization: its data, the app the requirement's resource belongs
+// to, and the requirement itself, each in that organization
+// (OrganizationCapable). For a target no organization owns, the gate's own
+// path: the caller's global data reach, then the requirement as the global
+// capability gate judges it (refuseBelowRequiredCapability's last question,
+// auth.CapableFor over the caller's subject), which the gate reaches by
+// answering "not handled".
+//
+// It judges the caller only. Internal origin, which the capability gate
+// passes before any requirement is asked, is not a pass here, and an
+// incomplete requirement is held by nobody.
+func (e *MemQLEngine) RequirementHeldFor(ctx context.Context, account string, required CapabilityRequirement) bool {
+	if e == nil || !required.complete() {
+		return false
+	}
+	if strings.TrimSpace(account) == "" {
+		if !e.GlobalDataCapable(ctx, auth.VerbRead) {
+			return false
+		}
+		subject, ok := e.subjectFor(ctx)
+		return ok && auth.CapableFor(ctx, subject, required.Verb, required.Resource)
+	}
+	return e.OrganizationCapable(ctx, account, auth.VerbRead, auth.ResourceData) &&
+		e.OrganizationCapable(ctx, account, auth.VerbRead, strings.SplitN(required.Resource, "/", 2)[0]) &&
+		e.OrganizationCapable(ctx, account, required.Verb, required.Resource)
+}
+
 func (e *MemQLEngine) refuseOrganizationActionCapability(ctx context.Context, fn *Function, args map[string]any) (bool, error) {
 	concept, argument := organizationCapabilityTarget(fn)
 	if concept == "" {
@@ -156,7 +190,7 @@ func (e *MemQLEngine) refuseOrganizationActionCapability(ctx context.Context, fn
 		}
 		return false, nil
 	}
-	if !e.OrganizationCapable(ctx, account, auth.VerbRead, auth.ResourceData) || !e.OrganizationCapable(ctx, account, auth.VerbRead, strings.SplitN(fn.RequiresCapability.Resource, "/", 2)[0]) || !e.OrganizationCapable(ctx, account, fn.RequiresCapability.Verb, fn.RequiresCapability.Resource) {
+	if !e.RequirementHeldFor(ctx, account, fn.RequiresCapability) {
 		return denied()
 	}
 	if requested != "" && BareShortId(requested) != BareShortId(account) && !e.OrganizationCapable(ctx, requested, fn.RequiresCapability.Verb, fn.RequiresCapability.Resource) {
