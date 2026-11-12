@@ -109,6 +109,20 @@ egress. Audit with `outboundRequestsByStatus(status: "pending")`: rows
 lingering there past the poll interval mean no node is configured for
 their medium.
 
+## Wholesale staff notices
+
+Wholesale staff notices use this outbox and the store's `staffEmail` setting.
+The exact address or its domain must be admitted by
+`MEMQL_OUTBOUND_EMAIL_ALLOWLIST`. Wholesale > Settings shows whether it is
+admitted; a rejected address is not treated as a delivered notice. The pack
+stages each event under a stable id so a repeated event does not create another
+notice.
+
+Applicant emails use the campaign row lane and the organization's sender,
+not this staff-notice allowlist. See
+[Messages about a person's own request](campaign-sending.md#messages-about-a-persons-own-request)
+and the [wholesale guide](../build/consuming-the-wholesale-pack.md).
+
 ## Delivery semantics
 
 - **At-least-once.** A crash between transport acceptance and the

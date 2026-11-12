@@ -1498,6 +1498,42 @@ the unsubscribe the buyer gets and the ledger, and any other organization's
 identity is still refused. The reviews pack says it only for the sender a
 store's reviews settings name, which only the cluster's operators can set.
 
+### Messages about a person's own request
+
+A template's **Purpose** is Marketing or Transactional. A purpose change is
+an explicit act, checked against the current revision; a published template
+returns to draft. Whether a message counts as transactional where you trade
+is your judgment of its words. A transactional template cannot contain
+unsubscribe, preferences, confirmation or view-in-browser links. The editor's
+preview, validation and test send follow the same rule as delivery.
+Campaigns, journeys and event email rules refuse transactional templates.
+
+The row lane (`campaignSendRowMessage`) is for a message about one person's
+own request, such as a wholesale application, where that person need not be
+a subscriber. A pack registers a resolver for its concept. At hand-over the
+resolver supplies the address and current fields, or withdraws a message that
+is no longer appropriate. The caller supplies a stable request id for one
+intended message; the lane records its delivery and guards against duplicate
+submission. A rate-limited row send is replayed by asking the resolver again,
+so a private link can be minted at hand-over without storing its token on the
+delivery record.
+
+The lane requires a published transactional template and a sender belonging
+to the same organization, with send authority for the person it acts as.
+Hard bounces, complaints and manual blocks stop delivery. An unsubscribe alone
+does not: the message concerns the person's request rather than a mailing
+list. A later unsubscribe cannot weaken an existing blocking suppression.
+These rules do not make the lane a way to send marketing without consent.
+
+Refusals and failures answer a stable code and a sentence explaining the
+remedy. Provider details stay in the delivery record rather than a pack's
+business record. An uncertain hand-over means the provider may have accepted
+the email; callers must not automatically submit it again. `campaignRowSender`
+answers the chosen sender and readiness; `campaignRowMessageStatus` reads one
+organization's row-message delivery evidence. Both are for trusted jobs.
+The [wholesale guide](../build/consuming-the-wholesale-pack.md) shows the
+applicant templates and event wiring that consume this lane.
+
 ### Campaigns do not use the transactional outbox
 
 `v1:platform:outboundRequest` and its worker deliver transactional mail.

@@ -1637,6 +1637,20 @@ returns changes what an installation holds. Before you roll it out:
 
 ---
 
+## Wholesale customer access
+
+The custom-app connection requests `write_customers` for the wholesale
+customer-tag route. The route finds the applicant's customer by email, creates
+a missing customer and applies the configured trade tag. The store must approve
+the requested customer permissions and any required protected-customer-data
+access. A refusal is recorded on the application's access result with the
+next action; an approval alone is not evidence that the tag landed.
+
+Removal acts on the customer id recorded by the grant, so a later email change
+does not leave the old customer tagged. Configure the customer-conditioned
+discount in the store; the tag alone does not change prices. See
+[Consuming the wholesale pack](../build/consuming-the-wholesale-pack.md).
+
 ## Unverified
 
 Carried from the research and not confirmed against a Shopify page. Each is
