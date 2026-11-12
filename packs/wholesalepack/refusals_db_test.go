@@ -17,7 +17,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -308,11 +310,7 @@ func TestTheApplicationFormAnswersApplicationsClosedAlikeForEveryClosedProgram(t
 	terms += "-terms-missing"
 	site := s.site(t, eng, terms, s.accountA)
 	setUp(t, eng, terms, site, true)
-	row := latestPayload(t, "v1:wholesale:wholesaleSettings", wholesalepack.SettingsRowID(terms))
-	wsExec(t, eng, seedCtx(), `setWholesaleSettingsRow(settingsId: `+quote(wholesalepack.SettingsRowID(terms))+
-		`, ownerUserId: `+quote(asString(row["ownerUserId"]))+`, storeId: `+quote(asString(row["storeId"]))+
-		`, applicationsOpen: true, entitlementAdapter: "customerTag", introText: "", accountId: `+quote(asString(row["accountId"]))+
-		`, siteId: `+quote(asString(row["siteId"]))+`, staffEmail: "", termsRequired: true, linkLifetimeDays: 0, acceptanceText: "")`)
+	rewriteSettings(t, eng, terms, true, true)
 	answers["terms required and a document missing"] = postApplication(t, eng, site, terms, s.owner,
 		applicationForm("c@kestrel.example.com")).Header().Get("Location")
 
@@ -323,5 +321,93 @@ func TestTheApplicationFormAnswersApplicationsClosedAlikeForEveryClosedProgram(t
 	}
 	if n := unsetApplications(t, eng, store) + unsetApplications(t, eng, terms); n != 0 {
 		t.Fatalf("the refused posts wrote %d applications", n)
+	}
+
+	// THE TERMS RULE REFUSED IT, and nothing else: once the three documents
+	// are published, the same post through the same site is written.
+	publishRaw(t, eng, terms, asString(latestPayload(t, "v1:wholesale:wholesaleSettings", wholesalepack.SettingsRowID(terms))["ownerUserId"]), s.accountA)
+	if loc := postApplication(t, eng, site, terms, s.owner, applicationForm("c@kestrel.example.com")).Header().Get("Location"); !strings.HasPrefix(loc, "/wholesale/thank-you") {
+		t.Fatalf("the same post with the documents published redirected to %q, want the thank-you page", loc)
+	}
+	if n := unsetApplications(t, eng, terms); n != 1 {
+		t.Fatalf("the post with the documents published wrote %d applications, want 1", n)
+	}
+}
+
+// rewriteSettings writes a new version of store's settings row at internal
+// origin, open and requiring its terms as given, and every other field as it
+// stands. The settings builtins refuse an open store requiring its terms with a
+// document missing, so that state is written as the row.
+func rewriteSettings(t *testing.T, eng *memql.MemQLEngine, store string, open, termsRequired bool) {
+	t.Helper()
+	id := wholesalepack.SettingsRowID(store)
+	row := latestPayload(t, "v1:wholesale:wholesaleSettings", id)
+	wsExec(t, eng, seedCtx(), `setWholesaleSettingsRow(settingsId: `+quote(id)+
+		`, ownerUserId: `+quote(asString(row["ownerUserId"]))+`, storeId: `+quote(asString(row["storeId"]))+
+		`, applicationsOpen: `+strconv.FormatBool(open)+`, entitlementAdapter: "customerTag", introText: "", accountId: `+
+		quote(asString(row["accountId"]))+`, siteId: `+quote(asString(row["siteId"]))+`, staffEmail: "", termsRequired: `+
+		strconv.FormatBool(termsRequired)+`, linkLifetimeDays: 0, acceptanceText: "")`)
+}
+
+// publishRaw publishes the three documents on store at internal origin, as the
+// store's own owner.
+func publishRaw(t *testing.T, eng *memql.MemQLEngine, store, owner, account string) {
+	t.Helper()
+	for _, kind := range []string{"terms", "map", "priceSheet"} {
+		wsExec(t, eng, seedCtx(), `appendWholesaleDocumentVersion(ownerUserId: `+quote(owner)+`, storeId: `+quote(store)+
+			`, accountId: `+quote(account)+`, kind: `+quote(kind)+`, label: `+quote(kind+" 2026")+`, body: "Net 30.", sha256: "x"`+
+			`, publishedBy: `+quote(owner)+`, publishedAt: `+quote(time.Now().UTC().Format(time.RFC3339Nano))+`)`)
+	}
+}
+
+// sameRefusal fails unless the two answers are one to the poster: the status,
+// the redirect and the body.
+func sameRefusal(t *testing.T, name string, repeat, unknown *httptest.ResponseRecorder) {
+	t.Helper()
+	if repeat.Code != unknown.Code || repeat.Header().Get("Location") != unknown.Header().Get("Location") ||
+		repeat.Body.String() != unknown.Body.String() {
+		t.Errorf("%s: a known address was answered %d %q %q, an unknown one %d %q %q", name,
+			repeat.Code, repeat.Header().Get("Location"), repeat.Body.String(),
+			unknown.Code, unknown.Header().Get("Location"), unknown.Body.String())
+	}
+}
+
+// A CLOSED PROGRAM ANSWERS A REPEAT POSTER AS IT ANSWERS ANYONE: an address
+// with an open application on the store, posting again once the program is
+// closed -- by the switch, through a site the store does not admit, or by
+// requiring terms with a document missing -- is sent to applications_closed,
+// writes nothing, and gets exactly the answer an unknown address gets. The
+// closed checks run before the open-application check, which would otherwise
+// send the known address to the thank-you page.
+func TestAClosedProgramAnswersARepeatPosterAsItAnswersAnUnknownOne(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	const want = "/wholesale/problem?reason=applications_closed"
+	for _, way := range []string{"the switch off", "a site the store does not admit", "terms required and a document missing"} {
+		s := newStorefrontScene(t, eng, "sf-repeat")
+		_, store, _ := wholesaleScope()
+		site, other := s.site(t, eng, store, s.accountA), s.site(t, eng, store, s.accountB)
+		setUp(t, eng, store, site, true)
+		const known = "known@kestrel.example.com"
+		if loc := postApplication(t, eng, site, store, s.owner, applicationForm(known)).Header().Get("Location"); !strings.HasPrefix(loc, "/wholesale/thank-you") {
+			t.Fatalf("%s: the first post on the open store redirected to %q", way, loc)
+		}
+		post := site
+		switch way {
+		case "the switch off":
+			rewriteSettings(t, eng, store, false, false)
+		case "a site the store does not admit":
+			post = other
+		case "terms required and a document missing":
+			rewriteSettings(t, eng, store, true, true)
+		}
+		repeat := postApplication(t, eng, post, store, s.owner, applicationForm(known))
+		if loc := repeat.Header().Get("Location"); repeat.Code != http.StatusSeeOther || loc != want {
+			t.Fatalf("%s: the known address was answered %d %q, want 303 to %q", way, repeat.Code, loc, want)
+		}
+		unknown := postApplication(t, eng, post, store, s.owner, applicationForm("unknown@kestrel.example.com"))
+		sameRefusal(t, way, repeat, unknown)
+		if n := unsetApplications(t, eng, store); n != 1 {
+			t.Fatalf("%s: the store holds %d applications, want the first one only", way, n)
+		}
 	}
 }

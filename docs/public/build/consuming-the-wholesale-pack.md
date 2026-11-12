@@ -312,10 +312,10 @@ its `statementSha256`, and the link's `expiresAt`.
 
 | `error` | What happened | What the page should say |
 |---|---|---|
-| `link_used` | The terms were accepted through this application's link. Checked first, so it stays the answer once the application is approved | The terms are already accepted; nothing more to do here |
+| `link_used` | The terms were accepted through this application's link. Checked first, so it stays the answer whatever happens to the application after the acceptance: approved, rejected or revoked. It says nothing about a decision | The terms are already accepted; nothing more to do here |
 | `link_closed` | The link is real, and its application is no longer waiting for its terms: rejected, approved without an acceptance, or removed | This link no longer applies |
 | `link_expired` | The link is past its expiry, and its application is still waiting for its terms | Ask the store for a new link |
-| `link_invalid` | The token is no link of this store: unknown, malformed, replaced by a newer link, or another store's, never told apart | This link is not valid |
+| `link_invalid` | The token is no link of this store: unknown, malformed, replaced by a newer link, or another store's, never told apart. Also a link that resolves but whose application cannot be read on this store | This link is not valid |
 | `documents_unavailable` | The store has no current terms or MAP version to show. A new link would not help | The terms are not available at the moment |
 
 A terms link is judged in the order `link_used`, `link_closed`, `link_expired`.
@@ -344,7 +344,7 @@ link has no expiry and is never used up.
 
 | `error` | What happened | What the page should say |
 |---|---|---|
-| `link_closed` | The link is real, and the buyer cannot read the sheet now: the application is not approved (submitted, rejected or revoked), or it is approved and its access is not granted yet | The price sheet is not available on this link now, which can be for good or for the moment |
+| `link_closed` | The link is real, and the buyer cannot read the sheet now: the application is not approved (submitted, rejected or revoked), or it is approved and the buyer's access is not in place: not granted, or no longer | The price sheet is not available on this link now, which can be for good or for the moment |
 | `link_invalid` | As on the terms read | This link is not valid |
 | `documents_unavailable` | The store has no current price sheet | The price sheet is not available at the moment |
 
