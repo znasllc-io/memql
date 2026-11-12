@@ -213,6 +213,9 @@ func trimmed(v any) string { return strings.TrimSpace(asString(v)) }
 // test that fakes one should not silently fake the other.
 type rowWriter interface {
 	Write(ctx context.Context, mutation string, args map[string]any) error
+	// Insert is Write for a mutation whose row id the engine generates, and
+	// answers that id: an append-only row the pack must name back to its caller.
+	Insert(ctx context.Context, mutation string, args map[string]any) (string, error)
 }
 
 // engineWriter is the production implementation.
@@ -221,14 +224,34 @@ type engineWriter struct {
 }
 
 func (w *engineWriter) Write(ctx context.Context, mutation string, args map[string]any) error {
+	_, err := w.execute(ctx, mutation, args)
+	return err
+}
+
+func (w *engineWriter) Insert(ctx context.Context, mutation string, args map[string]any) (string, error) {
+	result, err := w.execute(ctx, mutation, args)
+	if err != nil {
+		return "", err
+	}
+	// The engine answers the row it wrote, at the id it generated.
+	rows := memql.MaterializeRows(result)
+	if len(rows) == 0 || trimmed(rows[0]["id"]) == "" {
+		return "", fmt.Errorf("wholesale: %s wrote a row the engine did not name", mutation)
+	}
+	return trimmed(rows[0]["id"]), nil
+}
+
+// execute runs one of the pack's mutations: the writer's ONE stamp.
+func (w *engineWriter) execute(ctx context.Context, mutation string, args map[string]any) (*memql.ExecuteResult, error) {
 	if w == nil || w.engine == nil {
-		return fmt.Errorf("wholesale: the pack has no engine handle, so %q cannot be written", mutation)
+		return nil, fmt.Errorf("wholesale: the pack has no engine handle, so %q cannot be written", mutation)
 	}
 	// INLINE, so the internal stamp dies with this one call (auth.ContextWithInternalOrigin).
-	if _, err := w.engine.Execute(auth.ContextWithInternalOrigin(ctx), renderMutationCall(mutation, args)); err != nil {
-		return fmt.Errorf("wholesale: %s: %w", mutation, err)
+	result, err := w.engine.Execute(auth.ContextWithInternalOrigin(ctx), renderMutationCall(mutation, args))
+	if err != nil {
+		return nil, fmt.Errorf("wholesale: %s: %w", mutation, err)
 	}
-	return nil
+	return result, nil
 }
 
 // renderMutationCall writes the invocation a pack mutation becomes.
@@ -456,6 +479,15 @@ func (p *Provider) write(ctx context.Context, mutation string, args map[string]a
 		return fmt.Errorf("wholesale: the pack has no writer; %q cannot be persisted", mutation)
 	}
 	return p.writer.Write(ctx, mutation, args)
+}
+
+// insert runs one of the pack's own mutations whose row id the engine
+// generates, and answers that id.
+func (p *Provider) insert(ctx context.Context, mutation string, args map[string]any) (string, error) {
+	if p.writer == nil {
+		return "", fmt.Errorf("wholesale: the pack has no writer; %q cannot be persisted", mutation)
+	}
+	return p.writer.Insert(ctx, mutation, args)
 }
 
 // confirm is the ONE node a write capability replies with.

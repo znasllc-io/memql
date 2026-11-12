@@ -18,7 +18,7 @@
 // client needs it, it is an addition here rather than a rewrite, because
 // reach is declared per route.
 
-use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings }
+use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings, documentVersion }
 use shopify.overlay.concepts.{ store }
 
 // THE PACK'S ONE CROSS-DOMAIN READ, AND IT IS DELIBERATELY THREE FIELDS.
@@ -111,5 +111,24 @@ shape wholesaleSettings wholesaleSettingsFull {
   accountId
   siteId
   staffEmail
+  termsRequired
+  linkLifetimeDays
+  acceptanceText
+  row.createdAt
+}
+
+@description("A document version, whole: its body and the fingerprint of it. Append-only, so a row is a version and this is all of it.")
+@row
+shape documentVersion documentVersionFull {
+  row.id
+  ownerUserId
+  storeId
+  accountId
+  kind
+  label
+  body
+  sha256
+  publishedBy
+  publishedAt
   row.createdAt
 }

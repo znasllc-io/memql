@@ -8717,6 +8717,38 @@
       }
     },
     {
+      "concept": "v1:wholesale:documentVersion",
+      "file": "packs/wholesalepack/dsl/concepts.memql",
+      "fields": [
+        "accountId",
+        "body",
+        "kind",
+        "label",
+        "ownerUserId",
+        "publishedAt",
+        "publishedBy",
+        "sha256",
+        "storeId"
+      ],
+      "required": [
+        "body",
+        "kind",
+        "label",
+        "ownerUserId",
+        "publishedAt",
+        "publishedBy",
+        "sha256",
+        "storeId"
+      ],
+      "enums": {
+        "kind": [
+          "map",
+          "priceSheet",
+          "terms"
+        ]
+      }
+    },
+    {
       "concept": "v1:wholesale:entitlement",
       "file": "packs/wholesalepack/dsl/concepts.memql",
       "fields": [
@@ -8754,14 +8786,17 @@
       "concept": "v1:wholesale:wholesaleSettings",
       "file": "packs/wholesalepack/dsl/concepts.memql",
       "fields": [
+        "acceptanceText",
         "accountId",
         "applicationsOpen",
         "entitlementAdapter",
         "introText",
+        "linkLifetimeDays",
         "ownerUserId",
         "siteId",
         "staffEmail",
-        "storeId"
+        "storeId",
+        "termsRequired"
       ],
       "required": [
         "applicationsOpen",

@@ -65,7 +65,7 @@
 // the store's automation reads as the deployment, and a row stamped from a
 // system actor is owned by nobody.
 
-use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings }
+use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings, documentVersion }
 
 /// Write one application. IT NAMES NO ROW ID: on the shopper path the
 /// caller is a member of the public, `id` is a name the shopper surface
@@ -148,9 +148,12 @@ mutation wholesaleSettings setWholesaleSettingsRow {
     accountId           string
     siteId              string
     staffEmail          string   @maxLength(320)
+    termsRequired       bool
+    linkLifetimeDays    int
+    acceptanceText      string   @maxLength(2000)
   }
   insert {
-    accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText, accountId, siteId, staffEmail }
+    accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText, accountId, siteId, staffEmail, termsRequired, linkLifetimeDays, acceptanceText }
     stamp {
       id: args.settingsId
     }
@@ -175,12 +178,41 @@ mutation wholesaleSettings putWholesaleSettingsRow {
     staffEmail          string   @maxLength(320)
     accountId           string
     siteId              string
+    termsRequired       bool
+    linkLifetimeDays    int
+    acceptanceText      string   @maxLength(2000)
   }
   insert {
-    accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText, staffEmail, accountId, siteId }
+    accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText, staffEmail, accountId, siteId, termsRequired, linkLifetimeDays, acceptanceText }
     stamp {
       id: args.settingsId
     }
+  }
+}
+
+/// Append one version of a store's document. IT NAMES NO ID: a version is a
+/// new row every time, and an id the caller chose would let a second version
+/// overwrite the first -- the one an applicant may already have accepted.
+/// EVERY ARGUMENT IS ACCEPTED AND NOTHING IS STAMPED: wholesalePublishDocument
+/// names the merchant, the publisher (the caller), the clock and the body's
+/// digest, and runs the write as the store's merchant. Versions are never
+/// updated, so there is no mutation that writes one at an existing id.
+@serverOnly
+@actor
+mutation documentVersion appendWholesaleDocumentVersion {
+  args {
+    ownerUserId  string!
+    storeId      string!
+    accountId    string
+    kind         string!  @enum("terms", "map", "priceSheet")
+    label        string!  @maxLength(120)
+    body         string!  @maxLength(204800)
+    sha256       string!
+    publishedBy  string!
+    publishedAt  datetime!
+  }
+  insert {
+    accept { ownerUserId, storeId, accountId, kind, label, body, sha256, publishedBy, publishedAt }
   }
 }
 

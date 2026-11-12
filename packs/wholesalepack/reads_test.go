@@ -38,7 +38,8 @@ type storeFake struct {
 	extensions map[string]memql.ExtensionRow
 	sysOnlyExt map[string]bool // bare application id -> an extension row the caller cannot read
 	settings   map[string]any
-	pages      map[string]int // RowsPage calls per query
+	pages      map[string]int   // RowsPage calls per query
+	docs       []map[string]any // document versions, read by the system only
 }
 
 func newStoreFake() *storeFake {
@@ -193,6 +194,11 @@ func (f *storeFake) RowsPageWithList(ctx context.Context, query string, args map
 			all = append(all, f.byApplication(ctx, rows, id)...)
 		}
 		all = newestFirst(all)
+	case "documentVersionsForStore":
+		size = 200
+		if isSystem(ctx) {
+			all = docsMatching(f.docs, args["storeId"], args["kind"])
+		}
 	}
 	from, _ := strconv.Atoi(cursor)
 	if from > len(all) {

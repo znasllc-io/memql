@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -41,6 +42,10 @@ const NotSetUpSentence = "This store's wholesale program is not set up yet. The 
 
 // maxStaffEmail is the longest address the store's people may name.
 const maxStaffEmail = 320
+
+// maxAcceptanceText is the longest acceptance sentence, in characters: the
+// settings mutation's bound.
+const maxAcceptanceText = 2000
 
 // SettingsRowID derives the one settings row id for a store.
 //
@@ -136,21 +141,53 @@ func (p *Provider) storeSettingsRows(ctx context.Context, storeID string) ([]map
 }
 
 // Settings is one store's settings as every reader here takes them: absent
-// settings read as not set up, closed, with no route.
+// settings read as not set up, closed, with no route, requiring no terms, with
+// the default link lifetime and acceptance sentence.
 type Settings struct {
 	Exists, ApplicationsOpen                                     bool
 	EntitlementAdapter, IntroText, StaffEmail, AccountID, SiteID string
+	// TermsRequired absent is false.
+	TermsRequired bool
+	// LinkLifetimeDays is the row's, or DefaultLinkLifetimeDays when it names
+	// none in 1 to 365.
+	LinkLifetimeDays int
+	// AcceptanceText is the row's, or DefaultAcceptanceText when it is blank.
+	AcceptanceText string
+}
+
+// heldTerms is what a settings row itself holds of the three terms settings,
+// before any default: what a write of the whole row passes back.
+type heldTerms struct {
+	termsRequired    bool
+	linkLifetimeDays int
+	acceptanceText   string
+}
+
+// termsHeld reads the three terms settings a row holds, nil reading as none.
+func termsHeld(row map[string]any) heldTerms {
+	required, _ := row["termsRequired"].(bool)
+	days, _ := intArg(row["linkLifetimeDays"])
+	return heldTerms{termsRequired: required, linkLifetimeDays: days, acceptanceText: asString(row["acceptanceText"])}
 }
 
 // EffectiveSettings reads a settings row, or nil for a store with none.
 func EffectiveSettings(row map[string]any) Settings {
 	if row == nil {
-		return Settings{}
+		return Settings{LinkLifetimeDays: DefaultLinkLifetimeDays, AcceptanceText: DefaultAcceptanceText}
 	}
 	open, _ := row["applicationsOpen"].(bool)
 	route := trimmed(row["entitlementAdapter"])
 	if route == AdapterNone {
 		route = ""
+	}
+	held := termsHeld(row)
+	days := held.linkLifetimeDays
+	if days < minLinkLifetimeDays || days > maxLinkLifetimeDays {
+		days = DefaultLinkLifetimeDays
+	}
+	text := held.acceptanceText
+	if strings.TrimSpace(text) == "" {
+		text = DefaultAcceptanceText
 	}
 	return Settings{
 		Exists:             true,
@@ -160,6 +197,9 @@ func EffectiveSettings(row map[string]any) Settings {
 		StaffEmail:         trimmed(row["staffEmail"]),
 		AccountID:          trimmed(row["accountId"]),
 		SiteID:             trimmed(row["siteId"]),
+		TermsRequired:      held.termsRequired,
+		LinkLifetimeDays:   days,
+		AcceptanceText:     text,
 	}
 }
 
@@ -196,6 +236,11 @@ func (p *Provider) setWholesaleSettings(ctx context.Context, args map[string]any
 	if err != nil {
 		return nil, err
 	}
+	// THE TERMS RULE, ON THE ROW AS IT WILL BE: this write's applicationsOpen
+	// with the terms setting the row already holds.
+	if err := p.termsRuleRefusal(ctx, place.storeID, open, place.terms.termsRequired); err != nil {
+		return nil, err
+	}
 	// FENCED ON WHAT IT READ: an existing row on its version, an absent row on
 	// "absent". A staff save that lands between the read and this write is not
 	// overwritten; the set-up is refused and the operator reloads.
@@ -213,6 +258,11 @@ func (p *Provider) setWholesaleSettings(ctx context.Context, args map[string]any
 		"accountId":  place.accountID,
 		"siteId":     place.siteID,
 		"staffEmail": place.staffEmail,
+		// And the terms settings the row held, none on a new row: they are the
+		// store's people's to change, through wholesaleUpdateSettings.
+		"termsRequired":    place.terms.termsRequired,
+		"linkLifetimeDays": place.terms.linkLifetimeDays,
+		"acceptanceText":   place.terms.acceptanceText,
 	}); err != nil {
 		if errors.Is(err, memql.ErrRowVersionChanged) {
 			return nil, errors.New(ChangedWhileEditingSentence)
@@ -259,6 +309,8 @@ type settingsPlace struct {
 	owner, accountID, siteID string
 	// staffEmail is the address the row already holds, written back whole.
 	staffEmail string
+	// terms is the terms settings the row already holds, written back whole.
+	terms heldTerms
 	// version is the createdAt of the row read, zero when there was none: the
 	// write is fenced on it.
 	version time.Time
@@ -302,6 +354,8 @@ func (p *Provider) settingsOwner(ctx context.Context, storeID, siteID string) (s
 	}
 	if existing != nil {
 		place.rowID, place.storeID = settingsRowIDOf(existing, storeID), trimmed(existing["storeId"])
+		// The terms settings are the row's, whoever it is found to belong to.
+		place.terms = termsHeld(existing)
 	}
 	if place.rowID == "" {
 		place.rowID = newSettingsRowID(storeID)
@@ -412,12 +466,20 @@ func (p *Provider) storeSettings(ctx context.Context, args map[string]any, _ int
 		return nil, err
 	}
 	s := EffectiveSettings(row)
+	documents, err := p.documentsSummary(ctx, storeID)
+	if err != nil {
+		return nil, err
+	}
 	return confirm("wholesale:settings:store", map[string]any{
 		"exists":             s.Exists,
 		"applicationsOpen":   s.ApplicationsOpen,
 		"entitlementAdapter": s.EntitlementAdapter,
 		"introText":          s.IntroText,
 		"staffEmail":         s.StaffEmail,
+		"termsRequired":      s.TermsRequired,
+		"linkLifetimeDays":   s.LinkLifetimeDays,
+		"acceptanceText":     s.AcceptanceText,
+		"documents":          documents,
 		"adapters":           AdapterNames(),
 		"may": map[string]any{
 			// Everyone past the gate holds the part or is an operator, so a
@@ -480,6 +542,37 @@ func (p *Provider) updateSettings(ctx context.Context, args map[string]any, _ in
 		}
 		next.StaffEmail = email
 	}
+	// THE TERMS SETTINGS AS THE ROW HOLDS THEM, not their defaults: a lifetime
+	// or a sentence the store never named stays unnamed, and reads as the
+	// default whatever the default is then.
+	terms := termsHeld(row)
+	if v, named := args["termsRequired"]; named && v != nil {
+		required, ok := v.(bool)
+		if !ok {
+			return nil, fmt.Errorf("wholesale: termsRequired must be a bool")
+		}
+		terms.termsRequired = required
+	}
+	if v, named := args["linkLifetimeDays"]; named && v != nil {
+		days, err := validLinkLifetime(v)
+		if err != nil {
+			return nil, err
+		}
+		terms.linkLifetimeDays = days
+	}
+	if v, named := args["acceptanceText"]; named && v != nil {
+		text := asString(v)
+		if n := utf8.RuneCountInString(text); n > maxAcceptanceText {
+			return nil, fmt.Errorf("wholesale: the acceptance sentence is at most %d characters, or empty for the default; "+
+				"this one is %d", maxAcceptanceText, n)
+		}
+		terms.acceptanceText = text
+	}
+	// THE TERMS RULE, ON THE MERGED RESULT: a store that would take
+	// applications while requiring terms it has not published is refused.
+	if err := p.termsRuleRefusal(ctx, storeID, next.ApplicationsOpen, terms.termsRequired); err != nil {
+		return nil, err
+	}
 	// THE ROW READ IS THE ROW WRITTEN, at its own id with its own storeId,
 	// whichever form of the store id the caller named.
 	rowID := settingsRowIDOf(row, storeID)
@@ -507,6 +600,9 @@ func (p *Provider) updateSettings(ctx context.Context, args map[string]any, _ in
 		"staffEmail":         next.StaffEmail,
 		"accountId":          next.AccountID,
 		"siteId":             next.SiteID,
+		"termsRequired":      terms.termsRequired,
+		"linkLifetimeDays":   terms.linkLifetimeDays,
+		"acceptanceText":     terms.acceptanceText,
 	}); err != nil {
 		if errors.Is(err, memql.ErrRowVersionChanged) {
 			return nil, errors.New(ChangedWhileEditingSentence)
@@ -595,19 +691,6 @@ func (p *Provider) sitesForStore(ctx context.Context, storeID string) ([]map[str
 	bare := bareID(storeID)
 	return p.reader.RowsWithList(ctx, "sitesBoundToStore", map[string]string{},
 		"storeIds", []string{storeID, bare, "v1:shopify:store:" + bare})
-}
-
-// applicationsOpen reads this store's gate.
-//
-// ABSENT IS CLOSED. A store whose merchant has never touched the setting
-// has not asked for applications, and a missing row must not open a public
-// write endpoint that collects somebody's business contact details.
-func (p *Provider) applicationsOpen(ctx context.Context, storeID string) (bool, error) {
-	settings, err := p.settingsRowAt(ctx, storeID)
-	if err != nil {
-		return false, err
-	}
-	return EffectiveSettings(settings).ApplicationsOpen, nil
 }
 
 // settingsRowAt is the store's ONE settings row, whichever form of its id the

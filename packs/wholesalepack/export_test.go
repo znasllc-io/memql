@@ -25,6 +25,19 @@ func (h hookedWriter) Write(ctx context.Context, mutation string, args map[strin
 	return h.inner.Write(ctx, mutation, args)
 }
 
+func (h hookedWriter) Insert(ctx context.Context, mutation string, args map[string]any) (string, error) {
+	if h.before != nil {
+		h.before(ctx, mutation, args)
+	}
+	return h.inner.Insert(ctx, mutation, args)
+}
+
+// CurrentDocumentsForTest answers currentDocuments over eng.
+func CurrentDocumentsForTest(ctx context.Context, eng memql.IntegrationEngineAccess, storeID string) (map[string]map[string]any, error) {
+	p := &Provider{engine: eng, reader: &engineRowReader{engine: eng}, writer: &engineWriter{engine: eng}}
+	return p.currentDocuments(ctx, storeID)
+}
+
 // BackfillForTest runs wholesaleBackfillAccounts over eng with the given walk
 // window and write hook, and answers its report.
 func BackfillForTest(ctx context.Context, eng memql.IntegrationEngineAccess, args map[string]any, window int,

@@ -141,6 +141,32 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 				"entitlementAdapter": "string (optional) - the route; empty or none means none",
 				"introText":          "string (optional) - client-authored storefront copy",
 				"staffEmail":         "string (optional) - the store's people's address, or empty",
+				"termsRequired":      "bool (optional) - whether an applicant must accept the published terms",
+				"linkLifetimeDays":   "int (optional) - how many days a link to an applicant stays usable, 1 to 365",
+				"acceptanceText":     "string (optional) - the sentence an applicant accepts with; empty for the default",
+			},
+		},
+		{
+			Name: "publishDocument",
+			Description: "Publish a new version of a store's terms, MAP policy or price sheet. Append-only: " +
+				"a version is never changed, and the newest of a kind is its current one.",
+			Handler: p.publishDocument,
+			ArgsSchema: map[string]string{
+				"siteId":  "string (required) - the store's site; it must serve the store",
+				"storeId": "string (required) - the store whose document this is",
+				"kind":    "string (required) - terms, map or priceSheet",
+				"label":   "string (required) - the version's name, 1 to 120 characters once trimmed",
+				"body":    "string (required) - the Markdown text, 1 to 204800 bytes, stored as given",
+			},
+		},
+		{
+			Name:        "documents",
+			Description: "A store's documents with their current versions and histories, or one version by id.",
+			Handler:     p.documents,
+			ArgsSchema: map[string]string{
+				"siteId":    "string (required) - the store's site; it must serve the store",
+				"storeId":   "string (required) - the store whose documents to read",
+				"versionId": "string (optional) - one version of this store to answer, body included",
 			},
 		},
 		{

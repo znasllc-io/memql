@@ -14,8 +14,8 @@ import (
 //
 // One JSON file holding every application the caller reads -- each with the
 // client's own fields on it and the state its log gives it -- their decisions
-// and entitlements, and the store's settings, so a store can keep its record or
-// take it elsewhere.
+// and entitlements, the store's settings and every version of its documents, so
+// a store can keep its record or take it elsewhere.
 //
 // THE SAME RULE AS THE LIST. The applications are read under the caller, so
 // what a caller cannot read is not in their export; an application's decisions
@@ -98,6 +98,17 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 	if settings != nil {
 		settingsOut = withoutTokenHash(settings)
 	}
+	// EVERY VERSION OF EVERY DOCUMENT, bodies included, read to the end in
+	// every form of the store id: what an applicant accepted is part of the
+	// record.
+	versions, err := p.storeDocumentVersions(ctx, storeID)
+	if err != nil {
+		return nil, err
+	}
+	documentVersions := make([]map[string]any, 0, len(versions))
+	for _, v := range versions {
+		documentVersions = append(documentVersions, withoutTokenHash(v))
+	}
 	now := time.Now().UTC()
 	if p.now != nil {
 		now = p.now().UTC()
@@ -110,6 +121,8 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 		"decisions":    decisions,
 		"entitlements": entitlements,
 		"settings":     settingsOut,
+		// Kind by kind (terms, map, priceSheet), each newest first.
+		"documentVersions": documentVersions,
 	}, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("wholesale: marshal export: %w", err)

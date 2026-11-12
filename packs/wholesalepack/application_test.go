@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +33,7 @@ type fixtureReader struct {
 	readAs    []string         // the actor each read ran as, in order
 	sites     []map[string]any // sitesBoundToStore's answer
 	walk      []map[string]any // applicationsForBackfill's answer, whatever the cursor
+	docs      []map[string]any // every document version, matched by documentVersionsForStore as written
 }
 
 func (f *fixtureReader) Rows(ctx context.Context, query string, args map[string]string) ([]map[string]any, error) {
@@ -50,6 +52,8 @@ func (f *fixtureReader) Rows(ctx context.Context, query string, args map[string]
 		return f.stores[args["storeId"]], nil
 	case "applicationsForBackfill":
 		return f.walk, nil
+	case "documentVersionsForStore":
+		return docsMatching(f.docs, args["storeId"], args["kind"]), nil
 	case "siteById":
 		for _, site := range f.sites {
 			if bareID(trimmed(site["id"])) == bareID(args["siteId"]) {
@@ -110,6 +114,9 @@ type fakeWriter struct {
 	err    error
 	// refuse fails one write rather than all of them.
 	refuse func(mutation string, args map[string]any) error
+	// inserted answers the id the engine generated for an Insert; nil answers
+	// one numbered by the write.
+	inserted func(mutation string, args map[string]any) string
 }
 
 type writeCall struct {
@@ -130,6 +137,17 @@ func (f *fakeWriter) Write(ctx context.Context, mutation string, args map[string
 	}
 	f.writes = append(f.writes, writeCall{mutation: mutation, args: args, actor: actorOf(ctx), ctx: ctx})
 	return nil
+}
+
+// Insert records the write and answers the id the engine would have generated.
+func (f *fakeWriter) Insert(ctx context.Context, mutation string, args map[string]any) (string, error) {
+	if err := f.Write(ctx, mutation, args); err != nil {
+		return "", err
+	}
+	if f.inserted != nil {
+		return f.inserted(mutation, args), nil
+	}
+	return "generated-" + strconv.Itoa(len(f.writes)), nil
 }
 
 // asShopperPath is the borrowed authority the shopper handler submits under:
@@ -463,7 +481,8 @@ func TestUpdateSettingsMergesAndRefusesAStoreWithNoSettings(t *testing.T) {
 	}
 	want := map[string]any{"settingsId": SettingsRowID("store-live"), "ownerUserId": "v1:identity:user:merchant-1",
 		"storeId": "store-live", "applicationsOpen": true, "entitlementAdapter": AdapterCustomerTag,
-		"introText": "Apply here.", "staffEmail": "desk@example.com", "accountId": "acct-north", "siteId": "site-1"}
+		"introText": "Apply here.", "staffEmail": "desk@example.com", "accountId": "acct-north", "siteId": "site-1",
+		"termsRequired": false, "linkLifetimeDays": 0, "acceptanceText": ""}
 	wrote := writer.only(t, "putWholesaleSettingsRow")
 	for k, v := range want {
 		if wrote[k] != v {
@@ -815,6 +834,47 @@ func TestTheGateIsPerStore(t *testing.T) {
 	if writer.count("createApplicationRow") != 1 {
 		t.Fatalf("createApplicationRow written %d times; the closed store must write nothing",
 			writer.count("createApplicationRow"))
+	}
+}
+
+// A STORE THAT REQUIRES ITS TERMS TAKES NO APPLICATION UNTIL ALL THREE
+// DOCUMENTS EXIST, judged when the application is written, and the shopper is
+// refused exactly as a closed store refuses them: the same words, so the same
+// redirect. Nothing is written.
+func TestASubmissionIsRefusedWhenTermsAreRequiredAndADocumentIsMissing(t *testing.T) {
+	writer := &fakeWriter{}
+	reader := &fixtureReader{
+		settings: map[string][]map[string]any{
+			"store-live":   {{"storeId": "store-live", "applicationsOpen": true, "termsRequired": true}},
+			"store-closed": {{"storeId": "store-closed", "applicationsOpen": false}},
+		},
+		docs: docsFor(DocumentTerms, DocumentPriceSheet),
+	}
+	p := &Provider{writer: writer, reader: reader}
+	submit := func(store, id string) error {
+		_, err := p.submitApplication(asShopperPath(), map[string]any{
+			"submissionId": id, "storeId": store, "companyName": "Spoke and Chain Cycles",
+			"applicantName": "Sam", "applicantEmail": "sam@example.com",
+		}, 0)
+		return err
+	}
+	closed := submit("store-closed", "sub-0")
+	missing := submit("store-live", "sub-1")
+	if closed == nil || missing == nil || missing.Error() != closed.Error() {
+		t.Fatalf("a submission with the MAP policy missing answered %v; a closed store answers %v", missing, closed)
+	}
+	if strings.Contains(missing.Error(), "Publish the terms") {
+		t.Fatalf("the shopper is told the store's own instruction: %v", missing)
+	}
+	if len(writer.writes) != 0 {
+		t.Fatalf("a refused submission was written: %+v", writer.writes)
+	}
+	reader.docs = docsFor(DocumentTerms, DocumentMap, DocumentPriceSheet)
+	if err := submit("store-live", "sub-2"); err != nil {
+		t.Fatalf("a submission with all three documents: %v", err)
+	}
+	if writer.count("createApplicationRow") != 1 {
+		t.Fatalf("createApplicationRow written %d times, want 1", writer.count("createApplicationRow"))
 	}
 }
 

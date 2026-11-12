@@ -14,8 +14,8 @@
 // their own applications, a cluster owner reads every merchant's, and
 // nobody else reads any.
 
-use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings }
-use wholesale.shapes.{ applicationFull, applicationDecisionFull, entitlementFull, wholesaleSettingsFull }
+use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings, documentVersion }
+use wholesale.shapes.{ applicationFull, applicationDecisionFull, entitlementFull, wholesaleSettingsFull, documentVersionFull }
 use wholesale.shapes.{ wholesaleStorePlan }
 use shopify.overlay.concepts.{ store }
 
@@ -146,6 +146,19 @@ query wholesaleSettings wholesaleSettingsById {
   }
   filter  row => row.id == args.settingsId
   shape   wholesaleSettingsFull
+}
+
+@description("Every version of one of a store's documents (terms, map or priceSheet), newest first, paged to its end by the caller: the first row is the current version. A version is append-only, so this IS the document's history. Matched as written, so a reader asks every form of the store id (bare, or v1:shopify:store:<id>).")
+@actor
+query documentVersion documentVersionsForStore {
+  args {
+    storeId  string!
+    kind     string!
+  }
+  filter  row => row.storeId == args.storeId && row.kind == args.kind
+  sort    "row.createdAt", "desc"
+  paginate 200
+  shape   documentVersionFull
 }
 
 @description("The bound store's plan, through the pack's own narrow projection. THIS READ ANSWERING NOTHING IS ORDINARY: v1:shopify:store is readable by a cluster owner or a developer only (its read floor is developer), so a merchant reads no rows here. What an unknown plan MEANS is each adapter's to say -- shopifyB2B refuses, because it cannot establish the catalog ceiling it has to respect; customerTag proceeds, because it needs no plan at all. That difference is what plan-independence is.")

@@ -238,12 +238,13 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 	// THE GATE, AND IT IS FAIL-CLOSED. A merchant who has never touched
 	// their wholesale settings has not asked the internet for their
 	// customers' business details, so absent settings refuse.
-	open, err := p.applicationsOpen(ctx, storeID)
+	settings, err := p.settingsRowAt(ctx, storeID)
 	if err != nil {
 		return nil, err
 	}
-	if !open {
-		return nil, fmt.Errorf("wholesale: this store is not accepting applications")
+	s := EffectiveSettings(settings)
+	if !s.ApplicationsOpen {
+		return nil, errNotAccepting
 	}
 	// THE BUILTIN DECIDED; THE MUTATION WRITES. A builtin's returned nodes
 	// are the expression's VALUE and are never persisted, so the row is
@@ -295,6 +296,17 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 	if taken {
 		return p.existingSubmission(ctx, applicationID)
 	}
+	// A STORE THAT REQUIRES ITS TERMS TAKES NO APPLICATION UNTIL THEY EXIST,
+	// judged at write time. The shopper is refused exactly as a closed store
+	// refuses them -- the same words, so the same redirect: the sentence that
+	// names the missing documents is for the store's people, never for a member
+	// of the public.
+	if err := p.termsRuleRefusal(ctx, storeID, s.ApplicationsOpen, s.TermsRequired); err != nil {
+		if errors.Is(err, errTermsFirst) {
+			return nil, errNotAccepting
+		}
+		return nil, err
+	}
 	fenced := memql.ContextWithRowVersionFence(ctx, applicationConcept, applicationID, time.Time{})
 	// accountId IS THE SITE'S ORGANIZATION, stamped by the shopper handler
 	// from the site the post arrived on, and empty for a site with none --
@@ -324,6 +336,10 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 		"companyName":   company,
 	})
 }
+
+// errNotAccepting is a shopper's refusal by a store that takes no application
+// now: closed, or requiring terms it has not published.
+var errNotAccepting = errors.New("wholesale: this store is not accepting applications")
 
 // accountIsTheSites refuses an accountId unless the named site, read as the
 // system, is of that organization, serves the named store, and is owned by
