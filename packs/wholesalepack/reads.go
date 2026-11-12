@@ -315,7 +315,8 @@ func (p *Provider) list(ctx context.Context, args map[string]any, _ int) ([]memo
 			"createdAt":      timeText(a.row["createdAt"]),
 		})
 	}
-	return confirm("wholesale:list", map[string]any{"rows": rows, "counts": counts, "next": next, "truncated": truncated})
+	return confirm("wholesale:list", map[string]any{"rows": rows, "counts": counts, "next": next, "truncated": truncated,
+		"operator": isClusterOperator(ctx)})
 }
 
 // get answers wholesaleGet.
@@ -570,9 +571,12 @@ func (p *Provider) buyers(ctx context.Context, args map[string]any, _ int) ([]me
 		if err != nil {
 			return nil, err
 		}
-		access, code, grantedAt, customer := AccessNone, "", "", ""
+		// WHY ACCESS IS NOT ON is the entitlement's own sentence, the one the
+		// application's page shows (wholesaleGet's entitlement.error).
+		access, code, reason, grantedAt, customer := AccessNone, "", "", "", ""
 		if ent != nil {
 			access, code, customer = trimmed(ent["state"]), trimmed(ent["errorCode"]), trimmed(ent["shopifyCustomerId"])
+			reason = asString(ent["error"])
 			if access == EntitlementGranted {
 				grantedAt = timeText(ent["createdAt"])
 			}
@@ -583,11 +587,13 @@ func (p *Provider) buyers(ctx context.Context, args map[string]any, _ int) ([]me
 			"applicantEmail":    asString(a.row["applicantEmail"]),
 			"accessState":       access,
 			"errorCode":         code,
+			"error":             reason,
 			"grantedAt":         grantedAt,
 			"shopifyCustomerId": customer,
 		})
 	}
-	return confirm("wholesale:buyers", map[string]any{"rows": rows, "next": next, "truncated": truncated})
+	return confirm("wholesale:buyers", map[string]any{"rows": rows, "next": next, "truncated": truncated,
+		"operator": isClusterOperator(ctx)})
 }
 
 // admitStore reads a store-wide read's store and site and checks the site is
