@@ -431,6 +431,26 @@ builtin libraryRevisionReferences {
 @args(profile="object")
 builtin libraryRemoveDocumentAnnotation { artifactId string! commentId string! }
 
+/// Remove one artifact ENTIRELY, for the engine's own use: every version of every row the Library
+/// keeps for it, its index row with them, and what hangs from it (its version history, the comments
+/// on it). Named by what it indexes (sourceConceptRef) or by the index row's id (artifactId).
+///
+/// Archiving is the Library's removal for a person, and destroys nothing. This one is for an
+/// obligation that says a document must be gone: a customer's erasure removes the exports her data
+/// requests filed. It removes a generated output, whose whole content is its own row. An artifact
+/// whose content is kept elsewhere (a file's bytes, a document, a note or a live source of another
+/// domain) is refused, with nothing removed, rather than half removed and reported gone.
+///
+/// NOT ON THE WIRE, and not in an SDK: a builtin carries no @serverOnly, so the handler refuses any
+/// call that is not the engine's own before it reads a row. Safe to make twice. Answers `removed`,
+/// the row versions that went, and `remaining`, what a second look still found (0).
+@executor("integration.library.removeArtifact")
+@args(profile="object")
+builtin libraryRemoveArtifact {
+  sourceConceptRef string
+  artifactId string
+}
+
 /// Decode and validate an image acquisition plan before any effects.
 @executor("integration.library.revisionImagePlan")
 @args(profile="object")
