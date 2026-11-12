@@ -470,7 +470,8 @@ func percentDecoded(seg string) string {
 // combination, deduplicated and sorted. The blob reader compares these
 // prefixes exactly, so the list is every spelling a real key can have and no
 // other -- the same set Admits accepts. A placeholder with no usable value
-// (missing, empty, not a string, with surrounding whitespace, or holding a
+// (missing, empty, not a string, with surrounding whitespace, holding a
+// separator, or with a spelling that percent-decodes to a relative step or a
 // separator) gives an empty slice: a row that does not say whose bytes these
 // are owns none.
 //
@@ -491,6 +492,15 @@ func (f BytesField) Places(rowID string, payload map[string]any) []string {
 				return out
 			}
 			choices = spellings(value, expected)
+			// Every spelling must stand as a segment too: an id whose short
+			// form decodes to a relative step (`v1:platform:site:%2e`) owns
+			// no bytes, rather than a place that offers `sites/%2e`, which
+			// Admits refuses.
+			for _, c := range choices {
+				if !usableSegment(c) {
+					return out
+				}
+			}
 		}
 		next := make([]string, 0, len(prefixes)*len(choices))
 		for _, p := range prefixes {

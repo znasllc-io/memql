@@ -709,6 +709,8 @@ func TestBytesFieldPlaces(t *testing.T) {
 		{"a short id that reads as a version", siteBundle, "v1:platform:site:v2", nil, []string{"sites/v1:platform:site:v2"}},
 		{"a short id that reads as a concept", siteBundle, "v1:platform:site:v2:a:b", nil, []string{"sites/v1:platform:site:v2:a:b"}},
 		{"a row id with surrounding space", siteBundle, " s1", nil, []string{}},
+		{"a short id that decodes to a dot", siteBundle, "v1:platform:site:%2e", nil, []string{}},
+		{"a bare id that decodes to a dot", siteBundle, "%2e", nil, []string{}},
 		{"an owner with surrounding space", libraryFile, "f1", map[string]any{"ownerUserId": "u1 "}, []string{}},
 		{"a hand-built carried field naming another field", BytesField{Under: "x/{folderId}", Concept: "v1:a:b"}, "r1",
 			map[string]any{"folderId": "v1:platform:package:p1"}, []string{}},
@@ -801,10 +803,12 @@ func TestBytesFieldPlacesAndAdmitsAgree(t *testing.T) {
 		{snapshot, "d1", map[string]any{"packageId": "p1"}},
 		{siteBundle, "v1:platform:site:v2", nil},
 		{siteBundle, "v1:platform:site:v2:a:b", nil},
+		{siteBundle, "v1:platform:site:%2e", nil},
+		{siteBundle, "v1:platform:site:a%2Fb", nil},
 		{snapshot, "d1", map[string]any{"packageId": "v1:platform:package:v2"}},
 	}
 	candidates := []string{}
-	for _, short := range []string{"u1", "s1", "p1", "u2", "v2", "v2:a:b"} {
+	for _, short := range []string{"u1", "s1", "p1", "u2", "v2", "v2:a:b", "%2e", "%2e%2e", "a%2Fb"} {
 		candidates = append(candidates, short)
 		for _, concept := range []string{"v1:identity:user", "v1:agents:agent", "v1:platform:site", "v1:platform:package", "v1:library:file"} {
 			candidates = append(candidates, concept+":"+short, "x:"+concept+":"+short)
