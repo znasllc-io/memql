@@ -113,9 +113,17 @@ func (c *Connector) ReconcilePartition(ctx context.Context, partition, conceptNa
 	return report, err
 }
 
-// ingestingStore resolves a partition to its store, refusing one that is not
-// a store this connector ingests: the runtime only asks for partitions it was
-// given, so a store that has stopped ingesting since is named, not swept.
+// ingestingStore resolves a partition to its store. The runtime only asks for
+// partitions it was given, so a store that does not ingest here has stopped
+// since the pass listed it: somebody paused it, or it was uninstalled.
+//
+// THAT IS A WAIT, NOT A FAILURE (memqlsync.Busy): the store cannot be asked
+// now, and nothing is wrong with any of its domains. The runtime leaves a busy
+// backfill's row as it is -- queued, or running at its cursor -- and skips a
+// busy sweep, so a store resumed later continues from where it stopped. As a
+// plain error the runtime recorded the backfill `failed`, which nothing
+// retries: a pause that landed while a pass ran ended it for good. A store
+// that is not connected at all is still an error.
 func (c *Connector) ingestingStore(ctx context.Context, partition string) (Store, error) {
 	stores, err := c.stores.Stores(ctx)
 	if err != nil {
@@ -126,7 +134,7 @@ func (c *Connector) ingestingStore(ctx context.Context, partition string) (Store
 			continue
 		}
 		if !store.Ingests() {
-			return Store{}, fmt.Errorf("shopify: store %q does not ingest, so it is not a partition of the mirror", partition)
+			return Store{}, memqlsync.Busy(ConnectorName, fmt.Sprintf("store %q does not ingest now, so its mirror waits for it", partition))
 		}
 		return store, nil
 	}

@@ -29,7 +29,8 @@ import (
 //	queueBackfill    ENGINE-DRIVEN. A connector asking for a backfill --
 //	                 at connect, at boot -- without running it.
 //	continueBackfills SCHEDULED. A cron automation carries every queued
-//	                 or running backfill on by one page budget per tick.
+//	                 or running backfill on, in rounds, for four minutes
+//	                 of each tick.
 //	setSyncPaused    OPERATOR-DRIVEN, and the switch that stops the
 //	                 others for one domain.
 //	retryInbound     SCHEDULED. A cron automation tries again the failed
@@ -115,7 +116,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "continueBackfills",
-			Description: "Continue every queued or running backfill: for each partition of each bound connector, advance the one domain that is running, else start the first queued, by one page budget. Leaves paused domains alone. Refuses a call without internal origin.",
+			Description: "Continue every queued or running backfill, in rounds, for four minutes: in each round every partition of each bound connector with work left advances the one domain that is running, else starts the first queued, by one page budget. Leaves paused domains alone. Refuses a call without internal origin.",
 			Handler:     i.handleContinueBackfills,
 		},
 		{

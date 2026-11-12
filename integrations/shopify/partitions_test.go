@@ -125,6 +125,39 @@ func TestAStoreThatDoesNotIngestIsNotAPartition(t *testing.T) {
 	}
 }
 
+// A store that stopped ingesting -- paused, or uninstalled -- cannot be asked
+// now, and says so as the origin being busy does (memqlsync.Busy): the runtime
+// leaves a busy backfill's row as it is, where a plain error wrote `failed`,
+// which nothing retries, so a pause that landed while a pass ran ended the
+// store's backfill for good. A store that is not connected at all is still an
+// error of its own.
+func TestAStoreThatStoppedIngestingAnswersThatItCannotBeAskedNow(t *testing.T) {
+	h := newHarness(t)
+	h.engine.setRows("stores", []map[string]any{
+		storeRow(testStoreID, "acme-widgets.myshopify.com", StatusLive, nil),
+		storeRow("store-paused", "store-paused", StatusPaused, nil),
+		storeRow("store-uninstalled", "store-uninstalled", StatusLive, map[string]any{"uninstalledAt": "2026-08-20T10:00:00Z"}),
+	})
+	ctx := context.Background()
+	for _, id := range []string{"store-paused", "store-uninstalled"} {
+		_, err := h.conn.BackfillPartition(ctx, id, "v1:shopify:product", inFlight(backfillCursor{OperationID: "gid://shopify/BulkOperation/1", Line: 500}))
+		if !memqlsync.IsBusy(err) || !strings.Contains(err.Error(), id) {
+			t.Errorf("BackfillPartition(%q) = %v, want it to say the store cannot be asked now, naming it", id, err)
+		}
+		_, err = h.conn.ReconcilePartition(ctx, id, "v1:shopify:product", h.now)
+		if !memqlsync.IsBusy(err) || !strings.Contains(err.Error(), id) {
+			t.Errorf("ReconcilePartition(%q) = %v, want it to say the store cannot be asked now, naming it", id, err)
+		}
+	}
+	_, err := h.conn.BackfillPartition(ctx, "no-such-store", "v1:shopify:product", "")
+	if err == nil || memqlsync.IsBusy(err) {
+		t.Errorf("BackfillPartition of a store that is not connected = %v, want an error that is not a wait", err)
+	}
+	if seen := h.admin.seen(); len(seen) != 0 {
+		t.Fatalf("the origin was asked %d times on behalf of stores that do not ingest", len(seen))
+	}
+}
+
 func TestOneStoresRefusalIsItsOwn(t *testing.T) {
 	h := newHarness(t)
 	second := withTwoStores(t, h)

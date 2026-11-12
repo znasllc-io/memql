@@ -650,6 +650,28 @@ func TestTheCadenceStillRunsFromWhenTheSweepEnded(t *testing.T) {
 // stateRunner is a runner over a state-keeping engine and one bound
 // connector, without the process-global registry.
 func stateRunner(engine *stateEngine, c memqlsync.Connector) *Runner {
+	r, _ := clockedRunner(engine, c)
+	return r
+}
+
+// passClock is the clock of a runner under test. Nothing moves it but a
+// pass's own pauses and a test, so a pass that waits on its origin spends its
+// budget without the test sleeping.
+type passClock struct {
+	at     time.Time
+	pauses []time.Duration
+}
+
+func (c *passClock) now() time.Time { return c.at }
+
+func (c *passClock) pause(ctx context.Context, d time.Duration) error {
+	c.pauses = append(c.pauses, d)
+	c.at = c.at.Add(d)
+	return ctx.Err()
+}
+
+// clockedRunner is stateRunner with its clock handed back.
+func clockedRunner(engine *stateEngine, c memqlsync.Connector) (*Runner, *passClock) {
 	store := NewStore(engine)
 	r := NewRunner(store, NewApplier(store, newFakeWriter()), discardLogger())
 	r.lookup = func(name string) (memqlsync.Connector, bool) {
@@ -659,8 +681,10 @@ func stateRunner(engine *stateEngine, c memqlsync.Connector) *Runner {
 		return nil, false
 	}
 	r.bound = func() []string { return []string{c.Name()} }
-	r.now = func() time.Time { return testNow }
-	return r
+	clock := &passClock{at: testNow}
+	r.now = clock.now
+	r.pause = clock.pause
+	return r, clock
 }
 
 // continueOnce runs one continuing pass and fails the test on an error.
@@ -725,20 +749,44 @@ func TestAQueuedBackfillIsStartedByTheContinuingPass(t *testing.T) {
 }
 
 func TestABackfillThatUsedItsPageBudgetIsContinuedToComplete(t *testing.T) {
+	fivePages := func() *fakeConnector {
+		return mirrorConnector(
+			memqlsync.BackfillPage{NextCursor: "c-1"},
+			memqlsync.BackfillPage{NextCursor: "c-2"},
+			memqlsync.BackfillPage{NextCursor: "c-3"},
+			memqlsync.BackfillPage{NextCursor: "c-4"},
+			memqlsync.BackfillPage{Done: true},
+		)
+	}
+
+	// Within one pass, while its budget lasts: a round for each page budget.
 	engine := newStateEngine()
-	c := mirrorConnector(
-		memqlsync.BackfillPage{NextCursor: "c-1"},
-		memqlsync.BackfillPage{NextCursor: "c-2"},
-		memqlsync.BackfillPage{NextCursor: "c-3"},
-		memqlsync.BackfillPage{NextCursor: "c-4"},
-		memqlsync.BackfillPage{Done: true},
-	)
+	c := fivePages()
 	r := stateRunner(engine, c)
 	r.maxPages = 2
 	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
 		t.Fatal(err)
 	}
+	if res := continueOnce(t, r); res != (ContinueResult{Started: 1, Completed: 1}) {
+		t.Errorf("one pass = %+v, want the backfill started and carried to complete over its rounds", res)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "complete" || st.BackfillCursor != "" {
+		t.Errorf("row = %s at %q, want complete", st.BackfillStatus, st.BackfillCursor)
+	}
+	if got := strings.Join(c.backfillSeen, ","); got != ",c-1,c-2,c-3,c-4" {
+		t.Errorf("cursors asked for = %q, want each page once from where the last round stopped", got)
+	}
 
+	// And by the next pass, when a round uses the budget up: every page here
+	// takes three minutes, so each pass has time for one round of two.
+	engine = newStateEngine()
+	c = fivePages()
+	r, clock := clockedRunner(engine, c)
+	r.maxPages = 2
+	c.duringBackfill = func(string) { clock.at = clock.at.Add(3 * time.Minute) }
+	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
 	want := []struct {
 		res    ContinueResult
 		status string
@@ -752,11 +800,11 @@ func TestABackfillThatUsedItsPageBudgetIsContinuedToComplete(t *testing.T) {
 		res := continueOnce(t, r)
 		st := keptState(t, engine, testMirrorConcept, "")
 		if res != w.res || st.BackfillStatus != w.status || st.BackfillCursor != w.cursor {
-			t.Fatalf("call %d: result %+v, row %s at %q; want %+v, %s at %q", i+1, res, st.BackfillStatus, st.BackfillCursor, w.res, w.status, w.cursor)
+			t.Fatalf("pass %d: result %+v, row %s at %q; want %+v, %s at %q", i+1, res, st.BackfillStatus, st.BackfillCursor, w.res, w.status, w.cursor)
 		}
 	}
 	if got := strings.Join(c.backfillSeen, ","); got != ",c-1,c-2,c-3,c-4" {
-		t.Errorf("cursors asked for = %q, want each page once from where the last call stopped", got)
+		t.Errorf("cursors asked for = %q, want each page once from where the last pass stopped", got)
 	}
 	if res := continueOnce(t, r); res != (ContinueResult{}) || len(c.backfillSeen) != 5 {
 		t.Errorf("a complete backfill was continued again: %+v, %d asks", res, len(c.backfillSeen))
@@ -765,56 +813,93 @@ func TestABackfillThatUsedItsPageBudgetIsContinuedToComplete(t *testing.T) {
 
 func TestOneStoreRunsOneBackfillAtATime(t *testing.T) {
 	engine := newStateEngine()
-	p := newFakePartitioned("a")
-	p.domains = append(p.domains, memqlsync.DomainSpec{Concept: secondMirrorConcept, Direction: memqlsync.DirectionInbound})
-	p.partPages["a"] = []memqlsync.BackfillPage{{NextCursor: "a-1"}, {Done: true}}
-	r := stateRunner(engine, p)
-	r.maxPages = 1
-	for _, concept := range []string{testMirrorConcept, secondMirrorConcept} {
-		if err := r.QueueBackfill(context.Background(), "shopify", concept, "a"); err != nil {
-			t.Fatal(err)
+	o := newRoundsOrigin("a")
+	o.preparing["a/product"] = 2
+	// What the first domain's row said each time a step was asked of the
+	// second.
+	var firstWas []string
+	o.answer = func(_, domain, _ string) (memqlsync.BackfillPage, error, bool) {
+		if domain == "customer" {
+			firstWas = append(firstWas, keptState(t, engine, testMirrorConcept, "a").BackfillStatus)
+		}
+		return memqlsync.BackfillPage{}, nil, false
+	}
+	r := stateRunner(engine, o)
+	queueDomains(t, r, "a", testMirrorConcept, secondMirrorConcept)
+
+	if res := continueOnce(t, r); res != (ContinueResult{Started: 2, Completed: 2}) {
+		t.Errorf("the pass = %+v, want both domains started and completed, one after the other", res)
+	}
+	if len(firstWas) == 0 {
+		t.Fatal("the second domain was never asked")
+	}
+	for _, status := range firstWas {
+		if status != "complete" {
+			t.Errorf("the second domain was asked while the first was %q: a store runs one backfill at a time", status)
 		}
 	}
-
-	if res := continueOnce(t, r); res != (ContinueResult{Started: 1}) {
-		t.Errorf("first call = %+v, want one domain started", res)
-	}
-	if res := continueOnce(t, r); res != (ContinueResult{Completed: 1}) {
-		t.Errorf("second call = %+v, want the running domain completed and nothing else started", res)
-	}
-	if st := keptState(t, engine, secondMirrorConcept, "a"); st.BackfillStatus != "queued" {
-		t.Fatalf("the second domain is %q after the first completed in the same call; it waits for the next", st.BackfillStatus)
-	}
-	if res := continueOnce(t, r); res != (ContinueResult{Started: 1, Completed: 1}) {
-		t.Errorf("third call = %+v, want the second domain started and completed", res)
-	}
-	want := "a/" + testMirrorConcept + ",a/" + testMirrorConcept + ",a/" + secondMirrorConcept
-	if got := strings.Join(p.partBackfills, ","); got != want {
+	want := strings.Repeat("a/product,", 4) + "a/customer,a/customer"
+	if got := strings.Join(o.asked, ","); got != want {
 		t.Errorf("backfill steps = %s, want %s: the second domain may not start while the first runs", got, want)
 	}
 }
 
-func TestAPollThatMadeNoProgressYieldsUntilTheNextTick(t *testing.T) {
-	engine := newStateEngine()
+func TestAPollThatMadeNoProgressWaitsAndIsAskedAgainInTheNextRound(t *testing.T) {
 	// Three answers of an operation still running: no writes, and the cursor
 	// it was given back.
-	c := mirrorConnector(
-		memqlsync.BackfillPage{NextCursor: "op-1"},
-		memqlsync.BackfillPage{NextCursor: "op-1"},
-		memqlsync.BackfillPage{NextCursor: "op-1"},
-	)
+	stillRunning := func() *fakeConnector {
+		return mirrorConnector(
+			memqlsync.BackfillPage{NextCursor: "op-1"},
+			memqlsync.BackfillPage{NextCursor: "op-1"},
+			memqlsync.BackfillPage{NextCursor: "op-1"},
+		)
+	}
+
+	// One invocation stops at the poll: asking again at once would spend its
+	// page budget waiting.
+	engine := newStateEngine()
+	c := stillRunning()
 	r := stateRunner(engine, c)
 	writeKept(t, engine, SyncState{BackfillStatus: "running", BackfillCursor: "op-1"})
-
-	res := continueOnce(t, r)
-	if len(c.backfillSeen) != 1 {
-		t.Fatalf("the connector was asked %d times in one tick, want once: a poll that made no progress waits for the next tick", len(c.backfillSeen))
+	res, err := r.StartBackfill(context.Background(), "shopify", testMirrorConcept, "")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if res != (ContinueResult{}) {
-		t.Errorf("result = %+v, want nothing: a poll is not progress", res)
+	if len(c.backfillSeen) != 1 || res.Done || res.Abandoned || res.Waiting {
+		t.Fatalf("one invocation asked %d times and answered %+v, want one poll and a backfill still running", len(c.backfillSeen), res)
 	}
 	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "running" || st.BackfillCursor != "op-1" {
 		t.Errorf("row = %s at %q, want still running at op-1", st.BackfillStatus, st.BackfillCursor)
+	}
+
+	// The continuing pass asks again in its next round, after a pause, until
+	// the origin has the export ready.
+	engine = newStateEngine()
+	c = stillRunning()
+	r, clock := clockedRunner(engine, c)
+	writeKept(t, engine, SyncState{BackfillStatus: "running", BackfillCursor: "op-1"})
+	writes := writesCount(engine)
+	if res := continueOnce(t, r); res != (ContinueResult{Completed: 1}) {
+		t.Errorf("result = %+v, want the backfill completed once its export was ready: a poll is not progress", res)
+	}
+	if len(c.backfillSeen) != 4 {
+		t.Errorf("the connector was asked %d times, want 4: three polls and the read", len(c.backfillSeen))
+	}
+	if len(clock.pauses) != 3 {
+		t.Errorf("the pass paused %d times, want once after each poll that made no progress", len(clock.pauses))
+	}
+	for _, p := range clock.pauses {
+		if p != continueIdlePause {
+			t.Errorf("a pause of %s, want %s", p, continueIdlePause)
+		}
+	}
+	// A poll writes nothing: the row is written when the backfill completes,
+	// its cursor and then its status.
+	if got := rowWritesSince(engine, writes); len(got) != 2 {
+		t.Errorf("three polls and a read wrote the row %d times, want only the read's two writes: %v", len(got), got)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "complete" {
+		t.Errorf("status = %q, want complete", st.BackfillStatus)
 	}
 }
 

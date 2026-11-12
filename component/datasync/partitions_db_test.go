@@ -161,9 +161,9 @@ func TestSyncStatesReadsPastTheFirstPage(t *testing.T) {
 }
 
 // A queued backfill is carried to complete by the continuing pass, through a
-// real engine: the queue lands, syncStatesBackfilling lists the row while it
-// is queued or running and only at its current version, and drops it once it
-// is complete although every earlier version of it was running.
+// real engine: the queue lands, each round of the pass reads the row back as
+// the round before left it -- running, at that round's cursor -- and the pass
+// leaves it complete. A second pass finds nothing to do.
 func TestAQueuedBackfillRunsToCompleteAgainstARealEngine(t *testing.T) {
 	eng, db := healthEngine(t)
 	if eng == nil {
@@ -186,52 +186,46 @@ func TestAQueuedBackfillRunsToCompleteAgainstARealEngine(t *testing.T) {
 	r := NewRunner(store, NewApplier(store, newFakeWriter()), discardLogger())
 	r.lookup = func(name string) (memqlsync.Connector, bool) { return c, name == connector }
 	r.bound = func() []string { return []string{connector} }
-	r.maxPages = 1
-
-	backfilling := func() []map[string]any {
+	r.maxPages = 1 // one page a round
+	kept := func() SyncState {
 		t.Helper()
-		rows, err := store.rows(ctx, call("query", "syncStatesBackfilling", arg{"connector", connector}))
+		st, err := store.SyncStateFor(ctx, testMirrorConcept, connector, "inbound", "")
 		if err != nil {
-			t.Fatalf("syncStatesBackfilling: %v", err)
+			t.Fatal(err)
 		}
-		return rows
+		return st
 	}
 
 	if err := r.QueueBackfill(ctx, connector, testMirrorConcept, ""); err != nil {
 		t.Fatalf("QueueBackfill: %v", err)
 	}
-	if rows := backfilling(); len(rows) != 1 || stringField(rows[0], "backfillStatus") != "queued" {
-		t.Fatalf("syncStatesBackfilling after the queue = %v, want the one queued row", rows)
+	if st := kept(); st.BackfillStatus != "queued" || st.BackfillCursor != "" {
+		t.Fatalf("after the queue the row is %s at %q, want queued from the start", st.BackfillStatus, st.BackfillCursor)
 	}
 
-	var total ContinueResult
-	for i := 0; i < 3; i++ {
-		res, err := r.ContinueBackfills(ctx)
-		if err != nil {
-			t.Fatalf("ContinueBackfills %d: %v", i+1, err)
-		}
-		total.Started += res.Started
-		total.Advanced += res.Advanced
-		total.Completed += res.Completed
-		if i == 1 {
-			rows := backfilling()
-			if len(rows) != 1 || stringField(rows[0], "backfillStatus") != "running" || stringField(rows[0], "backfillCursor") != "c-2" {
-				t.Fatalf("syncStatesBackfilling mid-way = %v, want one row, running at its current cursor", rows)
-			}
-		}
+	// What the row said while each page was out.
+	var during []string
+	c.duringBackfill = func(cursor string) {
+		st := kept()
+		during = append(during, st.BackfillStatus+"@"+st.BackfillCursor)
 	}
-	if total != (ContinueResult{Started: 1, Advanced: 1, Completed: 1}) {
-		t.Errorf("three calls = %+v, want started, advanced, completed", total)
-	}
-	st, err := store.SyncStateFor(ctx, testMirrorConcept, connector, "inbound", "")
+	res, err := r.ContinueBackfills(ctx)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("ContinueBackfills: %v", err)
 	}
-	if st.BackfillStatus != "complete" {
-		t.Fatalf("status = %q after three calls, want complete", st.BackfillStatus)
+	if res != (ContinueResult{Started: 1, Completed: 1}) {
+		t.Errorf("the pass = %+v, want the backfill started and completed", res)
 	}
-	if rows := backfilling(); len(rows) != 0 {
-		t.Fatalf("syncStatesBackfilling still lists a complete row: %v -- a list returning an older version would continue it forever", rows)
+	if got := strings.Join(during, ","); got != "running@,running@c-1,running@c-2" {
+		t.Errorf("the row while each page was out = %s, want running at the cursor the round before recorded", got)
+	}
+	if st := kept(); st.BackfillStatus != "complete" {
+		t.Fatalf("status = %q after the pass, want complete", st.BackfillStatus)
+	}
+
+	asked := len(c.backfillSeen)
+	if res, err := r.ContinueBackfills(ctx); err != nil || res != (ContinueResult{}) || len(c.backfillSeen) != asked {
+		t.Errorf("a second pass = %+v, %v, with %d more steps; want nothing: a complete row is not continued", res, err, len(c.backfillSeen)-asked)
 	}
 }
 

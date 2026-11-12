@@ -182,8 +182,10 @@ func TestABackfillQueuedOrRunningIsStarting(t *testing.T) {
 	}
 }
 
-// doesNotIngest is the error the runtime writes for a store that stopped
-// ingesting between being listed and being swept (ingestingStore).
+// doesNotIngest is the error an earlier build wrote on a domain's row for a
+// store that stopped ingesting between being listed and being swept. A sweep
+// of such a store is skipped now and writes nothing (ingestingStore), but a
+// row written before keeps the text.
 const doesNotIngest = `shopify: store "acme" does not ingest, so it is not a partition of the mirror`
 
 func TestAPausedStoreIsPausedAndCarriesNoReasons(t *testing.T) {

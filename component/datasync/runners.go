@@ -54,6 +54,10 @@ type Runner struct {
 	// with its cursor persisted and the next invocation continues -- a
 	// bound on one call, not on the backfill.
 	maxPages int
+	// pause waits between two rounds of a continuing pass, and answers the
+	// context's error when the context is done first. A test replaces it,
+	// together with now, so a pass that waits does not sleep.
+	pause func(ctx context.Context, d time.Duration) error
 }
 
 // NewRunner builds the backfill / reconciliation driver.
@@ -69,6 +73,19 @@ func NewRunner(store *Store, applier *Applier, logger *slog.Logger) *Runner {
 		lookup:   memqlsync.Lookup,
 		bound:    memqlsync.BoundNames,
 		maxPages: 500,
+		pause:    pauseFor,
+	}
+}
+
+// pauseFor waits d, or until ctx is done, whichever comes first.
+func pauseFor(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 
@@ -237,18 +254,36 @@ func cleanPartitions(parts []string) []string {
 	return out
 }
 
+// errRowTaken is a write that did not land because the row is no longer the
+// invocation's: it was queued again from nothing, or another invocation holds
+// it. The invocation abandons.
+var errRowTaken = errors.New("datasync: the row is no longer this invocation's")
+
+// errUnrecorded is a write the store could not make at all -- an engine error,
+// or a row-version fence lost maxPatchAttempts times in a row. It is an error
+// and never an abandonment: nothing says another writer holds the row, and an
+// operator's "Backfill now" must not be told so.
+var errUnrecorded = errors.New("datasync: the backfill's progress could not be recorded")
+
 // backfillOne backfills one domain of one partition ("" for a connector
-// without partitions).
+// without partitions), from the row as it is now.
 func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector, specs map[string]memqlsync.DomainSpec, conceptID, partition string) (BackfillResult, error) {
+	// Read fresh: the cursor resumed from and the status decided on must be
+	// the row as it is, not as this node's result cache last saw it.
+	st, err := r.store.SyncStateFor(memql.ContextWithFreshRead(OperatorContext(ctx)), conceptID, connector.Name(), string(memqlsync.DirectionInbound), partition)
+	if err != nil {
+		return BackfillResult{}, err
+	}
+	return r.backfillFrom(ctx, connector, specs, conceptID, partition, st)
+}
+
+// backfillFrom is one invocation of a backfill from st, the domain's row as
+// its caller has just read it, fresh: up to maxPages pages, each applied and
+// its cursor recorded before the next is asked for.
+func (r *Runner) backfillFrom(ctx context.Context, connector memqlsync.Connector, specs map[string]memqlsync.DomainSpec, conceptID, partition string, st SyncState) (BackfillResult, error) {
 	var out BackfillResult
 	connectorName := connector.Name()
 	opCtx := OperatorContext(ctx)
-	// Read fresh: the cursor resumed from and the status decided on must be
-	// the row as it is, not as this node's result cache last saw it.
-	st, err := r.store.SyncStateFor(memql.ContextWithFreshRead(opCtx), conceptID, connectorName, string(memqlsync.DirectionInbound), partition)
-	if err != nil {
-		return out, err
-	}
 	if st.Paused {
 		// A pause is an operator's decision and outranks a request to
 		// run. Returning cleanly rather than erroring: "paused" is a
@@ -275,11 +310,17 @@ func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector,
 	// nothing more, records no error, and counts nothing. Without this, the
 	// next page would write the old cursor back over a restart, and a fetch
 	// made with a revoked token would write `failed`, which nothing retries.
+	//
+	// A write that names only what the row already holds is not made: the row
+	// is checked all the same, on a fresh read. An invocation that only polls
+	// an export the origin is still preparing -- which a continuing pass does
+	// every few seconds -- would otherwise add two versions of the row to its
+	// history for every poll.
 	connCtx := auth.ContextWithConnectorActor(ctx, connectorName)
 	cursor := st.BackfillCursor
 	priorStatus := st.BackfillStatus
 	heldStatus, heldCursor := st.BackfillStatus, st.BackfillCursor
-	claim := func(decide func(cur SyncState) SyncPatch) bool {
+	claim := func(decide func(cur SyncState) SyncPatch) error {
 		mine := false
 		var patch SyncPatch
 		err := r.store.PatchSyncState(opCtx, conceptID, connectorName, string(memqlsync.DirectionInbound), partition,
@@ -289,15 +330,13 @@ func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector,
 					return nil, false
 				}
 				patch = decide(cur)
-				return patch, true
+				return patch, !(cur.Stored && holdsBackfillPatch(cur, patch))
 			})
 		if err != nil {
-			r.logger.Warn("datasync: could not record a domain's health; the backfill stops here and resumes from what was recorded",
-				"connector", connectorName, "concept", conceptID, "partition", partition, "error", err)
-			return false
+			return fmt.Errorf("%w: %s from %q%s: %w", errUnrecorded, conceptID, connectorName, partitionSuffix(partition), err)
 		}
 		if !mine {
-			return false
+			return errRowTaken
 		}
 		if v, ok := patch["backfillStatus"].(string); ok {
 			heldStatus = v
@@ -305,19 +344,31 @@ func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector,
 		if v, ok := patch["backfillCursor"].(string); ok {
 			heldCursor = v
 		}
-		return true
+		return nil
 	}
-	set := func(p SyncPatch) bool { return claim(func(SyncState) SyncPatch { return p }) }
-	abandon := func() (BackfillResult, error) {
-		r.logger.Info("datasync backfill: the row is no longer this invocation's (queued again, or held by another); abandoned, nothing written",
-			"connector", connectorName, "concept", conceptID, "partition", partition, "pages", out.Pages)
-		out.Cursor, out.Abandoned = cursor, true
-		return out, nil
+	set := func(p SyncPatch) error { return claim(func(SyncState) SyncPatch { return p }) }
+	// stop is the invocation's answer when a write did not land: an
+	// abandonment when the row is no longer its own, and otherwise the error
+	// -- with `during`, the failure it was trying to record, when there is one.
+	stop := func(lost, during error) (BackfillResult, error) {
+		out.Cursor = cursor
+		if errors.Is(lost, errRowTaken) {
+			r.logger.Info("datasync backfill: the row is no longer this invocation's (queued again, or held by another); abandoned, nothing written",
+				"connector", connectorName, "concept", conceptID, "partition", partition, "pages", out.Pages)
+			out.Abandoned = true
+			return out, nil
+		}
+		r.logger.Warn("datasync: could not record a domain's health; the backfill stops here and resumes from what was recorded",
+			"connector", connectorName, "concept", conceptID, "partition", partition, "error", lost)
+		if during != nil {
+			return out, fmt.Errorf("%w (and that could not be recorded: %w)", during, lost)
+		}
+		return out, lost
 	}
 	// The start: only a row still as it was read -- queued, or, when
 	// continuing, running at the cursor read.
-	if !set(SyncPatch{"backfillStatus": "running"}) {
-		return abandon()
+	if err := set(SyncPatch{"backfillStatus": "running"}); err != nil {
+		return stop(err, nil)
 	}
 
 	fetch := func(cursor string) (memqlsync.BackfillPage, error) {
@@ -342,21 +393,22 @@ func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector,
 
 		page, pageErr := fetch(cursor)
 		if pageErr != nil && memqlsync.IsBusy(pageErr) {
-			// The origin is busy with another operation of the same kind
-			// (Shopify runs one bulk query per shop at a time). Nothing is
-			// wrong with this domain and nothing is recorded as an error: a
-			// backfill that had not begun goes back to queued, one already
-			// under way stays running at its cursor, and the continuing pass
-			// asks again on its next tick. Marking it failed would end it,
+			// The origin cannot take this now: it is busy with another
+			// operation of the same kind (Shopify runs one bulk query per shop
+			// at a time), or the store has stopped ingesting since the pass
+			// listed it. Nothing is wrong with this domain and nothing is
+			// recorded as an error: a backfill that had not begun goes back to
+			// queued, one already under way stays running at its cursor, and
+			// the continuing pass asks again. Marking it failed would end it,
 			// because nothing retries a failed backfill.
 			status := "running"
 			if priorStatus != "running" && out.Pages == 0 {
 				status = "queued"
 			}
-			if !set(SyncPatch{"backfillStatus": status, "backfillCursor": cursor}) {
-				return abandon()
+			if err := set(SyncPatch{"backfillStatus": status, "backfillCursor": cursor}); err != nil {
+				return stop(err, nil)
 			}
-			r.logger.Info("datasync backfill: the origin is busy with another operation; waiting for the next tick",
+			r.logger.Info("datasync backfill: the origin cannot take this now; it waits and is asked again",
 				"connector", connectorName, "concept", conceptID, "partition", partition, "reason", pageErr.Error())
 			out.Cursor, out.Waiting = cursor, true
 			return out, nil
@@ -379,25 +431,28 @@ func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector,
 			// It is failed, worded so that neither the refusal checks nor the
 			// clean-sweep rule read it as a refusal.
 			failed := false
-			if !claim(func(cur SyncState) SyncPatch {
+			err := claim(func(cur SyncState) SyncPatch {
 				failed = !cur.LastReconcileAt.IsZero() && !standingRefusal(cur.LastError)
 				if failed {
 					return SyncPatch{"backfillStatus": "failed", "backfillCursor": cursor, "lastError": backfillRefusedPrefix + pageErr.Error()}
 				}
 				return SyncPatch{"backfillStatus": "none", "backfillCursor": cursor, "lastError": pageErr.Error()}
-			}) {
-				return abandon()
+			})
+			refused := fmt.Errorf("datasync: backfilling %s from %q%s: %w", conceptID, connectorName, partitionSuffix(partition), pageErr)
+			if err != nil {
+				return stop(err, refused)
 			}
 			if failed {
 				return out, fmt.Errorf("datasync: backfilling %s from %q%s: %s%v", conceptID, connectorName, partitionSuffix(partition), backfillRefusedPrefix, pageErr)
 			}
-			return out, fmt.Errorf("datasync: backfilling %s from %q%s: %w", conceptID, connectorName, partitionSuffix(partition), pageErr)
+			return out, refused
 		}
 		if pageErr != nil {
-			if !set(SyncPatch{"backfillStatus": "failed", "backfillCursor": cursor, "lastError": backfillFailedPrefix + pageErr.Error()}) {
-				return abandon()
+			failure := fmt.Errorf("datasync: backfilling %s from %q%s: %w", conceptID, connectorName, partitionSuffix(partition), pageErr)
+			if err := set(SyncPatch{"backfillStatus": "failed", "backfillCursor": cursor, "lastError": backfillFailedPrefix + pageErr.Error()}); err != nil {
+				return stop(err, failure)
 			}
-			return out, fmt.Errorf("datasync: backfilling %s from %q%s: %w", conceptID, connectorName, partitionSuffix(partition), pageErr)
+			return out, failure
 		}
 		out.Pages++
 
@@ -405,8 +460,8 @@ func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector,
 		out.Applied += applied.Applied
 		out.Stale += applied.Stale
 		if applyErr != nil {
-			if !set(SyncPatch{"backfillStatus": "failed", "backfillCursor": cursor, "lastError": backfillFailedPrefix + applyErr.Error()}) {
-				return abandon()
+			if err := set(SyncPatch{"backfillStatus": "failed", "backfillCursor": cursor, "lastError": backfillFailedPrefix + applyErr.Error()}); err != nil {
+				return stop(err, applyErr)
 			}
 			return out, applyErr
 		}
@@ -415,15 +470,16 @@ func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector,
 			// No writes and the cursor it was given back: a poll of an
 			// operation the origin is still running. Asking again at once
 			// would spend the page budget waiting, so the invocation stops
-			// here, still running, and the next one polls again.
+			// here, still running: a continuing pass asks again in its next
+			// round, and an operator's start leaves it to the pass.
 			polling = true
 			break
 		}
 
 		// Persisted per PAGE. See the file header: a restart mid-backfill
 		// has to resume, not restart.
-		if !set(SyncPatch{"backfillCursor": page.NextCursor}) {
-			return abandon()
+		if err := set(SyncPatch{"backfillCursor": page.NextCursor}); err != nil {
+			return stop(err, nil)
 		}
 		cursor = page.NextCursor
 
@@ -445,7 +501,7 @@ func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector,
 				"connector", connectorName, "concept", conceptID, "partition", partition, "pages", out.Pages)
 		}
 	}
-	if !claim(func(cur SyncState) SyncPatch {
+	if err := claim(func(cur SyncState) SyncPatch {
 		p := SyncPatch{"backfillStatus": status, "backfillCursor": cursor}
 		if out.Done && backfillOwnError(cur.LastError) {
 			// The backfill's own failure or refusal, answered by a backfill
@@ -453,14 +509,43 @@ func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector,
 			p["lastError"] = ""
 		}
 		return p
-	}) {
-		return abandon()
+	}); err != nil {
+		return stop(err, nil)
 	}
 
 	r.logger.Info("datasync backfill: pass complete",
 		"connector", connectorName, "concept", conceptID, "partition", partition,
 		"pages", out.Pages, "applied", out.Applied, "stale", out.Stale, "done", out.Done)
 	return out, nil
+}
+
+// holdsBackfillPatch reports whether a row already holds everything a
+// backfill's patch names -- its status, its cursor, its own error text -- so
+// that writing the patch would only add a version that says the same.
+func holdsBackfillPatch(cur SyncState, patch SyncPatch) bool {
+	for field, v := range patch {
+		text, ok := v.(string)
+		if !ok {
+			return false
+		}
+		switch field {
+		case "backfillStatus":
+			if cur.BackfillStatus != text {
+				return false
+			}
+		case "backfillCursor":
+			if cur.BackfillCursor != text {
+				return false
+			}
+		case "lastError":
+			if cur.LastError != truncateError(text) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // partitionSuffix names a partition in an error, and nothing for none.
@@ -583,6 +668,14 @@ func (r *Runner) reconcileOne(ctx context.Context, connector memqlsync.Connector
 			// A connector that does not reconcile is a configuration
 			// fact, not a failure. Recorded as such and not written onto
 			// lastError, which is for things that went wrong.
+			out.Skipped = true
+			return out, nil
+		case memqlsync.IsBusy(reconcileErr):
+			// The origin cannot be asked now, and nothing is wrong with the
+			// domain: a store that stopped ingesting between being listed and
+			// being swept answers this way. Skipped with nothing recorded, as
+			// a paused domain is, so its row keeps the watermark it had and a
+			// resumed store is swept from where it stopped.
 			out.Skipped = true
 			return out, nil
 		case memqlsync.IsNotGranted(reconcileErr), memqlsync.IsNotRequested(reconcileErr):
@@ -759,6 +852,21 @@ const reconcileOverlap = 2 * time.Minute
 // every tick.
 const notGrantedRecheck = 6 * time.Hour
 
+// continueBudget is how long a continuing pass goes on starting rounds
+// (ContinueBackfills). The pass is scheduled every five minutes, and the
+// automation runtime sets no limit of its own on a builtin call -- a scheduled
+// firing runs under a context with no deadline -- so four minutes is the whole
+// rule: a pass has stopped starting rounds a minute before the next is due. It
+// bounds when a round may START; a round under way finishes.
+const continueBudget = 4 * time.Minute
+
+// continueIdlePause is the wait after a round in which every partition with
+// work left only waited on its origin: an export it is still preparing, or an
+// origin that cannot take the request now. Asking again at once would spend
+// the budget on polls; ten seconds is short beside an export and long beside a
+// poll.
+const continueIdlePause = 10 * time.Second
+
 // SetPaused flips a domain's pause switch, stopping both runners and the
 // drain for it. A partition's pause is its own: it names that partition's
 // row and no other. A partitioned connector asked for no partition is
@@ -883,36 +991,83 @@ func queuePatch(cur SyncState) SyncPatch {
 
 // ContinueResult is what one continuing pass did. Started counts domains
 // moved from queued to running in the pass, Advanced those already running
-// that made progress and are still running, and Completed those that reached
-// complete in it. A domain started and completed in one pass counts in both
-// Started and Completed.
+// when the pass took them that made progress and are still running, and
+// Completed those that reached complete in it. A domain is counted once
+// however many rounds of the pass it took; one started and completed in one
+// pass counts in both Started and Completed.
 type ContinueResult struct{ Started, Advanced, Completed int }
 
-// ContinueBackfills is one tick of the continuing pass: for each partition of
-// each bound connector ("" for a connector without partitions), it takes at
-// most one domain -- the one that is running, else the first queued in
-// Domains() order -- and advances it by one invocation of the page budget. A
-// partition never has a second domain started while one is running, and a
-// paused domain is left alone: it is neither taken nor counted as running.
+// ContinueBackfills is one continuing pass. It works in ROUNDS until its
+// budget (continueBudget) is spent.
 //
-// It reads each domain's row BY ID (SyncStateFor), never by listing the rows
-// that are queued or running. A list over v1:platform:syncState answers each
-// row at its current version, but the engine finds those by enumerating the
-// concept's versions, and every page of every backfill writes one, so a tick
-// that listed would cost more with every backfill ever run. By id it costs the
-// partitions times the domains, and exact. A partitioned connector's shared
-// row is never read, so a row with no partition is not continued.
+// In a round, every partition of every bound connector ("" for a connector
+// without partitions) that still has a backfill running or queued advances by
+// one step, in turn: one invocation of the page budget on the one domain the
+// pass holds for it -- the one that is running, else the first queued in
+// Domains() order. A partition never has a second domain started while one is
+// running, and a paused domain is left alone: it is neither taken nor counted
+// as running. What a step answers decides the partition's next round:
+//
+//   - it completed the domain: the next round picks the partition's next
+//     queued domain;
+//   - the origin is not ready -- it is still preparing the export, or cannot
+//     take the request now (memqlsync.Busy) -- the partition is asked again in
+//     the next round;
+//   - it failed, or the row turned out not to be this pass's (another
+//     invocation holds it, or it was queued again from nothing): the partition
+//     is left alone for the rest of the pass;
+//   - nothing is running or queued: the partition leaves the rounds.
+//
+// A round in which every partition with work left only waited is followed by a
+// pause (continueIdlePause), which the context cancels; a round that moved
+// anything is followed at once by the next. The pass ends when no partition
+// has work left, when its budget is spent, or when its context is done. The
+// budget bounds when a round may start: a step is still up to maxPages pages,
+// so a pass reading a large export can outlast it by the length of that round.
+//
+// WHY ROUNDS. An origin prepares an export in the background: it is started in
+// one step and can be read only in a later one. A pass that took one step for
+// each partition and returned needed two ticks for every domain, so a store of
+// sixteen bulk domains read "starting" for more than two hours although every
+// one of its exports was ready within seconds.
+//
+// It reads rows BY ID (SyncStateFor), never by listing the rows that are
+// queued or running. A list over v1:platform:syncState answers each row at its
+// current version, but the engine finds those by enumerating the concept's
+// versions, and every page of every backfill writes one, so a pass that listed
+// would cost more with every backfill ever run. And it does not read every
+// domain's row in every round: while the domain a partition holds is running,
+// only that row is read again; the partition's domains are scanned only to
+// pick one. A partitioned connector's shared row is never read, so a row with
+// no partition is not continued.
+//
+// Two nodes can run a pass at once (the automation's single mode is one
+// process's), so a step is safe to take twice: the fenced claim of the
+// invocation (backfillFrom) decides which of them a row belongs to, and the
+// one that loses it leaves that partition to the other.
 //
 // A refusal that is the origin's standing answer is recorded on its row and is
 // not an error of the pass; any other failure is logged, recorded `failed` on
-// its row, and returned with the rest once every partition has had its turn.
-// The pass stops when its context is done.
+// its row, and returned with the rest once the pass ends.
 func (r *Runner) ContinueBackfills(ctx context.Context) (ContinueResult, error) {
 	var out ContinueResult
 	var errs []error
+	var work []*continuing
+	// done is the pass's answer however it ends: what its partitions still
+	// hold is counted first.
+	done := func(err error) (ContinueResult, error) {
+		for _, w := range work {
+			w.release(&out, true)
+		}
+		if err != nil {
+			errs = append(errs, err)
+		}
+		return out, errors.Join(errs...)
+	}
+
 	for _, name := range r.bound() {
 		if err := ctx.Err(); err != nil {
-			return out, errors.Join(append(errs, err)...)
+			return done(err)
 		}
 		connector, ok := r.lookup(name)
 		if !ok || connector == nil {
@@ -930,34 +1085,207 @@ func (r *Runner) ContinueBackfills(ctx context.Context) (ContinueResult, error) 
 		}
 		specs := domainSpecsByConcept(connector)
 		for _, part := range parts {
+			work = append(work, &continuing{connector: connector, specs: specs, partition: part})
+		}
+	}
+
+	deadline := r.now().Add(continueBudget)
+	for len(work) > 0 {
+		// One round: every partition with work left takes a step, in turn.
+		moved := false
+		next := work[:0]
+		for i, w := range work {
 			if err := ctx.Err(); err != nil {
-				return out, errors.Join(append(errs, err)...)
+				// The partitions not yet asked in this round keep what they
+				// hold, to be counted.
+				work = append(next, work[i:]...)
+				return done(err)
 			}
-			res, err := r.continueOne(ctx, connector, specs, part)
-			out.Started += res.Started
-			out.Advanced += res.Advanced
-			out.Completed += res.Completed
+			outcome, err := r.continueStep(ctx, w, &out)
 			if err != nil {
 				errs = append(errs, err)
 			}
+			switch outcome {
+			case stepMoved:
+				moved = true
+				next = append(next, w)
+			case stepWaited:
+				next = append(next, w)
+			}
+		}
+		work = next
+		if err := ctx.Err(); err != nil {
+			return done(err)
+		}
+		if len(work) == 0 {
+			break
+		}
+		if !moved {
+			// Every partition with work left only waited on its origin. A
+			// pause that would only reach the end of the budget ends the pass
+			// instead.
+			if !r.now().Add(continueIdlePause).Before(deadline) {
+				break
+			}
+			if err := r.pause(ctx, continueIdlePause); err != nil {
+				return done(err)
+			}
+		}
+		if !r.now().Before(deadline) {
+			break
 		}
 	}
-	return out, errors.Join(errs...)
+	return done(nil)
 }
 
-// continueOne advances the one domain of one partition the pass takes.
-func (r *Runner) continueOne(ctx context.Context, connector memqlsync.Connector, specs map[string]memqlsync.DomainSpec, partition string) (ContinueResult, error) {
-	var out ContinueResult
-	name := connector.Name()
-	opCtx := OperatorContext(ctx)
+// continuing is one partition's place in a continuing pass: the domain the
+// pass holds for it, while that domain is still the pass's to carry on.
+type continuing struct {
+	connector memqlsync.Connector
+	specs     map[string]memqlsync.DomainSpec
+	partition string
+	// concept is the domain held, or "" when the next step picks one.
+	concept string
+	// wasRunning says the held domain was already running when the pass took
+	// it; advanced, that it has made progress in this pass since.
+	wasRunning, advanced bool
+}
+
+// hold takes a domain for the partition, as the pass found it.
+func (w *continuing) hold(st SyncState) {
+	w.concept, w.wasRunning, w.advanced = st.ConceptID, st.BackfillStatus == "running", false
+}
+
+// release lets go of the held domain. A domain that was already running when
+// the pass took it, made progress in the pass and is still running is the one
+// thing counted here: advanced, once, however many rounds it took.
+func (w *continuing) release(out *ContinueResult, stillRunning bool) {
+	if w.concept != "" && w.wasRunning && w.advanced && stillRunning {
+		out.Advanced++
+	}
+	w.concept, w.wasRunning, w.advanced = "", false, false
+}
+
+// stepOutcome is what one partition's step in a round means for its next.
+type stepOutcome int
+
+const (
+	// stepLeft: the partition takes no further step in this pass. Nothing is
+	// running or queued for it, its step failed, or its row is not this
+	// pass's.
+	stepLeft stepOutcome = iota
+	// stepWaited: the origin is not ready; the partition is asked again in
+	// the next round, and nothing moved.
+	stepWaited
+	// stepMoved: something moved -- a domain started, read on, completed, or
+	// answered with the origin's standing refusal -- and the partition goes
+	// on in the next round.
+	stepMoved
+)
+
+// continueStep is one partition's step in one round: one invocation of the
+// page budget on the domain the pass holds for it, picking one first when it
+// holds none.
+func (r *Runner) continueStep(ctx context.Context, w *continuing, out *ContinueResult) (stepOutcome, error) {
+	name := w.connector.Name()
+	st, found, err := r.heldOrPicked(ctx, w, out)
+	if err != nil || !found {
+		return stepLeft, err
+	}
+	queued := st.BackfillStatus == "queued"
+
+	res, err := r.backfillFrom(ctx, w.connector, w.specs, st.ConceptID, w.partition, st)
+	progressed := res.Cursor != st.BackfillCursor || res.Applied+res.Stale > 0
+	switch {
+	case res.Abandoned:
+		// The row stopped being this pass's while the step ran: nothing is
+		// counted, and the partition is left to whoever holds it.
+		w.release(out, false)
+		return stepLeft, nil
+	case errors.Is(err, errUnrecorded):
+		// A write did not land, so what the row says is not known: nothing is
+		// counted, and the next pass reads it again.
+		w.release(out, false)
+		return stepLeft, err
+	case err != nil && ctx.Err() != nil:
+		// The context ended the step. The row is running at the last cursor
+		// it recorded, and the pass, which ends here, counts it as that.
+		if queued {
+			out.Started++
+		}
+		w.advanced = w.advanced || progressed
+		return stepWaited, nil
+	case err != nil && (memqlsync.IsNotGranted(err) || memqlsync.IsNotRequested(err)):
+		// Refused before it ran: nothing started, and nothing is counted. The
+		// partition's next queued domain is picked in the next round.
+		r.logger.Info("datasync backfill: the origin refuses this domain; recorded, and not asked again until it changes",
+			"connector", name, "concept", st.ConceptID, "partition", w.partition, "reason", err.Error())
+		w.release(out, false)
+		return stepMoved, nil
+	case err != nil:
+		if queued {
+			out.Started++
+		}
+		w.release(out, false)
+		r.logger.Warn("datasync backfill: a continued backfill failed; the other partitions still run",
+			"connector", name, "concept", st.ConceptID, "partition", w.partition, "error", err)
+		return stepLeft, err
+	}
+
+	if queued && res.Waiting && res.Pages == 0 {
+		// The origin took none of it, and the row is queued again: nothing
+		// started. It is picked again in the next round.
+		w.release(out, false)
+		return stepWaited, nil
+	}
+	if queued {
+		out.Started++
+	}
+	if res.Done {
+		out.Completed++
+		w.release(out, false)
+		return stepMoved, nil
+	}
+	w.advanced = w.advanced || progressed
+	if !queued && !progressed {
+		// A poll of an export the origin is still preparing, an origin that
+		// cannot take the request now, or a page that changed nothing: the
+		// partition waited.
+		return stepWaited, nil
+	}
+	return stepMoved, nil
+}
+
+// heldOrPicked answers the row a partition's step works on. While the pass
+// holds a domain for the partition and it is still running, that is the one
+// row read. Otherwise the partition's domains are scanned, each row by id, for
+// the one that is running, else the first queued in Domains() order; a paused
+// domain is neither. False when nothing is running or queued.
+func (r *Runner) heldOrPicked(ctx context.Context, w *continuing, out *ContinueResult) (SyncState, bool, error) {
+	name := w.connector.Name()
+	fresh := memql.ContextWithFreshRead(OperatorContext(ctx))
+	if w.concept != "" {
+		st, err := r.store.SyncStateFor(fresh, w.concept, name, string(memqlsync.DirectionInbound), w.partition)
+		if err != nil {
+			return SyncState{}, false, err
+		}
+		if st.BackfillStatus == "running" && !st.Paused {
+			st.ConceptID = w.concept
+			return st, true, nil
+		}
+		// No longer the pass's to carry on: paused since, or another writer
+		// moved it. It is counted for what it did here, and the scan below
+		// picks again.
+		w.release(out, st.BackfillStatus == "running")
+	}
 	var running, queued *SyncState
-	for _, spec := range connector.Domains() {
+	for _, spec := range w.connector.Domains() {
 		if spec.Direction == memqlsync.DirectionOutbound {
 			continue
 		}
-		st, err := r.store.SyncStateFor(memql.ContextWithFreshRead(opCtx), spec.Concept, name, string(memqlsync.DirectionInbound), partition)
+		st, err := r.store.SyncStateFor(fresh, spec.Concept, name, string(memqlsync.DirectionInbound), w.partition)
 		if err != nil {
-			return out, err
+			return SyncState{}, false, err
 		}
 		if st.Paused {
 			continue
@@ -976,33 +1304,8 @@ func (r *Runner) continueOne(ctx context.Context, connector memqlsync.Connector,
 		pick = queued
 	}
 	if pick == nil {
-		return out, nil
+		return SyncState{}, false, nil
 	}
-
-	res, err := r.backfillOne(ctx, connector, specs, pick.ConceptID, partition)
-	if res.Waiting || res.Abandoned {
-		// The origin is busy, or the row stopped being this pass's: nothing
-		// moved for this pass, so nothing is counted.
-		return out, nil
-	}
-	if err != nil && (memqlsync.IsNotGranted(err) || memqlsync.IsNotRequested(err)) {
-		// Refused before it ran: nothing started, and nothing is counted.
-		r.logger.Info("datasync backfill: the origin refuses this domain; recorded, and not asked again until it changes",
-			"connector", name, "concept", pick.ConceptID, "partition", partition, "reason", err.Error())
-		return out, nil
-	}
-	if pick == queued {
-		out.Started++
-	}
-	switch {
-	case err != nil:
-		r.logger.Warn("datasync backfill: a continued backfill failed; the other partitions still run",
-			"connector", name, "concept", pick.ConceptID, "partition", partition, "error", err)
-		return out, err
-	case res.Done:
-		out.Completed++
-	case pick == running && (res.Cursor != pick.BackfillCursor || res.Applied+res.Stale > 0):
-		out.Advanced++
-	}
-	return out, nil
+	w.hold(*pick)
+	return *pick, true, nil
 }

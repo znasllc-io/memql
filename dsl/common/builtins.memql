@@ -730,7 +730,7 @@ builtin datasyncQueueBackfill {
 }
 
 @executor("integration.datasync.continueBackfills")
-@description("Continue every queued or running backfill. For each partition of each bound connector it advances at most one domain by one page budget -- the one running, else the first queued -- so one store runs one backfill at a time. Leaves paused domains alone; a domain the origin refuses is recorded with the reason and leaves the queue. Only the engine reaches it: a call without internal origin is refused.")
+@description("Continue every queued or running backfill. One pass works in rounds for four minutes: in each round every partition of each bound connector that has a backfill running or queued advances one domain by one page budget -- the one running, else the first queued -- so one store runs one backfill at a time and its domains follow one another within the pass. A round in which every partition only waited on its origin is followed by a ten-second pause. Leaves paused domains alone; a domain the origin refuses is recorded with the reason and leaves the queue. Only the engine reaches it: a call without internal origin is refused.")
 builtin datasyncContinueBackfills { }
 
 // Driven by the engine too: the retryFailedInboundDeliveries automation runs it
