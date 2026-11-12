@@ -48,6 +48,8 @@ export interface StatisticsRead<T> {
   state: "idle" | "loading" | "ready" | "error";
   /** The server's own sentence for a refusal; empty for a dropped connection, which the shell reports. */
   error: string;
+  /** A read is out, a retry of a failed one included: a page offers no second retry beside it. */
+  inFlight: boolean;
   /** Read again; one already out for the same identity is answered for both. */
   reload: () => Promise<void>;
 }
@@ -72,6 +74,7 @@ export function useStatisticsRead<T>({ identity, enabled, fetch }: {
   const [value, setValue] = useState<T | null>(null);
   const [state, setState] = useState<StatisticsRead<T>["state"]>("idle");
   const [error, setError] = useState("");
+  const [inFlight, setInFlight] = useState(false);
   // The read that is out, with the identity it was asked for.
   const out = useRef<{ key: string; controller: AbortController; done: Promise<void> } | null>(null);
   const latest = useRef({ key, connection, fetch });
@@ -87,6 +90,7 @@ export function useStatisticsRead<T>({ identity, enabled, fetch }: {
     const controller = new AbortController();
     // A retry of a failed read leaves the failure standing until it answers.
     setState((held) => (held === "error" ? "error" : "loading"));
+    setInFlight(true);
     const done = ask.fetch(ask.connection.query, controller.signal)
       .then((next) => {
         if (controller.signal.aborted) return;
@@ -103,7 +107,9 @@ export function useStatisticsRead<T>({ identity, enabled, fetch }: {
         setState("error");
       })
       .finally(() => {
-        if (out.current?.controller === controller) out.current = null;
+        if (out.current?.controller !== controller) return;
+        out.current = null;
+        setInFlight(false);
       });
     out.current = { key: ask.key, controller, done };
     return done;
@@ -114,6 +120,7 @@ export function useStatisticsRead<T>({ identity, enabled, fetch }: {
     setError("");
     if (key === "") {
       setState("idle");
+      setInFlight(false);
       return;
     }
     // A new question: whatever failed before was about another one.
@@ -125,5 +132,5 @@ export function useStatisticsRead<T>({ identity, enabled, fetch }: {
     };
   }, [key, read]);
 
-  return { value, state, error, reload: read };
+  return { value, state, error, inFlight, reload: read };
 }
