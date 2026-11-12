@@ -189,8 +189,9 @@ type exportWork struct {
 
 	files func() (exportFiles, error)
 	bytes func() (accountBytesSource, error)
-	// recordObject is Exports.recordObject: the committed file's key, written
-	// on the row by a statement guarded on this attempt.
+	// recordObject is Exports.recordObject: the file's key, written on the row
+	// just before the file is committed, by a statement guarded on this
+	// attempt.
 	recordObject func(ctx context.Context, x Export, key string) (bool, error)
 
 	engineVersion, domain, clusterID string
@@ -862,17 +863,16 @@ func (a *attempt) seal(ctx context.Context) (int64, string, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, "", err
 	}
-	size, sum, err := a.stream.Commit(ctx)
-	if err != nil {
-		return 0, "", fmt.Errorf("commit the export's file: %w", err)
-	}
-	a.committed = true
-	// The key goes on the record before anything else is done with the file.
-	// Reading it back takes as long as writing it did, and a node that dies in
-	// that window runs no cleanup: the recorded key is what lets the take-over
-	// delete the file (export_store.go, reclaimStale). A statement that
-	// matches nothing means this attempt no longer holds the run, so the file
-	// is deleted by the cleanup and nothing more is done.
+	// The key goes on the record BEFORE the file is committed. It is known
+	// from the start (the attempt's own key), so recording it first leaves no
+	// moment at which storage holds a file that no record names: a node that
+	// dies between the two statements leaves a key that names nothing, and
+	// deleting an object that is not there is done. Reading the file back
+	// takes as long as writing it did, and a node that dies in that window
+	// runs no cleanup: the recorded key is what lets the take-over delete the
+	// file (export_store.go, reclaimStale). A statement that matches nothing
+	// means this attempt no longer holds the run: nothing is committed, and
+	// the cleanup drops what was staged.
 	if a.w.recordObject == nil {
 		return 0, "", errors.New("the export's record cannot be written on this node")
 	}
@@ -883,6 +883,11 @@ func (a *attempt) seal(ctx context.Context) (int64, string, error) {
 	if !recorded {
 		return 0, "", errExportLeaseLost
 	}
+	size, sum, err := a.stream.Commit(ctx)
+	if err != nil {
+		return 0, "", fmt.Errorf("commit the export's file: %w", err)
+	}
+	a.committed = true
 	return size, sum, nil
 }
 

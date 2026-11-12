@@ -349,10 +349,10 @@ func TestExportRunCancelledAfterTheRowsCommitsNothing(t *testing.T) {
 	}
 }
 
-// The run records its file's key on the row as soon as the commit lands,
-// before it reads the file back: a node that stops in between leaves a key
-// the take-over deletes.
-func TestExportRunRecordsTheKeyRightAfterTheCommit(t *testing.T) {
+// The run records its file's key on the row BEFORE it commits the file: the
+// key is known from the start, so storage never holds a file that no record
+// names. A node that stops between the two leaves a key that names nothing.
+func TestExportRunRecordsTheKeyBeforeTheCommit(t *testing.T) {
 	f := newRunFixture(t)
 	f.seedAcme(t)
 	var recorded []string
@@ -360,7 +360,7 @@ func TestExportRunRecordsTheKeyRightAfterTheCommit(t *testing.T) {
 		f.store.mu.Lock()
 		_, committed := f.store.committed[key]
 		f.store.mu.Unlock()
-		require.True(t, committed, "the key is recorded once the file is committed")
+		require.False(t, committed, "the file was committed before its key was on the record")
 		require.Equal(t, "exp-acme", x.ID)
 		recorded = append(recorded, key)
 		return true, nil
@@ -368,18 +368,20 @@ func TestExportRunRecordsTheKeyRightAfterTheCommit(t *testing.T) {
 	res, err := f.run(t, f.export(acme, false), "")
 	require.NoError(t, err)
 	require.Equal(t, []string{res.ObjectKey}, recorded)
+	require.Contains(t, f.store.committed, res.ObjectKey)
 }
 
 // An attempt that can no longer record its key no longer holds the run: it
-// deletes the file it committed and stops.
-func TestExportRunThatCannotRecordItsKeyDeletesTheFile(t *testing.T) {
+// commits nothing, and what it staged is dropped.
+func TestExportRunThatCannotRecordItsKeyCommitsNothing(t *testing.T) {
 	f := newRunFixture(t)
 	f.seedAcme(t)
 	f.work.recordObject = func(context.Context, Export, string) (bool, error) { return false, nil }
 	_, err := f.run(t, f.export(acme, false), "")
-	require.Error(t, err)
+	require.ErrorIs(t, err, errExportLeaseLost)
 	require.Empty(t, f.store.committed)
-	require.Len(t, f.store.deleted, 1)
+	require.Empty(t, f.store.deleted, "nothing was committed, so there was nothing to delete")
+	require.Len(t, f.store.aborted, 1)
 }
 
 // A conflict recorded during the wait, by the very full pass the run asked

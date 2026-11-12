@@ -23,9 +23,11 @@ package accounts
 //
 // # The file a stopped attempt committed
 //
-// object_key is written twice: by the run once its file is committed
-// (recordObject), and with the complete state. Between the two, a node that
-// dies leaves a whole file that only that key names. The rules for such a key:
+// object_key is written twice: by the run just before it commits its file
+// (recordObject), and with the complete state. The key is recorded first so
+// that storage never holds a file no record names. Between the two writes, a
+// node that dies leaves a whole file that only that key names, or a key that
+// names nothing when it died before the commit. The rules for such a key:
 //
 //   - The take-over, the claim and the hand-back delete a recorded file
 //     through the blob store, and clear the key when the delete succeeds.
@@ -364,14 +366,16 @@ func (s *Exports) sweepDrafts(ctx context.Context) error {
 // storage that answers slowly cannot stretch a tick without end.
 const keptObjectsPerTick = 20
 
-// sweepKeptObjects tries again to delete the file of a row that ended failed or
-// cancelled and still records one: a delete that failed when it ended (the
-// take-over, the claim or the hand-back), or one the run's own cleanup could
-// not finish. Oldest first, at most keptObjectsPerTick a tick; the key is
-// cleared, guarded on itself, once the delete succeeds, and a failure is
-// logged with the export's id and tried again at the next tick. A complete
-// row's key is its file, served and removed by a person, and is never touched
-// here.
+// sweepKeptObjects clears the key of a row that ended failed or cancelled and
+// still records one. Most such keys name nothing: the run records its key
+// before it commits and deletes its own file when it fails, so the delete here
+// answers at once. The rest are files a delete could not reach when the row
+// ended (the take-over, the claim or the hand-back, or the run's own cleanup).
+// At most keptObjectsPerTick a tick, in no fixed order, so a file that cannot
+// be deleted does not hold the others back. The key is cleared, guarded on
+// itself, once the delete succeeds; what failed is logged once for the tick
+// and tried again at a later one. A complete row's key is its file, served and
+// removed by a person, and is never touched here.
 func (s *Exports) sweepKeptObjects(ctx context.Context) error {
 	db, err := s.inv.database()
 	if err != nil {
@@ -380,7 +384,7 @@ func (s *Exports) sweepKeptObjects(ctx context.Context) error {
 	if err := s.dropRecordedObjects(ctx, db,
 		`SELECT id, object_key FROM account_exports
 		 WHERE state IN ('failed', 'cancelled') AND object_key <> ''
-		 ORDER BY finished_at NULLS FIRST, id LIMIT $1`,
+		 ORDER BY random() LIMIT $1`,
 		`UPDATE account_exports SET object_key = ''
 		 WHERE id = $1 AND object_key = $2 AND state IN ('failed', 'cancelled')`, keptObjectsPerTick); err != nil {
 		return fmt.Errorf("account export: sweep kept files: %w", err)
@@ -396,9 +400,9 @@ func (s *Exports) sweepKeptObjects(ctx context.Context) error {
 // passphrase in the same statement. The rows that ended are audited and
 // counted by the caller.
 //
-// A STOPPED ATTEMPT MAY HAVE COMMITTED ITS FILE. The run records the key the
-// moment the commit lands (recordObject), so a node that died while reading
-// the file back left a whole file that only that key names. For such a row, in
+// A STOPPED ATTEMPT MAY HAVE COMMITTED ITS FILE. The run records the key just
+// before it commits (recordObject), so a node that died while reading the file
+// back left a whole file that only that key names. For such a row, in
 // this order: its lease is taken (claimed_by cleared, so no late write of the
 // stopped node lands, and it cannot finish the run over a file being deleted),
 // the file is deleted through the blob store, and the key is cleared. Then:
@@ -467,8 +471,10 @@ func (s *Exports) reclaimStale(ctx context.Context) error {
 // dropRecordedObjects deletes the file each row named by find records, then
 // clears the row's key with clear ($1 the id, $2 the key, guarded so a key that
 // changed meanwhile is left alone). find's own arguments are args. A delete
-// that fails keeps the key and is logged with the export's id; the row is left
-// for the next pass, which tries again.
+// that fails keeps the key, and the row is left for a later pass, which tries
+// again. The failures of one call are logged in one line, with their number
+// and the first export's id: storage that is not answering fails every delete
+// of the call the same way.
 func (s *Exports) dropRecordedObjects(ctx context.Context, db *bun.DB, find, clear string, args ...any) error {
 	rows, err := db.DB.QueryContext(ctx, find, args...)
 	if err != nil {
@@ -489,31 +495,35 @@ func (s *Exports) dropRecordedObjects(ctx context.Context, db *bun.DB, find, cle
 		return err
 	}
 	rows.Close()
+	failed, firstID := 0, ""
+	var firstErr error
 	for _, r := range found {
-		if !s.deleteRecordedObject(ctx, r.id, r.key) {
+		if err := s.deleteRecordedObject(ctx, r.key); err != nil {
+			if failed == 0 {
+				firstID, firstErr = r.id, err
+			}
+			failed++
 			continue
 		}
 		if _, err := db.DB.ExecContext(ctx, clear, r.id, r.key); err != nil {
 			return err
 		}
 	}
+	if failed > 0 {
+		s.logger.Error("account export: files of attempts that did not finish could not be deleted; their keys stay on the record and they are tried again",
+			"failed", failed, "firstExportId", firstID, "error", firstErr)
+	}
 	return nil
 }
 
 // deleteRecordedObject deletes one recorded file through the blob store Remove
-// uses, which answers a missing object as done, and reports whether it did.
-func (s *Exports) deleteRecordedObject(ctx context.Context, id, key string) bool {
+// uses, which answers a missing object as done.
+func (s *Exports) deleteRecordedObject(ctx context.Context, key string) error {
 	blobs, err := s.blobStore()
-	if err == nil {
-		err = blobs.Delete(ctx, key)
-	}
 	if err != nil {
-		s.logger.Error("account export: the file of an attempt that did not finish could not be deleted; its key stays on the record and it is tried again",
-			"exportId", id, "objectKey", key, "error", err)
-		return false
+		return err
 	}
-	s.logger.Info("account export: deleted the file of an attempt that did not finish", "exportId", id)
-	return true
+	return blobs.Delete(ctx, key)
 }
 
 // exportClaimLock is the transaction-level advisory lock the claim takes, so
@@ -552,8 +562,8 @@ func (s *Exports) claim(ctx context.Context, nodeID string) (Export, string, boo
 		return Export{}, "", false, err
 	}
 	if err := s.dropRecordedObjects(ctx, db,
-		`SELECT id, object_key FROM account_exports WHERE state = 'queued' AND object_key <> ''`,
-		`UPDATE account_exports SET object_key = '' WHERE id = $1 AND object_key = $2 AND state = 'queued'`); err != nil {
+		`SELECT id, object_key FROM account_exports WHERE state = 'queued' AND object_key <> '' ORDER BY id LIMIT $1`,
+		`UPDATE account_exports SET object_key = '' WHERE id = $1 AND object_key = $2 AND state = 'queued'`, keptObjectsPerTick); err != nil {
 		return Export{}, "", false, fmt.Errorf("account export: claim: %w", err)
 	}
 	var out Export
@@ -691,11 +701,11 @@ func (s *Exports) finishCancelled(ctx context.Context, x Export, nodeID string) 
 		x.ID, nodeID, x.Attempt)
 }
 
-// recordObject writes the key of the file this attempt has just committed,
+// recordObject writes the key of the file this attempt is about to commit,
 // guarded on the attempt as every write of a running attempt is (id, the node
 // holding it, attempt, running). It answers false when the attempt no longer
-// holds the run; the caller then deletes the file it committed and stops, as
-// for any lost lease. An attempt that names no node holds nothing: the
+// holds the run; the caller then commits nothing and stops, as for any lost
+// lease. An attempt that names no node holds nothing: the
 // take-over clears claimed_by while it deletes a stopped attempt's file, and
 // an empty guard would match that row.
 func (s *Exports) recordObject(ctx context.Context, x Export, key string) (bool, error) {
@@ -741,7 +751,15 @@ func (s *Exports) requeue(ctx context.Context, x Export, nodeID string) (bool, e
 	if err != nil {
 		return false, err
 	}
-	deleted := key == "" || s.deleteRecordedObject(ctx, x.ID, key)
+	deleted := key == ""
+	if !deleted {
+		if derr := s.deleteRecordedObject(ctx, key); derr != nil {
+			s.logger.Error("account export: the file of an attempt being handed back could not be deleted; its key stays on the record and it is tried again",
+				"exportId", x.ID, "error", derr)
+		} else {
+			deleted = true
+		}
+	}
 	if !deleted && !cancelRequested {
 		return false, nil
 	}

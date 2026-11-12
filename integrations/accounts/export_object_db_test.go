@@ -10,7 +10,6 @@ package accounts
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -265,8 +264,10 @@ func TestExportPrepareSweepsExpiredDrafts(t *testing.T) {
 
 type failingSender struct{}
 
-func (failingSender) Send(context.Context, email.Message, email.SendAs) error {
-	return errors.New("the mail provider refused")
+// Send fails the way a provider does, quoting the address it refused: the
+// log line must not carry it.
+func (failingSender) Send(_ context.Context, m email.Message, _ email.SendAs) error {
+	return fmt.Errorf("the mail provider refused <%s>", m.To)
 }
 
 func TestExportStartEmailFailureLogsNoAddress(t *testing.T) {
@@ -422,8 +423,17 @@ func TestExportSweepDeletesKeptFilesOfEndedRows(t *testing.T) {
 		got, _ := f.row(t, id)
 		require.Equal(t, key, got.ObjectKey, "a failed delete keeps the key")
 		require.True(t, f.holds(key))
-		require.Contains(t, f.logs.String(), id)
 	}
+	// One line for the pass, with how many failed and one export to start from.
+	logged := f.logs.String()
+	require.Contains(t, logged, "failed=2")
+	named := 0
+	for id := range keys {
+		if strings.Contains(logged, "firstExportId="+id) {
+			named++
+		}
+	}
+	require.Equal(t, 1, named, "the pass's line names one of the exports whose file could not be deleted")
 
 	f.setFailDelete(false)
 	r.tick(context.Background())
