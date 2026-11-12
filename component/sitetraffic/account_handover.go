@@ -76,7 +76,9 @@ func handOverSiteStatistics(ctx context.Context, q accountexport.Querier, in acc
 
 // statisticsTableSQL selects a table's rows for the sites, in key order.
 //
-// staged-data: MUST-NOT-GATE -- these are tables of their own, not rows of a concept; the account's sites are the rows the file already carries, chosen before this runs.
+// No staged-data verdict is needed here: these are tables of their own, not
+// rows of a concept, and the account's sites are the rows the file already
+// carries, chosen before this runs.
 func statisticsTableSQL(table statisticsTable) string {
 	line := "to_jsonb(t)"
 	for _, col := range table.timestamps {

@@ -28,11 +28,15 @@ const (
 	rowsNote = "v1:aerows:note"
 	// rowsRun is one of the concepts whose newest version may be an
 	// observation in memory_liveness (memorynodes.HasLiveness).
-	rowsRun        = "v1:pipelines:run"
-	rowsAcme       = "acme"
-	rowsAcmeCanon  = "v1:accounts:account:acme"
-	rowsBeta       = "beta"
-	rowsEmptyKind  = "v1:aerows:empty"
+	rowsRun       = "v1:pipelines:run"
+	rowsAcme      = "acme"
+	rowsAcmeCanon = "v1:accounts:account:acme"
+	rowsBeta      = "beta"
+	rowsEmptyKind = "v1:aerows:empty"
+	// rowsLoose holds a row in no account and a row of beta, none of acme's.
+	rowsLoose      = "v1:aerows:loose"
+	rowsLooseL1    = rowsLoose + ":l1"
+	rowsLooseL2    = rowsLoose + ":l2"
 	rowsNoteN1     = rowsNote + ":n1"
 	rowsNoteN2     = rowsNote + ":n2"
 	rowsNoteN3     = rowsNote + ":n3"
@@ -120,6 +124,10 @@ func seedAccountRows(t *testing.T, db *sql.DB) {
 	// the reader decides by createdAt and not by table.
 	rowsVersion(t, db, nodes, rowsRun, rowsRunR4, 5, map[string]any{"state": "done"})
 	rowsVersion(t, db, "memory_liveness", rowsRun, rowsRunR4, 4, a)
+
+	// l1: in no account; l2: beta's.
+	rowsVersion(t, db, nodes, rowsLoose, rowsLooseL1, 1, map[string]any{"title": "loose"})
+	rowsVersion(t, db, nodes, rowsLoose, rowsLooseL2, 1, b)
 }
 
 func TestAccountRowIDsAreTheRowsWhoseNewestVersionNamesTheAccount(t *testing.T) {
@@ -196,90 +204,191 @@ func TestUnplacedRowIDsAreTheRowsWhoseNewestVersionNamesNoAccount(t *testing.T) 
 	require.Equal(t, []string{rowsRunR4}, ids)
 }
 
+// rowsVersionKey is one version as the reader handed it over.
+type rowsVersionKey struct {
+	id       string
+	minutes  int
+	account  string
+	observed bool
+}
+
+func rowsCollect(t *testing.T, concept string, out *[]rowsVersionKey) func(memorynodes.MemoryNode, bool) error {
+	return func(n memorynodes.MemoryNode, observed bool) error {
+		require.Equal(t, concept, n.Concept)
+		require.Equal(t, rowsFixtureTag, n.CreatedBy)
+		require.NotEmpty(t, n.Provenance)
+		var p struct {
+			AccountID string `json:"accountId"`
+		}
+		require.NoError(t, json.Unmarshal(n.Payload, &p))
+		*out = append(*out, rowsVersionKey{n.ID, int(n.CreatedAt.Sub(rowsClock) / time.Minute), p.AccountID, observed})
+		return nil
+	}
+}
+
 func TestAccountRowVersionsAreEveryVersionInIdThenTimeOrder(t *testing.T) {
 	db := openAccountRowsDB(t)
 	seedAccountRows(t, db)
 	ctx := context.Background()
-
-	type key struct {
-		id      string
-		minutes int
-		account string
-	}
-	read := func(concept string, ids []string) []key {
+	read := func(concept string, ids []string) []rowsVersionKey {
 		t.Helper()
-		var out []key
-		require.NoError(t, AccountRowVersions(ctx, db, concept, ids, func(n memorynodes.MemoryNode) error {
-			require.Equal(t, concept, n.Concept)
-			require.Equal(t, rowsFixtureTag, n.CreatedBy)
-			require.NotEmpty(t, n.Provenance)
-			var p struct {
-				AccountID string `json:"accountId"`
-			}
-			require.NoError(t, json.Unmarshal(n.Payload, &p))
-			out = append(out, key{n.ID, int(n.CreatedAt.Sub(rowsClock) / time.Minute), p.AccountID})
-			return nil
-		}))
+		var out []rowsVersionKey
+		require.NoError(t, AccountRowVersions(ctx, db, concept, ids, rowsCollect(t, concept, &out)))
 		return out
 	}
 
 	// Given out of order; every version, including one naming another account.
-	require.Equal(t, []key{
-		{rowsNoteN1, 1, rowsAcme}, {rowsNoteN1, 2, rowsAcme},
-		{rowsNoteN2, 1, rowsBeta}, {rowsNoteN2, 2, rowsAcme},
+	require.Equal(t, []rowsVersionKey{
+		{rowsNoteN1, 1, rowsAcme, false}, {rowsNoteN1, 2, rowsAcme, false},
+		{rowsNoteN2, 1, rowsBeta, false}, {rowsNoteN2, 2, rowsAcme, false},
 	}, read(rowsNote, []string{rowsNoteN2, rowsNoteN1}))
-	// The observation is a version of the row, and the newest one.
-	require.Equal(t, []key{{rowsRunR1, 1, ""}, {rowsRunR1, 3, rowsAcme}}, read(rowsRun, []string{rowsRunR1}))
+	// The observation is a version of the row, the newest one, and says so.
+	require.Equal(t, []rowsVersionKey{{rowsRunR1, 1, "", false}, {rowsRunR1, 3, rowsAcme, true}}, read(rowsRun, []string{rowsRunR1}))
 	require.Empty(t, read(rowsNote, nil))
 	// The concept bounds the read: an id of another kind is not read.
 	require.Empty(t, read(rowsRun, []string{rowsNoteN1}))
+}
+
+// rowsWalk is what the page reader yields for an account and a kind: its
+// ids, then every version of them.
+func rowsWalk(t *testing.T, db *sql.DB, account, concept string) []rowsVersionKey {
+	t.Helper()
+	ctx := context.Background()
+	ids, err := AccountRowIDs(ctx, db, account, concept, "", 1000)
+	require.NoError(t, err)
+	var out []rowsVersionKey
+	require.NoError(t, AccountRowVersions(ctx, db, concept, ids, rowsCollect(t, concept, &out)))
+	return out
+}
+
+func TestAccountKindVersionsYieldWhatTheWalkYields(t *testing.T) {
+	db := openAccountRowsDB(t)
+	seedAccountRows(t, db)
+	ctx := context.Background()
+	kind := func(account, concept string) []rowsVersionKey {
+		t.Helper()
+		var out []rowsVersionKey
+		require.NoError(t, AccountKindVersions(ctx, db, account, concept, rowsCollect(t, concept, &out)))
+		return out
+	}
+
+	require.Equal(t, []rowsVersionKey{
+		{rowsNoteN1, 1, rowsAcme, false}, {rowsNoteN1, 2, rowsAcme, false},
+		{rowsNoteN2, 1, rowsBeta, false}, {rowsNoteN2, 2, rowsAcme, false},
+		{rowsNoteN5, 1, rowsAcmeCanon, false},
+	}, kind(rowsAcme, rowsNote))
+	require.Equal(t, []rowsVersionKey{
+		{rowsRunR1, 1, "", false}, {rowsRunR1, 3, rowsAcme, true},
+		{rowsRunR3, 1, rowsAcme, false},
+	}, kind(rowsAcmeCanon, rowsRun))
+	require.Equal(t, []rowsVersionKey{
+		{rowsRunR2, 1, rowsAcme, false}, {rowsRunR2, 3, rowsBeta, true},
+	}, kind(rowsBeta, rowsRun))
+	for _, account := range []string{rowsAcme, rowsBeta} {
+		for _, concept := range []string{rowsNote, rowsRun, rowsLoose, rowsEmptyKind} {
+			require.Equal(t, rowsWalk(t, db, account, concept), kind(account, concept), "%s %s", account, concept)
+		}
+	}
+	require.Error(t, AccountKindVersions(ctx, db, "", rowsNote, func(memorynodes.MemoryNode, bool) error { return nil }))
 }
 
 func TestAccountCensusAgreesWithTheIdWalk(t *testing.T) {
 	db := openAccountRowsDB(t)
 	seedAccountRows(t, db)
 	ctx := context.Background()
-	kinds := []string{rowsNote, rowsRun, rowsEmptyKind}
+	kinds := []string{rowsNote, rowsRun, rowsLoose, rowsEmptyKind}
 
 	walk := func(account string) []AccountCensusLine {
 		t.Helper()
 		var out []AccountCensusLine
-		for _, concept := range []string{rowsEmptyKind, rowsNote, rowsRun} {
+		for _, concept := range []string{rowsEmptyKind, rowsLoose, rowsNote, rowsRun} {
 			ids, err := AccountRowIDs(ctx, db, account, concept, "", 1000)
 			require.NoError(t, err)
-			if len(ids) == 0 {
+			unplaced, err := UnplacedRowIDs(ctx, db, concept, "", 1000)
+			require.NoError(t, err)
+			if len(ids) == 0 && len(unplaced) == 0 {
 				continue
 			}
 			var versions int64
-			require.NoError(t, AccountRowVersions(ctx, db, concept, ids, func(memorynodes.MemoryNode) error { versions++; return nil }))
-			out = append(out, AccountCensusLine{Concept: concept, Rows: int64(len(ids)), Versions: versions})
+			require.NoError(t, AccountRowVersions(ctx, db, concept, ids, func(memorynodes.MemoryNode, bool) error { versions++; return nil }))
+			out = append(out, AccountCensusLine{Concept: concept, Rows: int64(len(ids)), Versions: versions, InNoAccount: int64(len(unplaced))})
 		}
 		return out
 	}
 
 	acme, err := AccountCensus(ctx, db, rowsAcmeCanon, kinds)
 	require.NoError(t, err)
-	// notes n1 (2), n2 (2), n5 (1); runs r1 (2, one an observation), r3 (1).
-	// Sorted by concept; a kind with no rows has no line.
+	// notes n1 (2), n2 (2), n5 (1), and in no account n6, n7 (""), n8 (absent);
+	// runs r1 (2, one an observation), r3 (1), and r4 in no account; loose has
+	// none of acme's but l1 in no account (beta's l2 is not counted). Sorted by
+	// concept; a kind with neither has no line.
 	require.Equal(t, []AccountCensusLine{
-		{Concept: rowsNote, Rows: 3, Versions: 5},
-		{Concept: rowsRun, Rows: 2, Versions: 3},
+		{Concept: rowsLoose, Rows: 0, Versions: 0, InNoAccount: 1},
+		{Concept: rowsNote, Rows: 3, Versions: 5, InNoAccount: 3},
+		{Concept: rowsRun, Rows: 2, Versions: 3, InNoAccount: 1},
 	}, acme)
 	require.Equal(t, walk(rowsAcme), acme)
 
 	beta, err := AccountCensus(ctx, db, rowsBeta, kinds)
 	require.NoError(t, err)
 	require.Equal(t, []AccountCensusLine{
-		{Concept: rowsNote, Rows: 1, Versions: 2},
-		{Concept: rowsRun, Rows: 1, Versions: 2},
+		{Concept: rowsLoose, Rows: 1, Versions: 1, InNoAccount: 1},
+		{Concept: rowsNote, Rows: 1, Versions: 2, InNoAccount: 3},
+		{Concept: rowsRun, Rows: 1, Versions: 2, InNoAccount: 1},
 	}, beta)
 	require.Equal(t, walk(rowsBeta), beta)
 
 	// Only the kinds asked for are counted.
 	notes, err := AccountCensus(ctx, db, rowsAcme, []string{rowsNote})
 	require.NoError(t, err)
-	require.Equal(t, []AccountCensusLine{{Concept: rowsNote, Rows: 3, Versions: 5}}, notes)
+	require.Equal(t, []AccountCensusLine{{Concept: rowsNote, Rows: 3, Versions: 5, InNoAccount: 3}}, notes)
 	none, err := AccountCensus(ctx, db, rowsAcme, nil)
+	require.NoError(t, err)
+	require.Empty(t, none)
+}
+
+func TestAccountRowCountsCountARowUnderItsNewestAccountNamingVersion(t *testing.T) {
+	db := openAccountRowsDB(t)
+	seedAccountRows(t, db)
+	ctx := context.Background()
+	kinds := []string{rowsNote, rowsRun, rowsLoose, rowsEmptyKind}
+
+	// A row moved either way counts under the account its newest version
+	// names: n2 (beta then acme) is acme's, n3 (acme then beta) beta's; n5 is
+	// spelled canonically; r1's newest is an observation naming acme, r2's an
+	// observation naming beta.
+	//
+	// THE ONE DIFFERENCE FROM THE EXACT RULE, pinned: a row whose newest
+	// version names no account after an older version named one is in no
+	// account for the export and its census, and is still counted here under
+	// the account it last named. n6 (acme, then none) and r4 (an observation
+	// naming acme, older than its versioned row naming none) are counted for
+	// acme here and are not in acme's census or walk.
+	for _, spelling := range []string{rowsAcme, rowsAcmeCanon} {
+		acme, err := AccountRowCounts(ctx, db, spelling, kinds)
+		require.NoError(t, err)
+		require.Equal(t, []AccountKindCount{
+			{Concept: rowsNote, Rows: 4, Versions: 6}, // n1 (2), n2 (2: beta and acme), n5 (1), n6 (1: its acme version)
+			{Concept: rowsRun, Rows: 3, Versions: 3},  // r1 (1: the observation), r3 (1), r4 (1: the observation)
+		}, acme, spelling)
+	}
+	beta, err := AccountRowCounts(ctx, db, rowsBeta, kinds)
+	require.NoError(t, err)
+	require.Equal(t, []AccountKindCount{
+		{Concept: rowsLoose, Rows: 1, Versions: 1},
+		{Concept: rowsNote, Rows: 1, Versions: 2},
+		{Concept: rowsRun, Rows: 1, Versions: 2},
+	}, beta)
+
+	census, err := AccountCensus(ctx, db, rowsAcme, []string{rowsNote, rowsRun})
+	require.NoError(t, err)
+	require.Equal(t, int64(3), census[0].Rows, "n6 is not in acme's census")
+	require.Equal(t, int64(2), census[1].Rows, "r4 is not in acme's census")
+	for _, v := range rowsWalk(t, db, rowsAcme, rowsNote) {
+		require.NotEqual(t, rowsNoteN6, v.id, "n6 is not in acme's walk")
+	}
+
+	none, err := AccountRowCounts(ctx, db, rowsAcme, nil)
 	require.NoError(t, err)
 	require.Empty(t, none)
 }

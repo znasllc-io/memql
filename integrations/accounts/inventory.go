@@ -15,14 +15,18 @@ package accounts
 //
 // The answer is one grouped count over every concept that declares an account
 // form. The engine's read path answers one concept per query and pages its
-// rows. The counts come from memql.AccountCensus (component/memql/account_rows.go),
-// the reader the export and the move act use too, so the inventory and an
-// export can never disagree about whose a row is: a row is counted once, under
-// the account its NEWEST version names (across the row table and the
-// observation store), and `versions` is every version of those rows, whatever
-// account an older one names. The file sum below is raw SQL of its own over
-// the partial index idx_memorynodes_account, whose predicate it repeats so the
-// planner can use it.
+// rows. The counts come from memql.AccountRowCounts and the totals from
+// memql.AccountNamingNewestSQL (component/memql/account_rows.go): the
+// COUNTING rule, a row counted once under the account its newest
+// ACCOUNT-NAMING version names, across the row table and the observation
+// store, read only from versions that name an account so a request can afford
+// it. `versions` is the versions of those rows that name an account. The
+// exact rule, which an export carries, differs in one case: a row whose newest
+// version names no account after an older one named an account is in no
+// account there and still counted here under the account it last named (the
+// file header of account_rows.go). The file sum below is raw SQL of its own
+// over the partial index idx_memorynodes_account, whose predicate it repeats
+// so the planner can use it.
 //
 // # What counts
 //
@@ -54,6 +58,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lib/pq"
 	"github.com/uptrace/bun"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -78,10 +83,9 @@ const (
 
 	// inventoryDeadline bounds the inventory's two statements together. The
 	// request pool cancels a statement at 8 seconds and the node table holds
-	// tens of millions of rows; the census finds its candidates through the
-	// partial index but decides each by a read of its newest version and
-	// counts its versions, so an account holding most of a large cluster can
-	// take longer than one read may. A deadline of its own, shorter than the
+	// tens of millions of rows; the count reads every version that names an
+	// account in the account-scoped kinds, so on a large cluster it can take
+	// longer than one read may. A deadline of its own, shorter than the
 	// pool's, lets the handler answer in words the panel can show instead of a
 	// raw timeout.
 	inventoryDeadline = 6 * time.Second
@@ -211,40 +215,18 @@ const inventoryFilesSQL = `SELECT COALESCE(sum((f.payload->>'size')::numeric), 0
 // staged-data: MUST-NOT-GATE -- deciding whether the id names an account at all; a staged account is still one, and refusing it as unknown would hide rows that are already its.
 const accountExistsSQL = `SELECT EXISTS (SELECT 1 FROM "MemoryNodes" WHERE concept = $1 AND id IN ($2, $3))`
 
-// accountTotalsSQL counts the rows per (bare account, concept) by the rule
-// memql.AccountCensus reads with (component/memql/account_rows.go): a row
-// counts once, under the account its NEWEST version names, across the row
-// table and the observation store, so a row moved from one account to another
-// counts only under the second. Candidates are every row with a version naming
-// any account, found through idx_memorynodes_account (whose predicate is
-// repeated so the planner can match it), plus the observations naming one;
-// each is then decided by its newest version, the observation winning a
-// createdAt tie as in the reader. Grouped by the BARE id, so a row whose
-// newest version spells the account canonically counts under the same account
-// as one spelled bare. The newest version is a LATERAL join so it is read once
-// per row; as a scalar subquery the planner evaluated it once per reference.
-// This reads every account's rows at once, which is why
-// it runs under totalsDeadline and the status answers without it when slow.
+// accountTotalsSQL counts the rows per (bare account, concept) by the
+// counting rule AccountRowCounts uses, for every account in one pass:
+// memql.AccountNamingNewestSQL decides each row, and this groups it. Grouped
+// by the BARE id, so a row whose newest account-naming version spells the
+// account canonically counts under the same account as one spelled bare. It
+// runs under totalsDeadline and the status answers without it when slow.
 //
 // staged-data: MUST-NOT-GATE -- an inventory of what every account holds; a staged concept's rows are the account's all the same.
-const accountTotalsSQL = `SELECT CASE WHEN newest.account LIKE 'v1:accounts:account:%'
-            THEN substr(newest.account, 21) ELSE newest.account END AS account,
-       c.concept, count(*)
-  FROM (
-    SELECT concept, id FROM "MemoryNodes" WHERE ` + accountIdPresentSQL + `
-    UNION
-    SELECT concept, id FROM memory_liveness WHERE ` + accountIdPresentSQL + `
-  ) c
-  CROSS JOIN LATERAL (
-    SELECT v.account FROM (
-      SELECT n.payload->>'accountId' AS account, n."createdAt", 0 AS observed
-        FROM "MemoryNodes" n WHERE n.concept = c.concept AND n.id = c.id
-      UNION ALL
-      SELECT l.payload->>'accountId', l."createdAt", 1
-        FROM memory_liveness l WHERE l.concept = c.concept AND l.id = c.id
-    ) v ORDER BY v."createdAt" DESC, v.observed DESC LIMIT 1
-  ) newest
- WHERE COALESCE(newest.account, '') <> ''
+var accountTotalsSQL = `SELECT CASE WHEN r.account LIKE 'v1:accounts:account:%'
+            THEN substr(r.account, 21) ELSE r.account END AS account,
+       r.concept, count(*)
+  FROM (` + memql.AccountNamingNewestSQL + `) r
  GROUP BY 1, 2`
 
 const switchSQL = `SELECT enabled FROM account_stamping_storage LIMIT 1`
@@ -301,7 +283,7 @@ func (i *Integration) handleInventory(ctx context.Context, args map[string]any, 
 		}
 		return fmt.Errorf("accountInventory: %s: %w", what, err)
 	}
-	census, err := memql.AccountCensus(countCtx, db.DB, bare, memql.AccountKinds(i.conceptList(), false))
+	counts, err := memql.AccountRowCounts(countCtx, db.DB, bare, memql.AccountKinds(i.conceptList(), false))
 	if err != nil {
 		return nil, tooLarge(err, "count rows")
 	}
@@ -309,8 +291,8 @@ func (i *Integration) handleInventory(ctx context.Context, args map[string]any, 
 		concept, namespace, name string
 		rows, versions           int64
 	}
-	lines := make([]line, 0, len(census))
-	for _, c := range census {
+	lines := make([]line, 0, len(counts))
+	for _, c := range counts {
 		l := line{concept: c.Concept, rows: c.Rows, versions: c.Versions}
 		l.namespace, l.name = splitConcept(l.concept)
 		lines = append(lines, l)
@@ -468,7 +450,7 @@ func (i *Integration) accountTotals(ctx context.Context, db *bun.DB) ([]memoryno
 	ctx, cancel := context.WithTimeout(ctx, i.totalsDeadline)
 	defer cancel()
 	scoped := i.accountScopedConcepts()
-	totals, err := db.DB.QueryContext(ctx, accountTotalsSQL)
+	totals, err := db.DB.QueryContext(ctx, accountTotalsSQL, pq.Array(memql.AccountKinds(i.conceptList(), false)))
 	if err != nil {
 		return nil, fmt.Errorf("count rows per account: %w", err)
 	}
