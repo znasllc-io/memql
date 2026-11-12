@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // send_row_test.go -- the transactional row lane against the fake engine: what it
@@ -481,10 +483,10 @@ func TestTheRowSenderIsResolvedAsARowSendResolvesIt(t *testing.T) {
 		t.Fatalf("the chosen sender answered %v", got)
 	}
 	for sender, want := range map[string]string{
-		"si-other": "campaign and sending identity must belong to the same organization",
+		"si-other": "The chosen sender belongs to another organization.",
 		"si-off":   "The sender old@store.example.test is turned off. Turn it on to send this email.",
 		"si-none":  "The sender of this email no longer exists. Choose another sender to send it.",
-		"":         "choose a sending identity belonging to this organization",
+		"":         "No sender is chosen for this organization.",
 	} {
 		if got := ask(sender); got["ready"] != false || got["reason"] != want || got["address"] != "" {
 			t.Fatalf("sender %q answered %v, want refused with %q", sender, got, want)
@@ -492,5 +494,24 @@ func TestTheRowSenderIsResolvedAsARowSendResolvesIt(t *testing.T) {
 	}
 	if _, err := w.handleRowSender(context.Background(), map[string]any{"accountId": "acct-1"}, 0); err == nil {
 		t.Fatal("a client's call was answered")
+	}
+	// A TRUSTED CALLER WITHOUT AUTHORITY IN THE ORGANIZATION -- the send's own
+	// check, requireSendAuthority -- is answered exactly as for an organization
+	// that does not exist.
+	unauthorized := func(account string) map[string]any {
+		t.Helper()
+		nodes, err := w.handleRowSender(auth.ContextWithInternalOrigin(context.Background()),
+			map[string]any{"accountId": account, "senderIdentityId": "si-store"}, 0)
+		if err != nil {
+			t.Fatalf("rowSender without authority: %v", err)
+		}
+		got := decodeResult(t, nodes)
+		delete(got, "accountId")
+		return got
+	}
+	without, missing := unauthorized("acct-1"), unauthorized("acct-none")
+	if fmt.Sprint(without) != fmt.Sprint(missing) || without["ready"] != false || without["address"] != "" ||
+		without["reason"] != "No sender can be read for this organization." {
+		t.Fatalf("without authority the sender reads %v; for an organization that does not exist %v", without, missing)
 	}
 }
