@@ -159,7 +159,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "setSyncPaused",
-			Description: "Pause or resume one domain: stops its backfill, its reconciliation and its drain without unregistering the connector or changing any declaration. For a cluster owner or the engine's own call (internal origin); anybody else is refused before anything is read.",
+			Description: "Pause or resume one domain: stops its backfill and its reconciliation, without unregistering the connector or changing any declaration. It does not hold changes waiting to be pushed to the origin: the outbound drain does not read the pause. For a cluster owner or the engine's own call (internal origin); anybody else is refused before anything is read.",
 			Handler:     i.handleSetPaused,
 			ArgsSchema: map[string]string{
 				"connector":    "string - connector name",

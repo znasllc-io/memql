@@ -905,8 +905,9 @@ const continueBudget = 4 * time.Minute
 // poll.
 const continueIdlePause = 10 * time.Second
 
-// SetPaused flips a domain's pause switch, stopping both runners and the
-// drain for it. A partition's pause is its own: it names that partition's
+// SetPaused flips a domain's pause switch, stopping both runners for it. The
+// outbound drain does not read the switch, so changes waiting to be pushed to
+// the origin are not held by it. A partition's pause is its own: it names that partition's
 // row and no other. A partitioned connector asked for no partition is
 // paused on every partition's row, and never on the shared row, which
 // nothing reads.
