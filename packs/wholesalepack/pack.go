@@ -90,12 +90,13 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 		{
 			Name: "submitApplication",
 			Description: "The shopper write path: a business applies for trade terms. Refused " +
-				"when this store's applicationsOpen is false, and absent settings are closed.",
+				"when this store's applicationsOpen is false, absent settings are closed, and only a " +
+				"site the store admits, carrying its organization, from its owner, is taken.",
 			Handler: p.submitApplication,
 			ArgsSchema: map[string]string{
 				"storeId":        "string (required) - stamped from the binding the post arrived through",
-				"siteId":         "string (optional) - provenance",
-				"accountId":      "string (optional) - stamped from the site's organization; must be the site's",
+				"siteId":         "string - stamped from the site the post arrived on; the store must admit it",
+				"accountId":      "string - stamped from the site's organization; must be the site's, absent included",
 				"companyName":    "string (required) - the business applying",
 				"applicantName":  "string (required) - the person applying",
 				"applicantEmail": "string (required) - unverified; how a decision reaches them",

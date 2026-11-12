@@ -696,7 +696,7 @@ func TestASubmissionWritesItsOwnerInCanonicalForm(t *testing.T) {
 		settings: map[string][]map[string]any{"store-live": {{"storeId": "store-live", "applicationsOpen": true, "accountId": "acct-north"}}},
 	}}
 	if _, err := p.submitApplication(asShopperPath(), map[string]any{
-		"submissionId": "sub-canon", "storeId": "store-live", "siteId": "site-1", "companyName": "Acme",
+		"submissionId": "sub-canon", "storeId": "store-live", "siteId": "site-1", "accountId": "acct-north", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0); err != nil {
 		t.Fatalf("submitApplication: %v", err)
@@ -864,7 +864,7 @@ func TestTheGateIsPerStore(t *testing.T) {
 		},
 	}}
 	if _, err := p.submitApplication(asShopperPath(), map[string]any{
-		"submissionId": "sub-1", "storeId": "store-live", "siteId": "site-1", "companyName": "Acme",
+		"submissionId": "sub-1", "storeId": "store-live", "siteId": "site-1", "accountId": "acct-north", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0); err != nil {
 		t.Fatalf("submitApplication: %v", err)
@@ -903,7 +903,7 @@ func TestASubmissionIsRefusedWhenTermsAreRequiredAndADocumentIsMissing(t *testin
 	p := &Provider{writer: writer, reader: reader}
 	submit := func(store, id string) error {
 		_, err := p.submitApplication(asShopperPath(), map[string]any{
-			"submissionId": id, "storeId": store, "siteId": "site-1", "companyName": "Spoke and Chain Cycles",
+			"submissionId": id, "storeId": store, "siteId": "site-1", "accountId": "acct-north", "companyName": "Spoke and Chain Cycles",
 			"applicantName": "Sam", "applicantEmail": "sam@example.com",
 		}, 0)
 		return err
@@ -1027,7 +1027,7 @@ func TestTheApplicationIsWrittenAtTheSubmissionId(t *testing.T) {
 		},
 	}}
 	if _, err := p.submitApplication(asShopperPath(), map[string]any{
-		"submissionId": "sub-abc", "storeId": "store-live", "siteId": "site-1", "companyName": "Acme",
+		"submissionId": "sub-abc", "storeId": "store-live", "siteId": "site-1", "accountId": "acct-north", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0); err != nil {
 		t.Fatalf("submitApplication: %v", err)
@@ -1182,7 +1182,7 @@ func TestARepeatedSubmissionAnswersItsIdAndWritesNothing(t *testing.T) {
 		},
 	}}
 	got := decodedBy(t)(p.submitApplication(asShopperPath(), map[string]any{
-		"submissionId": "sub-abc", "storeId": "store-live", "siteId": "site-1", "companyName": "Acme",
+		"submissionId": "sub-abc", "storeId": "store-live", "siteId": "site-1", "accountId": "acct-north", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0))
 	if got["applicationId"] != "sub-abc" {
@@ -1204,7 +1204,7 @@ func TestANewApplicationIsFencedOnRowAbsent(t *testing.T) {
 		},
 	}}
 	if _, err := p.submitApplication(asShopperPath(), map[string]any{
-		"submissionId": "sub-new", "storeId": "store-live", "siteId": "site-1", "companyName": "Acme",
+		"submissionId": "sub-new", "storeId": "store-live", "siteId": "site-1", "accountId": "acct-north", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0); err != nil {
 		t.Fatalf("submitApplication: %v", err)
@@ -1282,10 +1282,14 @@ func TestASubmittedAccountMustBeTheSites(t *testing.T) {
 		"an unknown site":      {"store-live", "site-9", "acct-north"},
 		"B's own site and account, not B's owner": {"store-b", "site-b", "acct-b"},
 		"a site that does not serve the store":    {"store-live", "site-x", "acct-north"},
+		// AN ABSENT ACCOUNT IS NOT A PASS: the check is unconditional.
+		"no account": {"store-live", "site-1", ""},
 	} {
+		// EVERY CASE REACHES THE ONE CHECK, storefrontAdmits (which replaced
+		// accountIsTheSites), and is refused as a closed store is.
 		writer, err := submitAs(c[0], c[1], c[2])
-		if err == nil || len(writer.writes) != 0 {
-			t.Fatalf("%s: the account was written (err %v, writes %d)", name, err, len(writer.writes))
+		if !errors.Is(err, errNotAccepting) || len(writer.writes) != 0 {
+			t.Fatalf("%s: %v with %d writes, want refused as a closed store and nothing written", name, err, len(writer.writes))
 		}
 	}
 	writer, err := submitAs("store-live", "site-1", "acct-north")

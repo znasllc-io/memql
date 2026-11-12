@@ -230,7 +230,8 @@ func wsExec(t *testing.T, eng *memql.MemQLEngine, ctx context.Context, call stri
 // one site bound to the store or a site named. A store a test bound to its own
 // site is set up through it; a store with no site bound is given one here --
 // owned by ctx's actor, the store's merchant, and of an organization of its own
-// -- and set up naming it, so the row is the merchant's, as it was before.
+// in which the merchant holds the wholesale part -- and set up naming it, so
+// the row is the merchant's, as it was before.
 func openApplications(t *testing.T, eng *memql.MemQLEngine, ctx context.Context, storeID, adapter string) {
 	t.Helper()
 	call := func(site string) error {
@@ -247,7 +248,13 @@ func openApplications(t *testing.T, eng *memql.MemQLEngine, ctx context.Context,
 		ac, _ := auth.AccessFromContext(ctx)
 		owner := strings.TrimPrefix(ac.UserId, "v1:identity:user:")
 		site, account := "site-of-"+storeID, "acct-of-"+storeID
-		seedOrganization(t, eng, account)
+		// THE MERCHANT IS THE STORE'S PERSON in its organization, holding the
+		// part: applications are written tied to the site's organization
+		// (ruling 56), so deciding them is judged there.
+		group := seedOrganization(t, eng, account)
+		grantGroup(t, eng, group, "read", "app:deployables")
+		grantGroup(t, eng, group, "execute", "app:deployables/wholesale")
+		seedPersonIn(t, eng, owner, owner, "writer", true, group, account, "added")
 		seedSiteIn(t, eng, site, owner, storeID, account)
 		err = call(site)
 	}
@@ -256,16 +263,17 @@ func openApplications(t *testing.T, eng *memql.MemQLEngine, ctx context.Context,
 	}
 }
 
-// storeSite is the one site bound to store: a store takes applications only
-// through a site of its program's organization (ruling 56), so a direct
-// submission names the site the shopper handler would have stamped.
-func storeSite(t *testing.T, eng *memql.MemQLEngine, storeID string) string {
+// storeSiteArgs is the one site bound to store, as the call arguments the shopper
+// handler would have stamped: siteId and the site's accountId. A store takes
+// applications only through its admitted site, carrying that site's
+// organization (ruling 56), so a direct submission names both.
+func storeSiteArgs(t *testing.T, eng *memql.MemQLEngine, storeID string) string {
 	t.Helper()
 	rows := wsRows(t, eng, asOperator("operator-"+storeID), `query sitesBoundToStore(storeIds: [`+wsQuote(storeID)+`])`)
 	if len(rows) != 1 {
 		t.Fatalf("store %s has %d sites bound, want one", storeID, len(rows))
 	}
-	return bareID(asString(rows[0]["id"]))
+	return `siteId: ` + wsQuote(bareID(asString(rows[0]["id"]))) + `, accountId: ` + wsQuote(asString(rows[0]["accountId"]))
 }
 
 // submit stands in for component/server/shopper_handler.go: the pack's
@@ -279,7 +287,7 @@ func submit(t *testing.T, eng *memql.MemQLEngine, ctx context.Context, storeID, 
 	submissionID := "sub-" + id.NewShortId()
 	wsExec(t, eng, ctx, `builtin wholesaleSubmitApplication(applicantEmail: `+wsQuote(email)+
 		`, applicantName: "Sam Rivers", companyName: `+wsQuote(company)+
-		`, siteId: `+wsQuote(storeSite(t, eng, storeID))+`, storeId: `+wsQuote(storeID)+
+		`, `+storeSiteArgs(t, eng, storeID)+`, storeId: `+wsQuote(storeID)+
 		`, submissionId: `+wsQuote(submissionID)+`)`)
 	return submissionID
 }

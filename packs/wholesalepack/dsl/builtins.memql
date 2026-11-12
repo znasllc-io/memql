@@ -18,14 +18,14 @@
 
 @executor("integration.wholesale.submitApplication")
 @args(profile="object")
-@description("THE SHOPPER WRITE PATH: a business applies for trade terms on one store. Refused when that store's applicationsOpen is false, and ABSENT SETTINGS ARE CLOSED -- a merchant who has never touched their wholesale settings has not asked the internet for their customers' business details. Refused the same way when the store requires its terms (termsRequired) and the terms, the MAP policy or the price sheet has no published version. It derives the row id, because the caller is a member of the public posting a plain HTML form and a shopper who could choose a row id could overwrite another applicant's. storeId and siteId arrive STAMPED from the binding the post arrived through, never submitted.")
+@description("THE SHOPPER WRITE PATH: a business applies for trade terms on one store. Refused when that store's applicationsOpen is false, and ABSENT SETTINGS ARE CLOSED -- a merchant who has never touched their wholesale settings has not asked the internet for their customers' business details. Refused the same way when the store requires its terms (termsRequired) and the terms, the MAP policy or the price sheet has no published version; and when the post did not arrive through a site the store admits -- the store is not set up (no settings row, or one tied to no organization), or the site is of another organization or of none -- or does not carry that site's organization (accountId), or the caller is not that site's owner, whose authority the shopper path borrows. An absent accountId is not a pass. Nothing is written. It derives the row id, because the caller is a member of the public posting a plain HTML form and a shopper who could choose a row id could overwrite another applicant's. storeId and siteId arrive STAMPED from the binding the post arrived through, never submitted.")
 builtin wholesaleSubmitApplication {
   storeId         string!  @description("Stamped server-side from the binding in effect -- the serving binding, or the PREVIEW binding when the submission was made while exercising a candidate version.")
   companyName     string!  @description("The business applying.")
   applicantName   string!  @description("The person applying. Data, never an identity.")
   applicantEmail  string!  @description("Unverified. How a decision reaches them, and how an adapter finds the Shopify customer to entitle.")
-  siteId          string  @description("The deployable the post arrived on. Provenance; the row is scoped by storeId.")
-  accountId       string  @description("Stamped server-side from the organization of the site the post arrived on, and refused unless it is that site's. Empty for a site with no organization.")
+  siteId          string  @description("Stamped server-side: the deployable the post arrived on, and the site the store admits the application by -- it must serve the store and be of the organization the store's program is tied to. A call naming none is refused as a closed store.")
+  accountId       string  @description("Stamped server-side from the organization of the site the post arrived on, and refused unless it is that site's -- absent included: a site of no organization is not admitted.")
 }
 
 @executor("integration.wholesale.recordDecision")

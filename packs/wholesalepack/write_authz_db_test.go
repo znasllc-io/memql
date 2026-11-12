@@ -129,7 +129,7 @@ func TestLiveE2E_AnApplicationIsNeverWrittenOver(t *testing.T) {
 
 	// ANOTHER CALLER, THE SAME ID.
 	_, err := eng.Execute(asSiteOwner(other), `builtin wholesaleSubmitApplication(applicantEmail: "x@takeover.example"`+
-		`, applicantName: "Taker", companyName: "Takeover Ltd", storeId: `+wsQuote(otherStore)+
+		`, applicantName: "Taker", companyName: "Takeover Ltd", `+storeSiteArgs(t, eng, otherStore)+`, storeId: `+wsQuote(otherStore)+
 		`, submissionId: `+wsQuote(appID)+`)`)
 	if err == nil {
 		t.Fatal("a second caller's submission at a taken id was accepted")
@@ -151,7 +151,7 @@ func TestLiveE2E_AnApplicationIsNeverWrittenOver(t *testing.T) {
 
 	// THE SAME SUBMISSION AGAIN answers and writes nothing.
 	wsExec(t, eng, asSiteOwner(merchant), `builtin wholesaleSubmitApplication(applicantEmail: "first@original.example"`+
-		`, applicantName: "Sam Rivers", companyName: "Original Trading", siteId: `+wsQuote(storeSite(t, eng, storeLive))+`, storeId: `+
+		`, applicantName: "Sam Rivers", companyName: "Original Trading", `+storeSiteArgs(t, eng, storeLive)+`, storeId: `+
 		wsQuote(storeLive)+`, submissionId: `+wsQuote(appID)+`)`)
 	if got := versionCount(t, concept, appID); got != 1 {
 		t.Fatalf("a repeated submission wrote a second version: %d versions", got)
@@ -165,7 +165,7 @@ func TestLiveE2E_TwoSubmissionsAtOneIdAtOnceLeaveOneRow(t *testing.T) {
 	merchant, storeLive, _ := wholesaleScope()
 	openApplications(t, eng, asSiteOwner(merchant), storeLive, wholesalepack.AdapterCustomerTag)
 	appID := "sub-" + id.NewShortId()
-	site := storeSite(t, eng, storeLive)
+	site := storeSiteArgs(t, eng, storeLive)
 
 	var wg sync.WaitGroup
 	start := make(chan struct{})
@@ -175,7 +175,7 @@ func TestLiveE2E_TwoSubmissionsAtOneIdAtOnceLeaveOneRow(t *testing.T) {
 			defer wg.Done()
 			<-start
 			_, _ = eng.Execute(asSiteOwner(merchant), `builtin wholesaleSubmitApplication(applicantEmail: "race@race.example"`+
-				`, applicantName: "Racer", companyName: `+wsQuote(company)+`, siteId: `+wsQuote(site)+`, storeId: `+wsQuote(storeLive)+
+				`, applicantName: "Racer", companyName: `+wsQuote(company)+`, `+site+`, storeId: `+wsQuote(storeLive)+
 				`, submissionId: `+wsQuote(appID)+`)`)
 		}(company)
 	}
@@ -189,12 +189,16 @@ func TestLiveE2E_TwoSubmissionsAtOneIdAtOnceLeaveOneRow(t *testing.T) {
 // A CALLER WHO CANNOT READ AN APPLICATION CANNOT DECIDE IT. The decision's
 // write is no longer owner-checked, so the read under the caller is the check
 // -- even for a person holding the wholesale part, whom the organization gate
-// admits to an application tied to no organization.
+// admits to an application tied to no organization. No store takes such an
+// application any longer (ruling 56), so it is the older row it can still be:
+// seeded as one, written before the account tie.
 func TestLiveE2E_ACallerWhoCannotReadAnApplicationCannotDecideIt(t *testing.T) {
 	eng := liveWholesaleEngine(t)
 	merchant, storeLive, _ := wholesaleScope()
 	openApplications(t, eng, asSiteOwner(merchant), storeLive, wholesalepack.AdapterCustomerTag)
-	appID := submit(t, eng, asSiteOwner(merchant), storeLive, "Not Yours", "buyer@notyours.example")
+	appID := "old-" + id.NewShortId()
+	wsExec(t, eng, seedCtx(), `createApplicationRow(applicationId: `+wsQuote(appID)+`, ownerUserId: `+wsQuote(userRef(merchant))+
+		`, storeId: `+wsQuote(storeLive)+`, companyName: "Not Yours", applicantName: "Sam Rivers", applicantEmail: "buyer@notyours.example")`)
 
 	stranger := asDecider(t, eng, merchant+"-stranger")
 	_, err := eng.Execute(stranger, `builtin wholesaleRecordDecision(applicationId: `+wsQuote(appID)+

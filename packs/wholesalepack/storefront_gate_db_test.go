@@ -185,3 +185,63 @@ func TestASetUpNamingAnotherOwnersSiteIsRefused(t *testing.T) {
 		t.Fatalf("the refused set-up wrote %d versions", got-before)
 	}
 }
+
+// A DIRECT CALL OF THE SUBMISSION is written only as the shopper path writes it:
+// through the store's admitted site, carrying that site's organization, by that
+// site's owner. A signed-in stranger, and a member of the store's organization
+// who is not the site's owner, naming the right site -- with its organization
+// or with none -- are refused as a closed store, and nothing is written. The
+// shopper path through the handler still writes.
+func TestADirectSubmissionIsWrittenOnlyAsTheShopperPathWritesIt(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	s := newStorefrontScene(t, eng, "sf-direct")
+	_, store, _ := wholesaleScope()
+	site := s.site(t, eng, store, s.accountA)
+	setUp(t, eng, store, site, true)
+	member := "user-member-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	seedPersonIn(t, eng, member, member, "writer", true, "group-own-"+s.accountA, s.accountA, "added")
+	stranger := "user-stranger-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	seedUser(t, eng, stranger)
+	const closed = "wholesale: this store is not accepting applications"
+	for _, caller := range []string{stranger, member} {
+		for _, account := range []string{"", `, accountId: ` + quote(s.accountA)} {
+			_, err := eng.Execute(signedIn(caller), `builtin wholesaleSubmitApplication(applicantEmail: "direct@kestrel.example.com"`+
+				`, applicantName: "Ada Example", companyName: "Kestrel Cycles", siteId: `+quote(site)+`, storeId: `+quote(store)+
+				account+`, submissionId: `+quote("sub-"+strconv.FormatInt(time.Now().UnixNano(), 36))+`)`)
+			if err == nil || err.Error() != closed {
+				t.Errorf("%s naming the store's site (account %q): %v, want %q", caller, account, err, closed)
+			}
+		}
+	}
+	if n := unsetApplications(t, eng, store); n != 0 {
+		t.Fatalf("refused direct submissions wrote %d applications", n)
+	}
+	if loc := postApplication(t, eng, site, store, s.owner, applicationForm("a@kestrel.example.com")).Header().Get("Location"); !strings.HasPrefix(loc, "/wholesale/thank-you") {
+		t.Fatalf("the shopper path through the handler was refused: %q", loc)
+	}
+	apps := wsRows(t, eng, seedCtx(), `query applicationsForStore(storeId: `+quote(store)+`)`)
+	if len(apps) != 1 || bareID(asString(apps[0]["accountId"])) != s.accountA || apps[0]["ownerUserId"] != s.owner {
+		t.Fatalf("the shopper path wrote %+v, want one application of %s owned by %s", apps, s.accountA, s.owner)
+	}
+}
+
+// AN UNTIED ROW THAT IS OPEN AND REQUIRES ITS TERMS, with all three documents
+// published, is tied by the set-up and stays open: the terms rule is met.
+func TestTyingAnOpenUntiedRowThatRequiresItsTermsKeepsItOpen(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	g := newGateScene(t, eng, "tie-terms", false)
+	for _, kind := range []string{"terms", "map", "priceSheet"} {
+		wsExec(t, eng, seedCtx(), `appendWholesaleDocumentVersion(ownerUserId: `+quote(g.a.owner)+`, storeId: `+quote(g.a.store)+
+			`, accountId: `+quote(g.a.account)+`, kind: `+quote(kind)+`, label: `+quote(kind+" 2026")+`, body: "Net 30.", sha256: "x"`+
+			`, publishedBy: `+quote(userRef(g.a.staff))+`, publishedAt: `+quote(time.Now().UTC().Format(time.RFC3339Nano))+`)`)
+	}
+	wsExec(t, eng, seedCtx(), `setWholesaleSettingsRow(settingsId: `+quote(wholesalepack.SettingsRowID(g.a.store))+
+		`, ownerUserId: `+quote(g.a.owner)+`, storeId: `+quote(g.a.store)+`, applicationsOpen: true, entitlementAdapter: "customerTag"`+
+		`, introText: "", accountId: "", siteId: "", staffEmail: "", termsRequired: true, linkLifetimeDays: 0, acceptanceText: "")`)
+	wsExec(t, eng, asOperator("operator-"+g.a.staff), `builtin wholesaleSetSettings(applicationsOpen: false, entitlementAdapter: ""`+
+		`, storeId: `+quote(g.a.store)+`, siteId: `+quote(g.a.site)+`)`)
+	row := latestPayload(t, "v1:wholesale:wholesaleSettings", wholesalepack.SettingsRowID(g.a.store))
+	if bareID(asString(row["accountId"])) != g.a.account || row["applicationsOpen"] != true || row["termsRequired"] != true {
+		t.Fatalf("the tied row is %+v, want it tied, open and requiring its terms", row)
+	}
+}

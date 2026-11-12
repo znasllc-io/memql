@@ -184,10 +184,12 @@ func trimmed(v any) string { return strings.TrimSpace(asString(v)) }
 // writes could otherwise write over any row at an id they can name. So each
 // builtin authorizes its caller ITSELF, before it calls this:
 //
-//   - wholesaleSubmitApplication: the store's applicationsOpen gate, an
-//     accountId refused unless it is the named site's, then the id
-//     established absent (read as the system) and the write fenced on "row
-//     absent", so no application is ever written over;
+//   - wholesaleSubmitApplication: the store's applicationsOpen gate; then the
+//     store gate's judgement of the named site (the store set up, the site of
+//     its organization), the accountId the site's organization and the caller
+//     the site's owner, unconditionally -- else refused as a closed store; then
+//     the id established absent (read as the system) and the write fenced on
+//     "row absent", so no application is ever written over;
 //   - wholesaleRecordDecision: the wholesale part, judged by the organization
 //     gate against the APPLICATION's organization; then a signed-in person
 //     who is not one of the cluster's operators (deciderOf -- the decider is

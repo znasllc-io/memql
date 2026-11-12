@@ -33,6 +33,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/server"
+	"github.com/znasllc-io/memql/core/id"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 	wholesalepack "github.com/znasllc-io/memql/packs/wholesalepack"
 )
@@ -490,10 +491,16 @@ func contosoReviewVersions(t *testing.T, appID string) int {
 // and with it the run calls the adapter no more and touches no review.
 func TestABackfillSetsOffNoClientAutomation(t *testing.T) {
 	eng := automatedWholesaleEngine(t)
-	merchant, store, _, _ := tiedStore(t, eng, "quiet")
+	merchant, store, site, _ := tiedStore(t, eng, "quiet")
 	ctx := asSiteOwner(merchant)
 	openApplications(t, eng, ctx, store, automationFakeAdapter)
-	appID := submit(t, eng, ctx, store, "Quiet Trading", "buyer@quiet.example.com")
+	// AN APPLICATION AS ONE WAS WRITTEN BEFORE THE ACCOUNT TIE, the row the
+	// backfill exists for: no store takes an untied application any longer
+	// (ruling 56), so it is seeded as the older row it is.
+	appID := "sub-" + id.NewShortId()
+	wsExec(t, eng, seedCtx(), `createApplicationRow(applicationId: `+quote(appID)+`, ownerUserId: `+quote(userRef(merchant))+
+		`, storeId: `+quote(store)+`, siteId: `+quote(site)+`, companyName: "Quiet Trading", applicantName: "Sam Rivers"`+
+		`, applicantEmail: "buyer@quiet.example.com")`)
 	decide(t, eng, asDecider(t, eng, merchant), appID, wholesalepack.TransitionApprove, merchant, "approved")
 
 	deadline := time.Now().Add(10 * time.Second)
