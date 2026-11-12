@@ -358,3 +358,64 @@ func TestAStaffNoticeIsStagedOnceInTheOutbox(t *testing.T) {
 		t.Fatal("a person's call staged a notice")
 	}
 }
+
+// TWO NODES TELL ONE EVENT AT ONCE, through the real outbox: one notice is
+// staged, both calls answer it, and once the outbox has sent it a further call
+// leaves it sent and stages nothing.
+func TestTwoNodesAtOnceStageOneStaffNoticeAndASentOneStaysSent(t *testing.T) {
+	eng, s := newEmailStore(t, "mail-race", false)
+	call := `builtin wholesaleNotifyStaff(applicationId: ` + quote(s.appID) + `, event: "readyToReview")`
+	want := wholesalepack.StaffRequestID(wholesalepack.StaffEventReadyToReview, s.appID, "")
+	var wg sync.WaitGroup
+	answers := make([]map[string]any, 4)
+	start := make(chan struct{})
+	for i := range answers {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			result, err := eng.Execute(auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(context.Background(), "automation-runner")), call)
+			if err != nil {
+				t.Errorf("notice %d: %v", i, err)
+				return
+			}
+			if rows := memql.MaterializeRows(result); len(rows) == 1 {
+				answers[i] = rows[0]
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	if n := versionCount(t, "v1:platform:outboundRequest", want); n != 1 {
+		t.Fatalf("%d versions of the notice staged by four calls at once, want one; answers %v", n, answers)
+	}
+	fresh := 0
+	for i, a := range answers {
+		if a["status"] != "staged" || a["requestId"] != want {
+			t.Fatalf("notice %d answered %v", i, a)
+		}
+		if a["alreadyStaged"] == false {
+			fresh++
+		}
+	}
+	if fresh != 1 {
+		t.Fatalf("%d calls answered that they staged the notice, want one: %v", fresh, answers)
+	}
+
+	// THE OUTBOX SENDS IT (as its worker records a delivery: a new version, sent).
+	row := latestPayload(t, "v1:platform:outboundRequest", want)
+	row["status"] = "sent"
+	row["attempts"] = 1
+	delete(row, "id")
+	wsExec(t, eng, seedCtx(), rawInsert("v1:platform:outboundRequest", want, row))
+	if again := automationCall(t, eng, call); again["alreadyStaged"] != true {
+		t.Fatalf("a call after the notice was sent answered %v", again)
+	}
+	if got := latestPayload(t, "v1:platform:outboundRequest", want); got["status"] != "sent" || versionCount(t, "v1:platform:outboundRequest", want) != 2 {
+		t.Fatalf("after a further call the notice is %v with %d versions, want it still sent", got,
+			versionCount(t, "v1:platform:outboundRequest", want))
+	}
+	if lines := s.logs.lines("sam@"); lines != "" {
+		t.Fatalf("a log line carries the applicant's address:\n%s", lines)
+	}
+}

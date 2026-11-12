@@ -102,6 +102,13 @@ type emailWorld struct {
 	seen     map[string]int            // emailSend row id -> the version last read
 	staged   map[string]map[string]any // outbound request id -> row
 	stages   int                       // stage writes
+	// afterStagedRead runs once an outbox read has answered: another node's
+	// stage, landing between this node's check and its write.
+	afterStagedRead func()
+	// stagedReadsFresh is whether each outbox read asked for a fresh read.
+	stagedReadsFresh []bool
+	// stageErr, when set, refuses every stage with this error.
+	stageErr error
 	site     map[string]any
 	names    map[string]string
 	tick     int
@@ -163,7 +170,13 @@ func (w *emailWorld) Rows(ctx context.Context, query string, args map[string]str
 		if !auth.OriginFromContext(ctx).IsInternal() {
 			return nil, errors.New("outboundRequestById is @serverOnly")
 		}
-		if row, ok := w.staged[args["requestId"]]; ok {
+		w.stagedReadsFresh = append(w.stagedReadsFresh, memql.FreshReadFromContext(ctx))
+		row, ok := w.staged[args["requestId"]]
+		if after := w.afterStagedRead; after != nil {
+			w.afterStagedRead = nil
+			after()
+		}
+		if ok {
 			return []map[string]any{row}, nil
 		}
 		return nil, nil
@@ -236,10 +249,20 @@ func (w *emailWorld) Write(ctx context.Context, mutation string, args map[string
 		if !auth.OriginFromContext(ctx).IsInternal() {
 			return errors.New("stageServerOutboundRequest is @serverOnly")
 		}
+		if w.stageErr != nil {
+			return w.stageErr
+		}
+		id := asString(args["requestId"])
+		// THE ROW-ABSENT FENCE, as the engine holds it: a stage fenced on no row
+		// loses to a row already there.
+		if _, there := w.staged[id]; there && memql.HasRowVersionFence(ctx, outboundRequestConcept, id) {
+			return fmt.Errorf("wholesale: stageServerOutboundRequest: %w", memql.ErrRowVersionChanged)
+		}
 		w.stages++
 		row := copyRow(args)
-		row["id"] = asString(args["requestId"])
-		w.staged[asString(args["requestId"])] = row
+		row["id"] = id
+		row["status"] = "pending"
+		w.staged[id] = row
 	case "writeEntitlementRow", "backfillEntitlementRow":
 		row := copyRow(args)
 		delete(row, "entitlementId")
@@ -872,6 +895,33 @@ func TestAWronglyWiredStaffEventSendsNothing(t *testing.T) {
 	}
 	if w.stages != 0 {
 		t.Fatalf("%d notices staged", w.stages)
+	}
+}
+
+// TWO NODES TELL ONE EVENT AT ONCE: the other node's notice is staged, and
+// sent, between this node's check and its write. The check is a fresh read,
+// the stage is fenced on no row at the id, and the loser answers alreadyStaged
+// and writes nothing -- so the sent notice stays sent and is not staged again.
+func TestTwoNodesStagingOneNoticeStageItOnce(t *testing.T) {
+	w := newEmailWorld()
+	w.settings["termsRequired"] = false
+	p := w.provider()
+	id := StaffRequestID(StaffEventReadyToReview, linkApp, "")
+	w.afterStagedRead = func() {
+		w.stages++
+		w.staged[id] = map[string]any{"id": id, "requestId": id, "status": "sent", "target": "desk@example.com"}
+	}
+	got := w.notify(t, p, map[string]any{"event": StaffEventReadyToReview})
+	if got["alreadyStaged"] != true || got["status"] != "staged" || got["requestId"] != id {
+		t.Fatalf("the node that lost answered %v", got)
+	}
+	if w.stages != 1 || w.staged[id]["status"] != "sent" {
+		t.Fatalf("%d stages; the notice is %v, want the other node's, still sent", w.stages, w.staged[id])
+	}
+	for i, fresh := range w.stagedReadsFresh {
+		if !fresh {
+			t.Fatalf("outbox read %d was not a fresh read", i)
+		}
 	}
 }
 

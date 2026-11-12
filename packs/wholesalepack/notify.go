@@ -7,9 +7,11 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // notify.go -- THE STORE'S OWN PEOPLE ARE TOLD (wholesaleNotifyStaff).
@@ -52,6 +54,9 @@ const NoStaffAddressReason = "the store names no address"
 const (
 	notifyStaffActor = "wholesale-notify-staff"
 	staffRequestedBy = "wholesale:staffNotice"
+	// outboundRequestConcept is the transactional outbox's row; a notice is the
+	// row at its request id.
+	outboundRequestConcept = "v1:platform:outboundRequest"
 )
 
 // decisionOfEvent is the transition each decision event is a copy of.
@@ -210,16 +215,24 @@ func (p *Provider) notifyStaff(ctx context.Context, args map[string]any, _ int) 
 		body = defaults[1]
 	}
 	// ONE NOTICE PER REQUEST ID: one already staged is answered, and nothing is
-	// staged again.
-	staged, err := p.rowsFor(sys, "outboundRequestById", map[string]string{"requestId": requestID})
+	// staged again. The check is a FRESH read, and the stage is FENCED ON NO ROW
+	// AT THE ID: of two nodes that pass the check at once (or one whose cache had
+	// not heard of the other's stage), the second write loses the fence, writes
+	// nothing over the first notice -- which the outbox may already have sent --
+	// and answers it as already staged.
+	alreadyStaged := func() ([]memorynodes.MemoryNode, error) {
+		return confirm("wholesale:staffNotice", map[string]any{"applicationId": id, "event": event,
+			"status": "staged", "requestId": requestID, "alreadyStaged": true})
+	}
+	staged, err := p.rowsFor(memql.ContextWithFreshRead(sys), "outboundRequestById", map[string]string{"requestId": requestID})
 	if err != nil {
 		return nil, err
 	}
 	if len(staged) > 0 {
-		return confirm("wholesale:staffNotice", map[string]any{"applicationId": id, "event": event,
-			"status": "staged", "requestId": requestID, "alreadyStaged": true})
+		return alreadyStaged()
 	}
-	if err := p.write(sys, "stageServerOutboundRequest", map[string]any{
+	fenced := memql.ContextWithRowVersionFence(sys, outboundRequestConcept, requestID, time.Time{})
+	if err := p.write(fenced, "stageServerOutboundRequest", map[string]any{
 		"requestId":   requestID,
 		"medium":      "email",
 		"target":      target,
@@ -228,6 +241,9 @@ func (p *Provider) notifyStaff(ctx context.Context, args map[string]any, _ int) 
 		"dedupeKey":   requestID,
 		"requestedBy": staffRequestedBy,
 	}); err != nil {
+		if errors.Is(err, memql.ErrRowVersionChanged) {
+			return alreadyStaged()
+		}
 		// An engine error may quote the call it refused: the address does not
 		// reach the caller or a log line.
 		return nil, errors.New(strings.ReplaceAll(err.Error(), target, "the store's address"))
