@@ -338,6 +338,57 @@ func resolverFailure(err error) string {
 	return "failed"
 }
 
+// handleRowSender answers campaignRowSender: the sender a row send for the
+// organization would go out as, resolved exactly as sendRow resolves it
+// (resolveSendIdentityFor, with no installation fallback) -- {ready, fromName,
+// address, reason}. Ready answers the identity's name and address; otherwise
+// fromName and address are empty and reason is a sentence for a person: the
+// hold's own sentence, or one of rowSenderRefusals' words, never the campaign
+// worker's refusal text. It sends nothing and checks no transport.
+//
+// THE SEND'S OWN AUTHORITY: the caller must hold what a row send requires of
+// it (requireSendAuthority, update data in the organization). A caller without
+// it is answered exactly as for an organization that does not exist, so the
+// answer says nothing of the organization's senders.
+func (w *Worker) handleRowSender(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, errors.New("campaigns.rowSender: read by a trusted job, never by a client")
+	}
+	account := memql.BareShortId(strings.TrimSpace(argString(args, "accountId")))
+	if account == "" {
+		return nil, errors.New("campaigns.rowSender: accountId is required: a sender is one organization's")
+	}
+	refused := func(reason string) ([]memorynodes.MemoryNode, error) {
+		return resultNode("campaignRowSender", map[string]any{"accountId": account, "ready": false, "fromName": "", "address": "", "reason": reason})
+	}
+	if err := w.requireSendAuthority(ctx, account); err != nil {
+		return refused(rowSenderUnreadable)
+	}
+	campaign := Campaign{AccountID: account, SenderIdentityID: memql.BareShortId(strings.TrimSpace(argString(args, "senderIdentityId")))}
+	identity, refusal := w.resolveSendIdentityFor(memql.ContextWithFreshRead(w.systemActorContext(ctx)), campaign, false)
+	switch {
+	case !refusal.refused():
+		return resultNode("campaignRowSender", map[string]any{"accountId": account, "ready": true,
+			"fromName": identity.SendAs.FromName, "address": identity.SendAs.Address, "reason": ""})
+	case refusal.Held != "":
+		return refused(refusal.Held)
+	case !refusal.Terminal:
+		return refused(rowSenderReadFailed)
+	case campaign.SenderIdentityID == "":
+		return refused(rowSenderNoneChosen)
+	}
+	return refused(rowSenderOtherOrganization)
+}
+
+// The row sender's sentences for a person, in place of the campaign worker's
+// refusal text.
+const (
+	rowSenderUnreadable        = "No sender can be read for this organization."
+	rowSenderReadFailed        = "The sender could not be read just now."
+	rowSenderNoneChosen        = "No sender is chosen for this organization."
+	rowSenderOtherOrganization = "The chosen sender belongs to another organization."
+)
+
 // handleRowMessageStatus answers campaignRowMessageStatus: one row per request
 // id, {requestId, status, skipReason, providerStatus, sentAt}, read under the
 // system actor for the one organization the call names, and nothing else of the

@@ -15,9 +15,11 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/campaigns"
@@ -317,16 +319,36 @@ func TestAPriceSheetLinkStopsOpeningOnceTheBuyerIsRemoved(t *testing.T) {
 		t.Fatalf("after the removal the price-sheet link answered %d %s", code, body)
 	}
 	// THE REMOVAL EMAIL'S TEMPLATE IS UNPUBLISHED MEANWHILE: the lane holds it,
-	// and the row says what to fix; nothing is sent.
+	// the row says what to fix, the automation is answered that it was not sent,
+	// and nothing is sent.
 	s.putTemplate(t, eng, wholesalepack.EmailRevoked, "Your trade account", "No longer.", "draft")
-	held := automationCall(t, eng, s.sendCall("wholesaleSendBuyerEmail", "revoked"))
-	if held["state"] != wholesalepack.SendSkipped || !strings.Contains(asString(held["reason"]), "is not a published transactional template") ||
+	_, err := eng.Execute(auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(context.Background(), "automation-runner")),
+		s.sendCall("wholesaleSendBuyerEmail", "revoked"))
+	if err == nil || !strings.Contains(err.Error(), "the removal email was not sent") || !strings.Contains(err.Error(), "is not a published transactional template") ||
 		len(s.mail.messages()) != 1 {
-		t.Fatalf("a held removal email answered %v after %d messages", held, len(s.mail.messages()))
+		t.Fatalf("a held removal email answered %v after %d messages", err, len(s.mail.messages()))
 	}
 	row := latestPayload(t, "v1:wholesale:emailSend", wholesalepack.EmailSendRowID("revoked", s.appID, 1))
-	if row["state"] != wholesalepack.SendSkipped || row["reason"] != held["reason"] {
+	if row["state"] != wholesalepack.SendHeld || !strings.Contains(asString(row["reason"]), "is not a published transactional template") {
 		t.Fatalf("the held email's row is %v", row)
+	}
+	application := answerOf(t, eng, signedIn(s.staff), `builtin wholesaleGet(applicationId: `+quote(s.appID)+`)`)
+	if acts, _ := json.Marshal(application["acts"]); !strings.Contains(string(acts), `"resendRevoked"`) {
+		t.Fatalf("a held removal email offers acts %s", acts)
+	}
+	// PUBLISHED AGAIN, a person of the store sends it once, as attempt two.
+	s.putTemplate(t, eng, wholesalepack.EmailRevoked, "Your trade account", "No longer.", "ready")
+	resent := answerOf(t, eng, signedIn(s.staff), `builtin wholesaleResendEmail(applicationId: `+quote(s.appID)+`, kind: "revoked")`)
+	if resent["state"] != wholesalepack.SendSent || resent["attempt"] != float64(2) || len(s.mail.messages()) != 2 ||
+		s.mail.messages()[1].To != "sam@mail-sheet.example.com" {
+		t.Fatalf("the resent removal email answered %v after %d messages", resent, len(s.mail.messages()))
+	}
+	if _, err := eng.Execute(signedIn(s.staff), `builtin wholesaleResendEmail(applicationId: `+quote(s.appID)+`, kind: "revoked")`); err == nil ||
+		len(s.mail.messages()) != 2 {
+		t.Fatalf("a second resend of a sent removal email answered %v after %d messages", err, len(s.mail.messages()))
+	}
+	if lines := s.logs.lines("sam@"); lines != "" {
+		t.Fatalf("a log line carries the applicant's address:\n%s", lines)
 	}
 }
 
@@ -356,5 +378,208 @@ func TestAStaffNoticeIsStagedOnceInTheOutbox(t *testing.T) {
 	}
 	if _, err := eng.Execute(signedIn(s.staff), call); err == nil {
 		t.Fatal("a person's call staged a notice")
+	}
+}
+
+// TWO NODES TELL ONE EVENT AT ONCE, through the real outbox: one notice is
+// staged, both calls answer it, and once the outbox has sent it a further call
+// leaves it sent and stages nothing.
+func TestTwoNodesAtOnceStageOneStaffNoticeAndASentOneStaysSent(t *testing.T) {
+	eng, s := newEmailStore(t, "mail-race", false)
+	call := `builtin wholesaleNotifyStaff(applicationId: ` + quote(s.appID) + `, event: "readyToReview")`
+	want := wholesalepack.StaffRequestID(wholesalepack.StaffEventReadyToReview, s.appID, "")
+	var wg sync.WaitGroup
+	answers := make([]map[string]any, 4)
+	start := make(chan struct{})
+	for i := range answers {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			result, err := eng.Execute(auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(context.Background(), "automation-runner")), call)
+			if err != nil {
+				t.Errorf("notice %d: %v", i, err)
+				return
+			}
+			if rows := memql.MaterializeRows(result); len(rows) == 1 {
+				answers[i] = rows[0]
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	if n := versionCount(t, "v1:platform:outboundRequest", want); n != 1 {
+		t.Fatalf("%d versions of the notice staged by four calls at once, want one; answers %v", n, answers)
+	}
+	fresh := 0
+	for i, a := range answers {
+		if a["status"] != "staged" || a["requestId"] != want {
+			t.Fatalf("notice %d answered %v", i, a)
+		}
+		if a["alreadyStaged"] == false {
+			fresh++
+		}
+	}
+	if fresh != 1 {
+		t.Fatalf("%d calls answered that they staged the notice, want one: %v", fresh, answers)
+	}
+
+	// THE OUTBOX SENDS IT (as its worker records a delivery: a new version, sent).
+	row := latestPayload(t, "v1:platform:outboundRequest", want)
+	row["status"] = "sent"
+	row["attempts"] = 1
+	delete(row, "id")
+	wsExec(t, eng, seedCtx(), rawInsert("v1:platform:outboundRequest", want, row))
+	if again := automationCall(t, eng, call); again["alreadyStaged"] != true {
+		t.Fatalf("a call after the notice was sent answered %v", again)
+	}
+	if got := latestPayload(t, "v1:platform:outboundRequest", want); got["status"] != "sent" || versionCount(t, "v1:platform:outboundRequest", want) != 2 {
+		t.Fatalf("after a further call the notice is %v with %d versions, want it still sent", got,
+			versionCount(t, "v1:platform:outboundRequest", want))
+	}
+	if lines := s.logs.lines("sam@"); lines != "" {
+		t.Fatalf("a log line carries the applicant's address:\n%s", lines)
+	}
+}
+
+// NOTHING IS MAILED ON UPGRADE FOR WHAT HAPPENED BEFORE IT. An application
+// approved and granted before the pack sent emails -- its rows written without
+// an attempt, a direction or an email row, and not yet tied to its
+// organization -- is tied by the real account backfill. The store's automation
+// on the versions the backfill re-wrote then asks for the approval email and
+// the access notice, as an automation wired on every entitlement version would:
+// no email reaches the lane, no notice is staged, and no email row is written.
+// A retry of the buyer's access after the upgrade is attempt 1, and its
+// approval email is sent once.
+func TestNothingIsMailedOnUpgradeForAnAccessGrantedBeforeEmails(t *testing.T) {
+	fakeAdapterOnce.Do(func() { wholesalepack.RegisterAdapter(fakeAdapter) })
+	eng, s := newEmailStore(t, "mail-old", false)
+	oldApp := "old-mail-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	wsExec(t, eng, seedCtx(), rawInsert("v1:wholesale:application", oldApp, map[string]any{"ownerUserId": userRef(s.owner),
+		"storeId": s.store, "siteId": s.site, "companyName": "Old Trading", "applicantName": "Pat Old",
+		"applicantEmail": "pat@mail-old.example.com"}))
+	wsExec(t, eng, seedCtx(), rawInsert("v1:wholesale:applicationDecision", "old-dec-"+oldApp, map[string]any{
+		"applicationId": "v1:wholesale:application:" + oldApp, "storeId": s.store, "transition": "approve",
+		"decidedBy": userRef(s.staff), "principalKind": "client", "note": "known to us"}))
+	wsExec(t, eng, seedCtx(), rawInsert("v1:wholesale:entitlement", wholesalepack.EntitlementRowID(oldApp), map[string]any{
+		"ownerUserId": userRef(s.owner), "applicationId": "v1:wholesale:application:" + oldApp, "storeId": s.store,
+		"buyerEmail": "pat@mail-old.example.com", "adapter": wholesalepack.AdapterCustomerTag, "state": "granted", "reference": "wholesale"}))
+
+	report := answerOf(t, eng, asOperator("operator-"+s.site), `builtin wholesaleBackfillAccounts(storeId: `+quote(s.store)+`)`)
+	if countOf(report["tied"]) < 3 {
+		t.Fatalf("the backfill tied %v rows, want the application, its decision and its entitlement: %v", report["tied"], report)
+	}
+	ent := latestPayload(t, "v1:wholesale:entitlement", wholesalepack.EntitlementRowID(oldApp))
+	if bareID(asString(ent["accountId"])) != s.account || ent["attempt"] != nil || ent["state"] != "granted" {
+		t.Fatalf("the re-written entitlement is %v, want it tied, granted and still without an attempt", ent)
+	}
+
+	sendCall := `builtin wholesaleSendBuyerEmail(applicationId: ` + quote(oldApp) + `, kind: "approved")`
+	got := automationCall(t, eng, sendCall)
+	if got["state"] != wholesalepack.SendSkipped || got["recorded"] != false || got["reason"] != wholesalepack.ReasonAccessPredatesEmail {
+		t.Fatalf("the approval email for an access granted before emails answered %v", got)
+	}
+	notice := automationCall(t, eng, `builtin wholesaleNotifyStaff(applicationId: `+quote(oldApp)+`, event: "accessNotGranted")`)
+	if notice["status"] != "skipped" || notice["reason"] != wholesalepack.ReasonAccessPredatesEmail {
+		t.Fatalf("the access notice for an access from before emails answered %v", notice)
+	}
+	if n := len(s.mail.messages()); n != 0 {
+		t.Fatalf("%d emails reached the lane for an access granted before emails", n)
+	}
+	for _, attempt := range []int{0, 1} {
+		if n := versionCount(t, "v1:platform:outboundRequest",
+			wholesalepack.AccessStaffRequestID(wholesalepack.StaffEventAccessNotGranted, oldApp, attempt)); n != 0 {
+			t.Fatalf("an access notice was staged for attempt %d", attempt)
+		}
+	}
+	if n := versionCount(t, "v1:wholesale:emailSend", wholesalepack.EmailSendRowID(wholesalepack.EmailApproved, oldApp, 1)); n != 0 {
+		t.Fatalf("%d email rows were written for an access granted before emails", n)
+	}
+
+	// A RETRY AFTER THE UPGRADE, through an adapter that reaches no store.
+	openApplications(t, eng, asSiteOwner(s.owner), s.store, automationFakeAdapter)
+	if _, err := eng.Execute(signedIn(s.staff), `builtin wholesaleRetryAccess(applicationId: `+quote(oldApp)+`)`); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	ent = latestPayload(t, "v1:wholesale:entitlement", wholesalepack.EntitlementRowID(oldApp))
+	if ent["state"] != "granted" || ent["attempt"] != float64(1) || ent["direction"] != "grant" {
+		t.Fatalf("the retry wrote %v, want attempt 1, a granted grant", ent)
+	}
+	if got := automationCall(t, eng, sendCall); got["state"] != wholesalepack.SendSent || got["attempt"] != float64(1) {
+		t.Fatalf("the approval email after the retry answered %v", got)
+	}
+	automationCall(t, eng, sendCall) // the automation on the next version
+	if sent := s.mail.messages(); len(sent) != 1 || sent[0].To != "pat@mail-old.example.com" {
+		t.Fatalf("%d approval emails after the retry, want one to the stored address", len(sent))
+	}
+	if lines := s.logs.lines("pat@"); lines != "" {
+		t.Fatalf("a log line carries the applicant's address:\n%s", lines)
+	}
+}
+
+// THE SETTINGS ANSWER THE SENDER AS THE EMAILS GO OUT AS, through the real row
+// lane, and MAY PUBLISH AND MAY EXPORT AGREE WITH THE BUILTINS for a person of
+// the store holding the part, one of its people who does not, and a cluster
+// operator.
+func TestTheSettingsAnswerTheSenderAndWhatTheCallerMayPublishAndExport(t *testing.T) {
+	eng, s := newEmailStore(t, "mail-may", false)
+	store := `siteId: ` + quote(s.site) + `, storeId: ` + quote(s.store)
+	settings := `builtin wholesaleStoreSettings(` + store + `)`
+	got := answerOf(t, eng, signedIn(s.staff), settings)
+	sender, _ := got["sender"].(map[string]any)
+	if sender["ready"] != true || sender["fromName"] != "Kestrel Trade" || sender["address"] != "trade@example.com" || sender["reason"] != "" {
+		t.Fatalf("the chosen sender reads %v", sender)
+	}
+
+	without := "user-nopart-" + s.site
+	group := "group-nopart-" + s.site
+	seedGroup(t, eng, group, "custom", s.account)
+	seedPersonIn(t, eng, without, without, "writer", true, group, s.account, "added")
+	publish := `builtin wholesalePublishDocument(` + store + `, kind: "terms", label: "Terms 2027", body: "Net 45.")`
+	export := `builtin wholesaleExportStore(` + store + `)`
+	for who, ctx := range map[string]context.Context{
+		"a person holding the part": signedIn(s.staff), "a person without it": signedIn(without),
+		"a cluster operator": asOperator("operator-" + s.site),
+	} {
+		_, publishErr := eng.Execute(ctx, publish)
+		_, exportErr := eng.Execute(ctx, export)
+		result, err := eng.Execute(ctx, settings)
+		if err != nil {
+			// The settings are refused: so must both acts be.
+			if publishErr == nil || exportErr == nil {
+				t.Fatalf("%s reads no settings (%v) yet publish answered %v and export %v", who, err, publishErr, exportErr)
+			}
+			continue
+		}
+		rows := memql.MaterializeRows(result)
+		may, _ := rows[0]["may"].(map[string]any)
+		if may["publish"] != (publishErr == nil) || may["export"] != (exportErr == nil) {
+			t.Fatalf("%s: may %v, but publish answered %v and export %v", who, may, publishErr, exportErr)
+		}
+	}
+
+	// NO SENDER CHOSEN: what a send with none chosen goes out as, in the lane's words.
+	wsExec(t, eng, auth.ContextWithInternalOrigin(asOperator("operator-"+s.site)),
+		`builtin wholesaleUpdateSettings(`+store+`, senderIdentityId: "")`)
+	sender, _ = answerOf(t, eng, signedIn(s.staff), settings)["sender"].(map[string]any)
+	if sender["ready"] != false || sender["address"] != "" || strings.TrimSpace(asString(sender["reason"])) == "" {
+		t.Fatalf("no sender chosen reads %v", sender)
+	}
+	// AND EVERY EMAIL SAYS IT WOULD NOT BE SENT, with the sentence a send declines with.
+	would, _ := answerOf(t, eng, signedIn(s.staff), settings)["emailsWouldSend"].(map[string]any)
+	approved, _ := would[wholesalepack.EmailApproved].(map[string]any)
+	if approved["wouldSend"] != false || approved["reason"] != wholesalepack.NoSenderChosenReason {
+		t.Fatalf("with no sender chosen the approval email reads %v", approved)
+	}
+	if _, err := eng.Execute(signedIn(s.staff), `builtin wholesaleRecordDecision(applicationId: `+quote(s.appID)+
+		`, transition: "reject", note: "not a trade buyer")`); err != nil {
+		t.Fatalf("reject: %v", err)
+	}
+	if got := automationCall(t, eng, s.sendCall("wholesaleSendBuyerEmail", "rejected")); got["state"] != wholesalepack.SendSkipped ||
+		got["recorded"] != false || got["reason"] != wholesalepack.NoSenderChosenReason || len(s.mail.messages()) != 0 {
+		t.Fatalf("a rejection with no sender chosen answered %v after %d messages", got, len(s.mail.messages()))
+	}
+	if n := versionCount(t, "v1:wholesale:emailSend", wholesalepack.EmailSendRowID(wholesalepack.EmailRejected, s.appID, 1)); n != 0 {
+		t.Fatalf("%d email rows written for a store with no sender", n)
 	}
 }

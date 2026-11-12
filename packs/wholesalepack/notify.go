@@ -7,9 +7,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
+	"unicode"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // notify.go -- THE STORE'S OWN PEOPLE ARE TOLD (wholesaleNotifyStaff).
@@ -52,6 +55,9 @@ const NoStaffAddressReason = "the store names no address"
 const (
 	notifyStaffActor = "wholesale-notify-staff"
 	staffRequestedBy = "wholesale:staffNotice"
+	// outboundRequestConcept is the transactional outbox's row; a notice is the
+	// row at its request id.
+	outboundRequestConcept = "v1:platform:outboundRequest"
 )
 
 // decisionOfEvent is the transition each decision event is a copy of.
@@ -61,26 +67,48 @@ var decisionOfEvent = map[string]string{
 	StaffEventRevoked:  TransitionRevoke,
 }
 
-// staffDefaults is each event's own subject and body.
+// staffDefaults is each event's own subject and the first paragraph of its
+// body; staffDefault adds the rest.
+//
+// EACH SAYS ONLY WHAT HOLDS IN EVERY CASE ITS EVENT COVERS. readyToReview does
+// not say the company applied: the store's staff may have added it. An access
+// event does not say the buyer is approved: a removal may have been decided
+// after the grant that did not land. The access record says why it did not
+// land, on the application in MemQL OS.
 var staffDefaults = map[string][2]string{
 	StaffEventReadyToReview: {"A wholesale application is ready to review: {{companyName}}",
-		"{{companyName}} ({{applicantName}}) applied for trade terms, and the application is ready to review.\n\n" +
-			"Open the store's wholesale applications: {{adminUrl}}"},
+		"The wholesale application of {{companyName}} ({{applicantName}}) is ready to review."},
 	StaffEventApproved: {"Approved: {{companyName}}",
-		"{{decidedBy}} approved the wholesale application of {{companyName}} ({{applicantName}}).\n\n{{note}}\n\n" +
-			"Open the store's wholesale applications: {{adminUrl}}"},
+		"{{decidedBy}} approved the wholesale application of {{companyName}} ({{applicantName}})."},
 	StaffEventRejected: {"Rejected: {{companyName}}",
-		"{{decidedBy}} rejected the wholesale application of {{companyName}} ({{applicantName}}).\n\n{{note}}\n\n" +
-			"Open the store's wholesale applications: {{adminUrl}}"},
+		"{{decidedBy}} rejected the wholesale application of {{companyName}} ({{applicantName}})."},
 	StaffEventRevoked: {"Removed: {{companyName}}",
-		"{{decidedBy}} removed {{companyName}} ({{applicantName}}) as a wholesale buyer.\n\n{{note}}\n\n" +
-			"Open the store's wholesale applications: {{adminUrl}}"},
+		"{{decidedBy}} removed {{companyName}} ({{applicantName}}) as a wholesale buyer."},
 	StaffEventAccessNotGranted: {"Trade prices did not turn on: {{companyName}}",
-		"{{companyName}} ({{applicantName}}) is approved, but their trade prices did not turn on.\n\n" +
-			"Open the application to see why and to retry access: {{adminUrl}}"},
+		"The trade prices of {{companyName}} ({{applicantName}}) did not turn on."},
 	StaffEventAccessNotRemoved: {"Trade prices are still on: {{companyName}}",
-		"{{companyName}} ({{applicantName}}) was removed, but their trade prices did not turn off.\n\n" +
-			"Open the application to see why and to retry access: {{adminUrl}}"},
+		"{{companyName}} ({{applicantName}}) was removed, but their trade prices did not turn off."},
+}
+
+// staffDefault is an event's default subject and body for values: the
+// decision's note as its own paragraph when there is one, and a last line that
+// sends the reader to MemQL OS only when its address is known. The OS has no
+// address for one application, so the line names the OS itself (adminBase).
+func staffDefault(event string, values map[string]string) (string, string) {
+	d := staffDefaults[event]
+	body := d[1]
+	if _, decision := decisionOfEvent[event]; decision && strings.TrimSpace(values["note"]) != "" {
+		body += "\n\n{{note}}"
+	}
+	if values["adminUrl"] != "" {
+		switch event {
+		case StaffEventAccessNotGranted, StaffEventAccessNotRemoved:
+			body += "\n\nOpen MemQL OS to see why: {{adminUrl}}"
+		default:
+			body += "\n\nOpen MemQL OS: {{adminUrl}}"
+		}
+	}
+	return d[0], body
 }
 
 // StaffRequestID is one staff notice's outbox request id:
@@ -124,6 +152,19 @@ func fillPlaceholders(text string, values map[string]string) string {
 		pairs = append(pairs, "{{"+name+"}}", values[name])
 	}
 	return strings.NewReplacer(pairs...).Replace(text)
+}
+
+// oneLine is a subject as one line: every line break and other control
+// character becomes a space, and runs of spaces one. A company name the
+// applicant typed with a line break would otherwise make the email integration
+// refuse the subject, and the notice would never be delivered.
+func oneLine(text string) string {
+	return strings.Join(strings.Fields(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, text)), " ")
 }
 
 // notifyStaff answers wholesaleNotifyStaff.
@@ -199,38 +240,59 @@ func (p *Provider) notifyStaff(ctx context.Context, args map[string]any, _ int) 
 		if err != nil {
 			return nil, err
 		}
+		// AN ACCESS RECORD FROM BEFORE THE PACK SENT NOTICES (no attempt: see
+		// sendBuyerEmail) is told of by none, whatever its versions look like now.
+		if attempt == 0 {
+			return confirm("wholesale:staffNotice", map[string]any{"applicationId": id, "event": event,
+				"status": "skipped", "reason": ReasonAccessPredatesEmail, "requestId": ""})
+		}
 		requestID = AccessStaffRequestID(event, id, attempt)
 	}
-	defaults := staffDefaults[event]
+	defaultSubject, defaultBody := staffDefault(event, values)
 	subject, body := asString(args["subject"]), asString(args["body"])
 	if strings.TrimSpace(subject) == "" {
-		subject = defaults[0]
+		subject = defaultSubject
 	}
 	if strings.TrimSpace(body) == "" {
-		body = defaults[1]
+		body = defaultBody
 	}
 	// ONE NOTICE PER REQUEST ID: one already staged is answered, and nothing is
-	// staged again.
-	staged, err := p.rowsFor(sys, "outboundRequestById", map[string]string{"requestId": requestID})
+	// staged again. The check is a FRESH read, and the stage is FENCED ON NO ROW
+	// AT THE ID: of two nodes that pass the check at once (or one whose cache had
+	// not heard of the other's stage), the second write loses the fence, writes
+	// nothing over the first notice -- which the outbox may already have sent --
+	// and answers it as already staged.
+	alreadyStaged := func() ([]memorynodes.MemoryNode, error) {
+		return confirm("wholesale:staffNotice", map[string]any{"applicationId": id, "event": event,
+			"status": "staged", "requestId": requestID, "alreadyStaged": true})
+	}
+	staged, err := p.rowsFor(memql.ContextWithFreshRead(sys), "outboundRequestById", map[string]string{"requestId": requestID})
 	if err != nil {
 		return nil, err
 	}
 	if len(staged) > 0 {
-		return confirm("wholesale:staffNotice", map[string]any{"applicationId": id, "event": event,
-			"status": "staged", "requestId": requestID, "alreadyStaged": true})
+		return alreadyStaged()
 	}
-	if err := p.write(sys, "stageServerOutboundRequest", map[string]any{
+	fenced := memql.ContextWithRowVersionFence(sys, outboundRequestConcept, requestID, time.Time{})
+	if err := p.write(fenced, "stageServerOutboundRequest", map[string]any{
 		"requestId":   requestID,
 		"medium":      "email",
 		"target":      target,
-		"subject":     strings.TrimSpace(fillPlaceholders(subject, values)),
+		"subject":     oneLine(fillPlaceholders(subject, values)),
 		"body":        fillPlaceholders(body, values),
 		"dedupeKey":   requestID,
 		"requestedBy": staffRequestedBy,
 	}); err != nil {
-		// An engine error may quote the call it refused: the address does not
-		// reach the caller or a log line.
-		return nil, errors.New(strings.ReplaceAll(err.Error(), target, "the store's address"))
+		if errors.Is(err, memql.ErrRowVersionChanged) {
+			return alreadyStaged()
+		}
+		// NOTHING OF THE NOTICE IN THE ERROR. The engine's error may quote the call
+		// it refused, and the call carries the store's address and a subject and
+		// body filled with the applicant's address, name and company; scrubbing
+		// each value would miss one written another way. So the error is a fixed
+		// sentence naming the event and the application, and the engine's text is
+		// neither returned nor logged.
+		return nil, fmt.Errorf("wholesale: staging the %s notice for application %q in the outbox failed", event, id)
 	}
 	return confirm("wholesale:staffNotice", map[string]any{"applicationId": id, "event": event,
 		"status": "staged", "requestId": requestID, "alreadyStaged": false})
@@ -276,6 +338,11 @@ func (p *Provider) accessDidNotLand(sys context.Context, applicationID, state, e
 	}
 	if ent == nil {
 		return 0, fmt.Errorf("wholesale: application %q has no access record, so no access failed to land", applicationID)
+	}
+	if attemptOf(ent) == 0 {
+		// Written before the pack sent notices: answered as such, before any
+		// reading of its direction (notifyStaff declines it).
+		return 0, nil
 	}
 	entState := trimmed(ent["state"])
 	direction := trimmed(ent["direction"])

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // send_row_test.go -- the transactional row lane against the fake engine: what it
@@ -424,6 +426,20 @@ func TestAWithdrawalAnsweredAsAPointerIsAWithdrawal(t *testing.T) {
 
 // A HOLD IS READ BY ITS SENTENCE outside this package, through a wrap, and
 // nothing else is a hold: what a pack records as skipped rather than failed.
+// UncertainSend reads an uncertain hand-over through a caller's wrap, and
+// nothing else: not a hold, not a refusal, not nothing.
+func TestUncertainSendReadsAnUncertainHandOverThroughAWrapAndNothingElse(t *testing.T) {
+	uncertain := uncertainSend{error: errors.New("campaigns.sendToRecipient: the connection closed")}
+	if !UncertainSend(fmt.Errorf("a caller's wrap: %w", uncertain)) {
+		t.Fatal("an uncertain hand-over was not read as one through a wrap")
+	}
+	for name, err := range map[string]error{"a hold": sendHeld{reason: "Publish it."}, "a resolver failure": errResolverDidNotAnswer, "nothing": nil} {
+		if UncertainSend(err) {
+			t.Fatalf("%s was read as an uncertain hand-over", name)
+		}
+	}
+}
+
 func TestHeldReasonReadsAHoldThroughAWrapAndNothingElse(t *testing.T) {
 	engine := rowSendEngine()
 	engine.template["status"] = "draft"
@@ -439,5 +455,63 @@ func TestHeldReasonReadsAHoldThroughAWrapAndNothingElse(t *testing.T) {
 	}
 	if _, held := HeldReason(nil); held {
 		t.Fatal("no error is not a hold")
+	}
+}
+
+// THE ROW LANE'S SENDER, AS A ROW SEND RESOLVES IT: the chosen identity of the
+// organization, with its name and address; another organization's, one turned
+// off and one that does not exist each refused with the sentence the send
+// would give; none chosen, for an organization that is not the installation,
+// refused as the send refuses it. A client's call is refused before reading.
+func TestTheRowSenderIsResolvedAsARowSendResolvesIt(t *testing.T) {
+	engine := rowSendEngine()
+	other := senderIdentityRow("si-other", "news@other.example.test", "Other", "active")
+	other["accountId"] = "v1:accounts:account:acct-x"
+	off := senderIdentityRow("si-off", "old@store.example.test", "Old", "disabled")
+	off["accountId"] = "v1:accounts:account:acct-1"
+	engine.senderIdentities["si-other"], engine.senderIdentities["si-off"] = other, off
+	w := rowWorker(t, engine, &recordingSender{})
+	ask := func(sender string) map[string]any {
+		t.Helper()
+		nodes, err := w.handleRowSender(fromTrustedJob(), map[string]any{"accountId": "acct-1", "senderIdentityId": sender}, 0)
+		if err != nil {
+			t.Fatalf("rowSender(%q): %v", sender, err)
+		}
+		return decodeResult(t, nodes)
+	}
+	if got := ask("si-store"); got["ready"] != true || got["address"] != "hello@store.example.test" || got["fromName"] != "The Store" || got["reason"] != "" {
+		t.Fatalf("the chosen sender answered %v", got)
+	}
+	for sender, want := range map[string]string{
+		"si-other": "The chosen sender belongs to another organization.",
+		"si-off":   "The sender old@store.example.test is turned off. Turn it on to send this email.",
+		"si-none":  "The sender of this email no longer exists. Choose another sender to send it.",
+		"":         "No sender is chosen for this organization.",
+	} {
+		if got := ask(sender); got["ready"] != false || got["reason"] != want || got["address"] != "" {
+			t.Fatalf("sender %q answered %v, want refused with %q", sender, got, want)
+		}
+	}
+	if _, err := w.handleRowSender(context.Background(), map[string]any{"accountId": "acct-1"}, 0); err == nil {
+		t.Fatal("a client's call was answered")
+	}
+	// A TRUSTED CALLER WITHOUT AUTHORITY IN THE ORGANIZATION -- the send's own
+	// check, requireSendAuthority -- is answered exactly as for an organization
+	// that does not exist.
+	unauthorized := func(account string) map[string]any {
+		t.Helper()
+		nodes, err := w.handleRowSender(auth.ContextWithInternalOrigin(context.Background()),
+			map[string]any{"accountId": account, "senderIdentityId": "si-store"}, 0)
+		if err != nil {
+			t.Fatalf("rowSender without authority: %v", err)
+		}
+		got := decodeResult(t, nodes)
+		delete(got, "accountId")
+		return got
+	}
+	without, missing := unauthorized("acct-1"), unauthorized("acct-none")
+	if fmt.Sprint(without) != fmt.Sprint(missing) || without["ready"] != false || without["address"] != "" ||
+		without["reason"] != "No sender can be read for this organization." {
+		t.Fatalf("without authority the sender reads %v; for an organization that does not exist %v", without, missing)
 	}
 }

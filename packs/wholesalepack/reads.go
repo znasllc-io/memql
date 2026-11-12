@@ -76,6 +76,10 @@ const (
 	ActResendTerms = "resendTerms"
 	// ActResendApproved sends the approval email again.
 	ActResendApproved = "resendApproved"
+	// ActResendRejected sends the rejection email again.
+	ActResendRejected = "resendRejected"
+	// ActResendRevoked sends the removal email again.
+	ActResendRevoked = "resendRevoked"
 )
 
 // extensionReader is the engine's read of a client's own fields on a row of
@@ -94,6 +98,10 @@ type ActsInput struct {
 	// ApprovedEmailSent is whether the store's automation has sent the approval
 	// email (an approved emailSend row exists).
 	ApprovedEmailSent bool
+	// LatestRejectedEmail and LatestRevokedEmail are the state of the last
+	// attempt of the rejection and the removal email, as the lane says it stands
+	// (effectiveSend), "" when none was recorded.
+	LatestRejectedEmail, LatestRevokedEmail string
 }
 
 // ActsFor is the acts open on one application.
@@ -108,8 +116,10 @@ type ActsInput struct {
 // A person of the store also sends an email again (U9): the terms email on an
 // application waiting for its terms, while the store requires them and chose a
 // template for it, after reject; the approval email to a buyer whose access is
-// granted once the store's automation has sent it, after remove. An operator
-// sends none.
+// granted once the store's automation has sent it, after remove; and the
+// rejection or removal email while the application is still rejected or
+// removed and the last attempt of it did not reach the provider (held,
+// uncertain or failed). An operator sends none.
 func ActsFor(in ActsInput) []string {
 	retry := (in.Stage == StateApproved && in.AccessState != EntitlementGranted) ||
 		(in.Stage == StateRevoked && in.EntitlementExists && in.AccessState != EntitlementRevoked)
@@ -135,9 +145,16 @@ func ActsFor(in ActsInput) []string {
 		} else if in.AccessState == EntitlementGranted && in.ApprovedEmailSent {
 			acts = append(acts, ActResendApproved)
 		}
+	case StateRejected:
+		if notReachedProvider(in.LatestRejectedEmail) {
+			acts = append(acts, ActResendRejected)
+		}
 	case StateRevoked:
 		if retry {
 			acts = append(acts, ActRetryAccess)
+		}
+		if notReachedProvider(in.LatestRevokedEmail) {
+			acts = append(acts, ActResendRevoked)
 		}
 	}
 	return acts
@@ -298,7 +315,8 @@ func (p *Provider) list(ctx context.Context, args map[string]any, _ int) ([]memo
 			"createdAt":      timeText(a.row["createdAt"]),
 		})
 	}
-	return confirm("wholesale:list", map[string]any{"rows": rows, "counts": counts, "next": next, "truncated": truncated})
+	return confirm("wholesale:list", map[string]any{"rows": rows, "counts": counts, "next": next, "truncated": truncated,
+		"operator": isClusterOperator(ctx)})
 }
 
 // get answers wholesaleGet.
@@ -386,6 +404,7 @@ func (p *Provider) get(ctx context.Context, args map[string]any, _ int) ([]memor
 	}
 	operator := isClusterOperator(ctx)
 	addedBy := trimmed(app["addedBy"])
+	emails := p.emailsView(ctx, app, sends)
 	return confirm("wholesale:application", map[string]any{
 		"application": map[string]any{
 			"id":             trimmed(app["id"]),
@@ -406,11 +425,13 @@ func (p *Provider) get(ctx context.Context, args map[string]any, _ int) ([]memor
 		"entitlement": entitlement,
 		"acceptance":  acceptanceShown,
 		"termsLink":   termsLink,
-		"emails":      p.emailsView(ctx, app, sends),
+		"emails":      emails,
 		"operator":    operator,
 		"acts": ActsFor(ActsInput{Stage: stage, AccessState: access, EntitlementExists: ent != nil, Operator: operator,
 			TermsRequired: termsRequired, TermsTemplateChosen: settings.TermsTemplateID != "",
-			ApprovedEmailSent: highestAttempt(sends, EmailApproved) > 0}),
+			ApprovedEmailSent:   highestAttempt(sends, EmailApproved) > 0,
+			LatestRejectedEmail: trimmed(latestSend(emails, EmailRejected)["state"]),
+			LatestRevokedEmail:  trimmed(latestSend(emails, EmailRevoked)["state"])}),
 	})
 }
 
@@ -550,9 +571,12 @@ func (p *Provider) buyers(ctx context.Context, args map[string]any, _ int) ([]me
 		if err != nil {
 			return nil, err
 		}
-		access, code, grantedAt, customer := AccessNone, "", "", ""
+		// WHY ACCESS IS NOT ON is the entitlement's own sentence, the one the
+		// application's page shows (wholesaleGet's entitlement.error).
+		access, code, reason, grantedAt, customer := AccessNone, "", "", "", ""
 		if ent != nil {
 			access, code, customer = trimmed(ent["state"]), trimmed(ent["errorCode"]), trimmed(ent["shopifyCustomerId"])
+			reason = asString(ent["error"])
 			if access == EntitlementGranted {
 				grantedAt = timeText(ent["createdAt"])
 			}
@@ -563,11 +587,13 @@ func (p *Provider) buyers(ctx context.Context, args map[string]any, _ int) ([]me
 			"applicantEmail":    asString(a.row["applicantEmail"]),
 			"accessState":       access,
 			"errorCode":         code,
+			"error":             reason,
 			"grantedAt":         grantedAt,
 			"shopifyCustomerId": customer,
 		})
 	}
-	return confirm("wholesale:buyers", map[string]any{"rows": rows, "next": next, "truncated": truncated})
+	return confirm("wholesale:buyers", map[string]any{"rows": rows, "next": next, "truncated": truncated,
+		"operator": isClusterOperator(ctx)})
 }
 
 // admitStore reads a store-wide read's store and site and checks the site is
