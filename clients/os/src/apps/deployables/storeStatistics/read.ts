@@ -17,7 +17,11 @@ import { boundStoreId, previewStoreId, type SiteRow } from "../rows";
 // `Number()`; a null is never read as 0, because a zero is a measurement and
 // null is the absence of one.
 
-/** Which of the site's destinations names the store; "both" when the two name one. */
+/**
+ * Which of the site's destinations names the store; "both" when the two name
+ * one. The page's words: the engine answers with the name of the site's field
+ * that names the store (`destinationFrom`).
+ */
 export type StoreDestination = "production" | "testing" | "both";
 
 /** A period's eight figures. Money is a number in the store's currency; null is "not measured". */
@@ -87,12 +91,14 @@ export interface StoreStatistics {
   /** Null when the answer names none of the three. */
   destination: StoreDestination | null;
   currency: string | null;
-  /**
-   * The store's zone. Null when the store has none OR one the engine could not
-   * load: the answer does not tell the two apart, and in both the period was
-   * cut in UTC.
-   */
+  /** The zone the store recorded, as recorded, whether or not it loads; null when it recorded none. */
   timezone: string | null;
+  /**
+   * The zone the period was cut in: the store's zone when it loads, "UTC"
+   * otherwise; null for a store the walk holds no row for. A recorded
+   * `timezone` with "UTC" here is a zone that did not load.
+   */
+  periodZone: string | null;
   development: boolean | null;
   taxesIncluded: boolean | null;
   olderOrderChangesNotRecorded: boolean | null;
@@ -198,8 +204,13 @@ function sideFrom(raw: unknown): StoreSide {
   return { orders: figure(side?.["orders"]), netSales: figure(side?.["netSales"]) };
 }
 
+/**
+ * The engine names a destination by the site's field that names the store
+ * (component/storestats, `Statistics.Destination`): `binding` is Production,
+ * `previewBinding` is Testing. Anything else names none.
+ */
 function destinationFrom(raw: unknown): StoreDestination | null {
-  return raw === "production" || raw === "testing" || raw === "both" ? raw : null;
+  return raw === "binding" ? "production" : raw === "previewBinding" ? "testing" : raw === "both" ? "both" : null;
 }
 
 /**
@@ -222,6 +233,7 @@ export function parseStoreStatistics(row: Row, requested: Period): StoreStatisti
     destination: destinationFrom(row["destination"]),
     currency: textOrNull(row["currency"]),
     timezone: textOrNull(row["timezone"]),
+    periodZone: textOrNull(row["periodZone"]),
     development: flag(row["development"]),
     taxesIncluded: flag(row["taxesIncluded"]),
     olderOrderChangesNotRecorded: flag(row["olderOrderChangesNotRecorded"]),
