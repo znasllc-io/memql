@@ -66,9 +66,10 @@ func (e *MemQLEngine) tryParseMetaCommand(query string) (*BuiltinFunctionExpress
 		resultName = "memqlVersion"
 	}
 	return &BuiltinFunctionExpression{
-		Name:     resultName,
-		Executor: fn.Executor,
-		Args:     args,
+		Name:      resultName,
+		Executor:  fn.Executor,
+		Args:      args,
+		Construct: BuiltinConstructKey(fn),
 	}, true, nil
 }
 

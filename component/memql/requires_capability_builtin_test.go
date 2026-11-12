@@ -112,11 +112,32 @@ func TestABuiltinWithNoIdentityIsRefusedThePart(t *testing.T) {
 	}
 }
 
-// TestAMetaCommandIsNotGated. `concepts`, `functions` and `help` dispatch
-// through the same expression type under names no registry holds. They
-// carry no requirement and must keep answering, or refusing them would take
-// the engine's own introspection dark.
-func TestAMetaCommandIsNotGated(t *testing.T) {
+// TestABuiltinWithNoRequirementIsNotGated. `concepts`, `functions` and `help`
+// are registered builtins that declare no requirement, and keep answering any
+// caller: the gate refuses only what the resolved construct requires.
+func TestABuiltinWithNoRequirementIsNotGated(t *testing.T) {
+	installDeployPartFake(t)
+	e, _ := installBuiltinGateProbe(t)
+	reached := 0
+	_ = e.functions.Upsert(&Function{Name: "introspectProbe", Type: FunctionTypeBuiltin, FunctionKind: FunctionTypeBuiltin, Executor: "meta.probe", Enabled: true})
+	e.builtinExecutorHandlers["meta.probe"] = func(context.Context, map[string]any, int) ([]memorynodes.MemoryNode, error) {
+		reached++
+		return nil, nil
+	}
+	call := &BuiltinFunctionExpression{Name: "introspectProbe", Executor: "meta.probe"}
+	if _, err := e.evaluateBuiltinFunctionExpression(asCaller("viewer"), call, 0); err != nil {
+		t.Fatalf("a builtin declaring no requirement was refused: %v", err)
+	}
+	if reached != 1 {
+		t.Fatal("the executor did not run")
+	}
+}
+
+// TestABuiltinNameNoConstructHoldsIsRefused. A name the gate cannot resolve to
+// a construct has no requirements the gate can read, so it is refused rather
+// than admitted: a gate that admits what it cannot resolve admits whatever a
+// name it does not know dispatches to.
+func TestABuiltinNameNoConstructHoldsIsRefused(t *testing.T) {
 	installDeployPartFake(t)
 	e, _ := installBuiltinGateProbe(t)
 	reached := 0
@@ -125,11 +146,11 @@ func TestAMetaCommandIsNotGated(t *testing.T) {
 		return nil, nil
 	}
 	call := &BuiltinFunctionExpression{Name: "notInAnyRegistry", Executor: "meta.probe"}
-	if _, err := e.evaluateBuiltinFunctionExpression(asCaller("viewer"), call, 0); err != nil {
-		t.Fatalf("an unregistered (meta) builtin was refused: %v", err)
+	if _, err := e.evaluateBuiltinFunctionExpression(asCaller("owner"), call, 0); err == nil {
+		t.Fatal("a builtin name no construct holds was admitted")
 	}
-	if reached != 1 {
-		t.Fatal("the meta executor did not run")
+	if reached != 0 {
+		t.Fatal("the executor ran for a name no construct holds")
 	}
 }
 

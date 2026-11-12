@@ -18,6 +18,7 @@ func TestBuiltinPreviewRefusesEffectsBeforeHandler(t *testing.T) {
 					return nil, nil
 				},
 			}}
+			_ = engine.functions.Upsert(&Function{Name: "probe", Type: FunctionTypeBuiltin, FunctionKind: FunctionTypeBuiltin, Executor: executor, Enabled: true})
 			call := &BuiltinFunctionExpression{Name: "probe", Executor: executor}
 			ctx, cancel := context.WithCancel(WithBuiltinPreview(context.Background()))
 			defer cancel()

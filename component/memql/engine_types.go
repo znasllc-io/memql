@@ -454,9 +454,24 @@ type BuiltinFunctionExpression struct {
 	Executor string
 	// Args holds optional arguments for builtins that accept parameters.
 	Args map[string]any
+	// Construct is the registry key of the construct this call resolved to
+	// (BuiltinConstructKey), set wherever the call was resolved through the
+	// function registry. The execution gate judges the requirements of exactly
+	// this construct; when it is empty the gate resolves Name itself, and a
+	// name that does not resolve to exactly one construct is refused.
+	Construct string
 }
 
 func (*BuiltinFunctionExpression) isExpressionNode() {}
+
+// BuiltinConstructKey is the registry key a loaded construct is held under:
+// its namespace and its name, as FunctionRegistry.Upsert keys it.
+func BuiltinConstructKey(fn *Function) string {
+	if fn == nil {
+		return ""
+	}
+	return QualifyConstruct(ConstructNamespaceForOrigin(fn.Origin), fn.Name)
+}
 
 // Executor identifiers for builtin functions.
 const (

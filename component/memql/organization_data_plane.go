@@ -42,8 +42,11 @@ func (e *MemQLEngine) OrganizationDataPlaneEnforced(ctx context.Context, query s
 		if !organizationPlainValues(builtin.Args) {
 			return false
 		}
-		fn, found := e.functions.Lookup(builtin.Name)
-		if !found || fn.FunctionKind != "builtin" {
+		// The construct the call resolved to, not its bare name: a name the
+		// classifier cannot resolve to exactly one construct keeps the global
+		// gate.
+		fn, _, err := e.resolveBuiltinConstruct(builtin)
+		if err != nil || fn.FunctionKind != "builtin" {
 			return false
 		}
 		if personalSourceBuiltin(fn) {

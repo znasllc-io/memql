@@ -188,24 +188,87 @@ func (e *MemQLEngine) refusePlanBelowRequiredCapability(ctx context.Context, pla
 }
 
 // refuseBuiltinBelowRequiredCapability is the builtin entry point's half of
-// refuseBelowRequiredCapability: resolve the builtin by the name the
-// expression carries and enforce what it declares.
+// refuseBelowRequiredCapability: resolve the construct the call will run and
+// enforce what IT declares.
 //
-// A name that resolves to nothing is NOT a refusal. The meta commands
-// (`concepts`, `functions`, `help`) dispatch through the same expression
-// type under names no registry holds, and they carry no requirement by
-// construction; refusing them would take the engine's own introspection
-// dark. A name that resolves to a function with no declaration returns nil
-// from the gate below, exactly as it does for every other construct.
-func (e *MemQLEngine) refuseBuiltinBelowRequiredCapability(ctx context.Context, name string, arguments ...map[string]any) error {
-	if e == nil || e.functions == nil || strings.TrimSpace(name) == "" {
+// FAILS CLOSED ON A NAME IT CANNOT RESOLVE. The construct judged is the one the
+// call resolved to (expr.Construct, its registry key) or, for a call that was
+// not resolved through the registry, the one construct its name resolves to
+// (exactly, or through a builtin's @alias). A name that resolves to nothing, or
+// to more than one construct, is refused: requirements belong to a construct,
+// and a gate that cannot say which construct runs cannot say whose
+// requirements apply. So is a construct whose executor is not the one the call
+// dispatches to -- the requirements judged must be those of what runs. The
+// engine's own introspection builtins (`concepts`, `functions`, `help`) are
+// registered constructs and resolve like any other.
+//
+// @serverOnly is judged here too: this is the one seam every builtin execution
+// crosses, including a top-level call parsed without the function validator.
+func (e *MemQLEngine) refuseBuiltinBelowRequiredCapability(ctx context.Context, expr *BuiltinFunctionExpression) error {
+	if expr == nil {
+		return fmt.Errorf("builtin call is nil")
+	}
+	fn, key, err := e.resolveBuiltinConstruct(expr)
+	if err != nil {
+		return err
+	}
+	if fn.ServerOnly && !auth.OriginFromContext(ctx).IsInternal() {
+		return fmt.Errorf("function %q is server-only and cannot be called by a client", key)
+	}
+	return e.refuseBelowRequiredCapability(ctx, fn, key, expr.Args)
+}
+
+// resolveBuiltinConstruct answers the one construct a builtin call runs, and
+// the registry key it is held under, or the refusal that says why there is no
+// one construct.
+func (e *MemQLEngine) resolveBuiltinConstruct(expr *BuiltinFunctionExpression) (*Function, string, error) {
+	name := strings.TrimSpace(expr.Name)
+	if e == nil || e.functions == nil {
+		return nil, "", fmt.Errorf("builtin %q cannot be checked: no function registry is loaded, so the construct it runs is unknown", name)
+	}
+	var fn *Function
+	if key := strings.TrimSpace(expr.Construct); key != "" {
+		found, ok := e.functions.Lookup(key)
+		if !ok || found == nil || BuiltinConstructKey(found) != key {
+			return nil, "", fmt.Errorf("builtin %q resolved to %q, which is not a registered construct; refusing a call whose requirements cannot be read", name, key)
+		}
+		fn = found
+	} else {
+		if name == "" {
+			return nil, "", fmt.Errorf("builtin call names no construct")
+		}
+		if held := namespacesDeclaring(e.functions, name); len(held) > 1 {
+			return nil, "", fmt.Errorf("refusing builtin %q: the name is declared in %d namespaces (%s), so the construct this call runs is not one construct -- name it as <namespace>.%s",
+				name, len(held), strings.Join(held, ", "), name)
+		}
+		found, ok := e.lookupBuiltinFunction(name)
+		if !ok || found == nil {
+			return nil, "", fmt.Errorf("builtin %q is not a registered construct; refusing a call whose requirements cannot be read", name)
+		}
+		fn = found
+	}
+	if !fn.IsBuiltin() {
+		return nil, "", fmt.Errorf("%q is not a builtin", BuiltinConstructKey(fn))
+	}
+	if exec := strings.TrimSpace(expr.Executor); exec != "" && !strings.EqualFold(exec, strings.TrimSpace(fn.Executor)) {
+		return nil, "", fmt.Errorf("builtin %q dispatches to executor %q, but the construct it resolved to (%s) binds %q; refusing a call whose requirements are not those of what runs",
+			name, exec, BuiltinConstructKey(fn), fn.Executor)
+	}
+	return fn, BuiltinConstructKey(fn), nil
+}
+
+// namespacesDeclaring lists the registry keys holding the bare name, sorted.
+func namespacesDeclaring(fns *FunctionRegistry, bare string) []string {
+	if fns == nil || strings.Contains(bare, constructKeySeparator) {
 		return nil
 	}
-	fn, err := e.functions.Get(name)
-	if err != nil || fn == nil {
-		return nil
+	var out []string
+	for _, key := range fns.Names() {
+		if _, name := SplitConstructKey(key); name == bare {
+			out = append(out, key)
+		}
 	}
-	return e.refuseBelowRequiredCapability(ctx, fn, name, arguments...)
+	return out
 }
 
 // validateRequiresCapabilitySlugs is the LOAD-time half: every declared
