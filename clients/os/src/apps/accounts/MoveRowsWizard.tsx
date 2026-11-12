@@ -289,7 +289,7 @@ function PlanFacts({ plan, verb }: { plan: MovePlan; verb: "would" | "did" }) {
               ? "What hangs off these rows follows in the background, and an export waits until it has."
               : "What hangs off the rows that moved follows in the background, and an export waits until it has."}
           </Caption>
-          <Caption>Kinds that follow: {[...new Set(plan.follows.map((f) => kindName(f.concept)))].join(", ")}</Caption>
+          <Caption>Kinds that can follow: {[...new Set(plan.follows.map((f) => kindName(f.concept)))].join(", ")}</Caption>
         </>
       )}
       {refused.length === 0 ? null : (

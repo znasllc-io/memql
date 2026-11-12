@@ -353,7 +353,7 @@ describe("the wizard", () => {
     ]);
     // The kinds that follow, named, under one sentence; never counted.
     expect(screen.getByText("What hangs off these rows follows in the background, and an export waits until it has.")).toBeTruthy();
-    expect(screen.getByText("Kinds that follow: file")).toBeTruthy();
+    expect(screen.getByText("Kinds that can follow: file")).toBeTruthy();
     expect(screen.getByText("1 row. This kind states its own account and is changed in its own app.")).toBeTruthy();
 
     const before = callsTo(conn, "accountRows").length;
@@ -361,7 +361,7 @@ describe("the wizard", () => {
     await waitFor(() => expect(within(bar()!).getByText("Moved")).toBeTruthy());
     expect(callsTo(conn, "accountRowsMove")[1]).toContain("preview: false");
     expect(screen.getByText("What hangs off the rows that moved follows in the background, and an export waits until it has.")).toBeTruthy();
-    expect(screen.getByText("Kinds that follow: file")).toBeTruthy();
+    expect(screen.getByText("Kinds that can follow: file")).toBeTruthy();
 
     // Done returns to the rows, read again behind the wizard once the move
     // returned, with nothing chosen.
@@ -380,7 +380,7 @@ describe("the wizard", () => {
       ],
     });
     chooseOption(screen.getByRole("combobox", { name: "Destination account" }), "Borden Ltd");
-    const named = await screen.findByText("Kinds that follow: goal");
+    const named = await screen.findByText("Kinds that can follow: goal");
     expect(named.textContent).not.toMatch(/\d/);
     expect(screen.queryByText(/37/)).toBeNull();
     // The bar's total is of the rows chosen and moving, never of followers.
