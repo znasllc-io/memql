@@ -531,17 +531,24 @@ type productRow struct {
 // discounts less the refund lines' subtotals, in the store's currency only;
 // by units, the units sold less those returned, in every currency. A line
 // with no product is grouped by its title (its fact's key). A product's title
-// is that of its newest line in the period: the line of the latest order (or,
-// for a line reached only through a refund, the latest refund), then the
-// newest version of the line, then the greatest title. productCount is how many products
+// is that of its newest line SOLD in the period: the line of its latest order
+// in the period, then the newest version of the line, then the greatest
+// title. A refund of an older line never renames it. A product the period
+// holds only through refunds of older lines takes the title of the line of
+// its latest refund. productCount is how many products
 // the period has, the list by units' whole length.
 //
 // A list is null when a figure it is made of is not measured: by sales with
-// no currency or with a refund not read; by units with a refund not read or
-// holding a full page of lines (and productCount with it).
+// no currency; both, with productCount and refundsWithoutItem, with a refund
+// not read or one holding a full page of lines, whose lines past the page
+// may name any product.
 func readProducts(ctx context.Context, tx bun.Tx, c figureScope, from, until time.Time, all sums, s *Statistics) error {
-	bySales := c.currency != "" && all.notRead == 0
-	byUnits := all.notRead == 0 && all.incompleteRefunds == 0
+	// A refund whose lines fill a page may hold lines past it: their units
+	// and their money are on no product, so neither list is known, and
+	// neither is what names no product.
+	linesKnown := all.notRead == 0 && all.incompleteRefunds == 0
+	bySales := c.currency != "" && linesKnown
+	byUnits := linesKnown
 	s.ProductsBySales, s.ProductsByUnits, s.ProductCount, s.RefundsWithoutItem = nil, nil, nil, nil
 	if !bySales && !byUnits {
 		return nil
@@ -554,12 +561,13 @@ func readProducts(ctx context.Context, tx bun.Tx, c figureScope, from, until tim
 	var rows []productRow
 	// Each branch is summed by product as it is read, by hash, so the lines
 	// are never kept or sorted; a product's newest line is the greatest of
-	// newestKey, its title what follows the key's two instants.
+	// newestKey over its sold lines, or over its refunded lines when it has
+	// none, and its title what follows the key's two instants.
 	if err := tx.NewSelect().TableExpr(`(WITH sold AS (
 			SELECT l.product_key, sum(l.sold_quantity) AS units,
 				sum(CASE WHEN o.currency = ? THEN l.gross - l.discounts END) AS sales,
 				count(*) FILTER (WHERE o.currency = ?) AS priced, 0::numeric AS returned,
-				max(`+newestKey("o.ordered_at")+`) AS newest
+				max(`+newestKey("o.ordered_at")+`) AS newest, false AS refunded
 			FROM store_sales_order_fact o
 			JOIN store_sales_line_fact l ON l.store_id = o.store_id AND l.order_gid = o.order_gid
 			WHERE `+counted+` AND o.ordered_at >= ? AND o.ordered_at < ? AND NOT l.deleted AND NOT l.gift_card
@@ -569,7 +577,7 @@ func readProducts(ctx context.Context, tx bun.Tx, c figureScope, from, until tim
 				-sum(CASE WHEN o.currency = ? THEN rl.subtotal END) AS sales,
 				count(*) FILTER (WHERE o.currency = ?) AS priced,
 				COALESCE(sum(CASE WHEN o.currency = ? THEN rl.subtotal END), 0) AS returned,
-				max(`+newestKey("r.refunded_at")+`) AS newest
+				max(`+newestKey("r.refunded_at")+`) AS newest, true AS refunded
 			FROM store_sales_refund_fact r
 			JOIN store_sales_order_fact o ON o.store_id = r.store_id AND o.order_gid = r.order_gid
 			JOIN store_sales_refund_line_fact rl ON rl.store_id = r.store_id AND rl.refund_gid = r.refund_gid
@@ -578,7 +586,7 @@ func readProducts(ctx context.Context, tx bun.Tx, c figureScope, from, until tim
 				AND NOT l.deleted AND NOT l.gift_card
 			GROUP BY l.product_key
 		), per AS (
-			SELECT product_key, substr(max(newest), 41) AS title, sum(units)::bigint AS units, sum(sales) AS sales,
+			SELECT product_key, substr(COALESCE(max(newest) FILTER (WHERE NOT refunded), max(newest)), 41) AS title, sum(units)::bigint AS units, sum(sales) AS sales,
 				sum(priced) AS priced, sum(returned) AS returned
 			FROM (SELECT * FROM sold UNION ALL SELECT * FROM back) AS every GROUP BY product_key
 		)

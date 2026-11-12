@@ -586,6 +586,70 @@ func TestARefundWithAFullPageOfLinesBlanksUnitsSold(t *testing.T) {
 		"netSales": "40.00", "grossSales": "80.00", "orders": 1})
 	wantValues(t, "the count", got, map[string]any{"incompleteRefunds": 1, "refundsNotRead": 0, "productsByUnits": nil})
 	wantValues(t, "the refund's day", bucketOf(t, got, "2025-11-05T00:00:00+01:00"), map[string]any{"unitsSold": nil, "refunds": "40.00"})
+	// The money of the lines past the page has left its product: neither the
+	// products by sales nor the refunds that name no product are known. The
+	// money figures, summed from the refund's own amounts, are.
+	wantValues(t, "the product money", got, map[string]any{"productsBySales": nil, "refundsWithoutItem": nil})
+	wantValues(t, "the money figures", figuresIn(t, got, "figures"), map[string]any{"discounts": "0", "totalSales": "40.00",
+		"averageOrderValue": "80.00"})
+
+	// 80.00 went back and only 40.00 of it is on the lines recorded.
+	other, otherSite := salesStore(t, nil)
+	sell(t, other, sale{gid: orderGID(1), at: nov(3), lines: []item{{gid: lineGID(1), qty: 2, price: "40.00"}}})
+	refundOf(t, other, refund{gid: refundGID(1), order: orderGID(1), at: nov(5), amount: "80.00",
+		lines: []returned{{line: lineGID(1), qty: 1, subtotal: "40.00", tax: "0.00"}}, fullPage: true})
+	got = ask(t, other, otherSite)
+	wantValues(t, "80.00 back, 40.00 on its lines", got, map[string]any{"productsBySales": nil, "refundsWithoutItem": nil,
+		"productsByUnits": nil, "productCount": nil, "incompleteRefunds": 1})
+	wantValues(t, "80.00 back, the money figures", figuresIn(t, got, "figures"), map[string]any{"refunds": "80.00",
+		"netSales": "0.00", "totalSales": "0.00", "grossSales": "80.00", "unitsSold": nil})
+}
+
+// productTitles is each product's title in the list by units, by key.
+func productTitles(t *testing.T, answer map[string]any) map[string]string {
+	t.Helper()
+	list, ok := answer["productsByUnits"].([]any)
+	if !ok {
+		t.Fatalf("productsByUnits = %s, want a list", js(answer["productsByUnits"]))
+	}
+	out := map[string]string{}
+	for _, e := range list {
+		p := e.(map[string]any)
+		out[p["key"].(string)] = p["title"].(string)
+	}
+	return out
+}
+
+// A PRODUCT IS TITLED BY ITS NEWEST LINE SOLD IN THE PERIOD; one only refunded
+// in it, by the newest line it refunded.
+func TestAProductIsTitledByItsNewestLineSoldInThePeriod(t *testing.T) {
+	storeID, site := salesStore(t, nil)
+	oct := func(d int) time.Time { return local(madrid, 2025, 10, d, 12, 0) }
+	const renamed, refundedOnly, twice = "gid://shopify/Product/801", "gid://shopify/Product/802", "gid://shopify/Product/803"
+	// Renamed: sold Oct 20 as "Old name", sold Nov 3 as "New name", and the
+	// Oct 20 line refunded Nov 5.
+	sell(t, storeID, sale{gid: orderGID(1), at: oct(20), lines: []item{{gid: lineGID(1), product: renamed, qty: 1, price: "5.00", title: "Old name"}}})
+	sell(t, storeID, sale{gid: orderGID(2), at: nov(3), lines: []item{{gid: lineGID(2), product: renamed, qty: 1, price: "5.00", title: "New name"}}})
+	refundOf(t, storeID, refund{gid: refundGID(1), order: orderGID(1), at: nov(5), amount: "5.00",
+		lines: []returned{{line: lineGID(1), qty: 1, subtotal: "5.00", tax: "0.00"}}})
+	// Only refunded in the period: lines of Oct 20 and Oct 21, refunded Nov 4
+	// and Nov 5.
+	sell(t, storeID, sale{gid: orderGID(3), at: oct(20), lines: []item{{gid: lineGID(3), product: refundedOnly, qty: 1, price: "3.00", title: "A tube, first"}}})
+	sell(t, storeID, sale{gid: orderGID(4), at: oct(21), lines: []item{{gid: lineGID(4), product: refundedOnly, qty: 1, price: "3.00", title: "A tube, second"}}})
+	refundOf(t, storeID, refund{gid: refundGID(2), order: orderGID(3), at: nov(4), amount: "3.00",
+		lines: []returned{{line: lineGID(3), qty: 1, subtotal: "3.00", tax: "0.00"}}})
+	refundOf(t, storeID, refund{gid: refundGID(3), order: orderGID(4), at: nov(5), amount: "3.00",
+		lines: []returned{{line: lineGID(4), qty: 1, subtotal: "3.00", tax: "0.00"}}})
+	// Sold twice in the period under two titles.
+	sell(t, storeID, sale{gid: orderGID(5), at: nov(3), lines: []item{{gid: lineGID(5), product: twice, qty: 1, price: "2.00", title: "A bell"}}})
+	sell(t, storeID, sale{gid: orderGID(6), at: nov(4), lines: []item{{gid: lineGID(6), product: twice, qty: 1, price: "2.00", title: "A brass bell"}}})
+
+	titles := productTitles(t, ask(t, storeID, site))
+	for key, want := range map[string]string{renamed: "New name", refundedOnly: "A tube, second", twice: "A brass bell"} {
+		if titles[key] != want {
+			t.Errorf("product %s is titled %q, want %q", key, titles[key], want)
+		}
+	}
 }
 
 func TestBuyersAreNewReturningOrUnknown(t *testing.T) {
