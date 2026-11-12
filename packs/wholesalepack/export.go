@@ -90,12 +90,18 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 			byAccount[account] = append(byAccount[account], trimmed(send["requestId"]))
 		}
 	}
+	// A STATUS THAT CANNOT BE READ does not refuse the export: each attempt of
+	// that organization says, in its own field, that its delivery could not be
+	// read, and is exported as it was recorded.
 	deliveries := map[string]map[string]any{}
+	unreadable := map[string]bool{}
 	for account, requestIDs := range byAccount {
 		got, err := p.laneDeliveries(ctx, map[string]any{"accountId": account}, requestIDs)
 		if err != nil {
-			return nil, fmt.Errorf("wholesale: the email service's record of the store's emails could not be read, " +
-				"so the export would not say what was sent; export again")
+			for _, id := range requestIDs {
+				unreadable[id] = true
+			}
+			continue
 		}
 		for id, d := range got {
 			deliveries[id] = d
@@ -144,8 +150,9 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 		}
 		for _, send := range sends[bareID(id)] {
 			d := deliveries[trimmed(send["requestId"])]
-			row := withoutTokenHash(effectiveSend(send, d))
+			row := withoutTokenHash(p.effectiveSend(send, d))
 			row["applicationId"] = id
+			row["deliveryUnreadable"] = unreadable[trimmed(send["requestId"])]
 			if d != nil {
 				row["delivery"] = d
 			} else {

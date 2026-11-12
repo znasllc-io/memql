@@ -9093,6 +9093,7 @@
           "failed",
           "held",
           "pending",
+          "sending",
           "sent",
           "skipped",
           "uncertain"

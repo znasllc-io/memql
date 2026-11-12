@@ -299,10 +299,20 @@ func TestAPriceSheetLinkStopsOpeningOnceTheBuyerIsRemoved(t *testing.T) {
 	if n := versionCount(t, "v1:wholesale:privateLink", sheetLink); n != 1 {
 		t.Fatalf("%d price-sheet links minted, want one", n)
 	}
+	// THE RECORD ADMITS ONE HAND-OVER: one call answers sent; the other answers
+	// attempt 1 as the row stood when it read it -- sent, or still on its way.
+	sentAnswers := 0
 	for i, a := range answers {
-		if a["state"] != wholesalepack.SendSent {
+		switch {
+		case a["state"] == wholesalepack.SendSent:
+			sentAnswers++
+		case a["state"] == wholesalepack.SendDeferred && a["attempt"] == float64(1):
+		default:
 			t.Fatalf("send %d answered %v", i, a)
 		}
+	}
+	if sentAnswers < 1 {
+		t.Fatalf("no call answered the email sent: %v", answers)
 	}
 	token := linkToken(t, sent[0], "/wholesale/price-sheet")
 	s.requireNoTokenStored(t, "approved", 1, token)
@@ -322,11 +332,10 @@ func TestAPriceSheetLinkStopsOpeningOnceTheBuyerIsRemoved(t *testing.T) {
 	// the row says what to fix, the automation is answered that it was not sent,
 	// and nothing is sent.
 	s.putTemplate(t, eng, wholesalepack.EmailRevoked, "Your trade account", "No longer.", "draft")
-	_, err := eng.Execute(auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(context.Background(), "automation-runner")),
-		s.sendCall("wholesaleSendBuyerEmail", "revoked"))
-	if err == nil || !strings.Contains(err.Error(), "the removal email was not sent") || !strings.Contains(err.Error(), "is not a published transactional template") ||
-		len(s.mail.messages()) != 1 {
-		t.Fatalf("a held removal email answered %v after %d messages", err, len(s.mail.messages()))
+	held := automationCall(t, eng, s.sendCall("wholesaleSendBuyerEmail", "revoked"))
+	if held["state"] != wholesalepack.SendHeld || held["sent"] != false || held["reason"] != wholesalepack.ReasonHeldForAutomation ||
+		strings.Contains(asString(held["reason"]), "Your trade account") || len(s.mail.messages()) != 1 {
+		t.Fatalf("a held removal email answered %v after %d messages", held, len(s.mail.messages()))
 	}
 	row := latestPayload(t, "v1:wholesale:emailSend", wholesalepack.EmailSendRowID("revoked", s.appID, 1))
 	if row["state"] != wholesalepack.SendHeld || !strings.Contains(asString(row["reason"]), "is not a published transactional template") {

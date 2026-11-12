@@ -168,8 +168,9 @@ type Settings struct {
 	LinkLifetimeDays int
 	// AcceptanceText is the row's, or DefaultAcceptanceText when it is blank.
 	AcceptanceText string
-	// SenderIdentityID is the sender the applicant's emails go out from; empty
-	// is the organization's configured sender. The cluster's operators choose it.
+	// SenderIdentityID is the sender the applicant's emails go out from. Empty
+	// sends nothing for an organization other than the installation's (the lane
+	// resolves no sender for it). The cluster's operators choose it.
 	SenderIdentityID string
 	// The template of each of the applicant's emails; empty sends none.
 	TermsTemplateID, ApprovedTemplateID, RejectedTemplateID, RevokedTemplateID string
@@ -574,6 +575,12 @@ func (p *Provider) storeSettings(ctx context.Context, args map[string]any, _ int
 		return nil, err
 	}
 	s := EffectiveSettings(row)
+	// THE SENDER IS READ AS THE STORE'S MERCHANT, the settings row's owner, as a
+	// send reads it (senderView).
+	merchant := ctx
+	if owner := trimmed(row["ownerUserId"]); owner != "" {
+		merchant = auth.ContextWithUserActor(ctx, owner)
+	}
 	documents, err := p.documentsSummary(ctx, storeID)
 	if err != nil {
 		return nil, err
@@ -604,8 +611,8 @@ func (p *Provider) storeSettings(ctx context.Context, args map[string]any, _ int
 		"linkLifetimeDays":   s.LinkLifetimeDays,
 		"acceptanceText":     s.AcceptanceText,
 		"senderIdentityId":   s.SenderIdentityID,
-		"sender":             p.senderView(ctx, s),
-		"emailsWouldSend":    p.emailsWouldSend(ctx, s),
+		"sender":             p.senderView(merchant, s),
+		"emailsWouldSend":    p.emailsWouldSend(merchant, s),
 		"termsTemplateId":    s.TermsTemplateID,
 		"approvedTemplateId": s.ApprovedTemplateID,
 		"rejectedTemplateId": s.RejectedTemplateID,
