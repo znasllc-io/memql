@@ -1454,10 +1454,15 @@ func TestAQueuedDomainRefusedBeforeItRanIsNotCountedStarted(t *testing.T) {
 
 func TestQueueingClearsAStaleRefusalAndOnlyARefusal(t *testing.T) {
 	for name, tc := range map[string]struct{ lastError, want string }{
-		"not granted":      {memqlsync.NotGranted("shopify", "read_customers").Error(), ""},
-		"not requested":    {memqlsync.NotRequested("shopify").Error(), ""},
-		"a failure":        {"shopify admin: HTTP 502", "shopify admin: HTTP 502"},
-		"backfill refused": {backfillRefusedPrefix + "connector: not requested", backfillRefusedPrefix + "connector: not requested"},
+		"not granted":   {memqlsync.NotGranted("shopify", "read_customers").Error(), ""},
+		"not requested": {memqlsync.NotRequested("shopify").Error(), ""},
+		"a failure":     {"shopify admin: HTTP 502", "shopify admin: HTTP 502"},
+		// A backfill refused while the sweep reads the domain is a refusal too,
+		// in its other spelling: one rule of what a queue and a retry clear
+		// (clearsRefusal).
+		"backfill refused, not requested": {backfillRefusedPrefix + "connector: not requested", ""},
+		"backfill refused, not granted":   {backfillRefusedPrefix + memqlsync.NotGranted("shopify", "read_customers").Error(), ""},
+		"a backfill's failure":            {backfillFailedPrefix + "shopify: bulk operation FAILED", backfillFailedPrefix + "shopify: bulk operation FAILED"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			engine := newStateEngine()

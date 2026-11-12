@@ -1019,13 +1019,111 @@ func (r *Runner) queueOne(ctx context.Context, connectorName, conceptID, partiti
 }
 
 // queuePatch is what a queue writes on a row: `queued`, an empty cursor, and a
-// stale refusal -- and only a refusal -- cleared.
+// stale refusal -- and only a refusal -- cleared (clearsRefusal), in either
+// spelling, so a refused backfill queued again never reads refused while it
+// waits.
 func queuePatch(cur SyncState) SyncPatch {
 	p := SyncPatch{"backfillStatus": "queued", "backfillCursor": ""}
-	if standingRefusal(cur.LastError) {
+	if clearsRefusal(cur.LastError) {
 		p["lastError"] = ""
 	}
 	return p
+}
+
+// clearsRefusal reports whether a stored lastError is a refusal a fresh try
+// replaces: the origin's standing answer (standingRefusal), or a backfill the
+// origin refused although the sweep reads the domain (backfillRefusedPrefix).
+// The one rule of what a queue and a retry clear. A backfill's own failure
+// that is not a refusal, and a sweep's error, are not.
+func clearsRefusal(lastError string) bool {
+	return standingRefusal(lastError) || strings.HasPrefix(lastError, backfillRefusedPrefix)
+}
+
+// refusedNotGranted reports whether a stored lastError says the origin refused
+// the domain as not granted, in either spelling: the bare refusal, or a
+// backfill refused with it. A not-requested refusal is not one.
+func refusedNotGranted(lastError string) bool {
+	return strings.HasPrefix(strings.TrimPrefix(lastError, backfillRefusedPrefix), memqlsync.ErrNotGranted.Error())
+}
+
+// RefusalRetrier is what a connector may say about a refusal of one of its
+// domains, for RetryRefused. A connector need not implement it; it is met by
+// method set alone, so a connector outside this module offers it without
+// importing the runtime.
+type RefusalRetrier interface {
+	// RetryableRefusal reports whether a not-granted refusal recorded on the
+	// domain's row is one a wider grant can answer. A refusal worded for
+	// something else (data the app has not declared) answers false.
+	RetryableRefusal(conceptID, lastError string) bool
+	// BackfillsDomain reports whether the domain's past is read by a
+	// backfill, which is then what a retry queues.
+	BackfillsDomain(conceptID string) bool
+}
+
+// RetryRefusedResult is what RetryRefused did for the one domain: Retried,
+// and Action "queued" (its backfill) or "due" (the periodic check).
+type RetryRefusedResult struct {
+	Retried bool
+	Action  string
+}
+
+// RetryRefused tries again one domain of one partition whose row stands
+// refused as not granted. Decided on the row as it is now, behind the row's
+// version fence (PatchSyncState), so a sweep writing the row at the same
+// moment is never overwritten blindly: whichever write commits last decides
+// the row, and the other is decided again on a fresh read or lands after it.
+//
+//   - A row that does not stand refused as not granted -- no refusal, a
+//     not-requested one, one the connector says no grant answers, any other
+//     error, or no row at all -- is not written.
+//   - A domain the connector backfills (RefusalRetrier.BackfillsDomain, or, for
+//     a connector that does not say, a row whose backfill was the one refused)
+//     has its backfill queued as QueueBackfill queues it, its refusal cleared.
+//     A running backfill is left running; only the refusal is cleared.
+//   - Any other domain has its refusal cleared and its last attempt unset, so
+//     the cadence runs from its last finished sweep (dueOne) and it is due at
+//     the next pass. Nothing that says a check ran is written. A refusal is
+//     recorded by a sweep the domain was due for, so that sweep is at least an
+//     interval old.
+//
+// A paused domain is cleared and made due the same way; the pause stays, and
+// the pass goes on skipping it until it is resumed.
+func (r *Runner) RetryRefused(ctx context.Context, connectorName, conceptID, partition string) (RetryRefusedResult, error) {
+	connector, _, _, err := r.resolve(ctx, connectorName, conceptID, partition)
+	if err != nil {
+		return RetryRefusedResult{}, err
+	}
+	partition = strings.TrimSpace(partition)
+	if _, ok := connector.(memqlsync.Partitioned); ok && partition == "" {
+		return RetryRefusedResult{}, fmt.Errorf("datasync: %q keeps each tenant's domains apart; name the partition to retry", connectorName)
+	}
+	retrier, says := connector.(RefusalRetrier)
+	var out RetryRefusedResult
+	err = r.store.PatchSyncState(OperatorContext(ctx), conceptID, connector.Name(), string(memqlsync.DirectionInbound), partition,
+		func(cur SyncState) (SyncPatch, bool) {
+			out = RetryRefusedResult{}
+			if !cur.Stored || !refusedNotGranted(cur.LastError) || (says && !retrier.RetryableRefusal(conceptID, cur.LastError)) {
+				return nil, false
+			}
+			backfills := strings.HasPrefix(cur.LastError, backfillRefusedPrefix)
+			if says {
+				backfills = retrier.BackfillsDomain(conceptID)
+			}
+			out.Retried = true
+			if backfills {
+				out.Action = "queued"
+				if cur.BackfillStatus == "running" {
+					return SyncPatch{"lastError": ""}, true
+				}
+				return queuePatch(cur), true
+			}
+			out.Action = "due"
+			return SyncPatch{"lastError": "", "lastAttemptAt": ""}, true
+		})
+	if err != nil {
+		return RetryRefusedResult{}, err
+	}
+	return out, nil
 }
 
 // ContinueResult is what one continuing pass did. Started counts domains
