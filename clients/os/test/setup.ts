@@ -1,3 +1,5 @@
+import { configure, getConfig } from "@testing-library/react";
+
 import { setRoleLadder } from "../src/system/roles";
 import { installSeededAccess } from "./seededAccess";
 import { SEEDED_LADDER } from "./seededLadder";
@@ -23,6 +25,59 @@ setRoleLadder(SEEDED_LADDER);
 installSeededAccess("owner");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+// A WAIT HANDS BACK AFTER THE EFFECTS OF THE COMMIT IT WAITED FOR.
+//
+// Testing Library turns act off while a `findBy*` or `waitFor` waits, so
+// content a read brings in is committed by React's own scheduler. react-dom
+// asks for a paint after such a commit and the scheduler always yields to
+// that, so the commit's passive effects run in a LATER task. Testing Library
+// then hands the test back on a zero-delay timer of its own. React's task is
+// an immediate and normally runs first. When a millisecond boundary passes
+// between arming that timer and Node's next timer phase, the timer runs
+// first, and the test carries on among components whose mount effects are
+// still to come. Whatever it does next, a late effect can undo or use up: one
+// that resets a draft overwrites what the test just typed, one that reads a
+// ref takes the focus target a click just set.
+//
+// Measured on Node 22 with nothing but the two timers: the timer wins 1 time
+// in 300 on an idle machine, 1 in 4 after a quarter-millisecond stall, and
+// every time from one millisecond. So it was rare here and common on a loaded
+// runner. It failed a push check on a copy control's test, and holding the
+// thread at the hand-back failed three more every time
+// (test/profile/profileSection.test.tsx and the two focus tests under
+// test/pipelines/). None of them was wrong about the product; the order they
+// resumed in was this harness's.
+//
+// One real `setImmediate` after the wait is satisfied removes the race rather
+// than narrowing it. By the time a wait can see a commit, React has queued
+// that commit's effects; immediates run in the order they were queued; and
+// Testing Library arms its timer only after this callback returns. It is the
+// order the suite already ran in nearly every time, so no test that passed
+// sees anything new. It stops the order being luck.
+//
+// The timer is the REAL one, captured here before any test can fake it. It
+// has to wait in the queue React's scheduler uses, and the scheduler captured
+// its own when it loaded.
+//
+// Testing Library's wrapper is called, not replaced: it is what turns act off
+// for the wait and back on afterwards. Importing it here loads it for the
+// test files that never render as well, about 70 ms of processor time each.
+//
+// What this does not promise is that work those effects START has finished.
+// An effect that sets state or begins a read schedules another render, and a
+// test that needs its result still waits for it by name.
+//
+// test/handBack.test.tsx forces the losing order and holds this.
+const realSetImmediate = globalThis.setImmediate;
+const testingLibraryHandBack = getConfig().asyncWrapper;
+configure({
+  asyncWrapper: (wait) => testingLibraryHandBack(async () => {
+    const result = await wait();
+    await new Promise<void>((resolve) => { realSetImmediate(resolve); });
+    return result;
+  }),
+});
 
 class MemoryStorage implements Storage {
   private store = new Map<string, string>();
