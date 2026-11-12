@@ -1,0 +1,5 @@
+/// A ticket's published help page.
+concept ticketHelpPage {
+  title      string
+  bundleRef  string  @bytes(tre)
+}

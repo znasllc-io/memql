@@ -1,0 +1,6 @@
+/// A ticket's published help page and the snapshots it was built from.
+concept ticketHelpPage {
+  title      string
+  bundleRef  string    @bytes(tree)
+  snapshots  []string  @bytes(counted)
+}

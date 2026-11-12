@@ -189,6 +189,46 @@ func TestBelongsToViaADeclaredClusterWideParentIsRefused(t *testing.T) {
 	}
 }
 
+// A kind that travels may not follow a kind that stays: an export would carry
+// the child and leave behind the row it takes its account from. Filed under
+// the follower, which is the declaration to change.
+func TestBelongsToATravellingKindFollowingAStayingOneIsRefused(t *testing.T) {
+	concepts := belongsToConcepts(t, map[string]string{
+		"desk/concepts.memql": "@belongsTo(account, stays=\"signin\")\nconcept goal {\n  accountId  string\n  title      string\n}\n\n" + belongsToRun,
+	})
+	problems := validateBelongsToAcrossConcepts(concepts)
+	if codes := belongsToProblemCodes(t, problems); !reflect.DeepEqual(codes, []string{langparser.CodeBelongsToViaStays}) {
+		t.Fatalf("codes = %v, want one %s\n%v", codes, langparser.CodeBelongsToViaStays, problems)
+	}
+	msg := problems[0].Error()
+	for _, want := range []string{`concept "v1:desk:run"`, `@belongsTo(account, via="goalId")`, `"v1:desk:goal"`, `stays="signin"`} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the refusal must say %s: %s", want, msg)
+		}
+	}
+	if raw := belongsToProblems(concepts); len(raw) != 1 || raw[0].concept != "v1:desk:run" {
+		t.Errorf("the refusal is filed under %v, want the follower v1:desk:run", raw)
+	}
+}
+
+// The other direction is sound: a kind that stays may follow one that travels,
+// and two kinds that stay may follow each other.
+func TestBelongsToAStayingKindMayFollowAnyAccountKind(t *testing.T) {
+	stayingRun := "@belongsTo(account, via=\"goalId\", stays=\"transit\")\nconcept run {\n  accountId  string\n  goalId     string\n\n" +
+		"  @relationship(type=\"parent\", field=\"goalId\", target=goal, direction=\"outgoing\")\n}\n"
+	for name, goal := range map[string]string{
+		"follows a kind that travels": belongsToGoal,
+		"follows a kind that stays":   "@belongsTo(account, stays=\"machine\")\nconcept goal {\n  accountId  string\n}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			concepts := belongsToConcepts(t, map[string]string{"desk/concepts.memql": goal + "\n" + stayingRun})
+			if problems := validateBelongsToAcrossConcepts(concepts); len(problems) != 0 {
+				t.Fatalf("want no problems, got %v", problems)
+			}
+		})
+	}
+}
+
 func TestBelongsToParentNamingNoConceptIsRefused(t *testing.T) {
 	concepts := belongsToConcepts(t, map[string]string{
 		"desk/concepts.memql": "@belongsTo(account, via=\"storeId\", parent=\"v1:nowhere:store\")\n" +

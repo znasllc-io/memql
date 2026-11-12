@@ -1,0 +1,5 @@
+/// A file attached to a ticket. Its bytes are one object in blob storage.
+concept ticketAttachment {
+  title    string
+  blobUrl  string  @bytes
+}

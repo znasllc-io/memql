@@ -1,0 +1,17 @@
+/// A support ticket raised by a customer. Each ticket belongs to one account.
+@belongsTo(account)
+concept ticket {
+  accountId  string
+  title      string
+}
+
+/// A reply still being delivered. It takes its ticket's account and, as work
+/// in transit, stays on this cluster when the account is exported.
+@belongsTo(account, via="ticketId", stays="transit")
+concept ticketDelivery {
+  accountId  string
+  ticketId   string
+  attempt    int
+
+  @relationship(type="parent", field="ticketId", target=ticket, direction="outgoing")
+}

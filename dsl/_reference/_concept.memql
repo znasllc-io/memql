@@ -58,13 +58,15 @@ use identity.concepts.{ user }
 //                               or that it is cluster-wide. It records and
 //                               shares a row with nobody: opening rows to an
 //                               account's members is @rowAuthz's account=
-//                               argument, below. Six forms -- see section 15:
+//                               argument, below. Six forms, and `stays` beside
+//                               any account form -- see section 15:
 //                                 @belongsTo(account)
 //                                 @belongsTo(account, via="<field>")
 //                                 @belongsTo(account, via="<field>",
 //                                            parent="<concept id>")
 //                                 @belongsTo(account, shared)
 //                                 @belongsTo(account, stated)
+//                                 @belongsTo(account, stays="signin")
 //                                 @belongsTo(cluster)
 //
 // (`@scope` was retired in #56 -- see section 5.)
@@ -625,6 +627,18 @@ concept fieldTypes {
 //                       constrain its caller. ADDING @pii TO A FIELD CAN FAIL
 //                       THE BUILD. That is the intent, and it is the working
 //                       template for what "enforced" looks like here.
+//   @bytes              The field names bytes in blob storage: one object, or
+//                       with @bytes(tree) every object under the prefix it
+//                       names. An account export copies them into the file;
+//                       @bytes(counted) only counts them in its report. Emits
+//                       `x-bytes`, read back by Concept.BytesFields().
+//   @secretName         The field holds the NAME of a secret, never its value.
+//                       An account export lists each name as a connection to
+//                       set up again; the value never travels. Emits
+//                       `x-secret-name`, read back by Concept.SecretNameFields().
+//                       Both are written on a top-level string or []string
+//                       field; anywhere else they are refused
+//                       (field_annotation_type).
 //   @description("...") Human-readable description. Emitted into the concept
 //                       schema, so it reaches sense hover -- write it as
 //                       documentation, not as a note. (It does NOT reach the
@@ -1124,6 +1138,14 @@ concept nativeExample {
 //   @belongsTo(cluster)                   is cluster-wide: never inside an
 //                                         account
 //
+//   stays="signin" | "transit" | "machine", beside any account form: the row
+//   belongs to its account all the same, and NEVER LEAVES THIS CLUSTER. An
+//   account export counts such rows, prints the reason, and carries none.
+//   signin is sign-in material or a visit, transit is work in transit that
+//   means nothing elsewhere, machine is bound to a machine of this cluster.
+//   Any other value is refused (belongs_to_stays_unknown), and so is `stays`
+//   beside `cluster` (belongs_to_conflict).
+//
 // IT RECORDS; IT SHARES A ROW WITH NOBODY. A note belongs to its account and
 // stays private to its author. Opening rows to an account's members is the
 // account= argument of @rowAuthz (section 1), and a concept declares that only
@@ -1152,7 +1174,10 @@ concept nativeExample {
 // tree loads: a parent that declares @belongsTo(cluster)
 // (belongs_to_via_cluster), a parent= naming no registered concept
 // (belongs_to_parent_unknown), and a loop, a concept that follows itself
-// included (belongs_to_via_cycle). A parent that declares NOTHING is accepted.
+// included (belongs_to_via_cycle). A kind that travels may not follow a kind
+// that stays (belongs_to_via_stays): the export would carry the child and
+// leave its parent behind; the reverse is accepted. A parent that declares
+// NOTHING is accepted.
 //
 // LEAVING IT OFF LOADS, AND IS REPORTED. Nothing records the account of an
 // undeclared concept's rows, so they count as cluster-wide. `memqllint` names
@@ -1195,6 +1220,13 @@ concept sharedExample {
 concept statedExample {
   accountId  string
   name       string!
+}
+
+@description("Belongs to an account and never leaves this cluster: sign-in material.")
+@belongsTo(account, stays="signin")
+concept staysExample {
+  accountId  string
+  openedAt   datetime!
 }
 
 @description("Cluster-wide: never inside an account, and no accountId is asked for.")

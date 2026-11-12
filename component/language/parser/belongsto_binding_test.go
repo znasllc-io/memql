@@ -46,6 +46,13 @@ func TestParseBelongsToAcceptsEachSpelling(t *testing.T) {
 			BelongsToDecl{Scope: BelongsToAccount, Via: "storeId", Parent: "v1:shopify:store"}},
 		// A value is trimmed, so a padded field name is the field.
 		{`@belongsTo(account, via=" goalId ")`, BelongsToDecl{Scope: BelongsToAccount, Via: "goalId"}},
+		// `stays` sits beside account in any of its forms.
+		{`@belongsTo(account, stays="signin")`, BelongsToDecl{Scope: BelongsToAccount, Stays: BelongsToStaysSignin}},
+		{`@belongsTo(account, via="siteId", stays="transit")`,
+			BelongsToDecl{Scope: BelongsToAccount, Via: "siteId", Stays: BelongsToStaysTransit}},
+		{`@belongsTo(account, shared, stated, stays="machine")`,
+			BelongsToDecl{Scope: BelongsToAccount, Shared: true, Stated: true, Stays: BelongsToStaysMachine}},
+		{`@belongsTo(account, stays=" signin ")`, BelongsToDecl{Scope: BelongsToAccount, Stays: BelongsToStaysSignin}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.line, func(t *testing.T) {
@@ -89,6 +96,10 @@ func TestParseBelongsToRefusesWhatMeansNothing(t *testing.T) {
 		{"an empty via", `@belongsTo(account, via="")`, CodeBelongsToViaUnknown, "names no field"},
 		{"a blank via", `@belongsTo(account, via="  ")`, CodeBelongsToViaUnknown, "names no field"},
 		{"an empty parent", `@belongsTo(account, via="storeId", parent="")`, CodeBelongsToParentUnknown, "names no concept"},
+		{"stays beside cluster", `@belongsTo(cluster, stays="signin")`, CodeBelongsToConflict, "@belongsTo(cluster) takes nothing else"},
+		{"a stays reason outside the three", `@belongsTo(account, stays="forever")`, CodeBelongsToStaysUnknown, "signin, transit or machine"},
+		{"an empty stays", `@belongsTo(account, stays="")`, CodeBelongsToStaysUnknown, "signin, transit or machine"},
+		{"a stays reason in another case", `@belongsTo(account, stays="Signin")`, CodeBelongsToStaysUnknown, "signin, transit or machine"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -161,7 +172,7 @@ func TestParseBelongsToRejectsTheWrongAttribute(t *testing.T) {
 // the two ever disagree, a codemod run writes a tree the loader refuses. Every
 // declaration ParseBelongsTo can return is rendered and read back here, and the
 // rendering is pinned too: the keys come out in one order -- account, shared,
-// stated, via, parent -- so two runs over one tree produce one diff.
+// stated, via, parent, stays -- so two runs over one tree produce one diff.
 func TestBelongsToFormatParseRoundTrip(t *testing.T) {
 	cases := []struct {
 		decl BelongsToDecl
@@ -175,6 +186,13 @@ func TestBelongsToFormatParseRoundTrip(t *testing.T) {
 		{BelongsToDecl{Scope: BelongsToAccount, Via: "goalId"}, `@belongsTo(account, via="goalId")`},
 		{BelongsToDecl{Scope: BelongsToAccount, Via: "storeId", Parent: "v1:shopify:store"},
 			`@belongsTo(account, via="storeId", parent="v1:shopify:store")`},
+		{BelongsToDecl{Scope: BelongsToAccount, Stays: BelongsToStaysSignin}, `@belongsTo(account, stays="signin")`},
+		{BelongsToDecl{Scope: BelongsToAccount, Via: "siteId", Stays: BelongsToStaysTransit},
+			`@belongsTo(account, via="siteId", stays="transit")`},
+		{BelongsToDecl{Scope: BelongsToAccount, Shared: true, Stated: true, Stays: BelongsToStaysMachine},
+			`@belongsTo(account, shared, stated, stays="machine")`},
+		{BelongsToDecl{Scope: BelongsToAccount, Via: "storeId", Parent: "v1:shopify:store", Stays: BelongsToStaysTransit},
+			`@belongsTo(account, via="storeId", parent="v1:shopify:store", stays="transit")`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.want, func(t *testing.T) {
@@ -220,5 +238,19 @@ func TestBelongsToDeclAnswersScopeAndManagement(t *testing.T) {
 				t.Errorf("EngineManaged() = %v, want %v", got, tc.engineManaged)
 			}
 		})
+	}
+}
+
+// The reasons a kind stays are a closed list, in the order the file's report
+// and the documentation print them.
+func TestBelongsToStaysReasonsAreTheThree(t *testing.T) {
+	got := BelongsToStaysReasons()
+	want := []string{BelongsToStaysSignin, BelongsToStaysTransit, BelongsToStaysMachine}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("BelongsToStaysReasons() = %v, want %v", got, want)
+	}
+	got[0] = "changed"
+	if BelongsToStaysReasons()[0] != BelongsToStaysSignin {
+		t.Fatal("BelongsToStaysReasons() hands out its own slice; a caller changed the list")
 	}
 }

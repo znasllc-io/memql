@@ -154,6 +154,8 @@ func TestConceptCarriesTheParsersBelongsToRefusals(t *testing.T) {
 		{`@belongsTo(account, stated, via="goalId")`, langparser.CodeBelongsToConflict},
 		{`@belongsTo(account, parent="v1:x:y")`, langparser.CodeBelongsToConflict},
 		{`@belongsTo(account, via="")`, langparser.CodeBelongsToViaUnknown},
+		{`@belongsTo(cluster, stays="signin")`, langparser.CodeBelongsToConflict},
+		{`@belongsTo(account, stays="forever")`, langparser.CodeBelongsToStaysUnknown},
 	}
 	for _, tc := range cases {
 		t.Run(tc.annotation, func(t *testing.T) {
@@ -372,6 +374,7 @@ func TestBelongsToDoesNotChangeTheConceptSchema(t *testing.T) {
 		`@belongsTo(account, stated)`,
 		`@belongsTo(account, via="goalId")`,
 		`@belongsTo(account, via="goalId", parent="v1:work:goal")`,
+		`@belongsTo(account, stays="transit")`,
 	} {
 		declared, err := buildConcept(t, annotation+"\n"+fields)
 		if err != nil {
@@ -401,6 +404,7 @@ func TestBelongsToSurvivesConceptJSON(t *testing.T) {
 		`@belongsTo(cluster)`,
 		`@belongsTo(account, shared, stated)`,
 		`@belongsTo(account, via="goalId", parent="v1:work:goal")`,
+		`@belongsTo(account, via="goalId", stays="machine")`,
 	} {
 		c, err := buildConcept(t, annotation+"\n"+fields)
 		if err != nil {
@@ -429,5 +433,167 @@ func TestBelongsToSurvivesConceptJSON(t *testing.T) {
 	}
 	if strings.Contains(string(blob), "belongsTo") {
 		t.Fatalf("an undeclared concept serialises a belongsTo key: %s", blob)
+	}
+}
+
+// Stays and Travels are the two questions an account export asks of a kind.
+// Travels is narrower than AccountScoped: a kind that stays is the account's
+// all the same, and only the export leaves it behind. A cluster-wide kind and
+// an undeclared one neither travel nor stay -- they are in no account's file.
+func TestStaysAndTravelsAnswerForEveryDeclaration(t *testing.T) {
+	const fields = "concept probe {\n  accountId  string\n  goalId     string\n}\n"
+	cases := []struct {
+		name     string
+		preamble string
+		stays    string
+		travels  bool
+	}{
+		{name: "undeclared", preamble: ""},
+		{name: "cluster-wide", preamble: "@belongsTo(cluster)\n"},
+		{name: "an account", preamble: "@belongsTo(account)\n", travels: true},
+		{name: "the account of a parent", preamble: "@belongsTo(account, via=\"goalId\")\n", travels: true},
+		{name: "staying for sign-in", preamble: "@belongsTo(account, stays=\"signin\")\n", stays: "signin"},
+		{name: "staying in transit, through a parent", preamble: "@belongsTo(account, via=\"goalId\", stays=\"transit\")\n", stays: "transit"},
+		{name: "staying on a machine, shared and stated", preamble: "@belongsTo(account, shared, stated, stays=\"machine\")\n", stays: "machine"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := buildConcept(t, tc.preamble+fields)
+			if err != nil {
+				t.Fatalf("BuildConceptFromDecl: %v", err)
+			}
+			if got := c.Stays(); got != tc.stays {
+				t.Errorf("Stays() = %q, want %q", got, tc.stays)
+			}
+			if got := c.Travels(); got != tc.travels {
+				t.Errorf("Travels() = %v, want %v", got, tc.travels)
+			}
+		})
+	}
+	var nilConcept *Concept
+	if nilConcept.Stays() != "" || nilConcept.Travels() {
+		t.Errorf("a nil concept answered Stays=%q Travels=%v", nilConcept.Stays(), nilConcept.Travels())
+	}
+}
+
+// @bytes and @secretName reach the concept's schema and come back through
+// their accessors, sorted by name, with @bytes's two flags read as written.
+func TestBytesAndSecretNameFieldsAreReadBackFromTheSchema(t *testing.T) {
+	c, err := buildConcept(t, `@belongsTo(account)
+concept probe {
+  accountId  string
+  blobUrl    string    @bytes
+  bundleRef  string    @bytes(tree)
+  snapshot   string    @bytes(counted)
+  archives   []string  @bytes(tree, counted)
+  names      []string  @secretName
+  ref        string    @secretName
+  title      string
+}
+`)
+	if err != nil {
+		t.Fatalf("BuildConceptFromDecl: %v", err)
+	}
+	wantBytes := []BytesField{
+		{Name: "archives", Tree: true, Counted: true},
+		{Name: "blobUrl"},
+		{Name: "bundleRef", Tree: true},
+		{Name: "snapshot", Counted: true},
+	}
+	gotBytes := c.BytesFields()
+	if len(gotBytes) != len(wantBytes) {
+		t.Fatalf("BytesFields() = %+v, want %+v", gotBytes, wantBytes)
+	}
+	for i := range wantBytes {
+		if gotBytes[i] != wantBytes[i] {
+			t.Fatalf("BytesFields() = %+v, want %+v", gotBytes, wantBytes)
+		}
+	}
+	if got := strings.Join(c.SecretNameFields(), ","); got != "names,ref" {
+		t.Errorf("SecretNameFields() = %q, want \"names,ref\"", got)
+	}
+
+	plain, err := buildConcept(t, "concept probe {\n  title  string\n}\n")
+	if err != nil {
+		t.Fatalf("plain concept: %v", err)
+	}
+	if plain.BytesFields() != nil || plain.SecretNameFields() != nil {
+		t.Errorf("a concept with neither annotation answered bytes=%+v secretNames=%v", plain.BytesFields(), plain.SecretNameFields())
+	}
+	var nilConcept *Concept
+	if nilConcept.BytesFields() != nil || nilConcept.SecretNameFields() != nil {
+		t.Error("a nil concept answered a bytes or secret-name field")
+	}
+}
+
+// The schema keywords are the contract the accessors read, and a reader of a
+// stored schema (an import, a client) reads them too.
+func TestBytesAndSecretNameEmitTheirSchemaKeywords(t *testing.T) {
+	c, err := buildConcept(t, "concept probe {\n  bundleRef  string  @bytes(tree)\n  ref  string  @secretName\n}\n")
+	if err != nil {
+		t.Fatalf("BuildConceptFromDecl: %v", err)
+	}
+	var schema struct {
+		Properties map[string]map[string]any `json:"properties"`
+	}
+	if err := json.Unmarshal(c.Schemas[definitionSchemaKey], &schema); err != nil {
+		t.Fatalf("definition schema: %v", err)
+	}
+	bytesKw, ok := schema.Properties["bundleRef"]["x-bytes"].(map[string]any)
+	if !ok || bytesKw["tree"] != true || bytesKw["counted"] != false {
+		t.Errorf("bundleRef x-bytes = %#v, want {tree: true, counted: false}", schema.Properties["bundleRef"]["x-bytes"])
+	}
+	if schema.Properties["ref"]["x-secret-name"] != true {
+		t.Errorf("ref x-secret-name = %#v, want true", schema.Properties["ref"]["x-secret-name"])
+	}
+	// The keywords are markers: the schema still compiles, and a row is
+	// validated as it would be without them. The compiled schema is cached by
+	// concept name, so this probe takes a name no other test compiles under.
+	c.Name = "v1:test:fieldReferenceProbe"
+	if err := c.validate(definitionSchemaKey, map[string]any{"bundleRef": "sites/a/", "ref": "token"}); err != nil {
+		t.Errorf("a row under the marked schema: %v", err)
+	}
+}
+
+// Both annotations name something by a string, so on any other type they
+// would be a declaration nothing can read. Refused at load, with the field,
+// its type and what to write.
+func TestBytesAndSecretNameAreRefusedOnAFieldThatIsNotAString(t *testing.T) {
+	for _, annotation := range []string{"@bytes", "@bytes(tree)", "@secretName"} {
+		for _, fieldType := range []string{"int", "bool", "object", "[]int", "map[string]string"} {
+			t.Run(annotation+" on "+fieldType, func(t *testing.T) {
+				_, err := buildConcept(t, "concept probe {\n  target  "+fieldType+"  "+annotation+"\n}\n")
+				if err == nil {
+					t.Fatalf("%s on %s built", annotation, fieldType)
+				}
+				var coded interface{ RuleCode() string }
+				if !errors.As(err, &coded) || coded.RuleCode() != CodeFieldAnnotationType {
+					t.Fatalf("error = %v, want code %s", err, CodeFieldAnnotationType)
+				}
+				name := strings.SplitN(annotation, "(", 2)[0]
+				for _, want := range []string{name, "`target`", "string or a list of strings", "[" + CodeFieldAnnotationType + "]"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error = %q, want it to contain %q", err, want)
+					}
+				}
+			})
+		}
+	}
+}
+
+// The accessors read top-level fields only, so a @bytes or @secretName inside
+// a nested block would load and be read by nobody. Refused with the same code.
+func TestBytesAndSecretNameAreRefusedOnANestedField(t *testing.T) {
+	for _, annotation := range []string{"@bytes", "@secretName"} {
+		t.Run(annotation, func(t *testing.T) {
+			_, err := buildConcept(t, "concept probe {\n  bundle {\n    ref  string  "+annotation+"\n  }\n}\n")
+			var coded interface{ RuleCode() string }
+			if err == nil || !errors.As(err, &coded) || coded.RuleCode() != CodeFieldAnnotationType {
+				t.Fatalf("error = %v, want code %s", err, CodeFieldAnnotationType)
+			}
+			if !strings.Contains(err.Error(), "top-level") {
+				t.Errorf("error = %q, want it to say the field must be top-level", err)
+			}
+		})
 	}
 }

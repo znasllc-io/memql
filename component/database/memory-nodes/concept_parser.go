@@ -653,6 +653,13 @@ type parsedProperty struct {
 	// mutation's caller args. Surfaces as the x-internal custom
 	// JSON-Schema keyword.
 	internal bool
+	// bytes is the field's @bytes declaration: it points at bytes in blob
+	// storage. Nil when the field declares none. Surfaces as the x-bytes
+	// custom JSON-Schema keyword, read back by Concept.BytesFields.
+	bytes *bytesDecl
+	// secretName marks the field as holding the NAME of a secret. Surfaces
+	// as x-secret-name, read back by Concept.SecretNameFields.
+	secretName bool
 	// serverSet marks the field as stamped server-side (createdAt,
 	// createdBy, status, ...). A @serverSet field is NOT accepted from a
 	// mutation's caller args (it must be stamped) but MAY be projected.
@@ -778,6 +785,9 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 		if err != nil {
 			return parsedProperty{}, fmt.Errorf("nested property %q: %w", nested.Name, err)
 		}
+		if err := refuseNestedFieldReference(pp); err != nil {
+			return parsedProperty{}, err
+		}
 		out.nested = append(out.nested, pp)
 	}
 
@@ -829,6 +839,9 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 				pp, err := propertyDeclToParsed(nested)
 				if err != nil {
 					return parsedProperty{}, fmt.Errorf("variant %q property %q: %w", v.Name, nested.Name, err)
+				}
+				if err := refuseNestedFieldReference(pp); err != nil {
+					return parsedProperty{}, err
 				}
 				variant.properties = append(variant.properties, pp)
 			}
@@ -931,6 +944,9 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 		return parsedProperty{}, err
 	}
 	if err := checkOpenIsMeaningful(target, prop); err != nil {
+		return parsedProperty{}, err
+	}
+	if err := checkFieldReferenceType(out, prop); err != nil {
 		return parsedProperty{}, err
 	}
 
@@ -1601,6 +1617,12 @@ func applyPropertyAttribute(prop *parsedProperty, attr *parser.Attribute) error 
 		prop.secret = true
 	case "pii":
 		prop.pii = true
+	case "bytes":
+		// Bare, or with the flags tree and counted; the registry has
+		// already refused any other key and a valued flag.
+		prop.bytes = &bytesDecl{Tree: attrFlag(attr, "tree"), Counted: attrFlag(attr, "counted")}
+	case "secretName":
+		prop.secretName = true
 	case "internal":
 		prop.internal = true
 	case "serverSet":
@@ -1883,6 +1905,12 @@ func propertyToJSONSchema(prop parsedProperty) (map[string]any, error) {
 	}
 	if prop.pii {
 		schema["x-pii"] = true
+	}
+	if prop.bytes != nil {
+		schema["x-bytes"] = map[string]any{"tree": prop.bytes.Tree, "counted": prop.bytes.Counted}
+	}
+	if prop.secretName {
+		schema["x-secret-name"] = true
 	}
 	if prop.internal {
 		schema["x-internal"] = true

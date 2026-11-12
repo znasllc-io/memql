@@ -1,0 +1,27 @@
+{
+  "cases": [
+    {
+      "file": "written-bare.memql",
+      "verdict": "load_ok",
+      "note": "The field names one object in blob storage. An account export copies the object the newest version of each carried row names into the file."
+    },
+    {
+      "file": "with-its-flags.memql",
+      "verdict": "load_ok",
+      "note": "`tree`: the field names a prefix, and the bytes are every object under it. `counted`: the bytes are counted in the file's report and never carried. Either takes a list of strings as well as a string."
+    },
+    {
+      "file": "on-a-number.memql",
+      "verdict": "refuse_load",
+      "code": "field_annotation_type",
+      "message": "@bytes cannot be declared on `blobSize`, which is int",
+      "note": "The field names something kept outside the row, so it is a string or a list of strings; on any other type nothing could read the declaration."
+    },
+    {
+      "file": "with-a-misspelled-flag.memql",
+      "verdict": "refuse_load",
+      "code": "annotation_key",
+      "message": "@bytes on a concept field has no key tre"
+    }
+  ]
+}

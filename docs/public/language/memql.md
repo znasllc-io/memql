@@ -447,7 +447,7 @@ Annotations split by what they are *about*:
 | kind | annotations | on `[]T` / `map[string]T` |
 |---|---|---|
 | **value constraints** | `@pattern`, `@minLength`, `@maxLength`, `@minimum`, `@maximum`, `@variant` | apply to each **element** |
-| **field markers** | `@required` (and `!`), `@description`, `@unique`, `@immutable`, `@secret`, `@pii`, `@internal`, `@serverSet` | apply to the **field**, unchanged |
+| **field markers** | `@required` (and `!`), `@description`, `@unique`, `@immutable`, `@secret`, `@pii`, `@internal`, `@serverSet`, `@bytes`, `@secretName` | apply to the **field**, unchanged |
 
 So `blocks []object @variant(discriminator="kind") { … }` validates every block against the union, and `tags []string @pattern("^[a-z]+$")` constrains every tag. `capabilities []string!` still means "the field is required", not "the elements are".
 
@@ -495,6 +495,31 @@ So `blocks []object @variant(discriminator="kind") { … }` validates every bloc
 > it.
 
 > `@minLength` / `@maxLength` remain a **character** count on the element, not an element count. There is still no way to bound the length of an array itself.
+
+**Fields that name something outside the row.** Two field markers say that a
+field's value names something kept elsewhere, so an account export can find it:
+
+| Marker | The field holds | An account export |
+|---|---|---|
+| `@bytes` | the key of one object in blob storage | copies the object into the file |
+| `@bytes(tree)` | a prefix: every object under it | copies every object under the prefix |
+| `@bytes(counted)`, or `@bytes(tree, counted)` | the same | counts the bytes in the file's report and carries none |
+| `@secretName` | the name of a secret, never its value | lists the name as a connection to set up again; the value never travels |
+
+<!-- corpus: 2026/cells/conceptField/bytes/with-its-flags.memql -->
+```memql
+/// A ticket's published help page and the snapshots it was built from.
+concept ticketHelpPage {
+  title      string
+  bundleRef  string    @bytes(tree)
+  snapshots  []string  @bytes(counted)
+}
+```
+
+Both are written on a top-level field that is a `string` or a list of strings,
+and become the schema keywords `x-bytes` and `x-secret-name`. On any other
+type, or on a field inside a nested block, the load refuses them
+(`field_annotation_type`): nothing could read the declaration there.
 
 **Cross-concept references** are plain string fields holding the target's id (e.g. `folderId string`), optionally paired with an `@relationship` annotation so the engine can traverse the edge.
 
@@ -639,6 +664,7 @@ it out from a concept's fields or from who may see its rows.
 | `@belongsTo(account, via="<field>", parent="<concept id>")` | the same, where `<field>` carries no `@relationship` to say which concept it names. |
 | `@belongsTo(account, shared)` | belongs to an account or to none: a row with no account is provided by the cluster to every account. |
 | `@belongsTo(account, stated)` | belongs to the account the concept's own mutations name. The engine never fills the field in and never refuses a change to it. |
+| `@belongsTo(account, stays="<reason>")`, beside any of the forms above | belongs to its account all the same, and never leaves this cluster: an account export counts it and carries none. |
 | `@belongsTo(cluster)` | is cluster-wide: never inside an account. |
 
 <!-- corpus: 2026/cells/concept/belongsTo/an-account.memql -->
@@ -744,6 +770,33 @@ concept cannedReply {
 }
 ```
 
+**Rows that stay on the cluster.** An account export carries every row of a
+kind that belongs to the account, except the kinds that declare `stays`. The
+value is the reason, one of three, and a file's report prints it beside the
+count it left behind:
+
+| Reason | For rows that are |
+|---|---|
+| `signin` | sign-in material or a visit: an access session, a preview grant, an invitation |
+| `transit` | work in transit that means nothing elsewhere: an upload session, an outbox entry, a send in flight |
+| `machine` | bound to a machine of this cluster: a workbench workspace, a watched folder |
+
+<!-- corpus: 2026/cells/concept/belongsTo/stays.memql -->
+```memql
+/// A visit a customer opened with an access code. It belongs to an account,
+/// and as sign-in material it never leaves this cluster.
+@belongsTo(account, stays="signin")
+concept ticketVisit {
+  accountId  string
+  openedAt   datetime
+}
+```
+
+`stays` changes nothing about which account a row belongs to; only an export
+reads it. A kind that stays may follow, through `via`, a kind that travels. A
+kind that travels may not follow one that stays: the file would hold rows whose
+account nothing in it explains.
+
 **What it does not do.**
 
 - **It opens a row to nobody.** `@belongsTo` records; sharing a row with an
@@ -762,17 +815,20 @@ brackets:
 
 | Refused | Code |
 |---|---|
-| `account` and `cluster` together, or neither; `shared`, `stated`, `via` or `parent` beside `cluster`; `parent` without `via`; `shared` or `stated` beside `via` | `belongs_to_conflict` |
+| `account` and `cluster` together, or neither; `shared`, `stated`, `via`, `parent` or `stays` beside `cluster`; `parent` without `via`; `shared` or `stated` beside `via` | `belongs_to_conflict` |
 | An account form on a concept with no `accountId` field, or one that is not a `string` | `belongs_to_field` |
 | `via` names no field, or a field the concept does not declare | `belongs_to_via_unknown` |
 | `parent` names no concept, or one that is not registered | `belongs_to_parent_unknown` |
+| `stays` names no reason, or one outside `signin`, `transit` and `machine` | `belongs_to_stays_unknown` |
 | The concept a `via` leads to declares `@belongsTo(cluster)` | `belongs_to_via_cluster` |
 | The `via` declarations form a cycle, a concept that follows itself included | `belongs_to_via_cycle` |
+| A kind that travels follows, through `via`, a kind that declares `stays` | `belongs_to_via_stays` |
 | `@belongsTo(cluster)` on a concept whose `@rowAuthz` carries `account=` | `belongs_to_sharing_mismatch` |
 | The annotation written twice on one concept | `annotation_repeated` |
 
-Three of these need every concept at once -- a `parent` that is not
-registered, `belongs_to_via_cluster` and `belongs_to_via_cycle` -- so they are
+Four of these need every concept at once -- a `parent` that is not
+registered, `belongs_to_via_cluster`, `belongs_to_via_cycle` and
+`belongs_to_via_stays` -- so they are
 made when the whole tree loads rather than when one concept is built. A `via`
 that leads to a concept which declares **nothing** is accepted: its rows have
 no account to give yet, but unclassified is not the same statement as

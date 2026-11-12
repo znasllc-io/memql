@@ -290,6 +290,13 @@ concept it points at. A pack whose mutations already name the account (the
 reviews pack copies it onto each review) declares `@belongsTo(account, stated)`
 instead, and the engine leaves the field to them.
 
+Every kind a pack declares travels when its account is exported, unless the
+concept adds `stays` with a reason (`signin`, `transit` or `machine`) for rows
+that mean nothing on another cluster. A field that names bytes in blob storage
+is declared `@bytes`, and one that names a secret `@secretName`, so the export
+carries the bytes and lists the secret as a connection to set up again; a
+secret's value never travels.
+
 ---
 
 ## How a shopper writes to a pack

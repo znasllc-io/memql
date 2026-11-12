@@ -89,6 +89,30 @@
       "code": "belongs_to_sharing_mismatch",
       "message": "The account grant opens a row to the members of the account",
       "note": "@rowAuthz(account=...) puts a concept's rows inside accounts; declaring it cluster-wide says they are inside none, and the row gate and the inventory would then disagree about the same row."
+    },
+    {
+      "file": "stays.memql",
+      "verdict": "load_ok",
+      "note": "A kind whose rows belong to an account and never leave this cluster. `stays` names one of three reasons -- signin, transit or machine -- which an account export prints beside the count it leaves behind."
+    },
+    {
+      "file": "stays-via-a-parent.memql",
+      "verdict": "load_ok",
+      "note": "`stays` sits beside any account form, a `via` included. A kind that stays may follow a kind that travels; the reverse is refused at load (negative/concept/belongs-to-via-stays.memql)."
+    },
+    {
+      "file": "stays-beside-cluster.memql",
+      "verdict": "refuse_load",
+      "code": "belongs_to_conflict",
+      "message": "@belongsTo(cluster) takes nothing else",
+      "note": "A cluster-wide kind is in no account, so no account export reads it and there is nothing for it to stay out of."
+    },
+    {
+      "file": "stays-for-no-reason.memql",
+      "verdict": "refuse_load",
+      "code": "belongs_to_stays_unknown",
+      "message": "gives no reason the kind stays -- write stays= with one of signin, transit or machine",
+      "note": "The reasons are a closed list because a file's report prints them: an open value would let a misspelling stand as a fourth reason nobody explains."
     }
   ]
 }

@@ -1,0 +1,7 @@
+/// The desk's opening hours, said to be cluster-wide and to stay on the
+/// cluster at once.
+@belongsTo(cluster, stays="machine")
+concept supportHours {
+  opensAt   string
+  closesAt  string
+}

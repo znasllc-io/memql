@@ -12,6 +12,9 @@ package parser
 //	                                       by the cluster to every account
 //	@belongsTo(account, stated)            ... and the concept's own writers state
 //	                                       which; the engine leaves the field alone
+//	@belongsTo(account, stays="signin")    ... and its rows never leave this
+//	                                       cluster: an account export counts them
+//	                                       and carries none (any account form)
 //	@belongsTo(cluster)                    cluster-wide: never inside an account
 //
 // WHAT IT IS NOT. It does not open a row to anybody. `@rowAuthz(account=...)` is
@@ -58,9 +61,10 @@ const (
 	BelongsToCluster BelongsToScope = "cluster"
 )
 
-// The stable codes a @belongsTo refusal carries. The first three are raised
-// while one concept is built; the rest need every concept and are raised by the
-// engine's load.
+// The stable codes a @belongsTo refusal carries. Conflict, field, via-unknown,
+// parent-unknown, stays-unknown and sharing-mismatch are raised while one
+// concept is built; via-cluster, via-cycle and via-stays need every concept and
+// are raised by the engine's load.
 const (
 	CodeBelongsToConflict        = "belongs_to_conflict"
 	CodeBelongsToField           = "belongs_to_field"
@@ -69,7 +73,44 @@ const (
 	CodeBelongsToViaCluster      = "belongs_to_via_cluster"
 	CodeBelongsToViaCycle        = "belongs_to_via_cycle"
 	CodeBelongsToSharingMismatch = "belongs_to_sharing_mismatch"
+	CodeBelongsToStaysUnknown    = "belongs_to_stays_unknown"
+	CodeBelongsToViaStays        = "belongs_to_via_stays"
 )
+
+// The reasons a kind STAYS on its cluster: an account export counts its rows,
+// prints the reason in the file's report, and carries none of them (design
+// record docs/superpowers/specs/2026-11-12-account-export-design.md, section C).
+// A closed list, because the report and an import read the reason: an open
+// value would let a typo stand as a fourth reason nobody explains.
+const (
+	// BelongsToStaysSignin: sign-in material or a visit (an access session, a
+	// preview grant, an invitation).
+	BelongsToStaysSignin = "signin"
+	// BelongsToStaysTransit: work in transit that means nothing elsewhere (an
+	// upload session, an outbox entry, a send in flight).
+	BelongsToStaysTransit = "transit"
+	// BelongsToStaysMachine: bound to a machine of this cluster (a workbench
+	// workspace, a watched folder).
+	BelongsToStaysMachine = "machine"
+)
+
+// BelongsToStaysReasons returns the three reasons, in the order the report and
+// the documentation print them. A fresh slice each call.
+func BelongsToStaysReasons() []string {
+	return []string{BelongsToStaysSignin, BelongsToStaysTransit, BelongsToStaysMachine}
+}
+
+// belongsToStaysList is the three reasons as a refusal prints them.
+const belongsToStaysList = BelongsToStaysSignin + ", " + BelongsToStaysTransit + " or " + BelongsToStaysMachine
+
+func isBelongsToStaysReason(s string) bool {
+	for _, r := range BelongsToStaysReasons() {
+		if s == r {
+			return true
+		}
+	}
+	return false
+}
 
 // BelongsToDecl is one concept's declaration. A nil *BelongsToDecl means the
 // concept declared nothing, which is a different statement from cluster-wide:
@@ -99,6 +140,11 @@ type BelongsToDecl struct {
 	// assignment of existing rows leaves it alone. Without it the account is
 	// ENGINE-MANAGED: filled at write time and fixed from then on.
 	Stated bool `json:"stated,omitempty"`
+	// Stays is the reason the concept's rows never leave this cluster, one of
+	// BelongsToStaysReasons, or empty for a kind that travels. It changes
+	// nothing about which account a row belongs to: the row is the account's
+	// all the same, and only an account export reads it.
+	Stays string `json:"stays,omitempty"`
 }
 
 // AccountScoped reports whether the declaration places rows in accounts.
@@ -157,6 +203,7 @@ func ParseBelongsTo(attr *Attribute) (*BelongsToDecl, error) {
 	stated := belongsToFlag(attr.Args, "stated")
 	via, hasVia := belongsToString(attr.Args, "via")
 	parent, hasParent := belongsToString(attr.Args, "parent")
+	stays, hasStays := belongsToString(attr.Args, "stays")
 
 	switch {
 	case account && cluster:
@@ -170,9 +217,9 @@ func ParseBelongsTo(attr *Attribute) (*BelongsToDecl, error) {
 	}
 
 	if cluster {
-		if shared || stated || hasVia || hasParent {
+		if shared || stated || hasVia || hasParent || hasStays {
 			return nil, NewBelongsToError(CodeBelongsToConflict,
-				"@%s(cluster) takes nothing else -- `shared`, `stated`, `via` and `parent` describe rows that belong to an account, and a cluster-wide concept has none",
+				"@%s(cluster) takes nothing else -- `shared`, `stated`, `via`, `parent` and `stays` describe rows that belong to an account, and a cluster-wide concept has none",
 				BelongsToAnnotation)
 		}
 		return &BelongsToDecl{Scope: BelongsToCluster}, nil
@@ -205,7 +252,13 @@ func ParseBelongsTo(attr *Attribute) (*BelongsToDecl, error) {
 			BelongsToAnnotation, via)
 	}
 
-	return &BelongsToDecl{Scope: BelongsToAccount, Via: via, Parent: parent, Shared: shared, Stated: stated}, nil
+	if hasStays && !isBelongsToStaysReason(stays) {
+		return nil, NewBelongsToError(CodeBelongsToStaysUnknown,
+			"@%s(account, stays=%q) gives no reason the kind stays -- write stays= with one of %s, or drop `stays` so the kind travels in an account export",
+			BelongsToAnnotation, stays, belongsToStaysList)
+	}
+
+	return &BelongsToDecl{Scope: BelongsToAccount, Via: via, Parent: parent, Shared: shared, Stated: stated, Stays: stays}, nil
 }
 
 // FormatBelongsTo renders a declaration as the annotation an author writes.
@@ -227,6 +280,9 @@ func FormatBelongsTo(d BelongsToDecl) string {
 	}
 	if d.Parent != "" {
 		parts = append(parts, fmt.Sprintf("parent=%q", d.Parent))
+	}
+	if d.Stays != "" {
+		parts = append(parts, fmt.Sprintf("stays=%q", d.Stays))
 	}
 	return "@" + BelongsToAnnotation + "(" + strings.Join(parts, ", ") + ")"
 }

@@ -1,0 +1,17 @@
+/// A visit a customer opened with an access code. Sign-in material: it stays
+/// on this cluster when its account is exported.
+@belongsTo(account, stays="signin")
+concept deskVisit {
+  accountId  string
+  openedAt   datetime
+}
+
+/// A note made during a visit, which travels while the visit it follows stays.
+@belongsTo(account, via="visitId")
+concept deskVisitNote {
+  accountId  string
+  visitId    string
+  body       string
+
+  @relationship(type="parent", field="visitId", target=deskVisit, direction="outgoing")
+}

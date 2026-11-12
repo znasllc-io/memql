@@ -62,3 +62,20 @@ func (c *Concept) SharedRows() bool {
 func (c *Concept) AccountEngineManaged() bool {
 	return c != nil && c.BelongsTo.EngineManaged()
 }
+
+// Stays returns the reason this concept's rows never leave the cluster --
+// one of parser.BelongsToStaysReasons -- or "" when the kind travels, is not
+// account-scoped, or declared nothing. Only an account export asks it.
+func (c *Concept) Stays() string {
+	if !c.AccountScoped() {
+		return ""
+	}
+	return c.BelongsTo.Stays
+}
+
+// Travels reports whether an account export carries this concept's rows: the
+// kind is account-scoped and declared no `stays`. Narrower than AccountScoped
+// on purpose -- a kind that stays is the account's all the same.
+func (c *Concept) Travels() bool {
+	return c.AccountScoped() && c.Stays() == ""
+}

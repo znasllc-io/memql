@@ -252,6 +252,7 @@ var (
 		{Name: "stated", Type: "flag", Doc: "Beside account: the concept's own writers state the account; the engine never fills it in or refuses a change to it."},
 		{Name: "via", Type: "string", Doc: "Beside account: the payload field naming the parent row whose account this row takes."},
 		{Name: "parent", Type: "string", Doc: "Beside via: the concept id the field names, when the field carries no @relationship."},
+		{Name: "stays", Type: "string", Doc: "Beside account: the rows never leave this cluster, for one of three reasons -- signin, transit or machine. An account export counts them and carries none."},
 	}
 	displayCardKeys = []ArgSpec{
 		{Name: "primary", Type: "string", Doc: "The field shown as the row's title. Required."},
@@ -268,6 +269,10 @@ var (
 		{Name: "as", Type: "string", Doc: "The label a composed file names the row kind by, e.g. \"invoice\"."},
 		{Name: "fields", Type: "string", Doc: "Comma-separated fields to compose from, e.g. \"number,issuedAt,total\"; each must be a field the concept declares or a row intrinsic."},
 		{Name: "list", Type: "string", Doc: "The bare name of the query that lists the rows to compose from."},
+	}
+	bytesKeys = []ArgSpec{
+		{Name: "tree", Type: "flag", Doc: "The field names a prefix, and the bytes are every object under it (a site's bundle), not one object."},
+		{Name: "counted", Type: "flag", Doc: "An account export counts the bytes in the file's report and never carries them."},
 	}
 	variantKeys = []ArgSpec{
 		{Name: "discriminator", Type: "string", Doc: "The field whose value picks the branch."},
@@ -445,6 +450,7 @@ var placementTable = concat(
 
 	// ---- ConceptField ---------------------------------------------------
 	[]Placement{
+		{Receiver: ConceptField, Name: "bytes", Forms: FormFlag | FormKeywords, Keys: bytesKeys, Example: "@bytes"},
 		{Receiver: ConceptField, Name: "description", Forms: FormString, Example: `@description("The ticket's one-line title.")`, Doc: "The field's description, emitted into the concept schema."},
 		{Receiver: ConceptField, Name: "internal", Forms: FormFlag, Example: "@internal"},
 		{Receiver: ConceptField, Name: "maxLength", Forms: FormNumber, Example: "@maxLength(120)"},
@@ -456,6 +462,7 @@ var placementTable = concat(
 		{Receiver: ConceptField, Name: "pii", Forms: FormFlag, Example: "@pii"},
 		{Receiver: ConceptField, Name: "required", Forms: FormFlag, Example: "@required"},
 		{Receiver: ConceptField, Name: "secret", Forms: FormFlag, Example: "@secret", Doc: docSecretField},
+		{Receiver: ConceptField, Name: "secretName", Forms: FormFlag, Example: "@secretName"},
 		{Receiver: ConceptField, Name: "serverSet", Forms: FormFlag, Example: "@serverSet"},
 		{Receiver: ConceptField, Name: "variant", Forms: FormKeywords, Keys: variantKeys, Example: `@variant(discriminator="kind")`},
 	},
@@ -602,7 +609,7 @@ var Docs = map[string]string{
 	// conformance gate rejects (memql#3661).
 	"relationship":  "Foreign-key relationship metadata. Format: @relationship(type=\"parent\", field=\"x\", target=concept, direction=\"outgoing\"), plus an optional as=\"domainVerb\" label.",
 	"rowAuthz":      docRowAuthz,
-	"belongsTo":     "Declares WHICH ACCOUNT this concept's rows belong to, or that they belong to none. @belongsTo(account): every row belongs to one account, recorded in its `accountId` field, which the engine fills in at write time. @belongsTo(account, via=\"<field>\"): the row takes the account of the row that field names, and parent=\"<concept id>\" says which concept that is when the field carries no @relationship. @belongsTo(account, shared): as the first, and a row with no account is provided by the cluster to every account (a seeded skill beside one a person wrote). @belongsTo(account, stated): the concept's own mutations state the account, so the engine never fills the field in and never refuses a change to it. @belongsTo(cluster): the concept is cluster-wide and never inside an account. It RECORDS and opens a row to nobody: sharing a row with an account's members is @rowAuthz(account=...). A concept in a mounted product bundle that declares nothing is reported at load, and its rows count as cluster-wide until it does.",
+	"belongsTo":     "Declares WHICH ACCOUNT this concept's rows belong to, or that they belong to none. @belongsTo(account): every row belongs to one account, recorded in its `accountId` field, which the engine fills in at write time. @belongsTo(account, via=\"<field>\"): the row takes the account of the row that field names, and parent=\"<concept id>\" says which concept that is when the field carries no @relationship. @belongsTo(account, shared): as the first, and a row with no account is provided by the cluster to every account (a seeded skill beside one a person wrote). @belongsTo(account, stated): the concept's own mutations state the account, so the engine never fills the field in and never refuses a change to it. stays=\"signin\" | \"transit\" | \"machine\", beside any account form: the rows are the account's all the same, but never leave this cluster -- an account export counts them, prints the reason, and carries none. @belongsTo(cluster): the concept is cluster-wide and never inside an account. It RECORDS and opens a row to nobody: sharing a row with an account's members is @rowAuthz(account=...). A concept in a mounted product bundle that declares nothing is reported at load, and its rows count as cluster-wide until it does.",
 	"serverWritten": "Requires internal call origin for every write to this concept, including raw inserts and updates through named mutations. Does not grant read access or bypass row authorization. Use for service-authored evidence and configuration whose public capability validates a request before writing.",
 	// Data origins (epic memql#4378). Two declarations, three derived
 	// states, no fourth.
@@ -617,6 +624,8 @@ var Docs = map[string]string{
 	"minimum":      "The INCLUSIVE lower bound on a numeric value.",
 	"maximum":      "The INCLUSIVE upper bound on a numeric value.",
 	"secret":       "The field holds a secret: emitted as x-secret, and every validation surface that quotes a rejected value redacts it (memql#3036). Not a secrecy guarantee -- see Concept.SecretFields for the limits.",
+	"bytes":        "The field points at bytes in blob storage: one object, or with tree every object under the prefix it names. Emitted as x-bytes. An account export copies the bytes the newest version of each carried row points at into the file; with counted it only counts them in the file's report. On a string or a list of strings.",
+	"secretName":   "The field holds the NAME of a secret, never its value: emitted as x-secret-name. An account export lists each name it finds as a connection to set up again on the target; the value never travels. On a string or a list of strings.",
 	"pii":          "The field is personally identifying: emitted as x-pii, and the hard-delete scrub (@scrubPii, memql#1711) zeroes every such field generically.",
 	"serverSet":    "The field is stamped server-side (createdAt, createdBy, status, ...): never accepted from a mutation's caller args, but projected like any other field. Emitted as x-serverSet (memql#2035).",
 	"open":         "On a nested object block: the block accepts keys it does not declare, suppressing the closed-by-default additionalProperties: false (memql#3641). For a block whose keys are data rather than schema.",

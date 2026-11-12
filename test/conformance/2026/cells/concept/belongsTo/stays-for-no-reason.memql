@@ -1,0 +1,7 @@
+/// A support ticket that stays on the cluster for a reason the language does
+/// not have.
+@belongsTo(account, stays="forever")
+concept ticket {
+  accountId  string
+  title      string
+}

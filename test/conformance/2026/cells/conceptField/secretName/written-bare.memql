@@ -1,0 +1,6 @@
+/// A ticket desk's connection to a mail provider. The field holds the names of
+/// the secrets the connection uses, never their values.
+concept ticketMailbox {
+  address      string
+  secretNames  []string  @secretName
+}

@@ -3772,6 +3772,10 @@ things stop that chain reaching one, and both are refused when the tree loads:
 - a parent that declares `@belongsTo(cluster)`, refused with
   `[belongs_to_via_cluster]`: a cluster-wide row is inside no account, so there
   is nothing to take;
+- a kind that travels following a kind that declares `stays`, refused with
+  `[belongs_to_via_stays]`: an account export would carry the row and leave
+  behind the one its account comes from. A kind that stays may follow a kind
+  that travels;
 - a loop, a concept that follows itself included, refused with
   `[belongs_to_via_cycle]`:
 
@@ -3817,6 +3821,41 @@ statement that the concept is cluster-wide.
 exactly when its parent is, so `shared` goes on the parent concept; and `via`
 has the engine take the account from the parent, which is the opposite of
 leaving it to the concept's own writers.
+
+### `stays` is a reason, from a list of three
+
+`stays` keeps a kind's rows on the cluster when their account is exported.
+Write it beside an account form, with one of `signin`, `transit` or `machine`.
+`stays` beside `cluster` is refused (`belongs_to_conflict`), because a
+cluster-wide kind is in no account's file to begin with; and any other value,
+an empty one included, is refused with `[belongs_to_stays_unknown]`:
+
+<!-- corpus: 2026/cells/concept/belongsTo/stays-for-no-reason.memql -->
+```memql retired
+/// A support ticket that stays on the cluster for a reason the language does
+/// not have.
+@belongsTo(account, stays="forever")
+concept ticket {
+  accountId  string
+  title      string
+}
+```
+
+### `@bytes` and `@secretName` go on a string
+
+Both name something kept outside the row -- an object in blob storage, a
+secret -- so the field is a `string` or a list of strings, at the top level of
+the concept. On any other type, or inside a nested block, the load refuses them
+with `[field_annotation_type]`:
+
+<!-- corpus: 2026/cells/conceptField/bytes/on-a-number.memql -->
+```memql retired
+/// A file attached to a ticket, whose bytes are said to be a number.
+concept ticketAttachment {
+  title    string
+  blobSize int  @bytes
+}
+```
 
 ### Leaving it off loads, and is reported
 

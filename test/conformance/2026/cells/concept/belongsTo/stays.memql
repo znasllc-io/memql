@@ -1,0 +1,7 @@
+/// A visit a customer opened with an access code. It belongs to an account,
+/// and as sign-in material it never leaves this cluster.
+@belongsTo(account, stays="signin")
+concept ticketVisit {
+  accountId  string
+  openedAt   datetime
+}

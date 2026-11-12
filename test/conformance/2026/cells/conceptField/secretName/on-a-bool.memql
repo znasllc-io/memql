@@ -1,0 +1,5 @@
+/// A ticket desk's connection to a mail provider.
+concept ticketMailbox {
+  address    string
+  hasSecret  bool  @secretName
+}

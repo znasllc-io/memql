@@ -39,6 +39,13 @@
       "code": "belongs_to_via_cycle",
       "message": "the @belongsTo via declarations form a cycle:",
       "note": "Each of two concepts following the other says its rows take their account from the other's, so neither is where an account starts, and existing rows could not be assigned parents first. The loop is reported once, walked from the member whose name sorts first. The two relationships are of different types because the relationship derivation refuses, earlier and without a code, two concepts each declaring the same edge type outgoing to the other."
+    },
+    {
+      "file": "belongs-to-via-stays.memql",
+      "verdict": "refuse_load",
+      "code": "belongs_to_via_stays",
+      "message": "An account export carries this concept's rows and leaves that one's behind",
+      "note": "Checked where every concept is known. Each concept builds on its own; what is refused is a kind that travels following, through `via`, a kind that stays, since a file would then hold rows whose account nothing in it explains. Filed under the follower. The other direction loads (cells/concept/belongsTo/stays-via-a-parent.memql)."
     }
   ]
 }

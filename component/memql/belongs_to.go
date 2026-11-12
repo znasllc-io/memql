@@ -287,7 +287,7 @@ type belongsToProblem struct {
 // the concept each is filed under and then by code, so one broken declaration
 // names the same concept on every boot.
 //
-// THREE REFUSALS:
+// FOUR REFUSALS:
 //
 //   - belongs_to_parent_unknown: `parent=` names a concept the registry does
 //     not hold. A `via` field's relationship is resolved (and a missing target
@@ -299,6 +299,15 @@ type belongsToProblem struct {
 //     own statement, so a row that follows one has nothing to take.
 //
 //   - belongs_to_via_cycle: the declarations form a loop (see cycles).
+//
+//   - belongs_to_via_stays: a kind that TRAVELS follows a kind that declares
+//     `stays`. An account export would carry the child and leave behind the
+//     row its account comes from, so the file would hold rows whose account
+//     nothing in it explains. Filed under the follower: it is the declaration
+//     to change (declare the same `stays`, or follow something else). The
+//     other direction is sound -- a kind that stays may follow any account
+//     kind -- and a chain needs only the direct parent checked, because every
+//     link of it is checked as a child in its own turn.
 //
 // AN UNDECLARED PARENT IS ACCEPTED, and that is a decision rather than a gap.
 // Its rows count as cluster-wide until it declares, so a child that follows it
@@ -337,6 +346,16 @@ func belongsToProblems(all []*memorynodes.Concept) []belongsToProblem {
 		}
 
 		parent := g.byName[resolved]
+		if parent != nil && c.Travels() && parent.Stays() != "" {
+			out = append(out, belongsToProblem{concept: name, err: langparser.NewBelongsToError(
+				langparser.CodeBelongsToViaStays,
+				"concept %q declares %s, and its %q field names a row of %q, which declares %s. "+
+					"An account export carries this concept's rows and leaves that one's behind, so the file "+
+					"would hold rows whose account nothing in it explains. Declare the same stays=%q here, or "+
+					"follow a concept whose rows travel",
+				name, written, via, parent.Name, langparser.FormatBelongsTo(*parent.BelongsTo), parent.Stays())})
+			continue
+		}
 		if parent == nil || !parent.ClusterWide() {
 			continue
 		}

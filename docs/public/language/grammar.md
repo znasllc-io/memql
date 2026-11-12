@@ -173,9 +173,10 @@ Edition `2026`, grammar version `2026.11-case-insensitive-substring-bceec6b9`.
                         | <query-annotation> | <rule-annotation> | <seed-annotation>
                         | <shape-annotation> | <spec-annotation> | <tool-annotation>
                         | <trait-annotation>
-<concept-field-annotation> ::= ( "@description" | "@internal" | "@maxLength" | "@maximum"
-                        | "@minLength" | "@minimum" | "@open" | "@pattern" | "@pii"
-                        | "@required" | "@secret" | "@serverSet" | "@variant" ) [ <annotation-args> ]
+<concept-field-annotation> ::= ( "@bytes" | "@description" | "@internal" | "@maxLength"
+                        | "@maximum" | "@minLength" | "@minimum" | "@open"
+                        | "@pattern" | "@pii" | "@required" | "@secret"
+                        | "@secretName" | "@serverSet" | "@variant" ) [ <annotation-args> ]
 <args-field-annotation> ::= ( "@enum" | "@maxLength" | "@maximum" | "@minimum"
                         | "@pattern" | "@required" ) [ <annotation-args> ]
 <tool-field-annotation> ::= ( "@autoInjected" | "@default" | "@description" | "@enum"

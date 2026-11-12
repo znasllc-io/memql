@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "file": "written-bare.memql",
+      "verdict": "load_ok",
+      "note": "The field holds the names of secrets, never their values. An account export lists each name as a connection to set up again on the target."
+    },
+    {
+      "file": "on-a-bool.memql",
+      "verdict": "refuse_load",
+      "code": "field_annotation_type",
+      "message": "@secretName cannot be declared on `hasSecret`, which is bool"
+    },
+    {
+      "file": "with-true.memql",
+      "verdict": "refuse_load",
+      "code": "annotation_form",
+      "message": "@secretName on a concept field takes no arguments"
+    }
+  ]
+}

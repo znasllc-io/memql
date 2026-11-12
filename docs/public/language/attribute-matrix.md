@@ -126,6 +126,7 @@ One table per family of constructs, and one for the fields a construct declares.
 | Annotation | concept field | args field | tool field | prompt field | builtin field |
 |---|---|---|---|---|---|
 | [`@autoInjected`](#autoinjected) |  |  | flag |  |  |
+| [`@bytes`](#bytes) | flag or keywords |  |  |  |  |
 | [`@default`](#default) |  |  | string | string or number |  |
 | [`@description`](#description) | string |  | string | string | string |
 | [`@enum`](#enum) |  | strings | strings | strings | strings |
@@ -139,6 +140,7 @@ One table per family of constructs, and one for the fields a construct declares.
 | [`@pii`](#pii) | flag |  |  |  |  |
 | [`@required`](#required) | flag | flag | flag | flag | flag |
 | [`@secret`](#secret) | flag |  |  |  | flag |
+| [`@secretName`](#secretname) | flag |  |  |  |  |
 | [`@serverSet`](#serverset) | flag |  |  |  |  |
 | [`@variant`](#variant) | keywords |  |  |  |  |
 
@@ -367,6 +369,7 @@ Written after a field's type in the body of a `concept`.
 
 | Annotation | Written as | Example |
 |---|---|---|
+| [`@bytes`](#bytes) | no arguments or keyword arguments | `@bytes` |
 | [`@description`](#description) | one string | `@description("The ticket's one-line title.")` |
 | [`@internal`](#internal) | no arguments | `@internal` |
 | [`@maximum`](#maximum) | one number | `@maximum(100)` |
@@ -378,6 +381,7 @@ Written after a field's type in the body of a `concept`.
 | [`@pii`](#pii) | no arguments | `@pii` |
 | [`@required`](#required) | no arguments | `@required` |
 | [`@secret`](#secret) | no arguments | `@secret` |
+| [`@secretName`](#secretname) | no arguments | `@secretName` |
 | [`@serverSet`](#serverset) | no arguments | `@serverSet` |
 | [`@variant`](#variant) | keyword arguments | `@variant(discriminator="kind")` |
 
@@ -558,8 +562,24 @@ Mark a vendor-level base provider (auth + type only).
 | `stated` | flag | Beside account: the concept's own writers state the account; the engine never fills it in or refuses a change to it. |
 | `via` | string | Beside account: the payload field naming the parent row whose account this row takes. |
 | `parent` | string | Beside via: the concept id the field names, when the field carries no @relationship. |
+| `stays` | string | Beside account: the rows never leave this cluster, for one of three reasons -- signin, transit or machine. An account export counts them and carries none. |
 
-Declares WHICH ACCOUNT this concept's rows belong to, or that they belong to none. @belongsTo(account): every row belongs to one account, recorded in its `accountId` field, which the engine fills in at write time. @belongsTo(account, via="&lt;field>"): the row takes the account of the row that field names, and parent="&lt;concept id>" says which concept that is when the field carries no @relationship. @belongsTo(account, shared): as the first, and a row with no account is provided by the cluster to every account (a seeded skill beside one a person wrote). @belongsTo(account, stated): the concept's own mutations state the account, so the engine never fills the field in and never refuses a change to it. @belongsTo(cluster): the concept is cluster-wide and never inside an account. It RECORDS and opens a row to nobody: sharing a row with an account's members is @rowAuthz(account=...). A concept in a mounted product bundle that declares nothing is reported at load, and its rows count as cluster-wide until it does.
+Declares WHICH ACCOUNT this concept's rows belong to, or that they belong to none. @belongsTo(account): every row belongs to one account, recorded in its `accountId` field, which the engine fills in at write time. @belongsTo(account, via="&lt;field>"): the row takes the account of the row that field names, and parent="&lt;concept id>" says which concept that is when the field carries no @relationship. @belongsTo(account, shared): as the first, and a row with no account is provided by the cluster to every account (a seeded skill beside one a person wrote). @belongsTo(account, stated): the concept's own mutations state the account, so the engine never fills the field in and never refuses a change to it. stays="signin" | "transit" | "machine", beside any account form: the rows are the account's all the same, but never leave this cluster -- an account export counts them, prints the reason, and carries none. @belongsTo(cluster): the concept is cluster-wide and never inside an account. It RECORDS and opens a row to nobody: sharing a row with an account's members is @rowAuthz(account=...). A concept in a mounted product bundle that declares nothing is reported at load, and its rows count as cluster-wide until it does.
+
+### @bytes
+
+| On | Written as | Example |
+|---|---|---|
+| [concept field](#concept-field) | no arguments or keyword arguments | `@bytes` |
+
+`@bytes` takes these keys. A key of type `flag` is written bare, and every other as `key=value`.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `tree` | flag | The field names a prefix, and the bytes are every object under it (a site's bundle), not one object. |
+| `counted` | flag | An account export counts the bytes in the file's report and never carries them. |
+
+The field points at bytes in blob storage: one object, or with tree every object under the prefix it names. Emitted as x-bytes. An account export copies the bytes the newest version of each carried row points at into the file; with counted it only counts them in the file's report. On a string or a list of strings.
 
 ### @cache
 
@@ -1199,6 +1219,14 @@ Generator marker (sdk/gen reads from source); no engine effect.
 
   So `@secret` stops a credential leaking through a validation diagnostic. It is not a general secrecy guarantee, and not a reason to treat a credential in the graph as protected.
 - On a builtin field: The native input carries a credential or private settings: redact its diagnostic values and exclude the callable from general agent capability discovery. This does not replace authorization at execution.
+
+### @secretName
+
+| On | Written as | Example |
+|---|---|---|
+| [concept field](#concept-field) | no arguments | `@secretName` |
+
+The field holds the NAME of a secret, never its value: emitted as x-secret-name. An account export lists each name it finds as a connection to set up again on the target; the value never travels. On a string or a list of strings.
 
 ### @serverOnly
 

@@ -98,6 +98,10 @@ cells/concept/belongsTo/no-account-field.memql
 cells/concept/belongsTo/shared.memql
 cells/concept/belongsTo/stated-beside-via.memql
 cells/concept/belongsTo/stated.memql
+cells/concept/belongsTo/stays-beside-cluster.memql
+cells/concept/belongsTo/stays-for-no-reason.memql
+cells/concept/belongsTo/stays-via-a-parent.memql
+cells/concept/belongsTo/stays.memql
 cells/concept/belongsTo/via-a-named-parent.memql
 cells/concept/belongsTo/via-a-parent.memql
 cells/concept/belongsTo/via-an-undeclared-field.memql
@@ -132,6 +136,10 @@ cells/concept/version/with-no-value.memql
 cells/conceptBody/relationship/a-domain-verb-in-the-type-slot.memql
 cells/conceptBody/relationship/keyword-arguments.memql
 cells/conceptBody/relationship/with-a-positional-value.memql
+cells/conceptField/bytes/on-a-number.memql
+cells/conceptField/bytes/with-a-misspelled-flag.memql
+cells/conceptField/bytes/with-its-flags.memql
+cells/conceptField/bytes/written-bare.memql
 cells/conceptField/description/a-brace-in-the-text.memql
 cells/conceptField/description/a-string.memql
 cells/conceptField/description/with-no-value.memql
@@ -156,6 +164,9 @@ cells/conceptField/required/with-true.memql
 cells/conceptField/required/written-bare.memql
 cells/conceptField/secret/with-true.memql
 cells/conceptField/secret/written-bare.memql
+cells/conceptField/secretName/on-a-bool.memql
+cells/conceptField/secretName/with-true.memql
+cells/conceptField/secretName/written-bare.memql
 cells/conceptField/serverSet/with-true.memql
 cells/conceptField/serverSet/written-bare.memql
 cells/conceptField/variant/keyword-arguments.memql
@@ -873,6 +884,7 @@ negative/concept/an-unterminated-body.memql
 negative/concept/belongs-to-parent-unknown.memql
 negative/concept/belongs-to-via-cluster.memql
 negative/concept/belongs-to-via-cycle.memql
+negative/concept/belongs-to-via-stays.memql
 negative/concept/nesting-too-deep.memql
 negative/logic/chain-too-long.memql
 negative/logic/nesting-too-deep.memql
