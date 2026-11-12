@@ -243,7 +243,9 @@ func (d *Dispatcher) WithLogger(logger *slog.Logger) *Dispatcher {
 type DispatchResult struct {
 	// Handled is false when no connector serves this source. NOT an
 	// error: /inbound/{source} is a shared door and most of what comes
-	// through it belongs to something else.
+	// through it belongs to something else. It is false, with an error, for a
+	// delivery whose connector could not be told (place): that one is failed
+	// and due again, and no connector has seen it.
 	Handled bool
 	Applied int
 	Stale   int
@@ -271,8 +273,14 @@ type DispatchResult struct {
 // failed: stamped `failed` with the pause as its reason, no next try and the
 // try not counted, and put back in line when the tenant resumes (hold,
 // ReturnHeld).
+//
+// A delivery whose connector COULD NOT BE TOLD is neither: it is failed and
+// due again, its try not counted (place, unplaced).
 func (d *Dispatcher) Dispatch(ctx context.Context, req memqlsync.InboundRequest) (DispatchResult, error) {
-	connector, ok := d.connectorFor(ctx, req.Source)
+	connector, ok, err := d.place(ctx, req.Source)
+	if err != nil {
+		return DispatchResult{}, d.unplaced(ctx, strings.TrimSpace(req.RequestId), 0, err)
+	}
 	if !ok {
 		return DispatchResult{}, nil
 	}
@@ -327,8 +335,15 @@ func (d *Dispatcher) Staged(ctx context.Context, requestID string) (StagedReques
 // error, as Dispatch does with an apply failure: left `received`, it would say
 // nothing to the operator and, because @createOnly keeps the stored values,
 // re-fire identically on every re-stage.
+//
+// "No connector serves it" is said only when it is DEFINITE (place). A row
+// whose connector could not be told is stamped failed and due again, its try
+// not counted, and returned as an error (unplaced).
 func (d *Dispatcher) DispatchStaged(ctx context.Context, staged StagedRequest) (DispatchResult, error) {
-	connector, ok := d.connectorFor(ctx, staged.Source)
+	connector, ok, err := d.place(ctx, staged.Source)
+	if err != nil {
+		return DispatchResult{}, d.unplaced(ctx, strings.TrimSpace(staged.RequestId), staged.Attempts, err)
+	}
 	if !ok {
 		return DispatchResult{}, nil
 	}
@@ -398,6 +413,66 @@ func (s StagedRequest) parse(now func() time.Time) (memqlsync.InboundRequest, st
 		req.ReceivedAt = at.UTC()
 	}
 	return req, ""
+}
+
+// unplacedReason is the lastError of a delivery whose connector could not be
+// told when it was dispatched. A fixed sentence that names no source and no
+// store: it is read by whoever reads the delivery.
+const unplacedReason = "datasync: could not tell which connector serves this delivery's source; it is tried again"
+
+// errClaimedNotRouted is a source a connector claims and did not route: its
+// secret could not be resolved just now. The row is the connector's, and it
+// could not be handed over.
+var errClaimedNotRouted = errors.New("a connector claims the source and could not route it now")
+
+// place is the dispatcher's FIRST JUDGEMENT of a delivery: which connector
+// serves its source. It has three answers, as the retry pass's has (RetryDue):
+//
+//   - a connector: it serves the source, and the delivery is its to work;
+//   - nobody, said definitely (false, no error): no bound connector claims the
+//     source. /inbound/{source} is a shared door, and the row belongs to
+//     whatever does serve it;
+//   - COULD NOT TELL (an error): a connector could not say whether the source
+//     is its own -- it could not read its tenants -- or claims it and could
+//     not route it.
+//
+// The routing answer alone (connectorFor) is two-valued: a connector that
+// cannot read its tenants answers "not mine" there. Believed, that answer left
+// the row `received` with nothing recorded, and nothing reads a received row
+// again: a store's delivery staged during a moment its store list could not
+// be read was lost for good. So "not served" is checked against the
+// three-valued claim (memqlsync.SourceClaimed) before it is believed.
+func (d *Dispatcher) place(ctx context.Context, source string) (memqlsync.Connector, bool, error) {
+	if connector, ok := d.connectorFor(ctx, source); ok {
+		return connector, true, nil
+	}
+	unclaimed, err := d.unclaimed(ctx, strings.TrimSpace(source))
+	switch {
+	case err != nil:
+		return nil, false, err
+	case !unclaimed:
+		return nil, false, errClaimedNotRouted
+	}
+	return nil, false, nil
+}
+
+// unplaced records a delivery whose connector could not be told, and returns
+// the failure. The row is stamped `failed`, due again after the first retry's
+// wait, with unplacedReason as its lastError and ITS TRY NOT COUNTED: nothing
+// was tried. The count is written as it was, so the row is one the retry pass
+// reads (a row with no count is not due). That pass leaves it as it is while
+// nobody can tell, dispatches it when a connector serves it, and takes it out
+// of the retries when the source is definitely nobody's.
+//
+// The cause -- which may name the source -- goes into the returned error, for
+// the log and the automation's step, and never onto the row.
+func (d *Dispatcher) unplaced(ctx context.Context, requestID string, prior int, cause error) error {
+	failure := fmt.Errorf("%s: %w", unplacedReason, cause)
+	next := d.now().UTC().Add(inboundRetryAfter[0]).Format(time.RFC3339)
+	if err := d.stamp(OperatorContext(ctx), requestID, "failed", unplacedReason, arg{"attempts", prior}, arg{"nextAttemptAt", next}); err != nil {
+		return errors.Join(failure, fmt.Errorf("datasync: the delivery could not be stamped as waiting for its connector: %w", err))
+	}
+	return failure
 }
 
 // connectorFor resolves the connector serving a source, or reports none.
