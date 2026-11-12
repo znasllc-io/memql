@@ -121,6 +121,10 @@ func TestAPurgePastItsBudgetStopsBetweenBatchesAndResumes(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			i := testIntegration(t)
+			// Nobody is wholesale: the clock below moves sixteen seconds at
+			// every reading, which the wholesale reads' own budget of ten
+			// (wholesale.go) would read as spent before their first page.
+			i.wholesaleFor = nil
 			answerVerdict(i, verdictReply("recording", time.Now()))
 			lower(t, &deleteBatch, 2)
 			id := keptStore(t)
@@ -184,5 +188,10 @@ func TestTheRunDeadlineIsMinutesAboveWhatARunCanTake(t *testing.T) {
 	b := runDeadlineBound()
 	if b <= runBudget+turnBudget || runDeadline < b || runDeadline > 15*time.Minute {
 		t.Errorf("the run deadline is %s and what a run can take %s; want the deadline at or above it and at most fifteen minutes", runDeadline, b)
+	}
+	// The comment's sum, line by line (integration.go): the wholesale reads
+	// count as their time budget and the one read under way when it ran out.
+	if b != 700*time.Second {
+		t.Errorf("what a run can take is %s; the sum runDeadlineBound's comment writes out is 700 s", b)
 	}
 }

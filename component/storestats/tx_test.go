@@ -42,6 +42,9 @@ var writersThroughWriteTx = []string{
 	"deriveOrders",
 	"keepWatermark",
 	"keepWalked",
+	"startWholesalePass",
+	"wholesalePage",
+	"keepWholesaleOff",
 }
 
 // THE ONE WAY THIS PACKAGE WRITES, read off its source with its types. See

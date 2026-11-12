@@ -309,8 +309,25 @@ func floorOf(ctx context.Context, engine Engine, storeID string, now time.Time) 
 	return at, nil
 }
 
+// floorFailed is ensureFloor's failure, worded as its cause, so that a turn
+// can tell its walk failed on the store's floor: the wholesale pass is then
+// not attempted, since it would ask the same probes again (rollup.go).
+type floorFailed struct{ err error }
+
+func (f floorFailed) Error() string { return f.err.Error() }
+func (f floorFailed) Unwrap() error { return f.err }
+
 // ensureFloor answers the store's kept history_floor, or finds it with floorOf and keeps it.
+// Its failure is a floorFailed.
 func ensureFloor(ctx context.Context, i *Integration, storeID string, now time.Time) (time.Time, error) {
+	floor, err := keepOrFindFloor(ctx, i, storeID, now)
+	if err != nil {
+		return time.Time{}, floorFailed{err}
+	}
+	return floor, nil
+}
+
+func keepOrFindFloor(ctx context.Context, i *Integration, storeID string, now time.Time) (time.Time, error) {
 	if !floorForTests.IsZero() {
 		return floorForTests, nil
 	}

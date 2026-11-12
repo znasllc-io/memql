@@ -25,6 +25,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/integrations/shopify"
+	"github.com/znasllc-io/memql/packs/anchor"
 )
 
 // harness_db_test.go -- the store statistics against a real engine and a real
@@ -93,6 +94,12 @@ func statsEngine(t *testing.T) (*memql.MemQLEngine, *bun.DB) {
 		// take a hook off a handle, so it is added once and a test registers
 		// a recorder with it for as long as it runs.
 		db.AddQueryHook(statementRecorders)
+		// The wholesale pack, linked as every node links it, before the
+		// boot loads the tree: its two statistics reads are what wholesaleOf
+		// asks (wholesale_db_test.go). Linking is not enabling; the process's
+		// disabled set is empty, so the pack loads, and a test turns it off
+		// with dsl.SetDisabledPackDomains.
+		anchor.Storefront()
 		if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
 			s.bootErr = fmt.Errorf("LoadUnifiedConcepts: %w", err)
 			_ = db.Close()
