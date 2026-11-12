@@ -22,7 +22,7 @@ import { accountIsArchived, accountName, type AccountRow } from "./rows";
 export const NO_ACCOUNT_LABEL = "No client";
 
 /**
- * A single-account picker: sites, invitations, knowledge domains.
+ * A single-account picker: sites, invitations, knowledge domains, files and goals.
  *
  * ARCHIVED ACCOUNTS ARE OFFERED, and marked. Filing a client away must not
  * make the sites already tied to them unpickable -- somebody correcting a tie
@@ -89,91 +89,6 @@ export function AccountPicker({
         </option>
       ))}
     </Select>
-  );
-}
-
-/**
- * A multi-account picker: the Library index's `accountIds` list.
- *
- * A LIST OF TOGGLES RATHER THAN A MULTI-SELECT. A native `<select multiple>`
- * loses every selection the moment somebody clicks without holding a modifier
- * -- which is the single most destructive interaction available on a control
- * whose whole job is "one or two accounts". Toggles cost more vertical space
- * and cannot do that.
- *
- * ARCHIVED ACCOUNTS APPEAR ONLY IF ALREADY SELECTED. Unlike the single picker,
- * this one is a labelling surface rather than a correction surface: somebody
- * filing a new document should not be offered clients that have been filed
- * away, but a document already labelled with one must keep showing that label
- * -- and must be able to remove it.
- */
-export function AccountLabelPicker({
-  selected,
-  onChange,
-  accounts,
-  label,
-  disabled = false,
-}: {
-  selected: string[];
-  onChange: (next: string[]) => void;
-  accounts: AccountRow[];
-  label: string;
-  disabled?: boolean;
-}) {
-  const offered = useMemo(() => {
-    const held = new Set(selected);
-    const known = accounts.filter((a) => !accountIsArchived(a) || held.has(a.id));
-    const unresolvable = selected
-      .filter((id) => !known.some((a) => a.id === id))
-      .map((id) => ({ id, name: id, archived: false, unknown: true }));
-    return [
-      ...known.map((a) => ({
-        id: a.id,
-        name: accountName(a),
-        archived: accountIsArchived(a),
-        unknown: false,
-      })),
-      ...unresolvable,
-    ];
-  }, [accounts, selected]);
-
-  function toggle(accountId: string) {
-    onChange(
-      selected.includes(accountId)
-        ? selected.filter((id) => id !== accountId)
-        : [...selected, accountId],
-    );
-  }
-
-  if (offered.length === 0) {
-    return (
-      <p className="os-caption">
-        No clients yet. The Accounts app is where they are added.
-      </p>
-    );
-  }
-
-  return (
-    <div className="os-account-labels" role="group" aria-label={label}>
-      {offered.map((o) => {
-        const on = selected.includes(o.id);
-        return (
-          <button
-            key={o.id}
-            type="button"
-            className="os-account-label"
-            data-on={on || undefined}
-            aria-pressed={on}
-            disabled={disabled}
-            onClick={() => toggle(o.id)}
-          >
-            {o.name}
-            {o.archived ? <span className="os-caption"> archived</span> : null}
-            {o.unknown ? <span className="os-caption"> not visible to you</span> : null}
-          </button>
-        );
-      })}
-    </div>
   );
 }
 

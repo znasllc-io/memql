@@ -22,6 +22,7 @@ query ShopifyFetchSellingPlanGroup($id: ID!) {
       createdAt
       summary
       sellingPlans(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           billingPolicy { __typename ... on SellingPlanFixedBillingPolicy { remainingBalanceChargeExactTime remainingBalanceChargeTimeAfterCheckout remainingBalanceChargeTrigger } ... on SellingPlanRecurringBillingPolicy { createdAt interval intervalCount maxCycles minCycles } }
@@ -59,6 +60,32 @@ query ShopifyListSellingPlanGroup($first: Int!, $after: String, $query: String) 
       createdAt
       summary
       sellingPlans(first: 100) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          billingPolicy { __typename ... on SellingPlanFixedBillingPolicy { remainingBalanceChargeExactTime remainingBalanceChargeTimeAfterCheckout remainingBalanceChargeTrigger } ... on SellingPlanRecurringBillingPolicy { createdAt interval intervalCount maxCycles minCycles } }
+          category
+          deliveryPolicy { __typename ... on SellingPlanFixedDeliveryPolicy { cutoff fulfillmentExactTime fulfillmentTrigger intent preAnchorBehavior } ... on SellingPlanRecurringDeliveryPolicy { createdAt cutoff intent interval intervalCount preAnchorBehavior } }
+          description
+          inventoryPolicy { reserve }
+          metafields(first: 50) { nodes { namespace key type value jsonValue } }
+          name
+          options
+          position
+          pricingPolicies { __typename ... on SellingPlanFixedPricingPolicy { adjustmentType createdAt } ... on SellingPlanRecurringPricingPolicy { adjustmentType afterCycle createdAt } }
+          createdAt
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageSellingPlanGroupSellingPlans($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on SellingPlanGroup {
+      sellingPlans(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           billingPolicy { __typename ... on SellingPlanFixedBillingPolicy { remainingBalanceChargeExactTime remainingBalanceChargeTimeAfterCheckout remainingBalanceChargeTrigger } ... on SellingPlanRecurringBillingPolicy { createdAt interval intervalCount maxCycles minCycles } }

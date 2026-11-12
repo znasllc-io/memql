@@ -9,7 +9,6 @@ query ShopifyFetchChannel($id: ID!) {
     __typename
     ... on Channel {
       id
-      accountId
       accountName
       activeRegions
       app { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
@@ -18,6 +17,7 @@ query ShopifyFetchChannel($id: ID!) {
       name
       productsCount { count precision }
       resourceFeedback { app { apiKey appStoreAppUrl appStoreDeveloperUrl description developerName developerType embedded features handle id installUrl isPostPurchaseAppInUse previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published shopifyDeveloped title uninstallMessage webhookApiVersion } channel { id } feedbackGeneratedAt link { label url } messages { field message } state }
+      accountId
       specificationHandle
       supportsFuturePublishing
     }
@@ -29,7 +29,6 @@ query ShopifyListChannel($first: Int!, $after: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
-      accountId
       accountName
       activeRegions
       app { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
@@ -38,6 +37,7 @@ query ShopifyListChannel($first: Int!, $after: String) {
       name
       productsCount { count precision }
       resourceFeedback { app { apiKey appStoreAppUrl appStoreDeveloperUrl description developerName developerType embedded features handle id installUrl isPostPurchaseAppInUse previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published shopifyDeveloped title uninstallMessage webhookApiVersion } channel { id } feedbackGeneratedAt link { label url } messages { field message } state }
+      accountId
       specificationHandle
       supportsFuturePublishing
     }

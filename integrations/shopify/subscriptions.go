@@ -2,11 +2,14 @@ package shopify
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math/rand/v2"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/integrations/shopify/generated"
 )
 
@@ -110,19 +113,33 @@ func (c *Connector) EnsureSubscriptions(ctx context.Context) error {
 		if !store.Ingests() {
 			continue
 		}
-		report, err := c.EnsureSubscriptionsForStore(ctx, store)
-		if err != nil {
+		if _, err := c.subscriptionPass(ctx, store); err != nil {
 			failures = append(failures, store.ID+": "+err.Error())
-			continue
-		}
-		if err := c.recordSubscriptionHealth(ctx, store, report); err != nil {
-			c.logger.Warn("shopify: could not record subscription health", "store", store.ID, "error", err)
 		}
 	}
 	if len(failures) > 0 {
 		return fmt.Errorf("shopify: subscription reconcile failed for %d store(s): %s", len(failures), strings.Join(failures, "; "))
 	}
 	return nil
+}
+
+// subscriptionPass reconciles one store's subscriptions and records the pass
+// on its health, and returns the error of a pass that could not read the
+// store's subscriptions at all. That pass is recorded too, as a failure: a
+// read that failed and a pass nobody recorded look the same on the store's
+// health otherwise, and the verdict reads it (events_not_registered). The
+// daily pass and Register again run through here; the connect's pass
+// (registerConnectWebhooks) records the same failure in the same words.
+func (c *Connector) subscriptionPass(ctx context.Context, store Store) (SubscriptionReport, error) {
+	report, err := c.EnsureSubscriptionsForStore(ctx, store)
+	if err != nil {
+		c.logger.Warn("shopify: could not read the store's webhook subscriptions", "store", store.ID, "error", err.Error())
+		report.Failed = append(report.Failed, subscriptionsUnreadable)
+	}
+	if recErr := c.recordSubscriptionHealth(ctx, store, report); recErr != nil {
+		c.logger.Warn("shopify: could not record subscription health", "store", store.ID, "error", recErr.Error())
+	}
+	return report, err
 }
 
 // EnsureSubscriptionsForStore reconciles one store.
@@ -365,13 +382,10 @@ func sameFields(a, b []string) bool {
 	return true
 }
 
-// recordSubscriptionHealth folds a reconcile report into the store's health.
+// recordSubscriptionHealth folds a reconcile report into the store's health,
+// as its `subscriptions` key.
 func (c *Connector) recordSubscriptionHealth(ctx context.Context, store Store, report SubscriptionReport) error {
-	health := map[string]any{}
-	for k, v := range store.Health {
-		health[k] = v
-	}
-	health["subscriptions"] = map[string]any{
+	subscriptions := map[string]any{
 		"desired":    report.Desired,
 		"existing":   report.Existing,
 		"created":    toAny(report.Created),
@@ -382,20 +396,94 @@ func (c *Connector) recordSubscriptionHealth(ctx context.Context, store Store, r
 		"at":         report.At.Format(time.RFC3339),
 	}
 	if report.DeliveredAtVersion != "" {
-		subscriptions := health["subscriptions"].(map[string]any)
 		subscriptions["deliveredAtVersion"] = report.DeliveredAtVersion
 	}
-	call := renderCall("recordStoreHealth", map[string]any{
-		"storeId":                store.ID,
-		"health":                 health,
-		"subscriptionsCheckedAt": report.At.Format(time.RFC3339),
-	})
-	if _, err := c.engine.Execute(operatorContext(ctx), call); err != nil {
-		return err
-	}
-	c.stores.Invalidate()
-	return nil
+	return c.recordStoreHealthKey(ctx, store.ID, "subscriptions", subscriptions,
+		map[string]any{"subscriptionsCheckedAt": report.At.Format(time.RFC3339)})
 }
+
+// recordStoreHealthKey writes ONE key of a store's health: it reads the store
+// row fresh and writes the health back with that key replaced, and every other
+// key as the row holds it. extra carries the mutation's other arguments.
+//
+// recordStoreHealth replaces the whole object, and each writer used to send
+// the health of the copy of the store it held. The connect's webhook pass
+// holds the store as it was before the connect, so whatever another writer
+// added meanwhile -- the ordersFrom stamp, a verdict -- was erased by the
+// next pass. Every writer of a health key goes through here instead.
+//
+// THE WRITE IS FENCED ON THE VERSION IT READ. The read and the write are two
+// statements, and the writers run at once: the watch, the subscription pass
+// and a connect each write their own key of one row. A write of another key
+// that landed between this writer's read and its write was put back as this
+// writer had read it. For the watch's key that is an older verdict, whose
+// mailedFor says the episode was never mailed, and its owner was mailed
+// again. So the write carries a row-version fence on the version the read
+// answered (memql.ContextWithRowVersionFence); one another writer overtook is
+// refused, and this writer reads again and re-applies ITS OWN KEY ONLY, at
+// most maxHealthKeyAttempts times -- the pattern of the sync runtime's
+// PatchSyncState. A store with no row yet is fenced on its absence.
+func (c *Connector) recordStoreHealthKey(ctx context.Context, storeID, key string, value any, extra map[string]any) error {
+	opCtx := operatorContext(ctx)
+	for attempt := 0; attempt < maxHealthKeyAttempts; attempt++ {
+		if attempt > 0 {
+			healthKeyRetryWait(attempt)
+		}
+		held, version, err := c.storeHealthForWrite(opCtx, storeID)
+		if err != nil {
+			return err
+		}
+		health := map[string]any{}
+		for k, v := range held {
+			health[k] = v
+		}
+		health[key] = value
+		args := map[string]any{"storeId": storeID, "health": health}
+		for k, v := range extra {
+			args[k] = v
+		}
+		fenced := memql.ContextWithRowVersionFence(opCtx, conceptShopifyStore, storeID, version)
+		_, err = c.engine.Execute(fenced, renderCall("recordStoreHealth", args))
+		if errors.Is(err, memql.ErrRowVersionChanged) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		c.stores.Invalidate()
+		return nil
+	}
+	return fmt.Errorf("shopify: the row of store %q kept changing under %d writes of its health key %q; nothing was written", storeID, maxHealthKeyAttempts, key)
+}
+
+// storeHealthForWrite reads a store's health fresh, with the version of the
+// row it was read from: the witness a write decided on it is fenced on. No
+// row answers no health and the zero version.
+func (c *Connector) storeHealthForWrite(ctx context.Context, storeID string) (map[string]any, time.Time, error) {
+	res, err := c.engine.Execute(memql.ContextWithFreshRead(ctx), renderCall("storeById", map[string]any{"storeId": storeID}))
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	rows := memql.MaterializeRows(res)
+	if len(rows) == 0 {
+		return nil, time.Time{}, nil
+	}
+	health, _ := rowValue(rows[0], "health").(map[string]any)
+	return health, rowTime(rows[0], "createdAt"), nil
+}
+
+// healthKeyRetryWait is the pause before a health-key write that lost its
+// fence is decided again: a few milliseconds, longer each time and jittered,
+// so two writers that lost to each other do not decide again in step. The
+// four waits of one write add up to less than a tenth of a second.
+func healthKeyRetryWait(attempt int) {
+	base := 2 * time.Millisecond << (attempt - 1)
+	time.Sleep(base + time.Duration(rand.Int64N(int64(base))))
+}
+
+// maxHealthKeyAttempts bounds how often a write of one health key that another
+// writer of the store row overtook is decided again.
+const maxHealthKeyAttempts = 5
 
 func toAny(in []string) []any {
 	out := make([]any, 0, len(in))

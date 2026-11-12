@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/secret"
 )
@@ -104,12 +105,58 @@ func (e *MemQLEngine) readVariable(ctx context.Context, conceptName, name string
 	return valueField.GetStringValue(), nil
 }
 
+// secretResolverActor names the deployment in the resolver's own reads of the
+// two secret concepts. It shows up as `system:secrets` wherever an actor id is
+// recorded.
+const secretResolverActor = "secrets"
+
+// secretReadContext is the context a secret LOOKUP runs under: the deployment
+// reading its own row, whatever context the resolver was handed.
+//
+// WHY THE LOOKUP DOES NOT RUN AS ITS CALLER. v1:platform:globalSecret and
+// v1:platform:partitionSecret declare @rowAuthz(clusterOwner), and a lookup is
+// a raw read, so the row gate decides it from the actor on the context. The
+// resolver's callers hold whatever context they were handed: the edge resolves
+// a storefront token inside a visitor's request, the inbound receiver resolves
+// a signing secret with no identity at all, a send resolves its credentials
+// under whoever triggered it, and provider load resolves at boot under
+// context.Background(). Judged by its caller, every one of those answers "not
+// found" -- which is the answer for a secret nobody stored, so it would read
+// as a configuration problem and not as this.
+//
+// WHY A SYSTEM ACTOR AND NOT INTERNAL ORIGIN. Origin says the ENGINE is making
+// the call; it is what a @serverOnly construct asks, and the read side of the
+// cluster-owner tier does not consult it (rowAuthzAdmitsMode asks who the
+// actor is). auth.SystemActor is the identity for the deployment acting on a
+// row that belongs to the deployment and to no person, which is what a secret
+// row is. The caller's origin is left as it arrived: nothing here widens what
+// the caller's OWN calls may do.
+//
+// WHAT THIS DOES NOT DECIDE. Who may ask for a secret's VALUE is decided where
+// it always was: by the Go code that calls ResolveSecret / ResolveSystemSecret,
+// and by who may author a body that calls secret() or systemSecret(). The tier
+// decides who may read the ROW -- the ciphertext and the fingerprint -- and
+// this function is why declaring it took nothing away from the resolvers. The
+// derived context lives for the one Execute below and is never returned.
+//
+// Regression: TestSecretsResolveWhateverContextTheResolverWasHanded
+// (platform_secret_tier_db_test.go), which also holds that the caller issuing
+// the lookup's own query string still reads no row; the outbound worker's half
+// is app's TestOutboundSecretTargetsResolveUnderTheWorkersActor.
+func secretReadContext(ctx context.Context) context.Context {
+	return auth.ContextWithSystemActor(ctx, secretResolverActor)
+}
+
 // readSecret performs the common lookup against a *:secret concept
 // (v1:platform:partitionSecret or v1:platform:globalSecret). Reads payload.encryptedValue
 // and returns the decrypted plaintext via the secret package. Requires
 // MEMQL_MASTER_KEY to be set.
+//
+// The lookup runs as the deployment (secretReadContext), so it resolves the
+// same row for every caller; the plaintext it returns is the caller's to
+// handle, and must not be logged or persisted.
 func (e *MemQLEngine) readSecret(ctx context.Context, conceptName, name string) (string, error) {
-	fields, err := e.readNamedRowFields(ctx, conceptName, name, "secret")
+	fields, err := e.readNamedRowFields(secretReadContext(ctx), conceptName, name, "secret")
 	if err != nil {
 		return "", err
 	}

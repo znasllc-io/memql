@@ -80,14 +80,40 @@ func (s *shopperSiteReader) ShopperSite(ctx context.Context, siteID, ownerUserID
 		// exactly what an unauthenticated one gets.
 		return nil, nil
 	}
-	row := rows[0]
-	out := &server.ShopperSite{
-		ID:           siteID,
-		ShopperForms: rowBoolValue(row["shopperForms"]),
+	return shopperSiteFromRow(siteID, rows[0]), nil
+}
+
+// shopperSiteFromRow projects a site row onto the five fields the handler
+// decides on, and nothing else of it.
+//
+// Its own function so the projection is held by a test without an engine
+// (transport_shopper_surface_test.go): the handler's own tests fake this
+// reader, so a field this stopped filling would fail nowhere, and for the
+// account it would fail silently, with every submission recorded in whichever
+// account the site's owner resolves to instead of the site's.
+func shopperSiteFromRow(siteID string, row map[string]any) *server.ShopperSite {
+	return &server.ShopperSite{
+		ID:             siteID,
+		ShopperForms:   rowBoolValue(row["shopperForms"]),
+		StoreID:        bindingStoreID(row["binding"]),
+		PreviewStoreID: bindingStoreID(row["previewBinding"]),
+		// The site's account, off the same row and therefore under the same
+		// self-checking read: a caller who cannot read the site learns no
+		// account and reaches no construct. It says which account a submission
+		// through this storefront is recorded in (server.ShopperSite.AccountID).
+		AccountID: siteAccountID(row["accountId"]),
 	}
-	out.StoreID = bindingStoreID(row["binding"])
-	out.PreviewStoreID = bindingStoreID(row["previewBinding"])
-	return out, nil
+}
+
+// siteAccountID reads a site row's accountId as the bare id, or "". Absent, or
+// anything but a string, is no account, which states none.
+//
+// Bare whatever the read handed back. The field is a reference, so the row
+// stores it canonical and the wire answers it bare, and a caller here should
+// not have to know which of those a given read path does.
+func siteAccountID(v any) string {
+	id, _ := v.(string)
+	return memql.BareShortId(strings.TrimSpace(id))
 }
 
 // bindingStoreID reads {storeId} out of a binding object, or "".

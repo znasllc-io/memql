@@ -4,7 +4,7 @@
 // files cover the other construct kinds.
 
 
-use common.builtins.{ datasyncDispatchInbound, datasyncReconcileDomains }
+use common.builtins.{ datasyncDispatchInbound, datasyncReconcileDomains, datasyncContinueBackfills, datasyncRetryInbound }
 
 // ---- The sync runtime's automations (epic memql#4378) ----
 //
@@ -32,9 +32,36 @@ automation dispatchInboundToConnector {
 /// Sweep mirrored domains whose interval says they are due. Every 10 minutes, because the interval
 /// that matters is the DOMAIN's -- this only decides how often the runtime asks the question, and a
 /// domain reconciling every 6 hours is not swept 36 times in between.
+/// single: a sweep that outlasts ten minutes -- a domain's first one reads it from the beginning --
+/// is not overlapped by the next one in this process.
 @trigger(schedule="0 */10 * * * *")
+@mode(single)
 automation reconcileMirroredDomains {
   sweep := builtin datasyncReconcileDomains()
+}
+
+/// Carry every queued or running backfill on. Every 5 minutes: a backfill is queued by a connect,
+/// a wider grant or a boot, and one store's past arriving within minutes of connecting is the
+/// point. A pass works in rounds for four minutes. In each round every store with work left takes
+/// one step, so a store's domains follow one another within the pass and no store waits for
+/// another to finish; a store still runs one backfill at a time. A round in which every store only
+/// waited on an export its origin is still preparing is followed by a ten-second pause.
+/// single: a pass that outlasts five minutes is not overlapped by the next one in this process.
+@trigger(schedule="0 */5 * * * *")
+@mode(single)
+automation continueQueuedBackfills {
+  continued := builtin datasyncContinueBackfills()
+}
+
+/// Try again the failed deliveries whose next try has come. Every minute, because the first retry
+/// is due one minute after a failure; a pass with nothing due is one bounded read. Each row is
+/// claimed before it is dispatched, so a pass that overlaps the last, or a second cron leader during
+/// a failover, never tries one delivery twice at once; single keeps this process from starting a
+/// second pass while one runs.
+@trigger(schedule="0 * * * * *")
+@mode(single)
+automation retryFailedInboundDeliveries {
+  retried := builtin datasyncRetryInbound()
 }
 
 // ---- Custom domains (epic memql#4805) ----

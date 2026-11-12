@@ -60,6 +60,11 @@ func EmitConceptFile(version string, p *TypePlan) string {
 	b.WriteString(conceptDoc(p))
 	b.WriteString("@origin(\"shopify\")\n")
 	b.WriteString("@rowAuthz(clusterOwner)\n")
+	// Every mirror row belongs to the account of the store it was read from
+	// (design record 2026-11-12 account row ownership). `parent` is written
+	// out because storeId carries no @relationship: it holds the store's bare
+	// id, and the engine could not otherwise tell which concept it names.
+	b.WriteString("@belongsTo(account, via=\"storeId\", parent=\"v1:shopify:store\")\n")
 	fmt.Fprintf(&b, "@displayCard(primary=\"gid\", secondary=%q, status=\"deleted\")\n", displaySecondary(p))
 	// No @namespace line (memql#5375): the annotation is retired, and
 	// dsl/shopify/generated/namespace.pin already carries "shopify" -- which
@@ -126,12 +131,14 @@ func childLabel(p *TypePlan) string {
 	return "partOf" + strings.ToUpper(p.ParentConcept[:1]) + p.ParentConcept[1:]
 }
 
-// mirrorColumns are the five (six with a parent) fields every mirror row
+// mirrorColumns are the seven (eight with a parent) fields every mirror row
 // carries regardless of type.
 func mirrorColumns(p *TypePlan) string {
 	var b strings.Builder
 	b.WriteString("  /// The v1:shopify:store row this mirror belongs to. Every read is store-scoped.\n")
 	b.WriteString("  storeId    string!\n")
+	b.WriteString("  /// The account this row belongs to: its store's. The engine fills it in; the connector never supplies it.\n")
+	b.WriteString("  accountId  string\n")
 	if p.HasID {
 		b.WriteString("  /// Shopify's own identity, gid://shopify/<Type>/<id>. Stable across renames.\n")
 	} else {
@@ -141,10 +148,19 @@ func mirrorColumns(p *TypePlan) string {
 	b.WriteString("  gid        string!\n")
 	b.WriteString("  /// The ORIGIN's version. A write whose updatedAt is older than the stored one is refused as stale.\n")
 	b.WriteString("  updatedAt  datetime!\n")
-	b.WriteString("  /// When MemQL last wrote a change to this row: a delivery, or a reconciliation pass that found it different. A pass that\n")
+	b.WriteString("  /// Where updatedAt came from: \"origin\", Shopify's own version; \"read\", a time MemQL read Shopify -- for a row\n")
+	b.WriteString("  /// Shopify publishes no version for, and for a tombstone MemQL concluded from its reads, whose standing is when it was\n")
+	b.WriteString("  /// read (syncedAt), not a version; or \"announced\", a tombstone of a delete Shopify sent, whose standing is its receipt.\n")
+	b.WriteString("  /// Counted only beside versionReadAt equal to syncedAt; otherwise the row was written before every write said, and the\n")
+	b.WriteString("  /// guard reads it as holding no version.\n")
+	b.WriteString("  versionSource string\n")
+	b.WriteString("  /// When MemQL read Shopify for the write that last changed this row, on MemQL's clock: the fetch, the page, the start of a\n")
+	b.WriteString("  /// relist's listing or of a bulk export, the receipt of a delete. Whether the record exists is judged by it. A pass that\n")
 	b.WriteString("  /// finds the row unchanged writes nothing, so this is not when it was last checked; the domain's sync state (lastReconcileAt) is.\n")
 	b.WriteString("  syncedAt   datetime!\n")
-	b.WriteString("  /// Tombstone. A delete topic, or a fetch that finds nothing, sets it; the row and its history stay.\n")
+	b.WriteString("  /// The syncedAt of the write that set versionSource, which that marker counts beside.\n")
+	b.WriteString("  versionReadAt string\n")
+	b.WriteString("  /// Tombstone. A delete topic, a clean fetch that finds nothing, or a relist that does not list the row sets it; the row and its history stay.\n")
 	b.WriteString("  deleted    bool\n")
 	if p.ParentConcept != "" {
 		b.WriteString("  /// The parent's GID, from the nested selection on a fetch and from __parentId on a bulk stream.\n")

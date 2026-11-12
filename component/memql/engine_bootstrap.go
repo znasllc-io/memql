@@ -674,6 +674,53 @@ func (e *MemQLEngine) initFromTree(concepts concept.Registry, tree fs.FS, publis
 		}
 	}
 
+	// `@belongsTo` across concepts (design record 2026-11-12 account row
+	// ownership; belongs_to.go). One concept's declaration is checked where
+	// that concept is built; what is left needs every concept at once -- the
+	// concept a `via` follows has to exist, has to be one whose rows can have
+	// an account, and the chain has to end.
+	//
+	// Refused HERE rather than left to the write path because none of these
+	// fails a write: a row whose `via` leads to a cluster-wide concept finds
+	// nothing to follow, falls through to the call's account, and is filed
+	// under the wrong one with no error anywhere, and a loop has no concept
+	// where an account starts at all. Landed on the report as strict-boot
+	// problems, like the gates above, so a MEMQL_DSL_PATH product bundle is
+	// held to the same check this repo's own tree is.
+	//
+	// It reads `all`, the registry THIS Init was handed, and not the process's
+	// default registry: a candidate validation (package analysis) builds its
+	// concepts into a registry of its own, and judging the live one instead
+	// would report the node's chains for the candidate's.
+	for _, problem := range belongsToProblems(all) {
+		report.AddSkip(baseloader.Skip{
+			Component: "memql.engine",
+			Keyword:   "belongsTo",
+			Name:      "via",
+			Phase:     "contract-gate:belongsTo",
+			Err:       problem.err.Error(),
+			Code:      problem.err.Code,
+		})
+		if e.Component != nil && e.Logger != nil {
+			e.Logger.Error("@belongsTo via chain is not sound",
+				"component", "memql.engine",
+				"concept", problem.concept,
+				"detail", problem.err.Error())
+		}
+	}
+
+	// The concepts that declared no `@belongsTo` at all. NOT a problem and NOT
+	// on the report: an undeclared concept still loads, and its rows are
+	// treated as they always were. It is one WARN line and a gauge, and
+	// warnUndeclaredBelongsTo says why it is deliberately neither a skip nor a
+	// report warning. The gauge is the node's own, so only a publishing load
+	// sets it; a candidate validation logs to whatever logger it was handed.
+	var belongsToLogger *slog.Logger
+	if e.Component != nil && e.Logger != nil {
+		belongsToLogger = e.Logger
+	}
+	warnUndeclaredBelongsTo(belongsToLogger, all, publish)
+
 	dups := DetectDuplicateConstructs(rawTree)
 	report.SetDuplicates(dups)
 	if e.Component != nil && e.Logger != nil && len(dups) > 0 {

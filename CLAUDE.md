@@ -1858,6 +1858,53 @@ later, because `MemQLEngine.Init` runs BEFORE integrations are wired. An
 unresolvable name **refuses boot**: a mirror nobody fills reads as an empty
 catalog, silently. [data-origins.md](docs/public/concepts/data-origins.md).
 
+### Which account a row belongs to -- `@belongsTo`
+
+**Every concept says whose its rows are, and a reader asks the declaration,
+never a field name** (first piece of the accounts program; design record
+[2026-11-12](docs/superpowers/specs/2026-11-12-account-row-ownership-design.md),
+reference [memql.md](docs/public/language/memql.md#which-account-a-row-belongs-to)).
+The field is always `accountId`.
+
+```memql
+@belongsTo(account)                                              concept note { accountId string ... }
+@belongsTo(account, via="goalId")                                concept run { ... }       // follows its parent
+@belongsTo(account, via="storeId", parent="v1:shopify:store")    concept review { ... }    // a bare id with no @relationship
+@belongsTo(account, shared)                                      concept skill { ... }     // no account = the cluster's own row
+@belongsTo(account, stated)                                      concept campaign { ... }  // its own mutations name the account
+@belongsTo(cluster)                                              concept node { ... }
+```
+
+- **Engine-managed means account-scoped and not `stated`**
+  (`BelongsToDecl.EngineManaged`). The engine fills `accountId` on those in
+  `executeWrite` (`component/memql/account_stamp.go`): the parent's account,
+  else the call's account on a create (`component/memql/call_account.go`),
+  else nothing. **It never defaults to `self` and never changes a recorded
+  account**: a child whose parent has no account yet waits for it. A `stated`
+  concept is never touched; the organization rules
+  (`organization_ownership.go`) stay in charge of theirs.
+- **Recording is not sharing.** `@belongsTo` records; `@rowAuthz(account=...)`
+  is what opens rows to an account's members. No read changed.
+- **A new concept needs one.** `TestEveryShippedConceptDeclaresBelongsTo`
+  (`test/dslconformance`) fails the build on an undeclared concept in `dsl/`,
+  `packs/` or `deploy/fleet/dsl`. A bundle's undeclared concept still loads:
+  one warning at load, `memql_dsl_belongs_to_undeclared`, and a `memqllint`
+  warning. A `via` that leads to a cluster-wide concept, an unknown `parent=`
+  or a cycle refuses the load.
+- **Recording starts behind a one-way switch**, the reader handshake on
+  `account_stamping_storage` / `account_stamping_readers`: off until every
+  node that has not stopped advertises, because an older engine refuses to
+  update a row carrying a field its schema does not declare.
+  `MEMQL_ACCOUNT_STAMPING_ACTIVATE=false` on EVERY node holds it. Tests run
+  with it off; one that wants the stamp calls `SetAccountStampingEnabled(true)`.
+- **Existing rows are assigned by a background job behind the same switch**
+  (`component/memql/account_assignment.go`): newest version only, in place, no
+  event, parents first, progress in `account_assignment_progress`, and what it
+  will not guess in `account_assignment_conflict`.
+- **Readers match both spellings of the id.** The stamp writes the bare id; a
+  concept with an authored `@relationship` on the field stores the canonical
+  one.
+
 ### Infrastructure concepts
 
 Field inventories live in the `.memql` files; this is only what the schema
@@ -1884,7 +1931,23 @@ does not say.
   that pass the part and the organization gate, and only a digest is stored. Also
   `globalSecret` / `globalVariable`, `outboundRequest` /
   `inboundRequest`, `missingCapability`, and `dataOrigin` (a VIRTUAL projection,
-  never persisted).
+  never persisted). **`globalSecret` and `partitionSecret` declare plain
+  `@rowAuthz(clusterOwner)`**: the ROW is the cluster owner's, and a VALUE is
+  read only through `ResolveSecret` / `ResolveSystemSecret`, whose lookup runs
+  as the deployment whatever context it was handed (`secretReadContext`,
+  `component/memql/engine_variables.go`). A writer that is not a cluster owner
+  authorizes its caller, then stamps internal origin for the one write
+  ([the two secret concepts](docs/public/operate/auth/per-row-authz-audit.md#the-two-secret-concepts)).
+  **`globalVariable` and `partitionVariable` take the same WRITE rule and
+  declare no tier**: every signed-in caller, and engine code holding no
+  identity, reads them, so only writes are held
+  (`component/memql/platform_variable_write_guard.go`). A settings surface for
+  anyone below the cluster owner is a capability that derives the row's name
+  itself ([the two variable concepts](docs/public/operate/auth/per-row-authz-audit.md#the-two-variable-concepts)).
+  **`sourceCredential` is server-written**: without internal origin a row is
+  not created and nothing but its revocation changes, whatever construct or
+  raw literal the write arrives through
+  (`component/memql/platform_source_credential_write_guard.go`).
 - **Library** (`dsl/library/concepts.memql`) -- `artifact` is a thin INDEX row
   owning no content (memql#693); `file` is the only backing row with bytes
   (memql#4340); `fileChunk` holds its embeddings. All three declare

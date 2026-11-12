@@ -664,6 +664,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/mutations.memql", Name: "discardOutboxEntry"}:   true,
 		{Path: "platform/mutations.memql", Name: "upsertSyncState"}:      true,
 		{Path: "platform/mutations.memql", Name: "setSyncPaused"}:        true,
+		// The partial health write each sync writer makes (the backfill
+		// runner, the sweep, the queue, the inbound dispatcher, the pause).
+		// Same argument as upsertSyncState: the row is the DEPLOYMENT's, with
+		// no owner field to scope an actor against.
+		{Path: "platform/mutations.memql", Name: "patchSyncState"}: true,
 		// memql#5707 review. The inbound receiver's ONE write, and the NDR
 		// poller's. A staged delivery has no owner to scope to: the sender is
 		// a third party that signed with a shared secret and the receiver
@@ -686,6 +691,12 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// and product automations draining a source, whose tree-loaded step
 		// context carries internal origin; none of them is a client.
 		{Path: "platform/mutations.memql", Name: "updateInboundRequestStatus"}: true,
+		// Store mirror, U4: putting a given-up delivery back in line resets its
+		// try count and makes it due. Same row, same reason: no owner to scope
+		// to, and the one writer is the datasync runtime under its operator
+		// identity, reached through datasyncRequeueInbound, whose handler admits
+		// only a cluster owner or the engine itself.
+		{Path: "platform/mutations.memql", Name: "requeueInboundRequest"}: true,
 		// memql#5480. A webhook delivery whose URL is a credential (a Discord
 		// webhook's token is in its path) names the globalSecret holding it,
 		// and the outbound worker POSTs the row's body to whatever that secret
@@ -1669,6 +1680,14 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// let a caller schedule a purge of a merchant's whole mirror;
 		// `done` is a claim that a legal obligation was met.
 		//
+		// reopenComplianceJob / extendComplianceJob record a SECOND
+		// request on the job of the first: one opens a done erasure again
+		// for both passes, the other adds the request's orders to a job
+		// that is waiting. Both are the connector reacting to a verified
+		// webhook. A client-callable reopen would take back a `done` and
+		// schedule a purge again; a client-callable extend would name
+		// another person's orders into somebody's erasure.
+		//
 		// setProductContentStatus records what the far end did with a
 		// pushed row: `live` is a claim about Shopify's acceptance, and
 		// only the drain worker that made the call can make it.
@@ -1679,6 +1698,8 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// value is that its prices were locked into a real one.
 		{Path: "shopify/overlay/mutations.memql", Name: "queueComplianceJob"}:  true,
 		{Path: "shopify/overlay/mutations.memql", Name: "recordComplianceJob"}: true,
+		{Path: "shopify/overlay/mutations.memql", Name: "reopenComplianceJob"}: true,
+		{Path: "shopify/overlay/mutations.memql", Name: "extendComplianceJob"}: true,
 		{Path: "commerce/mutations.memql", Name: "setProductContentStatus"}:    true,
 		{Path: "commerce/mutations.memql", Name: "markQuoteAccepted"}:          true,
 		// memql#5638, a store's uninstall and its reinstall. Each row is a
@@ -1695,12 +1716,34 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// again. Client-callable, it would erase the record of a purge or put
 		// a disconnected store back online with a dead grant.
 		//
+		// markStoreConnected records when a connect Connect Shopify's callback
+		// verified started the store's recording afresh. Client-callable, it
+		// would let a caller move the clock the store's verdict measures a
+		// late check from, and so hide one.
+		//
 		// markExternalConnectionDisconnected runs under the selection owner's
 		// borrowed identity, so actor.userId scoping would pass; what it
 		// asserts -- that the provider ended the grant -- is the verified
 		// delivery's to say, never the person's.
+		//
+		// recordStoreHealth writes what the connector observed and decided
+		// on: the verdict's record, the mark that a store's once-only erasure
+		// work ran, the deliveries an uninstall arrived by. Its one caller is
+		// the connector, after a pass that has no user. Client-callable, it
+		// would let a caller silence a store's alert or mark erasure work
+		// done that never ran.
+		//
+		// markStoreRedacted stamps a shop's erasure and pauses the store. Its
+		// one caller is the privacy runner, after a purge it made and behind
+		// the fence on the row it read before purging. A store has no owner a
+		// filter could scope the stamp to; client-callable, it would let a
+		// cluster owner or a developer pause any store and record an erasure
+		// that never happened.
 		{Path: "shopify/overlay/mutations.memql", Name: "markStoreUninstalled"}:        true,
 		{Path: "shopify/overlay/mutations.memql", Name: "markStoreReconnected"}:        true,
+		{Path: "shopify/overlay/mutations.memql", Name: "markStoreConnected"}:          true,
+		{Path: "shopify/overlay/mutations.memql", Name: "markStoreRedacted"}:           true,
+		{Path: "shopify/overlay/mutations.memql", Name: "recordStoreHealth"}:           true,
 		{Path: "platform/mutations.memql", Name: "markExternalConnectionDisconnected"}: true,
 		// epic memql#4434, the release-cut pair. One argument covers both, and it
 		// is not "the caller is a machine" -- the caller here is a signed-in

@@ -54,7 +54,7 @@ func placement(t *testing.T, template string) (html string, fragment string, err
 	r := Recipient{ID: "r-1", Email: "someone@example.test", DisplayName: "Ada"}
 	opts := RenderOptions{Links: messageTestLinks(), Tracking: trackingConfig().trackingRenderFor(c, deliveryRowID(c.ID, r.ID))}
 
-	footer, ferr := footerTemplate(footerSender(opts), opts.Links.Unsubscribe)
+	footer, ferr := footerTemplate(footerReason(opts), footerSender(opts), opts.Links.Unsubscribe)
 	if ferr != nil {
 		t.Fatalf("footerTemplate: %v", ferr)
 	}

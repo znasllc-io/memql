@@ -9,6 +9,7 @@ query ShopifyFetchMetaobjectDefinition($id: ID!) {
     __typename
     ... on MetaobjectDefinition {
       id
+      updatedAt
       access { admin customerAccount storefront }
       capabilities { onlineStore { enabled } publishable { enabled } renderable { enabled } translatable { enabled } }
       createdByApp { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
@@ -31,6 +32,7 @@ query ShopifyListMetaobjectDefinition($first: Int!, $after: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       access { admin customerAccount storefront }
       capabilities { onlineStore { enabled } publishable { enabled } renderable { enabled } translatable { enabled } }
       createdByApp { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }

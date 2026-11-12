@@ -9,6 +9,7 @@ query ShopifyBulkProduct($query: String) {
     edges {
       node {
         id
+        updatedAt
         availablePublicationsCount { count precision }
         bundleConsolidatedOptions { name selections { value } }
         category { ancestorIds childrenIds fullName id isArchived isLeaf isRoot level name parentId }
@@ -54,6 +55,7 @@ query ShopifyBulkProduct($query: String) {
           edges {
             node {
             id
+            updatedAt
             availableForSale
             availablePublicationsCount { count precision }
             barcode

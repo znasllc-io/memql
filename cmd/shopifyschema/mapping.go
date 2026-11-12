@@ -51,9 +51,14 @@ const (
 // mirrorOwnFields are the columns every mirror row carries. A Shopify field
 // of the same name is renamed rather than dropped -- losing a field silently
 // is the one outcome the generator must not have.
+//
+// `accountId` is the account a mirror row belongs to, which the engine stamps
+// from the row's store. Shopify has a field of that name too (Channel's), and
+// it means something else, so it lands as `sourceAccountId`.
 var mirrorOwnFields = map[string]bool{
-	"storeId": true, "gid": true, "updatedAt": true, "syncedAt": true,
-	"deleted": true, "parentGid": true,
+	"storeId": true, "gid": true, "updatedAt": true, "versionSource": true,
+	"syncedAt": true, "versionReadAt": true, "deleted": true, "parentGid": true,
+	"accountId": true,
 }
 
 // engineReservedFields mirrors component/database/memory-nodes'
@@ -104,6 +109,18 @@ type FieldPlan struct {
 	// path language the connector's applier understands: "field",
 	// "field.id", "field[].id", "field.nodes[].id".
 	Extract string
+	// AdminType is the Admin GraphQL type of the field's value, with lists
+	// and non-nulls unwrapped: a scalar's name ("DateTime", "Money"), an
+	// enum's, a nested object's, and for a GID reference or a list of them
+	// the type of the row named. The DSL type cannot say this: a timestamp,
+	// an amount and a name are all `string` there (scalarToDSL), and what a
+	// customer's erasure keeps is decided by which of them a field is.
+	AdminType string
+	// GidsInside names the mirrored types a nested object's selection keeps
+	// the GID of, sorted: an order's purchasing entity keeps a customer's,
+	// so the object is about that customer. Empty for every field that is
+	// not an object or a list of objects, and for an object that keeps none.
+	GidsInside []string
 }
 
 // ChildPlan is a data-carrying connection materialised as its own concept.
@@ -440,6 +457,7 @@ func (p *Planner) planField(f *Field, isRef bool) (FieldPlan, bool, error) {
 		if named == "MetafieldConnection" {
 			fp.Kind = KindMetafields
 			fp.DSLType = "object"
+			fp.AdminType = "Metafield"
 			fp.Required = false
 			fp.Doc = "Merchant-owned and own-app metafields, keyed \"namespace.key\". App-owned metafields of OTHER apps are not visible to anyone (2025-05-19)."
 			fp.Selection = fmt.Sprintf("%s(first: %d) { nodes { namespace key type value jsonValue } }", f.Name, metafieldPageSize)
@@ -454,13 +472,19 @@ func (p *Planner) planField(f *Field, isRef bool) (FieldPlan, bool, error) {
 		fp.OmitFromBulk = true
 		fp.Required = false
 		node := p.connectionNodeType(named)
+		fp.AdminType = strings.TrimSuffix(named, "Connection")
+		if node != nil {
+			fp.AdminType = node.Name
+		}
 		if node != nil && node.Field("id") == nil {
 			// The node type has no id to keep -- ResourcePublication,
 			// DiscountApplication -- so the rows come inline instead.
-			sel := p.objectSelection(node, 0)
+			kept := map[string]bool{}
+			sel := p.objectSelection(node, 0, kept)
 			if sel == "" {
 				return fp, false, nil
 			}
+			fp.GidsInside = sortedNames(kept)
 			fp.Kind = KindObjectList
 			fp.DSLType = "[]object"
 			fp.Doc = fmt.Sprintf("Inline %s rows (reference connection, first %d): the type has no id to keep a GID of.", node.Name, refsPageSize)
@@ -481,6 +505,7 @@ func (p *Planner) planField(f *Field, isRef bool) (FieldPlan, bool, error) {
 	// (ShopLocale) falls through to the nested-object rule below and is
 	// inlined -- there is no GID to keep.
 	if target != nil && (target.Kind == "OBJECT" || target.Kind == "INTERFACE") && p.referencedByGid(target) {
+		fp.AdminType = target.Name
 		if f.Type.IsList() {
 			fp.Kind = KindRefs
 			fp.DSLType = "[]string"
@@ -501,6 +526,9 @@ func (p *Planner) planField(f *Field, isRef bool) (FieldPlan, bool, error) {
 		return fp, true, nil
 	}
 
+	if target != nil {
+		fp.AdminType = target.Name
+	}
 	switch {
 	case target == nil:
 		return fp, false, nil
@@ -542,10 +570,12 @@ func (p *Planner) planField(f *Field, isRef bool) (FieldPlan, bool, error) {
 		return fp, true, nil
 
 	case target.Kind == "OBJECT" || target.Kind == "INTERFACE" || target.Kind == "UNION":
-		sel := p.objectSelection(target, 0)
+		kept := map[string]bool{}
+		sel := p.objectSelection(target, 0, kept)
 		if sel == "" {
 			return fp, false, nil // nothing selectable: omit rather than emit an invalid query
 		}
+		fp.GidsInside = sortedNames(kept)
 		if f.Type.IsList() {
 			fp.Kind = KindObjectList
 			fp.DSLType = "[]object"
@@ -571,7 +601,11 @@ func (p *Planner) planField(f *Field, isRef bool) (FieldPlan, bool, error) {
 // being a shape and starts being a traversal -- MailingAddress and MoneyBag
 // are shapes, `Order.customer.lastOrder.customer` is a traversal, and a
 // mirror that follows one would fetch the store through a single field.
-func (p *Planner) objectSelection(t *Type, depth int) string {
+//
+// It also records, in kept, the name of every mirrored type the selection
+// keeps the GID of (a FieldPlan's GidsInside). One walk answers both: a second
+// one written beside it would drift from the selection it describes.
+func (p *Planner) objectSelection(t *Type, depth int, kept map[string]bool) string {
 	if t == nil {
 		return ""
 	}
@@ -608,9 +642,10 @@ func (p *Planner) objectSelection(t *Type, depth int) string {
 			// apart between fetches. (Only when it has an id to refer by.)
 			if p.referencedByGid(member) {
 				parts = append(parts, "... on "+member.Name+" { id }")
+				kept[member.Name] = true
 				continue
 			}
-			sub := p.objectSelection(member, depth+1)
+			sub := p.objectSelection(member, depth+1, kept)
 			if sub == "" {
 				// A member reached at the depth bound still keeps its own
 				// scalars: a PricingValue that is a percentage is
@@ -650,9 +685,10 @@ func (p *Planner) objectSelection(t *Type, depth int) string {
 			// A mirrored type with no id is inlined like anything else.
 			if p.referencedByGid(target) {
 				parts = append(parts, f.Name+" { id }")
+				kept[target.Name] = true
 				continue
 			}
-			if sub := p.objectSelection(target, depth+1); sub != "" {
+			if sub := p.objectSelection(target, depth+1, kept); sub != "" {
 				parts = append(parts, f.Name+" "+sub)
 			}
 		}
@@ -661,6 +697,19 @@ func (p *Planner) objectSelection(t *Type, depth int) string {
 		return ""
 	}
 	return "{ " + strings.Join(parts, " ") + " }"
+}
+
+// sortedNames is a set's members in order, nil for an empty one.
+func sortedNames(set map[string]bool) []string {
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(set))
+	for name := range set {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // leafSelection is a type's scalar and enum fields and nothing nested: the

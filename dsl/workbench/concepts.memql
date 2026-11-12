@@ -32,6 +32,7 @@ use work.concepts.{ run }
 /// the parent plan's requestedBy at provision time and never from a caller argument.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="runId", secondary="storageRoot", tertiary="lastUsedAt", status="status")
+@belongsTo(account, via="runId")
 concept workspace {
   runId           string! @description("v1:work:run.id this workspace belongs to. One workspace per run; the unique key. Was planId until memql#5053: a run is the unit of execution the spine dispatches, and a workspace is torn down when its run reaches a terminal status. A fork or a replay is a DIFFERENT run and therefore gets a clean tree, which is what replay means.")
   status          enum("provisioned", "released")! @description("Lifecycle. provisioned = workspace directory exists and is mountable. released = run reached terminal, directory torn down.")
@@ -46,6 +47,7 @@ concept workspace {
 
   nodeId          string @description("MEMQL_NODE_ID of the workbench replica whose disk holds this directory (memql#4354). Stamped at provision time by the serving node. THE FIX FOR THE TWO-WORKSPACES-PER-PLAN SPLIT: pickWorkbenchPeer was any-fit, so with two workbench replicas one plan got a directory on each and neither side was told -- a call would write a file and the next call, landing on the other replica, would not find it. The picker now prefers this node, and falls back only when it is gone.")
   ownerUserId     string! @serverSet @description("v1:identity:user.id this workspace's files belong to, taken from the parent run's ownerUserId at provision time. THE ROW-AUTHZ OWNER FIELD. Denormalized rather than joined because the row gate decides one row at a time and cannot follow runId to find out whose it is.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="runId", target=run, direction="outgoing")
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
@@ -57,6 +59,7 @@ concept workspace {
 /// explicit recovery advances the ephemeral generation after reported loss.
 @serverWritten
 @rowAuthz(owner="ownerUserId")
+@belongsTo(account, via="runId")
 concept executionBinding {
   runId string!
   resource enum("cloud", "fleet")!
@@ -67,6 +70,7 @@ concept executionBinding {
   generation int
   stateLost bool
   ownerUserId string! @serverSet
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
   @relationship(type="parent", field="runId", target=run, direction="outgoing")
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }

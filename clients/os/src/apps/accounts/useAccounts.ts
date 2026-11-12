@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
-import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { getRowByConceptAndId, renderMemQLValue, type Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { useReading, type Reading } from "../../cluster/reading";
 import { useOsConnection } from "../../live/connection";
+import { assignmentStatusFromRows, inventoryFromRows, type AssignmentStatus, type Inventory } from "./inventory";
 import { useLiveCollection, usePagedCollection } from "../../live/useLiveCollection";
 import { ACCOUNT_CONCEPT, accountFromRow, type AccountRow } from "./rows";
 
-// The client registry's one feed, and the four rollups a detail view reads.
+// The client registry's one feed, and the reads an account's page makes.
 //
 // ===========================================================================
 // BOTH VERBS ARE LIVE, AND THE SEED IS WHY THAT MATTERS MORE THAN USUAL
@@ -54,11 +56,11 @@ export function useAccountRecord(accountId: string) {
 }
 
 // ---------------------------------------------------------------------------
-// The four rollups
+// The guests band
 // ---------------------------------------------------------------------------
 
 /**
- * One rollup band's state.
+ * One band's state.
  *
  * `error` is the SERVER's sentence, kept verbatim and rendered in surface.
  * It is a first-class state rather than an empty list, because the two are
@@ -75,41 +77,22 @@ export interface Rollup {
 
 const EMPTY_ROLLUP: Rollup = { rows: [], state: "idle", error: "", readAt: "" };
 
-export interface AccountRollups {
-  sites: Rollup;
-  files: Rollup;
-  domains: Rollup;
-  invites: Rollup;
-  reload: () => void;
-}
-
 /**
- * The four populations tied to one account, read on open.
+ * The guest invitations filed under one account, read on open.
  *
- * ON-DEMAND READS, NOT LIVE FEEDS, and the honest move is to say which. Three
- * of the four concepts DO broadcast -- site, artifact and invitation all carry
- * rules -- so a live rollup is buildable. It is deliberately not built:
+ * THE ONE ROW-NAMING BAND THAT SURVIVED THE INVENTORY (account row ownership,
+ * section H). The inventory counts invitations under People, but it cannot say
+ * WHO was invited, and an invitation is a person who is not yet in any of the
+ * client's groups -- so the People band, which counts members, never shows
+ * them. The other four bands (deployables, files, knowledge, campaigns) named
+ * rows the inventory now counts, and each of those is listed in its own app.
  *
- *   - It would be four more subscriptions per OPEN ACCOUNT, over concepts the
- *     Files, Deployables and Users apps already hold feeds for. The cost lands
- *     on the mesh, and the benefit is a count changing under somebody reading
- *     a client's profile.
- *   - `v1:knowledge:knowledgeDomain` carries NO rule (#4809 is the tier
- *     question; nothing broadcasts it either), so one of the four could never
- *     be live. A ledger where three bands move and the fourth silently does
- *     not is worse than one where none do -- the reader has no way to tell
- *     which kind of band they are looking at.
- *
- * So all four are read together, they print WHEN they were read, and they
- * re-read on demand. That is the same call the Training app made for the
- * knowledge side, for the same reason.
+ * ON-DEMAND, like the inventory beside it: a ledger where one band moves and
+ * the rest do not is worse than one where none do.
  */
-export function useAccountRollups(accountId: string): AccountRollups {
+export function useAccountGuests(accountId: string): Rollup & { reload: () => void } {
   const connection = useOsConnection();
-  const [sites, setSites] = useState<Rollup>(EMPTY_ROLLUP);
-  const [files, setFiles] = useState<Rollup>(EMPTY_ROLLUP);
-  const [domains, setDomains] = useState<Rollup>(EMPTY_ROLLUP);
-  const [invites, setInvites] = useState<Rollup>(EMPTY_ROLLUP);
+  const [state, setState] = useState<Rollup>(EMPTY_ROLLUP);
   const [nonce, setNonce] = useState(0);
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
@@ -119,43 +102,87 @@ export function useAccountRollups(accountId: string): AccountRollups {
     if (query === null || accountId === "") return;
     const controller = new AbortController();
     const signal = controller.signal;
-
-    // EACH BAND SETTLES ON ITS OWN. A single Promise.all would let one
-    // refusal -- the invitation gate is the one that will actually happen --
-    // decide the state of three reads that succeeded, and a client's
-    // deployables would disappear because somebody is not an admin.
-    async function run(
-      read: () => Promise<{ rows: () => Row[] }>,
-      set: (r: Rollup) => void,
-    ): Promise<void> {
-      set({ ...EMPTY_ROLLUP, state: "loading" });
-      try {
-        const result = await read();
+    setState({ ...EMPTY_ROLLUP, state: "loading" });
+    query
+      .invitationsForAccount({ accountId }, { signal })
+      .then((result) => {
         if (signal.aborted) return;
-        set({ rows: result.rows(), state: "ready", error: "", readAt: new Date().toISOString() });
-      } catch (err: unknown) {
+        setState({ rows: result.rows(), state: "ready", error: "", readAt: new Date().toISOString() });
+      })
+      .catch((err: unknown) => {
         if (signal.aborted) return;
-        set({
+        // VERBATIM. A refusal here is the server saying reading invitations
+        // needs a higher rank, which is the most useful sentence this band can
+        // carry.
+        setState({
           rows: [],
           state: "error",
-          // VERBATIM. A refusal on the invitation rollup is the server saying
-          // reading invitations is owner and admin only, which is the most
-          // useful sentence this surface can carry.
           error: err instanceof Error ? err.message : String(err),
           readAt: new Date().toISOString(),
         });
-      }
-    }
-
-    void run(() => query.sitesForAccount({ accountId }, { signal }), setSites);
-    void run(() => query.libraryItemsForAccount({ accountId }, { signal }), setFiles);
-    void run(() => query.domainsForAccount({ accountId }, { signal }), setDomains);
-    void run(() => query.invitationsForAccount({ accountId }, { signal }), setInvites);
-
+      });
     return () => controller.abort();
   }, [connection, accountId, nonce]);
 
-  return { sites, files, domains, invites, reload };
+  return { ...state, reload };
+}
+
+// ---------------------------------------------------------------------------
+// The inventory and the assignment status (account row ownership, section H)
+// ---------------------------------------------------------------------------
+
+// BY NAME, NOT BY GENERATED METHOD, until the SDK carries them. Both are `@sdk`
+// builtins; `executeNamed` with the builtin call is what a generated method
+// does underneath (cluster/updates/InstallationUpdates.tsx calls its builtins
+// the same way).
+
+/**
+ * What one account holds, read on demand.
+ *
+ * NEVER LIVE, AND IT SAYS SO. The answer is one grouped count over every
+ * concept, not a feed of any one, so no event keeps it current; the page
+ * prints when it was read and offers a re-read.
+ *
+ * `enabled` is the caller holding `execute app:accounts/inventory`. A
+ * non-holder asks nothing: the builtin would refuse them, and the page draws
+ * no inventory for them at all.
+ */
+export function useAccountInventory(accountId: string, enabled: boolean): Reading<Inventory> {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  const read = useMemo(() => {
+    if (!enabled || query === null || accountId === "") return null;
+    return async (signal: AbortSignal) => {
+      const result = await query.executeNamed(
+        "accountInventory",
+        `builtin accountInventory(accountId: ${renderMemQLValue(accountId)})`,
+        { signal },
+      );
+      return inventoryFromRows(result.rows());
+    };
+  }, [enabled, query, accountId]);
+  return useReading<Inventory>(`accounts:inventory:${accountId}:${enabled}`, read);
+}
+
+/**
+ * How far the assignment of existing rows has got, cluster-wide, read on
+ * demand. Drawn on the primary account's page only.
+ */
+export function useAccountAssignmentStatus(enabled: boolean): Reading<AssignmentStatus> {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  const read = useMemo(() => {
+    if (!enabled || query === null) return null;
+    return async (signal: AbortSignal) => {
+      const result = await query.executeNamed(
+        "accountAssignmentStatus",
+        "builtin accountAssignmentStatus()",
+        { signal },
+      );
+      return assignmentStatusFromRows(result.rows());
+    };
+  }, [enabled, query]);
+  return useReading<AssignmentStatus>(`accounts:assignmentStatus:${enabled}`, read);
 }
 
 /**

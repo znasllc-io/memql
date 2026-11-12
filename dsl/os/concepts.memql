@@ -39,10 +39,12 @@ use identity.concepts.{ user }
 /// to nothing rearranges it, and the next save carries that; a row that can be absent would make
 /// "no desktop yet" and "desktop emptied" the same state to a reader that has to tell them apart.
 @rowAuthz(owner="ownerUserId")
+@belongsTo(account)
 concept desktop {
   ownerUserId  string!  @serverSet  @description("v1:identity:user.id whose desktop this is. THE ROW-AUTHZ OWNER FIELD, stamped from actor.userId by saveMyDesktop and never accepted from caller args -- @serverSet makes that a load-time rejection rather than a convention. It is also the whole of the row's identity: the row id is derived from it, so this field and the id can never disagree.")
   revision     int!     @description("The last-writer-wins stamp. A client writes `held + 1`, so a save carries evidence of which document it was made from. It is NOT a lock: two machines saving from revision 5 both write 6 and the second one wins, which is the model this epic chose (the conflict UX is a cue, not a merge editor). What it buys is that a client can tell a row it has already seen from one it has not, and can refuse to adopt a document older than the one it holds.")
   document     object!  @description("The whole DesktopStore document: `version`, desks, the per-desk surfaces (items, folders, widget placements, grid positions), dock pins and the theme pack. OPAQUE HERE ON PURPOSE -- the shape and its invariants live in clients/os/src/system/store.ts, which is the only thing that reads it. `document.version` is the client's own schema generation; the engine never parses it.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
@@ -51,6 +53,7 @@ concept desktop {
 /// are immutable per revision, so viewing an older revision cannot hide a new one.
 // @no-displayCard: internal per-user navigation state, rendered at its destination.
 @rowAuthz(owner="ownerUserId")
+@belongsTo(cluster)
 concept attentionReceipt {
   ownerUserId string! @serverSet
   changeId string! @description("Stable app/surface change identifier declared by the UI.")

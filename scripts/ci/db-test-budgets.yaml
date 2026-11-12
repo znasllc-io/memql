@@ -59,4 +59,14 @@ classes: |
   # The email statistics rollup walks shared watermarks over the campaign rows,
   # so its suite runs alone and uncached; about 10s on a laptop.
   db      emailstats component/emailstats 300s   serial,uncached 1
+  # The store mirror's suites (recording, held deliveries, privacy erasure) boot
+  # a real engine for most cases. Side by side with main on a laptop, with this
+  # lane's flags, integrations/shopify went from 21s to 125s and
+  # component/datasync from 7s to 61s: about 6 and 9 times. From the 51s and
+  # 15s the bounded AKS runner recorded for them (shard-timings.tsv), expect
+  # about 310s and 135s, past or close to the default class's 180s. Each gets
+  # its own class at about twice that; keep every test and its operation
+  # deadlines.
+  db      shopify   integrations/shopify 600s    serial    1
+  db      datasync  component/datasync  300s     serial    1
   db      default   -                   180s     -         2

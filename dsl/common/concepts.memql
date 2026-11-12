@@ -4,6 +4,7 @@
 
 /// A file attachment with extracted transcription.
 @displayCard(primary="fileName", secondary="mimeType", tertiary="uploadedBy", status="status")
+@belongsTo(account)
 concept attachment {
   fileName  string!  @description("Original filename of the uploaded file.")
   fileSize  int  @description("File size in bytes.")
@@ -13,6 +14,7 @@ concept attachment {
   summary  string  @description("AI-generated 2-3 sentence summary of the file content.")
   transcription  string  @description("Extracted plain text from the file, or image description for images.")
   uploadedBy  string!  @description("Actor identifier of the user who uploaded the file.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
 }
 

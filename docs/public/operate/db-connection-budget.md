@@ -114,7 +114,7 @@ REQUIRE:  peak_connections  ≤  max_connections − reserved_connections
 - **The maintenance session** (`component/database/maintenance_session.go`) is
   one connection, opened on the direct endpoint for one run of the work that
   uses it and closed after, with no statement timeout and no client read
-  deadline beyond the run's own: the work bounds every statement itself. Two
+  deadline beyond the run's own: the work bounds every statement itself. Four
   kinds of work open one. A closed-chunk compaction pass holds it for its
   duration (a `reorder_chunk` of a large chunk runs for minutes): an advisory
   lock admits one pass at a time cluster-wide, the nightly one on the cron
@@ -128,10 +128,19 @@ REQUIRE:  peak_connections  ≤  max_connections − reserved_connections
   timeout and pgdriver's 10 s read deadline
   ([the rollup](deployables.md#the-rollup)); it runs on the
   cron leader, so a second rollup session is open only while a change of leader
-  overlaps two runs. Count them per **installation**, not per process, under
-  separate jobs and monitors: two at once, since the nightly pass overlaps
-  rollup runs, and one more while the cron lead changes hands. An idle process
-  holds none.
+  overlaps two runs. The Shopify connector's privacy run
+  ([the compliance topics](shopify-connector.md#step-5----the-compliance-topics))
+  holds one from its first job that needs the database until the run ends: it
+  runs hourly at minute 7 on the cron leader, one run at a time, takes jobs for
+  twenty minutes and finishes the one it is on, and the server ends any of its
+  statements at ten minutes. It asks the session a trivial question before
+  each use and opens another if the server ended it, closing the old one first.
+  While one of its erasures removes an export from the Library, the Library's
+  removal holds a second session of its own for that one transaction, each
+  statement again bounded at ten minutes. Count them per **installation**, not
+  per process, under separate jobs and monitors: four at once -- the nightly
+  pass, a rollup run, a privacy run and a Library removal inside it -- and one
+  more while the cron lead changes hands. An idle process holds none.
 
 ## The knobs (per-pod pool — `component/database/database.go`)
 

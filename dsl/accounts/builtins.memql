@@ -1,0 +1,36 @@
+// builtins.memql
+//
+// The two reads behind the Accounts app's inventory part (account row
+// ownership, design record docs/superpowers/specs/2026-11-12-account-row-ownership-design.md,
+// section H), backed by integrations/accounts.
+//
+// WHO MAY CALL. Both declare execute on app:accounts/inventory, seeded on owner
+// and developer only (dsl/rbac/seeds.memql). The engine refuses every other
+// caller before the executor runs, and that IS the wall: the handlers read the
+// node table directly and answer counts, never a row. @requiresCapability
+// rather than @requiresRank because a builtin takes only the former, and
+// because developer outranks admin while the part is a grant, not a floor.
+//
+// @sdk for the reason automationGraph is: the OS panels call a typed method
+// rather than hand-building a call string. Neither is cached: a builtin call
+// reaches its handler every time.
+
+/// What one account holds: one row per concept that declares an account form and holds at least
+/// one row for it ({kind: "concept", concept, namespace, name, rows, versions}, by namespace then
+/// name), then one {kind: "files", bytes} with the summed size of its current, unarchived Library
+/// files. Either spelling of the id is accepted; an empty or unknown account is refused.
+@sdk
+@executor("integration.accounts.inventory")
+@requiresCapability("execute", "app:accounts/inventory")
+builtin accountInventory {
+  accountId  string!  @description("The account, as its bare id or v1:accounts:account:<bare>.")
+}
+
+/// How the assignment of existing rows to accounts is going: one {kind: "switch", enabled, held}
+/// (enabled is the cluster's switch, held is this node's MEMQL_ACCOUNT_STAMPING_ACTIVATE=false),
+/// one {kind: "progress", ...} per concept the job has worked on, one {kind: "account", accountId,
+/// rows} per account holding rows, and up to 200 unresolved {kind: "conflict", ...}, newest first.
+@sdk
+@executor("integration.accounts.assignmentStatus")
+@requiresCapability("execute", "app:accounts/inventory")
+builtin accountAssignmentStatus { }

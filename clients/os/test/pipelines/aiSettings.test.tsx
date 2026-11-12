@@ -8,10 +8,11 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 // WHAT THIS PINS
 // ===========================================================================
 // Both switches are off unless the stored value turns them on, read the way
-// the engine's `ParseAISettings` reads it; a toggle writes the WHOLE object
-// through `setGlobalVariable` under the row's own id (or the seeder's); and a
-// switch moves only on what the read-back answers, so a refused save never
-// looks saved. The fake answers at `executeNamed`, under the generated
+// the engine's `ParseAISettings` reads it; a toggle sends BOTH switches to the
+// engine through `pipelinesAISettingsSave`, which owns the row (its name, its
+// id and the stored JSON: component/pipelinerun settings.go and its tests);
+// and a switch moves only on what the read-back answers, so a refused save
+// never looks saved. The fake answers at `executeNamed`, under the generated
 // builders, so the strings asserted below are the ones the engine parses.
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -22,12 +23,14 @@ import { PIPELINES_AI_OFF, PipelinesAISettings, parsePipelinesAI } from "../../s
 import { click, fakeConnection, rowsResult, withSession } from "../deployables/harness";
 
 const READ = 'query globalVariable(name: "MEMQL_PIPELINES_AI")';
-const DESCRIPTION = "Pipeline AI features: independent pull-request review and failed-run diagnosis. Off unless turned on here.";
+const SAVE = "builtin pipelinesAISettingsSave(";
+const ROW_ID = "var-global-memql-pipelines-ai";
 
-/** One string argument of a rendered call, decoded the way the engine reads it. */
-function arg(call: string, name: string): string | undefined {
-  const match = new RegExp(`\\b${name}: ("(?:[^"\\\\]|\\\\.)*")`).exec(call);
-  return match ? (JSON.parse(match[1]!) as string) : undefined;
+/** One switch of a rendered save, as the engine reads it. */
+function switchArg(call: string, name: string): boolean {
+  const match = new RegExp(`\\b${name}: (true|false)\\b`).exec(call);
+  if (!match) throw new Error(`the save does not carry ${name}: ${call}`);
+  return match[1] === "true";
 }
 
 /** The cluster's one variable row, behind the Deployables fake. */
@@ -42,13 +45,22 @@ function mount(initial: Row | null, faults: { refuse?: string; drop?: boolean; r
       if (faults.readError) throw new Error(faults.readError);
       return rowsResult(row ? [row] : []);
     }
-    if (call.startsWith("mutation setGlobalVariable(")) {
+    if (call.startsWith(SAVE)) {
       calls.push(call);
       if (faults.hold) await faults.hold;
       if (faults.refuse) throw new Error(faults.refuse);
-      if (!faults.drop) row = { id: arg(call, "id"), name: arg(call, "name"), value: arg(call, "value"), description: arg(call, "description") };
+      // What the engine does with a save: the setting's own row, both keys.
+      if (!faults.drop) {
+        row = {
+          id: (row?.["id"] as string | undefined) ?? ROW_ID,
+          name: "MEMQL_PIPELINES_AI",
+          value: JSON.stringify({ review: switchArg(call, "review"), diagnosis: switchArg(call, "diagnosis") }),
+        };
+      }
       return rowsResult([]);
     }
+    // The page never writes the variable's row itself.
+    if (call.startsWith("mutation setGlobalVariable(")) throw new Error("the page wrote the variable row itself: " + call);
     return base(name, call, opts as never);
   };
   h.connection = fake;
@@ -60,7 +72,8 @@ function mount(initial: Row | null, faults: { refuse?: string; drop?: boolean; r
       act(() => fake.subscriptions.emit("v1:platform:globalVariable", next));
     },
     reads: () => calls.filter((c) => c === READ),
-    writes: () => calls.filter((c) => c.startsWith("mutation setGlobalVariable(")),
+    writes: () => calls.filter((c) => c.startsWith(SAVE)),
+    stored: () => row,
   };
 }
 
@@ -141,44 +154,39 @@ describe("reading the switches", () => {
 });
 
 describe("saving a switch", () => {
-  it("writes the whole object under the seeder's id, then shows what the cluster holds", async () => {
+  it("sends both switches to the engine, then shows what the cluster holds", async () => {
     const cluster = mount(null);
     render(<PipelinesAISettings />);
     const { review, diagnosis } = await switches();
     await click(review);
     await waitFor(() => expect(review.checked).toBe(true));
     expect(diagnosis.checked).toBe(false);
-    expect(cluster.writes()).toHaveLength(1);
-    const call = cluster.writes()[0]!;
-    expect(arg(call, "id")).toBe("var-global-memql-pipelines-ai");
-    expect(arg(call, "name")).toBe("MEMQL_PIPELINES_AI");
-    expect(arg(call, "value")).toBe('{"review":true,"diagnosis":false}');
-    expect(arg(call, "description")).toBe(DESCRIPTION);
-    expect(call).toContain("active: true");
+    // The switches and nothing else: the row's name, id and JSON are the engine's.
+    expect(cluster.writes()).toEqual(["builtin pipelinesAISettingsSave(review: true, diagnosis: false)"]);
     // Read back after the save, not assumed.
     expect(cluster.reads()).toHaveLength(2);
     expect(screen.queryByText("The change was not saved.")).toBeNull();
   });
 
-  it("keeps the other switch and the existing row's id", async () => {
+  it("keeps the other switch", async () => {
     const cluster = mount({ id: "var-global-pipelines-ai-legacy", name: "MEMQL_PIPELINES_AI", value: '{"review":true,"diagnosis":false}' });
     render(<PipelinesAISettings />);
     const { review, diagnosis } = await switches();
     expect(review.checked).toBe(true);
     await click(diagnosis);
     await waitFor(() => expect(diagnosis.checked).toBe(true));
-    const call = cluster.writes()[0]!;
-    expect(arg(call, "id")).toBe("var-global-pipelines-ai-legacy");
-    expect(arg(call, "value")).toBe('{"review":true,"diagnosis":true}');
+    expect(cluster.writes()).toEqual(["builtin pipelinesAISettingsSave(review: true, diagnosis: true)"]);
+    expect(review.checked).toBe(true);
   });
 
-  it("leaves a refused switch where the cluster has it, and Try again sends the same write", async () => {
-    const cluster = mount(null, { refuse: "capability_not_held: write globalVariable" });
+  it("leaves a refused switch where the cluster has it, and Try again sends the same save", async () => {
+    const refusal = "capability_not_held: \"pipelinesAISettingsSave\" requires execute on app:pipelines/settings";
+    const cluster = mount(null, { refuse: refusal });
     render(<PipelinesAISettings />);
     const { review } = await switches();
     await click(review);
     const notice = (await screen.findByText("The change was not saved.")).closest(".os-notice") as HTMLElement;
-    expect(within(notice).getByText("capability_not_held: write globalVariable")).toBeTruthy();
+    expect(within(notice).getByText(refusal)).toBeTruthy();
     expect(review.checked).toBe(false);
     await waitFor(() => expect(review.disabled).toBe(false));
 

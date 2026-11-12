@@ -14,6 +14,7 @@ package app
 // integrations/ with an init() that calls memql.RegisterPlugin, then add a
 // blank import in a build-tagged file alongside this one.
 import (
+	_ "github.com/znasllc-io/memql/integrations/accounts"
 	_ "github.com/znasllc-io/memql/integrations/agents"
 	_ "github.com/znasllc-io/memql/integrations/auth"
 	_ "github.com/znasllc-io/memql/integrations/azureblob"

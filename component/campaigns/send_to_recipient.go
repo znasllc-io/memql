@@ -320,6 +320,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		// The footer names the identity's display name, then the organization
 		// (F6). It used to name the synthetic campaign, which is the subject.
 		SenderName: identity.SendAs.FromName,
+		Order:      opts.orderRecipient != nil,
 	}
 	// A rule is not a persisted campaign. Keep its ID out of the links'
 	// campaign relationship; the signed organization and digest identify the opt-out.

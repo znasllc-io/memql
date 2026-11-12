@@ -245,15 +245,23 @@ func (f *accessFakeStore) regenerate(codeID, newCode string) {
 	f.codes[codeID].Generation++
 }
 
-// accessFakeEngine records every call and the identity it ran under.
+// accessFakeEngine records every call, the identity it ran under and the account
+// its context stated it acts in.
 type accessFakeEngine struct {
 	calls   []string
 	actors  []string
 	origins []auth.CallOrigin
-	result  any
-	err     error
-	during  func()
+	// accounts holds auth.CallAccountFromContext for each call, and
+	// accessNoAccount for a call whose context stated none.
+	accounts []string
+	result   any
+	err      error
+	during   func()
 }
+
+// accessNoAccount is what the fake engine notes for a call that stated no
+// account, so "none" is asserted as a value rather than read off an empty string.
+const accessNoAccount = "(none)"
 
 func (e *accessFakeEngine) Execute(ctx context.Context, query string) (any, error) {
 	e.calls = append(e.calls, query)
@@ -263,6 +271,11 @@ func (e *accessFakeEngine) Execute(ctx context.Context, query string) (any, erro
 	}
 	e.actors = append(e.actors, actor)
 	e.origins = append(e.origins, auth.OriginFromContext(ctx))
+	account, stated := auth.CallAccountFromContext(ctx)
+	if !stated {
+		account = accessNoAccount
+	}
+	e.accounts = append(e.accounts, account)
 	if e.during != nil {
 		e.during()
 	}
@@ -1089,6 +1102,56 @@ func TestCallRunsTheDeclaredConstructUnderTheOwner(t *testing.T) {
 	// whoever holds a code.
 	if rig.engine.origins[0] == auth.OriginInternal {
 		t.Fatal("the construct ran with internal origin")
+	}
+	// IN THE SITE'S ACCOUNT. The owner is borrowed, and the account they belong to
+	// need not be the one this deployable does: resolved from the actor, a row a
+	// visitor's call writes would be recorded in whichever account the owner
+	// joined first.
+	if rig.engine.accounts[0] != accessTestAccount {
+		t.Fatalf("the construct acts in account %q, want the site's (%s)", rig.engine.accounts[0], accessTestAccount)
+	}
+}
+
+// THE SITE'S ACCOUNT IS THE ROW'S, in whichever spelling the read hands it back,
+// and a site with none states none. A code copies its site's account and opens
+// nothing when the two differ (codeOpensSite), so each case moves the code's copy
+// with the site's.
+func TestACallActsInTheSitesAccount(t *testing.T) {
+	for name, tc := range map[string]struct{ stored, want string }{
+		"bare":                   {accessTestAccount, accessTestAccount},
+		"canonical":              {"v1:accounts:account:" + accessTestAccount, accessTestAccount},
+		"a site with no account": {"", accessNoAccount},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newAccessRig(t)
+			rig.store.site.AccountID = tc.stored
+			rig.store.codes[accessTestCodeID].AccountID = tc.stored
+			token := rig.open()
+
+			rec := rig.call(token, "deskNote", map[string]any{"noteId": "n1", "title": "Hello"})
+
+			if rec.Code != http.StatusOK || len(rig.engine.calls) != 1 {
+				t.Fatalf("the call answered %d and reached the engine %d times: %s", rec.Code, len(rig.engine.calls), rec.Body.String())
+			}
+			if rig.engine.accounts[0] != tc.want {
+				t.Fatalf("the construct acts in account %q, want %q", rig.engine.accounts[0], tc.want)
+			}
+		})
+	}
+}
+
+// NOTHING A VISITOR SENDS NAMES THE ACCOUNT. It is the row's, read as the cluster
+// and held to the stamp; an argument of that name is an undeclared one and is
+// refused before anything runs, like any other.
+func TestAVisitorCannotNameTheAccount(t *testing.T) {
+	rig := newAccessRig(t)
+	token := rig.open()
+
+	rec := rig.call(token, "deskNote", map[string]any{"noteId": "n1", "title": "Hello", "accountId": "acct-somebody-elses"})
+
+	assertAccessReply(t, rec, http.StatusBadRequest, `{"error":"invalid_args"}`)
+	if len(rig.engine.calls) != 0 {
+		t.Fatalf("a call naming an account reached the engine: %v", rig.engine.calls)
 	}
 }
 

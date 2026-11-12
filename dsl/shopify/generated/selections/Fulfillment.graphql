@@ -9,6 +9,7 @@ query ShopifyFetchFulfillment($id: ID!) {
     __typename
     ... on Fulfillment {
       id
+      updatedAt
       deliveredAt
       displayStatus
       estimatedDeliveryAt

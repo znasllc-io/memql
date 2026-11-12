@@ -471,3 +471,21 @@ func TestStagingFailureLogsNoCallerData(t *testing.T) {
 		t.Errorf("the log must carry the requestID, which is the safe correlation handle:\n%s", buf.String())
 	}
 }
+
+// THE RECEIPT IS STAGED TO THE NANOSECOND. A delete topic's tombstone is
+// timed by it and ordered against reads timed to the nanosecond; staged at
+// whole seconds, a delete received in the same second as a read just before
+// it was older than that read, and refused.
+func TestTheReceiptIsStagedToTheNanosecond(t *testing.T) {
+	eng := &fakeEngine{}
+	h := testHandler(t, eng, hexSource())
+	h.now = func() time.Time { return time.Unix(1_700_000_000, 700_000_000).UTC() }
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, signedRequest(t, `{"event":"order.created"}`))
+	if len(eng.calls) != 1 {
+		t.Fatalf("expected one staging call, got %d", len(eng.calls))
+	}
+	if want := `receivedAt: "2023-11-14T22:13:20.7Z"`; !strings.Contains(eng.calls[0], want) {
+		t.Errorf("the staging call does not carry %s:\n%s", want, eng.calls[0])
+	}
+}

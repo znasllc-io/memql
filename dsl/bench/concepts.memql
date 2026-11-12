@@ -34,6 +34,7 @@
 /// allowlist saying exactly that.
 @displayCard(primary="tier", secondary="verdict", tertiary="commit", status="verdict")
 @rowAuthz(clusterOwner, rankFloor="admin")
+@belongsTo(cluster)
 concept run {
   tier               enum("ci", "live")!  @description("Which lane produced this run. `ci` replays from recorded responses and reaches no provider; `live` runs against real providers. The two measure different things about the same metric names, which is why a figure from one is never compared against a figure from the other -- component/proving/figure.Compare returns `undecidable` across a tier boundary rather than pretending.")
   commit             string!  @description("Short SHA the suite ran at. Required on every figure: a number nobody can reproduce is a number nobody should act on.")
@@ -63,6 +64,7 @@ concept run {
 /// offered a bare number is a schema somebody would eventually publish from.
 @displayCard(primary="metric", secondary="arm", tertiary="scenarioId", status="arm")
 @rowAuthz(clusterOwner, rankFloor="admin")
+@belongsTo(cluster)
 concept sample {
   benchRunId    string!  @description("v1:bench:run.id this sample belongs to.")
   family        enum("amortizedCost", "reliability", "recovery", "durability", "learningCurve", "speed", "governance")!  @description("Which of the six families this belongs to, or `governance` -- which is carried by the same rows and is deliberately NOT a family in the epic's sense: it is pass-or-fail and has no statistics, so there is no governance score to be tempted by.")

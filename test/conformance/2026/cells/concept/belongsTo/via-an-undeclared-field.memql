@@ -1,0 +1,6 @@
+/// A reply on a ticket, following a field the concept does not declare.
+@belongsTo(account, via="ticketId")
+concept ticketReply {
+  accountId  string
+  body       string
+}

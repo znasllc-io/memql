@@ -14,7 +14,9 @@
 @version("1.0.0")
 @description("A minimal greeting record contributed by the reference pack (examples/referencepack). Demonstrates that a pack's embedded .memql concept lands in the engine's concept registry alongside the core domains.")
 @displayCard(primary="message", secondary="ownerUserId", tertiary="createdAt")
+@belongsTo(account)
 concept greeting {
   ownerUserId  string  @required  @description("v1:identity:user.id of the owner. Per-row authz key (owned tier); stamped from actor.userId by the writing mutation.")
   message      string  @required  @description("The greeting text, e.g. \"hello from the reference pack\".")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }

@@ -38,15 +38,17 @@ package email
 //
 // # Why the settings are separable from the secrets at all
 //
-// This is the whole reason "configurable from the portal" is possible without
-// a secret-writing path. The lazy resolver (lazy.go) already reads the
-// non-secret half of the configuration out of v1:platform:globalVariable
-// rows -- sender address, from-name, tenant id, client id, SMTP host / port /
-// username -- and only the client secret and the SMTP password out of
-// v1:platform:globalSecret. Those rows are ordinary graph state with an
-// existing mutation (setGlobalVariable), so the portal can edit the non-secret
-// half through a path that already exists, and the secret half stays where it
-// is: sealed, write-only from the operator's shell.
+// The lazy resolver (lazy.go) reads the non-secret half of the configuration
+// out of v1:platform:globalVariable rows -- sender address, from-name, tenant
+// id, client id, SMTP host / port / username -- and only the client secret and
+// the SMTP password out of v1:platform:globalSecret. So the two halves are
+// reported apart here: a setting's value can be shown, a credential's never.
+//
+// Both halves are WRITTEN the same way, though, and not by the browser: a
+// surface saves through integrationConfigure (configure.go), which authorizes
+// the caller, derives the row from the manifest and writes it server-side. A
+// variable's row, like a secret's, is written by a cluster owner or by server
+// code stamped for the write.
 
 import (
 	"context"
@@ -119,8 +121,8 @@ type Setting struct {
 	// Reason is the sentence to render under the field when something is
 	// wrong with it, and empty when nothing is.
 	Reason string `json:"reason,omitempty"`
-	// Editable reports whether the portal may write this setting through
-	// setGlobalVariable. False for a value the resolver only ever reads out
+	// Editable reports whether a surface may save this setting through
+	// integrationConfigure. False for a value the resolver only ever reads out
 	// of the environment.
 	Editable bool `json:"editable"`
 }

@@ -298,6 +298,21 @@ seed capability cap-developer-read-app-accounts-logs { roleSlug: "developer"  ve
 @description("admin: open the logs section of the accounts app -- reproduces the OS registry floor min admin (memql#5300).")
 seed capability cap-admin-read-app-accounts-logs { roleSlug: "admin"  verb: "read"  resourceType: "app:accounts/logs"  predefined: true }
 
+// ---- app:accounts/inventory -- what an account holds, and how the assignment of existing rows is going ----
+//
+// OWNER AND DEVELOPER, as the account row-ownership design record (2026-11-12,
+// section H) decides: the inventory counts every row an account holds across
+// every concept, and the status names the rows the assignment job could not
+// place. Both are the cluster's operators' view of the data, not something an
+// admin managing a client needs. An `execute` part, like every named part of
+// this registry: no section requires it as a `read`, so the OS draws the two
+// panels only to a holder, and the builtins accountInventory and
+// accountAssignmentStatus (dsl/accounts/builtins.memql) refuse anyone else.
+@description("owner: the inventory part of the Accounts app -- the rows an account holds by concept, and the progress of assigning existing rows to accounts.")
+seed capability cap-owner-execute-app-accounts-inventory { roleSlug: "owner"  verb: "execute"  resourceType: "app:accounts/inventory"  predefined: true }
+@description("developer: the inventory part of the Accounts app -- the rows an account holds by concept, and the progress of assigning existing rows to accounts.")
+seed capability cap-developer-execute-app-accounts-inventory { roleSlug: "developer"  verb: "execute"  resourceType: "app:accounts/inventory"  predefined: true }
+
 // ---- app:email (registry floor: no floor) ----
 @description("owner: open the email app.")
 seed capability cap-owner-read-app-email { roleSlug: "owner" verb: "read" resourceType: "app:email" predefined: true }
@@ -869,3 +884,17 @@ seed capability cap-developer-execute-app-pipelines-channels { roleSlug: "develo
 seed capability cap-owner-execute-app-pipelines-requests { roleSlug: "owner" verb: "execute" resourceType: "app:pipelines/requests" predefined: true }
 @description("developer: execute the app:pipelines/requests surface; this grants no repository authority.")
 seed capability cap-developer-execute-app-pipelines-requests { roleSlug: "developer" verb: "execute" resourceType: "app:pipelines/requests" predefined: true }
+
+// ---- app:pipelines/settings -- save the installation-wide switches of Pipelines > Settings ----
+//
+// OWNER AND DEVELOPER, the two roles the app is for. The switches (the two AI
+// switches, the weekly security scans) are configuration variables, and a
+// variable's row is written by a cluster owner or by server code that has
+// authorized its caller: pipelinesAISettingsSave and
+// pipelinesSecuritySettingsSave are that server code, and this part is what
+// they ask for. A part of its own, so turning a model on for every pipeline can
+// be granted or withheld apart from connecting one or re-running a run.
+@description("owner: the settings part of the Pipelines app -- save the installation-wide AI and weekly security scan switches; this grants no repository authority.")
+seed capability cap-owner-execute-app-pipelines-settings { roleSlug: "owner" verb: "execute" resourceType: "app:pipelines/settings" predefined: true }
+@description("developer: the settings part of the Pipelines app -- save the installation-wide AI and weekly security scan switches; this grants no repository authority.")
+seed capability cap-developer-execute-app-pipelines-settings { roleSlug: "developer" verb: "execute" resourceType: "app:pipelines/settings" predefined: true }

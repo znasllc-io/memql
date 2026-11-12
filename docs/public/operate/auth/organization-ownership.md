@@ -61,6 +61,95 @@ recipients or using its mailbox. Scheduled and queued sends recheck the relevant
 resources and current write permission when they execute. Reading campaign
 content alone does not authorize a test message or a single-recipient send.
 
+## Which account a row belongs to
+
+Every concept says whether its rows belong to an account or to the cluster, with
+one `@belongsTo` declaration
+([language reference](../../language/memql.md#which-account-a-row-belongs-to)).
+A row of an account-scoped concept records its account in `accountId`.
+
+The resources in the table above that require an organization state it
+themselves, and the rules on this page decide it. For every other account-scoped
+concept (a note, a to-do, a file, a goal and its runs, a mirrored store record)
+the engine records the account when the row is created, from the first of these
+that gives one:
+
+1. **The row it belongs to.** A run takes its goal's account and a file version
+   its file's. A row whose parent has no account yet is written without one and
+   follows the parent later.
+2. **The account the call is acting in.** For a person this is `self` for a
+   cluster operator, and the account of an account-scoped role for somebody who
+   holds one. Anybody else acts in the account they belong to: the oldest
+   membership of a person who belongs to several, and `self` for a person who
+   belongs to none. An automation acts in the account of the row that triggered
+   it, when the engine recorded that row's account or the rules on this page
+   checked it, and a shopper form or an access-code visit acts in the account
+   of its site.
+3. **Nothing.** A seed, a scheduled sweep and any other write with no account
+   behind it are written without one. On a concept declared `shared`, such a row
+   is the cluster's own and is offered to every account.
+
+The engine does not change a recorded account on an update. A write in which a
+person names the account themselves, outside a mutation or through one that
+accepts it, is refused when it names a different account from the stored one
+(`account_change_refused`), an account the caller does not belong to
+(`organization_forbidden`), or an account other than its parent's
+(`account_mismatch`). Two things a person supplies are held to the
+accounts that person belongs to without a refusal, and the row is recorded
+under their own account instead: a tag in a list of accounts, and the parent
+named by a write made outside a mutation.
+
+Recording an account does not change who can read a row. Access is still
+decided by row ownership, the sharing a concept declares, and capabilities.
+
+### Turning it on
+
+The release that records accounts also adds the `accountId` field to the
+concepts that gain one, and an engine older than that release refuses to update
+a row carrying a field it does not know. So the engine waits: each node
+advertises that it knows the field, and recording starts, once for the whole
+cluster, when every node that has not stopped has done so. Nothing turns it off
+again.
+
+Set `MEMQL_ACCOUNT_STAMPING_ACTIVATE=false` on every node to hold it
+([environment variables](../env-vars.md)). While it is held on every node, no
+row is changed and the previous release can still be restored. Until recording
+starts, an account named in a write to one of these concepts is dropped, so
+nothing can store one ahead of the checks above. Release the hold
+by removing the setting and rolling the nodes. Take a database backup first:
+from then on rows carry the field, and the release cannot be rolled back to one
+that predates it.
+
+### Rows written before
+
+Once recording is on, a background job gives existing rows their account. It
+changes the newest version of a row in place, publishes no event, and runs no
+automation. It assigns parents before the rows that follow them, in small
+batches, and resumes where it stopped after a restart. In order, a row takes:
+
+1. an account its own list of accounts names, where the concept has one: among
+   the listed accounts its owner may use (any, for a cluster operator), the
+   owner's own when it is listed, otherwise the first;
+2. its parent's account;
+3. for a connected store, the account of the site bound to it;
+4. its owner's account, by the rule for a person above;
+5. `self`, or no account on a `shared` concept.
+
+Two cases are never guessed. A store bound by sites of two different accounts,
+and a Library row its retention rules do not allow to change, are listed for an
+operator to decide and stay without an account until then.
+
+The job rewrites one version of every row it assigns. Check the database has
+room for that before releasing a hold on a large installation.
+
+### What an account holds
+
+In MemQL OS, an account's page in Accounts lists what the account holds, by
+area, with the number of rows and the size of its files. The primary account's
+page also shows how the assignment of existing rows is going and anything left
+for a decision. Both need the `execute app:accounts/inventory` capability,
+which owners and developers hold.
+
 ## Membership and delegated management
 
 Every account, including `self`, has a deterministic account group. Creation and

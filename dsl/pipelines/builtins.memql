@@ -332,6 +332,35 @@ builtin pipelinesChannelAllow {
   allowed    bool!   @description("True allows notification stages to use this channel; false revokes that permission.")
 }
 
+/// Save both installation-wide pipeline AI switches, the ones Pipelines > Settings > AI shows.
+/// The switches are one configuration variable (MEMQL_PIPELINES_AI), and a variable's row is
+/// written by a cluster owner or by server code that has authorized its caller, so the page
+/// saves through this and never through setGlobalVariable. The caller sends the two switches
+/// and nothing else: the variable's name, its row and the stored JSON are the engine's.
+@sdk
+@executor("integration.pipelines.aiSettingsSave")
+@args(profile="object")
+@requiresCapability("execute", "app:pipelines/settings")
+@description("Save both pipeline AI switches for every pipeline in this installation. Each switch allows its feature; a pipeline's installed policy still decides whether it is used. The engine reads the switches when a review or a diagnosis would start, so a save applies to the next one and never to one already running. Both switches are written together, so send both. Answers {setting, review, diagnosis}.")
+builtin pipelinesAISettingsSave {
+  review     bool!  @description("AI review of pull requests: after every check of a pull request passes, a model reviews the change and a rejection fails the run's check.")
+  diagnosis  bool!  @description("AI diagnosis of failed runs: the installed maintenance policy may open an AI analysis goal for a run's first failure.")
+}
+
+/// Save the installation-wide weekly security scans switch, the one Pipelines > Settings >
+/// Security shows (MEMQL_PIPELINES_SECURITY). Server-side for the reason
+/// pipelinesAISettingsSave gives. A setting carried by more than one active row is refused:
+/// the engine reads that as no consent, and a save that changed one row would leave the
+/// other deciding.
+@sdk
+@executor("integration.pipelines.securitySettingsSave")
+@args(profile="object")
+@requiresCapability("execute", "app:pipelines/settings")
+@description("Save the weekly security scans switch for every pipeline in this installation. On allows scheduled stages marked as security scans and their remediation goals; off prevents new scan runs and new goals, while runs and goals already in progress may finish. Answers {setting, enabled}.")
+builtin pipelinesSecuritySettingsSave {
+  enabled  bool!  @description("True allows weekly security scans; false stops new ones.")
+}
+
 /// Publish independent review evidence for this exact native merge group.
 /// Available only inside an operator-bound claimed pipeline workflow; accepts
 /// no caller-selected repository, members, verdict, or check identity.

@@ -33,6 +33,7 @@ use work.concepts.{ run }
 /// pause, rewrite or take one over.
 @displayCard(primary="title", secondary="status", tertiary="responsibilityId", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account)
 concept bundle {
   ownerUserId         string! @description("v1:identity:user.id who owns this bundle (the Responsibility author). Per-row authz owner; server-stamped from actor.userId at create, never caller-supplied. Authored automations run under THIS user's authz envelope -- no privilege escalation.")
   responsibilityId    string  @description("v1:planner:responsibility.id this bundle was compiled from, when authored via the Responsibility intake path. Empty for bundles authored directly. Links the human-facing standing directive to its compiled artifact.")
@@ -48,6 +49,7 @@ concept bundle {
   failureReason       string  @description("Populated when status transitions to failed -- which gate failed and why (e.g. 'gate1: spec specX references unknown field payload.foo'). Cleared on a successful re-author.")
   activatedAt         datetime @description("When the bundle was approved + registered into the authored runtime (status -> active). Null until activated.")
   retiredAt           datetime @description("When the bundle was retired. Null unless status=retired.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="responsibilityId", target=responsibility, direction="outgoing")
@@ -64,6 +66,7 @@ concept bundle {
 /// key lives in catalogKey (#957). Owned rows, like the bundle they belong to (memql#6022).
 @displayCard(primary="name", secondary="kind", tertiary="bundleId", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account, via="bundleId")
 concept construct {
   ownerUserId       string! @description("v1:identity:user.id who owns this construct (same as the parent bundle's owner). Per-row authz owner; server-stamped from actor.userId at create.")
   bundleId          string! @description("v1:authoring:bundle.id this construct belongs to. Every authored construct is a member of exactly one bundle.")
@@ -118,6 +121,7 @@ concept construct {
   reuse                enum("reusable", "goalSpecific", "accountSpecific") @description("What the EVIDENCE says about this construct (design D24): reusable once at least the feedbackPolicy's reusableAfterSignatures DISTINCT goal signatures of its owner have used it; accountSpecific when every use is tied to one account; goalSpecific otherwise. Written only by the reuse sweep (recordConstructReuse). ABSENT until the sweep has looked. The label a person sees is reuseOverride.label when that is set, and this otherwise.")
   reuseEvidence        object @description("What the sweep counted (D24): {goalSignatures: [string] -- the distinct signatures that used it, at most 20 kept --, signatureCount: int, accountIds: [string], uses: int, decidedAt}. Replaced whole on every sweep that changed it.")
   reuseOverride        object @description("A person's own label (D24): {label: reusable|goalSpecific|accountSpecific or \"\" to follow the evidence, by, at, version}. version counts every override written, so a later label is a new version rather than a rewrite. The evidence keeps counting underneath and is never changed by this.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="bundleId", target=bundle, direction="outgoing")
@@ -133,6 +137,7 @@ concept construct {
 /// cataloged construct re-validates its dependents.
 @displayCard(primary="fromConstruct", secondary="toName", tertiary="bundleId", status="toSource")
 @rowAuthz(owner="ownerUserId")
+@belongsTo(account, via="bundleId")
 concept dependencyEdge {
   ownerUserId    string! @description("v1:identity:user.id who owns this edge (the bundle owner). Per-row authz owner; server-stamped from actor.userId.")
   bundleId       string! @description("v1:authoring:bundle.id whose construct declares this dependency.")
@@ -141,6 +146,7 @@ concept dependencyEdge {
   toName         string! @description("Name of the depended-on construct.")
   toKind         enum("automation", "logic", "shape", "spec", "trait", "policy", "mutation", "query", "prompt")! @description("Kind of the depended-on construct.")
   toSource       enum("core", "catalog", "bundle")! @description("Where the dependency resolves under the precedence core -> owner-catalog -> bundle-local. Edges to `catalog` are the ones impact analysis cares about when a shared construct changes.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="bundleId", target=bundle, direction="outgoing")
@@ -181,6 +187,7 @@ concept dependencyEdge {
 /// Settings is always the row the ladder applies; Go's normalization of a non-positive value to its
 /// default exists only for the row that is absent.
 @rowAuthz(clusterOwner, rankFloor="reader")
+@belongsTo(cluster)
 concept ladderPolicy {
   shadowMatches         int!  @minimum(1)  @description("m: consecutive shadow comparisons that must match the app before promotion to canary is proposed. The seeded value is 5.")
   distinctBindings      int!  @minimum(1)  @description("k: how many DISTINCT bindings each free parameter needs across that streak. m matches on one binding prove nothing about the parameter, so the proposal waits for k. The seeded value is 2.")

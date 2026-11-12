@@ -39,6 +39,7 @@ use worker.concepts.{ registration }
 /// what gives an operator console the cross-user view a plain owner= tier has no bypass for.
 @displayCard(primary="title", secondary="summary", tertiary="updatedAt", status="lens")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountIds")
+@belongsTo(account, via="sourceConceptRef")
 concept artifact {
   ownerUserId      string!  @description("v1:identity:user.id that owns this index row. Stamped from actor.userId at create time and re-stamped on every update so ownership can never be reassigned. The load-bearing per-row authz key.")
 
@@ -84,6 +85,7 @@ concept artifact {
 
   producedBy       object  @description("Which intelligence produced this item, when an app session did (epic memql#5391, design D9): {app, model, effort, sessionId}. `app` is one of the engine's closed runnable ids; `model` and `effort` are what the app REPORTED -- empty when it said nothing, never the value that was requested, because a report copied from a request records as measured something nobody measured; `sessionId` is the v1:worker:appSession row the run is readable at. ABSENT MEANS NO SESSION PRODUCED THIS, which is every file a person uploaded, and the absence is the answer rather than a stamp naming no app: 'nobody delegated this' and 'an app produced it and reported nothing' are different facts and must not share a spelling. A lifted construct's source reads this stamp, which is what lets its provenance say 'recorded from claude-code, model X, effort Y, session Z'.")
   updatedAt        datetime  @description("RFC3339 watermark of the most recent change to the backing item, stamped on every index write. The default Library sort key (most-recent first).")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="agentId", target=agent, direction="outgoing")
@@ -115,6 +117,7 @@ concept artifact {
 /// actor.userId on every write and reads gate on `row.ownerUserId == actor.userId`.
 @displayCard(primary="title", secondary="summary", tertiary="createdAt")
 @rowAuthz(owner="ownerUserId")
+@belongsTo(account)
 concept generatedOutput {
   ownerUserId       string!  @serverSet  @description("v1:identity:user.id this output belongs to (the user the producing agent / plan acts for). Stamped from actor.userId on every write and never accepted as a mutation arg; the producing integrations run the mutation under that user's actor (auth.ContextWithUserActor), which binds the AccessContext actor.userId resolves from. @serverSet turns 'never accepted as a mutation arg' from a convention into a LOAD-TIME rejection: a mutation that writes this field from caller args now fails to load (memql#3175). The raw insert() surface bypasses accept/stamp entirely and is covered separately -- the engine server-stamps this field from the @rowAuthz declaration above on every non-template write (memql#3059 / #3175). The per-row authz key for Library reads.")
   title             string!  @description("Display title for the output, e.g. 'Ten most beautiful birds'.")
@@ -129,6 +132,7 @@ concept generatedOutput {
   producedByAgentId string  @description("v1:agents:agent.id that produced this output, when an agent emitted it.")
   producedByWorkerId   string  @description("v1:worker:registration.id of the worker MACHINE that produced this output, when source=computer_use. Empty otherwise. Copied onto the artifact index row.")
   producedByWorkerName string  @description("Human-readable name of the producing worker machine, copied from the worker registration at production time. Empty unless producedByWorkerId is set.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="attachmentId", target=attachment, direction="outgoing")
@@ -184,6 +188,7 @@ concept generatedOutput {
 /// `row.ownerUserId == actor.userId`.
 @displayCard(primary="documentId", secondary="note", tertiary="createdAt")
 @rowAuthz(owner="ownerUserId")
+@belongsTo(account, via="documentId")
 concept documentVersion {
   branchRootArtifactId string @description("Original artifact of a branch family, recorded only on the immutable initial snapshot.")
   branchParentArtifactId string @description("Artifact whose exact version was copied to create this branch; a provenance link, not authorship.")
@@ -219,6 +224,7 @@ concept documentVersion {
   // is a reserved row intrinsic. The shapes project it via row.createdAt
   // and the append mutation stamps it via `createdAt: now` in the
   // insert block.
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="attachmentId", target=attachment, direction="outgoing")
@@ -243,6 +249,7 @@ concept documentVersion {
 /// gate on `row.ownerUserId == actor.userId`.
 @displayCard(primary="title", secondary="content", tertiary="createdAt")
 @rowAuthz(owner="ownerUserId")
+@belongsTo(account)
 concept memory {
   ownerUserId       string!  @description("v1:identity:user.id this memory is about / belongs to. Stamped from actor.userId at create time. The per-row authz key.")
   title             string!  @description("Short label for the memory, e.g. 'Prefers concise replies'. The primary display line.")
@@ -251,6 +258,7 @@ concept memory {
   kind              enum("fact", "preference", "instruction", "episodic", "other")!  @description("Memory flavor. fact = stable truth about the user; preference = how they like things done; instruction = a standing directive; episodic = a specific past interaction worth recalling.")
   agentId           string  @description("v1:agents:agent.id that formed / owns this memory, when agent-scoped. Empty for user-global memories.")
   partitionId           string  @description("Optional product scope tag. The engine derives nothing from it.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="agentId", target=agent, direction="outgoing")
@@ -297,6 +305,7 @@ concept memory {
 // its blobUrl and its sha256, which say nothing a model can write from.
 @composable(as="file", fields="name,mimeType,format,summary,createdAt", list="libraryFilesForOwner")
 @rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account)
 concept file {
   /// Work run that produced this file, when it was materialized by an automation.
   producedByRunId string
@@ -352,6 +361,7 @@ concept file {
   imageProvenance object @description("Verified image acquisition receipt: revision request, source and licensing metadata, or actual generation model and prompt. Written only by the native image storage operation.")
   producedBy   object  @description("Which intelligence produced this item, when an app session did (epic memql#5391, design D9): {app, model, effort, sessionId}. `app` is one of the engine's closed runnable ids; `model` and `effort` are what the app REPORTED -- empty when it said nothing, never the value that was requested, because a report copied from a request records as measured something nobody measured; `sessionId` is the v1:worker:appSession row the run is readable at. ABSENT MEANS NO SESSION PRODUCED THIS, which is every file a person uploaded, and the absence is the answer rather than a stamp naming no app: 'nobody delegated this' and 'an app produced it and reported nothing' are different facts and must not share a spelling. A lifted construct's source reads this stamp, which is what lets its provenance say 'recorded from claude-code, model X, effort Y, session Z'.")
   linkCheckedAt  datetime  @description("RFC3339 moment linkState was last established. Displayed CONTINUOUSLY beside the state rather than fingerprinted into the arrival cue: a verify lane touches this on a schedule for every watched file forever, so naming it as news would strobe the Files list on the sweep's own cycle (the heartbeat rule, clients/os/README.md). It is what makes a stale `synced` honest -- 'synced, checked 3 weeks ago' is a different claim from 'synced', and only one of them is one this row can make.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="references", field="producedByRunId", target=run, direction="outgoing")
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
@@ -394,6 +404,7 @@ concept file {
 /// owner -- matching the file it is a version of.
 @displayCard(primary="name", secondary="summary", tertiary="uploadedAt")
 @rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account, via="fileId")
 concept fileVersion {
   ownerUserId  string!  @serverSet  @description("v1:identity:user.id that owns the file this version belongs to. Stamped from actor.userId, never accepted as a mutation arg (@serverSet makes that a load-time rejection, memql#3175); the supersede runs under the uploading caller's actor, and the target file was already resolved under that same actor, so the stamped owner is the file's owner by construction. The load-bearing per-row authz key -- it is duplicated here rather than resolved through fileId because the history read admits or denies each version row in its own right, with no join.")
 
@@ -424,6 +435,7 @@ concept fileVersion {
   uploadedAt   datetime!  @description("RFC3339 moment THIS version's bytes arrived, copied from the head's versionUploadedAt at snapshot time. Declared rather than read from the row intrinsic createdAt because createdAt on this row is when the SNAPSHOT was written -- which is the supersede moment, not the upload moment. The two are different facts and the history panel shows both.")
 
   supersededAt  datetime!  @description("RFC3339 moment this version stopped being the head, because a newer one landed. Equal to the row's own createdAt in practice; declared because a reader must not have to know that, and because a future re-write of this row for any reason would move the intrinsic and not this.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="fileId", target=file, direction="outgoing")
@@ -458,6 +470,7 @@ concept fileVersion {
 /// composite tier (memql#4312), the same as the file it belongs to -- ownerUserId is stamped from
 /// actor.userId, never accepted from caller args.
 @rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account, via="fileId")
 concept fileChunk {
   ownerUserId  string!  @serverSet  @description("v1:identity:user.id that owns the file this chunk came from. Stamped from actor.userId: the analysis pass runs under the file owner's actor, so the chunk lands owned by the same person as its file. @serverSet makes 'never a caller arg' a load-time rejection (memql#3175). The per-row authz key -- it is duplicated here rather than resolved through fileId because a similarity read matches CHUNKS first and must be able to admit or deny each one without a join.")
 
@@ -470,6 +483,7 @@ concept fileChunk {
   text         string!  @description("The chunk body -- the extracted text this row's embedding was computed from. About 1800 characters, the knowledge splitter's default. This is what a similarity match is actually matching against, and what a citation would quote.")
 
   tokenCount   int  @description("Approximate token count of text, recorded when the embedding was computed. Advisory: it drives batching and cost accounting, and nothing reads it as a correctness signal.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="fileId", target=file, direction="outgoing")
@@ -506,6 +520,7 @@ concept fileChunk {
 /// the owner, or a cluster owner -- matching artifact and file, whose rows it organizes.
 @displayCard(primary="name", tertiary="createdAt")
 @rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account)
 concept folder {
   ownerUserId     string!  @serverSet  @description("v1:identity:user.id that owns this folder. Stamped from actor.userId on every write and never accepted as a mutation arg (@serverSet makes that a load-time rejection, memql#3175); the engine also server-stamps it from the @rowAuthz declaration on the raw insert() surface. The load-bearing per-row authz key -- a folder is the owner's the way their files are, and confers no permissions of its own.")
 
@@ -516,6 +531,7 @@ concept folder {
   archived        bool  @description("Soft delete, set by archiveLibraryFolder. libraryFolders filters it with the null-safe `archived != true` spelling, so rows written before any future field change keep listing. The client-driven archive walk (design B5) archives a folder's CONTENTS first, children-first, then the folder -- idempotent under interruption, and re-running archives the remainder. Removing a desk shortcut is NEVER this write.")
 
   deleted         bool  @description("The disposition of a folder whose subtree held NO FILE AT ALL, at any depth, when somebody archived it -- set by deleteLibraryFolder, which the archive walk calls instead of archiveLibraryFolder for exactly those folders. Every folder read carries the isNotDeleted trait (the null-safe `deleted != true` spelling, for the reason archived above records), so a deleted folder leaves the tree, the Bin and a by-id resolve together: there is no surface it still appears on. NOT A FLAVOUR OF archived, and the difference is not cosmetic -- nothing archived this row. Archiving exists so a person can get something back, and an empty folder tree has nothing in it to get back, so an archived one would be a line in the Bin that answers no question anybody asked. NO RESTORE PATH RESURRECTS IT: restoreLibraryFolder clears archived and deliberately never touches this field, because a row every surface excludes is a row nothing can ask to have back.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="parentFolderId", target=folder, direction="outgoing")
@@ -562,6 +578,7 @@ concept folder {
 /// Azure's ~7-day clock and no sweeper exists. Per-row authz: the composite tier (memql#4312),
 /// matching every other Library concept.
 @rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account)
 concept uploadSession {
   backupWatchId string @description("The explicitly authorized directory backup for this upload; absent means an independent upload.")
   ownerUserId  string!  @serverSet  @description("v1:identity:user.id that opened this session. Stamped from actor.userId on every write and never accepted as a mutation arg (@serverSet, memql#3175). The per-row authz key, and therefore the WHOLE per-chunk authorization: chunk PUTs resolve the session under the caller's actor, and a session that is not theirs does not resolve.")
@@ -593,6 +610,7 @@ concept uploadSession {
   chunkSize    int!  @description("Chunk size in bytes -- 16 MiB, a constant of the design (D8), not a knob. Recorded on the row so complete and resume compute ceil(size / chunkSize) from what THIS session was opened with, even if the constant ever changes between releases.")
 
   status       enum("open", "completed", "abandoned")!  @description("Lifecycle. open = accepting chunks; completed = the block list committed and the file row exists (terminal); abandoned = declared but unwritten in v1 -- a stopped session needs no write to be abandoned, its staging garbage-collects server-side on Azure's ~7-day clock, and the row itself is inert either way. Stamped 'open' at init and never accepted from args: a caller who could re-open a completed session could drive complete twice.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="folderId", target=folder, direction="outgoing")
@@ -648,6 +666,7 @@ concept uploadSession {
 /// being able to rewrite it.
 @displayCard(primary="localPath", secondary="workerId", tertiary="lastSweepAt", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account)
 concept watchedFolder {
   mode enum("retain", "sync") @description("Absent or retain preserves deleted originals in Files. Sync moves confirmed local deletions to the Bin; Bin storage remains charged until purged.")
   intervalMinutes int @minimum(5) @maximum(525600) @description("Minutes between directory backups. Absent preserves the existing five-minute schedule. Missed runs are combined into one run when the machine is available.")
@@ -676,6 +695,7 @@ concept watchedFolder {
   filesSeen     int  @description("How many files the last sweep found beneath localPath, after exclusions. The origin's own count, which nothing else in the graph can answer -- the Library knows what ARRIVED, and the difference between the two is exactly what a person wants to see when a backup is behind. Absent on a watch nothing has reported yet.")
 
   bytesSeen     int  @description("Total size in bytes of those files at the origin. Same reason and same absence as filesSeen; rendered alongside it so 'watching 1,284 files, 42.1 GB' is one sentence about the origin rather than a claim about the copy.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="workerId", target=registration, direction="outgoing")
@@ -686,6 +706,7 @@ concept watchedFolder {
 /// which first rechecks access to the current artifact and its backing document.
 @displayCard(primary="body")
 @rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account, via="artifactId")
 concept documentComment {
   removed bool @description("A deleted annotation stays as an idempotency and authorship receipt but is excluded from document feedback and notes.")
   attachments []object @description("Authorized image and Markdown references pinned to their saved revision and content hash.")
@@ -698,6 +719,7 @@ concept documentComment {
   anchor       object!
   body         string!
   requestId    string!
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="artifactId", target=artifact, direction="outgoing")
   @relationship(type="references", field="authorUserId", target=user, direction="outgoing")

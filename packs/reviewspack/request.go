@@ -372,7 +372,14 @@ func (p *Provider) issueRequest(ctx context.Context, args map[string]any, _ int)
 	if read == nil {
 		read = p.engineOrders
 	}
-	order, lines, handleOf, err := read(ctx, storeID, orderGid)
+	// THE CLUSTER'S OPERATORS ONLY (the builtin's description). Mirrored orders are cluster-owner tier, so an operator
+	// below owner could not read the order its link is for; an operator reads it as the daily ask does. Anyone else who
+	// holds the reviews part (a client's moderator) still reads it as themselves, and is refused.
+	readCtx := ctx
+	if ac, ok := auth.AccessFromContext(ctx); ok && auth.IsClusterOperator(ac.Role) {
+		readCtx = auth.ContextWithSystemActor(ctx, dueActor)
+	}
+	order, lines, handleOf, err := read(readCtx, storeID, orderGid)
 	if err != nil {
 		return nil, err
 	}

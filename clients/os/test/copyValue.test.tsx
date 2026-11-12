@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { CopyValue, Fact, Facts } from "../src/kit";
+import { renderBeforeEffects } from "./renderBeforeEffects";
 
 const CSS = readFileSync(join(__dirname, "..", "src", "styles", "index.css"), "utf8");
 
@@ -60,6 +61,22 @@ it("ignores a copy finishing after the live value changes", async () => {
   await act(async () => finish());
   expect(screen.queryByRole("button", { name: "Copied Hostname" })).toBeNull();
   expect(screen.getByText("new.local")).toBeTruthy();
+});
+
+// A list that arrives from a read can take a copy before its mount effects run
+// (renderBeforeEffects); the release wizard's run list did, and its test lost
+// the confirmation at random. Nothing that runs later may take it back.
+it("keeps the confirmation of a copy that finishes before its mount effects run", async () => {
+  let finish!: () => void;
+  clipboard(vi.fn(() => new Promise<void>(resolve => { finish = resolve; })));
+  const view = await renderBeforeEffects(<CopyValue label="Revision" value="0123abc" presentation="row" />);
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "Copy Revision" }));
+    await act(async () => finish());
+    expect(screen.getByRole("button", { name: "Copied Revision" })).toBeTruthy();
+  } finally {
+    view.unmount();
+  }
 });
 
 it("offers no copy action for an unreported fact", () => {

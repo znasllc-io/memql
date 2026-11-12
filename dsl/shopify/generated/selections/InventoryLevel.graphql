@@ -9,6 +9,7 @@ query ShopifyFetchInventoryLevel($id: ID!) {
     __typename
     ... on InventoryLevel {
       id
+      updatedAt
       canDeactivate
       deactivationAlert
       isActive

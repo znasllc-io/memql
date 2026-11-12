@@ -38,13 +38,24 @@ func MirrorRowID(storeID, gid string) string {
 }
 
 // mapObject turns one fetched object into a MirrorWrite plus the writes for
-// every child materialised under it.
+// every child materialised under it. Each carries its store as its
+// partition, so the runtime records its health on that store's row.
 //
 // parentGID is the GID of the row that carried this one, empty at the top.
 // Children come AFTER their parent in the returned slice, so a caller that
 // applies in order never writes a child whose parentGid names a row that is
 // not there yet.
+//
+// `at` is when the origin was read for it, on this engine's clock: the
+// row's syncedAt, and its version only where the origin gives none
+// (originVersion).
 func mapObject(spec *generated.TypeSpec, storeID string, obj map[string]any, parentGID string, at time.Time) []memqlsync.MirrorWrite {
+	return mapObjectUnder(spec, storeID, obj, parentGID, "", at)
+}
+
+// mapObjectUnder is mapObject for an object whose parent's origin version is
+// known: a child that publishes no version of its own carries its parent's.
+func mapObjectUnder(spec *generated.TypeSpec, storeID string, obj map[string]any, parentGID, parentVersion string, at time.Time) []memqlsync.MirrorWrite {
 	if spec == nil || obj == nil {
 		return nil
 	}
@@ -52,13 +63,15 @@ func mapObject(spec *generated.TypeSpec, storeID string, obj map[string]any, par
 	if gid == "" {
 		return nil
 	}
-	version := originVersion(spec, obj, at)
+	version, source := originVersion(spec, obj, parentVersion, at)
 	payload := map[string]any{
-		"storeId":   storeID,
-		"gid":       gid,
-		"updatedAt": version,
-		"syncedAt":  at.UTC().Format(time.RFC3339),
-		"deleted":   false,
+		"storeId":       storeID,
+		"gid":           gid,
+		"updatedAt":     version,
+		"versionSource": source,
+		"syncedAt":      memqlsync.ReadTime(at),
+		"versionReadAt": memqlsync.ReadTime(at),
+		"deleted":       false,
 	}
 	// A directly-fetched child resolves its own lineage: the selection
 	// carries the parent as a reference, so a webhook naming a fulfilment
@@ -109,19 +122,30 @@ func mapObject(spec *generated.TypeSpec, storeID string, obj map[string]any, par
 	}
 
 	out := []memqlsync.MirrorWrite{{
-		Concept: generated.ConceptID(spec.Concept),
-		RowId:   MirrorRowID(storeID, gid),
-		Payload: payload,
-		Version: version,
+		Concept:   generated.ConceptID(spec.Concept),
+		RowId:     MirrorRowID(storeID, gid),
+		Payload:   payload,
+		Version:   version,
+		Partition: storeID,
 	}}
 
+	// The children carry this row's version where they have none of their
+	// own -- an order's lines move with the order's updatedAt -- and only
+	// when it is the origin's and one that MOVES: a createdAt never does, so
+	// a return's reverse fulfilment orders would hold it for good, and a read
+	// time handed down would stamp the children with a clock the origin never
+	// used.
+	inherited := ""
+	if source == memqlsync.VersionFromOrigin && spec.VersionField == "updatedAt" {
+		inherited = version
+	}
 	for _, child := range spec.Children {
 		childSpec := generated.Types[child.Concept]
 		if childSpec == nil {
 			continue
 		}
 		for _, item := range childItems(obj, child) {
-			out = append(out, mapObject(childSpec, storeID, item, gid, at)...)
+			out = append(out, mapObjectUnder(childSpec, storeID, item, gid, inherited, at)...)
 		}
 	}
 	return out
@@ -190,24 +214,34 @@ func idlessChildOf(parent *generated.TypeSpec, obj map[string]any) *generated.Ty
 	return match
 }
 
-// tombstone is the write that marks a mirrored row gone at the origin.
+// tombstone is the write that marks a mirrored row gone at the origin, on
+// its store's partition.
 //
 // It carries the identity fields and nothing else: the runtime's
 // retirement path adds the `deleted` marker, and re-sending a payload we
 // no longer have a source for would be inventing the row's contents at
 // the moment we learned it does not exist.
+//
+// `at` is when the origin was read for it, on this engine's clock: the
+// delete's receipt, the fetch that found nothing, or the start of the listing
+// that did not name it. Its standing is that read time, not a version
+// (memqlsync.Refuses): it retires a row the origin was last read for before
+// `at`, and is itself refused by a row read after it.
 func tombstone(conceptName, storeID, gid string, at time.Time) memqlsync.MirrorWrite {
 	return memqlsync.MirrorWrite{
 		Concept: generated.ConceptID(conceptName),
 		RowId:   MirrorRowID(storeID, gid),
 		Payload: map[string]any{
-			"storeId":   storeID,
-			"gid":       gid,
-			"updatedAt": at.UTC().Format(time.RFC3339),
-			"syncedAt":  at.UTC().Format(time.RFC3339),
+			"storeId":       storeID,
+			"gid":           gid,
+			"updatedAt":     at.UTC().Format(time.RFC3339),
+			"versionSource": memqlsync.VersionFromRead,
+			"syncedAt":      memqlsync.ReadTime(at),
+			"versionReadAt": memqlsync.ReadTime(at),
 		},
-		Version: at.UTC().Format(time.RFC3339),
-		Retire:  true,
+		Version:   at.UTC().Format(time.RFC3339),
+		Retire:    true,
+		Partition: storeID,
 	}
 }
 
@@ -259,27 +293,33 @@ func objectsOf(v any) []map[string]any {
 	return out
 }
 
-// originVersion reads the origin's own version of a row.
+// originVersion reads the origin's own version of a row, and says where it
+// came from (memqlsync.VersionFromOrigin or VersionFromRead).
 //
-// A type carrying neither updatedAt nor createdAt falls back to the FETCH
-// TIME, which makes that domain last-write-wins. That is a property of
-// Shopify's schema rather than a choice -- about forty of the sixty-five
-// mirrored types publish no version at all -- and it is recorded on the
-// TypeSpec so an operator reading the runbook learns which domains have
-// it rather than discovering it from a surprising overwrite.
+// The type's VersionField, which every generated document selects for that
+// purpose (emit_graphql.go); else, for a child with none of its own, its
+// parent's origin updatedAt (mapObjectUnder); else the READ TIME, which makes that domain
+// last-write-wins. That last is a property of Shopify's schema rather than a
+// choice -- about forty of the sixty-five mirrored types publish no version
+// at all -- and it is recorded on the TypeSpec so an operator reading the
+// runbook learns which domains have it rather than discovering it from a
+// surprising overwrite.
 //
 // The value is a STRING because that is what the contract's version guard
 // compares. RFC3339 in UTC compares lexicographically in chronological
 // order, which is what makes a string comparison correct here.
-func originVersion(spec *generated.TypeSpec, obj map[string]any, at time.Time) string {
+func originVersion(spec *generated.TypeSpec, obj map[string]any, parentVersion string, at time.Time) (string, string) {
 	if spec.VersionField != "" {
 		if raw, _ := obj[spec.VersionField].(string); raw != "" {
 			if t, err := time.Parse(time.RFC3339, raw); err == nil {
-				return t.UTC().Format(time.RFC3339)
+				return t.UTC().Format(time.RFC3339), memqlsync.VersionFromOrigin
 			}
 		}
 	}
-	return at.UTC().Format(time.RFC3339)
+	if parentVersion != "" {
+		return parentVersion, memqlsync.VersionFromOrigin
+	}
+	return at.UTC().Format(time.RFC3339), memqlsync.VersionFromRead
 }
 
 // normalizeJSON converts json.Number back to a plain number so the renderer

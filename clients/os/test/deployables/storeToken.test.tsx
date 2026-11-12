@@ -16,7 +16,7 @@ import { siteFromRow } from "../../src/apps/deployables/rows";
 import { ShopifyStorePanel } from "../../src/apps/deployables/store/ShopifyStorePanel";
 import { StorePanel } from "../../src/apps/deployables/store/StorePanel";
 import { storeConnection, storeFromRow } from "../../src/apps/deployables/store/rows";
-import { click, fakeConnection, previewReadinessRow, rowsResult, SHOP, siteRow, type as typeInto, withSession } from "./harness";
+import { click, fakeConnection, previewReadinessRow, rowsResult, SHOP, siteRow, storeVerdictRow, type as typeInto, withSession } from "./harness";
 
 // WHETHER A STORE IS CONNECTED, AS THE ENGINE ANSWERS IT (memql#5626, #5638).
 //
@@ -94,6 +94,8 @@ describe("the Store page", () => {
     const connection = fakeConnection({
       sites: [site],
       stores: [store as never],
+      // A connected store is then said by its verdict (U7).
+      storeVerdict: { [String(store["id"])]: storeVerdictRow({ storeId: String(store["id"]) }) },
       previewReadiness: {
         "site-shop": previewReadinessRow({
           siteId: "site-shop",
@@ -123,10 +125,10 @@ describe("the Store page", () => {
     return screen.getByText(text).closest(".os-notice") as HTMLElement;
   }
 
-  it("calls a store connected when the engine says its token is served", async () => {
+  it("says a store whose token is served is recording, by its verdict", async () => {
     open(OWN, { production: true });
     const row = await productionRow();
-    await waitFor(() => expect(row.textContent).toContain("Connected"));
+    await waitFor(() => expect(row.textContent).toContain("Recording"));
     expect(screen.queryByText(/registered under a different name/)).toBeNull();
   });
 

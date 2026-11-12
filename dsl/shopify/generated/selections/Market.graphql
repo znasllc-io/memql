@@ -21,6 +21,7 @@ query ShopifyFetchMarket($id: ID!) {
       type
       status
       webPresences(first: 25) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           alternateLocales { locale marketWebPresences { id } name primary published }
@@ -51,6 +52,26 @@ query ShopifyListMarket($first: Int!, $after: String, $query: String) {
       type
       status
       webPresences(first: 25) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          alternateLocales { locale marketWebPresences { id } name primary published }
+          defaultLocale { locale marketWebPresences { id } name primary published }
+          domain { host id localization { alternateLocales country defaultLocale } marketWebPresence { id } sslEnabled url }
+          rootUrls { locale url }
+          subfolderSuffix
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageMarketWebPresences($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Market {
+      webPresences(first: 25, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           alternateLocales { locale marketWebPresences { id } name primary published }

@@ -158,6 +158,29 @@ func seedSyncState(t *testing.T, eng *memql.MemQLEngine, db *sql.DB) {
 	})
 }
 
+// The mirrored rows seedMirrorRows writes.
+const (
+	authorityMirrorProductGid = "gid://shopify/Product/5574"
+	authorityMirrorOrderGid   = "gid://shopify/Order/5574"
+)
+
+// seedMirrorRows writes a product and an order with one line through the
+// connector's own mirror write path, so the mirror reads have a row to find.
+func seedMirrorRows(t *testing.T, eng *memql.MemQLEngine, db *sql.DB) {
+	t.Helper()
+	for _, concept := range []string{"product", "order", "orderLineItem"} {
+		cleanMirrored(t, db, concept)
+	}
+	c := &Connector{engine: eng}
+	writeMirrored(t, c, "product", map[string]any{
+		"id": authorityMirrorProductGid, "title": "Authority probe", "updatedAt": "2026-09-01T00:00:00Z",
+	})
+	writeMirrored(t, c, "order", map[string]any{
+		"id": authorityMirrorOrderGid, "name": "#5574", "updatedAt": "2026-09-01T00:00:00Z",
+		"lineItems": map[string]any{"nodes": []any{map[string]any{"id": "gid://shopify/LineItem/5574", "name": "probe line", "quantity": 1}}},
+	})
+}
+
 // seedCtx is what the FIXTURES are written under: a cluster owner plus
 // internal origin, because several of these mutations are @serverOnly and a
 // @serverOnly construct is refused to a client whatever actor it carries.
@@ -246,6 +269,9 @@ func TestConnectorReadsItsOwnStoreList(t *testing.T) {
 //   - a READ is REFUSED. Row admission answers the connector branch from the
 //     concept's own declaration, and none of these concepts names a connector.
 //     This is the half memql#5574 filed, and it is the half that was broken.
+//   - a read of the connector's OWN MIRROR answers no rows. The concept
+//     names this connector, so row admission lets it in; the generated
+//     read's actor.isClusterOwner conjunct is what turns it away (F10).
 //   - a WRITE is NOT refused, and this is the one a reader gets wrong. The
 //     row-authz write guard consults its ESCAPES first, and escape #1 is
 //     INTERNAL ORIGIN -- which `connectorContext` has always stamped, for the
@@ -272,6 +298,7 @@ func TestTheConnectorsOwnConceptsAreReadableAndWritable(t *testing.T) {
 	seedStore(t, eng, db)
 	seedComplianceJob(t, eng, db)
 	seedSyncState(t, eng, db)
+	seedMirrorRows(t, eng, db)
 	ctx := context.Background()
 	now := time.Now().UTC().Format(time.RFC3339)
 	bare := authorityTestStoreId
@@ -285,6 +312,10 @@ func TestTheConnectorsOwnConceptsAreReadableAndWritable(t *testing.T) {
 		// guard's first escape is internal origin, which connectorContext
 		// stamps, so the escape answers before admission is consulted.
 		internalOriginEscape = "internal-origin escape"
+		// notClusterOwner: the concept names this connector, so row
+		// admission lets it in, and the read's own actor.isClusterOwner
+		// conjunct answers no rows -- the mirror it wrote reads empty (F10).
+		notClusterOwner = "not a cluster owner"
 	)
 
 	cases := []struct {
@@ -310,10 +341,33 @@ func TestTheConnectorsOwnConceptsAreReadableAndWritable(t *testing.T) {
 			connector: refused,
 		},
 		{
-			what:      "the deployment's sync health -- what the capability surface reports on",
+			what:      "the deployment's sync health, read by id -- what the capability surface reports on",
 			concept:   "v1:platform:syncState",
-			call:      renderCall("syncStatesAll", map[string]any{"connector": ConnectorName}),
+			call:      renderCall("syncStateById", map[string]any{"stateId": "dbtest-authority-syncstate"}),
 			connector: refused,
+		},
+		// The three mirror reads below state the ENGINE's answer per
+		// identity; they call the engine directly, so they stay green if a
+		// production read moves back to connectorContext.
+		// connector_reads_db_test.go drives the connector's own methods and
+		// is what fails then.
+		{
+			what:      "the store's mirrored rows -- the full re-list's tombstone pass and the product capability by handle",
+			concept:   "v1:shopify:product",
+			call:      renderCall("shopifyProductForStore", map[string]any{"storeId": bare}),
+			connector: notClusterOwner,
+		},
+		{
+			what:      "one mirrored row by gid -- the product capability",
+			concept:   "v1:shopify:product",
+			call:      renderCall("shopifyProductByGid", map[string]any{"storeId": bare, "gid": authorityMirrorProductGid}),
+			connector: notClusterOwner,
+		},
+		{
+			what:      "an order's mirrored lines -- the analytics walk",
+			concept:   "v1:shopify:orderLineItem",
+			call:      renderCall("lineItemsForOrder", map[string]any{"storeId": bare, "orderGid": authorityMirrorOrderGid}),
+			connector: notClusterOwner,
 		},
 		{
 			what:    "the store's health stamp -- written after every subscription reconcile",
@@ -370,7 +424,7 @@ func TestTheConnectorsOwnConceptsAreReadableAndWritable(t *testing.T) {
 							"the escape set changed or the actor lost a surface again; both are "+
 							"things to read, not to relax")
 				}
-			case refused:
+			case refused, notClusterOwner:
 				if err == nil {
 					if got := len(memql.MaterializeRows(res)); got != 0 {
 						t.Errorf("a bare connector actor read %d rows of %s; want 0 -- %s",

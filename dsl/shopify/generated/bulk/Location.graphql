@@ -9,6 +9,7 @@ query ShopifyBulkLocation($query: String) {
     edges {
       node {
         id
+        updatedAt
         activatable
         address { address1 address2 city country countryCode formatted latitude longitude phone province provinceCode zip }
         addressVerified

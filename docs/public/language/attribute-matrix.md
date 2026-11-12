@@ -59,6 +59,7 @@ One table per family of constructs, and one for the fields a construct declares.
 | Annotation | concept | shape | spec and trait | seed |
 |---|---|---|---|---|
 | [`@actor`](#actor) |  | flag |  |  |
+| [`@belongsTo`](#belongsto) | keywords |  |  |  |
 | [`@composable`](#composable) | flag or keywords |  |  |  |
 | [`@description`](#description) | string | string | string | string |
 | [`@disabled`](#disabled) |  |  | flag | flag |
@@ -223,6 +224,7 @@ The fields of its `args` block take the annotations under [args field](#args-fie
 
 | Annotation | Written as | Example |
 |---|---|---|
+| [`@belongsTo`](#belongsto) | keyword arguments | `@belongsTo(cluster)` |
 | [`@composable`](#composable) | no arguments or keyword arguments | `@composable(as="ticket", fields="title,status", list="openTickets")` |
 | [`@description`](#description) | one string | `@description("A support ticket raised by a customer.")` |
 | [`@displayCard`](#displaycard) | keyword arguments | `@displayCard(primary="title", secondary="status")` |
@@ -539,6 +541,25 @@ The field is filled by the runtime rather than the model: it is kept out of the 
 | [provider](#provider) | no arguments | `@base` |
 
 Mark a vendor-level base provider (auth + type only).
+
+### @belongsTo
+
+| On | Written as | Example |
+|---|---|---|
+| [concept](#concept) | keyword arguments | `@belongsTo(cluster)` |
+
+`@belongsTo` takes these keys. A key of type `flag` is written bare, and every other as `key=value`.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `account` | flag | The concept's rows belong to an account, recorded in the `accountId` field. |
+| `cluster` | flag | The concept is cluster-wide: its rows are never inside an account. |
+| `shared` | flag | Beside account: a row with no account is provided by the cluster to every account. |
+| `stated` | flag | Beside account: the concept's own writers state the account; the engine never fills it in or refuses a change to it. |
+| `via` | string | Beside account: the payload field naming the parent row whose account this row takes. |
+| `parent` | string | Beside via: the concept id the field names, when the field carries no @relationship. |
+
+Declares WHICH ACCOUNT this concept's rows belong to, or that they belong to none. @belongsTo(account): every row belongs to one account, recorded in its `accountId` field, which the engine fills in at write time. @belongsTo(account, via="&lt;field>"): the row takes the account of the row that field names, and parent="&lt;concept id>" says which concept that is when the field carries no @relationship. @belongsTo(account, shared): as the first, and a row with no account is provided by the cluster to every account (a seeded skill beside one a person wrote). @belongsTo(account, stated): the concept's own mutations state the account, so the engine never fills the field in and never refuses a change to it. @belongsTo(cluster): the concept is cluster-wide and never inside an account. It RECORDS and opens a row to nobody: sharing a row with an account's members is @rowAuthz(account=...). A concept in a mounted product bundle that declares nothing is reported at load, and its rows count as cluster-wide until it does.
 
 ### @cache
 

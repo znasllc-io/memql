@@ -19,6 +19,7 @@ use identity.concepts.{ user }
 // prompt handed a full contact card spends its context on an address it
 // will not write.
 @composable(as="client", fields="name,domain,primaryContactEmail,status", list="clientAccountsAll")
+@belongsTo(cluster)
 concept account {
   ownerUserId  string   @description("The real principal owning this organization, stamped from the creator. The synthetic self seed starts unowned; successful ownership setup persists the verified claiming user. Group membership grants authorized organization access separately from this attribution.")
   name         string!  @description("The client's name, as a person would say it. REQUIRED, and it is the one thing the first-run card insists on (D7) -- an account whose name is a placeholder is a row nobody can pick out of a list. The seeded `self` row gets a starter value rather than a real one precisely so the card has something to ask for; see dsl/accounts/seeds.memql for why that starter is not a lie the app has to detect.")

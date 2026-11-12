@@ -155,6 +155,18 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 			return connectReasonExchangeFailed, keptResult
 		}
 	}
+	// 12a. The store's recording starts here when the connect starts it
+	// afresh: the clock a late check is measured from. A connect that only
+	// widens the grant keeps it. Through its own server-only write, so no
+	// client-callable store write takes it; a failure is logged, and the
+	// verdict then measures from the store's sweeps alone.
+	if startsAfresh(prior, found) {
+		if _, err := c.engine.Execute(opCtx, renderCall("markStoreConnected", map[string]any{
+			"storeId": storeID, "connectedAt": c.now().UTC().Format(time.RFC3339),
+		})); err != nil {
+			c.logger.Warn("shopify: Connect could not record when the store's recording started", "store", storeID, "error", err.Error())
+		}
+	}
 	if promoted && !managed {
 		c.clearPendingApp(opCtx, storeID, state.ClientID, grant.ClientSecret, person)
 	}
@@ -171,6 +183,18 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 			return connectReasonExchangeFailed, result
 		}
 	}
+
+	// 12c. The store's past (U3). The grant is on the row, so what it reaches
+	// is queued for the continuing pass, which reads it a page budget at a
+	// time; nothing here waits on Shopify. Before step 13, so a failed mint
+	// -- which keeps the Admin connection -- still has its backfills queued.
+	written := prior
+	written.ID, written.AdminTokenRef, written.APIVersion, written.ScopesGranted = storeID, adminRef, generated.APIVersion, scopes
+	written.UninstalledAt, written.RedactedAt = "", ""
+	if written.Domain == "" {
+		written.Domain = state.ShopDomain
+	}
+	c.queueConnectBackfills(ctx, prior, found, written)
 
 	// 13. A Storefront token for a store with none -- or with one the store
 	// now refuses (memql#5638). An uninstall may have revoked the token Connect
@@ -222,6 +246,106 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 // connectWebhookTimeout bounds step 15 once it no longer has a request to
 // end with it.
 const connectWebhookTimeout = 10 * time.Minute
+
+// ordersWindowDays is how far back read_orders reaches: without
+// read_all_orders, Shopify lists a store's last sixty days of orders.
+const ordersWindowDays = 60
+
+// queueConnectBackfills is step 12c: the bulk domains a connect makes
+// readable, queued on the store's own partition. prior is the store as it was
+// before the connect (found says whether it existed) and now the store as
+// written.
+//
+// A store that is new, was uninstalled or purged, or had no Admin token has
+// no past in the mirror that can be trusted, so every bulk domain of its
+// connection is queued, in apply order, as a RESTART: a backfill left running
+// when the store went away starts again from an empty cursor rather than
+// resuming at one that counted rows the store no longer gave us. Otherwise
+// only what the new grant
+// unlocked is: the bulk domains the prior grant reached none of the scopes for
+// and the new grant reaches. A domain inside the connection that Shopify
+// refuses all the same is queued too; its refusal comes back as the origin's
+// standing answer and is recorded on its row.
+//
+// When the orders are queued under a grant without read_all_orders, the
+// store's orders begin sixty days before now, and the store's health says so
+// once (ordersFrom): a later connect does not move it. A purge is the
+// exception: it removed every mirrored order, so the mirror's orders now
+// begin sixty days before the reconnect and ordersFrom is stamped anew.
+//
+// It queues through the sync runtime's builtin, under operatorContext: this
+// integration does not import the runtime. A queue that fails is logged and
+// the rest still queue; the boot pass (queueUnstartedBackfills) queues a
+// domain that never got its row.
+func (c *Connector) queueConnectBackfills(ctx context.Context, prior Store, found bool, now Store) {
+	everything := startsAfresh(prior, found)
+	for _, concept := range generated.ApplyOrder {
+		spec := generated.Types[concept]
+		if !bulkDomain(spec) || !domainInConnection(now, spec) {
+			continue
+		}
+		if !everything && (len(scopesMissingFor(prior, spec)) == 0 || len(scopesMissingFor(now, spec)) > 0) {
+			continue
+		}
+		if err := c.queueBackfill(ctx, now.ID, concept, everything); err != nil {
+			c.logger.Warn("shopify: Connect could not queue a backfill; the next boot queues a domain that was never backfilled", "store", now.ID, "concept", concept, "error", err.Error())
+			continue
+		}
+		if concept == "order" {
+			c.stampOrdersFrom(ctx, now, found && prior.RedactedAt != "")
+		}
+	}
+}
+
+// startsAfresh reports whether a connect starts the store's recording from
+// nothing: a new store, one Shopify reported uninstalled or purged, or one
+// with no Admin token. Such a connect queues every domain, restarts a running
+// backfill and stamps connectedAt; any other only widens what is recorded.
+func startsAfresh(prior Store, found bool) bool {
+	return !found || prior.UninstalledAt != "" || prior.RedactedAt != "" || prior.AdminTokenRef == ""
+}
+
+// bulkDomain reports whether a mirrored type is backfilled by a bulk
+// operation: the domains a backfill reads at all (BackfillStore).
+func bulkDomain(spec *generated.TypeSpec) bool {
+	return spec != nil && spec.Bulk && len(spec.BulkOps) > 0
+}
+
+// queueBackfill asks the sync runtime to backfill one domain of one store.
+// restart also resets a backfill left running to the start.
+func (c *Connector) queueBackfill(ctx context.Context, storeID, concept string, restart bool) error {
+	args := map[string]any{
+		"connector":    ConnectorName,
+		"conceptId":    generated.ConceptID(concept),
+		"partitionKey": storeID,
+	}
+	if restart {
+		args["restart"] = true
+	}
+	_, err := c.engine.Execute(operatorContext(ctx), "builtin "+renderCall("datasyncQueueBackfill", args))
+	return err
+}
+
+// stampOrdersFrom records the day the store's mirrored orders begin, when its
+// orders were just queued under a grant without read_all_orders: once, or
+// anew when renew is set (a purge removed the orders it counted from).
+func (c *Connector) stampOrdersFrom(ctx context.Context, store Store, renew bool) {
+	if grantIncludes(store.ScopesGranted)["read_all_orders"] {
+		return
+	}
+	storeID := store.ID
+	fresh, _, err := c.storeByID(memql.ContextWithFreshRead(operatorContext(ctx)), storeID)
+	if err == nil && !renew && mapString(fresh.Health, "ordersFrom") != "" {
+		return
+	}
+	if err == nil {
+		day := c.now().UTC().AddDate(0, 0, -ordersWindowDays).Format("2006-01-02")
+		err = c.recordStoreHealthKey(ctx, storeID, "ordersFrom", day, nil)
+	}
+	if err != nil {
+		c.logger.Warn("shopify: Connect could not record from when the store's orders are mirrored", "store", storeID, "error", err.Error())
+	}
+}
 
 // registerConnectWebhooks is step 15: the store's subscriptions reconciled and
 // the outcome recorded on its health, which the Store panel shows.
@@ -341,6 +465,10 @@ func (c *Connector) markReconnected(ctx, opCtx context.Context, storeID string, 
 	if _, err := c.engine.Execute(opCtx, renderCall("markStoreReconnected", args)); err != nil {
 		return err
 	}
+	// The delivery that carried the uninstall is deleted now that the store
+	// is connected again: the same notice after another uninstall must be a
+	// new delivery (compliance.go, forgetUninstallDelivery).
+	c.forgetUninstallDelivery(ctx, prior)
 	at := c.now().UTC()
 	detail := map[string]any{"shopDomain": prior.Domain}
 	if prior.UninstalledAt != "" {

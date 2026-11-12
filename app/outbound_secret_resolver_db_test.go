@@ -23,8 +23,11 @@ import (
 // no internal origin, no person. That is the half no unit test reaches -- the
 // worker's own tests answer from a fake resolver -- so this reads a
 // globalSecret sealed under MEMQL_MASTER_KEY through the real resolver as that
-// actor. A row tier added to v1:platform:globalSecret that shut the actor out
-// would otherwise show up as every secret target failing at run time.
+// actor. v1:platform:globalSecret declares the cluster-owner tier, and the
+// resolver's lookup runs as the deployment whatever context it was handed
+// (component/memql engine_variables.go, secretReadContext); a change to either
+// that shut this caller out would otherwise show up as every secret target
+// failing at run time.
 //
 // It also pins the two answers the worker fails a row on instead of retrying
 // it -- nobody stored the secret, and it does not decrypt -- against the

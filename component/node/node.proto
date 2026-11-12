@@ -385,6 +385,29 @@ message ForwardedAuthority {
   string first_name = 13;
   string last_name = 14;
   string role_test_session_id = 15; // bounded session, rechecked on the receiver
+
+  // The account the forwarded call acts in, as the BARE id ("acme", never
+  // "v1:accounts:account:acme"), or empty when the sending node stated none.
+  //
+  // A third kind of field, neither of the two above. It is not an authorization
+  // input: VerifyForwardedAuthority does not read it, and nothing admits or
+  // refuses a caller by it. It is not provenance about a person. It says which
+  // account a row this call writes is recorded in when neither the row's parent
+  // nor the write itself says so, and the receiver binds it under its own
+  // context key (auth.ContextWithCallAccount), never onto the AccessContext.
+  //
+  // It is on the wire because the receiving node cannot always work it out
+  // again. An automation's run acts in the account of the row that triggered
+  // it, and a shopper form in its site's; the principal those run as names a
+  // different account or none, and the fact that says otherwise stays on the
+  // node where the call started.
+  //
+  // Empty is a value: the receiver then resolves the account from the
+  // principal above, by the same rules over the same database. A node that
+  // predates this field sends none and ignores one it is sent, so during a
+  // rolling update a forward between the two releases is resolved on the
+  // receiver, as every forward was before.
+  string account_id = 16;
 }
 
 enum ForwardedPrincipalKind {

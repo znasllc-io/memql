@@ -133,6 +133,17 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 		}
 	}
 
+	// Same late pass, same reason: `@belongsTo(account, ...)` records the
+	// account in a field of the concept and `via=` names another, and the
+	// property set only exists now. It runs AFTER the row-authz pass because
+	// one of its checks reads that declaration too (a concept that shares its
+	// rows with an account is not cluster-wide), and a mistyped `account=`
+	// there is the refusal an author should meet first: it names the field
+	// that is wrong, where this one could only say the two disagree.
+	if err := validateBelongsTo(conceptName, parsed.belongsTo, parsed.rowAuthz, parsed.properties); err != nil {
+		return nil, err
+	}
+
 	if err := validateRetentionStore(conceptName, parsed.retention); err != nil {
 		return nil, err
 	}
@@ -160,6 +171,7 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 		ServerWritten: parsed.serverWritten,
 		Origin:        parsed.origin,
 		MirroredTo:    parsed.mirroredTo,
+		BelongsTo:     parsed.belongsTo,
 	}, nil
 }
 
@@ -323,6 +335,137 @@ func describeAccountFieldType(p parsedProperty) string {
 	return p.typeName
 }
 
+// validateBelongsTo checks the half of a `@belongsTo(...)` declaration that
+// only the property set, and the concept's other declarations, can answer
+// (design record docs/superpowers/specs/2026-11-12-account-row-ownership-design.md).
+// parser.ParseBelongsTo has already decided which combinations of KEYS mean
+// something; what is left is whether the concept those keys were written on can
+// carry what they say.
+//
+// THREE CHECKS, each with its own stable code, because each is a different
+// thing to fix:
+//
+//   - belongs_to_field: an account form records the account in a field named
+//     `accountId`, typed `string`. The name is fixed (parser.BelongsToAccountField)
+//     so that a reader of "whose row is this" -- the stamp, the assignment of
+//     existing rows, the inventory, later export -- needs no per-concept
+//     knowledge, and that only holds if every account-scoped concept really
+//     declares it. The type is checked for the reason the account grant's is:
+//     one row belongs to ONE account, and a reader that grouped by a list or an
+//     object would count the row under none of them or under a map key.
+//
+//     It applies to EVERY account form, `stated` included. A stated concept's
+//     own writers fill the field instead of the engine, but the field is read
+//     the same way whoever wrote it, so it has to be there to read.
+//
+//   - belongs_to_via_unknown: `via` names the field holding the id of the row
+//     whose account this row takes, and a name the concept does not declare
+//     is a field no row ever carries, so no write would find a parent. That
+//     failure is silent in the worst direction: the write does not fail, it
+//     falls through to the next source, and the row lands in the caller's
+//     account instead of its parent's -- which is a row filed under the wrong
+//     account, found only when somebody exports the right one.
+//
+//   - belongs_to_sharing_mismatch: `@rowAuthz(..., account="<field>")` opens a
+//     concept's rows to an account's members, so those rows are inside
+//     accounts. Declaring the same concept cluster-wide says they are not, and
+//     the two readers would then disagree about the same row: the row gate
+//     would show it to one account's people while the inventory and export
+//     said it belongs to nobody.
+//
+// A CLUSTER-WIDE concept may carry a field named `accountId` of any type and
+// any meaning (an entitlement's is a user id). The declaration, not the field's
+// name, is what makes a field the row's account, which is why no reader goes
+// looking for `accountId` on a concept that did not declare an account form.
+//
+// Whether a `via` chain is SOUND -- its parent concept exists, is not
+// cluster-wide, and the chain does not loop -- needs every concept and is
+// checked at the engine's load (component/memql/belongs_to.go). Whether the
+// `via` field carries a relationship is deliberately not checked at all: a
+// field holding canonical ids of several concepts (an index row's reference)
+// carries none, and the parent is resolved from the id itself at write time.
+func validateBelongsTo(conceptName string, decl *parser.BelongsToDecl, rowAuthz *parser.RowAuthzDecl, props []parsedProperty) error {
+	if decl == nil {
+		return nil
+	}
+	written := parser.FormatBelongsTo(*decl)
+
+	if !decl.AccountScoped() {
+		if rowAuthz != nil {
+			if field := strings.TrimSpace(rowAuthz.Account); field != "" {
+				return parser.NewBelongsToError(parser.CodeBelongsToSharingMismatch,
+					"concept %q declares %s and @%s(..., account=%q). The account grant opens a row to the "+
+						"members of the account its %q field names, so this concept's rows are inside accounts; "+
+						"declaring it cluster-wide says they are inside none, and the two would then disagree "+
+						"about the same row. Declare an account form -- @%s(account), or @%s(account, stated) "+
+						"when the concept's own mutations name the account -- or drop account= from @%s if the "+
+						"rows really are cluster-wide",
+					conceptName, written, parser.RowAuthzAnnotation, field, field,
+					parser.BelongsToAnnotation, parser.BelongsToAnnotation, parser.RowAuthzAnnotation)
+			}
+		}
+		return nil
+	}
+
+	var account *parsedProperty
+	for i := range props {
+		if props[i].name == parser.BelongsToAccountField {
+			account = &props[i]
+			break
+		}
+	}
+	if account == nil {
+		return parser.NewBelongsToError(parser.CodeBelongsToField,
+			"%s on concept %q records the account in a field named `%s`, and the concept declares none "+
+				"(declared: %s). Add `%s string` to the concept, or declare @%s(cluster) if its rows are "+
+				"never inside an account",
+			written, conceptName, parser.BelongsToAccountField, declaredPropertyNames(props),
+			parser.BelongsToAccountField, parser.BelongsToAnnotation)
+	}
+	if account.typeName != "string" {
+		return parser.NewBelongsToError(parser.CodeBelongsToField,
+			"%s on concept %q records the account in `%s`, which the concept declares as %s. One row "+
+				"belongs to one account, named by its id, so the field is a string: declare `%s string`. "+
+				"A concept that also takes a list of accounts keeps that list in a field of its own "+
+				"beside this one",
+			written, conceptName, parser.BelongsToAccountField, describeAccountFieldType(*account),
+			parser.BelongsToAccountField)
+	}
+
+	if decl.Via != "" {
+		declared := false
+		for _, p := range props {
+			if p.name == decl.Via {
+				declared = true
+				break
+			}
+		}
+		if !declared {
+			return parser.NewBelongsToError(parser.CodeBelongsToViaUnknown,
+				"%s on concept %q names a field the concept does not declare (declared: %s). `via` is "+
+					"the field of THIS concept holding the id of the row whose account a row takes -- "+
+					"`via=\"goalId\"` on a run whose `goalId` names its goal",
+				written, conceptName, declaredPropertyNames(props))
+		}
+	}
+	return nil
+}
+
+// declaredPropertyNames renders a concept's top-level field names, sorted, for
+// a refusal that has to show an author what they could have meant. An empty
+// concept reads "none" rather than an empty pair of parentheses.
+func declaredPropertyNames(props []parsedProperty) string {
+	if len(props) == 0 {
+		return "none"
+	}
+	names := make([]string, 0, len(props))
+	for _, p := range props {
+		names = append(names, p.name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
 // validateDisplayCard checks that every slot in the parsed card
 // names a real top-level property on the concept and that the
 // referenced property has a displayable type (string / enum / bool /
@@ -455,6 +598,11 @@ type parsedConcept struct {
 	serverWritten bool
 	origin        string
 	mirroredTo    []string
+
+	// belongsTo is the optional `@belongsTo(...)` declaration. Like rowAuthz,
+	// the fields it names are checked against the property list AFTER the
+	// property pass. Nil means the concept declared nothing.
+	belongsTo *parser.BelongsToDecl
 }
 
 // parsedProperty mirrors the legacy internal type so the JSON-Schema
@@ -1265,6 +1413,21 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 			return err
 		}
 		c.mirroredTo = targets
+	case parser.BelongsToAnnotation:
+		// @belongsTo(account | cluster, ...) -- which account this
+		//   concept's rows belong to, or that they belong to none (design
+		//   record 2026-11-12 account row ownership). Read through
+		//   parser.ParseBelongsTo, which decides which combinations of keys
+		//   mean something. Whether the fields it names exist is checked in
+		//   BuildConceptFromDecl AFTER the property pass, for the reason
+		//   @rowAuthz's field check is: attributes are folded before
+		//   properties on this path. Declared at most once (the registry's
+		//   repeat rule).
+		decl, err := parser.ParseBelongsTo(attr)
+		if err != nil {
+			return err
+		}
+		c.belongsTo = decl
 	}
 	return nil
 }

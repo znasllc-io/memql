@@ -1,6 +1,7 @@
 package shopify
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -91,8 +92,16 @@ func checkBulkDownloadURL(raw string) error {
 	if trimmed == "" {
 		return fmt.Errorf("shopify: bulk download URL is empty")
 	}
+	// No part of the link ever reaches an error: it opens a store's whole
+	// export for a week, and this error is the backfill's, which is kept on
+	// the domain's health row and drawn in MemQL OS. url.Parse's own error
+	// quotes the whole link, so only its cause is kept.
 	u, err := url.Parse(trimmed)
 	if err != nil {
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
 		return fmt.Errorf("shopify: bulk download URL is unparseable: %w", err)
 	}
 	if !strings.EqualFold(u.Scheme, "https") {
@@ -106,7 +115,7 @@ func checkBulkDownloadURL(raw string) error {
 		return fmt.Errorf("shopify: bulk download URL has no host")
 	}
 	if ip := net.ParseIP(host); ip != nil && !isPublicIP(ip) {
-		return fmt.Errorf("shopify: bulk download URL points at the non-public address %s", host)
+		return fmt.Errorf("shopify: bulk download URL points at a non-public address")
 	}
 	return nil
 }

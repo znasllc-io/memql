@@ -1109,6 +1109,20 @@ func (s *streamSession) forwardedPrincipal() (auth.ForwardedPrincipal, error) {
 	if err != nil {
 		return auth.ForwardedPrincipal{}, err
 	}
+	// THE ACCOUNT IS THE ONE THING HERE THAT DOES COME OFF THE STREAM CONTEXT,
+	// and the rule above does not reach it. That rule is about what a rotation
+	// swaps: class, ceiling, expiry and the actor all change mid-stream, and the
+	// context cannot follow. The account the call acts in is not a property of
+	// the credential and no rotation touches it. It is stated on the context by
+	// whoever opened this stream's work (auth.ContextWithCallAccount), and the
+	// case that matters is the SECOND hop: a session a worker runs over a
+	// forwarded request has the originating node's account on its context
+	// (BindForwardedContext), and a forward out of that session must carry it
+	// on, or the third node records an account it worked out again.
+	//
+	// A person's own session states none today, so this sends none and the
+	// receiver resolves it from the actor, exactly as before the field existed.
+	authority = authority.WithCallAccount(s.stream.Context())
 	return authority.WithDisplayName(firstName, lastName).Principal(), nil
 }
 

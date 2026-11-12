@@ -2,14 +2,17 @@ package datasync
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"github.com/znasllc-io/memql/core/id"
+	"math/rand/v2"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 )
 
 // store.go -- the engine seam for the sync runtime.
@@ -49,10 +52,18 @@ type Engine interface {
 }
 
 // Store issues the sync domain's named constructs.
-type Store struct{ engine Engine }
+type Store struct {
+	engine Engine
+	// retryWait is the pause before a write that lost its row-version fence
+	// is decided again (PatchSyncState); a test replaces it so it does not
+	// sleep.
+	retryWait func(attempt int)
+}
 
 // NewStore wraps an engine.
-func NewStore(engine Engine) *Store { return &Store{engine: engine} }
+func NewStore(engine Engine) *Store {
+	return &Store{engine: engine, retryWait: func(attempt int) { time.Sleep(retryWaitFor(attempt)) }}
+}
 
 // OutboxEntry is one row of v1:platform:outboxEntry, in the shape the
 // drain worker works with.
@@ -85,10 +96,14 @@ func (e OutboxEntry) Due(now time.Time) bool {
 
 // SyncState is one row of v1:platform:syncState.
 type SyncState struct {
-	ID              string
-	ConceptID       string
-	Connector       string
-	Direction       string
+	ID        string
+	ConceptID string
+	Connector string
+	Direction string
+	// Partition is the tenant of a memqlsync.Partitioned connector this
+	// row reports on, "" for a connector without partitions. Stored as
+	// partitionKey: the engine reserves `partition` as a payload field.
+	Partition       string
 	BackfillCursor  string
 	BackfillStatus  string
 	LastInboundAt   time.Time
@@ -104,11 +119,10 @@ type SyncState struct {
 	// state SyncStateFor hands out for a domain nothing has written yet,
 	// which already carries the id it WOULD have.
 	Stored bool
+	// Version is the stored version's time (row.createdAt), the witness a
+	// partial write is fenced on (PatchSyncState). Zero for no row.
+	Version time.Time
 }
-
-// syncIDs derives the health row ids. Untracked: a hash-only caller keeps
-// no generation history.
-var syncIDs = id.NewUntracked()
 
 // SyncStateID is the deterministic row id for one domain.
 //
@@ -124,8 +138,15 @@ var syncIDs = id.NewUntracked()
 // and a cluster ran for weeks with no health row at all: every domain due
 // on every tick, no cadence honoured, no sweep failure ever shown. The tuple
 // stays readable on the row's own fields.
-func SyncStateID(conceptID, connector, direction string) string {
-	return string(syncIDs.FromString(strings.TrimSpace(conceptID) + "|" + strings.TrimSpace(connector) + "|" + strings.TrimSpace(direction)))
+//
+// A partition (memqlsync.Partitioned) is appended as a FOURTH part, and an
+// empty one appends nothing: every row written before partitions existed
+// keeps the id it always had, and its history stays one timeline.
+//
+// It is memqlsync.StateID, which a connector reading its own health by id
+// derives the same way.
+func SyncStateID(conceptID, connector, direction, partition string) string {
+	return memqlsync.StateID(conceptID, connector, direction, partition)
 }
 
 // PendingOutbox returns the entries one connector still owes delivery
@@ -191,11 +212,18 @@ func (s *Store) MarkDead(ctx context.Context, entryID, lastError string) error {
 // Each field reads as the automation used to hand it over: as stored, untrimmed
 // (the body is what the signature covered), an absent one as "".
 func (s *Store) StagedInboundRequest(ctx context.Context, requestID string) (StagedRequest, bool, error) {
-	rows, err := s.rows(ctx, call("query", "inboundRequestById", arg{"requestId", requestID}))
+	// Read FRESH. The event path's status guard (handleDispatchInbound) is
+	// only as good as this read: a cached `received` version on another node
+	// would dispatch a row the retry pass has claimed.
+	rows, err := s.rows(memql.ContextWithFreshRead(ctx), call("query", "inboundRequestById", arg{"requestId", requestID}))
 	if err != nil || len(rows) == 0 {
 		return StagedRequest{}, false, err
 	}
-	row := rows[0]
+	return stagedFromRow(rows[0], requestID), true, nil
+}
+
+// stagedFromRow reads one inbound request row as the dispatcher works it.
+func stagedFromRow(row map[string]any, requestID string) StagedRequest {
 	return StagedRequest{
 		RequestId:         requestID,
 		Source:            argString(row, "source"),
@@ -204,41 +232,196 @@ func (s *Store) StagedInboundRequest(ctx context.Context, requestID string) (Sta
 		ReceivedAt:        argString(row, "receivedAt"),
 		VerifiedBy:        argString(row, "verifiedBy"),
 		SignatureVerified: boolField(row, "signatureVerified"),
-	}, true, nil
+		Attempts:          intField(row, "attempts"),
+		Status:            argString(row, "status"),
+		LastError:         argString(row, "lastError"),
+		Version:           timeField(row, "createdAt"),
+	}
 }
 
-// SyncStateFor reads one domain's health, or the zero value when the
-// domain has never been written.
-func (s *Store) SyncStateFor(ctx context.Context, conceptID, connector, direction string) (SyncState, error) {
-	rows, err := s.rows(ctx, call("query", "syncStateFor",
-		arg{"conceptId", conceptID}, arg{"connector", connector}, arg{"direction", direction}))
+// stagedFromRows reads a page of inbound request rows, each under its own id.
+func stagedFromRows(rows []map[string]any) []StagedRequest {
+	out := make([]StagedRequest, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, stagedFromRow(row, stringField(row, "id")))
+	}
+	return out
+}
+
+// inboundRequestConcept is the concept the staged deliveries are rows of.
+const inboundRequestConcept = "v1:platform:inboundRequest"
+
+// InboundRequestsDueForRetry reads ONE page of the failed deliveries whose
+// next try has come by asOf, least recently written first (the sort is the
+// latest version's time, which every claim and stamp moves), bodies included. Read fresh: a
+// cached page could hand back rows another pass has already claimed.
+func (s *Store) InboundRequestsDueForRetry(ctx context.Context, asOf time.Time) ([]StagedRequest, error) {
+	rows, err := s.rows(memql.ContextWithFreshRead(ctx), call("query", "inboundRequestsDueForRetry",
+		arg{"asOf", asOf.UTC().Format(time.RFC3339)}))
+	if err != nil {
+		return nil, err
+	}
+	return stagedFromRows(rows), nil
+}
+
+// ClaimInboundRetry moves a due delivery's next try to until, fenced on the
+// version the due read returned, and reports whether this caller holds it. A
+// claim another writer overtook -- another pass's claim, or any write of the
+// row since it was read -- answers false and writes nothing. The claim names
+// only the status (still failed) and the next try, so the try count is the
+// row's: a pass that dies mid-dispatch leaves the row due again once until
+// passes, with nothing spent.
+func (s *Store) ClaimInboundRetry(ctx context.Context, staged StagedRequest, until time.Time) (bool, error) {
+	fenced := memql.ContextWithRowVersionFence(ctx, inboundRequestConcept, staged.RequestId, staged.Version)
+	_, err := s.exec(fenced, call("mutation", "updateInboundRequestStatus",
+		arg{"requestId", staged.RequestId},
+		arg{"status", "failed"},
+		arg{"nextAttemptAt", until.UTC().Format(time.RFC3339)}))
+	if errors.Is(err, memql.ErrRowVersionChanged) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// ParkUnservedInbound takes a due delivery whose source no connector serves out
+// of the retries with one write: still failed, no next time, a lastError
+// saying why, and the try count left as it was -- nothing was tried. Fenced on
+// the version the due read returned, so it cannot overwrite a claim or an
+// outcome another writer made since; a loss is not an error, because whoever
+// won has written the row.
+func (s *Store) ParkUnservedInbound(ctx context.Context, staged StagedRequest) error {
+	fenced := memql.ContextWithRowVersionFence(ctx, inboundRequestConcept, staged.RequestId, staged.Version)
+	_, err := s.exec(fenced, call("mutation", "updateInboundRequestStatus",
+		arg{"requestId", staged.RequestId},
+		arg{"status", "failed"},
+		arg{"lastError", truncateError(fmt.Sprintf("no connector on this node serves source %q, so the delivery is not tried again", strings.TrimSpace(staged.Source)))},
+		arg{"nextAttemptAt", ""}))
+	if errors.Is(err, memql.ErrRowVersionChanged) {
+		return nil
+	}
+	return err
+}
+
+// InboundRequestsGivenUp reads one page of one source's given-up deliveries,
+// newest first and without their bodies. Read fresh, because Requeue reads it
+// again after putting the last page back in line.
+func (s *Store) InboundRequestsGivenUp(ctx context.Context, source string) ([]StagedRequest, error) {
+	rows, err := s.rows(memql.ContextWithFreshRead(ctx), call("query", "inboundRequestsGivenUp", arg{"source", source}))
+	if err != nil {
+		return nil, err
+	}
+	return stagedFromRows(rows), nil
+}
+
+// InboundRequestsHeld reads one page of one source's HELD deliveries, least
+// recently written first and without their bodies: failed, with no next try,
+// and their lastError exactly memqlsync.ErrRecordingPaused's text, which the
+// dispatcher's hold writes and nothing else does. Read fresh, because
+// ReturnHeld reads it again after putting the last page back in line.
+func (s *Store) InboundRequestsHeld(ctx context.Context, source string) ([]StagedRequest, error) {
+	rows, err := s.rows(memql.ContextWithFreshRead(ctx), call("query", "inboundRequestsHeld",
+		arg{"source", source}, arg{"reason", memqlsync.ErrRecordingPaused.Error()}))
+	if err != nil {
+		return nil, err
+	}
+	return stagedFromRows(rows), nil
+}
+
+// RequeueInboundRequest puts one delivery back in line -- no tries counted,
+// due at at -- fenced on the version the read that found it returned, and
+// reports whether this caller's write took. A write another writer overtook
+// answers false and writes nothing: whoever won has decided what the row is.
+func (s *Store) RequeueInboundRequest(ctx context.Context, staged StagedRequest, at time.Time) (bool, error) {
+	fenced := memql.ContextWithRowVersionFence(ctx, inboundRequestConcept, staged.RequestId, staged.Version)
+	_, err := s.exec(fenced, call("mutation", "requeueInboundRequest",
+		arg{"requestId", staged.RequestId}, arg{"nextAttemptAt", at.UTC().Format(time.RFC3339)}))
+	if errors.Is(err, memql.ErrRowVersionChanged) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// SyncStateFor reads one domain's health -- one partition's, for a
+// partitioned connector -- or the zero value when it has never been written.
+//
+// It reads the row BY ITS ID (syncStateById), not by its fields: a row
+// written before partitions has no partitionKey at all, and whether an
+// absent field matches "" is not a rule to rely on. The id is what the
+// partition derives, so the partition read back is the one asked for.
+func (s *Store) SyncStateFor(ctx context.Context, conceptID, connector, direction, partition string) (SyncState, error) {
+	partition = strings.TrimSpace(partition)
+	stateID := SyncStateID(conceptID, connector, direction, partition)
+	rows, err := s.rows(ctx, call("query", "syncStateById", arg{"stateId", stateID}))
 	if err != nil {
 		return SyncState{}, err
 	}
 	if len(rows) == 0 {
 		return SyncState{
-			ID:        SyncStateID(conceptID, connector, direction),
+			ID:        stateID,
 			ConceptID: conceptID,
 			Connector: connector,
 			Direction: direction,
+			Partition: partition,
 		}, nil
 	}
 	st := syncStateFromRow(rows[0])
+	st.Partition = partition
 	st.Stored = true
 	return st, nil
+}
+
+// SyncStates reads every health row of one connector, every partition's,
+// across every page of syncStatesAll.
+//
+// The page rides the context, as component/campaigns walks an audience: a
+// read that stopped at the first page would silently drop the stores past
+// the hundredth domain row.
+func (s *Store) SyncStates(ctx context.Context, connector string) ([]SyncState, error) {
+	var args []arg
+	if c := strings.TrimSpace(connector); c != "" {
+		args = append(args, arg{"connector", c})
+	}
+	q := call("query", "syncStatesAll", args...)
+	var out []SyncState
+	cursor := ""
+	seen := map[string]bool{}
+	for {
+		res, err := s.exec(memql.ContextWithCursor(ctx, cursor), q)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range memql.MaterializeRows(res) {
+			st := syncStateFromRow(r)
+			st.Stored = true
+			out = append(out, st)
+		}
+		next, err := memql.ResultPageCursor(res)
+		if err != nil {
+			return nil, fmt.Errorf("datasync: syncStatesAll: %w", err)
+		}
+		if next == "" {
+			return out, nil
+		}
+		if seen[next] {
+			return nil, fmt.Errorf("datasync: syncStatesAll: the engine handed back a cursor it had already given")
+		}
+		seen[next] = true
+		cursor = next
+	}
 }
 
 // WriteSyncState persists one domain's health.
 func (s *Store) WriteSyncState(ctx context.Context, st SyncState) error {
 	id := strings.TrimSpace(st.ID)
 	if id == "" {
-		id = SyncStateID(st.ConceptID, st.Connector, st.Direction)
+		id = SyncStateID(st.ConceptID, st.Connector, st.Direction, st.Partition)
 	}
 	args := []arg{
 		{"stateId", id},
 		{"conceptId", st.ConceptID},
 		{"connector", st.Connector},
 		{"direction", st.Direction},
+		{"partitionKey", strings.TrimSpace(st.Partition)},
 		{"backfillCursor", st.BackfillCursor},
 		{"backfillStatus", st.BackfillStatus},
 		{"lagSeconds", st.LagSeconds},
@@ -264,11 +447,145 @@ func (s *Store) WriteSyncState(ctx context.Context, st SyncState) error {
 	return err
 }
 
-// SetPaused flips one domain's pause switch.
-func (s *Store) SetPaused(ctx context.Context, stateID string, paused bool) error {
-	_, err := s.exec(ctx, call("mutation", "setSyncPaused",
-		arg{"stateId", stateID}, arg{"paused", paused}))
-	return err
+// syncStateConcept is the concept the health rows are versions of.
+const syncStateConcept = "v1:platform:syncState"
+
+// SyncPatch is the fields of one domain's health row that ONE writer owns,
+// by their DSL names: backfillCursor, backfillStatus, lastInboundAt,
+// lagSeconds, lastReconcileAt, lastAttemptAt, driftCount, paused, lastError.
+// A time is a time.Time.
+type SyncPatch map[string]any
+
+// maxPatchAttempts bounds how often a write overtaken by another writer of the
+// same row is decided again.
+const maxPatchAttempts = 5
+
+// PatchSyncState writes the fields one writer owns onto a domain's row, and
+// nothing else, so writers that run at once cannot erase each other's fields.
+//
+// WHY. The continuing pass, the sweep, the queue, the inbound dispatcher and
+// the pause switch all write one row, and they run at once (two schedules
+// fire in the same second, the scheduler runs automations in parallel). Each
+// used to write the whole row from a copy it had read earlier, so the sweep
+// put back the cursor it read before a backfill page, and every page put back
+// the watermark and error the sweep had just recorded.
+//
+// HOW. decide is handed the row as it is now (read fresh) and answers the
+// patch, or false to write nothing. On an existing row the patch is sent
+// through patchSyncState, whose omitted arguments the engine's read-merge
+// keeps; a domain with no row yet is created whole through upsertSyncState.
+// The read-merge is not atomic on its own -- the engine reads the prior
+// version outside the write's transaction (executeWrite) -- so the write
+// carries a row-version fence on the version decide was handed. A write that
+// another writer overtook is refused with memql.ErrRowVersionChanged, and the
+// patch is decided again on a fresh read, at most maxPatchAttempts times.
+// Deciding again matters as much as merging: the queue decides "not running"
+// and the clean-sweep rule decides "not running" on what it read.
+func (s *Store) PatchSyncState(ctx context.Context, conceptID, connector, direction, partition string, decide func(SyncState) (SyncPatch, bool)) error {
+	partition = strings.TrimSpace(partition)
+	for attempt := 0; attempt < maxPatchAttempts; attempt++ {
+		if attempt > 0 && s.retryWait != nil {
+			// The last write lost the fence: another writer of this row
+			// committed first. Deciding again at once could lose to the next
+			// write of a burst (inbound deliveries arrive in bursts) every
+			// time, so each fresh decision waits a little longer, jittered.
+			s.retryWait(attempt)
+		}
+		cur, err := s.SyncStateFor(memql.ContextWithFreshRead(ctx), conceptID, connector, direction, partition)
+		if err != nil {
+			return err
+		}
+		patch, ok := decide(cur)
+		if !ok || len(patch) == 0 {
+			return nil
+		}
+		id := SyncStateID(conceptID, connector, direction, partition)
+		fenced := memql.ContextWithRowVersionFence(ctx, syncStateConcept, id, cur.Version)
+		if cur.Stored {
+			_, err = s.exec(fenced, call("mutation", "patchSyncState", patchArgs(id, patch)...))
+		} else {
+			cur.ConceptID, cur.Connector, cur.Direction, cur.Partition = conceptID, connector, direction, partition
+			if cur.BackfillStatus == "" {
+				cur.BackfillStatus = "none"
+			}
+			err = s.WriteSyncState(fenced, applyPatch(cur, patch))
+		}
+		if errors.Is(err, memql.ErrRowVersionChanged) {
+			continue
+		}
+		return err
+	}
+	return fmt.Errorf("datasync: the health row of %s on %q%s kept changing under %d writes; nothing was written",
+		conceptID, connector, partitionSuffix(partition), maxPatchAttempts)
+}
+
+// retryWaitBounds is the range the wait before fresh decision `attempt`
+// (1-based) is drawn from: 2-4 ms, then 4-8, 8-16 and 16-32. A few
+// milliseconds is longer than one health write takes, and the whole budget of
+// four waits stays under a tenth of a second.
+func retryWaitBounds(attempt int) (time.Duration, time.Duration) {
+	if attempt < 1 {
+		attempt = 1
+	}
+	lo := 2 * time.Millisecond << (attempt - 1)
+	return lo, 2 * lo
+}
+
+// retryWaitFor draws one wait from retryWaitBounds, so writers that lost to
+// each other do not decide again in step.
+func retryWaitFor(attempt int) time.Duration {
+	lo, hi := retryWaitBounds(attempt)
+	return lo + time.Duration(rand.Int64N(int64(hi-lo)))
+}
+
+// patchArgs renders a patch in a stable order, times as RFC3339.
+func patchArgs(id string, patch SyncPatch) []arg {
+	keys := make([]string, 0, len(patch))
+	for k := range patch {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	args := []arg{{"stateId", id}}
+	for _, k := range keys {
+		v := patch[k]
+		switch t := v.(type) {
+		case time.Time:
+			v = t.UTC().Format(time.RFC3339)
+		case string:
+			if k == "lastError" {
+				v = truncateError(t)
+			}
+		}
+		args = append(args, arg{k, v})
+	}
+	return args
+}
+
+// applyPatch sets a patch's fields on a whole state, for a row's first write.
+func applyPatch(st SyncState, patch SyncPatch) SyncState {
+	for k, v := range patch {
+		switch k {
+		case "backfillCursor":
+			st.BackfillCursor, _ = v.(string)
+		case "backfillStatus":
+			st.BackfillStatus, _ = v.(string)
+		case "lastInboundAt":
+			st.LastInboundAt, _ = v.(time.Time)
+		case "lagSeconds":
+			st.LagSeconds, _ = v.(int)
+		case "lastReconcileAt":
+			st.LastReconcileAt, _ = v.(time.Time)
+		case "lastAttemptAt":
+			st.LastAttemptAt, _ = v.(time.Time)
+		case "driftCount":
+			st.DriftCount, _ = v.(int)
+		case "paused":
+			st.Paused, _ = v.(bool)
+		case "lastError":
+			st.LastError, _ = v.(string)
+		}
+	}
+	return st
 }
 
 // OperatorContext stamps the engine's own operator identity: a cluster
@@ -347,6 +664,7 @@ func syncStateFromRow(r map[string]any) SyncState {
 		ConceptID:       stringField(r, "conceptId"),
 		Connector:       stringField(r, "connector"),
 		Direction:       stringField(r, "direction"),
+		Partition:       stringField(r, "partitionKey"),
 		BackfillCursor:  stringField(r, "backfillCursor"),
 		BackfillStatus:  stringField(r, "backfillStatus"),
 		LastInboundAt:   timeField(r, "lastInboundAt"),
@@ -358,6 +676,7 @@ func syncStateFromRow(r map[string]any) SyncState {
 		DeadLetterCount: intField(r, "deadLetterCount"),
 		Paused:          boolField(r, "paused"),
 		LastError:       stringField(r, "lastError"),
+		Version:         timeField(r, "createdAt"),
 	}
 }
 

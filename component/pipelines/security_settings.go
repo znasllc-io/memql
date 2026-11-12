@@ -8,7 +8,9 @@ import (
 )
 
 // SecuritySettingsVariable is the operator's explicit consent to weekly
-// security stages and their remediation goals. An absent setting is off.
+// security stages and their remediation goals. An absent setting is off. Saved
+// from Pipelines > Settings > Security through pipelinesSecuritySettingsSave
+// (component/pipelinerun settings.go).
 const SecuritySettingsVariable = "MEMQL_PIPELINES_SECURITY"
 
 type SecuritySettings struct {
@@ -33,4 +35,15 @@ func ParseSecuritySettings(raw string) SecuritySettings {
 		return SecuritySettings{Enabled: enabled}
 	}
 	return SecuritySettings{}
+}
+
+// Encode is the value a save writes to SecuritySettingsVariable, in the form
+// ParseSecuritySettings reads back.
+func (s SecuritySettings) Encode() string {
+	raw, err := json.Marshal(s)
+	if err != nil {
+		// One boolean cannot fail to encode; an empty value reads as off.
+		return ""
+	}
+	return string(raw)
 }

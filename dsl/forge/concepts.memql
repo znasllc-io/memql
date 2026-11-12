@@ -72,6 +72,7 @@ use identity.concepts.{ user }
 /// scoped to a project so one agnostic bundle serves many apps. Partition-scoped: team-shared
 /// within the tenant.
 @displayCard(primary="name", secondary="targetApp", tertiary="status", status="status")
+@belongsTo(account)
 concept project {
   slug         string!  @description("Stable short id, e.g. 'memql', 'acme-app'. Unique within the partition.")
   name         string!  @description("Human-readable project name.")
@@ -81,6 +82,7 @@ concept project {
   status       enum("active", "archived")!  @description("active = accepting requests; archived = read-only history.")
   createdByUserId  string  @description("v1:identity:user.id of whoever registered the project.")
   provenanceMutation  string  @description("Name of the mutation that produced this version (audit trail).")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="createdByUserId", target=user, direction="outgoing")
 }
@@ -96,6 +98,7 @@ concept project {
 /// validators/approvers can read it. Every transition is recorded as a v1:forge:requestEvent for a
 /// full time-series audit trail.
 @displayCard(primary="title", secondary="requestType", tertiary="status", status="status")
+@belongsTo(account, via="projectId")
 concept request {
   projectId      string!  @description("v1:forge:project.id this request targets.")
   requestType    enum("bug", "feature", "chore", "question", "timeOff", "checkIn")!  @description("Request kind (named requestType because `type` is a reserved row intrinsic). Drives which pipeline applies. First slice centers bug/feature; HR types are modelled so they ride the same spine.")
@@ -111,6 +114,7 @@ concept request {
   approvedByUserId   string  @description("v1:identity:user.id of the approver (owner). Set on the approved transition.")
   resolution     string  @description("Free-form outcome note when the request reaches a terminal state.")
   provenanceMutation  string  @description("Name of the mutation that produced this version (audit trail).")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="projectId", target=project, direction="outgoing")
   @relationship(type="parent", field="submitterUserId", target=user, direction="outgoing")
@@ -127,6 +131,7 @@ concept request {
 /// rejection, comment, or mentoring touch. The time-series audit trail for a request -- every
 /// transition is one row, never mutated.
 @displayCard(primary="kind", secondary="requestId", tertiary="actorUserId", status="kind")
+@belongsTo(account, via="requestId", parent="v1:forge:request")
 concept requestEvent {
   requestId   string!  @description("v1:forge:request.id this event belongs to.")
   kind        enum("submitted", "routed", "validated", "changes_requested", "approved", "rejected", "commented", "mentored")!  @description("What happened.")
@@ -136,6 +141,7 @@ concept requestEvent {
   toStatus    string  @description("Request status after this event (for transitions).")
   note        string  @description("Free-form note: validation comment, rejection reason, mentoring summary, etc.")
   provenanceMutation  string  @description("Name of the mutation that produced this event (audit trail).")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="actorUserId", target=user, direction="outgoing")
 }

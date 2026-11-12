@@ -1,7 +1,7 @@
 import { useState } from "react";
 
-import { Button, Caption, Notice, Panel, Subhead } from "../../kit";
-import { AccountLabelPicker } from "../accounts/AccountPicker";
+import { Button, Caption, Field, Notice, Panel, Subhead } from "../../kit";
+import { AccountPicker } from "../accounts/AccountPicker";
 import { useAccountOptions } from "../accounts/tie";
 import type { CreateGoalState } from "./actions";
 import { ExecutionDestinationSelect, type ExecutionDestination } from "../../kit/ExecutionDestination";
@@ -40,14 +40,18 @@ export function NewGoal({
 }) {
   const [statement, setStatement] = useState("");
   const [destination, setDestination] = useState<ExecutionDestination>("auto");
-  const [accountIds, setAccountIds] = useState<string[]>([]);
+  const [accountId, setAccountId] = useState("");
   const accounts = useAccountOptions();
 
   async function submit() {
+    // ONE ACCOUNT PER ROW (account row ownership, section G). The goal still
+    // declares the list `accountIds` until the export piece retires it, so the
+    // single choice goes as a one-element list, or an empty one for none.
+    const accountIds = accountId === "" ? [] : [accountId];
     const id = await create.create({ statement, accountIds, destination });
     if (id === "") return;
     setStatement("");
-    setAccountIds([]);
+    setAccountId("");
     onCreated(id);
   }
 
@@ -73,16 +77,18 @@ export function NewGoal({
       {/* THE TAG IS A RECORD, NOT A SCOPE, and the label has to say so. An
           account tag on a goal is who the work is FOR; it narrows no read and
           grants no access, and somebody who read it as permissions would tag
-          defensively and wrongly. AccountLabelPicker rather than the single
-          picker because `accountIds` is a list on the concept -- the same
-          control the Library index uses for the same shape of field. */}
+          defensively and wrongly. The single picker, as the Files inspector
+          uses for the same field: a row belongs to one account. */}
       {accounts.length === 0 ? null : (
-        <AccountLabelPicker
-          selected={accountIds}
-          onChange={setAccountIds}
-          accounts={accounts}
-          label="Who this work is for (optional)"
-        />
+        <Field label="Who this work is for">
+          <AccountPicker
+            id="work-new-goal-account"
+            label="Who this work is for"
+            value={accountId}
+            onChange={setAccountId}
+            accounts={accounts}
+          />
+        </Field>
       )}
 
       <ExecutionDestinationSelect value={destination} onChange={setDestination} />

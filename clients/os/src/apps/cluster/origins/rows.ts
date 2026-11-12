@@ -44,6 +44,12 @@ export interface OriginRow {
   origin: string;
   mirroredTo: string[];
   connector: string;
+  /** The one store (partition) of a partitioned connector this row is about,
+   *  or "" for a connector that keeps no partitions apart. */
+  partition: string;
+  /** The connection never asked for this domain: the engine's own sentence
+   *  starts `connector: not requested`. Never an error on screen. */
+  notRequested: boolean;
   /** "inbound" | "outbound" | "" when nothing has reported and the
    *  declaration implies none. */
   direction: string;
@@ -52,6 +58,12 @@ export interface OriginRow {
    *  reason the row exists at all. */
   hasHealth: boolean;
   backfillStatus: string;
+  /** The row's backfill status is `failed`. Whatever failed it is still in
+   *  the cursor it stopped at (an export the origin may no longer have), so
+   *  "Backfill now" starts it again from the start rather than from the
+   *  cursor. The cursor names the export and the line reached, never an
+   *  address: nothing here reads it. */
+  backfillFailed: boolean;
   backfillCursor: string;
   lagSeconds: Figure;
   driftCount: Figure;
@@ -118,6 +130,10 @@ export function joinOrigins(inventoryRows: readonly Row[], healthRows: readonly 
 
   // Health, bucketed by the pairing it reports on.
   const health = new Map<string, Row[]>();
+  // The stores of every connector that keeps them apart. A connector named
+  // here has written at least one row with a partition, and from then on its
+  // rows with none are history: what it wrote before it kept its stores apart.
+  const partitions = new Map<string, Set<string>>();
   for (const raw of healthRows) {
     const row = flatten(raw);
     const conceptId = stringOf(row, "conceptId");
@@ -127,7 +143,15 @@ export function joinOrigins(inventoryRows: readonly Row[], healthRows: readonly 
     const list = health.get(key) ?? [];
     list.push(row);
     health.set(key, list);
+    const partition = stringOf(row, "partitionKey");
+    if (partition !== "") {
+      const held = partitions.get(connector) ?? new Set<string>();
+      held.add(partition);
+      partitions.set(connector, held);
+    }
   }
+  const isHistory = (row: Row): boolean =>
+    stringOf(row, "partitionKey") === "" && partitions.has(stringOf(row, "connector"));
 
   const rows: OriginRow[] = [];
   const connectors = new Set<string>();
@@ -137,19 +161,28 @@ export function joinOrigins(inventoryRows: readonly Row[], healthRows: readonly 
     for (const connector of declaration.connectors) {
       connectors.add(connector);
       const key = `${declaration.conceptId}|${connector}`;
-      const found = health.get(key) ?? [];
-      if (found.length === 0) {
-        rows.push(unmeasuredRow(declaration, connector));
+      const found = (health.get(key) ?? []).filter((row) => !isHistory(row));
+      matched.add(key);
+      const stores = partitions.get(connector);
+      if (stores === undefined) {
+        if (found.length === 0) rows.push(unmeasuredRow(declaration, connector, ""));
+        for (const row of found) rows.push(measuredRow(declaration, connector, row));
         continue;
       }
-      matched.add(key);
-      for (const row of found) rows.push(measuredRow(declaration, connector, row));
+      // A partitioned connector: every store it serves is its own pairing,
+      // and a store nothing has reported on for this domain is unmeasured
+      // there -- not hidden because another store reported.
+      for (const store of stores) {
+        const own = found.filter((row) => stringOf(row, "partitionKey") === store);
+        if (own.length === 0) rows.push(unmeasuredRow(declaration, connector, store));
+        for (const row of own) rows.push(measuredRow(declaration, connector, row));
+      }
     }
   }
 
   let unmatchedHealth = 0;
   for (const [key, list] of health.entries()) {
-    if (!matched.has(key)) unmatchedHealth += list.length;
+    if (!matched.has(key)) unmatchedHealth += list.filter((row) => !isHistory(row)).length;
   }
 
   rows.sort((a, b) => a.key.localeCompare(b.key));
@@ -163,17 +196,20 @@ export function joinOrigins(inventoryRows: readonly Row[], healthRows: readonly 
   };
 }
 
-function unmeasuredRow(declaration: OriginDeclaration, connector: string): OriginRow {
+function unmeasuredRow(declaration: OriginDeclaration, connector: string, partition: string): OriginRow {
   return {
-    key: `${declaration.conceptId}|${connector}|`,
+    key: `${declaration.conceptId}|${connector}|${partition}|`,
     conceptId: declaration.conceptId,
     dataState: declaration.dataState,
     origin: declaration.origin,
     mirroredTo: declaration.mirroredTo,
     connector,
+    partition,
+    notRequested: false,
     direction: impliedDirection(declaration.dataState, declaration.origin, connector),
     hasHealth: false,
     backfillStatus: "",
+    backfillFailed: false,
     backfillCursor: "",
     // EVERY figure absent, and this is the line the whole module exists for.
     // Nothing has reported on this pairing, so there is no lag, no drift, no
@@ -190,16 +226,21 @@ function unmeasuredRow(declaration: OriginDeclaration, connector: string): Origi
 
 function measuredRow(declaration: OriginDeclaration, connector: string, row: Row): OriginRow {
   const direction = stringOf(row, "direction");
+  const partition = stringOf(row, "partitionKey");
+  const lastError = stringOf(row, "lastError");
   return {
-    key: `${declaration.conceptId}|${connector}|${direction}`,
+    key: `${declaration.conceptId}|${connector}|${partition}|${direction}`,
     conceptId: declaration.conceptId,
     dataState: declaration.dataState,
     origin: declaration.origin,
     mirroredTo: declaration.mirroredTo,
     connector,
+    partition,
+    notRequested: isNotRequested(lastError),
     direction,
     hasHealth: true,
     backfillStatus: stringOf(row, "backfillStatus"),
+    backfillFailed: stringOf(row, "backfillStatus") === "failed",
     backfillCursor: stringOf(row, "backfillCursor"),
     // Per FIELD, not per row: a health row that reported a depth and never a
     // drift count has one measurement and one absence, and folding them into
@@ -209,7 +250,7 @@ function measuredRow(declaration: OriginDeclaration, connector: string, row: Row
     outboxDepth: figureFrom(row, "outboxDepth"),
     deadLetterCount: figureFrom(row, "deadLetterCount"),
     paused: boolOr(row, "paused", false),
-    lastError: stringOf(row, "lastError"),
+    lastError,
     lastReconcileAt: stringOf(row, "lastReconcileAt"),
   };
 }
@@ -236,6 +277,13 @@ function measuredRow(declaration: OriginDeclaration, connector: string, row: Row
  */
 export interface ConnectorCoverage {
   connector: string;
+  /** The stores of a connector that keeps them apart; 0 for one that does
+   *  not. Its sentences then name the stores, so a row per domain per store
+   *  is not read as that many concepts. */
+  stores: number;
+  /** Rows the connection never asked for. Counted in nothing below: only
+   *  kept so a connector that reaches nothing is not read as reporting. */
+  outside: number;
   /** Pairings the declarations name for this connector. */
   concepts: number;
   /** Pairings something has actually reported on. A MEASURED count, not a
@@ -258,22 +306,37 @@ export interface ConnectorCoverage {
  */
 export function connectorCoverage(rows: readonly OriginRow[]): ConnectorCoverage[] {
   const byConnector = new Map<string, ConnectorCoverage>();
+  const stores = new Map<string, Set<string>>();
   for (const row of rows) {
     if (row.connector === "") continue;
     const held = byConnector.get(row.connector) ?? {
       connector: row.connector,
+      stores: 0,
+      outside: 0,
       concepts: 0,
       reported: 0,
       paused: 0,
       withError: 0,
     };
+    byConnector.set(row.connector, held);
+    if (row.partition !== "") {
+      const own = stores.get(row.connector) ?? new Set<string>();
+      own.add(row.partition);
+      stores.set(row.connector, own);
+      held.stores = own.size;
+    }
+    // What the connection never asked for is outside it: not a concept it
+    // carries, not reported, not paused and not a failure of it.
+    if (row.notRequested) {
+      held.outside += 1;
+      continue;
+    }
     held.concepts += 1;
     if (row.hasHealth) {
       held.reported += 1;
       if (row.paused) held.paused += 1;
       if (row.lastError !== "") held.withError += 1;
     }
-    byConnector.set(row.connector, held);
   }
   return [...byConnector.values()].sort((a, b) => a.connector.localeCompare(b.connector));
 }
@@ -297,19 +360,33 @@ export function connectorCoverage(rows: readonly OriginRow[]): ConnectorCoverage
  * on an em dash not being a zero that would be the one unforgivable line.
  */
 export function coverageSentence(c: ConnectorCoverage): string {
-  if (c.concepts === 0) return "";
+  // " of its 2 stores" for a connector that keeps its stores apart, and
+  // nothing for one that does not, whose sentences stay as they always were.
+  const ofStores = c.stores === 0 ? "" : c.stores === 1 ? " of its store" : ` of its ${c.stores} stores`;
+  if (c.concepts === 0) {
+    if (c.outside === 0) return "";
+    return c.stores === 0
+      ? "None of its concepts is part of its connection."
+      : `None of its concepts is part of the connection${ofStores}.`;
+  }
   const noun = c.concepts === 1 ? "concept" : "concepts";
   if (c.reported === 0) {
-    return `Nothing has reported on any of its ${c.concepts} ${noun}. A connector that has not run yet and one that is running and reading nothing look the same from here -- the difference is in the connector's own configuration.`;
+    const what = c.stores === 0 ? `any of its ${c.concepts} ${noun}` : `any of the ${c.concepts} ${noun}${ofStores}`;
+    return `Nothing has reported on ${what}. A connector that has not run yet and one that is running and reading nothing look the same from here -- the difference is in the connector's own configuration.`;
   }
   if (c.reported < c.concepts) {
-    return `${c.reported} of ${c.concepts} ${noun} have reported. The rest have no measurement, which is not the same as no lag.`;
+    return `${c.reported} of ${c.concepts} ${noun}${ofStores} have reported. The rest have no measurement, which is not the same as no lag.`;
   }
   if (c.paused === c.concepts) {
-    return `Every concept is paused. Deliveries are staged and nothing is being applied.`;
+    // A DOMAIN'S PAUSE STOPS ITS BACKFILL AND ITS PERIODIC CHECK, AND NOTHING
+    // ELSE: the dispatcher never reads the sync-state row, so a change the
+    // origin sends is applied, and the outbound drain never reads it either,
+    // so a change waiting to be pushed is pushed. Holding deliveries is the
+    // Store page's pause, a store's, not this switch.
+    return `Every concept${ofStores} is paused: no backfill or check runs. Changes the origin sends are still applied.`;
   }
   if (c.paused > 0) {
-    return `All ${c.concepts} ${noun} have reported; ${c.paused} ${c.paused === 1 ? "is" : "are"} paused.`;
+    return `All ${c.concepts} ${noun}${ofStores} have reported; ${c.paused} ${c.paused === 1 ? "is" : "are"} paused.`;
   }
   return "";
 }
@@ -350,6 +427,75 @@ export function dataStateSentence(state: string, origin: string, mirroredTo: rea
   }
   if (state === "native") return "MemQL owns this data and nobody else holds a copy.";
   return "";
+}
+
+/** The engine's own sentence for a domain the connection never asked for. */
+const NOT_REQUESTED = "connector: not requested";
+
+export function isNotRequested(lastError: string): boolean {
+  return lastError.startsWith(NOT_REQUESTED);
+}
+
+/** One store's domains: those its connection reaches, and -- apart, because
+ *  neither is a fault -- those it never asked for. */
+export interface PartitionGroup {
+  /** The connector a store's group belongs to; "" for the shared group of
+   *  connectors that keep no stores apart. */
+  connector: string;
+  /** The store, or "" for the rows of connectors that keep no stores apart. */
+  partition: string;
+  rows: OriginRow[];
+  outside: OriginRow[];
+}
+
+/**
+ * The table, by store. The group of connectors that keep no stores apart
+ * (partition "") comes first and is drawn as the table always was; each store
+ * follows, by name. Rows keep the order they arrive in.
+ *
+ * History -- a partitioned connector's rows from before it kept its stores
+ * apart -- never reaches here: `joinOrigins` leaves it out, so the coverage
+ * above the table counts exactly what the table draws.
+ */
+export function groupByPartition(rows: readonly OriginRow[]): PartitionGroup[] {
+  // Keyed by connector AND store: two connectors that happen to name a store
+  // alike never share a group or its closed line.
+  const groups = new Map<string, PartitionGroup>();
+  for (const row of rows) {
+    const connector = row.partition === "" ? "" : row.connector;
+    const key = `${connector}|${row.partition}`;
+    const group = groups.get(key) ?? { connector, partition: row.partition, rows: [], outside: [] };
+    (row.notRequested ? group.outside : group.rows).push(row);
+    groups.set(key, group);
+  }
+  return [...groups.values()].sort((a, b) => a.partition.localeCompare(b.partition) || a.connector.localeCompare(b.connector));
+}
+
+/** One inbound source's deliveries that used their four tries. */
+export interface GivenUpSource {
+  source: string;
+  count: number;
+  /** The reason on the source's most recently received delivery, as the engine wrote it. */
+  lastError: string;
+}
+
+/**
+ * `inboundRequestsGivenUp` by source, in the order the sources first appear.
+ * The query answers the most recently received delivery first, so a source's
+ * first row carries the reason on its most recently received delivery, and
+ * the source received from most recently leads.
+ */
+export function givenUpBySource(rows: readonly Row[]): GivenUpSource[] {
+  const bySource = new Map<string, GivenUpSource>();
+  for (const raw of rows) {
+    const row = flatten(raw);
+    const source = stringOf(row, "source");
+    if (source === "") continue;
+    const held = bySource.get(source);
+    if (held === undefined) bySource.set(source, { source, count: 1, lastError: stringOf(row, "lastError") });
+    else held.count += 1;
+  }
+  return [...bySource.values()];
 }
 
 /** The acts this row's state offers. Legal-only, per DESIGN.md rule 12:

@@ -9,6 +9,7 @@ query ShopifyFetchLocation($id: ID!) {
     __typename
     ... on Location {
       id
+      updatedAt
       activatable
       address { address1 address2 city country countryCode formatted latitude longitude phone province provinceCode zip }
       addressVerified
@@ -38,6 +39,7 @@ query ShopifyListLocation($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       activatable
       address { address1 address2 city country countryCode formatted latitude longitude phone province provinceCode zip }
       addressVerified

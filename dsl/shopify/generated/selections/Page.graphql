@@ -9,6 +9,7 @@ query ShopifyFetchPage($id: ID!) {
     __typename
     ... on Page {
       id
+      updatedAt
       body
       bodySummary
       defaultCursor
@@ -28,6 +29,7 @@ query ShopifyListPage($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       body
       bodySummary
       defaultCursor

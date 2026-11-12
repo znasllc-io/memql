@@ -33,6 +33,7 @@
 /// history, node<->deploy linkage, next-version suggestion, and rollback can all be served from a
 /// query.
 @displayCard(primary="version", secondary="provider", tertiary="deploymentId", status="status")
+@belongsTo(cluster)
 concept deployment {
   deploymentId         string! @description("Stable deployment id; also the Argo rollout hash. Used as the concept row id so status transitions append to one timeline.")
   status               enum("pending", "in_progress", "succeeded", "failed", "superseded", "rolled_back") @description("Deployment lifecycle status. pending -> in_progress -> succeeded | failed; succeeded -> superseded when a newer deploy promotes; any -> rolled_back on an explicit rollback.")
@@ -62,6 +63,7 @@ concept deployment {
 /// references use FK fields, not @relationship). A deployment's full per-node spec set = every
 /// deploymentNodeSpec with the same deploymentId.
 @displayCard(primary="nodeType", secondary="version", tertiary="deploymentId")
+@belongsTo(cluster)
 concept deploymentNodeSpec {
   deploymentId  string! @minLength(1) @description("FK to v1:cluster:deployment.deploymentId this spec belongs to. Plain string FK (not a @relationship -- cross-concept references use FK fields). Normalised with shortId() and then hashed into the composite concept id, so a bare and a canonical form derive the same row (#2925). Stored normalised too, since nodeSpecsForDeployment filters on this field. @minLength(1) because hashing makes an empty key indistinguishable from a real one (#2885).")
   nodeType      string! @minLength(1) @description("Node role this spec targets: bff, agent, planner, identity, mcp, workbench, edge. Hashed into the composite concept id alongside deploymentId so each (deployment, nodeType) pin appends to one timeline. @minLength(1) for the same reason as deploymentId (#2885).")

@@ -1,0 +1,7 @@
+/// The support desk's opening hours. One row for the whole deployment: it is
+/// never inside an account.
+@belongsTo(cluster)
+concept supportHours {
+  opensAt   string
+  closesAt  string
+}

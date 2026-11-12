@@ -358,6 +358,28 @@ func (a *App) engineAndBus() {
 	a.Dependencies = append(a.Dependencies, a.engine)
 	a.Dependencies = append(a.Dependencies, a.automationScheduler)
 
+	// Account stamping's rollout switch (component/memql/account_ownership_runner.go).
+	// The engine records the account of a row only once every live node runs an
+	// engine that knows the accountId field, and a node learns that from the
+	// database through this runner. Without it the engine's flag stays off on
+	// this node for good: it never stamps, and it never assigns the rows written
+	// before. On EVERY node type, which is why it is built here and not in one
+	// role's phase: the stamp is in the write path every node type runs.
+	//
+	// Registered after the engine, so it is started after it and, at the same
+	// order, stopped before it. It reports ready only after its first reading of
+	// the switch, bounded at five seconds, so a node restarting into a cluster
+	// that already stamps has its flag on before it takes requests. The database
+	// handle and the node id are the app's own getters, resolved on every tick,
+	// because the node's identity is not known until the cluster phase. A value
+	// of MEMQL_ACCOUNT_STAMPING_ACTIVATE that is not a boolean refuses the boot
+	// here.
+	accountOwnership, err := memql.NewAccountOwnershipRunner(a.engine, a.BunDB, a.startupNodeID, a.Logger)
+	if err != nil {
+		a.fatal("invalid account-stamping activation configuration", "error", err, "component", memql.ComponentName)
+	}
+	a.Dependencies = append(a.Dependencies, accountOwnership)
+
 	// Stand up the owner-scoped authored-construct runtime (epic memql#954,
 	// #961 / #959 live glue): registry + per-owner scheduler (run hook -> the
 	// authored runner: event firings claimed once per event across replicas,

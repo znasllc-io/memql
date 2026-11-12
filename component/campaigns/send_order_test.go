@@ -307,3 +307,33 @@ func TestOnlyTheInstallationsSenderMayStandInForAnOrganizations(t *testing.T) {
 		t.Fatal("mail was sent")
 	}
 }
+
+// A BUYER SUBSCRIBED TO NOTHING. An order message (a review request) goes to
+// the person an order entitles, who is on no list, so its footer must not tell
+// them they subscribed; it says they bought from the sender. Before this the
+// footer read "You are receiving this because you subscribed to ..." on every
+// review request.
+func TestAnOrderMessageFooterSaysTheBuyerBoughtNotSubscribed(t *testing.T) {
+	engine := orderSendEngine()
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+	w.singleSendGate = func(context.Context, string) (gateHold, error) { return openGate{}, nil }
+	if _, err := w.handleSendOrderMessage(fromTrustedJob(), orderArgs(), 0); err != nil {
+		t.Fatalf("sendOrderMessage: %v", err)
+	}
+	if sender.count() != 1 {
+		t.Fatalf("messages = %d, want one", sender.count())
+	}
+	msg := sender.sent[0]
+	for part, body := range map[string]string{"text": msg.TextBody, "html": msg.HTMLBody} {
+		if body == "" {
+			continue
+		}
+		if strings.Contains(body, "you subscribed to") {
+			t.Errorf("%s footer tells a buyer they subscribed: %q", part, body)
+		}
+		if !strings.Contains(body, "you bought from") {
+			t.Errorf("%s footer: want \"you bought from\" in %q", part, body)
+		}
+	}
+}

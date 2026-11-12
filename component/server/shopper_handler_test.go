@@ -14,15 +14,23 @@ import (
 // shopperRecordingExecutor records every call, so "nothing was executed" is an
 // assertion rather than an inference.
 type shopperRecordingExecutor struct {
-	calls  []string
-	actor  []string
-	err    error
-	result any
+	calls []string
+	actor []string
+	// account is the account each call's context stated it acts in
+	// (auth.CallAccountFromContext), or shopperNoAccount when it stated none.
+	account []string
+	err     error
+	result  any
 	// errForCall fails ONE call rather than all of them, which is what an
 	// extension's partial-write test needs: the pack's construct succeeds
 	// and the client's does not (design record 2026-09-21, D5).
 	errForCall func(n int, query string) error
 }
+
+// shopperNoAccount is what the recording executor notes for a call whose
+// context stated no account, so "none" is a value a test can assert rather
+// than an empty string that also means "not recorded".
+const shopperNoAccount = "(none)"
 
 func (e *shopperRecordingExecutor) Execute(ctx context.Context, query string) (any, error) {
 	e.calls = append(e.calls, query)
@@ -31,6 +39,11 @@ func (e *shopperRecordingExecutor) Execute(ctx context.Context, query string) (a
 		userID = ac.UserId
 	}
 	e.actor = append(e.actor, userID)
+	account, stated := auth.CallAccountFromContext(ctx)
+	if !stated {
+		account = shopperNoAccount
+	}
+	e.account = append(e.account, account)
 	if e.errForCall != nil {
 		if err := e.errForCall(len(e.calls)-1, query); err != nil {
 			return nil, err
@@ -88,7 +101,7 @@ func shopperFixture(t *testing.T) (*ShopperHandler, *shopperRecordingExecutor, *
 	exec := &shopperRecordingExecutor{}
 	sites := &shopperFakeSites{
 		owner: "user-merchant",
-		site:  &ShopperSite{ID: "site1", ShopperForms: true, StoreID: "store-live", PreviewStoreID: "store-dev"},
+		site:  &ShopperSite{ID: "site1", ShopperForms: true, StoreID: "store-live", PreviewStoreID: "store-dev", AccountID: "acct-merchant"},
 	}
 	return NewShopperHandler(exec, sites, nil), exec, sites
 }
@@ -233,7 +246,67 @@ func TestAGoodPostWritesUnderTheSiteOwner(t *testing.T) {
 	if exec.actor[0] != "user-merchant" {
 		t.Fatalf("actor = %q, want the site owner", exec.actor[0])
 	}
+	// AND IN THE SITE'S ACCOUNT. The owner is borrowed, and the account they
+	// belong to is not necessarily the one this storefront does: resolved from
+	// the actor, a review a shopper left on one client's site would be recorded
+	// in whichever account its owner joined first.
+	if exec.account[0] != "acct-merchant" {
+		t.Fatalf("the write acts in account %q, want the site's", exec.account[0])
+	}
 	assertRedirect(t, rec, "/reviews/thanks", "")
+}
+
+// THE SITE'S ACCOUNT, in whichever spelling the row hands it back, and none when
+// the site has none. A site with no account states nothing, and the engine then
+// resolves the account from the borrowed owner as it did before this existed.
+func TestAShopperCallActsInTheSitesAccount(t *testing.T) {
+	for name, tc := range map[string]struct{ stored, want string }{
+		"bare":                   {"acct-merchant", "acct-merchant"},
+		"canonical":              {"v1:accounts:account:acct-merchant", "acct-merchant"},
+		"the primary account":    {"self", "self"},
+		"a site with no account": {"", shopperNoAccount},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, exec, sites := shopperFixture(t)
+			sites.site.AccountID = tc.stored
+
+			shopperPost(h, "/forms/reviews/review", "productHandle=boot&body=nice", goodStamp())
+			req := httptest.NewRequest(http.MethodGet, "/reads/reviews/published?productHandle=boot", nil)
+			for k, v := range goodStamp() {
+				req.Header.Set(k, v)
+			}
+			h.ServeHTTP(httptest.NewRecorder(), req)
+
+			if len(exec.calls) != 2 {
+				t.Fatalf("executed %v, want the form's write and the read", exec.calls)
+			}
+			for i, kind := range []string{"the form's write", "the read"} {
+				if exec.account[i] != tc.want {
+					t.Errorf("%s acts in account %q, want %q", kind, exec.account[i], tc.want)
+				}
+			}
+		})
+	}
+}
+
+// NOTHING THE REQUEST SENT CAN NAME THE ACCOUNT. It is read off the site row the
+// handler resolved under the owner, like the store, and a form field or a query
+// parameter of the same name is an undeclared input: dropped.
+func TestAShopperCannotNameTheAccount(t *testing.T) {
+	h, exec, _ := shopperFixture(t)
+
+	shopperPost(h, "/forms/reviews/review",
+		"productHandle=boot&body=nice&accountId=acct-somebody-elses", goodStamp())
+
+	if len(exec.calls) != 1 {
+		t.Fatalf("executed %v, want one call", exec.calls)
+	}
+	if exec.account[0] != "acct-merchant" {
+		t.Fatalf("a form-supplied accountId placed the write in %q", exec.account[0])
+	}
+	if strings.Contains(exec.calls[0], "accountId") {
+		t.Fatalf("an undeclared accountId reached the construct: %q", exec.calls[0])
+	}
 }
 
 // AN UNDECLARED INPUT IS DROPPED, NOT REFUSED: a browser posts what the
@@ -332,6 +405,11 @@ func TestAReadAnswersJSONUnderTheSiteOwner(t *testing.T) {
 	}
 	if exec.actor[0] != "user-merchant" {
 		t.Fatalf("actor = %q, want the site owner", exec.actor[0])
+	}
+	// A declared read can be a builtin, and a builtin can write: it acts in the
+	// site's account for the same reason the form does.
+	if exec.account[0] != "acct-merchant" {
+		t.Fatalf("the read acts in account %q, want the site's", exec.account[0])
 	}
 }
 

@@ -23,6 +23,7 @@
 /// There is nothing here to protect: every row is a public model id and a published size.
 @rowAuthz(public, requiresIdentity)
 @displayCard(primary="modelId", secondary="category", tertiary="runtime", status="curated")
+@belongsTo(cluster)
 concept modelProfile {
   reviewedAt datetime @description("Last manual review of the linked primary model source. Memory figures remain planning estimates unless measured provenance is present.")
   modelId          string!  @description("The runtime's own id, byte-identical to what a machine advertises as `model:<id>` -- an Ollama tag (qwen3.5:9b) or hf.co/<owner>/<repo>. A catalog hit is therefore a string equality and never a fuzzy match, which is what stops qwen3.5:9b and qwen3.5:9b-q4 from being read as one model. NOT the row id: a tag carries ':' and '/', and the canonical row id is {concept}:{shortId}, so the row id is a slug of this and this is the field everything compares on.")
@@ -51,6 +52,7 @@ concept modelProfile {
 /// Installation-wide research is opt-in and ships off. No machine is selected by a seed.
 // @no-displayCard: Singleton schedule configuration has no human-facing title; its state belongs in Models.
 @rowAuthz(clusterOwner)
+@belongsTo(cluster)
 concept catalogResearchSettings {
   enabled bool
   ownerUserId string
@@ -59,6 +61,7 @@ concept catalogResearchSettings {
 /// Research output is evidence to review, never permission to download or route.
 @displayCard(primary="summary", secondary="reviewedAt")
 @rowAuthz(clusterOwner)
+@belongsTo(cluster)
 concept catalogReview {
   runId string!
   reviewedAt datetime!

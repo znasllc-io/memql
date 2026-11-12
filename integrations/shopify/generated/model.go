@@ -37,6 +37,17 @@ type FieldSpec struct {
 	// path language ExtractField understands: "field", "field.id",
 	// "field[].id", "field.nodes[].id", "field.nodes[]".
 	Extract string
+	// AdminType is the Admin GraphQL type of the field's value, with lists
+	// and non-nulls unwrapped: a scalar's name ("DateTime", "Money"), an
+	// enum's, a nested object's, and for a GID reference or a list of them
+	// the type of the row named. DSLType cannot say this: a timestamp, an
+	// amount and a name are all "string" there.
+	AdminType string
+	// GidsInside names the mirrored Admin types a nested object keeps the GID
+	// of, sorted: an order's purchasing entity keeps a customer's. Nil for a
+	// field that is not an object or a list of objects, and for an object
+	// that keeps none.
+	GidsInside []string
 }
 
 // Field kinds.
@@ -63,6 +74,10 @@ type ChildSpec struct {
 	// Relay connection: the apply path reads it directly instead of
 	// through "nodes" / "edges".
 	List bool
+	// PageOp names the operation in the parent's FetchDocument that reads
+	// one further page of this connection, by the parent's id and an
+	// "after" cursor. Empty for a plain list, which is never paged.
+	PageOp string
 }
 
 // TypeSpec is everything the connector knows about one mirrored domain.
@@ -122,8 +137,9 @@ type TypeSpec struct {
 
 	Fields []FieldSpec
 
-	// FetchDocument holds both generated operations: ShopifyFetch<Type>
-	// (by GID, or the singleton) and ShopifyList<Type> (paged, filterable).
+	// FetchDocument holds the generated operations: ShopifyFetch<Type>
+	// (by GID, or the singleton), ShopifyList<Type> (paged, filterable)
+	// and one ShopifyPage<Type><Connection> per paged child connection.
 	FetchDocument string
 	FetchOp       string
 	ListOp        string
@@ -310,25 +326,25 @@ func init() {
 		Scopes:         []string{"read_orders"},
 		VersionField:   "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "abandonedCheckoutUrl", GraphQL: "abandonedCheckoutUrl", Kind: "scalar", DSLType: "string", Extract: "abandonedCheckoutUrl"},
-			{Name: "billingAddress", GraphQL: "billingAddress", Kind: "object", DSLType: "object", Extract: "billingAddress"},
-			{Name: "completedAt", GraphQL: "completedAt", Kind: "scalar", DSLType: "string", Extract: "completedAt"},
-			{Name: "customAttributes", GraphQL: "customAttributes", Kind: "objectList", DSLType: "[]object", Extract: "customAttributes"},
-			{Name: "customerGid", GraphQL: "customer", Kind: "gid", DSLType: "string", Extract: "customer.id"},
-			{Name: "defaultCursor", GraphQL: "defaultCursor", Kind: "scalar", DSLType: "string", Extract: "defaultCursor"},
-			{Name: "discountCodes", GraphQL: "discountCodes", Kind: "scalarList", DSLType: "[]string", Extract: "discountCodes"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "note", GraphQL: "note", Kind: "scalar", DSLType: "string", Extract: "note"},
-			{Name: "shippingAddress", GraphQL: "shippingAddress", Kind: "object", DSLType: "object", Extract: "shippingAddress"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "subtotalPriceSet", GraphQL: "subtotalPriceSet", Kind: "object", DSLType: "object", Extract: "subtotalPriceSet"},
-			{Name: "taxLines", GraphQL: "taxLines", Kind: "objectList", DSLType: "[]object", Extract: "taxLines"},
-			{Name: "taxesIncluded", GraphQL: "taxesIncluded", Kind: "scalar", DSLType: "bool", Extract: "taxesIncluded"},
-			{Name: "totalDiscountSet", GraphQL: "totalDiscountSet", Kind: "object", DSLType: "object", Extract: "totalDiscountSet"},
-			{Name: "totalDutiesSet", GraphQL: "totalDutiesSet", Kind: "object", DSLType: "object", Extract: "totalDutiesSet"},
-			{Name: "totalLineItemsPriceSet", GraphQL: "totalLineItemsPriceSet", Kind: "object", DSLType: "object", Extract: "totalLineItemsPriceSet"},
-			{Name: "totalPriceSet", GraphQL: "totalPriceSet", Kind: "object", DSLType: "object", Extract: "totalPriceSet"},
-			{Name: "totalTaxSet", GraphQL: "totalTaxSet", Kind: "object", DSLType: "object", Extract: "totalTaxSet"},
+			{Name: "abandonedCheckoutUrl", GraphQL: "abandonedCheckoutUrl", Kind: "scalar", DSLType: "string", Extract: "abandonedCheckoutUrl", AdminType: "URL"},
+			{Name: "billingAddress", GraphQL: "billingAddress", Kind: "object", DSLType: "object", Extract: "billingAddress", AdminType: "MailingAddress"},
+			{Name: "completedAt", GraphQL: "completedAt", Kind: "scalar", DSLType: "string", Extract: "completedAt", AdminType: "DateTime"},
+			{Name: "customAttributes", GraphQL: "customAttributes", Kind: "objectList", DSLType: "[]object", Extract: "customAttributes", AdminType: "Attribute"},
+			{Name: "customerGid", GraphQL: "customer", Kind: "gid", DSLType: "string", Extract: "customer.id", AdminType: "Customer"},
+			{Name: "defaultCursor", GraphQL: "defaultCursor", Kind: "scalar", DSLType: "string", Extract: "defaultCursor", AdminType: "String"},
+			{Name: "discountCodes", GraphQL: "discountCodes", Kind: "scalarList", DSLType: "[]string", Extract: "discountCodes", AdminType: "String"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "note", GraphQL: "note", Kind: "scalar", DSLType: "string", Extract: "note", AdminType: "String"},
+			{Name: "shippingAddress", GraphQL: "shippingAddress", Kind: "object", DSLType: "object", Extract: "shippingAddress", AdminType: "MailingAddress"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "subtotalPriceSet", GraphQL: "subtotalPriceSet", Kind: "object", DSLType: "object", Extract: "subtotalPriceSet", AdminType: "MoneyBag"},
+			{Name: "taxLines", GraphQL: "taxLines", Kind: "objectList", DSLType: "[]object", Extract: "taxLines", AdminType: "TaxLine"},
+			{Name: "taxesIncluded", GraphQL: "taxesIncluded", Kind: "scalar", DSLType: "bool", Extract: "taxesIncluded", AdminType: "Boolean"},
+			{Name: "totalDiscountSet", GraphQL: "totalDiscountSet", Kind: "object", DSLType: "object", Extract: "totalDiscountSet", AdminType: "MoneyBag"},
+			{Name: "totalDutiesSet", GraphQL: "totalDutiesSet", Kind: "object", DSLType: "object", Extract: "totalDutiesSet", AdminType: "MoneyBag"},
+			{Name: "totalLineItemsPriceSet", GraphQL: "totalLineItemsPriceSet", Kind: "object", DSLType: "object", Extract: "totalLineItemsPriceSet", AdminType: "MoneyBag"},
+			{Name: "totalPriceSet", GraphQL: "totalPriceSet", Kind: "object", DSLType: "object", Extract: "totalPriceSet", AdminType: "MoneyBag"},
+			{Name: "totalTaxSet", GraphQL: "totalTaxSet", Kind: "object", DSLType: "object", Extract: "totalTaxSet", AdminType: "MoneyBag"},
 		},
 		FetchOp: "ShopifyFetchAbandonedCheckout",
 		ListOp:  "ShopifyListAbandonedCheckout",
@@ -343,6 +359,7 @@ query ShopifyFetchAbandonedCheckout($id: ID!) {
     __typename
     ... on AbandonedCheckout {
       id
+      updatedAt
       abandonedCheckoutUrl
       billingAddress { address1 address2 city company coordinatesValidated country countryCodeV2 firstName formatted formattedArea id lastName latitude longitude name phone province provinceCode timeZone validationResultSummary zip }
       completedAt
@@ -371,6 +388,7 @@ query ShopifyListAbandonedCheckout($first: Int!, $after: String, $query: String)
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       abandonedCheckoutUrl
       billingAddress { address1 address2 city company coordinatesValidated country countryCodeV2 firstName formatted formattedArea id lastName latitude longitude name phone province provinceCode timeZone validationResultSummary zip }
       completedAt
@@ -405,6 +423,7 @@ query ShopifyBulkAbandonedCheckout($query: String) {
     edges {
       node {
         id
+        updatedAt
         abandonedCheckoutUrl
         billingAddress { address1 address2 city company coordinatesValidated country countryCodeV2 firstName formatted formattedArea id lastName latitude longitude name phone province provinceCode timeZone validationResultSummary zip }
         completedAt
@@ -451,24 +470,24 @@ query ShopifyBulkAbandonedCheckout($query: String) {
 		ParentGidPath:    "blog.id",
 		VersionField:     "updatedAt",
 		Children: []ChildSpec{
-			{Connection: "comments", Concept: "articleComment", GraphQLType: "Comment", List: false},
+			{Connection: "comments", Concept: "articleComment", GraphQLType: "Comment", List: false, PageOp: "ShopifyPageArticleComments"},
 		},
 		Fields: []FieldSpec{
-			{Name: "author", GraphQL: "author", Kind: "object", DSLType: "object", Extract: "author"},
-			{Name: "blogGid", GraphQL: "blog", Kind: "gid", DSLType: "string", Extract: "blog.id"},
-			{Name: "body", GraphQL: "body", Kind: "scalar", DSLType: "string", Extract: "body"},
-			{Name: "commentsCount", GraphQL: "commentsCount", Kind: "object", DSLType: "object", Extract: "commentsCount"},
-			{Name: "defaultCursor", GraphQL: "defaultCursor", Kind: "scalar", DSLType: "string", Extract: "defaultCursor"},
-			{Name: "handle", GraphQL: "handle", Kind: "scalar", DSLType: "string", Extract: "handle"},
-			{Name: "image", GraphQL: "image", Kind: "object", DSLType: "object", Extract: "image"},
-			{Name: "isPublished", GraphQL: "isPublished", Kind: "scalar", DSLType: "bool", Extract: "isPublished"},
-			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]"},
-			{Name: "publishedAt", GraphQL: "publishedAt", Kind: "scalar", DSLType: "string", Extract: "publishedAt"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "summary", GraphQL: "summary", Kind: "scalar", DSLType: "string", Extract: "summary"},
-			{Name: "tags", GraphQL: "tags", Kind: "scalarList", DSLType: "[]string", Extract: "tags"},
-			{Name: "templateSuffix", GraphQL: "templateSuffix", Kind: "scalar", DSLType: "string", Extract: "templateSuffix"},
-			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title"},
+			{Name: "author", GraphQL: "author", Kind: "object", DSLType: "object", Extract: "author", AdminType: "ArticleAuthor"},
+			{Name: "blogGid", GraphQL: "blog", Kind: "gid", DSLType: "string", Extract: "blog.id", AdminType: "Blog"},
+			{Name: "body", GraphQL: "body", Kind: "scalar", DSLType: "string", Extract: "body", AdminType: "HTML"},
+			{Name: "commentsCount", GraphQL: "commentsCount", Kind: "object", DSLType: "object", Extract: "commentsCount", AdminType: "Count"},
+			{Name: "defaultCursor", GraphQL: "defaultCursor", Kind: "scalar", DSLType: "string", Extract: "defaultCursor", AdminType: "String"},
+			{Name: "handle", GraphQL: "handle", Kind: "scalar", DSLType: "string", Extract: "handle", AdminType: "String"},
+			{Name: "image", GraphQL: "image", Kind: "object", DSLType: "object", Extract: "image", AdminType: "Image"},
+			{Name: "isPublished", GraphQL: "isPublished", Kind: "scalar", DSLType: "bool", Extract: "isPublished", AdminType: "Boolean"},
+			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]", AdminType: "Metafield"},
+			{Name: "publishedAt", GraphQL: "publishedAt", Kind: "scalar", DSLType: "string", Extract: "publishedAt", AdminType: "DateTime"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "summary", GraphQL: "summary", Kind: "scalar", DSLType: "string", Extract: "summary", AdminType: "HTML"},
+			{Name: "tags", GraphQL: "tags", Kind: "scalarList", DSLType: "[]string", Extract: "tags", AdminType: "String"},
+			{Name: "templateSuffix", GraphQL: "templateSuffix", Kind: "scalar", DSLType: "string", Extract: "templateSuffix", AdminType: "String"},
+			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title", AdminType: "String"},
 		},
 		FetchOp: "ShopifyFetchArticle",
 		ListOp:  "ShopifyListArticle",
@@ -483,6 +502,7 @@ query ShopifyFetchArticle($id: ID!) {
     __typename
     ... on Article {
       id
+      updatedAt
       author { name }
       blog { id }
       body
@@ -499,8 +519,10 @@ query ShopifyFetchArticle($id: ID!) {
       templateSuffix
       title
       comments(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           article { id }
           author { email name }
           body
@@ -522,6 +544,7 @@ query ShopifyListArticle($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       author { name }
       blog { id }
       body
@@ -538,8 +561,35 @@ query ShopifyListArticle($first: Int!, $after: String, $query: String) {
       templateSuffix
       title
       comments(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
+          article { id }
+          author { email name }
+          body
+          bodyHtml
+          ip
+          isPublished
+          publishedAt
+          createdAt
+          status
+          userAgent
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageArticleComments($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Article {
+      comments(first: 50, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          updatedAt
           article { id }
           author { email name }
           body
@@ -577,16 +627,16 @@ query ShopifyListArticle($first: Int!, $after: String, $query: String) {
 		ParentGidPath:    "article.id",
 		VersionField:     "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "articleGid", GraphQL: "article", Kind: "gid", DSLType: "string", Extract: "article.id"},
-			{Name: "author", GraphQL: "author", Kind: "object", DSLType: "object", Extract: "author"},
-			{Name: "body", GraphQL: "body", Kind: "scalar", DSLType: "string", Extract: "body"},
-			{Name: "bodyHtml", GraphQL: "bodyHtml", Kind: "scalar", DSLType: "string", Extract: "bodyHtml"},
-			{Name: "ip", GraphQL: "ip", Kind: "scalar", DSLType: "string", Extract: "ip"},
-			{Name: "isPublished", GraphQL: "isPublished", Kind: "scalar", DSLType: "bool", Extract: "isPublished"},
-			{Name: "publishedAt", GraphQL: "publishedAt", Kind: "scalar", DSLType: "string", Extract: "publishedAt"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"SPAM\", \"REMOVED\", \"PUBLISHED\", \"UNAPPROVED\", \"PENDING\")", Extract: "status"},
-			{Name: "userAgent", GraphQL: "userAgent", Kind: "scalar", DSLType: "string", Extract: "userAgent"},
+			{Name: "articleGid", GraphQL: "article", Kind: "gid", DSLType: "string", Extract: "article.id", AdminType: "Article"},
+			{Name: "author", GraphQL: "author", Kind: "object", DSLType: "object", Extract: "author", AdminType: "CommentAuthor"},
+			{Name: "body", GraphQL: "body", Kind: "scalar", DSLType: "string", Extract: "body", AdminType: "String"},
+			{Name: "bodyHtml", GraphQL: "bodyHtml", Kind: "scalar", DSLType: "string", Extract: "bodyHtml", AdminType: "HTML"},
+			{Name: "ip", GraphQL: "ip", Kind: "scalar", DSLType: "string", Extract: "ip", AdminType: "String"},
+			{Name: "isPublished", GraphQL: "isPublished", Kind: "scalar", DSLType: "bool", Extract: "isPublished", AdminType: "Boolean"},
+			{Name: "publishedAt", GraphQL: "publishedAt", Kind: "scalar", DSLType: "string", Extract: "publishedAt", AdminType: "DateTime"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"SPAM\", \"REMOVED\", \"PUBLISHED\", \"UNAPPROVED\", \"PENDING\")", Extract: "status", AdminType: "CommentStatus"},
+			{Name: "userAgent", GraphQL: "userAgent", Kind: "scalar", DSLType: "string", Extract: "userAgent", AdminType: "String"},
 		},
 		FetchOp: "ShopifyFetchArticleComment",
 		ListOp:  "ShopifyListArticleComment",
@@ -601,6 +651,7 @@ query ShopifyFetchArticleComment($id: ID!) {
     __typename
     ... on Comment {
       id
+      updatedAt
       article { id }
       author { email name }
       body
@@ -620,6 +671,7 @@ query ShopifyListArticleComment($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       article { id }
       author { email name }
       body
@@ -652,18 +704,18 @@ query ShopifyListArticleComment($first: Int!, $after: String, $query: String) {
 		Scopes:         []string{"read_content"},
 		VersionField:   "updatedAt",
 		Children: []ChildSpec{
-			{Connection: "articles", Concept: "article", GraphQLType: "Article", List: false},
+			{Connection: "articles", Concept: "article", GraphQLType: "Article", List: false, PageOp: "ShopifyPageBlogArticles"},
 		},
 		Fields: []FieldSpec{
-			{Name: "articlesCount", GraphQL: "articlesCount", Kind: "object", DSLType: "object", Extract: "articlesCount"},
-			{Name: "commentPolicy", GraphQL: "commentPolicy", Kind: "enum", DSLType: "enum(\"AUTO_PUBLISHED\", \"CLOSED\", \"MODERATED\")", Extract: "commentPolicy"},
-			{Name: "feed", GraphQL: "feed", Kind: "object", DSLType: "object", Extract: "feed"},
-			{Name: "handle", GraphQL: "handle", Kind: "scalar", DSLType: "string", Extract: "handle"},
-			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "tags", GraphQL: "tags", Kind: "scalarList", DSLType: "[]string", Extract: "tags"},
-			{Name: "templateSuffix", GraphQL: "templateSuffix", Kind: "scalar", DSLType: "string", Extract: "templateSuffix"},
-			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title"},
+			{Name: "articlesCount", GraphQL: "articlesCount", Kind: "object", DSLType: "object", Extract: "articlesCount", AdminType: "Count"},
+			{Name: "commentPolicy", GraphQL: "commentPolicy", Kind: "enum", DSLType: "enum(\"AUTO_PUBLISHED\", \"CLOSED\", \"MODERATED\")", Extract: "commentPolicy", AdminType: "CommentPolicy"},
+			{Name: "feed", GraphQL: "feed", Kind: "object", DSLType: "object", Extract: "feed", AdminType: "BlogFeed"},
+			{Name: "handle", GraphQL: "handle", Kind: "scalar", DSLType: "string", Extract: "handle", AdminType: "String"},
+			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]", AdminType: "Metafield"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "tags", GraphQL: "tags", Kind: "scalarList", DSLType: "[]string", Extract: "tags", AdminType: "String"},
+			{Name: "templateSuffix", GraphQL: "templateSuffix", Kind: "scalar", DSLType: "string", Extract: "templateSuffix", AdminType: "String"},
+			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title", AdminType: "String"},
 		},
 		FetchOp: "ShopifyFetchBlog",
 		ListOp:  "ShopifyListBlog",
@@ -678,6 +730,7 @@ query ShopifyFetchBlog($id: ID!) {
     __typename
     ... on Blog {
       id
+      updatedAt
       articlesCount { count precision }
       commentPolicy
       feed { location path }
@@ -688,8 +741,10 @@ query ShopifyFetchBlog($id: ID!) {
       templateSuffix
       title
       articles(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           author { name }
           blog { id }
           body
@@ -716,6 +771,7 @@ query ShopifyListBlog($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       articlesCount { count precision }
       commentPolicy
       feed { location path }
@@ -726,8 +782,40 @@ query ShopifyListBlog($first: Int!, $after: String, $query: String) {
       templateSuffix
       title
       articles(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
+          author { name }
+          blog { id }
+          body
+          commentsCount { count precision }
+          defaultCursor
+          handle
+          image { altText height id thumbhash url width }
+          isPublished
+          metafields(first: 50) { nodes { namespace key type value jsonValue } }
+          publishedAt
+          createdAt
+          summary
+          tags
+          templateSuffix
+          title
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageBlogArticles($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Blog {
+      articles(first: 50, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          updatedAt
           author { name }
           blog { id }
           body
@@ -760,6 +848,7 @@ query ShopifyBulkBlog($query: String) {
     edges {
       node {
         id
+        updatedAt
         articlesCount { count precision }
         commentPolicy
         feed { location path }
@@ -773,6 +862,7 @@ query ShopifyBulkBlog($query: String) {
           edges {
             node {
             id
+            updatedAt
             author { name }
             blog { id }
             body
@@ -814,13 +904,13 @@ query ShopifyBulkBlog($query: String) {
 		Scopes:       []string{"read_products"},
 		VersionField: "",
 		Fields: []FieldSpec{
-			{Name: "address", GraphQL: "address", Kind: "object", DSLType: "object", Extract: "address"},
-			{Name: "archived", GraphQL: "archived", Kind: "scalar", DSLType: "bool", Extract: "archived"},
-			{Name: "companyName", GraphQL: "companyName", Kind: "scalar", DSLType: "string", Extract: "companyName"},
-			{Name: "displayName", GraphQL: "displayName", Kind: "scalar", DSLType: "string", Extract: "displayName"},
-			{Name: "legalEntityId", GraphQL: "legalEntityId", Kind: "scalar", DSLType: "string", Extract: "legalEntityId"},
-			{Name: "primary", GraphQL: "primary", Kind: "scalar", DSLType: "bool", Extract: "primary"},
-			{Name: "shopifyPaymentsAccount", GraphQL: "shopifyPaymentsAccount", Kind: "object", DSLType: "object", Extract: "shopifyPaymentsAccount"},
+			{Name: "address", GraphQL: "address", Kind: "object", DSLType: "object", Extract: "address", AdminType: "BusinessEntityAddress"},
+			{Name: "archived", GraphQL: "archived", Kind: "scalar", DSLType: "bool", Extract: "archived", AdminType: "Boolean"},
+			{Name: "companyName", GraphQL: "companyName", Kind: "scalar", DSLType: "string", Extract: "companyName", AdminType: "String"},
+			{Name: "displayName", GraphQL: "displayName", Kind: "scalar", DSLType: "string", Extract: "displayName", AdminType: "String"},
+			{Name: "legalEntityId", GraphQL: "legalEntityId", Kind: "scalar", DSLType: "string", Extract: "legalEntityId", AdminType: "BigInt"},
+			{Name: "primary", GraphQL: "primary", Kind: "scalar", DSLType: "bool", Extract: "primary", AdminType: "Boolean"},
+			{Name: "shopifyPaymentsAccount", GraphQL: "shopifyPaymentsAccount", Kind: "object", DSLType: "object", Extract: "shopifyPaymentsAccount", AdminType: "ShopifyPaymentsAccount"},
 		},
 		FetchOp: "ShopifyFetchBusinessEntity",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -863,11 +953,11 @@ query ShopifyFetchBusinessEntity($id: ID!) {
 		Scopes:         []string{"read_publications"},
 		VersionField:   "",
 		Fields: []FieldSpec{
-			{Name: "operations", GraphQL: "operations", Kind: "objectList", DSLType: "[]object", Extract: "operations"},
-			{Name: "priceListGid", GraphQL: "priceList", Kind: "gid", DSLType: "string", Extract: "priceList.id"},
-			{Name: "publicationGid", GraphQL: "publication", Kind: "gid", DSLType: "string", Extract: "publication.id"},
-			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"ACTIVE\", \"ARCHIVED\", \"DRAFT\")", Extract: "status"},
-			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title"},
+			{Name: "operations", GraphQL: "operations", Kind: "objectList", DSLType: "[]object", Extract: "operations", AdminType: "ResourceOperation"},
+			{Name: "priceListGid", GraphQL: "priceList", Kind: "gid", DSLType: "string", Extract: "priceList.id", AdminType: "PriceList"},
+			{Name: "publicationGid", GraphQL: "publication", Kind: "gid", DSLType: "string", Extract: "publication.id", AdminType: "Publication"},
+			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"ACTIVE\", \"ARCHIVED\", \"DRAFT\")", Extract: "status", AdminType: "CatalogStatus"},
+			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title", AdminType: "String"},
 		},
 		FetchOp: "ShopifyFetchCatalog",
 		ListOp:  "ShopifyListCatalog",
@@ -923,17 +1013,17 @@ query ShopifyListCatalog($first: Int!, $after: String, $query: String) {
 		Scopes:         []string{"read_publications"},
 		VersionField:   "",
 		Fields: []FieldSpec{
-			{Name: "accountId", GraphQL: "accountId", Kind: "scalar", DSLType: "string", Extract: "accountId"},
-			{Name: "accountName", GraphQL: "accountName", Kind: "scalar", DSLType: "string", Extract: "accountName"},
-			{Name: "activeRegions", GraphQL: "activeRegions", Kind: "scalarList", DSLType: "[]string", Extract: "activeRegions"},
-			{Name: "app", GraphQL: "app", Kind: "object", DSLType: "object", Extract: "app"},
-			{Name: "handle", GraphQL: "handle", Kind: "scalar", DSLType: "string", Extract: "handle"},
-			{Name: "marketsCount", GraphQL: "marketsCount", Kind: "object", DSLType: "object", Extract: "marketsCount"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "productsCount", GraphQL: "productsCount", Kind: "object", DSLType: "object", Extract: "productsCount"},
-			{Name: "resourceFeedback", GraphQL: "resourceFeedback", Kind: "object", DSLType: "object", Extract: "resourceFeedback"},
-			{Name: "specificationHandle", GraphQL: "specificationHandle", Kind: "scalar", DSLType: "string", Extract: "specificationHandle"},
-			{Name: "supportsFuturePublishing", GraphQL: "supportsFuturePublishing", Kind: "scalar", DSLType: "bool", Extract: "supportsFuturePublishing"},
+			{Name: "accountName", GraphQL: "accountName", Kind: "scalar", DSLType: "string", Extract: "accountName", AdminType: "String"},
+			{Name: "activeRegions", GraphQL: "activeRegions", Kind: "scalarList", DSLType: "[]string", Extract: "activeRegions", AdminType: "CountryCode"},
+			{Name: "app", GraphQL: "app", Kind: "object", DSLType: "object", Extract: "app", AdminType: "App", GidsInside: []string{"Channel"}},
+			{Name: "handle", GraphQL: "handle", Kind: "scalar", DSLType: "string", Extract: "handle", AdminType: "String"},
+			{Name: "marketsCount", GraphQL: "marketsCount", Kind: "object", DSLType: "object", Extract: "marketsCount", AdminType: "Count"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "productsCount", GraphQL: "productsCount", Kind: "object", DSLType: "object", Extract: "productsCount", AdminType: "Count"},
+			{Name: "resourceFeedback", GraphQL: "resourceFeedback", Kind: "object", DSLType: "object", Extract: "resourceFeedback", AdminType: "AppFeedback", GidsInside: []string{"Channel"}},
+			{Name: "sourceAccountId", GraphQL: "accountId", Kind: "scalar", DSLType: "string", Extract: "accountId", AdminType: "String"},
+			{Name: "specificationHandle", GraphQL: "specificationHandle", Kind: "scalar", DSLType: "string", Extract: "specificationHandle", AdminType: "String"},
+			{Name: "supportsFuturePublishing", GraphQL: "supportsFuturePublishing", Kind: "scalar", DSLType: "bool", Extract: "supportsFuturePublishing", AdminType: "Boolean"},
 		},
 		FetchOp: "ShopifyFetchChannel",
 		ListOp:  "ShopifyListChannel",
@@ -948,7 +1038,6 @@ query ShopifyFetchChannel($id: ID!) {
     __typename
     ... on Channel {
       id
-      accountId
       accountName
       activeRegions
       app { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
@@ -957,6 +1046,7 @@ query ShopifyFetchChannel($id: ID!) {
       name
       productsCount { count precision }
       resourceFeedback { app { apiKey appStoreAppUrl appStoreDeveloperUrl description developerName developerType embedded features handle id installUrl isPostPurchaseAppInUse previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published shopifyDeveloped title uninstallMessage webhookApiVersion } channel { id } feedbackGeneratedAt link { label url } messages { field message } state }
+      accountId
       specificationHandle
       supportsFuturePublishing
     }
@@ -968,7 +1058,6 @@ query ShopifyListChannel($first: Int!, $after: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
-      accountId
       accountName
       activeRegions
       app { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
@@ -977,6 +1066,7 @@ query ShopifyListChannel($first: Int!, $after: String) {
       name
       productsCount { count precision }
       resourceFeedback { app { apiKey appStoreAppUrl appStoreDeveloperUrl description developerName developerType embedded features handle id installUrl isPostPurchaseAppInUse previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published shopifyDeveloped title uninstallMessage webhookApiVersion } channel { id } feedbackGeneratedAt link { label url } messages { field message } state }
+      accountId
       specificationHandle
       supportsFuturePublishing
     }
@@ -1001,25 +1091,25 @@ query ShopifyListChannel($first: Int!, $after: String) {
 		Scopes:         []string{"read_products"},
 		VersionField:   "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "activeOperations", GraphQL: "activeOperations", Kind: "object", DSLType: "object", Extract: "activeOperations"},
-			{Name: "availablePublicationsCount", GraphQL: "availablePublicationsCount", Kind: "object", DSLType: "object", Extract: "availablePublicationsCount"},
-			{Name: "description", GraphQL: "description", Kind: "scalar", DSLType: "string", Extract: "description"},
-			{Name: "descriptionHtml", GraphQL: "descriptionHtml", Kind: "scalar", DSLType: "string", Extract: "descriptionHtml"},
-			{Name: "feedback", GraphQL: "feedback", Kind: "object", DSLType: "object", Extract: "feedback"},
-			{Name: "handle", GraphQL: "handle", Kind: "scalar", DSLType: "string", Extract: "handle"},
-			{Name: "image", GraphQL: "image", Kind: "object", DSLType: "object", Extract: "image"},
-			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId"},
-			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]"},
-			{Name: "productsCount", GraphQL: "productsCount", Kind: "object", DSLType: "object", Extract: "productsCount"},
-			{Name: "productsGids", GraphQL: "products", Kind: "refs", DSLType: "[]string", Extract: "products.nodes[].id"},
-			{Name: "resourcePublications", GraphQL: "resourcePublications", Kind: "objectList", DSLType: "[]object", Extract: "resourcePublications.nodes[]"},
-			{Name: "resourcePublicationsCount", GraphQL: "resourcePublicationsCount", Kind: "object", DSLType: "object", Extract: "resourcePublicationsCount"},
-			{Name: "seo", GraphQL: "seo", Kind: "object", DSLType: "object", Extract: "seo"},
-			{Name: "sortOrder", GraphQL: "sortOrder", Kind: "enum", DSLType: "enum(\"ALPHA_ASC\", \"ALPHA_DESC\", \"BEST_SELLING\", \"MOST_RELEVANT\", \"CREATED\", \"CREATED_DESC\", \"MANUAL\", \"PRICE_ASC\", \"PRICE_DESC\")", Extract: "sortOrder"},
-			{Name: "sources", GraphQL: "sources", Kind: "objectList", DSLType: "[]object", Extract: "sources"},
-			{Name: "subCollectionEligibility", GraphQL: "subCollectionEligibility", Kind: "object", DSLType: "object", Extract: "subCollectionEligibility"},
-			{Name: "templateSuffix", GraphQL: "templateSuffix", Kind: "scalar", DSLType: "string", Extract: "templateSuffix"},
-			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title"},
+			{Name: "activeOperations", GraphQL: "activeOperations", Kind: "object", DSLType: "object", Extract: "activeOperations", AdminType: "CollectionOperations"},
+			{Name: "availablePublicationsCount", GraphQL: "availablePublicationsCount", Kind: "object", DSLType: "object", Extract: "availablePublicationsCount", AdminType: "Count"},
+			{Name: "description", GraphQL: "description", Kind: "scalar", DSLType: "string", Extract: "description", AdminType: "String"},
+			{Name: "descriptionHtml", GraphQL: "descriptionHtml", Kind: "scalar", DSLType: "string", Extract: "descriptionHtml", AdminType: "HTML"},
+			{Name: "feedback", GraphQL: "feedback", Kind: "object", DSLType: "object", Extract: "feedback", AdminType: "ResourceFeedback", GidsInside: []string{"Channel"}},
+			{Name: "handle", GraphQL: "handle", Kind: "scalar", DSLType: "string", Extract: "handle", AdminType: "String"},
+			{Name: "image", GraphQL: "image", Kind: "object", DSLType: "object", Extract: "image", AdminType: "Image"},
+			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId", AdminType: "UnsignedInt64"},
+			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]", AdminType: "Metafield"},
+			{Name: "productsCount", GraphQL: "productsCount", Kind: "object", DSLType: "object", Extract: "productsCount", AdminType: "Count"},
+			{Name: "productsGids", GraphQL: "products", Kind: "refs", DSLType: "[]string", Extract: "products.nodes[].id", AdminType: "Product"},
+			{Name: "resourcePublications", GraphQL: "resourcePublications", Kind: "objectList", DSLType: "[]object", Extract: "resourcePublications.nodes[]", AdminType: "ResourcePublication", GidsInside: []string{"Publication"}},
+			{Name: "resourcePublicationsCount", GraphQL: "resourcePublicationsCount", Kind: "object", DSLType: "object", Extract: "resourcePublicationsCount", AdminType: "Count"},
+			{Name: "seo", GraphQL: "seo", Kind: "object", DSLType: "object", Extract: "seo", AdminType: "SEO"},
+			{Name: "sortOrder", GraphQL: "sortOrder", Kind: "enum", DSLType: "enum(\"ALPHA_ASC\", \"ALPHA_DESC\", \"BEST_SELLING\", \"MOST_RELEVANT\", \"CREATED\", \"CREATED_DESC\", \"MANUAL\", \"PRICE_ASC\", \"PRICE_DESC\")", Extract: "sortOrder", AdminType: "CollectionSortOrder"},
+			{Name: "sources", GraphQL: "sources", Kind: "objectList", DSLType: "[]object", Extract: "sources", AdminType: "CollectionSource"},
+			{Name: "subCollectionEligibility", GraphQL: "subCollectionEligibility", Kind: "object", DSLType: "object", Extract: "subCollectionEligibility", AdminType: "CollectionSubCollectionEligibility"},
+			{Name: "templateSuffix", GraphQL: "templateSuffix", Kind: "scalar", DSLType: "string", Extract: "templateSuffix", AdminType: "String"},
+			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title", AdminType: "String"},
 		},
 		FetchOp: "ShopifyFetchCollection",
 		ListOp:  "ShopifyListCollection",
@@ -1034,6 +1124,7 @@ query ShopifyFetchCollection($id: ID!) {
     __typename
     ... on Collection {
       id
+      updatedAt
       activeOperations { duplicate { collectionRole } }
       availablePublicationsCount { count precision }
       description
@@ -1062,6 +1153,7 @@ query ShopifyListCollection($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       activeOperations { duplicate { collectionRole } }
       availablePublicationsCount { count precision }
       description
@@ -1096,6 +1188,7 @@ query ShopifyBulkCollection($query: String) {
     edges {
       node {
         id
+        updatedAt
         activeOperations { duplicate { collectionRole } }
         availablePublicationsCount { count precision }
         description
@@ -1137,27 +1230,27 @@ query ShopifyBulkCollection($query: String) {
 		Scopes:         []string{"read_customers"},
 		VersionField:   "updatedAt",
 		Children: []ChildSpec{
-			{Connection: "locations", Concept: "companyLocation", GraphQLType: "CompanyLocation", List: false},
-			{Connection: "contacts", Concept: "companyContact", GraphQLType: "CompanyContact", List: false},
+			{Connection: "locations", Concept: "companyLocation", GraphQLType: "CompanyLocation", List: false, PageOp: "ShopifyPageCompanyLocations"},
+			{Connection: "contacts", Concept: "companyContact", GraphQLType: "CompanyContact", List: false, PageOp: "ShopifyPageCompanyContacts"},
 		},
 		Fields: []FieldSpec{
-			{Name: "contactsCount", GraphQL: "contactsCount", Kind: "object", DSLType: "object", Extract: "contactsCount"},
-			{Name: "customerSince", GraphQL: "customerSince", Kind: "scalar", DSLType: "string", Extract: "customerSince"},
-			{Name: "defaultCursor", GraphQL: "defaultCursor", Kind: "scalar", DSLType: "string", Extract: "defaultCursor"},
-			{Name: "defaultRole", GraphQL: "defaultRole", Kind: "object", DSLType: "object", Extract: "defaultRole"},
-			{Name: "draftOrdersGids", GraphQL: "draftOrders", Kind: "refs", DSLType: "[]string", Extract: "draftOrders.nodes[].id"},
-			{Name: "externalId", GraphQL: "externalId", Kind: "scalar", DSLType: "string", Extract: "externalId"},
-			{Name: "hasTimelineComment", GraphQL: "hasTimelineComment", Kind: "scalar", DSLType: "bool", Extract: "hasTimelineComment"},
-			{Name: "lifetimeDuration", GraphQL: "lifetimeDuration", Kind: "scalar", DSLType: "string", Extract: "lifetimeDuration"},
-			{Name: "locationsCount", GraphQL: "locationsCount", Kind: "object", DSLType: "object", Extract: "locationsCount"},
-			{Name: "mainContactGid", GraphQL: "mainContact", Kind: "gid", DSLType: "string", Extract: "mainContact.id"},
-			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "note", GraphQL: "note", Kind: "scalar", DSLType: "string", Extract: "note"},
-			{Name: "ordersCount", GraphQL: "ordersCount", Kind: "object", DSLType: "object", Extract: "ordersCount"},
-			{Name: "ordersGids", GraphQL: "orders", Kind: "refs", DSLType: "[]string", Extract: "orders.nodes[].id"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "totalSpent", GraphQL: "totalSpent", Kind: "object", DSLType: "object", Extract: "totalSpent"},
+			{Name: "contactsCount", GraphQL: "contactsCount", Kind: "object", DSLType: "object", Extract: "contactsCount", AdminType: "Count"},
+			{Name: "customerSince", GraphQL: "customerSince", Kind: "scalar", DSLType: "string", Extract: "customerSince", AdminType: "DateTime"},
+			{Name: "defaultCursor", GraphQL: "defaultCursor", Kind: "scalar", DSLType: "string", Extract: "defaultCursor", AdminType: "String"},
+			{Name: "defaultRole", GraphQL: "defaultRole", Kind: "object", DSLType: "object", Extract: "defaultRole", AdminType: "CompanyContactRole"},
+			{Name: "draftOrdersGids", GraphQL: "draftOrders", Kind: "refs", DSLType: "[]string", Extract: "draftOrders.nodes[].id", AdminType: "DraftOrder"},
+			{Name: "externalId", GraphQL: "externalId", Kind: "scalar", DSLType: "string", Extract: "externalId", AdminType: "String"},
+			{Name: "hasTimelineComment", GraphQL: "hasTimelineComment", Kind: "scalar", DSLType: "bool", Extract: "hasTimelineComment", AdminType: "Boolean"},
+			{Name: "lifetimeDuration", GraphQL: "lifetimeDuration", Kind: "scalar", DSLType: "string", Extract: "lifetimeDuration", AdminType: "String"},
+			{Name: "locationsCount", GraphQL: "locationsCount", Kind: "object", DSLType: "object", Extract: "locationsCount", AdminType: "Count"},
+			{Name: "mainContactGid", GraphQL: "mainContact", Kind: "gid", DSLType: "string", Extract: "mainContact.id", AdminType: "CompanyContact"},
+			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]", AdminType: "Metafield"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "note", GraphQL: "note", Kind: "scalar", DSLType: "string", Extract: "note", AdminType: "String"},
+			{Name: "ordersCount", GraphQL: "ordersCount", Kind: "object", DSLType: "object", Extract: "ordersCount", AdminType: "Count"},
+			{Name: "ordersGids", GraphQL: "orders", Kind: "refs", DSLType: "[]string", Extract: "orders.nodes[].id", AdminType: "Order"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "totalSpent", GraphQL: "totalSpent", Kind: "object", DSLType: "object", Extract: "totalSpent", AdminType: "MoneyV2"},
 		},
 		FetchOp: "ShopifyFetchCompany",
 		ListOp:  "ShopifyListCompany",
@@ -1172,6 +1265,7 @@ query ShopifyFetchCompany($id: ID!) {
     __typename
     ... on Company {
       id
+      updatedAt
       contactsCount { count precision }
       customerSince
       defaultCursor
@@ -1190,8 +1284,10 @@ query ShopifyFetchCompany($id: ID!) {
       createdAt
       totalSpent { amount currencyCode }
       locations(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
           buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
           catalogsCount { count precision }
@@ -1215,8 +1311,10 @@ query ShopifyFetchCompany($id: ID!) {
         }
       }
       contacts(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           company { id }
           customer { id }
           isMainContact
@@ -1235,6 +1333,7 @@ query ShopifyListCompany($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       contactsCount { count precision }
       customerSince
       defaultCursor
@@ -1253,8 +1352,10 @@ query ShopifyListCompany($first: Int!, $after: String, $query: String) {
       createdAt
       totalSpent { amount currencyCode }
       locations(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
           buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
           catalogsCount { count precision }
@@ -1278,8 +1379,67 @@ query ShopifyListCompany($first: Int!, $after: String, $query: String) {
         }
       }
       contacts(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
+          company { id }
+          customer { id }
+          isMainContact
+          lifetimeDuration
+          locale
+          createdAt
+          title
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageCompanyLocations($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Company {
+      locations(first: 50, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          updatedAt
+          billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
+          buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
+          catalogsCount { count precision }
+          catalogs(first: 25) { nodes { id } }
+          company { id }
+          currency
+          defaultCursor
+          externalId
+          hasTimelineComment
+          locale
+          metafields(first: 50) { nodes { namespace key type value jsonValue } }
+          name
+          note
+          ordersCount { count precision }
+          phone
+          shippingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
+          createdAt
+          storeCreditAccounts(first: 25) { nodes { id } }
+          taxSettings { taxExempt taxExemptions taxRegistrationId }
+          totalSpent { amount currencyCode }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageCompanyContacts($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Company {
+      contacts(first: 50, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          updatedAt
           company { id }
           customer { id }
           isMainContact
@@ -1304,6 +1464,7 @@ query ShopifyBulkCompany($query: String) {
     edges {
       node {
         id
+        updatedAt
         contactsCount { count precision }
         customerSince
         defaultCursor
@@ -1323,6 +1484,7 @@ query ShopifyBulkCompany($query: String) {
           edges {
             node {
             id
+            updatedAt
             billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
             buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
             catalogsCount { count precision }
@@ -1348,6 +1510,7 @@ query ShopifyBulkCompany($query: String) {
           edges {
             node {
             id
+            updatedAt
             company { id }
             customer { id }
             isMainContact
@@ -1384,13 +1547,13 @@ query ShopifyBulkCompany($query: String) {
 		ParentGidPath:    "company.id",
 		VersionField:     "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "companyGid", GraphQL: "company", Kind: "gid", DSLType: "string", Extract: "company.id"},
-			{Name: "customerGid", GraphQL: "customer", Kind: "gid", DSLType: "string", Extract: "customer.id"},
-			{Name: "isMainContact", GraphQL: "isMainContact", Kind: "scalar", DSLType: "bool", Extract: "isMainContact"},
-			{Name: "lifetimeDuration", GraphQL: "lifetimeDuration", Kind: "scalar", DSLType: "string", Extract: "lifetimeDuration"},
-			{Name: "locale", GraphQL: "locale", Kind: "scalar", DSLType: "string", Extract: "locale"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title"},
+			{Name: "companyGid", GraphQL: "company", Kind: "gid", DSLType: "string", Extract: "company.id", AdminType: "Company"},
+			{Name: "customerGid", GraphQL: "customer", Kind: "gid", DSLType: "string", Extract: "customer.id", AdminType: "Customer"},
+			{Name: "isMainContact", GraphQL: "isMainContact", Kind: "scalar", DSLType: "bool", Extract: "isMainContact", AdminType: "Boolean"},
+			{Name: "lifetimeDuration", GraphQL: "lifetimeDuration", Kind: "scalar", DSLType: "string", Extract: "lifetimeDuration", AdminType: "String"},
+			{Name: "locale", GraphQL: "locale", Kind: "scalar", DSLType: "string", Extract: "locale", AdminType: "String"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title", AdminType: "String"},
 		},
 		FetchOp: "ShopifyFetchCompanyContact",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -1404,6 +1567,7 @@ query ShopifyFetchCompanyContact($id: ID!) {
     __typename
     ... on CompanyContact {
       id
+      updatedAt
       company { id }
       customer { id }
       isMainContact
@@ -1436,26 +1600,26 @@ query ShopifyFetchCompanyContact($id: ID!) {
 		ParentGidPath:    "company.id",
 		VersionField:     "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "billingAddress", GraphQL: "billingAddress", Kind: "object", DSLType: "object", Extract: "billingAddress"},
-			{Name: "buyerExperienceConfiguration", GraphQL: "buyerExperienceConfiguration", Kind: "object", DSLType: "object", Extract: "buyerExperienceConfiguration"},
-			{Name: "catalogsCount", GraphQL: "catalogsCount", Kind: "object", DSLType: "object", Extract: "catalogsCount"},
-			{Name: "catalogsGids", GraphQL: "catalogs", Kind: "refs", DSLType: "[]string", Extract: "catalogs.nodes[].id"},
-			{Name: "companyGid", GraphQL: "company", Kind: "gid", DSLType: "string", Extract: "company.id"},
-			{Name: "currency", GraphQL: "currency", Kind: "scalar", DSLType: "string", Extract: "currency"},
-			{Name: "defaultCursor", GraphQL: "defaultCursor", Kind: "scalar", DSLType: "string", Extract: "defaultCursor"},
-			{Name: "externalId", GraphQL: "externalId", Kind: "scalar", DSLType: "string", Extract: "externalId"},
-			{Name: "hasTimelineComment", GraphQL: "hasTimelineComment", Kind: "scalar", DSLType: "bool", Extract: "hasTimelineComment"},
-			{Name: "locale", GraphQL: "locale", Kind: "scalar", DSLType: "string", Extract: "locale"},
-			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "note", GraphQL: "note", Kind: "scalar", DSLType: "string", Extract: "note"},
-			{Name: "ordersCount", GraphQL: "ordersCount", Kind: "object", DSLType: "object", Extract: "ordersCount"},
-			{Name: "phone", GraphQL: "phone", Kind: "scalar", DSLType: "string", Extract: "phone"},
-			{Name: "shippingAddress", GraphQL: "shippingAddress", Kind: "object", DSLType: "object", Extract: "shippingAddress"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "storeCreditAccountsGids", GraphQL: "storeCreditAccounts", Kind: "refs", DSLType: "[]string", Extract: "storeCreditAccounts.nodes[].id"},
-			{Name: "taxSettings", GraphQL: "taxSettings", Kind: "object", DSLType: "object", Extract: "taxSettings"},
-			{Name: "totalSpent", GraphQL: "totalSpent", Kind: "object", DSLType: "object", Extract: "totalSpent"},
+			{Name: "billingAddress", GraphQL: "billingAddress", Kind: "object", DSLType: "object", Extract: "billingAddress", AdminType: "CompanyAddress"},
+			{Name: "buyerExperienceConfiguration", GraphQL: "buyerExperienceConfiguration", Kind: "object", DSLType: "object", Extract: "buyerExperienceConfiguration", AdminType: "BuyerExperienceConfiguration", GidsInside: []string{"PaymentTermsTemplate"}},
+			{Name: "catalogsCount", GraphQL: "catalogsCount", Kind: "object", DSLType: "object", Extract: "catalogsCount", AdminType: "Count"},
+			{Name: "catalogsGids", GraphQL: "catalogs", Kind: "refs", DSLType: "[]string", Extract: "catalogs.nodes[].id", AdminType: "Catalog"},
+			{Name: "companyGid", GraphQL: "company", Kind: "gid", DSLType: "string", Extract: "company.id", AdminType: "Company"},
+			{Name: "currency", GraphQL: "currency", Kind: "scalar", DSLType: "string", Extract: "currency", AdminType: "CurrencyCode"},
+			{Name: "defaultCursor", GraphQL: "defaultCursor", Kind: "scalar", DSLType: "string", Extract: "defaultCursor", AdminType: "String"},
+			{Name: "externalId", GraphQL: "externalId", Kind: "scalar", DSLType: "string", Extract: "externalId", AdminType: "String"},
+			{Name: "hasTimelineComment", GraphQL: "hasTimelineComment", Kind: "scalar", DSLType: "bool", Extract: "hasTimelineComment", AdminType: "Boolean"},
+			{Name: "locale", GraphQL: "locale", Kind: "scalar", DSLType: "string", Extract: "locale", AdminType: "String"},
+			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]", AdminType: "Metafield"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "note", GraphQL: "note", Kind: "scalar", DSLType: "string", Extract: "note", AdminType: "String"},
+			{Name: "ordersCount", GraphQL: "ordersCount", Kind: "object", DSLType: "object", Extract: "ordersCount", AdminType: "Count"},
+			{Name: "phone", GraphQL: "phone", Kind: "scalar", DSLType: "string", Extract: "phone", AdminType: "String"},
+			{Name: "shippingAddress", GraphQL: "shippingAddress", Kind: "object", DSLType: "object", Extract: "shippingAddress", AdminType: "CompanyAddress"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "storeCreditAccountsGids", GraphQL: "storeCreditAccounts", Kind: "refs", DSLType: "[]string", Extract: "storeCreditAccounts.nodes[].id", AdminType: "StoreCreditAccount"},
+			{Name: "taxSettings", GraphQL: "taxSettings", Kind: "object", DSLType: "object", Extract: "taxSettings", AdminType: "CompanyLocationTaxSettings"},
+			{Name: "totalSpent", GraphQL: "totalSpent", Kind: "object", DSLType: "object", Extract: "totalSpent", AdminType: "MoneyV2"},
 		},
 		FetchOp: "ShopifyFetchCompanyLocation",
 		ListOp:  "ShopifyListCompanyLocation",
@@ -1470,6 +1634,7 @@ query ShopifyFetchCompanyLocation($id: ID!) {
     __typename
     ... on CompanyLocation {
       id
+      updatedAt
       billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
       buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
       catalogsCount { count precision }
@@ -1499,6 +1664,7 @@ query ShopifyListCompanyLocation($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
       buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
       catalogsCount { count precision }
@@ -1534,6 +1700,7 @@ query ShopifyBulkCompanyLocation($query: String) {
     edges {
       node {
         id
+        updatedAt
         billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
         buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
         catalogsCount { count precision }
@@ -1576,42 +1743,42 @@ query ShopifyBulkCompanyLocation($query: String) {
 		Scopes:         []string{"read_customers"},
 		VersionField:   "updatedAt",
 		Children: []ChildSpec{
-			{Connection: "paymentMethods", Concept: "customerPaymentMethod", GraphQLType: "CustomerPaymentMethod", List: false},
-			{Connection: "storeCreditAccounts", Concept: "storeCreditAccount", GraphQLType: "StoreCreditAccount", List: false},
+			{Connection: "paymentMethods", Concept: "customerPaymentMethod", GraphQLType: "CustomerPaymentMethod", List: false, PageOp: "ShopifyPageCustomerPaymentMethods"},
+			{Connection: "storeCreditAccounts", Concept: "storeCreditAccount", GraphQLType: "StoreCreditAccount", List: false, PageOp: "ShopifyPageCustomerStoreCreditAccounts"},
 		},
 		Fields: []FieldSpec{
-			{Name: "amountSpent", GraphQL: "amountSpent", Kind: "object", DSLType: "object", Extract: "amountSpent"},
-			{Name: "canDelete", GraphQL: "canDelete", Kind: "scalar", DSLType: "bool", Extract: "canDelete"},
-			{Name: "companyContactProfilesGids", GraphQL: "companyContactProfiles", Kind: "refs", DSLType: "[]string", Extract: "companyContactProfiles[].id"},
-			{Name: "dataSaleOptOut", GraphQL: "dataSaleOptOut", Kind: "scalar", DSLType: "bool", Extract: "dataSaleOptOut"},
-			{Name: "defaultAddress", GraphQL: "defaultAddress", Kind: "object", DSLType: "object", Extract: "defaultAddress"},
-			{Name: "defaultEmailAddress", GraphQL: "defaultEmailAddress", Kind: "object", DSLType: "object", Extract: "defaultEmailAddress"},
-			{Name: "defaultPhoneNumber", GraphQL: "defaultPhoneNumber", Kind: "object", DSLType: "object", Extract: "defaultPhoneNumber"},
-			{Name: "displayName", GraphQL: "displayName", Kind: "scalar", DSLType: "string", Extract: "displayName"},
-			{Name: "firstName", GraphQL: "firstName", Kind: "scalar", DSLType: "string", Extract: "firstName"},
-			{Name: "identityProviderSubjects", GraphQL: "identityProviderSubjects", Kind: "objectList", DSLType: "[]object", Extract: "identityProviderSubjects"},
-			{Name: "image", GraphQL: "image", Kind: "object", DSLType: "object", Extract: "image"},
-			{Name: "lastName", GraphQL: "lastName", Kind: "scalar", DSLType: "string", Extract: "lastName"},
-			{Name: "lastOrderGid", GraphQL: "lastOrder", Kind: "gid", DSLType: "string", Extract: "lastOrder.id"},
-			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId"},
-			{Name: "lifetimeDuration", GraphQL: "lifetimeDuration", Kind: "scalar", DSLType: "string", Extract: "lifetimeDuration"},
-			{Name: "locale", GraphQL: "locale", Kind: "scalar", DSLType: "string", Extract: "locale"},
-			{Name: "mergeable", GraphQL: "mergeable", Kind: "object", DSLType: "object", Extract: "mergeable"},
-			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]"},
-			{Name: "multipassIdentifier", GraphQL: "multipassIdentifier", Kind: "scalar", DSLType: "string", Extract: "multipassIdentifier"},
-			{Name: "note", GraphQL: "note", Kind: "scalar", DSLType: "string", Extract: "note"},
-			{Name: "numberOfOrders", GraphQL: "numberOfOrders", Kind: "scalar", DSLType: "string", Extract: "numberOfOrders"},
-			{Name: "ordersGids", GraphQL: "orders", Kind: "refs", DSLType: "[]string", Extract: "orders.nodes[].id"},
-			{Name: "productSubscriberStatus", GraphQL: "productSubscriberStatus", Kind: "enum", DSLType: "enum(\"ACTIVE\", \"CANCELLED\", \"EXPIRED\", \"FAILED\", \"NEVER_SUBSCRIBED\", \"PAUSED\")", Extract: "productSubscriberStatus"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "state", GraphQL: "state", Kind: "enum", DSLType: "enum(\"DECLINED\", \"DISABLED\", \"ENABLED\", \"INVITED\")", Extract: "state"},
-			{Name: "statistics", GraphQL: "statistics", Kind: "object", DSLType: "object", Extract: "statistics"},
-			{Name: "subscriptionContractsGids", GraphQL: "subscriptionContracts", Kind: "refs", DSLType: "[]string", Extract: "subscriptionContracts.nodes[].id"},
-			{Name: "tags", GraphQL: "tags", Kind: "scalarList", DSLType: "[]string", Extract: "tags"},
-			{Name: "taxExempt", GraphQL: "taxExempt", Kind: "scalar", DSLType: "bool", Extract: "taxExempt"},
-			{Name: "taxExemptions", GraphQL: "taxExemptions", Kind: "scalarList", DSLType: "[]string", Extract: "taxExemptions"},
-			{Name: "taxSettings", GraphQL: "taxSettings", Kind: "object", DSLType: "object", Extract: "taxSettings"},
-			{Name: "verifiedEmail", GraphQL: "verifiedEmail", Kind: "scalar", DSLType: "bool", Extract: "verifiedEmail"},
+			{Name: "amountSpent", GraphQL: "amountSpent", Kind: "object", DSLType: "object", Extract: "amountSpent", AdminType: "MoneyV2"},
+			{Name: "canDelete", GraphQL: "canDelete", Kind: "scalar", DSLType: "bool", Extract: "canDelete", AdminType: "Boolean"},
+			{Name: "companyContactProfilesGids", GraphQL: "companyContactProfiles", Kind: "refs", DSLType: "[]string", Extract: "companyContactProfiles[].id", AdminType: "CompanyContact"},
+			{Name: "dataSaleOptOut", GraphQL: "dataSaleOptOut", Kind: "scalar", DSLType: "bool", Extract: "dataSaleOptOut", AdminType: "Boolean"},
+			{Name: "defaultAddress", GraphQL: "defaultAddress", Kind: "object", DSLType: "object", Extract: "defaultAddress", AdminType: "MailingAddress"},
+			{Name: "defaultEmailAddress", GraphQL: "defaultEmailAddress", Kind: "object", DSLType: "object", Extract: "defaultEmailAddress", AdminType: "CustomerEmailAddress", GidsInside: []string{"Location"}},
+			{Name: "defaultPhoneNumber", GraphQL: "defaultPhoneNumber", Kind: "object", DSLType: "object", Extract: "defaultPhoneNumber", AdminType: "CustomerPhoneNumber", GidsInside: []string{"Location"}},
+			{Name: "displayName", GraphQL: "displayName", Kind: "scalar", DSLType: "string", Extract: "displayName", AdminType: "String"},
+			{Name: "firstName", GraphQL: "firstName", Kind: "scalar", DSLType: "string", Extract: "firstName", AdminType: "String"},
+			{Name: "identityProviderSubjects", GraphQL: "identityProviderSubjects", Kind: "objectList", DSLType: "[]object", Extract: "identityProviderSubjects", AdminType: "IdentityProviderSubject"},
+			{Name: "image", GraphQL: "image", Kind: "object", DSLType: "object", Extract: "image", AdminType: "Image"},
+			{Name: "lastName", GraphQL: "lastName", Kind: "scalar", DSLType: "string", Extract: "lastName", AdminType: "String"},
+			{Name: "lastOrderGid", GraphQL: "lastOrder", Kind: "gid", DSLType: "string", Extract: "lastOrder.id", AdminType: "Order"},
+			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId", AdminType: "UnsignedInt64"},
+			{Name: "lifetimeDuration", GraphQL: "lifetimeDuration", Kind: "scalar", DSLType: "string", Extract: "lifetimeDuration", AdminType: "String"},
+			{Name: "locale", GraphQL: "locale", Kind: "scalar", DSLType: "string", Extract: "locale", AdminType: "String"},
+			{Name: "mergeable", GraphQL: "mergeable", Kind: "object", DSLType: "object", Extract: "mergeable", AdminType: "CustomerMergeable"},
+			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]", AdminType: "Metafield"},
+			{Name: "multipassIdentifier", GraphQL: "multipassIdentifier", Kind: "scalar", DSLType: "string", Extract: "multipassIdentifier", AdminType: "String"},
+			{Name: "note", GraphQL: "note", Kind: "scalar", DSLType: "string", Extract: "note", AdminType: "String"},
+			{Name: "numberOfOrders", GraphQL: "numberOfOrders", Kind: "scalar", DSLType: "string", Extract: "numberOfOrders", AdminType: "UnsignedInt64"},
+			{Name: "ordersGids", GraphQL: "orders", Kind: "refs", DSLType: "[]string", Extract: "orders.nodes[].id", AdminType: "Order"},
+			{Name: "productSubscriberStatus", GraphQL: "productSubscriberStatus", Kind: "enum", DSLType: "enum(\"ACTIVE\", \"CANCELLED\", \"EXPIRED\", \"FAILED\", \"NEVER_SUBSCRIBED\", \"PAUSED\")", Extract: "productSubscriberStatus", AdminType: "CustomerProductSubscriberStatus"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "state", GraphQL: "state", Kind: "enum", DSLType: "enum(\"DECLINED\", \"DISABLED\", \"ENABLED\", \"INVITED\")", Extract: "state", AdminType: "CustomerState"},
+			{Name: "statistics", GraphQL: "statistics", Kind: "object", DSLType: "object", Extract: "statistics", AdminType: "CustomerStatistics"},
+			{Name: "subscriptionContractsGids", GraphQL: "subscriptionContracts", Kind: "refs", DSLType: "[]string", Extract: "subscriptionContracts.nodes[].id", AdminType: "SubscriptionContract"},
+			{Name: "tags", GraphQL: "tags", Kind: "scalarList", DSLType: "[]string", Extract: "tags", AdminType: "String"},
+			{Name: "taxExempt", GraphQL: "taxExempt", Kind: "scalar", DSLType: "bool", Extract: "taxExempt", AdminType: "Boolean"},
+			{Name: "taxExemptions", GraphQL: "taxExemptions", Kind: "scalarList", DSLType: "[]string", Extract: "taxExemptions", AdminType: "TaxExemption"},
+			{Name: "taxSettings", GraphQL: "taxSettings", Kind: "object", DSLType: "object", Extract: "taxSettings", AdminType: "TaxSettings"},
+			{Name: "verifiedEmail", GraphQL: "verifiedEmail", Kind: "scalar", DSLType: "bool", Extract: "verifiedEmail", AdminType: "Boolean"},
 		},
 		FetchOp: "ShopifyFetchCustomer",
 		ListOp:  "ShopifyListCustomer",
@@ -1626,6 +1793,7 @@ query ShopifyFetchCustomer($id: ID!) {
     __typename
     ... on Customer {
       id
+      updatedAt
       amountSpent { amount currencyCode }
       canDelete
       companyContactProfiles { id }
@@ -1659,6 +1827,7 @@ query ShopifyFetchCustomer($id: ID!) {
       taxSettings { taxId }
       verifiedEmail
       paymentMethods(first: 25) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           customer { id }
@@ -1668,6 +1837,7 @@ query ShopifyFetchCustomer($id: ID!) {
         }
       }
       storeCreditAccounts(first: 25) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           balance { amount currencyCode }
@@ -1683,6 +1853,7 @@ query ShopifyListCustomer($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       amountSpent { amount currencyCode }
       canDelete
       companyContactProfiles { id }
@@ -1716,6 +1887,7 @@ query ShopifyListCustomer($first: Int!, $after: String, $query: String) {
       taxSettings { taxId }
       verifiedEmail
       paymentMethods(first: 25) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           customer { id }
@@ -1725,6 +1897,41 @@ query ShopifyListCustomer($first: Int!, $after: String, $query: String) {
         }
       }
       storeCreditAccounts(first: 25) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          balance { amount currencyCode }
+          owner { __typename }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageCustomerPaymentMethods($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Customer {
+      paymentMethods(first: 25, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          customer { id }
+          instrument { __typename ... on BankAccount { accountHolderType accountType bankName lastDigits } ... on CustomerCreditCard { brand expiresSoon expiryMonth expiryYear firstDigits isRevocable lastDigits maskedNumber name source virtualLastDigits } ... on CustomerPaypalBillingAgreement { inactive isRevocable paypalAccountEmail } ... on CustomerShopPayAgreement { expiresSoon expiryMonth expiryYear inactive isRevocable lastDigits maskedNumber name } }
+          revokedAt
+          revokedReason
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageCustomerStoreCreditAccounts($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Customer {
+      storeCreditAccounts(first: 25, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           balance { amount currencyCode }
@@ -1746,6 +1953,7 @@ query ShopifyBulkCustomer($query: String) {
     edges {
       node {
         id
+        updatedAt
         amountSpent { amount currencyCode }
         canDelete
         dataSaleOptOut
@@ -1821,10 +2029,10 @@ query ShopifyBulkCustomer($query: String) {
 		ParentGidPath:    "customer.id",
 		VersionField:     "",
 		Fields: []FieldSpec{
-			{Name: "customerGid", GraphQL: "customer", Kind: "gid", DSLType: "string", Extract: "customer.id"},
-			{Name: "instrument", GraphQL: "instrument", Kind: "object", DSLType: "object", Extract: "instrument"},
-			{Name: "revokedAt", GraphQL: "revokedAt", Kind: "scalar", DSLType: "string", Extract: "revokedAt"},
-			{Name: "revokedReason", GraphQL: "revokedReason", Kind: "enum", DSLType: "enum(\"AUTHORIZE_NET_GATEWAY_NOT_ENABLED\", \"AUTHORIZE_NET_RETURNED_NO_PAYMENT_METHOD\", \"FAILED_TO_UPDATE_CREDIT_CARD\", \"STRIPE_API_AUTHENTICATION_ERROR\", \"STRIPE_API_INVALID_REQUEST_ERROR\", \"STRIPE_GATEWAY_NOT_ENABLED\", \"STRIPE_RETURNED_NO_PAYMENT_METHOD\", \"STRIPE_PAYMENT_METHOD_NOT_CARD\", \"BRAINTREE_API_AUTHENTICATION_ERROR\", \"BRAINTREE_GATEWAY_NOT_ENABLED\", \"BRAINTREE_RETURNED_NO_PAYMENT_METHOD\", \"BRAINTREE_PAYMENT_METHOD_NOT_CARD\", \"PAYMENT_METHOD_VERIFICATION_FAILED\", \"THREE_D_SECURE_FLOW_IN_VERIFICATION_NOT_IMPLEMENTED\", \"MANUALLY_REVOKED\", \"FAILED_TO_RETRIEVE_BILLING_ADDRESS\", \"MERGED\", \"CUSTOMER_REDACTED\", \"TOO_MANY_CONSECUTIVE_FAILURES\", \"CVV_ATTEMPTS_LIMIT_EXCEEDED\")", Extract: "revokedReason"},
+			{Name: "customerGid", GraphQL: "customer", Kind: "gid", DSLType: "string", Extract: "customer.id", AdminType: "Customer"},
+			{Name: "instrument", GraphQL: "instrument", Kind: "object", DSLType: "object", Extract: "instrument", AdminType: "CustomerPaymentInstrument"},
+			{Name: "revokedAt", GraphQL: "revokedAt", Kind: "scalar", DSLType: "string", Extract: "revokedAt", AdminType: "DateTime"},
+			{Name: "revokedReason", GraphQL: "revokedReason", Kind: "enum", DSLType: "enum(\"AUTHORIZE_NET_GATEWAY_NOT_ENABLED\", \"AUTHORIZE_NET_RETURNED_NO_PAYMENT_METHOD\", \"FAILED_TO_UPDATE_CREDIT_CARD\", \"STRIPE_API_AUTHENTICATION_ERROR\", \"STRIPE_API_INVALID_REQUEST_ERROR\", \"STRIPE_GATEWAY_NOT_ENABLED\", \"STRIPE_RETURNED_NO_PAYMENT_METHOD\", \"STRIPE_PAYMENT_METHOD_NOT_CARD\", \"BRAINTREE_API_AUTHENTICATION_ERROR\", \"BRAINTREE_GATEWAY_NOT_ENABLED\", \"BRAINTREE_RETURNED_NO_PAYMENT_METHOD\", \"BRAINTREE_PAYMENT_METHOD_NOT_CARD\", \"PAYMENT_METHOD_VERIFICATION_FAILED\", \"THREE_D_SECURE_FLOW_IN_VERIFICATION_NOT_IMPLEMENTED\", \"MANUALLY_REVOKED\", \"FAILED_TO_RETRIEVE_BILLING_ADDRESS\", \"MERGED\", \"CUSTOMER_REDACTED\", \"TOO_MANY_CONSECUTIVE_FAILURES\", \"CVV_ATTEMPTS_LIMIT_EXCEEDED\")", Extract: "revokedReason", AdminType: "CustomerPaymentMethodRevocationReason"},
 		},
 		FetchOp: "ShopifyFetchCustomerPaymentMethod",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -1864,12 +2072,12 @@ query ShopifyFetchCustomerPaymentMethod($id: ID!) {
 		Scopes:         []string{"read_shipping"},
 		VersionField:   "",
 		Fields: []FieldSpec{
-			{Name: "active", GraphQL: "active", Kind: "scalar", DSLType: "bool", Extract: "active"},
-			{Name: "callbackUrl", GraphQL: "callbackUrl", Kind: "scalar", DSLType: "string", Extract: "callbackUrl"},
-			{Name: "formattedName", GraphQL: "formattedName", Kind: "scalar", DSLType: "string", Extract: "formattedName"},
-			{Name: "icon", GraphQL: "icon", Kind: "object", DSLType: "object", Extract: "icon"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "supportsServiceDiscovery", GraphQL: "supportsServiceDiscovery", Kind: "scalar", DSLType: "bool", Extract: "supportsServiceDiscovery"},
+			{Name: "active", GraphQL: "active", Kind: "scalar", DSLType: "bool", Extract: "active", AdminType: "Boolean"},
+			{Name: "callbackUrl", GraphQL: "callbackUrl", Kind: "scalar", DSLType: "string", Extract: "callbackUrl", AdminType: "URL"},
+			{Name: "formattedName", GraphQL: "formattedName", Kind: "scalar", DSLType: "string", Extract: "formattedName", AdminType: "String"},
+			{Name: "icon", GraphQL: "icon", Kind: "object", DSLType: "object", Extract: "icon", AdminType: "Image"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "supportsServiceDiscovery", GraphQL: "supportsServiceDiscovery", Kind: "scalar", DSLType: "bool", Extract: "supportsServiceDiscovery", AdminType: "Boolean"},
 		},
 		FetchOp: "ShopifyFetchDeliveryCarrierService",
 		ListOp:  "ShopifyListDeliveryCarrierService",
@@ -1927,12 +2135,12 @@ query ShopifyListDeliveryCarrierService($first: Int!, $after: String, $query: St
 		Scopes:         []string{"read_shipping"},
 		VersionField:   "",
 		Fields: []FieldSpec{
-			{Name: "enabled", GraphQL: "enabled", Kind: "scalar", DSLType: "bool", Extract: "enabled"},
-			{Name: "errorHistory", GraphQL: "errorHistory", Kind: "object", DSLType: "object", Extract: "errorHistory"},
-			{Name: "functionId", GraphQL: "functionId", Kind: "scalar", DSLType: "string", Extract: "functionId"},
-			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]"},
-			{Name: "shopifyFunction", GraphQL: "shopifyFunction", Kind: "object", DSLType: "object", Extract: "shopifyFunction"},
-			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title"},
+			{Name: "enabled", GraphQL: "enabled", Kind: "scalar", DSLType: "bool", Extract: "enabled", AdminType: "Boolean"},
+			{Name: "errorHistory", GraphQL: "errorHistory", Kind: "object", DSLType: "object", Extract: "errorHistory", AdminType: "FunctionsErrorHistory"},
+			{Name: "functionId", GraphQL: "functionId", Kind: "scalar", DSLType: "string", Extract: "functionId", AdminType: "String"},
+			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]", AdminType: "Metafield"},
+			{Name: "shopifyFunction", GraphQL: "shopifyFunction", Kind: "object", DSLType: "object", Extract: "shopifyFunction", AdminType: "ShopifyFunction"},
+			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title", AdminType: "String"},
 		},
 		FetchOp: "ShopifyFetchDeliveryCustomization",
 		ListOp:  "ShopifyListDeliveryCustomization",
@@ -1990,17 +2198,17 @@ query ShopifyListDeliveryCustomization($first: Int!, $after: String, $query: Str
 		Scopes:         []string{"read_shipping"},
 		VersionField:   "",
 		Fields: []FieldSpec{
-			{Name: "activeMethodDefinitionsCount", GraphQL: "activeMethodDefinitionsCount", Kind: "scalar", DSLType: "int", Extract: "activeMethodDefinitionsCount"},
-			{Name: "coversAllItems", GraphQL: "coversAllItems", Kind: "scalar", DSLType: "bool", Extract: "coversAllItems"},
-			{Name: "locationsWithoutRatesCount", GraphQL: "locationsWithoutRatesCount", Kind: "scalar", DSLType: "int", Extract: "locationsWithoutRatesCount"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "originLocationCount", GraphQL: "originLocationCount", Kind: "scalar", DSLType: "int", Extract: "originLocationCount"},
-			{Name: "productVariantsCount", GraphQL: "productVariantsCount", Kind: "object", DSLType: "object", Extract: "productVariantsCount"},
-			{Name: "profileLocationGroups", GraphQL: "profileLocationGroups", Kind: "objectList", DSLType: "[]object", Extract: "profileLocationGroups"},
-			{Name: "sourceDefault", GraphQL: "default", Kind: "scalar", DSLType: "bool", Extract: "default"},
-			{Name: "unassignedLocationsGids", GraphQL: "unassignedLocations", Kind: "refs", DSLType: "[]string", Extract: "unassignedLocations[].id"},
-			{Name: "version", GraphQL: "version", Kind: "scalar", DSLType: "int", Extract: "version"},
-			{Name: "zoneCountryCount", GraphQL: "zoneCountryCount", Kind: "scalar", DSLType: "int", Extract: "zoneCountryCount"},
+			{Name: "activeMethodDefinitionsCount", GraphQL: "activeMethodDefinitionsCount", Kind: "scalar", DSLType: "int", Extract: "activeMethodDefinitionsCount", AdminType: "Int"},
+			{Name: "coversAllItems", GraphQL: "coversAllItems", Kind: "scalar", DSLType: "bool", Extract: "coversAllItems", AdminType: "Boolean"},
+			{Name: "locationsWithoutRatesCount", GraphQL: "locationsWithoutRatesCount", Kind: "scalar", DSLType: "int", Extract: "locationsWithoutRatesCount", AdminType: "Int"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "originLocationCount", GraphQL: "originLocationCount", Kind: "scalar", DSLType: "int", Extract: "originLocationCount", AdminType: "Int"},
+			{Name: "productVariantsCount", GraphQL: "productVariantsCount", Kind: "object", DSLType: "object", Extract: "productVariantsCount", AdminType: "Count"},
+			{Name: "profileLocationGroups", GraphQL: "profileLocationGroups", Kind: "objectList", DSLType: "[]object", Extract: "profileLocationGroups", AdminType: "DeliveryProfileLocationGroup"},
+			{Name: "sourceDefault", GraphQL: "default", Kind: "scalar", DSLType: "bool", Extract: "default", AdminType: "Boolean"},
+			{Name: "unassignedLocationsGids", GraphQL: "unassignedLocations", Kind: "refs", DSLType: "[]string", Extract: "unassignedLocations[].id", AdminType: "Location"},
+			{Name: "version", GraphQL: "version", Kind: "scalar", DSLType: "int", Extract: "version", AdminType: "Int"},
+			{Name: "zoneCountryCount", GraphQL: "zoneCountryCount", Kind: "scalar", DSLType: "int", Extract: "zoneCountryCount", AdminType: "Int"},
 		},
 		FetchOp: "ShopifyFetchDeliveryProfile",
 		ListOp:  "ShopifyListDeliveryProfile",
@@ -2068,8 +2276,8 @@ query ShopifyListDeliveryProfile($first: Int!, $after: String) {
 		Scopes:         []string{"read_discounts"},
 		VersionField:   "",
 		Fields: []FieldSpec{
-			{Name: "discount", GraphQL: "discount", Kind: "object", DSLType: "object", Extract: "discount"},
-			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]"},
+			{Name: "discount", GraphQL: "discount", Kind: "object", DSLType: "object", Extract: "discount", AdminType: "Discount"},
+			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]", AdminType: "Metafield"},
 		},
 		FetchOp: "ShopifyFetchDiscountNode",
 		ListOp:  "ShopifyListDiscountNode",
@@ -2138,60 +2346,60 @@ query ShopifyBulkDiscountNode($query: String) {
 		Scopes:         []string{"read_draft_orders"},
 		VersionField:   "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "acceptAutomaticDiscounts", GraphQL: "acceptAutomaticDiscounts", Kind: "scalar", DSLType: "bool", Extract: "acceptAutomaticDiscounts"},
-			{Name: "allVariantPricesOverridden", GraphQL: "allVariantPricesOverridden", Kind: "scalar", DSLType: "bool", Extract: "allVariantPricesOverridden"},
-			{Name: "allowDiscountCodesInCheckout", GraphQL: "allowDiscountCodesInCheckout", Kind: "scalar", DSLType: "bool", Extract: "allowDiscountCodesInCheckout"},
-			{Name: "amountDueLaterSet", GraphQL: "amountDueLaterSet", Kind: "object", DSLType: "object", Extract: "amountDueLaterSet"},
-			{Name: "amountDueNowSet", GraphQL: "amountDueNowSet", Kind: "object", DSLType: "object", Extract: "amountDueNowSet"},
-			{Name: "anyVariantPricesOverridden", GraphQL: "anyVariantPricesOverridden", Kind: "scalar", DSLType: "bool", Extract: "anyVariantPricesOverridden"},
-			{Name: "appliedDiscount", GraphQL: "appliedDiscount", Kind: "object", DSLType: "object", Extract: "appliedDiscount"},
-			{Name: "billingAddress", GraphQL: "billingAddress", Kind: "object", DSLType: "object", Extract: "billingAddress"},
-			{Name: "billingAddressMatchesShippingAddress", GraphQL: "billingAddressMatchesShippingAddress", Kind: "scalar", DSLType: "bool", Extract: "billingAddressMatchesShippingAddress"},
-			{Name: "completedAt", GraphQL: "completedAt", Kind: "scalar", DSLType: "string", Extract: "completedAt"},
-			{Name: "currencyCode", GraphQL: "currencyCode", Kind: "scalar", DSLType: "string", Extract: "currencyCode"},
-			{Name: "customAttributes", GraphQL: "customAttributes", Kind: "objectList", DSLType: "[]object", Extract: "customAttributes"},
-			{Name: "customerGid", GraphQL: "customer", Kind: "gid", DSLType: "string", Extract: "customer.id"},
-			{Name: "defaultCursor", GraphQL: "defaultCursor", Kind: "scalar", DSLType: "string", Extract: "defaultCursor"},
-			{Name: "deposit", GraphQL: "deposit", Kind: "object", DSLType: "object", Extract: "deposit"},
-			{Name: "discountCodes", GraphQL: "discountCodes", Kind: "scalarList", DSLType: "[]string", Extract: "discountCodes"},
-			{Name: "email", GraphQL: "email", Kind: "scalar", DSLType: "string", Extract: "email"},
-			{Name: "hasTimelineComment", GraphQL: "hasTimelineComment", Kind: "scalar", DSLType: "bool", Extract: "hasTimelineComment"},
-			{Name: "invoiceEmailTemplateSubject", GraphQL: "invoiceEmailTemplateSubject", Kind: "scalar", DSLType: "string", Extract: "invoiceEmailTemplateSubject"},
-			{Name: "invoiceSentAt", GraphQL: "invoiceSentAt", Kind: "scalar", DSLType: "string", Extract: "invoiceSentAt"},
-			{Name: "invoiceUrl", GraphQL: "invoiceUrl", Kind: "scalar", DSLType: "string", Extract: "invoiceUrl"},
-			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId"},
-			{Name: "lineItemsSubtotalPrice", GraphQL: "lineItemsSubtotalPrice", Kind: "object", DSLType: "object", Extract: "lineItemsSubtotalPrice"},
-			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "note2", GraphQL: "note2", Kind: "scalar", DSLType: "string", Extract: "note2"},
-			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id"},
-			{Name: "paymentTerms", GraphQL: "paymentTerms", Kind: "object", DSLType: "object", Extract: "paymentTerms"},
-			{Name: "phone", GraphQL: "phone", Kind: "scalar", DSLType: "string", Extract: "phone"},
-			{Name: "platformDiscounts", GraphQL: "platformDiscounts", Kind: "objectList", DSLType: "[]object", Extract: "platformDiscounts"},
-			{Name: "poNumber", GraphQL: "poNumber", Kind: "scalar", DSLType: "string", Extract: "poNumber"},
-			{Name: "presentmentCurrencyCode", GraphQL: "presentmentCurrencyCode", Kind: "scalar", DSLType: "string", Extract: "presentmentCurrencyCode"},
-			{Name: "purchasingEntity", GraphQL: "purchasingEntity", Kind: "object", DSLType: "object", Extract: "purchasingEntity"},
-			{Name: "ready", GraphQL: "ready", Kind: "scalar", DSLType: "bool", Extract: "ready"},
-			{Name: "reserveInventoryUntil", GraphQL: "reserveInventoryUntil", Kind: "scalar", DSLType: "string", Extract: "reserveInventoryUntil"},
-			{Name: "shippingAddress", GraphQL: "shippingAddress", Kind: "object", DSLType: "object", Extract: "shippingAddress"},
-			{Name: "shippingLine", GraphQL: "shippingLine", Kind: "object", DSLType: "object", Extract: "shippingLine"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"COMPLETED\", \"INVOICE_SENT\", \"OPEN\")", Extract: "status"},
-			{Name: "subtotalPriceSet", GraphQL: "subtotalPriceSet", Kind: "object", DSLType: "object", Extract: "subtotalPriceSet"},
-			{Name: "tags", GraphQL: "tags", Kind: "scalarList", DSLType: "[]string", Extract: "tags"},
-			{Name: "taxExempt", GraphQL: "taxExempt", Kind: "scalar", DSLType: "bool", Extract: "taxExempt"},
-			{Name: "taxLines", GraphQL: "taxLines", Kind: "objectList", DSLType: "[]object", Extract: "taxLines"},
-			{Name: "taxesIncluded", GraphQL: "taxesIncluded", Kind: "scalar", DSLType: "bool", Extract: "taxesIncluded"},
-			{Name: "totalDiscountsSet", GraphQL: "totalDiscountsSet", Kind: "object", DSLType: "object", Extract: "totalDiscountsSet"},
-			{Name: "totalLineItemsPriceSet", GraphQL: "totalLineItemsPriceSet", Kind: "object", DSLType: "object", Extract: "totalLineItemsPriceSet"},
-			{Name: "totalPriceSet", GraphQL: "totalPriceSet", Kind: "object", DSLType: "object", Extract: "totalPriceSet"},
-			{Name: "totalQuantityOfLineItems", GraphQL: "totalQuantityOfLineItems", Kind: "scalar", DSLType: "int", Extract: "totalQuantityOfLineItems"},
-			{Name: "totalShippingPriceSet", GraphQL: "totalShippingPriceSet", Kind: "object", DSLType: "object", Extract: "totalShippingPriceSet"},
-			{Name: "totalTaxSet", GraphQL: "totalTaxSet", Kind: "object", DSLType: "object", Extract: "totalTaxSet"},
-			{Name: "totalWeight", GraphQL: "totalWeight", Kind: "scalar", DSLType: "string", Extract: "totalWeight"},
-			{Name: "transformerFingerprint", GraphQL: "transformerFingerprint", Kind: "scalar", DSLType: "string", Extract: "transformerFingerprint"},
-			{Name: "visibleToCustomer", GraphQL: "visibleToCustomer", Kind: "scalar", DSLType: "bool", Extract: "visibleToCustomer"},
-			{Name: "warnings", GraphQL: "warnings", Kind: "objectList", DSLType: "[]object", Extract: "warnings"},
+			{Name: "acceptAutomaticDiscounts", GraphQL: "acceptAutomaticDiscounts", Kind: "scalar", DSLType: "bool", Extract: "acceptAutomaticDiscounts", AdminType: "Boolean"},
+			{Name: "allVariantPricesOverridden", GraphQL: "allVariantPricesOverridden", Kind: "scalar", DSLType: "bool", Extract: "allVariantPricesOverridden", AdminType: "Boolean"},
+			{Name: "allowDiscountCodesInCheckout", GraphQL: "allowDiscountCodesInCheckout", Kind: "scalar", DSLType: "bool", Extract: "allowDiscountCodesInCheckout", AdminType: "Boolean"},
+			{Name: "amountDueLaterSet", GraphQL: "amountDueLaterSet", Kind: "object", DSLType: "object", Extract: "amountDueLaterSet", AdminType: "MoneyBag"},
+			{Name: "amountDueNowSet", GraphQL: "amountDueNowSet", Kind: "object", DSLType: "object", Extract: "amountDueNowSet", AdminType: "MoneyBag"},
+			{Name: "anyVariantPricesOverridden", GraphQL: "anyVariantPricesOverridden", Kind: "scalar", DSLType: "bool", Extract: "anyVariantPricesOverridden", AdminType: "Boolean"},
+			{Name: "appliedDiscount", GraphQL: "appliedDiscount", Kind: "object", DSLType: "object", Extract: "appliedDiscount", AdminType: "DraftOrderAppliedDiscount"},
+			{Name: "billingAddress", GraphQL: "billingAddress", Kind: "object", DSLType: "object", Extract: "billingAddress", AdminType: "MailingAddress"},
+			{Name: "billingAddressMatchesShippingAddress", GraphQL: "billingAddressMatchesShippingAddress", Kind: "scalar", DSLType: "bool", Extract: "billingAddressMatchesShippingAddress", AdminType: "Boolean"},
+			{Name: "completedAt", GraphQL: "completedAt", Kind: "scalar", DSLType: "string", Extract: "completedAt", AdminType: "DateTime"},
+			{Name: "currencyCode", GraphQL: "currencyCode", Kind: "scalar", DSLType: "string", Extract: "currencyCode", AdminType: "CurrencyCode"},
+			{Name: "customAttributes", GraphQL: "customAttributes", Kind: "objectList", DSLType: "[]object", Extract: "customAttributes", AdminType: "Attribute"},
+			{Name: "customerGid", GraphQL: "customer", Kind: "gid", DSLType: "string", Extract: "customer.id", AdminType: "Customer"},
+			{Name: "defaultCursor", GraphQL: "defaultCursor", Kind: "scalar", DSLType: "string", Extract: "defaultCursor", AdminType: "String"},
+			{Name: "deposit", GraphQL: "deposit", Kind: "object", DSLType: "object", Extract: "deposit", AdminType: "DepositConfiguration"},
+			{Name: "discountCodes", GraphQL: "discountCodes", Kind: "scalarList", DSLType: "[]string", Extract: "discountCodes", AdminType: "String"},
+			{Name: "email", GraphQL: "email", Kind: "scalar", DSLType: "string", Extract: "email", AdminType: "String"},
+			{Name: "hasTimelineComment", GraphQL: "hasTimelineComment", Kind: "scalar", DSLType: "bool", Extract: "hasTimelineComment", AdminType: "Boolean"},
+			{Name: "invoiceEmailTemplateSubject", GraphQL: "invoiceEmailTemplateSubject", Kind: "scalar", DSLType: "string", Extract: "invoiceEmailTemplateSubject", AdminType: "String"},
+			{Name: "invoiceSentAt", GraphQL: "invoiceSentAt", Kind: "scalar", DSLType: "string", Extract: "invoiceSentAt", AdminType: "DateTime"},
+			{Name: "invoiceUrl", GraphQL: "invoiceUrl", Kind: "scalar", DSLType: "string", Extract: "invoiceUrl", AdminType: "URL"},
+			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId", AdminType: "UnsignedInt64"},
+			{Name: "lineItemsSubtotalPrice", GraphQL: "lineItemsSubtotalPrice", Kind: "object", DSLType: "object", Extract: "lineItemsSubtotalPrice", AdminType: "MoneyBag"},
+			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]", AdminType: "Metafield"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "note2", GraphQL: "note2", Kind: "scalar", DSLType: "string", Extract: "note2", AdminType: "String"},
+			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id", AdminType: "Order"},
+			{Name: "paymentTerms", GraphQL: "paymentTerms", Kind: "object", DSLType: "object", Extract: "paymentTerms", AdminType: "PaymentTerms", GidsInside: []string{"DraftOrder", "Order"}},
+			{Name: "phone", GraphQL: "phone", Kind: "scalar", DSLType: "string", Extract: "phone", AdminType: "String"},
+			{Name: "platformDiscounts", GraphQL: "platformDiscounts", Kind: "objectList", DSLType: "[]object", Extract: "platformDiscounts", AdminType: "DraftOrderPlatformDiscount", GidsInside: []string{"DiscountNode"}},
+			{Name: "poNumber", GraphQL: "poNumber", Kind: "scalar", DSLType: "string", Extract: "poNumber", AdminType: "String"},
+			{Name: "presentmentCurrencyCode", GraphQL: "presentmentCurrencyCode", Kind: "scalar", DSLType: "string", Extract: "presentmentCurrencyCode", AdminType: "CurrencyCode"},
+			{Name: "purchasingEntity", GraphQL: "purchasingEntity", Kind: "object", DSLType: "object", Extract: "purchasingEntity", AdminType: "PurchasingEntity", GidsInside: []string{"Company", "CompanyContact", "CompanyLocation", "Customer"}},
+			{Name: "ready", GraphQL: "ready", Kind: "scalar", DSLType: "bool", Extract: "ready", AdminType: "Boolean"},
+			{Name: "reserveInventoryUntil", GraphQL: "reserveInventoryUntil", Kind: "scalar", DSLType: "string", Extract: "reserveInventoryUntil", AdminType: "DateTime"},
+			{Name: "shippingAddress", GraphQL: "shippingAddress", Kind: "object", DSLType: "object", Extract: "shippingAddress", AdminType: "MailingAddress"},
+			{Name: "shippingLine", GraphQL: "shippingLine", Kind: "object", DSLType: "object", Extract: "shippingLine", AdminType: "ShippingLine"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"COMPLETED\", \"INVOICE_SENT\", \"OPEN\")", Extract: "status", AdminType: "DraftOrderStatus"},
+			{Name: "subtotalPriceSet", GraphQL: "subtotalPriceSet", Kind: "object", DSLType: "object", Extract: "subtotalPriceSet", AdminType: "MoneyBag"},
+			{Name: "tags", GraphQL: "tags", Kind: "scalarList", DSLType: "[]string", Extract: "tags", AdminType: "String"},
+			{Name: "taxExempt", GraphQL: "taxExempt", Kind: "scalar", DSLType: "bool", Extract: "taxExempt", AdminType: "Boolean"},
+			{Name: "taxLines", GraphQL: "taxLines", Kind: "objectList", DSLType: "[]object", Extract: "taxLines", AdminType: "TaxLine"},
+			{Name: "taxesIncluded", GraphQL: "taxesIncluded", Kind: "scalar", DSLType: "bool", Extract: "taxesIncluded", AdminType: "Boolean"},
+			{Name: "totalDiscountsSet", GraphQL: "totalDiscountsSet", Kind: "object", DSLType: "object", Extract: "totalDiscountsSet", AdminType: "MoneyBag"},
+			{Name: "totalLineItemsPriceSet", GraphQL: "totalLineItemsPriceSet", Kind: "object", DSLType: "object", Extract: "totalLineItemsPriceSet", AdminType: "MoneyBag"},
+			{Name: "totalPriceSet", GraphQL: "totalPriceSet", Kind: "object", DSLType: "object", Extract: "totalPriceSet", AdminType: "MoneyBag"},
+			{Name: "totalQuantityOfLineItems", GraphQL: "totalQuantityOfLineItems", Kind: "scalar", DSLType: "int", Extract: "totalQuantityOfLineItems", AdminType: "Int"},
+			{Name: "totalShippingPriceSet", GraphQL: "totalShippingPriceSet", Kind: "object", DSLType: "object", Extract: "totalShippingPriceSet", AdminType: "MoneyBag"},
+			{Name: "totalTaxSet", GraphQL: "totalTaxSet", Kind: "object", DSLType: "object", Extract: "totalTaxSet", AdminType: "MoneyBag"},
+			{Name: "totalWeight", GraphQL: "totalWeight", Kind: "scalar", DSLType: "string", Extract: "totalWeight", AdminType: "UnsignedInt64"},
+			{Name: "transformerFingerprint", GraphQL: "transformerFingerprint", Kind: "scalar", DSLType: "string", Extract: "transformerFingerprint", AdminType: "String"},
+			{Name: "visibleToCustomer", GraphQL: "visibleToCustomer", Kind: "scalar", DSLType: "bool", Extract: "visibleToCustomer", AdminType: "Boolean"},
+			{Name: "warnings", GraphQL: "warnings", Kind: "objectList", DSLType: "[]object", Extract: "warnings", AdminType: "DraftOrderWarning"},
 		},
 		FetchOp: "ShopifyFetchDraftOrder",
 		ListOp:  "ShopifyListDraftOrder",
@@ -2206,6 +2414,7 @@ query ShopifyFetchDraftOrder($id: ID!) {
     __typename
     ... on DraftOrder {
       id
+      updatedAt
       acceptAutomaticDiscounts
       allVariantPricesOverridden
       allowDiscountCodesInCheckout
@@ -2269,6 +2478,7 @@ query ShopifyListDraftOrder($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       acceptAutomaticDiscounts
       allVariantPricesOverridden
       allowDiscountCodesInCheckout
@@ -2338,6 +2548,7 @@ query ShopifyBulkDraftOrder($query: String) {
     edges {
       node {
         id
+        updatedAt
         acceptAutomaticDiscounts
         allVariantPricesOverridden
         allowDiscountCodesInCheckout
@@ -2418,23 +2629,23 @@ query ShopifyBulkDraftOrder($query: String) {
 		ParentGidPath:    "order.id",
 		VersionField:     "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "deliveredAt", GraphQL: "deliveredAt", Kind: "scalar", DSLType: "string", Extract: "deliveredAt"},
-			{Name: "displayStatus", GraphQL: "displayStatus", Kind: "enum", DSLType: "enum(\"ATTEMPTED_DELIVERY\", \"CANCELED\", \"CONFIRMED\", \"DELAYED\", \"DELIVERED\", \"FAILURE\", \"FULFILLED\", \"CARRIER_PICKED_UP\", \"IN_TRANSIT\", \"LABEL_PRINTED\", \"LABEL_PURCHASED\", \"LABEL_VOIDED\", \"MARKED_AS_FULFILLED\", \"NOT_DELIVERED\", \"OUT_FOR_DELIVERY\", \"READY_FOR_PICKUP\", \"PICKED_UP\", \"SUBMITTED\")", Extract: "displayStatus"},
-			{Name: "estimatedDeliveryAt", GraphQL: "estimatedDeliveryAt", Kind: "scalar", DSLType: "string", Extract: "estimatedDeliveryAt"},
-			{Name: "fulfillmentOrdersGids", GraphQL: "fulfillmentOrders", Kind: "refs", DSLType: "[]string", Extract: "fulfillmentOrders.nodes[].id"},
-			{Name: "inTransitAt", GraphQL: "inTransitAt", Kind: "scalar", DSLType: "string", Extract: "inTransitAt"},
-			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId"},
-			{Name: "locationGid", GraphQL: "location", Kind: "gid", DSLType: "string", Extract: "location.id"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id"},
-			{Name: "originAddress", GraphQL: "originAddress", Kind: "object", DSLType: "object", Extract: "originAddress"},
-			{Name: "requiresShipping", GraphQL: "requiresShipping", Kind: "scalar", DSLType: "bool", Extract: "requiresShipping"},
-			{Name: "service", GraphQL: "service", Kind: "object", DSLType: "object", Extract: "service"},
-			{Name: "shippingLabel", GraphQL: "shippingLabel", Kind: "object", DSLType: "object", Extract: "shippingLabel"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"SUCCESS\", \"CANCELLED\", \"ERROR\", \"FAILURE\")", Extract: "status"},
-			{Name: "totalQuantity", GraphQL: "totalQuantity", Kind: "scalar", DSLType: "int", Extract: "totalQuantity"},
-			{Name: "trackingInfo", GraphQL: "trackingInfo", Kind: "objectList", DSLType: "[]object", Extract: "trackingInfo"},
+			{Name: "deliveredAt", GraphQL: "deliveredAt", Kind: "scalar", DSLType: "string", Extract: "deliveredAt", AdminType: "DateTime"},
+			{Name: "displayStatus", GraphQL: "displayStatus", Kind: "enum", DSLType: "enum(\"ATTEMPTED_DELIVERY\", \"CANCELED\", \"CONFIRMED\", \"DELAYED\", \"DELIVERED\", \"FAILURE\", \"FULFILLED\", \"CARRIER_PICKED_UP\", \"IN_TRANSIT\", \"LABEL_PRINTED\", \"LABEL_PURCHASED\", \"LABEL_VOIDED\", \"MARKED_AS_FULFILLED\", \"NOT_DELIVERED\", \"OUT_FOR_DELIVERY\", \"READY_FOR_PICKUP\", \"PICKED_UP\", \"SUBMITTED\")", Extract: "displayStatus", AdminType: "FulfillmentDisplayStatus"},
+			{Name: "estimatedDeliveryAt", GraphQL: "estimatedDeliveryAt", Kind: "scalar", DSLType: "string", Extract: "estimatedDeliveryAt", AdminType: "DateTime"},
+			{Name: "fulfillmentOrdersGids", GraphQL: "fulfillmentOrders", Kind: "refs", DSLType: "[]string", Extract: "fulfillmentOrders.nodes[].id", AdminType: "FulfillmentOrder"},
+			{Name: "inTransitAt", GraphQL: "inTransitAt", Kind: "scalar", DSLType: "string", Extract: "inTransitAt", AdminType: "DateTime"},
+			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId", AdminType: "UnsignedInt64"},
+			{Name: "locationGid", GraphQL: "location", Kind: "gid", DSLType: "string", Extract: "location.id", AdminType: "Location"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id", AdminType: "Order"},
+			{Name: "originAddress", GraphQL: "originAddress", Kind: "object", DSLType: "object", Extract: "originAddress", AdminType: "FulfillmentOriginAddress"},
+			{Name: "requiresShipping", GraphQL: "requiresShipping", Kind: "scalar", DSLType: "bool", Extract: "requiresShipping", AdminType: "Boolean"},
+			{Name: "service", GraphQL: "service", Kind: "object", DSLType: "object", Extract: "service", AdminType: "FulfillmentService", GidsInside: []string{"Location"}},
+			{Name: "shippingLabel", GraphQL: "shippingLabel", Kind: "object", DSLType: "object", Extract: "shippingLabel", AdminType: "ShippingLabel", GidsInside: []string{"Location"}},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"SUCCESS\", \"CANCELLED\", \"ERROR\", \"FAILURE\")", Extract: "status", AdminType: "FulfillmentStatus"},
+			{Name: "totalQuantity", GraphQL: "totalQuantity", Kind: "scalar", DSLType: "int", Extract: "totalQuantity", AdminType: "Int"},
+			{Name: "trackingInfo", GraphQL: "trackingInfo", Kind: "objectList", DSLType: "[]object", Extract: "trackingInfo", AdminType: "FulfillmentTrackingInfo"},
 		},
 		FetchOp: "ShopifyFetchFulfillment",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -2448,6 +2659,7 @@ query ShopifyFetchFulfillment($id: ID!) {
     __typename
     ... on Fulfillment {
       id
+      updatedAt
       deliveredAt
       displayStatus
       estimatedDeliveryAt
@@ -2487,23 +2699,23 @@ query ShopifyFetchFulfillment($id: ID!) {
 		Scopes:         []string{"read_assigned_fulfillment_orders", "read_merchant_managed_fulfillment_orders"},
 		VersionField:   "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "assignedLocation", GraphQL: "assignedLocation", Kind: "object", DSLType: "object", Extract: "assignedLocation"},
-			{Name: "deliveryMethod", GraphQL: "deliveryMethod", Kind: "object", DSLType: "object", Extract: "deliveryMethod"},
-			{Name: "destination", GraphQL: "destination", Kind: "object", DSLType: "object", Extract: "destination"},
-			{Name: "fulfillAt", GraphQL: "fulfillAt", Kind: "scalar", DSLType: "string", Extract: "fulfillAt"},
-			{Name: "fulfillBy", GraphQL: "fulfillBy", Kind: "scalar", DSLType: "string", Extract: "fulfillBy"},
-			{Name: "fulfillmentHolds", GraphQL: "fulfillmentHolds", Kind: "objectList", DSLType: "[]object", Extract: "fulfillmentHolds"},
-			{Name: "fulfillmentsGids", GraphQL: "fulfillments", Kind: "refs", DSLType: "[]string", Extract: "fulfillments.nodes[].id"},
-			{Name: "internationalDuties", GraphQL: "internationalDuties", Kind: "object", DSLType: "object", Extract: "internationalDuties"},
-			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id"},
-			{Name: "orderId", GraphQL: "orderId", Kind: "scalar", DSLType: "string", Extract: "orderId"},
-			{Name: "orderName", GraphQL: "orderName", Kind: "scalar", DSLType: "string", Extract: "orderName"},
-			{Name: "orderProcessedAt", GraphQL: "orderProcessedAt", Kind: "scalar", DSLType: "string", Extract: "orderProcessedAt"},
-			{Name: "remainingLineItemsWeight", GraphQL: "remainingLineItemsWeight", Kind: "object", DSLType: "object", Extract: "remainingLineItemsWeight"},
-			{Name: "requestStatus", GraphQL: "requestStatus", Kind: "enum", DSLType: "enum(\"UNSUBMITTED\", \"SUBMITTED\", \"ACCEPTED\", \"REJECTED\", \"CANCELLATION_REQUESTED\", \"CANCELLATION_ACCEPTED\", \"CANCELLATION_REJECTED\", \"CLOSED\")", Extract: "requestStatus"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"OPEN\", \"IN_PROGRESS\", \"CANCELLED\", \"INCOMPLETE\", \"CLOSED\", \"SCHEDULED\", \"ON_HOLD\")", Extract: "status"},
-			{Name: "supportedActions", GraphQL: "supportedActions", Kind: "objectList", DSLType: "[]object", Extract: "supportedActions"},
+			{Name: "assignedLocation", GraphQL: "assignedLocation", Kind: "object", DSLType: "object", Extract: "assignedLocation", AdminType: "FulfillmentOrderAssignedLocation", GidsInside: []string{"Location"}},
+			{Name: "deliveryMethod", GraphQL: "deliveryMethod", Kind: "object", DSLType: "object", Extract: "deliveryMethod", AdminType: "DeliveryMethod"},
+			{Name: "destination", GraphQL: "destination", Kind: "object", DSLType: "object", Extract: "destination", AdminType: "FulfillmentOrderDestination", GidsInside: []string{"Location"}},
+			{Name: "fulfillAt", GraphQL: "fulfillAt", Kind: "scalar", DSLType: "string", Extract: "fulfillAt", AdminType: "DateTime"},
+			{Name: "fulfillBy", GraphQL: "fulfillBy", Kind: "scalar", DSLType: "string", Extract: "fulfillBy", AdminType: "DateTime"},
+			{Name: "fulfillmentHolds", GraphQL: "fulfillmentHolds", Kind: "objectList", DSLType: "[]object", Extract: "fulfillmentHolds", AdminType: "FulfillmentHold"},
+			{Name: "fulfillmentsGids", GraphQL: "fulfillments", Kind: "refs", DSLType: "[]string", Extract: "fulfillments.nodes[].id", AdminType: "Fulfillment"},
+			{Name: "internationalDuties", GraphQL: "internationalDuties", Kind: "object", DSLType: "object", Extract: "internationalDuties", AdminType: "FulfillmentOrderInternationalDuties"},
+			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id", AdminType: "Order"},
+			{Name: "orderId", GraphQL: "orderId", Kind: "scalar", DSLType: "string", Extract: "orderId", AdminType: "ID"},
+			{Name: "orderName", GraphQL: "orderName", Kind: "scalar", DSLType: "string", Extract: "orderName", AdminType: "String"},
+			{Name: "orderProcessedAt", GraphQL: "orderProcessedAt", Kind: "scalar", DSLType: "string", Extract: "orderProcessedAt", AdminType: "DateTime"},
+			{Name: "remainingLineItemsWeight", GraphQL: "remainingLineItemsWeight", Kind: "object", DSLType: "object", Extract: "remainingLineItemsWeight", AdminType: "Weight"},
+			{Name: "requestStatus", GraphQL: "requestStatus", Kind: "enum", DSLType: "enum(\"UNSUBMITTED\", \"SUBMITTED\", \"ACCEPTED\", \"REJECTED\", \"CANCELLATION_REQUESTED\", \"CANCELLATION_ACCEPTED\", \"CANCELLATION_REJECTED\", \"CLOSED\")", Extract: "requestStatus", AdminType: "FulfillmentOrderRequestStatus"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"OPEN\", \"IN_PROGRESS\", \"CANCELLED\", \"INCOMPLETE\", \"CLOSED\", \"SCHEDULED\", \"ON_HOLD\")", Extract: "status", AdminType: "FulfillmentOrderStatus"},
+			{Name: "supportedActions", GraphQL: "supportedActions", Kind: "objectList", DSLType: "[]object", Extract: "supportedActions", AdminType: "FulfillmentOrderSupportedAction"},
 		},
 		FetchOp: "ShopifyFetchFulfillmentOrder",
 		ListOp:  "ShopifyListFulfillmentOrder",
@@ -2518,6 +2730,7 @@ query ShopifyFetchFulfillmentOrder($id: ID!) {
     __typename
     ... on FulfillmentOrder {
       id
+      updatedAt
       assignedLocation { address1 address2 city countryCode location { id } name phone province zip }
       deliveryMethod { additionalInformation { instructions phone } brandedPromise { handle name } id maxDeliveryDateTime methodType minDeliveryDateTime presentedName serviceCode sourceReference }
       destination { address1 address2 city company countryCode email firstName id lastName location { id } phone province zip }
@@ -2544,6 +2757,7 @@ query ShopifyListFulfillmentOrder($first: Int!, $after: String, $query: String) 
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       assignedLocation { address1 address2 city countryCode location { id } name phone province zip }
       deliveryMethod { additionalInformation { instructions phone } brandedPromise { handle name } id maxDeliveryDateTime methodType minDeliveryDateTime presentedName serviceCode sourceReference }
       destination { address1 address2 city company countryCode email firstName id lastName location { id } phone province zip }
@@ -2576,6 +2790,7 @@ query ShopifyBulkFulfillmentOrder($query: String) {
     edges {
       node {
         id
+        updatedAt
         assignedLocation { address1 address2 city countryCode location { id } name phone province zip }
         deliveryMethod { additionalInformation { instructions phone } brandedPromise { handle name } id maxDeliveryDateTime methodType minDeliveryDateTime presentedName serviceCode sourceReference }
         destination { address1 address2 city company countryCode email firstName id lastName location { id } phone province zip }
@@ -2616,22 +2831,22 @@ query ShopifyBulkFulfillmentOrder($query: String) {
 		Scopes:         []string{"read_gift_cards"},
 		VersionField:   "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "balance", GraphQL: "balance", Kind: "object", DSLType: "object", Extract: "balance"},
-			{Name: "crossCurrencyRedemptionStrategy", GraphQL: "crossCurrencyRedemptionStrategy", Kind: "enum", DSLType: "enum(\"NONE\", \"MARKET_FX\", \"SPOT_FX\")", Extract: "crossCurrencyRedemptionStrategy"},
-			{Name: "customerGid", GraphQL: "customer", Kind: "gid", DSLType: "string", Extract: "customer.id"},
-			{Name: "deactivatedAt", GraphQL: "deactivatedAt", Kind: "scalar", DSLType: "string", Extract: "deactivatedAt"},
-			{Name: "enabled", GraphQL: "enabled", Kind: "scalar", DSLType: "bool", Extract: "enabled"},
-			{Name: "expiresOn", GraphQL: "expiresOn", Kind: "scalar", DSLType: "string", Extract: "expiresOn"},
-			{Name: "initialValue", GraphQL: "initialValue", Kind: "object", DSLType: "object", Extract: "initialValue"},
-			{Name: "isRedeemable", GraphQL: "isRedeemable", Kind: "scalar", DSLType: "bool", Extract: "isRedeemable"},
-			{Name: "lastCharacters", GraphQL: "lastCharacters", Kind: "scalar", DSLType: "string", Extract: "lastCharacters"},
-			{Name: "lineItemGid", GraphQL: "lineItem", Kind: "gid", DSLType: "string", Extract: "lineItem.id"},
-			{Name: "maskedCode", GraphQL: "maskedCode", Kind: "scalar", DSLType: "string", Extract: "maskedCode"},
-			{Name: "note", GraphQL: "note", Kind: "scalar", DSLType: "string", Extract: "note"},
-			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id"},
-			{Name: "recipientAttributes", GraphQL: "recipientAttributes", Kind: "object", DSLType: "object", Extract: "recipientAttributes"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "templateSuffix", GraphQL: "templateSuffix", Kind: "scalar", DSLType: "string", Extract: "templateSuffix"},
+			{Name: "balance", GraphQL: "balance", Kind: "object", DSLType: "object", Extract: "balance", AdminType: "MoneyV2"},
+			{Name: "crossCurrencyRedemptionStrategy", GraphQL: "crossCurrencyRedemptionStrategy", Kind: "enum", DSLType: "enum(\"NONE\", \"MARKET_FX\", \"SPOT_FX\")", Extract: "crossCurrencyRedemptionStrategy", AdminType: "GiftCardCrossCurrencyRedemptionStrategy"},
+			{Name: "customerGid", GraphQL: "customer", Kind: "gid", DSLType: "string", Extract: "customer.id", AdminType: "Customer"},
+			{Name: "deactivatedAt", GraphQL: "deactivatedAt", Kind: "scalar", DSLType: "string", Extract: "deactivatedAt", AdminType: "DateTime"},
+			{Name: "enabled", GraphQL: "enabled", Kind: "scalar", DSLType: "bool", Extract: "enabled", AdminType: "Boolean"},
+			{Name: "expiresOn", GraphQL: "expiresOn", Kind: "scalar", DSLType: "string", Extract: "expiresOn", AdminType: "Date"},
+			{Name: "initialValue", GraphQL: "initialValue", Kind: "object", DSLType: "object", Extract: "initialValue", AdminType: "MoneyV2"},
+			{Name: "isRedeemable", GraphQL: "isRedeemable", Kind: "scalar", DSLType: "bool", Extract: "isRedeemable", AdminType: "Boolean"},
+			{Name: "lastCharacters", GraphQL: "lastCharacters", Kind: "scalar", DSLType: "string", Extract: "lastCharacters", AdminType: "String"},
+			{Name: "lineItemGid", GraphQL: "lineItem", Kind: "gid", DSLType: "string", Extract: "lineItem.id", AdminType: "LineItem"},
+			{Name: "maskedCode", GraphQL: "maskedCode", Kind: "scalar", DSLType: "string", Extract: "maskedCode", AdminType: "String"},
+			{Name: "note", GraphQL: "note", Kind: "scalar", DSLType: "string", Extract: "note", AdminType: "String"},
+			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id", AdminType: "Order"},
+			{Name: "recipientAttributes", GraphQL: "recipientAttributes", Kind: "object", DSLType: "object", Extract: "recipientAttributes", AdminType: "GiftCardRecipient", GidsInside: []string{"Customer"}},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "templateSuffix", GraphQL: "templateSuffix", Kind: "scalar", DSLType: "string", Extract: "templateSuffix", AdminType: "String"},
 		},
 		FetchOp: "ShopifyFetchGiftCard",
 		ListOp:  "ShopifyListGiftCard",
@@ -2646,6 +2861,7 @@ query ShopifyFetchGiftCard($id: ID!) {
     __typename
     ... on GiftCard {
       id
+      updatedAt
       balance { amount currencyCode }
       crossCurrencyRedemptionStrategy
       customer { id }
@@ -2671,6 +2887,7 @@ query ShopifyListGiftCard($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       balance { amount currencyCode }
       crossCurrencyRedemptionStrategy
       customer { id }
@@ -2702,6 +2919,7 @@ query ShopifyBulkGiftCard($query: String) {
     edges {
       node {
         id
+        updatedAt
         balance { amount currencyCode }
         crossCurrencyRedemptionStrategy
         customer { id }
@@ -2742,24 +2960,24 @@ query ShopifyBulkGiftCard($query: String) {
 		Scopes:         []string{"read_inventory"},
 		VersionField:   "updatedAt",
 		Children: []ChildSpec{
-			{Connection: "inventoryLevels", Concept: "inventoryLevel", GraphQLType: "InventoryLevel", List: false},
+			{Connection: "inventoryLevels", Concept: "inventoryLevel", GraphQLType: "InventoryLevel", List: false, PageOp: "ShopifyPageInventoryItemInventoryLevels"},
 		},
 		Fields: []FieldSpec{
-			{Name: "countryCodeOfOrigin", GraphQL: "countryCodeOfOrigin", Kind: "scalar", DSLType: "string", Extract: "countryCodeOfOrigin"},
-			{Name: "duplicateSkuCount", GraphQL: "duplicateSkuCount", Kind: "scalar", DSLType: "int", Extract: "duplicateSkuCount"},
-			{Name: "harmonizedSystemCode", GraphQL: "harmonizedSystemCode", Kind: "scalar", DSLType: "string", Extract: "harmonizedSystemCode"},
-			{Name: "inventoryHistoryUrl", GraphQL: "inventoryHistoryUrl", Kind: "scalar", DSLType: "string", Extract: "inventoryHistoryUrl"},
-			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId"},
-			{Name: "locationsCount", GraphQL: "locationsCount", Kind: "object", DSLType: "object", Extract: "locationsCount"},
-			{Name: "measurement", GraphQL: "measurement", Kind: "object", DSLType: "object", Extract: "measurement"},
-			{Name: "provinceCodeOfOrigin", GraphQL: "provinceCodeOfOrigin", Kind: "scalar", DSLType: "string", Extract: "provinceCodeOfOrigin"},
-			{Name: "requiresShipping", GraphQL: "requiresShipping", Kind: "scalar", DSLType: "bool", Extract: "requiresShipping"},
-			{Name: "sku", GraphQL: "sku", Kind: "scalar", DSLType: "string", Extract: "sku"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "tracked", GraphQL: "tracked", Kind: "scalar", DSLType: "bool", Extract: "tracked"},
-			{Name: "trackedEditable", GraphQL: "trackedEditable", Kind: "object", DSLType: "object", Extract: "trackedEditable"},
-			{Name: "unitCost", GraphQL: "unitCost", Kind: "object", DSLType: "object", Extract: "unitCost"},
-			{Name: "variantsGids", GraphQL: "variants", Kind: "refs", DSLType: "[]string", Extract: "variants.nodes[].id"},
+			{Name: "countryCodeOfOrigin", GraphQL: "countryCodeOfOrigin", Kind: "scalar", DSLType: "string", Extract: "countryCodeOfOrigin", AdminType: "CountryCode"},
+			{Name: "duplicateSkuCount", GraphQL: "duplicateSkuCount", Kind: "scalar", DSLType: "int", Extract: "duplicateSkuCount", AdminType: "Int"},
+			{Name: "harmonizedSystemCode", GraphQL: "harmonizedSystemCode", Kind: "scalar", DSLType: "string", Extract: "harmonizedSystemCode", AdminType: "String"},
+			{Name: "inventoryHistoryUrl", GraphQL: "inventoryHistoryUrl", Kind: "scalar", DSLType: "string", Extract: "inventoryHistoryUrl", AdminType: "URL"},
+			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId", AdminType: "UnsignedInt64"},
+			{Name: "locationsCount", GraphQL: "locationsCount", Kind: "object", DSLType: "object", Extract: "locationsCount", AdminType: "Count"},
+			{Name: "measurement", GraphQL: "measurement", Kind: "object", DSLType: "object", Extract: "measurement", AdminType: "InventoryItemMeasurement"},
+			{Name: "provinceCodeOfOrigin", GraphQL: "provinceCodeOfOrigin", Kind: "scalar", DSLType: "string", Extract: "provinceCodeOfOrigin", AdminType: "String"},
+			{Name: "requiresShipping", GraphQL: "requiresShipping", Kind: "scalar", DSLType: "bool", Extract: "requiresShipping", AdminType: "Boolean"},
+			{Name: "sku", GraphQL: "sku", Kind: "scalar", DSLType: "string", Extract: "sku", AdminType: "String"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "tracked", GraphQL: "tracked", Kind: "scalar", DSLType: "bool", Extract: "tracked", AdminType: "Boolean"},
+			{Name: "trackedEditable", GraphQL: "trackedEditable", Kind: "object", DSLType: "object", Extract: "trackedEditable", AdminType: "EditableProperty"},
+			{Name: "unitCost", GraphQL: "unitCost", Kind: "object", DSLType: "object", Extract: "unitCost", AdminType: "MoneyV2"},
+			{Name: "variantsGids", GraphQL: "variants", Kind: "refs", DSLType: "[]string", Extract: "variants.nodes[].id", AdminType: "ProductVariant"},
 		},
 		FetchOp: "ShopifyFetchInventoryItem",
 		ListOp:  "ShopifyListInventoryItem",
@@ -2774,6 +2992,7 @@ query ShopifyFetchInventoryItem($id: ID!) {
     __typename
     ... on InventoryItem {
       id
+      updatedAt
       countryCodeOfOrigin
       duplicateSkuCount
       harmonizedSystemCode
@@ -2790,8 +3009,10 @@ query ShopifyFetchInventoryItem($id: ID!) {
       unitCost { amount currencyCode }
       variants(first: 25) { nodes { id } }
       inventoryLevels(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           canDeactivate
           deactivationAlert
           isActive
@@ -2809,6 +3030,7 @@ query ShopifyListInventoryItem($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       countryCodeOfOrigin
       duplicateSkuCount
       harmonizedSystemCode
@@ -2825,8 +3047,31 @@ query ShopifyListInventoryItem($first: Int!, $after: String, $query: String) {
       unitCost { amount currencyCode }
       variants(first: 25) { nodes { id } }
       inventoryLevels(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
+          canDeactivate
+          deactivationAlert
+          isActive
+          item { id }
+          location { id }
+          createdAt
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageInventoryItemInventoryLevels($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on InventoryItem {
+      inventoryLevels(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          updatedAt
           canDeactivate
           deactivationAlert
           isActive
@@ -2850,6 +3095,7 @@ query ShopifyBulkInventoryItem($query: String) {
     edges {
       node {
         id
+        updatedAt
         countryCodeOfOrigin
         duplicateSkuCount
         harmonizedSystemCode
@@ -2868,6 +3114,7 @@ query ShopifyBulkInventoryItem($query: String) {
           edges {
             node {
             id
+            updatedAt
             canDeactivate
             deactivationAlert
             isActive
@@ -2903,12 +3150,12 @@ query ShopifyBulkInventoryItem($query: String) {
 		ParentGidPath:    "item.id",
 		VersionField:     "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "canDeactivate", GraphQL: "canDeactivate", Kind: "scalar", DSLType: "bool", Extract: "canDeactivate"},
-			{Name: "deactivationAlert", GraphQL: "deactivationAlert", Kind: "scalar", DSLType: "string", Extract: "deactivationAlert"},
-			{Name: "isActive", GraphQL: "isActive", Kind: "scalar", DSLType: "bool", Extract: "isActive"},
-			{Name: "itemGid", GraphQL: "item", Kind: "gid", DSLType: "string", Extract: "item.id"},
-			{Name: "locationGid", GraphQL: "location", Kind: "gid", DSLType: "string", Extract: "location.id"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
+			{Name: "canDeactivate", GraphQL: "canDeactivate", Kind: "scalar", DSLType: "bool", Extract: "canDeactivate", AdminType: "Boolean"},
+			{Name: "deactivationAlert", GraphQL: "deactivationAlert", Kind: "scalar", DSLType: "string", Extract: "deactivationAlert", AdminType: "String"},
+			{Name: "isActive", GraphQL: "isActive", Kind: "scalar", DSLType: "bool", Extract: "isActive", AdminType: "Boolean"},
+			{Name: "itemGid", GraphQL: "item", Kind: "gid", DSLType: "string", Extract: "item.id", AdminType: "InventoryItem"},
+			{Name: "locationGid", GraphQL: "location", Kind: "gid", DSLType: "string", Extract: "location.id", AdminType: "Location"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
 		},
 		FetchOp: "ShopifyFetchInventoryLevel",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -2922,6 +3169,7 @@ query ShopifyFetchInventoryLevel($id: ID!) {
     __typename
     ... on InventoryLevel {
       id
+      updatedAt
       canDeactivate
       deactivationAlert
       isActive
@@ -2950,18 +3198,18 @@ query ShopifyFetchInventoryLevel($id: ID!) {
 		Scopes:         []string{"read_inventory"},
 		VersionField:   "",
 		Fields: []FieldSpec{
-			{Name: "barcode", GraphQL: "barcode", Kind: "scalar", DSLType: "string", Extract: "barcode"},
-			{Name: "dateCreated", GraphQL: "dateCreated", Kind: "scalar", DSLType: "string", Extract: "dateCreated"},
-			{Name: "dateReceived", GraphQL: "dateReceived", Kind: "scalar", DSLType: "string", Extract: "dateReceived"},
-			{Name: "dateShipped", GraphQL: "dateShipped", Kind: "scalar", DSLType: "string", Extract: "dateShipped"},
-			{Name: "lineItemTotalQuantity", GraphQL: "lineItemTotalQuantity", Kind: "scalar", DSLType: "int", Extract: "lineItemTotalQuantity"},
-			{Name: "lineItemsCount", GraphQL: "lineItemsCount", Kind: "object", DSLType: "object", Extract: "lineItemsCount"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"DRAFT\", \"IN_TRANSIT\", \"PARTIALLY_RECEIVED\", \"RECEIVED\", \"OTHER\")", Extract: "status"},
-			{Name: "totalAcceptedQuantity", GraphQL: "totalAcceptedQuantity", Kind: "scalar", DSLType: "int", Extract: "totalAcceptedQuantity"},
-			{Name: "totalReceivedQuantity", GraphQL: "totalReceivedQuantity", Kind: "scalar", DSLType: "int", Extract: "totalReceivedQuantity"},
-			{Name: "totalRejectedQuantity", GraphQL: "totalRejectedQuantity", Kind: "scalar", DSLType: "int", Extract: "totalRejectedQuantity"},
-			{Name: "tracking", GraphQL: "tracking", Kind: "object", DSLType: "object", Extract: "tracking"},
+			{Name: "barcode", GraphQL: "barcode", Kind: "scalar", DSLType: "string", Extract: "barcode", AdminType: "String"},
+			{Name: "dateCreated", GraphQL: "dateCreated", Kind: "scalar", DSLType: "string", Extract: "dateCreated", AdminType: "DateTime"},
+			{Name: "dateReceived", GraphQL: "dateReceived", Kind: "scalar", DSLType: "string", Extract: "dateReceived", AdminType: "DateTime"},
+			{Name: "dateShipped", GraphQL: "dateShipped", Kind: "scalar", DSLType: "string", Extract: "dateShipped", AdminType: "DateTime"},
+			{Name: "lineItemTotalQuantity", GraphQL: "lineItemTotalQuantity", Kind: "scalar", DSLType: "int", Extract: "lineItemTotalQuantity", AdminType: "Int"},
+			{Name: "lineItemsCount", GraphQL: "lineItemsCount", Kind: "object", DSLType: "object", Extract: "lineItemsCount", AdminType: "Count"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"DRAFT\", \"IN_TRANSIT\", \"PARTIALLY_RECEIVED\", \"RECEIVED\", \"OTHER\")", Extract: "status", AdminType: "InventoryShipmentStatus"},
+			{Name: "totalAcceptedQuantity", GraphQL: "totalAcceptedQuantity", Kind: "scalar", DSLType: "int", Extract: "totalAcceptedQuantity", AdminType: "Int"},
+			{Name: "totalReceivedQuantity", GraphQL: "totalReceivedQuantity", Kind: "scalar", DSLType: "int", Extract: "totalReceivedQuantity", AdminType: "Int"},
+			{Name: "totalRejectedQuantity", GraphQL: "totalRejectedQuantity", Kind: "scalar", DSLType: "int", Extract: "totalRejectedQuantity", AdminType: "Int"},
+			{Name: "tracking", GraphQL: "tracking", Kind: "object", DSLType: "object", Extract: "tracking", AdminType: "InventoryShipmentTracking"},
 		},
 		FetchOp: "ShopifyFetchInventoryShipment",
 		ListOp:  "ShopifyListInventoryShipment",
@@ -3060,19 +3308,19 @@ query ShopifyBulkInventoryShipment($query: String) {
 		Scopes:         []string{"read_inventory"},
 		VersionField:   "",
 		Fields: []FieldSpec{
-			{Name: "dateCreated", GraphQL: "dateCreated", Kind: "scalar", DSLType: "string", Extract: "dateCreated"},
-			{Name: "destination", GraphQL: "destination", Kind: "object", DSLType: "object", Extract: "destination"},
-			{Name: "hasTimelineComment", GraphQL: "hasTimelineComment", Kind: "scalar", DSLType: "bool", Extract: "hasTimelineComment"},
-			{Name: "lineItemsCount", GraphQL: "lineItemsCount", Kind: "object", DSLType: "object", Extract: "lineItemsCount"},
-			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "note", GraphQL: "note", Kind: "scalar", DSLType: "string", Extract: "note"},
-			{Name: "origin", GraphQL: "origin", Kind: "object", DSLType: "object", Extract: "origin"},
-			{Name: "receivedQuantity", GraphQL: "receivedQuantity", Kind: "scalar", DSLType: "int", Extract: "receivedQuantity"},
-			{Name: "referenceName", GraphQL: "referenceName", Kind: "scalar", DSLType: "string", Extract: "referenceName"},
-			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"DRAFT\", \"READY_TO_SHIP\", \"IN_PROGRESS\", \"TRANSFERRED\", \"CANCELED\", \"OTHER\")", Extract: "status"},
-			{Name: "tags", GraphQL: "tags", Kind: "scalarList", DSLType: "[]string", Extract: "tags"},
-			{Name: "totalQuantity", GraphQL: "totalQuantity", Kind: "scalar", DSLType: "int", Extract: "totalQuantity"},
+			{Name: "dateCreated", GraphQL: "dateCreated", Kind: "scalar", DSLType: "string", Extract: "dateCreated", AdminType: "DateTime"},
+			{Name: "destination", GraphQL: "destination", Kind: "object", DSLType: "object", Extract: "destination", AdminType: "LocationSnapshot", GidsInside: []string{"Location"}},
+			{Name: "hasTimelineComment", GraphQL: "hasTimelineComment", Kind: "scalar", DSLType: "bool", Extract: "hasTimelineComment", AdminType: "Boolean"},
+			{Name: "lineItemsCount", GraphQL: "lineItemsCount", Kind: "object", DSLType: "object", Extract: "lineItemsCount", AdminType: "Count"},
+			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]", AdminType: "Metafield"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "note", GraphQL: "note", Kind: "scalar", DSLType: "string", Extract: "note", AdminType: "String"},
+			{Name: "origin", GraphQL: "origin", Kind: "object", DSLType: "object", Extract: "origin", AdminType: "LocationSnapshot", GidsInside: []string{"Location"}},
+			{Name: "receivedQuantity", GraphQL: "receivedQuantity", Kind: "scalar", DSLType: "int", Extract: "receivedQuantity", AdminType: "Int"},
+			{Name: "referenceName", GraphQL: "referenceName", Kind: "scalar", DSLType: "string", Extract: "referenceName", AdminType: "String"},
+			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"DRAFT\", \"READY_TO_SHIP\", \"IN_PROGRESS\", \"TRANSFERRED\", \"CANCELED\", \"OTHER\")", Extract: "status", AdminType: "InventoryTransferStatus"},
+			{Name: "tags", GraphQL: "tags", Kind: "scalarList", DSLType: "[]string", Extract: "tags", AdminType: "String"},
+			{Name: "totalQuantity", GraphQL: "totalQuantity", Kind: "scalar", DSLType: "int", Extract: "totalQuantity", AdminType: "Int"},
 		},
 		FetchOp: "ShopifyFetchInventoryTransfer",
 		ListOp:  "ShopifyListInventoryTransfer",
@@ -3174,26 +3422,26 @@ query ShopifyBulkInventoryTransfer($query: String) {
 		Scopes:         []string{"read_locations"},
 		VersionField:   "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "activatable", GraphQL: "activatable", Kind: "scalar", DSLType: "bool", Extract: "activatable"},
-			{Name: "address", GraphQL: "address", Kind: "object", DSLType: "object", Extract: "address"},
-			{Name: "addressVerified", GraphQL: "addressVerified", Kind: "scalar", DSLType: "bool", Extract: "addressVerified"},
-			{Name: "deactivatable", GraphQL: "deactivatable", Kind: "scalar", DSLType: "bool", Extract: "deactivatable"},
-			{Name: "deactivatedAt", GraphQL: "deactivatedAt", Kind: "scalar", DSLType: "string", Extract: "deactivatedAt"},
-			{Name: "deletable", GraphQL: "deletable", Kind: "scalar", DSLType: "bool", Extract: "deletable"},
-			{Name: "fulfillmentService", GraphQL: "fulfillmentService", Kind: "object", DSLType: "object", Extract: "fulfillmentService"},
-			{Name: "fulfillsOnlineOrders", GraphQL: "fulfillsOnlineOrders", Kind: "scalar", DSLType: "bool", Extract: "fulfillsOnlineOrders"},
-			{Name: "hasActiveInventory", GraphQL: "hasActiveInventory", Kind: "scalar", DSLType: "bool", Extract: "hasActiveInventory"},
-			{Name: "hasUnfulfilledOrders", GraphQL: "hasUnfulfilledOrders", Kind: "scalar", DSLType: "bool", Extract: "hasUnfulfilledOrders"},
-			{Name: "inventoryLevelsGids", GraphQL: "inventoryLevels", Kind: "refs", DSLType: "[]string", Extract: "inventoryLevels.nodes[].id"},
-			{Name: "isActive", GraphQL: "isActive", Kind: "scalar", DSLType: "bool", Extract: "isActive"},
-			{Name: "isFulfillmentService", GraphQL: "isFulfillmentService", Kind: "scalar", DSLType: "bool", Extract: "isFulfillmentService"},
-			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId"},
-			{Name: "localPickupSettingsV2", GraphQL: "localPickupSettingsV2", Kind: "object", DSLType: "object", Extract: "localPickupSettingsV2"},
-			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "shipsInventory", GraphQL: "shipsInventory", Kind: "scalar", DSLType: "bool", Extract: "shipsInventory"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "suggestedAddresses", GraphQL: "suggestedAddresses", Kind: "objectList", DSLType: "[]object", Extract: "suggestedAddresses"},
+			{Name: "activatable", GraphQL: "activatable", Kind: "scalar", DSLType: "bool", Extract: "activatable", AdminType: "Boolean"},
+			{Name: "address", GraphQL: "address", Kind: "object", DSLType: "object", Extract: "address", AdminType: "LocationAddress"},
+			{Name: "addressVerified", GraphQL: "addressVerified", Kind: "scalar", DSLType: "bool", Extract: "addressVerified", AdminType: "Boolean"},
+			{Name: "deactivatable", GraphQL: "deactivatable", Kind: "scalar", DSLType: "bool", Extract: "deactivatable", AdminType: "Boolean"},
+			{Name: "deactivatedAt", GraphQL: "deactivatedAt", Kind: "scalar", DSLType: "string", Extract: "deactivatedAt", AdminType: "String"},
+			{Name: "deletable", GraphQL: "deletable", Kind: "scalar", DSLType: "bool", Extract: "deletable", AdminType: "Boolean"},
+			{Name: "fulfillmentService", GraphQL: "fulfillmentService", Kind: "object", DSLType: "object", Extract: "fulfillmentService", AdminType: "FulfillmentService", GidsInside: []string{"Location"}},
+			{Name: "fulfillsOnlineOrders", GraphQL: "fulfillsOnlineOrders", Kind: "scalar", DSLType: "bool", Extract: "fulfillsOnlineOrders", AdminType: "Boolean"},
+			{Name: "hasActiveInventory", GraphQL: "hasActiveInventory", Kind: "scalar", DSLType: "bool", Extract: "hasActiveInventory", AdminType: "Boolean"},
+			{Name: "hasUnfulfilledOrders", GraphQL: "hasUnfulfilledOrders", Kind: "scalar", DSLType: "bool", Extract: "hasUnfulfilledOrders", AdminType: "Boolean"},
+			{Name: "inventoryLevelsGids", GraphQL: "inventoryLevels", Kind: "refs", DSLType: "[]string", Extract: "inventoryLevels.nodes[].id", AdminType: "InventoryLevel"},
+			{Name: "isActive", GraphQL: "isActive", Kind: "scalar", DSLType: "bool", Extract: "isActive", AdminType: "Boolean"},
+			{Name: "isFulfillmentService", GraphQL: "isFulfillmentService", Kind: "scalar", DSLType: "bool", Extract: "isFulfillmentService", AdminType: "Boolean"},
+			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId", AdminType: "UnsignedInt64"},
+			{Name: "localPickupSettingsV2", GraphQL: "localPickupSettingsV2", Kind: "object", DSLType: "object", Extract: "localPickupSettingsV2", AdminType: "DeliveryLocalPickupSettings"},
+			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]", AdminType: "Metafield"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "shipsInventory", GraphQL: "shipsInventory", Kind: "scalar", DSLType: "bool", Extract: "shipsInventory", AdminType: "Boolean"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "suggestedAddresses", GraphQL: "suggestedAddresses", Kind: "objectList", DSLType: "[]object", Extract: "suggestedAddresses", AdminType: "LocationSuggestedAddress"},
 		},
 		FetchOp: "ShopifyFetchLocation",
 		ListOp:  "ShopifyListLocation",
@@ -3208,6 +3456,7 @@ query ShopifyFetchLocation($id: ID!) {
     __typename
     ... on Location {
       id
+      updatedAt
       activatable
       address { address1 address2 city country countryCode formatted latitude longitude phone province provinceCode zip }
       addressVerified
@@ -3237,6 +3486,7 @@ query ShopifyListLocation($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       activatable
       address { address1 address2 city country countryCode formatted latitude longitude phone province provinceCode zip }
       addressVerified
@@ -3272,6 +3522,7 @@ query ShopifyBulkLocation($query: String) {
     edges {
       node {
         id
+        updatedAt
         activatable
         address { address1 address2 city country countryCode formatted latitude longitude phone province provinceCode zip }
         addressVerified
@@ -3315,20 +3566,20 @@ query ShopifyBulkLocation($query: String) {
 		Scopes:         []string{"read_markets"},
 		VersionField:   "",
 		Children: []ChildSpec{
-			{Connection: "webPresences", Concept: "marketWebPresence", GraphQLType: "MarketWebPresence", List: false},
+			{Connection: "webPresences", Concept: "marketWebPresence", GraphQLType: "MarketWebPresence", List: false, PageOp: "ShopifyPageMarketWebPresences"},
 		},
 		Fields: []FieldSpec{
-			{Name: "catalogsCount", GraphQL: "catalogsCount", Kind: "object", DSLType: "object", Extract: "catalogsCount"},
-			{Name: "conditions", GraphQL: "conditions", Kind: "object", DSLType: "object", Extract: "conditions"},
-			{Name: "currencySettings", GraphQL: "currencySettings", Kind: "object", DSLType: "object", Extract: "currencySettings"},
-			{Name: "delivery", GraphQL: "delivery", Kind: "object", DSLType: "object", Extract: "delivery"},
-			{Name: "discountsCount", GraphQL: "discountsCount", Kind: "object", DSLType: "object", Extract: "discountsCount"},
-			{Name: "handle", GraphQL: "handle", Kind: "scalar", DSLType: "string", Extract: "handle"},
-			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "priceInclusions", GraphQL: "priceInclusions", Kind: "object", DSLType: "object", Extract: "priceInclusions"},
-			{Name: "sourceType", GraphQL: "type", Kind: "enum", DSLType: "enum(\"NONE\", \"REGION\", \"LOCATION\", \"COMPANY_LOCATION\", \"CHANNEL\")", Extract: "type"},
-			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"ACTIVE\", \"DRAFT\")", Extract: "status"},
+			{Name: "catalogsCount", GraphQL: "catalogsCount", Kind: "object", DSLType: "object", Extract: "catalogsCount", AdminType: "Count"},
+			{Name: "conditions", GraphQL: "conditions", Kind: "object", DSLType: "object", Extract: "conditions", AdminType: "MarketConditions"},
+			{Name: "currencySettings", GraphQL: "currencySettings", Kind: "object", DSLType: "object", Extract: "currencySettings", AdminType: "MarketCurrencySettings"},
+			{Name: "delivery", GraphQL: "delivery", Kind: "object", DSLType: "object", Extract: "delivery", AdminType: "MarketDeliveryConfigurations"},
+			{Name: "discountsCount", GraphQL: "discountsCount", Kind: "object", DSLType: "object", Extract: "discountsCount", AdminType: "Count"},
+			{Name: "handle", GraphQL: "handle", Kind: "scalar", DSLType: "string", Extract: "handle", AdminType: "String"},
+			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]", AdminType: "Metafield"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "priceInclusions", GraphQL: "priceInclusions", Kind: "object", DSLType: "object", Extract: "priceInclusions", AdminType: "MarketPriceInclusions"},
+			{Name: "sourceType", GraphQL: "type", Kind: "enum", DSLType: "enum(\"NONE\", \"REGION\", \"LOCATION\", \"COMPANY_LOCATION\", \"CHANNEL\")", Extract: "type", AdminType: "MarketType"},
+			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"ACTIVE\", \"DRAFT\")", Extract: "status", AdminType: "MarketStatus"},
 		},
 		FetchOp: "ShopifyFetchMarket",
 		ListOp:  "ShopifyListMarket",
@@ -3355,6 +3606,7 @@ query ShopifyFetchMarket($id: ID!) {
       type
       status
       webPresences(first: 25) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           alternateLocales { locale marketWebPresences { id } name primary published }
@@ -3385,6 +3637,26 @@ query ShopifyListMarket($first: Int!, $after: String, $query: String) {
       type
       status
       webPresences(first: 25) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          alternateLocales { locale marketWebPresences { id } name primary published }
+          defaultLocale { locale marketWebPresences { id } name primary published }
+          domain { host id localization { alternateLocales country defaultLocale } marketWebPresence { id } sslEnabled url }
+          rootUrls { locale url }
+          subfolderSuffix
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageMarketWebPresences($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Market {
+      webPresences(first: 25, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           alternateLocales { locale marketWebPresences { id } name primary published }
@@ -3418,11 +3690,11 @@ query ShopifyListMarket($first: Int!, $after: String, $query: String) {
 		ParentGidPath:    "",
 		VersionField:     "",
 		Fields: []FieldSpec{
-			{Name: "alternateLocales", GraphQL: "alternateLocales", Kind: "objectList", DSLType: "[]object", Extract: "alternateLocales"},
-			{Name: "defaultLocale", GraphQL: "defaultLocale", Kind: "object", DSLType: "object", Extract: "defaultLocale"},
-			{Name: "domain", GraphQL: "domain", Kind: "object", DSLType: "object", Extract: "domain"},
-			{Name: "rootUrls", GraphQL: "rootUrls", Kind: "objectList", DSLType: "[]object", Extract: "rootUrls"},
-			{Name: "subfolderSuffix", GraphQL: "subfolderSuffix", Kind: "scalar", DSLType: "string", Extract: "subfolderSuffix"},
+			{Name: "alternateLocales", GraphQL: "alternateLocales", Kind: "objectList", DSLType: "[]object", Extract: "alternateLocales", AdminType: "ShopLocale", GidsInside: []string{"MarketWebPresence"}},
+			{Name: "defaultLocale", GraphQL: "defaultLocale", Kind: "object", DSLType: "object", Extract: "defaultLocale", AdminType: "ShopLocale", GidsInside: []string{"MarketWebPresence"}},
+			{Name: "domain", GraphQL: "domain", Kind: "object", DSLType: "object", Extract: "domain", AdminType: "Domain", GidsInside: []string{"MarketWebPresence"}},
+			{Name: "rootUrls", GraphQL: "rootUrls", Kind: "objectList", DSLType: "[]object", Extract: "rootUrls", AdminType: "MarketWebPresenceRootUrl"},
+			{Name: "subfolderSuffix", GraphQL: "subfolderSuffix", Kind: "scalar", DSLType: "string", Extract: "subfolderSuffix", AdminType: "String"},
 		},
 		FetchOp: "ShopifyFetchMarketWebPresence",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -3463,30 +3735,30 @@ query ShopifyFetchMarketWebPresence($id: ID!) {
 		Scopes:         []string{"read_marketing_events"},
 		VersionField:   "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "activityListUrl", GraphQL: "activityListUrl", Kind: "scalar", DSLType: "string", Extract: "activityListUrl"},
-			{Name: "adSpend", GraphQL: "adSpend", Kind: "object", DSLType: "object", Extract: "adSpend"},
-			{Name: "app", GraphQL: "app", Kind: "object", DSLType: "object", Extract: "app"},
-			{Name: "appErrors", GraphQL: "appErrors", Kind: "object", DSLType: "object", Extract: "appErrors"},
-			{Name: "budget", GraphQL: "budget", Kind: "object", DSLType: "object", Extract: "budget"},
-			{Name: "formData", GraphQL: "formData", Kind: "scalar", DSLType: "string", Extract: "formData"},
-			{Name: "hierarchyLevel", GraphQL: "hierarchyLevel", Kind: "enum", DSLType: "enum(\"AD\", \"AD_GROUP\", \"CAMPAIGN\")", Extract: "hierarchyLevel"},
-			{Name: "inMainWorkflowVersion", GraphQL: "inMainWorkflowVersion", Kind: "scalar", DSLType: "bool", Extract: "inMainWorkflowVersion"},
-			{Name: "isExternal", GraphQL: "isExternal", Kind: "scalar", DSLType: "bool", Extract: "isExternal"},
-			{Name: "marketingChannelType", GraphQL: "marketingChannelType", Kind: "enum", DSLType: "enum(\"SEARCH\", \"DISPLAY\", \"SOCIAL\", \"EMAIL\", \"REFERRAL\")", Extract: "marketingChannelType"},
-			{Name: "marketingEventGid", GraphQL: "marketingEvent", Kind: "gid", DSLType: "string", Extract: "marketingEvent.id"},
-			{Name: "parentActivityId", GraphQL: "parentActivityId", Kind: "scalar", DSLType: "string", Extract: "parentActivityId"},
-			{Name: "parentRemoteId", GraphQL: "parentRemoteId", Kind: "scalar", DSLType: "string", Extract: "parentRemoteId"},
-			{Name: "sourceAndMedium", GraphQL: "sourceAndMedium", Kind: "scalar", DSLType: "string", Extract: "sourceAndMedium"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"ACTIVE\", \"DELETED\", \"DELETED_EXTERNALLY\", \"DISCONNECTED\", \"DRAFT\", \"FAILED\", \"INACTIVE\", \"PAUSED\", \"PENDING\", \"SCHEDULED\", \"UNDEFINED\")", Extract: "status"},
-			{Name: "statusBadgeTypeV2", GraphQL: "statusBadgeTypeV2", Kind: "enum", DSLType: "enum(\"DEFAULT\", \"SUCCESS\", \"ATTENTION\", \"WARNING\", \"INFO\", \"CRITICAL\")", Extract: "statusBadgeTypeV2"},
-			{Name: "statusLabel", GraphQL: "statusLabel", Kind: "scalar", DSLType: "string", Extract: "statusLabel"},
-			{Name: "statusTransitionedAt", GraphQL: "statusTransitionedAt", Kind: "scalar", DSLType: "string", Extract: "statusTransitionedAt"},
-			{Name: "tactic", GraphQL: "tactic", Kind: "enum", DSLType: "enum(\"ABANDONED_CART\", \"AD\", \"AFFILIATE\", \"LINK\", \"LOYALTY\", \"MESSAGE\", \"NEWSLETTER\", \"NOTIFICATION\", \"POST\", \"RETARGETING\", \"TRANSACTIONAL\", \"STOREFRONT_APP\", \"SEO\")", Extract: "tactic"},
-			{Name: "targetStatus", GraphQL: "targetStatus", Kind: "enum", DSLType: "enum(\"ACTIVE\", \"DELETED\", \"DELETED_EXTERNALLY\", \"DISCONNECTED\", \"DRAFT\", \"FAILED\", \"INACTIVE\", \"PAUSED\", \"PENDING\", \"SCHEDULED\", \"UNDEFINED\")", Extract: "targetStatus"},
-			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title"},
-			{Name: "urlParameterValue", GraphQL: "urlParameterValue", Kind: "scalar", DSLType: "string", Extract: "urlParameterValue"},
-			{Name: "utmParameters", GraphQL: "utmParameters", Kind: "object", DSLType: "object", Extract: "utmParameters"},
+			{Name: "activityListUrl", GraphQL: "activityListUrl", Kind: "scalar", DSLType: "string", Extract: "activityListUrl", AdminType: "URL"},
+			{Name: "adSpend", GraphQL: "adSpend", Kind: "object", DSLType: "object", Extract: "adSpend", AdminType: "MoneyV2"},
+			{Name: "app", GraphQL: "app", Kind: "object", DSLType: "object", Extract: "app", AdminType: "App", GidsInside: []string{"Channel"}},
+			{Name: "appErrors", GraphQL: "appErrors", Kind: "object", DSLType: "object", Extract: "appErrors", AdminType: "MarketingActivityExtensionAppErrors"},
+			{Name: "budget", GraphQL: "budget", Kind: "object", DSLType: "object", Extract: "budget", AdminType: "MarketingBudget"},
+			{Name: "formData", GraphQL: "formData", Kind: "scalar", DSLType: "string", Extract: "formData", AdminType: "String"},
+			{Name: "hierarchyLevel", GraphQL: "hierarchyLevel", Kind: "enum", DSLType: "enum(\"AD\", \"AD_GROUP\", \"CAMPAIGN\")", Extract: "hierarchyLevel", AdminType: "MarketingActivityHierarchyLevel"},
+			{Name: "inMainWorkflowVersion", GraphQL: "inMainWorkflowVersion", Kind: "scalar", DSLType: "bool", Extract: "inMainWorkflowVersion", AdminType: "Boolean"},
+			{Name: "isExternal", GraphQL: "isExternal", Kind: "scalar", DSLType: "bool", Extract: "isExternal", AdminType: "Boolean"},
+			{Name: "marketingChannelType", GraphQL: "marketingChannelType", Kind: "enum", DSLType: "enum(\"SEARCH\", \"DISPLAY\", \"SOCIAL\", \"EMAIL\", \"REFERRAL\")", Extract: "marketingChannelType", AdminType: "MarketingChannel"},
+			{Name: "marketingEventGid", GraphQL: "marketingEvent", Kind: "gid", DSLType: "string", Extract: "marketingEvent.id", AdminType: "MarketingEvent"},
+			{Name: "parentActivityId", GraphQL: "parentActivityId", Kind: "scalar", DSLType: "string", Extract: "parentActivityId", AdminType: "ID"},
+			{Name: "parentRemoteId", GraphQL: "parentRemoteId", Kind: "scalar", DSLType: "string", Extract: "parentRemoteId", AdminType: "String"},
+			{Name: "sourceAndMedium", GraphQL: "sourceAndMedium", Kind: "scalar", DSLType: "string", Extract: "sourceAndMedium", AdminType: "String"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"ACTIVE\", \"DELETED\", \"DELETED_EXTERNALLY\", \"DISCONNECTED\", \"DRAFT\", \"FAILED\", \"INACTIVE\", \"PAUSED\", \"PENDING\", \"SCHEDULED\", \"UNDEFINED\")", Extract: "status", AdminType: "MarketingActivityStatus"},
+			{Name: "statusBadgeTypeV2", GraphQL: "statusBadgeTypeV2", Kind: "enum", DSLType: "enum(\"DEFAULT\", \"SUCCESS\", \"ATTENTION\", \"WARNING\", \"INFO\", \"CRITICAL\")", Extract: "statusBadgeTypeV2", AdminType: "BadgeType"},
+			{Name: "statusLabel", GraphQL: "statusLabel", Kind: "scalar", DSLType: "string", Extract: "statusLabel", AdminType: "String"},
+			{Name: "statusTransitionedAt", GraphQL: "statusTransitionedAt", Kind: "scalar", DSLType: "string", Extract: "statusTransitionedAt", AdminType: "DateTime"},
+			{Name: "tactic", GraphQL: "tactic", Kind: "enum", DSLType: "enum(\"ABANDONED_CART\", \"AD\", \"AFFILIATE\", \"LINK\", \"LOYALTY\", \"MESSAGE\", \"NEWSLETTER\", \"NOTIFICATION\", \"POST\", \"RETARGETING\", \"TRANSACTIONAL\", \"STOREFRONT_APP\", \"SEO\")", Extract: "tactic", AdminType: "MarketingTactic"},
+			{Name: "targetStatus", GraphQL: "targetStatus", Kind: "enum", DSLType: "enum(\"ACTIVE\", \"DELETED\", \"DELETED_EXTERNALLY\", \"DISCONNECTED\", \"DRAFT\", \"FAILED\", \"INACTIVE\", \"PAUSED\", \"PENDING\", \"SCHEDULED\", \"UNDEFINED\")", Extract: "targetStatus", AdminType: "MarketingActivityStatus"},
+			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title", AdminType: "String"},
+			{Name: "urlParameterValue", GraphQL: "urlParameterValue", Kind: "scalar", DSLType: "string", Extract: "urlParameterValue", AdminType: "String"},
+			{Name: "utmParameters", GraphQL: "utmParameters", Kind: "object", DSLType: "object", Extract: "utmParameters", AdminType: "UTMParameters"},
 		},
 		FetchOp: "ShopifyFetchMarketingActivity",
 		ListOp:  "ShopifyListMarketingActivity",
@@ -3501,6 +3773,7 @@ query ShopifyFetchMarketingActivity($id: ID!) {
     __typename
     ... on MarketingActivity {
       id
+      updatedAt
       activityListUrl
       adSpend { amount currencyCode }
       app { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
@@ -3534,6 +3807,7 @@ query ShopifyListMarketingActivity($first: Int!, $after: String, $query: String)
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       activityListUrl
       adSpend { amount currencyCode }
       app { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
@@ -3580,22 +3854,22 @@ query ShopifyListMarketingActivity($first: Int!, $after: String, $query: String)
 		Scopes:         []string{"read_marketing_events"},
 		VersionField:   "",
 		Fields: []FieldSpec{
-			{Name: "app", GraphQL: "app", Kind: "object", DSLType: "object", Extract: "app"},
-			{Name: "channelHandle", GraphQL: "channelHandle", Kind: "scalar", DSLType: "string", Extract: "channelHandle"},
-			{Name: "description", GraphQL: "description", Kind: "scalar", DSLType: "string", Extract: "description"},
-			{Name: "endedAt", GraphQL: "endedAt", Kind: "scalar", DSLType: "string", Extract: "endedAt"},
-			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId"},
-			{Name: "manageUrl", GraphQL: "manageUrl", Kind: "scalar", DSLType: "string", Extract: "manageUrl"},
-			{Name: "marketingChannelType", GraphQL: "marketingChannelType", Kind: "enum", DSLType: "enum(\"SEARCH\", \"DISPLAY\", \"SOCIAL\", \"EMAIL\", \"REFERRAL\")", Extract: "marketingChannelType"},
-			{Name: "previewUrl", GraphQL: "previewUrl", Kind: "scalar", DSLType: "string", Extract: "previewUrl"},
-			{Name: "remoteId", GraphQL: "remoteId", Kind: "scalar", DSLType: "string", Extract: "remoteId"},
-			{Name: "scheduledToEndAt", GraphQL: "scheduledToEndAt", Kind: "scalar", DSLType: "string", Extract: "scheduledToEndAt"},
-			{Name: "sourceAndMedium", GraphQL: "sourceAndMedium", Kind: "scalar", DSLType: "string", Extract: "sourceAndMedium"},
-			{Name: "sourceType", GraphQL: "type", Kind: "enum", DSLType: "enum(\"ABANDONED_CART\", \"AD\", \"AFFILIATE\", \"LINK\", \"LOYALTY\", \"MESSAGE\", \"NEWSLETTER\", \"NOTIFICATION\", \"POST\", \"RETARGETING\", \"TRANSACTIONAL\", \"STOREFRONT_APP\", \"SEO\")", Extract: "type"},
-			{Name: "startedAt", GraphQL: "startedAt", Kind: "scalar", DSLType: "string", Extract: "startedAt"},
-			{Name: "utmCampaign", GraphQL: "utmCampaign", Kind: "scalar", DSLType: "string", Extract: "utmCampaign"},
-			{Name: "utmMedium", GraphQL: "utmMedium", Kind: "scalar", DSLType: "string", Extract: "utmMedium"},
-			{Name: "utmSource", GraphQL: "utmSource", Kind: "scalar", DSLType: "string", Extract: "utmSource"},
+			{Name: "app", GraphQL: "app", Kind: "object", DSLType: "object", Extract: "app", AdminType: "App", GidsInside: []string{"Channel"}},
+			{Name: "channelHandle", GraphQL: "channelHandle", Kind: "scalar", DSLType: "string", Extract: "channelHandle", AdminType: "String"},
+			{Name: "description", GraphQL: "description", Kind: "scalar", DSLType: "string", Extract: "description", AdminType: "String"},
+			{Name: "endedAt", GraphQL: "endedAt", Kind: "scalar", DSLType: "string", Extract: "endedAt", AdminType: "DateTime"},
+			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId", AdminType: "UnsignedInt64"},
+			{Name: "manageUrl", GraphQL: "manageUrl", Kind: "scalar", DSLType: "string", Extract: "manageUrl", AdminType: "URL"},
+			{Name: "marketingChannelType", GraphQL: "marketingChannelType", Kind: "enum", DSLType: "enum(\"SEARCH\", \"DISPLAY\", \"SOCIAL\", \"EMAIL\", \"REFERRAL\")", Extract: "marketingChannelType", AdminType: "MarketingChannel"},
+			{Name: "previewUrl", GraphQL: "previewUrl", Kind: "scalar", DSLType: "string", Extract: "previewUrl", AdminType: "URL"},
+			{Name: "remoteId", GraphQL: "remoteId", Kind: "scalar", DSLType: "string", Extract: "remoteId", AdminType: "String"},
+			{Name: "scheduledToEndAt", GraphQL: "scheduledToEndAt", Kind: "scalar", DSLType: "string", Extract: "scheduledToEndAt", AdminType: "DateTime"},
+			{Name: "sourceAndMedium", GraphQL: "sourceAndMedium", Kind: "scalar", DSLType: "string", Extract: "sourceAndMedium", AdminType: "String"},
+			{Name: "sourceType", GraphQL: "type", Kind: "enum", DSLType: "enum(\"ABANDONED_CART\", \"AD\", \"AFFILIATE\", \"LINK\", \"LOYALTY\", \"MESSAGE\", \"NEWSLETTER\", \"NOTIFICATION\", \"POST\", \"RETARGETING\", \"TRANSACTIONAL\", \"STOREFRONT_APP\", \"SEO\")", Extract: "type", AdminType: "MarketingTactic"},
+			{Name: "startedAt", GraphQL: "startedAt", Kind: "scalar", DSLType: "string", Extract: "startedAt", AdminType: "DateTime"},
+			{Name: "utmCampaign", GraphQL: "utmCampaign", Kind: "scalar", DSLType: "string", Extract: "utmCampaign", AdminType: "String"},
+			{Name: "utmMedium", GraphQL: "utmMedium", Kind: "scalar", DSLType: "string", Extract: "utmMedium", AdminType: "String"},
+			{Name: "utmSource", GraphQL: "utmSource", Kind: "scalar", DSLType: "string", Extract: "utmSource", AdminType: "String"},
 		},
 		FetchOp: "ShopifyFetchMarketingEvent",
 		ListOp:  "ShopifyListMarketingEvent",
@@ -3673,10 +3947,10 @@ query ShopifyListMarketingEvent($first: Int!, $after: String, $query: String) {
 		Scopes:         []string{"read_online_store_navigation"},
 		VersionField:   "",
 		Fields: []FieldSpec{
-			{Name: "handle", GraphQL: "handle", Kind: "scalar", DSLType: "string", Extract: "handle"},
-			{Name: "isDefault", GraphQL: "isDefault", Kind: "scalar", DSLType: "bool", Extract: "isDefault"},
-			{Name: "items", GraphQL: "items", Kind: "objectList", DSLType: "[]object", Extract: "items"},
-			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title"},
+			{Name: "handle", GraphQL: "handle", Kind: "scalar", DSLType: "string", Extract: "handle", AdminType: "String"},
+			{Name: "isDefault", GraphQL: "isDefault", Kind: "scalar", DSLType: "bool", Extract: "isDefault", AdminType: "Boolean"},
+			{Name: "items", GraphQL: "items", Kind: "objectList", DSLType: "[]object", Extract: "items", AdminType: "MenuItem"},
+			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title", AdminType: "String"},
 		},
 		FetchOp: "ShopifyFetchMenu",
 		ListOp:  "ShopifyListMenu",
@@ -3729,22 +4003,22 @@ query ShopifyListMenu($first: Int!, $after: String, $query: String) {
 		Scopes:       []string{"read_products"},
 		VersionField: "",
 		Fields: []FieldSpec{
-			{Name: "access", GraphQL: "access", Kind: "object", DSLType: "object", Extract: "access"},
-			{Name: "capabilities", GraphQL: "capabilities", Kind: "object", DSLType: "object", Extract: "capabilities"},
-			{Name: "constraints", GraphQL: "constraints", Kind: "object", DSLType: "object", Extract: "constraints"},
-			{Name: "description", GraphQL: "description", Kind: "scalar", DSLType: "string", Extract: "description"},
-			{Name: "key", GraphQL: "key", Kind: "scalar", DSLType: "string", Extract: "key"},
-			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]"},
-			{Name: "metafieldsCount", GraphQL: "metafieldsCount", Kind: "scalar", DSLType: "int", Extract: "metafieldsCount"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "namespace", GraphQL: "namespace", Kind: "scalar", DSLType: "string", Extract: "namespace"},
-			{Name: "ownerType", GraphQL: "ownerType", Kind: "enum", DSLType: "enum(\"API_PERMISSION\", \"COMPANY\", \"COMPANY_LOCATION\", \"PAYMENT_CUSTOMIZATION\", \"VALIDATION\", \"CUSTOMER\", \"DELIVERY_CUSTOMIZATION\", \"DRAFTORDER\", \"GIFT_CARD_TRANSACTION\", \"TRANSFER\", \"MARKET\", \"CARTTRANSFORM\", \"COLLECTION\", \"PRODUCT\", \"PRODUCTVARIANT\", \"SELLING_PLAN\", \"ARTICLE\", \"BLOG\", \"PAGE\", \"FULFILLMENT_CONSTRAINT_RULE\", \"ORDER_ROUTING_LOCATION_RULE\", \"DISCOUNT\", \"ORDER\", \"LOCATION\", \"SHOP\")", Extract: "ownerType"},
-			{Name: "pinnedPosition", GraphQL: "pinnedPosition", Kind: "scalar", DSLType: "int", Extract: "pinnedPosition"},
-			{Name: "sourceType", GraphQL: "type", Kind: "object", DSLType: "object", Extract: "type"},
-			{Name: "standardTemplate", GraphQL: "standardTemplate", Kind: "object", DSLType: "object", Extract: "standardTemplate"},
-			{Name: "useAsCollectionCondition", GraphQL: "useAsCollectionCondition", Kind: "scalar", DSLType: "bool", Extract: "useAsCollectionCondition"},
-			{Name: "validationStatus", GraphQL: "validationStatus", Kind: "enum", DSLType: "enum(\"ALL_VALID\", \"IN_PROGRESS\", \"SOME_INVALID\")", Extract: "validationStatus"},
-			{Name: "validations", GraphQL: "validations", Kind: "objectList", DSLType: "[]object", Extract: "validations"},
+			{Name: "access", GraphQL: "access", Kind: "object", DSLType: "object", Extract: "access", AdminType: "MetafieldAccess"},
+			{Name: "capabilities", GraphQL: "capabilities", Kind: "object", DSLType: "object", Extract: "capabilities", AdminType: "MetafieldCapabilities"},
+			{Name: "constraints", GraphQL: "constraints", Kind: "object", DSLType: "object", Extract: "constraints", AdminType: "MetafieldDefinitionConstraints"},
+			{Name: "description", GraphQL: "description", Kind: "scalar", DSLType: "string", Extract: "description", AdminType: "String"},
+			{Name: "key", GraphQL: "key", Kind: "scalar", DSLType: "string", Extract: "key", AdminType: "String"},
+			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]", AdminType: "Metafield"},
+			{Name: "metafieldsCount", GraphQL: "metafieldsCount", Kind: "scalar", DSLType: "int", Extract: "metafieldsCount", AdminType: "Int"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "namespace", GraphQL: "namespace", Kind: "scalar", DSLType: "string", Extract: "namespace", AdminType: "String"},
+			{Name: "ownerType", GraphQL: "ownerType", Kind: "enum", DSLType: "enum(\"API_PERMISSION\", \"COMPANY\", \"COMPANY_LOCATION\", \"PAYMENT_CUSTOMIZATION\", \"VALIDATION\", \"CUSTOMER\", \"DELIVERY_CUSTOMIZATION\", \"DRAFTORDER\", \"GIFT_CARD_TRANSACTION\", \"TRANSFER\", \"MARKET\", \"CARTTRANSFORM\", \"COLLECTION\", \"PRODUCT\", \"PRODUCTVARIANT\", \"SELLING_PLAN\", \"ARTICLE\", \"BLOG\", \"PAGE\", \"FULFILLMENT_CONSTRAINT_RULE\", \"ORDER_ROUTING_LOCATION_RULE\", \"DISCOUNT\", \"ORDER\", \"LOCATION\", \"SHOP\")", Extract: "ownerType", AdminType: "MetafieldOwnerType"},
+			{Name: "pinnedPosition", GraphQL: "pinnedPosition", Kind: "scalar", DSLType: "int", Extract: "pinnedPosition", AdminType: "Int"},
+			{Name: "sourceType", GraphQL: "type", Kind: "object", DSLType: "object", Extract: "type", AdminType: "MetafieldDefinitionType"},
+			{Name: "standardTemplate", GraphQL: "standardTemplate", Kind: "object", DSLType: "object", Extract: "standardTemplate", AdminType: "StandardMetafieldDefinitionTemplate"},
+			{Name: "useAsCollectionCondition", GraphQL: "useAsCollectionCondition", Kind: "scalar", DSLType: "bool", Extract: "useAsCollectionCondition", AdminType: "Boolean"},
+			{Name: "validationStatus", GraphQL: "validationStatus", Kind: "enum", DSLType: "enum(\"ALL_VALID\", \"IN_PROGRESS\", \"SOME_INVALID\")", Extract: "validationStatus", AdminType: "MetafieldDefinitionValidationStatus"},
+			{Name: "validations", GraphQL: "validations", Kind: "objectList", DSLType: "[]object", Extract: "validations", AdminType: "MetafieldDefinitionValidation"},
 		},
 		FetchOp: "ShopifyFetchMetafieldDefinition",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -3795,18 +4069,18 @@ query ShopifyFetchMetafieldDefinition($id: ID!) {
 		Scopes:       []string{"read_metaobjects"},
 		VersionField: "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "capabilities", GraphQL: "capabilities", Kind: "object", DSLType: "object", Extract: "capabilities"},
-			{Name: "createdByApp", GraphQL: "createdByApp", Kind: "object", DSLType: "object", Extract: "createdByApp"},
-			{Name: "createdByStaffGid", GraphQL: "createdByStaff", Kind: "gid", DSLType: "string", Extract: "createdByStaff.id"},
-			{Name: "definitionGid", GraphQL: "definition", Kind: "gid", DSLType: "string", Extract: "definition.id"},
-			{Name: "displayName", GraphQL: "displayName", Kind: "scalar", DSLType: "string", Extract: "displayName"},
-			{Name: "fields", GraphQL: "fields", Kind: "objectList", DSLType: "[]object", Extract: "fields"},
-			{Name: "handle", GraphQL: "handle", Kind: "scalar", DSLType: "string", Extract: "handle"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "sourceCreatedBy", GraphQL: "createdBy", Kind: "object", DSLType: "object", Extract: "createdBy"},
-			{Name: "sourceType", GraphQL: "type", Kind: "scalar", DSLType: "string", Extract: "type"},
-			{Name: "thumbnailField", GraphQL: "thumbnailField", Kind: "object", DSLType: "object", Extract: "thumbnailField"},
-			{Name: "values", GraphQL: "values", Kind: "scalar", DSLType: "any", Extract: "values"},
+			{Name: "capabilities", GraphQL: "capabilities", Kind: "object", DSLType: "object", Extract: "capabilities", AdminType: "MetaobjectCapabilityData"},
+			{Name: "createdByApp", GraphQL: "createdByApp", Kind: "object", DSLType: "object", Extract: "createdByApp", AdminType: "App", GidsInside: []string{"Channel"}},
+			{Name: "createdByStaffGid", GraphQL: "createdByStaff", Kind: "gid", DSLType: "string", Extract: "createdByStaff.id", AdminType: "StaffMember"},
+			{Name: "definitionGid", GraphQL: "definition", Kind: "gid", DSLType: "string", Extract: "definition.id", AdminType: "MetaobjectDefinition"},
+			{Name: "displayName", GraphQL: "displayName", Kind: "scalar", DSLType: "string", Extract: "displayName", AdminType: "String"},
+			{Name: "fields", GraphQL: "fields", Kind: "objectList", DSLType: "[]object", Extract: "fields", AdminType: "MetaobjectField", GidsInside: []string{"Article", "Collection", "Company", "Customer", "Metaobject", "Order", "Page", "Product", "ProductVariant"}},
+			{Name: "handle", GraphQL: "handle", Kind: "scalar", DSLType: "string", Extract: "handle", AdminType: "String"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "sourceCreatedBy", GraphQL: "createdBy", Kind: "object", DSLType: "object", Extract: "createdBy", AdminType: "App", GidsInside: []string{"Channel"}},
+			{Name: "sourceType", GraphQL: "type", Kind: "scalar", DSLType: "string", Extract: "type", AdminType: "String"},
+			{Name: "thumbnailField", GraphQL: "thumbnailField", Kind: "object", DSLType: "object", Extract: "thumbnailField", AdminType: "MetaobjectField", GidsInside: []string{"Article", "Collection", "Company", "Customer", "Metaobject", "Order", "Page", "Product", "ProductVariant"}},
+			{Name: "values", GraphQL: "values", Kind: "scalar", DSLType: "any", Extract: "values", AdminType: "JSON"},
 		},
 		FetchOp: "ShopifyFetchMetaobject",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -3820,6 +4094,7 @@ query ShopifyFetchMetaobject($id: ID!) {
     __typename
     ... on Metaobject {
       id
+      updatedAt
       capabilities { onlineStore { templateSuffix } publishable { status } }
       createdByApp { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
       createdByStaff { id }
@@ -3854,19 +4129,19 @@ query ShopifyFetchMetaobject($id: ID!) {
 		Scopes:         []string{"read_metaobject_definitions"},
 		VersionField:   "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "access", GraphQL: "access", Kind: "object", DSLType: "object", Extract: "access"},
-			{Name: "capabilities", GraphQL: "capabilities", Kind: "object", DSLType: "object", Extract: "capabilities"},
-			{Name: "createdByApp", GraphQL: "createdByApp", Kind: "object", DSLType: "object", Extract: "createdByApp"},
-			{Name: "createdByStaffGid", GraphQL: "createdByStaff", Kind: "gid", DSLType: "string", Extract: "createdByStaff.id"},
-			{Name: "description", GraphQL: "description", Kind: "scalar", DSLType: "string", Extract: "description"},
-			{Name: "displayNameKey", GraphQL: "displayNameKey", Kind: "scalar", DSLType: "string", Extract: "displayNameKey"},
-			{Name: "fieldDefinitions", GraphQL: "fieldDefinitions", Kind: "objectList", DSLType: "[]object", Extract: "fieldDefinitions"},
-			{Name: "hasThumbnailField", GraphQL: "hasThumbnailField", Kind: "scalar", DSLType: "bool", Extract: "hasThumbnailField"},
-			{Name: "metaobjectsCount", GraphQL: "metaobjectsCount", Kind: "scalar", DSLType: "int", Extract: "metaobjectsCount"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "sourceType", GraphQL: "type", Kind: "scalar", DSLType: "string", Extract: "type"},
-			{Name: "standardTemplate", GraphQL: "standardTemplate", Kind: "object", DSLType: "object", Extract: "standardTemplate"},
+			{Name: "access", GraphQL: "access", Kind: "object", DSLType: "object", Extract: "access", AdminType: "MetaobjectAccess"},
+			{Name: "capabilities", GraphQL: "capabilities", Kind: "object", DSLType: "object", Extract: "capabilities", AdminType: "MetaobjectCapabilities"},
+			{Name: "createdByApp", GraphQL: "createdByApp", Kind: "object", DSLType: "object", Extract: "createdByApp", AdminType: "App", GidsInside: []string{"Channel"}},
+			{Name: "createdByStaffGid", GraphQL: "createdByStaff", Kind: "gid", DSLType: "string", Extract: "createdByStaff.id", AdminType: "StaffMember"},
+			{Name: "description", GraphQL: "description", Kind: "scalar", DSLType: "string", Extract: "description", AdminType: "String"},
+			{Name: "displayNameKey", GraphQL: "displayNameKey", Kind: "scalar", DSLType: "string", Extract: "displayNameKey", AdminType: "String"},
+			{Name: "fieldDefinitions", GraphQL: "fieldDefinitions", Kind: "objectList", DSLType: "[]object", Extract: "fieldDefinitions", AdminType: "MetaobjectFieldDefinition"},
+			{Name: "hasThumbnailField", GraphQL: "hasThumbnailField", Kind: "scalar", DSLType: "bool", Extract: "hasThumbnailField", AdminType: "Boolean"},
+			{Name: "metaobjectsCount", GraphQL: "metaobjectsCount", Kind: "scalar", DSLType: "int", Extract: "metaobjectsCount", AdminType: "Int"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "sourceType", GraphQL: "type", Kind: "scalar", DSLType: "string", Extract: "type", AdminType: "String"},
+			{Name: "standardTemplate", GraphQL: "standardTemplate", Kind: "object", DSLType: "object", Extract: "standardTemplate", AdminType: "StandardMetaobjectDefinitionTemplate"},
 		},
 		FetchOp: "ShopifyFetchMetaobjectDefinition",
 		ListOp:  "ShopifyListMetaobjectDefinition",
@@ -3881,6 +4156,7 @@ query ShopifyFetchMetaobjectDefinition($id: ID!) {
     __typename
     ... on MetaobjectDefinition {
       id
+      updatedAt
       access { admin customerAccount storefront }
       capabilities { onlineStore { enabled } publishable { enabled } renderable { enabled } translatable { enabled } }
       createdByApp { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
@@ -3903,6 +4179,7 @@ query ShopifyListMetaobjectDefinition($first: Int!, $after: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       access { admin customerAccount storefront }
       capabilities { onlineStore { enabled } publishable { enabled } renderable { enabled } translatable { enabled } }
       createdByApp { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
@@ -3938,13 +4215,13 @@ query ShopifyListMetaobjectDefinition($first: Int!, $after: String) {
 		Scopes:         []string{"read_themes"},
 		VersionField:   "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "prefix", GraphQL: "prefix", Kind: "scalar", DSLType: "string", Extract: "prefix"},
-			{Name: "processing", GraphQL: "processing", Kind: "scalar", DSLType: "bool", Extract: "processing"},
-			{Name: "processingFailed", GraphQL: "processingFailed", Kind: "scalar", DSLType: "bool", Extract: "processingFailed"},
-			{Name: "role", GraphQL: "role", Kind: "enum", DSLType: "enum(\"MAIN\", \"UNPUBLISHED\", \"DEMO\", \"DEVELOPMENT\", \"ARCHIVED\", \"LOCKED\")", Extract: "role"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "themeStoreId", GraphQL: "themeStoreId", Kind: "scalar", DSLType: "int", Extract: "themeStoreId"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "prefix", GraphQL: "prefix", Kind: "scalar", DSLType: "string", Extract: "prefix", AdminType: "String"},
+			{Name: "processing", GraphQL: "processing", Kind: "scalar", DSLType: "bool", Extract: "processing", AdminType: "Boolean"},
+			{Name: "processingFailed", GraphQL: "processingFailed", Kind: "scalar", DSLType: "bool", Extract: "processingFailed", AdminType: "Boolean"},
+			{Name: "role", GraphQL: "role", Kind: "enum", DSLType: "enum(\"MAIN\", \"UNPUBLISHED\", \"DEMO\", \"DEVELOPMENT\", \"ARCHIVED\", \"LOCKED\")", Extract: "role", AdminType: "ThemeRole"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "themeStoreId", GraphQL: "themeStoreId", Kind: "scalar", DSLType: "int", Extract: "themeStoreId", AdminType: "Int"},
 		},
 		FetchOp: "ShopifyFetchOnlineStoreTheme",
 		ListOp:  "ShopifyListOnlineStoreTheme",
@@ -3959,6 +4236,7 @@ query ShopifyFetchOnlineStoreTheme($id: ID!) {
     __typename
     ... on OnlineStoreTheme {
       id
+      updatedAt
       name
       prefix
       processing
@@ -3975,6 +4253,7 @@ query ShopifyListOnlineStoreTheme($first: Int!, $after: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       name
       prefix
       processing
@@ -4004,129 +4283,129 @@ query ShopifyListOnlineStoreTheme($first: Int!, $after: String) {
 		Scopes:         []string{"read_orders", "read_all_orders"},
 		VersionField:   "updatedAt",
 		Children: []ChildSpec{
-			{Connection: "lineItems", Concept: "orderLineItem", GraphQLType: "LineItem", List: false},
-			{Connection: "transactions", Concept: "orderTransaction", GraphQLType: "OrderTransaction", List: true},
-			{Connection: "refunds", Concept: "refund", GraphQLType: "Refund", List: true},
-			{Connection: "fulfillments", Concept: "fulfillment", GraphQLType: "Fulfillment", List: true},
-			{Connection: "returns", Concept: "shopifyReturn", GraphQLType: "Return", List: false},
+			{Connection: "lineItems", Concept: "orderLineItem", GraphQLType: "LineItem", List: false, PageOp: "ShopifyPageOrderLineItems"},
+			{Connection: "transactions", Concept: "orderTransaction", GraphQLType: "OrderTransaction", List: true, PageOp: ""},
+			{Connection: "refunds", Concept: "refund", GraphQLType: "Refund", List: true, PageOp: ""},
+			{Connection: "fulfillments", Concept: "fulfillment", GraphQLType: "Fulfillment", List: true, PageOp: ""},
+			{Connection: "returns", Concept: "shopifyReturn", GraphQLType: "Return", List: false, PageOp: "ShopifyPageOrderReturns"},
 		},
 		Fields: []FieldSpec{
-			{Name: "additionalFees", GraphQL: "additionalFees", Kind: "objectList", DSLType: "[]object", Extract: "additionalFees"},
-			{Name: "agreementsGids", GraphQL: "agreements", Kind: "refs", DSLType: "[]string", Extract: "agreements.nodes[].id"},
-			{Name: "alerts", GraphQL: "alerts", Kind: "objectList", DSLType: "[]object", Extract: "alerts"},
-			{Name: "app", GraphQL: "app", Kind: "object", DSLType: "object", Extract: "app"},
-			{Name: "attribution", GraphQL: "attribution", Kind: "object", DSLType: "object", Extract: "attribution"},
-			{Name: "billingAddress", GraphQL: "billingAddress", Kind: "object", DSLType: "object", Extract: "billingAddress"},
-			{Name: "billingAddressMatchesShippingAddress", GraphQL: "billingAddressMatchesShippingAddress", Kind: "scalar", DSLType: "bool", Extract: "billingAddressMatchesShippingAddress"},
-			{Name: "canMarkAsPaid", GraphQL: "canMarkAsPaid", Kind: "scalar", DSLType: "bool", Extract: "canMarkAsPaid"},
-			{Name: "canNotifyCustomer", GraphQL: "canNotifyCustomer", Kind: "scalar", DSLType: "bool", Extract: "canNotifyCustomer"},
-			{Name: "cancelReason", GraphQL: "cancelReason", Kind: "enum", DSLType: "enum(\"CUSTOMER\", \"DECLINED\", \"FRAUD\", \"INVENTORY\", \"STAFF\", \"OTHER\")", Extract: "cancelReason"},
-			{Name: "cancellation", GraphQL: "cancellation", Kind: "object", DSLType: "object", Extract: "cancellation"},
-			{Name: "cancelledAt", GraphQL: "cancelledAt", Kind: "scalar", DSLType: "string", Extract: "cancelledAt"},
-			{Name: "capturable", GraphQL: "capturable", Kind: "scalar", DSLType: "bool", Extract: "capturable"},
-			{Name: "cartDiscountAmountSet", GraphQL: "cartDiscountAmountSet", Kind: "object", DSLType: "object", Extract: "cartDiscountAmountSet"},
-			{Name: "cartToken", GraphQL: "cartToken", Kind: "scalar", DSLType: "string", Extract: "cartToken"},
-			{Name: "checkoutToken", GraphQL: "checkoutToken", Kind: "scalar", DSLType: "string", Extract: "checkoutToken"},
-			{Name: "clientIp", GraphQL: "clientIp", Kind: "scalar", DSLType: "string", Extract: "clientIp"},
-			{Name: "closed", GraphQL: "closed", Kind: "scalar", DSLType: "bool", Extract: "closed"},
-			{Name: "closedAt", GraphQL: "closedAt", Kind: "scalar", DSLType: "string", Extract: "closedAt"},
-			{Name: "confirmationNumber", GraphQL: "confirmationNumber", Kind: "scalar", DSLType: "string", Extract: "confirmationNumber"},
-			{Name: "confirmed", GraphQL: "confirmed", Kind: "scalar", DSLType: "bool", Extract: "confirmed"},
-			{Name: "currencyCode", GraphQL: "currencyCode", Kind: "scalar", DSLType: "string", Extract: "currencyCode"},
-			{Name: "currentCartDiscountAmountSet", GraphQL: "currentCartDiscountAmountSet", Kind: "object", DSLType: "object", Extract: "currentCartDiscountAmountSet"},
-			{Name: "currentShippingPriceSet", GraphQL: "currentShippingPriceSet", Kind: "object", DSLType: "object", Extract: "currentShippingPriceSet"},
-			{Name: "currentSubtotalLineItemsQuantity", GraphQL: "currentSubtotalLineItemsQuantity", Kind: "scalar", DSLType: "int", Extract: "currentSubtotalLineItemsQuantity"},
-			{Name: "currentSubtotalPriceSet", GraphQL: "currentSubtotalPriceSet", Kind: "object", DSLType: "object", Extract: "currentSubtotalPriceSet"},
-			{Name: "currentTaxLines", GraphQL: "currentTaxLines", Kind: "objectList", DSLType: "[]object", Extract: "currentTaxLines"},
-			{Name: "currentTotalAdditionalFeesSet", GraphQL: "currentTotalAdditionalFeesSet", Kind: "object", DSLType: "object", Extract: "currentTotalAdditionalFeesSet"},
-			{Name: "currentTotalDiscountsSet", GraphQL: "currentTotalDiscountsSet", Kind: "object", DSLType: "object", Extract: "currentTotalDiscountsSet"},
-			{Name: "currentTotalDutiesSet", GraphQL: "currentTotalDutiesSet", Kind: "object", DSLType: "object", Extract: "currentTotalDutiesSet"},
-			{Name: "currentTotalPriceSet", GraphQL: "currentTotalPriceSet", Kind: "object", DSLType: "object", Extract: "currentTotalPriceSet"},
-			{Name: "currentTotalTaxSet", GraphQL: "currentTotalTaxSet", Kind: "object", DSLType: "object", Extract: "currentTotalTaxSet"},
-			{Name: "currentTotalWeight", GraphQL: "currentTotalWeight", Kind: "scalar", DSLType: "string", Extract: "currentTotalWeight"},
-			{Name: "customAttributes", GraphQL: "customAttributes", Kind: "objectList", DSLType: "[]object", Extract: "customAttributes"},
-			{Name: "customerAcceptsMarketing", GraphQL: "customerAcceptsMarketing", Kind: "scalar", DSLType: "bool", Extract: "customerAcceptsMarketing"},
-			{Name: "customerGid", GraphQL: "customer", Kind: "gid", DSLType: "string", Extract: "customer.id"},
-			{Name: "customerJourneySummary", GraphQL: "customerJourneySummary", Kind: "object", DSLType: "object", Extract: "customerJourneySummary"},
-			{Name: "customerLocale", GraphQL: "customerLocale", Kind: "scalar", DSLType: "string", Extract: "customerLocale"},
-			{Name: "discountApplications", GraphQL: "discountApplications", Kind: "objectList", DSLType: "[]object", Extract: "discountApplications.nodes[]"},
-			{Name: "discountCode", GraphQL: "discountCode", Kind: "scalar", DSLType: "string", Extract: "discountCode"},
-			{Name: "discountCodes", GraphQL: "discountCodes", Kind: "scalarList", DSLType: "[]string", Extract: "discountCodes"},
-			{Name: "displayAddress", GraphQL: "displayAddress", Kind: "object", DSLType: "object", Extract: "displayAddress"},
-			{Name: "displayFinancialStatus", GraphQL: "displayFinancialStatus", Kind: "enum", DSLType: "enum(\"PENDING\", \"AUTHORIZED\", \"PARTIALLY_PAID\", \"PARTIALLY_REFUNDED\", \"VOIDED\", \"PAID\", \"REFUNDED\", \"EXPIRED\")", Extract: "displayFinancialStatus"},
-			{Name: "displayFulfillmentStatus", GraphQL: "displayFulfillmentStatus", Kind: "enum", DSLType: "enum(\"UNFULFILLED\", \"PARTIALLY_FULFILLED\", \"FULFILLED\", \"RESTOCKED\", \"PENDING_FULFILLMENT\", \"OPEN\", \"IN_PROGRESS\", \"ON_HOLD\", \"SCHEDULED\", \"REQUEST_DECLINED\")", Extract: "displayFulfillmentStatus"},
-			{Name: "disputes", GraphQL: "disputes", Kind: "objectList", DSLType: "[]object", Extract: "disputes"},
-			{Name: "dutiesIncluded", GraphQL: "dutiesIncluded", Kind: "scalar", DSLType: "bool", Extract: "dutiesIncluded"},
-			{Name: "edited", GraphQL: "edited", Kind: "scalar", DSLType: "bool", Extract: "edited"},
-			{Name: "email", GraphQL: "email", Kind: "scalar", DSLType: "string", Extract: "email"},
-			{Name: "estimatedTaxes", GraphQL: "estimatedTaxes", Kind: "scalar", DSLType: "bool", Extract: "estimatedTaxes"},
-			{Name: "fulfillable", GraphQL: "fulfillable", Kind: "scalar", DSLType: "bool", Extract: "fulfillable"},
-			{Name: "fulfillmentOrdersGids", GraphQL: "fulfillmentOrders", Kind: "refs", DSLType: "[]string", Extract: "fulfillmentOrders.nodes[].id"},
-			{Name: "fulfillmentsCount", GraphQL: "fulfillmentsCount", Kind: "object", DSLType: "object", Extract: "fulfillmentsCount"},
-			{Name: "fullyPaid", GraphQL: "fullyPaid", Kind: "scalar", DSLType: "bool", Extract: "fullyPaid"},
-			{Name: "hasTimelineComment", GraphQL: "hasTimelineComment", Kind: "scalar", DSLType: "bool", Extract: "hasTimelineComment"},
-			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId"},
-			{Name: "merchantBusinessEntityGid", GraphQL: "merchantBusinessEntity", Kind: "gid", DSLType: "string", Extract: "merchantBusinessEntity.id"},
-			{Name: "merchantEditable", GraphQL: "merchantEditable", Kind: "scalar", DSLType: "bool", Extract: "merchantEditable"},
-			{Name: "merchantEditableErrors", GraphQL: "merchantEditableErrors", Kind: "scalarList", DSLType: "[]string", Extract: "merchantEditableErrors"},
-			{Name: "merchantOfRecordApp", GraphQL: "merchantOfRecordApp", Kind: "object", DSLType: "object", Extract: "merchantOfRecordApp"},
-			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "netPaymentSet", GraphQL: "netPaymentSet", Kind: "object", DSLType: "object", Extract: "netPaymentSet"},
-			{Name: "note", GraphQL: "note", Kind: "scalar", DSLType: "string", Extract: "note"},
-			{Name: "number", GraphQL: "number", Kind: "scalar", DSLType: "int", Extract: "number"},
-			{Name: "originalTotalAdditionalFeesSet", GraphQL: "originalTotalAdditionalFeesSet", Kind: "object", DSLType: "object", Extract: "originalTotalAdditionalFeesSet"},
-			{Name: "originalTotalDutiesSet", GraphQL: "originalTotalDutiesSet", Kind: "object", DSLType: "object", Extract: "originalTotalDutiesSet"},
-			{Name: "originalTotalPriceSet", GraphQL: "originalTotalPriceSet", Kind: "object", DSLType: "object", Extract: "originalTotalPriceSet"},
-			{Name: "paymentCollectionDetails", GraphQL: "paymentCollectionDetails", Kind: "object", DSLType: "object", Extract: "paymentCollectionDetails"},
-			{Name: "paymentGatewayNames", GraphQL: "paymentGatewayNames", Kind: "scalarList", DSLType: "[]string", Extract: "paymentGatewayNames"},
-			{Name: "paymentTerms", GraphQL: "paymentTerms", Kind: "object", DSLType: "object", Extract: "paymentTerms"},
-			{Name: "phone", GraphQL: "phone", Kind: "scalar", DSLType: "string", Extract: "phone"},
-			{Name: "poNumber", GraphQL: "poNumber", Kind: "scalar", DSLType: "string", Extract: "poNumber"},
-			{Name: "presentmentCurrencyCode", GraphQL: "presentmentCurrencyCode", Kind: "scalar", DSLType: "string", Extract: "presentmentCurrencyCode"},
-			{Name: "processedAt", GraphQL: "processedAt", Kind: "scalar", DSLType: "string", Extract: "processedAt"},
-			{Name: "productNetwork", GraphQL: "productNetwork", Kind: "scalar", DSLType: "bool", Extract: "productNetwork"},
-			{Name: "publicationGid", GraphQL: "publication", Kind: "gid", DSLType: "string", Extract: "publication.id"},
-			{Name: "purchasingEntity", GraphQL: "purchasingEntity", Kind: "object", DSLType: "object", Extract: "purchasingEntity"},
-			{Name: "refundDiscrepancySet", GraphQL: "refundDiscrepancySet", Kind: "object", DSLType: "object", Extract: "refundDiscrepancySet"},
-			{Name: "refundable", GraphQL: "refundable", Kind: "scalar", DSLType: "bool", Extract: "refundable"},
-			{Name: "registeredSourceUrl", GraphQL: "registeredSourceUrl", Kind: "scalar", DSLType: "string", Extract: "registeredSourceUrl"},
-			{Name: "requiresShipping", GraphQL: "requiresShipping", Kind: "scalar", DSLType: "bool", Extract: "requiresShipping"},
-			{Name: "restockable", GraphQL: "restockable", Kind: "scalar", DSLType: "bool", Extract: "restockable"},
-			{Name: "retailLocationGid", GraphQL: "retailLocation", Kind: "gid", DSLType: "string", Extract: "retailLocation.id"},
-			{Name: "returnStatus", GraphQL: "returnStatus", Kind: "enum", DSLType: "enum(\"IN_PROGRESS\", \"INSPECTION_COMPLETE\", \"NO_RETURN\", \"RETURNED\", \"RETURN_FAILED\", \"RETURN_REQUESTED\")", Extract: "returnStatus"},
-			{Name: "risk", GraphQL: "risk", Kind: "object", DSLType: "object", Extract: "risk"},
-			{Name: "shippingAddress", GraphQL: "shippingAddress", Kind: "object", DSLType: "object", Extract: "shippingAddress"},
-			{Name: "shippingLine", GraphQL: "shippingLine", Kind: "object", DSLType: "object", Extract: "shippingLine"},
-			{Name: "shippingLinesGids", GraphQL: "shippingLines", Kind: "refs", DSLType: "[]string", Extract: "shippingLines.nodes[].id"},
-			{Name: "shopifyProtect", GraphQL: "shopifyProtect", Kind: "object", DSLType: "object", Extract: "shopifyProtect"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "sourceIdentifier", GraphQL: "sourceIdentifier", Kind: "scalar", DSLType: "string", Extract: "sourceIdentifier"},
-			{Name: "sourceName", GraphQL: "sourceName", Kind: "scalar", DSLType: "string", Extract: "sourceName"},
-			{Name: "staffMemberGid", GraphQL: "staffMember", Kind: "gid", DSLType: "string", Extract: "staffMember.id"},
-			{Name: "statusPageUrl", GraphQL: "statusPageUrl", Kind: "scalar", DSLType: "string", Extract: "statusPageUrl"},
-			{Name: "subtotalLineItemsQuantity", GraphQL: "subtotalLineItemsQuantity", Kind: "scalar", DSLType: "int", Extract: "subtotalLineItemsQuantity"},
-			{Name: "subtotalPriceSet", GraphQL: "subtotalPriceSet", Kind: "object", DSLType: "object", Extract: "subtotalPriceSet"},
-			{Name: "suggestedRefund", GraphQL: "suggestedRefund", Kind: "object", DSLType: "object", Extract: "suggestedRefund"},
-			{Name: "tags", GraphQL: "tags", Kind: "scalarList", DSLType: "[]string", Extract: "tags"},
-			{Name: "taxExempt", GraphQL: "taxExempt", Kind: "scalar", DSLType: "bool", Extract: "taxExempt"},
-			{Name: "taxLines", GraphQL: "taxLines", Kind: "objectList", DSLType: "[]object", Extract: "taxLines"},
-			{Name: "taxesIncluded", GraphQL: "taxesIncluded", Kind: "scalar", DSLType: "bool", Extract: "taxesIncluded"},
-			{Name: "test", GraphQL: "test", Kind: "scalar", DSLType: "bool", Extract: "test"},
-			{Name: "totalCapturableSet", GraphQL: "totalCapturableSet", Kind: "object", DSLType: "object", Extract: "totalCapturableSet"},
-			{Name: "totalCashRoundingAdjustment", GraphQL: "totalCashRoundingAdjustment", Kind: "object", DSLType: "object", Extract: "totalCashRoundingAdjustment"},
-			{Name: "totalDiscountsSet", GraphQL: "totalDiscountsSet", Kind: "object", DSLType: "object", Extract: "totalDiscountsSet"},
-			{Name: "totalOutstandingSet", GraphQL: "totalOutstandingSet", Kind: "object", DSLType: "object", Extract: "totalOutstandingSet"},
-			{Name: "totalPriceSet", GraphQL: "totalPriceSet", Kind: "object", DSLType: "object", Extract: "totalPriceSet"},
-			{Name: "totalReceivedSet", GraphQL: "totalReceivedSet", Kind: "object", DSLType: "object", Extract: "totalReceivedSet"},
-			{Name: "totalRefundedSet", GraphQL: "totalRefundedSet", Kind: "object", DSLType: "object", Extract: "totalRefundedSet"},
-			{Name: "totalRefundedShippingSet", GraphQL: "totalRefundedShippingSet", Kind: "object", DSLType: "object", Extract: "totalRefundedShippingSet"},
-			{Name: "totalShippingPriceSet", GraphQL: "totalShippingPriceSet", Kind: "object", DSLType: "object", Extract: "totalShippingPriceSet"},
-			{Name: "totalTaxSet", GraphQL: "totalTaxSet", Kind: "object", DSLType: "object", Extract: "totalTaxSet"},
-			{Name: "totalTipReceivedSet", GraphQL: "totalTipReceivedSet", Kind: "object", DSLType: "object", Extract: "totalTipReceivedSet"},
-			{Name: "totalWeight", GraphQL: "totalWeight", Kind: "scalar", DSLType: "string", Extract: "totalWeight"},
-			{Name: "transactionsCount", GraphQL: "transactionsCount", Kind: "object", DSLType: "object", Extract: "transactionsCount"},
-			{Name: "unpaid", GraphQL: "unpaid", Kind: "scalar", DSLType: "bool", Extract: "unpaid"},
+			{Name: "additionalFees", GraphQL: "additionalFees", Kind: "objectList", DSLType: "[]object", Extract: "additionalFees", AdminType: "AdditionalFee"},
+			{Name: "agreementsGids", GraphQL: "agreements", Kind: "refs", DSLType: "[]string", Extract: "agreements.nodes[].id", AdminType: "SalesAgreement"},
+			{Name: "alerts", GraphQL: "alerts", Kind: "objectList", DSLType: "[]object", Extract: "alerts", AdminType: "ResourceAlert"},
+			{Name: "app", GraphQL: "app", Kind: "object", DSLType: "object", Extract: "app", AdminType: "OrderApp"},
+			{Name: "attribution", GraphQL: "attribution", Kind: "object", DSLType: "object", Extract: "attribution", AdminType: "OrderAttribution"},
+			{Name: "billingAddress", GraphQL: "billingAddress", Kind: "object", DSLType: "object", Extract: "billingAddress", AdminType: "MailingAddress"},
+			{Name: "billingAddressMatchesShippingAddress", GraphQL: "billingAddressMatchesShippingAddress", Kind: "scalar", DSLType: "bool", Extract: "billingAddressMatchesShippingAddress", AdminType: "Boolean"},
+			{Name: "canMarkAsPaid", GraphQL: "canMarkAsPaid", Kind: "scalar", DSLType: "bool", Extract: "canMarkAsPaid", AdminType: "Boolean"},
+			{Name: "canNotifyCustomer", GraphQL: "canNotifyCustomer", Kind: "scalar", DSLType: "bool", Extract: "canNotifyCustomer", AdminType: "Boolean"},
+			{Name: "cancelReason", GraphQL: "cancelReason", Kind: "enum", DSLType: "enum(\"CUSTOMER\", \"DECLINED\", \"FRAUD\", \"INVENTORY\", \"STAFF\", \"OTHER\")", Extract: "cancelReason", AdminType: "OrderCancelReason"},
+			{Name: "cancellation", GraphQL: "cancellation", Kind: "object", DSLType: "object", Extract: "cancellation", AdminType: "OrderCancellation"},
+			{Name: "cancelledAt", GraphQL: "cancelledAt", Kind: "scalar", DSLType: "string", Extract: "cancelledAt", AdminType: "DateTime"},
+			{Name: "capturable", GraphQL: "capturable", Kind: "scalar", DSLType: "bool", Extract: "capturable", AdminType: "Boolean"},
+			{Name: "cartDiscountAmountSet", GraphQL: "cartDiscountAmountSet", Kind: "object", DSLType: "object", Extract: "cartDiscountAmountSet", AdminType: "MoneyBag"},
+			{Name: "cartToken", GraphQL: "cartToken", Kind: "scalar", DSLType: "string", Extract: "cartToken", AdminType: "String"},
+			{Name: "checkoutToken", GraphQL: "checkoutToken", Kind: "scalar", DSLType: "string", Extract: "checkoutToken", AdminType: "String"},
+			{Name: "clientIp", GraphQL: "clientIp", Kind: "scalar", DSLType: "string", Extract: "clientIp", AdminType: "String"},
+			{Name: "closed", GraphQL: "closed", Kind: "scalar", DSLType: "bool", Extract: "closed", AdminType: "Boolean"},
+			{Name: "closedAt", GraphQL: "closedAt", Kind: "scalar", DSLType: "string", Extract: "closedAt", AdminType: "DateTime"},
+			{Name: "confirmationNumber", GraphQL: "confirmationNumber", Kind: "scalar", DSLType: "string", Extract: "confirmationNumber", AdminType: "String"},
+			{Name: "confirmed", GraphQL: "confirmed", Kind: "scalar", DSLType: "bool", Extract: "confirmed", AdminType: "Boolean"},
+			{Name: "currencyCode", GraphQL: "currencyCode", Kind: "scalar", DSLType: "string", Extract: "currencyCode", AdminType: "CurrencyCode"},
+			{Name: "currentCartDiscountAmountSet", GraphQL: "currentCartDiscountAmountSet", Kind: "object", DSLType: "object", Extract: "currentCartDiscountAmountSet", AdminType: "MoneyBag"},
+			{Name: "currentShippingPriceSet", GraphQL: "currentShippingPriceSet", Kind: "object", DSLType: "object", Extract: "currentShippingPriceSet", AdminType: "MoneyBag"},
+			{Name: "currentSubtotalLineItemsQuantity", GraphQL: "currentSubtotalLineItemsQuantity", Kind: "scalar", DSLType: "int", Extract: "currentSubtotalLineItemsQuantity", AdminType: "Int"},
+			{Name: "currentSubtotalPriceSet", GraphQL: "currentSubtotalPriceSet", Kind: "object", DSLType: "object", Extract: "currentSubtotalPriceSet", AdminType: "MoneyBag"},
+			{Name: "currentTaxLines", GraphQL: "currentTaxLines", Kind: "objectList", DSLType: "[]object", Extract: "currentTaxLines", AdminType: "TaxLine"},
+			{Name: "currentTotalAdditionalFeesSet", GraphQL: "currentTotalAdditionalFeesSet", Kind: "object", DSLType: "object", Extract: "currentTotalAdditionalFeesSet", AdminType: "MoneyBag"},
+			{Name: "currentTotalDiscountsSet", GraphQL: "currentTotalDiscountsSet", Kind: "object", DSLType: "object", Extract: "currentTotalDiscountsSet", AdminType: "MoneyBag"},
+			{Name: "currentTotalDutiesSet", GraphQL: "currentTotalDutiesSet", Kind: "object", DSLType: "object", Extract: "currentTotalDutiesSet", AdminType: "MoneyBag"},
+			{Name: "currentTotalPriceSet", GraphQL: "currentTotalPriceSet", Kind: "object", DSLType: "object", Extract: "currentTotalPriceSet", AdminType: "MoneyBag"},
+			{Name: "currentTotalTaxSet", GraphQL: "currentTotalTaxSet", Kind: "object", DSLType: "object", Extract: "currentTotalTaxSet", AdminType: "MoneyBag"},
+			{Name: "currentTotalWeight", GraphQL: "currentTotalWeight", Kind: "scalar", DSLType: "string", Extract: "currentTotalWeight", AdminType: "UnsignedInt64"},
+			{Name: "customAttributes", GraphQL: "customAttributes", Kind: "objectList", DSLType: "[]object", Extract: "customAttributes", AdminType: "Attribute"},
+			{Name: "customerAcceptsMarketing", GraphQL: "customerAcceptsMarketing", Kind: "scalar", DSLType: "bool", Extract: "customerAcceptsMarketing", AdminType: "Boolean"},
+			{Name: "customerGid", GraphQL: "customer", Kind: "gid", DSLType: "string", Extract: "customer.id", AdminType: "Customer"},
+			{Name: "customerJourneySummary", GraphQL: "customerJourneySummary", Kind: "object", DSLType: "object", Extract: "customerJourneySummary", AdminType: "CustomerJourneySummary", GidsInside: []string{"MarketingEvent"}},
+			{Name: "customerLocale", GraphQL: "customerLocale", Kind: "scalar", DSLType: "string", Extract: "customerLocale", AdminType: "String"},
+			{Name: "discountApplications", GraphQL: "discountApplications", Kind: "objectList", DSLType: "[]object", Extract: "discountApplications.nodes[]", AdminType: "DiscountApplication"},
+			{Name: "discountCode", GraphQL: "discountCode", Kind: "scalar", DSLType: "string", Extract: "discountCode", AdminType: "String"},
+			{Name: "discountCodes", GraphQL: "discountCodes", Kind: "scalarList", DSLType: "[]string", Extract: "discountCodes", AdminType: "String"},
+			{Name: "displayAddress", GraphQL: "displayAddress", Kind: "object", DSLType: "object", Extract: "displayAddress", AdminType: "MailingAddress"},
+			{Name: "displayFinancialStatus", GraphQL: "displayFinancialStatus", Kind: "enum", DSLType: "enum(\"PENDING\", \"AUTHORIZED\", \"PARTIALLY_PAID\", \"PARTIALLY_REFUNDED\", \"VOIDED\", \"PAID\", \"REFUNDED\", \"EXPIRED\")", Extract: "displayFinancialStatus", AdminType: "OrderDisplayFinancialStatus"},
+			{Name: "displayFulfillmentStatus", GraphQL: "displayFulfillmentStatus", Kind: "enum", DSLType: "enum(\"UNFULFILLED\", \"PARTIALLY_FULFILLED\", \"FULFILLED\", \"RESTOCKED\", \"PENDING_FULFILLMENT\", \"OPEN\", \"IN_PROGRESS\", \"ON_HOLD\", \"SCHEDULED\", \"REQUEST_DECLINED\")", Extract: "displayFulfillmentStatus", AdminType: "OrderDisplayFulfillmentStatus"},
+			{Name: "disputes", GraphQL: "disputes", Kind: "objectList", DSLType: "[]object", Extract: "disputes", AdminType: "OrderDisputeSummary"},
+			{Name: "dutiesIncluded", GraphQL: "dutiesIncluded", Kind: "scalar", DSLType: "bool", Extract: "dutiesIncluded", AdminType: "Boolean"},
+			{Name: "edited", GraphQL: "edited", Kind: "scalar", DSLType: "bool", Extract: "edited", AdminType: "Boolean"},
+			{Name: "email", GraphQL: "email", Kind: "scalar", DSLType: "string", Extract: "email", AdminType: "String"},
+			{Name: "estimatedTaxes", GraphQL: "estimatedTaxes", Kind: "scalar", DSLType: "bool", Extract: "estimatedTaxes", AdminType: "Boolean"},
+			{Name: "fulfillable", GraphQL: "fulfillable", Kind: "scalar", DSLType: "bool", Extract: "fulfillable", AdminType: "Boolean"},
+			{Name: "fulfillmentOrdersGids", GraphQL: "fulfillmentOrders", Kind: "refs", DSLType: "[]string", Extract: "fulfillmentOrders.nodes[].id", AdminType: "FulfillmentOrder"},
+			{Name: "fulfillmentsCount", GraphQL: "fulfillmentsCount", Kind: "object", DSLType: "object", Extract: "fulfillmentsCount", AdminType: "Count"},
+			{Name: "fullyPaid", GraphQL: "fullyPaid", Kind: "scalar", DSLType: "bool", Extract: "fullyPaid", AdminType: "Boolean"},
+			{Name: "hasTimelineComment", GraphQL: "hasTimelineComment", Kind: "scalar", DSLType: "bool", Extract: "hasTimelineComment", AdminType: "Boolean"},
+			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId", AdminType: "UnsignedInt64"},
+			{Name: "merchantBusinessEntityGid", GraphQL: "merchantBusinessEntity", Kind: "gid", DSLType: "string", Extract: "merchantBusinessEntity.id", AdminType: "BusinessEntity"},
+			{Name: "merchantEditable", GraphQL: "merchantEditable", Kind: "scalar", DSLType: "bool", Extract: "merchantEditable", AdminType: "Boolean"},
+			{Name: "merchantEditableErrors", GraphQL: "merchantEditableErrors", Kind: "scalarList", DSLType: "[]string", Extract: "merchantEditableErrors", AdminType: "String"},
+			{Name: "merchantOfRecordApp", GraphQL: "merchantOfRecordApp", Kind: "object", DSLType: "object", Extract: "merchantOfRecordApp", AdminType: "OrderApp"},
+			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]", AdminType: "Metafield"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "netPaymentSet", GraphQL: "netPaymentSet", Kind: "object", DSLType: "object", Extract: "netPaymentSet", AdminType: "MoneyBag"},
+			{Name: "note", GraphQL: "note", Kind: "scalar", DSLType: "string", Extract: "note", AdminType: "String"},
+			{Name: "number", GraphQL: "number", Kind: "scalar", DSLType: "int", Extract: "number", AdminType: "Int"},
+			{Name: "originalTotalAdditionalFeesSet", GraphQL: "originalTotalAdditionalFeesSet", Kind: "object", DSLType: "object", Extract: "originalTotalAdditionalFeesSet", AdminType: "MoneyBag"},
+			{Name: "originalTotalDutiesSet", GraphQL: "originalTotalDutiesSet", Kind: "object", DSLType: "object", Extract: "originalTotalDutiesSet", AdminType: "MoneyBag"},
+			{Name: "originalTotalPriceSet", GraphQL: "originalTotalPriceSet", Kind: "object", DSLType: "object", Extract: "originalTotalPriceSet", AdminType: "MoneyBag"},
+			{Name: "paymentCollectionDetails", GraphQL: "paymentCollectionDetails", Kind: "object", DSLType: "object", Extract: "paymentCollectionDetails", AdminType: "OrderPaymentCollectionDetails"},
+			{Name: "paymentGatewayNames", GraphQL: "paymentGatewayNames", Kind: "scalarList", DSLType: "[]string", Extract: "paymentGatewayNames", AdminType: "String"},
+			{Name: "paymentTerms", GraphQL: "paymentTerms", Kind: "object", DSLType: "object", Extract: "paymentTerms", AdminType: "PaymentTerms", GidsInside: []string{"DraftOrder", "Order"}},
+			{Name: "phone", GraphQL: "phone", Kind: "scalar", DSLType: "string", Extract: "phone", AdminType: "String"},
+			{Name: "poNumber", GraphQL: "poNumber", Kind: "scalar", DSLType: "string", Extract: "poNumber", AdminType: "String"},
+			{Name: "presentmentCurrencyCode", GraphQL: "presentmentCurrencyCode", Kind: "scalar", DSLType: "string", Extract: "presentmentCurrencyCode", AdminType: "CurrencyCode"},
+			{Name: "processedAt", GraphQL: "processedAt", Kind: "scalar", DSLType: "string", Extract: "processedAt", AdminType: "DateTime"},
+			{Name: "productNetwork", GraphQL: "productNetwork", Kind: "scalar", DSLType: "bool", Extract: "productNetwork", AdminType: "Boolean"},
+			{Name: "publicationGid", GraphQL: "publication", Kind: "gid", DSLType: "string", Extract: "publication.id", AdminType: "Publication"},
+			{Name: "purchasingEntity", GraphQL: "purchasingEntity", Kind: "object", DSLType: "object", Extract: "purchasingEntity", AdminType: "PurchasingEntity", GidsInside: []string{"Company", "CompanyContact", "CompanyLocation", "Customer"}},
+			{Name: "refundDiscrepancySet", GraphQL: "refundDiscrepancySet", Kind: "object", DSLType: "object", Extract: "refundDiscrepancySet", AdminType: "MoneyBag"},
+			{Name: "refundable", GraphQL: "refundable", Kind: "scalar", DSLType: "bool", Extract: "refundable", AdminType: "Boolean"},
+			{Name: "registeredSourceUrl", GraphQL: "registeredSourceUrl", Kind: "scalar", DSLType: "string", Extract: "registeredSourceUrl", AdminType: "URL"},
+			{Name: "requiresShipping", GraphQL: "requiresShipping", Kind: "scalar", DSLType: "bool", Extract: "requiresShipping", AdminType: "Boolean"},
+			{Name: "restockable", GraphQL: "restockable", Kind: "scalar", DSLType: "bool", Extract: "restockable", AdminType: "Boolean"},
+			{Name: "retailLocationGid", GraphQL: "retailLocation", Kind: "gid", DSLType: "string", Extract: "retailLocation.id", AdminType: "Location"},
+			{Name: "returnStatus", GraphQL: "returnStatus", Kind: "enum", DSLType: "enum(\"IN_PROGRESS\", \"INSPECTION_COMPLETE\", \"NO_RETURN\", \"RETURNED\", \"RETURN_FAILED\", \"RETURN_REQUESTED\")", Extract: "returnStatus", AdminType: "OrderReturnStatus"},
+			{Name: "risk", GraphQL: "risk", Kind: "object", DSLType: "object", Extract: "risk", AdminType: "OrderRiskSummary"},
+			{Name: "shippingAddress", GraphQL: "shippingAddress", Kind: "object", DSLType: "object", Extract: "shippingAddress", AdminType: "MailingAddress"},
+			{Name: "shippingLine", GraphQL: "shippingLine", Kind: "object", DSLType: "object", Extract: "shippingLine", AdminType: "ShippingLine"},
+			{Name: "shippingLinesGids", GraphQL: "shippingLines", Kind: "refs", DSLType: "[]string", Extract: "shippingLines.nodes[].id", AdminType: "ShippingLine"},
+			{Name: "shopifyProtect", GraphQL: "shopifyProtect", Kind: "object", DSLType: "object", Extract: "shopifyProtect", AdminType: "ShopifyProtectOrderSummary"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "sourceIdentifier", GraphQL: "sourceIdentifier", Kind: "scalar", DSLType: "string", Extract: "sourceIdentifier", AdminType: "String"},
+			{Name: "sourceName", GraphQL: "sourceName", Kind: "scalar", DSLType: "string", Extract: "sourceName", AdminType: "String"},
+			{Name: "staffMemberGid", GraphQL: "staffMember", Kind: "gid", DSLType: "string", Extract: "staffMember.id", AdminType: "StaffMember"},
+			{Name: "statusPageUrl", GraphQL: "statusPageUrl", Kind: "scalar", DSLType: "string", Extract: "statusPageUrl", AdminType: "URL"},
+			{Name: "subtotalLineItemsQuantity", GraphQL: "subtotalLineItemsQuantity", Kind: "scalar", DSLType: "int", Extract: "subtotalLineItemsQuantity", AdminType: "Int"},
+			{Name: "subtotalPriceSet", GraphQL: "subtotalPriceSet", Kind: "object", DSLType: "object", Extract: "subtotalPriceSet", AdminType: "MoneyBag"},
+			{Name: "suggestedRefund", GraphQL: "suggestedRefund", Kind: "object", DSLType: "object", Extract: "suggestedRefund", AdminType: "SuggestedRefund", GidsInside: []string{"LineItem", "Location", "OrderTransaction"}},
+			{Name: "tags", GraphQL: "tags", Kind: "scalarList", DSLType: "[]string", Extract: "tags", AdminType: "String"},
+			{Name: "taxExempt", GraphQL: "taxExempt", Kind: "scalar", DSLType: "bool", Extract: "taxExempt", AdminType: "Boolean"},
+			{Name: "taxLines", GraphQL: "taxLines", Kind: "objectList", DSLType: "[]object", Extract: "taxLines", AdminType: "TaxLine"},
+			{Name: "taxesIncluded", GraphQL: "taxesIncluded", Kind: "scalar", DSLType: "bool", Extract: "taxesIncluded", AdminType: "Boolean"},
+			{Name: "test", GraphQL: "test", Kind: "scalar", DSLType: "bool", Extract: "test", AdminType: "Boolean"},
+			{Name: "totalCapturableSet", GraphQL: "totalCapturableSet", Kind: "object", DSLType: "object", Extract: "totalCapturableSet", AdminType: "MoneyBag"},
+			{Name: "totalCashRoundingAdjustment", GraphQL: "totalCashRoundingAdjustment", Kind: "object", DSLType: "object", Extract: "totalCashRoundingAdjustment", AdminType: "CashRoundingAdjustment"},
+			{Name: "totalDiscountsSet", GraphQL: "totalDiscountsSet", Kind: "object", DSLType: "object", Extract: "totalDiscountsSet", AdminType: "MoneyBag"},
+			{Name: "totalOutstandingSet", GraphQL: "totalOutstandingSet", Kind: "object", DSLType: "object", Extract: "totalOutstandingSet", AdminType: "MoneyBag"},
+			{Name: "totalPriceSet", GraphQL: "totalPriceSet", Kind: "object", DSLType: "object", Extract: "totalPriceSet", AdminType: "MoneyBag"},
+			{Name: "totalReceivedSet", GraphQL: "totalReceivedSet", Kind: "object", DSLType: "object", Extract: "totalReceivedSet", AdminType: "MoneyBag"},
+			{Name: "totalRefundedSet", GraphQL: "totalRefundedSet", Kind: "object", DSLType: "object", Extract: "totalRefundedSet", AdminType: "MoneyBag"},
+			{Name: "totalRefundedShippingSet", GraphQL: "totalRefundedShippingSet", Kind: "object", DSLType: "object", Extract: "totalRefundedShippingSet", AdminType: "MoneyBag"},
+			{Name: "totalShippingPriceSet", GraphQL: "totalShippingPriceSet", Kind: "object", DSLType: "object", Extract: "totalShippingPriceSet", AdminType: "MoneyBag"},
+			{Name: "totalTaxSet", GraphQL: "totalTaxSet", Kind: "object", DSLType: "object", Extract: "totalTaxSet", AdminType: "MoneyBag"},
+			{Name: "totalTipReceivedSet", GraphQL: "totalTipReceivedSet", Kind: "object", DSLType: "object", Extract: "totalTipReceivedSet", AdminType: "MoneyBag"},
+			{Name: "totalWeight", GraphQL: "totalWeight", Kind: "scalar", DSLType: "string", Extract: "totalWeight", AdminType: "UnsignedInt64"},
+			{Name: "transactionsCount", GraphQL: "transactionsCount", Kind: "object", DSLType: "object", Extract: "transactionsCount", AdminType: "Count"},
+			{Name: "unpaid", GraphQL: "unpaid", Kind: "scalar", DSLType: "bool", Extract: "unpaid", AdminType: "Boolean"},
 		},
 		FetchOp: "ShopifyFetchOrder",
 		ListOp:  "ShopifyListOrder",
@@ -4141,6 +4420,7 @@ query ShopifyFetchOrder($id: ID!) {
     __typename
     ... on Order {
       id
+      updatedAt
       additionalFees { id name price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxLines { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title } }
       agreements(first: 25) { nodes { id } }
       alerts { actions { primary show title url } content dismissibleHandle icon severity title }
@@ -4258,6 +4538,7 @@ query ShopifyFetchOrder($id: ID!) {
       transactionsCount { count precision }
       unpaid
       lineItems(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           contract { id }
@@ -4334,6 +4615,7 @@ query ShopifyFetchOrder($id: ID!) {
       }
       refunds {
         id
+        updatedAt
         duties { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } originalDuty { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
         legacyResourceId
         note
@@ -4346,6 +4628,7 @@ query ShopifyFetchOrder($id: ID!) {
       }
       fulfillments {
         id
+        updatedAt
         deliveredAt
         displayStatus
         estimatedDeliveryAt
@@ -4365,6 +4648,7 @@ query ShopifyFetchOrder($id: ID!) {
         trackingInfo { company number url }
       }
       returns(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           closedAt
@@ -4390,6 +4674,7 @@ query ShopifyListOrder($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       additionalFees { id name price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxLines { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title } }
       agreements(first: 25) { nodes { id } }
       alerts { actions { primary show title url } content dismissibleHandle icon severity title }
@@ -4507,6 +4792,7 @@ query ShopifyListOrder($first: Int!, $after: String, $query: String) {
       transactionsCount { count precision }
       unpaid
       lineItems(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           contract { id }
@@ -4583,6 +4869,7 @@ query ShopifyListOrder($first: Int!, $after: String, $query: String) {
       }
       refunds {
         id
+        updatedAt
         duties { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } originalDuty { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
         legacyResourceId
         note
@@ -4595,6 +4882,7 @@ query ShopifyListOrder($first: Int!, $after: String, $query: String) {
       }
       fulfillments {
         id
+        updatedAt
         deliveredAt
         displayStatus
         estimatedDeliveryAt
@@ -4614,6 +4902,83 @@ query ShopifyListOrder($first: Int!, $after: String, $query: String) {
         trackingInfo { company number url }
       }
       returns(first: 50) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          closedAt
+          decline { note reason }
+          name
+          order { id }
+          refunds(first: 25) { nodes { id } }
+          requestApprovedAt
+          returnShippingFees { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } id }
+          createdAt
+          staffMember { id }
+          status
+          totalQuantity
+          transactions(first: 25) { nodes { id } }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageOrderLineItems($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Order {
+      lineItems(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          contract { id }
+          currentQuantity
+          customAttributes { key value }
+          discountAllocations { allocatedAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } discountApplication { __typename allocationMethod index targetSelection targetType } }
+          discountedTotalSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          discountedUnitPriceAfterAllDiscountsSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          discountedUnitPriceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          duties { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxLines { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title } }
+          image { altText height id thumbhash url width }
+          isGiftCard
+          lineItemGroup { customAttributes { key value } id productId quantity title variantId variantSku }
+          merchantEditable
+          name
+          nonFulfillableQuantity
+          originalTotalSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          originalUnitPriceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          priceAfterAllDiscountsBeforeTaxesSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          product { id }
+          quantity
+          refundableQuantity
+          requiresShipping
+          restockable
+          sellingPlan { name sellingPlanId }
+          sku
+          staffMember { id }
+          taxLines { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title }
+          taxable
+          title
+          totalDiscountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          unfulfilledDiscountedTotalSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          unfulfilledOriginalTotalSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          unfulfilledQuantity
+          variant { id }
+          variantTitle
+          vendor
+          weight { unit value }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageOrderReturns($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Order {
+      returns(first: 50, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           closedAt
@@ -4645,6 +5010,7 @@ query ShopifyBulkOrder($query: String) {
     edges {
       node {
         id
+        updatedAt
         additionalFees { id name price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxLines { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title } }
         alerts { actions { primary show title url } content dismissibleHandle icon severity title }
         app { icon { altText height id thumbhash url width } id name }
@@ -4836,6 +5202,7 @@ query ShopifyBulkOrder($query: String) {
         }
         refunds {
           id
+          updatedAt
           duties { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } originalDuty { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
           legacyResourceId
           note
@@ -4848,6 +5215,7 @@ query ShopifyBulkOrder($query: String) {
         }
         fulfillments {
           id
+          updatedAt
           deliveredAt
           displayStatus
           estimatedDeliveryAt
@@ -4908,42 +5276,42 @@ query ShopifyBulkOrder($query: String) {
 		ParentGidPath:    "",
 		VersionField:     "",
 		Fields: []FieldSpec{
-			{Name: "contractGid", GraphQL: "contract", Kind: "gid", DSLType: "string", Extract: "contract.id"},
-			{Name: "currentQuantity", GraphQL: "currentQuantity", Kind: "scalar", DSLType: "int", Extract: "currentQuantity"},
-			{Name: "customAttributes", GraphQL: "customAttributes", Kind: "objectList", DSLType: "[]object", Extract: "customAttributes"},
-			{Name: "discountAllocations", GraphQL: "discountAllocations", Kind: "objectList", DSLType: "[]object", Extract: "discountAllocations"},
-			{Name: "discountedTotalSet", GraphQL: "discountedTotalSet", Kind: "object", DSLType: "object", Extract: "discountedTotalSet"},
-			{Name: "discountedUnitPriceAfterAllDiscountsSet", GraphQL: "discountedUnitPriceAfterAllDiscountsSet", Kind: "object", DSLType: "object", Extract: "discountedUnitPriceAfterAllDiscountsSet"},
-			{Name: "discountedUnitPriceSet", GraphQL: "discountedUnitPriceSet", Kind: "object", DSLType: "object", Extract: "discountedUnitPriceSet"},
-			{Name: "duties", GraphQL: "duties", Kind: "objectList", DSLType: "[]object", Extract: "duties"},
-			{Name: "image", GraphQL: "image", Kind: "object", DSLType: "object", Extract: "image"},
-			{Name: "isGiftCard", GraphQL: "isGiftCard", Kind: "scalar", DSLType: "bool", Extract: "isGiftCard"},
-			{Name: "lineItemGroup", GraphQL: "lineItemGroup", Kind: "object", DSLType: "object", Extract: "lineItemGroup"},
-			{Name: "merchantEditable", GraphQL: "merchantEditable", Kind: "scalar", DSLType: "bool", Extract: "merchantEditable"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "nonFulfillableQuantity", GraphQL: "nonFulfillableQuantity", Kind: "scalar", DSLType: "int", Extract: "nonFulfillableQuantity"},
-			{Name: "originalTotalSet", GraphQL: "originalTotalSet", Kind: "object", DSLType: "object", Extract: "originalTotalSet"},
-			{Name: "originalUnitPriceSet", GraphQL: "originalUnitPriceSet", Kind: "object", DSLType: "object", Extract: "originalUnitPriceSet"},
-			{Name: "priceAfterAllDiscountsBeforeTaxesSet", GraphQL: "priceAfterAllDiscountsBeforeTaxesSet", Kind: "object", DSLType: "object", Extract: "priceAfterAllDiscountsBeforeTaxesSet"},
-			{Name: "productGid", GraphQL: "product", Kind: "gid", DSLType: "string", Extract: "product.id"},
-			{Name: "quantity", GraphQL: "quantity", Kind: "scalar", DSLType: "int", Extract: "quantity"},
-			{Name: "refundableQuantity", GraphQL: "refundableQuantity", Kind: "scalar", DSLType: "int", Extract: "refundableQuantity"},
-			{Name: "requiresShipping", GraphQL: "requiresShipping", Kind: "scalar", DSLType: "bool", Extract: "requiresShipping"},
-			{Name: "restockable", GraphQL: "restockable", Kind: "scalar", DSLType: "bool", Extract: "restockable"},
-			{Name: "sellingPlan", GraphQL: "sellingPlan", Kind: "object", DSLType: "object", Extract: "sellingPlan"},
-			{Name: "sku", GraphQL: "sku", Kind: "scalar", DSLType: "string", Extract: "sku"},
-			{Name: "staffMemberGid", GraphQL: "staffMember", Kind: "gid", DSLType: "string", Extract: "staffMember.id"},
-			{Name: "taxLines", GraphQL: "taxLines", Kind: "objectList", DSLType: "[]object", Extract: "taxLines"},
-			{Name: "taxable", GraphQL: "taxable", Kind: "scalar", DSLType: "bool", Extract: "taxable"},
-			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title"},
-			{Name: "totalDiscountSet", GraphQL: "totalDiscountSet", Kind: "object", DSLType: "object", Extract: "totalDiscountSet"},
-			{Name: "unfulfilledDiscountedTotalSet", GraphQL: "unfulfilledDiscountedTotalSet", Kind: "object", DSLType: "object", Extract: "unfulfilledDiscountedTotalSet"},
-			{Name: "unfulfilledOriginalTotalSet", GraphQL: "unfulfilledOriginalTotalSet", Kind: "object", DSLType: "object", Extract: "unfulfilledOriginalTotalSet"},
-			{Name: "unfulfilledQuantity", GraphQL: "unfulfilledQuantity", Kind: "scalar", DSLType: "int", Extract: "unfulfilledQuantity"},
-			{Name: "variantGid", GraphQL: "variant", Kind: "gid", DSLType: "string", Extract: "variant.id"},
-			{Name: "variantTitle", GraphQL: "variantTitle", Kind: "scalar", DSLType: "string", Extract: "variantTitle"},
-			{Name: "vendor", GraphQL: "vendor", Kind: "scalar", DSLType: "string", Extract: "vendor"},
-			{Name: "weight", GraphQL: "weight", Kind: "object", DSLType: "object", Extract: "weight"},
+			{Name: "contractGid", GraphQL: "contract", Kind: "gid", DSLType: "string", Extract: "contract.id", AdminType: "SubscriptionContract"},
+			{Name: "currentQuantity", GraphQL: "currentQuantity", Kind: "scalar", DSLType: "int", Extract: "currentQuantity", AdminType: "Int"},
+			{Name: "customAttributes", GraphQL: "customAttributes", Kind: "objectList", DSLType: "[]object", Extract: "customAttributes", AdminType: "Attribute"},
+			{Name: "discountAllocations", GraphQL: "discountAllocations", Kind: "objectList", DSLType: "[]object", Extract: "discountAllocations", AdminType: "DiscountAllocation"},
+			{Name: "discountedTotalSet", GraphQL: "discountedTotalSet", Kind: "object", DSLType: "object", Extract: "discountedTotalSet", AdminType: "MoneyBag"},
+			{Name: "discountedUnitPriceAfterAllDiscountsSet", GraphQL: "discountedUnitPriceAfterAllDiscountsSet", Kind: "object", DSLType: "object", Extract: "discountedUnitPriceAfterAllDiscountsSet", AdminType: "MoneyBag"},
+			{Name: "discountedUnitPriceSet", GraphQL: "discountedUnitPriceSet", Kind: "object", DSLType: "object", Extract: "discountedUnitPriceSet", AdminType: "MoneyBag"},
+			{Name: "duties", GraphQL: "duties", Kind: "objectList", DSLType: "[]object", Extract: "duties", AdminType: "Duty"},
+			{Name: "image", GraphQL: "image", Kind: "object", DSLType: "object", Extract: "image", AdminType: "Image"},
+			{Name: "isGiftCard", GraphQL: "isGiftCard", Kind: "scalar", DSLType: "bool", Extract: "isGiftCard", AdminType: "Boolean"},
+			{Name: "lineItemGroup", GraphQL: "lineItemGroup", Kind: "object", DSLType: "object", Extract: "lineItemGroup", AdminType: "LineItemGroup"},
+			{Name: "merchantEditable", GraphQL: "merchantEditable", Kind: "scalar", DSLType: "bool", Extract: "merchantEditable", AdminType: "Boolean"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "nonFulfillableQuantity", GraphQL: "nonFulfillableQuantity", Kind: "scalar", DSLType: "int", Extract: "nonFulfillableQuantity", AdminType: "Int"},
+			{Name: "originalTotalSet", GraphQL: "originalTotalSet", Kind: "object", DSLType: "object", Extract: "originalTotalSet", AdminType: "MoneyBag"},
+			{Name: "originalUnitPriceSet", GraphQL: "originalUnitPriceSet", Kind: "object", DSLType: "object", Extract: "originalUnitPriceSet", AdminType: "MoneyBag"},
+			{Name: "priceAfterAllDiscountsBeforeTaxesSet", GraphQL: "priceAfterAllDiscountsBeforeTaxesSet", Kind: "object", DSLType: "object", Extract: "priceAfterAllDiscountsBeforeTaxesSet", AdminType: "MoneyBag"},
+			{Name: "productGid", GraphQL: "product", Kind: "gid", DSLType: "string", Extract: "product.id", AdminType: "Product"},
+			{Name: "quantity", GraphQL: "quantity", Kind: "scalar", DSLType: "int", Extract: "quantity", AdminType: "Int"},
+			{Name: "refundableQuantity", GraphQL: "refundableQuantity", Kind: "scalar", DSLType: "int", Extract: "refundableQuantity", AdminType: "Int"},
+			{Name: "requiresShipping", GraphQL: "requiresShipping", Kind: "scalar", DSLType: "bool", Extract: "requiresShipping", AdminType: "Boolean"},
+			{Name: "restockable", GraphQL: "restockable", Kind: "scalar", DSLType: "bool", Extract: "restockable", AdminType: "Boolean"},
+			{Name: "sellingPlan", GraphQL: "sellingPlan", Kind: "object", DSLType: "object", Extract: "sellingPlan", AdminType: "LineItemSellingPlan"},
+			{Name: "sku", GraphQL: "sku", Kind: "scalar", DSLType: "string", Extract: "sku", AdminType: "String"},
+			{Name: "staffMemberGid", GraphQL: "staffMember", Kind: "gid", DSLType: "string", Extract: "staffMember.id", AdminType: "StaffMember"},
+			{Name: "taxLines", GraphQL: "taxLines", Kind: "objectList", DSLType: "[]object", Extract: "taxLines", AdminType: "TaxLine"},
+			{Name: "taxable", GraphQL: "taxable", Kind: "scalar", DSLType: "bool", Extract: "taxable", AdminType: "Boolean"},
+			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title", AdminType: "String"},
+			{Name: "totalDiscountSet", GraphQL: "totalDiscountSet", Kind: "object", DSLType: "object", Extract: "totalDiscountSet", AdminType: "MoneyBag"},
+			{Name: "unfulfilledDiscountedTotalSet", GraphQL: "unfulfilledDiscountedTotalSet", Kind: "object", DSLType: "object", Extract: "unfulfilledDiscountedTotalSet", AdminType: "MoneyBag"},
+			{Name: "unfulfilledOriginalTotalSet", GraphQL: "unfulfilledOriginalTotalSet", Kind: "object", DSLType: "object", Extract: "unfulfilledOriginalTotalSet", AdminType: "MoneyBag"},
+			{Name: "unfulfilledQuantity", GraphQL: "unfulfilledQuantity", Kind: "scalar", DSLType: "int", Extract: "unfulfilledQuantity", AdminType: "Int"},
+			{Name: "variantGid", GraphQL: "variant", Kind: "gid", DSLType: "string", Extract: "variant.id", AdminType: "ProductVariant"},
+			{Name: "variantTitle", GraphQL: "variantTitle", Kind: "scalar", DSLType: "string", Extract: "variantTitle", AdminType: "String"},
+			{Name: "vendor", GraphQL: "vendor", Kind: "scalar", DSLType: "string", Extract: "vendor", AdminType: "String"},
+			{Name: "weight", GraphQL: "weight", Kind: "object", DSLType: "object", Extract: "weight", AdminType: "Weight"},
 		},
 		FetchOp: "ShopifyFetchOrderLineItem",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -5017,37 +5385,37 @@ query ShopifyFetchOrderLineItem($id: ID!) {
 		ParentGidPath:    "order.id",
 		VersionField:     "createdAt",
 		Fields: []FieldSpec{
-			{Name: "accountNumber", GraphQL: "accountNumber", Kind: "scalar", DSLType: "string", Extract: "accountNumber"},
-			{Name: "amountRoundingSet", GraphQL: "amountRoundingSet", Kind: "object", DSLType: "object", Extract: "amountRoundingSet"},
-			{Name: "amountSet", GraphQL: "amountSet", Kind: "object", DSLType: "object", Extract: "amountSet"},
-			{Name: "authorizationExpiresAt", GraphQL: "authorizationExpiresAt", Kind: "scalar", DSLType: "string", Extract: "authorizationExpiresAt"},
-			{Name: "currencyExchangeAdjustment", GraphQL: "currencyExchangeAdjustment", Kind: "object", DSLType: "object", Extract: "currencyExchangeAdjustment"},
-			{Name: "device", GraphQL: "device", Kind: "object", DSLType: "object", Extract: "device"},
-			{Name: "errorCode", GraphQL: "errorCode", Kind: "scalar", DSLType: "string", Extract: "errorCode"},
-			{Name: "fees", GraphQL: "fees", Kind: "objectList", DSLType: "[]object", Extract: "fees"},
-			{Name: "formattedGateway", GraphQL: "formattedGateway", Kind: "scalar", DSLType: "string", Extract: "formattedGateway"},
-			{Name: "gateway", GraphQL: "gateway", Kind: "scalar", DSLType: "string", Extract: "gateway"},
-			{Name: "kind", GraphQL: "kind", Kind: "enum", DSLType: "enum(\"SALE\", \"CAPTURE\", \"AUTHORIZATION\", \"VOID\", \"REFUND\", \"CHANGE\", \"EMV_AUTHORIZATION\", \"SUGGESTED_REFUND\")", Extract: "kind"},
-			{Name: "locationGid", GraphQL: "location", Kind: "gid", DSLType: "string", Extract: "location.id"},
-			{Name: "manualPaymentGateway", GraphQL: "manualPaymentGateway", Kind: "scalar", DSLType: "bool", Extract: "manualPaymentGateway"},
-			{Name: "manuallyCapturable", GraphQL: "manuallyCapturable", Kind: "scalar", DSLType: "bool", Extract: "manuallyCapturable"},
-			{Name: "maximumRefundableV2", GraphQL: "maximumRefundableV2", Kind: "object", DSLType: "object", Extract: "maximumRefundableV2"},
-			{Name: "multiCapturable", GraphQL: "multiCapturable", Kind: "scalar", DSLType: "bool", Extract: "multiCapturable"},
-			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id"},
-			{Name: "parentTransactionGid", GraphQL: "parentTransaction", Kind: "gid", DSLType: "string", Extract: "parentTransaction.id"},
-			{Name: "paymentDetails", GraphQL: "paymentDetails", Kind: "object", DSLType: "object", Extract: "paymentDetails"},
-			{Name: "paymentIcon", GraphQL: "paymentIcon", Kind: "object", DSLType: "object", Extract: "paymentIcon"},
-			{Name: "paymentId", GraphQL: "paymentId", Kind: "scalar", DSLType: "string", Extract: "paymentId"},
-			{Name: "processedAt", GraphQL: "processedAt", Kind: "scalar", DSLType: "string", Extract: "processedAt"},
-			{Name: "receiptJson", GraphQL: "receiptJson", Kind: "scalar", DSLType: "any", Extract: "receiptJson"},
-			{Name: "settlementCurrency", GraphQL: "settlementCurrency", Kind: "scalar", DSLType: "string", Extract: "settlementCurrency"},
-			{Name: "settlementCurrencyRate", GraphQL: "settlementCurrencyRate", Kind: "scalar", DSLType: "string", Extract: "settlementCurrencyRate"},
-			{Name: "shopifyPaymentsSet", GraphQL: "shopifyPaymentsSet", Kind: "object", DSLType: "object", Extract: "shopifyPaymentsSet"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"SUCCESS\", \"FAILURE\", \"PENDING\", \"ERROR\", \"AWAITING_RESPONSE\", \"UNKNOWN\")", Extract: "status"},
-			{Name: "test", GraphQL: "test", Kind: "scalar", DSLType: "bool", Extract: "test"},
-			{Name: "totalUnsettledSet", GraphQL: "totalUnsettledSet", Kind: "object", DSLType: "object", Extract: "totalUnsettledSet"},
-			{Name: "userGid", GraphQL: "user", Kind: "gid", DSLType: "string", Extract: "user.id"},
+			{Name: "accountNumber", GraphQL: "accountNumber", Kind: "scalar", DSLType: "string", Extract: "accountNumber", AdminType: "String"},
+			{Name: "amountRoundingSet", GraphQL: "amountRoundingSet", Kind: "object", DSLType: "object", Extract: "amountRoundingSet", AdminType: "MoneyBag"},
+			{Name: "amountSet", GraphQL: "amountSet", Kind: "object", DSLType: "object", Extract: "amountSet", AdminType: "MoneyBag"},
+			{Name: "authorizationExpiresAt", GraphQL: "authorizationExpiresAt", Kind: "scalar", DSLType: "string", Extract: "authorizationExpiresAt", AdminType: "DateTime"},
+			{Name: "currencyExchangeAdjustment", GraphQL: "currencyExchangeAdjustment", Kind: "object", DSLType: "object", Extract: "currencyExchangeAdjustment", AdminType: "CurrencyExchangeAdjustment"},
+			{Name: "device", GraphQL: "device", Kind: "object", DSLType: "object", Extract: "device", AdminType: "PointOfSaleDevice", GidsInside: []string{"Location", "StaffMember"}},
+			{Name: "errorCode", GraphQL: "errorCode", Kind: "scalar", DSLType: "string", Extract: "errorCode", AdminType: "OrderTransactionErrorCode"},
+			{Name: "fees", GraphQL: "fees", Kind: "objectList", DSLType: "[]object", Extract: "fees", AdminType: "TransactionFee"},
+			{Name: "formattedGateway", GraphQL: "formattedGateway", Kind: "scalar", DSLType: "string", Extract: "formattedGateway", AdminType: "String"},
+			{Name: "gateway", GraphQL: "gateway", Kind: "scalar", DSLType: "string", Extract: "gateway", AdminType: "String"},
+			{Name: "kind", GraphQL: "kind", Kind: "enum", DSLType: "enum(\"SALE\", \"CAPTURE\", \"AUTHORIZATION\", \"VOID\", \"REFUND\", \"CHANGE\", \"EMV_AUTHORIZATION\", \"SUGGESTED_REFUND\")", Extract: "kind", AdminType: "OrderTransactionKind"},
+			{Name: "locationGid", GraphQL: "location", Kind: "gid", DSLType: "string", Extract: "location.id", AdminType: "Location"},
+			{Name: "manualPaymentGateway", GraphQL: "manualPaymentGateway", Kind: "scalar", DSLType: "bool", Extract: "manualPaymentGateway", AdminType: "Boolean"},
+			{Name: "manuallyCapturable", GraphQL: "manuallyCapturable", Kind: "scalar", DSLType: "bool", Extract: "manuallyCapturable", AdminType: "Boolean"},
+			{Name: "maximumRefundableV2", GraphQL: "maximumRefundableV2", Kind: "object", DSLType: "object", Extract: "maximumRefundableV2", AdminType: "MoneyV2"},
+			{Name: "multiCapturable", GraphQL: "multiCapturable", Kind: "scalar", DSLType: "bool", Extract: "multiCapturable", AdminType: "Boolean"},
+			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id", AdminType: "Order"},
+			{Name: "parentTransactionGid", GraphQL: "parentTransaction", Kind: "gid", DSLType: "string", Extract: "parentTransaction.id", AdminType: "OrderTransaction"},
+			{Name: "paymentDetails", GraphQL: "paymentDetails", Kind: "object", DSLType: "object", Extract: "paymentDetails", AdminType: "PaymentDetails"},
+			{Name: "paymentIcon", GraphQL: "paymentIcon", Kind: "object", DSLType: "object", Extract: "paymentIcon", AdminType: "Image"},
+			{Name: "paymentId", GraphQL: "paymentId", Kind: "scalar", DSLType: "string", Extract: "paymentId", AdminType: "String"},
+			{Name: "processedAt", GraphQL: "processedAt", Kind: "scalar", DSLType: "string", Extract: "processedAt", AdminType: "DateTime"},
+			{Name: "receiptJson", GraphQL: "receiptJson", Kind: "scalar", DSLType: "any", Extract: "receiptJson", AdminType: "JSON"},
+			{Name: "settlementCurrency", GraphQL: "settlementCurrency", Kind: "scalar", DSLType: "string", Extract: "settlementCurrency", AdminType: "CurrencyCode"},
+			{Name: "settlementCurrencyRate", GraphQL: "settlementCurrencyRate", Kind: "scalar", DSLType: "string", Extract: "settlementCurrencyRate", AdminType: "Decimal"},
+			{Name: "shopifyPaymentsSet", GraphQL: "shopifyPaymentsSet", Kind: "object", DSLType: "object", Extract: "shopifyPaymentsSet", AdminType: "ShopifyPaymentsTransactionSet"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"SUCCESS\", \"FAILURE\", \"PENDING\", \"ERROR\", \"AWAITING_RESPONSE\", \"UNKNOWN\")", Extract: "status", AdminType: "OrderTransactionStatus"},
+			{Name: "test", GraphQL: "test", Kind: "scalar", DSLType: "bool", Extract: "test", AdminType: "Boolean"},
+			{Name: "totalUnsettledSet", GraphQL: "totalUnsettledSet", Kind: "object", DSLType: "object", Extract: "totalUnsettledSet", AdminType: "MoneyBag"},
+			{Name: "userGid", GraphQL: "user", Kind: "gid", DSLType: "string", Extract: "user.id", AdminType: "StaffMember"},
 		},
 		FetchOp: "ShopifyFetchOrderTransaction",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -5114,16 +5482,16 @@ query ShopifyFetchOrderTransaction($id: ID!) {
 		Scopes:         []string{"read_content"},
 		VersionField:   "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "body", GraphQL: "body", Kind: "scalar", DSLType: "string", Extract: "body"},
-			{Name: "bodySummary", GraphQL: "bodySummary", Kind: "scalar", DSLType: "string", Extract: "bodySummary"},
-			{Name: "defaultCursor", GraphQL: "defaultCursor", Kind: "scalar", DSLType: "string", Extract: "defaultCursor"},
-			{Name: "handle", GraphQL: "handle", Kind: "scalar", DSLType: "string", Extract: "handle"},
-			{Name: "isPublished", GraphQL: "isPublished", Kind: "scalar", DSLType: "bool", Extract: "isPublished"},
-			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]"},
-			{Name: "publishedAt", GraphQL: "publishedAt", Kind: "scalar", DSLType: "string", Extract: "publishedAt"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "templateSuffix", GraphQL: "templateSuffix", Kind: "scalar", DSLType: "string", Extract: "templateSuffix"},
-			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title"},
+			{Name: "body", GraphQL: "body", Kind: "scalar", DSLType: "string", Extract: "body", AdminType: "HTML"},
+			{Name: "bodySummary", GraphQL: "bodySummary", Kind: "scalar", DSLType: "string", Extract: "bodySummary", AdminType: "String"},
+			{Name: "defaultCursor", GraphQL: "defaultCursor", Kind: "scalar", DSLType: "string", Extract: "defaultCursor", AdminType: "String"},
+			{Name: "handle", GraphQL: "handle", Kind: "scalar", DSLType: "string", Extract: "handle", AdminType: "String"},
+			{Name: "isPublished", GraphQL: "isPublished", Kind: "scalar", DSLType: "bool", Extract: "isPublished", AdminType: "Boolean"},
+			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]", AdminType: "Metafield"},
+			{Name: "publishedAt", GraphQL: "publishedAt", Kind: "scalar", DSLType: "string", Extract: "publishedAt", AdminType: "DateTime"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "templateSuffix", GraphQL: "templateSuffix", Kind: "scalar", DSLType: "string", Extract: "templateSuffix", AdminType: "String"},
+			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title", AdminType: "String"},
 		},
 		FetchOp: "ShopifyFetchPage",
 		ListOp:  "ShopifyListPage",
@@ -5138,6 +5506,7 @@ query ShopifyFetchPage($id: ID!) {
     __typename
     ... on Page {
       id
+      updatedAt
       body
       bodySummary
       defaultCursor
@@ -5157,6 +5526,7 @@ query ShopifyListPage($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       body
       bodySummary
       defaultCursor
@@ -5182,6 +5552,7 @@ query ShopifyBulkPage($query: String) {
     edges {
       node {
         id
+        updatedAt
         body
         bodySummary
         defaultCursor
@@ -5215,11 +5586,11 @@ query ShopifyBulkPage($query: String) {
 		Scopes:       []string{"read_payment_terms"},
 		VersionField: "",
 		Fields: []FieldSpec{
-			{Name: "description", GraphQL: "description", Kind: "scalar", DSLType: "string", Extract: "description"},
-			{Name: "dueInDays", GraphQL: "dueInDays", Kind: "scalar", DSLType: "int", Extract: "dueInDays"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "paymentTermsType", GraphQL: "paymentTermsType", Kind: "enum", DSLType: "enum(\"RECEIPT\", \"NET\", \"FIXED\", \"FULFILLMENT\", \"UNKNOWN\")", Extract: "paymentTermsType"},
-			{Name: "translatedName", GraphQL: "translatedName", Kind: "scalar", DSLType: "string", Extract: "translatedName"},
+			{Name: "description", GraphQL: "description", Kind: "scalar", DSLType: "string", Extract: "description", AdminType: "String"},
+			{Name: "dueInDays", GraphQL: "dueInDays", Kind: "scalar", DSLType: "int", Extract: "dueInDays", AdminType: "Int"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "paymentTermsType", GraphQL: "paymentTermsType", Kind: "enum", DSLType: "enum(\"RECEIPT\", \"NET\", \"FIXED\", \"FULFILLMENT\", \"UNKNOWN\")", Extract: "paymentTermsType", AdminType: "PaymentTermsType"},
+			{Name: "translatedName", GraphQL: "translatedName", Kind: "scalar", DSLType: "string", Extract: "translatedName", AdminType: "String"},
 		},
 		FetchOp: "ShopifyFetchPaymentTermsTemplate",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -5260,15 +5631,15 @@ query ShopifyFetchPaymentTermsTemplate($id: ID!) {
 		Scopes:         []string{"read_products"},
 		VersionField:   "",
 		Children: []ChildSpec{
-			{Connection: "prices", Concept: "priceListPrice", GraphQLType: "PriceListPrice", List: false},
-			{Connection: "quantityRules", Concept: "quantityRule", GraphQLType: "QuantityRule", List: false},
+			{Connection: "prices", Concept: "priceListPrice", GraphQLType: "PriceListPrice", List: false, PageOp: "ShopifyPagePriceListPrices"},
+			{Connection: "quantityRules", Concept: "quantityRule", GraphQLType: "QuantityRule", List: false, PageOp: "ShopifyPagePriceListQuantityRules"},
 		},
 		Fields: []FieldSpec{
-			{Name: "catalogGid", GraphQL: "catalog", Kind: "gid", DSLType: "string", Extract: "catalog.id"},
-			{Name: "currency", GraphQL: "currency", Kind: "scalar", DSLType: "string", Extract: "currency"},
-			{Name: "fixedPricesCount", GraphQL: "fixedPricesCount", Kind: "scalar", DSLType: "int", Extract: "fixedPricesCount"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "parent", GraphQL: "parent", Kind: "object", DSLType: "object", Extract: "parent"},
+			{Name: "catalogGid", GraphQL: "catalog", Kind: "gid", DSLType: "string", Extract: "catalog.id", AdminType: "Catalog"},
+			{Name: "currency", GraphQL: "currency", Kind: "scalar", DSLType: "string", Extract: "currency", AdminType: "CurrencyCode"},
+			{Name: "fixedPricesCount", GraphQL: "fixedPricesCount", Kind: "scalar", DSLType: "int", Extract: "fixedPricesCount", AdminType: "Int"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "parent", GraphQL: "parent", Kind: "object", DSLType: "object", Extract: "parent", AdminType: "PriceListParent"},
 		},
 		FetchOp: "ShopifyFetchPriceList",
 		ListOp:  "ShopifyListPriceList",
@@ -5289,6 +5660,7 @@ query ShopifyFetchPriceList($id: ID!) {
       name
       parent { adjustment { type value } settings { compareAtMode } }
       prices(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           compareAtPrice { amount currencyCode }
           originType
@@ -5297,6 +5669,7 @@ query ShopifyFetchPriceList($id: ID!) {
         }
       }
       quantityRules(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           increment
           isDefault
@@ -5321,6 +5694,7 @@ query ShopifyListPriceList($first: Int!, $after: String) {
       name
       parent { adjustment { type value } settings { compareAtMode } }
       prices(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           compareAtPrice { amount currencyCode }
           originType
@@ -5329,6 +5703,43 @@ query ShopifyListPriceList($first: Int!, $after: String) {
         }
       }
       quantityRules(first: 100) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          increment
+          isDefault
+          maximum
+          minimum
+          originType
+          productVariant { id }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPagePriceListPrices($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on PriceList {
+      prices(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          compareAtPrice { amount currencyCode }
+          originType
+          price { amount currencyCode }
+          variant { id }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPagePriceListQuantityRules($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on PriceList {
+      quantityRules(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           increment
           isDefault
@@ -5406,10 +5817,10 @@ query ShopifyBulkPriceList {
 		ParentGidPath:    "",
 		VersionField:     "",
 		Fields: []FieldSpec{
-			{Name: "compareAtPrice", GraphQL: "compareAtPrice", Kind: "object", DSLType: "object", Extract: "compareAtPrice"},
-			{Name: "originType", GraphQL: "originType", Kind: "enum", DSLType: "enum(\"FIXED\", \"RELATIVE\")", Extract: "originType"},
-			{Name: "price", GraphQL: "price", Kind: "object", DSLType: "object", Extract: "price"},
-			{Name: "variantGid", GraphQL: "variant", Kind: "gid", DSLType: "string", Extract: "variant.id"},
+			{Name: "compareAtPrice", GraphQL: "compareAtPrice", Kind: "object", DSLType: "object", Extract: "compareAtPrice", AdminType: "MoneyV2"},
+			{Name: "originType", GraphQL: "originType", Kind: "enum", DSLType: "enum(\"FIXED\", \"RELATIVE\")", Extract: "originType", AdminType: "PriceListPriceOriginType"},
+			{Name: "price", GraphQL: "price", Kind: "object", DSLType: "object", Extract: "price", AdminType: "MoneyV2"},
+			{Name: "variantGid", GraphQL: "variant", Kind: "gid", DSLType: "string", Extract: "variant.id", AdminType: "ProductVariant"},
 		},
 		FetchOp: "ShopifyFetchPriceListPrice",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -5448,54 +5859,54 @@ query ShopifyFetchPriceListPrice($id: ID!) {
 		Scopes:         []string{"read_products"},
 		VersionField:   "updatedAt",
 		Children: []ChildSpec{
-			{Connection: "variants", Concept: "productVariant", GraphQLType: "ProductVariant", List: false},
+			{Connection: "variants", Concept: "productVariant", GraphQLType: "ProductVariant", List: false, PageOp: "ShopifyPageProductVariants"},
 		},
 		Fields: []FieldSpec{
-			{Name: "availablePublicationsCount", GraphQL: "availablePublicationsCount", Kind: "object", DSLType: "object", Extract: "availablePublicationsCount"},
-			{Name: "bundleConsolidatedOptions", GraphQL: "bundleConsolidatedOptions", Kind: "objectList", DSLType: "[]object", Extract: "bundleConsolidatedOptions"},
-			{Name: "category", GraphQL: "category", Kind: "object", DSLType: "object", Extract: "category"},
-			{Name: "collectionsGids", GraphQL: "collections", Kind: "refs", DSLType: "[]string", Extract: "collections.nodes[].id"},
-			{Name: "combinedListing", GraphQL: "combinedListing", Kind: "object", DSLType: "object", Extract: "combinedListing"},
-			{Name: "combinedListingRole", GraphQL: "combinedListingRole", Kind: "enum", DSLType: "enum(\"PARENT\", \"CHILD\")", Extract: "combinedListingRole"},
-			{Name: "compareAtPriceRange", GraphQL: "compareAtPriceRange", Kind: "object", DSLType: "object", Extract: "compareAtPriceRange"},
-			{Name: "defaultCursor", GraphQL: "defaultCursor", Kind: "scalar", DSLType: "string", Extract: "defaultCursor"},
-			{Name: "description", GraphQL: "description", Kind: "scalar", DSLType: "string", Extract: "description"},
-			{Name: "descriptionHtml", GraphQL: "descriptionHtml", Kind: "scalar", DSLType: "string", Extract: "descriptionHtml"},
-			{Name: "featuredMedia", GraphQL: "featuredMedia", Kind: "object", DSLType: "object", Extract: "featuredMedia"},
-			{Name: "feedback", GraphQL: "feedback", Kind: "object", DSLType: "object", Extract: "feedback"},
-			{Name: "giftCardSettings", GraphQL: "giftCardSettings", Kind: "object", DSLType: "object", Extract: "giftCardSettings"},
-			{Name: "giftCardTemplateSuffix", GraphQL: "giftCardTemplateSuffix", Kind: "scalar", DSLType: "string", Extract: "giftCardTemplateSuffix"},
-			{Name: "handle", GraphQL: "handle", Kind: "scalar", DSLType: "string", Extract: "handle"},
-			{Name: "hasOnlyDefaultVariant", GraphQL: "hasOnlyDefaultVariant", Kind: "scalar", DSLType: "bool", Extract: "hasOnlyDefaultVariant"},
-			{Name: "hasOutOfStockVariants", GraphQL: "hasOutOfStockVariants", Kind: "scalar", DSLType: "bool", Extract: "hasOutOfStockVariants"},
-			{Name: "hasVariantsThatRequiresComponents", GraphQL: "hasVariantsThatRequiresComponents", Kind: "scalar", DSLType: "bool", Extract: "hasVariantsThatRequiresComponents"},
-			{Name: "isGiftCard", GraphQL: "isGiftCard", Kind: "scalar", DSLType: "bool", Extract: "isGiftCard"},
-			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId"},
-			{Name: "mediaCount", GraphQL: "mediaCount", Kind: "object", DSLType: "object", Extract: "mediaCount"},
-			{Name: "mediaGids", GraphQL: "media", Kind: "refs", DSLType: "[]string", Extract: "media.nodes[].id"},
-			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]"},
-			{Name: "onlineStorePreviewUrl", GraphQL: "onlineStorePreviewUrl", Kind: "scalar", DSLType: "string", Extract: "onlineStorePreviewUrl"},
-			{Name: "onlineStoreUrl", GraphQL: "onlineStoreUrl", Kind: "scalar", DSLType: "string", Extract: "onlineStoreUrl"},
-			{Name: "options", GraphQL: "options", Kind: "objectList", DSLType: "[]object", Extract: "options"},
-			{Name: "priceRangeV2", GraphQL: "priceRangeV2", Kind: "object", DSLType: "object", Extract: "priceRangeV2"},
-			{Name: "productComponentsCount", GraphQL: "productComponentsCount", Kind: "object", DSLType: "object", Extract: "productComponentsCount"},
-			{Name: "productType", GraphQL: "productType", Kind: "scalar", DSLType: "string", Extract: "productType"},
-			{Name: "publishedAt", GraphQL: "publishedAt", Kind: "scalar", DSLType: "string", Extract: "publishedAt"},
-			{Name: "requiresSellingPlan", GraphQL: "requiresSellingPlan", Kind: "scalar", DSLType: "bool", Extract: "requiresSellingPlan"},
-			{Name: "resourcePublications", GraphQL: "resourcePublications", Kind: "objectList", DSLType: "[]object", Extract: "resourcePublications.nodes[]"},
-			{Name: "resourcePublicationsCount", GraphQL: "resourcePublicationsCount", Kind: "object", DSLType: "object", Extract: "resourcePublicationsCount"},
-			{Name: "sellingPlanGroupsCount", GraphQL: "sellingPlanGroupsCount", Kind: "object", DSLType: "object", Extract: "sellingPlanGroupsCount"},
-			{Name: "sellingPlanGroupsGids", GraphQL: "sellingPlanGroups", Kind: "refs", DSLType: "[]string", Extract: "sellingPlanGroups.nodes[].id"},
-			{Name: "seo", GraphQL: "seo", Kind: "object", DSLType: "object", Extract: "seo"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"ACTIVE\", \"ARCHIVED\", \"DRAFT\", \"UNLISTED\")", Extract: "status"},
-			{Name: "tags", GraphQL: "tags", Kind: "scalarList", DSLType: "[]string", Extract: "tags"},
-			{Name: "templateSuffix", GraphQL: "templateSuffix", Kind: "scalar", DSLType: "string", Extract: "templateSuffix"},
-			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title"},
-			{Name: "totalInventory", GraphQL: "totalInventory", Kind: "scalar", DSLType: "int", Extract: "totalInventory"},
-			{Name: "tracksInventory", GraphQL: "tracksInventory", Kind: "scalar", DSLType: "bool", Extract: "tracksInventory"},
-			{Name: "variantsCount", GraphQL: "variantsCount", Kind: "object", DSLType: "object", Extract: "variantsCount"},
-			{Name: "vendor", GraphQL: "vendor", Kind: "scalar", DSLType: "string", Extract: "vendor"},
+			{Name: "availablePublicationsCount", GraphQL: "availablePublicationsCount", Kind: "object", DSLType: "object", Extract: "availablePublicationsCount", AdminType: "Count"},
+			{Name: "bundleConsolidatedOptions", GraphQL: "bundleConsolidatedOptions", Kind: "objectList", DSLType: "[]object", Extract: "bundleConsolidatedOptions", AdminType: "ComponentizedProductsBundleConsolidatedOption"},
+			{Name: "category", GraphQL: "category", Kind: "object", DSLType: "object", Extract: "category", AdminType: "TaxonomyCategory"},
+			{Name: "collectionsGids", GraphQL: "collections", Kind: "refs", DSLType: "[]string", Extract: "collections.nodes[].id", AdminType: "Collection"},
+			{Name: "combinedListing", GraphQL: "combinedListing", Kind: "object", DSLType: "object", Extract: "combinedListing", AdminType: "CombinedListing", GidsInside: []string{"Product"}},
+			{Name: "combinedListingRole", GraphQL: "combinedListingRole", Kind: "enum", DSLType: "enum(\"PARENT\", \"CHILD\")", Extract: "combinedListingRole", AdminType: "CombinedListingsRole"},
+			{Name: "compareAtPriceRange", GraphQL: "compareAtPriceRange", Kind: "object", DSLType: "object", Extract: "compareAtPriceRange", AdminType: "ProductCompareAtPriceRange"},
+			{Name: "defaultCursor", GraphQL: "defaultCursor", Kind: "scalar", DSLType: "string", Extract: "defaultCursor", AdminType: "String"},
+			{Name: "description", GraphQL: "description", Kind: "scalar", DSLType: "string", Extract: "description", AdminType: "String"},
+			{Name: "descriptionHtml", GraphQL: "descriptionHtml", Kind: "scalar", DSLType: "string", Extract: "descriptionHtml", AdminType: "HTML"},
+			{Name: "featuredMedia", GraphQL: "featuredMedia", Kind: "object", DSLType: "object", Extract: "featuredMedia", AdminType: "Media"},
+			{Name: "feedback", GraphQL: "feedback", Kind: "object", DSLType: "object", Extract: "feedback", AdminType: "ResourceFeedback", GidsInside: []string{"Channel"}},
+			{Name: "giftCardSettings", GraphQL: "giftCardSettings", Kind: "object", DSLType: "object", Extract: "giftCardSettings", AdminType: "GiftCardProductSettings"},
+			{Name: "giftCardTemplateSuffix", GraphQL: "giftCardTemplateSuffix", Kind: "scalar", DSLType: "string", Extract: "giftCardTemplateSuffix", AdminType: "String"},
+			{Name: "handle", GraphQL: "handle", Kind: "scalar", DSLType: "string", Extract: "handle", AdminType: "String"},
+			{Name: "hasOnlyDefaultVariant", GraphQL: "hasOnlyDefaultVariant", Kind: "scalar", DSLType: "bool", Extract: "hasOnlyDefaultVariant", AdminType: "Boolean"},
+			{Name: "hasOutOfStockVariants", GraphQL: "hasOutOfStockVariants", Kind: "scalar", DSLType: "bool", Extract: "hasOutOfStockVariants", AdminType: "Boolean"},
+			{Name: "hasVariantsThatRequiresComponents", GraphQL: "hasVariantsThatRequiresComponents", Kind: "scalar", DSLType: "bool", Extract: "hasVariantsThatRequiresComponents", AdminType: "Boolean"},
+			{Name: "isGiftCard", GraphQL: "isGiftCard", Kind: "scalar", DSLType: "bool", Extract: "isGiftCard", AdminType: "Boolean"},
+			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId", AdminType: "UnsignedInt64"},
+			{Name: "mediaCount", GraphQL: "mediaCount", Kind: "object", DSLType: "object", Extract: "mediaCount", AdminType: "Count"},
+			{Name: "mediaGids", GraphQL: "media", Kind: "refs", DSLType: "[]string", Extract: "media.nodes[].id", AdminType: "Media"},
+			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]", AdminType: "Metafield"},
+			{Name: "onlineStorePreviewUrl", GraphQL: "onlineStorePreviewUrl", Kind: "scalar", DSLType: "string", Extract: "onlineStorePreviewUrl", AdminType: "URL"},
+			{Name: "onlineStoreUrl", GraphQL: "onlineStoreUrl", Kind: "scalar", DSLType: "string", Extract: "onlineStoreUrl", AdminType: "URL"},
+			{Name: "options", GraphQL: "options", Kind: "objectList", DSLType: "[]object", Extract: "options", AdminType: "ProductOption"},
+			{Name: "priceRangeV2", GraphQL: "priceRangeV2", Kind: "object", DSLType: "object", Extract: "priceRangeV2", AdminType: "ProductPriceRangeV2"},
+			{Name: "productComponentsCount", GraphQL: "productComponentsCount", Kind: "object", DSLType: "object", Extract: "productComponentsCount", AdminType: "Count"},
+			{Name: "productType", GraphQL: "productType", Kind: "scalar", DSLType: "string", Extract: "productType", AdminType: "String"},
+			{Name: "publishedAt", GraphQL: "publishedAt", Kind: "scalar", DSLType: "string", Extract: "publishedAt", AdminType: "DateTime"},
+			{Name: "requiresSellingPlan", GraphQL: "requiresSellingPlan", Kind: "scalar", DSLType: "bool", Extract: "requiresSellingPlan", AdminType: "Boolean"},
+			{Name: "resourcePublications", GraphQL: "resourcePublications", Kind: "objectList", DSLType: "[]object", Extract: "resourcePublications.nodes[]", AdminType: "ResourcePublication", GidsInside: []string{"Publication"}},
+			{Name: "resourcePublicationsCount", GraphQL: "resourcePublicationsCount", Kind: "object", DSLType: "object", Extract: "resourcePublicationsCount", AdminType: "Count"},
+			{Name: "sellingPlanGroupsCount", GraphQL: "sellingPlanGroupsCount", Kind: "object", DSLType: "object", Extract: "sellingPlanGroupsCount", AdminType: "Count"},
+			{Name: "sellingPlanGroupsGids", GraphQL: "sellingPlanGroups", Kind: "refs", DSLType: "[]string", Extract: "sellingPlanGroups.nodes[].id", AdminType: "SellingPlanGroup"},
+			{Name: "seo", GraphQL: "seo", Kind: "object", DSLType: "object", Extract: "seo", AdminType: "SEO"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"ACTIVE\", \"ARCHIVED\", \"DRAFT\", \"UNLISTED\")", Extract: "status", AdminType: "ProductStatus"},
+			{Name: "tags", GraphQL: "tags", Kind: "scalarList", DSLType: "[]string", Extract: "tags", AdminType: "String"},
+			{Name: "templateSuffix", GraphQL: "templateSuffix", Kind: "scalar", DSLType: "string", Extract: "templateSuffix", AdminType: "String"},
+			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title", AdminType: "String"},
+			{Name: "totalInventory", GraphQL: "totalInventory", Kind: "scalar", DSLType: "int", Extract: "totalInventory", AdminType: "Int"},
+			{Name: "tracksInventory", GraphQL: "tracksInventory", Kind: "scalar", DSLType: "bool", Extract: "tracksInventory", AdminType: "Boolean"},
+			{Name: "variantsCount", GraphQL: "variantsCount", Kind: "object", DSLType: "object", Extract: "variantsCount", AdminType: "Count"},
+			{Name: "vendor", GraphQL: "vendor", Kind: "scalar", DSLType: "string", Extract: "vendor", AdminType: "String"},
 		},
 		FetchOp: "ShopifyFetchProduct",
 		ListOp:  "ShopifyListProduct",
@@ -5510,6 +5921,7 @@ query ShopifyFetchProduct($id: ID!) {
     __typename
     ... on Product {
       id
+      updatedAt
       availablePublicationsCount { count precision }
       bundleConsolidatedOptions { name selections { value } }
       category { ancestorIds childrenIds fullName id isArchived isLeaf isRoot level name parentId }
@@ -5556,8 +5968,10 @@ query ShopifyFetchProduct($id: ID!) {
       variantsCount { count precision }
       vendor
       variants(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           availableForSale
           availablePublicationsCount { count precision }
           barcode
@@ -5597,6 +6011,7 @@ query ShopifyListProduct($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       availablePublicationsCount { count precision }
       bundleConsolidatedOptions { name selections { value } }
       category { ancestorIds childrenIds fullName id isArchived isLeaf isRoot level name parentId }
@@ -5643,8 +6058,53 @@ query ShopifyListProduct($first: Int!, $after: String, $query: String) {
       variantsCount { count precision }
       vendor
       variants(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
+          availableForSale
+          availablePublicationsCount { count precision }
+          barcode
+          compareAtPrice
+          defaultCursor
+          deliveryProfile { id }
+          displayName
+          inventoryItem { id }
+          inventoryPolicy
+          inventoryQuantity
+          legacyResourceId
+          metafields(first: 50) { nodes { namespace key type value jsonValue } }
+          position
+          price
+          product { id }
+          requiresComponents
+          resourcePublicationsCount { count precision }
+          selectedOptions { name optionValue { hasVariants id linkedMetafieldValue name } value }
+          sellableOnlineQuantity
+          sellingPlanGroupsCount { count precision }
+          sellingPlanGroups(first: 25) { nodes { id } }
+          showUnitPrice
+          sku
+          createdAt
+          taxable
+          title
+          unitPrice { amount currencyCode }
+          unitPriceMeasurement { measuredType quantityUnit quantityValue referenceUnit referenceValue }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageProductVariants($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Product {
+      variants(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          updatedAt
           availableForSale
           availablePublicationsCount { count precision }
           barcode
@@ -5690,6 +6150,7 @@ query ShopifyBulkProduct($query: String) {
     edges {
       node {
         id
+        updatedAt
         availablePublicationsCount { count precision }
         bundleConsolidatedOptions { name selections { value } }
         category { ancestorIds childrenIds fullName id isArchived isLeaf isRoot level name parentId }
@@ -5735,6 +6196,7 @@ query ShopifyBulkProduct($query: String) {
           edges {
             node {
             id
+            updatedAt
             availableForSale
             availablePublicationsCount { count precision }
             barcode
@@ -5789,10 +6251,10 @@ query ShopifyBulkProduct($query: String) {
 		Scopes:         []string{"read_product_feeds"},
 		VersionField:   "",
 		Fields: []FieldSpec{
-			{Name: "channelId", GraphQL: "channelId", Kind: "scalar", DSLType: "string", Extract: "channelId"},
-			{Name: "country", GraphQL: "country", Kind: "scalar", DSLType: "string", Extract: "country"},
-			{Name: "language", GraphQL: "language", Kind: "scalar", DSLType: "string", Extract: "language"},
-			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"ACTIVE\", \"INACTIVE\")", Extract: "status"},
+			{Name: "channelId", GraphQL: "channelId", Kind: "scalar", DSLType: "string", Extract: "channelId", AdminType: "ID"},
+			{Name: "country", GraphQL: "country", Kind: "scalar", DSLType: "string", Extract: "country", AdminType: "CountryCode"},
+			{Name: "language", GraphQL: "language", Kind: "scalar", DSLType: "string", Extract: "language", AdminType: "LanguageCode"},
+			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"ACTIVE\", \"INACTIVE\")", Extract: "status", AdminType: "ProductFeedStatus"},
 		},
 		FetchOp: "ShopifyFetchProductFeed",
 		ListOp:  "ShopifyListProductFeed",
@@ -5849,34 +6311,34 @@ query ShopifyListProductFeed($first: Int!, $after: String) {
 		ParentGidPath:    "product.id",
 		VersionField:     "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "availableForSale", GraphQL: "availableForSale", Kind: "scalar", DSLType: "bool", Extract: "availableForSale"},
-			{Name: "availablePublicationsCount", GraphQL: "availablePublicationsCount", Kind: "object", DSLType: "object", Extract: "availablePublicationsCount"},
-			{Name: "barcode", GraphQL: "barcode", Kind: "scalar", DSLType: "string", Extract: "barcode"},
-			{Name: "compareAtPrice", GraphQL: "compareAtPrice", Kind: "scalar", DSLType: "string", Extract: "compareAtPrice"},
-			{Name: "defaultCursor", GraphQL: "defaultCursor", Kind: "scalar", DSLType: "string", Extract: "defaultCursor"},
-			{Name: "deliveryProfileGid", GraphQL: "deliveryProfile", Kind: "gid", DSLType: "string", Extract: "deliveryProfile.id"},
-			{Name: "displayName", GraphQL: "displayName", Kind: "scalar", DSLType: "string", Extract: "displayName"},
-			{Name: "inventoryItemGid", GraphQL: "inventoryItem", Kind: "gid", DSLType: "string", Extract: "inventoryItem.id"},
-			{Name: "inventoryPolicy", GraphQL: "inventoryPolicy", Kind: "enum", DSLType: "enum(\"DENY\", \"CONTINUE\")", Extract: "inventoryPolicy"},
-			{Name: "inventoryQuantity", GraphQL: "inventoryQuantity", Kind: "scalar", DSLType: "int", Extract: "inventoryQuantity"},
-			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId"},
-			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]"},
-			{Name: "position", GraphQL: "position", Kind: "scalar", DSLType: "int", Extract: "position"},
-			{Name: "price", GraphQL: "price", Kind: "scalar", DSLType: "string", Extract: "price"},
-			{Name: "productGid", GraphQL: "product", Kind: "gid", DSLType: "string", Extract: "product.id"},
-			{Name: "requiresComponents", GraphQL: "requiresComponents", Kind: "scalar", DSLType: "bool", Extract: "requiresComponents"},
-			{Name: "resourcePublicationsCount", GraphQL: "resourcePublicationsCount", Kind: "object", DSLType: "object", Extract: "resourcePublicationsCount"},
-			{Name: "selectedOptions", GraphQL: "selectedOptions", Kind: "objectList", DSLType: "[]object", Extract: "selectedOptions"},
-			{Name: "sellableOnlineQuantity", GraphQL: "sellableOnlineQuantity", Kind: "scalar", DSLType: "int", Extract: "sellableOnlineQuantity"},
-			{Name: "sellingPlanGroupsCount", GraphQL: "sellingPlanGroupsCount", Kind: "object", DSLType: "object", Extract: "sellingPlanGroupsCount"},
-			{Name: "sellingPlanGroupsGids", GraphQL: "sellingPlanGroups", Kind: "refs", DSLType: "[]string", Extract: "sellingPlanGroups.nodes[].id"},
-			{Name: "showUnitPrice", GraphQL: "showUnitPrice", Kind: "scalar", DSLType: "bool", Extract: "showUnitPrice"},
-			{Name: "sku", GraphQL: "sku", Kind: "scalar", DSLType: "string", Extract: "sku"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "taxable", GraphQL: "taxable", Kind: "scalar", DSLType: "bool", Extract: "taxable"},
-			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title"},
-			{Name: "unitPrice", GraphQL: "unitPrice", Kind: "object", DSLType: "object", Extract: "unitPrice"},
-			{Name: "unitPriceMeasurement", GraphQL: "unitPriceMeasurement", Kind: "object", DSLType: "object", Extract: "unitPriceMeasurement"},
+			{Name: "availableForSale", GraphQL: "availableForSale", Kind: "scalar", DSLType: "bool", Extract: "availableForSale", AdminType: "Boolean"},
+			{Name: "availablePublicationsCount", GraphQL: "availablePublicationsCount", Kind: "object", DSLType: "object", Extract: "availablePublicationsCount", AdminType: "Count"},
+			{Name: "barcode", GraphQL: "barcode", Kind: "scalar", DSLType: "string", Extract: "barcode", AdminType: "String"},
+			{Name: "compareAtPrice", GraphQL: "compareAtPrice", Kind: "scalar", DSLType: "string", Extract: "compareAtPrice", AdminType: "Money"},
+			{Name: "defaultCursor", GraphQL: "defaultCursor", Kind: "scalar", DSLType: "string", Extract: "defaultCursor", AdminType: "String"},
+			{Name: "deliveryProfileGid", GraphQL: "deliveryProfile", Kind: "gid", DSLType: "string", Extract: "deliveryProfile.id", AdminType: "DeliveryProfile"},
+			{Name: "displayName", GraphQL: "displayName", Kind: "scalar", DSLType: "string", Extract: "displayName", AdminType: "String"},
+			{Name: "inventoryItemGid", GraphQL: "inventoryItem", Kind: "gid", DSLType: "string", Extract: "inventoryItem.id", AdminType: "InventoryItem"},
+			{Name: "inventoryPolicy", GraphQL: "inventoryPolicy", Kind: "enum", DSLType: "enum(\"DENY\", \"CONTINUE\")", Extract: "inventoryPolicy", AdminType: "ProductVariantInventoryPolicy"},
+			{Name: "inventoryQuantity", GraphQL: "inventoryQuantity", Kind: "scalar", DSLType: "int", Extract: "inventoryQuantity", AdminType: "Int"},
+			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId", AdminType: "UnsignedInt64"},
+			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]", AdminType: "Metafield"},
+			{Name: "position", GraphQL: "position", Kind: "scalar", DSLType: "int", Extract: "position", AdminType: "Int"},
+			{Name: "price", GraphQL: "price", Kind: "scalar", DSLType: "string", Extract: "price", AdminType: "Money"},
+			{Name: "productGid", GraphQL: "product", Kind: "gid", DSLType: "string", Extract: "product.id", AdminType: "Product"},
+			{Name: "requiresComponents", GraphQL: "requiresComponents", Kind: "scalar", DSLType: "bool", Extract: "requiresComponents", AdminType: "Boolean"},
+			{Name: "resourcePublicationsCount", GraphQL: "resourcePublicationsCount", Kind: "object", DSLType: "object", Extract: "resourcePublicationsCount", AdminType: "Count"},
+			{Name: "selectedOptions", GraphQL: "selectedOptions", Kind: "objectList", DSLType: "[]object", Extract: "selectedOptions", AdminType: "SelectedOption"},
+			{Name: "sellableOnlineQuantity", GraphQL: "sellableOnlineQuantity", Kind: "scalar", DSLType: "int", Extract: "sellableOnlineQuantity", AdminType: "Int"},
+			{Name: "sellingPlanGroupsCount", GraphQL: "sellingPlanGroupsCount", Kind: "object", DSLType: "object", Extract: "sellingPlanGroupsCount", AdminType: "Count"},
+			{Name: "sellingPlanGroupsGids", GraphQL: "sellingPlanGroups", Kind: "refs", DSLType: "[]string", Extract: "sellingPlanGroups.nodes[].id", AdminType: "SellingPlanGroup"},
+			{Name: "showUnitPrice", GraphQL: "showUnitPrice", Kind: "scalar", DSLType: "bool", Extract: "showUnitPrice", AdminType: "Boolean"},
+			{Name: "sku", GraphQL: "sku", Kind: "scalar", DSLType: "string", Extract: "sku", AdminType: "String"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "taxable", GraphQL: "taxable", Kind: "scalar", DSLType: "bool", Extract: "taxable", AdminType: "Boolean"},
+			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title", AdminType: "String"},
+			{Name: "unitPrice", GraphQL: "unitPrice", Kind: "object", DSLType: "object", Extract: "unitPrice", AdminType: "MoneyV2"},
+			{Name: "unitPriceMeasurement", GraphQL: "unitPriceMeasurement", Kind: "object", DSLType: "object", Extract: "unitPriceMeasurement", AdminType: "UnitPriceMeasurement"},
 		},
 		FetchOp: "ShopifyFetchProductVariant",
 		ListOp:  "ShopifyListProductVariant",
@@ -5891,6 +6353,7 @@ query ShopifyFetchProductVariant($id: ID!) {
     __typename
     ... on ProductVariant {
       id
+      updatedAt
       availableForSale
       availablePublicationsCount { count precision }
       barcode
@@ -5928,6 +6391,7 @@ query ShopifyListProductVariant($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       availableForSale
       availablePublicationsCount { count precision }
       barcode
@@ -5971,6 +6435,7 @@ query ShopifyBulkProductVariant($query: String) {
     edges {
       node {
         id
+        updatedAt
         availableForSale
         availablePublicationsCount { count precision }
         barcode
@@ -6022,11 +6487,11 @@ query ShopifyBulkProductVariant($query: String) {
 		Scopes:         []string{"read_publications"},
 		VersionField:   "",
 		Fields: []FieldSpec{
-			{Name: "autoPublish", GraphQL: "autoPublish", Kind: "scalar", DSLType: "bool", Extract: "autoPublish"},
-			{Name: "catalogGid", GraphQL: "catalog", Kind: "gid", DSLType: "string", Extract: "catalog.id"},
-			{Name: "includedProductsCount", GraphQL: "includedProductsCount", Kind: "object", DSLType: "object", Extract: "includedProductsCount"},
-			{Name: "operation", GraphQL: "operation", Kind: "object", DSLType: "object", Extract: "operation"},
-			{Name: "supportsFuturePublishing", GraphQL: "supportsFuturePublishing", Kind: "scalar", DSLType: "bool", Extract: "supportsFuturePublishing"},
+			{Name: "autoPublish", GraphQL: "autoPublish", Kind: "scalar", DSLType: "bool", Extract: "autoPublish", AdminType: "Boolean"},
+			{Name: "catalogGid", GraphQL: "catalog", Kind: "gid", DSLType: "string", Extract: "catalog.id", AdminType: "Catalog"},
+			{Name: "includedProductsCount", GraphQL: "includedProductsCount", Kind: "object", DSLType: "object", Extract: "includedProductsCount", AdminType: "Count"},
+			{Name: "operation", GraphQL: "operation", Kind: "object", DSLType: "object", Extract: "operation", AdminType: "PublicationOperation"},
+			{Name: "supportsFuturePublishing", GraphQL: "supportsFuturePublishing", Kind: "scalar", DSLType: "bool", Extract: "supportsFuturePublishing", AdminType: "Boolean"},
 		},
 		FetchOp: "ShopifyFetchPublication",
 		ListOp:  "ShopifyListPublication",
@@ -6084,12 +6549,12 @@ query ShopifyListPublication($first: Int!, $after: String) {
 		ParentGidPath:    "",
 		VersionField:     "",
 		Fields: []FieldSpec{
-			{Name: "increment", GraphQL: "increment", Kind: "scalar", DSLType: "int", Extract: "increment"},
-			{Name: "isDefault", GraphQL: "isDefault", Kind: "scalar", DSLType: "bool", Extract: "isDefault"},
-			{Name: "maximum", GraphQL: "maximum", Kind: "scalar", DSLType: "int", Extract: "maximum"},
-			{Name: "minimum", GraphQL: "minimum", Kind: "scalar", DSLType: "int", Extract: "minimum"},
-			{Name: "originType", GraphQL: "originType", Kind: "enum", DSLType: "enum(\"FIXED\", \"RELATIVE\")", Extract: "originType"},
-			{Name: "productVariantGid", GraphQL: "productVariant", Kind: "gid", DSLType: "string", Extract: "productVariant.id"},
+			{Name: "increment", GraphQL: "increment", Kind: "scalar", DSLType: "int", Extract: "increment", AdminType: "Int"},
+			{Name: "isDefault", GraphQL: "isDefault", Kind: "scalar", DSLType: "bool", Extract: "isDefault", AdminType: "Boolean"},
+			{Name: "maximum", GraphQL: "maximum", Kind: "scalar", DSLType: "int", Extract: "maximum", AdminType: "Int"},
+			{Name: "minimum", GraphQL: "minimum", Kind: "scalar", DSLType: "int", Extract: "minimum", AdminType: "Int"},
+			{Name: "originType", GraphQL: "originType", Kind: "enum", DSLType: "enum(\"FIXED\", \"RELATIVE\")", Extract: "originType", AdminType: "QuantityRuleOriginType"},
+			{Name: "productVariantGid", GraphQL: "productVariant", Kind: "gid", DSLType: "string", Extract: "productVariant.id", AdminType: "ProductVariant"},
 		},
 		FetchOp: "ShopifyFetchQuantityRule",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -6132,15 +6597,15 @@ query ShopifyFetchQuantityRule($id: ID!) {
 		ParentGidPath:    "order.id",
 		VersionField:     "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "duties", GraphQL: "duties", Kind: "objectList", DSLType: "[]object", Extract: "duties"},
-			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId"},
-			{Name: "note", GraphQL: "note", Kind: "scalar", DSLType: "string", Extract: "note"},
-			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id"},
-			{Name: "processedAt", GraphQL: "processedAt", Kind: "scalar", DSLType: "string", Extract: "processedAt"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "sourceReturnGid", GraphQL: "return", Kind: "gid", DSLType: "string", Extract: "return.id"},
-			{Name: "staffMemberGid", GraphQL: "staffMember", Kind: "gid", DSLType: "string", Extract: "staffMember.id"},
-			{Name: "totalRefundedSet", GraphQL: "totalRefundedSet", Kind: "object", DSLType: "object", Extract: "totalRefundedSet"},
+			{Name: "duties", GraphQL: "duties", Kind: "objectList", DSLType: "[]object", Extract: "duties", AdminType: "RefundDuty"},
+			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId", AdminType: "UnsignedInt64"},
+			{Name: "note", GraphQL: "note", Kind: "scalar", DSLType: "string", Extract: "note", AdminType: "String"},
+			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id", AdminType: "Order"},
+			{Name: "processedAt", GraphQL: "processedAt", Kind: "scalar", DSLType: "string", Extract: "processedAt", AdminType: "DateTime"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "sourceReturnGid", GraphQL: "return", Kind: "gid", DSLType: "string", Extract: "return.id", AdminType: "Return"},
+			{Name: "staffMemberGid", GraphQL: "staffMember", Kind: "gid", DSLType: "string", Extract: "staffMember.id", AdminType: "StaffMember"},
+			{Name: "totalRefundedSet", GraphQL: "totalRefundedSet", Kind: "object", DSLType: "object", Extract: "totalRefundedSet", AdminType: "MoneyBag"},
 		},
 		FetchOp: "ShopifyFetchRefund",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -6154,6 +6619,7 @@ query ShopifyFetchRefund($id: ID!) {
     __typename
     ... on Refund {
       id
+      updatedAt
       duties { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } originalDuty { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
       legacyResourceId
       note
@@ -6187,8 +6653,8 @@ query ShopifyFetchRefund($id: ID!) {
 		ParentGidPath:    "reverseFulfillmentOrder.id",
 		VersionField:     "",
 		Fields: []FieldSpec{
-			{Name: "deliverable", GraphQL: "deliverable", Kind: "object", DSLType: "object", Extract: "deliverable"},
-			{Name: "reverseFulfillmentOrderGid", GraphQL: "reverseFulfillmentOrder", Kind: "gid", DSLType: "string", Extract: "reverseFulfillmentOrder.id"},
+			{Name: "deliverable", GraphQL: "deliverable", Kind: "object", DSLType: "object", Extract: "deliverable", AdminType: "ReverseDeliveryDeliverable"},
+			{Name: "reverseFulfillmentOrderGid", GraphQL: "reverseFulfillmentOrder", Kind: "gid", DSLType: "string", Extract: "reverseFulfillmentOrder.id", AdminType: "ReverseFulfillmentOrder"},
 		},
 		FetchOp: "ShopifyFetchReverseDelivery",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -6228,12 +6694,12 @@ query ShopifyFetchReverseDelivery($id: ID!) {
 		ParentGidPath:    "",
 		VersionField:     "",
 		Children: []ChildSpec{
-			{Connection: "reverseDeliveries", Concept: "reverseDelivery", GraphQLType: "ReverseDelivery", List: false},
+			{Connection: "reverseDeliveries", Concept: "reverseDelivery", GraphQLType: "ReverseDelivery", List: false, PageOp: "ShopifyPageReverseFulfillmentOrderReverseDeliveries"},
 		},
 		Fields: []FieldSpec{
-			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id"},
-			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"CANCELED\", \"CLOSED\", \"OPEN\")", Extract: "status"},
-			{Name: "thirdPartyConfirmation", GraphQL: "thirdPartyConfirmation", Kind: "object", DSLType: "object", Extract: "thirdPartyConfirmation"},
+			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id", AdminType: "Order"},
+			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"CANCELED\", \"CLOSED\", \"OPEN\")", Extract: "status", AdminType: "ReverseFulfillmentOrderStatus"},
+			{Name: "thirdPartyConfirmation", GraphQL: "thirdPartyConfirmation", Kind: "object", DSLType: "object", Extract: "thirdPartyConfirmation", AdminType: "ReverseFulfillmentOrderThirdPartyConfirmation"},
 		},
 		FetchOp: "ShopifyFetchReverseFulfillmentOrder",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -6251,6 +6717,23 @@ query ShopifyFetchReverseFulfillmentOrder($id: ID!) {
       status
       thirdPartyConfirmation { status }
       reverseDeliveries(first: 25) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          deliverable { __typename }
+          reverseFulfillmentOrder { id }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageReverseFulfillmentOrderReverseDeliveries($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on ReverseFulfillmentOrder {
+      reverseDeliveries(first: 25, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           deliverable { __typename }
@@ -6279,10 +6762,10 @@ query ShopifyFetchReverseFulfillmentOrder($id: ID!) {
 		Scopes:         []string{"read_customers"},
 		VersionField:   "",
 		Fields: []FieldSpec{
-			{Name: "creationDate", GraphQL: "creationDate", Kind: "scalar", DSLType: "string", Extract: "creationDate"},
-			{Name: "lastEditDate", GraphQL: "lastEditDate", Kind: "scalar", DSLType: "string", Extract: "lastEditDate"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "query", GraphQL: "query", Kind: "scalar", DSLType: "string", Extract: "query"},
+			{Name: "creationDate", GraphQL: "creationDate", Kind: "scalar", DSLType: "string", Extract: "creationDate", AdminType: "DateTime"},
+			{Name: "lastEditDate", GraphQL: "lastEditDate", Kind: "scalar", DSLType: "string", Extract: "lastEditDate", AdminType: "DateTime"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "query", GraphQL: "query", Kind: "scalar", DSLType: "string", Extract: "query", AdminType: "String"},
 		},
 		FetchOp: "ShopifyFetchSegment",
 		ListOp:  "ShopifyListSegment",
@@ -6338,17 +6821,17 @@ query ShopifyListSegment($first: Int!, $after: String, $query: String) {
 		ParentGidPath:    "",
 		VersionField:     "createdAt",
 		Fields: []FieldSpec{
-			{Name: "billingPolicy", GraphQL: "billingPolicy", Kind: "object", DSLType: "object", Extract: "billingPolicy"},
-			{Name: "category", GraphQL: "category", Kind: "enum", DSLType: "enum(\"OTHER\", \"PRE_ORDER\", \"SUBSCRIPTION\", \"TRY_BEFORE_YOU_BUY\")", Extract: "category"},
-			{Name: "deliveryPolicy", GraphQL: "deliveryPolicy", Kind: "object", DSLType: "object", Extract: "deliveryPolicy"},
-			{Name: "description", GraphQL: "description", Kind: "scalar", DSLType: "string", Extract: "description"},
-			{Name: "inventoryPolicy", GraphQL: "inventoryPolicy", Kind: "object", DSLType: "object", Extract: "inventoryPolicy"},
-			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "options", GraphQL: "options", Kind: "scalarList", DSLType: "[]string", Extract: "options"},
-			{Name: "position", GraphQL: "position", Kind: "scalar", DSLType: "int", Extract: "position"},
-			{Name: "pricingPolicies", GraphQL: "pricingPolicies", Kind: "objectList", DSLType: "[]object", Extract: "pricingPolicies"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
+			{Name: "billingPolicy", GraphQL: "billingPolicy", Kind: "object", DSLType: "object", Extract: "billingPolicy", AdminType: "SellingPlanBillingPolicy"},
+			{Name: "category", GraphQL: "category", Kind: "enum", DSLType: "enum(\"OTHER\", \"PRE_ORDER\", \"SUBSCRIPTION\", \"TRY_BEFORE_YOU_BUY\")", Extract: "category", AdminType: "SellingPlanCategory"},
+			{Name: "deliveryPolicy", GraphQL: "deliveryPolicy", Kind: "object", DSLType: "object", Extract: "deliveryPolicy", AdminType: "SellingPlanDeliveryPolicy"},
+			{Name: "description", GraphQL: "description", Kind: "scalar", DSLType: "string", Extract: "description", AdminType: "String"},
+			{Name: "inventoryPolicy", GraphQL: "inventoryPolicy", Kind: "object", DSLType: "object", Extract: "inventoryPolicy", AdminType: "SellingPlanInventoryPolicy"},
+			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]", AdminType: "Metafield"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "options", GraphQL: "options", Kind: "scalarList", DSLType: "[]string", Extract: "options", AdminType: "String"},
+			{Name: "position", GraphQL: "position", Kind: "scalar", DSLType: "int", Extract: "position", AdminType: "Int"},
+			{Name: "pricingPolicies", GraphQL: "pricingPolicies", Kind: "objectList", DSLType: "[]object", Extract: "pricingPolicies", AdminType: "SellingPlanPricingPolicy"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
 		},
 		FetchOp: "ShopifyFetchSellingPlan",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -6395,21 +6878,21 @@ query ShopifyFetchSellingPlan($id: ID!) {
 		Scopes:         []string{"read_products"},
 		VersionField:   "createdAt",
 		Children: []ChildSpec{
-			{Connection: "sellingPlans", Concept: "sellingPlan", GraphQLType: "SellingPlan", List: false},
+			{Connection: "sellingPlans", Concept: "sellingPlan", GraphQLType: "SellingPlan", List: false, PageOp: "ShopifyPageSellingPlanGroupSellingPlans"},
 		},
 		Fields: []FieldSpec{
-			{Name: "appId", GraphQL: "appId", Kind: "scalar", DSLType: "string", Extract: "appId"},
-			{Name: "description", GraphQL: "description", Kind: "scalar", DSLType: "string", Extract: "description"},
-			{Name: "merchantCode", GraphQL: "merchantCode", Kind: "scalar", DSLType: "string", Extract: "merchantCode"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "options", GraphQL: "options", Kind: "scalarList", DSLType: "[]string", Extract: "options"},
-			{Name: "position", GraphQL: "position", Kind: "scalar", DSLType: "int", Extract: "position"},
-			{Name: "productVariantsCount", GraphQL: "productVariantsCount", Kind: "object", DSLType: "object", Extract: "productVariantsCount"},
-			{Name: "productVariantsGids", GraphQL: "productVariants", Kind: "refs", DSLType: "[]string", Extract: "productVariants.nodes[].id"},
-			{Name: "productsCount", GraphQL: "productsCount", Kind: "object", DSLType: "object", Extract: "productsCount"},
-			{Name: "productsGids", GraphQL: "products", Kind: "refs", DSLType: "[]string", Extract: "products.nodes[].id"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "summary", GraphQL: "summary", Kind: "scalar", DSLType: "string", Extract: "summary"},
+			{Name: "appId", GraphQL: "appId", Kind: "scalar", DSLType: "string", Extract: "appId", AdminType: "String"},
+			{Name: "description", GraphQL: "description", Kind: "scalar", DSLType: "string", Extract: "description", AdminType: "String"},
+			{Name: "merchantCode", GraphQL: "merchantCode", Kind: "scalar", DSLType: "string", Extract: "merchantCode", AdminType: "String"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "options", GraphQL: "options", Kind: "scalarList", DSLType: "[]string", Extract: "options", AdminType: "String"},
+			{Name: "position", GraphQL: "position", Kind: "scalar", DSLType: "int", Extract: "position", AdminType: "Int"},
+			{Name: "productVariantsCount", GraphQL: "productVariantsCount", Kind: "object", DSLType: "object", Extract: "productVariantsCount", AdminType: "Count"},
+			{Name: "productVariantsGids", GraphQL: "productVariants", Kind: "refs", DSLType: "[]string", Extract: "productVariants.nodes[].id", AdminType: "ProductVariant"},
+			{Name: "productsCount", GraphQL: "productsCount", Kind: "object", DSLType: "object", Extract: "productsCount", AdminType: "Count"},
+			{Name: "productsGids", GraphQL: "products", Kind: "refs", DSLType: "[]string", Extract: "products.nodes[].id", AdminType: "Product"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "summary", GraphQL: "summary", Kind: "scalar", DSLType: "string", Extract: "summary", AdminType: "String"},
 		},
 		FetchOp: "ShopifyFetchSellingPlanGroup",
 		ListOp:  "ShopifyListSellingPlanGroup",
@@ -6437,6 +6920,7 @@ query ShopifyFetchSellingPlanGroup($id: ID!) {
       createdAt
       summary
       sellingPlans(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           billingPolicy { __typename ... on SellingPlanFixedBillingPolicy { remainingBalanceChargeExactTime remainingBalanceChargeTimeAfterCheckout remainingBalanceChargeTrigger } ... on SellingPlanRecurringBillingPolicy { createdAt interval intervalCount maxCycles minCycles } }
@@ -6474,6 +6958,32 @@ query ShopifyListSellingPlanGroup($first: Int!, $after: String, $query: String) 
       createdAt
       summary
       sellingPlans(first: 100) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          billingPolicy { __typename ... on SellingPlanFixedBillingPolicy { remainingBalanceChargeExactTime remainingBalanceChargeTimeAfterCheckout remainingBalanceChargeTrigger } ... on SellingPlanRecurringBillingPolicy { createdAt interval intervalCount maxCycles minCycles } }
+          category
+          deliveryPolicy { __typename ... on SellingPlanFixedDeliveryPolicy { cutoff fulfillmentExactTime fulfillmentTrigger intent preAnchorBehavior } ... on SellingPlanRecurringDeliveryPolicy { createdAt cutoff intent interval intervalCount preAnchorBehavior } }
+          description
+          inventoryPolicy { reserve }
+          metafields(first: 50) { nodes { namespace key type value jsonValue } }
+          name
+          options
+          position
+          pricingPolicies { __typename ... on SellingPlanFixedPricingPolicy { adjustmentType createdAt } ... on SellingPlanRecurringPricingPolicy { adjustmentType afterCycle createdAt } }
+          createdAt
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageSellingPlanGroupSellingPlans($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on SellingPlanGroup {
+      sellingPlans(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           billingPolicy { __typename ... on SellingPlanFixedBillingPolicy { remainingBalanceChargeExactTime remainingBalanceChargeTimeAfterCheckout remainingBalanceChargeTrigger } ... on SellingPlanRecurringBillingPolicy { createdAt interval intervalCount maxCycles minCycles } }
@@ -6555,52 +7065,52 @@ query ShopifyBulkSellingPlanGroup($query: String) {
 		Scopes:       []string{"read_products"},
 		VersionField: "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "accountOwnerGid", GraphQL: "accountOwner", Kind: "gid", DSLType: "string", Extract: "accountOwner.id"},
-			{Name: "alerts", GraphQL: "alerts", Kind: "objectList", DSLType: "[]object", Extract: "alerts"},
-			{Name: "allProductCategoriesList", GraphQL: "allProductCategoriesList", Kind: "objectList", DSLType: "[]object", Extract: "allProductCategoriesList"},
-			{Name: "checkoutApiSupported", GraphQL: "checkoutApiSupported", Kind: "scalar", DSLType: "bool", Extract: "checkoutApiSupported"},
-			{Name: "contactEmail", GraphQL: "contactEmail", Kind: "scalar", DSLType: "string", Extract: "contactEmail"},
-			{Name: "countriesInShippingZones", GraphQL: "countriesInShippingZones", Kind: "object", DSLType: "object", Extract: "countriesInShippingZones"},
-			{Name: "currencyCode", GraphQL: "currencyCode", Kind: "scalar", DSLType: "string", Extract: "currencyCode"},
-			{Name: "currencyFormats", GraphQL: "currencyFormats", Kind: "object", DSLType: "object", Extract: "currencyFormats"},
-			{Name: "customerAccounts", GraphQL: "customerAccounts", Kind: "enum", DSLType: "enum(\"REQUIRED\", \"OPTIONAL\", \"DISABLED\")", Extract: "customerAccounts"},
-			{Name: "customerAccountsV2", GraphQL: "customerAccountsV2", Kind: "object", DSLType: "object", Extract: "customerAccountsV2"},
-			{Name: "description", GraphQL: "description", Kind: "scalar", DSLType: "string", Extract: "description"},
-			{Name: "email", GraphQL: "email", Kind: "scalar", DSLType: "string", Extract: "email"},
-			{Name: "enabledPresentmentCurrencies", GraphQL: "enabledPresentmentCurrencies", Kind: "scalarList", DSLType: "[]string", Extract: "enabledPresentmentCurrencies"},
-			{Name: "entitlements", GraphQL: "entitlements", Kind: "object", DSLType: "object", Extract: "entitlements"},
-			{Name: "features", GraphQL: "features", Kind: "object", DSLType: "object", Extract: "features"},
-			{Name: "fulfillmentServices", GraphQL: "fulfillmentServices", Kind: "objectList", DSLType: "[]object", Extract: "fulfillmentServices"},
-			{Name: "ianaTimezone", GraphQL: "ianaTimezone", Kind: "scalar", DSLType: "string", Extract: "ianaTimezone"},
-			{Name: "marketingSmsConsentEnabledAtCheckout", GraphQL: "marketingSmsConsentEnabledAtCheckout", Kind: "scalar", DSLType: "bool", Extract: "marketingSmsConsentEnabledAtCheckout"},
-			{Name: "merchantApprovalSignals", GraphQL: "merchantApprovalSignals", Kind: "object", DSLType: "object", Extract: "merchantApprovalSignals"},
-			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]"},
-			{Name: "myshopifyDomain", GraphQL: "myshopifyDomain", Kind: "scalar", DSLType: "string", Extract: "myshopifyDomain"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "navigationSettings", GraphQL: "navigationSettings", Kind: "objectList", DSLType: "[]object", Extract: "navigationSettings"},
-			{Name: "orderNumberFormatPrefix", GraphQL: "orderNumberFormatPrefix", Kind: "scalar", DSLType: "string", Extract: "orderNumberFormatPrefix"},
-			{Name: "orderNumberFormatSuffix", GraphQL: "orderNumberFormatSuffix", Kind: "scalar", DSLType: "string", Extract: "orderNumberFormatSuffix"},
-			{Name: "paymentSettings", GraphQL: "paymentSettings", Kind: "object", DSLType: "object", Extract: "paymentSettings"},
-			{Name: "plan", GraphQL: "plan", Kind: "object", DSLType: "object", Extract: "plan"},
-			{Name: "primaryDomain", GraphQL: "primaryDomain", Kind: "object", DSLType: "object", Extract: "primaryDomain"},
-			{Name: "resourceLimits", GraphQL: "resourceLimits", Kind: "object", DSLType: "object", Extract: "resourceLimits"},
-			{Name: "richTextEditorUrl", GraphQL: "richTextEditorUrl", Kind: "scalar", DSLType: "string", Extract: "richTextEditorUrl"},
-			{Name: "searchFilters", GraphQL: "searchFilters", Kind: "object", DSLType: "object", Extract: "searchFilters"},
-			{Name: "setupRequired", GraphQL: "setupRequired", Kind: "scalar", DSLType: "bool", Extract: "setupRequired"},
-			{Name: "shipsToCountries", GraphQL: "shipsToCountries", Kind: "scalarList", DSLType: "[]string", Extract: "shipsToCountries"},
-			{Name: "shopAddress", GraphQL: "shopAddress", Kind: "object", DSLType: "object", Extract: "shopAddress"},
-			{Name: "shopOwnerName", GraphQL: "shopOwnerName", Kind: "scalar", DSLType: "string", Extract: "shopOwnerName"},
-			{Name: "shopPoliciesGids", GraphQL: "shopPolicies", Kind: "refs", DSLType: "[]string", Extract: "shopPolicies[].id"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "taxShipping", GraphQL: "taxShipping", Kind: "scalar", DSLType: "bool", Extract: "taxShipping"},
-			{Name: "taxesIncluded", GraphQL: "taxesIncluded", Kind: "scalar", DSLType: "bool", Extract: "taxesIncluded"},
-			{Name: "timezoneAbbreviation", GraphQL: "timezoneAbbreviation", Kind: "scalar", DSLType: "string", Extract: "timezoneAbbreviation"},
-			{Name: "timezoneOffset", GraphQL: "timezoneOffset", Kind: "scalar", DSLType: "string", Extract: "timezoneOffset"},
-			{Name: "timezoneOffsetMinutes", GraphQL: "timezoneOffsetMinutes", Kind: "scalar", DSLType: "int", Extract: "timezoneOffsetMinutes"},
-			{Name: "transactionalSmsDisabled", GraphQL: "transactionalSmsDisabled", Kind: "scalar", DSLType: "bool", Extract: "transactionalSmsDisabled"},
-			{Name: "unitSystem", GraphQL: "unitSystem", Kind: "enum", DSLType: "enum(\"IMPERIAL_SYSTEM\", \"METRIC_SYSTEM\")", Extract: "unitSystem"},
-			{Name: "url", GraphQL: "url", Kind: "scalar", DSLType: "string", Extract: "url"},
-			{Name: "weightUnit", GraphQL: "weightUnit", Kind: "enum", DSLType: "enum(\"KILOGRAMS\", \"GRAMS\", \"POUNDS\", \"OUNCES\")", Extract: "weightUnit"},
+			{Name: "accountOwnerGid", GraphQL: "accountOwner", Kind: "gid", DSLType: "string", Extract: "accountOwner.id", AdminType: "StaffMember"},
+			{Name: "alerts", GraphQL: "alerts", Kind: "objectList", DSLType: "[]object", Extract: "alerts", AdminType: "ShopAlert"},
+			{Name: "allProductCategoriesList", GraphQL: "allProductCategoriesList", Kind: "objectList", DSLType: "[]object", Extract: "allProductCategoriesList", AdminType: "TaxonomyCategory"},
+			{Name: "checkoutApiSupported", GraphQL: "checkoutApiSupported", Kind: "scalar", DSLType: "bool", Extract: "checkoutApiSupported", AdminType: "Boolean"},
+			{Name: "contactEmail", GraphQL: "contactEmail", Kind: "scalar", DSLType: "string", Extract: "contactEmail", AdminType: "String"},
+			{Name: "countriesInShippingZones", GraphQL: "countriesInShippingZones", Kind: "object", DSLType: "object", Extract: "countriesInShippingZones", AdminType: "CountriesInShippingZones"},
+			{Name: "currencyCode", GraphQL: "currencyCode", Kind: "scalar", DSLType: "string", Extract: "currencyCode", AdminType: "CurrencyCode"},
+			{Name: "currencyFormats", GraphQL: "currencyFormats", Kind: "object", DSLType: "object", Extract: "currencyFormats", AdminType: "CurrencyFormats"},
+			{Name: "customerAccounts", GraphQL: "customerAccounts", Kind: "enum", DSLType: "enum(\"REQUIRED\", \"OPTIONAL\", \"DISABLED\")", Extract: "customerAccounts", AdminType: "ShopCustomerAccountsSetting"},
+			{Name: "customerAccountsV2", GraphQL: "customerAccountsV2", Kind: "object", DSLType: "object", Extract: "customerAccountsV2", AdminType: "CustomerAccountsV2"},
+			{Name: "description", GraphQL: "description", Kind: "scalar", DSLType: "string", Extract: "description", AdminType: "String"},
+			{Name: "email", GraphQL: "email", Kind: "scalar", DSLType: "string", Extract: "email", AdminType: "String"},
+			{Name: "enabledPresentmentCurrencies", GraphQL: "enabledPresentmentCurrencies", Kind: "scalarList", DSLType: "[]string", Extract: "enabledPresentmentCurrencies", AdminType: "CurrencyCode"},
+			{Name: "entitlements", GraphQL: "entitlements", Kind: "object", DSLType: "object", Extract: "entitlements", AdminType: "EntitlementsType"},
+			{Name: "features", GraphQL: "features", Kind: "object", DSLType: "object", Extract: "features", AdminType: "ShopFeatures"},
+			{Name: "fulfillmentServices", GraphQL: "fulfillmentServices", Kind: "objectList", DSLType: "[]object", Extract: "fulfillmentServices", AdminType: "FulfillmentService", GidsInside: []string{"Location"}},
+			{Name: "ianaTimezone", GraphQL: "ianaTimezone", Kind: "scalar", DSLType: "string", Extract: "ianaTimezone", AdminType: "String"},
+			{Name: "marketingSmsConsentEnabledAtCheckout", GraphQL: "marketingSmsConsentEnabledAtCheckout", Kind: "scalar", DSLType: "bool", Extract: "marketingSmsConsentEnabledAtCheckout", AdminType: "Boolean"},
+			{Name: "merchantApprovalSignals", GraphQL: "merchantApprovalSignals", Kind: "object", DSLType: "object", Extract: "merchantApprovalSignals", AdminType: "MerchantApprovalSignals"},
+			{Name: "metafields", GraphQL: "metafields", Kind: "metafields", DSLType: "object", Extract: "metafields.nodes[]", AdminType: "Metafield"},
+			{Name: "myshopifyDomain", GraphQL: "myshopifyDomain", Kind: "scalar", DSLType: "string", Extract: "myshopifyDomain", AdminType: "String"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "navigationSettings", GraphQL: "navigationSettings", Kind: "objectList", DSLType: "[]object", Extract: "navigationSettings", AdminType: "NavigationItem"},
+			{Name: "orderNumberFormatPrefix", GraphQL: "orderNumberFormatPrefix", Kind: "scalar", DSLType: "string", Extract: "orderNumberFormatPrefix", AdminType: "String"},
+			{Name: "orderNumberFormatSuffix", GraphQL: "orderNumberFormatSuffix", Kind: "scalar", DSLType: "string", Extract: "orderNumberFormatSuffix", AdminType: "String"},
+			{Name: "paymentSettings", GraphQL: "paymentSettings", Kind: "object", DSLType: "object", Extract: "paymentSettings", AdminType: "PaymentSettings"},
+			{Name: "plan", GraphQL: "plan", Kind: "object", DSLType: "object", Extract: "plan", AdminType: "ShopPlan"},
+			{Name: "primaryDomain", GraphQL: "primaryDomain", Kind: "object", DSLType: "object", Extract: "primaryDomain", AdminType: "Domain", GidsInside: []string{"MarketWebPresence"}},
+			{Name: "resourceLimits", GraphQL: "resourceLimits", Kind: "object", DSLType: "object", Extract: "resourceLimits", AdminType: "ShopResourceLimits"},
+			{Name: "richTextEditorUrl", GraphQL: "richTextEditorUrl", Kind: "scalar", DSLType: "string", Extract: "richTextEditorUrl", AdminType: "URL"},
+			{Name: "searchFilters", GraphQL: "searchFilters", Kind: "object", DSLType: "object", Extract: "searchFilters", AdminType: "SearchFilterOptions"},
+			{Name: "setupRequired", GraphQL: "setupRequired", Kind: "scalar", DSLType: "bool", Extract: "setupRequired", AdminType: "Boolean"},
+			{Name: "shipsToCountries", GraphQL: "shipsToCountries", Kind: "scalarList", DSLType: "[]string", Extract: "shipsToCountries", AdminType: "CountryCode"},
+			{Name: "shopAddress", GraphQL: "shopAddress", Kind: "object", DSLType: "object", Extract: "shopAddress", AdminType: "ShopAddress"},
+			{Name: "shopOwnerName", GraphQL: "shopOwnerName", Kind: "scalar", DSLType: "string", Extract: "shopOwnerName", AdminType: "String"},
+			{Name: "shopPoliciesGids", GraphQL: "shopPolicies", Kind: "refs", DSLType: "[]string", Extract: "shopPolicies[].id", AdminType: "ShopPolicy"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "taxShipping", GraphQL: "taxShipping", Kind: "scalar", DSLType: "bool", Extract: "taxShipping", AdminType: "Boolean"},
+			{Name: "taxesIncluded", GraphQL: "taxesIncluded", Kind: "scalar", DSLType: "bool", Extract: "taxesIncluded", AdminType: "Boolean"},
+			{Name: "timezoneAbbreviation", GraphQL: "timezoneAbbreviation", Kind: "scalar", DSLType: "string", Extract: "timezoneAbbreviation", AdminType: "String"},
+			{Name: "timezoneOffset", GraphQL: "timezoneOffset", Kind: "scalar", DSLType: "string", Extract: "timezoneOffset", AdminType: "String"},
+			{Name: "timezoneOffsetMinutes", GraphQL: "timezoneOffsetMinutes", Kind: "scalar", DSLType: "int", Extract: "timezoneOffsetMinutes", AdminType: "Int"},
+			{Name: "transactionalSmsDisabled", GraphQL: "transactionalSmsDisabled", Kind: "scalar", DSLType: "bool", Extract: "transactionalSmsDisabled", AdminType: "Boolean"},
+			{Name: "unitSystem", GraphQL: "unitSystem", Kind: "enum", DSLType: "enum(\"IMPERIAL_SYSTEM\", \"METRIC_SYSTEM\")", Extract: "unitSystem", AdminType: "UnitSystem"},
+			{Name: "url", GraphQL: "url", Kind: "scalar", DSLType: "string", Extract: "url", AdminType: "URL"},
+			{Name: "weightUnit", GraphQL: "weightUnit", Kind: "enum", DSLType: "enum(\"KILOGRAMS\", \"GRAMS\", \"POUNDS\", \"OUNCES\")", Extract: "weightUnit", AdminType: "WeightUnit"},
 		},
 		FetchOp: "ShopifyFetchShop",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -6612,6 +7122,7 @@ query ShopifyBulkSellingPlanGroup($query: String) {
 query ShopifyFetchShop {
   shop {
     id
+    updatedAt
     accountOwner { id }
     alerts { action { title url } description }
     allProductCategoriesList { ancestorIds childrenIds fullName id isArchived isLeaf isRoot level name parentId }
@@ -6678,11 +7189,11 @@ query ShopifyFetchShop {
 		Scopes:       []string{"read_locales"},
 		VersionField: "",
 		Fields: []FieldSpec{
-			{Name: "locale", GraphQL: "locale", Kind: "scalar", DSLType: "string", Extract: "locale"},
-			{Name: "marketWebPresencesGids", GraphQL: "marketWebPresences", Kind: "refs", DSLType: "[]string", Extract: "marketWebPresences[].id"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "primary", GraphQL: "primary", Kind: "scalar", DSLType: "bool", Extract: "primary"},
-			{Name: "published", GraphQL: "published", Kind: "scalar", DSLType: "bool", Extract: "published"},
+			{Name: "locale", GraphQL: "locale", Kind: "scalar", DSLType: "string", Extract: "locale", AdminType: "String"},
+			{Name: "marketWebPresencesGids", GraphQL: "marketWebPresences", Kind: "refs", DSLType: "[]string", Extract: "marketWebPresences[].id", AdminType: "MarketWebPresence"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "primary", GraphQL: "primary", Kind: "scalar", DSLType: "bool", Extract: "primary", AdminType: "Boolean"},
+			{Name: "published", GraphQL: "published", Kind: "scalar", DSLType: "bool", Extract: "published", AdminType: "Boolean"},
 		},
 		FetchOp: "ShopifyFetchShopLocale",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -6721,11 +7232,11 @@ query ShopifyFetchShopLocale($id: ID!) {
 		Scopes:       []string{"read_legal_policies"},
 		VersionField: "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "body", GraphQL: "body", Kind: "scalar", DSLType: "string", Extract: "body"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "sourceType", GraphQL: "type", Kind: "enum", DSLType: "enum(\"REFUND_POLICY\", \"SHIPPING_POLICY\", \"PRIVACY_POLICY\", \"TERMS_OF_SERVICE\", \"TERMS_OF_SALE\", \"LEGAL_NOTICE\", \"SUBSCRIPTION_POLICY\", \"CONTACT_INFORMATION\")", Extract: "type"},
-			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title"},
-			{Name: "url", GraphQL: "url", Kind: "scalar", DSLType: "string", Extract: "url"},
+			{Name: "body", GraphQL: "body", Kind: "scalar", DSLType: "string", Extract: "body", AdminType: "HTML"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "sourceType", GraphQL: "type", Kind: "enum", DSLType: "enum(\"REFUND_POLICY\", \"SHIPPING_POLICY\", \"PRIVACY_POLICY\", \"TERMS_OF_SERVICE\", \"TERMS_OF_SALE\", \"LEGAL_NOTICE\", \"SUBSCRIPTION_POLICY\", \"CONTACT_INFORMATION\")", Extract: "type", AdminType: "ShopPolicyType"},
+			{Name: "title", GraphQL: "title", Kind: "scalar", DSLType: "string", Extract: "title", AdminType: "String"},
+			{Name: "url", GraphQL: "url", Kind: "scalar", DSLType: "string", Extract: "url", AdminType: "URL"},
 		},
 		FetchOp: "ShopifyFetchShopPolicy",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -6739,6 +7250,7 @@ query ShopifyFetchShopPolicy($id: ID!) {
     __typename
     ... on ShopPolicy {
       id
+      updatedAt
       body
       createdAt
       type
@@ -6765,19 +7277,19 @@ query ShopifyFetchShopPolicy($id: ID!) {
 		Scopes:       []string{"read_shopify_payments_payouts"},
 		VersionField: "",
 		Fields: []FieldSpec{
-			{Name: "adjustmentReason", GraphQL: "adjustmentReason", Kind: "scalar", DSLType: "string", Extract: "adjustmentReason"},
-			{Name: "adjustmentsOrders", GraphQL: "adjustmentsOrders", Kind: "objectList", DSLType: "[]object", Extract: "adjustmentsOrders"},
-			{Name: "amount", GraphQL: "amount", Kind: "object", DSLType: "object", Extract: "amount"},
-			{Name: "associatedOrder", GraphQL: "associatedOrder", Kind: "object", DSLType: "object", Extract: "associatedOrder"},
-			{Name: "associatedPayout", GraphQL: "associatedPayout", Kind: "object", DSLType: "object", Extract: "associatedPayout"},
-			{Name: "fee", GraphQL: "fee", Kind: "object", DSLType: "object", Extract: "fee"},
-			{Name: "net", GraphQL: "net", Kind: "object", DSLType: "object", Extract: "net"},
-			{Name: "sourceId", GraphQL: "sourceId", Kind: "scalar", DSLType: "string", Extract: "sourceId"},
-			{Name: "sourceOrderTransactionId", GraphQL: "sourceOrderTransactionId", Kind: "scalar", DSLType: "string", Extract: "sourceOrderTransactionId"},
-			{Name: "sourceType", GraphQL: "sourceType", Kind: "enum", DSLType: "enum(\"ADJUSTMENT_REVERSAL\", \"CHARGE\", \"REFUND\", \"SYSTEM_ADJUSTMENT\", \"DISPUTE\", \"ADJUSTMENT\", \"TRANSFER\")", Extract: "sourceType"},
-			{Name: "sourceTypeField", GraphQL: "type", Kind: "scalar", DSLType: "string", Extract: "type"},
-			{Name: "test", GraphQL: "test", Kind: "scalar", DSLType: "bool", Extract: "test"},
-			{Name: "transactionDate", GraphQL: "transactionDate", Kind: "scalar", DSLType: "string", Extract: "transactionDate"},
+			{Name: "adjustmentReason", GraphQL: "adjustmentReason", Kind: "scalar", DSLType: "string", Extract: "adjustmentReason", AdminType: "String"},
+			{Name: "adjustmentsOrders", GraphQL: "adjustmentsOrders", Kind: "objectList", DSLType: "[]object", Extract: "adjustmentsOrders", AdminType: "ShopifyPaymentsAdjustmentOrder"},
+			{Name: "amount", GraphQL: "amount", Kind: "object", DSLType: "object", Extract: "amount", AdminType: "MoneyV2"},
+			{Name: "associatedOrder", GraphQL: "associatedOrder", Kind: "object", DSLType: "object", Extract: "associatedOrder", AdminType: "ShopifyPaymentsAssociatedOrder"},
+			{Name: "associatedPayout", GraphQL: "associatedPayout", Kind: "object", DSLType: "object", Extract: "associatedPayout", AdminType: "ShopifyPaymentsBalanceTransactionAssociatedPayout"},
+			{Name: "fee", GraphQL: "fee", Kind: "object", DSLType: "object", Extract: "fee", AdminType: "MoneyV2"},
+			{Name: "net", GraphQL: "net", Kind: "object", DSLType: "object", Extract: "net", AdminType: "MoneyV2"},
+			{Name: "sourceId", GraphQL: "sourceId", Kind: "scalar", DSLType: "string", Extract: "sourceId", AdminType: "BigInt"},
+			{Name: "sourceOrderTransactionId", GraphQL: "sourceOrderTransactionId", Kind: "scalar", DSLType: "string", Extract: "sourceOrderTransactionId", AdminType: "BigInt"},
+			{Name: "sourceType", GraphQL: "sourceType", Kind: "enum", DSLType: "enum(\"ADJUSTMENT_REVERSAL\", \"CHARGE\", \"REFUND\", \"SYSTEM_ADJUSTMENT\", \"DISPUTE\", \"ADJUSTMENT\", \"TRANSFER\")", Extract: "sourceType", AdminType: "ShopifyPaymentsSourceType"},
+			{Name: "sourceTypeField", GraphQL: "type", Kind: "scalar", DSLType: "string", Extract: "type", AdminType: "ShopifyPaymentsTransactionType"},
+			{Name: "test", GraphQL: "test", Kind: "scalar", DSLType: "bool", Extract: "test", AdminType: "Boolean"},
+			{Name: "transactionDate", GraphQL: "transactionDate", Kind: "scalar", DSLType: "string", Extract: "transactionDate", AdminType: "DateTime"},
 		},
 		FetchOp: "ShopifyFetchShopifyPaymentsBalanceTransaction",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -6826,17 +7338,17 @@ query ShopifyFetchShopifyPaymentsBalanceTransaction($id: ID!) {
 		Scopes:         []string{"read_shopify_payments_disputes"},
 		VersionField:   "",
 		Fields: []FieldSpec{
-			{Name: "amount", GraphQL: "amount", Kind: "object", DSLType: "object", Extract: "amount"},
-			{Name: "disputeEvidence", GraphQL: "disputeEvidence", Kind: "object", DSLType: "object", Extract: "disputeEvidence"},
-			{Name: "evidenceDueBy", GraphQL: "evidenceDueBy", Kind: "scalar", DSLType: "string", Extract: "evidenceDueBy"},
-			{Name: "evidenceSentOn", GraphQL: "evidenceSentOn", Kind: "scalar", DSLType: "string", Extract: "evidenceSentOn"},
-			{Name: "finalizedOn", GraphQL: "finalizedOn", Kind: "scalar", DSLType: "string", Extract: "finalizedOn"},
-			{Name: "initiatedAt", GraphQL: "initiatedAt", Kind: "scalar", DSLType: "string", Extract: "initiatedAt"},
-			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId"},
-			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id"},
-			{Name: "reasonDetails", GraphQL: "reasonDetails", Kind: "object", DSLType: "object", Extract: "reasonDetails"},
-			{Name: "sourceType", GraphQL: "type", Kind: "enum", DSLType: "enum(\"CHARGEBACK\", \"INQUIRY\")", Extract: "type"},
-			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"ACCEPTED\", \"LOST\", \"NEEDS_RESPONSE\", \"PREVENTED\", \"UNDER_REVIEW\", \"WON\")", Extract: "status"},
+			{Name: "amount", GraphQL: "amount", Kind: "object", DSLType: "object", Extract: "amount", AdminType: "MoneyV2"},
+			{Name: "disputeEvidence", GraphQL: "disputeEvidence", Kind: "object", DSLType: "object", Extract: "disputeEvidence", AdminType: "ShopifyPaymentsDisputeEvidence", GidsInside: []string{"ShopifyPaymentsDispute"}},
+			{Name: "evidenceDueBy", GraphQL: "evidenceDueBy", Kind: "scalar", DSLType: "string", Extract: "evidenceDueBy", AdminType: "DateTime"},
+			{Name: "evidenceSentOn", GraphQL: "evidenceSentOn", Kind: "scalar", DSLType: "string", Extract: "evidenceSentOn", AdminType: "DateTime"},
+			{Name: "finalizedOn", GraphQL: "finalizedOn", Kind: "scalar", DSLType: "string", Extract: "finalizedOn", AdminType: "DateTime"},
+			{Name: "initiatedAt", GraphQL: "initiatedAt", Kind: "scalar", DSLType: "string", Extract: "initiatedAt", AdminType: "DateTime"},
+			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId", AdminType: "UnsignedInt64"},
+			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id", AdminType: "Order"},
+			{Name: "reasonDetails", GraphQL: "reasonDetails", Kind: "object", DSLType: "object", Extract: "reasonDetails", AdminType: "ShopifyPaymentsDisputeReasonDetails"},
+			{Name: "sourceType", GraphQL: "type", Kind: "enum", DSLType: "enum(\"CHARGEBACK\", \"INQUIRY\")", Extract: "type", AdminType: "DisputeType"},
+			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"ACCEPTED\", \"LOST\", \"NEEDS_RESPONSE\", \"PREVENTED\", \"UNDER_REVIEW\", \"WON\")", Extract: "status", AdminType: "DisputeStatus"},
 		},
 		FetchOp: "ShopifyFetchShopifyPaymentsDispute",
 		ListOp:  "ShopifyListShopifyPaymentsDispute",
@@ -6903,14 +7415,14 @@ query ShopifyListShopifyPaymentsDispute($first: Int!, $after: String, $query: St
 		Scopes:       []string{"read_shopify_payments_payouts"},
 		VersionField: "",
 		Fields: []FieldSpec{
-			{Name: "businessEntityGid", GraphQL: "businessEntity", Kind: "gid", DSLType: "string", Extract: "businessEntity.id"},
-			{Name: "externalTraceId", GraphQL: "externalTraceId", Kind: "scalar", DSLType: "string", Extract: "externalTraceId"},
-			{Name: "issuedAt", GraphQL: "issuedAt", Kind: "scalar", DSLType: "string", Extract: "issuedAt"},
-			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId"},
-			{Name: "net", GraphQL: "net", Kind: "object", DSLType: "object", Extract: "net"},
-			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"SCHEDULED\", \"PAID\", \"FAILED\", \"CANCELED\")", Extract: "status"},
-			{Name: "summary", GraphQL: "summary", Kind: "object", DSLType: "object", Extract: "summary"},
-			{Name: "transactionType", GraphQL: "transactionType", Kind: "enum", DSLType: "enum(\"DEPOSIT\", \"WITHDRAWAL\")", Extract: "transactionType"},
+			{Name: "businessEntityGid", GraphQL: "businessEntity", Kind: "gid", DSLType: "string", Extract: "businessEntity.id", AdminType: "BusinessEntity"},
+			{Name: "externalTraceId", GraphQL: "externalTraceId", Kind: "scalar", DSLType: "string", Extract: "externalTraceId", AdminType: "String"},
+			{Name: "issuedAt", GraphQL: "issuedAt", Kind: "scalar", DSLType: "string", Extract: "issuedAt", AdminType: "DateTime"},
+			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId", AdminType: "UnsignedInt64"},
+			{Name: "net", GraphQL: "net", Kind: "object", DSLType: "object", Extract: "net", AdminType: "MoneyV2"},
+			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"SCHEDULED\", \"PAID\", \"FAILED\", \"CANCELED\")", Extract: "status", AdminType: "ShopifyPaymentsPayoutStatus"},
+			{Name: "summary", GraphQL: "summary", Kind: "object", DSLType: "object", Extract: "summary", AdminType: "ShopifyPaymentsPayoutSummary"},
+			{Name: "transactionType", GraphQL: "transactionType", Kind: "enum", DSLType: "enum(\"DEPOSIT\", \"WITHDRAWAL\")", Extract: "transactionType", AdminType: "ShopifyPaymentsPayoutTransactionType"},
 		},
 		FetchOp: "ShopifyFetchShopifyPaymentsPayout",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -6956,21 +7468,21 @@ query ShopifyFetchShopifyPaymentsPayout($id: ID!) {
 		ParentGidPath:    "order.id",
 		VersionField:     "createdAt",
 		Children: []ChildSpec{
-			{Connection: "reverseFulfillmentOrders", Concept: "reverseFulfillmentOrder", GraphQLType: "ReverseFulfillmentOrder", List: false},
+			{Connection: "reverseFulfillmentOrders", Concept: "reverseFulfillmentOrder", GraphQLType: "ReverseFulfillmentOrder", List: false, PageOp: "ShopifyPageShopifyReturnReverseFulfillmentOrders"},
 		},
 		Fields: []FieldSpec{
-			{Name: "closedAt", GraphQL: "closedAt", Kind: "scalar", DSLType: "string", Extract: "closedAt"},
-			{Name: "decline", GraphQL: "decline", Kind: "object", DSLType: "object", Extract: "decline"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id"},
-			{Name: "refundsGids", GraphQL: "refunds", Kind: "refs", DSLType: "[]string", Extract: "refunds.nodes[].id"},
-			{Name: "requestApprovedAt", GraphQL: "requestApprovedAt", Kind: "scalar", DSLType: "string", Extract: "requestApprovedAt"},
-			{Name: "returnShippingFees", GraphQL: "returnShippingFees", Kind: "objectList", DSLType: "[]object", Extract: "returnShippingFees"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "staffMemberGid", GraphQL: "staffMember", Kind: "gid", DSLType: "string", Extract: "staffMember.id"},
-			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"CANCELED\", \"CLOSED\", \"OPEN\", \"REQUESTED\", \"DECLINED\")", Extract: "status"},
-			{Name: "totalQuantity", GraphQL: "totalQuantity", Kind: "scalar", DSLType: "int", Extract: "totalQuantity"},
-			{Name: "transactionsGids", GraphQL: "transactions", Kind: "refs", DSLType: "[]string", Extract: "transactions.nodes[].id"},
+			{Name: "closedAt", GraphQL: "closedAt", Kind: "scalar", DSLType: "string", Extract: "closedAt", AdminType: "DateTime"},
+			{Name: "decline", GraphQL: "decline", Kind: "object", DSLType: "object", Extract: "decline", AdminType: "ReturnDecline"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id", AdminType: "Order"},
+			{Name: "refundsGids", GraphQL: "refunds", Kind: "refs", DSLType: "[]string", Extract: "refunds.nodes[].id", AdminType: "Refund"},
+			{Name: "requestApprovedAt", GraphQL: "requestApprovedAt", Kind: "scalar", DSLType: "string", Extract: "requestApprovedAt", AdminType: "DateTime"},
+			{Name: "returnShippingFees", GraphQL: "returnShippingFees", Kind: "objectList", DSLType: "[]object", Extract: "returnShippingFees", AdminType: "ReturnShippingFee"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "staffMemberGid", GraphQL: "staffMember", Kind: "gid", DSLType: "string", Extract: "staffMember.id", AdminType: "StaffMember"},
+			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"CANCELED\", \"CLOSED\", \"OPEN\", \"REQUESTED\", \"DECLINED\")", Extract: "status", AdminType: "ReturnStatus"},
+			{Name: "totalQuantity", GraphQL: "totalQuantity", Kind: "scalar", DSLType: "int", Extract: "totalQuantity", AdminType: "Int"},
+			{Name: "transactionsGids", GraphQL: "transactions", Kind: "refs", DSLType: "[]string", Extract: "transactions.nodes[].id", AdminType: "OrderTransaction"},
 		},
 		FetchOp: "ShopifyFetchShopifyReturn",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -6997,6 +7509,24 @@ query ShopifyFetchShopifyReturn($id: ID!) {
       totalQuantity
       transactions(first: 25) { nodes { id } }
       reverseFulfillmentOrders(first: 25) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          order { id }
+          status
+          thirdPartyConfirmation { status }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageShopifyReturnReverseFulfillmentOrders($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Return {
+      reverseFulfillmentOrders(first: 25, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           order { id }
@@ -7026,19 +7556,19 @@ query ShopifyFetchShopifyReturn($id: ID!) {
 		Scopes:         []string{"read_users"},
 		VersionField:   "",
 		Fields: []FieldSpec{
-			{Name: "accountType", GraphQL: "accountType", Kind: "enum", DSLType: "enum(\"REGULAR\", \"RESTRICTED\", \"INVITED\", \"REQUESTED\", \"COLLABORATOR\", \"COLLABORATOR_TEAM_MEMBER\", \"SAML\", \"INVITED_STORE_OWNER\")", Extract: "accountType"},
-			{Name: "active", GraphQL: "active", Kind: "scalar", DSLType: "bool", Extract: "active"},
-			{Name: "avatar", GraphQL: "avatar", Kind: "object", DSLType: "object", Extract: "avatar"},
-			{Name: "email", GraphQL: "email", Kind: "scalar", DSLType: "string", Extract: "email"},
-			{Name: "exists", GraphQL: "exists", Kind: "scalar", DSLType: "bool", Extract: "exists"},
-			{Name: "firstName", GraphQL: "firstName", Kind: "scalar", DSLType: "string", Extract: "firstName"},
-			{Name: "initials", GraphQL: "initials", Kind: "scalarList", DSLType: "[]string", Extract: "initials"},
-			{Name: "isShopOwner", GraphQL: "isShopOwner", Kind: "scalar", DSLType: "bool", Extract: "isShopOwner"},
-			{Name: "lastName", GraphQL: "lastName", Kind: "scalar", DSLType: "string", Extract: "lastName"},
-			{Name: "locale", GraphQL: "locale", Kind: "scalar", DSLType: "string", Extract: "locale"},
-			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name"},
-			{Name: "phone", GraphQL: "phone", Kind: "scalar", DSLType: "string", Extract: "phone"},
-			{Name: "privateData", GraphQL: "privateData", Kind: "object", DSLType: "object", Extract: "privateData"},
+			{Name: "accountType", GraphQL: "accountType", Kind: "enum", DSLType: "enum(\"REGULAR\", \"RESTRICTED\", \"INVITED\", \"REQUESTED\", \"COLLABORATOR\", \"COLLABORATOR_TEAM_MEMBER\", \"SAML\", \"INVITED_STORE_OWNER\")", Extract: "accountType", AdminType: "AccountType"},
+			{Name: "active", GraphQL: "active", Kind: "scalar", DSLType: "bool", Extract: "active", AdminType: "Boolean"},
+			{Name: "avatar", GraphQL: "avatar", Kind: "object", DSLType: "object", Extract: "avatar", AdminType: "Image"},
+			{Name: "email", GraphQL: "email", Kind: "scalar", DSLType: "string", Extract: "email", AdminType: "String"},
+			{Name: "exists", GraphQL: "exists", Kind: "scalar", DSLType: "bool", Extract: "exists", AdminType: "Boolean"},
+			{Name: "firstName", GraphQL: "firstName", Kind: "scalar", DSLType: "string", Extract: "firstName", AdminType: "String"},
+			{Name: "initials", GraphQL: "initials", Kind: "scalarList", DSLType: "[]string", Extract: "initials", AdminType: "String"},
+			{Name: "isShopOwner", GraphQL: "isShopOwner", Kind: "scalar", DSLType: "bool", Extract: "isShopOwner", AdminType: "Boolean"},
+			{Name: "lastName", GraphQL: "lastName", Kind: "scalar", DSLType: "string", Extract: "lastName", AdminType: "String"},
+			{Name: "locale", GraphQL: "locale", Kind: "scalar", DSLType: "string", Extract: "locale", AdminType: "String"},
+			{Name: "name", GraphQL: "name", Kind: "scalar", DSLType: "string", Extract: "name", AdminType: "String"},
+			{Name: "phone", GraphQL: "phone", Kind: "scalar", DSLType: "string", Extract: "phone", AdminType: "String"},
+			{Name: "privateData", GraphQL: "privateData", Kind: "object", DSLType: "object", Extract: "privateData", AdminType: "StaffMemberPrivateData"},
 		},
 		FetchOp: "ShopifyFetchStaffMember",
 		ListOp:  "ShopifyListStaffMember",
@@ -7112,8 +7642,8 @@ query ShopifyListStaffMember($first: Int!, $after: String, $query: String) {
 		ParentGidPath:    "",
 		VersionField:     "",
 		Fields: []FieldSpec{
-			{Name: "balance", GraphQL: "balance", Kind: "object", DSLType: "object", Extract: "balance"},
-			{Name: "owner", GraphQL: "owner", Kind: "object", DSLType: "object", Extract: "owner"},
+			{Name: "balance", GraphQL: "balance", Kind: "object", DSLType: "object", Extract: "balance", AdminType: "MoneyV2"},
+			{Name: "owner", GraphQL: "owner", Kind: "object", DSLType: "object", Extract: "owner", AdminType: "HasStoreCreditAccounts"},
 		},
 		FetchOp: "ShopifyFetchStoreCreditAccount",
 		FetchDocument: `# Code generated by cmd/shopifyschema from Admin GraphQL 2026-07. DO NOT EDIT.
@@ -7151,25 +7681,25 @@ query ShopifyFetchStoreCreditAccount($id: ID!) {
 		Scopes:         []string{"read_own_subscription_contracts"},
 		VersionField:   "updatedAt",
 		Fields: []FieldSpec{
-			{Name: "app", GraphQL: "app", Kind: "object", DSLType: "object", Extract: "app"},
-			{Name: "appAdminUrl", GraphQL: "appAdminUrl", Kind: "scalar", DSLType: "string", Extract: "appAdminUrl"},
-			{Name: "billingPolicy", GraphQL: "billingPolicy", Kind: "object", DSLType: "object", Extract: "billingPolicy"},
-			{Name: "currencyCode", GraphQL: "currencyCode", Kind: "scalar", DSLType: "string", Extract: "currencyCode"},
-			{Name: "customAttributes", GraphQL: "customAttributes", Kind: "objectList", DSLType: "[]object", Extract: "customAttributes"},
-			{Name: "customerGid", GraphQL: "customer", Kind: "gid", DSLType: "string", Extract: "customer.id"},
-			{Name: "customerPaymentMethodGid", GraphQL: "customerPaymentMethod", Kind: "gid", DSLType: "string", Extract: "customerPaymentMethod.id"},
-			{Name: "deliveryMethod", GraphQL: "deliveryMethod", Kind: "object", DSLType: "object", Extract: "deliveryMethod"},
-			{Name: "deliveryPolicy", GraphQL: "deliveryPolicy", Kind: "object", DSLType: "object", Extract: "deliveryPolicy"},
-			{Name: "deliveryPrice", GraphQL: "deliveryPrice", Kind: "object", DSLType: "object", Extract: "deliveryPrice"},
-			{Name: "lastBillingAttemptErrorType", GraphQL: "lastBillingAttemptErrorType", Kind: "enum", DSLType: "enum(\"PAYMENT_ERROR\", \"CUSTOMER_ERROR\", \"INVENTORY_ERROR\", \"OTHER\")", Extract: "lastBillingAttemptErrorType"},
-			{Name: "lastPaymentStatus", GraphQL: "lastPaymentStatus", Kind: "enum", DSLType: "enum(\"SUCCEEDED\", \"FAILED\")", Extract: "lastPaymentStatus"},
-			{Name: "linesCount", GraphQL: "linesCount", Kind: "object", DSLType: "object", Extract: "linesCount"},
-			{Name: "nextBillingDate", GraphQL: "nextBillingDate", Kind: "scalar", DSLType: "string", Extract: "nextBillingDate"},
-			{Name: "note", GraphQL: "note", Kind: "scalar", DSLType: "string", Extract: "note"},
-			{Name: "originOrderGid", GraphQL: "originOrder", Kind: "gid", DSLType: "string", Extract: "originOrder.id"},
-			{Name: "revisionId", GraphQL: "revisionId", Kind: "scalar", DSLType: "string", Extract: "revisionId"},
-			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt"},
-			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"ACTIVE\", \"PAUSED\", \"CANCELLED\", \"EXPIRED\", \"FAILED\")", Extract: "status"},
+			{Name: "app", GraphQL: "app", Kind: "object", DSLType: "object", Extract: "app", AdminType: "App", GidsInside: []string{"Channel"}},
+			{Name: "appAdminUrl", GraphQL: "appAdminUrl", Kind: "scalar", DSLType: "string", Extract: "appAdminUrl", AdminType: "URL"},
+			{Name: "billingPolicy", GraphQL: "billingPolicy", Kind: "object", DSLType: "object", Extract: "billingPolicy", AdminType: "SubscriptionBillingPolicy"},
+			{Name: "currencyCode", GraphQL: "currencyCode", Kind: "scalar", DSLType: "string", Extract: "currencyCode", AdminType: "CurrencyCode"},
+			{Name: "customAttributes", GraphQL: "customAttributes", Kind: "objectList", DSLType: "[]object", Extract: "customAttributes", AdminType: "Attribute"},
+			{Name: "customerGid", GraphQL: "customer", Kind: "gid", DSLType: "string", Extract: "customer.id", AdminType: "Customer"},
+			{Name: "customerPaymentMethodGid", GraphQL: "customerPaymentMethod", Kind: "gid", DSLType: "string", Extract: "customerPaymentMethod.id", AdminType: "CustomerPaymentMethod"},
+			{Name: "deliveryMethod", GraphQL: "deliveryMethod", Kind: "object", DSLType: "object", Extract: "deliveryMethod", AdminType: "SubscriptionDeliveryMethod"},
+			{Name: "deliveryPolicy", GraphQL: "deliveryPolicy", Kind: "object", DSLType: "object", Extract: "deliveryPolicy", AdminType: "SubscriptionDeliveryPolicy"},
+			{Name: "deliveryPrice", GraphQL: "deliveryPrice", Kind: "object", DSLType: "object", Extract: "deliveryPrice", AdminType: "MoneyV2"},
+			{Name: "lastBillingAttemptErrorType", GraphQL: "lastBillingAttemptErrorType", Kind: "enum", DSLType: "enum(\"PAYMENT_ERROR\", \"CUSTOMER_ERROR\", \"INVENTORY_ERROR\", \"OTHER\")", Extract: "lastBillingAttemptErrorType", AdminType: "SubscriptionContractLastBillingErrorType"},
+			{Name: "lastPaymentStatus", GraphQL: "lastPaymentStatus", Kind: "enum", DSLType: "enum(\"SUCCEEDED\", \"FAILED\")", Extract: "lastPaymentStatus", AdminType: "SubscriptionContractLastPaymentStatus"},
+			{Name: "linesCount", GraphQL: "linesCount", Kind: "object", DSLType: "object", Extract: "linesCount", AdminType: "Count"},
+			{Name: "nextBillingDate", GraphQL: "nextBillingDate", Kind: "scalar", DSLType: "string", Extract: "nextBillingDate", AdminType: "DateTime"},
+			{Name: "note", GraphQL: "note", Kind: "scalar", DSLType: "string", Extract: "note", AdminType: "String"},
+			{Name: "originOrderGid", GraphQL: "originOrder", Kind: "gid", DSLType: "string", Extract: "originOrder.id", AdminType: "Order"},
+			{Name: "revisionId", GraphQL: "revisionId", Kind: "scalar", DSLType: "string", Extract: "revisionId", AdminType: "UnsignedInt64"},
+			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
+			{Name: "status", GraphQL: "status", Kind: "enum", DSLType: "enum(\"ACTIVE\", \"PAUSED\", \"CANCELLED\", \"EXPIRED\", \"FAILED\")", Extract: "status", AdminType: "SubscriptionContractSubscriptionStatus"},
 		},
 		FetchOp: "ShopifyFetchSubscriptionContract",
 		ListOp:  "ShopifyListSubscriptionContract",
@@ -7184,6 +7714,7 @@ query ShopifyFetchSubscriptionContract($id: ID!) {
     __typename
     ... on SubscriptionContract {
       id
+      updatedAt
       app { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
       appAdminUrl
       billingPolicy { anchors { cutoffDay day month type } interval intervalCount maxCycles minCycles }
@@ -7212,6 +7743,7 @@ query ShopifyListSubscriptionContract($first: Int!, $after: String, $query: Stri
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       app { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
       appAdminUrl
       billingPolicy { anchors { cutoffDay day month type } interval intervalCount maxCycles minCycles }
@@ -7246,6 +7778,7 @@ query ShopifyBulkSubscriptionContract($query: String) {
     edges {
       node {
         id
+        updatedAt
         app { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
         appAdminUrl
         billingPolicy { anchors { cutoffDay day month type } interval intervalCount maxCycles minCycles }
@@ -7289,14 +7822,14 @@ query ShopifyBulkSubscriptionContract($query: String) {
 		Scopes:         []string{"read_orders"},
 		VersionField:   "",
 		Fields: []FieldSpec{
-			{Name: "amount", GraphQL: "amount", Kind: "object", DSLType: "object", Extract: "amount"},
-			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id"},
-			{Name: "paymentMethod", GraphQL: "paymentMethod", Kind: "scalar", DSLType: "string", Extract: "paymentMethod"},
-			{Name: "processedAt", GraphQL: "processedAt", Kind: "scalar", DSLType: "string", Extract: "processedAt"},
-			{Name: "remoteReference", GraphQL: "remoteReference", Kind: "scalar", DSLType: "string", Extract: "remoteReference"},
-			{Name: "test", GraphQL: "test", Kind: "scalar", DSLType: "bool", Extract: "test"},
-			{Name: "transactionDetails", GraphQL: "transactionDetails", Kind: "object", DSLType: "object", Extract: "transactionDetails"},
-			{Name: "userGid", GraphQL: "user", Kind: "gid", DSLType: "string", Extract: "user.id"},
+			{Name: "amount", GraphQL: "amount", Kind: "object", DSLType: "object", Extract: "amount", AdminType: "MoneyV2"},
+			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id", AdminType: "Order"},
+			{Name: "paymentMethod", GraphQL: "paymentMethod", Kind: "scalar", DSLType: "string", Extract: "paymentMethod", AdminType: "String"},
+			{Name: "processedAt", GraphQL: "processedAt", Kind: "scalar", DSLType: "string", Extract: "processedAt", AdminType: "DateTime"},
+			{Name: "remoteReference", GraphQL: "remoteReference", Kind: "scalar", DSLType: "string", Extract: "remoteReference", AdminType: "String"},
+			{Name: "test", GraphQL: "test", Kind: "scalar", DSLType: "bool", Extract: "test", AdminType: "Boolean"},
+			{Name: "transactionDetails", GraphQL: "transactionDetails", Kind: "object", DSLType: "object", Extract: "transactionDetails", AdminType: "TenderTransactionDetails"},
+			{Name: "userGid", GraphQL: "user", Kind: "gid", DSLType: "string", Extract: "user.id", AdminType: "StaffMember"},
 		},
 		FetchOp: "ShopifyFetchTenderTransaction",
 		ListOp:  "ShopifyListTenderTransaction",
@@ -7383,8 +7916,8 @@ query ShopifyBulkTenderTransaction($query: String) {
 		Scopes:         []string{"read_online_store_pages"},
 		VersionField:   "",
 		Fields: []FieldSpec{
-			{Name: "path", GraphQL: "path", Kind: "scalar", DSLType: "string", Extract: "path"},
-			{Name: "target", GraphQL: "target", Kind: "scalar", DSLType: "string", Extract: "target"},
+			{Name: "path", GraphQL: "path", Kind: "scalar", DSLType: "string", Extract: "path", AdminType: "String"},
+			{Name: "target", GraphQL: "target", Kind: "scalar", DSLType: "string", Extract: "target", AdminType: "String"},
 		},
 		FetchOp: "ShopifyFetchUrlRedirect",
 		ListOp:  "ShopifyListUrlRedirect",

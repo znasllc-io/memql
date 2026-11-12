@@ -16,10 +16,20 @@
 //
 // The encryptedValue + fingerprint are produced by
 // component/secret.Encrypt before this mutation is called.
+//
+// WHO MAY CALL IT is the concept's to say, not this mutation's:
+// v1:platform:globalSecret declares @rowAuthz(clusterOwner), and the engine
+// judges every write to it at the write seam -- this mutation and the raw
+// insert literal alike, on a fresh id or over a stored row. A cluster owner
+// (the operator credential's stream is one) and server code stamping internal
+// origin for the write are admitted; anyone else is refused. It carries no
+// @serverOnly because the operator CLI calls it by name over the wire, and no
+// @requiresRank because a floor here would be a second place for the tier's
+// rule to drift (create_rank_floor.go).
 
 /// Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The
 /// encryptedValue and fingerprint are produced by the backend secret helper; this mutation only
-/// stores them.
+/// stores them. Cluster owner only: the concept's row tier judges the write.
 mutation globalSecret setGlobalSecret {
   args {
     id              string!
@@ -47,8 +57,20 @@ mutation globalSecret setGlobalSecret {
 // Upserts an instance-wide (global) plaintext variable in
 // v1:platform:globalVariable. Used by seed files and
 // `make variable-set SCOPE=global` to populate instance defaults.
+//
+// WHO MAY CALL IT is the engine's to say, for this mutation and for the raw
+// insert literal alike (component/memql platform_variable_write_guard.go): a
+// cluster owner -- the operator credential's stream is one -- or server code
+// that has authorized its caller and stamps internal origin for the write.
+// A settings surface for anyone else goes through a capability that derives
+// the row's name itself (integrationConfigure, providerFederationSet,
+// pipelinesAISettingsSave, pipelinesSecuritySettingsSave). It carries no
+// @serverOnly because the operator CLI calls it by name over the wire, and no
+// @requiresRank or @requiresCapability because a gate declared here would be
+// judged for this one call and never for the raw literal.
 
 /// Persist an instance-wide (global) plaintext variable row in v1:platform:globalVariable.
+/// Cluster owner, or server code stamped for the write: the engine judges the write itself.
 mutation globalVariable setGlobalVariable {
   args {
     id           string!
@@ -78,10 +100,13 @@ mutation globalVariable setGlobalVariable {
 //
 // Deterministic id means re-submitting rotates the value; the prior
 // ciphertext remains in the time-series history under the same id.
+//
+// Who may call it is the concept's to say, exactly as for setGlobalSecret
+// above: v1:platform:partitionSecret declares @rowAuthz(clusterOwner).
 
 /// Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The
 /// encryptedValue and fingerprint are produced by the backend secret helper; this mutation only
-/// stores them.
+/// stores them. Cluster owner only: the concept's row tier judges the write.
 mutation partitionSecret setPartitionSecret {
   args {
     id              string!
@@ -110,8 +135,13 @@ mutation partitionSecret setPartitionSecret {
 // v1:platform:partitionVariable. Companion to setPartitionSecret
 // for non-sensitive values. Used by `make variable-set SCOPE=partition`
 // and by automations that write per-tenant config.
+//
+// Who may call it is the engine's to say, exactly as for setGlobalVariable
+// above: a cluster owner (an automation of the registered tree writes as the
+// deployment), or server code stamped for the write.
 
 /// Persist a partition-scoped plaintext variable row in v1:platform:partitionVariable.
+/// Cluster owner, or server code stamped for the write: the engine judges the write itself.
 mutation partitionVariable setPartitionVariable {
   args {
     id           string!
@@ -442,7 +472,14 @@ mutation outboundRequest updateOutboundRequestStatus {
 /// the way to a connector's privacy purge, so the writer must be the receiver (or the NDR poller),
 /// each staging under internal origin, and never a client choosing a source name and a topic
 /// header. Only the wire bar expresses that.
-@createOnly("status", "headersJson", "receivedAt", "verifiedBy")
+///
+/// THE BODY IS KEPT TOO. A redelivery lands on this row only when it carries the same signed
+/// payload, so its body is the stored body by definition and writing it again changes nothing --
+/// except on a row whose body was blanked since: a privacy erasure empties the body of a delivery
+/// that has been processed, and a redelivery that wrote it back would put a person's name and
+/// address into a row nothing looks at again. So `body` is one of the fields a later write of the
+/// same delivery does not replace.
+@createOnly("status", "headersJson", "receivedAt", "verifiedBy", "body")
 @serverOnly
 mutation inboundRequest stageInboundRequest {
   args {
@@ -496,19 +533,46 @@ mutation inboundRequest stageInboundRequest {
 /// owner to scope to, and the writers -- the datasync dispatcher, campaigns' feedback ingester and a
 /// product automation's trusted step -- act for no user. What must hold is that the row's handling
 /// state is written by whatever WORKED it, never by a client choosing a status.
+///
+/// attempts and nextAttemptAt are the datasync dispatcher's try count and next try (store mirror,
+/// U4). Every argument is optional beside the status, and one left out keeps its stored value, so a
+/// writer that stamps only a status cannot reset a try count another writer recorded.
 @serverOnly
 mutation inboundRequest updateInboundRequestStatus {
   args {
-    requestId    string!
-    status       string!
-    lastError    string
-    processedAt  string
+    requestId      string!
+    status         string!
+    lastError      string
+    processedAt    string
+    attempts       int
+    nextAttemptAt  datetime
   }
   update {
-    accept { status, lastError, processedAt }
+    accept { status, lastError, processedAt, attempts, nextAttemptAt }
     stamp {
       id: args.requestId
     }
+  }
+}
+
+/// Put one delivery back in line (store mirror, U4): its tries start again from none and the retry
+/// pass may take it at nextAttemptAt. Called by datasyncRequeueInbound for the given-up rows
+/// inboundRequestsGivenUp answers, and by datasyncReturnHeldInbound for the held rows
+/// inboundRequestsHeld answers; the status stays failed, which is what the retry pass reads.
+///
+/// @serverOnly rather than actor.userId scoping, for updateInboundRequestStatus's reason: a staged
+/// delivery has no owner to scope to, and the one writer is the datasync runtime under its operator
+/// identity, behind the two builtins' cluster-owner gate. A client never works a delivery.
+@serverOnly
+mutation inboundRequest requeueInboundRequest {
+  args {
+    requestId      string!
+    nextAttemptAt  datetime!
+  }
+  update {
+    id:             args.requestId
+    attempts:       0
+    nextAttemptAt:  args.nextAttemptAt
   }
 }
 
@@ -2140,8 +2204,8 @@ mutation outboxEntry discardOutboxEntry {
   }
 }
 
-/// Write one domain's health. Deterministic id per (concept, connector, direction), so this is an
-/// append onto the same timeline every time. actor.userId scoping does not apply: the writer is the
+/// Write one domain's health. Deterministic id per (concept, connector, direction) and partition, so
+/// this is an append onto the same timeline every time. actor.userId scoping does not apply: the writer is the
 /// sync runtime, acting for no user.
 @serverOnly
 mutation syncState upsertSyncState {
@@ -2150,6 +2214,7 @@ mutation syncState upsertSyncState {
     conceptId        string!
     connector        string!
     direction        string!
+    partitionKey     string
     backfillCursor   string
     backfillStatus   string
     lastInboundAt    datetime
@@ -2163,7 +2228,7 @@ mutation syncState upsertSyncState {
     lastError        string
   }
   insert {
-    accept { conceptId, connector, direction, lastInboundAt, lastReconcileAt, lastAttemptAt }
+    accept { conceptId, connector, direction, partitionKey, lastInboundAt, lastReconcileAt, lastAttemptAt }
     stamp {
       id:               args.stateId
       backfillCursor:   args.backfillCursor ?? ""
@@ -2174,6 +2239,38 @@ mutation syncState upsertSyncState {
       deadLetterCount:  args.deadLetterCount ?? 0
       paused:           args.paused ?? false
       lastError:        args.lastError ?? ""
+    }
+  }
+}
+
+/// Write the fields of one domain's health that ONE writer owns, onto a row that exists. Each
+/// writer -- the backfill runner, the sweep, the queue, the inbound dispatcher, the pause switch --
+/// names only its own fields, and the read-merge keeps every field the write omits: an omitted arg
+/// is left out of the delta, never defaulted, which is what upsertSyncState's stamps would do.
+/// The runtime guards each write with a row-version fence on the version it read, so a write
+/// decided on a read another writer has since overtaken is refused and decided again.
+///
+/// @serverOnly, and actor.userId scoping is not the fix, for upsertSyncState's reason: a
+/// sync-health row belongs to the DEPLOYMENT, not to a user, so there is no owner field to compare
+/// an actor against. Only the sync runtime writes it, under its own operator identity.
+@serverOnly
+mutation syncState patchSyncState {
+  args {
+    stateId          string!
+    backfillCursor   string
+    backfillStatus   string
+    lastInboundAt    datetime
+    lagSeconds       int
+    lastReconcileAt  datetime
+    lastAttemptAt    datetime
+    driftCount       int
+    paused           bool
+    lastError        string
+  }
+  update {
+    accept { backfillCursor, backfillStatus, lastInboundAt, lagSeconds, lastReconcileAt, lastAttemptAt, driftCount, paused, lastError }
+    stamp {
+      id:  args.stateId
     }
   }
 }
@@ -2873,6 +2970,12 @@ mutation site setSiteStatus {
 // the fetcher's own account of a fetch. revokeSourceCredential is the PERSON's:
 // an owned, client-reachable status flip the write guard admits for the row's
 // owner and refuses for everyone else.
+//
+// @serverOnly decides who may CALL the engine's writers. What a write may put
+// on the row, whichever construct or literal it arrives through, is held at the
+// write itself (component/memql platform_source_credential_write_guard.go):
+// without internal origin a row is not created and nothing but its revocation
+// changes.
 
 /// Land a sealed credential. @serverOnly, and caller-scoping is not the fix: the row IS the caller's
 /// (ownerUserId is stamped from actor.userId below), so a scoped form would admit exactly the call

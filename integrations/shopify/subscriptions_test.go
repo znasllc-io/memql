@@ -324,16 +324,17 @@ func createdTopics(h *testHarness) map[string]bool {
 }
 
 // THE GRANT DECIDES WHAT IS ASKED FOR (memql#5638, G3). A store connected
-// through Connect Shopify holds the managed scopes and nothing else, and 97 of
-// the generated topics route to concepts none of those scopes reads -- the
-// customer topics under read_customers, fulfillment orders, returns, discounts.
+// through Connect Shopify before the commerce set holds the old managed scopes
+// and nothing else, and 97 of the generated topics route to concepts none of
+// those scopes reads -- the customer topics under read_customers, fulfillment
+// orders, returns, discounts.
 // Shopify refuses each such creation, the refusal lands on the store's
 // subscription health, and the daily reconcile asks again. The rule is
 // reconciliation's own (scopesMissingFor): a topic is asked for when the grant
 // holds ANY scope its concept reads under.
 func TestEnsureSubscriptionsAsksOnlyForTopicsTheGrantCovers(t *testing.T) {
 	h := newHarness(t)
-	withScopes(t, h, managedConnectScopes()...)
+	withScopes(t, h, oldManagedList...)
 	h.admin.reply("ShopifyWebhookSubscriptions", webhookList(
 		// One of ours, created under a wider grant this store no longer holds.
 		subscription("gid://shopify/WebhookSubscription/5", "CUSTOMERS_UPDATE", testCallback, generated.APIVersion, includeFields),

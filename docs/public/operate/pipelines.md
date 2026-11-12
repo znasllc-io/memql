@@ -137,6 +137,16 @@ start, not when the run opens: a change applies to the next review or failure,
 and a review already in flight is never refused for a policy change, because
 the switch is not part of the run's captured policy.
 
+**Who:** a holder of `execute` on `app:pipelines/settings`, which the owner and
+developer roles hold. The page saves both switches through
+`pipelinesAISettingsSave`, and the engine writes the variable's row: its name,
+the row a save updates and the stored JSON are derived there, so a save never
+adds a second row under the same name. A configuration variable is written by
+a cluster owner or by the engine for a caller it has authorized
+([who writes a variable row](env-vars.md#who-reads-and-writes-a-variable-row)),
+so a cluster owner can also set the variable directly, and anyone else's own
+`setGlobalVariable` is refused.
+
 A switch is an owner gate on top of the installed policy, not a replacement for
 it. With review on, a pipeline whose policy names no reviewer still has none;
 with diagnosis on, the maintenance policy still decides whether a failure gets
@@ -1068,6 +1078,13 @@ new finding goals. Already running scanners and existing goals are not
 cancelled. A manual run also respects the switch. Enabling does not add steps
 to a weekly run already opened that week; start a manual run or wait for the
 next weekly period.
+
+The switch is saved through `pipelinesSecuritySettingsSave`, by a holder of
+`execute` on `app:pipelines/settings` (the owner and developer roles), for the
+reason the [AI switches](#ai-review-and-failure-diagnosis-are-off-until-you-turn-them-on)
+are saved through theirs. If more than one active row carries the variable's
+name, the engine reads the setting as off and the save refuses until one row
+is left: updating one would leave the other deciding.
 
 Set `pipeline.schedule` to `daily` or `weekly` and opt each audit stage in with
 `on: [schedule]`. A stage may override the pipeline cadence with its own
