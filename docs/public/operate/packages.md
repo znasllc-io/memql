@@ -76,14 +76,14 @@ manifest names rather than the row id because a row id is a fact about one
 cluster's database, while the myshopify.com domain is the same identifier
 everywhere and one an operator can check by eye.
 
-A store is attached on the deployable's Store panel. A manifest naming a store
+A store is attached on the deployable's Store page. A manifest naming a store
 the deployer may not attach -- one this cluster does not have, one they may not
 read, or one they may read without holding the store part -- does not refuse
 the deploy. A first deploy places the storefront as a **draft with no store**,
 and the run records a non-fatal `deployable_store_unknown` note saying so; a
 redeploy of a storefront that is already bound keeps the store it has. An
 unattached storefront can go live for design review. Shopping requires a store
-connected on its Store panel. Once a later deploy can attach the manifest's
+connected on its Store page. Once a later deploy can attach the manifest's
 store, it re-points the storefront to it.
 
 Two halves, and the asymmetry is deliberate:

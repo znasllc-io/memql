@@ -317,8 +317,12 @@ who did it. Details are in [Pausing a store](#pausing-a-store).
 **Who may call the store's builtins.** Each one that names a store asks who is
 calling before it reads anything but the store row, and before it asks
 Shopify. A store that exists and one that does not answer a refused caller
-alike. A caller who is not a cluster owner and names no store is given the one
-store they own, and otherwise refused.
+alike. A person names the store (`storeId`) for the verdict, its acts and the
+wholesale builtins, and is refused with "shopify: <builtin> needs a storeId"
+without one. The mirror reads, `shopifyql` and `storefrontProbe` may leave it
+out: a cluster owner then gets the cluster's only store, and anybody else the
+one store they own -- refused when they own none, and asked to name one when
+they own several.
 
 | Builtin | Who |
 |---|---|
@@ -330,11 +334,14 @@ store they own, and otherwise refused.
 | `shopifyStoreHealth` | answers every store for a cluster owner or a caller who may read store rows, their own store for a store's owner, and an empty list -- not a refusal -- for anybody else |
 | `shopifyEnsureSubscriptions`, `shopifyRunComplianceJobs` | their scheduled automations, or a cluster owner running them by hand |
 | `shopifyStoreAlertWaitSet` | cluster owner |
-| `datasyncStartBackfill`, `datasyncSetSyncPaused`, `datasyncRequeueInbound`, `datasyncRetryOutboxEntry`, `datasyncDiscardOutboxEntry` (the acts of [Cluster > Data](#cluster--data)) | cluster owner, or the engine itself; anybody else is refused with "datasync: <name> is for a cluster owner" |
+| `shopifyProvisionWholesale`, `shopifyRevokeWholesale`, `shopifyTagWholesaleCustomer`, `shopifyUntagWholesaleCustomer`, `shopifyWholesaleCatalogHeadroom` (the wholesale pack's calls) | the store's owner, cluster owner, or a step of a registered automation; anybody else is refused with "shopify: <builtin> is for the store's owner or a cluster owner" before Shopify is asked. A wholesale application approved by somebody who is neither keeps its entitlement `pending`, with that sentence as its error. |
+| `datasyncStartBackfill`, `datasyncSetSyncPaused`, `datasyncRequeueInbound`, `datasyncRetryOutboxEntry`, `datasyncDiscardOutboxEntry` (the acts of [Cluster > Data](#cluster--data)), and `datasyncReturnHeldInbound` | cluster owner, or the engine itself; anybody else is refused with "datasync: <name> is for a cluster owner" |
 
 `shopifyStoreRetryDeliveries` -- the Store page's "Try again" -- puts the
 store's given-up deliveries back in line by making that requeue itself, as
 the engine, so it works for the store's owner who is not a cluster owner.
+Resuming a store calls `datasyncReturnHeldInbound` the same way
+([Pausing a store](#pausing-a-store)).
 
 Below developer a store read answers **zero rows, not an error**: the binding
 guard and the deploy path read "not readable" off an empty result. The read
@@ -407,12 +414,19 @@ would do it only on the nodes carrying the variable.
 ### The development store
 
 A storefront is exercised against a **development store** before it serves
-shoppers. It is attached exactly like any other store -- a second
+shoppers. It is connected exactly like any other store -- a second
 `v1:shopify:store` row -- and mirrored like any other, so an order placed
 against it lands in the mirror under that store's own `storeId` and is already
-excluded from every read scoped to the live one. Two fields say what it is:
-`isDevelopment`, and `developmentOfStoreId` naming the live store it stands in
-for. Attach it from the same panel, under Development store.
+excluded from every read scoped to the live one.
+
+Connect it in Settings with "Add Shopify store", as in
+[Step 3](#step-3----attach-the-store-to-its-storefront). Connect Shopify asks
+Shopify for the store's plan and records a development store as one
+(`isDevelopment`); nobody marks it by hand. On the storefront's Store page,
+choose it for the **Testing** row: the list of stores calls it "Sandbox
+store", and the Store slot adds "Sandbox". The Store page does not record
+which live store it stands in for; `developmentOfStoreId` is set only by a
+cluster owner through `updateStore`.
 
 It is not a store this program provisions, and specifically not a Shopify store
 created with generated test data -- such a store cannot be transferred to a
@@ -475,16 +489,24 @@ past to arrive. A domain's backfill is QUEUED:
   data declaration made since).
 
 The `continueQueuedBackfills` automation then carries every queued or running
-backfill on by one page budget **every five minutes**. It takes at most one
-domain per store at a time, so a store runs one backfill at a time, and it
-leaves a paused domain alone. While any of them is queued or running, the
-store's Store page reads "Starting".
+backfill on. It starts **every five minutes** and works for up to **four
+minutes** in rounds: in each round every store with work left takes one step,
+and when a domain is done the store's next queued domain starts in the next
+round. A round in which every store only waited for Shopify to prepare an
+export is followed by a ten-second pause. A store still runs one backfill at a
+time, a store does not wait for another to finish, and a paused domain is left
+alone. A domain whose step failed is left for the rest of that pass. While any
+of a store's backfills is queued or running, its Store page reads "Starting":
+for a store with little in it, a few minutes; for a large history, as long as
+Shopify takes to prepare its exports and the passes to read them.
 
 **When an export fails.** A history download is an export Shopify prepares,
-and its link lasts a week. When the link has expired or the file is gone, the
-backfill starts that export again by itself, from its first line. An export
-Shopify reports as failed, cancelled or expired is started again the same way.
-Both count toward one limit: **two restarts per backfill**. The next failure
+and its link lasts a week. The link is never stored: the domain's row keeps
+the export and the line reached, and each step asks Shopify for the link
+again. When Shopify gives no link, refuses the download, or no longer knows
+the export, the backfill starts that export again by itself, from its first
+line. An export Shopify reports as failed, cancelled or expired is started
+again the same way. All count toward one limit: **two restarts per backfill**. The next failure
 after that leaves the backfill failed, and the Store page says "The last check
 of orders failed" (naming the domain), with the reason beneath it.
 
@@ -495,6 +517,15 @@ stopped. It is refused while that backfill is running. The same call is
 `datasyncStartBackfill(connector: "shopify", conceptId: "v1:shopify:order", partitionKey: "<storeId>")`,
 with `restart: true` to start from the start. While a restarted backfill
 runs, the Store page reads "Starting".
+
+Its reply's `outcome` says what became of it. `waiting` leaves the backfill
+queued for the continuing pass, and its detail says why: for a paused or
+uninstalled store, `store "<storeId>" does not ingest now, so its mirror waits
+for it`, and the pass carries it on once the store is recorded again.
+`abandoned` means the domain's row was queued again, or another backfill of it
+holds the row. A call whose progress could not be written fails with
+`datasync: the backfill's progress could not be recorded`, and the next pass
+continues from the last line that was recorded.
 
 **Where a store's orders begin.** Without `read_all_orders`, Shopify lists
 only a store's last 60 days of orders. When a connect or the boot pass queues
@@ -547,31 +578,31 @@ and dropped.
 - **A deletion Shopify does not announce** -- a notice about a record that
   Shopify, when asked, no longer has -- is believed only when Shopify answers
   nothing for it **twice in a row** for the same notice. The first empty
-  answer retires nothing: the delivery fails, to be asked again, on the
-  delivery retry's waits -- one minute after the first try, five after the
-  second, thirty after the third, so at most thirty minutes between two tries.
-  If the tries run out without two empty answers in a row, the delivery is
-  given up and the Store page says "1 change could not be recorded."; its
-  "Try again" asks again, and the count of empty answers starts again.
+  answer retires nothing: the delivery fails with `connector: the origin
+  answered nothing for this record; it is asked once more before that answer
+  is believed`, to be asked again on the delivery retry's waits -- one minute
+  after the first try, five after the second, thirty after the third, so at
+  most thirty minutes between two tries. If the tries run out without two
+  empty answers in a row, the delivery is given up and the Store page says "1
+  change could not be recorded."; its "Try again" asks again, and the count of
+  empty answers starts again.
+- **Order data is never retired by an empty answer on a store without
+  `read_all_orders`** -- every store connected through the shared app. That
+  is an order and everything read with it: its lines, transactions, refunds,
+  fulfilments, returns, reverse fulfilment orders and their deliveries, and
+  abandoned checkouts and payments. Shopify hides such a record from the app
+  once it is older than sixty days and answers nothing for it, so an empty
+  answer writes nothing and is not asked again. Only its delete notice retires
+  it ([What the mirror cannot do](#what-the-mirror-cannot-do)).
+- **A record the mirror does not hold yet** is asked once more too: a notice
+  can arrive before its record is readable. The second empty answer writes
+  nothing, and the record arrives with the next read that finds it.
+- **A record the mirror already holds as deleted** is left as it is: an empty
+  answer for it writes nothing and is not asked again.
 - **Nothing else retires a record.** An answer with any error, a refusal of
   protected customer data, and a partial answer (Shopify refused part of what
-  was asked, and what is left has no record) are not deletions. An empty
-  answer for a record the mirror does not hold yet writes nothing; the record
-  arrives with the next read that finds it.
+  was asked, and what is left has no record) are not deletions.
 - **A record wrongly seen as gone** comes back on the next read that finds it.
-
-**After upgrading to this version**, each store's domains are read once more
-from the start, because a history read under the earlier version may have put
-an older snapshot over a newer change. At boot, every domain of a store being
-recorded whose backfill completed under the earlier version is queued again.
-A backfill an earlier version left running does not finish first: at its next
-step it begins again from the start. Each store reads "Starting" while this runs, then "Recording" again. The
-first periodic check that reads a record written under the earlier version
-rewrites it once, to add its `versionSource`, so `driftLast` can read high for
-that one pass. It happens
-once: a backfill completed under this version is never queued again for it. A
-store that is paused at that boot is read again at the first boot after it is
-resumed.
 
 **A failed delivery is tried again.** A delivery the connector could not work
 -- the Admin API did not answer, the write failed -- gets **four tries at
@@ -584,27 +615,45 @@ and from then on it no longer counts against the store. Until then the Store
 page says "3 changes could not be recorded." (or "1 change could not be
 recorded."), and its act, "Try again", puts every given-up delivery of that
 store back in line, with its tries counted from none. The retry pass runs
-every minute, so they are tried within a minute. The full rules are in
+every minute, so they are tried within a minute. A delivery of a paused store
+is *held* instead, and a delivery that arrived while the connector could not
+read its list of stores fails with `shopify: could not tell which store a
+delivery on source "..." belongs to; it is tried again` and is tried again
+like any other. The full rules are in
 [Inbound delivery](inbound-delivery.md#when-a-connectors-try-fails).
 
 **Reconciliation.** Every ten minutes the runtime sweeps the domains whose
-own interval has elapsed. Domains whose root connection accepts a `query:`
-filter are paged by `updated_at:>`; the rest -- gift cards, price lists and
-catalogs, menus, pages, blogs, articles, policies, marketing, payouts,
-redirects, carrier services, store credit -- are re-listed whole on their own
-cadence and rows the origin no longer returns are tombstoned. Metaobjects
-and metafield definitions are not swept at all: `metaobjects(type:)` and
-`metafieldDefinitions(ownerType:)` each require an argument a generic
-listing cannot supply, so those two domains are kept current by their
-webhooks alone (listing them per type / per owner type is future work).
+own interval has elapsed; a sweep that is still running when the next is due
+is not overlapped. Orders, customers, products, product variants,
+collections, companies, company locations, locations, inventory items, draft
+orders and subscription contracts are paged by `updated_at:>`, the time each
+last changed. The other swept kinds -- among them discounts, abandoned
+checkouts, payments, customer segments, gift cards, price lists and catalogs,
+markets, menus, pages, blogs and articles, themes, publications, redirects,
+carrier and delivery settings, inventory transfers and shipments, disputes,
+staff and marketing -- are re-listed whole on their own cadence and rows the
+origin no longer returns are tombstoned. A kind read with its parent, such as
+an order's lines, refunds, fulfilments and returns, is not swept on its own.
+Metaobjects and metafield definitions are not swept at all:
+`metaobjects(type:)` and `metafieldDefinitions(ownerType:)` each require an
+argument a generic listing cannot supply, so those two domains are kept
+current by their webhooks alone (listing them per type / per owner type is
+future work).
+
+A sweep in which a row could not be written is not a clean sweep: the rest of
+the pass still runs, the domain's last error reads `shopify: 1 row read from
+the store could not be written to the mirror; the next check reads it again`
+(or "N rows ... reads them again"), and the next sweep starts from where this
+one did.
 
 A full re-list that hits its page cap tombstones **nothing**. Tombstoning is
 an argument from absence, and the argument is only valid if the walk was
 complete.
 
 So a record is marked deleted three ways: by a delete notice; by a notice
-whose record Shopify answers nothing for twice in a row (see "How a deletion
-is believed", above); and by a complete full re-list that no longer lists it
+whose record Shopify answers nothing for twice in a row, except order data on
+a store without `read_all_orders` (see "How a deletion is believed", above);
+and by a complete full re-list that no longer lists it
 -- never from a partial listing such as an `updated_at:>` page. A record read
 after the re-list began is not marked deleted by it.
 When the mirror holds more of a domain than one pass reads back, its oldest
@@ -749,6 +798,14 @@ Shopify. An hourly automation runs the ones whose hold has elapsed.
   is served as unavailable, like an uninstalled one, until a verified
   reinstall clears it (see [app/uninstalled](#appuninstalled)).
 
+A redaction or a purge that runs while one of the store's history downloads
+is queued or under way starts that download again from nothing, so an export
+taken before the erasure is never applied after it. The job's outcome then
+ends "; started N backfill(s) again from nothing". When a download cannot be
+started again the job fails with "shopify: ... but a backfill in flight could
+not be started again, so an export begun before the erasure may still be
+applied", after the erasure itself has run.
+
 Redaction is the **one write to a mirror that is not an apply**. Everything
 else converges the mirror onto what the origin says; redaction deliberately
 makes it differ, by rewriting rows the origin has already forgotten. It runs
@@ -876,6 +933,42 @@ discovered on launch day.
 
 ---
 
+## What the mirror cannot do
+
+These are limits of this connector, as it is built today.
+
+- **An order older than sixty days, without `read_all_orders`.** Shopify
+  hides it from the app, so the mirror keeps it as last recorded and does not
+  follow a later refund, edit or cancellation of it. Its delete notice still
+  retires it. Every store connected through the shared app is in this case.
+- **An abandoned checkout Shopify expires** is kept the same way, as last
+  recorded, for the same reason.
+- **A lost delete notice** is not found by the periodic check of a kind that
+  is checked by the time each record last changed: orders, customers,
+  products, product variants, collections, companies, company locations,
+  locations, inventory items, draft orders and subscription contracts. A
+  deletion changes no such time. The re-listed kinds
+  ([Reconciliation](#step-4----what-happens-next)) find it at their next full
+  re-list, except those whose listing is not the whole set.
+- **A delivery being dispatched in the instant a node stopped** is not
+  dispatched again. The next periodic check of its kind reads the record's
+  present state, and a deletion delivered in that instant is not applied.
+- **After a long pause** the held deliveries are worked fifty a minute, so
+  ten thousand take over three hours. The first periodic check after the
+  resume brings the changed records of a kind current sooner.
+- **A record the mirror cannot write** holds its kind's check back: the kind
+  reads "The last check of ... failed" and the store Needs attention until the
+  record can be written.
+- **A periodic check that reaches its row budget** (20,000 rows) is recorded
+  as run. Shopify does not list records in the order they changed, so the
+  check cannot tell which changes it did not reach, and a record it did not
+  reach is read again only when it next changes.
+- **A store connected with its own app** that grants less than the full list
+  of [Step 2](#step-2----create-the-app) reads Needs attention for as long as
+  it does.
+
+---
+
 ## The wholesale foundation
 
 `dsl/commerce/` carries what Shopify does not model. Since 2026-04-02
@@ -905,7 +998,7 @@ boundary.
 
 ## Operating it
 
-### The storefront's Store panel
+### The storefront's Store page
 
 MemQL OS → Deployables → the storefront → **Store**. The page answers one
 question for each store bound to the storefront: **is this store being
@@ -921,7 +1014,7 @@ of it; the page draws what it is given. What the page shows besides is in
 | `not connected` | Uninstalled, or Data removed ("Not connected" while the store's own row does not say which) | Shopify reported the app uninstalled from the store, or removed the store's data. |
 | `paused` | Paused | Somebody paused recording for the store ([Pausing a store](#pausing-a-store)). |
 | `needs attention` | Needs attention | At least one of the reasons below holds. |
-| `starting` | Starting | A backfill of a domain in the store's connection is queued or running, or a domain has never been checked. |
+| `starting` | Starting | A backfill of a domain in the store's connection is queued or running, or a domain has never been checked. A domain somebody paused in Cluster > Data does not count. |
 | `recording` | Recording | None of the above: every domain in the connection has been checked, and no reason holds. |
 
 A paused or not-connected store carries no reasons: nothing it would say is
@@ -937,7 +1030,7 @@ both destinations shows each reason once. A domain is named in plain words
 | Reason | The sentence | Beneath it | The act |
 |---|---|---|---|
 | `data_not_declared` | "Shopify refuses orders for this app, because the app has not declared the customer data it uses." -- naming every refused domain, as in "orders and customers" | -- | "Declare the customer data": a link to Shopify's page on protected customer data. The steps are [The data declaration](#the-data-declaration). |
-| `approval_outdated` | "This store approved an older list of permissions." | The scopes the store's grant lacks. | "Open MemQL OS from the store's Shopify admin and approve": a link to the store's apps page in its Shopify admin ([When the list grows](#when-the-list-grows)). |
+| `approval_outdated` | "This store approved an older list of permissions." -- or, for a store connected with its own app, "This store's own app does not allow everything MemQL records." | The scopes the store's grant lacks. | "Open MemQL OS from the store's Shopify admin and approve": a link to the store's apps page in its Shopify admin ([When the list grows](#when-the-list-grows)). None for a store on its own app: MemQL cannot widen that app's permissions, and the store reads Needs attention until they cover the list. |
 | `grant_lost` | "MemQL can no longer reach this store." | The error the store's last check recorded. | "Reconnect in Settings", which opens the Shopify connections. |
 | `events_not_registered` | "Shopify is not sending every change." | The subscriptions that failed, or "The last registration left 20 of the 24 subscriptions it wanted." | "Register again": the store's subscription pass, run now. It is refused within a minute of the last pass, and for a store that is not recording. |
 | `check_failing` | "The last check of orders failed" | For a backfill that failed: its own reason, or "The backfill did not finish." Otherwise the sweep's last error, or "No check has run since" a time, then "The next check is at" a time, or "The next check is due now." | None. |
@@ -946,13 +1039,17 @@ both destinations shows each reason once. A domain is named in plain words
 A check is *failing* when a domain's backfill failed, at once, or when twice
 the domain's own sweep interval has passed with no clean sweep. That time is
 counted from the latest of three: the domain's last clean sweep, the store's
-connection, and the store's last return from paused or not connected. So a
-store resumed after a long pause is not late until two of its intervals have
-passed. An error about the store's grant is `grant_lost`, never this.
+connection, and the store's last return from paused or not connected. A store
+with no recorded connection time counts a domain never swept clean from when
+its verdict was first recorded (`health.verdict.firstRecordedAt`), so it has
+the same grace as a store connected then. So a store resumed after a long
+pause is not late until two of its intervals have passed. An error about the
+store's grant is `grant_lost`, never this.
 
 A change is *not recorded* when a delivery used its four tries and its domain
 has had no clean sweep since it arrived. Once that sweep runs, it has read what
-the delivery named, and the delivery stops counting.
+the delivery named, and the delivery stops counting. A delivery held during a
+pause is never counted ([Pausing a store](#pausing-a-store)).
 
 **Who sees what.** The page is drawn for anyone holding `execute
 app:deployables/store`, but the engine serves a store's verdict only to the
@@ -980,15 +1077,18 @@ holding `app:cluster/origins`. For Shopify:
   depth, dead letters and last error.
 - **Who may act.** Every act on this page -- "Backfill now", "Pause",
   "Resume", "Try again" under "Changes that could not be recorded", and a dead
-  letter's "Retry" and "Discard" -- is for a cluster owner (or the engine
-  itself). Somebody who holds the page's part but is not a cluster owner sees
-  the buttons, and pressing one shows "The cluster refused, and nothing
-  changed." with the engine's reason, such as "datasync: startBackfill is for
-  a cluster owner". A store's owner retries that store's changes from its
-  Store page instead, where the connector makes the call for them.
+  letter's "Retry" and "Discard" -- is for a cluster owner, and only a cluster
+  owner is shown them. Somebody else who holds the page's part sees every
+  state, count and error, and no button to press. A store's owner retries that
+  store's changes from its Store page instead, where the connector makes the
+  call for them.
 - **"Backfill now", "Pause" and "Resume" act on that one store's domain** --
   never on every store. "Backfill now" starts a failed backfill again from the
-  start, and carries any other on from where it stopped. They are not drawn until the connector health has
+  start, and carries any other on from where it stopped; on a paused or
+  uninstalled store it leaves the backfill queued, to carry on once the store
+  is recorded again ([Step 4](#step-4----what-happens-next)). "Pause" stops
+  the domain's backfill, its periodic check and its pushes to Shopify; the
+  changes Shopify sends for it are still applied. They are not drawn until the connector health has
   been read, and read to its end: while it is first read, when it could not be
   read, and when it stopped short -- the page then says "The connector health
   was not read to its end, so this list is incomplete." -- no act is drawn.
@@ -1111,23 +1211,40 @@ recording)`:
 The write runs as the deployment, so `setStoreStatus` called directly is still
 a cluster owner's act (see
 [Who may read and change a store row](#who-may-read-and-change-a-store-row)).
-The builtin changes the status only: the next verdict reads the store as
-resumed from that moment (`resumedAt`), and the next watch pass records it.
+The next verdict reads the store as resumed from that moment (`resumedAt`),
+and the next watch pass records it.
 
 While a store is paused:
 
-- Deliveries are still **staged** and simply not applied, so a pause loses
-  telemetry rather than events, and resuming does not need a backfill.
+- Every delivery Shopify sends is **held**: staged, not applied, and kept for
+  the resume. A deletion made in Shopify during the pause is held the same way
+  and applied after it, so a pause loses nothing and resuming needs no
+  backfill. A held delivery is `failed` with no next try and its tries
+  uncounted, and its `lastError` reads `connector: recording is paused, so this
+  delivery is held; it goes back in line when recording resumes`. It is never
+  counted as a change that could not be recorded.
 - Its state is Paused. It carries no reasons, and its owner is not emailed.
-- After "Resume", a late check is counted from the resume, so the store does
-  not read as failing because it was paused.
-- A backfill under way is held where it is and carries on after "Resume".
-  If the pause outlasted the week Shopify keeps a download, the backfill
-  starts that export again by itself (see "When an export fails" in
+- A backfill under way keeps its place and carries on after the resume. If
+  the pause outlasted the week Shopify keeps a download, the backfill starts
+  that export again by itself (see "When an export fails" in
   [Step 4](#step-4----what-happens-next)).
+- "Try again" in Cluster > Data on the store's given-up deliveries puts them
+  back in line, and their next try holds them like the rest.
+
+"Resume" answers at once. Before it does, it puts up to fifty held
+deliveries back in line and queues the backfill of every domain the store
+never read. The store watch puts the rest back on its next pass, at most five
+minutes later; it does that on every pass for every connected store that is
+not paused, so a store resumed by writing its status directly gets its held deliveries
+back the same way. The retry pass then works them fifty a minute, so a long
+pause takes a while to catch up
+([What the mirror cannot do](#what-the-mirror-cannot-do)). A late check is
+counted from the resume, so the store does not read as failing because it was
+paused, and it reads Starting while a backfill it never ran is read.
 
 This is the whole store. Pausing one domain of one store is "Pause" on that
-domain in **Cluster → Data**.
+domain in **Cluster → Data**: it stops that domain's backfill, its periodic
+check and its pushes, and the changes Shopify sends for it are still applied.
 
 ### When a store stops being recorded: the owner's email
 
@@ -1143,22 +1260,34 @@ paused and recording end it. Paused never sends an email (somebody chose it),
 and neither does starting (the store is on its way).
 
 **The first email** goes when an episode has lasted the *alert wait* and was
-not mailed yet:
+not mailed yet. It is worded for the state the store is in when it is sent,
+so an episode that began as needs attention and is not connected by then is
+mailed as not connected:
 
-- Subject: `example-store.myshopify.com is not being recorded`
-- Body: "MemQL has not been recording example-store.myshopify.com since" the
-  episode's start, then each reason's sentence, one to a line, then "Open the
-  storefront's Store page in MemQL OS to see what fixes it:" with MemQL OS's
-  address, then "This email carries no order and nothing about a customer."
-  When the cluster names no domain, the whole "Open the storefront's Store
-  page..." sentence is left out, not only the address.
+- A store that is **not connected**: subject `example-store.myshopify.com is
+  not being recorded`; the body opens "MemQL has not been recording
+  example-store.myshopify.com since" the episode's start.
+- A store that **needs attention**: subject `example-store.myshopify.com needs
+  attention`; the body opens "MemQL is not recording everything from
+  example-store.myshopify.com, since" the episode's start.
+
+Either body goes on with each reason's sentence, one to a line, then "Open the
+storefront's Store page in MemQL OS to see what fixes it:" with MemQL OS's
+address, then "This email carries no order and nothing about a customer."
+When the cluster names no domain, the whole "Open the storefront's Store
+page..." sentence is left out, not only the address.
 
 **The second email** goes when the store is recording again after an episode
 that was mailed:
 
 - Subject: `example-store.myshopify.com is being recorded again`
-- Body: "MemQL is recording example-store.myshopify.com again. It was not
-  recording from" the episode's start "to" now.
+- Body: "MemQL is recording example-store.myshopify.com in full again. It
+  needed attention from" the episode's start "to" now.
+
+A store the watch sees for the first time already not connected -- uninstalled
+or its data removed before the watch first looked at it -- is never mailed
+about that episode, and not when it is connected again. A store first seen
+needing attention is mailed after the wait like any other.
 
 The recovery email is sent even when the first could not be delivered. Times
 are written in UTC. A reason's detail never travels: it is the engine's or
@@ -1197,15 +1326,17 @@ The notice is shown only while the store is still not recorded.
 Run this against a Shopify development store before pointing the connector at
 a real one. It is the end-to-end proof, in the order things can break:
 
-1. **Install.** Create the custom-distribution app on the dev store with the
-   scopes above. Note the Admin token, the Storefront token and the webhook
-   secret.
-2. **Configure.** Connect the store in Settings and choose it for the
-   storefront's Testing destination
-   ([Step 3](#step-3----attach-the-store-to-its-storefront)). The Store page
-   should read "Starting", with no notice, and then "Recording". A notice
-   names what to fix first. Mark it a development store if that is what it
-   is, and name the live store it stands in for.
+1. **A development store.** Create a development store in Shopify, and make
+   sure the cluster's Shopify app is registered ([Connect
+   Shopify](shopify-connect.md)). No token is copied by hand: Connect seals
+   the Admin token, the Storefront token and the webhook secret itself.
+2. **Configure.** In Settings, press "Add Shopify store", then "Continue to
+   Shopify", choose the development store and approve. On the storefront's
+   Store page, open the **Testing** row and choose it: the list calls it
+   "Sandbox store", which is how you know Connect recorded it as a development
+   store ([The development store](#the-development-store)). Press "Continue",
+   then "Connect store". The Store page should read "Starting", with no
+   notice, and then "Recording". A notice names what to fix first.
 3. **Subscriptions.** As a cluster owner, run `shopifyEnsureSubscriptions()`. The store's health
    should show `created` equal to the desired count and `failed` empty.
    Cross-check that the subscriptions point at
@@ -1244,6 +1375,41 @@ a real one. It is the end-to-end proof, in the order things can break:
 
 Record the results in the PR that changes the connector. A smoke nobody wrote
 down is a smoke nobody ran.
+
+---
+
+## Upgrading to the release that records every store
+
+The release that holds a paused store's deliveries, believes a deletion only
+on the rules above, and asks a managed store for customers, discounts and
+returns changes what an installation holds. Before you roll it out:
+
+- **It is roll-forward only.** Once a node of this release has written mirror
+  rows, an earlier release cannot read them: they carry fields it does not
+  know. Do not pin the installation back to an earlier release after it.
+- **Every store connected through the shared app needs attention once.** The
+  permission list grew, so each store reads Needs attention, with "This store
+  approved an older list of permissions." and the scopes it lacks beneath, and
+  its owner is emailed "<store> needs attention" after the alert wait. The
+  store's owner (or a cluster owner) follows "Open MemQL OS from the store's
+  Shopify admin and approve", somebody on the store's staff approves the new
+  list in Shopify's admin, and the store returns to Recording by itself
+  ([When the list grows](#when-the-list-grows)).
+- **Each store reads Starting for some minutes.** At the first boot, every
+  domain of a store being recorded that no backfill read, or whose backfill
+  completed under the earlier release, is queued; a backfill the earlier
+  release left running begins again from the start at its next step. A
+  history read under the earlier release may have put an older snapshot over
+  a newer change, which is why each is read once more. What bounds it is the
+  continuing pass ([Step 4](#step-4----what-happens-next)): four minutes of
+  every five, one domain of a store at a time, for as long as Shopify takes to
+  prepare each export. The first periodic check that reads a record written
+  under the earlier release rewrites it once, to add its `versionSource`, so
+  `driftLast` can read high for that one pass. A store that is paused at that
+  boot is read again when it is resumed.
+- **An index is built at the rollout.** The retry pass reads the failed
+  deliveries through a new index, and building it reads the table of staged
+  deliveries once.
 
 ---
 

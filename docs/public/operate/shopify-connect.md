@@ -17,11 +17,11 @@ marker on the Store icon indicates that setup remains.
 
 1. Open **Settings → Connections → Shopify**, or **Deployables → Settings → Shopify**.
    These surfaces use the same personal connections and controls.
-2. Use the plus button and continue to Shopify. Select the store and approve
+2. Press "Add Shopify store", then "Continue to Shopify". Select the store and approve
    access on Shopify. MemQL verifies Shopify's signed launch, completes
    authorization, and returns to the Settings surface that began the flow.
    Installing directly from Shopify opens global Settings → Connections.
-3. Open the storefront's **Store** panel. Choose **Testing** or **Production**,
+3. Open the storefront's **Store** page. Choose **Testing** or **Production**,
    select a saved store, review the selection, and connect it.
 
 Shopify authorizes an app separately for each store. Connecting one store does not

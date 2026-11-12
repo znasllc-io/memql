@@ -16,8 +16,8 @@ binding. A design deployment or rollback changes the build served by both.
 
 | Destination | Example address | Store selection |
 |---|---|---|
-| Production website | `https://graceful-fjord.example.com` | Production in the Store panel |
-| Testing website | `https://test--graceful-fjord.example.com` | Testing in the Store panel |
+| Production website | `https://graceful-fjord.example.com` | Production in the Store page |
+| Testing website | `https://test--graceful-fjord.example.com` | Testing in the Store page |
 
 Either destination can use a sandbox or a live store, and both may select the
 same store. An unconnected destination displays design preview. Store selection
@@ -70,7 +70,7 @@ Package analysis carries both bindings through review. Changing the declared
 Testing store changes the plan fingerprint. Publishing resolves and authorizes
 each store independently. A missing or inaccessible declared store is reported;
 an existing connection is retained. Omitting a binding leaves a selection made
-in the Store panel intact. See [Packages](packages.md).
+in the Store page intact. See [Packages](packages.md).
 
 ## Access and serving contract
 

@@ -744,18 +744,16 @@ recorded, from Production's store, or Testing's when Production has none:
 | The slot reads | When |
 |---|---|
 | Not connected | Neither destination names a store. |
-| the store, then Recording, Starting, Paused or Needs attention | The store is connected; the word is the store's verdict ([the Shopify connector](shopify-connector.md#the-storefronts-store-panel)). |
+| the store, then Recording, Starting, Paused or Needs attention | The store is connected; the word is the store's verdict ([the Shopify connector](shopify-connector.md#the-storefronts-store-page)). |
 | the store, then Uninstalled, or Data removed | Shopify reported the app uninstalled, or removed the store's data. |
 | the store, then Setup needed | The store's Admin authorization or its own Storefront token is not in place. |
 | the store, then Not connected | The engine's verdict says not connected while the store's own row still reads connected. |
 | the store, then Status unknown | Whether the store is being recorded could not be read, or the answer named no state the page knows. |
 | The store could not be read | The store's row could not be read. |
-| Names a store that is not on this cluster | The binding names a store this cluster does not have. |
+| Store unavailable | The binding names a store that did not read back: one this cluster does not have, or one you may not read. |
 
 "Testing" is added when the store is Testing's, and "Sandbox" when it is a
-development store. The slot carries the setup marker when no store is bound,
-when the store cannot be read or is not connected, and when it needs
-attention.
+development store.
 
 Opening the slot opens the **Store** page. Above the store's own settings
 ([Settings that belong to one store](#settings-that-belong-to-one-store)) it
