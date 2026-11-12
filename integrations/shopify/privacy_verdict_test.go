@@ -230,3 +230,68 @@ func TestTheMailForAFailingPrivacyRequestAloneDoesNotSayTheStoreIsNotRecorded(t 
 		t.Errorf("subject %q", subject)
 	}
 }
+
+// The recovery after an episode whose only reason was a failing privacy
+// request does not say the store "is being recorded again": it was recorded
+// all along. It says the store no longer needs attention. An episode that had
+// any other reason at any pass is recovered as it always was.
+func TestTheRecoveryAfterAPrivacyOnlyEpisodeSaysItNoLongerNeedsAttention(t *testing.T) {
+	store := verdictStore()
+	wait := 30 * time.Minute
+	clean := computeVerdict(verdictInputOf(store, cleanRows(store)))
+	onlyPrivacy := func() Verdict {
+		in := verdictInputOf(store, cleanRows(store))
+		in.Privacy = failingSince(25 * time.Hour)
+		return computeVerdict(in)
+	}
+	withAnother := func() Verdict {
+		rows := cleanRows(store)
+		setRow(rows, "customer", func(r map[string]any) { r["lastError"] = "shopify admin: HTTP 401" })
+		in := verdictInputOf(store, rows)
+		in.Privacy = failingSince(25 * time.Hour)
+		return computeVerdict(in)
+	}
+	// episode walks a store through the passes of one episode and answers the
+	// recovery mail staged when it records again.
+	episode := func(passes ...Verdict) (string, string, string) {
+		t.Helper()
+		recorded := watchedBefore(clean)
+		at := verdictNow
+		var start string
+		for i, v := range passes {
+			plan := planWatch(recorded, v, wait, at)
+			if i == 0 {
+				start = plan.Record.Episode
+			}
+			if plan.Alert {
+				plan.Record.alertStaged(plan.Record.Episode)
+			}
+			recorded = plan.Record.payload()
+			at = at.Add(wait + time.Minute)
+		}
+		plan := planWatch(recorded, clean, wait, at)
+		if plan.Recover == "" {
+			t.Fatalf("no recovery was planned after %d pass(es)", len(passes))
+		}
+		subject, body := recoveryEmailOf(plan.Record, store.Domain, plan.Recover, at)
+		return subject, body, "from " + stampRFC1123(start) + " to " + at.UTC().Format(time.RFC1123) + "."
+	}
+
+	subject, body, span := episode(onlyPrivacy(), onlyPrivacy())
+	if subject != store.Domain+" no longer needs attention" {
+		t.Errorf("the recovery of a privacy-only episode has the subject %q", subject)
+	}
+	if want := store.Domain + " no longer needs attention in MemQL. It needed attention " + span; body != want {
+		t.Errorf("the recovery of a privacy-only episode reads\n  %q\nwant\n  %q", body, want)
+	}
+
+	for name, passes := range map[string][]Verdict{
+		"another reason beside it":          {withAnother(), withAnother()},
+		"another reason at an earlier pass": {withAnother(), onlyPrivacy(), onlyPrivacy()},
+	} {
+		subject, body, span := episode(passes...)
+		if subject != store.Domain+" is being recorded again" || body != "MemQL is recording "+store.Domain+" in full again. It needed attention "+span {
+			t.Errorf("%s: the recovery reads %q / %q, want it as it was", name, subject, body)
+		}
+	}
+}
