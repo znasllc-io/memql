@@ -257,8 +257,9 @@ trimmed and lower-cased, the same rule a staff member's *Add buyer* is refused
 by — writes nothing, your extension's row included, and is answered exactly as
 an accepted post: the same `303` to `/wholesale/thank-you`. Telling the poster
 "this address already applied" would tell anybody typing somebody else's
-address who your wholesale buyers are. Your staff see one log line naming the
-store and the open application, never the address. A `rejected` or `revoked`
+address who your wholesale buyers are. The instance's log holds one line naming
+the store and the open application, never the address; a store's own people
+may not be able to read that log. A `rejected` or `revoked`
 application blocks nothing: the business applies again.
 
 ## 5. There is no public read of an application

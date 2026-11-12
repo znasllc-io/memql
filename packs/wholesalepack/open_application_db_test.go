@@ -206,6 +206,12 @@ func TestTheBuiltinAnswersARepeatAsItAnswersAnAcceptedSubmission(t *testing.T) {
 			t.Errorf("%s answered %+v, want %+v", id, answer, want(id))
 		}
 	}
+	// THE SAME KIND OF ANSWER on both paths, so a repeat that one day answered a
+	// direct caller differently fails here.
+	if got[first]["concept"] != "wholesale:application:accepted" || got[repeat]["concept"] != got[first]["concept"] {
+		t.Errorf("the receipts' concepts are %v and %v, want both wholesale:application:accepted",
+			got[first]["concept"], got[repeat]["concept"])
+	}
 	if rows := wsRows(t, eng, seedCtx(), `query applicationById(applicationId: `+quote(repeat)+`)`); len(rows) != 0 {
 		t.Fatalf("the repeat was written: %+v", rows)
 	}

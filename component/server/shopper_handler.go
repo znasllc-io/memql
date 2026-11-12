@@ -409,9 +409,9 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 // somebody who has just typed seventeen fields to an error page, from
 // which they resubmit -- and a pack with no dedupe on its rows turns one
 // business into two, one with fields and one without. That is a worse
-// outcome from the same fault. (Wholesale now writes no second open
-// application for one address, and answers the resubmission as accepted with
-// no row, so the blank-fields application stands alone.)
+// outcome from the same fault. (A pack that declines such a resubmission
+// answers it as accepted with no row through memql.ShopperOutcome, and then no
+// extension row follows it either.)
 //
 // It is also the stance the pack itself already takes one level up: when
 // entitlement provisioning fails, "the application STAYS APPROVED -- an

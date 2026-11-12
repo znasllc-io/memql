@@ -374,13 +374,12 @@ func ShopperEvidenceFrom(ctx context.Context) (ShopperEvidence, bool) {
 // ShopperOutcome is what a form's construct tells the shopper handler beyond
 // its answer: that it accepted the submission and WROTE NOTHING.
 //
-// A construct that declines a post it must not tell apart from an accepted one
-// -- wholesale's application from an address that already has an open one,
-// where a refusal would tell an anonymous visitor who a store's buyers are --
-// answers exactly as it answers an accepted post, and marks this. The handler
-// then answers the success page as for any accepted post, and does not write
-// the client extension's row, which would otherwise point at a submission that
-// was never written.
+// A construct may accept a post and write nothing, when telling the poster the
+// post was declined would itself reveal something (for example, that somebody
+// else's details are already on file). It answers exactly as it answers an
+// accepted post, and marks this. The handler then answers the success page as
+// for any accepted post, and does not write the client extension's row, which
+// would otherwise point at a submission that was never written.
 //
 // A CONTEXT VALUE, NEVER AN ARGUMENT, like ShopperEvidence: nothing posted and
 // nothing a DSL caller writes can set it, and a direct call of the construct
