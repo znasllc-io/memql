@@ -2763,6 +2763,32 @@ QueryClient.prototype.complianceJobsForStore = function (this: QueryClient, args
   return this.executeNamed("complianceJobsForStore", buildComplianceJobsForStore(args), opts);
 };
 
+/** The privacy jobs of one topic for one customer of one store, newest first. A customer's erasure reads her data requests through it, to remove the exports they filed: each such job says what it filed (exportId). */
+// Bound concept: v1:shopify:complianceJob (machine-readable: BoundConcepts["complianceJobsOfCustomer"] in generated_concepts.ts).
+export interface ComplianceJobsOfCustomerArgs {
+  storeId: string;
+  topic: string;
+  customerGid: string;
+}
+
+export function buildComplianceJobsOfCustomer(args: ComplianceJobsOfCustomerArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("topic: " + renderMemQLValue(args.topic));
+  parts.push("customerGid: " + renderMemQLValue(args.customerGid));
+  return "query complianceJobsOfCustomer(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    complianceJobsOfCustomer(args: ComplianceJobsOfCustomerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.complianceJobsOfCustomer = function (this: QueryClient, args: ComplianceJobsOfCustomerArgs = {} as ComplianceJobsOfCustomerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("complianceJobsOfCustomer", buildComplianceJobsOfCustomer(args), opts);
+};
+
 /** One recipe by id, gated to its owner. Backs running a recipe: the selectors it holds are resolved under the caller's own actor, so a recipe can never widen what its runner may read. */
 // Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["composeRecipeById"] in generated_concepts.ts).
 export interface ComposeRecipeByIdArgs {

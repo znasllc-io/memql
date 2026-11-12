@@ -2837,6 +2837,40 @@ func ComplianceJobsForStoreBuild(args ComplianceJobsForStoreArgs) string {
 	return b.String()
 }
 
+// ComplianceJobsOfCustomer -- The privacy jobs of one topic for one customer of one store, newest first. A customer's erasure reads her data requests through it, to remove the exports they filed: each such job says what it filed (exportId).
+//
+// Bound concept: v1:shopify:complianceJob (machine-readable: BoundConcepts["complianceJobsOfCustomer"] in generated_concepts.go).
+type ComplianceJobsOfCustomerArgs struct {
+	StoreId     string
+	Topic       string
+	CustomerGid string
+}
+
+// ComplianceJobsOfCustomer calls the engine query complianceJobsOfCustomer.
+func (qc *QueryClient) ComplianceJobsOfCustomer(ctx context.Context, args ComplianceJobsOfCustomerArgs) (*Result, error) {
+	call := ComplianceJobsOfCustomerBuild(args)
+	return qc.executeNamed(ctx, "complianceJobsOfCustomer", call)
+}
+
+func ComplianceJobsOfCustomerBuild(args ComplianceJobsOfCustomerArgs) string {
+	var b strings.Builder
+	b.WriteString("query complianceJobsOfCustomer(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("topic: ")
+	b.WriteString(quoteMemQL(args.Topic))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("customerGid: ")
+	b.WriteString(quoteMemQL(args.CustomerGid))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ComposeRecipeById -- One recipe by id, gated to its owner. Backs running a recipe: the selectors it holds are resolved under the caller's own actor, so a recipe can never widen what its runner may read.
 //
 // Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["composeRecipeById"] in generated_concepts.go).

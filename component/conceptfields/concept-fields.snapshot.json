@@ -6226,7 +6226,9 @@
       "fields": [
         "completedAt",
         "customerGid",
+        "deliveryIds",
         "dueAt",
+        "exportId",
         "lastError",
         "orderGids",
         "outcome",
