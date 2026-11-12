@@ -45,7 +45,7 @@ the owner has read it.
 | E7 | The five account lists | A list holds at most one account, the row's own. A tag means "shared with the members of its account". Tags naming other accounts are removed from every stored version. The field is dropped later, by the sign-in piece |
 | E8 | Moving and placing rows | A governed act, offered in Accounts from the inventory. A row's children follow it |
 | E9 | Mirrored records | Included, marked as mirrors |
-| E10 | Bytes | What current rows point at: Library files with every kept version, attachments, each site's live bundle and its candidate |
+| E10 | Bytes | What current rows point at: Library files with every kept version, attachments, each site's live bundle and its candidate. Attachments are counted and not carried in this piece ("Decided without asking") |
 | E11 | People | Members named. An owner or developer who is not a member appears as an id only, and the request context of what they wrote is removed |
 | E12 | Secret values | None leaves the cluster in this piece. The file lists the connections. Carrying secrets is designed with import |
 | E13 | Website statistics | The summaries travel. The raw request log does not |
@@ -72,7 +72,7 @@ the owner has read it.
 | Row ownership D12, R17 | The deprecation-window entry is left to this piece | Entered (E5) |
 | Row ownership section F | A write that commits more than a minute late is not caught, and that is accepted | Closed (section F), because E2 depends on it |
 | Row ownership section C | Re-tagging a list row moves that row alone, and a tag for an account the tagger is not in is stored without moving the row | The row's children follow it, and such a tag is refused (section I) |
-| Row ownership section H | The inventory counts a row under any account one of its versions names | It counts by the newest version, through the reader in section B |
+| Row ownership section H | The inventory counts a row under any account one of its versions names | It counts a row once, under the account its newest account-naming version names (section B, "Two readings") |
 
 ## Words
 
@@ -99,6 +99,16 @@ the owner has read it.
   `"MemoryNodesObserved"` is their union. Two account-scoped concepts are among
   the six: `v1:platform:customDomain` and `v1:pipelines:run`. Nothing routes an
   account-scoped concept to the secret table today.
+- **How the row table is stored.** `"MemoryNodes"` is a hypertable on `createdAt`
+  with seven-day chunks. Chunks older than ninety days are compressed, segmented
+  by concept and ordered by `createdAt`
+  (`20260609000000_document_version_history`). A compressed chunk has no index on
+  id and none on the account: a read by id filters the concept's batches there,
+  and a read by account decompresses the concept's segment. A read of one id's
+  newest version written `ORDER BY "createdAt" DESC LIMIT 1` was planned as an
+  ordered walk of the chunks and read a whole chunk on an installation; the shape
+  that is safe matches the id with `= ANY` and sorts by the id first
+  (`component/memql/executor.go`).
 - **Schemas by reference.** A version's `schema` column is usually
   `{"$ref": "memql-schema:<fingerprint>"}`, and the document sits once in
   `memory_node_schemas`.
@@ -144,12 +154,29 @@ origin, so an import lands it read-only and the connector reconciles it
 afterwards.
 
 One reader answers "which rows are this account's" for the export, the inventory
-and the move act (`component/memql/account_rows.go`): the kinds that are
-account-scoped, the ids of a kind whose newest version names an account, every
-version of those ids in `(id, createdAt)` order, and a count of rows and versions
-per kind. It reads rows directly, so two things are said here once. A staged
-concept's rows are the account's all the same and are carried; and the capability
-in section H is the wall, so no per-row admission is applied.
+and the move act (`component/memql/account_rows.go`). It reads rows directly, so
+two things are said here once. A staged concept's rows are the account's all the
+same and are carried; and the capability in section H is the wall, so no per-row
+admission is applied.
+
+**Two readings.** The rule above is exact: the newest version decides, whatever
+it says. Deciding it for one row costs a read of that row in every chunk (section
+A), so the reader never does that once per row of an account.
+
+- **The export** reads a kind in one statement: it finds the kind's rows whose
+  newest version names the account and streams every version of them in
+  `(id, createdAt)` order. Its second count is one grouped statement over the
+  same kinds: rows and versions per kind, and the rows whose newest version names
+  no account. Both are exact, and both cost a pass over the kind, which a run
+  that takes minutes can afford.
+- **The move** decides the rows a person selected, at most 500, one read each.
+  A list of a kind's rows decides one page.
+- **Counts on screen** (the inventory, the totals beside the assignment status)
+  are read from the account index with no read per row. A row counts once, under
+  the account its newest version that names an account names. That differs from
+  the exact rule for one kind of row only: one whose account a later version
+  removed is in no export, and is still counted on screen under the account it
+  last named. A moved row is counted once, in its new account.
 
 The reader covers the row table and the observation store. Nothing writes an
 account-scoped kind to the secret table, and nothing routes a concept there by
@@ -164,7 +191,7 @@ its declaration. A change that does has to extend the reader in the same push.
 | Rows of cluster-wide kinds | People, sign-in, roles, nodes, configuration | People appear in `people.jsonl`; credentials and connections in `connections.jsonl` |
 | Rows in no account | Nobody's (E1) | Counted per kind, as they stood on the source |
 | Secret values | E12 | The names are listed |
-| Bytes only an older version of a row points at, and package snapshots | E10 | Counted, with their size where storage answers |
+| Bytes only an older version of a row points at, package snapshots, and attachments | E10, and "Decided without asking" for attachments | Counted, with their size where storage answers |
 | Vectors, email statistics, site health | Rebuilt on the target from what travels | Named once |
 | Logs, quota ledgers, release and pipeline journals, machine backups | The cluster's own machinery, or a person's own machine | Not mentioned |
 
@@ -230,10 +257,11 @@ Library file's key sits under its owner's prefix, a site names only its own
 bundle), stated once where the export can read it.
 
 - **Carried:** every Library file with every kept version (each version is a row
-  of its own, and a binned file keeps its bytes), every attachment, each site's
-  live bundle and its candidate.
+  of its own, and a binned file keeps its bytes), each site's live bundle and its
+  candidate.
 - **Counted, not carried:** bytes that only an older version of a row points at,
-  and fields declared `@bytes(counted)`, which are package snapshots.
+  and fields declared `@bytes(counted)`: package snapshots, and attachments,
+  whose keys no declaration can tie to their rows ("Decided without asking").
 - **Skipped:** a reference to files shipped inside the engine image.
 - **Missing at the source.** A row can point at bytes that are gone. The line in
   `bytes.jsonl` says so, the report counts it, and the run goes on: the source
@@ -272,6 +300,10 @@ concept packageDeployment {
   snapshotArtifactId  string  @bytes(counted, under="packages/snapshots/{packageId}")   // counted in a file's report, not carried
 }
 
+concept attachment {
+  blobUrl  string!  @bytes(counted, under="spaces")           // counted: nothing in the row ties the key to it
+}
+
 concept store {
   adminTokenRef  string  @secretName    // the name of a secret; the value never travels
 }
@@ -298,11 +330,27 @@ required key, `under`.
 **`under`** is the place a row's bytes live in: path segments, where a segment
 written `{id}` stands for the row's own id and `{<field>}` for the value of one
 of the row's own string fields. A reference is the row's own when its key lies
-strictly inside that place, compared segment by segment, with ids compared in
-their bare form. A bare top-level place such as `library` cannot be named by a
-tree. The blob reader adds its own floor whatever a declaration says: it reads
-nothing outside the configured container, nothing under `exports/`, and no tree
-shallower than two segments.
+strictly inside that place, compared segment by segment.
+
+A place has to tie the bytes to the row, so three things are held at load:
+
+- A place has at least one placeholder. A place made of fixed words would let
+  any row of the kind name any key under it.
+- A placeholder names the row's id, or the field the concept's
+  `@rowAuthz(owner=...)` names, which the write guard already holds to the
+  writer's own id. Any other field is one its writer chooses.
+- A field declared `counted` is exempt from both, because its bytes are never
+  read, only sized.
+
+An id in a key and an id on a row are the same id when they are written the same,
+or when they have the same short id and neither names another concept than the
+one expected: the row's own concept for `{id}`, a person for the owner field.
+This is the comparison `core/librarykey` makes for a Library key.
+
+A bare top-level place such as `library` cannot be named by a tree. The blob
+reader adds its own floor whatever a declaration says: it reads nothing outside
+the configured container, nothing under `exports/`, and no tree shallower than
+two segments.
 
 **A `@secret` field never travels.** The value is removed from every carried
 version, and the report names the field. A build gate keeps the engine's own
@@ -322,7 +370,7 @@ own members.
 | `stays` with a value outside the three | `belongs_to_stays_unknown` |
 | A kind that travels follows, through `via`, a kind that stays | `belongs_to_via_stays` |
 | `@bytes` or `@secretName` on a field that is not a string or a list of strings | `field_annotation_type` |
-| `@bytes` with no `under`, an empty one, or one whose `{...}` names neither `id` nor a string field of the concept | `bytes_under` |
+| `@bytes` with no `under`, an empty or relative segment, a place with no placeholder, or a placeholder that names neither the row's id nor the concept's owner field (a `counted` field may have no placeholder, and may name any string field) | `bytes_under` |
 
 Each has its cells in the conformance corpus.
 
@@ -657,8 +705,8 @@ While recording is off, the lists behave as they did.
 - **`accountIds`.** The field is dropped by the sign-in piece, which decides what
   sharing inside an account looks like. Its last writer stops then, and the strip
   follows one release later.
-- **The inventory** counts by the newest version, through the reader of
-  section B, so a moved row is counted once, in its new account.
+- **The inventory** counts through the reader of section B ("Two readings"), so
+  a moved row is counted once, in its new account.
 - **Load on scroll** (program P40) arrives in the kit as one control, used by this
   piece's lists: it loads the next page as the end comes into view, holds its
   place while loading, offers a retry in place after a failure, and states the
@@ -866,11 +914,14 @@ recommended. They are listed so the owner can read and overturn any of them.
 |---|---|
 | The download route of section G is built | The owner approved it by name while this design was settled (E17) |
 | A run waits ten minutes for rows to get their account, its rows phase may take sixty minutes, a dead run is restarted three times at most, and a prepared export that is not started within fifteen minutes is removed | Each needs a number, and these fail safe: a run that stops says why and can be started again |
-| For kinds whose account the engine records, the report's count of rows in no account is the job's own count of rows left waiting; for kinds that state their own account it is exact | An exact count for the first would walk every row of the largest kinds on every export |
+| The report's count of rows in no account is exact for every kind, taken by the same statement that counts the file's rows | The export reads each kind in one pass anyway (section B, "Two readings"), so the exact count costs nothing more |
+| The reader has two readings of one rule: the export and the move decide by a row's newest version; counts on screen are read from the account index and decide by the newest version that names an account | Deciding the exact rule for every row of an account costs a read per row in every chunk of the row table, and the oldest chunks are compressed. On the owner's installation that is minutes to hours for a count a person is waiting for. The two differ only for a row whose account a later version removed |
 | A row awaiting a decision can be left out for good, and that is recorded on the conflict with who decided | Section I needs a second way to resolve a conflict that cannot be placed |
 | The move's history (`accountMoves`) has a call and no screen | The audit trail already shows it, and no screen was designed for it |
 | The reuse evidence on a learned procedure keeps listing account ids | Changing it reaches into procedure learning, outside this piece; it is a known limit in section O |
 | `@bytes` takes a required `under`, and a reference outside it is refused, not read | A row names its own bytes, and the export must not read whatever a row names. Each existing reader already holds its own kind to such a place |
+| A place needs a placeholder, a placeholder names the row's id or its owner field, and ids are compared as `core/librarykey` compares them | A place that does not tie the bytes to the row is no place at all |
+| Attachment bytes are counted in a file's report and not carried. This departs from E10's list | An attachment's key holds a partition and a digest of the run that made it, and neither is a field of the row, so no declaration can tie the key to the row. No bundle of the three installations at hand can create an attachment row, so nothing is lost today; carrying them needs the key recorded on the row first |
 | An export may not carry a row larger than 64 MiB in one version, and its checker bounds every member it reads | The checker will read files from outside once import exists; the writer refuses what the checker would |
 | A deleted row is decided like any other: by its newest version, which is its deletion | The reader has one rule, and a kind that deletes by an update keeps its account on that version |
 | The spec and the plan were not reviewed by the owner before the build | The owner's instruction |
