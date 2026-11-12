@@ -59,6 +59,10 @@ type Integration struct {
 	storeState   func(ctx context.Context, store map[string]any, now time.Time) (outcome string, err error)
 	walkStore    func(ctx context.Context, store map[string]any, generation int64, now time.Time, report *RollupReport) error
 	wholesaleFor func(ctx context.Context, storeIDs []string) (map[string]wholesaleState, error)
+	// verdictOf reads a store's verdict; NewIntegration sets it to askVerdict,
+	// which asks the mirror's builtin (store.go). keepStore reads a nil one as
+	// a verdict that cannot be read.
+	verdictOf func(ctx context.Context, storeID string) (storeVerdict, error)
 
 	// rollupRunning keeps one rollup per process, the email statistics
 	// rollup's guard: a run slower than the schedule must not have the next
@@ -75,7 +79,10 @@ func NewIntegration(engine Engine, bunDB func() *bun.DB, logger *slog.Logger) *I
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Integration{engine: engine, bunDB: bunDB, logger: logger}
+	i := &Integration{engine: engine, bunDB: bunDB, logger: logger}
+	i.storeState = i.keepStore
+	i.verdictOf = i.askVerdict
+	return i
 }
 
 // IntegrationName implements memql.IntegrationProvider.
