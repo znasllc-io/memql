@@ -243,7 +243,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "checkState",
-			Description: "One store's check: when the pass under way began, when the last pass began and ended, when one last ended clean, and the last ended pass's compared, mismatched, repaired and disagreeing counts. For a person who is a cluster owner.",
+			Description: "One store's check: when the pass under way began, when the last pass began and ended, when one last ended clean, and the last ended pass's counts: compared (comparisons, not rows), mismatched, repaired and disagreeing. For a person who is a cluster owner.",
 			Handler:     i.handleCheckState,
 			ArgsSchema:  map[string]string{"storeId": "string - the store, bare or v1:shopify:store:<id>"},
 		},
