@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -980,6 +981,112 @@ func TestAccountAssignmentRequestedPassLeavesHalfTheCallToOthers(t *testing.T) {
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT pass_finished_at IS NULL OR pass_finished_at < pass_started_at
 		FROM account_assignment_progress WHERE concept = ?`, todo).Scan(&open))
 	require.True(t, open, "fixture: the to-dos' pass was meant to outlast the call")
+}
+
+// slowRequestedPasses gives each listed kind a requested full pass of batch
+// size 1, each batch slowed down, and counts its batches.
+func slowRequestedPasses(t *testing.T, db *bun.DB, kinds ...string) map[string]int {
+	t.Helper()
+	ctx := context.Background()
+	require.NoError(t, RequestAccountFullPass(ctx, db, kinds))
+	_, err := db.ExecContext(ctx, `UPDATE account_assignment_progress SET batch_size = 1 WHERE concept = ANY(?::text[])`, pq.Array(kinds))
+	require.NoError(t, err)
+	slow := map[string]bool{}
+	for _, k := range kinds {
+		slow[k] = true
+	}
+	counts := map[string]int{}
+	var mu sync.Mutex
+	assignmentWriteFault = func(concept string) error {
+		if slow[concept] {
+			mu.Lock()
+			counts[concept]++
+			mu.Unlock()
+			time.Sleep(100 * time.Millisecond)
+		}
+		return nil
+	}
+	t.Cleanup(func() { assignmentWriteFault = nil })
+	return counts
+}
+
+// onlyDue makes every kind but the given ones not due, until the test ends.
+func onlyDue(t *testing.T, db *bun.DB, kinds ...string) {
+	t.Helper()
+	_, err := db.ExecContext(context.Background(), `UPDATE account_assignment_progress
+		SET next_at = CASE WHEN concept = ANY(?::text[]) THEN clock_timestamp() ELSE clock_timestamp() + interval '1 hour' END`,
+		pq.Array(kinds))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `UPDATE account_assignment_progress SET next_at = clock_timestamp()`)
+	})
+}
+
+func seedRows(t *testing.T, db *bun.DB, concept, prefix string, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		seedRawRow(t, context.Background(), db, concept, fmt.Sprintf("%s:%s-%d", concept, prefix, i), time.Now().Add(-time.Hour),
+			"assignment-test", map[string]any{"title": "t", "accountId": "self"})
+	}
+}
+
+// Several kinds in requested passes share at most half of a call between them
+// while another kind is due, in turns of one batch each; the kind due for an
+// incremental pass still gets its batch.
+func TestAccountAssignmentRequestedPassesTakeTurnsAndLeaveHalfTheCall(t *testing.T) {
+	engine, db, _ := readMergeTestEngine(t)
+	ctx := context.Background()
+	s := uniqueSuffix(t.Name())
+	const todo, goal = "v1:todos:todo", "v1:work:goal"
+	_, order, err := assignmentConcepts()
+	require.NoError(t, err)
+	require.NoError(t, ensureAssignmentProgressRows(ctx, db, order))
+	seedRows(t, db, todo, "turns-"+s, 40)
+	seedRows(t, db, goal, "turns-"+s, 40)
+	third := ""
+	for i, name := range order {
+		if (name == todo || name == goal) && i+1 < len(order) && order[i+1] != todo && order[i+1] != goal {
+			third = order[i+1]
+		}
+	}
+	require.NotEmpty(t, third)
+	makeDue(t, db, third)
+	runOnePassOf(t, engine, db, third)
+	var finishedBefore time.Time
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT pass_finished_at FROM account_assignment_progress WHERE concept = ?`, third).Scan(&finishedBefore))
+
+	onlyDue(t, db, todo, goal, third)
+	counts := slowRequestedPasses(t, db, todo, goal)
+	callCtx, cancel := context.WithTimeout(ctx, accountOwnershipDeadline)
+	defer cancel()
+	require.NoError(t, engine.runAccountAssignmentBatch(callCtx))
+
+	var finishedAfter time.Time
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT pass_finished_at FROM account_assignment_progress WHERE concept = ?`, third).Scan(&finishedAfter))
+	require.True(t, finishedAfter.After(finishedBefore), "%s, due for an incremental pass, got no batch", third)
+	require.Positive(t, counts[todo])
+	require.Positive(t, counts[goal])
+	diff := counts[todo] - counts[goal]
+	require.True(t, diff <= 1 && diff >= -1, "the requested kinds did not take turns: %v", counts)
+}
+
+// One requested kind and nothing else due: it takes the whole call.
+func TestAccountAssignmentALoneRequestedPassUsesTheWholeCall(t *testing.T) {
+	engine, db, _ := readMergeTestEngine(t)
+	ctx := context.Background()
+	s := uniqueSuffix(t.Name())
+	const todo = "v1:todos:todo"
+	_, order, err := assignmentConcepts()
+	require.NoError(t, err)
+	require.NoError(t, ensureAssignmentProgressRows(ctx, db, order))
+	seedRows(t, db, todo, "alone-"+s, 40)
+	onlyDue(t, db, todo)
+	counts := slowRequestedPasses(t, db, todo)
+	callCtx, cancel := context.WithTimeout(ctx, accountOwnershipDeadline)
+	defer cancel()
+	require.NoError(t, engine.runAccountAssignmentBatch(callCtx))
+	// 100 ms a batch in a 2 s call: well over half the call's batches.
+	require.GreaterOrEqual(t, counts[todo], 14, "a requested pass with nothing else due stopped short of the call: %v", counts)
 }
 
 // A full pass asked for is the next pass of that concept, whatever its last

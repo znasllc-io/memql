@@ -120,7 +120,9 @@ package memql
 //   - A requested full pass waits for no other kind (assignmentCandidates): a
 //     carrying pass writes change records, which request the next generation,
 //     so a child kind that ran too early runs again. It does not crawl either:
-//     its batches run back to back within the call's time budget
+//     its batches run back to back within the call's time budget, the kinds
+//     with a requested pass taking turns of one batch each, and between them
+//     using at most half of the call while another kind is due
 //     (runAccountAssignmentBatch).
 //   - A finished full pass keeps its SAFE POINT in full_pass_at: the earlier of
 //     its start and its horizon, the value verified_through takes. A request
@@ -252,37 +254,66 @@ func (e *MemQLEngine) runAccountAssignmentBatch(ctx context.Context) error {
 
 	started := time.Now()
 	budget := assignmentBatchIds
-	// A REQUESTED full pass does not crawl at one batch a tick: its batches run
+	// REQUESTED full passes do not crawl at one batch a tick: their batches run
 	// back to back, each its own short transaction, and do not spend the id
-	// budget the other kinds share. It may not starve them either: once it has
-	// used half of the call's time it is set aside (deferred), the other kinds
-	// get one batch each in their usual order, and only when none of them is
-	// due does it take the rest of the call.
-	deferred := ""
-	var spent time.Duration
+	// budget the other kinds share. They may not starve the other kinds either.
+	// The kinds found in a requested pass this call (requested) take turns, one
+	// batch each per turn, and between them use at most half of the call's
+	// time while another kind is due; turns alternate with the other kinds,
+	// which get one batch each in their usual order. "Another kind is due" is
+	// what the claim answers: a claim over the others that finds nothing due
+	// ends them for the call, and the requested kinds then share the rest of
+	// the call in turns.
+	requested, others, err := splitRequestedCandidates(ctx, db, candidates)
+	if err != nil {
+		return err
+	}
+	var requestedSpent time.Duration
+	half := assignmentCallBudget / 2
+	requestedTurn := false
 	for time.Since(started) < assignmentCallBudget && ctx.Err() == nil {
-		if len(candidates) == 0 || budget <= 0 {
-			if deferred == "" {
-				break
-			}
-			candidates, deferred = []string{deferred}, ""
+		othersLeft := len(others) > 0 && budget > 0
+		if !othersLeft && len(requested) == 0 {
+			break
 		}
+		useRequested := len(requested) > 0 && (!othersLeft || (requestedTurn && requestedSpent < half))
+		requestedTurn = !requestedTurn
+		var claimFrom []string
 		limit := budget
-		if limit <= 0 {
-			limit = assignmentBatchIds // the deferred pass, once the others are served
+		if useRequested {
+			claimFrom, limit = requested[:1], assignmentBatchIds
+		} else {
+			claimFrom = others
 		}
 		batchStarted := time.Now()
-		result, err := e.assignOneBatch(ctx, db, candidates, limit)
+		result, err := e.assignOneBatch(ctx, db, claimFrom, limit)
 		if err != nil {
 			return err
 		}
-		if result.concept == "" {
-			if deferred != "" {
-				// None of the others is due: the deferred pass takes the rest.
-				candidates, deferred = []string{deferred}, ""
-				continue
+		took := time.Since(batchStarted)
+		if useRequested {
+			// The turn passes to the next requested kind.
+			k := requested[0]
+			requested = append(requested[1:], k)
+			requestedSpent += took
+			if result.concept == "" || !result.requested || result.finished {
+				requested = removeCandidate(requested, k) // held elsewhere, or its pass is done
 			}
-			return nil // every candidate is held by another replica or not due
+		} else if result.concept == "" {
+			others = nil // no other kind is due now
+			continue
+		} else if result.requested && !result.finished {
+			requestedSpent += took
+			others = removeCandidate(others, result.concept)
+			requested = append(requested, result.concept)
+		} else {
+			if !result.requested {
+				budget -= result.examined
+			}
+			others = removeCandidate(others, result.concept)
+		}
+		if result.concept == "" {
+			continue
 		}
 		result.record()
 		if result.changed {
@@ -291,20 +322,43 @@ func (e *MemQLEngine) runAccountAssignmentBatch(ctx context.Context) error {
 			// concept takes hours, and its readers should not wait for the end.
 			e.InvalidateCacheForConcept(result.concept)
 		}
-		if result.requested && !result.finished {
-			spent += time.Since(batchStarted)
-			if spent >= assignmentCallBudget/2 && len(candidates) > 1 && deferred == "" {
-				deferred = result.concept
-				candidates = removeCandidate(candidates, result.concept)
-			}
-			continue
-		}
-		if !result.requested {
-			budget -= result.examined
-		}
-		candidates = removeCandidate(candidates, result.concept)
 	}
 	return nil
+}
+
+// splitRequestedCandidates parts the candidates, in their order, into those
+// with a requested full pass owed (requested after their last safe point) and
+// the rest, so the requested kinds share their turns from the call's first
+// batch. A kind whose request is held back (requestHeldBack) takes an
+// incremental pass in its turn and leaves the rotation once that finishes.
+func splitRequestedCandidates(ctx context.Context, db *bun.DB, candidates []string) ([]string, []string, error) {
+	rows, err := db.QueryContext(ctx, `SELECT concept FROM account_assignment_progress
+		WHERE concept = ANY(?::text[]) AND full_pass_requested_at IS NOT NULL
+		  AND (full_pass_at IS NULL OR full_pass_requested_at > full_pass_at)`, pq.Array(candidates))
+	if err != nil {
+		return nil, nil, fmt.Errorf("account assignment: reading the requested passes: %w", err)
+	}
+	defer rows.Close()
+	owed := map[string]bool{}
+	for rows.Next() {
+		var concept string
+		if err := rows.Scan(&concept); err != nil {
+			return nil, nil, err
+		}
+		owed[concept] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	var requested, others []string
+	for _, c := range candidates {
+		if owed[c] {
+			requested = append(requested, c)
+		} else {
+			others = append(others, c)
+		}
+	}
+	return requested, others, nil
 }
 
 // assignmentConcepts returns every engine-managed concept by name and the order

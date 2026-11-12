@@ -619,10 +619,13 @@ func (lk *assignmentLookups) changedAwayFrom(id string, line ledgerLine) bool {
 // ledger lines were read by loadMoves.
 //
 // THE CLOCK. A row's createdAt is the clock of the node that wrote it, and a
-// record's created_at is the database's, so a row created within their skew of
-// a parent's record may be judged created after it and not be carried. That
-// errs by leaving the row where it was, never by moving one, and nothing later
-// carries it: an owner places it.
+// record's created_at is the database's, so within their skew the judgment of
+// "created before the record" can be wrong either way. A node clock AHEAD of
+// the database's makes a row that did exist before the record look newer, and
+// it is left where it was. A node clock BEHIND makes a row created just after
+// the record look older, and the record carries it to the parent's account.
+// Nothing later repairs either: the first waits for an owner to place it, and
+// the second for an owner to move it back.
 //
 // staged-data: MUST-NOT-GATE -- reads the change records and a row's first version time; a staged row follows its parent like any other.
 func (lk *assignmentLookups) loadParentChanges(meta *memorynodes.Concept, rows []assignmentRow) error {
