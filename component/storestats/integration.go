@@ -63,6 +63,9 @@ type Integration struct {
 	// which asks the mirror's builtin (store.go). keepStore reads a nil one as
 	// a verdict that cannot be read.
 	verdictOf func(ctx context.Context, storeID string) (storeVerdict, error)
+	// noted is what is wrong with each store that is logged when it begins
+	// and when it ends (store.go).
+	noted conditions
 
 	// rollupRunning keeps one rollup per process, the email statistics
 	// rollup's guard: a run slower than the schedule must not have the next

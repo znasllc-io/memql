@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -74,15 +75,61 @@ const rebuildCaughtUp = 5 * time.Minute
 // sixty days of orders: the test the mirror makes in stampOrdersFrom.
 const allOrdersScope = "read_all_orders"
 
-// factTables are the four tables that hold a store's facts, the ones a purge
-// deletes in batches. The other three of the seven -- the store's row, its
-// watermarks and its check row -- are a rebuild's and forgetStore's.
-var factTables = []string{
-	"store_sales_order_fact",
-	"store_sales_line_fact",
-	"store_sales_refund_fact",
-	"store_sales_refund_line_fact",
+// statsTable is one table the store statistics keep, and how a removal
+// deletes a store's rows from it.
+type statsTable struct {
+	name    string
+	batched bool // a fact table: deleted deleteBatch rows a transaction, before any other
 }
+
+// storeSalesTables is THE ONE LIST of the tables the store statistics keep. A
+// removal deletes a store's rows from each of them: the batched ones (the
+// facts) a batch at a time (purgeBatch), then the others, in this order, the
+// store's own row last (forgetStore). A table the migrations add joins this
+// list: TestEveryStoreSalesTableIsOnThePurgeList holds the migrations to it.
+var storeSalesTables = []statsTable{
+	{"store_sales_order_fact", true},
+	{"store_sales_line_fact", true},
+	{"store_sales_refund_fact", true},
+	{"store_sales_refund_line_fact", true},
+	{"store_sales_watermark", false},
+	{"store_sales_check", false},
+	{"store_sales_store", false},
+}
+
+// statsTableNames is the name of every table on storeSalesTables, in order.
+func statsTableNames() []string {
+	out := make([]string, 0, len(storeSalesTables))
+	for _, t := range storeSalesTables {
+		out = append(out, t.name)
+	}
+	return out
+}
+
+// factTables are the batched tables of storeSalesTables: the four that hold
+// a store's facts.
+var factTables = func() []string {
+	var out []string
+	for _, t := range storeSalesTables {
+		if t.batched {
+			out = append(out, t.name)
+		}
+	}
+	return out
+}()
+
+// verdictStaleAfter is how long after the last run that read a store's
+// verdict a verdict that cannot be read changes nothing. A rollout of the
+// engine's nodes can make the read fail for some minutes; past this the store
+// is recorded as blocked, since nothing then confirms its figures are current.
+const verdictStaleAfter = 15 * time.Minute
+
+// The reasons this package adds to a store's kept reasons, with no code: the
+// mirror gives none for either.
+const (
+	verdictUnreadableSentence = "The store's recording state could not be read."
+	notRecordedSentence       = "Part of what the figures need is not recorded for this store."
+)
 
 // verdictReason is one reason of a store's verdict as the statistics keep it.
 type verdictReason struct {
@@ -112,6 +159,15 @@ func (v storeVerdict) blocked() bool {
 		if r.InTheWay {
 			return true
 		}
+	}
+	return false
+}
+
+// known reports whether the state is one of the five this build knows.
+func (v storeVerdict) known() bool {
+	switch v.State {
+	case shopify.VerdictRecording, shopify.VerdictStarting, shopify.VerdictPaused, shopify.VerdictNeedsAttention, shopify.VerdictNotConnected:
+		return true
 	}
 	return false
 }
@@ -276,33 +332,24 @@ func (i *Integration) keepStore(ctx context.Context, store map[string]any, now t
 		return i.removeStore(ctx, db, id, now)
 	}
 
-	purging, err := storePurging(ctx, db, id)
-	if err != nil {
-		return "", err
-	}
-	if purging {
-		done, err := purgeStore(ctx, i, id, purgeBudget)
-		if err != nil {
-			return "", err
-		}
-		if !done {
-			return outcomePurging, nil
-		}
-	}
-
+	// The store's row is written first, purging or not, so its verdict and
+	// settings stay current while its facts are deleted. Whether it is
+	// purging is read under the lock, in the same transaction.
 	k, err := i.readKept(ctx, store, id)
 	if err != nil {
 		return "", err
 	}
-	rebuilt := false
+	var rebuilt, purging, rebuilding bool
 	if err := writeTx(ctx, db, id, anyGeneration, func(ctx context.Context, tx bun.Tx) error {
 		if err := ensureStore(ctx, tx, id); err != nil {
 			return err
 		}
 		var definition int
 		var zone string
-		if err := tx.NewSelect().Table("store_sales_store").Column("definition", "timezone").
-			Where("store_id = ?", id).Scan(ctx, &definition, &zone); err != nil {
+		var readAt sql.NullTime
+		if err := tx.NewSelect().Table("store_sales_store").
+			Column("definition", "timezone", "purging", "verdict_read_at").ColumnExpr("rebuilding_since IS NOT NULL").
+			Where("store_id = ?", id).Scan(ctx, &definition, &zone, &purging, &readAt, &rebuilding); err != nil {
 			return fmt.Errorf("read the store's row: %w", err)
 		}
 		if k.shop != nil {
@@ -312,31 +359,40 @@ func (i *Integration) keepStore(ctx context.Context, store map[string]any, now t
 		if err != nil {
 			return err
 		}
-		if err := keepStoreRow(ctx, tx, id, k, since, now); err != nil {
+		if err := keepStoreRow(ctx, tx, id, k, since, readAt, now); err != nil {
 			return err
 		}
 		if definition < storeStatsDefinition {
-			rebuilt = true
+			rebuilt, purging = true, true
 			return rebuildStore(ctx, tx, id, now)
+		}
+		if !purging && rebuilding {
+			return clearRebuilding(ctx, tx, id, now)
 		}
 		return nil
 	}); err != nil {
 		return "", err
 	}
-	if !rebuilt {
+	if !purging {
 		return "", nil
 	}
-	// The rebuild set purging: its facts go before the store is walked again.
+	// A rebuild sets purging: the store's facts go before it is walked again.
 	done, err := purgeStore(ctx, i, id, purgeBudget)
 	if err != nil {
 		return "", err
 	}
 	if !done {
-		i.logger.Info("Store statistics: a store's rebuild began; its facts are being deleted before it is walked again",
-			"component", "storestats", "storeId", id)
+		if rebuilt {
+			i.logger.Info("Store statistics: a store's rebuild began; its facts are being deleted before it is walked again",
+				"component", "storestats", "storeId", id)
+		}
 		return outcomePurging, nil
 	}
-	return outcomeRebuilt, nil
+	// The run that finishes a rebuild's purge reports the rebuild.
+	if rebuilt || rebuilding {
+		return outcomeRebuilt, nil
+	}
+	return "", nil
 }
 
 // readKept reads, before any transaction, what the store's row is written
@@ -391,27 +447,65 @@ func (i *Integration) readKept(ctx context.Context, store map[string]any, id str
 		k.verdict, err = i.verdictOf(ctx, id)
 	}
 	if err != nil {
-		// Once a run: this is the store's one turn.
-		i.logger.Warn("Store statistics: a store's verdict could not be read; its state is not known this run",
-			"component", "storestats", "storeId", id, "error", err)
+		if i.noted.change("verdict:"+id, "unreadable") {
+			i.logger.Warn("Store statistics: a store's verdict could not be read; its recorded state is kept for a while, then blocked",
+				"component", "storestats", "storeId", id, "error", err)
+		}
 		k.verdict = storeVerdict{}
 	} else {
 		k.verdictRead = true
+		if i.noted.change("verdict:"+id, "") {
+			i.logger.Info("Store statistics: a store's verdict is read again",
+				"component", "storestats", "storeId", id)
+		}
 	}
 	return k, nil
+}
+
+// conditions remembers, per process, what is wrong with each store that is
+// logged when it begins and when it ends, never on every run.
+type conditions struct {
+	mu sync.Mutex
+	m  map[string]string
+}
+
+// change records the condition of key ("" for none) and reports whether it
+// differs from the one recorded: the line to write when it begins or ends.
+// A condition that was never recorded and is none is no change.
+func (c *conditions) change(key, now string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.m == nil {
+		c.m = map[string]string{}
+	}
+	was := c.m[key]
+	if now == "" {
+		delete(c.m, key)
+	} else {
+		c.m[key] = now
+	}
+	return was != now
 }
 
 // zoneOf loads the zone the store's days are cut in: UTC when it has none, or
 // one this runtime cannot load.
 func (i *Integration) zoneOf(storeID, zone string) *time.Location {
-	if zone == "" {
-		return time.UTC
+	loc := time.UTC
+	bad := ""
+	if zone != "" {
+		var err error
+		if loc, err = time.LoadLocation(zone); err != nil {
+			loc, bad = time.UTC, zone
+		}
 	}
-	loc, err := time.LoadLocation(zone)
-	if err != nil {
-		i.logger.Warn("Store statistics: a store's time zone could not be loaded; its days are cut in UTC",
-			"component", "storestats", "storeId", storeID, "timezone", zone)
-		return time.UTC
+	if i.noted.change("zone:"+storeID, bad) {
+		if bad != "" {
+			i.logger.Warn("Store statistics: a store's time zone could not be loaded; its days are cut in UTC",
+				"component", "storestats", "storeId", storeID, "timezone", zone)
+		} else {
+			i.logger.Info("Store statistics: a store's time zone loads again",
+				"component", "storestats", "storeId", storeID, "timezone", zone)
+		}
 	}
 	return loc
 }
@@ -443,38 +537,71 @@ func historySince(ctx context.Context, tx bun.Tx, storeID, ordersFrom string, lo
 }
 
 // keepStoreRow writes the store's row from what was read. See the brief's
-// rules in the file's comment and in the design (D4, D16).
-func keepStoreRow(ctx context.Context, tx bun.Tx, storeID string, k keptFields, historySince *time.Time, now time.Time) error {
-	reasons := make([]map[string]string, 0, len(k.verdict.Reasons))
-	for _, r := range k.verdict.Reasons {
-		reasons = append(reasons, map[string]string{"code": r.Code, "sentence": r.Sentence})
-	}
-	reasonsJSON, err := json.Marshal(reasons)
-	if err != nil {
-		return fmt.Errorf("encode the verdict's reasons: %w", err)
-	}
-	var verdictSince *time.Time
-	if k.verdictRead {
-		s := k.verdict.Since.UTC()
-		verdictSince = &s
-	}
+// rules in the file's comment and in the design (D4, D16). readAt is the
+// last run that read the store's verdict, as the row holds it.
+//
+// A VERDICT THAT CANNOT BE READ changes nothing of what the row says of it
+// while readAt is within verdictStaleAfter; past that, or when it was never
+// read, the store is blocked with verdictUnreadableSentence, until the first
+// run that reads it and finds nothing in the way. A state this build does not
+// know is blocked with the same sentence at once: it was read, and cannot be
+// interpreted.
+func keepStoreRow(ctx context.Context, tx bun.Tx, storeID string, k keptFields, historySince *time.Time, readAt sql.NullTime, now time.Time) error {
 	q := tx.NewUpdate().TableExpr("store_sales_store").
 		Set("store_domain = ?", k.domain).
 		Set("store_name = ?", k.name).
 		Set("development = ?", k.development).
 		Set("all_orders_readable = ?", k.allOrders).
 		Set("history_since = ?", historySince).
-		Set("verdict_state = ?", k.verdict.State).
-		Set("verdict_reasons = ?::jsonb", string(reasonsJSON)).
-		Set("verdict_since = ?", verdictSince).
-		Set("recording_blocked = ?", k.verdictRead && k.verdict.blocked()).
 		Where("store_id = ?", storeID)
 	if k.shop != nil {
 		q = q.Set("currency = ?", k.shop.currency).
 			Set("timezone = ?", k.shop.zone).
 			Set("taxes_included = ?", k.shop.taxesIncluded)
 	}
-	if k.verdictRead && k.verdict.clear() {
+
+	type keptReason struct {
+		Code     string `json:"code"`
+		Sentence string `json:"sentence"`
+	}
+	reasons := []keptReason{}
+	var verdictSince *time.Time
+	state, blocked, clear := "", true, false
+	switch {
+	case k.verdictRead:
+		for _, r := range k.verdict.Reasons {
+			reasons = append(reasons, keptReason{r.Code, r.Sentence})
+		}
+		if k.verdict.Outside {
+			reasons = append(reasons, keptReason{"", notRecordedSentence})
+		}
+		if !k.verdict.known() {
+			reasons = append(reasons, keptReason{"", verdictUnreadableSentence})
+		}
+		s := k.verdict.Since.UTC()
+		state, verdictSince = k.verdict.State, &s
+		blocked = !k.verdict.known() || k.verdict.blocked()
+		clear = k.verdict.known() && k.verdict.clear()
+		q = q.Set("verdict_read_at = ?", now.UTC())
+	case readAt.Valid && now.Sub(readAt.Time) < verdictStaleAfter:
+		// Not read this run, and read a moment ago: nothing of it changes.
+		_, err := q.Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("keep the store's row: %w", err)
+		}
+		return nil
+	default:
+		reasons = append(reasons, keptReason{"", verdictUnreadableSentence})
+	}
+	reasonsJSON, err := json.Marshal(reasons)
+	if err != nil {
+		return fmt.Errorf("encode the verdict's reasons: %w", err)
+	}
+	q = q.Set("verdict_state = ?", state).
+		Set("verdict_reasons = ?::jsonb", string(reasonsJSON)).
+		Set("verdict_since = ?", verdictSince).
+		Set("recording_blocked = ?", blocked)
+	if clear {
 		q = q.Set("last_clear_at = ?", now.UTC())
 	}
 	if _, err := q.Exec(ctx); err != nil {
@@ -483,13 +610,17 @@ func keepStoreRow(ctx context.Context, tx bun.Tx, storeID string, k keptFields, 
 	return nil
 }
 
-// rebuildStore marks a store for a rebuild inside tx: it raises generation,
-// sets purging and rebuilding_since, clears walked_through, sets definition,
-// and deletes the store's watermarks and its check row. It deletes no fact:
-// purgeStore does, in batches.
+// rebuildStore marks a store for a rebuild inside tx: it draws the store a
+// new generation from the one sequence, sets purging and rebuilding_since,
+// clears walked_through, sets definition, drops the wholesale pass it would
+// otherwise resume (its cursor, and the width it learned) while keeping the
+// store's wholesale settings, and deletes the store's watermarks and its
+// check row. It deletes no fact: purgeStore does, in batches.
 func rebuildStore(ctx context.Context, tx bun.Tx, storeID string, now time.Time) error {
 	if _, err := tx.NewUpdate().TableExpr("store_sales_store").
-		Set("generation = generation + 1").
+		Set("generation = nextval('store_sales_generation')").
+		Set("wholesale_cursor = ''").
+		Set("wholesale_window_seconds = 86400").
 		Set("purging = true").
 		Set("rebuilding_since = ?", now.UTC()).
 		Set("walked_through = NULL").
@@ -560,7 +691,11 @@ func purgeBatch(ctx context.Context, tx bun.Tx, storeID string) (done bool, err 
 		return true, nil
 	}
 	last := true
-	for _, table := range factTables {
+	for _, t := range storeSalesTables {
+		if !t.batched {
+			continue
+		}
+		table := t.name
 		res, err := tx.NewDelete().TableExpr(table).
 			Where("ctid IN (SELECT ctid FROM ? WHERE store_id = ? LIMIT ?)", bun.Ident(table), storeID, deleteBatch).
 			Exec(ctx)
@@ -586,18 +721,19 @@ func purgeBatch(ctx context.Context, tx bun.Tx, storeID string) (done bool, err 
 }
 
 // removeStore is a turn of a store whose data was removed. See "A store whose
-// data was removed".
+// data was removed". A store that has no row left is left: nothing is
+// written, logged or reported of it again.
 func (i *Integration) removeStore(ctx context.Context, db *bun.DB, id string, now time.Time) (string, error) {
-	var exists bool
-	if err := db.NewSelect().Table("store_sales_store").ColumnExpr("true").
-		Where("store_id = ?", id).Scan(ctx, &exists); errors.Is(err, sql.ErrNoRows) {
-		return outcomeRemoved, nil
-	} else if err != nil {
-		return "", fmt.Errorf("read the row of store %s: %w", id, err)
-	}
 	purging, err := storePurging(ctx, db, id)
 	if err != nil {
 		return "", err
+	}
+	var exists bool
+	if err := db.NewSelect().Table("store_sales_store").ColumnExpr("true").
+		Where("store_id = ?", id).Scan(ctx, &exists); errors.Is(err, sql.ErrNoRows) {
+		return outcomeLeft, nil
+	} else if err != nil {
+		return "", fmt.Errorf("read the row of store %s: %w", id, err)
 	}
 	if !purging {
 		if err := writeTx(ctx, db, id, anyGeneration, func(ctx context.Context, tx bun.Tx) error {
@@ -605,6 +741,8 @@ func (i *Integration) removeStore(ctx context.Context, db *bun.DB, id string, no
 		}); err != nil {
 			return "", err
 		}
+		i.logger.Info("Store statistics: a store's data was removed; its statistics are being deleted",
+			"component", "storestats", "storeId", id)
 	}
 	done, err := purgeStore(ctx, i, id, purgeBudget)
 	if err != nil {
@@ -624,22 +762,27 @@ func (i *Integration) removeStore(ctx context.Context, db *bun.DB, id string, no
 	if !gone {
 		return outcomePurging, nil
 	}
+	i.logger.Info("Store statistics: the statistics of a store whose data was removed are deleted",
+		"component", "storestats", "storeId", id)
 	return outcomeRemoved, nil
 }
 
-// forgetStore deletes what is left of a store whose facts are gone: its row,
-// its watermarks and its check row. A fact found left behind keeps the row
-// and sets purging again, so the next run purges the store first; gone is
-// false then.
+// forgetStore deletes what is left of a store whose facts are gone: its rows
+// in every table of storeSalesTables that is not batched, its own row last.
+// A fact found left behind keeps the row and sets purging again, so the next
+// run purges the store first; gone is false then.
 func forgetStore(ctx context.Context, tx bun.Tx, storeID string) (gone bool, err error) {
-	for _, table := range factTables {
+	for _, t := range storeSalesTables {
+		if !t.batched {
+			continue
+		}
 		var left bool
-		err := tx.NewSelect().TableExpr(table).ColumnExpr("true").Where("store_id = ?", storeID).Limit(1).Scan(ctx, &left)
+		err := tx.NewSelect().TableExpr(t.name).ColumnExpr("true").Where("store_id = ?", storeID).Limit(1).Scan(ctx, &left)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
 		if err != nil {
-			return false, fmt.Errorf("read what is left of the store's %s: %w", table, err)
+			return false, fmt.Errorf("read what is left of the store's %s: %w", t.name, err)
 		}
 		if _, err := tx.NewUpdate().TableExpr("store_sales_store").Set("purging = true").
 			Where("store_id = ?", storeID).Exec(ctx); err != nil {
@@ -647,9 +790,12 @@ func forgetStore(ctx context.Context, tx bun.Tx, storeID string) (gone bool, err
 		}
 		return false, nil
 	}
-	for _, table := range []string{"store_sales_watermark", "store_sales_check", "store_sales_store"} {
-		if _, err := tx.NewDelete().TableExpr(table).Where("store_id = ?", storeID).Exec(ctx); err != nil {
-			return false, fmt.Errorf("delete the store's %s: %w", table, err)
+	for _, t := range storeSalesTables {
+		if t.batched {
+			continue
+		}
+		if _, err := tx.NewDelete().TableExpr(t.name).Where("store_id = ?", storeID).Exec(ctx); err != nil {
+			return false, fmt.Errorf("delete the store's %s: %w", t.name, err)
 		}
 	}
 	return true, nil
@@ -660,7 +806,7 @@ func forgetStore(ctx context.Context, tx bun.Tx, storeID string) (gone bool, err
 func clearRebuilding(ctx context.Context, tx bun.Tx, storeID string, now time.Time) error {
 	if _, err := tx.NewUpdate().TableExpr("store_sales_store").
 		Set("rebuilding_since = NULL").
-		Where("store_id = ? AND rebuilding_since IS NOT NULL AND walked_through >= ?", storeID, now.UTC().Add(-rebuildCaughtUp)).
+		Where("store_id = ? AND rebuilding_since IS NOT NULL AND NOT purging AND walked_through >= ?", storeID, now.UTC().Add(-rebuildCaughtUp)).
 		Exec(ctx); err != nil {
 		return fmt.Errorf("end the store's rebuild: %w", err)
 	}
