@@ -408,3 +408,36 @@ func TestDeferredRowMessageStatusPreservesAnUnknownProviderOutcomeAcrossReplicas
 		})
 	}
 }
+
+func TestRowMessageStatusFindsTheCanonicalSendingActorsReceipt(t *testing.T) {
+	l := newRowLane(t, "lane-canonical-outcome")
+	l.owner = auth.ContextWithUserActor(context.Background(), "v1:identity:user:"+l.user)
+	l.sender.fail = func(int) error {
+		return &email.SendError{Permanent: true, Detail: "provider connection lost"}
+	}
+	_, _ = l.worker.handleSendRowMessage(auth.ContextWithInternalOrigin(l.owner), l.args("outcome"), 0)
+	if row := l.ledger(t, "outcome"); str(row, "status") != "failed" {
+		t.Fatalf("the unknown hand-over did not leave its delivery: %v", row)
+	}
+	e2, db2 := digestDBEngine(t)
+	other := newGatedWorker(t, e2, db2, l.sender)
+	check := func() {
+		t.Helper()
+		nodes, err := other.handleRowMessageStatus(auth.ContextWithInternalOrigin(context.Background()),
+			map[string]any{"requestIds": []any{l.suffix + "-outcome"}, "accountId": l.org}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := decodeResult(t, nodes); got["status"] != "uncertain" {
+			t.Fatalf("another replica reads %v, want uncertain", got)
+		}
+	}
+	check()
+	// A separate definite refusal under the worker's bare identity cannot
+	// erase the canonical actor's earlier unknown hand-over.
+	refused := &singleSendReceipt{id: singleSendReceiptID(l.user, l.suffix+"-outcome"), accountID: l.org}
+	if err := l.worker.saveSingleSendReceipt(auth.ContextWithUserActor(context.Background(), l.user), refused, receiptFailed, nil); err != nil {
+		t.Fatal(err)
+	}
+	check()
+}

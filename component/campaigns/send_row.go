@@ -743,25 +743,41 @@ func (w *Worker) rowMessageOutcome(ctx context.Context, row map[string]any) (str
 		return "", "", errors.New("the message's sending identity could not be read")
 	}
 	actor := auth.ContextWithInternalOrigin(memql.ContextWithFreshRead(w.ownerActorContext(ctx, owner)))
-	rows, err := w.store.rows(actor, call("query", "campaignSingleSendById",
-		arg{"receiptId", singleSendReceiptID(owner, str(row, "requestId"))}))
-	if err != nil {
-		return "", "", err
-	}
-	if len(rows) == 0 {
-		return status, sentAt, nil // The send stopped before a provider attempt.
-	}
-	receipt := rows[0]
-	if !sameOrganization(str(receipt, "accountId"), str(row, "accountId")) {
-		return "", "", errors.New("the message's saved receipt belongs to another organization")
-	}
-	switch str(receipt, "status") {
-	case receiptFailed:
-		return status, sentAt, nil
-	case receiptComplete:
-		if objectField(receipt, "result")["sent"] == true {
-			return "sent", str(receipt, "createdAt"), nil
+	// Direct callers can carry a canonical user id; deferred workers borrow
+	// its bare form. Older receipts hash the spelling the sending actor carried.
+	// Read both: a definite refusal under one must not hide an unknown hand-over
+	// under the other. These are identities of the same already admitted owner.
+	accepted, uncertain := false, false
+	for _, identity := range []string{owner, "v1:identity:user:" + owner} {
+		rows, err := w.store.rows(actor, call("query", "campaignSingleSendById",
+			arg{"receiptId", singleSendReceiptID(identity, str(row, "requestId"))}))
+		if err != nil {
+			return "", "", err
+		}
+		if len(rows) == 0 {
+			continue
+		}
+		receipt := rows[0]
+		if !sameOrganization(str(receipt, "accountId"), str(row, "accountId")) {
+			return "", "", errors.New("the message's saved receipt belongs to another organization")
+		}
+		switch str(receipt, "status") {
+		case receiptFailed:
+		case receiptComplete:
+			if objectField(receipt, "result")["sent"] == true {
+				accepted, sentAt = true, str(receipt, "createdAt")
+			} else {
+				uncertain = true
+			}
+		default:
+			uncertain = true
 		}
 	}
-	return "uncertain", "", nil
+	if accepted {
+		return "sent", sentAt, nil
+	}
+	if uncertain {
+		return "uncertain", "", nil
+	}
+	return status, sentAt, nil // No attempt, or every attempt was refused.
 }
