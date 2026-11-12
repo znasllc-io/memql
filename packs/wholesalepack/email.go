@@ -43,9 +43,9 @@ import (
 //     ID. That write is what admits the hand-over: of two callers for one
 //     attempt, the one whose write loses the fence hands over nothing and
 //     answers the row the other wrote.
-//  2. HAND OVER. The winner calls the row lane as the store's merchant
-//     (asStoreMerchant); the lane asks the pack's resolver for the address and
-//     mints the link.
+//  2. HAND OVER. The winner calls the row lane as the store's merchant -- the
+//     person who owns the store's site now (asStoreMerchant); the lane asks the
+//     pack's resolver for the address and mints the link.
 //  3. SETTLE. What the lane answered is written over the row, fenced on the
 //     version recorded in step 1.
 //
@@ -64,7 +64,8 @@ import (
 // application in the state for it and the kind applies to the store (the terms
 // email of a store that requires no terms is never due). An email that is not
 // due is declined and nothing is recorded. An email that is due and that THE
-// STORE'S OWN CHECKS decline -- no template chosen, no sender chosen
+// STORE'S OWN CHECKS decline -- no template chosen, no sender chosen, nobody to
+// send as, or that person without the permission a send requires
 // (emailBlocker) -- is recorded all the same: attempt 1, skipped, with the
 // check's own sentence, through step 1's fenced write and with the lane not
 // asked. It is then an attempt like any other: the application's page lists
@@ -72,7 +73,7 @@ import (
 // sends it again once the store is ready. Without the record such an email
 // could never be sent and nothing would say so: the automatic call comes once.
 //
-// # What happened is a row, in the lane's words
+// # What happened is a row, in a sentence written for a person
 //
 // What the lane answered is recorded on the email's row: sent; skipped with the
 // lane's sentence (the row withdrew it, or the address is one the email service
@@ -80,14 +81,24 @@ import (
 // the lane's sentence (configuration the store can fix, such as an unpublished
 // template: nothing was attempted); uncertain (the hand-over had no answer, and
 // the provider may have the message -- always with the one uncertain sentence,
-// never the lane's words); failed with the lane's words; or deferred (the
-// send-rate limit: the lane replays it). Every outcome is ANSWERED AS A REPLY --
-// sent true or false, with its reason -- and never as an error that would make
-// the engine run the automation again; only a fault that kept anything from
-// being recorded is an error. The automation's reply carries the pack's own
-// fixed sentences for a hold and a failure: the lane's words, which can name
-// the store's template, its sender or a transport's text, stay on the row for
-// the store's people. Every reason answered is a whole sentence (wholeSentence).
+// never the lane's words); failed; or deferred (the send-rate limit: the lane
+// replays it). Every outcome is ANSWERED AS A REPLY -- sent true or false, with
+// its reason -- and never as an error that would make the engine run the
+// automation again; only a fault that kept anything from being recorded is an
+// error. The automation's reply carries the pack's own fixed sentences for a
+// hold and a failure: the lane's sentence, which can name the store's template
+// or its sender, stays on the row for the store's people.
+//
+// NOTHING REACHES A PERSON AS A REASON THAT WAS NOT WRITTEN FOR A PERSON. A send
+// the lane refuses or fails answers a code and a sentence (campaigns
+// RowSendFailure), and the sentence is the email's reason: on the row, on the
+// application's page, in the export and in a resend's reply. THE PACK DECIDES
+// ON THE CODE, NEVER ON THE SENTENCE, and for one code it has a sentence of its
+// own (the person a send runs as lacks the permission: NoSendAuthoritySentence).
+// THE TEXT OF AN ERROR IS NEVER A REASON -- it names the function that failed,
+// and a provider's own message in it can quote the applicant's address: what
+// reaches the pack with no sentence is answered in the pack's own
+// (ReasonNotSent). Every reason answered is a whole sentence (wholeSentence).
 //
 // # The lane's status is the truth, except its early word on an uncertain one
 //
@@ -96,12 +107,16 @@ import (
 // provider refused). The application's page, the export, the acts and the
 // resend read each attempt through the lane's status read (effectiveSend). An
 // attempt recorded UNCERTAIN stays uncertain until the lane says something
-// definite -- sent, or a provider report of delivery or a bounce -- because the
-// lane writes failed in its ledger before it decides a hand-over was uncertain.
-// An attempt recorded and NEVER SETTLED is read through the lane first, at any
-// age; only one the lane has no record of turns uncertain, once sendingWindow
-// has passed. SENT MEANS HANDED TO THE EMAIL SERVICE: whether it arrived is the
-// delivery's to say (its providerStatus, answered beside the state).
+// definite -- that it sent it, or a provider's report on it -- because the lane
+// writes failed in its ledger before it decides a hand-over was uncertain. For
+// the same reason the lane's failed is not final for an attempt recorded and
+// NEVER SETTLED either: such an attempt is read through the lane first, at any
+// age -- one the lane sent is sent, one it still holds is on its way, one its
+// ledger says failed is uncertain -- and only one the lane has no record of
+// waits for sendingWindow to pass before it turns uncertain. AN ATTEMPT THE
+// PROVIDER REPORTS ON WAS HANDED OVER: delivered or not, it reads sent, with the
+// report beside it. SENT MEANS HANDED TO THE EMAIL SERVICE: whether it arrived
+// is the delivery's to say (its providerStatus, answered beside the state).
 //
 // # Sent again by a person
 //
@@ -117,14 +132,20 @@ import (
 // sent and since reported not delivered). The answer to a resend over an
 // uncertain attempt says the applicant may receive it twice.
 //
-// # One person sends for a store
+// # One person sends for a store: whoever owns its site now
 //
 // The lane is asked -- which sender, and the send itself -- as the store's
-// merchant, the owner the store's settings name (asStoreMerchant): the sends,
-// the resend, the acts and the settings all resolve that person through the one
-// function, so what the settings say would be sent is what a send then does.
-// The email's row, and the link the resolver mints, stay the application's
-// merchant's, as every row of an application is.
+// merchant: THE CURRENT OWNER OF THE SITE THAT SERVES THE STORE, resolved at the
+// moment it is asked (asStoreMerchant). The sends, the resend, the acts and the
+// settings all resolve that person through the one function, so what the
+// settings say would be sent is what a send then does. Not the application's
+// owner, who is fixed when it is submitted, and not the settings row's owner,
+// who is fixed when the row is first written: the site that serves a store can
+// change, and so can who owns it. When nobody can be resolved, or that person
+// lacks the permission, the store's own check declines the email with a
+// sentence that says who can put it right. The email's row, and the link the
+// resolver mints, stay the application's merchant's, as every row of an
+// application is.
 
 // The applicant's four emails, matching the emailSend concept's kind enum.
 const (
@@ -188,10 +209,11 @@ func (p *Provider) recordedState(row map[string]any) (string, string) {
 }
 
 // The row lane's readings of its own errors. Seams, so the pack's tests can
-// stand in for the lane's unexported hold and uncertain types.
+// stand in for the lane's unexported hold, uncertain and failure types.
 var (
 	laneHeldReason = campaigns.HeldReason
 	laneUncertain  = campaigns.UncertainSend
+	laneFailure    = campaigns.RowSendFailure
 )
 
 // The sentences a send answers for an email that is NOT DUE: the kind does not
@@ -212,15 +234,14 @@ const (
 // The sentences of an attempt that was recorded, the resolver's withdrawals,
 // and what this file calls the lane's constructs and the email's row.
 const (
-	// An attempt that could not be handed to the lane, or whose answer could not
-	// be read, is recorded failed with one of these.
-	ReasonNoOrganization   = "The application belongs to no organization, so no email can be sent for it."
-	reasonUnreadableAnswer = "The row lane answered nothing this pack can read."
-	reasonNoLane           = "The pack has no row lane, so no email can be sent."
+	// An attempt that could not be handed to the lane is recorded failed with one
+	// of these.
+	ReasonNoOrganization = "The application belongs to no organization, so no email can be sent for it."
+	reasonNoLane         = "The pack has no row lane, so no email can be sent."
 	// reasonSending is an attempt recorded while the lane is being asked.
 	reasonSending = "The email is being handed to the email service."
 	// reasonFailedForAutomation is a failed attempt as the automation that asked
-	// for it is answered; the lane's words stay on the row.
+	// for it is answered; the lane's sentence stays on the row.
 	reasonFailedForAutomation = "The email was not sent; the application's page says why."
 	// reasonLaneFailed is a delivery the lane recorded as failed after the row
 	// said otherwise; the lane's status read does not carry its words.
@@ -252,11 +273,13 @@ func notInStateReason(state string) string { return "The application is not " + 
 
 // wholeSentence is text as a sentence a person reads: a capital first, a full
 // stop last. Every sentence the pack writes is one already; this is for words
-// that are not the pack's -- the lane's error text on a failed attempt, a
-// route's error on an access record, a row an earlier build recorded -- so that
-// every reason answered is a whole sentence whatever form it arrived in. A
-// first character that is not a small letter (the quotation mark before a
-// template's name) is left as it is, and so is a sentence that already ends.
+// that are not the pack's -- the lane's sentence for a hold, a skip or a
+// failure, a route's own sentence on an access record, a row an earlier build
+// recorded -- so that every reason answered is a whole sentence whatever form
+// it arrived in. IT MAKES NO SENTENCE OF AN ERROR'S TEXT: that is never
+// answered as a reason at all (failedReason, accessReason). A first character
+// that is not a small letter (the quotation mark before a template's name) is
+// left as it is, and so is a sentence that already ends.
 func wholeSentence(text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -335,10 +358,11 @@ const (
 	// store that requires no terms. Nothing is sent and nothing is recorded.
 	blockNotDue
 	// blockDeclined: one of the store's own checks declines the email -- no
-	// template chosen, no sender chosen, nobody to send as. The lane is not
-	// asked, and A DUE EMAIL IS RECORDED as a skipped attempt with the reason,
-	// so the application's page shows it and a person sends it again once the
-	// store is ready.
+	// template chosen, no sender chosen, nobody to send as, or that person
+	// without the permission a send requires. The lane's send is not asked, and A
+	// DUE EMAIL IS RECORDED as a skipped attempt with the reason, so the
+	// application's page shows it and a person sends it again once the store is
+	// ready.
 	blockDeclined
 	// blockLaneDecides: the lane would hold or refuse the email, or could not say
 	// just now. An automatic send goes to the lane, whose answer is the
@@ -352,8 +376,11 @@ const (
 //
 //   - the terms email needs the store to require its terms;
 //   - a template must be chosen for the kind;
-//   - the lane must resolve a sender for the store's merchant
-//     (campaignRowSender, as a send resolves it).
+//   - there must be somebody to send as: the store's merchant, the person who
+//     owns its site now (asStoreMerchant, for app's own site when app is not
+//     nil);
+//   - the lane must resolve a sender for that person (campaignRowSender, as a
+//     send resolves it), who must hold what a send requires.
 //
 // ONE FUNCTION, FOUR CALLERS, so they cannot disagree: the automatic sends, a
 // person's resend, the resend acts the application's page offers, and the
@@ -363,29 +390,31 @@ const (
 // The effect says what an AUTOMATIC send of a due email does about it:
 //
 //   - blockNotDue (terms not required): nothing is sent and nothing recorded;
-//   - blockDeclined (no template chosen, no sender chosen, a store whose
-//     settings name no owner): the lane is not asked and the attempt is
-//     RECORDED, skipped, with the reason. It used to record nothing, "so the
-//     same call once the store is ready sends" -- but that call never comes: a
-//     client's automation runs on a row's first version, so an email declined
-//     that way was lost with nothing to say so. The record is what a person's
-//     resend, and the act that offers it, start from;
+//   - blockDeclined (no template chosen, no sender chosen, nobody to send as,
+//     the store's merchant without write permission in its organization): the
+//     lane's send is not asked and the attempt is RECORDED, skipped, with the
+//     reason. It used to record nothing, "so the same call once the store is
+//     ready sends" -- but that call never comes: a client's automation runs on a
+//     row's first version, so an email declined that way was lost with nothing
+//     to say so. The record is what a person's resend, and the act that offers
+//     it, start from;
 //   - blockLaneDecides: a sender that IS chosen and that the lane will not
-//     send as (turned off, gone, another organization's), one the store's
-//     merchant may not read, or one that could not be read just now. The lane
-//     is asked and its answer recorded: held with its sentence, or failed.
+//     send as (turned off, gone, another organization's), or one that could not
+//     be read just now. The lane is asked and its answer recorded: held with
+//     its sentence, or failed with its sentence.
 //
-// WHICH OF THESE A SENDER'S ANSWER IS, IS READ FROM THE LANE'S FIELDS, never
-// from its sentence (readSender): "no sender is chosen" is said only of a
-// store with none chosen, by the lane's own word that none is.
+// WHICH OF THESE A SENDER'S ANSWER IS, IS READ FROM THE LANE'S FIELDS AND ITS
+// CODE, never from its sentence (readSender): "no sender is chosen" is said
+// only of a store with none chosen, by the lane's own word that none is, and
+// the permission is said to be missing only by the lane's code for it.
 //
 // What it cannot know without sending: whether the chosen template is still a
 // published transactional template. The pack reads the store's templates only
 // under the caller (the Email app's own read), so a template it cannot see may
 // be unpublished or merely hidden from the caller; the lane's hold is what
 // finds an unpublished one.
-func (p *Provider) emailBlocker(ctx context.Context, s Settings, kind string) (string, blockEffect) {
-	return blockerGiven(s, kind, func() senderLine { return p.readSender(ctx, s) })
+func (p *Provider) emailBlocker(ctx context.Context, s Settings, app map[string]any, kind string) (string, blockEffect) {
+	return blockerGiven(s, kind, func() senderLine { return p.readSender(ctx, s, trimmed(app["storeId"]), app) })
 }
 
 // blockerGiven is emailBlocker over the store's sender line, read only when the
@@ -403,8 +432,10 @@ func blockerGiven(s Settings, kind string, senderOf func() senderLine) (string, 
 	switch {
 	case sender.ready:
 		return "", blockNothing
-	case sender.noMerchant:
-		return NoStoreOwnerSentence, blockDeclined
+	case sender.nobody, sender.noAuthority:
+		// NOBODY TO SEND AS, or that person without the permission: the line's own
+		// sentence says which, and who can put it right.
+		return sender.reason, blockDeclined
 	case sender.readFailed:
 		return SenderUnreadableSentence, blockLaneDecides
 	case sender.noneChosen:
@@ -426,20 +457,85 @@ func emailsWouldSend(s Settings, sender senderLine) map[string]any {
 }
 
 // asStoreMerchant is ctx acting as THE PERSON A SEND OF THE STORE RUNS AS: the
-// store's merchant, the owner its settings row names.
+// store's merchant, which is THE CURRENT OWNER OF THE SITE THAT SERVES THE
+// STORE, read now.
 //
-// ONE FUNCTION FOR EVERY ASKER. The lane answers which sender a store's emails
-// go out as only to a person holding what a send requires, and makes the send
-// as the person who asks. The automatic sends, a person's resend, the acts and
-// the settings all resolve that person here, so what the settings say would be
-// sent is what a send then does -- whoever owns the application, and whoever
-// is reading the settings. False when the settings name no owner: there is
-// nobody to send as, and nothing is asked of the lane as anybody else.
-func (p *Provider) asStoreMerchant(ctx context.Context, s Settings) (context.Context, bool) {
-	if s.OwnerUserID == "" {
-		return ctx, false
+//   - For an application: the site it came through (its siteId), while that
+//     site still serves the store.
+//   - Otherwise, and for the store's settings (app nil): the one site that
+//     serves the store. Where several do, the owner they share; or else the
+//     owner of the one the store's settings name (the site its program belongs
+//     to).
+//
+// NOT THE APPLICATION'S OWNER AND NOT THE SETTINGS ROW'S OWNER. Each names the
+// owner of the site the row was written through, as they stood then -- when the
+// application was submitted, when the settings row was first written -- and
+// nothing in the pack moves either. The site that serves a store can change,
+// and so can who owns it; the person asked is whoever owns the serving site at
+// this moment.
+//
+// ONE FUNCTION FOR EVERY ASKER, asked at the moment of the send and at the
+// moment the settings answer. The lane answers which sender a store's emails go
+// out as only to a person holding what a send requires, and makes the send as
+// the person who asks. The automatic sends, a person's resend, the acts and the
+// settings all resolve that person here, so what the settings say would be sent
+// is what a send then does.
+//
+// WHEN NOBODY CAN BE RESOLVED -- no site serves the store; several serve it
+// under different owners and nothing names one of them; the site names no owner
+// -- nobody is the pack's sentence for it, which says who can put it right, and
+// ctx is answered as it came: nothing is asked of the lane as anybody else. An
+// error is a read of the store's sites that failed: nothing is known, and
+// nothing is decided on it.
+func (p *Provider) asStoreMerchant(ctx context.Context, s Settings, storeID string, app map[string]any) (merchant context.Context, nobody string, err error) {
+	// A FRESH READ, as the deployment: who owns the site is asked of the rows as
+	// they stand at this moment, not as a node last heard of them.
+	sys := memql.ContextWithFreshRead(auth.ContextWithSystemActor(ctx, storeLookupActor))
+	as := func(site map[string]any) (context.Context, string, error) {
+		owner := userRef(trimmed(site["ownerUserId"]))
+		if owner == "" {
+			return ctx, SiteNamesNoOwnerSentence, nil
+		}
+		return auth.ContextWithUserActor(ctx, owner), "", nil
 	}
-	return auth.ContextWithUserActor(ctx, s.OwnerUserID), true
+	// 1. THE SITE THE APPLICATION CAME THROUGH, while it still serves the store.
+	if own := bareID(trimmed(app["siteId"])); own != "" {
+		rows, err := p.rowsFor(sys, "siteById", map[string]string{"siteId": own})
+		if err != nil {
+			return ctx, "", err
+		}
+		if len(rows) > 0 && servesStore(rows[0], bareID(strings.TrimSpace(storeID))) {
+			return as(rows[0])
+		}
+	}
+	// 2. THE ONE SITE THAT SERVES THE STORE.
+	sites, err := p.sitesForStore(sys, storeID)
+	if err != nil {
+		return ctx, "", err
+	}
+	switch len(sites) {
+	case 0:
+		return ctx, NoSiteServesSentence, nil
+	case 1:
+		return as(sites[0])
+	}
+	// SEVERAL: the owner they share, or else the owner of the one the store's
+	// settings name.
+	shared := true
+	for _, site := range sites[1:] {
+		shared = shared && userRef(trimmed(site["ownerUserId"])) == userRef(trimmed(sites[0]["ownerUserId"]))
+	}
+	if shared {
+		return as(sites[0])
+	}
+	if named := bareID(s.SiteID); named != "" {
+		for _, site := range sites {
+			if bareID(trimmed(site["id"])) == named {
+				return as(site)
+			}
+		}
+	}
+	return ctx, SeveralSitesSentence, nil
 }
 
 // senderLine is the store's sender as the lane resolves it for the store's
@@ -448,12 +544,14 @@ func (p *Provider) asStoreMerchant(ctx context.Context, s Settings) (context.Con
 type senderLine struct {
 	ready                     bool
 	fromName, address, reason string
-	// What a decision is made on, read from the lane's own fields and never from
-	// its sentence. readFailed: the lane could not be asked, or could not read
-	// the sender just now -- nothing is known of it. noneChosen: the lane resolves
-	// none because the organization has none chosen. noMerchant: the store's
-	// settings name no owner, so nobody was asked for.
-	readFailed, noneChosen, noMerchant bool
+	// What a decision is made on, read from the lane's own fields and code and
+	// never from its sentence. readFailed: the store's sites or the lane could
+	// not be asked, or the lane could not read the sender just now -- nothing is
+	// known of it. noneChosen: the lane resolves none because the organization
+	// has none chosen. nobody: there is nobody to send as (asStoreMerchant), so
+	// the lane was not asked. noAuthority: the store's merchant does not hold
+	// what a send requires.
+	readFailed, noneChosen, nobody, noAuthority bool
 }
 
 // view is the line as wholesaleStoreSettings answers it. The address is the
@@ -465,17 +563,23 @@ func (l senderLine) view() map[string]any {
 // readSender reads the store's sender line, as a send resolves it (the chosen
 // identity, or what a send with none chosen goes out as).
 //
-// AS THE STORE'S MERCHANT (asStoreMerchant): the lane answers a caller holding
-// what a send requires of it, and the pack sends as that person. One who may
-// not read the sender is answered the lane's own sentence for that, never "no
-// sender is chosen". The installation's own organization with no sender chosen
-// sends as the installation's default mailbox, which has no name or address the
-// lane can show: it says so.
-func (p *Provider) readSender(ctx context.Context, s Settings) senderLine {
+// AS THE STORE'S MERCHANT (asStoreMerchant, for app's own site when app is not
+// nil): the lane answers a caller holding what a send requires of it, and the
+// pack sends as that person. With nobody to send as the line says so and the
+// lane is not asked. A merchant WITHOUT WRITE PERMISSION in the store's
+// organization is told by the lane's code, and the line says it in the pack's
+// own sentence, which names what is missing and who can give it -- never "no
+// sender is chosen", and never the lane's words for it. The installation's own
+// organization with no sender chosen sends as the installation's default
+// mailbox, which has no name or address the lane can show: it says so.
+func (p *Provider) readSender(ctx context.Context, s Settings, storeID string, app map[string]any) senderLine {
 	unread := senderLine{reason: SenderUnreadableSentence, readFailed: true}
-	merchant, ok := p.asStoreMerchant(ctx, s)
-	if !ok {
-		return senderLine{reason: NoStoreOwnerSentence, noMerchant: true}
+	merchant, nobody, err := p.asStoreMerchant(ctx, s, storeID, app)
+	switch {
+	case err != nil:
+		return unread
+	case nobody != "":
+		return senderLine{reason: nobody, nobody: true}
 	}
 	account := bareID(s.AccountID)
 	if account == "" || p.lane == nil {
@@ -492,10 +596,14 @@ func (p *Provider) readSender(ctx context.Context, s Settings) senderLine {
 		}
 		return line
 	}
-	// THE LANE'S FIELDS DECIDE. One that could not be read just now is said in the
-	// pack's own sentence, whatever words the lane put beside the field.
+	// THE LANE'S FIELDS AND ITS CODE DECIDE. One that could not be read just now is
+	// said in the pack's own sentence, whatever words the lane put beside the
+	// field; so is a merchant without the permission.
 	if failed, _ := got["readFailed"].(bool); failed {
 		return unread
+	}
+	if trimmed(got["code"]) == campaigns.RowSendNoAuthority {
+		return senderLine{reason: NoSendAuthoritySentence, noAuthority: true}
 	}
 	line := senderLine{reason: wholeSentence(asString(got["reason"]))}
 	line.noneChosen, _ = got["noneChosen"].(bool)
@@ -561,7 +669,7 @@ func (p *Provider) automaticEmail(ctx, sys context.Context, app map[string]any, 
 		return declined(app, kind, notDue)
 	}
 	attempt := emailAttempt{kind: kind, number: 1, templateID: settings.TemplateFor(kind), automatic: true}
-	switch reason, effect := p.emailBlocker(ctx, settings, kind); effect {
+	switch reason, effect := p.emailBlocker(ctx, settings, app, kind); effect {
 	case blockNotDue:
 		return declined(app, kind, reason)
 	case blockDeclined:
@@ -638,6 +746,9 @@ func (p *Provider) notDueReason(sys context.Context, app map[string]any, setting
 // WHETHER IT IS SENT IS resendRefusal's, the one function the application's
 // page offers the act by: the store would send the email now, no attempt of
 // the kind is on its way, and the application is in the state for it.
+//
+// EVERY REFUSAL IS A WHOLE SENTENCE FOR THE PERSON WHO ASKED, with no prefix of
+// the pack's: a client shows it as it is.
 func (p *Provider) resendEmail(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	requester, err := resenderOf(ctx)
 	if err != nil {
@@ -645,18 +756,18 @@ func (p *Provider) resendEmail(ctx context.Context, args map[string]any, _ int) 
 	}
 	kind := trimmed(args["kind"])
 	if _, known := emailNouns[kind]; !known {
-		return nil, fmt.Errorf("wholesale: %q is not one of the applicant's emails; it is terms, approved, rejected or revoked", kind)
+		return nil, errors.New(ResendUnknownKindSentence)
 	}
 	applicationID := trimmed(args["applicationId"])
 	if applicationID == "" {
-		return nil, fmt.Errorf("wholesale: applicationId is required")
+		return nil, errors.New(ResendNoApplicationSentence)
 	}
 	rows, err := p.rowsFor(ctx, "applicationById", map[string]string{"applicationId": applicationID})
 	if err != nil {
 		return nil, err
 	}
 	if len(rows) == 0 {
-		return nil, fmt.Errorf("wholesale: application %q is not readable by this caller, so no email of it is sent again", applicationID)
+		return nil, errors.New(ResendUnreadableSentence)
 	}
 	app := rows[0]
 	sys := auth.ContextWithSystemActor(ctx, emailActor)
@@ -676,9 +787,9 @@ func (p *Provider) resendEmail(ctx context.Context, args map[string]any, _ int) 
 	// EACH ATTEMPT AS THE LANE NOW SAYS IT STANDS, the reading the application's
 	// page shows and offers its acts by; then the store's own readiness.
 	standing := emailStandingOf(p.emailsView(ctx, app, sends), kind)
-	standing.Blocker, _ = p.emailBlocker(ctx, settings, kind)
+	standing.Blocker, _ = p.emailBlocker(ctx, settings, app, kind)
 	if refusal := resendRefusal(kind, stage, access, standing); refusal != "" {
-		return nil, errors.New("wholesale: " + refusal)
+		return nil, errors.New(refusal)
 	}
 	// A RESEND OVER AN ATTEMPT THAT MAY HAVE BEEN DELIVERED says so in its answer.
 	note := ""
@@ -783,8 +894,8 @@ func notReached(state string, bounced bool) bool {
 // application in stage whose access is access, or "" when it is not refused.
 //
 // THE ONE QUESTION BEHIND THE RESEND AND ITS ACT: wholesaleResendEmail refuses
-// with this sentence, and ActsFor offers the act exactly when it is empty. In
-// order:
+// with this sentence -- a whole one, as it stands -- and ActsFor offers the act
+// exactly when it is empty. In order:
 //
 //   - the store would send the email now (the standing's Blocker, the checks a
 //     send makes of the store: emailBlocker);
@@ -803,20 +914,20 @@ func resendRefusal(kind, stage, access string, s EmailStanding) string {
 		return s.Blocker
 	}
 	if (kind == EmailRejected || kind == EmailRevoked) && s.Unreadable {
-		return "the email service's record of the last " + noun + " could not be read, so it is not sent again now"
+		return "The email service's record of the last " + noun + " could not be read just now, so it is not sent again. Try again in a moment."
 	}
 	if s.OnItsWay {
-		return "the last " + noun + " is waiting to be sent by the email service, so it is not sent again"
+		return "The last " + noun + " is waiting to be sent by the email service, so it is not sent again."
 	}
 	switch kind {
 	case EmailTerms:
 		if stage != StageWaitingForTerms {
-			return "the terms email is sent again only while the application waits for its terms"
+			return "The terms email is sent again only while the application waits for its terms."
 		}
 	case EmailApproved:
 		if stage != StateApproved || access != EntitlementGranted || !s.FirstRecorded {
-			return "the approval email is sent again only to a buyer whose access is granted, " +
-				"once the store's automation has sent it"
+			return "The approval email is sent again only to a buyer whose access is granted, " +
+				"once the store's automation has sent it."
 		}
 	case EmailRejected, EmailRevoked:
 		want := StateRejected
@@ -824,14 +935,25 @@ func resendRefusal(kind, stage, access string, s EmailStanding) string {
 			want = StateRevoked
 		}
 		if stage != want || !notReached(s.LastState, s.LastBounced) {
-			return "the " + noun + " is sent again only while the application is " + strings.ToLower(staffWords[want]) +
-				" and its last attempt did not reach the applicant"
+			return "The " + noun + " is sent again only while the application is " + strings.ToLower(staffWords[want]) +
+				" and its last attempt did not reach the applicant."
 		}
 	default:
-		return "that is not one of the applicant's emails"
+		return ResendUnknownKindSentence
 	}
 	return ""
 }
+
+// The refusals of a resend that is not judged at all: each a whole sentence for
+// the person who asked.
+const (
+	ResendUnknownKindSentence   = "That is not one of the applicant's emails. An email sent again is the terms, approved, rejected or revoked one."
+	ResendNoApplicationSentence = "No application is named, so there is no email to send again."
+	ResendUnreadableSentence    = "This application is not readable to you, so none of its emails is sent again."
+	ResendNobodySentence        = "An email is sent again by a signed-in person."
+	ResendOperatorSentence      = "The cluster's operators host the store's applications and send none of their emails. " +
+		"A person on the store's side sends one again."
+)
 
 // resenderOf is the person a resend is recorded for: the calling user, never
 // one of the cluster's operators, who send nothing on a store's behalf (the
@@ -839,11 +961,10 @@ func resendRefusal(kind, stage, access string, s EmailStanding) string {
 func resenderOf(ctx context.Context) (string, error) {
 	ac, ok := auth.AccessFromContext(ctx)
 	if !ok || ac.Synthetic || strings.TrimSpace(ac.UserId) == "" {
-		return "", errors.New("wholesale: an email is sent again by a signed-in person")
+		return "", errors.New(ResendNobodySentence)
 	}
 	if auth.IsClusterOperator(ac.Role) {
-		return "", errors.New("wholesale: the cluster's operators host the store's applications and send none of " +
-			"their emails; a person on the store's side sends one again")
+		return "", errors.New(ResendOperatorSentence)
 	}
 	return strings.TrimSpace(ac.UserId), nil
 }
@@ -939,6 +1060,18 @@ func (p *Provider) sendEmail(ctx, sys context.Context, app map[string]any, setti
 			return p.answerRecorded(ctx, app, row, !a.automatic, a.note)
 		}
 	}
+	// WHO THE SEND RUNS AS, RESOLVED NOW: the person who owns the store's site at
+	// this moment (asStoreMerchant). Before anything is recorded: a read of the
+	// store's sites that fails is a fault, not an attempt, and with nobody to
+	// send as the attempt is recorded as the store's own check declining it.
+	var sender context.Context
+	if a.declined == "" {
+		merchantNow, nobody, err := p.asStoreMerchant(ctx, settings, trimmed(app["storeId"]), app)
+		if err != nil {
+			return nil, err
+		}
+		sender, a.declined = merchantNow, nobody
+	}
 	// THE ROW IS THE APPLICATION'S MERCHANT'S, written as them, like every row of
 	// an application.
 	merchant, err := p.asMerchant(ctx, app)
@@ -995,12 +1128,9 @@ func (p *Provider) sendEmail(ctx, sys context.Context, app map[string]any, setti
 	// read as (emailBlocker), so the lane answers the send as it answered that.
 	state, reason, sentAt := SendFailed, ReasonNoOrganization, ""
 	if account := bareID(trimmed(app["accountId"])); account != "" {
-		sender, hasMerchant := p.asStoreMerchant(ctx, settings)
 		switch {
 		case p.lane == nil:
 			state, reason = SendFailed, reasonNoLane
-		case !hasMerchant:
-			state, reason = SendFailed, NoStoreOwnerSentence
 		default:
 			laneArgs := map[string]any{
 				"rowConcept": applicationConcept,
@@ -1102,8 +1232,8 @@ func (p *Provider) answerOutcome(row map[string]any, forStaff bool, note string)
 // laneOutcome reads what the row lane answered as an emailSend state and its
 // sentence: a hold is held, and a skip skipped, each with the lane's sentence;
 // an uncertain hand-over is uncertain, with the one uncertain sentence whatever
-// the lane said of it; a deferral deferred; any other error is failed with the
-// lane's words.
+// the lane said of it; a deferral deferred; any other error is failed, with a
+// sentence written for a person (failedReason) and never the error's text.
 func laneOutcome(reply map[string]any, err error) (string, string) {
 	if err != nil {
 		if reason, held := laneHeldReason(err); held {
@@ -1112,7 +1242,7 @@ func laneOutcome(reply map[string]any, err error) (string, string) {
 		if laneUncertain(err) {
 			return SendUncertain, ReasonUncertain
 		}
-		return SendFailed, laneWords(err)
+		return SendFailed, failedReason(err)
 	}
 	switch {
 	case reply["sent"] == true:
@@ -1126,7 +1256,35 @@ func laneOutcome(reply map[string]any, err error) (string, string) {
 	case reply["deferred"] == true:
 		return SendDeferred, wholeSentence(trimmed(reply["reason"]))
 	}
-	return SendFailed, reasonUnreadableAnswer
+	// A REPLY THAT SAYS NONE OF THESE reached the pack with no sentence.
+	return SendFailed, ReasonNotSent
+}
+
+// failedReason is why a send the lane refused, or that failed, was not sent, AS
+// A PERSON READS IT. The lane answers a code and a sentence with every refusal
+// and failure of a row send (campaigns.RowSendFailure):
+//
+//   - THE PACK DECIDES ON THE CODE, never on the sentence. For the one code it
+//     has words of its own for -- the person the send ran as does not hold what
+//     a send requires -- it answers them (NoSendAuthoritySentence), which name
+//     what is missing and who can give it;
+//   - any other code: the lane's sentence for it;
+//   - anything that reaches the pack with no sentence -- an error that is not
+//     the lane's answer, an answer with no words: the pack's own
+//     (ReasonNotSent).
+//
+// THE ERROR'S OWN TEXT IS NEVER READ. It names the functions that failed, and
+// what wraps the lane's answer on its way here may quote a provider's message,
+// and the applicant's address in it.
+func failedReason(err error) string {
+	code, sentence, failed := laneFailure(err)
+	switch {
+	case failed && code == campaigns.RowSendNoAuthority:
+		return NoSendAuthoritySentence
+	case failed && strings.TrimSpace(sentence) != "":
+		return wholeSentence(sentence)
+	}
+	return ReasonNotSent
 }
 
 // skipSentenceOf is why the lane skipped a send, in a sentence: the lane's own
@@ -1147,17 +1305,22 @@ func skipSentenceOf(sentence, reason any) string {
 //
 //   - an attempt recorded and NEVER SETTLED is read THROUGH THE LANE FIRST, at
 //     any age: where the lane has a record of it, the lane's status decides (one
-//     it still holds to send is on its way, and is not sent again; one it
-//     failed is failed; one it sent is sent). Only when the lane was read and
-//     has no record of it does the row's age decide -- on its way while it is
-//     young, uncertain once sendingWindow has passed. When the lane's record
-//     could not be read, nothing says the lane has none, so it does not turn
-//     uncertain: it stays on its way;
+//     it still holds to send is on its way, and is not sent again; one it sent
+//     is sent; one it skipped is skipped). ITS failed IS NOT FINAL: the lane
+//     writes failed in its ledger before it decides a hand-over was uncertain,
+//     and this attempt's own outcome was never written, so nothing says which
+//     it was -- it reads UNCERTAIN, with ReasonUncertain, and a resend over it
+//     says it may be a second copy. Only when the lane was read and has no
+//     record of it does the row's age decide -- on its way while it is young,
+//     uncertain once sendingWindow has passed. When the lane's record could not
+//     be read, nothing says the lane has none, so it does not turn uncertain:
+//     it stays on its way;
 //   - an UNCERTAIN attempt stays uncertain, with ReasonUncertain, unless the
-//     lane says something definite: sent, or a provider report of delivery
-//     (sent) or of a bounce (failed, reasonBounced). The lane writes failed in
-//     its ledger before it decides a hand-over was uncertain, so its failed is
-//     not final for one;
+//     lane says something definite: that it sent it, or A PROVIDER'S REPORT ON
+//     IT. An attempt the provider reports on was handed over, whatever the
+//     report: delivered or not delivered, it reads sent, with the report beside
+//     it, exactly as a sent attempt does. The lane's ledger failed is not final
+//     for one, for the reason above;
 //   - any other attempt takes the lane's status: sent with the lane's time,
 //     failed, skipped with the lane's sentence, pending as deferred; the row's
 //     own sentence is kept only when the row already said the same.
@@ -1178,6 +1341,11 @@ func (p *Provider) effectiveSend(row, delivery map[string]any, laneRead bool) ma
 	known := status == "sent" || status == "failed" || status == "skipped" || status == "pending"
 	if trimmed(row["state"]) == sendSending {
 		switch {
+		case status == "failed":
+			// THE LANE'S RECORD SAYS FAILED, WHICH IT WRITES BEFORE IT DECIDES A
+			// HAND-OVER WAS UNCERTAIN, and this attempt's own outcome was never
+			// written: it may have been delivered.
+			state, reason = SendUncertain, ReasonUncertain
 		case known:
 			// THE LANE HAS A RECORD OF IT, and decides: none of the row's own reading
 			// is kept.
@@ -1191,14 +1359,14 @@ func (p *Provider) effectiveSend(row, delivery map[string]any, laneRead bool) ma
 		}
 	}
 	if state == SendUncertain {
-		switch {
-		case status == "sent" || provider == "delivered":
+		// THE LANE SENT IT, OR THE PROVIDER REPORTS ON IT: either way it was handed
+		// over. A report of non-delivery leaves it sent with the report beside it
+		// (the delivery's providerStatus), as it leaves a sent attempt.
+		if status == "sent" || provider != "" {
 			state, reason = SendSent, ""
 			if at := timeText(delivery["sentAt"]); at != "" {
 				sentAt = at
 			}
-		case bouncedReports[provider]:
-			state, reason, sentAt = SendFailed, reasonBounced, ""
 		}
 	} else {
 		switch status {
@@ -1302,14 +1470,6 @@ func skipSentenceIfSkipped(status map[string]any) string {
 		return ""
 	}
 	return skipSentenceOf(status["skipSentence"], status["skipReason"])
-}
-
-// laneWords is the lane's error as the store's people read it: without the
-// pack's own prefix for the call, as a whole sentence. The lane's errors never
-// carry an address (campaigns/send_row.go), and the call carries none to quote.
-func laneWords(err error) string {
-	text := strings.TrimSpace(err.Error())
-	return wholeSentence(strings.TrimPrefix(text, "wholesale: "+laneSendConstruct+": "))
 }
 
 // declined answers a send of an email that is NOT DUE, recording nothing: the
@@ -1610,16 +1770,37 @@ const ReasonHeldForAutomation = "The email service held this email until the sto
 // may have been delivered.
 const NoteMaybeSecondCopy = "The last attempt may have been delivered, so the applicant may receive this email twice."
 
-// reasonBounced is an attempt the provider reported it could not deliver.
-const reasonBounced = "The email service reports this email could not be delivered."
-
 // reasonLaneUnread is an attempt recorded and never settled whose record at the
 // email service could not be read: nothing says what became of it.
 const reasonLaneUnread = "The email service could not say just now what became of this email."
 
-// NoStoreOwnerSentence is the sender, and every email, of a store whose
-// settings name no owner: there is nobody a send of it would run as.
-const NoStoreOwnerSentence = "This store's settings name no owner, so no email can be sent for it. The cluster's operators set the store up again."
+// ReasonNotSent is a failed attempt that reached the pack with no sentence for
+// a person: an error that is not the lane's answer, or an answer with no words.
+// It says what happened and what a person can do next, and nothing of the error.
+const ReasonNotSent = "The email could not be sent. Send it again; if it is still not sent, the cluster's operators can say why."
+
+// The sentences of a store with NOBODY TO SEND ITS EMAILS AS (asStoreMerchant):
+// each says why, and who can put it right. They are the sender line's reason,
+// every email's in emailsWouldSend, the reason a due email is recorded skipped
+// with, and a resend's refusal.
+const (
+	// NoSiteServesSentence: no site's binding names the store.
+	NoSiteServesSentence = "No site serves this store now, so there is nobody its emails can be sent as. The cluster's operators connect a site to the store."
+	// SeveralSitesSentence: several sites serve the store under different
+	// owners, and neither the application nor the store's settings names one of
+	// them.
+	SeveralSitesSentence = "More than one site serves this store, under different owners, and the store's wholesale settings name none of them, so there is nobody its emails can be sent as. The cluster's operators leave one site serving the store, or say in its wholesale settings which of them its program belongs to."
+	// SiteNamesNoOwnerSentence: the site that serves the store names no owner.
+	SiteNamesNoOwnerSentence = "The site that serves this store names no owner, so there is nobody its emails can be sent as. The cluster's operators serve the store from a site that a person owns."
+)
+
+// NoSendAuthoritySentence is the store's merchant -- the person who owns its
+// site now -- without what the lane requires of whoever sends for an
+// organization: write permission in it. THE PACK'S OWN SENTENCE, answered
+// wherever the lane's code says so (the sender read, and a send the lane
+// refuses for it): it names what is missing and who can give it, and is never
+// the lane's words for it.
+const NoSendAuthoritySentence = "The owner of the site that serves this store does not have write permission in the store's organization, so its emails cannot be sent. An administrator of the organization, or the cluster's operators, can give them that permission."
 
 // SenderUnreadableSentence is the store's sender when the email service could
 // not be asked which one its emails go out as.

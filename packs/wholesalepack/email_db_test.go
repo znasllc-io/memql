@@ -39,13 +39,27 @@ import (
 type recordingMail struct {
 	mu   sync.Mutex
 	sent []email.Message
+	// refuse, when set, is the provider's answer to a message in place of taking it.
+	refuse func(email.Message) error
 }
 
 func (m *recordingMail) Send(_ context.Context, msg email.Message, _ email.SendAs) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.refuse != nil {
+		if err := m.refuse(msg); err != nil {
+			return err
+		}
+	}
 	m.sent = append(m.sent, msg)
 	return nil
+}
+
+// refuseWith makes the provider answer every message from now on with refuse.
+func (m *recordingMail) refuseWith(refuse func(email.Message) error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.refuse = refuse
 }
 
 func (m *recordingMail) messages() []email.Message {
@@ -259,6 +273,55 @@ func TestTheTermsEmailReachesTheLaneAndItsDeliveryShowsOnTheApplication(t *testi
 		t.Fatalf("the new link answered %d", code)
 	}
 	s.requireNoTokenStored(t, "terms", 2, fresh)
+
+	// THE PROVIDER REFUSES THE NEXT ONE, IN WORDS THAT QUOTE THE APPLICANT'S
+	// ADDRESS, as a mail server's refusal does. What a person reads is the lane's
+	// sentence for a message the provider did not take: on the resend's reply, on
+	// the email's row, on the application's page and in the export, and none of
+	// the four carries the provider's words or the address. The lane's own record
+	// of the delivery keeps them; no log line does.
+	s.mail.refuseWith(func(msg email.Message) error {
+		return &email.SendError{StatusCode: 550, Permanent: true, NotAccepted: true,
+			Detail: "550 5.1.1 <" + msg.To + ">: Recipient address rejected"}
+	})
+	sentence := campaigns.RowSendSentence(campaigns.RowSendProviderRefused)
+	refused := answerOf(t, eng, signedIn(s.staff), `builtin wholesaleResendEmail(applicationId: `+quote(s.appID)+`, kind: "terms")`)
+	if refused["attempt"] != float64(3) || refused["state"] != wholesalepack.SendFailed || refused["sent"] != false ||
+		refused["reason"] != sentence || len(s.mail.messages()) != 2 {
+		t.Fatalf("the resend the provider refused answered %v after %d messages, want attempt 3 failed with %q", refused, len(s.mail.messages()), sentence)
+	}
+	failedRow := latestPayload(t, "v1:wholesale:emailSend", wholesalepack.EmailSendRowID("terms", s.appID, 3))
+	application = answerOf(t, eng, signedIn(s.staff), `builtin wholesaleGet(applicationId: `+quote(s.appID)+`)`)
+	shown := emailOf(t, application, wholesalepack.EmailTerms, 3)
+	var exported struct {
+		EmailSends []map[string]any `json:"emailSends"`
+	}
+	export := answerOf(t, eng, signedIn(s.staff), `builtin wholesaleExportStore(siteId: `+quote(s.site)+`, storeId: `+quote(s.store)+`)`)
+	if err := json.Unmarshal([]byte(asString(export["json"])), &exported); err != nil || len(exported.EmailSends) != 3 {
+		t.Fatalf("the export's emails: %v %v", err, exported.EmailSends)
+	}
+	if failedRow["state"] != wholesalepack.SendFailed || failedRow["reason"] != sentence || shown["state"] != wholesalepack.SendFailed || shown["reason"] != sentence {
+		t.Fatalf("the refused email's row is %v and the page shows %v, want both failed with %q", failedRow, shown, sentence)
+	}
+	for where, value := range map[string]any{"the resend's reply": refused, "the email's row": failedRow,
+		"the application's page": application["emails"], "the export": exported.EmailSends} {
+		raw, _ := json.Marshal(value)
+		for _, never := range []string{"sam@", "Recipient address rejected", "550 5.1.1", "campaigns.", "permanent failure"} {
+			if strings.Contains(string(raw), never) {
+				t.Fatalf("%s carries %q: %s", where, never, raw)
+			}
+		}
+	}
+	if _, ledger := laneDelivery(t, wholesalepack.LaneRequestID("terms", s.appID, 3)); ledger["status"] != "failed" ||
+		!strings.Contains(asString(ledger["lastError"]), "Recipient address rejected") {
+		t.Fatalf("the lane's own record of the delivery does not keep the provider's answer: %v", ledger)
+	}
+	if lines := s.logs.lines("sam@"); lines != "" {
+		t.Fatalf("a log line carries the applicant's address:\n%s", lines)
+	}
+	if lines := s.logs.lines("Recipient address rejected"); lines != "" {
+		t.Fatalf("a log line carries the provider's words:\n%s", lines)
+	}
 }
 
 // A PRICE-SHEET LINK STOPS OPENING ONCE THE BUYER IS REMOVED. The approval
@@ -731,5 +794,127 @@ func TestTheSettingsAnswerTheSenderAndWhatTheCallerMayPublishAndExport(t *testin
 	if again["attempt"] != float64(1) || again["state"] != wholesalepack.SendSkipped || len(s.mail.messages()) != 1 ||
 		versionCount(t, "v1:wholesale:emailSend", rejectedRow) != 1 {
 		t.Fatalf("the automatic call after the resend answered %v after %d messages", again, len(s.mail.messages()))
+	}
+}
+
+// A STORE'S EMAILS FOLLOW THE OWNER OF THE SITE THAT SERVES IT, through the real
+// row lane and its real check of who may send for an organization. The
+// application was posted, and the store's settings saved, through a site one
+// person owns, and both rows name that person for good. Then another site of
+// the organization, owned by another of its people, takes the store over: it is
+// bound to the store and the first site to another. (Through the engine's own
+// writes that is how the person changes: an organization's site keeps the owner
+// it was created with -- the engine restores the stored owner of an
+// organization's row on every write, an ownership transfer included.) The new
+// owner reads the organization's data and may not change it:
+//
+//   - the settings say no email would be sent, in the pack's own sentence, which
+//     names what is missing and who can give it;
+//   - a rejection that falls due is recorded as not sent with that sentence,
+//     and nothing reaches the provider; the application's page lists it and
+//     offers no resend, and a resend asked for is refused with the sentence.
+//
+// Then the new owner is given write permission and the OLD owner loses it: the
+// act is offered, a person's resend goes out, and the lane's own record of the
+// delivery is the new owner's -- while the email's row stays the application's
+// merchant's, as every row of an application is.
+func TestAStoresEmailsFollowTheOwnerOfTheSiteThatServesItThroughTheRealLane(t *testing.T) {
+	eng, s := newEmailStore(t, "mail-owner", false)
+	get := `builtin wholesaleGet(applicationId: ` + quote(s.appID) + `)`
+	resend := `builtin wholesaleResendEmail(applicationId: ` + quote(s.appID) + `, kind: "rejected")`
+	// senderOf is the sender line and the rejection email's standing, as the
+	// store's settings answer them through site.
+	senderOf := func(site string) (map[string]any, map[string]any) {
+		t.Helper()
+		got := answerOf(t, eng, signedIn(s.staff), `builtin wholesaleStoreSettings(siteId: `+quote(site)+`, storeId: `+quote(s.store)+`)`)
+		line, _ := got["sender"].(map[string]any)
+		would, _ := got["emailsWouldSend"].(map[string]any)
+		rejected, _ := would[wholesalepack.EmailRejected].(map[string]any)
+		return line, rejected
+	}
+	setRole := func(user, role string) {
+		t.Helper()
+		row := latestPayload(t, "v1:identity:user", user)
+		row["role"] = role
+		delete(row, "id")
+		wsExec(t, eng, seedCtx(), rawInsert("v1:identity:user", user, row))
+	}
+	if line, _ := senderOf(s.site); line["ready"] != true {
+		t.Fatalf("before the store changes sites the sender reads %v", line)
+	}
+
+	// ANOTHER SITE TAKES THE STORE OVER, owned by a person of the organization
+	// who reads its data and may not change it.
+	oldOwner := bareID(s.owner)
+	heir, heirs, next := "user-heir-"+s.site, "group-heirs-"+s.site, "next-"+s.site
+	seedGroup(t, eng, heirs, "custom", s.account)
+	seedPersonIn(t, eng, heir, heir, "reader", true, heirs, s.account, "added")
+	seedSiteIn(t, eng, next, heir, s.store, s.account)
+	elsewhere := s.store + "-elsewhere"
+	wsExec(t, eng, seedCtx(), rawInsert("v1:shopify:store", elsewhere, map[string]any{"domain": elsewhere + ".myshopify.com"}))
+	wsExec(t, eng, seedCtx(), rawInsert("v1:platform:site", s.site, map[string]any{"binding": map[string]any{"storeId": elsewhere}}))
+	if got := siteOwnerOf(t, eng, next); bareID(got) != heir {
+		t.Fatalf("the new site's owner reads %q", got)
+	}
+	for concept, row := range map[string]string{"v1:wholesale:application": s.appID, "v1:wholesale:wholesaleSettings": wholesalepack.SettingsRowID(s.store)} {
+		if got := latestPayload(t, concept, row); bareID(asString(got["ownerUserId"])) != oldOwner {
+			t.Fatalf("%s %s is owned by %v; the case needs it to keep naming the old owner", concept, row, got["ownerUserId"])
+		}
+	}
+
+	const want = wholesalepack.NoSendAuthoritySentence
+	if line, rejected := senderOf(next); line["ready"] != false || line["reason"] != want || rejected["wouldSend"] != false || rejected["reason"] != want {
+		t.Fatalf("with a site owner who may not send, the sender reads %v and the rejection email %v; want both %q", line, rejected, want)
+	}
+	if _, err := eng.Execute(signedIn(s.staff), `builtin wholesaleRecordDecision(applicationId: `+quote(s.appID)+
+		`, transition: "reject", note: "not a trade buyer")`); err != nil {
+		t.Fatalf("reject: %v", err)
+	}
+	declined := automationCall(t, eng, s.sendCall("wholesaleSendBuyerEmail", "rejected"))
+	if declined["state"] != wholesalepack.SendSkipped || declined["recorded"] != true || declined["attempt"] != float64(1) ||
+		declined["reason"] != want || len(s.mail.messages()) != 0 {
+		t.Fatalf("the due rejection answered %v after %d messages, want attempt 1 recorded as skipped with %q", declined, len(s.mail.messages()), want)
+	}
+	application := answerOf(t, eng, signedIn(s.staff), get)
+	if e := emailOf(t, application, wholesalepack.EmailRejected, 1); e["state"] != wholesalepack.SendSkipped || e["reason"] != want {
+		t.Fatalf("the page shows the attempt as %v", e)
+	}
+	if acts, _ := json.Marshal(application["acts"]); strings.Contains(string(acts), "resendRejected") {
+		t.Fatalf("while the site's owner may not send the page offers %s", acts)
+	}
+	if _, err := eng.Execute(signedIn(s.staff), resend); err == nil || !strings.Contains(err.Error(), want) || len(s.mail.messages()) != 0 {
+		t.Fatalf("a resend answered %v after %d messages, want it refused with the sentence", err, len(s.mail.messages()))
+	}
+
+	// THE NEW OWNER IS GIVEN WRITE PERMISSION, AND THE OLD OWNER LOSES IT.
+	setRole(heir, "writer")
+	setRole(oldOwner, "reader")
+	if line, rejected := senderOf(next); line["ready"] != true || line["address"] != "trade@example.com" || rejected["wouldSend"] != true {
+		t.Fatalf("once the site's owner may send, the sender reads %v and the rejection email %v", line, rejected)
+	}
+	application = answerOf(t, eng, signedIn(s.staff), get)
+	if acts, _ := json.Marshal(application["acts"]); string(acts) != `["resendRejected"]` {
+		t.Fatalf("once the site's owner may send the page offers %s, want resendRejected", acts)
+	}
+	resent := answerOf(t, eng, signedIn(s.staff), resend)
+	if resent["state"] != wholesalepack.SendSent || resent["attempt"] != float64(2) || len(s.mail.messages()) != 1 ||
+		s.mail.messages()[0].To != "sam@mail-owner.example.com" {
+		t.Fatalf("the resend answered %v after %d messages", resent, len(s.mail.messages()))
+	}
+	// SENT AS THE NEW OWNER: the lane's own record of the delivery is theirs. The
+	// email's row is the application's merchant's, as it always was.
+	if _, ledger := laneDelivery(t, wholesalepack.LaneRequestID(wholesalepack.EmailRejected, s.appID, 2)); bareID(asString(ledger["ownerUserId"])) != heir {
+		t.Fatalf("the lane's record of the delivery is owned by %v, want the owner of the site that serves the store", ledger["ownerUserId"])
+	}
+	row := latestPayload(t, "v1:wholesale:emailSend", wholesalepack.EmailSendRowID(wholesalepack.EmailRejected, s.appID, 2))
+	if row["state"] != wholesalepack.SendSent || bareID(asString(row["ownerUserId"])) != oldOwner {
+		t.Fatalf("the email's row is %v, want it sent and the application's merchant's", row)
+	}
+	if again := automationCall(t, eng, s.sendCall("wholesaleSendBuyerEmail", "rejected")); again["attempt"] != float64(1) ||
+		again["state"] != wholesalepack.SendSkipped || len(s.mail.messages()) != 1 {
+		t.Fatalf("the automatic call after the resend answered %v after %d messages", again, len(s.mail.messages()))
+	}
+	if lines := s.logs.lines("sam@"); lines != "" {
+		t.Fatalf("a log line carries the applicant's address:\n%s", lines)
 	}
 }

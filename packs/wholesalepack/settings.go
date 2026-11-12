@@ -161,9 +161,6 @@ func (p *Provider) storeSettingsRows(ctx context.Context, storeID string) ([]map
 type Settings struct {
 	Exists, ApplicationsOpen                                     bool
 	EntitlementAdapter, IntroText, StaffEmail, AccountID, SiteID string
-	// OwnerUserID is the store's merchant: the owner the settings row names, and
-	// the person every send of the store runs as (asStoreMerchant).
-	OwnerUserID string
 	// TermsRequired absent is false.
 	TermsRequired bool
 	// LinkLifetimeDays is the row's, or DefaultLinkLifetimeDays when it names
@@ -269,7 +266,6 @@ func EffectiveSettings(row map[string]any) Settings {
 		StaffEmail:         trimmed(row["staffEmail"]),
 		AccountID:          trimmed(row["accountId"]),
 		SiteID:             trimmed(row["siteId"]),
-		OwnerUserID:        trimmed(row["ownerUserId"]),
 		TermsRequired:      held.termsRequired,
 		LinkLifetimeDays:   days,
 		AcceptanceText:     text,
@@ -595,10 +591,11 @@ func (p *Provider) storeSettings(ctx context.Context, args map[string]any, _ int
 	_, exportErr := p.exportAdmission(ctx, args)
 	exportAllowed := exportErr == nil
 	// THE SENDER, AND WHETHER EACH EMAIL WOULD BE SENT, ARE ASKED AS A SEND OF THE
-	// STORE ASKS: as the store's merchant, resolved by the one function a send
-	// resolves that person by (asStoreMerchant), never as whoever is reading. One
-	// reading of the lane answers the line and all four kinds.
-	sender := p.readSender(ctx, s)
+	// STORE ASKS: as the store's merchant -- the person who owns the site that
+	// serves the store now -- resolved by the one function a send resolves that
+	// person by (asStoreMerchant), never as whoever is reading. One reading of
+	// the lane answers the line and all four kinds.
+	sender := p.readSender(ctx, s, storeID, nil)
 	choices := make([]map[string]any, 0, len(templates))
 	for _, t := range templates {
 		choices = append(choices, map[string]any{"id": t.id, "name": t.name})

@@ -141,6 +141,11 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 		if versions := ents[bareID(id)]; len(versions) > 0 {
 			row := withoutTokenHash(versions[0])
 			row["applicationId"] = id
+			// WHY ACCESS IS NOT ON, as the application's page and the buyers list say
+			// it: a sentence for a person (accessReason), never the record's own text.
+			if asString(row["error"]) != "" {
+				row["error"] = accessReason(versions[0])
+			}
 			entitlements = append(entitlements, row)
 		}
 		if rows := accs[bareID(id)]; len(rows) > 0 {

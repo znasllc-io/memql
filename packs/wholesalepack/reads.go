@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -169,8 +170,9 @@ var resendKindOf = map[string]string{StageWaitingForTerms: EmailTerms, StateAppr
 // them. An operator sends none, so nothing is read for one.
 //
 // THE STORE'S READINESS IS ASKED LAST, and only when everything else admits the
-// resend: it is a read of the lane (emailBlocker), made as the store's merchant.
-func (p *Provider) resendStandings(ctx context.Context, settings Settings, stage, access string, operator bool,
+// resend: it is a read of the store's sites and of the lane (emailBlocker),
+// made as the person a send of this application runs as.
+func (p *Provider) resendStandings(ctx context.Context, settings Settings, app map[string]any, stage, access string, operator bool,
 	emails []map[string]any) map[string]EmailStanding {
 	kind := resendKindOf[stage]
 	if operator || kind == "" {
@@ -178,16 +180,115 @@ func (p *Provider) resendStandings(ctx context.Context, settings Settings, stage
 	}
 	standing := emailStandingOf(emails, kind)
 	if resendRefusal(kind, stage, access, standing) == "" {
-		standing.Blocker, _ = p.emailBlocker(ctx, settings, kind)
+		standing.Blocker, _ = p.emailBlocker(ctx, settings, app, kind)
 	}
 	return map[string]EmailStanding{kind: standing}
 }
 
-// accessReason is why an application's access is not on, as a person reads it:
-// the access record's own error -- what the route answered, which a route
-// writes as an error's text -- as a whole sentence (wholeSentence). The buyers
-// list and the application's page both answer it, so they say one thing.
-func accessReason(ent map[string]any) string { return wholeSentence(asString(ent["error"])) }
+// What a person reads of an access record whose cause the route does not name,
+// and what is left off the words of one the pack's own routes recorded.
+const (
+	// storeRefusedLead comes before the store's own words, given as it gave them.
+	storeRefusedLead = "The store refused this change. Its answer was: "
+	// StoreRefusedSentence is a refusal the store gave no words for.
+	StoreRefusedSentence = "The store refused this change."
+	// AccessUnconfirmedSentence is anything else that kept a change from being
+	// recorded as done: the store could not be reached, or what it answered
+	// could not be read. It says what a person can do next, and nothing of the
+	// error.
+	AccessUnconfirmedSentence = "This change could not be confirmed with the store, so it is not recorded as done. Retry access; if it still does not go through, the cluster's operators can say why."
+	// connectorPrefix is how the Shopify connector, which the pack's own two
+	// routes ask, begins the text of a refusal: its package's name.
+	connectorPrefix = "shopify: "
+)
+
+// accessReason is why an application's access is not on, AS A PERSON READS IT.
+// The buyers list, the application's page and the export all answer it, so they
+// say one thing.
+//
+// The access record keeps what the route's attempt came to as the text of an
+// error (its error field: the pack's own prefix, and for a refusal the route's
+// name, before the words) beside the cause it names (errorCode). That text is
+// the record's, not a reader's:
+//
+//   - A CAUSE THE ROUTE NAMES -- no settings, no route, the store's permissions,
+//     its plan's ceiling, a refusal for want of a connector or of anything to
+//     undo -- reads as the sentence recorded for it, with no prefix of the
+//     pack's.
+//   - A REFUSAL WHOSE CAUSE THE ROUTE DOES NOT NAME -- the store said no to the
+//     change itself (customer_refused, which is also what a refusal under a code
+//     this build does not know is recorded as), or a refusal recorded before
+//     records named their cause -- reads "The store refused this change. Its
+//     answer was: " and the store's words as it gave them.
+//   - ANYTHING ELSE -- an outage, an answer nobody could read: what is recorded
+//     is an error's chain, which names the constructs that failed. It is never
+//     answered; the pack's own sentence is (AccessUnconfirmedSentence).
+//
+// THE PACK'S OWN TWO ROUTES ASK THE SHOPIFY CONNECTOR, whose refusal is itself
+// an error's text and begins with the connector's package name
+// (connectorPrefix): that name is no part of the words, and is left off. A
+// route of a client's own is given word for word -- the pack cannot tell a
+// package's name from a store's own words that begin with a word and a colon.
+func accessReason(ent map[string]any) string {
+	recorded := strings.TrimSpace(asString(ent["error"]))
+	if recorded == "" {
+		return ""
+	}
+	words, prefixed := strings.CutPrefix(recorded, "wholesale: ")
+	reason, refusal := "", false
+	if prefixed {
+		reason, refusal = refusalWords(words)
+	}
+	if route := trimmed(ent["adapter"]); refusal && (route == AdapterShopifyB2B || route == AdapterCustomerTag) {
+		reason = strings.TrimPrefix(reason, connectorPrefix)
+	}
+	asGiven := func(said string) string {
+		if said = strings.TrimSpace(said); said == "" {
+			return StoreRefusedSentence
+		}
+		switch last, _ := utf8.DecodeLastRuneInString(said); last {
+		case '.', '!', '?':
+			return storeRefusedLead + said
+		}
+		return storeRefusedLead + said + "."
+	}
+	// named is a cause the route names, in the sentence recorded for it; one
+	// recorded with no words has none to give.
+	named := func(sentence string) string {
+		if sentence = wholeSentence(sentence); sentence != "" {
+			return sentence
+		}
+		return AccessUnconfirmedSentence
+	}
+	switch code := trimmed(ent["errorCode"]); {
+	case code == ErrorCustomerRefused:
+		if refusal {
+			return asGiven(reason)
+		}
+		return asGiven(words)
+	case code == ErrorNoSettings, code == ErrorNoRoute, code == ErrorScopeMissing, code == ErrorPlanCeiling:
+		if refusal {
+			return named(reason)
+		}
+		return named(words)
+	case refusal && code == ErrorShopifyError:
+		return named(reason)
+	case refusal:
+		return asGiven(reason)
+	}
+	return AccessUnconfirmedSentence
+}
+
+// refusalWords reads the words of a route's refusal out of what a record keeps
+// of one, once the pack's own prefix is off it: "<the route's name> refused:
+// <the words>" (AdapterRefusal). False for anything else.
+func refusalWords(recorded string) (string, bool) {
+	route, words, found := strings.Cut(recorded, " refused:")
+	if !found || route == "" || strings.ContainsAny(route, " \t:") {
+		return "", false
+	}
+	return strings.TrimSpace(words), true
+}
 
 // staged is one application the caller reads, with the state its whole log
 // gives it.
@@ -458,7 +559,7 @@ func (p *Provider) get(ctx context.Context, args map[string]any, _ int) ([]memor
 		"operator":    operator,
 		// EACH RESEND IS OFFERED EXACTLY WHEN IT WOULD NOT BE REFUSED (resendRefusal).
 		"acts": ActsFor(ActsInput{Stage: stage, AccessState: access, EntitlementExists: ent != nil, Operator: operator,
-			Emails: p.resendStandings(ctx, settings, stage, access, operator, emails)}),
+			Emails: p.resendStandings(ctx, settings, app, stage, access, operator, emails)}),
 	})
 }
 
