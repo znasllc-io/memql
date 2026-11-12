@@ -126,10 +126,6 @@ const bumpProcedure = `
        EnsureSubscriptions, which re-registers every topic at the new version
   See docs/public/operate/shopify-connector.md, "the quarterly bump".`
 
-// TestRecordedFixtureCoversTheAllowlist fails when the fixture was recorded
-// before a type was added to the allowlist. Without it the generator's error
-// is "type X is not in the 2026-07 schema", which reads like Shopify removed
-// the type rather than like the fixture is behind.
 // Every field the generator plans from the recorded schema says what its value
 // is: its Admin type, and for a nested object the mirrored rows whose GIDs it
 // keeps. The connector decides what a customer's erasure keeps from those two
@@ -184,6 +180,10 @@ func TestEveryPlannedFieldSaysWhatItsValueIs(t *testing.T) {
 	}
 }
 
+// TestRecordedFixtureCoversTheAllowlist fails when the fixture was recorded
+// before a type was added to the allowlist. Without it the generator's error
+// is "type X is not in the 2026-07 schema", which reads like Shopify removed
+// the type rather than like the fixture is behind.
 func TestRecordedFixtureCoversTheAllowlist(t *testing.T) {
 	repo := repoRoot()
 	list, err := LoadAllowlist(filepath.Join(repo, "cmd", "shopifyschema", "allowlist.yaml"))
