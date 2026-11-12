@@ -124,10 +124,13 @@ var factTables = func() []string {
 // is recorded as blocked, since nothing then confirms its figures are current.
 const verdictStaleAfter = 15 * time.Minute
 
-// The reasons this package adds to a store's kept reasons, with no code: the
-// mirror gives none for either.
+// The reasons this package adds to a store's kept reasons. Each has a code of
+// its own, outside the mirror's, so nothing that keys or deduplicates reasons
+// by code takes one for the other or for a mirror reason.
 const (
+	verdictUnreadableCode     = "statistics_verdict_unreadable"
 	verdictUnreadableSentence = "The store's recording state could not be read."
+	notRecordedCode           = "statistics_not_recorded"
 	notRecordedSentence       = "Part of what the figures need is not recorded for this store."
 )
 
@@ -573,10 +576,10 @@ func keepStoreRow(ctx context.Context, tx bun.Tx, storeID string, k keptFields, 
 			reasons = append(reasons, keptReason{r.Code, r.Sentence})
 		}
 		if k.verdict.Outside {
-			reasons = append(reasons, keptReason{"", notRecordedSentence})
+			reasons = append(reasons, keptReason{notRecordedCode, notRecordedSentence})
 		}
 		if !k.verdict.known() {
-			reasons = append(reasons, keptReason{"", verdictUnreadableSentence})
+			reasons = append(reasons, keptReason{verdictUnreadableCode, verdictUnreadableSentence})
 		}
 		s := k.verdict.Since.UTC()
 		state, verdictSince = k.verdict.State, &s
@@ -591,7 +594,7 @@ func keepStoreRow(ctx context.Context, tx bun.Tx, storeID string, k keptFields, 
 		}
 		return nil
 	default:
-		reasons = append(reasons, keptReason{"", verdictUnreadableSentence})
+		reasons = append(reasons, keptReason{verdictUnreadableCode, verdictUnreadableSentence})
 	}
 	reasonsJSON, err := json.Marshal(reasons)
 	if err != nil {
@@ -735,12 +738,20 @@ func (i *Integration) removeStore(ctx context.Context, db *bun.DB, id string, no
 	} else if err != nil {
 		return "", fmt.Errorf("read the row of store %s: %w", id, err)
 	}
+	// A store already purging -- for a rebuild, say -- already holds a new
+	// generation and refuses every writer, so it is not marked again.
 	if !purging {
 		if err := writeTx(ctx, db, id, anyGeneration, func(ctx context.Context, tx bun.Tx) error {
 			return rebuildStore(ctx, tx, id, now)
 		}); err != nil {
 			return "", err
 		}
+	}
+	// The line is this process's, written at its first turn of the removal,
+	// whether the removal marked the store or met a rebuild's purge. Another
+	// node, or a new cron leader, that takes a turn of the same removal writes
+	// it once more: a log line, nothing else.
+	if i.noted.change("removal:"+id, "under way") {
 		i.logger.Info("Store statistics: a store's data was removed; its statistics are being deleted",
 			"component", "storestats", "storeId", id)
 	}
@@ -762,6 +773,7 @@ func (i *Integration) removeStore(ctx context.Context, db *bun.DB, id string, no
 	if !gone {
 		return outcomePurging, nil
 	}
+	i.noted.change("removal:"+id, "")
 	i.logger.Info("Store statistics: the statistics of a store whose data was removed are deleted",
 		"component", "storestats", "storeId", id)
 	return outcomeRemoved, nil

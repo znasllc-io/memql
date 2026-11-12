@@ -484,7 +484,7 @@ func TestAVerdictThatCannotBeReadIsNotKnown(t *testing.T) {
 	}
 	keep(t, i, storeOf(id, nil), t1.Add(verdictStaleAfter+time.Minute))
 	k = keptRow(t, id)
-	wantReasons := `[{"code": "", "sentence": "` + verdictUnreadableSentence + `"}]`
+	wantReasons := `[{"code": "statistics_verdict_unreadable", "sentence": "` + verdictUnreadableSentence + `"}]`
 	if k.verdictState != "" || !k.recordingBlocked || !k.lastClearAt.Time.Equal(t1) || k.verdictReasons != wantReasons {
 		t.Errorf("failed reads past the bound: state %q, recording_blocked %v, last_clear_at %v, reasons %s; want \"\", true, %s, %s",
 			k.verdictState, k.recordingBlocked, k.lastClearAt, k.verdictReasons, t1, wantReasons)
@@ -643,6 +643,20 @@ func TestALowerDefinitionRebuilds(t *testing.T) {
 	if k.definition != storeStatsDefinition || k.purging || walked != 1 {
 		t.Errorf("after the first fill: definition %d, purging %v, walked %d; want %d, false, 1",
 			k.definition, k.purging, walked, storeStatsDefinition)
+	}
+	// The first fill's rebuild is marked until the run after the walk
+	// reaches the clock, which clears it.
+	if !k.rebuildingSince.Valid {
+		t.Error("the first fill's rebuild was not marked")
+	}
+	now = now.Add(time.Minute)
+	through = now
+	if _, err := runRollup(principalCtx(t, "storeStatisticsRollupSweep"), i, now); err != nil {
+		t.Fatal(err)
+	}
+	if k := keptRow(t, id); k.rebuildingSince.Valid || k.generation != made {
+		t.Errorf("the run after the first fill's walk reached the clock left rebuilding_since %v and generation %d, want cleared and %d",
+			k.rebuildingSince, k.generation, made)
 	}
 	before := facts()
 
@@ -1291,6 +1305,51 @@ func TestAConditionIsLoggedWhenItBeginsAndEnds(t *testing.T) {
 // AN ERASED STORE IS REMOVED ONCE. The removal is logged when it begins and
 // when it ends and reported removed once; after that the store is left: not
 // listed again, nothing written, nothing logged.
+// THE TWO REASONS THIS PACKAGE ADDS have codes of their own: a store with a
+// state this build does not know and a walked concept outside what it records
+// keeps two reasons with two different codes.
+func TestTheReasonsThisPackageAddsHaveCodesOfTheirOwn(t *testing.T) {
+	i := testIntegration(t)
+	id := keptStore(t)
+	reply := verdictReply("on holiday", time.Now())
+	reply["outsideConcepts"] = []any{"order"}
+	answerVerdict(i, reply)
+	keep(t, i, storeOf(id, nil), time.Now())
+	want := `[{"code": "statistics_not_recorded", "sentence": "` + notRecordedSentence + `"}, {"code": "statistics_verdict_unreadable", "sentence": "` + verdictUnreadableSentence + `"}]`
+	if got := keptRow(t, id).verdictReasons; got != want {
+		t.Errorf("kept reasons %s, want %s", got, want)
+	}
+}
+
+// AN ERASURE THAT ARRIVES DURING A REBUILD'S PURGE still logs that its
+// removal began, once, and that it ended, once.
+func TestAnErasureDuringARebuildsPurgeLogsItsBeginning(t *testing.T) {
+	i := testIntegration(t)
+	logged := captureLogs(i)
+	answerVerdict(i, verdictReply("recording", time.Now()))
+	id := keptStore(t)
+	keep(t, i, storeOf(id, nil), time.Now())
+	for n := 1; n <= 3; n++ {
+		orderFact(t, id, fmt.Sprintf("o-%d", n), at("2025-10-01T10:00:00Z"), false)
+	}
+	lower(t, &deleteBatch, 1)
+	lower(t, &purgeBudget, 1)
+	exec(t, `UPDATE store_sales_store SET definition = 0 WHERE store_id = ?`, id)
+	if out := keep(t, i, storeOf(id, nil), time.Now()); out != outcomePurging {
+		t.Fatalf("the rebuild answered %q, want it purging", out)
+	}
+	removed := storeOf(id, map[string]any{"redactedAt": time.Now().UTC().Format(time.RFC3339)})
+	for n := 0; n < 10 && storeRow(t, id) != nil; n++ {
+		keep(t, i, removed, time.Now())
+	}
+	if storeRow(t, id) != nil {
+		t.Fatal("the store was never removed")
+	}
+	if b, e := logged("data was removed; its statistics are being deleted"), logged("statistics of a store whose data was removed are deleted"); b != 1 || e != 1 {
+		t.Errorf("the removal logged its beginning %d times and its end %d times, want once each", b, e)
+	}
+}
+
 func TestAnErasedStoreIsRemovedOnce(t *testing.T) {
 	i := testIntegration(t)
 	logged := captureLogs(i)
