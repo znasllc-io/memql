@@ -368,25 +368,31 @@ func TestMaintenanceActorIsNotMintableFromARequest(t *testing.T) {
 // Three things are scanned, and each closes a way the rule could come back
 // with every behavioural test still green:
 //
-//  1. Every call, anywhere in the repository, that asks with an origin
-//     (maintenanceAsks) states the origin truthfully (maintenanceAskOffence):
-//     read from the loaded automation's own source through
-//     maintenanceOrigin(a), or the engine's origin stated as a constant for a
-//     name fixed at compile time -- the engine's own Go acting as one of its
-//     automations. A constant engine origin with a name that is not a
-//     constant, a conversion of anything to the origin type, and any other
-//     expression are offences.
+//  1. Every ask anywhere in the repository (maintenanceAsks) states its origin
+//     truthfully. Production code is judged on what the type checker resolves
+//     each name to (maintenance_ask_types_test.go): the origin is read from
+//     the loaded automation's own source through component/automations' own
+//     maintenanceOrigin(a), or it is component/auth's own engine-origin
+//     constant for a name that is a constant -- the engine's own Go acting as
+//     one of its automations, at a site argued in engineGoAsks. A constant
+//     engine origin with a name that is not a constant, a conversion, any
+//     other expression, a function or a constant of the same name declared
+//     elsewhere, and an ask used as a value are offences. A test builds
+//     principals on purpose, and is held to the spelling only.
 //  2. In component/auth, the list itself is read only by the functions that
 //     either take an origin or do not grant: a new reader of the map is a new
 //     way to be granted, and it has to be argued here.
 //  3. The executor's contextWithSystemActor takes the automation, not its
 //     name: the origin can only come from the automation.
 func TestTheMaintenanceListIsNeverAskedWithANameAlone(t *testing.T) {
-	root := filepath.Join("..", "..")
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
 	var offenders []string
 	calls := 0
-	consts := map[string]map[string]bool{}
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	production := map[string][]byte{}
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -406,24 +412,65 @@ func TestTheMaintenanceListIsNeverAskedWithANameAlone(t *testing.T) {
 		if !mentionsMaintenanceAsk(string(body)) {
 			return nil
 		}
-		dir := filepath.Dir(path)
-		if consts[dir] == nil {
-			consts[dir] = packageStringConsts(t, dir)
+		if strings.HasSuffix(path, "_test.go") {
+			found, offences := testFileAskOffences(path, body)
+			calls += found
+			offenders = append(offenders, offences...)
+			return nil
 		}
-		found, offences := maintenanceAskOffences(path, body, consts[dir])
-		calls += found
-		offenders = append(offenders, offences...)
+		file, parseErr := goparser.ParseFile(token.NewFileSet(), path, body, goparser.SkipObjectResolution)
+		if parseErr != nil {
+			return fmt.Errorf("parse %s: %w", path, parseErr)
+		}
+		if namesAnAsk(file) {
+			production[path] = body
+		}
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("walk: %v", err)
 	}
-	// REACHABLE POSITIVE: the tree asks the list from dozens of places, so a
-	// scan that finds a handful has stopped looking.
+	// Production code, by what each name resolves to.
+	fromTheAutomation := 0
+	made := map[string]bool{}
+	for _, finding := range productionAsks(t, root, production) {
+		at := strings.TrimPrefix(finding.at, root+string(filepath.Separator))
+		if finding.why != "" {
+			offenders = append(offenders, at+" "+finding.why)
+			continue
+		}
+		calls++
+		switch {
+		case finding.engineGo != "":
+			site := finding.fn + ": " + finding.engineGo
+			made[site] = true
+			if _, argued := engineGoAsks[site]; !argued {
+				t.Errorf("%s states the engine's origin as a constant (%s) and is not argued in engineGoAsks.\n"+
+					"The engine's own Go acts as one of its automations at the sites pinned there and at no other: a path a "+
+					"person's request reaches does not mint the engine's principal. Read what is needed under the caller's own "+
+					"authority, or argue the site in engineGoAsks.", at, site)
+			}
+		case finding.fn == automationsImportPath+".contextWithSystemActor":
+			fromTheAutomation++
+		}
+	}
+	for site := range engineGoAsks {
+		if !made[site] {
+			t.Errorf("engineGoAsks pins %q and the tree no longer makes that ask: remove the entry", site)
+		}
+	}
+	// REACHABLE POSITIVES: the tree asks the list from dozens of places, so a
+	// scan that finds a handful has stopped looking; and the executor's two
+	// asks are the ones every run goes through, so a judgment that does not
+	// see them read the origin from the automation is not resolving anything.
 	if calls < 20 {
 		t.Fatalf("found only %d calls to the maintenance list, expected 20+ -- the scan is broken, not the tree", calls)
 	}
+	if fromTheAutomation != 2 {
+		t.Fatalf("contextWithSystemActor makes %d asks that read the origin from the automation, want its 2 -- the judgment is broken, or the executor no longer asks through %s", fromTheAutomation, originHelper)
+	}
 	if len(offenders) > 0 {
+		sort.Strings(offenders)
 		t.Errorf("the maintenance list is asked with an origin that is not read from the automation:\n  %s",
 			strings.Join(offenders, "\n  "))
 	}
@@ -508,19 +555,20 @@ func TestTheMaintenanceListIsNeverAskedWithANameAlone(t *testing.T) {
 // maintenanceAsks are the functions asked with an automation's origin first.
 var maintenanceAsks = map[string]bool{"MaintenanceActor": true, "IsMaintenanceAutomation": true, "AutomationActor": true}
 
+// mentionsMaintenanceAsk is the cheap first cut: source cannot reach an ask
+// without spelling its name.
 func mentionsMaintenanceAsk(body string) bool {
 	for name := range maintenanceAsks {
-		if strings.Contains(body, name+"(") {
+		if strings.Contains(body, name) {
 			return true
 		}
 	}
 	return false
 }
 
-// maintenanceAskOffences parses one Go file and answers how many asks it makes
-// and which of them offend (maintenanceAskOffence). consts are the package's
-// top-level string constants.
-func maintenanceAskOffences(path string, body []byte, consts map[string]bool) (int, []string) {
+// testFileAskOffences parses one test file and answers how many asks it makes
+// and which of them offend (testFileAskOffence).
+func testFileAskOffences(path string, body []byte) (int, []string) {
 	fset := token.NewFileSet()
 	file, err := goparser.ParseFile(fset, path, body, goparser.SkipObjectResolution)
 	if err != nil {
@@ -544,7 +592,7 @@ func maintenanceAskOffences(path string, body []byte, consts map[string]bool) (i
 			return true
 		}
 		calls++
-		if why := maintenanceAskOffence(path, call, consts); why != "" {
+		if why := testFileAskOffence(call); why != "" {
 			out = append(out, fmt.Sprintf("%s:%d %s: %s", path, fset.Position(call.Pos()).Line, name, why))
 		}
 		return true
@@ -552,133 +600,36 @@ func maintenanceAskOffences(path string, body []byte, consts map[string]bool) (i
 	return calls, out
 }
 
-// maintenanceAskOffence says what is wrong with one ask, or "".
-func maintenanceAskOffence(path string, call *ast.CallExpr, consts map[string]bool) string {
+// testFileAskOffence says what is wrong with one ask in a test file, or "". A
+// test builds principals on purpose, to see what each handler does with them;
+// the rule is the production code's. A test states an origin and a name:
+// either constant origin for any name, the zero origin as a literal, or the
+// origin read from an automation.
+func testFileAskOffence(call *ast.CallExpr) string {
 	if len(call.Args) != 2 {
 		return "does not pass an origin and a name"
 	}
-	origin, name := call.Args[0], call.Args[1]
-	// MaintenanceActor hands IsMaintenanceAutomation the origin it was itself
-	// given.
-	if id, ok := origin.(*ast.Ident); ok && id.Name == "origin" &&
-		filepath.ToSlash(filepath.Clean(path)) == "../../component/auth/maintenance_actor.go" {
-		return ""
-	}
-	// A test builds principals on purpose, to see what each handler does
-	// with them; the rule is the production code's. A test may state either
-	// constant origin for any name, and the zero origin as a literal.
-	test := strings.HasSuffix(path, "_test.go")
-	switch x := origin.(type) {
+	switch x := call.Args[0].(type) {
 	case *ast.CallExpr:
-		if fn, ok := x.Fun.(*ast.Ident); ok && fn.Name == "maintenanceOrigin" && len(x.Args) == 1 {
-			return "" // read from the loaded automation's own source
-		}
-		if lit, ok := singleArg(x).(*ast.BasicLit); test && ok && lit.Kind == token.INT {
+		if fn, ok := x.Fun.(*ast.Ident); ok && fn.Name == originHelper && len(x.Args) == 1 {
 			return ""
 		}
-		return "the origin is not read from the loaded automation (only maintenanceOrigin(a) reads it); a conversion or a call is not an origin"
-	case *ast.SelectorExpr, *ast.Ident:
-		constant := ""
-		if sel, ok := x.(*ast.SelectorExpr); ok {
-			constant = sel.Sel.Name
-		} else {
-			constant = x.(*ast.Ident).Name
-		}
-		switch constant {
-		case "AutomationOriginOther":
-			return "" // grants nothing, whatever the name
-		case "AutomationOriginEngine":
-			if test || isCompileTimeName(name, consts) {
-				return "" // the engine's own Go acting as one of its automations
+		if len(x.Args) == 1 {
+			if lit, ok := x.Args[0].(*ast.BasicLit); ok && lit.Kind == token.INT {
+				return ""
 			}
-			return "the engine's origin is stated as a constant for a name that is not one: a name read at run time must come with the origin read from its automation, maintenanceOrigin(a)"
 		}
-	}
-	return "the origin is neither maintenanceOrigin(a) nor an AutomationOrigin constant"
-}
-
-func singleArg(call *ast.CallExpr) ast.Expr {
-	if len(call.Args) != 1 {
-		return nil
-	}
-	return call.Args[0]
-}
-
-// isCompileTimeName reports whether e is a string fixed at compile time: a
-// literal, one of the package's string constants, or a sum of them.
-func isCompileTimeName(e ast.Expr, consts map[string]bool) bool {
-	switch x := e.(type) {
-	case *ast.BasicLit:
-		return x.Kind == token.STRING
+		return "the origin is a call that is neither " + originHelper + "(a) nor a literal origin"
+	case *ast.SelectorExpr:
+		if x.Sel.Name == "AutomationOriginOther" || x.Sel.Name == "AutomationOriginEngine" {
+			return ""
+		}
 	case *ast.Ident:
-		return consts[x.Name]
-	case *ast.ParenExpr:
-		return isCompileTimeName(x.X, consts)
-	case *ast.BinaryExpr:
-		return x.Op == token.ADD && isCompileTimeName(x.X, consts) && isCompileTimeName(x.Y, consts)
-	}
-	return false
-}
-
-// packageStringConsts collects the names of the top-level constants declared
-// in dir's Go files.
-func packageStringConsts(t *testing.T, dir string) map[string]bool {
-	t.Helper()
-	out := map[string]bool{}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read %s: %v", dir, err)
-	}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
-			continue
-		}
-		file, err := goparser.ParseFile(token.NewFileSet(), filepath.Join(dir, e.Name()), nil, goparser.SkipObjectResolution)
-		if err != nil {
-			continue
-		}
-		for _, decl := range file.Decls {
-			gen, ok := decl.(*ast.GenDecl)
-			if !ok || gen.Tok != token.CONST {
-				continue
-			}
-			for _, spec := range gen.Specs {
-				for _, n := range spec.(*ast.ValueSpec).Names {
-					out[n.Name] = true
-				}
-			}
+		if x.Name == "AutomationOriginOther" || x.Name == "AutomationOriginEngine" {
+			return ""
 		}
 	}
-	return out
-}
-
-// TestTheSourceGateRefusesAnOriginNotReadFromTheAutomation shows the gate
-// failing on each form an untrue origin takes, and passing the true ones.
-func TestTheSourceGateRefusesAnOriginNotReadFromTheAutomation(t *testing.T) {
-	consts := map[string]bool{"listedSweep": true}
-	for src, wantOffence := range map[string]bool{
-		`auth.MaintenanceActor(auth.AutomationOriginEngine, a.Name)`:                 true,
-		`auth.MaintenanceActor(auth.AutomationOrigin(1), "sweep")`:                   true,
-		`auth.MaintenanceActor(auth.AutomationOrigin(a.Source), a.Name)`:             true,
-		`auth.MaintenanceActor(originOf(a), a.Name)`:                                 true,
-		`auth.MaintenanceActor(origin, a.Name)`:                                      true,
-		`auth.IsMaintenanceAutomation(auth.AutomationOriginEngine, name)`:            true,
-		`auth.AutomationActor(auth.AutomationOriginEngine, a.Name)`:                  true,
-		`auth.MaintenanceActor(auth.AutomationOriginEngine)`:                         true,
-		`auth.MaintenanceActor(maintenanceOrigin(a), a.Name)`:                        false,
-		`auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns")`: false,
-		`auth.MaintenanceActor(auth.AutomationOriginEngine, listedSweep)`:            false,
-		`auth.MaintenanceActor(auth.AutomationOriginOther, a.Name)`:                  false,
-	} {
-		body := []byte("package probe\n\nfunc probe() { _ = " + src + " }\n")
-		n, offences := maintenanceAskOffences("probe.go", body, consts)
-		if n != 1 {
-			t.Fatalf("%s: the scan found %d asks, want 1", src, n)
-		}
-		if got := len(offences) > 0; got != wantOffence {
-			t.Errorf("%s: offence=%v (%v), want %v", src, got, offences, wantOffence)
-		}
-	}
+	return "the origin is neither " + originHelper + "(a) nor an AutomationOrigin constant"
 }
 
 func firstParamIs(fn *ast.FuncDecl, typeName string) bool {
