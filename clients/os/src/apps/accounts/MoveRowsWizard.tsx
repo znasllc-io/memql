@@ -19,8 +19,9 @@ import { useMoveCalls } from "./useAccounts";
 //   Review        the PREVIEW call: what moves, what follows, and what is
 //                 refused, per kind and in words. Writes nothing.
 //   Move          the cluster's turn: the same call, for real
-//   Done          what moved. Followers follow in the background after the
-//                 call returns; that is said once, and not waited for.
+//   Done          what moved. What hangs off it follows in a background pass
+//                 after the call returns: the kinds are named, never counted,
+//                 and not waited for.
 //
 // ONE QUESTION A STEP, and the only question is where: choosing the account
 // answers Destination and opens Review (DESIGN.md, One wizard for adding).
@@ -181,9 +182,6 @@ export function MoveRowsWizard({
       move.plan === null ? null : (
         <div className="os-app-stack">
           <PlanFacts plan={move.plan} verb="did" />
-          {move.plan.follows.length === 0 ? null : (
-            <Caption>The rows that follow them move in the background, and arrive in {destinationName} shortly.</Caption>
-          )}
         </div>
       ),
   };
@@ -282,14 +280,16 @@ function PlanFacts({ plan, verb }: { plan: MovePlan; verb: "would" | "did" }) {
           </Facts>
         </>
       )}
+      {/* WHAT FOLLOWS IS NAMED, NEVER COUNTED: a background pass carries it
+          after the move returns, so no number here would be true. */}
       {plan.follows.length === 0 ? null : (
         <>
-          <Subhead>Follows</Subhead>
-          <Facts>
-            {plan.follows.map((f) => (
-              <Fact key={f.concept} label={kindName(f.concept)} value={rowsPhrase(f.rows)} />
-            ))}
-          </Facts>
+          <Caption>
+            {verb === "would"
+              ? "What hangs off these rows follows in the background, and an export waits until it has."
+              : "What hangs off the rows that moved follows in the background, and an export waits until it has."}
+          </Caption>
+          <Caption>Kinds that follow: {[...new Set(plan.follows.map((f) => kindName(f.concept)))].join(", ")}</Caption>
         </>
       )}
       {refused.length === 0 ? null : (

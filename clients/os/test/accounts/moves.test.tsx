@@ -308,14 +308,14 @@ describe("the wizard", () => {
 
   const PREVIEW = [
     { kind: "wouldMove", concept: "v1:library:artifact", rows: 2 },
-    { kind: "follows", concept: "v1:library:file", rows: 4 },
+    { kind: "follows", concept: "v1:library:file" },
     { kind: "refused", concept: "v1:library:artifact", id: "r9", reason: "states_own_account" },
-    { kind: "summary", moved: 2, followers: 4, refused: 1 },
+    { kind: "summary", moved: 2, followerKinds: 1, refused: 1 },
   ];
   const MOVED = [
     { kind: "moved", concept: "v1:library:artifact", rows: 2 },
-    { kind: "follows", concept: "v1:library:file", rows: 4 },
-    { kind: "summary", moved: 2, followers: 4, refused: 0 },
+    { kind: "follows", concept: "v1:library:file" },
+    { kind: "summary", moved: 2, followerKinds: 1, refused: 0 },
   ];
 
   async function startMove(handlers: Parameters<typeof connection>[0]) {
@@ -351,15 +351,17 @@ describe("the wizard", () => {
     expect(callsTo(conn, "accountRowsMove")).toEqual([
       'builtin accountRowsMove(rows: [{concept: "v1:library:artifact", id: "r1"}, {concept: "v1:library:artifact", id: "r2"}], toAccountId: "b2", preview: true)',
     ]);
-    expect(screen.getByText("Follows")).toBeTruthy();
-    expect(screen.getByText("4 rows")).toBeTruthy();
+    // The kinds that follow, named, under one sentence; never counted.
+    expect(screen.getByText("What hangs off these rows follows in the background, and an export waits until it has.")).toBeTruthy();
+    expect(screen.getByText("Kinds that follow: file")).toBeTruthy();
     expect(screen.getByText("1 row. This kind states its own account and is changed in its own app.")).toBeTruthy();
 
     const before = callsTo(conn, "accountRows").length;
     pressInBar("Move");
     await waitFor(() => expect(within(bar()!).getByText("Moved")).toBeTruthy());
     expect(callsTo(conn, "accountRowsMove")[1]).toContain("preview: false");
-    expect(screen.getByText("The rows that follow them move in the background, and arrive in Borden Ltd shortly.")).toBeTruthy();
+    expect(screen.getByText("What hangs off the rows that moved follows in the background, and an export waits until it has.")).toBeTruthy();
+    expect(screen.getByText("Kinds that follow: file")).toBeTruthy();
 
     // Done returns to the rows, read again behind the wizard once the move
     // returned, with nothing chosen.
@@ -367,6 +369,22 @@ describe("the wizard", () => {
     expect(await screen.findByRole("heading", { name: "artifact" })).toBeTruthy();
     expect(bar()).toBeNull();
     expect(callsTo(conn, "accountRows").length).toBeGreaterThan(before);
+  });
+
+  it("names a kind that follows and gives no number, even if a count arrives", async () => {
+    await startMove({
+      accountRowsMove: () => [
+        { kind: "wouldMove", concept: "v1:library:artifact", rows: 2 },
+        { kind: "follows", concept: "v1:work:goal", rows: 37 },
+        { kind: "summary", moved: 2, followerKinds: 1, refused: 0 },
+      ],
+    });
+    chooseOption(screen.getByRole("combobox", { name: "Destination account" }), "Borden Ltd");
+    const named = await screen.findByText("Kinds that follow: goal");
+    expect(named.textContent).not.toMatch(/\d/);
+    expect(screen.queryByText(/37/)).toBeNull();
+    // The bar's total is of the rows chosen and moving, never of followers.
+    expect(within(bar()!).getByText("2 rows to Borden Ltd")).toBeTruthy();
   });
 
   it("names every refusal in a sentence", async () => {

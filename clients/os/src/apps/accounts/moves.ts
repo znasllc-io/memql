@@ -41,11 +41,17 @@ export interface MovePlan {
   /** Rows that move (or would), per kind. */
   moves: { concept: string; rows: number }[];
   /** Rows that follow them, per kind. */
-  follows: { concept: string; rows: number }[];
+  /**
+   * The kinds whose rows follow them, NAMED, NOT COUNTED: a background pass
+   * carries what hangs off a moved row, so the engine names the kinds and does
+   * not know how many rows will follow. A `rows` field, should one ever
+   * arrive, is not read.
+   */
+  follows: { concept: string }[];
   /** Each refused row, with its reason. */
   refused: { concept: string; id: string; reason: string }[];
   /** The totals the engine counted, or null when it sent none. */
-  summary: { moved: number; followers: number; refused: number } | null;
+  summary: { moved: number; followerKinds: number; refused: number } | null;
 }
 
 /** A kind with rows that belong to no account. */
@@ -157,13 +163,13 @@ export function movePlanFromRows(rows: readonly Row[]): MovePlan {
         plan.moves.push({ concept: text(row["concept"]), rows: count(row["rows"]) });
         break;
       case "follows":
-        plan.follows.push({ concept: text(row["concept"]), rows: count(row["rows"]) });
+        plan.follows.push({ concept: text(row["concept"]) });
         break;
       case "refused":
         plan.refused.push({ concept: text(row["concept"]), id: text(row["id"]), reason: text(row["reason"]) });
         break;
       case "summary":
-        plan.summary = { moved: count(row["moved"]), followers: count(row["followers"]), refused: count(row["refused"]) };
+        plan.summary = { moved: count(row["moved"]), followerKinds: count(row["followerKinds"]), refused: count(row["refused"]) };
         break;
     }
   }
