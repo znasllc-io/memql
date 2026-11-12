@@ -727,7 +727,7 @@ func (r *Runner) reconcileOne(ctx context.Context, connector memqlsync.Connector
 				set(SyncPatch{"lastError": msg, "lastAttemptAt": r.now().UTC()})
 			}
 			return out, nil
-		case memqlsync.IsPermanent(reconcileErr):
+		case memqlsync.IsPermanent(reconcileErr), memqlsync.IsWaitingCadence(reconcileErr):
 			// A refusal the next tick cannot change: a generated query the
 			// origin rejects. Still reported -- somebody has to fix the
 			// query -- and stamped as an ATTEMPT, so the domain waits its
@@ -736,6 +736,13 @@ func (r *Runner) reconcileOne(ctx context.Context, connector memqlsync.Connector
 			// updated_at watermark the next sweep narrows on, and moving
 			// it for a sweep that never ran would skip the drift between
 			// the last real sweep and the refusal once the refusal clears.
+			//
+			// A failure the connector says waits its cadence is held the
+			// same way: a sweep that read rows the mirror could not write
+			// must read them again, but at its own interval, not on every
+			// tick over everything since the held watermark. Its text is the
+			// connector's sentence, recorded as it is. Any other failure is
+			// due again at the next tick (below).
 			set(SyncPatch{"lastError": reconcileErr.Error(), "lastAttemptAt": r.now().UTC()})
 			return out, fmt.Errorf("datasync: reconciling %s against %q%s: %w", conceptID, connectorName, partitionSuffix(partition), reconcileErr)
 		}

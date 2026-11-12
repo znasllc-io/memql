@@ -21,8 +21,10 @@ import (
 // not read the domain as swept clean. Moved here from the connector's package
 // because it needs the runner.
 
-// THE WATERMARK HOLDS. The sweep's failure is recorded as the domain's error,
-// and its lastReconcileAt -- what the next sweep reads from -- is not moved.
+// THE WATERMARK HOLDS AND THE CADENCE WITH IT. The sweep's failure is recorded
+// as the domain's error, in the connector's own sentence; its lastReconcileAt
+// -- what the next sweep reads from -- is not moved; and its attempt is
+// stamped, so it is next due one cadence later, not at the next tick.
 func TestASweepInWhichAWriteFailedLeavesTheWatermarkWhereItWas(t *testing.T) {
 	r := newShopRig(t)
 	r.now = clockAt("10:10:00")
@@ -61,7 +63,14 @@ func TestASweepInWhichAWriteFailedLeavesTheWatermarkWhereItWas(t *testing.T) {
 			t.Errorf("the watermark moved for a sweep whose write failed:\n%s", q)
 		}
 	}
-	if last := wrote[len(wrote)-1]; !strings.Contains(last, "could not be written") {
-		t.Errorf("the domain's row does not carry the failure:\n%s", last)
+	last := wrote[len(wrote)-1]
+	const sentence = "shopify: 1 row read from the store could not be written to the mirror; the next check reads it again"
+	if !strings.Contains(last, `lastError: "`+sentence+`"`) {
+		t.Errorf("the domain's row does not carry the failure in the connector's words:\n%s", last)
+	}
+	// The attempt is stamped, so the domain is next due at its own cadence:
+	// a row the mirror refuses does not make the sweep run on every tick.
+	if !strings.Contains(last, "lastAttemptAt") {
+		t.Errorf("the failed sweep did not stamp its attempt, so it is due again at the next tick:\n%s", last)
 	}
 }

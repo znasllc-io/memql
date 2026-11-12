@@ -111,6 +111,50 @@ func TestAPermanentSweepFailureWaitsForTheDomainsOwnCadence(t *testing.T) {
 	}
 }
 
+// A FAILURE THAT WAITS ITS CADENCE is held as a permanent one is -- the error
+// recorded, the attempt stamped, the watermark where it was -- and the row
+// carries its sentence as the connector said it, with nothing added: a person
+// reads it as the detail of the failed check.
+func TestASweepFailureThatWaitsItsCadenceIsNextDueAtItsInterval(t *testing.T) {
+	const sentence = "shopify: 1 row read from the store could not be written to the mirror; the next check reads it again"
+	engine := newFakeEngine()
+	c := mirrorConnector()
+	c.reconcileErr = memqlsync.WaitsCadence(errors.New(sentence))
+	r := testRunner(engine, newFakeWriter(), c)
+
+	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept, ""); err == nil {
+		t.Fatal("a sweep that failed was not reported")
+	}
+	writes := engine.callsContaining("mutation upsertSyncState")
+	if len(writes) != 1 {
+		t.Fatalf("health writes = %d, want 1", len(writes))
+	}
+	if !strings.Contains(writes[0], "lastAttemptAt") {
+		t.Fatalf("the attempt was not stamped, so the sweep is due again at the next tick: %s", writes[0])
+	}
+	if strings.Contains(writes[0], "lastReconcileAt") {
+		t.Fatalf("the watermark moved for a sweep that failed: %s", writes[0])
+	}
+	if !strings.Contains(writes[0], `lastError: "`+sentence+`"`) {
+		t.Errorf("the row does not carry the connector's sentence exactly: %s", writes[0])
+	}
+
+	engine.seed(`query syncStateById`, []map[string]any{{
+		"id":              SyncStateID(testMirrorConcept, "shopify", "inbound", ""),
+		"conceptId":       testMirrorConcept,
+		"connector":       "shopify",
+		"direction":       "inbound",
+		"lastReconcileAt": testNow.Add(-5 * time.Hour).Format(time.RFC3339),
+		"lastAttemptAt":   testNow.Format(time.RFC3339),
+		"lastError":       sentence,
+	}})
+	if r.ReconcileDue(context.Background(), "shopify", c.domains[0], "") {
+		t.Error("due again at the next tick after a failure that waits its cadence")
+	}
+}
+
+// AN ORDINARY FAILURE is due again at the next tick: nothing stamps the
+// attempt, so the cadence still runs from the last sweep that ran.
 func TestATransientSweepFailureStaysDue(t *testing.T) {
 	engine := newFakeEngine()
 	c := mirrorConnector()
@@ -126,6 +170,21 @@ func TestATransientSweepFailureStaysDue(t *testing.T) {
 	}
 	if strings.Contains(writes[0], "lastReconcileAt") {
 		t.Errorf("a transient failure stamped lastReconcileAt; the next tick should retry it: %s", writes[0])
+	}
+	if strings.Contains(writes[0], "lastAttemptAt") {
+		t.Errorf("a transient failure stamped the attempt, so it waits its cadence instead of the next tick: %s", writes[0])
+	}
+	// The domain was due when it failed; what the failure wrote leaves it due.
+	engine.seed(`query syncStateById`, []map[string]any{{
+		"id":              SyncStateID(testMirrorConcept, "shopify", "inbound", ""),
+		"conceptId":       testMirrorConcept,
+		"connector":       "shopify",
+		"direction":       "inbound",
+		"lastReconcileAt": testNow.Add(-c.domains[0].ReconcileInterval).Format(time.RFC3339),
+		"lastError":       c.reconcileErr.Error(),
+	}})
+	if !r.ReconcileDue(context.Background(), "shopify", c.domains[0], "") {
+		t.Error("a transient failure is not due again at the next tick")
 	}
 }
 

@@ -297,7 +297,8 @@ func (c *Connector) reconcileStore(ctx context.Context, store Store, spec *gener
 // A SWEEP IN WHICH A WRITE FAILED IS NOT A CLEAN SWEEP (unwritten). Every row
 // is still healed that can be -- one row's failure does not stop the rest --
 // and the sweep then answers an error, so the runtime holds the watermark
-// where it was and the next sweep reads the same rows again.
+// where it was and the next sweep, at the domain's own cadence, reads the
+// same rows again.
 //
 // THE ROW BUDGET CUTS A SWEEP SHORT AND IT IS STILL RECORDED AS RUN. The
 // watermark could be moved only to the last row read if the rows came in
@@ -365,19 +366,22 @@ func (c *Connector) reconcileByUpdatedAt(ctx context.Context, store Store, spec 
 }
 
 // unwritten is the failure of a sweep or a re-list that read rows the mirror
-// did not take: heal could not read or write them. It is an ordinary failure,
-// worth another try: the runtime records it as the domain's error and leaves
-// the watermark where it was, so the next sweep reads those rows again. A
-// sweep that dropped the count was recorded clean, and a change that could
-// not be recorded read as recorded.
+// did not take: heal could not read or write them. It is worth another try,
+// at the domain's own cadence (memqlsync.WaitsCadence): the runtime records it
+// as the domain's error, stamps the attempt and leaves the watermark where it
+// was, so the next sweep reads those rows again. Not at the next tick: a row
+// the mirror refuses now is most likely refused then too, and a sweep repeated
+// every tick reads everything since the held watermark. A sweep that dropped
+// the count was recorded clean, and a change that could not be recorded read
+// as recorded.
 func unwritten(failed int) error {
 	switch failed {
 	case 0:
 		return nil
 	case 1:
-		return errors.New("shopify: 1 row read from the store could not be written to the mirror; the next check reads it again")
+		return memqlsync.WaitsCadence(errors.New("shopify: 1 row read from the store could not be written to the mirror; the next check reads it again"))
 	}
-	return fmt.Errorf("shopify: %d rows read from the store could not be written to the mirror; the next check reads them again", failed)
+	return memqlsync.WaitsCadence(fmt.Errorf("shopify: %d rows read from the store could not be written to the mirror; the next check reads them again", failed))
 }
 
 // relistListsPartially names the full re-list domains whose origin listing

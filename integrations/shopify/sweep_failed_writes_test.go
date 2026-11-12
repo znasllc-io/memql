@@ -63,11 +63,18 @@ func TestASweepInWhichAWriteFailedIsNotAnsweredClean(t *testing.T) {
 	if err == nil {
 		t.Fatalf("a sweep that could not write an order answered a clean report: %+v", report)
 	}
-	if memqlsync.IsPermanent(err) || memqlsync.IsNotGranted(err) || memqlsync.IsNotRequested(err) || memqlsync.IsNotImplemented(err) {
-		t.Fatalf("err = %v, want an ordinary failure: the next sweep reads the row again", err)
+	// A failure that waits its cadence: the runtime holds the watermark and
+	// reads the row again at the domain's own interval, not at the next tick,
+	// and nothing else of the contract's answers.
+	if !memqlsync.IsWaitingCadence(err) {
+		t.Fatalf("err = %v does not wait its cadence: a row the mirror refuses would make the sweep run every tick", err)
 	}
-	if !strings.Contains(err.Error(), "1 row") || !strings.Contains(err.Error(), "could not be written") {
-		t.Errorf("err = %v, want it to say how many rows could not be written", err)
+	if memqlsync.IsPermanent(err) || memqlsync.IsNotGranted(err) || memqlsync.IsNotRequested(err) || memqlsync.IsNotImplemented(err) {
+		t.Fatalf("err = %v, want a failure the next check reads again, not a refusal", err)
+	}
+	// What a person reads as the detail of the failed check, word for word.
+	if got, want := err.Error(), "shopify: 1 row read from the store could not be written to the mirror; the next check reads it again"; got != want {
+		t.Errorf("err reads %q, want %q", got, want)
 	}
 	// One row's failure does not stop the sweep: the rows after it are healed.
 	for _, n := range []string{"1", "3"} {
@@ -100,6 +107,9 @@ func TestARelistInWhichAWriteFailedIsNotAnsweredClean(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "could not be written") {
 			t.Fatalf("a relist that could not write a card answered %+v, %v", report, err)
 		}
+		if !memqlsync.IsWaitingCadence(err) {
+			t.Errorf("err = %v does not wait its cadence", err)
+		}
 		if row := r.row("giftCard", "gid://shopify/GiftCard/2"); row == nil {
 			t.Error("the card listed beside the one that failed was not written")
 		}
@@ -121,4 +131,19 @@ func TestARelistInWhichAWriteFailedIsNotAnsweredClean(t *testing.T) {
 			t.Fatal("the refused tombstone was written")
 		}
 	})
+}
+
+// MORE THAN ONE ROW is said in the plural, in the same words, and waits its
+// cadence the same way.
+func TestRowsTheMirrorDidNotTakeAreCountedInThePlural(t *testing.T) {
+	if err := unwritten(0); err != nil {
+		t.Errorf("no row lost answered %v", err)
+	}
+	err := unwritten(3)
+	if got, want := err.Error(), "shopify: 3 rows read from the store could not be written to the mirror; the next check reads them again"; got != want {
+		t.Errorf("err reads %q, want %q", got, want)
+	}
+	if !memqlsync.IsWaitingCadence(err) {
+		t.Errorf("err = %v does not wait its cadence", err)
+	}
 }
