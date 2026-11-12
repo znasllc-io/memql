@@ -690,8 +690,9 @@ func replyOf(t *testing.T, v Verdict) map[string]any {
 
 func TestTheVerdictNamesTheConceptsOutsideWhatTheStoreRecords(t *testing.T) {
 	// A store row from before grants were recorded: nothing is known to be
-	// missing, so no reason; the origin refuses the orders, and the order row
-	// reads not granted.
+	// missing from the grant; the origin refuses the orders, and the order row
+	// reads not granted. That raises the approval by itself (fix round 2), and
+	// the reply says so in machine form a second way.
 	store := verdictStore()
 	store.ScopesGranted = nil
 	rows := setRow(cleanRows(store), "order", func(r map[string]any) {
@@ -699,8 +700,8 @@ func TestTheVerdictNamesTheConceptsOutsideWhatTheStoreRecords(t *testing.T) {
 		r["lastReconcileAt"] = ""
 	})
 	v := computeVerdict(verdictInputOf(store, rows))
-	if len(v.Reasons) != 0 {
-		t.Fatalf("reasons = %v; a store with no recorded grant has none for a refused domain", reasonCodes(v))
+	if !slices.Equal(reasonCodes(v), []string{ReasonApprovalOutdated}) {
+		t.Fatalf("reasons = %v; the origin's refusal is the approval's reason", reasonCodes(v))
 	}
 	if !slices.Contains(v.OutsideConcepts, "order") || !sort.StringsAreSorted(v.OutsideConcepts) {
 		t.Errorf("outside concepts = %v; want order, sorted", v.OutsideConcepts)
@@ -774,5 +775,101 @@ func TestAnOlderNodesVerdictLeavesWhatIsOutsideUnknown(t *testing.T) {
 	}
 	if outside, known := OutsideWhatTheStoreRecords(nil, statisticsWalk); known || !outside {
 		t.Errorf("no reply: outside %v, known %v; want unknown", outside, known)
+	}
+}
+
+// refusedAtTheOrigin marks a domain's row as the origin refused it, naming a
+// scope the connection asks for: not granted.
+func refusedAtTheOrigin(rows []map[string]any, concept, scope string) []map[string]any {
+	return setRow(rows, concept, func(r map[string]any) {
+		r["lastError"] = memqlsync.NotGranted(ConnectorName, scope).Error()
+		r["lastReconcileAt"] = ""
+	})
+}
+
+func TestARowTheOriginRefusesRaisesTheApprovalByItself(t *testing.T) {
+	// No recorded grant: nothing is known to be missing, and the order row
+	// says the origin refuses orders. It read recording before.
+	noGrant := verdictStore()
+	noGrant.ScopesGranted = nil
+	// A recorded grant that holds every scope, and the origin refuses orders
+	// all the same: the grant changed at the origin after it was recorded.
+	everything := verdictStore()
+	for name, store := range map[string]Store{"no recorded grant": noGrant, "a grant holding every scope": everything} {
+		if len(scopesNotApproved(store)) != 0 {
+			t.Fatalf("%s: the fixture lacks a scope", name)
+		}
+		v := computeVerdict(verdictInputOf(store, refusedAtTheOrigin(cleanRows(store), "order", "read_orders")))
+		if v.State != VerdictNeedsAttention || !slices.Equal(reasonCodes(v), []string{ReasonApprovalOutdated}) {
+			t.Fatalf("%s: state %q, reasons %v; want needs attention with approval_outdated alone", name, v.State, reasonCodes(v))
+		}
+		r := v.Reasons[0]
+		checkReasonKind(t, r)
+		if r.Concerns != ConcernsConcepts || !slices.Equal(r.Concepts, []string{"order"}) || !r.StandsInTheWayOf(statisticsWalk) {
+			t.Errorf("%s: %+v; want concepts [order], in the way of the walk", name, r)
+		}
+		// The managed store's sentence and act, as for a grant lacking a
+		// scope; with no scope known to be missing, the detail names what the
+		// origin refuses instead of an empty list.
+		if r.Sentence != "This store approved an older list of permissions." || r.Act != ActApprove ||
+			r.ActURL != "https://acme-widgets.myshopify.com/admin/apps" {
+			t.Errorf("%s: %+v; want the approval's sentence and act", name, r)
+		}
+		if r.Detail != "Shopify refuses orders under the store's grant." {
+			t.Errorf("%s: detail %q", name, r.Detail)
+		}
+	}
+
+	// A store on its own app keeps its own sentence and no act.
+	own := Store{ID: testStoreID, Domain: "acme-widgets.myshopify.com", AdminTokenRef: "ACME_ADMIN", Status: StatusLive}
+	r := reasonNamed(t, computeVerdict(verdictInputOf(own, refusedAtTheOrigin(cleanRows(own), "order", "read_orders"))), ReasonApprovalOutdated)
+	if r.Sentence != "This store's own app does not allow everything MemQL records." || r.Act != "" {
+		t.Errorf("own app: %+v", r)
+	}
+
+	// Customers refused, orders fine: the reason names customers, and the
+	// walk is clear.
+	v := computeVerdict(verdictInputOf(noGrant, refusedAtTheOrigin(cleanRows(noGrant), "customer", "read_customers")))
+	r = reasonNamed(t, v, ReasonApprovalOutdated)
+	if !slices.Equal(r.Concepts, []string{"customer"}) || r.StandsInTheWayOf(statisticsWalk) || r.Detail != "Shopify refuses customers under the store's grant." {
+		t.Errorf("customers refused: %+v; want concepts [customer], clear of the walk", r)
+	}
+
+	// A grant lacking a scope still names the scopes, and a refused row
+	// beside it adds its concept.
+	older := managedStore(oldManagedList...)
+	r = reasonNamed(t, computeVerdict(verdictInputOf(older, refusedAtTheOrigin(cleanRows(older), "order", "read_orders"))), ReasonApprovalOutdated)
+	if !strings.Contains(r.Detail, "read_customers") || !slices.Contains(r.Concepts, "order") {
+		t.Errorf("an older grant beside a refused row: %+v", r)
+	}
+}
+
+func TestARefusalThatIsNotTheGrantsRaisesNoApproval(t *testing.T) {
+	store := verdictStore()
+	store.ScopesGranted = nil
+	// Undeclared data is its own reason.
+	rows := setRow(cleanRows(store), "order", func(r map[string]any) {
+		r["lastError"] = protectedRefusal
+		r["lastReconcileAt"] = ""
+		r["backfillStatus"] = "none"
+	})
+	if codes := reasonCodes(computeVerdict(verdictInputOf(store, rows))); !slices.Equal(codes, []string{ReasonDataNotDeclared}) {
+		t.Errorf("undeclared data: reasons %v; want data_not_declared alone", codes)
+	}
+	// A domain the connection does not ask for is outside, and no reason.
+	rows = cleanRows(store)
+	for _, concept := range domainsOutside(store) {
+		rows = refusedAtTheOrigin(rows, generated.ConceptFromID(concept), "read_content")
+	}
+	if v := computeVerdict(verdictInputOf(store, rows)); len(v.Reasons) != 0 || v.State != VerdictRecording {
+		t.Errorf("refused rows outside the connection: state %q, reasons %v; want recording", v.State, reasonCodes(v))
+	}
+	// A row refused as not requested is outside too.
+	rows = setRow(cleanRows(store), "order", func(r map[string]any) {
+		r["lastError"] = memqlsync.NotRequested(ConnectorName).Error()
+		r["lastReconcileAt"] = ""
+	})
+	if codes := reasonCodes(computeVerdict(verdictInputOf(store, rows))); len(codes) != 0 {
+		t.Errorf("not requested: reasons %v; want none", codes)
 	}
 }

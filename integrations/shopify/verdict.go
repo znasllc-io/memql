@@ -225,6 +225,24 @@ func conceptNames(concepts []string) []string {
 	return uniqueSorted(out)
 }
 
+// refusedByTheOrigin is the domains of the store's connection, by generated
+// concept name in apply order, whose own row the origin refused as not
+// granted: a refusal naming a scope the connection asks for. The
+// undeclared-data refusal (data_not_declared's) is not one, and neither is a
+// domain the connection does not ask for, or a row refused as not requested:
+// both are outside.
+func refusedByTheOrigin(store Store, rows map[string]map[string]any) []string {
+	var out []string
+	for _, concept := range generated.ApplyOrder {
+		spec := generated.Types[concept]
+		row := rows[generated.ConceptID(concept)]
+		if spec != nil && row != nil && domainInConnection(store, spec) && isNotGranted(refusalOf(row)) && !undeclaredData(row) {
+			out = append(out, concept)
+		}
+	}
+	return out
+}
+
 // approvalConcerns is what an outdated approval stands in the way of: the
 // concepts of the store's connection the mirror itself refuses under the
 // grant, because the grant holds none of their scopes (scopesMissingFor, the
@@ -243,13 +261,7 @@ func approvalConcerns(store Store, rows map[string]map[string]any) (string, []st
 			refused = append(refused, concept)
 		}
 	}
-	for id, row := range rows {
-		concept := generated.ConceptFromID(id)
-		spec := generated.Types[concept]
-		if spec != nil && domainInConnection(store, spec) && isNotGranted(refusalOf(row)) && !undeclaredData(row) {
-			refused = append(refused, concept)
-		}
-	}
+	refused = append(refused, refusedByTheOrigin(store, rows)...)
 	if len(refused) == 0 {
 		return ConcernsNoRecording, nil
 	}
@@ -462,7 +474,8 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from, fromNeverC
 		})
 	}
 
-	if missing := scopesNotApproved(store); len(missing) > 0 {
+	missing, refusedRows := scopesNotApproved(store), refusedByTheOrigin(store, rows)
+	if len(missing) > 0 || len(refusedRows) > 0 {
 		// The grant lacks something the store's connection asks for. WHO CAN
 		// GIVE IT depends on how the store is connected (Store.Managed: the
 		// Admin token it holds is the shared app's offline grant, or a token
@@ -471,10 +484,24 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from, fromNeverC
 		// app has nothing to approve in MemQL OS: what its token allows is
 		// that app's own configuration, so the reason says so and offers no
 		// act.
+		//
+		// THE ORIGIN'S OWN ANSWER RAISES IT TOO. The recorded grant is written
+		// at connect and never refreshed, and a store connected before it was
+		// recorded has none (scopesNotApproved is then nil). A domain of the
+		// connection whose row the origin refused as not granted is the same
+		// fact said by the origin, so it raises the reason by itself. With no
+		// scope known to be missing, the detail names what is refused.
 		reason := VerdictReason{
 			Code:     ReasonApprovalOutdated,
 			Sentence: "This store's own app does not allow everything MemQL records.",
 			Detail:   strings.Join(missing, ", "),
+		}
+		if len(missing) == 0 {
+			words := make([]string, 0, len(refusedRows))
+			for _, concept := range refusedRows {
+				words = append(words, plainDomain(concept))
+			}
+			reason.Detail = "Shopify refuses " + joinWords(words) + " under the store's grant."
 		}
 		reason.Concerns, reason.Concepts = approvalConcerns(store, rows)
 		if store.Managed() {
