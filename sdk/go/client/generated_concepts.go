@@ -430,6 +430,7 @@ var BoundConcepts = map[string]string{
 	"companyLocationNoteFor":                           "v1:commerce:companyLocationNote",
 	"completeTodo":                                     "v1:todos:todo",
 	"complianceJobsDue":                                "v1:shopify:complianceJob",
+	"complianceJobsFailingForStore":                    "v1:shopify:complianceJob",
 	"complianceJobsForStore":                           "v1:shopify:complianceJob",
 	"composeRecipeById":                                "v1:compose:recipe",
 	"composeRecipes":                                   "v1:compose:recipe",

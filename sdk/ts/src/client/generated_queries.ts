@@ -2672,7 +2672,8 @@ QueryClient.prototype.companyLocationNoteFor = function (this: QueryClient, args
   return this.executeNamed("companyLocationNoteFor", buildCompanyLocationNoteFor(args), opts);
 };
 
-/** Privacy jobs whose hold has elapsed. The read the hourly runner makes. */
+/** Privacy jobs that are due. The read the hourly runner makes, page by page.
+Three kinds of job, all of them only once their dueAt has come: one that is waiting (for its hold, or for the second pass of its erasure); one that failed, which is run again at every run until it is done; and a customers/redact job that is done and carries no scrubbedAt. That last was recorded done by a version whose erasure left a customer's email address and phone number behind and never reached an order's children, so it is made again, once: its first pass under this version sets scrubbedAt. */
 // Bound concept: v1:shopify:complianceJob (machine-readable: BoundConcepts["complianceJobsDue"] in generated_concepts.ts).
 export interface ComplianceJobsDueArgs {
   asOf: string;
@@ -2692,6 +2693,30 @@ declare module "./query.js" {
 
 QueryClient.prototype.complianceJobsDue = function (this: QueryClient, args: ComplianceJobsDueArgs = {} as ComplianceJobsDueArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("complianceJobsDue", buildComplianceJobsDue(args), opts);
+};
+
+/** A store's privacy jobs that are failed and were due before a given time, oldest due first. The store's verdict reads its first page to say that a privacy request for the store could not be completed, how many, and since when; it asks for those due more than a day ago. */
+// Bound concept: v1:shopify:complianceJob (machine-readable: BoundConcepts["complianceJobsFailingForStore"] in generated_concepts.ts).
+export interface ComplianceJobsFailingForStoreArgs {
+  storeId: string;
+  dueBefore: string;
+}
+
+export function buildComplianceJobsFailingForStore(args: ComplianceJobsFailingForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("dueBefore: " + renderMemQLValue(args.dueBefore));
+  return "query complianceJobsFailingForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    complianceJobsFailingForStore(args: ComplianceJobsFailingForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.complianceJobsFailingForStore = function (this: QueryClient, args: ComplianceJobsFailingForStoreArgs = {} as ComplianceJobsFailingForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("complianceJobsFailingForStore", buildComplianceJobsFailingForStore(args), opts);
 };
 
 /** Every privacy job for a store, newest first -- the audit view. */
