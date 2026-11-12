@@ -63,3 +63,34 @@ func TestAccountExportDownloadSurvivesProxyWriteDeadline(t *testing.T) {
 		t.Fatalf("proxy truncated an export download: status=%d body=%q error=%v", response.StatusCode, body, err)
 	}
 }
+
+// Which requests get the long-download treatment, and with which ceiling: only
+// a GET of the Library's content route (the default ceiling) or of the account
+// export download (the long one). Every other method on either shape, and every
+// neighbouring path, is proxied with the ordinary deadline.
+func TestDownloadTreatmentIsGetOnlyAndExact(t *testing.T) {
+	cases := []struct {
+		method, path string
+		treated      bool
+		long         bool
+	}{
+		{http.MethodGet, "/_memql/accounts/exports/exp-1/content", true, true},
+		{http.MethodGet, "/_memql/artifacts/a-1/content", true, false},
+		{http.MethodPost, "/_memql/accounts/exports/exp-1/content", false, false},
+		{http.MethodHead, "/_memql/accounts/exports/exp-1/content", false, false},
+		{http.MethodPut, "/_memql/accounts/exports/exp-1/content", false, false},
+		{http.MethodPost, "/_memql/artifacts/a-1/content", false, false},
+		{http.MethodGet, "/_memql/accounts/exports/exp-1", false, false},
+		{http.MethodGet, "/_memql/accounts/exports//content", false, false},
+		{http.MethodGet, "/_memql/accounts/exports/exp-1/content/more", false, false},
+		{http.MethodGet, "/_memql/accounts/imports/exp-1/content", false, false},
+		{http.MethodGet, "/_memql/ws", false, false},
+	}
+	for _, tc := range cases {
+		treated, long := downloadTreatment(tc.method, tc.path)
+		if treated != tc.treated || long != tc.long {
+			t.Errorf("%s %s: treated=%v long=%v, want treated=%v long=%v",
+				tc.method, tc.path, treated, long, tc.treated, tc.long)
+		}
+	}
+}

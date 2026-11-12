@@ -2,6 +2,7 @@
 package edge
 
 import (
+	"context"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -77,13 +78,14 @@ func (h *Handler) serveAPI(w http.ResponseWriter, r *http.Request, site *Site) {
 	// silently died.
 	// Library downloads cross this connection as well as the BFF's. A fixed
 	// 15-second response deadline truncates large files even while bytes flow.
-	// A finished account export is the same kind of answer, so its download
-	// gets the same treatment, on its one exact shape.
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/_memql/"), "/")
-	libraryDownload := len(parts) == 3 && parts[0] == "artifacts" && parts[1] != "" && parts[2] == "content"
-	exportDownload := isAccountExportDownloadPath(strings.TrimPrefix(r.URL.Path, "/_memql"))
-	if r.Method == http.MethodGet && (libraryDownload || exportDownload) {
-		writer, request, finish, err := httpstream.Download(w, r)
+	if treated, long := downloadTreatment(r.Method, r.URL.Path); treated {
+		download := httpstream.Download
+		if long {
+			download = func(w http.ResponseWriter, r *http.Request) (http.ResponseWriter, *http.Request, context.CancelFunc, error) {
+				return httpstream.DownloadWithin(w, r, httpstream.LongDownloadLimit)
+			}
+		}
+		writer, request, finish, err := download(w, r)
 		if err != nil {
 			http.Error(w, "download unavailable", http.StatusServiceUnavailable)
 			return
@@ -201,6 +203,29 @@ func isBffRootPath(rest string) bool {
 		}
 	}
 	return false
+}
+
+// downloadTreatment reports whether a request is one of the two long downloads
+// this proxy carries, and whether it takes the long ceiling.
+//
+// The Library's content route keeps httpstream.Download's default ceiling: the Library caps a file at
+// 4 GiB. A finished account export has no such cap and can be many gigabytes,
+// so its download takes httpstream.LongDownloadLimit, the same ceiling the bff
+// handler uses (component/server/account_export_handler.go); a shorter ceiling
+// on either hop would cut the transfer. The idle write deadline is the same for
+// both. GET only, on the exact shapes and nothing wider.
+func downloadTreatment(method, path string) (treated, long bool) {
+	if method != http.MethodGet {
+		return false, false
+	}
+	parts := strings.Split(strings.TrimPrefix(path, "/_memql/"), "/")
+	if len(parts) == 3 && parts[0] == "artifacts" && parts[1] != "" && parts[2] == "content" {
+		return true, false
+	}
+	if isAccountExportDownloadPath(strings.TrimPrefix(path, "/_memql")) {
+		return true, true
+	}
+	return false, false
 }
 
 // isAccountExportDownloadPath reports whether a marker-stripped path is exactly
