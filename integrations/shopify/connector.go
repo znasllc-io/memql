@@ -292,12 +292,6 @@ func (c *Connector) InboundSource(ctx context.Context, name string) (memqlsync.I
 	return c.stores.InboundSourceFor(ctx, store)
 }
 
-// StoreFor resolves the store a staged delivery belongs to.
-//
-// Per-store source names are authoritative. The managed app-level source --
-// the privacy topics and app/uninstalled -- instead resolves the signed shop
-// domain and verifies app ownership (managedAppLevelStore). An unknown source
-// never falls back to an unsigned shop-domain header.
 // ClaimsInboundSource answers whether name is one of this connector's
 // sources -- its own app-level name, or `shopify-<storeId>` for a store that
 // exists -- without resolving any secret (memqlsync.InboundSourceClaimer).
@@ -316,34 +310,65 @@ func (c *Connector) ClaimsInboundSource(ctx context.Context, name string) (bool,
 	if name == ConnectorName {
 		return true, nil
 	}
-	prefix := ConnectorName + "-"
-	if !strings.HasPrefix(name, prefix) {
-		return false, nil
-	}
-	stores, err := c.stores.Stores(ctx)
-	if err != nil {
-		return false, err
-	}
-	id := strings.TrimPrefix(name, prefix)
-	for _, s := range stores {
-		if s.ID == id {
-			return true, nil
-		}
-	}
-	return false, nil
+	_, found, err := c.storeOfSource(ctx, name)
+	return found, err
 }
 
-func (c *Connector) StoreFor(ctx context.Context, req memqlsync.InboundRequest) (Store, bool) {
+// findStore is the one store `match` accepts, answered three ways: the store;
+// found false when the list was read and holds none; and an error when the
+// list could not be read. The registry's ByID and ByDomain answer that last
+// case as "no such store", which is right for a caller that only wants a
+// store to act on and wrong for one deciding whether a delivery is anybody's.
+func (c *Connector) findStore(ctx context.Context, match func(Store) bool) (Store, bool, error) {
+	stores, err := c.stores.Stores(ctx)
+	if err != nil {
+		return Store{}, false, err
+	}
+	for _, s := range stores {
+		if match(s) {
+			return s, true, nil
+		}
+	}
+	return Store{}, false, nil
+}
+
+// storeOfSource is the store a per-store source name, `shopify-<storeId>`,
+// names: three-valued, as findStore is. A name of another shape is
+// definitely not a store's.
+func (c *Connector) storeOfSource(ctx context.Context, name string) (Store, bool, error) {
+	prefix := ConnectorName + "-"
+	if !strings.HasPrefix(name, prefix) {
+		return Store{}, false, nil
+	}
+	id := strings.TrimPrefix(name, prefix)
+	return c.findStore(ctx, func(s Store) bool { return s.ID == id })
+}
+
+// deliveryStore resolves the store a staged delivery belongs to, and says
+// when it CANNOT TELL.
+//
+// Per-store source names are authoritative. The managed app-level source --
+// the privacy topics and app/uninstalled -- instead resolves the signed shop
+// domain and verifies app ownership (managedAppLevelStore). An unknown source
+// never falls back to an unsigned shop-domain header.
+//
+// Three answers, and the third is the one that matters: found false is a
+// delivery that is definitely nobody's, which is dropped; an error is a store
+// list that could not be read, which says nothing about whose the delivery
+// is. It is the same read ClaimsInboundSource makes for a store's own source,
+// so Apply and the retry pass cannot disagree about what "could not tell" is.
+func (c *Connector) deliveryStore(ctx context.Context, req memqlsync.InboundRequest) (Store, bool, error) {
 	if req.Source == ConnectorName {
 		return c.managedAppLevelStore(ctx, req)
 	}
-	prefix := ConnectorName + "-"
-	if strings.HasPrefix(req.Source, prefix) {
-		if store, ok := c.stores.ByID(ctx, strings.TrimPrefix(req.Source, prefix)); ok {
-			return store, true
-		}
-	}
-	return Store{}, false
+	return c.storeOfSource(ctx, req.Source)
+}
+
+// StoreFor is deliveryStore for a caller that only wants a store to act on:
+// "could not tell" and "nobody's" both answer false.
+func (c *Connector) StoreFor(ctx context.Context, req memqlsync.InboundRequest) (Store, bool) {
+	store, found, err := c.deliveryStore(ctx, req)
+	return store, found && err == nil
 }
 
 // header reads a delivery header case-insensitively.

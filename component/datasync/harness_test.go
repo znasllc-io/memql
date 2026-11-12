@@ -407,14 +407,14 @@ func (w *fakeWriter) WriteMirror(_ context.Context, _ string, mw memqlsync.Mirro
 	return nil
 }
 
-func (w *fakeWriter) StoredRow(_ context.Context, spec memqlsync.DomainSpec, rowID string) (map[string]any, bool, error) {
+func (w *fakeWriter) StoredRow(_ context.Context, spec memqlsync.DomainSpec, rowID string) (StoredMirrorRow, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	v, ok := w.versions[spec.Concept+"|"+rowID]
 	if !ok {
-		return nil, false, nil
+		return StoredMirrorRow{}, nil
 	}
-	return map[string]any{spec.VersionField: v}, true, nil
+	return StoredMirrorRow{Exists: true, Payload: map[string]any{spec.VersionField: v}}, nil
 }
 
 func (w *fakeWriter) writtenIDs() []string {

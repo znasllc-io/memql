@@ -106,12 +106,20 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 			return nil, fmt.Errorf("shopify: delivery on the app-level source while the managed app's client id or sealed secret is missing; nothing verified it as app-signed")
 		}
 	}
-	store, ok := c.StoreFor(ctx, req)
-	if !ok {
-		// A delivery for a store nobody configured. Not an error: an
-		// operator may have removed the store while Shopify still had a
-		// subscription, and failing would retry it eight times over four
-		// hours for no reason.
+	store, found, err := c.deliveryStore(ctx, req)
+	if err != nil {
+		// COULD NOT TELL whose the delivery is: the store list, or the
+		// managed app's configuration, could not be read. That is not "nobody
+		// configured this store". Answered as that, the delivery was stamped
+		// processed with nothing done, and a privacy request is not sent
+		// twice. It fails as worth another try instead.
+		return nil, fmt.Errorf("shopify: could not tell which store a delivery on source %q belongs to; it is tried again: %w", req.Source, err)
+	}
+	if !found {
+		// A delivery for a store nobody configured, said definitely: the
+		// list was read and holds no such store. Not an error: an operator
+		// may have removed the store while Shopify still had a
+		// subscription, and failing would retry it for no reason.
 		c.logger.Warn("shopify: delivery for an unknown store", "source", req.Source, "topic", req.Topic)
 		return nil, nil
 	}
@@ -256,7 +264,7 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 //     fetch's time, which is the read that found it gone.
 func (c *Connector) answeredNothing(ctx context.Context, store Store, spec *generated.TypeSpec, req memqlsync.InboundRequest, gid string, readAt time.Time) ([]memqlsync.MirrorWrite, error) {
 	conceptID := generated.ConceptID(spec.Concept)
-	stored, err := c.storedMirrorRow(ctx, memqlsync.MirrorWrite{Concept: conceptID, RowId: MirrorRowID(store.ID, gid)})
+	stored, _, err := c.storedMirrorRow(ctx, memqlsync.MirrorWrite{Concept: conceptID, RowId: MirrorRowID(store.ID, gid)})
 	if err != nil {
 		c.forgetDelivery(req, gid)
 		return nil, err

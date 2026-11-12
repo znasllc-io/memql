@@ -3,12 +3,14 @@ package datasync
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 )
 
@@ -78,10 +80,22 @@ type MirrorWriter interface {
 	// WriteMirror applies one write under the connector's actor and
 	// returns the version now stored for that row.
 	WriteMirror(ctx context.Context, connector string, w memqlsync.MirrorWrite) error
-	// StoredRow returns the payload MemQL currently holds for a row, and
-	// whether the row exists at all. The guard reads it through
-	// memqlsync.StoredStamp.
-	StoredRow(ctx context.Context, spec memqlsync.DomainSpec, rowID string) (map[string]any, bool, error)
+	// StoredRow returns the row MemQL currently holds, read past any result
+	// cache: its payload, which the guard reads through memqlsync.StoredStamp,
+	// and its version, which the write the guard admits is fenced on.
+	StoredRow(ctx context.Context, spec memqlsync.DomainSpec, rowID string) (StoredMirrorRow, error)
+}
+
+// StoredMirrorRow is the row a mirror write is judged against.
+type StoredMirrorRow struct {
+	// Exists is false for a row MemQL does not hold.
+	Exists bool
+	// Payload is the row's fields.
+	Payload map[string]any
+	// Version is the stored version's time (the row's createdAt): the witness
+	// a write judged against this row is fenced on. Zero for a row that does
+	// not exist.
+	Version time.Time
 }
 
 // NewApplier builds the shared write path.
@@ -110,42 +124,73 @@ func (a *Applier) Apply(
 ) (ApplyResult, error) {
 	var out ApplyResult
 	for _, w := range writes {
-		spec := specs[strings.TrimSpace(w.Concept)]
-		stale, err := a.isStale(ctx, spec, w)
+		applied, err := a.applyOne(ctx, connector, specs[strings.TrimSpace(w.Concept)], w)
 		if err != nil {
 			return out, err
 		}
-		if stale {
+		if applied {
+			out.Applied++
+		} else {
 			out.Stale++
-			continue
 		}
-		if err := a.writer.WriteMirror(ctx, connector, w); err != nil {
-			return out, fmt.Errorf("datasync: applying %s %q from %q: %w", w.Concept, w.RowId, connector, err)
-		}
-		out.Applied++
 	}
 	return out, nil
 }
 
-// isStale reports whether this write must not replace what MemQL holds, by
-// the contract's one rule (memqlsync.Refuses), which a connector's own sweep
-// asks too: whether a record exists is judged by when the origin was read for
-// each side, and which of two live states is newer by the origin's version.
+// applyOne writes one MirrorWrite unless the row MemQL holds refuses it, and
+// reports whether it was written.
 //
-// A row MemQL does not have is never refused: a first delivery has nothing
-// to be older than, and refusing it would leave the mirror permanently
+// THE RULE is the contract's one (memqlsync.Refuses), which a connector's own
+// sweep asks too: whether a record exists is judged by when the origin was
+// read for each side, and which of two live states is newer by the origin's
+// version. A row MemQL does not have is never refused: a first delivery has
+// nothing to be older than, and refusing it would leave the mirror permanently
 // empty. Nor is a write over a row that holds no version, or one carrying
 // none -- a connector that cannot say when a change happened gets
 // last-write-wins, which is what it had before the guard existed.
-func (a *Applier) isStale(ctx context.Context, spec memqlsync.DomainSpec, w memqlsync.MirrorWrite) (bool, error) {
-	stored, exists, err := a.writer.StoredRow(ctx, spec, w.RowId)
-	if err != nil {
-		return false, err
+//
+// THE WRITE IS FENCED ON THE ROW THAT WAS JUDGED. The read and the write are
+// two statements, and a delivery, a backfill page and a sweep write one row at
+// once: a newer state another writer committed between the two would be
+// replaced by the older one this write was admitted against. So the write
+// carries the judged row's version (memql.ContextWithRowVersionFence; a row
+// that did not exist must still not exist), and the engine refuses it when the
+// row has moved. The row is then read and judged again, ONCE: skipped as
+// stale, or written against the row as it is now. A second loss is returned,
+// and the delivery or the page is tried again like any other failure.
+func (a *Applier) applyOne(ctx context.Context, connector string, spec memqlsync.DomainSpec, w memqlsync.MirrorWrite) (bool, error) {
+	for try := 0; ; try++ {
+		stored, err := a.writer.StoredRow(ctx, spec, w.RowId)
+		if err != nil {
+			return false, err
+		}
+		if stored.Exists && memqlsync.Refuses(memqlsync.StoredStamp(spec, stored.Payload), memqlsync.WriteStamp(spec, w)) {
+			return false, nil
+		}
+		err = a.writer.WriteMirror(fencedOn(ctx, spec, w, stored), connector, w)
+		if err == nil {
+			return true, nil
+		}
+		if try == 0 && errors.Is(err, memql.ErrRowVersionChanged) {
+			continue
+		}
+		return false, fmt.Errorf("datasync: applying %s %q from %q: %w", w.Concept, w.RowId, connector, err)
 	}
-	if !exists {
-		return false, nil
+}
+
+// fencedOn is ctx with the write fenced on the row it was judged against.
+//
+// Two writes are left unfenced, because for them a fence would refuse what it
+// should admit. One whose concept the connector declared no domain for was
+// never read at all. And an existing row whose read carried no version cannot
+// be fenced on it: a zero version on the fence means "this row must not
+// exist", and every write to it would lose for good.
+func fencedOn(ctx context.Context, spec memqlsync.DomainSpec, w memqlsync.MirrorWrite, stored StoredMirrorRow) context.Context {
+	concept := strings.TrimSpace(spec.Concept)
+	if concept == "" || (stored.Exists && stored.Version.IsZero()) {
+		return ctx
 	}
-	return memqlsync.Refuses(memqlsync.StoredStamp(spec, stored), memqlsync.WriteStamp(spec, w)), nil
+	return memql.ContextWithRowVersionFence(ctx, concept, w.RowId, stored.Version)
 }
 
 // Dispatcher routes a staged inbound request to its connector.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -133,70 +134,109 @@ func mirrorInsert(w memqlsync.MirrorWrite) (string, error) {
 // fault this check exists for. So does a read that answers two rows for the
 // one id: the raw read is by concept and id, and two answers mean the read is
 // not the row this write would replace.
+//
+// EACH WRITE IS FENCED ON THE ROW IT WAS JUDGED AGAINST (healOne), so a
+// delivery that commits between the read and the write is not replaced by the
+// older state the page carried.
 func (c *Connector) heal(ctx context.Context, writes []memqlsync.MirrorWrite) (healed int, failed int) {
 	for _, w := range writes {
-		stored, err := c.storedMirrorRow(ctx, w)
+		wrote, err := c.healOne(ctx, w)
 		if err != nil {
 			failed++
-			c.logger.Warn("shopify: reconcile could not read a row before healing it; not written",
+			c.logger.Warn("shopify: reconcile could not heal a row; not written",
 				"concept", w.Concept, "row", w.RowId, "error", err)
 			continue
 		}
-		if stored != nil {
-			spec := mirrorDomain(w.Concept)
-			if memqlsync.Refuses(memqlsync.StoredStamp(spec, stored), memqlsync.WriteStamp(spec, w)) {
-				continue
-			}
-			if !w.Retire && mirrorPayloadHolds(stored, w.Payload, fetchTimeVersion(w)) {
-				continue
-			}
+		if wrote {
+			healed++
 		}
-		if err := c.writeMirror(ctx, w); err != nil {
-			failed++
-			c.logger.Warn("shopify: reconcile could not heal a row",
-				"concept", w.Concept, "row", w.RowId, "error", err)
-			continue
-		}
-		healed++
 	}
 	return healed, failed
 }
 
-// storedMirrorRow reads the payload the mirror holds for w's row, or nil for
-// a row it does not hold (heal).
+// healOne judges one write against the row the mirror holds and writes it
+// unless the row refuses it or already holds it, and reports whether it wrote.
+//
+// The read and the write are two statements. A delivery can commit a newer
+// state in between, and the write this page was admitted for would put the
+// older one back, on a domain whose next sweep reads only what changed since.
+// So the write carries the judged row's version
+// (memql.ContextWithRowVersionFence; a row that was not there must still not
+// be), and the engine refuses it when the row has moved. The row is then read
+// and judged again, ONCE; a second loss is this row's failure, and the sweep
+// that counts it holds its watermark.
+func (c *Connector) healOne(ctx context.Context, w memqlsync.MirrorWrite) (bool, error) {
+	for try := 0; ; try++ {
+		stored, version, err := c.storedMirrorRow(ctx, w)
+		if err != nil {
+			return false, fmt.Errorf("reading the row before healing it: %w", err)
+		}
+		if stored != nil {
+			spec := mirrorDomain(w.Concept)
+			if memqlsync.Refuses(memqlsync.StoredStamp(spec, stored), memqlsync.WriteStamp(spec, w)) {
+				return false, nil
+			}
+			if !w.Retire && mirrorPayloadHolds(stored, w.Payload, fetchTimeVersion(w)) {
+				return false, nil
+			}
+		}
+		fenced := ctx
+		if stored == nil || !version.IsZero() {
+			// An existing row whose read carried no version cannot be fenced
+			// on it: a zero version means "this row must not exist".
+			fenced = memql.ContextWithRowVersionFence(ctx, strings.TrimSpace(w.Concept), strings.TrimSpace(w.RowId), version)
+		}
+		err = c.writeMirror(fenced, w)
+		if err == nil {
+			return true, nil
+		}
+		if try == 0 && errors.Is(err, memql.ErrRowVersionChanged) {
+			continue
+		}
+		return false, err
+	}
+}
+
+// storedMirrorRow reads the payload the mirror holds for w's row and that
+// row's version (the stored version's time), or nil for a row it does not
+// hold.
 //
 // The read is the runtime's own raw concept read (component/datasync
-// StoredVersion), so it needs no generated query and no cluster-owner filter
+// StoredRow), so it needs no generated query and no cluster-owner filter
 // the connector actor would fail, and it goes to the database rather than to
 // a replica's result cache (memql.ContextWithFreshRead): a sibling's eviction
 // is asynchronous, and a stale cached row could hide a change. A bundle with
 // two nodes for the id is an error (heal).
-func (c *Connector) storedMirrorRow(ctx context.Context, w memqlsync.MirrorWrite) (map[string]any, error) {
+func (c *Connector) storedMirrorRow(ctx context.Context, w memqlsync.MirrorWrite) (map[string]any, time.Time, error) {
 	concept, rowID := strings.TrimSpace(w.Concept), strings.TrimSpace(w.RowId)
 	if concept == "" || rowID == "" || c.engine == nil {
-		return nil, nil
+		return nil, time.Time{}, nil
 	}
 	q := fmt.Sprintf("concept==%s && id==%s", concept, langparser.QuoteString(rowID))
 	res, err := c.engine.Execute(memql.ContextWithFreshRead(connectorContext(ctx)), q)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	if res == nil || res.Bundle == nil {
-		return nil, nil
+		return nil, time.Time{}, nil
 	}
 	// The row is matched by its own id rather than taken as the only node:
 	// an id is bare-ified on egress, and a bundle may carry other nodes.
 	var stored map[string]any
+	var version time.Time
 	for _, node := range res.Bundle.GetNodes() {
 		if memql.BareShortId(node.GetId()) != memql.BareShortId(rowID) {
 			continue
 		}
 		if stored != nil {
-			return nil, fmt.Errorf("shopify: the mirror answered two rows for %s %q", concept, rowID)
+			return nil, time.Time{}, fmt.Errorf("shopify: the mirror answered two rows for %s %q", concept, rowID)
 		}
 		stored = node.GetPayload().AsMap()
+		if at := node.GetCreatedAt(); at != nil {
+			version = at.AsTime()
+		}
 	}
-	return stored, nil
+	return stored, version, nil
 }
 
 // fetchTimeVersion reports whether the write's updatedAt is the TIME OF

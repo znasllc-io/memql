@@ -291,6 +291,19 @@ func (c *Connector) reconcileStore(ctx context.Context, store Store, spec *gener
 // deletion is carried by the delete topic and, when that is lost, by the
 // domain's periodic full re-list -- which is why every updated_at domain
 // that can be deleted also carries delete topics.
+//
+// A SWEEP IN WHICH A WRITE FAILED IS NOT A CLEAN SWEEP (unwritten). Every row
+// is still healed that can be -- one row's failure does not stop the rest --
+// and the sweep then answers an error, so the runtime holds the watermark
+// where it was and the next sweep reads the same rows again.
+//
+// THE ROW BUDGET CUTS A SWEEP SHORT AND IT IS STILL RECORDED AS RUN. The
+// watermark could be moved only to the last row read if the rows came in
+// order of their last change, and they do not: the generated list operation
+// names no sortKey, so the origin answers in its own default order (the id
+// for most connections, processed_at for orders), and the last row read says
+// nothing about which changes are still unread. Ordering the listing is the
+// generator's to do.
 func (c *Connector) reconcileByUpdatedAt(ctx context.Context, store Store, spec *generated.TypeSpec, since time.Time) (memqlsync.ReconcileReport, error) {
 	var report memqlsync.ReconcileReport
 	if spec.ListQuery == "" || spec.ListOp == "" {
@@ -305,6 +318,7 @@ func (c *Connector) reconcileByUpdatedAt(ctx context.Context, store Store, spec 
 		filter = "updated_at:>'" + since.UTC().Format(time.RFC3339) + "'"
 	}
 	after := ""
+	failed := 0
 	for rows := 0; rows < relistRowCap; {
 		vars := map[string]any{"first": c.pageSizeFor(store, spec)}
 		if after != "" {
@@ -331,20 +345,37 @@ func (c *Connector) reconcileByUpdatedAt(ctx context.Context, store Store, spec 
 				return report, err
 			}
 			writes := mapObject(spec, store.ID, obj, "", readAt)
-			healed, _ := c.heal(ctx, writes)
+			healed, lost := c.heal(ctx, writes)
+			failed += lost
 			if healed > 0 {
 				report.Drifted++
 				report.Healed++
 			}
 		}
 		if !hasNext || next == "" {
-			return report, nil
+			return report, unwritten(failed)
 		}
 		after = next
 	}
 	c.logger.Warn("shopify: updated_at sweep hit the row budget",
 		"store", store.ID, "concept", spec.Concept, "rows", relistRowCap)
-	return report, nil
+	return report, unwritten(failed)
+}
+
+// unwritten is the failure of a sweep or a re-list that read rows the mirror
+// did not take: heal could not read or write them. It is an ordinary failure,
+// worth another try: the runtime records it as the domain's error and leaves
+// the watermark where it was, so the next sweep reads those rows again. A
+// sweep that dropped the count was recorded clean, and a change that could
+// not be recorded read as recorded.
+func unwritten(failed int) error {
+	switch failed {
+	case 0:
+		return nil
+	case 1:
+		return errors.New("shopify: 1 row read from the store could not be written to the mirror; the next check reads it again")
+	}
+	return fmt.Errorf("shopify: %d rows read from the store could not be written to the mirror; the next check reads them again", failed)
 }
 
 // relistListsPartially names the full re-list domains whose origin listing
@@ -391,6 +422,10 @@ func (c *Connector) relist(ctx context.Context, store Store, spec *generated.Typ
 	seen := map[string]bool{}
 	after := ""
 	complete := false
+	// Rows the mirror did not take: the pass goes on, and answers them at its
+	// end (unwritten). Tombstoning does not wait on them -- a row that was
+	// listed is in `seen` whether or not its write landed.
+	failed := 0
 	for rows := 0; rows < relistRowCap; {
 		vars := map[string]any{"first": c.pageSizeFor(store, spec)}
 		if after != "" {
@@ -412,7 +447,8 @@ func (c *Connector) relist(ctx context.Context, store Store, spec *generated.Typ
 			if err := c.completeChildren(ctx, store, spec, obj); err != nil {
 				return report, err
 			}
-			healed, _ := c.heal(ctx, mapObject(spec, store.ID, obj, "", begun))
+			healed, lost := c.heal(ctx, mapObject(spec, store.ID, obj, "", begun))
+			failed += lost
 			if healed > 0 {
 				report.Drifted++
 				report.Healed++
@@ -427,10 +463,10 @@ func (c *Connector) relist(ctx context.Context, store Store, spec *generated.Typ
 	if !complete {
 		c.logger.Warn("shopify: full re-list hit the page cap; not tombstoning",
 			"store", store.ID, "concept", spec.Concept, "rows", relistRowCap)
-		return report, nil
+		return report, unwritten(failed)
 	}
 	if _, partial := relistListsPartially[spec.Concept]; partial {
-		return report, nil
+		return report, unwritten(failed)
 	}
 
 	absent, err := c.liveRowsAbsentFrom(ctx, store, spec, seen)
@@ -440,12 +476,14 @@ func (c *Connector) relist(ctx context.Context, store Store, spec *generated.Typ
 	for _, gid := range absent {
 		// heal logs a row it could not write; a tombstone it refused is a
 		// row written after the listing began.
-		if healed, _ := c.heal(ctx, []memqlsync.MirrorWrite{tombstone(spec.Concept, store.ID, gid, begun)}); healed > 0 {
+		healed, lost := c.heal(ctx, []memqlsync.MirrorWrite{tombstone(spec.Concept, store.ID, gid, begun)})
+		failed += lost
+		if healed > 0 {
 			report.Drifted++
 			report.Healed++
 		}
 	}
-	return report, nil
+	return report, unwritten(failed)
 }
 
 // liveRowPageCap bounds the read of a domain's live mirror rows, in pages
