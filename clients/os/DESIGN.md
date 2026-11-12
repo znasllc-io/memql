@@ -550,7 +550,10 @@ Statistics are drawn with the kit's statistics pieces and nothing else
 for a dimension's leading values and `PeriodControl` for the period, with
 `kit/format`'s `formatCount`, `formatRate`, `formatBytes` and `formatMoney` for
 the numbers. `formatMoney(currency)` writes an amount in its currency's own
-decimals ("€1,204.50", "¥1,200") and keeps a sign below zero.
+decimals ("€1,204.50", "¥1,200"), keeps a sign below zero and never signs a
+zero. The value axis of a money chart writes its whole steps without decimals
+(`formatMoneyAxis`, handed to `TimeChart` as `axisFormat`: "€1,000"), while the
+readout, the summary and the figures keep the currency's decimals.
 The client picker is `ScopeControl` over `useClientScope`, which live with the
 account concept (`apps/accounts`): the kit is the shell's vocabulary, and a
 client picker is one domain's surface. A deployable's Statistics, the
@@ -606,9 +609,12 @@ for, and an Overview that is its app's statistics hands `StatFigures` to
   figure a day of refunds outweighed scales from a round floor under zero to
   the round top. Its fill runs to zero, not to the plot's bottom, so a day
   below zero hangs beneath zero, and the rule at zero reads a step stronger
-  than the other rules: it is the one rule the reader needs to find. Each value
+  than the other rules: it is the one rule the reader needs to find. With
+  nothing above zero, zero is the top and the line hangs from it. Each value
   label stands on its own rule, because the steps below and above zero need
-  not be even. A figure that cannot be below zero keeps the axis from zero.
+  not be even, and a step whose rule would sit within a label's height of
+  another's is left out: zero first, then the top and the floor, then the
+  halves. A figure that cannot be below zero keeps the axis from zero.
 - **Loading is the chart's shape.** While a read is out, `TimeChartSkeleton`
   stands in the chart's place with its head, plot and time axis, and the
   figures and lists are their shapes (`loading` on `StatFigures` and

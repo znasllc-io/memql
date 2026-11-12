@@ -306,7 +306,10 @@ previous period, a rate with a gap, the first day counted, a small count, a
 previous period of lone days, this period unmeasured beside a measured
 previous one, nothing measured), `view=store` (a net figure below zero beside
 a previous period, and hours in a store's zone across the night its clocks go
-back, where 01:00 is labelled twice) and `view=states` (reading and empty). Hover the chart, then Tab into it and
+back, where 01:00 is labelled twice; money steps are whole on the axis),
+`view=refunds` (nothing above zero: zero is the top), `view=lopsided` (-5,000
+under 40: only zero and the floor are labelled) and `view=states` (reading and
+empty). Hover the chart, then Tab into it and
 use the arrow keys: one readout above the plot follows both. Check `mode=light`
 and `mode=dark`, and `width=narrow`, where five figures stand two to a row.
 

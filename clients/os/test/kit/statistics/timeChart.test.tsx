@@ -208,6 +208,49 @@ describe("below zero", () => {
     expect([...container.querySelectorAll<HTMLElement>(".os-time-chart-values > span")].map((span) => span.style.top)).toEqual(["", ""]);
   });
 
+  it("hangs from zero at the top when nothing is above zero", () => {
+    const { container } = render(<TimeChart label="Net sales" bucket="day" points={days([-10, -36, -20])} format={count} />);
+    // The axis runs from -50 to 0: zero is the top rule, and the fill hangs from it.
+    expect([...container.querySelectorAll(".os-time-chart-values > span")].map((span) => span.textContent)).toEqual(["0", "-25", "-50"]);
+    expect(container.querySelector('.os-time-chart-grid[data-zero="true"]')?.getAttribute("y1")).toBe("0");
+    expect(seriesPath(container, "current")?.getAttribute("d")).toBe("M0 32 L300 115.2 L600 64");
+    expect(container.querySelector('path[data-area="current"]')?.getAttribute("d")).toBe("M0 0 L0 32 L300 115.2 L600 64 L600 0 Z");
+  });
+
+  it("draws a series of zeros as it always has", () => {
+    const { container } = render(<TimeChart label="Visitors" bucket="day" points={days([0, 0, 0])} format={count} />);
+    expect(seriesPath(container, "current")?.getAttribute("d")).toBe("M0 160 L300 160 L600 160");
+    expect(container.querySelector('path[data-area="current"]')?.getAttribute("d")).toBe("M0 160 L0 160 L300 160 L600 160 L600 160 Z");
+    expect([...container.querySelectorAll(".os-time-chart-values > span")].map((span) => span.textContent)).toEqual(["1", "0"]);
+    expect(container.querySelector(".os-time-chart-values")?.hasAttribute("data-below-zero")).toBe(false);
+    expect(container.querySelector(".os-time-chart-grid[data-zero]")).toBeNull();
+  });
+
+  it("leaves out a step whose rule would sit on another's", () => {
+    const labels = (container: HTMLElement) => [...container.querySelectorAll(".os-time-chart-values > span")].map((span) => span.textContent);
+    const lopsided = render(<TimeChart label="Net sales" bucket="day" points={days([-5000, 40, 10])} format={count} />).container;
+    expect(labels(lopsided)).toEqual(["0", "-5,000"]);
+    expect(lopsided.querySelectorAll(".os-time-chart-grid")).toHaveLength(2);
+    cleanup();
+    const huge = render(<TimeChart label="Net sales" bucket="day" points={days([-1, 1_000_000, 10])} format={count} />).container;
+    expect(labels(huge)).toEqual(["1,000,000", "500,000", "0"]);
+    cleanup();
+    const even = render(<TimeChart label="Net sales" bucket="day" points={days([20, -36, 55])} format={count} />).container;
+    expect(labels(even)).toEqual(["100", "50", "0", "-50"]);
+    cleanup();
+    const short = render(<TimeChart label="Net sales" bucket="day" points={days([20, -36, 55])} format={count} height={30} />).container;
+    expect(labels(short)).toEqual(["100", "0"]);
+  });
+
+  it("writes its value axis through axisFormat, and everything else through format", () => {
+    const whole = (value: number) => `${value} whole`;
+    const { container } = render(<TimeChart label="Net sales" bucket="day" points={days([20, -36, 55])} format={count} axisFormat={whole} />);
+    expect([...container.querySelectorAll(".os-time-chart-values > span")].map((span) => span.textContent)).toEqual(["100 whole", "50 whole", "0 whole", "-50 whole"]);
+    expect(container.querySelector("figcaption")?.textContent).toBe("Net sales: 3 points from Nov 2 to Nov 4; highest 55 on Nov 4.");
+    act(() => screen.getByRole("application", { name: "Net sales" }).focus());
+    expect(screen.getByRole("status").textContent).toBe("Nov 4: 55");
+  });
+
   it("names its lowest step through the page's format, and keeps a whole-number axis whole", () => {
     const { container } = render(<TimeChart label="Net sales" bucket="day" points={days([5, -3, 2])} format={count} />);
     // -5 to 5: the half of the top is 2.5, which a whole-number axis leaves out.

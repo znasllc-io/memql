@@ -2,7 +2,7 @@ import { useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "
 
 import { useWidth } from "../useWide";
 import { bucketLabel, bucketMoment, type Bucket } from "./period";
-import { niceMax, niceMin, timeTickIndexes, valueTicks } from "./scale";
+import { niceMax, niceMin, spacedTicks, timeTickIndexes, valueTicks } from "./scale";
 import "./statistics.css";
 
 // ONE TIME-SERIES CHART FOR EVERY STATISTICS PAGE (spec 8).
@@ -63,6 +63,12 @@ export interface ChartPoint {
 /** The drawing's own coordinate width, stretched to the plot's real width. */
 const VIEW_WIDTH = 600;
 const DEFAULT_HEIGHT = 160;
+/**
+ * The CSS pixels a value-axis label stands tall: statistics.css sets the
+ * gutter (`.os-time-chart-values`) in `--os-text-xs`, 11px, at `line-height:
+ * 1`. Below zero, two steps' rules closer than this would stack their labels.
+ */
+const VALUE_LABEL_HEIGHT = 11;
 /** The CSS pixels a time-axis label is owed: how many labels fit is the plot's width over this. */
 const TIME_LABEL_ROOM = 72;
 
@@ -190,7 +196,7 @@ export function TimeChartSkeleton({ label, height = DEFAULT_HEIGHT }: {
   );
 }
 
-export function TimeChart({ label, bucket, points, previous, format, timeZone, height = DEFAULT_HEIGHT }: {
+export function TimeChart({ label, bucket, points, previous, format, axisFormat = format, timeZone, height = DEFAULT_HEIGHT }: {
   /** What is drawn ("Visitors"). Names the plot, and starts its sentence. */
   label: string;
   bucket: Bucket;
@@ -199,6 +205,9 @@ export function TimeChart({ label, bucket, points, previous, format, timeZone, h
   previous?: readonly ChartPoint[];
   /** How a value is written, on the value axis and in the readout. */
   format: (value: number) => string;
+  /** How a step of the value axis is written, and nothing else ("€1,000" where
+   *  the readout says "€1,000.00"). Absent, `format`. */
+  axisFormat?: (value: number) => string;
   /** The store's time zone ("Europe/Madrid"), its buckets are named in. Absent, UTC. */
   timeZone?: string;
   /** The plot's height in CSS pixels, and the drawing's. */
@@ -218,8 +227,9 @@ export function TimeChart({ label, bucket, points, previous, format, timeZone, h
   const measured = [...current, ...(prior ?? [])].filter((value): value is number => value !== null);
   const largest = Math.max(0, ...measured);
   const smallest = Math.min(0, ...measured);
-  const top = niceMax(largest);
   const floor = niceMin(smallest);
+  // Below zero with nothing above it, zero is the top: the line hangs from it.
+  const top = floor < 0 && largest <= 0 ? 0 : niceMax(largest);
   const span = top - floor;
 
   const x = (index: number) => (count <= 1 ? VIEW_WIDTH / 2 : (index / (count - 1)) * VIEW_WIDTH);
@@ -247,10 +257,12 @@ export function TimeChart({ label, bucket, points, previous, format, timeZone, h
   // ruled. A series of whole numbers drops a fractional middle step
   // (`valueTicks`). And while the current period says "Not measured" in the
   // middle of the plot, the middle step gives way, so no rule crosses it.
-  // Below zero the floor is a step too, under zero.
-  const steps = measured.length === 0 ? [] : valueTicks(largest, measured.every(Number.isInteger), smallest);
+  // Below zero the floor is a step too, under zero, and a step whose rule
+  // would sit within a label's height of another's is left out (`spacedTicks`).
+  const valued = measured.length === 0 ? [] : valueTicks(largest, measured.every(Number.isInteger), smallest);
+  const steps = floor < 0 ? spacedTicks(valued, y, VALUE_LABEL_HEIGHT) : valued;
   const ticks = runs.length === 0 ? steps.filter((tick) => tick === floor || tick === 0 || tick === top) : steps;
-  const rules = ticks.length === 0 ? [{ at: height, zero: false }] : ticks.map((tick) => ({ at: coordinate(y(tick)), zero: floor < 0 && tick === 0 }));
+  const rules = ticks.length === 0 ? [{ key: "base", at: height, zero: false }] : ticks.map((tick) => ({ key: String(tick), at: coordinate(y(tick)), zero: floor < 0 && tick === 0 }));
 
   // Clamped at render: a shorter series arriving under a held index reads its
   // last bucket rather than nothing.
@@ -325,7 +337,7 @@ export function TimeChart({ label, bucket, points, previous, format, timeZone, h
             labels evenly. A floor below zero need not be (-200 under 0, 500
             and 1,000), so then each label is set on its own rule. */}
         <div className="os-time-chart-values" data-below-zero={floor < 0 ? "true" : undefined} aria-hidden="true" style={{ height }}>
-          {[...ticks].reverse().map((tick) => <span key={tick} style={floor < 0 ? { top: topOf(tick) } : undefined}>{format(tick)}</span>)}
+          {[...ticks].reverse().map((tick) => <span key={tick} style={floor < 0 ? { top: topOf(tick) } : undefined}>{axisFormat(tick)}</span>)}
         </div>
         <div
           ref={plotRef}
@@ -353,7 +365,7 @@ export function TimeChart({ label, bucket, points, previous, format, timeZone, h
         >
           <svg viewBox={`0 0 ${VIEW_WIDTH} ${height}`} preserveAspectRatio="none" aria-hidden="true">
             {rules.map((rule) => (
-              <line key={rule.at} className="os-time-chart-grid" data-zero={rule.zero ? "true" : undefined} x1={0} x2={VIEW_WIDTH} y1={rule.at} y2={rule.at} vectorEffect="non-scaling-stroke" shapeRendering="crispEdges" />
+              <line key={rule.key} className="os-time-chart-grid" data-zero={rule.zero ? "true" : undefined} x1={0} x2={VIEW_WIDTH} y1={rule.at} y2={rule.at} vectorEffect="non-scaling-stroke" shapeRendering="crispEdges" />
             ))}
             {area === "" ? null : <path className="os-time-chart-area" data-area="current" d={area} />}
             {priorLine === "" ? null : <path className="os-time-chart-previous" data-series="previous" d={priorLine} strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />}

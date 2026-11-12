@@ -139,6 +139,13 @@ describe("a bucket in a store's time zone", () => {
     expect(bucketLabel("2025-11-02T07:00:00Z", "hour", "America/New_York")).toBe("02:00");
   });
 
+  it("labels the hours either side of a spring-forward night 01:00 and 03:00, and none 02:00", () => {
+    expect(bucketLabel("2025-03-09T06:00:00Z", "hour", "America/New_York")).toBe("01:00");
+    expect(bucketLabel("2025-03-09T07:00:00Z", "hour", "America/New_York")).toBe("03:00");
+    const night = Array.from({ length: 8 }, (_, index) => bucketLabel(new Date(Date.parse("2025-03-09T03:00:00Z") + index * 3_600_000).toISOString(), "hour", "America/New_York"));
+    expect(night).toEqual(["22:00", "23:00", "00:00", "01:00", "03:00", "04:00", "05:00", "06:00"]);
+  });
+
   it("labels midnight 00:00, never 24:00", () => expect(bucketLabel("2025-11-08T23:00:00Z", "hour", "Europe/Madrid")).toBe("00:00"));
 
   it("reads a zone it does not know as UTC", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { niceMax, niceMin, timeTickIndexes, valueTicks } from "../../../src/kit/statistics/scale";
+import { niceMax, niceMin, spacedTicks, timeTickIndexes, valueTicks } from "../../../src/kit/statistics/scale";
 
 // A chart's two axes. The value axis has three labelled steps from zero to a
 // round top; the time axis labels as many buckets as its width has room for,
@@ -124,5 +124,38 @@ describe("the value axis's steps below zero", () => {
     // A floor at or above zero is zero: the steps are those it has without one.
     expect(valueTicks(55, true, 12)).toEqual([0, 50, 100]);
     expect(valueTicks(55, true, 0)).toEqual(valueTicks(55, true));
+  });
+});
+
+describe("the value axis's steps with nothing above zero", () => {
+  it("runs from the floor through its half to zero, which is the top", () => {
+    expect(valueTicks(0, false, -36)).toEqual([-50, -25, 0]);
+    expect(valueTicks(0, true, -36)).toEqual([-50, -25, 0]);
+    // Half of -5 is not a whole number, so a whole-number axis leaves it out.
+    expect(valueTicks(0, true, -3)).toEqual([-5, 0]);
+    expect(valueTicks(0, false, -3)).toEqual([-5, -2.5, 0]);
+  });
+});
+
+// Steps whose rules would sit closer than a label's height are left out:
+// zero first, then the top and the floor, then the halves.
+describe("steps kept apart", () => {
+  const at = (floor: number, top: number, height: number) => (value: number) => height - ((value - floor) / (top - floor)) * height;
+
+  it("keeps every step that has room", () => {
+    expect(spacedTicks([-50, 0, 50, 100], at(-50, 100, 160), 11)).toEqual([-50, 0, 50, 100]);
+  });
+
+  it("keeps zero and the floor when the top sits on zero", () => {
+    expect(spacedTicks([-5000, 0, 25, 50], at(-5000, 50, 160), 11)).toEqual([-5000, 0]);
+  });
+
+  it("keeps zero, the half and the top when the floor sits on zero", () => {
+    expect(spacedTicks([-1, 0, 500_000, 1_000_000], at(-1, 1_000_000, 160), 11)).toEqual([0, 500_000, 1_000_000]);
+  });
+
+  it("leaves out a step that fitted at a greater height", () => {
+    // Each step is a third of the height apart: 10 px at 30, under a label's 11.
+    expect(spacedTicks([-50, 0, 50, 100], at(-50, 100, 30), 11)).toEqual([0, 100]);
   });
 });
