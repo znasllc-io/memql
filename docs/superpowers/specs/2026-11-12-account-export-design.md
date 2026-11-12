@@ -221,6 +221,14 @@ of each carried row, the object or tree the field names is copied into the file
 once, under `bytes/`, and `bytes.jsonl` records its original key, size, checksum
 and the rows that use it.
 
+A row is believed about which bytes are its own only as far as its concept
+allows. The declaration names the place a row's bytes live in, built from the
+row's own values (`under`, section C), and a reference that points anywhere else
+is not read: the line in `bytes.jsonl` says it was refused and the report counts
+it. This is the rule each of today's readers already applies to its own kind (a
+Library file's key sits under its owner's prefix, a site names only its own
+bundle), stated once where the export can read it.
+
 - **Carried:** every Library file with every kept version (each version is a row
   of its own, and a binned file keeps its bytes), every attachment, each site's
   live bundle and its candidate.
@@ -253,15 +261,15 @@ The export reads declarations and nothing else. Three are new.
 concept siteAccessSession { ... }
 
 concept file {
-  blobUrl  string!  @bytes              // one object in blob storage
+  blobUrl  string!  @bytes(under="library/{ownerUserId}")     // one object, in its owner's place
 }
 
 concept site {
-  bundleRef  string  @bytes(tree)       // a tree of objects under one prefix
+  bundleRef  string  @bytes(tree, under="sites/{id}")         // a tree of objects, in the site's own place
 }
 
 concept packageDeployment {
-  snapshotArtifactId  string  @bytes(counted)   // counted in a file's report, not carried
+  snapshotArtifactId  string  @bytes(counted, under="packages/snapshots/{packageId}")   // counted in a file's report, not carried
 }
 
 concept store {
@@ -284,7 +292,17 @@ work that is still running or queued. How such work lands is the import piece's
 question (program P21).
 
 **`@bytes`** and **`@secretName`** are field annotations on a string or a list of
-strings. `@bytes` takes two optional flags, `tree` and `counted`.
+strings. `@bytes` takes two optional flags, `tree` and `counted`, and one
+required key, `under`.
+
+**`under`** is the place a row's bytes live in: path segments, where a segment
+written `{id}` stands for the row's own id and `{<field>}` for the value of one
+of the row's own string fields. A reference is the row's own when its key lies
+strictly inside that place, compared segment by segment, with ids compared in
+their bare form. A bare top-level place such as `library` cannot be named by a
+tree. The blob reader adds its own floor whatever a declaration says: it reads
+nothing outside the configured container, nothing under `exports/`, and no tree
+shallower than two segments.
 
 **A `@secret` field never travels.** The value is removed from every carried
 version, and the report names the field. A build gate keeps the engine's own
@@ -304,6 +322,7 @@ own members.
 | `stays` with a value outside the three | `belongs_to_stays_unknown` |
 | A kind that travels follows, through `via`, a kind that stays | `belongs_to_via_stays` |
 | `@bytes` or `@secretName` on a field that is not a string or a list of strings | `field_annotation_type` |
+| `@bytes` with no `under`, an empty one, or one whose `{...}` names neither `id` nor a string field of the concept | `bytes_under` |
 
 Each has its cells in the conformance corpus.
 
@@ -824,6 +843,9 @@ under piece 1's rule, which moves a row without its children.
 - **A run restarts from the beginning** when its node dies.
 - **History that retention archived or deleted** is not in the database and so
   not in a file.
+- **A deleted row travels when its deletion is a version that still names the
+  account**, which is how the DSL's kinds delete. A deletion marker that names no
+  account leaves its row in no account.
 
 **Not verified**
 
@@ -832,6 +854,26 @@ under piece 1's rule, which moves a row without its children.
 - A rolling deployment with a run in progress.
 - The settling time after release, which is another session's measurement.
 - The screens, which are described here and not drawn.
+
+## Decided without asking
+
+On 2026-11-12, after this record was written, the owner asked for the piece to be
+built end to end with no further questions. These decisions were taken on the
+owner's behalf from then on, each by the option this record's author would have
+recommended. They are listed so the owner can read and overturn any of them.
+
+| Decision | Reason |
+|---|---|
+| The download route of section G is built | The owner approved it by name while this design was settled (E17) |
+| A run waits ten minutes for rows to get their account, its rows phase may take sixty minutes, a dead run is restarted three times at most, and a prepared export that is not started within fifteen minutes is removed | Each needs a number, and these fail safe: a run that stops says why and can be started again |
+| For kinds whose account the engine records, the report's count of rows in no account is the job's own count of rows left waiting; for kinds that state their own account it is exact | An exact count for the first would walk every row of the largest kinds on every export |
+| A row awaiting a decision can be left out for good, and that is recorded on the conflict with who decided | Section I needs a second way to resolve a conflict that cannot be placed |
+| The move's history (`accountMoves`) has a call and no screen | The audit trail already shows it, and no screen was designed for it |
+| The reuse evidence on a learned procedure keeps listing account ids | Changing it reaches into procedure learning, outside this piece; it is a known limit in section O |
+| `@bytes` takes a required `under`, and a reference outside it is refused, not read | A row names its own bytes, and the export must not read whatever a row names. Each existing reader already holds its own kind to such a place |
+| An export may not carry a row larger than 64 MiB in one version, and its checker bounds every member it reads | The checker will read files from outside once import exists; the writer refuses what the checker would |
+| A deleted row is decided like any other: by its newest version, which is its deletion | The reader has one rule, and a kind that deletes by an update keeps its account on that version |
+| The spec and the plan were not reviewed by the owner before the build | The owner's instruction |
 
 ## P. Out of scope
 
