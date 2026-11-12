@@ -21,6 +21,7 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/driver/pgdriver"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/integrations/shopify"
@@ -154,8 +155,11 @@ func TestAPastWindowIsReadAsOfItsEndAndTheNextStartsThere(t *testing.T) {
 	if len(second.Rows) != 1 || caughtUp.IsZero() || !second.CaughtUp.Equal(caughtUp) {
 		t.Fatalf("the read to the clock handed on %v, caught up %v", second.Rows, caughtUp)
 	}
-	if at, _ := instantOf(second.Rows[0]["createdAt"]); !at.Equal(now.Add(-time.Hour)) || !next.Through.Equal(at) {
-		t.Errorf("the read to the clock handed on the version written at %v and stands at %v, want the rewrite an hour ago", at, next.Through)
+	if at, _ := instantOf(second.Rows[0]["createdAt"]); !at.Equal(now.Add(-time.Hour)) {
+		t.Errorf("the read to the clock handed on the version written at %v, want the rewrite an hour ago", at)
+	}
+	if want := caughtUp.Add(-watermarkOverlap); !next.Through.Equal(want) {
+		t.Errorf("caught up at %v, the walk stands at %v, want the clock it asked by less the overlap, %v", caughtUp, next.Through, want)
 	}
 }
 
@@ -212,12 +216,15 @@ func TestARowCommittedBehindTheWatermarkIsReadByTheNextRun(t *testing.T) {
 
 	floor := time.Now().UTC().Add(-time.Hour)
 	var p pages
-	w, _, err := walkSource(walkCtx(t), e, "storeStatisticsOrdersChanged", storeID, floor, walkWindow{}, time.Now, maxPagesPerRun, p.visit)
+	w, caughtUp, err := walkSource(walkCtx(t), e, "storeStatisticsOrdersChanged", storeID, floor, walkWindow{}, time.Now, maxPagesPerRun, p.visit)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !w.Through.Equal(writtenAt(t, orderConcept, storeID, first)) {
-		t.Fatalf("the first run stands at %v, want the order's write time", w.Through)
+	// The order was written a moment before the read: its page reaches the
+	// overlap, and the walk stands at that page's asking time less the
+	// overlap, behind the order (walk.go, "Where a read leaves the walk").
+	if want := caughtUp.Add(-watermarkOverlap); !w.Through.Equal(want) || !w.Through.Before(writtenAt(t, orderConcept, storeID, first)) {
+		t.Fatalf("the first run stands at %v, want its page's asking time less the overlap, %v, behind the order", w.Through, want)
 	}
 
 	late := fmt.Sprintf("gid://shopify/Order/%d-2", suffix)
@@ -395,6 +402,38 @@ func TestTheFloorIsFoundOnceAndKept(t *testing.T) {
 	}
 	if !again.Equal(floor) || e.asked() != asked {
 		t.Errorf("asked again, the floor is %v after %d more reads, want the kept %v and none", again, e.asked()-asked, floor)
+	}
+}
+
+// A STORE THAT CANNOT BE READ GETS NO FLOOR. An id with no store row, and a
+// real store asked about by a caller the read does not admit, each answer an
+// error, and nothing is kept: no history_floor, and no row made for the id. The
+// next run asks again.
+func TestAStoreThatCannotBeReadGetsNoFloor(t *testing.T) {
+	i := testIntegration(t)
+	now := time.Now().UTC()
+
+	unknown := fmt.Sprintf("dbtest-storestats-unknown-%d", now.UnixNano())
+	t.Cleanup(func() {
+		_, db := statsEngine(t)
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM store_sales_store WHERE store_id = ?`, unknown)
+	})
+	if floor, err := ensureFloor(walkCtx(t), i, unknown, now); err == nil {
+		t.Errorf("an id with no store row was given the floor %v", floor)
+	} else if !strings.Contains(err.Error(), unknown) {
+		t.Errorf("the error %q does not name the store", err)
+	}
+	if row := storeRow(t, unknown); row != nil {
+		t.Errorf("an id with no store row has a store_sales_store row %v", row)
+	}
+
+	storeID := newStore(t)
+	reader := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "dbtest-storestats-reader", Role: auth.RoleReader})
+	if floor, err := ensureFloor(reader, i, storeID, now); err == nil {
+		t.Errorf("a store read by a caller the read does not admit was given the floor %v", floor)
+	}
+	if row := storeRow(t, storeID); row != nil && row["history_floor"] != nil {
+		t.Errorf("a refused read kept the history floor %v", row["history_floor"])
 	}
 }
 

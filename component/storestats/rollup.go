@@ -113,6 +113,20 @@ const shopRead = "query storeStatisticsShop(storeId: %s)"
 // it.
 var onlyStoresForTests func(id string) bool
 
+// storeAtRead is the floor search's statement (walk.go, floorOf): a format
+// taking the quoted store id and the quoted instant. Here for the same reason.
+const storeAtRead = "query storeStatisticsStoreAt(storeId: %s, at: %s)"
+
+// changedReads are the walk's statements (walk.go, walkSource), by the name
+// of the read: each a format taking the quoted store id, the quoted since and
+// the page size. Here for the same reason.
+var changedReads = map[string]string{
+	"storeStatisticsOrdersChanged":  "paginate(query storeStatisticsOrdersChanged(storeId: %s, since: %s), %d)",
+	"storeStatisticsLinesChanged":   "paginate(query storeStatisticsLinesChanged(storeId: %s, since: %s), %d)",
+	"storeStatisticsRefundsChanged": "paginate(query storeStatisticsRefundsChanged(storeId: %s, since: %s), %d)",
+	"storeStatisticsOrderBuyers":    "paginate(query storeStatisticsOrderBuyers(storeId: %s, since: %s), %d)",
+}
+
 // maxStorePages bounds the stores read: a cursor that never ends is an error,
 // never a loop.
 const maxStorePages = 10000

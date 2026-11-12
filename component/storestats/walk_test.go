@@ -4,8 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +55,7 @@ type scriptedEngine struct {
 	fail       func(call scriptedCall, read int) error
 	sameCursor bool           // answer every page with more rows and the one cursor "stuck"
 	afterPage  func(read int) // runs after each walk read is answered
+	perPage    time.Duration  // how far the clock moves while each walk read is answered
 
 	calls []scriptedCall
 }
@@ -150,6 +156,7 @@ func (e *scriptedEngine) Execute(ctx context.Context, query string) (*memql.Exec
 		last := rows[len(rows)-1]
 		res.Meta = &memql.ResultMeta{HasMore: true, Cursor: last.at.UTC().Format(time.RFC3339Nano) + "|" + last.id}
 	}
+	e.clock = e.clock.Add(e.perPage)
 	if e.afterPage != nil {
 		e.afterPage(read)
 	}
@@ -204,7 +211,7 @@ func fixedClock(at time.Time) func() time.Time { return func() time.Time { retur
 func newScripted(t *testing.T) *scriptedEngine { return &scriptedEngine{t: t, clock: testClock} }
 
 func (e *scriptedEngine) walk(floor time.Time, w walkWindow, budget int, p *pages) (walkWindow, time.Time, error) {
-	return walkSource(context.Background(), e, testQuery, "store-a", floor, w, fixedClock(e.clock), budget, p.visit)
+	return walkSource(context.Background(), e, testQuery, "store-a", floor, w, func() time.Time { return e.clock }, budget, p.visit)
 }
 
 // A PAGE THAT OUTLASTS A READ HALVES THE WINDOW. The statement timeout on the
@@ -476,8 +483,8 @@ func TestRowsWrittenAtOneInstantAcrossAPageBoundaryAreAllRead(t *testing.T) {
 			t.Errorf("the row %s, written at the instant a page ended, was never read", id)
 		}
 	}
-	if !w.Through.Equal(instant.Add(time.Second)) {
-		t.Errorf("the walk ended at %v, want the newest row's %v", w.Through, instant.Add(time.Second))
+	if want := testClock.Add(-watermarkOverlap); !w.Through.Equal(want) {
+		t.Errorf("the walk ended at %v, want the clock it caught up at less the overlap, %v", w.Through, want)
 	}
 }
 
@@ -519,8 +526,8 @@ func TestARowRewrittenBetweenTwoPagesIsHandedOnAgain(t *testing.T) {
 	}
 }
 
-// THE WALK STANDS AT THE NEWEST ROW IT READ, NEVER PAST THE CLOCK: a row dated
-// past the clock moves it only as far as the clock.
+// THE WALK NEVER STANDS PAST THE CLOCK: a row dated past it moves the walk no
+// further than the clock the read was asked by, less the overlap.
 func TestTheWalkNeverStandsPastTheClock(t *testing.T) {
 	e := newScripted(t)
 	e.versions = []version{{id: "o1", at: testClock.Add(time.Minute)}}
@@ -528,8 +535,8 @@ func TestTheWalkNeverStandsPastTheClock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !next.Through.Equal(testClock) || !caughtUp.Equal(testClock) {
-		t.Errorf("a row dated past the clock left the walk at %v (caught up %v), want the clock %v", next.Through, caughtUp, testClock)
+	if want := testClock.Add(-watermarkOverlap); !next.Through.Equal(want) || !caughtUp.Equal(testClock) {
+		t.Errorf("a row dated past the clock left the walk at %v (caught up %v), want the clock less the overlap, %v", next.Through, caughtUp, want)
 	}
 }
 
@@ -547,9 +554,7 @@ func TestABoundedRunCarriesOnWhereItStopped(t *testing.T) {
 			at := floor.Add(time.Duration(n/4)*9*24*time.Hour + time.Duration(n%4/2)*time.Second)
 			e.versions = append(e.versions, version{id: fmt.Sprintf("o%02d", n), at: at})
 		}
-		// And the newest row an hour ago, so where a caught-up walk stands is
-		// that row whatever windows it came through: a read to the clock
-		// moves Through only to the newest row it read.
+		// And the newest row an hour ago, the last read to the clock's.
 		e.versions = append(e.versions, version{id: "o40", at: testClock.Add(-time.Hour)})
 		return e
 	}
@@ -602,13 +607,13 @@ func TestABoundedRunCarriesOnWhereItStopped(t *testing.T) {
 			t.Errorf("the bounded runs never read %v", k)
 		}
 	}
-	if !w.Through.Equal(end.Through) || !end.Through.Equal(testClock.Add(-time.Hour)) || w.Width != end.Width {
+	if !w.Through.Equal(end.Through) || !end.Through.Equal(testClock.Add(-watermarkOverlap)) || w.Width != end.Width || end.Width != defaultWindow {
 		t.Errorf("the bounded runs ended at %+v, one unbounded run at %+v", w, end)
 	}
 }
 
-// THE FLOOR IS THE FIRST INSTANT WITH NO STORE ROW, asked at the clock less 1,
-// 2, 4 ... days. A store first written 100 days ago and rewritten since has a
+// THE FLOOR IS THE FIRST INSTANT WITH NO STORE ROW, asked at the clock first
+// (the store must exist now) and then at the clock less 1, 2, 4 ... days. A store first written 100 days ago and rewritten since has a
 // row as of 1 to 64 days back and none as of 128: its floor is the clock less
 // 128 days. One written an hour ago: the clock less a day.
 func TestTheFloorIsTheFirstInstantWithNoStoreRow(t *testing.T) {
@@ -618,8 +623,8 @@ func TestTheFloorIsTheFirstInstantWithNoStoreRow(t *testing.T) {
 		floor        time.Time
 		probes       int
 	}{
-		{"a hundred days old", testClock.AddDate(0, 0, -100), testClock.Add(-128 * 24 * time.Hour), 8},
-		{"an hour old", testClock.Add(-time.Hour), testClock.Add(-24 * time.Hour), 1},
+		{"a hundred days old", testClock.AddDate(0, 0, -100), testClock.Add(-128 * 24 * time.Hour), 9},
+		{"an hour old", testClock.Add(-time.Hour), testClock.Add(-24 * time.Hour), 2},
 	} {
 		e := newScripted(t)
 		e.storeFirstWritten = c.firstWritten
@@ -634,7 +639,7 @@ func TestTheFloorIsTheFirstInstantWithNoStoreRow(t *testing.T) {
 }
 
 // A STORE OLDER THAN EVERY PROBE has the last instant asked as its floor: the
-// clock less 8192 days, after floorProbes probes.
+// clock less 8192 days, after the probe at the clock and floorProbes more.
 func TestTheFloorOfAStoreOlderThanEveryProbeIsTheLastInstantAsked(t *testing.T) {
 	e := newScripted(t)
 	e.storeFirstWritten = testClock.AddDate(-40, 0, 0)
@@ -642,8 +647,8 @@ func TestTheFloorOfAStoreOlderThanEveryProbeIsTheLastInstantAsked(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := testClock.Add(-8192 * 24 * time.Hour); !floor.Equal(want) || len(e.calls) != floorProbes {
-		t.Errorf("the floor is %v after %d probes, want %v after %d", floor, len(e.calls), want, floorProbes)
+	if want := testClock.Add(-8192 * 24 * time.Hour); !floor.Equal(want) || len(e.calls) != 1+floorProbes {
+		t.Errorf("the floor is %v after %d probes, want %v after %d", floor, len(e.calls), want, 1+floorProbes)
 	}
 }
 
@@ -666,4 +671,516 @@ func TestTheStoreConceptKeepsEveryVersion(t *testing.T) {
 			"every version of the store row being kept: with versions pruned the floor moves forward and every row written "+
 			"before it is never walked", *store.Retention)
 	}
+}
+
+// A STORE WITH NO ROW AT THE CLOCK HAS NO FLOOR. An unknown or mistyped id, a
+// principal the read does not admit and a row that is gone all answer no row,
+// the same answer a store not yet written gives; taken for "not written yet"
+// it would give a floor of a day ago, kept for good, and every older row
+// hidden. So the clock is asked first, and no row there is the source's error.
+func TestAStoreWithNoRowAtTheClockHasNoFloor(t *testing.T) {
+	e := newScripted(t)
+	floor, err := floorOf(context.Background(), e, "store-a", testClock)
+	if err == nil {
+		t.Fatalf("a store with no row at the clock was given the floor %v", floor)
+	}
+	if !strings.Contains(err.Error(), "store-a") || !strings.Contains(err.Error(), "storeStatisticsStoreAt") {
+		t.Errorf("the error %q does not name the store and the read", err)
+	}
+	if len(e.calls) != 1 || !strings.Contains(e.call(0).query, quoteInstant(testClock)) {
+		t.Errorf("the search asked %d times, first %q; want once, at the clock", len(e.calls), e.call(0).query)
+	}
+}
+
+// A QUIET STORE COSTS ALMOST NOTHING. A store that has written nothing for a
+// month, its width at the widest: the run that catches up reads the month
+// once, then stands at the clock it asked by less the overlap with the
+// default width, so the next run, a minute later, reads only the overlap, the
+// overlap again and that minute. A row that becomes visible as late as the
+// overlap after its write time is still read.
+func TestAQuietStoreReadsOnlyTheOverlapOnceCaughtUp(t *testing.T) {
+	e := newScripted(t)
+	w := walkWindow{Through: testClock.AddDate(0, 0, -30), Width: maxWindow}
+	next, caughtUp, err := e.walk(time.Time{}, w, maxPagesPerRun, &pages{})
+	if err != nil || !caughtUp.Equal(testClock) {
+		t.Fatalf("the quiet store's run answered %v, caught up %v", err, caughtUp)
+	}
+	if want := testClock.Add(-watermarkOverlap); !next.Through.Equal(want) || next.Width != defaultWindow {
+		t.Errorf("a caught-up read left the walk at %+v, want through %v at the default width %v", next, want, defaultWindow)
+	}
+
+	const period = time.Minute
+	asked := testClock
+	late := version{id: "late", at: asked.Add(-watermarkOverlap)} // written as the first run read, visible only after it
+	e.versions = append(e.versions, late)
+	for run := 1; run <= 3; run++ {
+		e.clock = e.clock.Add(period)
+		var p pages
+		n := len(e.calls)
+		next, caughtUp, err = e.walk(time.Time{}, next, maxPagesPerRun, &p)
+		if err != nil || caughtUp.IsZero() {
+			t.Fatalf("run %d answered %v, caught up %v", run, err, caughtUp)
+		}
+		if got := e.clock.Sub(e.calls[n].since); len(e.calls) != n+1 || got > 2*watermarkOverlap+period {
+			t.Errorf("run %d read %d times, the first from %v before its clock; want one read of at most twice the overlap and the period, %v",
+				run, len(e.calls)-n, got, 2*watermarkOverlap+period)
+		}
+		if run == 1 && (len(p.rows()) != 1 || p.rows()[0]["id"] != "late") {
+			t.Errorf("the row written the overlap before the caught-up read and visible after it was not read: %v", p.rows())
+		}
+	}
+}
+
+// THE WINDOW'S BOUNDARY: a window that ends exactly the overlap before the
+// clock is read to the clock; one that ends a moment earlier is a past window,
+// read as of its end.
+func TestAWindowEndingTheOverlapBeforeTheClockIsReadToTheClock(t *testing.T) {
+	edge := testClock.Add(-watermarkOverlap - defaultWindow)
+	for _, c := range []struct {
+		name    string
+		through time.Time
+		toClock bool
+	}{
+		{"ending the overlap before the clock", edge, true},
+		{"ending a moment before that", edge.Add(-time.Microsecond), false},
+	} {
+		e := newScripted(t)
+		if _, _, err := e.walk(time.Time{}, walkWindow{Through: c.through, Width: defaultWindow}, maxPagesPerRun, &pages{}); err != nil {
+			t.Fatal(err)
+		}
+		if got := e.call(0).until.IsZero(); got != c.toClock {
+			t.Errorf("%s: the first read was %q; read to the clock %v, want %v", c.name, e.call(0).query, got, c.toClock)
+		}
+	}
+}
+
+// A READ TO THE CLOCK THAT KEEPS TIMING OUT BECOMES AN ERROR. Each timed-out
+// run halves the width (or the span tried, when narrower); a read that times
+// out at the narrowest width is the source's error. From the default width
+// that is at most clockTimeoutRuns runs, whatever the runs read.
+func TestAReadToTheClockThatKeepsTimingOutIsAnError(t *testing.T) {
+	// Runs in quick succession, and runs a minute apart: in the first the
+	// halved span still reads to the clock every time.
+	for _, step := range []time.Duration{0, time.Minute} {
+		e := newScripted(t)
+		e.timeout = func(scriptedCall, int) bool { return true }
+		w := walkWindow{Through: testClock.Add(-2 * time.Minute), Width: maxWindow}
+		var err error
+		runs := 0
+		for ; runs < 2*clockTimeoutRuns && err == nil; runs++ {
+			w, _, err = e.walk(time.Time{}, w, maxPagesPerRun, &pages{})
+			e.clock = e.clock.Add(step)
+		}
+		if err == nil {
+			t.Fatalf("runs %v apart: %d runs whose every read timed out answered no error; the walk would stay silent for ever", step, runs)
+		}
+		if runs > clockTimeoutRuns {
+			t.Errorf("runs %v apart: the error came after %d runs, want at most clockTimeoutRuns (%d)", step, runs, clockTimeoutRuns)
+		}
+		if !strings.Contains(err.Error(), "store-a") || !strings.Contains(err.Error(), testQuery) {
+			t.Errorf("the error %q does not name the store and the read", err)
+		}
+	}
+}
+
+// MORE VERSIONS INSIDE ONE OVERLAP THAN A RUN MAY READ is an error of its own,
+// which says so and what the limit is, not a transient failure: every run
+// would read the same pages and stop at the same place.
+func TestMoreVersionsInOneOverlapThanARunMayReadIsAnErrorThatSaysSo(t *testing.T) {
+	through := testClock.Add(-time.Hour)
+	e := newScripted(t)
+	e.pageSize = 1
+	for n := 0; n <= maxReadsPerRun; n++ {
+		e.versions = append(e.versions, version{id: fmt.Sprintf("o%03d", n), at: through.Add(-time.Minute)})
+	}
+	next, _, err := e.walk(time.Time{}, walkWindow{Through: through, Width: defaultWindow}, maxPagesPerRun, &pages{})
+	if !errors.Is(err, errOverlapTooDense) {
+		t.Fatalf("a run that read %d pages without passing where it stood answered %v, want errOverlapTooDense", e.walkReads(), err)
+	}
+	if e.walkReads() != maxReadsPerRun || !next.Through.Equal(through) {
+		t.Errorf("the run read %d pages and stands at %v, want maxReadsPerRun and where it began", e.walkReads(), next.Through)
+	}
+	for _, said := range []string{"store-a", testQuery, fmt.Sprint(maxReadsPerRun * walkPageSize), watermarkOverlap.String()} {
+		if !strings.Contains(err.Error(), said) {
+			t.Errorf("the error %q does not say %q", err, said)
+		}
+	}
+}
+
+// THE OVERLAP HOLDS THE ENGINE'S OWN BOUNDS ON A LATE COMMIT. A version's
+// write time is taken before its INSERT is sent; on the request pool a
+// statement is cancelled at the statement timeout, and on the transactional
+// write path a session is ended after the idle-in-transaction bound. The
+// overlap rests on their sum staying well inside it. Read from the engine's
+// own code, the way the engine reads them (component/database/database.go,
+// sessionConnParams), so changing either default without the overlap fails
+// here.
+func TestTheOverlapHoldsTheEnginesOwnBoundsOnALateCommit(t *testing.T) {
+	statement := engineDefaultMs(t, "defaultStatementTimeoutMs")
+	idle := engineDefaultMs(t, "defaultIdleInTxTimeoutMs")
+	if statement <= 0 || idle <= 0 {
+		t.Fatalf("the engine's default statement timeout is %v and its idle-in-transaction bound %v; one is off, and a commit "+
+			"can then be later than any overlap: the walk's overlap (walk.go, watermarkOverlap) rests on both", statement, idle)
+	}
+	if sum := statement + idle; sum > watermarkOverlap/2 {
+		t.Errorf("the engine's default statement timeout (%v) and idle-in-transaction bound (%v) sum to %v, more than half the "+
+			"walk's overlap (%v): a version can become visible later than the walk looks back. Widen watermarkOverlap in "+
+			"walk.go to at least twice the sum, or bring the defaults in component/database/database.go back down",
+			statement, idle, sum, watermarkOverlap)
+	}
+}
+
+// engineDefaultMs is the value of one of the engine's millisecond default
+// constants in component/database/database.go.
+func engineDefaultMs(t *testing.T, name string) time.Duration {
+	t.Helper()
+	path := filepath.Join("..", "database", "database.go")
+	file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			vs := spec.(*ast.ValueSpec)
+			for n, id := range vs.Names {
+				if id.Name != name || n >= len(vs.Values) {
+					continue
+				}
+				lit, ok := vs.Values[n].(*ast.BasicLit)
+				if !ok || lit.Kind != token.INT {
+					t.Fatalf("%s in %s is no longer a plain number; read it as the engine now does", name, path)
+				}
+				ms, err := strconv.Atoi(lit.Value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return time.Duration(ms) * time.Millisecond
+			}
+		}
+	}
+	t.Fatalf("no constant %s in %s: the engine moved its default; find where it reads it now and read it from there", name, path)
+	return 0
+}
+
+// seen says whether a row of the id was handed on.
+func seen(p *pages, id string) bool {
+	for _, r := range p.rows() {
+		if r["id"] == id {
+			return true
+		}
+	}
+	return false
+}
+
+// runsRead walks e from w for up to runs further runs, the clock moving period
+// between them, and says whether any of them handed the row on.
+func runsRead(e *scriptedEngine, w walkWindow, runs int, period time.Duration, id string) bool {
+	for n := 0; n < runs; n++ {
+		e.clock = e.clock.Add(period)
+		var p pages
+		next, _, err := e.walk(time.Time{}, w, maxPagesPerRun, &p)
+		if err != nil {
+			e.t.Fatal(err)
+		}
+		if seen(&p, id) {
+			return true
+		}
+		w = next
+	}
+	return false
+}
+
+// A ROW LATE BEHIND AN EARLY PAGE OF A LONG READ IS READ BY THE NEXT RUN. A read
+// to the clock of twenty pages, 25 s apart, lasts 7m55s. A row written between
+// the fourth page's rows becomes visible after that page was asked, 4m40s
+// after its write time, inside the overlap: this read cannot see it, and the
+// walk must stand early enough that the next reads it. Standing at the last
+// page's clock less the overlap, it never is.
+func TestARowLateBehindAnEarlyPageOfALongReadIsReadByTheNextRun(t *testing.T) {
+	e := newScripted(t)
+	e.pageSize = 2
+	e.perPage = 25 * time.Second
+	start := e.clock
+	for n := 0; n < 40; n++ {
+		e.versions = append(e.versions, version{id: fmt.Sprintf("o%02d", n), at: start.Add(-3*time.Minute - 10*time.Second + time.Duration(n)*1500*time.Millisecond)})
+	}
+	late := version{id: "late", at: start.Add(-3 * time.Minute)} // between o06 and o07, on the fourth page
+	e.afterPage = func(read int) {
+		if read == 4 {
+			e.versions = append(e.versions, late)
+		}
+	}
+	var p pages
+	w, caughtUp, err := e.walk(time.Time{}, walkWindow{Through: start.Add(-30 * time.Minute)}, maxPagesPerRun, &p)
+	if err != nil || caughtUp.IsZero() || e.walkReads() != 20 {
+		t.Fatalf("the long read answered %v after %d pages, caught up %v", err, e.walkReads(), caughtUp)
+	}
+	if lateness := start.Add(4 * e.perPage).Sub(late.at); lateness >= watermarkOverlap {
+		t.Fatalf("the row is %v late, not inside the overlap", lateness)
+	}
+	if seen(&p, "late") {
+		t.Fatal("the read saw the late row; the test does not put it behind the cursor")
+	}
+	if !runsRead(e, w, 3, time.Minute, "late") {
+		t.Errorf("a row %v late, written behind the fourth page of a read that began at %v, was not read by three further runs; the walk stood at %v",
+			start.Add(4*e.perPage).Sub(late.at), start, w.Through)
+	}
+}
+
+// A ROW LATE BEHIND THE FIRST PAGE OF A BUSY STORE'S READ IS READ BY THE NEXT
+// RUN. Rows keep arriving while the read pages, 30 s apart, so the newest row
+// read is near the last page's clock; a row 90 s late, behind the first page's
+// cursor, must still be read.
+func TestARowLateBehindTheFirstPageOfABusyReadIsReadByTheNextRun(t *testing.T) {
+	e := newScripted(t)
+	e.pageSize = 2
+	e.perPage = 30 * time.Second
+	start := e.clock
+	for n, at := range []time.Duration{-60 * time.Second, -59 * time.Second, -50 * time.Second, -49 * time.Second} {
+		e.versions = append(e.versions, version{id: fmt.Sprintf("o%d", n), at: start.Add(at)})
+	}
+	late := version{id: "late", at: start.Add(-59*time.Second - 500*time.Millisecond)} // behind the first page's cursor
+	arrived := 0
+	e.afterPage = func(read int) {
+		if read == 1 {
+			e.versions = append(e.versions, late)
+		}
+		if read < 13 { // the store is busy for the first six minutes of the read
+			for k := 0; k < 2; k++ {
+				arrived++
+				e.versions = append(e.versions, version{id: fmt.Sprintf("new%02d", arrived), at: e.clock})
+			}
+		}
+	}
+	var p pages
+	w, caughtUp, err := e.walk(time.Time{}, walkWindow{Through: start.Add(-30 * time.Minute)}, maxPagesPerRun, &p)
+	if err != nil || caughtUp.IsZero() {
+		t.Fatalf("the busy read answered %v, caught up %v", err, caughtUp)
+	}
+	if lateness := start.Add(e.perPage).Sub(late.at); lateness >= watermarkOverlap || seen(&p, "late") {
+		t.Fatalf("the row is %v late, seen by the read %v; the test does not hold", lateness, seen(&p, "late"))
+	}
+	if !runsRead(e, w, 3, time.Minute, "late") {
+		t.Errorf("a row 90 s late behind the first page of a read of %d pages was not read by three further runs; the walk stood at %v, the read began at %v",
+			e.walkReads(), w.Through, start)
+	}
+}
+
+// A ROW LATE BEHIND AN EARLY PAGE OF A READ THE BUDGET STOPPED is read by a
+// later run: where a partial read leaves the walk is bounded the same way.
+func TestARowLateBehindAnEarlyPageOfAPartialReadIsReadLater(t *testing.T) {
+	e := newScripted(t)
+	e.pageSize = 2
+	e.perPage = 2 * time.Minute
+	start := e.clock
+	for n, at := range []time.Duration{-3 * time.Minute, -2 * time.Minute, time.Minute, 90 * time.Second, 105 * time.Second, 110 * time.Second} {
+		e.versions = append(e.versions, version{id: fmt.Sprintf("o%d", n), at: start.Add(at)})
+	}
+	late := version{id: "late", at: start.Add(-4 * time.Minute)} // behind the first page, visible 4m late
+	e.afterPage = func(read int) {
+		if read == 1 {
+			e.versions = append(e.versions, late)
+		}
+	}
+	var p pages
+	w, caughtUp, err := e.walk(time.Time{}, walkWindow{Through: start.Add(-30 * time.Minute)}, 2, &p)
+	if err != nil || !caughtUp.IsZero() || e.walkReads() != 2 {
+		t.Fatalf("the read on a budget of two pages answered %v after %d reads, caught up %v; want stopped behind after two", err, e.walkReads(), caughtUp)
+	}
+	if seen(&p, "late") {
+		t.Fatal("the partial read saw the late row; the test does not put it behind the cursor")
+	}
+	if !runsRead(e, w, 3, time.Minute, "late") {
+		t.Errorf("a row 4m late behind the first page of a read the budget stopped was not read by three further runs; the walk stood at %v, the read began at %v", w.Through, start)
+	}
+}
+
+// A PAST WINDOW STANDS AT ITS END, however long its read took: it ends more
+// than the overlap before the clock its first page was asked by, so the bound
+// on where a read leaves the walk changes nothing, and nothing is re-read.
+func TestAPastWindowStandsAtItsEndHoweverLongItsReadTook(t *testing.T) {
+	floor := testClock.AddDate(0, 0, -10)
+	e := newScripted(t)
+	e.pageSize = 2
+	e.perPage = 4 * time.Minute
+	for n := 0; n < 9; n++ {
+		e.versions = append(e.versions, version{id: fmt.Sprintf("o%d", n), at: floor.Add(time.Duration(n+1) * time.Hour)})
+	}
+	var p pages
+	if _, _, err := e.walk(floor, walkWindow{Width: defaultWindow}, maxPagesPerRun, &p); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.got) < 5 || len(p.got[4].Rows) != 1 {
+		t.Fatalf("the first window was handed on as %d pages", len(p.got))
+	}
+	if end := p.got[4]; !end.Through.Equal(floor.Add(defaultWindow)) || end.Width != 2*defaultWindow {
+		t.Errorf("the past window's last page, after a read of five pages over 20 minutes, stands at %v with width %v, want its end %v at %v",
+			end.Through, end.Width, floor.Add(defaultWindow), 2*defaultWindow)
+	}
+}
+
+// A STORE WHOSE EVERY READ TAKES LONGER THAN THE OVERLAP STILL GETS THERE. A
+// backlog of two days, every page taking six minutes, and rows arriving while
+// the pages are read -- one row every one, two, three or four pages, so at a
+// half, a quarter, a sixth and an eighth of the read rate (a page reads two
+// rows): each run moves where the walk stands forward, and the walk reaches
+// the clock. A bound taken at the call's first page never reaches it at half
+// the read rate: every run re-reads all the last one read.
+func TestAStoreWhoseReadsTakeLongerThanTheOverlapStillCatchesUp(t *testing.T) {
+	for _, every := range []int{1, 2, 3, 4} {
+		e := newScripted(t)
+		e.pageSize = 2
+		e.perPage = 6 * time.Minute
+		for n := 0; n < 100; n++ {
+			e.versions = append(e.versions, version{id: fmt.Sprintf("o%03d", n), at: e.clock.Add(-48*time.Hour + time.Duration(n)*28*time.Minute)})
+		}
+		pagesRead, arrived := 0, 0
+		e.afterPage = func(int) {
+			if pagesRead++; pagesRead%every == 0 {
+				arrived++
+				e.versions = append(e.versions, version{id: fmt.Sprintf("new%04d", arrived), at: e.clock})
+			}
+		}
+		w := walkWindow{Through: e.clock.Add(-49 * time.Hour)}
+		for run := 1; ; run++ {
+			if run > 30 {
+				t.Fatalf("arrival:read 1:%d: thirty runs did not catch up; the walk stands at %v, the clock is %v", 2*every, w.Through, e.clock)
+			}
+			reads := e.walkReads()
+			next, caughtUp, err := e.walk(time.Time{}, w, maxPagesPerRun, &pages{})
+			if err != nil {
+				t.Fatalf("arrival:read 1:%d, run %d: %v", 2*every, run, err)
+			}
+			if took := time.Duration(e.walkReads()-reads) * e.perPage; took <= watermarkOverlap {
+				t.Fatalf("arrival:read 1:%d, run %d read for %v, not longer than the overlap; the test does not hold", 2*every, run, took)
+			}
+			if !next.Through.After(w.Through) {
+				t.Fatalf("arrival:read 1:%d, run %d did not move the walk: it stands at %v as before", 2*every, run, next.Through)
+			}
+			w = next
+			if !caughtUp.IsZero() {
+				break
+			}
+			e.clock = e.clock.Add(time.Minute)
+		}
+	}
+}
+
+// WITHIN THE OVERLAP IS INCLUSIVE. A read to the clock of two pages a minute
+// apart, the first page's newest row exactly the overlap before that page's
+// asking time, a millisecond older, or a millisecond newer. At or newer, the
+// first page reaches the overlap and bounds the walk at its asking time less
+// the overlap; older, it is a backlog page, sets no bound, and the bound is
+// the last page's.
+func TestAPageExactlyTheOverlapBehindItsAskingTimeReachesIt(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		offset  time.Duration
+		reaches bool
+	}{
+		{"exactly the overlap behind", 0, true},
+		{"a millisecond older", -time.Millisecond, false},
+		{"a millisecond newer", time.Millisecond, true},
+	} {
+		e := newScripted(t)
+		e.pageSize = 2
+		e.perPage = time.Minute
+		first := testClock // the first page's asking time
+		edge := first.Add(-watermarkOverlap + c.offset)
+		e.versions = []version{
+			{id: "a", at: edge.Add(-time.Second)}, {id: "b", at: edge},
+			{id: "c", at: first.Add(30 * time.Second)},
+		}
+		w, caughtUp, err := e.walk(time.Time{}, walkWindow{Through: first.Add(-time.Hour)}, maxPagesPerRun, &pages{})
+		if err != nil || caughtUp.IsZero() || e.walkReads() != 2 {
+			t.Fatalf("%s: the read answered %v after %d pages, caught up %v", c.name, err, e.walkReads(), caughtUp)
+		}
+		want := first.Add(e.perPage - watermarkOverlap) // the last page's
+		if c.reaches {
+			want = first.Add(-watermarkOverlap)
+		}
+		if !w.Through.Equal(want) {
+			t.Errorf("%s: the walk stands at %v, want %v (the first page reaches the overlap: %v)", c.name, w.Through, want, c.reaches)
+		}
+	}
+}
+
+// A ROW LATE BEHIND ANY PAGE FROM THE FIRST THAT REACHES THE OVERLAP IS READ.
+// By the overlap's assumption no row can be late behind a backlog page (its
+// rows are older than the overlap at its asking time), so the premise is
+// pinned from the other side: a read of five backlog pages and then ten pages
+// of rows written moments before they are asked, a minute apart, so the read
+// lasts longer than the overlap; for each page from the first that reaches the
+// overlap to the last, a row written just behind that page's newest row
+// becomes visible as late as the overlap allows (between 70 s and 10 s inside
+// it), and the next run reads it. Standing at the newest row read would lose
+// the early ones. The backlog pages bound nothing: the walk stood at their
+// newest row as they were read.
+func TestARowLateBehindAnyPageThatReachesTheOverlapIsRead(t *testing.T) {
+	const backlog, recent = 5, 10
+	for k := backlog + 1; k <= backlog+recent; k++ {
+		e := newScripted(t)
+		e.pageSize = 2
+		e.perPage = time.Minute
+		start := e.clock
+		for n := 0; n < 2*backlog; n++ {
+			e.versions = append(e.versions, version{id: fmt.Sprintf("b%02d", n), at: start.Add(-48*time.Hour + time.Duration(n)*time.Hour)})
+		}
+		var behind time.Time
+		for j := backlog + 1; j <= backlog+recent; j++ {
+			asked := start.Add(time.Duration(j-1) * e.perPage)
+			for _, d := range []time.Duration{-2 * time.Second, -time.Second} {
+				at := asked.Add(d)
+				e.versions = append(e.versions, version{id: fmt.Sprintf("r%02d%v", j, d), at: at})
+				if j == k {
+					behind = at.Add(-time.Millisecond) // behind page k's newest row
+				}
+			}
+		}
+		late := version{id: "late", at: behind}
+		visibleBy := behind.Add(watermarkOverlap - 70*time.Second)
+		added := false
+		var visibleAt time.Time
+		e.afterPage = func(read int) {
+			if !added && read >= k && !e.clock.Before(visibleBy) {
+				e.versions, added, visibleAt = append(e.versions, late), true, e.clock
+			}
+		}
+		var p pages
+		// The widest window: one read to the clock, from the backlog on.
+		w, caughtUp, err := e.walk(time.Time{}, walkWindow{Through: start.Add(-49 * time.Hour), Width: maxWindow}, maxPagesPerRun, &p)
+		if err != nil || caughtUp.IsZero() || e.walkReads() != backlog+recent {
+			t.Fatalf("page %d: the read answered %v after %d pages, caught up %v; want one read of %d pages", k, err, e.walkReads(), caughtUp, backlog+recent)
+		}
+		for n, page := range p.got[:backlog] {
+			if want := start.Add(-48*time.Hour + time.Duration(2*n+1)*time.Hour); !page.Through.Equal(want) {
+				t.Errorf("page %d: backlog page %d stood at %v, want its newest row %v", k, n+1, page.Through, want)
+			}
+		}
+		if !added { // the read ended first: it becomes visible now
+			e.clock = maxTime(e.clock, visibleBy)
+			e.versions, added, visibleAt = append(e.versions, late), true, e.clock
+		}
+		if seen(&p, "late") {
+			t.Fatalf("page %d: the read saw the late row; the test does not put it behind the cursor", k)
+		}
+		if lateness := visibleAt.Sub(late.at); lateness >= watermarkOverlap {
+			t.Fatalf("page %d: the row is %v late, not inside the overlap", k, lateness)
+		}
+		if !runsRead(e, w, 1, 0, "late") {
+			t.Errorf("a row late behind page %d, the first that reaches the overlap being page %d, was not read by the next run; the walk stood at %v",
+				k, backlog+1, w.Through)
+		}
+	}
+}
+
+func maxTime(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
 }
