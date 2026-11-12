@@ -514,3 +514,26 @@ func refundLineFactsOf(t *testing.T, storeID string) map[string]map[string]any {
 func watermarksOf(t *testing.T, storeID string) map[string]map[string]any {
 	return salesRows(t, "store_sales_watermark", storeID, "source")
 }
+
+// ---- Task 16: the check ----
+
+// rewriteInPlace changes the keys named in every stored version of a mirror
+// row with one statement, and leaves each version's write time as it was. It
+// is a test's stand-in for a customer's erasure, which rewrites a row's
+// versions in place where no walk looks; Task 18 runs the mirror's own.
+func rewriteInPlace(t *testing.T, concept, storeID, gid string, change map[string]any) {
+	t.Helper()
+	_, db := statsEngine(t)
+	raw, err := json.Marshal(change)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := db.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload = payload || ?::jsonb WHERE concept = ? AND id = ?`,
+		string(raw), concept, concept+":"+shopify.MirrorRowID(storeID, gid))
+	if err != nil {
+		t.Fatalf("rewrite %s in place: %v", gid, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		t.Fatalf("rewrite %s in place changed no version", gid)
+	}
+}

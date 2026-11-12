@@ -42,6 +42,9 @@ var writersThroughWriteTx = []string{
 	"deriveOrders",
 	"keepWatermark",
 	"keepWalked",
+	// Task 16: the check (check.go).
+	"startCheckPass",
+	"checkPage",
 }
 
 // THE ONE WAY THIS PACKAGE WRITES, read off its source with its types. See
