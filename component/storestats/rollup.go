@@ -39,7 +39,8 @@ import (
 //
 // A run asks wholesaleFor once, after it has listed the stores and before it
 // rolls the first, for every store it is about to roll, and hands each store's
-// walk that store's own judgement (wholesaleState.judge): the walk folds every
+// walk that store's own state, a value (wholesaleState.isWholesale), the zero
+// one when wholesaleFor is nil or names none for the store: the walk folds every
 // order it reads with it. When wholesaleFor cannot answer, the run answers
 // that error and walks no store: a store walked with "nobody is wholesale"
 // would write its granted buyers' new orders retail, and nothing would read
@@ -160,7 +161,7 @@ func runRollup(ctx context.Context, i *Integration, now time.Time) (RollupReport
 	var failures []error
 	for _, store := range stores {
 		id := store["id"].(string)
-		if err := i.rollStore(ctx, db, store, now, wholesale[id].judge(), &rep); err != nil && !errors.Is(err, errRebuilt) {
+		if err := i.rollStore(ctx, db, store, now, wholesale[id], &rep); err != nil && !errors.Is(err, errRebuilt) {
 			i.logger.Warn("Store statistics for a store were not kept this run; the next run carries on",
 				"component", "storestats", "storeId", id, "error", err)
 			failures = append(failures, &storeFailure{StoreID: id, Err: err})
@@ -170,7 +171,7 @@ func runRollup(ctx context.Context, i *Integration, now time.Time) (RollupReport
 }
 
 // rollStore is one store's turn.
-func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[string]any, now time.Time, wholesale func(email string) bool, rep *RollupReport) error {
+func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[string]any, now time.Time, wholesale wholesaleState, rep *RollupReport) error {
 	id := store["id"].(string)
 	// A store whose data was removed is given no new row (store.go).
 	if !storeDataRemoved(store) {
@@ -233,17 +234,6 @@ func (i *Integration) wholesaleStates(ctx context.Context, stores []map[string]a
 // foldEmail is an address as a granted set holds it: trimmed and in lower
 // case.
 func foldEmail(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
-
-// judge is the store's wholesale judgement for this run: an address is
-// wholesale when the store is enabled and the folded address is granted. A
-// blank address is never wholesale, nor is any address of a store that is
-// not enabled or that wholesaleFor said nothing of (the zero state).
-func (s wholesaleState) judge() func(email string) bool {
-	return func(email string) bool {
-		folded := foldEmail(email)
-		return s.Enabled && folded != "" && s.Granted[folded]
-	}
-}
 
 // listStores reads every page of the stores read and answers each store once,
 // in bare-id order, with its id bare. A row whose id is blank is no store and

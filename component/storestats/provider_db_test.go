@@ -201,7 +201,7 @@ type walkRecorder struct {
 	fail        func(storeID string) error
 }
 
-func (w *walkRecorder) walk(_ context.Context, store map[string]any, generation int64, _ time.Time, _ func(string) bool, _ *RollupReport) error {
+func (w *walkRecorder) walk(_ context.Context, store map[string]any, generation int64, _ time.Time, _ wholesaleState, _ *RollupReport) error {
 	id, _ := store["id"].(string)
 	w.mu.Lock()
 	w.stores = append(w.stores, id)
@@ -396,7 +396,7 @@ func TestOnlyTheRollupsPrincipalRunsIt(t *testing.T) {
 	var touched atomic.Bool
 	refusing := NewIntegration(engine, func() *bun.DB { touched.Store(true); return nil }, quietLogger())
 	walked := false
-	refusing.walkStore = func(context.Context, map[string]any, int64, time.Time, func(string) bool, *RollupReport) error {
+	refusing.walkStore = func(context.Context, map[string]any, int64, time.Time, wholesaleState, *RollupReport) error {
 		walked = true
 		return nil
 	}
@@ -452,7 +452,7 @@ func TestTwoRunsAtOnceInOneProcessAreOne(t *testing.T) {
 	inside := make(chan struct{})
 	release := make(chan struct{})
 	var walks, held atomic.Int32
-	i.walkStore = func(_ context.Context, store map[string]any, _ int64, _ time.Time, _ func(string) bool, _ *RollupReport) error {
+	i.walkStore = func(_ context.Context, store map[string]any, _ int64, _ time.Time, _ wholesaleState, _ *RollupReport) error {
 		walks.Add(1)
 		// Only the first walk of the test's store is held, so a second run
 		// that did not stand down is seen walking rather than hanging.
@@ -544,16 +544,16 @@ func TestTheReportHoldsNothingDrawnFromARow(t *testing.T) {
 	i.wholesaleFor = func(context.Context, []string) (map[string]wholesaleState, error) {
 		return map[string]wholesaleState{storeID: {Enabled: true, Granted: map[string]bool{email: true}}}, nil
 	}
-	var read, wholesale int
-	i.walkStore = func(ctx context.Context, store map[string]any, _ int64, now time.Time, isWholesale func(string) bool, rep *RollupReport) error {
+	var read, judgedWholesale int
+	i.walkStore = func(ctx context.Context, store map[string]any, _ int64, now time.Time, wholesale wholesaleState, rep *RollupReport) error {
 		id, _ := store["id"].(string)
 		_, _, err := walkSource(ctx, i.engine, "storeStatisticsOrderBuyers", id, now.Add(-24*time.Hour), walkWindow{}, time.Now, maxPagesPerRun,
 			func(page walkPage) error {
 				for _, row := range page.Rows {
 					read++
 					rep.Rows[sourceOrder]++
-					if e, _ := row["email"].(string); isWholesale(e) {
-						wholesale++
+					if e, _ := row["email"].(string); wholesale.isWholesale(e) {
+						judgedWholesale++
 					}
 				}
 				return nil
@@ -568,8 +568,8 @@ func TestTheReportHoldsNothingDrawnFromARow(t *testing.T) {
 	if len(nodes) != 1 {
 		t.Fatalf("the run answered %d nodes, want its report", len(nodes))
 	}
-	if read != 1 || wholesale != 1 {
-		t.Fatalf("the walk read %d rows and judged %d wholesale; want the order read and its buyer judged, or nothing below measures a leak", read, wholesale)
+	if read != 1 || judgedWholesale != 1 {
+		t.Fatalf("the walk read %d rows and judged %d wholesale; want the order read and its buyer judged, or nothing below measures a leak", read, judgedWholesale)
 	}
 	raw, err := json.Marshal(nodes)
 	if err != nil {
@@ -645,9 +645,9 @@ func TestTheWholesaleStateIsAskedOncePerRun(t *testing.T) {
 		}, nil
 	}
 	judged := map[string][3]bool{}
-	i.walkStore = func(_ context.Context, store map[string]any, _ int64, _ time.Time, wholesale func(string) bool, _ *RollupReport) error {
+	i.walkStore = func(_ context.Context, store map[string]any, _ int64, _ time.Time, wholesale wholesaleState, _ *RollupReport) error {
 		id, _ := store["id"].(string)
-		judged[id] = [3]bool{wholesale(" Buyer@Example.COM "), wholesale("other@example.com"), wholesale("")}
+		judged[id] = [3]bool{wholesale.isWholesale(" Buyer@Example.COM "), wholesale.isWholesale("other@example.com"), wholesale.isWholesale("")}
 		return nil
 	}
 	if _, err := runRollup(principalCtx(t, "storeStatisticsRollupSweep"), i, time.Now()); err != nil {
@@ -687,7 +687,7 @@ func TestAWholesaleStateThatCannotBeReadRollsNoStore(t *testing.T) {
 		return nil, errors.New("the wholesale settings could not be read")
 	}
 	walked := 0
-	i.walkStore = func(context.Context, map[string]any, int64, time.Time, func(string) bool, *RollupReport) error {
+	i.walkStore = func(context.Context, map[string]any, int64, time.Time, wholesaleState, *RollupReport) error {
 		walked++
 		return nil
 	}
@@ -720,7 +720,7 @@ func TestARunThatOutlastsItsDeadlineIsCancelledAndTheNextRuns(t *testing.T) {
 	release := make(chan struct{})
 	stuck := make(chan error, 1)
 	var calls atomic.Int32
-	i.walkStore = func(ctx context.Context, _ map[string]any, _ int64, _ time.Time, _ func(string) bool, _ *RollupReport) error {
+	i.walkStore = func(ctx context.Context, _ map[string]any, _ int64, _ time.Time, _ wholesaleState, _ *RollupReport) error {
 		if calls.Add(1) == 1 {
 			<-release
 			stuck <- ctx.Err()

@@ -42,6 +42,19 @@ type wholesaleState struct {
 	Digest  string
 }
 
+// isWholesale reports whether an order whose email is this is wholesale in
+// the store: never when the store is not enabled, nor for a blank address;
+// otherwise whether the folded address is in the granted set. A method on
+// the value, not a func, so the fold may call it inside a write transaction
+// (the write gate in tx_test.go refuses a function value there).
+func (s wholesaleState) isWholesale(email string) bool {
+	if !s.Enabled {
+		return false
+	}
+	folded := foldEmail(email)
+	return folded != "" && s.Granted[folded]
+}
+
 // A RUN HAS A DEADLINE OF ITS OWN. The brief gives no budget for a whole run,
 // so it is the schedule's period, a minute, less a margin: a run that is still
 // going when the next minute fires makes that one stand down, and a run stuck
@@ -74,7 +87,7 @@ type Integration struct {
 	// nil walkStore walks nothing, and a nil wholesaleFor means no store has
 	// the wholesale pack enabled. A test sets its own.
 	storeState   func(ctx context.Context, store map[string]any, now time.Time) (outcome string, err error)
-	walkStore    func(ctx context.Context, store map[string]any, generation int64, now time.Time, wholesale func(email string) bool, report *RollupReport) error
+	walkStore    func(ctx context.Context, store map[string]any, generation int64, now time.Time, wholesale wholesaleState, report *RollupReport) error
 	wholesaleFor func(ctx context.Context, storeIDs []string) (map[string]wholesaleState, error)
 	// verdictOf reads a store's verdict; NewIntegration sets it to askVerdict,
 	// which asks the mirror's builtin (store.go). keepStore reads a nil one as
