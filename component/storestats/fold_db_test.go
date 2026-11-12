@@ -215,14 +215,21 @@ func wantVersion(t *testing.T, what string, row map[string]any, col string, v ti
 	}
 }
 
-// snapshot is every fact of the store, as text, without checked_at.
+// snapshot is every fact of the store, as text, without checked_at: the
+// check marks every fact it compares (check.go), and the check a rebuild's
+// end begins runs in an ordinary run.
 func snapshot(t *testing.T, storeID string) string {
 	t.Helper()
-	all := map[string]any{
+	all := map[string]map[string]map[string]any{
 		"order":       orderFactsOf(t, storeID),
 		"line":        lineFactsOf(t, storeID),
 		"refund":      refundFactsOf(t, storeID),
 		"refund_line": refundLineFactsOf(t, storeID),
+	}
+	for _, table := range all {
+		for _, row := range table {
+			delete(row, "checked_at")
+		}
 	}
 	raw, err := json.Marshal(all)
 	if err != nil {

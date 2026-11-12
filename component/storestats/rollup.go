@@ -150,6 +150,9 @@ const (
 	outcomeRemoved = "removed" // the walk leaves the store
 	outcomePurging = "purging" // its facts are still being deleted; the walk leaves the store for this run
 	outcomeLeft    = "left"    // nothing is done for the store this run, and nothing is reported of it
+	// The store's rebuild ended this turn: it is walked, and then its check
+	// begins in the same turn (check.go).
+	outcomeRebuildEnded = "rebuildEnded"
 )
 
 // walkContext is the context every read of the run is made under, and the
@@ -241,8 +244,10 @@ func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[strin
 			return err
 		}
 	}
+	var outcome string
 	if i.storeState != nil {
-		outcome, err := i.storeState(ctx, store, now)
+		var err error
+		outcome, err = i.storeState(ctx, store, now)
 		if err != nil {
 			return err
 		}
@@ -265,7 +270,13 @@ func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[strin
 	if !walk || i.walkStore == nil {
 		return nil
 	}
-	return i.walkStore(ctx, store, generation, now, wholesale, rep)
+	if err := i.walkStore(ctx, store, generation, now, wholesale, rep); err != nil || outcome != outcomeRebuildEnded {
+		return err
+	}
+	// A rebuild is proven by the check its end begins, here, once its walk has
+	// caught up (check.go, checkStore, which asks the turn's budget first).
+	_, err = checkStore(ctx, i, id, now, checkPagesPerRun, wholesale, nil)
+	return err
 }
 
 // budgetNow is the clock the run's and the turn's budgets read: the time, or

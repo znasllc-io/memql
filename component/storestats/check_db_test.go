@@ -10,7 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uptrace/bun"
+
 	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/integrations/shopify"
 )
 
@@ -98,27 +101,6 @@ func checkThroughAt(t *testing.T, i *Integration, id string, wholesale wholesale
 	return row
 }
 
-// factsWithoutCheck is every fact of the store, as text, less checked_at.
-func factsWithoutCheck(t *testing.T, id string) string {
-	t.Helper()
-	all := map[string]map[string]map[string]any{
-		"order":       orderFactsOf(t, id),
-		"line":        lineFactsOf(t, id),
-		"refund":      refundFactsOf(t, id),
-		"refund_line": refundLineFactsOf(t, id),
-	}
-	for _, table := range all {
-		for _, row := range table {
-			delete(row, "checked_at")
-		}
-	}
-	raw, err := json.Marshal(all)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(raw)
-}
-
 func wantCounts(t *testing.T, what string, r checkRow, mismatched, repaired int) {
 	t.Helper()
 	if _, m, rp := passCounts(r); m != mismatched || rp != repaired {
@@ -141,10 +123,10 @@ func TestAFactDeletedByHandIsRestored(t *testing.T) {
 			i, id := runStore(t)
 			mirrorThreeLines(t, id)
 			settle(t, i, id)
-			before := factsWithoutCheck(t, id)
+			before := snapshot(t, id)
 			exec(t, "DELETE FROM "+c.table+" WHERE store_id = ? AND "+c.column+" = ?", id, c.gid)
 			row := checkThrough(t, i, id, wholesaleState{})
-			if after := factsWithoutCheck(t, id); after != before {
+			if after := snapshot(t, id); after != before {
 				t.Errorf("the facts after the pass differ from before the delete:\nbefore %s\nafter  %s", before, after)
 			}
 			wantCounts(t, c.table, row, 1, 1)
@@ -158,11 +140,11 @@ func TestAFactWhoseVersionWasSetBackIsRecomputed(t *testing.T) {
 	i, id := runStore(t)
 	mirrorThreeLines(t, id)
 	settle(t, i, id)
-	before := factsWithoutCheck(t, id)
+	before := snapshot(t, id)
 	exec(t, `UPDATE store_sales_order_fact SET order_version = order_version - interval '1 hour', shipping = 0
 		WHERE store_id = ? AND order_gid = ?`, id, theOrder)
 	row := checkThrough(t, i, id, wholesaleState{})
-	if after := factsWithoutCheck(t, id); after != before {
+	if after := snapshot(t, id); after != before {
 		t.Errorf("the order set back was not recomputed:\nbefore %s\nafter  %s", before, after)
 	}
 	wantCounts(t, "the order set back", row, 1, 1)
@@ -374,7 +356,7 @@ func TestAFactWithNoMirroredRowIsDeleted(t *testing.T) {
 	i, id := runStore(t)
 	mirrorThreeLines(t, id)
 	settle(t, i, id)
-	before := factsWithoutCheck(t, id)
+	before := snapshot(t, id)
 	orderFact(t, id, "gid://shopify/Order/9001", time.Now().Add(-time.Hour), false)
 	lineFact(t, id, "gid://shopify/LineItem/9001", theOrder)
 	exec(t, `INSERT INTO store_sales_refund_fact (store_id, refund_gid, order_gid, refund_version, recorded_at, refunded_at,
@@ -383,7 +365,7 @@ func TestAFactWithNoMirroredRowIsDeleted(t *testing.T) {
 		VALUES (?, 'gid://shopify/Refund/9001', 0, ?, ?, 1, 19.99, 0)`, id, theOrder, lineTwo)
 	exec(t, `UPDATE store_sales_line_fact SET refunded_quantity = 1 WHERE store_id = ? AND line_gid = ?`, id, lineTwo)
 	row := checkThrough(t, i, id, wholesaleState{})
-	if after := factsWithoutCheck(t, id); after != before {
+	if after := snapshot(t, id); after != before {
 		t.Errorf("the facts no row answers for were not all deleted, or their order not derived again:\nbefore %s\nafter  %s", before, after)
 	}
 	wantCounts(t, "three facts no row answers for", row, 3, 3)
@@ -637,5 +619,361 @@ func TestAnUnreadableRowsRecordGoesWithItsRowAndStaysWhileItIsUnreadable(t *test
 		if kept == removed {
 			t.Errorf("row removed %v: record kept %v after a pass", removed, kept)
 		}
+	}
+}
+
+// ---- who may call what: the check, the rebuild and the check's state ----
+
+// payloadOfNode is the one node a handler answered, decoded.
+func payloadOfNode(t *testing.T, nodes []memorynodes.MemoryNode, id, concept string) map[string]any {
+	t.Helper()
+	if len(nodes) != 1 || nodes[0].ID != id || nodes[0].Concept != concept {
+		t.Fatalf("the handler answered %d nodes %+v, want one %s node %s", len(nodes), nodes, concept, id)
+	}
+	out := map[string]any{}
+	if err := json.Unmarshal(nodes[0].Payload, &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// asActor is ac signed in, at client origin.
+func asActor(ac *auth.AccessContext) context.Context {
+	return auth.ContextWithAccess(context.Background(), ac)
+}
+
+var (
+	aDeveloper = &auth.AccessContext{UserId: "dbtest-storestats-developer", Role: auth.RoleDeveloper}
+	aWriter    = &auth.AccessContext{UserId: "dbtest-storestats-writer", Role: auth.RoleWriter}
+)
+
+// checksPrincipal is the check's maintenance principal, as its automation
+// runs under it.
+func checksPrincipal() *auth.AccessContext {
+	return &auth.AccessContext{UserId: checkPrincipal, Role: auth.RoleOwner, Unranked: true, Synthetic: true}
+}
+
+// THE CHECK IS THE ENGINE'S. A cluster owner by hand, the automation's reader
+// actor, the rollup's principal, the principal's id as a reader, the
+// principal at client origin and nobody at all are each refused, before any
+// read and before the database is reached. The principal at internal origin
+// runs it and is answered with counts and the stores whose pass ended.
+func TestOnlyTheChecksPrincipalRunsIt(t *testing.T) {
+	internal := func(ac *auth.AccessContext) context.Context {
+		return auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), ac))
+	}
+	engine := &contextEngine{}
+	touched := false
+	refusing := NewIntegration(engine, func() *bun.DB { touched = true; return nil }, quietLogger())
+	for name, ctx := range map[string]context.Context{
+		"a cluster owner by hand, at internal origin": internal(&auth.AccessContext{UserId: "user-owner", Role: auth.RoleOwner}),
+		"the automation's reader actor":               internal(&auth.AccessContext{UserId: "system:automation:storeStatisticsCheckSweep", Role: auth.RoleReader}),
+		"the rollup's principal":                      internal(auth.MaintenanceActor("storeStatisticsRollupSweep")),
+		"the principal's id as a reader":              internal(&auth.AccessContext{UserId: checkPrincipal, Role: auth.RoleReader}),
+		"the principal at client origin":              asActor(checksPrincipal()),
+		"nobody at all, at internal origin":           auth.ContextWithInternalOrigin(context.Background()),
+	} {
+		nodes, err := refusing.handleCheck(ctx, nil, 0)
+		if err == nil || nodes != nil || !strings.Contains(err.Error(), "store statistics check requires the engine maintenance principal") {
+			t.Errorf("%s: got %d nodes and error %v, want the check's refusal", name, len(nodes), err)
+		}
+	}
+	if engine.asked() != 0 || touched {
+		t.Errorf("a refused call asked %d queries and reached for the database %v; want neither", engine.asked(), touched)
+	}
+
+	i, id := runStore(t)
+	mirrorThreeLines(t, id)
+	settle(t, i, id)
+	ahead := time.Now().Add(checkAhead)
+	i.now = func() time.Time { return ahead }
+	nodes, err := i.handleCheck(auth.ContextWithInternalOrigin(checkCtx(t)), nil, 0)
+	if err != nil {
+		t.Fatalf("the check's principal was refused: %v", err)
+	}
+	rep := payloadOfNode(t, nodes, "storeStatisticsCheck", checkConcept)
+	finished, _ := rep["finished"].([]any)
+	if rep["stores"] == float64(0) || len(finished) != 1 || finished[0] != id || rep["compared"] == float64(0) {
+		t.Errorf("the check's report is %v, want the store's pass ended and its rows compared", rep)
+	}
+}
+
+// ONLY A PERSON WHO IS A CLUSTER OWNER REBUILDS: a developer and a writer are
+// refused and nothing is marked; a cluster owner's rebuild raises the store's
+// generation and marks it rebuilding.
+func TestOnlyAPersonWhoIsAClusterOwnerRebuilds(t *testing.T) {
+	i := testIntegration(t)
+	id := foldStore(t)
+	before := keptRow(t, id)
+	for name, ac := range map[string]*auth.AccessContext{"a developer": aDeveloper, "a writer": aWriter} {
+		nodes, err := i.handleRebuild(asActor(ac), map[string]any{"storeId": id}, 0)
+		if err == nil || nodes != nil || err.Error() != "store statistics rebuild is for a cluster owner" {
+			t.Errorf("%s: got %d nodes and error %v, want the rebuild's refusal", name, len(nodes), err)
+		}
+	}
+	if k := keptRow(t, id); k.generation != before.generation || k.rebuildingSince.Valid || k.purging {
+		t.Errorf("a refused rebuild marked the store: generation %d (was %d), rebuilding %v, purging %v",
+			k.generation, before.generation, k.rebuildingSince.Valid, k.purging)
+	}
+	nodes, err := i.handleRebuild(ownerCtx(), map[string]any{"storeId": id}, 0)
+	if err != nil {
+		t.Fatalf("a cluster owner was refused: %v", err)
+	}
+	answer := payloadOfNode(t, nodes, "storeStatisticsRebuild", rebuildConcept)
+	k := keptRow(t, id)
+	if answer["storeId"] != id || answer["rebuildingSince"] == nil || k.generation == before.generation || !k.rebuildingSince.Valid || !k.purging {
+		t.Errorf("a cluster owner's rebuild answered %v; row generation %d (was %d), rebuilding %v, purging %v",
+			answer, k.generation, before.generation, k.rebuildingSince.Valid, k.purging)
+	}
+}
+
+// A MAINTENANCE PRINCIPAL CANNOT REBUILD, though each is a cluster owner: the
+// rollup's and the check's are refused with the rebuild's sentence, at either
+// origin, and the generation does not move.
+func TestAMaintenancePrincipalCannotRebuild(t *testing.T) {
+	i := testIntegration(t)
+	id := foldStore(t)
+	before := keptRow(t, id).generation
+	for name, ac := range map[string]*auth.AccessContext{
+		"the rollup's principal": auth.MaintenanceActor("storeStatisticsRollupSweep"),
+		"the check's principal":  checksPrincipal(),
+	} {
+		if !ac.IsClusterOwner() {
+			t.Fatalf("%s is not a cluster owner, so this proves nothing", name)
+		}
+		for _, ctx := range []context.Context{asActor(ac), auth.ContextWithInternalOrigin(asActor(ac))} {
+			nodes, err := i.handleRebuild(ctx, map[string]any{"storeId": id}, 0)
+			if err == nil || nodes != nil || err.Error() != "store statistics rebuild is for a cluster owner" {
+				t.Errorf("%s: got %d nodes and error %v, want the rebuild's refusal", name, len(nodes), err)
+			}
+		}
+	}
+	if after := keptRow(t, id).generation; after != before {
+		t.Errorf("a maintenance principal's rebuild moved the generation from %d to %d", before, after)
+	}
+}
+
+// A REBUILD TAKES EITHER FORM OF THE STORE ID: "<id>" and
+// "v1:shopify:store:<id>" mark the same row.
+func TestARebuildTakesEitherFormOfTheStoreId(t *testing.T) {
+	i := testIntegration(t)
+	id := foldStore(t)
+	generation := keptRow(t, id).generation
+	for _, form := range []string{"v1:shopify:store:" + id, id} {
+		nodes, err := i.handleRebuild(ownerCtx(), map[string]any{"storeId": form}, 0)
+		if err != nil {
+			t.Fatalf("a rebuild of %q: %v", form, err)
+		}
+		if answer := payloadOfNode(t, nodes, "storeStatisticsRebuild", rebuildConcept); answer["storeId"] != id {
+			t.Errorf("a rebuild of %q answered store %v, want %s", form, answer["storeId"], id)
+		}
+		k := keptRow(t, id)
+		if k.generation == generation {
+			t.Errorf("a rebuild of %q did not mark the store's row", form)
+		}
+		generation = k.generation
+	}
+}
+
+// A REBUILD OF A STORE WITH NO ROW IS REFUSED with a sentence, and no row is
+// made.
+func TestARebuildOfAStoreWithNoRowIsRefused(t *testing.T) {
+	i := testIntegration(t)
+	id := "dbtest-storestats-none-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	for _, form := range []string{id, "v1:shopify:store:" + id, ""} {
+		nodes, err := i.handleRebuild(ownerCtx(), map[string]any{"storeId": form}, 0)
+		if err == nil || nodes != nil || err.Error() != "Store statistics has no store with that id." {
+			t.Errorf("a rebuild of %q: got %d nodes and error %v, want the sentence that there is no such store", form, len(nodes), err)
+		}
+	}
+	if storeRow(t, id) != nil {
+		t.Error("a refused rebuild made the store a row")
+	}
+}
+
+// checkState reads the store's check state as a cluster owner.
+func checkState(t *testing.T, i *Integration, storeID string) map[string]any {
+	t.Helper()
+	nodes, err := i.handleCheckState(ownerCtx(), map[string]any{"storeId": storeID}, 0)
+	if err != nil {
+		t.Fatalf("read the check state: %v", err)
+	}
+	return payloadOfNode(t, nodes, "checkState", checkStateConcept)
+}
+
+// THE CHECK STATE SAYS WHEN THE PASS BEGAN, ENDED AND ENDED CLEAN: before any
+// pass every time is null; under way it names when; after a clean pass its
+// start, end and cleanAt, nothing mismatched; after a dirty one cleanAt is the
+// earlier pass's.
+func TestTheCheckStateSaysWhenThePassBeganEndedAndEndedClean(t *testing.T) {
+	i, id := runStore(t)
+	mirrorThreeLines(t, id)
+	if _, err := run(t, i); err != nil { // the first fill: rebuilding, no pass yet
+		t.Fatal(err)
+	}
+	s := checkState(t, i, id)
+	for _, k := range []string{"passUnderWaySince", "lastStartedAt", "lastFinishedAt", "cleanAt"} {
+		if s[k] != nil {
+			t.Errorf("before any pass: %s = %v, want null", k, s[k])
+		}
+	}
+	if s["storeId"] != id || s["compared"] != float64(0) || s["mismatched"] != float64(0) {
+		t.Errorf("before any pass: %v", s)
+	}
+	settle(t, i, id)
+
+	began := time.Now().Add(-time.Minute).UTC()
+	exec(t, `INSERT INTO store_sales_check (store_id, pass_started_at) VALUES (?, ?)
+		ON CONFLICT (store_id) DO UPDATE SET pass_started_at = EXCLUDED.pass_started_at`, id, began)
+	if s := checkState(t, i, id); s["passUnderWaySince"] != stampOf(micro(began)) {
+		t.Errorf("a pass under way: passUnderWaySince %v, want %s", s["passUnderWaySince"], stampOf(micro(began)))
+	}
+	exec(t, `UPDATE store_sales_check SET pass_started_at = NULL WHERE store_id = ?`, id)
+
+	first := time.Now().Add(checkAhead).UTC()
+	checkThroughAt(t, i, id, wholesaleState{}, first)
+	s = checkState(t, i, id)
+	if s["passUnderWaySince"] != nil || s["lastStartedAt"] != stampOf(micro(first)) || s["lastFinishedAt"] != stampOf(micro(first)) ||
+		s["cleanAt"] != stampOf(micro(first)) || s["mismatched"] != float64(0) || s["compared"] == float64(0) {
+		t.Errorf("after a clean pass at %s: %v", stampOf(first), s)
+	}
+	exec(t, `DELETE FROM store_sales_line_fact WHERE store_id = ? AND line_gid = ?`, id, lineTwo)
+	second := first.Add(time.Minute)
+	checkThroughAt(t, i, id, wholesaleState{}, second)
+	s = checkState(t, i, id)
+	if s["lastStartedAt"] != stampOf(micro(second)) || s["cleanAt"] != stampOf(micro(first)) || s["mismatched"] != float64(1) ||
+		s["repaired"] != float64(1) || s["disagreeing"] != float64(1) {
+		t.Errorf("after a dirty pass at %s: %v, want cleanAt kept at %s", stampOf(second), s, stampOf(first))
+	}
+}
+
+// ONLY A PERSON WHO IS A CLUSTER OWNER READS THE CHECK STATE: a developer and
+// a maintenance principal are refused; either form of the store id is taken;
+// a store with no row is refused.
+func TestOnlyAPersonWhoIsAClusterOwnerReadsTheCheckState(t *testing.T) {
+	i := testIntegration(t)
+	id := foldStore(t)
+	for name, ctx := range map[string]context.Context{
+		"a developer":            asActor(aDeveloper),
+		"the check's principal":  auth.ContextWithInternalOrigin(asActor(checksPrincipal())),
+		"the rollup's principal": auth.ContextWithInternalOrigin(asActor(auth.MaintenanceActor("storeStatisticsRollupSweep"))),
+	} {
+		nodes, err := i.handleCheckState(ctx, map[string]any{"storeId": id}, 0)
+		if err == nil || nodes != nil || err.Error() != "store statistics check state is for a cluster owner" {
+			t.Errorf("%s: got %d nodes and error %v, want the check state's refusal", name, len(nodes), err)
+		}
+	}
+	for _, form := range []string{id, "v1:shopify:store:" + id} {
+		if s := checkState(t, i, form); s["storeId"] != id {
+			t.Errorf("the check state of %q names store %v, want %s", form, s["storeId"], id)
+		}
+	}
+	none := "dbtest-storestats-none-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	if _, err := i.handleCheckState(ownerCtx(), map[string]any{"storeId": none}, 0); err == nil || err.Error() != "Store statistics has no store with that id." {
+		t.Errorf("the check state of a store with no row: %v, want the sentence that there is no such store", err)
+	}
+}
+
+// A REBUILD DELETES IN BATCHES AND ENDS WITH THE SAME FACTS AND A CLEAN
+// CHECK: with a batch of two, the store's facts are deleted over several
+// batches and refilled by the walk; every fact row is what it was but its
+// checked_at, and the pass the walk began when the rebuild ended is clean and
+// compared the store's rows.
+func TestARebuildDeletesInBatchesAndEndsWithTheSameFactsAndACleanCheck(t *testing.T) {
+	lower(t, &deleteBatch, 2)
+	i, id := runStore(t)
+	mirrorThreeLines(t, id)
+	ago := time.Now().Add(-10 * time.Minute)
+	backdate(t, orderConcept, id, theOrder, ago)
+	for _, l := range []string{lineOne, lineTwo, lineGift} {
+		backdate(t, "v1:shopify:orderLineItem", id, l, ago)
+	}
+	backdate(t, "v1:shopify:refund", id, theRefund, ago)
+	settle(t, i, id)
+	before := snapshot(t, id)
+
+	if _, err := i.handleRebuild(ownerCtx(), map[string]any{"storeId": id}, 0); err != nil {
+		t.Fatal(err)
+	}
+	queries := storeSalesQueries(t)
+	if _, err := run(t, i); err != nil { // the purge, in batches, and the walk that refills
+		t.Fatal(err)
+	}
+	batches := 0
+	for _, q := range queries() {
+		if strings.HasPrefix(q, "DELETE FROM store_sales_line_fact") && strings.Contains(q, "ctid IN") {
+			batches++
+		}
+	}
+	if batches < 2 {
+		t.Errorf("the rebuild deleted the store's three line facts in %d batches of two, want two or more", batches)
+	}
+	if row, found := checkRowOf(t, id); found {
+		t.Errorf("a check began before the rebuild's walk had caught up: %+v", row)
+	}
+	if _, err := run(t, i); err != nil { // the walk at the clock: the rebuild ends, and its check begins
+		t.Fatal(err)
+	}
+	if after := snapshot(t, id); after != before {
+		t.Errorf("the facts after the rebuild differ:\nbefore %s\nafter  %s", before, after)
+	}
+	row, _ := checkRowOf(t, id)
+	if row.PassStartedAt.Valid || !row.CleanAt.Valid || row.LastMismatched != 0 || row.LastCompared < 5 {
+		t.Errorf("the rebuild's check: under way %v, clean at %v, mismatched %d, compared %d; want it ended clean over the five rows",
+			row.PassStartedAt.Valid, row.CleanAt, row.LastMismatched, row.LastCompared)
+	}
+}
+
+// A REBUILD DURING A PASS DROPS THE PASS: the generation raised between a
+// check page's read and its write, nothing is written, and the store has no
+// check row until its walk has caught up again.
+func TestARebuildDuringAPassDropsThePass(t *testing.T) {
+	i, id := runStore(t)
+	mirrorThreeLines(t, id)
+	settle(t, i, id)
+	exec(t, `DELETE FROM store_sales_line_fact WHERE store_id = ? AND line_gid = ?`, id, lineOne)
+	rebuilt := false
+	i.engine = &hookEngine{inner: i.engine, after: func(q string) {
+		if !rebuilt && strings.Contains(q, "storeStatisticsOrdersChanged") {
+			rebuilt = true
+			markRebuild(t, id, time.Now())
+		}
+	}}
+	finished, err := checkStore(checkCtx(t), i, id, time.Now().Add(checkAhead), checkPagesPerRun, wholesaleState{}, nil)
+	if err != nil || finished || !rebuilt {
+		t.Fatalf("a check under a rebuild: finished %v, error %v, rebuilt %v; want it left with no error", finished, err, rebuilt)
+	}
+	if row, found := checkRowOf(t, id); found {
+		t.Errorf("the store has a check row after the rebuild: %+v", row)
+	}
+	if lineFactsOf(t, id)[lineOne] != nil {
+		t.Error("the check wrote under the rebuild")
+	}
+	if finished, err := checkStore(checkCtx(t), i, id, time.Now().Add(checkAhead), checkPagesPerRun, wholesaleState{}, nil); err != nil || finished {
+		t.Fatalf("a check of a store rebuilding: finished %v, error %v", finished, err)
+	}
+	if _, found := checkRowOf(t, id); found {
+		t.Error("a store rebuilding got a check row")
+	}
+	if _, err := run(t, i); err != nil {
+		t.Fatal(err)
+	}
+	if _, found := checkRowOf(t, id); found {
+		t.Error("a store whose rebuild's walk has not caught up got a check row")
+	}
+	if _, err := run(t, i); err != nil {
+		t.Fatal(err)
+	}
+	if _, found := checkRowOf(t, id); !found {
+		t.Error("the store has no check row once its rebuild's walk caught up")
+	}
+}
+
+// A CHECK RUN'S DEADLINE sits at or above what a run can take once its
+// budgets are spent, and below the schedule's hour. Not a database test.
+func TestTheCheckRunDeadlineIsBelowTheHour(t *testing.T) {
+	b := checkRunDeadlineBound()
+	if b <= checkRunBudget || checkRunDeadline < b || checkRunDeadline >= time.Hour {
+		t.Errorf("the check run's deadline is %s and what a run can take %s; want the deadline at or above it and under an hour", checkRunDeadline, b)
 	}
 }

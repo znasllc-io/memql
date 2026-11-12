@@ -127,6 +127,7 @@ const (
 //	  one purge batch     its transaction (txTimeout 20 s), BEGIN to COMMIT    20 s
 //	  the store's keeping unbudgetedTransactions (12) x txTimeout (20 s)
 //	                      + unbudgetedReads (16) x readBound (10 s)          400 s
+//	  a check's start     checkStartUnit: three transactions (20 s)           60 s
 //	                                                               total     780 s
 //
 // The keeping is the largest unit: a turn asks no budget before its first
@@ -134,11 +135,14 @@ const (
 // it runs, and a page or a batch is one transaction of it. The purge is
 // counted as it runs: a turn can purge twice, a batch at a time, the budget
 // asked before each, so one batch is under way at most; each transaction is
-// timed BEGIN to COMMIT by txTimeout. Thirteen minutes, and runDeadline adds
-// a minute over it.
+// timed BEGIN to COMMIT by txTimeout. The check a rebuild's end begins in the
+// same turn (rollup.go, rollStore) asks turnSpent before its start and before
+// each of its pages and batches, so it adds a unit to the list, its start,
+// and no term to the sum. Thirteen minutes, and runDeadline adds a minute
+// over it.
 func runDeadlineBound() time.Duration {
 	keeping := unbudgetedTransactions*txTimeout + unbudgetedReads*readBound
-	unit := max(readBound+txTimeout, txTimeout, keeping)
+	unit := max(readBound+txTimeout, txTimeout, keeping, checkStartUnit())
 	return maxStorePages*readBound + wholesaleReadsBound*readBound + runBudget + turnBudget + unit
 }
 
@@ -181,6 +185,8 @@ type Integration struct {
 	// next run begins with the store after it (rollup.go, "One long store
 	// does not starve the others"). In memory, under runningMu.
 	lastTaken string
+	// checkLastTaken is lastTaken for the check's runs (check.go, runCheck).
+	checkLastTaken string
 }
 
 // NewIntegration wires the handles. The db getter is resolved at call time,
@@ -213,6 +219,24 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Name:        "rollup",
 			Description: "Keep every store's statistics: list every configured store through the engine, give each its row in the store statistics tables, and walk each in turn, one store's failure leaving the next walked. Answers counts and store ids only. Admits only the storeStatisticsRollupSweep maintenance principal, at internal origin.",
 			Handler:     i.handleRollup,
+		},
+		// Task 16: the check, the rebuild and the check's state (check.go).
+		{
+			Name:        "check",
+			Description: "Carry every store's check pass on: walk each caught-up store's mirrored orders, lines and refunds again from its floor, compare each fact with what its row gives now by version and by content, write again what differs, and at the end of a pass delete the facts no row answers for. Answers counts and store ids only. Admits only the storeStatisticsCheckSweep maintenance principal, at internal origin.",
+			Handler:     i.handleCheck,
+		},
+		{
+			Name:        "rebuild",
+			Description: "Rebuild one store's statistics: raise its generation, mark it rebuilding and delete its watermarks and check row, so the walk deletes its facts in batches and refills them, and a check begins when it has caught up. Answers {storeId, rebuildingSince}. For a person who is a cluster owner.",
+			Handler:     i.handleRebuild,
+			ArgsSchema:  map[string]string{"storeId": "string - the store, bare or v1:shopify:store:<id>"},
+		},
+		{
+			Name:        "checkState",
+			Description: "One store's check: when the pass under way began, when the last pass began and ended, when one last ended clean, and the last ended pass's compared, mismatched, repaired and disagreeing counts. For a person who is a cluster owner.",
+			Handler:     i.handleCheckState,
+			ArgsSchema:  map[string]string{"storeId": "string - the store, bare or v1:shopify:store:<id>"},
 		},
 	}
 }
