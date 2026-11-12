@@ -574,17 +574,33 @@ export function useAccountExports(accountId: string, enabled: boolean): ExportsF
 
   // A REFRESH KEEPS THE PAGES ALREADY READ. The first page is read again and
   // its rows replace their older selves; a new export lands at the top; the
-  // rest stay where they are. A failed refresh leaves the list as it was: the
-  // next tick asks again.
+  // rows of later pages stay where they are. A failed refresh leaves the list
+  // as it was: the next tick asks again.
+  //
+  // A HELD ROW THE FIRST PAGE SHOULD HAVE CARRIED AND DID NOT IS GONE. The
+  // engine deletes a prepared export not started within fifteen minutes;
+  // kept, its line would read "Prepared" for as long as the tab stays open
+  // and hold the list on the three-second cadence. A held row is dropped when
+  // it is absent from the fresh page and the page covers where it would be:
+  // the page has no next cursor (it is the whole list), or the row sorts at
+  // or before the page's last row in the list's order (requestedAt, then id,
+  // both newest first). A row that sorts after it belongs to a later page and
+  // is kept. Only rows held when the read went out are judged: one put in
+  // place while it was in flight (a new export's answer) is newer than the
+  // page and kept.
   const refresh = useCallback(async () => {
     if (query === null || accountId === "" || refreshing.current || current.current.state !== "read") return;
     refreshing.current = true;
+    const judged = new Set(current.current.exports);
     try {
       const result = await query.executeNamed("accountExports", exportsCall(accountId, ""));
       const page = exportsPageFromRows(result.rows());
       setState((s) => {
         const fresh = new Set(page.exports.map((x) => x.id));
-        return { ...s, exports: [...page.exports, ...s.exports.filter((x) => !fresh.has(x.id))] };
+        const last = page.exports[page.exports.length - 1];
+        const covered = (x: ExportRow) => page.nextCursor === "" || last === undefined || !sortsAfter(x, last);
+        const kept = s.exports.filter((x) => !fresh.has(x.id) && !(judged.has(x) && covered(x)));
+        return { ...s, exports: [...page.exports, ...kept] };
       });
     } catch {
       // Kept as it was.
@@ -617,6 +633,18 @@ export function useAccountExports(accountId: string, enabled: boolean): ExportsF
     loadMore,
     progress: `${state.exports.length}\u001f${state.cursor}`,
   };
+}
+
+/**
+ * Whether `x` sorts after `y` in the exports list's order: requestedAt, then
+ * id, both newest first, as the engine pages them. Times are compared as
+ * instants, since two spellings of one moment need not compare as text.
+ */
+function sortsAfter(x: ExportRow, y: ExportRow): boolean {
+  const a = Date.parse(x.requestedAt);
+  const b = Date.parse(y.requestedAt);
+  if (Number.isFinite(a) && Number.isFinite(b) && a !== b) return a < b;
+  return x.id < y.id;
 }
 
 /** The acts on an export. Null with no connection. */

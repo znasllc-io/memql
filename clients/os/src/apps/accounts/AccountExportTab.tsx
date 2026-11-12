@@ -55,6 +55,10 @@ import { useExportCalls, type ExportsFeed } from "./useAccounts";
 //   Ready       "Exports" with the Add control, and the account's exports,
 //               newest first, loaded on scroll. Read again every three
 //               seconds while one is active and every fifteen otherwise.
+//               While one is active there is no Add: the account has at most
+//               one export in progress, so the engine would refuse another.
+//               An active or complete export's line opens the wizard where
+//               it stands; a complete one keeps Download on its line.
 //
 // Under either, one quiet line counts the rows in no account and leads to
 // the primary account's Data tab, which is where they are placed.
@@ -75,7 +79,7 @@ export function AccountExportTab({
   feed: ExportsFeed;
   /** Opens "Export this account". */
   onAdd: () => void;
-  /** Opens the wizard where an active export stands. */
+  /** Opens the wizard where an active or complete export stands. */
   onOpenExport: (x: ExportRow) => void;
   /** The primary account's Data tab. */
   onOpenUnplaced: () => void;
@@ -173,7 +177,7 @@ function ExportsList({ feed, onAdd, onOpenExport }: { feed: ExportsFeed; onAdd: 
         enabled={feed.state === "read"}
         intervalMs={active ? ACTIVE_REFRESH_MS : IDLE_REFRESH_MS}
       />
-      <Subhead actions={<AddButton label="Export this account" onClick={onAdd} />}>Exports</Subhead>
+      <Subhead actions={active ? undefined : <AddButton label="Export this account" onClick={onAdd} />}>Exports</Subhead>
       {list}
     </section>
   );
@@ -189,6 +193,8 @@ function ExportLine({ x, onOpen, onChanged }: { x: ExportRow; onOpen: () => void
   const removed = exportIsRemoved(x);
   const downloadable = x.state === "complete" && !removed;
   const active = exportIsActive(x);
+  // A complete export opens at Download, where its report's flags are read.
+  const openable = active || downloadable;
 
   async function download() {
     setBusy(true);
@@ -220,7 +226,7 @@ function ExportLine({ x, onOpen, onChanged }: { x: ExportRow; onOpen: () => void
   // NAMES, NEVER IDS: a fact the answer cannot name a person for is left out
   // rather than printed as an id.
   if (removed) facts.push(x.removedByName !== "" ? `Removed by ${x.removedByName}, ${formatMoment(x.removedAt)}` : `Removed, ${formatMoment(x.removedAt)}`);
-  else if (active && x.state !== "draft") facts.push(exportProgress(x));
+  else if (active && exportProgress(x) !== "") facts.push(exportProgress(x));
   if (!removed && exportSize(x) !== "") facts.push(exportSize(x));
   if (x.protected) facts.push("Protected");
   if (x.requestedByName !== "") facts.push(`Started by ${x.requestedByName}`);
@@ -232,8 +238,8 @@ function ExportLine({ x, onOpen, onChanged }: { x: ExportRow; onOpen: () => void
         state={exportStateWord(x)}
         tone={x.state === "failed" ? "warn" : x.state === "complete" && !removed ? "accent" : "muted"}
         dim={removed || x.state === "cancelled"}
-        onOpen={active ? onOpen : undefined}
-        label={active ? `${when}, ${exportStateWord(x)}` : undefined}
+        onOpen={openable ? onOpen : undefined}
+        label={openable ? `${when}, ${exportStateWord(x)}` : undefined}
         actions={downloadable && !asking ? (
           <>
             <Button onClick={() => void download()} busy={busy} ariaLabel={`Download the export of ${when}`}>Download</Button>

@@ -23,6 +23,7 @@ import {
   conceptFinished,
   inventoryAreas,
   inventoryIsEmpty,
+  inventoryLimitNote,
   rowsPhrase,
   type AssignmentStatus,
   type Inventory,
@@ -70,7 +71,14 @@ export function InventorySection({
     });
 
   let body;
-  if (reading.state === "failed") {
+  const limit = reading.state === "failed" ? inventoryLimitNote(reading.error) : null;
+  if (limit !== null) {
+    body = (
+      <Notice sentence={limit}>
+        <Button onClick={reading.reread}>Try again</Button>
+      </Notice>
+    );
+  } else if (reading.state === "failed") {
     body = (
       <Notice tone="error" sentence="The inventory was not read." next="Nothing below is current." detail={reading.error}>
         <Button onClick={reading.reread}>Try again</Button>

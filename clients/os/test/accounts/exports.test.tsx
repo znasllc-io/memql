@@ -175,6 +175,97 @@ describe("the Export tab", () => {
     expect(callsTo(conn, "accountExports")).toHaveLength(0);
   });
 
+  it("says why existing rows are not yet assigned when every kind has finished but a pass that was asked for has not", async () => {
+    const conn = connection({ accountExportReadiness: () => [
+      condition("recording", true),
+      condition("assigned", false, { kindsTotal: 12, kindsFinished: 12, waiting: 0, pendingPasses: 2 }),
+      condition("declared", true), condition("decided", true), condition("followed", true),
+      { kind: "unplaced", rows: 0 },
+      { kind: "ready", ready: false },
+    ] });
+    const tab = await openExport(conn);
+    const readiness = await within(tab).findByRole("region", { name: "Readiness" });
+    expect(within(readiness).getByText("12 of 12 kinds finished. 2 kinds are finishing a pass that was asked for.")).toBeTruthy();
+  });
+
+  it("says a failed read of the kinds' declarations as a failed read, not as a fact", async () => {
+    const conn = connection({ accountExportReadiness: () => [
+      condition("recording", true), condition("assigned", true),
+      condition("declared", false, { concepts: [] }),
+      condition("decided", true), condition("followed", true),
+      { kind: "unplaced", rows: 0 },
+      { kind: "ready", ready: false },
+    ] });
+    const tab = await openExport(conn);
+    const readiness = await within(tab).findByRole("region", { name: "Readiness" });
+    expect(within(readiness).queryByText("Not every kind does")).toBeNull();
+    expect(within(readiness).getByText("Could not be read")).toBeTruthy();
+  });
+
+  it("says a queued export is waiting to start, never that it is working", async () => {
+    const conn = connection({ accountExports: () => [exportRow("x7", { state: "queued", phase: "", sizeBytes: 0 }), { kind: "page", nextCursor: "" }] });
+    const tab = await openExport(conn);
+    const list = await within(tab).findByRole("list", { name: "Exports" });
+    expect(within(list).getByText("Waiting to start")).toBeTruthy();
+    expect(within(list).queryByText("Working")).toBeNull();
+  });
+
+  it("does not offer Export this account while an export of it is in progress", async () => {
+    const conn = connection({ accountExports: () => [exportRow("x2", { state: "running", phase: "rows", sizeBytes: 0 }), exportRow("x1"), { kind: "page", nextCursor: "" }] });
+    const tab = await openExport(conn);
+    await within(tab).findByRole("list", { name: "Exports" });
+    expect(within(tab).queryByRole("button", { name: "Export this account" })).toBeNull();
+  });
+
+  describe("a prepared export the cluster removed", () => {
+    useFakeDate();
+
+    it("drops a prepared export the cluster removed, at the next refresh, and stops reading every three seconds", async () => {
+      let swept = false;
+      const conn = connection({
+        accountExports: () => swept ? [{ kind: "page", nextCursor: "" }] : [exportRow("x5", { state: "draft", protected: false, sizeBytes: 0 }), { kind: "page", nextCursor: "" }],
+        accountExportStatus: () => [exportRow("x5", { state: "draft", protected: false, sizeBytes: 0 })],
+      });
+      const tab = await openExport(conn);
+      fireEvent.click(await within(tab).findByRole("button", { name: /Prepared/ }));
+      await screen.findByRole("heading", { name: "Export this account" });
+      swept = true;
+      pressInBar("Leave");
+      const back = await screen.findByRole("region", { name: "Export" });
+      await waitFor(() => expect(within(back).queryByRole("button", { name: /Prepared/ })).toBeNull());
+      expect(within(back).getByText("No exports yet.")).toBeTruthy();
+      // Nothing is active, so the list is read on the idle cadence, not every three seconds.
+      const asked = callsTo(conn, "accountExports").length;
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 3_500)));
+      expect(callsTo(conn, "accountExports")).toHaveLength(asked);
+    }, 10_000);
+
+    it("drops a removed prepared export the first page covers, and keeps the rows of later pages", async () => {
+      let swept = false;
+      const conn = connection({
+        accountExports: (call) => call.includes('after: "c2"')
+          ? [exportRow("x0", { requestedAt: "2026-11-01T09:00:00Z" }), { kind: "page", nextCursor: "" }]
+          : [
+            ...(swept ? [] : [exportRow("x5", { requestedAt: "2026-11-12T10:00:00Z", state: "draft", protected: false, sizeBytes: 0 })]),
+            exportRow("x3", { requestedAt: "2026-11-12T09:00:00Z" }),
+            { kind: "page", nextCursor: "c2" },
+          ],
+        accountExportStatus: () => [exportRow("x5", { requestedAt: "2026-11-12T10:00:00Z", state: "draft", protected: false, sizeBytes: 0 })],
+      });
+      const tab = await openExport(conn);
+      await within(tab).findByRole("list", { name: "Exports" });
+      await act(async () => intersect(document.querySelector(".os-next-page-sentinel")!));
+      await waitFor(() => expect(within(within(tab).getByRole("list", { name: "Exports" })).getAllByRole("listitem")).toHaveLength(3));
+      fireEvent.click(within(tab).getByRole("button", { name: /Prepared/ }));
+      await screen.findByRole("heading", { name: "Export this account" });
+      swept = true;
+      pressInBar("Leave");
+      const back = await screen.findByRole("region", { name: "Export" });
+      await waitFor(() => expect(within(back).queryByRole("button", { name: /Prepared/ })).toBeNull());
+      expect(within(within(back).getByRole("list", { name: "Exports" })).getAllByRole("listitem")).toHaveLength(2);
+    });
+  });
+
   it("lists the exports when ready, each with when, state, size, protection and who started it", async () => {
     const conn = connection({
       accountExports: () => [
@@ -196,7 +287,6 @@ describe("the Export tab", () => {
     expect(within(items[1]!).getByText("Started by Dana Reyes")).toBeTruthy();
     // The person's id is never printed.
     expect(within(list).queryByText(/u-dana/)).toBeNull();
-    expect(within(tab).getByRole("button", { name: "Export this account" })).toBeTruthy();
   });
 
   it("loads the next page of exports on scroll, passing the cursor back", async () => {
@@ -385,6 +475,21 @@ describe("Export this account", () => {
     expect(callsTo(conn, "accountInventory")).toHaveLength(1);
   });
 
+  it("shows the documented too-large limit on Contents as a plain note, not as an error", async () => {
+    const sentence = "This account holds too many rows to count here. An export does not depend on these counts.";
+    const conn = connection({});
+    const original = conn.query.executeNamed.getMockImplementation()!;
+    conn.query.executeNamed.mockImplementation(async (n: string, call: string) => {
+      if (n === "accountInventory") throw new Error(`account_inventory_too_large: ${sentence}`);
+      return original(n, call);
+    });
+    await openWizard(conn);
+    expect(await screen.findByText(sentence)).toBeTruthy();
+    expect(screen.queryByText("What this account holds was not read.")).toBeNull();
+    expect(screen.queryByText(/account_inventory_too_large/)).toBeNull();
+    expect(within(bar()!).getByRole("button", { name: "Continue" })).toBeTruthy();
+  });
+
   it("walks a protected export: the passphrase shown once, never stored, gone once started", async () => {
     const conn = connection({
       accountExportPrepare: () => [{ ...exportRow("x9", { state: "draft", sizeBytes: 0, fileName: "" }), passphrase: PASSPHRASE }],
@@ -462,10 +567,22 @@ describe("Export this account", () => {
 
   it("reopens a running export at its stage, and cancels it only after asking by name", async () => {
     const running = exportRow("x2", { state: "running", phase: "bytes", bytesDone: 1024, bytesTotal: 2048, sizeBytes: 0 });
+    // The engine's real answer: a running export stays running with the
+    // cancel asked; the runner writes cancelled at its next heartbeat.
+    const asked = { ...running, cancelRequested: true };
+    let cancelled = false;
+    let after = 0;
     const conn = connection({
       accountExports: () => [running, { kind: "page", nextCursor: "" }],
-      accountExportStatus: () => [running],
-      accountExportCancel: () => [exportRow("x2", { state: "cancelled", sizeBytes: 0 })],
+      accountExportStatus: () => {
+        if (!cancelled) return [running];
+        after += 1;
+        return after === 1 ? [asked] : [exportRow("x2", { state: "cancelled", sizeBytes: 0 })];
+      },
+      accountExportCancel: () => {
+        cancelled = true;
+        return [asked];
+      },
     });
     const tab = await openExport(conn);
     fireEvent.click(await within(tab).findByRole("button", { name: /Running/ }));
@@ -477,7 +594,54 @@ describe("Export this account", () => {
     expect(callsTo(conn, "accountExportCancel")).toHaveLength(0);
     pressInBar("Cancel export");
     await waitFor(() => expect(callsTo(conn, "accountExportCancel")).toEqual(['builtin accountExportCancel(exportId: "x2")']));
-    await waitFor(() => expect(within(bar()!).getByText("Cancelled")).toBeTruthy());
+    // Asked, not yet done: the bar says so, and Cancel is not offered again.
+    await waitFor(() => expect(within(bar()!).getByText("Cancelling")).toBeTruthy());
+    expect(within(bar()!).queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(within(bar()!).getByRole("button", { name: "Leave" })).toBeTruthy();
+    // The runner's next heartbeat writes cancelled; a later status says it.
+    // The Date is fake, so the clock is moved on for the status cadence.
+    await waitFor(() => {
+      vi.setSystemTime(Date.now() + 1_100);
+      expect(within(bar()!).getByText("Cancelled")).toBeTruthy();
+    }, { timeout: 6_000 });
+  }, 12_000);
+
+  it("says Cancelling in the list for a running export whose cancel was asked", async () => {
+    const conn = connection({ accountExports: () => [exportRow("x2", { state: "running", phase: "rows", sizeBytes: 0, cancelRequested: true }), { kind: "page", nextCursor: "" }] });
+    const tab = await openExport(conn);
+    const list = await within(tab).findByRole("list", { name: "Exports" });
+    expect(within(list).getByText("Cancelling")).toBeTruthy();
+    expect(within(list).queryByText("Running")).toBeNull();
+  });
+
+  it("opens a complete export at Download, reading what its report flags, with Download still on its line", async () => {
+    const conn = connection({
+      accountExports: () => [exportRow("x1"), { kind: "page", nextCursor: "" }],
+      accountExportStatus: () => [exportRow("x1", {
+        report: { bytes: { missing: 0, refused: 2, notCarriedObjects: 3, notCarriedBytes: 1024, notCarriedUnknownSize: 1 }, scrubbedFields: [] },
+      })],
+    });
+    const tab = await openExport(conn);
+    expect(within(tab).getByRole("button", { name: /^Download the export of / })).toBeTruthy();
+    fireEvent.click(within(tab).getByRole("button", { name: /Complete/ }));
+    await screen.findByRole("heading", { name: "Export this account" });
+    await waitFor(() => expect(callsTo(conn, "accountExportStatus")).toEqual(['builtin accountExportStatus(exportId: "x1")']));
+    expect(await screen.findByText("2 references to files outside where their kind keeps them were left out and not read.")).toBeTruthy();
+    expect(screen.getByText("3 older or attached files were counted, not carried (1.0 KiB).")).toBeTruthy();
+    expect(screen.getByText("1 of them has no known size.")).toBeTruthy();
+    expect(within(bar()!).getByRole("button", { name: "Download" })).toBeTruthy();
+  });
+
+  it("reads readiness again when the wizard opens, and offers nothing to prepare once the account is not ready", async () => {
+    let read = 0;
+    const conn = connection({ accountExportReadiness: () => (++read === 1 ? READY : NOT_READY) });
+    await openWizard(conn);
+    await waitFor(() => expect(callsTo(conn, "accountExportReadiness")).toHaveLength(2));
+    expect(await screen.findByText("This account is no longer ready to export.")).toBeTruthy();
+    expect(within(bar()!).queryByRole("button", { name: "Continue" })).toBeNull();
+    pressInBar("Leave");
+    expect(await screen.findByRole("region", { name: "Export" })).toBeTruthy();
+    expect(callsTo(conn, "accountExportPrepare")).toHaveLength(0);
   });
 
   it("leaves a running export running", async () => {

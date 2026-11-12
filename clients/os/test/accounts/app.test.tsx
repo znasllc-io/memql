@@ -526,6 +526,17 @@ describe("the inventory", () => {
     expect(within(inventory).queryByText(sentence)).toBeNull();
   });
 
+  it("shows the documented too-large limit as a plain note, not as an error", async () => {
+    const sentence = "This account holds too many rows to count here. An export does not depend on these counts.";
+    const conn = fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })], accountInventory: new Error(`account_inventory_too_large: ${sentence}`) });
+    const inventory = await openInventory(conn);
+    expect(await within(inventory).findByText(sentence)).toBeTruthy();
+    expect(within(inventory).queryByText("The inventory was not read.")).toBeNull();
+    expect(within(inventory).queryByRole("alert")).toBeNull();
+    // The code is for the client to decide by; it is never drawn.
+    expect(within(inventory).queryByText(/account_inventory_too_large/)).toBeNull();
+  });
+
   it("re-reads on demand and says when it read", async () => {
     const conn = fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })], accountInventory: POPULATED });
     const inventory = await openInventory(conn);

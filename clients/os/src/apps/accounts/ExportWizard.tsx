@@ -31,7 +31,7 @@ import {
   refusalOf,
   type ExportRow,
 } from "./exports";
-import { rowsPhrase, type Inventory } from "./inventory";
+import { inventoryLimitNote, rowsPhrase, type Inventory } from "./inventory";
 import { useExportCalls } from "./useAccounts";
 
 // "EXPORT THIS ACCOUNT": the kit wizard over one export (design record
@@ -48,7 +48,9 @@ import { useExportCalls } from "./useAccounts";
 //                time in the bar's meta. Leave keeps it running; Cancel asks
 //                first, by name.
 //   Download     the file's name, size and checksum, what the report flags,
-//                and Download.
+//                and Download. A complete export's line opens the wizard
+//                here, and the step reads the export's status once for the
+//                report, which the list does not carry.
 //
 // ===========================================================================
 // THE PASSPHRASE LIVES IN THIS COMPONENT'S STATE, FOR ONE STEP
@@ -61,8 +63,9 @@ import { useExportCalls } from "./useAccounts";
 // because a passphrase gone from under somebody who had not copied it is a
 // file nobody can open.
 //
-// A wizard REOPENED on an active export starts at Export: a run that is going
-// has no Contents or Protection left to answer, and its passphrase is gone.
+// A wizard REOPENED on an active export starts at Export, and on a complete
+// one at Download: a run that is going or done has no Contents or Protection
+// left to answer, and its passphrase is gone.
 
 export interface ExportWizardProps {
   accountId: string;
@@ -71,6 +74,12 @@ export interface ExportWizardProps {
   inventory: Reading<Inventory>;
   /** An export to follow from where it stands; absent to start a new one. */
   existing?: ExportRow;
+  /**
+   * The account's readiness, read again as the wizard opened, came back not
+   * ready (a move since the tab last read it, say). Nothing is prepared then:
+   * the engine would refuse it.
+   */
+  notReady?: boolean;
   breadcrumbs?: readonly Breadcrumb[];
   back: { label: string; onSelect: () => void };
   /** An export's newest answer, for the list behind the wizard. */
@@ -110,7 +119,7 @@ type Question = "" | "unprotect" | "cancelDraft" | "cancelRun";
 
 const SHOWN_ONCE = "Its passphrase was shown once, when the export was prepared, and is not shown again.";
 
-export function ExportWizard({ accountId, accountName, inventory, existing, breadcrumbs, back, onChanged, onClose }: ExportWizardProps) {
+export function ExportWizard({ accountId, accountName, inventory, existing, notReady = false, breadcrumbs, back, onChanged, onClose }: ExportWizardProps) {
   const calls = useExportCalls();
   const auth = useAuthSource();
   const [step, setStep] = useState<StepId>(() => (existing === undefined ? "contents" : existing.state === "complete" ? "download" : "export"));
@@ -166,6 +175,17 @@ export function ExportWizard({ accountId, accountName, inventory, existing, brea
     // Once per arrival at the step; the cadence below does the rest.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [following, x?.id]);
+
+  // A COMPLETE EXPORT OPENED FROM ITS LINE reads its status once: the list
+  // carries no report, and the report's flags are for whoever opens the
+  // export, not only for whoever watched it finish.
+  const reportAsked = useRef("");
+  useEffect(() => {
+    if (step !== "download" || x === null || x.report !== null || reportAsked.current === x.id) return;
+    reportAsked.current = x.id;
+    void readStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, x?.id]);
 
   async function prepare(): Promise<ExportRow | null> {
     if (calls === null) return null;
@@ -366,6 +386,9 @@ export function ExportWizard({ accountId, accountName, inventory, existing, brea
   } else if (expired) {
     status = { word: "Not started in time" };
     acts.push({ label: "Leave", text: true, onAct: close }, { label: "Prepare again", tone: "primary", onAct: prepareAgain });
+  } else if (x === null && notReady) {
+    status = { word: "Not ready" };
+    acts.push({ label: "Leave", tone: "primary", onAct: close });
   } else if (busy === "prepare") {
     status = { word: "Preparing the export", tone: "busy" };
   } else if (busy === "start") {
@@ -402,7 +425,10 @@ export function ExportWizard({ accountId, accountName, inventory, existing, brea
     } else {
       const measure = [exportProgress(x), elapsed(x.startedAt || x.requestedAt, now)].filter((s) => s !== "").join(" · ");
       status = { word: exportStateWord(x), tone: "busy", meta: measure };
-      acts.push({ label: "Cancel", text: true, onAct: () => setQuestion("cancelRun") }, { label: "Leave", tone: "primary", onAct: close });
+      // A cancel already asked is not offered again: the runner ends the run
+      // at its next heartbeat, and the status read below says when it has.
+      if (!x.cancelRequested) acts.push({ label: "Cancel", text: true, onAct: () => setQuestion("cancelRun") });
+      acts.push({ label: "Leave", tone: "primary", onAct: close });
     }
   } else if (step === "download" && x !== null) {
     status = { word: "Complete" };
@@ -425,6 +451,9 @@ export function ExportWizard({ accountId, accountName, inventory, existing, brea
   const notices = (
     <>
       {failure}
+      {x === null && notReady ? (
+        <Notice tone="warn" sentence="This account is no longer ready to export." next="The Export tab says what is missing." />
+      ) : null}
       {expired ? (
         <Notice
           tone="warn"
@@ -464,7 +493,11 @@ export function ExportWizard({ accountId, accountName, inventory, existing, brea
 
 function Contents({ inventory }: { inventory: Reading<Inventory> }) {
   let counts;
-  if (inventory.state === "failed") {
+  const limit = inventory.state === "failed" ? inventoryLimitNote(inventory.error) : null;
+  if (limit !== null) {
+    // The documented limit, not a fault: the export does not depend on it.
+    counts = <Notice sentence={limit} />;
+  } else if (inventory.state === "failed") {
     counts = <Notice tone="error" sentence="What this account holds was not read." detail={inventory.error} />;
   } else if (inventory.value === null) {
     counts = inventory.state === "unread"
@@ -496,7 +529,7 @@ function RunFacts({ x }: { x: ExportRow }) {
   return (
     <Facts>
       <Fact label="State" value={exportStateWord(x)} />
-      {exportIsActive(x) && x.state !== "draft" ? <Fact label="Progress" value={exportProgress(x)} /> : null}
+      {exportIsActive(x) && exportProgress(x) !== "" ? <Fact label="Progress" value={exportProgress(x)} /> : null}
       <Fact label="Protected" value={x.protected ? "Yes" : "No"} />
     </Facts>
   );
@@ -511,8 +544,16 @@ function DownloadFacts({ x }: { x: ExportRow }) {
         ? "1 file was missing at the source and is not in the file."
         : `${r.missingObjects.toLocaleString("en-US")} files were missing at the source and are not in the file.`);
     }
+    if (r.refused > 0) {
+      flags.push(r.refused === 1
+        ? "1 reference to a file outside where its kind keeps them was left out and not read."
+        : `${r.refused.toLocaleString("en-US")} references to files outside where their kind keeps them were left out and not read.`);
+    }
     if (r.notCarriedObjects > 0) {
       flags.push(`${r.notCarriedObjects.toLocaleString("en-US")} older or attached files were counted, not carried (${formatBytes(r.notCarriedBytes)}).`);
+      if (r.notCarriedUnknownSize > 0) {
+        flags.push(r.notCarriedUnknownSize === 1 ? "1 of them has no known size." : `${r.notCarriedUnknownSize.toLocaleString("en-US")} of them have no known size.`);
+      }
     }
     if (r.scrubbed.length > 0) flags.push(`Secret values removed: ${r.scrubbed.join(", ")}.`);
   }

@@ -33,6 +33,13 @@ export interface ExportRow {
   phase: string;
   protected: boolean;
   attempt: number;
+  /**
+   * A cancel was asked of a running export. The engine answers that cancel
+   * with the run still `running`; the runner writes `cancelled` at its next
+   * heartbeat. Until then the export reads "Cancelling" and Cancel is not
+   * offered again.
+   */
+  cancelRequested: boolean;
   startedAt: string;
   finishedAt: string;
   kindsTotal: number;
@@ -57,9 +64,13 @@ export interface ExportRow {
 export interface ExportReport {
   /** Objects a carried row named that storage no longer had. */
   missingObjects: number;
+  /** References outside the place a kind's declaration gives its bytes: recorded as refused, never read. */
+  refused: number;
   /** Bytes counted but not carried: older versions, package snapshots, attachments. */
   notCarriedObjects: number;
   notCarriedBytes: number;
+  /** Of the objects counted, not carried: those whose size storage did not give. */
+  notCarriedUnknownSize: number;
   /** Secret values removed, as `kind.field`. */
   scrubbed: string[];
 }
@@ -74,6 +85,8 @@ export interface ExportCondition {
   concepts: string[];
   rows: number;
   tasks: number;
+  /** Kinds with a full pass that was asked for and has not finished (after a move, a placement or a re-tag). */
+  pendingPasses: number;
 }
 
 export interface ExportReadiness {
@@ -132,8 +145,10 @@ export function reportFrom(value: unknown): ExportReport | null {
     : [];
   return {
     missingObjects: count(bytes["missing"]),
+    refused: count(bytes["refused"]),
     notCarriedObjects: count(bytes["notCarriedObjects"]),
     notCarriedBytes: count(bytes["notCarriedBytes"]),
+    notCarriedUnknownSize: count(bytes["notCarriedUnknownSize"]),
     scrubbed,
   };
 }
@@ -151,6 +166,7 @@ export function exportFromRow(raw: Row): ExportRow {
     phase: text(row["phase"]),
     protected: bool(row["protected"]),
     attempt: count(row["attempt"]),
+    cancelRequested: bool(row["cancelRequested"]),
     startedAt: text(row["startedAt"]),
     finishedAt: text(row["finishedAt"]),
     kindsTotal: count(row["kindsTotal"]),
@@ -225,6 +241,7 @@ export function readinessFromRows(rows: readonly Row[]): ExportReadiness {
           concepts: strings(row["concepts"]),
           rows: count(row["rows"]),
           tasks: count(row["tasks"]),
+          pendingPasses: count(row["pendingPasses"]),
         });
         break;
       case "unplaced":
@@ -265,12 +282,18 @@ export function conditionState(c: ExportCondition): string {
     case "assigned": {
       if (c.met) return "Assigned";
       const kinds = `${c.kindsFinished.toLocaleString("en-US")} of ${c.kindsTotal.toLocaleString("en-US")} kinds finished`;
-      return c.waiting > 0 ? `${kinds}, ${rowsPhrase(c.waiting)} waiting` : kinds;
+      const counted = c.waiting > 0 ? `${kinds}, ${rowsPhrase(c.waiting)} waiting` : kinds;
+      // A pass that was asked for holds the condition back even once every
+      // kind finished its first pass; without this the count reads as met.
+      if (c.pendingPasses <= 0) return counted;
+      return `${counted}. ${c.pendingPasses === 1 ? "1 kind is" : `${c.pendingPasses.toLocaleString("en-US")} kinds are`} finishing a pass that was asked for.`;
     }
     case "declared":
       if (c.met) return "Yes";
+      // Unmet with no kind named: the engine could not read the declarations,
+      // which says nothing about the kinds themselves.
       return c.concepts.length === 0
-        ? "Not every kind does"
+        ? "Could not be read"
         : `${c.concepts.length === 1 ? "1 kind does not" : `${c.concepts.length} kinds do not`}: ${c.concepts.map(kindName).join(", ")}`;
     case "decided":
       return c.met ? "None" : `${rowsPhrase(c.rows)} awaiting`;
@@ -298,7 +321,7 @@ export function exportStateWord(x: ExportRow): string {
     case "queued":
       return "Waiting to start";
     case "running":
-      return "Running";
+      return x.cancelRequested ? "Cancelling" : "Running";
     case "complete":
       return "Complete";
     case "failed":
@@ -318,9 +341,15 @@ const PHASE_WORD: Record<string, string> = {
   verifying: "Verifying",
 };
 
-/** "Writing rows: 1,204 rows, 3 of 9 kinds", or the phase alone. */
+/**
+ * "Writing rows: 1,204 rows, 3 of 9 kinds", or the phase alone; "" for a
+ * prepared export, which has no progress, and for a queued export, whose state word ("Waiting to start") already says all that
+ * is known. The engine does not say whether another export holds the
+ * installation, so nothing here claims it.
+ */
 export function exportProgress(x: ExportRow): string {
-  const phase = PHASE_WORD[x.phase] ?? "Working";
+  if (x.state === "queued" || x.state === "draft") return "";
+  const phase = PHASE_WORD[x.phase] ?? "Starting";
   switch (x.phase) {
     case "rows":
       return `${phase}: ${rowsPhrase(x.rowsWritten)}, ${x.kindsDone.toLocaleString("en-US")} of ${x.kindsTotal.toLocaleString("en-US")} kinds`;
@@ -397,8 +426,12 @@ export const LEFT_OUT: readonly { what: string; why: string }[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Calls, by name until the SDK carries them
+// Calls
 // ---------------------------------------------------------------------------
+// The SDK's generated methods build this same text and send it through
+// `executeNamed`. The hooks call `executeNamed` with it directly so every
+// account call goes through one path, the one the tests fake and whose sent
+// text they check.
 
 /** The default and the most `accountExports` answers in one page. */
 export const EXPORTS_PAGE = 20;

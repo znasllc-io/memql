@@ -8,7 +8,7 @@ import type { Stop } from "../../kit/Rail";
 import { Wizard } from "../../kit/Wizard";
 import { AccountPicker } from "./AccountPicker";
 import { rowsPhrase } from "./inventory";
-import { kindName, planMoves, refusedByKind, refusalSentence, type MovePlan, type RowRef } from "./moves";
+import { kindName, moveOutcomeUnknown, planMoves, refusedByKind, refusalSentence, type MovePlan, type RowRef } from "./moves";
 import { accountIsArchived, accountName, type AccountRow } from "./rows";
 import { useMoveCalls } from "./useAccounts";
 
@@ -87,6 +87,9 @@ export function MoveRowsWizard({
   const [step, setStep] = useState<StepId>("destination");
   const [preview, setPreview] = useState<Call>(IDLE);
   const [move, setMove] = useState<Call>(IDLE);
+  // THE ANSWER WAS LOST, NOT REFUSED: the write may have landed, so the floor
+  // says to look at the list rather than that nothing moved.
+  const [lost, setLost] = useState(false);
   const [previewAttempt, setPreviewAttempt] = useState(0);
   // A move is asked once at a time, whatever the bar draws.
   const moving = useRef(false);
@@ -124,12 +127,14 @@ export function MoveRowsWizard({
     moving.current = true;
     setStep("move");
     setMove({ state: "running", plan: null, error: "" });
+    setLost(false);
     try {
       const plan = await calls.move(rows, to);
       setMove({ state: "done", plan, error: "" });
       setStep("done");
       onMoved(plan);
     } catch (err: unknown) {
+      setLost(moveOutcomeUnknown(err));
       setMove({ state: "failed", plan: null, error: err instanceof Error ? err.message : String(err) });
     } finally {
       moving.current = false;
@@ -204,7 +209,9 @@ export function MoveRowsWizard({
   } else if (move.state === "running") {
     status = { word: "Moving rows", tone: "busy" };
   } else if (move.state === "failed") {
-    status = { word: "Not moved", detail: "Nothing was moved." };
+    status = lost
+      ? { word: "Not confirmed", detail: "The move may not have finished." }
+      : { word: "Not moved", detail: "Nothing was moved." };
     acts.push(cancel, { label: "Try again", tone: "primary", onAct: () => void runMove() });
   } else if (step === "destination" || to === "") {
     status = { word: "Choose an account" };
@@ -235,7 +242,11 @@ export function MoveRowsWizard({
 
   const notices =
     move.state === "failed" ? (
-      <Notice tone="error" sentence="The rows were not moved." next="Nothing was moved." detail={move.error} />
+      lost ? (
+        <Notice tone="error" sentence="The move may not have finished." next="Check the list before trying again." detail={move.error} />
+      ) : (
+        <Notice tone="error" sentence="The rows were not moved." next="Nothing was moved." detail={move.error} />
+      )
     ) : step === "review" && preview.state === "failed" ? (
       <Notice tone="error" sentence="What would move was not checked." detail={preview.error} />
     ) : null;

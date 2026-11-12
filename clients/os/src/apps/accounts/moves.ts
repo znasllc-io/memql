@@ -253,9 +253,23 @@ export function refusalSentence(reason: string): string {
   }
 }
 
+/**
+ * Whether a failed move may still have landed: the request went out and its
+ * answer was lost (the connection dropped or closed while it was in flight).
+ * A refusal from the engine is an answer, and a refused move moved nothing;
+ * a lost answer says nothing either way, so the screen must not claim it.
+ */
+export function moveOutcomeUnknown(err: unknown): boolean {
+  if (!(err instanceof Error) || !("reason" in err)) return false;
+  const reason = (err as { reason?: unknown }).reason;
+  return reason === "transport" || reason === "closed";
+}
+
 // ---------------------------------------------------------------------------
-// The calls, BY NAME until the SDK carries them (as `useAccounts.ts` calls the
-// inventory). Optional arguments the caller left empty are left out.
+// The calls. The SDK's generated methods build this same text and send it
+// through `executeNamed`; the hooks call `executeNamed` with it directly so
+// every account call goes through one path, the one the tests fake and whose
+// sent text they check. Optional arguments the caller left empty are left out.
 // ---------------------------------------------------------------------------
 
 /** The default and the most the engine answers in one page. */

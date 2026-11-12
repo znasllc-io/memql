@@ -239,3 +239,21 @@ export function assignmentPhase(status: AssignmentStatus): AssignmentPhase {
 export function conceptFinished(progress: AssignmentProgress): boolean {
   return progress.passFinishedAt.trim() !== "";
 }
+
+/** The engine's code for the documented limit: an account too large to count in one read. */
+export const INVENTORY_TOO_LARGE = "account_inventory_too_large";
+
+/**
+ * The engine's sentence when a failed inventory read is the documented
+ * "too large to count" limit, and null for any other failure.
+ *
+ * KEYED ON THE CODE, NEVER ON THE SENTENCE: the engine answers this limit as
+ * `account_inventory_too_large: <sentence>`, and the sentence is its to word.
+ * The limit is a fact about the account, not a fault, so it is shown as a
+ * plain note rather than an error.
+ */
+export function inventoryLimitNote(error: string): string | null {
+  const match = new RegExp(`(?:^|\\s)${INVENTORY_TOO_LARGE}\\s*:\\s*([\\s\\S]*)$`).exec(error);
+  if (match === null) return null;
+  return match[1]!.trim() || "This account holds too many rows to count here.";
+}

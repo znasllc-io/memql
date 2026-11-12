@@ -430,6 +430,19 @@ describe("the wizard", () => {
     expect(callsTo(conn, "accountRowsMove").filter((c) => c.includes("preview: false"))).toHaveLength(3);
   });
 
+  it("says a move whose answer was lost may have finished, and never that nothing was moved", async () => {
+    const lost = Object.assign(new Error("the connection closed before the answer arrived"), { reason: "transport" });
+    await startMove({
+      accountRowsMove: (call) => call.includes("preview: true") ? PREVIEW : lost,
+    });
+    chooseOption(screen.getByRole("combobox", { name: "Destination account" }), "Borden Ltd");
+    await screen.findByText("Moves");
+    pressInBar("Move");
+    expect(await screen.findByText("the connection closed before the answer arrived")).toBeTruthy();
+    expect(screen.queryByText("Nothing was moved.")).toBeNull();
+    expect(screen.getAllByText(/The move may not have finished/).length).toBeGreaterThan(0);
+  });
+
   it("keeps the refused rows chosen after a move, and lets the moved ones go", async () => {
     await startMove({
       accountRowsMove: (call) => call.includes("preview: true")

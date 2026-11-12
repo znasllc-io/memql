@@ -260,7 +260,13 @@ export function AccountPage({
           <AccountExportTab
             readiness={readiness}
             feed={exportsFeed}
-            onAdd={() => setExportWizard({})}
+            onAdd={() => {
+              // READ AGAIN AS THE WIZARD OPENS: once ready, the tab stops
+              // reading readiness, and a move since then can make the account
+              // not ready. When the answer says so, the wizard prepares nothing.
+              readiness.reread();
+              setExportWizard({});
+            }}
             onOpenExport={(x) => setExportWizard({ existing: x })}
             onOpenUnplaced={openPrimaryData}
           />
@@ -357,6 +363,7 @@ export function AccountPage({
           accountName={name}
           inventory={inventory}
           existing={exportWizard.existing}
+          notReady={readiness.value !== null && !readiness.value.ready}
           breadcrumbs={[...accountCrumbs, { label: "Export", onSelect: () => setExportWizard(null) }, { label: "Export this account" }]}
           back={{ label: "Export", onSelect: () => setExportWizard(null) }}
           onChanged={exportsFeed.upsert}
