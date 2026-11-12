@@ -130,6 +130,60 @@ const bumpProcedure = `
 // before a type was added to the allowlist. Without it the generator's error
 // is "type X is not in the 2026-07 schema", which reads like Shopify removed
 // the type rather than like the fixture is behind.
+// Every field the generator plans from the recorded schema says what its value
+// is: its Admin type, and for a nested object the mirrored rows whose GIDs it
+// keeps. The connector decides what a customer's erasure keeps from those two
+// (integrations/shopify/erasure_fields.go): a date is kept and a name is
+// scrubbed, and both are strings in the mirror. So a new branch of planField
+// that returns a field without its Admin type would have the erasure treat
+// whatever it holds as a string of no known sort. The miniature schema of
+// mapping_test.go holds one example of each rule; this holds every field the
+// mirror really has.
+func TestEveryPlannedFieldSaysWhatItsValueIs(t *testing.T) {
+	repo := repoRoot()
+	list, err := LoadAllowlist(filepath.Join(repo, "cmd", "shopifyschema", "allowlist.yaml"))
+	if err != nil {
+		t.Fatalf("allowlist: %v", err)
+	}
+	schema, err := ReadSchemaFile(filepath.Join(repo, "cmd", "shopifyschema", "testdata", "schema-"+list.APIVersion+".json"))
+	if err != nil {
+		t.Fatalf("recorded schema: %v", err)
+	}
+	plans, err := NewPlanner(schema, list).Plan()
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	fields := 0
+	for _, p := range plans {
+		for _, f := range p.Fields {
+			fields++
+			if f.AdminType == "" {
+				t.Errorf("%s.%s is planned without its Admin type", p.Concept, f.Name)
+			} else if schema.Lookup(f.AdminType) == nil {
+				t.Errorf("%s.%s says its value is a %q, which the schema does not have", p.Concept, f.Name, f.AdminType)
+			}
+			if len(f.GidsInside) > 0 && f.Kind != KindObject && f.Kind != KindObjectList {
+				t.Errorf("%s.%s is a %s and says it keeps GIDs inside; only an object or a list of objects can", p.Concept, f.Name, f.Kind)
+			}
+			for _, kept := range f.GidsInside {
+				if list.Entry(kept) == nil {
+					t.Errorf("%s.%s says it keeps the GID of a %q, which is not mirrored", p.Concept, f.Name, kept)
+				}
+			}
+			// What an object keeps the GID of is read off its selection: a
+			// kept GID is an `{ id }` there. (Not the other way round: a
+			// nested type that is not mirrored can be selected down to its
+			// own id.)
+			if len(f.GidsInside) > 0 && !strings.Contains(f.Selection, "{ id }") {
+				t.Errorf("%s.%s selects %q and says it keeps the GIDs of %v", p.Concept, f.Name, f.Selection, f.GidsInside)
+			}
+		}
+	}
+	if fields == 0 {
+		t.Fatal("no field was planned: this test examined nothing")
+	}
+}
+
 func TestRecordedFixtureCoversTheAllowlist(t *testing.T) {
 	repo := repoRoot()
 	list, err := LoadAllowlist(filepath.Join(repo, "cmd", "shopifyschema", "allowlist.yaml"))

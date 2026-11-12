@@ -172,6 +172,17 @@ type FieldSpec struct {
 	// path language ExtractField understands: "field", "field.id",
 	// "field[].id", "field.nodes[].id", "field.nodes[]".
 	Extract string
+	// AdminType is the Admin GraphQL type of the field's value, with lists
+	// and non-nulls unwrapped: a scalar's name ("DateTime", "Money"), an
+	// enum's, a nested object's, and for a GID reference or a list of them
+	// the type of the row named. DSLType cannot say this: a timestamp, an
+	// amount and a name are all "string" there.
+	AdminType string
+	// GidsInside names the mirrored Admin types a nested object keeps the GID
+	// of, sorted: an order's purchasing entity keeps a customer's. Nil for a
+	// field that is not an object or a list of objects, and for an object
+	// that keeps none.
+	GidsInside []string
 }
 
 // Field kinds.
@@ -365,7 +376,11 @@ func emitTypeSpec(p *TypePlan, doc, bulkDoc string, bulkOps []string) string {
 	}
 	b.WriteString("\t\tFields: []FieldSpec{\n")
 	for _, f := range p.Fields {
-		fmt.Fprintf(&b, "\t\t\t{Name: %q, GraphQL: %q, Kind: %q, DSLType: %q, Extract: %q},\n", f.Name, f.GraphQL, goKindConst(f.Kind), f.DSLType, f.Extract)
+		fmt.Fprintf(&b, "\t\t\t{Name: %q, GraphQL: %q, Kind: %q, DSLType: %q, Extract: %q, AdminType: %q", f.Name, f.GraphQL, goKindConst(f.Kind), f.DSLType, f.Extract, f.AdminType)
+		if len(f.GidsInside) > 0 {
+			fmt.Fprintf(&b, ", GidsInside: []string{%s}", quoteList(f.GidsInside))
+		}
+		b.WriteString("},\n")
 	}
 	b.WriteString("\t\t},\n")
 	fmt.Fprintf(&b, "\t\tFetchOp:       %q,\n", "ShopifyFetch"+title(p.Concept))
