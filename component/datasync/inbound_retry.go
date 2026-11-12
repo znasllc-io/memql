@@ -3,6 +3,7 @@ package datasync
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -61,6 +62,12 @@ type RetryResult struct {
 // window passed, writing a version, an index entry and an event every ten
 // minutes for ever; and left unwritten it would keep its place among the least
 // recently written rows and hold the page against every real retry.
+//
+// A row whose source NOBODY COULD TELL is a connector's -- a tenant list that
+// could not be read answers "not served" to the routing question -- is left as
+// it is and judged again on the next pass. The pass asks once for each such
+// source and says so once, with how many deliveries wait on it: one line a
+// row, every minute, is what an outage of a store list used to write.
 func (d *Dispatcher) RetryDue(ctx context.Context) (RetryResult, error) {
 	opCtx := OperatorContext(ctx)
 	due, err := d.store.InboundRequestsDueForRetry(opCtx, d.now().UTC())
@@ -68,13 +75,24 @@ func (d *Dispatcher) RetryDue(ctx context.Context) (RetryResult, error) {
 		return RetryResult{}, err
 	}
 	var out RetryResult
+	undecided := map[string]*undecidedSource{}
+	defer d.warnUndecided(undecided)
 	for _, staged := range due {
+		source := strings.TrimSpace(staged.Source)
+		if waiting := undecided[source]; waiting != nil {
+			waiting.deliveries++
+			continue
+		}
 		if _, served := d.connectorFor(ctx, staged.Source); !served {
-			if !d.definitelyUnclaimed(ctx, staged.Source) {
-				// Nobody could say whether the source is a connector's -- a
-				// tenant list that could not be read answers "not served"
-				// above -- so the row is left as it is and judged again on
-				// the next pass.
+			unclaimed, err := d.unclaimed(ctx, source)
+			if err != nil {
+				undecided[source] = &undecidedSource{deliveries: 1, err: err}
+				continue
+			}
+			if !unclaimed {
+				// A connector claims the source and did not route it (its
+				// secret could not be resolved just now): not this pass's to
+				// retire, and judged again on the next.
 				continue
 			}
 			if err := d.store.ParkUnservedInbound(opCtx, staged); err != nil && d.logger != nil {
@@ -108,29 +126,49 @@ func (d *Dispatcher) RetryDue(ctx context.Context) (RetryResult, error) {
 	return out, nil
 }
 
-// definitelyUnclaimed reports whether no bound connector claims source, said
-// definitely. The routing answer (connectorFor) is two-valued: a connector
-// that could not read its tenants answers "not mine" there, and retiring a
-// row on that answer would retire every tenant's row on the page for good
-// whenever the read failed. memqlsync.SourceClaimed is three-valued -- a
-// connector implementing InboundSourceClaimer returns an error when it cannot
-// tell -- and only its definite "nobody" retires a row. A connector that
-// claims a source it did not route (its secret could not be resolved just
-// now) is "could not tell" as well. One with no claimer is asked through
-// InboundSource, as before.
-func (d *Dispatcher) definitelyUnclaimed(ctx context.Context, source string) bool {
+// undecidedSource is a source nobody could tell is a connector's, in one
+// pass: how many of the pass's deliveries wait on it, and why.
+type undecidedSource struct {
+	deliveries int
+	err        error
+}
+
+// warnUndecided says, once for each source of a pass nobody could tell is a
+// connector's, how many deliveries wait on it.
+func (d *Dispatcher) warnUndecided(undecided map[string]*undecidedSource) {
+	if d.logger == nil || len(undecided) == 0 {
+		return
+	}
+	sources := make([]string, 0, len(undecided))
+	for source := range undecided {
+		sources = append(sources, source)
+	}
+	sort.Strings(sources)
+	for _, source := range sources {
+		d.logger.Warn("datasync: could not tell whether a connector serves the source of failed deliveries; they wait for the next pass",
+			"source", source, "deliveries", undecided[source].deliveries, "error", undecided[source].err)
+	}
+}
+
+// unclaimed reports whether no bound connector claims source, said
+// definitely, or an error when one could not tell. The routing answer
+// (connectorFor) is two-valued: a connector that could not read its tenants
+// answers "not mine" there, and retiring a row on that answer would retire
+// every tenant's row on the page for good whenever the read failed.
+// memqlsync.SourceClaimed is three-valued -- a connector implementing
+// InboundSourceClaimer returns an error when it cannot tell -- and only its
+// definite "nobody" retires a row. A connector that claims a source it did
+// not route (its secret could not be resolved just now) is not "nobody"
+// either. One with no claimer is asked through InboundSource, as before.
+func (d *Dispatcher) unclaimed(ctx context.Context, source string) (bool, error) {
 	if d.claimed == nil {
-		return true
+		return true, nil
 	}
-	_, claimed, err := d.claimed(ctx, strings.TrimSpace(source))
+	_, claimed, err := d.claimed(ctx, source)
 	if err != nil {
-		if d.logger != nil {
-			d.logger.Warn("datasync: could not tell whether a connector serves a failed delivery's source; it waits for the next pass",
-				"source", source, "error", err)
-		}
-		return false
+		return false, err
 	}
-	return !claimed
+	return !claimed, nil
 }
 
 // Requeue puts every given-up delivery of one source back in line -- failed,

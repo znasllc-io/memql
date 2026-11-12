@@ -181,10 +181,19 @@ func verdictDomains(store Store) []string {
 // delivery can count toward: a delivery received before it cannot count,
 // whatever domain it routes to. Zero when any such domain has never been
 // swept clean -- every delivery routed to that one counts, however old.
+//
+// A domain the grant holds no scope of is left out. It is never swept clean
+// -- the sweep does not ask the origin for it -- and it receives no delivery
+// either, since no topic is registered for it (topicScopesMissingFor). Counted
+// in, it left the walk unbounded for every store between a release that
+// widens the permission list and its re-approval.
 func givenUpBound(store Store, states []map[string]any) time.Time {
 	rows := rowsByConcept(states)
 	var bound time.Time
 	for _, concept := range insideDomains(store, rows) {
+		if len(scopesMissingFor(store, generated.Types[generated.ConceptFromID(concept)])) > 0 {
+			continue
+		}
 		clean := rowTime(rows[concept], "lastReconcileAt")
 		if clean.IsZero() {
 			return time.Time{}

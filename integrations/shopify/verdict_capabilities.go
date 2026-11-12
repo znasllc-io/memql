@@ -344,12 +344,13 @@ var givenUpPageBudget = 1000
 //
 // THE WALK STOPS at the first page whose rows were all last written before
 // `bound`, the oldest clean sweep among the domains the verdict asks about
-// (givenUpBound). A row's last write is never earlier than its receipt -- the
-// receiver writes it when the delivery arrives, and every write after that
-// is later -- so a row last written before the bound was received before it,
-// and before the clean sweep of whichever domain it routes to: it cannot
-// count. The rows come newest-written first, so every page after that one is
-// older still. A zero bound reads on to the end.
+// and the store's grant holds (givenUpBound). A row's last write is never
+// earlier than its receipt -- the receiver writes it when the delivery
+// arrives, and every write after that is later -- so a row last written
+// before the bound was received before it, and before the clean sweep of
+// whichever domain it routes to: it cannot count. The rows come newest-written
+// first, so every page after that one is older still. A zero bound reads on to
+// the end.
 func (c *Connector) givenUpDeliveries(ctx context.Context, storeID string, bound time.Time) ([]map[string]any, bool, error) {
 	var out []map[string]any
 	query := renderCall("inboundRequestsGivenUp", map[string]any{"source": storeInboundSource(storeID)})
