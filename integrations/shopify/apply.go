@@ -481,6 +481,28 @@ func fetchedObject(data map[string]any, spec *generated.TypeSpec) map[string]any
 // `id`; a few carry `admin_graphql_api_id` nested under the resource. A
 // connector that knew only the first would silently ignore every delivery of
 // the others -- which looks exactly like a store that has stopped changing.
+//
+// A FOURTH, FOR A DELIVERY THAT IS ABOUT AN ORDER RATHER THAN THE ORDER
+// ITSELF. orders/risk_assessment_changed is routed to its order, and its body
+// is a risk assessment: no `id` and no `admin_graphql_api_id` of its own, only
+// the order's, under `admin_graphql_api_order_id` and `order_id`
+// (orders/shopify_protect_eligibility_changed carries `order_id` the same way).
+// Read by the first three spellings alone it carried no object id, so every
+// such delivery failed each of its four tries and ended given up. The two keys
+// are read ONLY WHEN THE BODY CARRIES NO ID OF ITS OWN: a fulfilment and a
+// refund carry their own id beside the id of the order they belong to, and
+// are still read by their own.
+//
+// HELD TO AN ORDER, ON PURPOSE (aboutType), though other routed topics share
+// the shape. A customer's do -- marketing consent, joining or leaving a
+// segment name theirs by `customer_id` -- and reading those would start a
+// customer fetch for every such delivery, a segment's worth at a time. Whether
+// to pay that is a decision about those topics, to be made where they are
+// routed (cmd/shopifyschema's allowlist), not a side effect of reading one more
+// spelling here. Until then they answer "carried no object id", as do the
+// deliveries that name their object under a key of the body (a fulfilment
+// order's under `fulfillment_order`, a listing's under `product_listing`) or by
+// another spelling (`customerId`).
 func deliveredGID(body []byte, graphqlType string) string {
 	if len(body) == 0 {
 		return ""
@@ -500,8 +522,25 @@ func deliveredGID(body []byte, graphqlType string) string {
 		}
 		return "gid://shopify/" + graphqlType + "/" + id
 	}
+	if graphqlType != aboutType {
+		return ""
+	}
+	if gid := firstString(payload, "admin_graphql_api_order_id"); strings.HasPrefix(gid, "gid://") {
+		return gid
+	}
+	if id := firstString(payload, "order_id"); id != "" {
+		if strings.HasPrefix(id, "gid://") {
+			return id
+		}
+		return "gid://shopify/" + graphqlType + "/" + id
+	}
 	return ""
 }
+
+// aboutType is the one routed type a delivery may name by `order_id` and
+// `admin_graphql_api_order_id` when it carries no id of its own. deliveredGID
+// says why it is one type and not every type.
+const aboutType = "Order"
 
 // announcedAt is a delete topic's tombstone time: the delivery's receipt.
 // A receipt an earlier build staged at whole seconds (the receiver now stages

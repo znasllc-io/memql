@@ -257,6 +257,116 @@ func TestDeliveredGidReadsEverySpelling(t *testing.T) {
 	}
 }
 
+// riskAssessmentBody is the body of an orders/risk_assessment_changed
+// delivery, with the keys Shopify's webhook reference shows for the topic. It
+// is ABOUT an order and carries no `id` or `admin_graphql_api_id` of its own:
+// the order is named by `admin_graphql_api_order_id` and `order_id`.
+func riskAssessmentBody(orderID any, orderGID any) []byte {
+	body, _ := json.Marshal(map[string]any{
+		"provider_id":                nil,
+		"provider_title":             nil,
+		"risk_level":                 "medium",
+		"created_at":                 nil,
+		"order_id":                   orderID,
+		"admin_graphql_api_order_id": orderGID,
+	})
+	return body
+}
+
+// A DELIVERY ABOUT AN ORDER NAMES THE ORDER. Most deliveries are the object:
+// they carry its `id`. A few are about one -- a risk assessment is about an
+// order -- and carry no id of their own, only the order's, under
+// `admin_graphql_api_order_id` and `order_id`. Read as carrying nothing, every
+// such delivery failed all four of its tries and ended given up.
+func TestDeliveredGidReadsTheOrderADeliveryIsAbout(t *testing.T) {
+	marshal := func(body map[string]any) []byte {
+		b, _ := json.Marshal(body)
+		return b
+	}
+	cases := []struct {
+		name string
+		typ  string
+		body []byte
+		want string
+	}{
+		{"the order's gid", "Order", riskAssessmentBody(7, "gid://shopify/Order/7"), "gid://shopify/Order/7"},
+		{"the order's numeric id alone", "Order", riskAssessmentBody(7, nil), "gid://shopify/Order/7"},
+		{"the order's gid alone", "Order", riskAssessmentBody(nil, "gid://shopify/Order/7"), "gid://shopify/Order/7"},
+		// A gid key holding something that is not a gid is not believed; the
+		// numeric id beside it still names the order.
+		{"a gid key that holds no gid", "Order", riskAssessmentBody(7, "7"), "gid://shopify/Order/7"},
+		// orders/shopify_protect_eligibility_changed: the numeric key alone.
+		{"a protect-eligibility delivery", "Order", marshal(map[string]any{"order_id": 7, "status": "active", "eligibility": map[string]any{"status": "eligible"}}), "gid://shopify/Order/7"},
+		// The reference's own sample: both keys present and null.
+		{"both keys null", "Order", riskAssessmentBody(nil, nil), ""},
+		// THE OBJECT'S OWN ID WINS. A fulfilment and a refund carry their own
+		// id AND the id of the order they belong to; they are read by their
+		// own, exactly as before.
+		{"its own id beside an order's", "Fulfillment", marshal(map[string]any{"id": 9, "order_id": 7}), "gid://shopify/Fulfillment/9"},
+		{"an order's own id beside an order_id", "Order", marshal(map[string]any{"id": 9, "order_id": 7}), "gid://shopify/Order/9"},
+		{"its own gid beside an order's", "Refund", marshal(map[string]any{
+			"admin_graphql_api_id": "gid://shopify/Refund/9", "order_id": 7, "admin_graphql_api_order_id": "gid://shopify/Order/7",
+		}), "gid://shopify/Refund/9"},
+		// An order's id says nothing about a delivery routed to another type.
+		{"an order's id on another type's route", "Fulfillment", riskAssessmentBody(7, "gid://shopify/Order/7"), ""},
+		// HELD TO AN ORDER. A customer's consent and segment deliveries name
+		// their customer the same way and are deliberately not read: each
+		// would start a customer fetch (deliveredGID says why that is not
+		// decided here).
+		{"a customer's is not read", "Customer", marshal(map[string]any{"shop_id": 1, "customer_id": 5, "segment_id": 9}), ""},
+		{"nothing", "Order", marshal(map[string]any{"risk_level": "medium"}), ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := deliveredGID(tc.body, tc.typ); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// THE DELIVERY IS FETCHED, NOT GIVEN UP. Through Apply: a risk-assessment
+// delivery fetches the order it is about and writes it, as an orders/updated
+// delivery for that order would.
+func TestARiskAssessmentDeliveryFetchesItsOrder(t *testing.T) {
+	h := newHarness(t)
+	h.admin.reply("ShopifyFetchOrder", orderWithLines(lineItemPage(1, 1, false, "")))
+
+	req := delivery("orders/risk_assessment_changed", orderGID)
+	req.Body = riskAssessmentBody(7, orderGID)
+	writes, err := h.conn.Apply(context.Background(), req)
+	if err != nil {
+		t.Fatalf("a risk-assessment delivery failed: %v", err)
+	}
+	if len(writes) == 0 || writes[0].Concept != generated.ConceptID("order") || writes[0].Payload["gid"] != orderGID {
+		t.Fatalf("writes = %+v, want the order the delivery is about first", writes)
+	}
+	fetched := false
+	for _, r := range h.admin.seen() {
+		if r.Operation == "ShopifyFetchOrder" && r.Variables["id"] == orderGID {
+			fetched = true
+		}
+	}
+	if !fetched {
+		t.Fatalf("the order was not fetched by its gid: %v", h.admin.seenOps())
+	}
+}
+
+// A delivery that names no object still fails, in the same words: the
+// reference's sample for the topic carries both keys null.
+func TestADeliveryThatNamesNoObjectStillFails(t *testing.T) {
+	h := newHarness(t)
+	req := delivery("orders/risk_assessment_changed", orderGID)
+	req.Body = riskAssessmentBody(nil, nil)
+	_, err := h.conn.Apply(context.Background(), req)
+	if err == nil || !strings.Contains(err.Error(), "orders/risk_assessment_changed delivery carried no object id") {
+		t.Fatalf("err = %v, want the delivery refused for carrying no object id", err)
+	}
+	if n := h.admin.countOp("ShopifyFetchOrder"); n != 0 {
+		t.Fatalf("a delivery naming no order fetched one %d times", n)
+	}
+}
+
 func TestTopicHeaderMapsOntoTheEnumSpelling(t *testing.T) {
 	// The two spellings exist because subscriptions are created through
 	// GraphQL and deliveries arrive over HTTP. A connector that compared the
