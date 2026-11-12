@@ -67,26 +67,48 @@ var decisionOfEvent = map[string]string{
 	StaffEventRevoked:  TransitionRevoke,
 }
 
-// staffDefaults is each event's own subject and body.
+// staffDefaults is each event's own subject and the first paragraph of its
+// body; staffDefault adds the rest.
+//
+// EACH SAYS ONLY WHAT HOLDS IN EVERY CASE ITS EVENT COVERS. readyToReview does
+// not say the company applied: the store's staff may have added it. An access
+// event does not say the buyer is approved: a removal may have been decided
+// after the grant that did not land. The access record says why it did not
+// land, on the application in MemQL OS.
 var staffDefaults = map[string][2]string{
 	StaffEventReadyToReview: {"A wholesale application is ready to review: {{companyName}}",
-		"{{companyName}} ({{applicantName}}) applied for trade terms, and the application is ready to review.\n\n" +
-			"Open the store's wholesale applications: {{adminUrl}}"},
+		"The wholesale application of {{companyName}} ({{applicantName}}) is ready to review."},
 	StaffEventApproved: {"Approved: {{companyName}}",
-		"{{decidedBy}} approved the wholesale application of {{companyName}} ({{applicantName}}).\n\n{{note}}\n\n" +
-			"Open the store's wholesale applications: {{adminUrl}}"},
+		"{{decidedBy}} approved the wholesale application of {{companyName}} ({{applicantName}})."},
 	StaffEventRejected: {"Rejected: {{companyName}}",
-		"{{decidedBy}} rejected the wholesale application of {{companyName}} ({{applicantName}}).\n\n{{note}}\n\n" +
-			"Open the store's wholesale applications: {{adminUrl}}"},
+		"{{decidedBy}} rejected the wholesale application of {{companyName}} ({{applicantName}})."},
 	StaffEventRevoked: {"Removed: {{companyName}}",
-		"{{decidedBy}} removed {{companyName}} ({{applicantName}}) as a wholesale buyer.\n\n{{note}}\n\n" +
-			"Open the store's wholesale applications: {{adminUrl}}"},
+		"{{decidedBy}} removed {{companyName}} ({{applicantName}}) as a wholesale buyer."},
 	StaffEventAccessNotGranted: {"Trade prices did not turn on: {{companyName}}",
-		"{{companyName}} ({{applicantName}}) is approved, but their trade prices did not turn on.\n\n" +
-			"Open the application to see why and to retry access: {{adminUrl}}"},
+		"The trade prices of {{companyName}} ({{applicantName}}) did not turn on."},
 	StaffEventAccessNotRemoved: {"Trade prices are still on: {{companyName}}",
-		"{{companyName}} ({{applicantName}}) was removed, but their trade prices did not turn off.\n\n" +
-			"Open the application to see why and to retry access: {{adminUrl}}"},
+		"{{companyName}} ({{applicantName}}) was removed, but their trade prices did not turn off."},
+}
+
+// staffDefault is an event's default subject and body for values: the
+// decision's note as its own paragraph when there is one, and a last line that
+// sends the reader to MemQL OS only when its address is known. The OS has no
+// address for one application, so the line names the OS itself (adminBase).
+func staffDefault(event string, values map[string]string) (string, string) {
+	d := staffDefaults[event]
+	body := d[1]
+	if _, decision := decisionOfEvent[event]; decision && strings.TrimSpace(values["note"]) != "" {
+		body += "\n\n{{note}}"
+	}
+	if values["adminUrl"] != "" {
+		switch event {
+		case StaffEventAccessNotGranted, StaffEventAccessNotRemoved:
+			body += "\n\nOpen MemQL OS to see why: {{adminUrl}}"
+		default:
+			body += "\n\nOpen MemQL OS: {{adminUrl}}"
+		}
+	}
+	return d[0], body
 }
 
 // StaffRequestID is one staff notice's outbox request id:
@@ -226,13 +248,13 @@ func (p *Provider) notifyStaff(ctx context.Context, args map[string]any, _ int) 
 		}
 		requestID = AccessStaffRequestID(event, id, attempt)
 	}
-	defaults := staffDefaults[event]
+	defaultSubject, defaultBody := staffDefault(event, values)
 	subject, body := asString(args["subject"]), asString(args["body"])
 	if strings.TrimSpace(subject) == "" {
-		subject = defaults[0]
+		subject = defaultSubject
 	}
 	if strings.TrimSpace(body) == "" {
-		body = defaults[1]
+		body = defaultBody
 	}
 	// ONE NOTICE PER REQUEST ID: one already staged is answered, and nothing is
 	// staged again. The check is a FRESH read, and the stage is FENCED ON NO ROW

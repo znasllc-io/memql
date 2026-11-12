@@ -1293,6 +1293,46 @@ func TestAValueFilledIntoASubjectIsOneLine(t *testing.T) {
 	}
 }
 
+// EVERY DEFAULT TEXT IS TRUE IN EVERY CASE IT COVERS: an application the
+// store's staff added is not said to have applied; a grant that did not land
+// does not say the buyer is approved (a removal may have been decided since);
+// a decision with no note leaves no empty paragraph; and a sentence that tells
+// a person to open MemQL OS appears only when its address is known.
+func TestTheDefaultNoticesSayOnlyWhatIsTrue(t *testing.T) {
+	w := newEmailWorld()
+	w.settings["termsRequired"] = false
+	w.apps[0]["addedBy"] = emailStaff
+	p := w.provider()
+	w.notify(t, p, map[string]any{"event": StaffEventReadyToReview})
+	body := asString(w.staged[StaffRequestID(StaffEventReadyToReview, linkApp, "")]["body"])
+	if strings.Contains(body, "applied") || !strings.Contains(body, "is ready to review") ||
+		!strings.HasSuffix(body, "Open MemQL OS: https://os.example.test/") {
+		t.Fatalf("the readyToReview notice of an application the staff added reads %q", body)
+	}
+
+	// NO ADDRESS FOR MEMQL OS: no sentence sends anybody there.
+	w2 := newEmailWorld()
+	p2 := w2.provider()
+	p2.osBase = func() string { return "" }
+	w2.approveAndGrant(EntitlementPending)
+	w2.decide(TransitionRevoke)
+	w2.notify(t, p2, map[string]any{"event": StaffEventRevoked, "decisionId": "dec-revoke"})
+	removed := asString(w2.staged[StaffRequestID(StaffEventRevoked, linkApp, "dec-revoke")]["body"])
+	if strings.Contains(removed, "Open") || strings.Contains(removed, "\n\n\n") || strings.HasSuffix(removed, "\n") {
+		t.Fatalf("the removal notice with no note and no OS address reads %q", removed)
+	}
+	// THE GRANT THAT DID NOT LAND, on an application removed since: not "approved".
+	w2.notify(t, p2, map[string]any{"event": StaffEventAccessNotGranted})
+	notOn := asString(w2.staged[AccessStaffRequestID(StaffEventAccessNotGranted, linkApp, 1)]["body"])
+	if strings.Contains(notOn, "approved") || strings.Contains(notOn, "Open") || !strings.Contains(notOn, "did not turn on") {
+		t.Fatalf("the access notice reads %q", notOn)
+	}
+	// THE APPROVAL EMAIL OF AN APPLICATION THAT IS NOT APPROVED is not "not granted yet".
+	if got := w2.sendBuyer(t, p2, EmailApproved); got["reason"] != "the application is not approved" {
+		t.Fatalf("the approval email of a removed application declined with %v", got["reason"])
+	}
+}
+
 func TestAReDeliveredStaffEventStagesNothingNew(t *testing.T) {
 	w := newEmailWorld()
 	w.settings["termsRequired"] = false

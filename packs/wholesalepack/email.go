@@ -242,6 +242,11 @@ func (p *Provider) sendBuyerEmail(ctx context.Context, args map[string]any, _ in
 		// THE APPROVAL EMAIL WAITS FOR THE GRANT (W3): it tells the buyer their
 		// trade prices are on and carries the price-sheet link, which opens only
 		// while they are.
+		// THE REASON IS TRUE OF THE APPLICATION: "not granted yet" only of one that
+		// is approved, and so may yet be granted.
+		if state != StateApproved {
+			return declined(app, kind, notInStateReason(StateApproved))
+		}
 		granted, err := p.accessGranted(sys, app, state)
 		if err != nil {
 			return nil, err
