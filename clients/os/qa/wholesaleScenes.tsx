@@ -31,6 +31,15 @@ import { seededAccessFor } from "../test/seededAccess";
 //   view=wholesale-publish-text            its Text step, a file loaded
 //   view=wholesale-publish-preview         its Preview step, Publish on the floor
 //   view=wholesale-publish-refused         the same, the engine's refusal on the Preview step
+//   view=wholesale-add-buyer-checking      Add buyer after a lost answer, while the store is read again
+//   view=wholesale-add-buyer-there         ... the buyer is there (Done)
+//   view=wholesale-add-buyer-absent        ... the buyer is not there (the act again)
+//   view=wholesale-add-buyer-unread        ... the store could not be read (Check again)
+//   view=wholesale-publish-checking        Publish after a lost answer, while the documents are read again
+//   view=wholesale-publish-there           ... the version is there (Done)
+//   view=wholesale-publish-absent          ... the version is not there (Publish again)
+//   view=wholesale-publish-unread          ... the documents could not be read (Check again)
+//   view=wholesale-documents-no-fingerprint an earlier version the engine recorded no fingerprint for
 //   view=wholesale-emails                  an application's emails in every state, its resends in the section
 //   view=wholesale-records-refused         the settings after a refused export, said in Records
 //   view=wholesale-version                 an earlier version, read-only
@@ -152,7 +161,9 @@ const ACCEPTED = {
   clientAddress: "203.0.113.7", userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
 };
 
-function seed(over: { operator?: boolean; settings?: Record<string, unknown>; buyers?: Record<string, unknown>; addError?: string; publishError?: string; exportError?: string; notSetUp?: boolean } = {}): FakeSeed {
+type Lose = NonNullable<NonNullable<FakeSeed["wholesale"]>["lose"]>;
+
+function seed(over: { operator?: boolean; settings?: Record<string, unknown>; buyers?: Record<string, unknown>; documents?: Record<string, unknown>; addError?: string; publishError?: string; exportError?: string; lose?: Lose; notSetUp?: boolean } = {}): FakeSeed {
   const operator = over.operator === true;
   const staffActs = (acts: string[]) => (operator ? acts.filter((a) => a === "retryAccess") : acts);
   return {
@@ -183,11 +194,12 @@ function seed(over: { operator?: boolean; settings?: Record<string, unknown>; bu
       },
       settings: (over.settings ?? SET_UP) as unknown as Row,
       buyers: (over.buyers ?? { ...BUYERS, operator }) as unknown as Row,
-      documents: DOCUMENTS as unknown as Row,
+      documents: (over.documents ?? DOCUMENTS) as unknown as Row,
       versions: VERSIONS as unknown as Record<string, Row>,
       ...(over.addError !== undefined ? { addError: over.addError } : {}),
       ...(over.publishError !== undefined ? { publishError: over.publishError } : {}),
       ...(over.exportError !== undefined ? { exportError: over.exportError } : {}),
+      ...(over.lose !== undefined ? { lose: over.lose, addedId: id("harbor-added") } : {}),
       ...(over.notSetUp ? { buyersError: NOT_SET_UP_SENTENCE, documentsError: NOT_SET_UP_SENTENCE, listError: NOT_SET_UP_SENTENCE } : {}),
     },
   };
@@ -297,8 +309,17 @@ export const WHOLESALE_CLICKS: Record<string, string> = {
   "wholesale-publish": "Documents|Publish a new version of the wholesale terms|fill:Label=Trade terms 2027",
   "wholesale-publish-text": "Documents|Publish a new version of the wholesale terms|fill:Label=Trade terms 2027|Continue|file:document",
   "wholesale-publish-preview": "Documents|Publish a new version of the wholesale terms|fill:Label=Trade terms 2027|Continue|file:document|Continue",
-  "wholesale-publish-refused": "Documents|Publish a new version of the wholesale terms|fill:Label=Trade terms 2027|Continue|file:document|Continue|Publish",
+  "wholesale-publish-refused": "Documents|Publish a new version of the wholesale terms|fill:Label=Trade terms 2027 for every account that buys at trade prices, with the spring shipping schedule and the new return window|Continue|fill:Text=# Trade terms\n\nThese terms apply to every order placed at trade prices.\n\n## Payment\n\nNet **30** days from the invoice date.|Continue|Publish",
   "wholesale-emails": "Refine applications|Approved|Open Cedar Spoke Studio",
+  "wholesale-add-buyer-checking": "Buyers|Add buyer|fill:Company=Harbor Wheelworks and Touring Bicycle Cooperative|Continue|fill:Name=Sam Okafor|Continue|fill:Email=sam.okafor@harbor-wheelworks.example.com|Add and send the terms",
+  "wholesale-add-buyer-there": "Buyers|Add buyer|fill:Company=Harbor Wheelworks and Touring Bicycle Cooperative|Continue|fill:Name=Sam Okafor|Continue|fill:Email=sam.okafor@harbor-wheelworks.example.com|Add and send the terms",
+  "wholesale-add-buyer-absent": "Buyers|Add buyer|fill:Company=Harbor Wheelworks and Touring Bicycle Cooperative|Continue|fill:Name=Sam Okafor|Continue|fill:Email=sam.okafor@harbor-wheelworks.example.com|Add and send the terms",
+  "wholesale-add-buyer-unread": "Buyers|Add buyer|fill:Company=Harbor Wheelworks and Touring Bicycle Cooperative|Continue|fill:Name=Sam Okafor|Continue|fill:Email=sam.okafor@harbor-wheelworks.example.com|Add and send the terms",
+  "wholesale-publish-checking": "Documents|Publish a new version of the wholesale terms|fill:Label=Trade terms 2027|Continue|fill:Text=# Trade terms\n\nThese terms apply to every order placed at trade prices.\n\n## Payment\n\nNet **30** days from the invoice date.|Continue|Publish",
+  "wholesale-publish-there": "Documents|Publish a new version of the wholesale terms|fill:Label=Trade terms 2027|Continue|fill:Text=# Trade terms\n\nThese terms apply to every order placed at trade prices.\n\n## Payment\n\nNet **30** days from the invoice date.|Continue|Publish",
+  "wholesale-publish-absent": "Documents|Publish a new version of the wholesale terms|fill:Label=Trade terms 2027|Continue|fill:Text=# Trade terms\n\nThese terms apply to every order placed at trade prices.\n\n## Payment\n\nNet **30** days from the invoice date.|Continue|Publish",
+  "wholesale-publish-unread": "Documents|Publish a new version of the wholesale terms|fill:Label=Trade terms 2027|Continue|fill:Text=# Trade terms\n\nThese terms apply to every order placed at trade prices.\n\n## Payment\n\nNet **30** days from the invoice date.|Continue|Publish",
+  "wholesale-documents-no-fingerprint": "Documents",
   "wholesale-records-refused": "Settings|Download every record",
   "wholesale-version": "Documents|Open Trade terms 2025, with the spring shipping schedule and returns window",
   "wholesale-accepted": "Refine applications|Approved|Open Cedar Spoke Studio",
@@ -349,6 +370,15 @@ export function wholesaleScenes(WindowBody: Frame) {
     "wholesale-publish-preview": { seed: seed(), wrap: staff, render: page },
     "wholesale-publish-refused": { seed: seed({ publishError: "wholesale: a label is 1 to 120 characters; this one is 121" }), wrap: staff, render: page },
     "wholesale-emails": { seed: emailsSeed(), wrap: staff, render: page },
+    "wholesale-add-buyer-checking": { seed: seed({ lose: { write: "add", landed: true, check: "hold" } }), wrap: staff, render: page },
+    "wholesale-add-buyer-there": { seed: seed({ lose: { write: "add", landed: true, check: "answer" } }), wrap: staff, render: page },
+    "wholesale-add-buyer-absent": { seed: seed({ lose: { write: "add", landed: false, check: "answer" } }), wrap: staff, render: page },
+    "wholesale-add-buyer-unread": { seed: seed({ lose: { write: "add", landed: true, check: "fail" } }), wrap: staff, render: page },
+    "wholesale-publish-checking": { seed: seed({ lose: { write: "publish", landed: true, check: "hold" } }), wrap: staff, render: page },
+    "wholesale-publish-there": { seed: seed({ lose: { write: "publish", landed: true, check: "answer" } }), wrap: staff, render: page },
+    "wholesale-publish-absent": { seed: seed({ lose: { write: "publish", landed: false, check: "answer" } }), wrap: staff, render: page },
+    "wholesale-publish-unread": { seed: seed({ lose: { write: "publish", landed: true, check: "fail" } }), wrap: staff, render: page },
+    "wholesale-documents-no-fingerprint": { seed: seed({ documents: { kinds: DOCUMENTS.kinds.map((k) => (k.kind === "terms" ? { ...k, history: k.history.map((v) => (v.id === "doc-terms-1" ? { ...v, sha256: "" } : v)) } : k)) } }), wrap: staff, render: page },
     "wholesale-records-refused": { seed: seed({ exportError: "wholesale: The export could not be read just now." }), wrap: staff, render: page },
     "wholesale-version": { seed: seed(), wrap: staff, render: page },
     "wholesale-accepted": { seed: termsSeed(), wrap: staff, render: page },
