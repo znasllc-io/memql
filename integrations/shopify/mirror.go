@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -12,7 +13,6 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
-	"github.com/znasllc-io/memql/integrations/shopify/generated"
 )
 
 // mirror.go -- the connector's own write of a MirrorWrite.
@@ -24,7 +24,8 @@ import (
 // ReconcileReport carries counts rather than writes, because a sweep
 // heals as it goes and reporting a million writes back through a struct
 // would be a different design. So a reconciliation sweep writes its own
-// rows, and this is that write.
+// rows, and this is that write -- behind the same guard, by the contract's
+// own rule (memqlsync.Refuses), not a copy of it.
 //
 // # Why it renders the same statement rather than importing the runtime
 //
@@ -92,105 +93,174 @@ func mirrorInsert(w memqlsync.MirrorWrite) (string, error) {
 // that healed nothing because of one row is worse than one that healed
 // all but that row and said so.
 //
+// A WRITE THE ROW OUTRANKS IS REFUSED, by the guard's own rule
+// (memqlsync.Refuses over memqlsync.StoredStamp, which the runtime's applier
+// asks too). A sweep's page is read before it is written, and a delivery can
+// record a newer state in between; written unguarded, the sweep put the older
+// one back. Whether a record exists is judged by when the origin was read: a
+// relist's tombstone (the listing's start) is refused by a row read after its
+// listing began, and a sweep that reads a record after a tombstone's time
+// puts it back. Which of two live states is newer is the origin's version. A
+// row written before every write carried them holds none and is replaced.
+//
 // A ROW THE MIRROR ALREADY HOLDS IS NOT WRITTEN AGAIN. A sweep stamps every
 // row it maps with syncedAt = the fetch time, and a type Shopify publishes no
 // version for (about forty of the sixty-five, originVersion) with that time
 // as updatedAt too, so every pass appended a version of every row whether or
 // not the origin had changed anything: about 3,400 a day each for
 // quantityRule and priceListPrice across 170 rows on production (2026-11-06),
-// re-listed hourly. mirrorHolds skips the write when the stored row already
-// carries every value the write states, those two stamps aside.
+// re-listed hourly. mirrorPayloadHolds skips the write when the stored row
+// already carries every value the write states, syncedAt aside, and updatedAt
+// aside when it is only the time of reading (fetchTimeVersion). With the
+// origin's version on both sides, updatedAt IS compared: it moves only when
+// Shopify changed the row. versionReadAt is the read time's pair and moves
+// with it, so it is not compared either. A row written before versionSource
+// existed lacks it, so the write's versionSource differs and the row is
+// rewritten once. A skip leaves the row's read time where the last write put
+// it, which makes a later tombstone easier to apply, never harder; the next
+// read that finds the record puts it back.
 //
 // What a skip costs: syncedAt on a row a pass found unchanged keeps the time
 // of the last write that changed it, so it says "last changed here", not
 // "last confirmed against the origin". Nothing reads it to judge freshness:
 // the store's health reports the domain's sync state (lastReconcileAt and
 // the pass's drift count), never a row's syncedAt. And `healed` -- with the
-// Drifted count the report carries -- now counts the rows a pass actually
-// changed, which is what drift was always documented to mean; it used to
-// count every row a pass saw.
+// Drifted count the report carries -- counts the rows a pass actually
+// changed, which is what drift was always documented to mean.
 //
-// The version guard is untouched: Apply's writes still go through the
-// runtime's, and a skipped heal writes nothing for it to compare. The read
-// runs under the connector actor, the one identity the mirror admits.
+// The row is read once, for both questions, under the connector actor, the
+// one identity the mirror admits. A read that fails writes nothing: without
+// the stored row the guard cannot be asked, and an unguarded write is the
+// fault this check exists for. So does a read that answers two rows for the
+// one id: the raw read is by concept and id, and two answers mean the read is
+// not the row this write would replace.
+//
+// EACH WRITE IS FENCED ON THE ROW IT WAS JUDGED AGAINST (healOne), so a
+// delivery that commits between the read and the write is not replaced by the
+// older state the page carried.
 func (c *Connector) heal(ctx context.Context, writes []memqlsync.MirrorWrite) (healed int, failed int) {
 	for _, w := range writes {
-		if c.mirrorHolds(ctx, w) {
-			continue
-		}
-		if err := c.writeMirror(ctx, w); err != nil {
+		wrote, err := c.healOne(ctx, w)
+		if err != nil {
 			failed++
-			c.logger.Warn("shopify: reconcile could not heal a row",
+			c.logger.Warn("shopify: reconcile could not heal a row; not written",
 				"concept", w.Concept, "row", w.RowId, "error", err)
 			continue
 		}
-		healed++
+		if wrote {
+			healed++
+		}
 	}
 	return healed, failed
 }
 
-// mirrorHolds reports whether the mirror already holds what w would write
-// (heal). It is proof or nothing: a retirement, a row that is not there, a
-// read that fails or a value it cannot compare all answer false, and the
-// write goes ahead exactly as it did before this check existed.
+// healOne judges one write against the row the mirror holds and writes it
+// unless the row refuses it or already holds it, and reports whether it wrote.
+//
+// The read and the write are two statements. A delivery can commit a newer
+// state in between, and the write this page was admitted for would put the
+// older one back, on a domain whose next sweep reads only what changed since.
+// So the write carries the judged row's version
+// (memql.ContextWithRowVersionFence; a row that was not there must still not
+// be), and the engine refuses it when the row has moved. The row is then read
+// and judged again, ONCE; a second loss is this row's failure, and the sweep
+// that counts it holds its watermark.
+func (c *Connector) healOne(ctx context.Context, w memqlsync.MirrorWrite) (bool, error) {
+	for try := 0; ; try++ {
+		stored, version, err := c.storedMirrorRow(ctx, w)
+		if err != nil {
+			return false, fmt.Errorf("reading the row before healing it: %w", err)
+		}
+		if stored != nil {
+			spec := mirrorDomain(w.Concept)
+			if memqlsync.Refuses(memqlsync.StoredStamp(spec, stored), memqlsync.WriteStamp(spec, w)) {
+				return false, nil
+			}
+			if !w.Retire && mirrorPayloadHolds(stored, w.Payload, fetchTimeVersion(w)) {
+				return false, nil
+			}
+		}
+		fenced := ctx
+		if stored == nil || !version.IsZero() {
+			// An existing row whose read carried no version cannot be fenced
+			// on it: a zero version means "this row must not exist".
+			fenced = memql.ContextWithRowVersionFence(ctx, strings.TrimSpace(w.Concept), strings.TrimSpace(w.RowId), version)
+		}
+		err = c.writeMirror(fenced, w)
+		if err == nil {
+			return true, nil
+		}
+		if try == 0 && errors.Is(err, memql.ErrRowVersionChanged) {
+			continue
+		}
+		return false, err
+	}
+}
+
+// storedMirrorRow reads the payload the mirror holds for w's row and that
+// row's version (the stored version's time), or nil for a row it does not
+// hold.
 //
 // The read is the runtime's own raw concept read (component/datasync
-// StoredVersion), so it needs no generated query and no cluster-owner filter
+// StoredRow), so it needs no generated query and no cluster-owner filter
 // the connector actor would fail, and it goes to the database rather than to
 // a replica's result cache (memql.ContextWithFreshRead): a sibling's eviction
-// is asynchronous, and a stale cached row could hide a change.
-func (c *Connector) mirrorHolds(ctx context.Context, w memqlsync.MirrorWrite) bool {
+// is asynchronous, and a stale cached row could hide a change. A bundle with
+// two nodes for the id is an error (heal).
+func (c *Connector) storedMirrorRow(ctx context.Context, w memqlsync.MirrorWrite) (map[string]any, time.Time, error) {
 	concept, rowID := strings.TrimSpace(w.Concept), strings.TrimSpace(w.RowId)
-	if w.Retire || concept == "" || rowID == "" || c.engine == nil {
-		return false
+	if concept == "" || rowID == "" || c.engine == nil {
+		return nil, time.Time{}, nil
 	}
 	q := fmt.Sprintf("concept==%s && id==%s", concept, langparser.QuoteString(rowID))
 	res, err := c.engine.Execute(memql.ContextWithFreshRead(connectorContext(ctx)), q)
-	if err != nil || res == nil || res.Bundle == nil {
-		return false
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	if res == nil || res.Bundle == nil {
+		return nil, time.Time{}, nil
 	}
 	// The row is matched by its own id rather than taken as the only node:
 	// an id is bare-ified on egress, and a bundle may carry other nodes.
 	var stored map[string]any
+	var version time.Time
 	for _, node := range res.Bundle.GetNodes() {
 		if memql.BareShortId(node.GetId()) != memql.BareShortId(rowID) {
 			continue
 		}
 		if stored != nil {
-			return false
+			return nil, time.Time{}, fmt.Errorf("shopify: the mirror answered two rows for %s %q", concept, rowID)
 		}
 		stored = node.GetPayload().AsMap()
+		if at := node.GetCreatedAt(); at != nil {
+			version = at.AsTime()
+		}
 	}
-	return mirrorPayloadHolds(stored, w.Payload, fetchTimeVersion(w))
+	return stored, version, nil
 }
 
-// fetchTimeVersion reports whether the write's updatedAt is the FETCH TIME
-// rather than the origin's version: the type declares no version field, or
-// the fetched object carried none (originVersion then stamps the fetch time,
-// the same instant mapObject writes as syncedAt). Such an updatedAt moves on
-// every pass and says nothing about the row, so it is not compared. An origin
-// version IS compared: it moves only when Shopify changed the row, and the
-// apply guard reads it.
+// fetchTimeVersion reports whether the write's updatedAt is the TIME OF
+// READING rather than the origin's version: the type publishes none, and no
+// parent handed it one (originVersion). Such an updatedAt moves on every pass
+// and says nothing about the row, so it is not compared. An origin version IS
+// compared: it moves only when Shopify changed the row, and the guard reads
+// it.
 func fetchTimeVersion(w memqlsync.MirrorWrite) bool {
-	if spec := generated.Types[generated.ConceptFromID(w.Concept)]; spec == nil || spec.VersionField == "" {
-		return true
-	}
-	updated, _ := w.Payload["updatedAt"].(string)
-	synced, _ := w.Payload["syncedAt"].(string)
-	return updated != "" && updated == synced
+	source, _ := w.Payload["versionSource"].(string)
+	return source != memqlsync.VersionFromOrigin
 }
 
 // mirrorPayloadHolds compares a write with the stored payload the way the raw
 // insert would apply it: a top-level field the write omits keeps its stored
 // value, so only the fields it states are compared; a nested object it states
 // replaces the stored one whole, so a nested object must match key for key.
-// syncedAt is the pass's own stamp and is never compared.
+// syncedAt and versionReadAt are the pass's own stamps and are never compared.
 func mirrorPayloadHolds(stored, write map[string]any, ignoreUpdatedAt bool) bool {
 	if stored == nil {
 		return false
 	}
 	for key, value := range write {
-		if key == "syncedAt" || (key == "updatedAt" && ignoreUpdatedAt) {
+		if key == "syncedAt" || key == "versionReadAt" || (key == "updatedAt" && ignoreUpdatedAt) {
 			continue
 		}
 		if !sameMirrorValue(stored[key], value) {

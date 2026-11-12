@@ -529,7 +529,23 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// ResolveConnectSite's site checks in the same handler --
 		// integrations/shopify/connect_precondition_test.go drives every
 		// refusal and asserts no write is reached.
-		"integrations/shopify":           "the shopify CONNECTOR -- server-initiated mirror writes under the connector actor (epic memql#4378), plus REQUEST-DERIVED Connect Shopify writes under operatorContext, each downstream of the store part and the site checks (asserted by integrations/shopify/connect_precondition_test.go)",
+		//
+		// REQUEST-DERIVED, since the store's verdict (design record
+		// 2026-11-11-store-mirror-recording): the store's own acts --
+		// shopifyStoreRetryDeliveries requeues its given-up deliveries,
+		// shopifyStoreRegisterEvents records its subscription pass, and
+		// shopifyStoreSetRecording pauses and resumes it and audits the
+		// caller -- each under operatorContext, because the store row and the
+		// inbound queue are the cluster's. Each is downstream of the same
+		// store part and of the handler's caller check (the store's owner or
+		// a cluster owner, storeForCaller), asked before anything but the
+		// store row is read: integrations/shopify/verdict_test.go
+		// (TestAStoreActIsRefusedForSomebodyWhoIsNeitherItsOwnerNorAClusterOwner)
+		// and integrations/shopify/caller_gate_test.go
+		// (TestSetRecordingIsForTheStoresOwnerOrAClusterOwner,
+		// TestSetRecordingDeclaresTheStorePart) drive the refusals and assert
+		// no write is reached.
+		"integrations/shopify":           "the shopify CONNECTOR -- server-initiated mirror writes under the connector actor (epic memql#4378), plus REQUEST-DERIVED writes under operatorContext: Connect Shopify's, each downstream of the store part and the site checks (asserted by integrations/shopify/connect_precondition_test.go), and the store's own acts -- requeue, register again, pause and resume -- each downstream of the store part and the handler's caller check (asserted by integrations/shopify/verdict_test.go and integrations/shopify/caller_gate_test.go)",
 		"component/inbound":              "the inbound webhook receiver -- REQUEST-DERIVED, earned in the same function: its ONE Execute (stageInboundRequest, @serverOnly since memql#5707) runs after the source allowlist and the HMAC check in ServeHTTP on a context carrying no caller identity, and the receiver's own tests assert that an unlisted source or a bad signature stages nothing",
 		"integrations/email":             "the NDR mailbox reader -- server-initiated: the poller reads the bounce mailbox itself and stages each bounce through stageInboundRequest (@serverOnly since memql#5707); no request reaches its context. Plus one REQUEST-DERIVED stamp, earned by ORDER: the Integrations section's save writes a v1:platform:globalSecret row (cluster-owner tier) or a v1:platform:globalVariable row (written by a cluster owner or stamped server code) for an owner or a developer, so handleConfigure stamps a context it builds for the ONE row write it composed, whose name and id come from the manifest, after configureAuthorized has admitted the caller -- a refused role reaches no statement (TestConfigureIsOwnerOrDeveloperOnly), nothing else the handler sends carries the stamp (TestConfigureStampsInternalOriginOnItsRowWriteOnly), and against the real engine the developer's own calls are still refused (TestConfigureSavesAValueForEveryRoleTheSectionAdmits)",
 		"component/outbound":             "the outbound delivery worker -- server-initiated: its one inline stamp is in stamp(), on the updateOutboundRequestStatus transitions it composes for rows it claimed, which a secret-target row refuses without it (memql#5480); the drain scan and the secret lookup run without it, asserted by component/outbound's TestOnlyTheWorkersStatusStampsCarryInternalOrigin",

@@ -365,7 +365,8 @@ which answers from the same rule the write guard refuses with. A storefront
 with no connected store may go live for design review. Catalog, cart and checkout
 become available after a store is connected through the Store, the first of the
 connections on the deployable's page.
-An amber marker identifies incomplete Shopify setup independently of Live status.
+The Store slot says what Shopify setup remains in words ("Not connected",
+"Setup needed"), independently of Live status.
 A bound development store or unreadable store still refuses publication.
 GitHub accounts and organization access are managed in Settings; the repository
 wizard selects that saved access, with an accent text action back to Settings.
@@ -734,6 +735,62 @@ Orders, inventory and refunds are **not** this feature. They reach MemQL
 through webhooks and reconciliation, so a sale from any channel lands, not only
 one made through this storefront
 ([the Shopify connector](shopify-connector.md)).
+
+### The Store slot and the Store page
+
+A storefront's page has a **Store** slot, drawn for anyone holding `execute
+app:deployables/store`. It names the store and says whether it is being
+recorded, from Production's store, or Testing's when Production has none:
+
+| The slot reads | When |
+|---|---|
+| Not connected | Neither destination names a store. |
+| the store, then Recording, Starting, Paused or Needs attention | The store is connected; the word is the store's verdict ([the Shopify connector](shopify-connector.md#the-storefronts-store-page)). |
+| the store, then Uninstalled, or Data removed | Shopify reported the app uninstalled, or removed the store's data. |
+| the store, then Setup needed | The store's Admin authorization or its own Storefront token is not in place. |
+| the store, then Not connected | The engine's verdict says not connected while the store's own row still reads connected. |
+| the store, then Status unknown | Whether the store is being recorded could not be read, or the answer named no state the page knows. |
+| The store could not be read | The store's row could not be read. |
+| Store unavailable | The binding names a store that did not read back: one this cluster does not have, or one you may not read. |
+
+"Testing" is added when the store is Testing's, and "Sandbox" when it is a
+development store.
+
+Opening the slot opens the **Store** page. Above the store's own settings
+([Settings that belong to one store](#settings-that-belong-to-one-store)) it
+has three parts:
+
+1. **Connections.** One row for Testing and one for Production, each with its
+   store's domain and the same word as the slot. A destination with no store
+   reads "Design preview". Opening a row chooses its store. "Manage Shopify
+   connections in Settings" is beneath.
+2. **Notices.** One for each reason the engine gives for a store, in its
+   sentence, with what is wrong beneath and the one act that fixes it, whatever
+   the store's state: a paused or not-connected store can carry one, a privacy
+   request that keeps failing. A store bound to both destinations shows each
+   reason once. The three repairs a
+   store's connection can need -- "was uninstalled in Shopify", "Shopify
+   removed the data of", a Storefront token "registered under a different
+   name" -- are notices too, each with "Reconnect in Settings". When the
+   owner's alert email could not be sent, a notice says "The alert could not
+   be sent." and why.
+3. **What is recorded.** For each connected store, one group per kind in its
+   connection -- Catalog, Orders, Customers, Discounts, and Returns while the
+   store's grant holds `read_returns` -- each with "Last change" (when the last
+   change arrived) and "Last checked". Then "Orders since" the day the store's
+   orders begin, "Shopify withholds:" and the fields Shopify does not give the
+   app, and one closed line, "Not part of this connection", which opens to the
+   domains the connection does not ask for. Neither the withheld fields nor
+   that list is a fault.
+
+The bar carries "Pause recording" or "Resume" for the store the page leads
+with, for the store's owner and a cluster owner; both call
+`shopifyStoreSetRecording`. Pause works on any store that is being recorded,
+Resume on a paused one; each is recorded in the audit log under the person who
+did it, and a store that is not connected is refused. The
+engine serves a store's state and reasons only to its owner, a cluster owner,
+or a caller who may read store rows. Every state, reason, act and
+email is in [the Shopify connector](shopify-connector.md#operating-it).
 
 ---
 

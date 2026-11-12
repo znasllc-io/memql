@@ -18,7 +18,6 @@ package shopify
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"log/slog"
 	"os"
 	"strings"
@@ -109,8 +108,9 @@ func connectorContext(ctx context.Context) context.Context {
 // The SYSTEM ACTOR is the cluster's own identity: RoleOwner (which is what the
 // `actor.isClusterOwner` conjunct and the clusterOwner tier are both asking),
 // Unranked and Synthetic. INTERNAL ORIGIN is again the @serverOnly axis --
-// `markStoreRedacted`, `recordStoreHealth` and the compliance mutations are all
-// server-only, and the identity alone does not satisfy that.
+// `recordStoreHealth`, the compliance mutations and the stamps of a store's
+// uninstall, reconnect, connect and redaction are all server-only, and the
+// identity alone does not satisfy that.
 //
 // It is composed here rather than inside auth.ContextWithSystemActor on
 // purpose: whose authority a call runs under, and whether the engine is the one
@@ -131,16 +131,22 @@ type Connector struct {
 	admin  *AdminClient
 	now    func() time.Time
 
-	// db is the raw handle the two compliance jobs need. Everything else
-	// goes through the engine; redaction and purge cannot, because
-	// "every version of every row" is exactly what an append-only model
-	// will not let you touch.
+	// db is the raw handle of the request pool, which Connect takes its
+	// lock on (connect_gate.go). The privacy jobs do not use it: their
+	// statements outlast the pool's limits, and run on maintain.
 	db func() *sql.DB
+	// maintain opens the engine's maintenance session, which the privacy
+	// jobs run their statements on (compliance.go, privacySession).
+	// Everything else goes through the engine; redaction and purge cannot,
+	// because "every version of every row" is exactly what an append-only
+	// model will not let you touch.
+	maintain func(context.Context) (*sql.Conn, func(), error)
 
 	// applied is the process-local short-circuit for redelivered
 	// webhooks. See apply.go.
 	applied *applied
-	// bulkReady records which bulk operations Shopify has said are done.
+	// bulkReady records which bulk operations Shopify has said are done;
+	// nothing reads it (bulkReadySet).
 	bulkReady *bulkReadySet
 	// definitions remembers which metafield definitions have been
 	// created, per store.
@@ -187,9 +193,28 @@ func NewConnector(engine memql.IntegrationEngineAccess, logger *slog.Logger, sto
 	}
 }
 
-// WithDatabase attaches the raw handle the compliance jobs need.
+// WithDatabase attaches the request pool's raw handle, which Connect takes
+// its lock on. The privacy jobs run on WithMaintenanceSession's session.
 func (c *Connector) WithDatabase(db func() *sql.DB) *Connector {
 	c.db = db
+	return c
+}
+
+// WithClock replaces the connector's clock: the time it says it read the
+// origin at, which every mirror write carries.
+//
+// A TEST'S OPTION. Production never calls it; NewConnector's clock is
+// time.Now. It exists for the tests that compose the connector with the sync
+// runtime, which live in the root module (component/datasync) because this
+// module cannot import the runtime, and so cannot reach an unexported field.
+// Those tests decide a race by the order of two reads of the origin -- a
+// delivery against a bulk export started before it -- and have to say when
+// each was made. It changes nothing a caller could not already do to data: it
+// only says what time it is.
+func (c *Connector) WithClock(now func() time.Time) *Connector {
+	if now != nil {
+		c.now = now
+	}
 	return c
 }
 
@@ -209,19 +234,9 @@ func (c *Connector) Domains() []memqlsync.DomainSpec {
 		if spec == nil {
 			continue
 		}
-		out = append(out, memqlsync.DomainSpec{
-			Concept: generated.ConceptID(concept),
-			// The ORIGIN's own version, which the runtime compares
-			// against the stored row before applying. Every mirrored
-			// concept carries it in `updatedAt`; for a type Shopify
-			// publishes no version for, the connector stamps the fetch
-			// time into that field and the guard degrades to
-			// last-write-wins -- recorded on the TypeSpec rather than
-			// discovered at runtime.
-			VersionField:      "updatedAt",
-			ReconcileInterval: parseCadence(spec.Cadence, spec.Reconcile),
-			Direction:         memqlsync.DirectionInbound,
-		})
+		d := mirrorDomain(generated.ConceptID(concept))
+		d.ReconcileInterval = parseCadence(spec.Cadence, spec.Reconcile)
+		out = append(out, d)
 	}
 	for _, concept := range originDomains {
 		out = append(out, memqlsync.DomainSpec{
@@ -230,6 +245,29 @@ func (c *Connector) Domains() []memqlsync.DomainSpec {
 		})
 	}
 	return out
+}
+
+// mirrorDomain is a mirrored concept's version guard as the runtime and the
+// connector's own heal both read it.
+//
+// The ORIGIN's own version, compared against the stored row before a write.
+// Every mirrored concept carries it in `updatedAt`; for a type Shopify
+// publishes no version for, the connector stamps the time of reading into
+// that field and the guard degrades to last-write-wins -- recorded on the
+// TypeSpec rather than discovered at runtime. `versionSource` says which of
+// the two a row holds, `syncedAt` when the origin was read for it, and
+// `versionReadAt` pairs the marker with that read: a row without the pair was
+// written before every write said, and holds no version
+// (memqlsync.StoredStamp).
+func mirrorDomain(conceptID string) memqlsync.DomainSpec {
+	return memqlsync.DomainSpec{
+		Concept:            conceptID,
+		VersionField:       "updatedAt",
+		VersionSourceField: "versionSource",
+		ReadAtField:        "syncedAt",
+		VersionReadAtField: "versionReadAt",
+		Direction:          memqlsync.DirectionInbound,
+	}
 }
 
 // parseCadence turns the allowlist's duration string into the interval
@@ -280,12 +318,6 @@ func (c *Connector) InboundSource(ctx context.Context, name string) (memqlsync.I
 	return c.stores.InboundSourceFor(ctx, store)
 }
 
-// StoreFor resolves the store a staged delivery belongs to.
-//
-// Per-store source names are authoritative. The managed app-level source --
-// the privacy topics and app/uninstalled -- instead resolves the signed shop
-// domain and verifies app ownership (managedAppLevelStore). An unknown source
-// never falls back to an unsigned shop-domain header.
 // ClaimsInboundSource answers whether name is one of this connector's
 // sources -- its own app-level name, or `shopify-<storeId>` for a store that
 // exists -- without resolving any secret (memqlsync.InboundSourceClaimer).
@@ -304,34 +336,65 @@ func (c *Connector) ClaimsInboundSource(ctx context.Context, name string) (bool,
 	if name == ConnectorName {
 		return true, nil
 	}
-	prefix := ConnectorName + "-"
-	if !strings.HasPrefix(name, prefix) {
-		return false, nil
-	}
-	stores, err := c.stores.Stores(ctx)
-	if err != nil {
-		return false, err
-	}
-	id := strings.TrimPrefix(name, prefix)
-	for _, s := range stores {
-		if s.ID == id {
-			return true, nil
-		}
-	}
-	return false, nil
+	_, found, err := c.storeOfSource(ctx, name)
+	return found, err
 }
 
-func (c *Connector) StoreFor(ctx context.Context, req memqlsync.InboundRequest) (Store, bool) {
+// findStore is the one store `match` accepts, answered three ways: the store;
+// found false when the list was read and holds none; and an error when the
+// list could not be read. The registry's ByID and ByDomain answer that last
+// case as "no such store", which is right for a caller that only wants a
+// store to act on and wrong for one deciding whether a delivery is anybody's.
+func (c *Connector) findStore(ctx context.Context, match func(Store) bool) (Store, bool, error) {
+	stores, err := c.stores.Stores(ctx)
+	if err != nil {
+		return Store{}, false, err
+	}
+	for _, s := range stores {
+		if match(s) {
+			return s, true, nil
+		}
+	}
+	return Store{}, false, nil
+}
+
+// storeOfSource is the store a per-store source name, `shopify-<storeId>`,
+// names: three-valued, as findStore is. A name of another shape is
+// definitely not a store's.
+func (c *Connector) storeOfSource(ctx context.Context, name string) (Store, bool, error) {
+	prefix := ConnectorName + "-"
+	if !strings.HasPrefix(name, prefix) {
+		return Store{}, false, nil
+	}
+	id := strings.TrimPrefix(name, prefix)
+	return c.findStore(ctx, func(s Store) bool { return s.ID == id })
+}
+
+// deliveryStore resolves the store a staged delivery belongs to, and says
+// when it CANNOT TELL.
+//
+// Per-store source names are authoritative. The managed app-level source --
+// the privacy topics and app/uninstalled -- instead resolves the signed shop
+// domain and verifies app ownership (managedAppLevelStore). An unknown source
+// never falls back to an unsigned shop-domain header.
+//
+// Three answers, and the third is the one that matters: found false is a
+// delivery that is definitely nobody's, which is dropped; an error is a store
+// list that could not be read, which says nothing about whose the delivery
+// is. It is the same read ClaimsInboundSource makes for a store's own source,
+// so Apply and the retry pass cannot disagree about what "could not tell" is.
+func (c *Connector) deliveryStore(ctx context.Context, req memqlsync.InboundRequest) (Store, bool, error) {
 	if req.Source == ConnectorName {
 		return c.managedAppLevelStore(ctx, req)
 	}
-	prefix := ConnectorName + "-"
-	if strings.HasPrefix(req.Source, prefix) {
-		if store, ok := c.stores.ByID(ctx, strings.TrimPrefix(req.Source, prefix)); ok {
-			return store, true
-		}
-	}
-	return Store{}, false
+	return c.storeOfSource(ctx, req.Source)
+}
+
+// StoreFor is deliveryStore for a caller that only wants a store to act on:
+// "could not tell" and "nobody's" both answer false.
+func (c *Connector) StoreFor(ctx context.Context, req memqlsync.InboundRequest) (Store, bool) {
+	store, found, err := c.deliveryStore(ctx, req)
+	return store, found && err == nil
 }
 
 // header reads a delivery header case-insensitively.
@@ -352,8 +415,10 @@ func (c *Connector) adminCall(ctx context.Context, store Store, document, operat
 		// Refused rather than attempted. A store pinned to a different
 		// version answers with fields the concepts do not declare and
 		// omits fields they require, and the resulting mirror is wrong
-		// in a way no error message would explain.
-		return nil, fmt.Errorf("shopify: store %q is pinned to Admin API %s but the mirror was generated from %s -- regenerate (see the quarterly bump) or repin the store",
+		// in a way no error message would explain. Permanent: every try is
+		// refused the same way until somebody regenerates or repins, so a
+		// retry would spend its tries on nothing.
+		return nil, memqlsync.Permanentf("shopify: store %q is pinned to Admin API %s but the mirror was generated from %s -- regenerate (see the quarterly bump) or repin the store",
 			store.ID, store.APIVersion, generated.APIVersion)
 	}
 	return c.admin.Do(ctx, storeWithVersion(store), token, document, operation, variables)

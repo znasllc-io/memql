@@ -9,6 +9,7 @@ query ShopifyFetchShopPolicy($id: ID!) {
     __typename
     ... on ShopPolicy {
       id
+      updatedAt
       body
       createdAt
       type

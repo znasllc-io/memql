@@ -60,7 +60,8 @@ export function entryFromRow(raw: Row): DeadLetterEntry {
   };
 }
 
-export function DeadLetterBand({ connector }: { connector: string }) {
+/** `mayAct`: Retry and Discard are a cluster owner's; anybody else sees the entries and no act. */
+export function DeadLetterBand({ connector, mayAct }: { connector: string; mayAct: boolean }) {
   const connection = useOsConnection();
 
   const [search, setSearch] = useState("");
@@ -132,7 +133,7 @@ export function DeadLetterBand({ connector }: { connector: string }) {
 
       <RecordList as="ul" label={`${connector} dead letters`}>
       {rows.map((entry) => (
-        <RecordRow key={entry.id} name={entry.conceptId} secondary={entry.rowRef} state={entry.action || "unstated"} tone="warn" actions={
+        <RecordRow key={entry.id} name={entry.conceptId} secondary={entry.rowRef} state={entry.action || "unstated"} tone="warn" actions={!mayAct ? undefined :
           confirming !== null && confirming.id === entry.id ? (
             <InPlaceAsk as="span" className="os-cluster-confirm">
               <span className="os-cluster-confirm-text">

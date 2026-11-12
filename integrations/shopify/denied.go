@@ -37,9 +37,10 @@ const maxDeniedPrunes = 4
 // selections this store's grant has already refused, and learns new ones.
 //
 // The three ways out: a clean answer; a not-granted, when the denial is the
-// root connection itself (the domain, not a field of it); or, when nothing
-// new can be removed, the partial answer the origin did return -- and a
-// permanent failure when it returned none.
+// root connection itself (the domain, not a field of it) or the fetched node
+// (the record, as Shopify refuses protected customer data on node(id:)); or,
+// when nothing new can be removed, the partial answer the origin did return,
+// with its errors -- and a permanent failure when it returned none.
 func (c *Connector) callWithGrant(ctx context.Context, store Store, spec *generated.TypeSpec, operation string, vars map[string]any) (*AdminResponse, error) {
 	for prunes := 0; ; prunes++ {
 		resp, err := c.adminCall(ctx, store, c.documentFor(store, spec), operation, vars)
@@ -51,14 +52,16 @@ func (c *Connector) callWithGrant(ctx context.Context, store Store, spec *genera
 			return nil, err
 		}
 		fields := ae.DeniedFields()
-		if deniesRoot(fields, spec) {
+		if deniesRoot(fields, spec) || ae.DeniesNode() {
 			return nil, fmt.Errorf("%w: %v", memqlsync.ErrNotGranted, ae)
 		}
 		if c.noteDeniedFields(store, spec, fields) && prunes < maxDeniedPrunes {
 			continue
 		}
 		if len(ae.Data) > 0 {
-			return &AdminResponse{Data: ae.Data, StatusCode: ae.StatusCode}, nil
+			// The partial answer carries its errors, so a caller that finds
+			// no object in it knows that was a refusal, not an absence.
+			return &AdminResponse{Data: ae.Data, Errors: ae.Errors, StatusCode: ae.StatusCode}, nil
 		}
 		return nil, memqlsync.Permanent(err)
 	}

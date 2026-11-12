@@ -557,8 +557,8 @@ builtin dateKeyInTimezone {
 
 // ---- The data-origins inventory (epic memql#4378) ----
 //
-// @sdk on this and on the four datasync builtins below: most builtins are
-// internal and stay out of the generated SDKs, but these five ARE the
+// @sdk on this and on the five datasync builtins below: most builtins are
+// internal and stay out of the generated SDKs, but these six ARE the
 // operator surface. The portal's Data origins page reads the inventory and
 // drives backfill / pause / retry / discard through them, and a typed
 // method is what keeps that page from hand-building call strings.
@@ -691,11 +691,12 @@ builtin providerFederationSet {
 
 // ---- The sync runtime (epic memql#4378) ----
 //
-// Four builtins over component/datasync. The first two are driven by the
-// automations in dsl/platform/automations.memql; the last two are what an
-// operator's Data origins page calls.
+// The builtins over component/datasync. The first four are driven by the
+// engine (the automations in dsl/platform/automations.memql, and a connector
+// queueing a backfill); the rest are what an operator's Data origins page
+// calls.
 //
-// THE FIRST TWO CARRY NO @sdk AND THAT KEEPS NOTHING OUT. @sdk has no engine
+// THE ENGINE'S CARRY NO @sdk AND THAT KEEPS NOTHING OUT. @sdk has no engine
 // effect, a builtin takes no @serverOnly, and any signed-in client's query can
 // name a builtin, so each refuses a call without internal origin in its
 // HANDLER. datasyncDispatchInbound is also handed the staged row's id and
@@ -704,7 +705,7 @@ builtin providerFederationSet {
 // called it chose the delivery a connector saw.
 
 @executor("integration.datasync.dispatchInbound")
-@description("Route one staged inbound request to the connector its source names, apply the returned mirror writes behind the version guard (a write older than the stored row's is recorded stale and skipped), and stamp the request processed or failed. Only the shipped automation reaches it: a call without internal origin is refused before anything is read. Reads the v1:platform:inboundRequest row by its id -- its source, body, headers, receipt time, verifying tier and signature verdict, absent fields included -- and takes none of them from an argument. A row whose source a connector claims is applied only when the connector verified it (verifiedBy='connector', or absent on a row that predates the field) and the receiver's signature check passed (signatureVerified=true); one another tier verified, or nothing verified, is stamped failed. A no-op for a source no connector serves, which is most of them.")
+@description("Route one staged inbound request to the connector its source names, apply the returned mirror writes behind the version guard (a write older than the stored row's is recorded stale and skipped), and stamp the request processed or failed. Only the shipped automation reaches it: a call without internal origin is refused before anything is read. Reads the v1:platform:inboundRequest row by its id -- its source, body, headers, receipt time, verifying tier and signature verdict, absent fields included -- and takes none of them from an argument. A row whose source a connector claims is applied only when the connector verified it (verifiedBy='connector', or absent on a row that predates the field) and the receiver's signature check passed (signatureVerified=true); one another tier verified, or nothing verified, is stamped failed. A no-op for a source no connector serves, which is most of them. When a connector could not say whether the source is its own -- it could not read its tenants -- the request is not left as it was: it is stamped failed, due again in a minute and with no try counted, and the retry pass places it.")
 builtin datasyncDispatchInbound {
   inboundRequestId  string!  @description("The v1:platform:inboundRequest row the inbound receiver staged. Its source, body, headers, receipt time, verifying tier and signature verdict are read from the row; no argument can supply them.")
 }
@@ -713,36 +714,87 @@ builtin datasyncDispatchInbound {
 @description("Sweep every mirrored domain whose own DomainSpec interval says it is due, healing drift through the same version-guarded apply path inbound uses. Skips paused domains and connectors that do not implement Reconcile.")
 builtin datasyncReconcileDomains { }
 
+// The two below are driven by the engine as well, so they carry no @sdk and
+// refuse a call without internal origin in their handler. A connector queues a
+// backfill through the first, under its own operator identity, when a store is
+// connected, its grant widens, or a boot finds a store whose past was never
+// read; the continueQueuedBackfills automation drives the second.
+
+@executor("integration.datasync.queueBackfill")
+@description("Queue one domain's backfill: write backfillStatus queued and an empty cursor on its v1:platform:syncState row, and run nothing -- the continuing pass starts it. A running backfill is left as it is unless restart is set; a complete one is queued again from the start. Only the engine reaches it: a call without internal origin is refused before anything is read.")
+builtin datasyncQueueBackfill {
+  connector     string!
+  conceptId     string!
+  partitionKey  string  @description("One partition of a partitioned connector (one store). Absent queues every partition the connector names; a partition named on a connector without partitions is refused.")
+  restart       boolean  @description("Also reset a running backfill to queued with an empty cursor, so it starts again from nothing: for an origin that no longer holds what the cursor counted, such as a store reconnected after an uninstall or a purge. An ordinary queue leaves a running backfill alone.")
+}
+
+@executor("integration.datasync.continueBackfills")
+@description("Continue every queued or running backfill. One pass works in rounds for four minutes: in each round every partition of each bound connector that has a backfill running or queued advances one domain by one page budget -- the one running, else the first queued -- so one store runs one backfill at a time and its domains follow one another within the pass. A round in which every partition only waited on its origin is followed by a ten-second pause. Leaves paused domains alone; a domain the origin refuses is recorded with the reason and leaves the queue. Only the engine reaches it: a call without internal origin is refused.")
+builtin datasyncContinueBackfills { }
+
+// Driven by the engine too: the retryFailedInboundDeliveries automation runs it
+// every minute, so it carries no @sdk and refuses a call without internal origin
+// in its handler.
+@executor("integration.datasync.retryInbound")
+@description("Try again the failed inbound deliveries whose next try has come: one page of inboundRequestsDueForRetry, each row claimed behind its row version (a second pass that claims it first leaves it alone) and dispatched as dispatchInbound dispatches a staged row. A delivery gets four tries, 1, 5 and 30 minutes apart; a refusal no retry changes is not tried again. Refuses a call without internal origin.")
+builtin datasyncRetryInbound { }
+
+// A connector drives this one, as the operator and with internal origin: one
+// page when a person resumes one of its stores, and on every pass of its watch
+// for every store that ingests. It carries no @sdk. Its handler admits that
+// call and a cluster owner, and refuses anybody else.
+@executor("integration.datasync.returnHeldInbound")
+@description("Put the held inbound deliveries of one source back in line: a delivery of that source a connector would not apply while its store's recording was paused -- failed, with no next try and the pause as its reason -- has its tries set to none and is due now, so the retry pass works it within a minute. A delivery whose store is still paused is held again. One call moves at most `limit` deliveries, five thousand when no limit is named, and answers how many it moved and whether it stopped at that bound; with nothing held it is one read and no write. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.")
+builtin datasyncReturnHeldInbound {
+  source  string!  @description("The inbound source whose held deliveries go back in line, as the staged rows name it (for Shopify, shopify-<store>).")
+  limit   int      @description("The most deliveries this call moves, from 1 to 5000. Left out, 5000.")
+}
+
+// The five below are the operator's sync acts, behind Cluster > Data's buttons.
+// They are @sdk with no @requiresCapability, so nothing ranks a caller before
+// the handler runs: each handler admits a cluster owner or internal origin (a
+// connector acting as the operator, an automation) and refuses anybody else.
 @sdk
 @executor("integration.datasync.startBackfill")
-@description("Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. Operator-driven; nothing schedules it.")
+@description("Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. With restart, start it again from nothing first. Operator-driven; nothing schedules it. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.")
 builtin datasyncStartBackfill {
-  connector  string!
-  conceptId  string!
+  connector     string!
+  conceptId     string!
+  partitionKey  string  @description("One partition of a partitioned connector (one store). Absent backfills every partition the connector names, each from its own cursor.")
+  restart       boolean  @description("Start the backfill again from nothing: reset its row to queued with an empty cursor, then run it. For a backfill whose cursor no longer leads anywhere, such as a failed one whose download link expired. Refused while the backfill is running, and for a partitioned connector without a partition.")
 }
 
 @sdk
 @executor("integration.datasync.setSyncPaused")
-@description("Pause or resume one domain: stops its backfill, its reconciliation and its outbox drain, without unregistering the connector or changing any declaration.")
+@description("Pause or resume one domain: stops its backfill and its reconciliation, without unregistering the connector or changing any declaration. It does not hold changes waiting to be pushed to the origin: the outbound drain does not read the pause. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.")
 builtin datasyncSetSyncPaused {
-  connector  string!
-  conceptId  string!
-  paused     boolean!
+  connector     string!
+  conceptId     string!
+  partitionKey  string  @description("The one partition of a partitioned connector (one store) to pause or resume; its pause is its own.")
+  paused        boolean!
 }
 
 @sdk
 @executor("integration.datasync.retryOutboxEntry")
-@description("Return one DEAD-lettered outbox entry to the queue with its attempts reset. Refuses an entry that is not dead: a pending or failed one is still the drain worker's, and acting on it would race a delivery in flight.")
+@description("Return one DEAD-lettered outbox entry to the queue with its attempts reset. Refuses an entry that is not dead: a pending or failed one is still the drain worker's, and acting on it would race a delivery in flight. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.")
 builtin datasyncRetryOutboxEntry {
   entryId  string!
 }
 
 @sdk
 @executor("integration.datasync.discardOutboxEntry")
-@description("Discard one DEAD-lettered outbox entry: the operator has decided this change will never be delivered. The row survives as audit history carrying the reason. Refuses an entry that is not dead.")
+@description("Discard one DEAD-lettered outbox entry: the operator has decided this change will never be delivered. The row survives as audit history carrying the reason. Refuses an entry that is not dead. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.")
 builtin datasyncDiscardOutboxEntry {
   entryId  string!
   reason   string
+}
+
+@sdk
+@executor("integration.datasync.requeueInbound")
+@description("Put the given-up inbound deliveries of one source back in line: every failed delivery of that source that used its four tries has its tries set back to none and is due now, so the retry pass tries it again within a minute. A delivery still waiting for its next try is left alone. For a cluster owner or the engine's own call (internal origin): anybody else is refused before anything is read.")
+builtin datasyncRequeueInbound {
+  source  string!  @description("The inbound source whose given-up deliveries go back in line, as the staged rows name it (for Shopify, shopify-<store>).")
 }
 
 // ---- Pulling a model onto one of your machines (epic memql#5103) ----

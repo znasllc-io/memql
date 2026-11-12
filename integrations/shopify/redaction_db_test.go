@@ -29,8 +29,12 @@ import (
 // The second claim is what SURVIVES. Redaction keeps the commercial facts --
 // quantities, totals, dates -- because the merchant's books are not the
 // customer's personal data and destroying them is a different compliance
-// failure. That is a property of the jsonb_set list, and it is asserted here
-// rather than trusted.
+// failure. That is a property of the policy (erasure_fields.go), and it is
+// asserted here rather than trusted.
+//
+// These rows are seeded by SQL, with a history at times of the test's own
+// choosing. The erasure against rows the mirror itself wrote, and everything
+// about what it reaches, is erasure_db_test.go.
 
 const redactTestStore = "dbtest-acme"
 
@@ -129,10 +133,8 @@ func TestRedactCustomerScrubsEveryVersionAndKeepsTheCommercialFacts(t *testing.T
 	}
 
 	h := newHarness(t)
-	h.conn.WithDatabase(func() *sql.DB { return db })
-	store := Store{ID: redactTestStore, Domain: "acme.myshopify.com"}
-
-	if _, err := h.conn.RedactCustomer(context.Background(), store, customerGID); err != nil {
+	h.conn.WithDatabase(func() *sql.DB { return db }).WithMaintenanceSession(privacySessionOf(db))
+	if _, err := h.conn.RedactCustomer(context.Background(), redactTestStore, customerGID, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -141,10 +143,19 @@ func TestRedactCustomerScrubsEveryVersionAndKeepsTheCommercialFacts(t *testing.T
 		t.Fatalf("redaction changed the version count to %d -- it rewrites history, it does not delete it", len(after))
 	}
 	for i, payload := range after {
-		for _, field := range []string{"email", "phone", "name", "billingAddress"} {
+		for _, field := range []string{"email", "phone"} {
 			if got := payload[field]; got != RedactionMarker {
 				t.Errorf("version %d kept %s = %v, want %q", i, field, got, RedactionMarker)
 			}
+		}
+		// An object is not left holding a string: its key is removed, and a
+		// typed read answers null for it (ruling 81).
+		if got, present := payload["billingAddress"]; present {
+			t.Errorf("version %d kept billingAddress = %v, want the key removed", i, got)
+		}
+		// The order's number is the sale's, not the person's.
+		if got := payload["name"]; got != "#1001" {
+			t.Errorf("version %d lost the order's number: %v", i, got)
 		}
 		// WHAT SURVIVES. The opaque GID stays so the row is still
 		// attributable to a customer record Shopify has itself redacted,
@@ -164,10 +175,10 @@ func TestRedactCustomerScrubsEveryVersionAndKeepsTheCommercialFacts(t *testing.T
 	}
 }
 
-// A field the concept does not carry must be left ALONE rather than invented.
-// create_missing=false on every jsonb_set is what makes that true, and
-// without it a redaction would add a dozen "[redacted]" keys to every row of
-// every concept it touched.
+// A field the row does not carry must be left ALONE rather than invented. The
+// scrub rebuilds a payload from the keys it already has, so it can take a key
+// away and never add one; a redaction that set every scrubbed field would add
+// a dozen "[redacted]" keys to every row it touched.
 func TestRedactionInventsNoFields(t *testing.T) {
 	db := openTestDB(t, "customers/redact invents no fields (memql#4395)")
 	if db == nil {
@@ -179,8 +190,8 @@ func TestRedactionInventsNoFields(t *testing.T) {
 
 	before := payloadsFor(t, db, rowID)
 	h := newHarness(t)
-	h.conn.WithDatabase(func() *sql.DB { return db })
-	if _, err := h.conn.RedactCustomer(context.Background(), Store{ID: redactTestStore}, customerGID); err != nil {
+	h.conn.WithDatabase(func() *sql.DB { return db }).WithMaintenanceSession(privacySessionOf(db))
+	if _, err := h.conn.RedactCustomer(context.Background(), redactTestStore, customerGID, nil); err != nil {
 		t.Fatal(err)
 	}
 	after := payloadsFor(t, db, rowID)
@@ -194,9 +205,9 @@ func TestRedactionInventsNoFields(t *testing.T) {
 	}
 }
 
-// A customer the row does not mention must not be scrubbed by somebody
-// else's request. The LIKE on the whole payload is what scopes it, and this
-// is the test that keeps that scoping honest.
+// A customer the row does not name must not be scrubbed by somebody else's
+// request. The scope is what holds that (erasureScopeOf), and this is the
+// test that keeps it honest.
 func TestRedactionLeavesAnotherCustomersRowsAlone(t *testing.T) {
 	db := openTestDB(t, "customers/redact is scoped to one customer (memql#4395)")
 	if db == nil {
@@ -206,8 +217,8 @@ func TestRedactionLeavesAnotherCustomersRowsAlone(t *testing.T) {
 	seedVersionedOrder(t, db, rowID, "gid://shopify/Customer/9993")
 
 	h := newHarness(t)
-	h.conn.WithDatabase(func() *sql.DB { return db })
-	if _, err := h.conn.RedactCustomer(context.Background(), Store{ID: redactTestStore}, "gid://shopify/Customer/OTHER"); err != nil {
+	h.conn.WithDatabase(func() *sql.DB { return db }).WithMaintenanceSession(privacySessionOf(db))
+	if _, err := h.conn.RedactCustomer(context.Background(), redactTestStore, "gid://shopify/Customer/777000999", nil); err != nil {
 		t.Fatal(err)
 	}
 	for i, payload := range payloadsFor(t, db, rowID) {
@@ -247,7 +258,7 @@ func TestPurgeStoreRemovesEveryVersionAndItsSyncState(t *testing.T) {
 	})
 
 	h := newHarness(t)
-	h.conn.WithDatabase(func() *sql.DB { return db })
+	h.conn.WithDatabase(func() *sql.DB { return db }).WithMaintenanceSession(privacySessionOf(db))
 	removed, err := h.conn.PurgeStore(ctx, Store{ID: redactTestStore, Domain: "acme.myshopify.com"})
 	if err != nil {
 		t.Fatal(err)
@@ -272,5 +283,55 @@ func TestPurgeStoreRemovesEveryVersionAndItsSyncState(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(h.engine.callsTo("markStoreRedacted"), " "), "redactedAt") {
 		t.Error("markStoreRedacted carried no timestamp")
+	}
+}
+
+// A store's health rows are partitions of the mirror: they carry the store as
+// partitionKey and no storeId. The purge removes them too, so a reinstall
+// starts every backfill from nothing, and leaves another store's alone.
+func TestAPurgedStoreHasNoSyncStateRowsLeftPartitionedOnesIncluded(t *testing.T) {
+	db := openTestDB(t, "shop/redact purge of partitioned sync state")
+	if db == nil {
+		return
+	}
+	ctx := context.Background()
+	seed := func(id, partition string) {
+		t.Helper()
+		payload, _ := json.Marshal(map[string]any{
+			"connector": ConnectorName, "partitionKey": partition, "conceptId": generated.ConceptID("order"),
+			"direction": "inbound", "backfillStatus": "running", "backfillCursor": "c-4",
+		})
+		for _, at := range []time.Time{time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC), time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)} {
+			if _, err := db.ExecContext(ctx,
+				`INSERT INTO "MemoryNodes" (id, "createdAt", "createdBy", concept, type, schema, payload)
+				 VALUES ($1, $2, $3, 'v1:platform:syncState', 'object', '{"type":"object"}'::jsonb, $4::jsonb)
+				 ON CONFLICT (id, "createdAt") DO UPDATE SET payload = EXCLUDED.payload`,
+				id, at, "system:datasync", string(payload)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE id = $1`, id) })
+	}
+	mine, other := "syn-part-"+redactTestStore, "syn-part-other-"+redactTestStore
+	seed(mine, redactTestStore)
+	seed(other, "store-b")
+
+	h := newHarness(t)
+	h.conn.WithDatabase(func() *sql.DB { return db }).WithMaintenanceSession(privacySessionOf(db))
+	if _, err := h.conn.PurgeStore(ctx, Store{ID: redactTestStore, Domain: "acme.myshopify.com"}); err != nil {
+		t.Fatal(err)
+	}
+	count := func(id string) int {
+		var n int
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM "MemoryNodes" WHERE id = $1`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := count(mine); n != 0 {
+		t.Errorf("%d version(s) of the store's partitioned sync state survived the purge: a reinstall would resume at the old cursor", n)
+	}
+	if n := count(other); n != 2 {
+		t.Errorf("another store's sync state lost %d of its 2 versions to this store's purge", 2-n)
 	}
 }

@@ -2672,7 +2672,30 @@ QueryClient.prototype.companyLocationNoteFor = function (this: QueryClient, args
   return this.executeNamed("companyLocationNoteFor", buildCompanyLocationNoteFor(args), opts);
 };
 
-/** Privacy jobs whose hold has elapsed. The read the hourly runner makes. */
+/** One privacy job by its row id, with the row's version. What the connector reads before it writes a job's row: a request that lands on a job, and the runner when it takes one. */
+// Bound concept: v1:shopify:complianceJob (machine-readable: BoundConcepts["complianceJobById"] in generated_concepts.ts).
+export interface ComplianceJobByIdArgs {
+  jobId: string;
+}
+
+export function buildComplianceJobById(args: ComplianceJobByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("jobId: " + renderMemQLValue(args.jobId));
+  return "query complianceJobById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    complianceJobById(args: ComplianceJobByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.complianceJobById = function (this: QueryClient, args: ComplianceJobByIdArgs = {} as ComplianceJobByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("complianceJobById", buildComplianceJobById(args), opts);
+};
+
+/** Privacy jobs that are due. The read the hourly runner makes, page by page.
+Three kinds of job, all of them only once their dueAt has come: one that is waiting (for its hold, or for the second pass of its erasure); one that failed, which is run again at every run until it is done; and a customers/redact job that is done and carries no scrubbedAt. That last was recorded done by a version whose erasure left a customer's email address and phone number behind and never reached an order's children, so it is made again, once: its first pass under this version sets scrubbedAt. */
 // Bound concept: v1:shopify:complianceJob (machine-readable: BoundConcepts["complianceJobsDue"] in generated_concepts.ts).
 export interface ComplianceJobsDueArgs {
   asOf: string;
@@ -2692,6 +2715,30 @@ declare module "./query.js" {
 
 QueryClient.prototype.complianceJobsDue = function (this: QueryClient, args: ComplianceJobsDueArgs = {} as ComplianceJobsDueArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("complianceJobsDue", buildComplianceJobsDue(args), opts);
+};
+
+/** A store's privacy jobs that are failed and were due before a given time, oldest due first. The store's verdict reads its first page to say that a privacy request for the store could not be completed, how many, and since when; it asks for those due more than a day ago. */
+// Bound concept: v1:shopify:complianceJob (machine-readable: BoundConcepts["complianceJobsFailingForStore"] in generated_concepts.ts).
+export interface ComplianceJobsFailingForStoreArgs {
+  storeId: string;
+  dueBefore: string;
+}
+
+export function buildComplianceJobsFailingForStore(args: ComplianceJobsFailingForStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("dueBefore: " + renderMemQLValue(args.dueBefore));
+  return "query complianceJobsFailingForStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    complianceJobsFailingForStore(args: ComplianceJobsFailingForStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.complianceJobsFailingForStore = function (this: QueryClient, args: ComplianceJobsFailingForStoreArgs = {} as ComplianceJobsFailingForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("complianceJobsFailingForStore", buildComplianceJobsFailingForStore(args), opts);
 };
 
 /** Every privacy job for a store, newest first -- the audit view. */
@@ -2714,6 +2761,32 @@ declare module "./query.js" {
 
 QueryClient.prototype.complianceJobsForStore = function (this: QueryClient, args: ComplianceJobsForStoreArgs = {} as ComplianceJobsForStoreArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("complianceJobsForStore", buildComplianceJobsForStore(args), opts);
+};
+
+/** The privacy jobs of one topic for one customer of one store, newest first. A customer's erasure reads her data requests through it, to remove the exports they filed: each such job says what it filed (exportId). */
+// Bound concept: v1:shopify:complianceJob (machine-readable: BoundConcepts["complianceJobsOfCustomer"] in generated_concepts.ts).
+export interface ComplianceJobsOfCustomerArgs {
+  storeId: string;
+  topic: string;
+  customerGid: string;
+}
+
+export function buildComplianceJobsOfCustomer(args: ComplianceJobsOfCustomerArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("topic: " + renderMemQLValue(args.topic));
+  parts.push("customerGid: " + renderMemQLValue(args.customerGid));
+  return "query complianceJobsOfCustomer(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    complianceJobsOfCustomer(args: ComplianceJobsOfCustomerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.complianceJobsOfCustomer = function (this: QueryClient, args: ComplianceJobsOfCustomerArgs = {} as ComplianceJobsOfCustomerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("complianceJobsOfCustomer", buildComplianceJobsOfCustomer(args), opts);
 };
 
 /** One recipe by id, gated to its owner. Backs running a recipe: the selectors it holds are resolved under the caller's own actor, so a recipe can never widen what its runner may read. */
@@ -4672,6 +4745,75 @@ declare module "./query.js" {
 
 QueryClient.prototype.inboundRequestsByStatus = function (this: QueryClient, args: InboundRequestsByStatusArgs = {} as InboundRequestsByStatusArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("inboundRequestsByStatus", buildInboundRequestsByStatus(args), opts);
+};
+
+/** The failed deliveries whose next try has come, least recently written first (the sort is the latest version's creation time, which every claim and stamp moves): what the datasync retry pass (retryFailedInboundDeliveries) works each minute. A row with no nextAttemptAt -- refused for a reason no retry changes -- and a row at four tries are never answered. One bounded page; the next minute's pass takes the rest. The full shape, because a retry needs the body.
+Read through the failed-delivery lookup (memory_nodes_inbound_failed_lookup_idx), which the `status == "failed"` conjunct engages: the read enumerates the deliveries that ever failed, never the inbox. */
+// Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["inboundRequestsDueForRetry"] in generated_concepts.ts).
+export interface InboundRequestsDueForRetryArgs {
+  asOf: string;
+}
+
+export function buildInboundRequestsDueForRetry(args: InboundRequestsDueForRetryArgs): string {
+  const parts: string[] = [];
+  parts.push("asOf: " + renderMemQLValue(args.asOf));
+  return "query inboundRequestsDueForRetry(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    inboundRequestsDueForRetry(args: InboundRequestsDueForRetryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.inboundRequestsDueForRetry = function (this: QueryClient, args: InboundRequestsDueForRetryArgs = {} as InboundRequestsDueForRetryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("inboundRequestsDueForRetry", buildInboundRequestsDueForRetry(args), opts);
+};
+
+/** The failed deliveries that used their four tries, most recently written first, of one source when one is named: what an operator puts back in line with datasyncRequeueInbound. Without the body. Read through the failed-delivery lookup, as inboundRequestsDueForRetry is. */
+// Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["inboundRequestsGivenUp"] in generated_concepts.ts).
+export interface InboundRequestsGivenUpArgs {
+  source?: string;
+}
+
+export function buildInboundRequestsGivenUp(args: InboundRequestsGivenUpArgs): string {
+  const parts: string[] = [];
+  if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
+  return "query inboundRequestsGivenUp(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    inboundRequestsGivenUp(args: InboundRequestsGivenUpArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.inboundRequestsGivenUp = function (this: QueryClient, args: InboundRequestsGivenUpArgs = {} as InboundRequestsGivenUpArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("inboundRequestsGivenUp", buildInboundRequestsGivenUp(args), opts);
+};
+
+/** The HELD deliveries of one source, least recently written first: failed, with no next try, and their lastError exactly the reason named. The reason is the connector contract's own sentence for a delivery of a store whose recording is paused; the datasync dispatcher writes it as it is, with the try not counted, and nothing else writes it. Such a row is answered by neither inboundRequestsDueForRetry (it has no next try) nor inboundRequestsGivenUp (its tries are below four): it waits, and datasyncReturnHeldInbound puts what this answers back in line when the store resumes. Without the body. Read through the failed-delivery lookup, as both of those are. */
+// Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["inboundRequestsHeld"] in generated_concepts.ts).
+export interface InboundRequestsHeldArgs {
+  source: string;
+  reason: string;
+}
+
+export function buildInboundRequestsHeld(args: InboundRequestsHeldArgs): string {
+  const parts: string[] = [];
+  parts.push("source: " + renderMemQLValue(args.source));
+  parts.push("reason: " + renderMemQLValue(args.reason));
+  return "query inboundRequestsHeld(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    inboundRequestsHeld(args: InboundRequestsHeldArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.inboundRequestsHeld = function (this: QueryClient, args: InboundRequestsHeldArgs = {} as InboundRequestsHeldArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("inboundRequestsHeld", buildInboundRequestsHeld(args), opts);
 };
 
 /** Returns the invitation with the given id. Zero or one result. */
@@ -13140,6 +13282,28 @@ QueryClient.prototype.surfacesForOwner = function (this: QueryClient, args: Surf
   return this.executeNamed("surfacesForOwner", buildSurfacesForOwner(args), opts);
 };
 
+/** One domain's health by its row id -- what the runtime reads. By id, not by its fields: the id is derived from (concept, connector, direction) and the partition, and a row written before partitions has no partitionKey, so matching an absent field against "" is not a rule to rely on. */
+// Bound concept: v1:platform:syncState (machine-readable: BoundConcepts["syncStateById"] in generated_concepts.ts).
+export interface SyncStateByIdArgs {
+  stateId: string;
+}
+
+export function buildSyncStateById(args: SyncStateByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("stateId: " + renderMemQLValue(args.stateId));
+  return "query syncStateById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    syncStateById(args: SyncStateByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.syncStateById = function (this: QueryClient, args: SyncStateByIdArgs = {} as SyncStateByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("syncStateById", buildSyncStateById(args), opts);
+};
+
 /** Health for one (concept, connector, direction). Sorted newest-first because the row id is deterministic per domain, so the append-only history IS the health timeline and the caller wants its tip. */
 // Bound concept: v1:platform:syncState (machine-readable: BoundConcepts["syncStateFor"] in generated_concepts.ts).
 export interface SyncStateForArgs {
@@ -13166,15 +13330,17 @@ QueryClient.prototype.syncStateFor = function (this: QueryClient, args: SyncStat
   return this.executeNamed("syncStateFor", buildSyncStateFor(args), opts);
 };
 
-/** Every domain's health -- the Data origins page's health half. */
+/** Every domain's health -- the Data origins page's health half. `partitionKey` narrows to one tenant of a partitioned connector when given. */
 // Bound concept: v1:platform:syncState (machine-readable: BoundConcepts["syncStatesAll"] in generated_concepts.ts).
 export interface SyncStatesAllArgs {
   connector?: string;
+  partitionKey?: string;
 }
 
 export function buildSyncStatesAll(args: SyncStatesAllArgs): string {
   const parts: string[] = [];
   if (args.connector !== undefined) parts.push("connector: " + renderMemQLValue(args.connector));
+  if (args.partitionKey !== undefined) parts.push("partitionKey: " + renderMemQLValue(args.partitionKey));
   return "query syncStatesAll(" + parts.join(", ") + ")";
 }
 

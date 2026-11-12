@@ -55,12 +55,30 @@ func TestInboundRetryWritesAndDispatchesOnlyChangedContent(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 	require.Equal(t, "processed", latestPayload(t, ctx, db, inboundRequestConcept, id)["status"])
+	// The body is create-only as the receiver's stamps are: a delivery is named
+	// by its signed payload, so a later write with another body is no change to
+	// the row, and it is neither written nor dispatched.
 	args["body"] = "changed body"
+	require.Equal(t, id, runMutation(t, ctx, eng, "stageInboundRequest", args))
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM "MemoryNodes" WHERE id=?`, id).Scan(&versions))
+	require.Equal(t, 2, versions, "a later body is not a change to the row")
+	require.Zero(t, writes, "a later body must not open the held work journal")
+	select {
+	case <-arrivals:
+		t.Fatal("a delivery whose only difference is a later body was redispatched")
+	case <-time.After(100 * time.Millisecond):
+	}
+	require.Equal(t, "original body", latestPayload(t, ctx, db, inboundRequestConcept, id)["body"])
+	// A field that is not create-only and changed IS a change: written once and
+	// dispatched once, with the product's status kept.
+	args["contentType"] = "text/plain"
 	runMutation(t, ctx, eng, "stageInboundRequest", args)
 	await()
 	require.Equal(t, 1, writes)
-	require.Equal(t, "changed body", latestPayload(t, ctx, db, inboundRequestConcept, id)["body"])
-	require.Equal(t, "processed", latestPayload(t, ctx, db, inboundRequestConcept, id)["status"])
+	row := latestPayload(t, ctx, db, inboundRequestConcept, id)
+	require.Equal(t, "text/plain", row["contentType"])
+	require.Equal(t, "original body", row["body"])
+	require.Equal(t, "processed", row["status"])
 }
 
 func TestUnchangedInboundComparisonPreservesLargeNumbers(t *testing.T) {

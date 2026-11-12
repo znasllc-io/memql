@@ -9,11 +9,11 @@ import { ShopifyConnections } from "../../src/modules/connections/ShopifyConnect
 import { captureShopifyReturn, takeShopifyReturn } from "../../src/apps/deployables/store/connectReturn";
 import { ALL_PARTS } from "../../src/apps/deployables/parts";
 import { siteFromRow } from "../../src/apps/deployables/rows";
-import { builtinReply, click, fakeConnection, rowsResult, SHOP, withSession } from "./harness";
+import { builtinReply, click, fakeConnection, rowsResult, SHOP, type as typeInto, withSession, type FakeSeed } from "./harness";
 
 const saved = { id: "connection", ownerUserId: "u-me", provider: "shopify", resourceId: "my-store", label: "my-store.myshopify.com", status: "active" };
-function fixture(connections = [saved], configured = false, development = false) {
-  const connection = fakeConnection({ sites: [SHOP], stores: [{ id: "my-store", domain: saved.label, adminTokenRef: "admin", storefrontTokenRef: "public", isDevelopment: development, plan: "Basic" }] });
+function fixture(connections = [saved], configured = false, development = false, seed: FakeSeed = {}) {
+  const connection = fakeConnection({ sites: [SHOP], stores: [{ id: "my-store", domain: saved.label, adminTokenRef: "admin", storefrontTokenRef: "public", isDevelopment: development, plan: "Basic" }], ...seed });
   let rows = [...connections];
   const original = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
   vi.spyOn(connection.query, "executeNamed").mockImplementation(async (name, call, options) => {
@@ -160,4 +160,49 @@ describe("shared Shopify connections", () => {
     expect(takeShopifyReturn()).toBeNull();
   });
   it("does not treat ordinary navigation as a failed connection", () => expect(captureShopifyReturn(window)).toBeNull());
+});
+
+// THE ALERT WAIT (U7): how long a store goes without recording before its
+// owner is emailed. A cluster owner's to set; the engine answers who may
+// (`maySet`) and refuses anything outside 1 to 1440 in its own words.
+describe("the alert wait in Settings > Shopify", () => {
+  const settings = () => render(withSession(<ShopifyConnections header={<h2>Settings</h2>} appId="settings" />));
+
+  it("shows the alert wait to a cluster owner and saves five", async () => {
+    const connection = fixture([saved], false, false, { storeAlertWait: { minutes: 30, isDefault: true, maySet: true } as never });
+    settings();
+    const minutes = await screen.findByLabelText("Minutes without recording") as HTMLInputElement;
+    await vi.waitFor(() => expect(minutes.value).toBe("30"));
+    const group = minutes.closest("section") as HTMLElement;
+    expect(group.textContent).toContain("Email a store's owner after");
+    expect(group.textContent).toContain("minutes without recording");
+    await typeInto(minutes, "5");
+    await click(within(group).getByRole("button", { name: "Save" }));
+    await vi.waitFor(() => expect(connection.callsNamed("shopifyStoreAlertWaitSet")).toHaveLength(1));
+    expect(connection.callsNamed("shopifyStoreAlertWaitSet")[0]).toBe("builtin shopifyStoreAlertWaitSet(minutes: 5)");
+    await vi.waitFor(() => expect(minutes.value).toBe("5"));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("draws no alert wait for somebody who may not set it", async () => {
+    const connection = fixture([saved], false, false, { storeAlertWait: { minutes: 30, isDefault: true, maySet: false } as never });
+    settings();
+    expect(await screen.findByRole("button", { name: `Manage Shopify store ${saved.label}` })).toBeTruthy();
+    await vi.waitFor(() => expect(connection.callsNamed("shopifyStoreAlertWait").length).toBeGreaterThan(0));
+    expect(screen.queryByText(/Email a store's owner/)).toBeNull();
+    expect(screen.queryByLabelText("Minutes without recording")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+  });
+
+  it("shows the engine's refusal for a wait of zero", async () => {
+    const connection = fixture([saved], false, false, { storeAlertWait: { minutes: 30, isDefault: true, maySet: true } as never });
+    settings();
+    const minutes = await screen.findByLabelText("Minutes without recording") as HTMLInputElement;
+    await vi.waitFor(() => expect(minutes.value).toBe("30"));
+    await typeInto(minutes, "0");
+    await click(within(minutes.closest("section") as HTMLElement).getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("shopify: the alert wait is a whole number of minutes from 1 to 1440")).toBeTruthy();
+    expect(connection.callsNamed("shopifyStoreAlertWaitSet")[0]).toBe("builtin shopifyStoreAlertWaitSet(minutes: 0)");
+    expect(minutes.value).toBe("0");
+  });
 });

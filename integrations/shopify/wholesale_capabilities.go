@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -36,6 +37,17 @@ import (
 // `failed` and final, a transient failure is `pending` and retried. So a
 // refusal comes back as {status: "refused", reason: ...} with a nil error,
 // and a nil error with status != "ok" is what the pack reads as a refusal.
+//
+// # Who may call them
+//
+// The declarations carry no @requiresCapability, and a builtin without one
+// has no rank floor: every signed-in caller of any role reaches the handler.
+// So each handler asks, before it reads anything but the store row and before
+// it sends anything to Shopify (wholesaleStore): the engine's own call, the
+// store's owner, or a cluster owner. Nobody else is told whether the store
+// exists. A caller who is none of the three gets an error, not a refused
+// reply: the pack records that as a push that has not landed, which is what
+// it is.
 
 // wholesaleCapabilities is appended to the connector's DSL-callable
 // surface by Capabilities().
@@ -48,7 +60,7 @@ func (i *Integration) wholesaleCapabilities() []memql.IntegrationCapability {
 				"ACTIVE catalog with a price list. Idempotent -- a second call for one " +
 				"application finds the first company rather than making a twin. Refuses " +
 				"BEFORE creating anything when the store is below Plus and already holds its " +
-				"three company-location catalogs.",
+				"three company-location catalogs. " + wholesaleCallers,
 			Handler: i.handleProvisionWholesale,
 			ArgsSchema: map[string]string{
 				"storeId":       "string - the store to provision on",
@@ -66,7 +78,7 @@ func (i *Integration) wholesaleCapabilities() []memql.IntegrationCapability {
 			Description: "End a B2B entitlement by setting its catalog to DRAFT. DELETES " +
 				"NOTHING: the company, its location, its contact, the price list and every " +
 				"order placed under them are untouched, because revoking trade terms is " +
-				"ending a discount rather than erasing a customer.",
+				"ending a discount rather than erasing a customer. " + wholesaleCallers,
 			Handler: i.handleRevokeWholesale,
 			ArgsSchema: map[string]string{
 				"storeId":   "string - the store",
@@ -78,7 +90,7 @@ func (i *Integration) wholesaleCapabilities() []memql.IntegrationCapability {
 			Description: "The plan-independent grant: add one tag to the buyer's customer " +
 				"record. Writes the tag and nothing else -- what the tag DOES is the " +
 				"merchant's own automatic discount, which this connector deliberately does " +
-				"not create on their behalf.",
+				"not create on their behalf. " + wholesaleCallers,
 			Handler: i.handleTagWholesaleCustomer,
 			ArgsSchema: map[string]string{
 				"storeId":    "string - the store",
@@ -88,7 +100,7 @@ func (i *Integration) wholesaleCapabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "untagWholesaleCustomer",
-			Description: "The plan-independent revoke: remove that one tag.",
+			Description: "The plan-independent revoke: remove that one tag. " + wholesaleCallers,
 			Handler:     i.handleUntagWholesaleCustomer,
 			ArgsSchema: map[string]string{
 				"storeId":    "string - the store",
@@ -101,7 +113,7 @@ func (i *Integration) wholesaleCapabilities() []memql.IntegrationCapability {
 			Description: "How many more company-location catalogs this store may hold: -1 on " +
 				"Plus, which is unlimited, and otherwise three minus what it already has. The " +
 				"read that lets an adapter REPORT the ceiling instead of discovering it at the " +
-				"fourth grant, in a merchant's live store.",
+				"fourth grant, in a merchant's live store. " + wholesaleCallers,
 			Handler: i.handleWholesaleCatalogHeadroom,
 			ArgsSchema: map[string]string{
 				"storeId": "string - the store to measure",
@@ -110,12 +122,40 @@ func (i *Integration) wholesaleCapabilities() []memql.IntegrationCapability {
 	}
 }
 
+// wholesaleCallers is who may call a wholesale builtin, as each description
+// says it.
+const wholesaleCallers = "For the engine's own call (internal origin), the store's owner or a cluster owner; " +
+	"anybody else is refused before the store is read or Shopify is asked."
+
+// wholesaleStore resolves the store a wholesale builtin names, FOR A CALLER
+// WHO MAY REACH IT, and is the first thing each of the five handlers does:
+// nothing but the store row is read before it answers, and nothing is sent to
+// Shopify.
+//
+//   - A call with INTERNAL ORIGIN is the engine's own: a trusted automation's
+//     step, whose actor is a reader. It is admitted first and resolved as it
+//     always was, a missing store named.
+//   - Anybody else must be THE STORE'S OWNER OR A CLUSTER OWNER
+//     (storeForCaller, mayActOnStore), and a caller who is neither is told the
+//     same thing whether or not the store exists.
+//
+// The wholesale pack reaches these under whatever context its own caller has,
+// so a person approving an application who neither owns the store nor the
+// cluster is refused here. ONE FUNCTION, so that narrowing the engine's arm to
+// the pack's own stamped call is a change to this function alone.
+func (c *Connector) wholesaleStore(ctx context.Context, storeID, builtin string) (Store, error) {
+	if auth.OriginFromContext(ctx).IsInternal() {
+		return c.resolveStoreArg(ctx, storeID)
+	}
+	return c.storeForCaller(ctx, storeID, builtin, actRefusal, func(s Store) bool { return c.mayActOnStore(ctx, s) })
+}
+
 func (i *Integration) handleProvisionWholesale(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	c := i.connector
 	if c == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
-	store, err := c.resolveStoreArg(ctx, argString(args, "storeId"))
+	store, err := c.wholesaleStore(ctx, argString(args, "storeId"), "shopifyProvisionWholesale")
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +188,7 @@ func (i *Integration) handleRevokeWholesale(ctx context.Context, args map[string
 	if c == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
-	store, err := c.resolveStoreArg(ctx, argString(args, "storeId"))
+	store, err := c.wholesaleStore(ctx, argString(args, "storeId"), "shopifyRevokeWholesale")
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +213,7 @@ func (i *Integration) handleTagWholesaleCustomer(ctx context.Context, args map[s
 	if c == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
-	store, err := c.resolveStoreArg(ctx, argString(args, "storeId"))
+	store, err := c.wholesaleStore(ctx, argString(args, "storeId"), "shopifyTagWholesaleCustomer")
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +242,7 @@ func (i *Integration) handleUntagWholesaleCustomer(ctx context.Context, args map
 	if c == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
-	store, err := c.resolveStoreArg(ctx, argString(args, "storeId"))
+	store, err := c.wholesaleStore(ctx, argString(args, "storeId"), "shopifyUntagWholesaleCustomer")
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +265,7 @@ func (i *Integration) handleWholesaleCatalogHeadroom(ctx context.Context, args m
 	if c == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
-	store, err := c.resolveStoreArg(ctx, argString(args, "storeId"))
+	store, err := c.wholesaleStore(ctx, argString(args, "storeId"), "shopifyWholesaleCatalogHeadroom")
 	if err != nil {
 		return nil, err
 	}

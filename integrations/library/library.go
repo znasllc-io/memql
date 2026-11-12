@@ -52,6 +52,9 @@ const resultConcept = "integration:library:result"
 // Integration is the Library edit capability surface. Holds the engine
 // handle so it can re-enter Execute for the read-then-write dance.
 type Integration struct {
+	// maintain opens the engine's maintenance session, which
+	// libraryRemoveArtifact runs its statements on (remove_artifact.go).
+	maintain        func(context.Context) (*sql.Conn, func(), error)
 	engine          memql.IntegrationEngineAccess
 	authority       documentAuthority
 	reviewGoals     ReviewGoalOpener
@@ -133,6 +136,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "ownedTrainingLessons", Description: "Read bounded reviewed passages from the current work owner's taught Library files.", Handler: i.handleOwnedTrainingLessons, PreserveOrder: true},
 		{Name: "consultWorkTraining", Description: "Read reviewed lessons for a live work need and report indexing or retrieval gaps.", Handler: i.handleConsultWorkTraining},
 		{Name: "removeDocumentAnnotation", Description: "Remove your document feedback or personal note.", Handler: i.handleRemoveDocumentAnnotation},
+		{Name: "removeArtifact", Description: "Remove a generated output entirely, for the engine's own use.", Handler: i.handleRemoveArtifact},
 		{Name: "documentNotes", Description: "Read the caller’s personal notes.", Handler: i.handleDocumentNotes},
 		{Name: "addDocumentNote", Description: "Save a personal note, excluded from AI feedback.", Handler: i.handleAddDocumentNote},
 		{Name: "documentHistory", Description: "Read retained versions and branch provenance.", Handler: i.handleDocumentHistory},

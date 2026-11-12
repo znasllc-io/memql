@@ -284,6 +284,25 @@ func (e *AdminError) DeniedFields() []string {
 	return out
 }
 
+// DeniesNode reports an ACCESS_DENIED whose path is the fetched node itself
+// (["node"]): the origin refusing the record, not a field of it -- the shape
+// of Shopify's protected customer data refusal on node(id:). DeniedFields
+// names nothing for it, since `node` is the document's own structure.
+func (e *AdminError) DeniesNode() bool {
+	if e == nil {
+		return false
+	}
+	for _, err := range e.Errors {
+		if err.Code() != "ACCESS_DENIED" || len(err.Path) != 1 {
+			continue
+		}
+		if s, _ := err.Path[0].(string); s == "node" {
+			return true
+		}
+	}
+	return false
+}
+
 var deniedFieldRe = regexp.MustCompile(`Access denied for ([A-Za-z0-9_]+) field`)
 
 // AdminClient calls one deployment's stores. It is safe for concurrent use;

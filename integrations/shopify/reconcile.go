@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -46,49 +47,47 @@ const (
 // Reconcile implements sync.Connector: sweep one domain across every
 // ingesting store, healing as it goes.
 //
+// The runtime never calls it: the connector is partitioned, and a sweep runs
+// one store at a time through ReconcilePartition. It stays for the contract,
+// as a loop over Partitions that answers for the stores together.
+//
 // The contract's report carries COUNTS rather than writes, so the sweep
 // performs its own writes -- see mirror.go for why that is a local write
 // rather than the runtime's. `since` is the previous sweep's time, which
 // an updated_at domain narrows on and a re-list ignores.
 func (c *Connector) Reconcile(ctx context.Context, conceptID string, since time.Time) (memqlsync.ReconcileReport, error) {
-	spec := generated.Types[generated.ConceptFromID(conceptID)]
-	if spec == nil {
-		return memqlsync.ReconcileReport{}, memqlsync.NotImplemented(ConnectorName, "Reconcile of "+conceptID)
+	spec, err := reconcileSpec(conceptID)
+	if err != nil || spec == nil {
+		return memqlsync.ReconcileReport{}, err
 	}
-	if spec.Reconcile == generated.ReconcileNone {
-		// A child materialised with its parent, or a singleton. Not a
-		// failure and not a not-implemented: there is genuinely nothing
-		// to sweep, and the runtime records a clean pass.
-		return memqlsync.ReconcileReport{}, nil
-	}
-	stores, err := c.stores.Stores(ctx)
+	parts, err := c.Partitions(ctx)
 	if err != nil {
 		return memqlsync.ReconcileReport{}, err
 	}
 	var report memqlsync.ReconcileReport
 	var swept int
 	var missingScopes []string
-	var refused error
-	for _, store := range stores {
-		if !store.Ingests() {
+	var refused, notRequested error
+	for _, part := range parts {
+		store, err := c.ingestingStore(ctx, part)
+		if err != nil {
+			// Stopped ingesting since it was listed: not swept.
 			continue
 		}
-		if missing := scopesMissingFor(store, spec); len(missing) > 0 {
-			// The store was connected without any scope this domain reads
-			// under. Asking would get ACCESS_DENIED, as it did once per
-			// tick for 22 domains on one store; the answer is known here.
+		one, missing, err := c.sweepStore(ctx, store, spec, since)
+		switch {
+		case len(missing) > 0:
 			missingScopes = append(missingScopes, missing...)
 			continue
-		}
-		one, err := c.reconcileStore(ctx, store, spec, since)
-		if memqlsync.IsNotGranted(err) {
-			// The origin said what the recorded grant could not: this
-			// store does not have the domain. The other stores still get
-			// their sweep.
+		case memqlsync.IsNotRequested(err):
+			notRequested = err
+			continue
+		case memqlsync.IsNotGranted(err):
+			// This store does not have the domain. The other stores still
+			// get their sweep.
 			refused = err
 			continue
-		}
-		if err != nil {
+		case err != nil:
 			return report, err
 		}
 		swept++
@@ -97,14 +96,113 @@ func (c *Connector) Reconcile(ctx context.Context, conceptID string, since time.
 		report.Healed += one.Healed
 	}
 	if swept == 0 {
+		// Something a person can fix is said before what nobody asked for.
 		if len(missingScopes) > 0 {
 			return report, memqlsync.NotGranted(ConnectorName, uniqueSorted(missingScopes)...)
 		}
 		if refused != nil {
 			return report, refused
 		}
+		if notRequested != nil {
+			return report, notRequested
+		}
 	}
 	return report, nil
+}
+
+// reconcileSpec is the mirrored type a sweep of conceptID walks. A concept
+// this build does not mirror is not implemented; one with nothing to sweep --
+// a child materialised with its parent, or a singleton -- is nil with no
+// error, which the runtime records as a clean pass.
+func reconcileSpec(conceptID string) (*generated.TypeSpec, error) {
+	spec := generated.Types[generated.ConceptFromID(conceptID)]
+	if spec == nil {
+		return nil, memqlsync.NotImplemented(ConnectorName, "Reconcile of "+conceptID)
+	}
+	if spec.Reconcile == generated.ReconcileNone {
+		return nil, nil
+	}
+	return spec, nil
+}
+
+// sweepStore is one store's sweep of one domain, in the order its answer is
+// decided:
+//
+//  1. The store's connection never asks for any scope the domain reads
+//     under: nothing to grant and nothing to ask, so not requested.
+//  2. The store was connected without any scope the domain reads under:
+//     asking would get ACCESS_DENIED, as it did once per tick for 22 domains
+//     on one store, so the origin is not asked. The scopes the connection
+//     asks for -- the ones a person can approve -- come back as missing.
+//  3. The sweep itself. The origin's root refusal stays not granted when a
+//     person can fix it, and is not requested otherwise.
+func (c *Connector) sweepStore(ctx context.Context, store Store, spec *generated.TypeSpec, since time.Time) (memqlsync.ReconcileReport, []string, error) {
+	if !domainInConnection(store, spec) {
+		return memqlsync.ReconcileReport{}, nil, memqlsync.NotRequested(ConnectorName)
+	}
+	if missing := scopesMissingFor(store, spec); len(missing) > 0 {
+		return memqlsync.ReconcileReport{}, askedOf(store, spec.Scopes), nil
+	}
+	report, err := c.reconcileStore(ctx, store, spec, since)
+	if memqlsync.IsNotGranted(err) && !refusalIsFixable(store, err.Error()) {
+		return report, nil, memqlsync.NotRequested(ConnectorName)
+	}
+	return report, nil, err
+}
+
+// domainInConnection reports whether the store's own connection asks for any
+// scope the domain reads under (a write scope asked reaches its read). A
+// domain that names no scope is the origin's to answer, and inside.
+func domainInConnection(store Store, spec *generated.TypeSpec) bool {
+	if spec == nil || len(spec.Scopes) == 0 {
+		return true
+	}
+	return len(askedOf(store, spec.Scopes)) > 0
+}
+
+// askedOf is the scopes among `scopes` that the store's connection asks for.
+func askedOf(store Store, scopes []string) []string {
+	asked := grantIncludes(connectionScopes(store))
+	var out []string
+	for _, s := range scopes {
+		if asked[s] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// refusalIsFixable sorts Shopify's refusal of a domain's root. Two are
+// something a person can fix and stay not granted: the app has not declared
+// the protected customer data the domain carries, or the refusal names a
+// scope the connection asks for and the grant lacks. Every other root refusal
+// -- a scope the connection never asks for, a feature the store's plan does
+// not have -- is outside the connection.
+func refusalIsFixable(store Store, message string) bool {
+	if protectedDataRefusal(message) {
+		return true
+	}
+	scope := requiredScopeOf(message)
+	return scope != "" && grantIncludes(connectionScopes(store))[scope]
+}
+
+// requiredScopeRE reads the scope in Shopify's "Required access: `<scope>`
+// access scope" sentence.
+var requiredScopeRE = regexp.MustCompile("Required access: `([a-z_]+)` access scope")
+
+// requiredScopeOf is the scope a Shopify refusal names, or "".
+func requiredScopeOf(message string) string {
+	if m := requiredScopeRE.FindStringSubmatch(message); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// protectedDataRefusal reports whether a refusal is Shopify's protected
+// customer data gate: the app has not declared, or been approved for, the
+// customer data an object carries.
+func protectedDataRefusal(message string) bool {
+	return strings.Contains(message, "is not approved to access") || strings.Contains(message, "protected-customer-data")
 }
 
 // scopesMissingFor is the domain's scopes the store holds NONE of.
@@ -190,9 +288,25 @@ func (c *Connector) reconcileStore(ctx context.Context, store Store, spec *gener
 //
 // Tombstoning is NOT part of this mode, and that is not an oversight: an
 // `updated_at:>` filter cannot express "and tell me what you deleted". A
-// deletion is carried by the delete topic and, when that is lost, by the
-// domain's periodic full re-list -- which is why every updated_at domain
-// that can be deleted also carries delete topics.
+// deletion is carried by the delete topic, which is why every updated_at
+// domain that can be deleted carries delete topics. When that notice is
+// lost nothing in this mode finds it: a domain checked by last change is
+// never re-listed in full, so the record stays in the mirror as it was. It
+// is a stated limit of the mirror, not something a later sweep repairs.
+//
+// A SWEEP IN WHICH A WRITE FAILED IS NOT A CLEAN SWEEP (unwritten). Every row
+// is still healed that can be -- one row's failure does not stop the rest --
+// and the sweep then answers an error, so the runtime holds the watermark
+// where it was and the next sweep, at the domain's own cadence, reads the
+// same rows again.
+//
+// THE ROW BUDGET CUTS A SWEEP SHORT AND IT IS STILL RECORDED AS RUN. The
+// watermark could be moved only to the last row read if the rows came in
+// order of their last change, and they do not: the generated list operation
+// names no sortKey, so the origin answers in its own default order (the id
+// for most connections, processed_at for orders), and the last row read says
+// nothing about which changes are still unread. Ordering the listing is the
+// generator's to do.
 func (c *Connector) reconcileByUpdatedAt(ctx context.Context, store Store, spec *generated.TypeSpec, since time.Time) (memqlsync.ReconcileReport, error) {
 	var report memqlsync.ReconcileReport
 	if spec.ListQuery == "" || spec.ListOp == "" {
@@ -207,6 +321,7 @@ func (c *Connector) reconcileByUpdatedAt(ctx context.Context, store Store, spec 
 		filter = "updated_at:>'" + since.UTC().Format(time.RFC3339) + "'"
 	}
 	after := ""
+	failed := 0
 	for rows := 0; rows < relistRowCap; {
 		vars := map[string]any{"first": c.pageSizeFor(store, spec)}
 		if after != "" {
@@ -215,6 +330,8 @@ func (c *Connector) reconcileByUpdatedAt(ctx context.Context, store Store, spec 
 		if filter != "" {
 			vars["query"] = filter
 		}
+		// When this page was read: the read time every row on it carries.
+		readAt := c.now()
 		nodes, next, hasNext, err := c.listPage(ctx, store, spec, vars)
 		if err != nil {
 			return report, err
@@ -227,21 +344,66 @@ func (c *Connector) reconcileByUpdatedAt(ctx context.Context, store Store, spec 
 		}
 		for _, obj := range nodes {
 			report.Checked++
-			writes := mapObject(spec, store.ID, obj, "", c.now())
-			healed, _ := c.heal(ctx, writes)
+			if err := c.completeChildren(ctx, store, spec, obj); err != nil {
+				return report, err
+			}
+			writes := mapObject(spec, store.ID, obj, "", readAt)
+			healed, lost := c.heal(ctx, writes)
+			failed += lost
 			if healed > 0 {
 				report.Drifted++
 				report.Healed++
 			}
 		}
 		if !hasNext || next == "" {
-			return report, nil
+			return report, unwritten(failed)
 		}
 		after = next
 	}
 	c.logger.Warn("shopify: updated_at sweep hit the row budget",
 		"store", store.ID, "concept", spec.Concept, "rows", relistRowCap)
-	return report, nil
+	return report, unwritten(failed)
+}
+
+// unwritten is the failure of a sweep or a re-list that read rows the mirror
+// did not take: heal could not read or write them. It is worth another try,
+// at the domain's own cadence (memqlsync.WaitsCadence): the runtime records it
+// as the domain's error, stamps the attempt and leaves the watermark where it
+// was, so the next sweep reads those rows again. Not at the next tick: a row
+// the mirror refuses now is most likely refused then too, and a sweep repeated
+// every tick reads everything since the held watermark. A sweep that dropped
+// the count was recorded clean, and a change that could not be recorded read
+// as recorded.
+func unwritten(failed int) error {
+	switch failed {
+	case 0:
+		return nil
+	case 1:
+		return memqlsync.WaitsCadence(errors.New("shopify: 1 row read from the store could not be written to the mirror; the next check reads it again"))
+	}
+	return memqlsync.WaitsCadence(fmt.Errorf("shopify: %d rows read from the store could not be written to the mirror; the next check reads them again", failed))
+}
+
+// relistListsPartially names the full re-list domains whose origin listing
+// does not return every object the mirror may hold, and why. Tombstoning
+// is an argument from absence, valid only against a listing that would
+// have named the row, so these domains are healed by the walk and never
+// tombstoned by it; a deletion reaches them through a delete topic or not
+// at all. Every other full re-list domain is listed with no query, no date
+// floor and no status filter (relist sends first and after only).
+var relistListsPartially = map[string]string{
+	"fulfillmentOrder": "fulfillmentOrders lists open fulfillment orders only (includeClosed defaults to false), " +
+		"and only those the grant's fulfillment scopes reach",
+	"abandonedCheckout": "order data read under read_orders; without read_all_orders, which is not requested, " +
+		"Shopify answers recent order data only, so an older checkout is absent without being gone",
+	"tenderTransaction": "order data read under read_orders; without read_all_orders, which is not requested, " +
+		"Shopify answers recent order data only, so an older transaction is absent without being gone",
+	"sellingPlanGroup": "sellingPlanGroups may answer only the groups the calling app created, " +
+		"so a group another app made is absent without being gone",
+	"marketingActivity": "marketingActivities may answer only the activities the calling app created, " +
+		"so an activity another app made is absent without being gone",
+	"marketingEvent": "marketingEvents may answer only the events the calling app created, " +
+		"so an event another app made is absent without being gone",
 }
 
 // relist walks a whole domain and tombstones what the origin no longer
@@ -258,9 +420,18 @@ func (c *Connector) relist(ctx context.Context, store Store, spec *generated.Typ
 	if spec.ListQuery == "" || spec.ListOp == "" {
 		return report, nil
 	}
+	// When the listing began: the read time of every row it writes and every
+	// tombstone, on this engine's clock. A row a delivery read after this
+	// moment is not in the listing and not gone, and was read after it, so
+	// heal refuses the tombstone (memqlsync.Refuses).
+	begun := c.now()
 	seen := map[string]bool{}
 	after := ""
 	complete := false
+	// Rows the mirror did not take: the pass goes on, and answers them at its
+	// end (unwritten). Tombstoning does not wait on them -- a row that was
+	// listed is in `seen` whether or not its write landed.
+	failed := 0
 	for rows := 0; rows < relistRowCap; {
 		vars := map[string]any{"first": c.pageSizeFor(store, spec)}
 		if after != "" {
@@ -279,7 +450,11 @@ func (c *Connector) relist(ctx context.Context, store Store, spec *generated.Typ
 			if gid, ok := obj["id"].(string); ok {
 				seen[gid] = true
 			}
-			healed, _ := c.heal(ctx, mapObject(spec, store.ID, obj, "", c.now()))
+			if err := c.completeChildren(ctx, store, spec, obj); err != nil {
+				return report, err
+			}
+			healed, lost := c.heal(ctx, mapObject(spec, store.ID, obj, "", begun))
+			failed += lost
 			if healed > 0 {
 				report.Drifted++
 				report.Healed++
@@ -294,7 +469,10 @@ func (c *Connector) relist(ctx context.Context, store Store, spec *generated.Typ
 	if !complete {
 		c.logger.Warn("shopify: full re-list hit the page cap; not tombstoning",
 			"store", store.ID, "concept", spec.Concept, "rows", relistRowCap)
-		return report, nil
+		return report, unwritten(failed)
+	}
+	if _, partial := relistListsPartially[spec.Concept]; partial {
+		return report, unwritten(failed)
 	}
 
 	absent, err := c.liveRowsAbsentFrom(ctx, store, spec, seen)
@@ -302,32 +480,71 @@ func (c *Connector) relist(ctx context.Context, store Store, spec *generated.Typ
 		return report, err
 	}
 	for _, gid := range absent {
-		if err := c.writeMirror(ctx, tombstone(spec.Concept, store.ID, gid, c.now())); err != nil {
-			c.logger.Warn("shopify: could not tombstone an absent row",
-				"store", store.ID, "concept", spec.Concept, "gid", gid, "error", err)
-			continue
+		// heal logs a row it could not write; a tombstone it refused is a
+		// row written after the listing began.
+		healed, lost := c.heal(ctx, []memqlsync.MirrorWrite{tombstone(spec.Concept, store.ID, gid, begun)})
+		failed += lost
+		if healed > 0 {
+			report.Drifted++
+			report.Healed++
 		}
-		report.Drifted++
-		report.Healed++
 	}
-	return report, nil
+	return report, unwritten(failed)
 }
 
+// liveRowPageCap bounds the read of a domain's live mirror rows, in pages
+// of the generated read (100 rows, newest first). It is the re-list's own
+// row cap and one page over, so a domain the walk could list whole is read
+// whole; a mirror past it leaves its oldest rows untombstoned this pass,
+// which errs toward keeping a row.
+const liveRowPageCap = relistRowCap/100 + 1
+
 // liveRowsAbsentFrom lists the mirror's live GIDs for a domain and returns
-// the ones the origin walk did not produce.
+// the ones the origin walk did not produce. The generated read pages, newest
+// first, and the oldest rows are the likeliest to be gone, so it is read to
+// its end, the cursor riding the context as walk's does.
 func (c *Connector) liveRowsAbsentFrom(ctx context.Context, store Store, spec *generated.TypeSpec, seen map[string]bool) ([]string, error) {
 	var absent []string
-	res, err := c.engine.Execute(connectorContext(ctx), renderCall(spec.ForStoreFn, map[string]any{"storeId": store.ID}))
-	if err != nil {
-		return nil, fmt.Errorf("shopify: list mirrored %s: %w", spec.Concept, err)
-	}
-	for _, row := range memql.MaterializeRows(res) {
-		gid := mapString(row, "gid")
-		if gid == "" || seen[gid] {
-			continue
+	// operatorContext, not connectorContext: the generated mirror reads
+	// filter on actor.isClusterOwner, which a connector actor never is, so
+	// under its own identity the connector read none of the rows it wrote
+	// (F10). TestTheConnectorReadsBackTheMirrorRowsItWrote holds it.
+	base := operatorContext(ctx)
+	call := renderCall(spec.ForStoreFn, map[string]any{"storeId": store.ID})
+	cursor := ""
+	for page := 0; page < liveRowPageCap; page++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
-		absent = append(absent, gid)
+		pageCtx := base
+		if cursor != "" {
+			pageCtx = memql.ContextWithCursor(base, cursor)
+		}
+		res, err := c.engine.Execute(pageCtx, call)
+		if err != nil {
+			return nil, fmt.Errorf("shopify: list mirrored %s: %w", spec.Concept, err)
+		}
+		rows := memql.MaterializeRows(res)
+		for _, row := range rows {
+			gid := mapString(row, "gid")
+			if gid == "" || seen[gid] {
+				continue
+			}
+			absent = append(absent, gid)
+		}
+		next := ""
+		if res != nil {
+			if meta := res.GetMeta(); meta != nil {
+				next = strings.TrimSpace(meta.Cursor)
+			}
+		}
+		if next == "" || next == cursor || len(rows) == 0 {
+			return absent, nil
+		}
+		cursor = next
 	}
+	c.logger.Warn("shopify: the mirror holds more live rows than one tombstone pass reads; the oldest are kept",
+		"store", store.ID, "concept", spec.Concept, "pages", liveRowPageCap)
 	return absent, nil
 }
 

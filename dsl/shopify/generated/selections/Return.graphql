@@ -22,6 +22,24 @@ query ShopifyFetchShopifyReturn($id: ID!) {
       totalQuantity
       transactions(first: 25) { nodes { id } }
       reverseFulfillmentOrders(first: 25) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          order { id }
+          status
+          thirdPartyConfirmation { status }
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageShopifyReturnReverseFulfillmentOrders($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Return {
+      reverseFulfillmentOrders(first: 25, after: $after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           order { id }

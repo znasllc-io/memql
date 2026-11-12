@@ -2,6 +2,7 @@ package main
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -203,4 +204,166 @@ func TestRecordedUnionMembersAtTheDepthBoundKeepTheirLeaves(t *testing.T) {
 	if !strings.Contains(sel, "... on MoneyV2 { amount currencyCode }") {
 		t.Fatalf("Order.discountApplications.value lost its money member:\n%s", sel)
 	}
+}
+
+// EVERY DOCUMENT SELECTS ITS TYPE'S VERSION FIELD, at the object's own top
+// level: the fetch, the list, the page operation of every paged child and
+// every bulk operation, and each child nested in them whose type has a
+// version of its own. The mirror's guard refuses a write older than the row
+// it holds, and the version it compares is read from the fetched object
+// (originVersion); a document that does not ask for it leaves the connector
+// stamping a clock of its own instead -- the time it read the object, or
+// streamed a bulk line -- which is how an older bulk snapshot replaced a
+// newer delivery. The field is selection only: it is the row's version and
+// never a payload field (mapping.go keeps updatedAt out of Fields).
+func TestEveryDocumentSelectsItsTypesVersionField(t *testing.T) {
+	version, plans := recordedPlans(t)
+	set := NewPlanSet(plans)
+	checked := 0
+	expect := func(doc, what string, versionField string, path ...string) {
+		t.Helper()
+		fields, ok := selectionAt(doc, path...)
+		if !ok {
+			t.Errorf("%s: no selection at %q in:\n%s", what, path, doc)
+			return
+		}
+		checked++
+		if !slices.Contains(fields, versionField) {
+			t.Errorf("%s does not select %s at %q", what, versionField, path)
+		}
+	}
+	// children expects the version of each child nested at path whose type
+	// has one; bulk streams a connection through edges/node.
+	children := func(doc, what string, p *TypePlan, bulk bool, path ...string) {
+		t.Helper()
+		for _, ch := range p.Children {
+			child := set.ByType(ch.Type)
+			if child == nil || child.VersionField == "" {
+				continue
+			}
+			at := append(append([]string(nil), path...), ch.Connection)
+			switch {
+			case ch.List:
+			case bulk:
+				at = append(at, "edges", "node")
+			default:
+				at = append(at, "nodes")
+			}
+			expect(doc, what+" > "+ch.Connection, child.VersionField, at...)
+		}
+	}
+	for _, p := range plans {
+		doc := set.EmitSelectionDocument(version, p)
+		object := []string{"node(id: $id)", "... on " + p.GraphQLType}
+		if p.Entry.Singleton != "" {
+			object = []string{p.Entry.Singleton}
+		}
+		fetch := append([]string{"query ShopifyFetch" + title(p.Concept)}, object...)
+		if p.VersionField != "" {
+			expect(doc, "ShopifyFetch"+title(p.Concept), p.VersionField, fetch...)
+		}
+		children(doc, "ShopifyFetch"+title(p.Concept), p, false, fetch...)
+		if p.Entry.Query != "" {
+			list := []string{"query ShopifyList" + title(p.Concept), p.Entry.Query, "nodes"}
+			if p.VersionField != "" {
+				expect(doc, "ShopifyList"+title(p.Concept), p.VersionField, list...)
+			}
+			children(doc, "ShopifyList"+title(p.Concept), p, false, list...)
+		}
+		for _, ch := range p.Children {
+			name := pageOpName(p, ch)
+			child := set.ByType(ch.Type)
+			if name == "" || child == nil || child.VersionField == "" {
+				continue
+			}
+			expect(doc, name, child.VersionField, append(append([]string{"query " + name}, object...), ch.Connection, "nodes")...)
+		}
+		bulk, ops := set.EmitBulkDocuments(version, p)
+		for i, op := range ops {
+			root := []string{"query " + op, p.Entry.Query, "edges", "node"}
+			if p.VersionField != "" {
+				expect(bulk, op, p.VersionField, root...)
+			}
+			sub := *p
+			sub.Children = bulkBatch(p, i)
+			children(bulk, op, &sub, true, root...)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no document of the recorded fixture was checked, so this test no longer exercises the rule")
+	}
+}
+
+// bulkBatch is the children EmitBulkDocuments puts in its i-th operation.
+func bulkBatch(p *TypePlan, i int) []ChildPlan {
+	batches := [][]ChildPlan{nil}
+	used := 0
+	for _, ch := range p.Children {
+		last := len(batches) - 1
+		if !ch.List && used >= maxBulkConnections {
+			batches = append(batches, nil)
+			last++
+			used = 0
+		}
+		if !ch.List {
+			used++
+		}
+		batches[last] = append(batches[last], ch)
+	}
+	return batches[i]
+}
+
+// selectionAt reads the direct fields of the selection set a path of opening
+// lines leads to, in a document the generator emitted: one field per line, a
+// set opened by a line ending in "{" and closed by a line of "}". Each path
+// step matches the opening line's text up to its "{" -- exactly, or up to
+// the step's own "(" when the step names a field and its arguments differ.
+func selectionAt(doc string, path ...string) ([]string, bool) {
+	var stack []string
+	var fields []string
+	found := false
+	matches := func() bool {
+		if len(stack) != len(path) {
+			return false
+		}
+		for i, step := range path {
+			name := stack[i]
+			if name != step && !strings.HasPrefix(name, step+"(") && !strings.HasPrefix(name, step+" ") {
+				return false
+			}
+		}
+		return true
+	}
+	for _, raw := range strings.Split(doc, "\n") {
+		line := strings.TrimSpace(raw)
+		switch {
+		case line == "" || strings.HasPrefix(line, "#"):
+		case line == "}":
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		case strings.HasSuffix(line, "{"):
+			if matches() {
+				fields = append(fields, fieldName(line))
+			}
+			stack = append(stack, strings.TrimSpace(strings.TrimSuffix(line, "{")))
+			if matches() {
+				found = true
+			}
+		default:
+			if matches() {
+				fields = append(fields, fieldName(line))
+			}
+		}
+	}
+	return fields, found
+}
+
+// fieldName is a selection line's field: its text before any argument list
+// or nested selection.
+func fieldName(line string) string {
+	if i := strings.IndexAny(line, "( {"); i > 0 {
+		return line[:i]
+	}
+	return line
 }

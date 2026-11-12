@@ -2,12 +2,16 @@ package datasync
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 )
 
@@ -28,6 +32,9 @@ type fakeEngine struct {
 	// origin. Several of the runtime's writes are @serverOnly and the
 	// rendered text is identical with or without the stamp.
 	internal []bool
+	// fresh records, per call, whether its context asked for a fresh read
+	// (memql.ContextWithFreshRead), past the result cache.
+	fresh []bool
 	// rows answers a read whose rendered call STARTS WITH the key, so a
 	// test seeds `query outboxPending` without restating its arguments.
 	rows map[string][]map[string]any
@@ -44,6 +51,7 @@ func (f *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, q)
 	f.internal = append(f.internal, auth.OriginFromContext(ctx).IsInternal())
+	f.fresh = append(f.fresh, memql.FreshReadFromContext(ctx))
 	for needle, err := range f.failOn {
 		if strings.Contains(q, needle) {
 			return nil, err
@@ -93,6 +101,20 @@ func (f *fakeEngine) internalContaining(needle string) []bool {
 	return out
 }
 
+// freshContaining reports, for every recorded call carrying the substring,
+// whether that call's context asked for a fresh read.
+func (f *fakeEngine) freshContaining(needle string) []bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []bool
+	for i, c := range f.calls {
+		if strings.Contains(c, needle) {
+			out = append(out, f.fresh[i])
+		}
+	}
+	return out
+}
+
 // fakeConnector is a scriptable Connector. Every method answers from a
 // field the test sets, so a suite says what the origin does rather than
 // mocking a vendor API.
@@ -116,10 +138,18 @@ type fakeConnector struct {
 	backfillPages []memqlsync.BackfillPage
 	backfillErr   error
 	backfillSeen  []string
+	// duringBackfill runs inside Backfill, before the page is answered and
+	// outside the connector's lock, so a test can have another writer of
+	// the domain's row act while a page is in flight.
+	duringBackfill func(cursor string)
 
 	reconcileReport memqlsync.ReconcileReport
 	reconcileErr    error
 	reconcileSince  []time.Time
+	// duringReconcile runs inside Reconcile, outside the connector's lock, so
+	// a test can move its clock forward, or have another writer of the
+	// domain's row act, while a sweep is in flight.
+	duringReconcile func()
 
 	mu sync.Mutex
 }
@@ -143,6 +173,12 @@ func (c *fakeConnector) Apply(_ context.Context, req memqlsync.InboundRequest) (
 
 func (c *fakeConnector) Backfill(_ context.Context, conceptName, cursor string) (memqlsync.BackfillPage, error) {
 	c.mu.Lock()
+	during := c.duringBackfill
+	c.mu.Unlock()
+	if during != nil {
+		during(cursor)
+	}
+	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.backfillSeen = append(c.backfillSeen, cursor)
 	if c.backfillErr != nil {
@@ -158,8 +194,14 @@ func (c *fakeConnector) Backfill(_ context.Context, conceptName, cursor string) 
 
 func (c *fakeConnector) Reconcile(_ context.Context, _ string, since time.Time) (memqlsync.ReconcileReport, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.reconcileSince = append(c.reconcileSince, since)
+	during := c.duringReconcile
+	c.mu.Unlock()
+	if during != nil {
+		during()
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.reconcileReport, c.reconcileErr
 }
 
@@ -180,6 +222,167 @@ func (c *fakeConnector) propagateCount() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.propagateCalls)
+}
+
+// fakePartitioned is a fakeConnector that serves many tenants. It embeds
+// fakeConnector, so its SHARED Backfill and Reconcile still record into
+// backfillSeen and reconcileSince -- which is what lets a test say the
+// runtime never reached them. Each partition scripts its own report, error
+// and backfill pages, and records the `since` and cursors it was handed.
+type fakePartitioned struct {
+	*fakeConnector
+
+	partitions    []string
+	partitionsErr error
+
+	partReports map[string]memqlsync.ReconcileReport
+	partErrs    map[string]error
+	partSince   map[string][]time.Time
+	partPages   map[string][]memqlsync.BackfillPage
+	partCursors map[string][]string
+	partOrder   []string
+	// partBackfills is every backfill step asked for, as partition/concept,
+	// in order.
+	partBackfills []string
+}
+
+func newFakePartitioned(partitions ...string) *fakePartitioned {
+	return &fakePartitioned{
+		fakeConnector: mirrorConnector(),
+		partitions:    partitions,
+		partReports:   map[string]memqlsync.ReconcileReport{},
+		partErrs:      map[string]error{},
+		partSince:     map[string][]time.Time{},
+		partPages:     map[string][]memqlsync.BackfillPage{},
+		partCursors:   map[string][]string{},
+	}
+}
+
+func (p *fakePartitioned) Partitions(context.Context) ([]string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.partitions, p.partitionsErr
+}
+
+func (p *fakePartitioned) BackfillPartition(_ context.Context, partition, concept string, cursor string) (memqlsync.BackfillPage, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.partCursors[partition] = append(p.partCursors[partition], cursor)
+	p.partBackfills = append(p.partBackfills, partition+"/"+concept)
+	if err := p.partErrs[partition]; err != nil {
+		return memqlsync.BackfillPage{}, err
+	}
+	pages := p.partPages[partition]
+	if len(pages) == 0 {
+		return memqlsync.BackfillPage{Done: true}, nil
+	}
+	p.partPages[partition] = pages[1:]
+	return pages[0], nil
+}
+
+func (p *fakePartitioned) ReconcilePartition(_ context.Context, partition, _ string, since time.Time) (memqlsync.ReconcileReport, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.partSince[partition] = append(p.partSince[partition], since)
+	p.partOrder = append(p.partOrder, partition)
+	return p.partReports[partition], p.partErrs[partition]
+}
+
+// stateEngine is a fakeEngine that KEEPS the health rows: an upsertSyncState
+// or a setSyncPaused lands on its row, and syncStateById answers the row as
+// last written. A pass that continues a backfill over several calls reads
+// back what the call before it wrote, which the seeded fake cannot show.
+// Every call is still recorded by the fakeEngine it wraps.
+type stateEngine struct {
+	*fakeEngine
+	stateMu sync.Mutex
+	states  map[string]map[string]any
+	// loseFences makes that many health writes lose the row-version fence,
+	// as a write another writer overtook does on a real engine.
+	loseFences int
+}
+
+func newStateEngine() *stateEngine {
+	return &stateEngine{fakeEngine: newFakeEngine(), states: map[string]map[string]any{}}
+}
+
+func (s *stateEngine) Execute(ctx context.Context, q string) (any, error) {
+	res, err := s.fakeEngine.Execute(ctx, q)
+	if err != nil {
+		return res, err
+	}
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	if s.loseFences > 0 && (strings.HasPrefix(q, "mutation upsertSyncState(") || strings.HasPrefix(q, "mutation patchSyncState(")) {
+		s.loseFences--
+		return nil, fmt.Errorf("execute: %w", memql.ErrRowVersionChanged)
+	}
+	args := renderedArgs(q)
+	switch {
+	case strings.HasPrefix(q, "mutation upsertSyncState("), strings.HasPrefix(q, "mutation patchSyncState("):
+		id, _ := args["stateId"].(string)
+		row := s.states[id]
+		if row == nil {
+			row = map[string]any{"id": id}
+		}
+		for k, v := range args {
+			if k != "stateId" {
+				row[k] = v
+			}
+		}
+		s.states[id] = row
+	case strings.HasPrefix(q, "mutation setSyncPaused("):
+		id, _ := args["stateId"].(string)
+		if row := s.states[id]; row != nil {
+			row["paused"] = args["paused"]
+		}
+	case strings.HasPrefix(q, "query syncStateById("):
+		id, _ := args["stateId"].(string)
+		if row := s.states[id]; row != nil {
+			copied := map[string]any{}
+			for k, v := range row {
+				copied[k] = v
+			}
+			return []map[string]any{copied}, nil
+		}
+		return []map[string]any{}, nil
+	}
+	return res, nil
+}
+
+// row is one kept health row, or nil.
+func (s *stateEngine) row(id string) map[string]any {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return s.states[id]
+}
+
+// renderedArgRE reads one `name: value` of a rendered call: a JSON-quoted
+// string (call quotes through the parser's quoter), an integer or a boolean.
+var renderedArgRE = regexp.MustCompile(`(\w+): ("(?:[^"\\]|\\.)*"|-?\d+|true|false)`)
+
+// renderedArgs decodes the arguments of a call rendered by call().
+func renderedArgs(q string) map[string]any {
+	out := map[string]any{}
+	open := strings.IndexByte(q, '(')
+	if open < 0 {
+		return out
+	}
+	for _, m := range renderedArgRE.FindAllStringSubmatch(q[open:], -1) {
+		switch raw := m[2]; {
+		case strings.HasPrefix(raw, `"`):
+			var s string
+			if err := json.Unmarshal([]byte(raw), &s); err == nil {
+				out[m[1]] = s
+			}
+		case raw == "true" || raw == "false":
+			out[m[1]] = raw == "true"
+		default:
+			n, _ := strconv.Atoi(raw)
+			out[m[1]] = n
+		}
+	}
+	return out
 }
 
 // fakeWriter records mirror writes and answers stored versions from a
@@ -204,11 +407,14 @@ func (w *fakeWriter) WriteMirror(_ context.Context, _ string, mw memqlsync.Mirro
 	return nil
 }
 
-func (w *fakeWriter) StoredVersion(_ context.Context, spec memqlsync.DomainSpec, rowID string) (string, bool, error) {
+func (w *fakeWriter) StoredRow(_ context.Context, spec memqlsync.DomainSpec, rowID string) (StoredMirrorRow, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	v, ok := w.versions[spec.Concept+"|"+rowID]
-	return v, ok, nil
+	if !ok {
+		return StoredMirrorRow{}, nil
+	}
+	return StoredMirrorRow{Exists: true, Payload: map[string]any{spec.VersionField: v}}, nil
 }
 
 func (w *fakeWriter) writtenIDs() []string {

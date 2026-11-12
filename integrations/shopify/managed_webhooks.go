@@ -2,6 +2,7 @@ package shopify
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
@@ -57,10 +58,20 @@ func (c *Connector) managedInboundSource(ctx context.Context) (memqlsync.Inbound
 // `myshopify_domain`. The app-level endpoint may only touch this app's stores,
 // and only while the app can actually have signed the delivery
 // (managedAppSigning); Apply refuses the row with a reason before this runs.
-func (c *Connector) managedAppLevelStore(ctx context.Context, req memqlsync.InboundRequest) (Store, bool) {
-	client, _, ok := c.managedAppSigning(ctx)
-	if !ok {
-		return Store{}, false
+//
+// THREE ANSWERS (deliveryStore). Found false is definite: the app is not
+// configured, the topic is not one this endpoint serves, the body names no
+// shop or another one than its header, the list holds no such shop, or the
+// shop is another app's. An error is "could not tell": the app's
+// configuration or the store list could not be read. A privacy request is
+// delivered once, so the difference is whether it is tried again or lost.
+func (c *Connector) managedAppLevelStore(ctx context.Context, req memqlsync.InboundRequest) (Store, bool, error) {
+	client, secret, err := c.managedApp(ctx)
+	if err != nil {
+		return Store{}, false, fmt.Errorf("the managed app's configuration could not be read: %w", err)
+	}
+	if client == "" || secret == "" {
+		return Store{}, false, nil
 	}
 	topic := req.Topic
 	if topic == "" {
@@ -68,24 +79,24 @@ func (c *Connector) managedAppLevelStore(ctx context.Context, req memqlsync.Inbo
 	}
 	field := signedShopDomainField(topic)
 	if field == "" {
-		return Store{}, false
+		return Store{}, false, nil
 	}
 	obj, err := decodeJSONObject(string(req.Body))
 	if err != nil {
-		return Store{}, false
+		return Store{}, false, nil
 	}
 	domain, err := NormalizeShopDomain(firstString(obj, field))
 	if err != nil {
-		return Store{}, false
+		return Store{}, false, nil
 	}
 	if h := header(req, HeaderShopDomain); h != "" && !strings.EqualFold(h, domain) {
-		return Store{}, false
+		return Store{}, false, nil
 	}
-	store, ok := c.stores.ByDomain(ctx, domain)
-	if !ok {
-		return Store{}, false
+	store, found, err := c.findStore(ctx, func(s Store) bool { return strings.EqualFold(s.Domain, domain) })
+	if err != nil || !found {
+		return Store{}, false, err
 	}
-	return store, store.AppClientID == client
+	return store, store.AppClientID == client, nil
 }
 
 // signedShopDomainField names the body field an app-level topic's shop is

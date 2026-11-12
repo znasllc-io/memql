@@ -283,7 +283,16 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 202 -> 203: emailStatisticsRollupSweep, the five-minute fold of campaign
 // deliveries, engagement and consent events into the email statistics facts
 // (2026-11-08). One added, none removed; measured by the strict loader.
-const shippedAutomationCount = 203
+// 203 -> 204: continueQueuedBackfills, the five-minute pass that carries every
+// queued or running backfill on, in rounds, for four minutes (2026-11-11). One
+// added, none removed; measured by the strict loader.
+// 204 -> 205: retryFailedInboundDeliveries, the one-minute pass that tries
+// again the failed inbound deliveries whose next try has come (2026-11-11).
+// One added, none removed; measured by the strict loader.
+// 205 -> 206: watchShopifyStores, the five-minute pass that records every
+// store's verdict and tells its owner when it stops being recorded and when it
+// is back (2026-11-11). One added, none removed; measured by the strict loader.
+const shippedAutomationCount = 206
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

@@ -1,45 +1,130 @@
 @sdk
 @executor("integration.shopify.ensureSubscriptions")
-@description("Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health.")
+@description("Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health. For the scheduled automation or a cluster owner; anybody else is refused before anything runs.")
 builtin shopifyEnsureSubscriptions {
 }
 
 @sdk
 @executor("integration.shopify.runComplianceJobs")
-@description("Run the queued privacy jobs whose hold has elapsed: export a customer's data to the Library, scrub a redacted customer's PII across every version, purge a redacted shop's whole mirror. Every action is audited; shop/redact re-checks reachability first so a reverted uninstall does not cost the mirror.")
+@description("Run the privacy jobs that are due: export what the mirror holds on a customer to the store owner's Library (nothing, once she has been erased), erase a customer from every version of every row of the person and from the store's processed deliveries, purge a redacted shop's mirror with its sync state and its staged deliveries. Every erasure is made twice, an hour apart, and a job that fails is run again at every run until it is done. Every pass that ran is audited. A shop's purge reads the store as it is now: a store whose row records the uninstall is purged, and any other is asked first and purged only when the origin refuses the app outright, so a reverted uninstall does not cost the mirror; a purge that is skipped queues the store's backfills that have not started. The deliveries that asked for a job are deleted when it is done. For the scheduled automation or a cluster owner; anybody else is refused before anything runs.")
 builtin shopifyRunComplianceJobs {
 }
 
 @sdk
 
 @executor("integration.shopify.fetchProduct")
-@description("Read a mirrored Shopify product by GID or handle. Answers from the mirror, so it costs no Admin API call and no cost points. Tokens never appear in the reply.")
+@description("Read a mirrored Shopify product by GID or handle. Answers from the mirror, so it costs no Admin API call and no cost points. Tokens never appear in the reply. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.")
 builtin shopifyFetchProduct {
-  storeId  string
+  storeId  string  @description("The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.")
   id       string
   handle   string
 }
 
 @sdk
 @executor("integration.shopify.shopifyql")
-@description("Run an ad-hoc ShopifyQL analytics query for questions the mirror cannot answer. Requires read_reports and protected-customer-data Level 2 approval; refused below that with a reason naming the level, which Shopify's own 403 does not.")
+@description("Run an ad-hoc ShopifyQL analytics query for questions the mirror cannot answer. Requires read_reports and protected-customer-data Level 2 approval; refused below that with a reason naming the level, which Shopify's own 403 does not. For the store's owner or a cluster owner; anybody else is refused before Shopify is asked.")
 builtin shopifyql {
-  storeId  string
+  storeId  string  @description("The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.")
   query    string
 }
 
 @sdk
 @executor("integration.shopify.storeHealth")
-@description("Report every configured store's status, granted-versus-needed scopes, subscription reconcile time, cost-bucket state and per-domain sync state with drift counters. The read behind the portal's Stores page.")
+@description("Report the status, granted-versus-needed scopes, subscription reconcile time, cost-bucket state and per-domain sync state with drift counters of each store the caller may read: every store for a cluster owner or a caller who may read stores, a store's owner their own, anybody else none. The read behind the portal's Stores page.")
 builtin shopifyStoreHealth {
-  storeId  string
+  storeId  string  @description("One store. When omitted, every store the caller may read.")
+}
+
+/// One store's verdict (U6): whether it is being recorded, and when it is not, why and the one act
+/// that fixes each reason. Computed in the engine from the store row, its sync state and its
+/// given-up deliveries, so a screen draws it without a copy of the rules.
+///
+/// `state` is recording, starting, paused, needs attention or not connected, `since` when it began,
+/// `resumedAt` when the store last left paused or not connected (empty when it never has), and
+/// `connectedAt` when a connect last started its recording afresh (empty for a store connected before
+/// that was recorded). Each reason has a `code` (data_not_declared, approval_outdated, grant_lost,
+/// events_not_registered, check_failing, changes_not_recorded), one `sentence` for a person, and an
+/// `act` with its `actLabel` and `actUrl` (or none); `count` is a floor when `atLeast` is true. `outside` and `withheld` are plain words.
+/// `may.act` says whether the caller may take the acts. For the store's owner, a cluster owner, or a
+/// caller who may read stores; anyone else is refused before the store's state is read.
+@sdk
+@executor("integration.shopify.storeVerdict")
+@requiresCapability("execute", "app:deployables/store")
+@description("One store's verdict: state (recording, starting, paused, needs attention, not connected), since, resumedAt and connectedAt; reasons, each {code, domain, sentence, detail, count, atLeast, act, actLabel, actUrl} (atLeast: the count is a floor); recorded, each {kind, lastChangeAt, lastCheckedAt}; outside and withheld in plain words; ordersFrom; alert {state, reason}; may {act}. For the store's owner, a cluster owner, or a caller who may read stores.")
+builtin shopifyStoreVerdict {
+  storeId  string!  @description("The store.")
+}
+
+/// Register again: run the store's subscription pass now and record it on the store's health, as
+/// the daily pass does. For the store's owner or a cluster owner; anyone else is refused before
+/// Shopify is asked.
+@sdk
+@executor("integration.shopify.storeRegisterEvents")
+@requiresCapability("execute", "app:deployables/store")
+@description("Register again: reconcile one store's webhook subscriptions now and record the pass on its health. Returns {status, storeId, desired, existing, created, failed}; status is registered or failed. For the store's owner or a cluster owner.")
+builtin shopifyStoreRegisterEvents {
+  storeId  string!  @description("The store whose subscriptions are registered again.")
+}
+
+/// Try again: put the store's deliveries that used their four tries back in line, through
+/// datasyncRequeueInbound for the source shopify-<store>. For the store's owner or a cluster owner;
+/// anyone else is refused before anything is read.
+@sdk
+@executor("integration.shopify.storeRetryDeliveries")
+@requiresCapability("execute", "app:deployables/store")
+@description("Try again: put one store's given-up deliveries back in line, so the retry pass tries each again within a minute. Returns {status, storeId, source}. For the store's owner or a cluster owner.")
+builtin shopifyStoreRetryDeliveries {
+  storeId  string!  @description("The store whose given-up deliveries are tried again.")
+}
+
+/// Pause recording, or resume it: a store being recorded (configured, backfilling or live) moves to
+/// paused, and a paused one to live, through setStoreStatus written as the deployment, so a store's
+/// owner who is not a cluster owner may take the Store page's two acts without the store row's own
+/// gate being widened. Each pause and resume is audited under the caller. A store that is not
+/// connected (error, uninstalled, purged) is refused before anything is written, and asking for the
+/// state the store is in writes nothing. For the store's owner or a cluster owner; anyone else is
+/// refused before anything else is read.
+@sdk
+@executor("integration.shopify.storeSetRecording")
+@requiresCapability("execute", "app:deployables/store")
+@description("Pause or resume recording one store: recording false moves a store being recorded (configured, backfilling or live) to paused, true moves a paused store to live, and asking for the state it is in writes nothing. Each pause and resume is audited under the caller. Returns {status, storeId}; status is live (being recorded) or paused. A store that is not connected (error, uninstalled, purged) is refused. For the store's owner or a cluster owner.")
+builtin shopifyStoreSetRecording {
+  storeId    string!   @description("The store.")
+  recording  boolean!  @description("True resumes recording; false pauses it.")
+}
+
+/// The store watch: one pass computes every store's verdict, records it on the store's health as
+/// `verdict` {state, reasons, since, episode, resumedAt, mailedFor, recoveredFor, alert {state, reason}},
+/// and stages one email to the store's owner when an episode -- needs attention and not connected, in
+/// any order, unbroken -- has lasted the alert wait, and one when the store is recording again. Driven by the watchShopifyStores automation, so
+/// it carries no @sdk and refuses a call without internal origin in its handler.
+@executor("integration.shopify.watchStores")
+@description("One pass of the store watch: compute every store's verdict, record it on the store's health, and email the store's owner once when it has needed attention or been disconnected for the alert wait and once when it is recording again. Only the engine reaches it: a call without internal origin is refused.")
+builtin shopifyWatchStores { }
+
+/// The alert wait: how many minutes a store needs attention, or is disconnected, before its owner is
+/// emailed. 30 when SHOPIFY_STORE_ALERT_MINUTES is unset, unreadable or out of range.
+@sdk
+@executor("integration.shopify.storeAlertWait")
+@requiresCapability("read", "app:settings/connections")
+@description("The minutes a store needs attention before its owner is emailed. Returns {minutes, isDefault, maySet}; isDefault is true when nothing valid is set (30 minutes), maySet whether the caller, a cluster owner, may change it.")
+builtin shopifyStoreAlertWait { }
+
+/// Set the alert wait, from 1 to 1440 minutes, in the global variable SHOPIFY_STORE_ALERT_MINUTES.
+/// A cluster owner's; anybody else, and any value out of range, is refused before anything is read.
+@sdk
+@executor("integration.shopify.storeAlertWaitSet")
+@requiresCapability("execute", "app:settings/connections")
+@description("Cluster owners only. Set the minutes a store needs attention before its owner is emailed, from 1 to 1440. Returns {minutes, isDefault, maySet}.")
+builtin shopifyStoreAlertWaitSet {
+  minutes  int!  @description("Minutes, from 1 to 1440.")
 }
 
 @sdk
 @executor("integration.shopify.commerceSold")
-@description("What sold in a window, grouped by product or by variant, read entirely from the mirror -- no Admin API call and no cost points. Reports units and orders per line, and reports truncated=true when the walk hit its page cap rather than returning a smaller number and letting the caller believe it.")
+@description("What sold in a window, grouped by product or by variant, read entirely from the mirror -- no Admin API call and no cost points. Reports units and orders per line, and reports truncated=true when the walk hit its page cap rather than returning a smaller number and letting the caller believe it. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.")
 builtin commerceSold {
-  storeId  string
+  storeId  string  @description("The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.")
   from     string
   to       string
   groupBy  string
@@ -47,27 +132,27 @@ builtin commerceSold {
 
 @sdk
 @executor("integration.shopify.commerceStock")
-@description("Inventory levels below a threshold at one location. Shopify models inventory as NAMED quantities (available, committed, on_hand), so the threshold is applied in Go and a level with no `available` count reads as unknown rather than as a stockout.")
+@description("Inventory levels below a threshold at one location. Shopify models inventory as NAMED quantities (available, committed, on_hand), so the threshold is applied in Go and a level with no `available` count reads as unknown rather than as a stockout. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.")
 builtin commerceStock {
-  storeId      string
+  storeId      string  @description("The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.")
   locationGid  string
   threshold    integer
 }
 
 @sdk
 @executor("integration.shopify.commerceCustomers")
-@description("Repeat-customer and refund rates for a window, from the mirror. Repeat rate is customers with more than one order over customers with any; refund rate is refunds over orders.")
+@description("Repeat-customer and refund rates for a window, from the mirror. Repeat rate is customers with more than one order over customers with any; refund rate is refunds over orders. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.")
 builtin commerceCustomers {
-  storeId  string
+  storeId  string  @description("The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.")
   from     string
   to       string
 }
 
 @sdk
 @executor("integration.shopify.commerceCompany")
-@description("One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both.")
+@description("One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.")
 builtin commerceCompany {
-  storeId     string
+  storeId     string  @description("The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.")
   companyGid  string
   from        string
   to          string
@@ -94,9 +179,9 @@ builtin commerceCompany {
 @sdk
 @executor("integration.shopify.storefrontProbe")
 @requiresCapability("execute", "app:deployables/preview")
-@description("Ask one store's Storefront API the three questions a storefront preview can answer: does the catalog read, does a cart accept a line, does a checkoutUrl come back. Creates a cart on the store and buys nothing. Returns {storeId, storeDomain, isDevelopment, catalog, cart, checkout}, each of the three {ok, detail, failure, durationMs}.")
+@description("Ask one store's Storefront API the three questions a storefront preview can answer: does the catalog read, does a cart accept a line, does a checkoutUrl come back. Creates a cart on the store and buys nothing. Returns {storeId, storeDomain, isDevelopment, catalog, cart, checkout}, each of the three {ok, detail, failure, durationMs}. For the store's owner, a cluster owner, or a caller who may read stores; anybody else is refused before Shopify is asked.")
 builtin storefrontProbe {
-  storeId  string  @description("The store to ask. The only configured store when omitted.")
+  storeId  string  @description("The store to ask. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.")
 }
 
 // The B2B writes the wholesale pack's entitlement adapters reach Shopify through (epic
@@ -116,9 +201,16 @@ builtin storefrontProbe {
 // A capability gate here would be a second, different answer to a question already answered --
 // and it would have to be held by the client's own approval automation, which is exactly the
 // process the pack deliberately does not own.
+//
+// THE PACK'S CHECKS ARE NOT THESE BUILTINS' GATE, THOUGH. A builtin with no @requiresCapability
+// has no rank floor, so any signed-in caller can name one of these directly and never pass
+// through the pack at all. Each handler therefore asks who is calling before it reads the store
+// or asks Shopify anything (integrations/shopify/wholesale_capabilities.go, wholesaleStore): the
+// engine's own call (internal origin), the store's owner, or a cluster owner. Anybody else is
+// refused, in the same words whether or not the store exists.
 @sdk
 @executor("integration.shopify.provisionWholesale")
-@description("Create or find one buyer's B2B account: a company stamped with the MemQL application id, its location, the buyer as a company contact, and an ACTIVE catalog with a price list. Idempotent -- a second call for one application finds the first company rather than making a twin. Refuses BEFORE creating anything when the store is below Plus and already holds its three company-location catalogs, answering {status: refused, reason} rather than an error so the caller can tell a ceiling from an outage.")
+@description("Create or find one buyer's B2B account: a company stamped with the MemQL application id, its location, the buyer as a company contact, and an ACTIVE catalog with a price list. Idempotent -- a second call for one application finds the first company rather than making a twin. Refuses BEFORE creating anything when the store is below Plus and already holds its three company-location catalogs, answering {status: refused, reason} rather than an error so the caller can tell a ceiling from an outage. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked.")
 builtin shopifyProvisionWholesale {
   storeId        string!  @description("The store to provision on.")
   applicationId  string!  @description("The MemQL application this grant came from. Becomes the company's externalId, which is what makes a retry find the first company.")
@@ -132,7 +224,7 @@ builtin shopifyProvisionWholesale {
 
 @sdk
 @executor("integration.shopify.revokeWholesale")
-@description("End a B2B entitlement by setting its catalog to DRAFT. DELETES NOTHING: the company, its location, its contact, the price list and every order placed under them are untouched, because revoking trade terms is ending a discount rather than erasing a customer -- and deleting a company would take its order history's association with it.")
+@description("End a B2B entitlement by setting its catalog to DRAFT. DELETES NOTHING: the company, its location, its contact, the price list and every order placed under them are untouched, because revoking trade terms is ending a discount rather than erasing a customer -- and deleting a company would take its order history's association with it. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked.")
 builtin shopifyRevokeWholesale {
   storeId    string!  @description("The store.")
   reference  string!  @description("The encoded refs a provision returned. Opaque to the pack, which never parses it.")
@@ -140,7 +232,7 @@ builtin shopifyRevokeWholesale {
 
 @sdk
 @executor("integration.shopify.tagWholesaleCustomer")
-@description("The plan-independent grant: add one tag to the buyer's customer record. Writes the tag and NOTHING else -- what the tag does is the merchant's own automatic discount, which this connector deliberately does not create on their behalf. Refuses when no customer on the store has that email, because a tag on an account that does not exist entitles nobody.")
+@description("The plan-independent grant: add one tag to the buyer's customer record. Writes the tag and NOTHING else -- what the tag does is the merchant's own automatic discount, which this connector deliberately does not create on their behalf. Refuses when no customer on the store has that email, because a tag on an account that does not exist entitles nobody. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked.")
 builtin shopifyTagWholesaleCustomer {
   storeId     string!  @description("The store.")
   buyerEmail  string!  @description("The customer to tag.")
@@ -149,7 +241,7 @@ builtin shopifyTagWholesaleCustomer {
 
 @sdk
 @executor("integration.shopify.untagWholesaleCustomer")
-@description("The plan-independent revoke: remove that one tag from the buyer's customer record.")
+@description("The plan-independent revoke: remove that one tag from the buyer's customer record. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked.")
 builtin shopifyUntagWholesaleCustomer {
   storeId     string!  @description("The store.")
   buyerEmail  string!  @description("The customer to untag.")
@@ -158,7 +250,7 @@ builtin shopifyUntagWholesaleCustomer {
 
 @sdk
 @executor("integration.shopify.wholesaleCatalogHeadroom")
-@description("How many more company-location catalogs this store may hold: -1 on Plus, which is unlimited, and otherwise three minus what it already has. Since 2026-04-02 companies, payment terms, volume pricing and up to three catalogs are available BELOW Plus, so the ceiling is real and this is what lets an adapter REPORT it rather than discover it at the fourth grant, in a merchant's live store.")
+@description("How many more company-location catalogs this store may hold: -1 on Plus, which is unlimited, and otherwise three minus what it already has. Since 2026-04-02 companies, payment terms, volume pricing and up to three catalogs are available BELOW Plus, so the ceiling is real and this is what lets an adapter REPORT it rather than discover it at the fourth grant, in a merchant's live store. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked.")
 builtin shopifyWholesaleCatalogHeadroom {
   storeId  string!  @description("The store to measure.")
 }

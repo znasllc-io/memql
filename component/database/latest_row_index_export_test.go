@@ -32,5 +32,6 @@ var (
 	EnsureWorkRunSignatureLookupIndex = ensureWorkRunSignatureLookupIndex
 	EnsureWorkRunRevisionLookupIndex  = ensureWorkRunRevisionLookupIndex
 	EnsureSiteAccessLookupIndexes     = ensureSiteAccessLookupIndexes
+	EnsureInboundFailedLookupIndex    = ensureInboundFailedLookupIndex
 	EnsureAccountIndex                = ensureAccountIndex
 )

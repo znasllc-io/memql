@@ -87,6 +87,12 @@ concept store {
   /// The mirror stays until shop/redact purges it. Cleared by a verified
   /// reinstall.
   uninstalledAt       datetime
+  /// When a connect last started this store's recording afresh: its first
+  /// connect, or one after an uninstall, a purge, or with no Admin token. A
+  /// connect that only widens the grant leaves it alone. The verdict measures
+  /// a late check from it, so a store that has just connected is not late at
+  /// its first error. Empty for a store connected before it was recorded.
+  connectedAt         datetime
   /// True when this store is a DEVELOPMENT store -- the one a storefront is
   /// exercised against before it serves shoppers (design D8). It is attached
   /// and mirrored like any other store: a second row, its own storeId, and
@@ -138,21 +144,60 @@ concept complianceJob {
   topic        string!
   /// The customer, for the two customer topics.
   customerGid  string
+  /// The orders the request names (orders_to_redact, orders_requested), as
+  /// gids. One of them is in the request's scope when it names the customer
+  /// now, or names nobody. One that has since become another customer's is
+  /// not: it is that person's order, and only its versions from when it was
+  /// hers are scrubbed.
+  orderGids    []string
   /// Shopify's own request id, recorded with the export it produces.
   requestId    string
   /// The shop domain as delivered, kept because a store row can be
   /// removed while a job for it is still queued.
   shopDomain   string
-  /// Not before this time. The hold, made explicit.
+  /// Not before this time. The hold, made explicit; and, once the first pass
+  /// of an erasure has run, when its second pass is due.
   dueAt        datetime!
-  /// pending -- waiting for its hold
+  /// pending -- waiting for its hold, or for the second pass of an erasure
   /// done    -- the job ran and was audited
-  /// failed  -- the job errored; lastError says how, and it is retried
+  /// failed  -- the job errored; lastError says how, and it is run again at
+  ///            every run of the privacy jobs until it is done
   status       enum("pending", "done", "failed")
   /// What the run produced, for the audit trail: the artifact id, the
   /// number of rows scrubbed, or the reason a purge was skipped.
   outcome      string
+  /// What failed, as one of a fixed set of sentences. Never for whom: no
+  /// customer's id, address or name is written here.
   lastError    string
+  /// When the first pass of an erasure ran. Every erasure is made twice, an
+  /// hour apart: a write that was in flight when the first pass ran lands
+  /// after it, and the second pass takes it. Empty until the first pass has
+  /// run -- and on a customers/redact job an earlier version recorded done,
+  /// which is how such a job is found and made again.
+  scrubbedAt   datetime
   completedAt  datetime
+  /// When a request for this job was last recorded on its row: the first
+  /// delivery, or a later one for the same erasure (a customer who asks
+  /// again, a shop uninstalled a second time). A request that finds its job
+  /// done opens it again for both passes; one that finds it waiting or
+  /// failed adds its orders and leaves dueAt where it is. Empty on a job
+  /// queued before the field existed.
+  requestedAt  datetime
+  /// The staged deliveries that asked for this job, as the row ids of their
+  /// v1:platform:inboundRequest rows; one is added at each request. A
+  /// privacy delivery's body holds the customer's email address and phone
+  /// number, and a managed store's arrive on the app-level source, where
+  /// nothing that is done to the store's own deliveries reaches them. So the
+  /// job remembers them: their bodies are blanked at each pass of an erasure,
+  /// and when the job ends done the deliveries themselves are deleted. The
+  /// receiver names a delivery by its signed body, so one that stayed would
+  /// be the row the same request lands on when it is asked again, already
+  /// processed, and never worked.
+  deliveryIds  []string
+  /// What a data request filed in the store owner's Library: the id of the
+  /// v1:library:generatedOutput that holds the export. An erasure of the same
+  /// customer removes it. Empty on any other job, and on a data request that
+  /// filed nothing or ran before the field existed.
+  exportId     string
   accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }

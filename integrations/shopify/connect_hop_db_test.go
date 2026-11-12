@@ -396,6 +396,12 @@ func TestConnectShopifyBeginsOnOneEngineAndFinishesOnAnother(t *testing.T) {
 		s.StorefrontTokenRef == "" || memql.BareShortId(s.OwnerUserID) != dev || s.Plan != "Basic" || len(s.ScopesGranted) != len(ConnectScopes()) {
 		t.Fatalf("round 1 store row: %+v", s)
 	}
+	// The first connect starts the store's recording: the real engine keeps
+	// and projects the connect time the verdict measures a late check from.
+	connectedAt := s.ConnectedAt
+	if _, err := time.Parse(time.RFC3339, connectedAt); err != nil {
+		t.Fatalf("round 1 stamped no connectedAt: %q", connectedAt)
+	}
 	if secretOf(adminName) != admin1 || secretOf(webhookName) != secret1 || secretOf(s.StorefrontTokenRef) != minted1 {
 		t.Fatal("round 1 sealed the wrong values")
 	}
@@ -442,6 +448,9 @@ func TestConnectShopifyBeginsOnOneEngineAndFinishesOnAnother(t *testing.T) {
 	}
 	if s.AppClientID != "hop-client-two" || secretOf(webhookName) != secret2 || secretOf(adminName) != admin2 {
 		t.Fatalf("round 2 did not promote the approved app: %+v", s)
+	}
+	if s.ConnectedAt != connectedAt {
+		t.Fatalf("a reconnect of a recording store moved connectedAt from %q to %q", connectedAt, s.ConnectedAt)
 	}
 	if memql.BareShortId(s.OwnerUserID) != "hop-merchant-"+suffix {
 		t.Fatalf("a reconnect moved the privacy owner to %q", s.OwnerUserID)

@@ -9,6 +9,7 @@ query ShopifyFetchMarketingActivity($id: ID!) {
     __typename
     ... on MarketingActivity {
       id
+      updatedAt
       activityListUrl
       adSpend { amount currencyCode }
       app { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
@@ -42,6 +43,7 @@ query ShopifyListMarketingActivity($first: Int!, $after: String, $query: String)
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       activityListUrl
       adSpend { amount currencyCode }
       app { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }

@@ -76,7 +76,11 @@ type Connector interface {
 	// Apply turns one staged inbound delivery into version-stamped
 	// mirror writes. Returning zero writes is a normal outcome: a
 	// delivery this connector does not recognise is skipped, not
-	// failed.
+	// failed. Two of its errors are answers rather than failures, and
+	// the runtime acts on each: ErrRecordingPaused, for a delivery of a
+	// tenant a person paused, which is held until the tenant resumes;
+	// and ErrAnsweredNothing, for a record the origin answered nothing
+	// for, which is asked once more.
 	Apply(ctx context.Context, req InboundRequest) ([]MirrorWrite, error)
 
 	// Backfill returns one resumable page of the origin's current
@@ -113,6 +117,28 @@ type DomainSpec struct {
 	// the connector stamps MirrorWrite.Version itself and the runtime
 	// compares against the stored row's recorded version.
 	VersionField string
+	// VersionSourceField, when set, names the payload field the connector
+	// writes on every row to say where VersionField's value came from
+	// (VersionFromOrigin or VersionFromRead). A stored row on which it is
+	// empty was written before the connector stamped it, and its version is
+	// a clock of MemQL's that orders nothing against the origin's: the guard
+	// reads it as holding no version (StoredVersion). Empty means every
+	// stored version is compared, as before the field existed.
+	VersionSourceField string
+	// ReadAtField, when set, names the payload field carrying when the origin
+	// was read for the write that set the row (ReadTime, this engine's clock):
+	// the fetch, the listing's start, the export's start, the delivery's
+	// receipt. Whether a record EXISTS is judged by it (Refuses), never by
+	// the record's version. Empty leaves retirements ordered by version.
+	ReadAtField string
+	// VersionReadAtField, when set, names the payload field the connector
+	// writes beside VersionSourceField with the same value as ReadAtField. A
+	// marker counts only beside the read time of the write that set it: a
+	// write that leaves the marker out -- an earlier build's, during a rolling
+	// upgrade -- moves ReadAtField but not this, and the engine's read-merge
+	// would otherwise keep the old marker beside a version it does not
+	// describe.
+	VersionReadAtField string
 	// ReconcileInterval is how often the reconciliation runner should
 	// sweep this domain. Zero means "do not schedule" -- reconciliation
 	// is then operator-driven only.
@@ -152,7 +178,30 @@ type InboundRequest struct {
 	// ReceivedAt is when the delivery was staged -- the fallback
 	// version for an origin that stamps nothing of its own (D6).
 	ReceivedAt time.Time
+	// Attempts is how many times the runtime tried this delivery before
+	// this try: 0 on the first, 1 on the retry lane's first retry. A
+	// connector that needs a second answer before it acts on one -- a record
+	// the origin answers nothing for -- reads it here.
+	Attempts int
+	// AnsweredNothingBefore says the previous try of this delivery ended in
+	// ErrAnsweredNothing: the origin answered cleanly that it has no such
+	// record. A try that finds the same is the second answer in a row, and is
+	// believed: a record the mirror holds is retired, and one it does not hold
+	// is not there to record. False on a first try, and on the first try
+	// after a delivery was put back in line.
+	AnsweredNothingBefore bool
 }
+
+// MaxInboundAttempts is how many tries the runtime gives a delivery, the
+// first included. A try that fails at this count, for any reason, leaves no
+// next try: the delivery ends given up.
+const MaxInboundAttempts = 4
+
+// LastTry reports whether this try is the last one the delivery gets: if it
+// fails, the runtime does not try it again. A connector that would fail a try
+// only to be asked once more reads it here, since on the last try there is no
+// once more.
+func (r InboundRequest) LastTry() bool { return r.Attempts+1 >= MaxInboundAttempts }
 
 // MirrorWrite is one row Apply wants written into a mirror. The runtime
 // performs the write, under the connector's actor and behind the
@@ -175,6 +224,16 @@ type MirrorWrite struct {
 	// it already had; it never invents one, which is why this is a flag
 	// on a write rather than a separate delete verb.
 	Retire bool
+	// Announced marks a retirement the origin announced -- a delete event --
+	// rather than one MemQL concluded from reading the origin. Its time is
+	// the event's receipt on one node, compared against reads made on
+	// others, and the guard allows for the difference
+	// (AnnouncedRetireAllowance).
+	Announced bool
+	// Partition names the tenant this row belongs to, for a connector
+	// that implements Partitioned; empty for one that does not. The
+	// runtime records the delivery's health on that tenant's own row.
+	Partition string
 }
 
 // BackfillPage is one resumable page of a connector's current state.

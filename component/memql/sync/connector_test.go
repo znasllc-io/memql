@@ -131,3 +131,35 @@ func TestNotImplementedIsDistinguishableFromADeliveryFailure(t *testing.T) {
 		t.Error("IsNotImplemented matched an unrelated error")
 	}
 }
+
+// A domain outside a store's connection was never asked for; a domain the
+// connection asks for and the grant lacks is something an operator can fix.
+// The two answers must never be read as each other.
+func TestNotRequestedIsNotNotGranted(t *testing.T) {
+	notRequested := NotRequested("shopify")
+	if !IsNotRequested(notRequested) {
+		t.Fatalf("IsNotRequested(%v) = false", notRequested)
+	}
+	if IsNotGranted(notRequested) {
+		t.Errorf("a domain outside the connection reads as not granted: %v", notRequested)
+	}
+	notGranted := NotGranted("shopify", "read_customers")
+	if IsNotRequested(notGranted) {
+		t.Errorf("a missing scope reads as not requested: %v", notGranted)
+	}
+	const want = "connector: not requested: shopify's connection does not ask for this domain"
+	if got := notRequested.Error(); got != want {
+		t.Errorf("text = %q, want %q", got, want)
+	}
+}
+
+// THE LAST TRY is the one at the contract's count: a try before it that fails
+// is tried again, and one at it is not.
+func TestOnlyTheTryAtTheContractsCountIsTheLast(t *testing.T) {
+	for attempts := 0; attempts < MaxInboundAttempts+1; attempts++ {
+		want := attempts >= MaxInboundAttempts-1
+		if got := (InboundRequest{Attempts: attempts}).LastTry(); got != want {
+			t.Errorf("after %d tries, LastTry = %t, want %t", attempts, got, want)
+		}
+	}
+}

@@ -172,6 +172,17 @@ type FieldSpec struct {
 	// path language ExtractField understands: "field", "field.id",
 	// "field[].id", "field.nodes[].id", "field.nodes[]".
 	Extract string
+	// AdminType is the Admin GraphQL type of the field's value, with lists
+	// and non-nulls unwrapped: a scalar's name ("DateTime", "Money"), an
+	// enum's, a nested object's, and for a GID reference or a list of them
+	// the type of the row named. DSLType cannot say this: a timestamp, an
+	// amount and a name are all "string" there.
+	AdminType string
+	// GidsInside names the mirrored Admin types a nested object keeps the GID
+	// of, sorted: an order's purchasing entity keeps a customer's. Nil for a
+	// field that is not an object or a list of objects, and for an object
+	// that keeps none.
+	GidsInside []string
 }
 
 // Field kinds.
@@ -198,6 +209,10 @@ type ChildSpec struct {
 	// Relay connection: the apply path reads it directly instead of
 	// through "nodes" / "edges".
 	List bool
+	// PageOp names the operation in the parent's FetchDocument that reads
+	// one further page of this connection, by the parent's id and an
+	// "after" cursor. Empty for a plain list, which is never paged.
+	PageOp string
 }
 
 // TypeSpec is everything the connector knows about one mirrored domain.
@@ -257,8 +272,9 @@ type TypeSpec struct {
 
 	Fields []FieldSpec
 
-	// FetchDocument holds both generated operations: ShopifyFetch<Type>
-	// (by GID, or the singleton) and ShopifyList<Type> (paged, filterable).
+	// FetchDocument holds the generated operations: ShopifyFetch<Type>
+	// (by GID, or the singleton), ShopifyList<Type> (paged, filterable)
+	// and one ShopifyPage<Type><Connection> per paged child connection.
 	FetchDocument string
 	FetchOp       string
 	ListOp        string
@@ -354,13 +370,17 @@ func emitTypeSpec(p *TypePlan, doc, bulkDoc string, bulkOps []string) string {
 	if len(p.Children) > 0 {
 		b.WriteString("\t\tChildren: []ChildSpec{\n")
 		for _, ch := range p.Children {
-			fmt.Fprintf(&b, "\t\t\t{Connection: %q, Concept: %q, GraphQLType: %q, List: %t},\n", ch.Connection, ch.Concept, ch.Type, ch.List)
+			fmt.Fprintf(&b, "\t\t\t{Connection: %q, Concept: %q, GraphQLType: %q, List: %t, PageOp: %q},\n", ch.Connection, ch.Concept, ch.Type, ch.List, pageOpName(p, ch))
 		}
 		b.WriteString("\t\t},\n")
 	}
 	b.WriteString("\t\tFields: []FieldSpec{\n")
 	for _, f := range p.Fields {
-		fmt.Fprintf(&b, "\t\t\t{Name: %q, GraphQL: %q, Kind: %q, DSLType: %q, Extract: %q},\n", f.Name, f.GraphQL, goKindConst(f.Kind), f.DSLType, f.Extract)
+		fmt.Fprintf(&b, "\t\t\t{Name: %q, GraphQL: %q, Kind: %q, DSLType: %q, Extract: %q, AdminType: %q", f.Name, f.GraphQL, goKindConst(f.Kind), f.DSLType, f.Extract, f.AdminType)
+		if len(f.GidsInside) > 0 {
+			fmt.Fprintf(&b, ", GidsInside: []string{%s}", quoteList(f.GidsInside))
+		}
+		b.WriteString("},\n")
 	}
 	b.WriteString("\t\t},\n")
 	fmt.Fprintf(&b, "\t\tFetchOp:       %q,\n", "ShopifyFetch"+title(p.Concept))

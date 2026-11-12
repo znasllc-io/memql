@@ -9,6 +9,7 @@ query ShopifyFetchCompanyContact($id: ID!) {
     __typename
     ... on CompanyContact {
       id
+      updatedAt
       company { id }
       customer { id }
       isMainContact

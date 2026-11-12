@@ -9,6 +9,7 @@ query ShopifyFetchCollection($id: ID!) {
     __typename
     ... on Collection {
       id
+      updatedAt
       activeOperations { duplicate { collectionRole } }
       availablePublicationsCount { count precision }
       description
@@ -37,6 +38,7 @@ query ShopifyListCollection($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       activeOperations { duplicate { collectionRole } }
       availablePublicationsCount { count precision }
       description

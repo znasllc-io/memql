@@ -79,7 +79,7 @@ func TestTheSyncRuntimeHealthRowActuallyLands(t *testing.T) {
 			`DELETE FROM "MemoryNodes" WHERE concept = 'v1:platform:syncState' AND payload->>'conceptId' = $1`, concept)
 	})
 
-	before, err := store.SyncStateFor(ctx, concept, connector, direction)
+	before, err := store.SyncStateFor(ctx, concept, connector, direction, "")
 	if err != nil {
 		t.Fatalf("SyncStateFor before any write: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestTheSyncRuntimeHealthRowActuallyLands(t *testing.T) {
 		t.Fatalf("WriteSyncState refused -- this is the refusal every runner discards: %v", err)
 	}
 
-	after, err := store.SyncStateFor(ctx, concept, connector, direction)
+	after, err := store.SyncStateFor(ctx, concept, connector, direction, "")
 	if err != nil {
 		t.Fatalf("SyncStateFor after the write: %v", err)
 	}

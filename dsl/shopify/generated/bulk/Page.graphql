@@ -9,6 +9,7 @@ query ShopifyBulkPage($query: String) {
     edges {
       node {
         id
+        updatedAt
         body
         bodySummary
         defaultCursor

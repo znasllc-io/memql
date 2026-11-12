@@ -9,6 +9,7 @@ query ShopifyBulkCustomer($query: String) {
     edges {
       node {
         id
+        updatedAt
         amountSpent { amount currencyCode }
         canDelete
         dataSaleOptOut

@@ -9,6 +9,7 @@ query ShopifyFetchDraftOrder($id: ID!) {
     __typename
     ... on DraftOrder {
       id
+      updatedAt
       acceptAutomaticDiscounts
       allVariantPricesOverridden
       allowDiscountCodesInCheckout
@@ -72,6 +73,7 @@ query ShopifyListDraftOrder($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       acceptAutomaticDiscounts
       allVariantPricesOverridden
       allowDiscountCodesInCheckout

@@ -28,6 +28,12 @@ func init() {
 		}
 		i := NewIntegration(pctx.Engine, pctx.GateDB)
 		i.SetLogger(pctx.Logger)
+		// libraryRemoveArtifact runs its statements on the engine's maintenance
+		// session and on nothing else (remove_artifact.go). A node that offers
+		// none leaves it unset, and the removal then refuses, saying so.
+		if pctx.OpenMaintenanceSession != nil {
+			i.SetMaintenanceSession(pctx.OpenMaintenanceSession)
+		}
 		if err := i.setTrainingReader(pctx); err != nil {
 			return nil, err
 		}

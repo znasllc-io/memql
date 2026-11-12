@@ -10,6 +10,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // mirror_writer.go -- the generic write into a mirror.
@@ -117,61 +118,101 @@ func retireFieldsFor(payload map[string]any) map[string]any {
 	return map[string]any{"deleted": true}
 }
 
-// StoredVersion returns the version MemQL holds for a row.
+// StoredVersion returns the version MemQL holds for a row, as the guard
+// reads it (memqlsync.StoredStamp), and whether the row exists.
 func (w *EngineMirrorWriter) StoredVersion(ctx context.Context, spec memqlsync.DomainSpec, rowID string) (string, bool, error) {
+	row, err := w.StoredRow(ctx, spec, rowID)
+	if err != nil || !row.Exists {
+		return "", row.Exists, err
+	}
+	return memqlsync.StoredStamp(spec, row.Payload).Version, true, nil
+}
+
+// StoredRow returns the row MemQL holds: its payload, and its version.
+//
+// The read goes PAST THE RESULT CACHE (memql.ContextWithFreshRead). The guard
+// is only as good as the row it judges, and a node's cached copy can be a
+// version another node has since replaced -- its eviction is asynchronous --
+// so a write older than what is stored would be admitted against it.
+//
+// The row is a PAYLOAD read: the raw read answers bundle rows whose top level
+// holds only the intrinsics, and the version is a payload field
+// (DomainSpec.VersionField) -- read at the top level it was empty on every row
+// and the guard refused nothing (memql#5638). Which of its values count is
+// the contract's rule (memqlsync.StoredStamp).
+//
+// A spec with no VersionField falls back to D6 -- the version is when MemQL
+// last applied a delivery for the row -- and that READS NOTHING TODAY, left
+// alone on purpose (memql#5638): the raw read carries the row's creation time
+// as `created_at`, a protobuf timestamp, not as a payload field, and no
+// connector declares a domain without a VersionField, so turning it on is a
+// decision for the first one that does rather than a repair.
+func (w *EngineMirrorWriter) StoredRow(ctx context.Context, spec memqlsync.DomainSpec, rowID string) (StoredMirrorRow, error) {
 	if w == nil || w.engine == nil {
-		return "", false, fmt.Errorf("datasync: no engine wired for mirror reads")
+		return StoredMirrorRow{}, fmt.Errorf("datasync: no engine wired for mirror reads")
 	}
 	conceptID := strings.TrimSpace(spec.Concept)
 	rowID = strings.TrimSpace(rowID)
 	if conceptID == "" || rowID == "" {
-		return "", false, nil
+		return StoredMirrorRow{}, nil
 	}
 
 	// The row id is a literal, quoted as WriteMirror quotes it (memql#5625's
 	// sweep). It is the connector's to mint and the contract types it as a
 	// string: pasted bare, an id carrying a quote or a space failed to parse,
-	// and since this read runs before every versioned write, such a row could
-	// never be applied at all. The concept is the connector's declared domain
-	// and stays bare.
+	// and since this read runs before every write, such a row could never be
+	// applied at all. The concept is the connector's declared domain and
+	// stays bare.
 	q := fmt.Sprintf("concept==%s && id==%s", conceptID, langparser.QuoteString(rowID))
-	res, err := w.engine.Execute(ctx, q)
+	res, err := w.engine.Execute(memql.ContextWithFreshRead(ctx), q)
 	if err != nil {
-		return "", false, fmt.Errorf("datasync: reading the stored version of %s %q: %w", conceptID, rowID, err)
+		return StoredMirrorRow{}, fmt.Errorf("datasync: reading the stored version of %s %q: %w", conceptID, rowID, err)
 	}
 	rows := memql.MaterializeRows(res)
 	if len(rows) == 0 {
-		return "", false, nil
+		return StoredMirrorRow{}, nil
 	}
-	row := rows[0]
+	return StoredMirrorRow{Exists: true, Payload: payloadOf(rows[0]), Version: rowVersion(rows[0])}, nil
+}
 
-	if field := strings.TrimSpace(spec.VersionField); field != "" {
-		// The origin's own version, kept on the row. Exact. It is a PAYLOAD
-		// field (DomainSpec.VersionField says so), and the raw read above
-		// answers bundle rows whose top level holds only the intrinsics: read
-		// there, it was empty on every row and the guard refused nothing
-		// (memql#5638). The connector stamps this field and MirrorWrite.Version
-		// from one value, so both sides of the comparison are the origin's
-		// clock -- never the row's createdAt, which is MemQL's.
-		return payloadField(row, field), true, nil
+// rowVersion is the stored version's time of a row a raw read answered, or
+// the zero time when the row does not carry one. A bundle row carries the
+// intrinsic as created_at, a protobuf timestamp that arrives here as its
+// seconds and nanoseconds; a flat row carries createdAt.
+func rowVersion(row map[string]any) time.Time {
+	if stamp, ok := row["created_at"].(map[string]any); ok {
+		seconds, nanos := int64Field(stamp, "seconds"), int64Field(stamp, "nanos")
+		if seconds != 0 || nanos != 0 {
+			return time.Unix(seconds, nanos).UTC()
+		}
 	}
-	// The fallback (D6): the origin publishes no version, so the version
-	// is when MemQL last applied a delivery for this row.
-	//
-	// IT READS NOTHING TODAY, and that is left alone on purpose (memql#5638).
-	// The raw read carries the row's creation time as `created_at`, a
-	// protobuf timestamp, not as `createdAt`, so every row answers "no
-	// version" here. Reading it would compare a connector-stamped delivery
-	// time against MemQL's own write clock, and no connector declares a
-	// domain without a VersionField, so turning it on is a decision for the
-	// first one that does rather than a repair.
-	if t := timeField(row, "createdAt"); !t.IsZero() {
-		return t.UTC().Format(time.RFC3339Nano), true, nil
+	return timeField(row, "createdAt")
+}
+
+// int64Field reads a whole number a JSON decode left as a float64 or a
+// json.Number, or 0 for anything else. A timestamp's seconds and nanoseconds
+// are both exact in a float64.
+func int64Field(row map[string]any, key string) int64 {
+	switch v := row[key].(type) {
+	case float64:
+		n, _ := num.WholeInt64(v)
+		return n
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	case json.Number:
+		n, _ := v.Int64()
+		return n
 	}
-	// A row whose createdAt cannot be read is a row we cannot order
-	// against. Reported as EXISTING WITH NO VERSION, which the guard
-	// reads as "not stale" -- applying a possibly-older write is
-	// recoverable by the next reconciliation, while refusing every write
-	// to such a row is not.
-	return "", true, nil
+	return 0
+}
+
+// payloadOf is a raw read's row payload: the bundle row's `payload`, or the
+// row itself when it arrives flat.
+func payloadOf(row map[string]any) map[string]any {
+	if payload, ok := row["payload"].(map[string]any); ok {
+		return payload
+	}
+	return row
 }

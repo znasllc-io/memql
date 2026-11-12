@@ -7,6 +7,7 @@
 query ShopifyFetchShop {
   shop {
     id
+    updatedAt
     accountOwner { id }
     alerts { action { title url } description }
     allProductCategoriesList { ancestorIds childrenIds fullName id isArchived isLeaf isRoot level name parentId }

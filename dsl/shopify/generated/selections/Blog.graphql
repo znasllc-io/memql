@@ -9,6 +9,7 @@ query ShopifyFetchBlog($id: ID!) {
     __typename
     ... on Blog {
       id
+      updatedAt
       articlesCount { count precision }
       commentPolicy
       feed { location path }
@@ -19,8 +20,10 @@ query ShopifyFetchBlog($id: ID!) {
       templateSuffix
       title
       articles(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           author { name }
           blog { id }
           body
@@ -47,6 +50,7 @@ query ShopifyListBlog($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       articlesCount { count precision }
       commentPolicy
       feed { location path }
@@ -57,8 +61,40 @@ query ShopifyListBlog($first: Int!, $after: String, $query: String) {
       templateSuffix
       title
       articles(first: 50) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
+          author { name }
+          blog { id }
+          body
+          commentsCount { count precision }
+          defaultCursor
+          handle
+          image { altText height id thumbhash url width }
+          isPublished
+          metafields(first: 50) { nodes { namespace key type value jsonValue } }
+          publishedAt
+          createdAt
+          summary
+          tags
+          templateSuffix
+          title
+        }
+      }
+    }
+  }
+}
+
+query ShopifyPageBlogArticles($id: ID!, $after: String!) {
+  node(id: $id) {
+    __typename
+    ... on Blog {
+      articles(first: 50, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          updatedAt
           author { name }
           blog { id }
           body
