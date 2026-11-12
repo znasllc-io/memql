@@ -188,6 +188,27 @@ builtin wholesaleDocuments {
   versionId  string  @description("One version to answer, body included.")
 }
 
+@executor("integration.wholesale.addBuyer")
+@args(profile="object")
+@description("A PERSON OF THE STORE ADDS A BUYER BY HAND, and the buyer skips nothing: it writes one submitted application on the buyer's behalf, which then goes through the same steps as an applicant's -- while the store requires its terms it waits for the acceptance before it can be approved, and nothing here approves or grants. It works whether applications are open or closed (closed is the public form). The three fields are trimmed and held to the application form's rules: each required, the company at most 200 bytes, the name 120, the email 320. Refused while the store requires its terms and the terms, the MAP policy or the price sheet has no published version (\"Publish the terms, the MAP policy and the price sheet first.\"), and for an address -- compared trimmed and lower-cased, in every form the store id is held in -- that has a submitted or approved application on the store (\"This address already has an application on this store.\"); a rejected or removed one blocks nothing. The application is written once at wholesale-staff-<id>, owned by the site's owner (the store's merchant), tied to the site's organization and the site, with source staff and addedBy the caller; the client's own automation sends the first email on its node.created, as for anyone. Answers {applicationId}. The caller holds the wholesale part in the site's organization (the organization gate judges it) and is not one of the cluster's operators, who add nobody; the site must serve the store.")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesaleAddBuyer {
+  siteId          string!  @description("The store's site: the organization gate judges the act against its organization, and the store must be bound to it.")
+  storeId         string!  @description("The store the buyer is added to.")
+  companyName     string!  @description("The business.")
+  applicantName   string!  @description("The person. Data, never an identity.")
+  applicantEmail  string!  @description("How the terms and the decision reach them. Unverified.")
+}
+
+@executor("integration.wholesale.removeBuyer")
+@args(profile="object")
+@description("A PERSON OF THE STORE REMOVES A BUYER: a revoke decision on an approved application, recorded by the caller with the note, through the same write as wholesaleRecordDecision's. An application that is not approved is refused (\"wholesale: only an approved buyer can be removed\"). The tag comes off through the client's revoke automation, or wholesaleRetryAccess where that automation is not wired. The caller holds the wholesale part in the application's organization (the organization gate judges it), reads the application under their own actor -- one they cannot read is answered as one that does not exist -- and is not one of the cluster's operators, who remove nobody; the state is folded from the whole log as the deployment. Answers the decision receipt wholesaleRecordDecision answers.")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesaleRemoveBuyer {
+  applicationId  string!  @description("The approved buyer's application, bare or canonical.")
+  note           string  @description("The reason, kept on the decision.")
+}
+
 // # The private links (U8)
 //
 // THE TOKEN IS THE AUTHORITY. These three carry no capability, as the reviews

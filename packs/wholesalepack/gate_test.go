@@ -97,17 +97,17 @@ func TestEveryGatedBuiltinDeclaresTheWholesalePartAndItsTarget(t *testing.T) {
 			t.Errorf("%s does not require %q, the argument the organization gate resolves its target from", name, target[1])
 		}
 	}
-	// THE REACHABLE POSITIVE: the eleven this pack declares today must be found,
-	// or a walk that found nothing would pass for the wrong reason.
+	// THE REACHABLE POSITIVE: the thirteen this pack declares today must be
+	// found, or a walk that found nothing would pass for the wrong reason.
 	for _, name := range []string{"wholesaleRecordDecision", "wholesaleRetryAccess", "wholesaleStoreSettings", "wholesaleUpdateSettings",
 		"wholesaleList", "wholesaleGet", "wholesaleDecisionLog", "wholesaleBuyers", "wholesaleExportStore",
-		"wholesaleDocuments", "wholesalePublishDocument"} {
+		"wholesaleDocuments", "wholesalePublishDocument", "wholesaleAddBuyer", "wholesaleRemoveBuyer"} {
 		if _, ok := builtins[name]; !ok {
 			t.Errorf("%s is not declared", name)
 		}
 	}
-	if declared < 11 {
-		t.Errorf("found %d gated builtins in the tree, want at least 11", declared)
+	if declared < 13 {
+		t.Errorf("found %d gated builtins in the tree, want at least 13", declared)
 	}
 	// A BUILTIN CARRYING THE PART THAT THE TABLE DOES NOT NAME would be judged
 	// against the caller's global capability alone.

@@ -125,6 +125,30 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name: "addBuyer",
+			Description: "A person of the store adds a buyer by hand: a submitted application on the buyer's " +
+				"behalf, which then goes through the same steps as an applicant's. Refuses the cluster's " +
+				"operators and an address with a submitted or approved application on the store.",
+			Handler: p.addBuyer,
+			ArgsSchema: map[string]string{
+				"siteId":         "string (required) - the store's site; it must serve the store",
+				"storeId":        "string (required) - the store the buyer is added to",
+				"companyName":    "string (required) - the business",
+				"applicantName":  "string (required) - the person",
+				"applicantEmail": "string (required) - how the terms and the decision reach them",
+			},
+		},
+		{
+			Name: "removeBuyer",
+			Description: "A person of the store removes an approved buyer: a revoke decision recorded by the " +
+				"caller. Refuses the cluster's operators and an application that is not approved.",
+			Handler: p.removeBuyer,
+			ArgsSchema: map[string]string{
+				"applicationId": "string (required) - the approved buyer's application",
+				"note":          "string (optional) - the reason, kept on the decision",
+			},
+		},
+		{
 			Name: "storeSettings",
 			Description: "One store's wholesale settings, the routes this engine has, and whether the " +
 				"caller may set the store up or update it.",

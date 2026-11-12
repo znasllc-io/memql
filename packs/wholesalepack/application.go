@@ -228,12 +228,9 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 		return nil, fmt.Errorf("wholesale: storeId is required; it is stamped from the " +
 			"binding the submission arrived through")
 	}
-	company := trimmed(args["companyName"])
-	name := trimmed(args["applicantName"])
-	email := trimmed(args["applicantEmail"])
-	if company == "" || name == "" || email == "" {
-		return nil, fmt.Errorf("wholesale: companyName, applicantName and applicantEmail " +
-			"are the minimum an application needs to be one")
+	company, name, email, err := applicationContactOf(args)
+	if err != nil {
+		return nil, err
 	}
 	// THE GATE, AND IT IS FAIL-CLOSED. A merchant who has never touched
 	// their wholesale settings has not asked the internet for their
@@ -335,6 +332,27 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 		"storeId":       storeID,
 		"companyName":   company,
 	})
+}
+
+// applicationContactOf is an application's company, applicant and email, each
+// trimmed, held to the application form's own rules (applicationFields): every
+// one is required, and none is longer than the form admits. The shopper's post
+// and a person of the store adding a buyer meet the same rules here.
+func applicationContactOf(args map[string]any) (company, name, email string, err error) {
+	values := map[string]string{}
+	for _, f := range applicationFields() {
+		v := trimmed(args[f.Name])
+		if v == "" && f.Required {
+			return "", "", "", fmt.Errorf("wholesale: companyName, applicantName and applicantEmail " +
+				"are the minimum an application needs to be one")
+		}
+		if len(v) > f.EffectiveMaxLength() {
+			return "", "", "", fmt.Errorf("wholesale: %s is at most %d bytes; this one is %d",
+				f.Name, f.EffectiveMaxLength(), len(v))
+		}
+		values[f.Name] = v
+	}
+	return values["companyName"], values["applicantName"], values["applicantEmail"], nil
 }
 
 // errNotAccepting is a shopper's refusal by a store that takes no application
@@ -459,6 +477,13 @@ func (p *Provider) recordDecision(ctx context.Context, args map[string]any, _ in
 	if err := p.appendDecision(ctx, app, transition, asString(args["note"])); err != nil {
 		return nil, err
 	}
+	return decisionReceipt(applicationID, app, transition, decider, termsRequired, accepted)
+}
+
+// decisionReceipt answers a decision just recorded on app, named as the caller
+// named it: its store, the act, the decider, and the state and stage it leaves.
+func decisionReceipt(applicationID string, app map[string]any, transition, decider string,
+	termsRequired, accepted bool) ([]memorynodes.MemoryNode, error) {
 	after := StateAfter(transition)
 	return confirm("wholesale:decision:recorded", map[string]any{
 		"applicationId": applicationID,

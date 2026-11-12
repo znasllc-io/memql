@@ -59,27 +59,7 @@ func registerShopperSurface() {
 		Description: "A business applies for trade terms on this store. Plain HTML form " +
 			"post, no JavaScript; answers 303. Refused when this store's " +
 			"applicationsOpen is false.",
-		// THE MINIMUM AN APPLICATION NEEDS TO BE ONE, and nothing else
-		// (design record, section 7). The first client collects an EIN and
-		// the next will not, so the EIN is a RELATED CONCEPT in that
-		// client's own domain with an @relationship to the application --
-		// never a field here and never a metadata blob. A pack that grew a
-		// field per client would stop being a pack at the second one.
-		Fields: []memql.ShopperField{
-			{
-				Name: "companyName", Required: true, MaxLength: 200,
-				Description: "The business applying.",
-			},
-			{
-				Name: "applicantName", Required: true, MaxLength: 120,
-				Description: "The person applying. Data, never an identity.",
-			},
-			{
-				Name: "applicantEmail", Required: true, MaxLength: 320,
-				Description: "How a decision reaches them, and how an entitlement adapter " +
-					"finds the Shopify customer to entitle. Unverified.",
-			},
-		},
+		Fields: applicationFields(),
 		// SITE-RELATIVE, and the merchant owns both pages. A refusal renders
 		// in their design and their language with ?reason= naming what
 		// happened, rather than in ours.
@@ -89,6 +69,33 @@ func registerShopperSurface() {
 	memql.RegisterShopperForm(acceptanceForm())
 	memql.RegisterShopperRead(termsRead())
 	memql.RegisterShopperRead(priceSheetRead())
+}
+
+// applicationFields is the application form's three fields, and the rules an
+// application's contact is held to wherever it arrives from: the shopper's form
+// post, and a person of the store adding a buyer (applicationContactOf).
+//
+// THE MINIMUM AN APPLICATION NEEDS TO BE ONE, and nothing else (design record,
+// section 7). The first client collects an EIN and the next will not, so the
+// EIN is a RELATED CONCEPT in that client's own domain with an @relationship to
+// the application -- never a field here and never a metadata blob. A pack that
+// grew a field per client would stop being a pack at the second one.
+func applicationFields() []memql.ShopperField {
+	return []memql.ShopperField{
+		{
+			Name: "companyName", Required: true, MaxLength: 200,
+			Description: "The business applying.",
+		},
+		{
+			Name: "applicantName", Required: true, MaxLength: 120,
+			Description: "The person applying. Data, never an identity.",
+		},
+		{
+			Name: "applicantEmail", Required: true, MaxLength: 320,
+			Description: "How a decision reaches them, and how an entitlement adapter " +
+				"finds the Shopify customer to entitle. Unverified.",
+		},
+	}
 }
 
 // tokenField is a private link's token, from its t parameter.
