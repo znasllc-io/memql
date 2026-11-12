@@ -986,7 +986,7 @@ func (r *privacyRun) shopErasure(ctx context.Context, store Store, found bool, j
 			// here and nothing would ever read the store again.
 			owed := ""
 			if job.LastError == failReadAgain {
-				queued, err := c.queueUnstartedBackfillsOf(ctx, store.ID)
+				queued, err := c.queueBackfillsAPurgeOwes(ctx, store.ID)
 				if err != nil {
 					return jobStep{}, failedJob(failReadAgain, err)
 				}
@@ -1055,7 +1055,7 @@ func (r *privacyRun) shopErasure(ctx context.Context, store Store, found bool, j
 		if connected {
 			// The store was connected again while it was being purged. It is
 			// not redacted; what the purge removed is read again.
-			queued, err := c.queueUnstartedBackfillsOf(ctx, store.ID)
+			queued, err := c.queueBackfillsAPurgeOwes(ctx, store.ID)
 			if err != nil {
 				// The job is run again, and that run finds the store answering
 				// and does not purge it: it queues them (above, owed).
@@ -1163,11 +1163,13 @@ func showsAConnect(read, now Store) bool {
 		(now.ConnectedAt != "" && now.ConnectedAt != read.ConnectedAt)
 }
 
-// queueUnstartedBackfillsOf queues the backfill of each of a store's domains
+// queueBackfillsAPurgeOwes queues the backfill of each of a store's domains
 // that has none started, and answers how many: what a purge that a reconnect
 // overtook owes the store. A domain whose backfill the reconnect itself has
-// queued or started since is left to it.
-func (c *Connector) queueUnstartedBackfillsOf(ctx context.Context, storeID string) (int, error) {
+// queued or started since is left to it. It is the purge's own count of what
+// it queued, read from the store as it is now; queueUnstartedBackfillsOf
+// (plugin.go) is the boot's and the resume's, for a store already in hand.
+func (c *Connector) queueBackfillsAPurgeOwes(ctx context.Context, storeID string) (int, error) {
 	store, _, found, err := c.storeAsItIs(ctx, storeID)
 	if err != nil || !found {
 		return 0, err
