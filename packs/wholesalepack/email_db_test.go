@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -74,6 +75,13 @@ func (s emailStore) templateFor(kind string) string { return "tpl-" + kind + "-"
 func newEmailStore(t *testing.T, label string, termsRequired bool) (*memql.MemQLEngine, emailStore) {
 	t.Helper()
 	eng := liveWholesaleEngine(t)
+	return eng, newEmailStoreOn(t, eng, label, termsRequired, nil)
+}
+
+// newEmailStoreOn is newEmailStore on an engine the caller booted, with extra
+// fields posted on the store's first application (a client's extension).
+func newEmailStoreOn(t *testing.T, eng *memql.MemQLEngine, label string, termsRequired bool, extra url.Values) emailStore {
+	t.Helper()
 	logs := &lockedBuffer{}
 	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	eng.Logger = logger
@@ -90,7 +98,7 @@ func newEmailStore(t *testing.T, label string, termsRequired bool) (*memql.MemQL
 	if err := eng.RegisterIntegration(worker); err != nil {
 		t.Fatalf("register the campaigns worker: %v", err)
 	}
-	s := emailStore{accessStore: newAccessStore(t, eng, label), mail: mail, logs: logs}
+	s := emailStore{accessStore: newAccessStoreWith(t, eng, label, extra), mail: mail, logs: logs}
 	for kind, body := range map[string]string{"terms": "Net 30 for Kestrel Cycles.", "map": "Advertise at list.", "priceSheet": "Frame 410.00"} {
 		answerOf(t, eng, signedIn(s.staff), `builtin wholesalePublishDocument(siteId: `+quote(s.site)+`, storeId: `+quote(s.store)+
 			`, kind: `+quote(kind)+`, label: `+quote(kind+" 2026")+`, body: `+quote(body)+`)`)
@@ -118,7 +126,7 @@ func newEmailStore(t *testing.T, label string, termsRequired bool) (*memql.MemQL
 	// THE OPERATORS CHOOSE THE SENDER; an operator holds no part, so the call
 	// comes as trusted server code acting as one.
 	wsExec(t, eng, auth.ContextWithInternalOrigin(asOperator("operator-"+s.site)), settings+`, staffEmail: "desk@example.com")`)
-	return eng, s
+	return s
 }
 
 // putTemplate writes one version of the store's template of kind.
