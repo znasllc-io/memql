@@ -3,6 +3,7 @@ package inbound
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
@@ -34,8 +35,9 @@ func (s *syncBuffer) String() string {
 }
 
 // largeTurnHandler is a receiver whose acme source may carry 4096 bytes over
-// the receiver's 1024, with the large-body pacing shortened so a test can watch
-// a turn being lost.
+// the receiver's 1024. Its pacing is generous -- a five-second grace, thirty to
+// hold -- so a test that only needs the deadlines in force passes on a starved
+// build node; the test that watches a turn being lost shortens the grace itself.
 func largeTurnHandler(t *testing.T, logs *syncBuffer) *Handler {
 	t.Helper()
 	src := hexSource()
@@ -43,7 +45,7 @@ func largeTurnHandler(t *testing.T, logs *syncBuffer) *Handler {
 	h := testHandler(t, &fakeEngine{}, src)
 	h.logger = slog.New(slog.NewTextHandler(logs, nil))
 	h.largeBodyWait = time.Millisecond
-	h.largeBodyGrace, h.largeBodyRate, h.largeBodyHold = 50*time.Millisecond, 64<<10, 2*time.Second
+	h.largeBodyGrace, h.largeBodyRate, h.largeBodyHold = 5*time.Second, 64<<10, 30*time.Second
 	return h
 }
 
@@ -73,15 +75,37 @@ func TestAnUnsignedLargeRequestIsRefusedBeforeItsBodyOrATurn(t *testing.T) {
 	}
 }
 
+// A request that finds a turn free gets it, even when its wait has already run
+// out by the time it asks -- which is what a throttled container does to a
+// goroutine between arming its timer and reaching the select. A zero wait makes
+// that moment certain: the timer is due before the select runs, so a select
+// over both would pick at random and give away about half the free turns.
+func TestAFreeTurnIsTakenEvenWhenItsWaitHasAlreadyRunOut(t *testing.T) {
+	var logs syncBuffer
+	h := largeTurnHandler(t, &logs)
+	h.largeBodyWait = 0
+	for i := 0; i < 200; i++ {
+		if !h.takeLargeBodyTurn(context.Background()) {
+			t.Fatalf("attempt %d: a free turn was refused because the wait had run out", i+1)
+		}
+		<-h.largeBodies
+	}
+}
+
 // A body holding a large-body turn has to keep arriving. Trickling bytes is the
 // cheap way to hold a turn for as long as the server lets a request read (15
 // seconds by default), and two such senders would starve every large delivery.
 // A body that falls behind largeBodyRate once largeBodyGrace has passed loses
 // its turn: the read is cut, the request is answered 408 and logged, and the
 // turn is free again.
+//
+// The hold stays at thirty seconds and the trickle would need forty to finish,
+// so an answer inside the five-second bound below can only be the pace cutting
+// it -- with room for a throttled build node to be slow about saying so.
 func TestALargeBodyThatStopsArrivingLosesItsTurn(t *testing.T) {
 	var logs syncBuffer
 	h := largeTurnHandler(t, &logs)
+	h.largeBodyGrace = 50 * time.Millisecond
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
@@ -107,7 +131,7 @@ func TestALargeBodyThatStopsArrivingLosesItsTurn(t *testing.T) {
 			}
 		}
 	}()
-	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(20 * time.Second))
 	started := time.Now()
 	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
 	if err != nil {
@@ -118,8 +142,8 @@ func TestALargeBodyThatStopsArrivingLosesItsTurn(t *testing.T) {
 	if resp.StatusCode != http.StatusRequestTimeout {
 		t.Fatalf("a body trickling a byte every 20ms answered %d, want 408", resp.StatusCode)
 	}
-	if took := time.Since(started); took > time.Second {
-		t.Errorf("the trickling body held its turn for %s; the pacing should cut it well inside a second", took)
+	if took := time.Since(started); took > 5*time.Second {
+		t.Errorf("the trickling body held its turn for %s; its pace should have cut it within moments of a 50ms grace", took)
 	}
 	if n := len(h.largeBodies); n != 0 {
 		t.Errorf("%d turn(s) still taken after the slow read was cut", n)

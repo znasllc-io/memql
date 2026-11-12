@@ -535,7 +535,19 @@ func isTimeout(err error) bool {
 // takeLargeBodyTurn waits up to largeBodyWait for a turn, or until the request
 // is gone. A nil largeBodies (a Handler not built by NewHandler) never yields
 // one, which fails closed: such a request is refused rather than unbounded.
+//
+// A FREE TURN IS TAKEN FIRST, before any timer exists. Waiting on the turn and
+// the timer in one select alone would let a request that found a turn free
+// lose it to its own timer: when the goroutine is held up past largeBodyWait
+// between arming the timer and reaching the select -- a throttled container
+// does that -- both cases are ready, select picks one at random, and half the
+// time a free turn answered 503.
 func (h *Handler) takeLargeBodyTurn(ctx context.Context) bool {
+	select {
+	case h.largeBodies <- struct{}{}:
+		return true
+	default:
+	}
 	timer := time.NewTimer(h.largeBodyWait)
 	defer timer.Stop()
 	select {
