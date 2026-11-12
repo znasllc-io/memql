@@ -66,7 +66,7 @@ func refusePersonSession(why string) error {
 // class, no pat_id and no delegation; the credential class travels on the
 // assertion alone. So when an assertion is on the context it must be a user
 // principal of class `user`, and a present but zero assertion -- what a refused
-// binding leaves behind so an older one cannot be used -- is refused. The same
+// binding leaves behind so an older one cannot be used -- is refused. A
 // person's own direct stream carries a `user` assertion too, so this refuses
 // nothing a sign-in opened.
 //
