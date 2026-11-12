@@ -165,6 +165,40 @@ func TestACallerHoldingTheGrantStillReachesTheEnginesOwnBuiltin(t *testing.T) {
 	}
 }
 
+// With another namespace declaring the same bare name, each construct is still
+// reached by its own qualified name and judged by its own requirements: a
+// holder of the engine's grant reaches the engine's builtin, and the other
+// namespace's builtin, which declares no requirement, answers its own callers.
+// Only the bare name is refused, since it no longer names one construct.
+func TestEachConstructOfASharedNameIsReachedByItsQualifiedName(t *testing.T) {
+	gateCatalog(t)
+	e, reached := gateEngineWithPeer(t, true)
+	owner := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "v1:identity:user:caller", Role: auth.RoleOwner})
+	engine := gatedEngineBuiltins[0]
+	peerExecutor := "integration." + gatePeerNamespace + "." + engine.name
+
+	if err := runGatedCall(e, owner, engine.namespace+"."+engine.name+"("+engine.args+")"); err != nil {
+		t.Errorf("a holder of the grant was refused the engine's builtin by its qualified name: %v", err)
+	}
+	if reached[engine.executor] != 1 || reached[peerExecutor] != 0 {
+		t.Errorf("the holder's qualified call ran the engine's executor %d time(s) and the other namespace's %d, want 1 and 0", reached[engine.executor], reached[peerExecutor])
+	}
+
+	if err := runGatedCall(e, asCaller("writer"), gatePeerNamespace+"."+engine.name+"("+engine.args+")"); err != nil {
+		t.Errorf("the other namespace's builtin, which declares no requirement, was refused its own caller: %v", err)
+	}
+	if reached[engine.executor] != 1 || reached[peerExecutor] != 1 {
+		t.Errorf("the other namespace's qualified call ran the engine's executor %d time(s) and its own %d, want 1 and 1", reached[engine.executor], reached[peerExecutor])
+	}
+
+	if err := runGatedCall(e, owner, engine.name+"("+engine.args+")"); err == nil {
+		t.Error("the bare name, which two namespaces declare, was admitted")
+	}
+	if reached[engine.executor] != 1 || reached[peerExecutor] != 1 {
+		t.Errorf("the bare call ran an executor: the engine's %d time(s), the other namespace's %d", reached[engine.executor], reached[peerExecutor])
+	}
+}
+
 // TestTheBuiltinSeamRefusesWhatItCannotResolveToOneConstruct is the execution
 // seam alone, the one every builtin execution crosses whatever parsed it.
 func TestTheBuiltinSeamRefusesWhatItCannotResolveToOneConstruct(t *testing.T) {
