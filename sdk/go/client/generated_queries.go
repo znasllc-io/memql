@@ -4923,6 +4923,34 @@ func InboundRequestsGivenUpBuild(args InboundRequestsGivenUpArgs) string {
 	return b.String()
 }
 
+// InboundRequestsHeld -- The HELD deliveries of one source, least recently written first: failed, with no next try, and their lastError exactly the reason named. The reason is the connector contract's own sentence for a delivery of a store whose recording is paused; the datasync dispatcher writes it as it is, with the try not counted, and nothing else writes it. Such a row is answered by neither inboundRequestsDueForRetry (it has no next try) nor inboundRequestsGivenUp (its tries are below four): it waits, and datasyncReturnHeldInbound puts what this answers back in line when the store resumes. Without the body. Read through the failed-delivery lookup, as both of those are.
+//
+// Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["inboundRequestsHeld"] in generated_concepts.go).
+type InboundRequestsHeldArgs struct {
+	Source string
+	Reason string
+}
+
+// InboundRequestsHeld calls the engine query inboundRequestsHeld.
+func (qc *QueryClient) InboundRequestsHeld(ctx context.Context, args InboundRequestsHeldArgs) (*Result, error) {
+	call := InboundRequestsHeldBuild(args)
+	return qc.executeNamed(ctx, "inboundRequestsHeld", call)
+}
+
+func InboundRequestsHeldBuild(args InboundRequestsHeldArgs) string {
+	var b strings.Builder
+	b.WriteString("query inboundRequestsHeld(")
+	b.WriteString("source: ")
+	b.WriteString(quoteMemQL(args.Source))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("reason: ")
+	b.WriteString(quoteMemQL(args.Reason))
+	b.WriteString(")")
+	return b.String()
+}
+
 // InvitationById -- Returns the invitation with the given id. Zero or one result.
 //
 // Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["invitationById"] in generated_concepts.go).

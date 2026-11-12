@@ -7050,7 +7050,7 @@ QueryClient.prototype.shopifyFetchProduct = function (this: QueryClient, args: S
   return this.executeNamed("shopifyFetchProduct", buildShopifyFetchProduct(args), opts);
 };
 
-/** Create or find one buyer's B2B account: a company stamped with the MemQL application id, its location, the buyer as a company contact, and an ACTIVE catalog with a price list. Idempotent -- a second call for one application finds the first company rather than making a twin. Refuses BEFORE creating anything when the store is below Plus and already holds its three company-location catalogs, answering {status: refused, reason} rather than an error so the caller can tell a ceiling from an outage. */
+/** Create or find one buyer's B2B account: a company stamped with the MemQL application id, its location, the buyer as a company contact, and an ACTIVE catalog with a price list. Idempotent -- a second call for one application finds the first company rather than making a twin. Refuses BEFORE creating anything when the store is below Plus and already holds its three company-location catalogs, answering {status: refused, reason} rather than an error so the caller can tell a ceiling from an outage. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked. */
 export interface ShopifyProvisionWholesaleArgs {
   /** The store to provision on. */
   storeId: string;
@@ -7093,7 +7093,7 @@ QueryClient.prototype.shopifyProvisionWholesale = function (this: QueryClient, a
   return this.executeNamed("shopifyProvisionWholesale", buildShopifyProvisionWholesale(args), opts);
 };
 
-/** End a B2B entitlement by setting its catalog to DRAFT. DELETES NOTHING: the company, its location, its contact, the price list and every order placed under them are untouched, because revoking trade terms is ending a discount rather than erasing a customer -- and deleting a company would take its order history's association with it. */
+/** End a B2B entitlement by setting its catalog to DRAFT. DELETES NOTHING: the company, its location, its contact, the price list and every order placed under them are untouched, because revoking trade terms is ending a discount rather than erasing a customer -- and deleting a company would take its order history's association with it. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked. */
 export interface ShopifyRevokeWholesaleArgs {
   /** The store. */
   storeId: string;
@@ -7348,7 +7348,7 @@ QueryClient.prototype.shopifyStorefrontTokenSet = function (this: QueryClient, a
   return this.executeNamed("shopifyStorefrontTokenSet", buildShopifyStorefrontTokenSet(args), opts);
 };
 
-/** The plan-independent grant: add one tag to the buyer's customer record. Writes the tag and NOTHING else -- what the tag does is the merchant's own automatic discount, which this connector deliberately does not create on their behalf. Refuses when no customer on the store has that email, because a tag on an account that does not exist entitles nobody. */
+/** The plan-independent grant: add one tag to the buyer's customer record. Writes the tag and NOTHING else -- what the tag does is the merchant's own automatic discount, which this connector deliberately does not create on their behalf. Refuses when no customer on the store has that email, because a tag on an account that does not exist entitles nobody. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked. */
 export interface ShopifyTagWholesaleCustomerArgs {
   /** The store. */
   storeId: string;
@@ -7376,7 +7376,7 @@ QueryClient.prototype.shopifyTagWholesaleCustomer = function (this: QueryClient,
   return this.executeNamed("shopifyTagWholesaleCustomer", buildShopifyTagWholesaleCustomer(args), opts);
 };
 
-/** The plan-independent revoke: remove that one tag from the buyer's customer record. */
+/** The plan-independent revoke: remove that one tag from the buyer's customer record. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked. */
 export interface ShopifyUntagWholesaleCustomerArgs {
   /** The store. */
   storeId: string;
@@ -7404,7 +7404,7 @@ QueryClient.prototype.shopifyUntagWholesaleCustomer = function (this: QueryClien
   return this.executeNamed("shopifyUntagWholesaleCustomer", buildShopifyUntagWholesaleCustomer(args), opts);
 };
 
-/** How many more company-location catalogs this store may hold: -1 on Plus, which is unlimited, and otherwise three minus what it already has. Since 2026-04-02 companies, payment terms, volume pricing and up to three catalogs are available BELOW Plus, so the ceiling is real and this is what lets an adapter REPORT it rather than discover it at the fourth grant, in a merchant's live store. */
+/** How many more company-location catalogs this store may hold: -1 on Plus, which is unlimited, and otherwise three minus what it already has. Since 2026-04-02 companies, payment terms, volume pricing and up to three catalogs are available BELOW Plus, so the ceiling is real and this is what lets an adapter REPORT it rather than discover it at the fourth grant, in a merchant's live store. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked. */
 export interface ShopifyWholesaleCatalogHeadroomArgs {
   /** The store to measure. */
   storeId: string;
