@@ -1727,10 +1727,11 @@ func TestATombstoneAtALaterVersionClearsTheRecord(t *testing.T) {
 	want(t, "the line", lineFactsOf(t, id)[lineOne], "deleted", "true")
 }
 
-// ONLY A ROW WITH NO ID OF ITS OWN IS LEFT UNRECORDED: one with no gid, one
-// with no store and one of another store are each recorded; one with no row
-// id is counted and has no record.
-func TestOnlyARowWithNoIdIsLeftUnrecorded(t *testing.T) {
+// ONLY A ROW WITH NO ID OF ITS OWN, OR NO WRITE TIME, IS LEFT UNRECORDED: one
+// with no gid, one with no store and one of another store are each recorded;
+// one with no row id and one with no write time are counted and have no
+// record (unreadableRow.recordable).
+func TestOnlyARowWithNoIdOrNoWriteTimeIsLeftUnrecorded(t *testing.T) {
 	id := foldStore(t)
 	noGID := orderAt(id, "", ver(1))
 	delete(noGID, "gid")
@@ -1740,16 +1741,21 @@ func TestOnlyARowWithNoIdIsLeftUnrecorded(t *testing.T) {
 	another := orderAt(id, "gid://shopify/Order/4", ver(1), "storeId", "dbtest-storestats-another")
 	noID := orderAt(id, "gid://shopify/Order/5", ver(1), "totalTaxSet", set("1,0", "EUR"))
 	delete(noID, "id")
-	res := fold(t, id, sourceOrder, noGID, noStore, another, noID)
-	if res.Unreadable != 4 {
-		t.Errorf("the page counted %d unreadable rows, want four", res.Unreadable)
+	noTime := orderAt(id, "gid://shopify/Order/6", ver(1))
+	delete(noTime, "createdAt")
+	res := fold(t, id, sourceOrder, noGID, noStore, another, noID, noTime)
+	if res.Unreadable != 5 {
+		t.Errorf("the page counted %d unreadable rows, want five", res.Unreadable)
 	}
 	records := recordsOf(t, id)
 	want(t, "the row with no gid", records[sourceOrder+"/"], "row_id", "shp-no-gid", "field", "gid")
 	want(t, "the row with no store", records[sourceOrder+"/gid://shopify/Order/3"], "field", "storeId")
 	want(t, "the row of another store", records[sourceOrder+"/gid://shopify/Order/4"], "field", "storeId")
-	if records[sourceOrder+"/gid://shopify/Order/5"] != nil || len(records) != 3 {
-		t.Errorf("records %v, want the three rows that have an id of their own", records)
+	if records[sourceOrder+"/gid://shopify/Order/5"] != nil || records[sourceOrder+"/gid://shopify/Order/6"] != nil || len(records) != 3 {
+		t.Errorf("records %v, want the three rows that have an id of their own and a write time", records)
+	}
+	if facts := orderFactsOf(t, id); facts["gid://shopify/Order/6"] != nil {
+		t.Errorf("the row with no write time has a fact: %v", facts["gid://shopify/Order/6"])
 	}
 }
 
@@ -1944,8 +1950,10 @@ func TestAQuietStoresWalkCosts(t *testing.T) {
 					wholesaleReads++
 				}
 			}
-			if locks != 5 || engine.asked()+verdicts != 5 {
-				t.Errorf("a quiet store's turn with its walk took %d locked transactions and %d engine and %d verdict reads; want 5 and 5 in all",
+			// The engine reads are the shop row and the three reads to the
+			// clock; the verdict is asked of verdictOf, once.
+			if locks != 5 || engine.asked() != 4 || verdicts != 1 {
+				t.Errorf("a quiet store's turn with its walk took %d locked transactions, %d engine reads and %d verdict reads; want 5, 4 and 1",
 					locks, engine.asked(), verdicts)
 			}
 			if wholesaleReads != 1 {

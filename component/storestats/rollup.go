@@ -93,14 +93,19 @@ import (
 // lists name. Nothing in it is drawn from a row but those ids (see "The reads
 // are called from here, never as steps").
 type RollupReport struct {
-	Stores     int            `json:"stores"`
-	Rows       map[string]int `json:"rows"`
-	Facts      int            `json:"facts"`
-	Unreadable int            `json:"unreadable"`
-	Behind     []string       `json:"behind,omitempty"`     // "<store>/<source>"
-	Rebuilt    []string       `json:"rebuilt,omitempty"`    // stores storeState rebuilt this run
-	Removed    []string       `json:"removed,omitempty"`    // stores storeState removed this run
-	NotReached int            `json:"notReached,omitempty"` // stores the run did not take up: its budget was spent
+	Stores int            `json:"stores"`
+	Rows   map[string]int `json:"rows"`
+	Facts  int            `json:"facts"`
+	// Unreadable is the rows the run's pages met that could not be read,
+	// counted after each page's unreadable rows are reduced to one a row id,
+	// at its newest version (fold.go, readPageFrom): a row a page holds twice
+	// counts once, a row an overlap reads again on a later page counts again,
+	// and a row with no id of its own or no write time counts each time.
+	Unreadable int      `json:"unreadable"`
+	Behind     []string `json:"behind,omitempty"`     // "<store>/<source>"
+	Rebuilt    []string `json:"rebuilt,omitempty"`    // stores storeState rebuilt this run
+	Removed    []string `json:"removed,omitempty"`    // stores storeState removed this run
+	NotReached int      `json:"notReached,omitempty"` // stores the run did not take up: its budget was spent
 }
 
 // storesPageSize is how many stores one page of the stores read holds: the

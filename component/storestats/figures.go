@@ -100,7 +100,11 @@ func readFigures(ctx context.Context, tx bun.Tx, s *Statistics) error {
 	// statements as leading buckets: [PrevStart, PrevEnd) is bucket 1, and
 	// when PrevEnd is before the period's start the stretch between them is
 	// bucket 2, read and left out. A previous period that ran past the
-	// period's start is read on its own.
+	// period's start is read on its own. The bounds core/statsperiod makes
+	// always end the previous period at the period's start, so only bounds
+	// made by hand -- a test's -- reach that read; it is kept because, without
+	// it, bounds that did overlap would answer an empty previous period rather
+	// than its figures.
 	comparable := s.comparable()
 	readFrom, readStarts, lead := from, starts, 0
 	if comparable && !b.PrevEnd.After(from) {
@@ -240,7 +244,16 @@ type figureScope struct {
 // countedOrder is the filter of a counted order fact aliased o, and its
 // arguments.
 func (c figureScope) countedOrder() (string, []any) {
-	return "o.store_id = ? AND NOT o.deleted AND NOT o.cancelled AND (? OR NOT o.test)", []any{c.storeID, c.development}
+	return countedOrderWhere(c.storeID, c.development)
+}
+
+// countedOrderWhere is the one rule for a counted order, the figures' and the
+// check's (check_end.go, disagreeingOrders): the filter of an order fact
+// aliased o of the store that is not deleted, not cancelled, and not a test
+// order unless the store is a development store, and its arguments.
+// development is a bool, or SQL that answers one (bun.Safe).
+func countedOrderWhere(storeID string, development any) (string, []any) {
+	return "o.store_id = ? AND NOT o.deleted AND NOT o.cancelled AND (? OR NOT o.test)", []any{storeID, development}
 }
 
 // sums is what one bucket and one wholesale side sum to. Money is the store's
@@ -322,9 +335,12 @@ func (p periodSums) side(wholesale bool) sums {
 
 // figures turns sums into figures. A refund not read and one with a full
 // page of lines are counted over the orders of every currency, as the floors
-// are, so one of an order in another currency blanks the store-currency
-// figures until its detail is read: the brief's wording, and the cautious
-// side. The null rules:
+// are: the brief's wording, and the cautious side. So a refund not read of an
+// order in another currency blanks the store-currency Refunds, Net sales and
+// Total sales, and Units sold, until its detail is read; a refund with a full
+// page of lines blanks Units sold here and, in readProducts, the two product
+// lists, productCount and refundsWithoutItem, and none of the money figures
+// figures answers. The null rules:
 //   - with no currency, no money figure;
 //   - with a counted refund whose detail is not read, no Refunds, Net sales,
 //     Total sales or Units sold (D22);
@@ -565,7 +581,8 @@ type productRow struct {
 // in the period, then the newest version of the line, then the greatest
 // title. A refund of an older line never renames it. A product the period
 // holds only through refunds of older lines takes the title of the line of
-// its latest refund. productCount is how many products
+// its latest refund -- the refund's time first, then the line's version --
+// which need not be its newest refunded line. productCount is how many products
 // the period has, the list by units' whole length.
 //
 // A list is null when a figure it is made of is not measured: by sales with
@@ -662,7 +679,9 @@ func readProducts(ctx context.Context, tx bun.Tx, c figureScope, from, until tim
 		// refund line naming a line the store has since deleted is not an item
 		// return, and the refund's amount for it stays here, in the refunds of
 		// items that name no product; once the line is gone the fold cannot
-		// tell what kind of line it was. Today's mirror does not produce this.
+		// tell what kind of line it was, so a refund of a DELETED gift-card
+		// line lands here too, as a refund of items. Today's mirror produces
+		// neither: it retires orders, not lines.
 		without := all.refunds.Sub(returned)
 		s.RefundsWithoutItem = &without
 	}

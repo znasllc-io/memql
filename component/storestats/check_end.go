@@ -139,19 +139,21 @@ func finishCheckPass(ctx context.Context, tx bun.Tx, storeID string, started, no
 	return n == 1, disagreeing, nil
 }
 
-// disagreeingOrders counts the store's counted orders with complete lines
-// whose Shopify totals the facts do not add up to (D14), over facts that are
-// not deleted, amounts compared by value: the refunds' money against
-// shopify_total_refunded; every line's allocated discounts against
-// shopify_total_discounts; and, when no line is partly removed, the lines
-// still whole, each unit_price * quantity - allocated_discounts, against
-// shopify_current_subtotal. A total the row did not hold disagrees with
-// nothing.
+// disagreeingOrders counts the store's counted orders (countedOrderWhere,
+// the figures' own rule) with complete lines whose Shopify totals the facts
+// do not add up to (D14), over facts that are not deleted, amounts compared
+// by value: the refunds' money against shopify_total_refunded; every line's
+// allocated discounts against shopify_total_discounts; and, when no line is
+// partly removed, the lines still whole, each unit_price * quantity -
+// allocated_discounts, against shopify_current_subtotal. A total the row did
+// not hold disagrees with nothing.
 func disagreeingOrders(ctx context.Context, tx bun.Tx, storeID string) (int, error) {
 	var n int
+	counted, countedArgs := countedOrderWhere(storeID,
+		bun.Safe("EXISTS (SELECT 1 FROM store_sales_store s WHERE s.store_id = o.store_id AND s.development)"))
 	err := tx.NewSelect().TableExpr("store_sales_order_fact AS o").ColumnExpr("count(*)").
-		Where("o.store_id = ? AND NOT o.deleted AND NOT o.cancelled AND o.lines_complete", storeID).
-		Where("(NOT o.test OR EXISTS (SELECT 1 FROM store_sales_store s WHERE s.store_id = o.store_id AND s.development))").
+		Where(counted, countedArgs...).
+		Where("o.lines_complete").
 		Where(`(o.shopify_total_refunded <> (SELECT COALESCE(sum(r.money_refunded), 0) FROM store_sales_refund_fact r
 					WHERE r.store_id = o.store_id AND r.order_gid = o.order_gid AND NOT r.deleted)
 			OR o.shopify_total_discounts <> (SELECT COALESCE(sum(l.allocated_discounts), 0) FROM store_sales_line_fact l
