@@ -194,20 +194,60 @@ func TestAnExpiredOperationRestarts(t *testing.T) {
 	}
 }
 
-// A completed operation with no URL means the query matched nothing. That is
-// a legitimately empty domain and the step is DONE, not stuck.
-func TestAnEmptyDomainCompletes(t *testing.T) {
-	h := newHarness(t)
-	h.admin.reply("ShopifyBulkStatus", operationStatus("gid://shopify/BulkOperation/1", "COMPLETED", ""))
-	// A backfill this build began: its cursor carries the rule it began
-	// under, so its end is the end (finished).
-	cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", Rule: originVersionRule, At: exportStartedAt}
-	page, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", cur.encode())
-	if err != nil {
-		t.Fatal(err)
+// linklessCompletion is the origin's answer for a completed operation that
+// gives no link, counting count objects ("" for an answer with no count).
+func linklessCompletion(id, count string) map[string]any {
+	node := map[string]any{"id": id, "status": "COMPLETED", "url": nil}
+	if count != "" {
+		node["objectCount"] = count
 	}
-	if !page.Done {
-		t.Fatalf("page = %+v, want done", page)
+	return map[string]any{"node": node}
+}
+
+// A completed operation with no URL that exported nothing means the query
+// matched nothing. That is a legitimately empty domain and the step is DONE,
+// not stuck.
+func TestAnEmptyDomainCompletes(t *testing.T) {
+	for name, count := range map[string]string{"a count of zero": "0", "no count": ""} {
+		h := newHarness(t)
+		h.admin.reply("ShopifyBulkStatus", linklessCompletion("gid://shopify/BulkOperation/1", count))
+		// A backfill this build began: its cursor carries the rule it began
+		// under, so its end is the end (finished).
+		cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", Rule: originVersionRule, At: exportStartedAt}
+		page, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", cur.encode())
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !page.Done {
+			t.Fatalf("%s: page = %+v, want done", name, page)
+		}
+	}
+}
+
+// A completed operation that COUNTED objects and gives no link, with nothing
+// read from it, is not an empty kind: its file is gone -- an origin that stops
+// giving a link once it has expired answers this way -- and it takes the path
+// a gone download takes, started again within the two restarts.
+func TestACompletedExportThatCountedObjectsAndGivesNoLinkIsAGoneDownload(t *testing.T) {
+	h := newHarness(t)
+	h.admin.reply("ShopifyBulkStatus", linklessCompletion("gid://shopify/BulkOperation/1", "2"))
+	cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1"}
+	page, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", inFlight(cur))
+	if err != nil {
+		t.Fatalf("a completed export with no link failed the backfill: %v", err)
+	}
+	if page.Done {
+		t.Fatalf("page = %+v: an export that counted 2 objects and gave no file was read as an empty kind", page)
+	}
+	if next, want := decodeBackfillCursor(page.NextCursor), (backfillCursor{Restarts: 1, Rule: originVersionRule}); next != want {
+		t.Errorf("next cursor = %+v, want %+v: started again, one restart", next, want)
+	}
+
+	cur.Restarts = maxDownloadRestarts
+	_, err = h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", inFlight(cur))
+	var gone bulkDownloadGone
+	if !errors.As(err, &gone) {
+		t.Errorf("past the restarts: err = %v, want a gone download", err)
 	}
 }
 
@@ -736,7 +776,9 @@ func TestALinkTheOriginNoLongerGivesStartsTheOperationAgainWithinTheTwoRestarts(
 		t.Errorf("err = %v, want a gone download naming the week a link lasts", err)
 	}
 
-	// Nothing read from it yet, and no link: the export matched nothing.
+	// Nothing read from it yet, no link, and nothing counted: the export
+	// matched nothing.
+	h.admin.reply("ShopifyBulkStatus", linklessCompletion("gid://shopify/BulkOperation/1", "0"))
 	page, err = h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product",
 		inFlight(backfillCursor{OperationID: "gid://shopify/BulkOperation/1", OpIndex: 1}))
 	if err != nil || !page.Done {

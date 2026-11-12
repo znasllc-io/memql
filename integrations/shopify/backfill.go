@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	neturl "net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -166,6 +167,14 @@ type bulkOperation struct {
 	CompletedAt string `json:"completedAt"`
 }
 
+// exported reports whether the origin counted any object in the operation's
+// export. Shopify answers objectCount as an unsigned integer in a string; a
+// count it did not give, or cannot be read as one, is no count.
+func (op bulkOperation) exported() bool {
+	n, err := strconv.ParseUint(strings.TrimSpace(op.ObjectCount), 10, 64)
+	return err == nil && n > 0
+}
+
 // Backfill implements sync.Connector for one store's domain.
 //
 // The runtime never calls it: the connector is partitioned, and each store is
@@ -253,10 +262,13 @@ func (c *Connector) BackfillStore(ctx context.Context, store Store, concept, cur
 	}
 	switch op.Status {
 	case "COMPLETED":
-		if op.URL == "" && cur.Line == 0 {
-			// A completed operation with no link, and nothing read from it:
-			// the query matched nothing. That is a legitimate empty domain and
-			// the step is done, not stuck.
+		if op.URL == "" && cur.Line == 0 && !op.exported() {
+			// A completed operation with no link, nothing read from it and
+			// nothing counted: the query matched nothing. That is a legitimate
+			// empty domain and the step is done, not stuck. One that counted
+			// objects and gives no link has a file that is gone -- an origin
+			// may stop giving the link once it has expired -- and is taken as
+			// a gone download is (below).
 			return c.advanceOperation(cur, spec, "no rows")
 		}
 	case "CREATED", "RUNNING":
