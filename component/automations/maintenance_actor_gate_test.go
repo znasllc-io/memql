@@ -155,6 +155,13 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 		// -- so under the default RoleReader actor every run is refused and
 		// every deployable's statistics read as not measured.
 		"siteStatisticsRollupSweep",
+		// storeStatisticsCheckSweep (the 2026-11-11 store statistics design)
+		// checks every store's statistics facts against its mirrored rows
+		// hourly, through the same @serverOnly queries the rollup reads, and
+		// repairs what differs. Under the default RoleReader actor those reads
+		// answer zero rows and the builtin refuses every run besides, so no
+		// fact would ever be proven against its row.
+		"storeStatisticsCheckSweep",
 		// storeStatisticsRollupSweep (the 2026-11-11 store statistics design)
 		// walks every store's mirrored orders, lines and refunds into the
 		// store statistics facts: a cross-owner roll-up by nature, read

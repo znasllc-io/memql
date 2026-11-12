@@ -45,6 +45,11 @@ var writersThroughWriteTx = []string{
 	"startWholesalePass",
 	"wholesalePage",
 	"keepWholesaleOff",
+	// Task 16: the check (check.go).
+	"startCheckPass",
+	"checkPage",
+	"orphanBatch",
+	"finishCheckPass",
 }
 
 // THE ONE WAY THIS PACKAGE WRITES, read off its source with its types. See

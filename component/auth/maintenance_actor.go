@@ -128,6 +128,13 @@ var maintenanceAutomations = map[string]string{
 		"storeStatisticsRollup admits this principal and no other caller in its Go handler besides, so without it " +
 		"every run is refused, nothing is folded, and every store's figures read as not measured -- a failure that " +
 		"looks like a store that sells nothing",
+	"storeStatisticsCheckSweep": "the hourly check of every store's store statistics facts against its mirrored " +
+		"orders, lines and refunds (the 2026-11-11 store statistics design): it walks each store's mirror rows again " +
+		"through the same @serverOnly queries the walk reads, filtered on actor.isClusterOwner, and repairs the facts " +
+		"that differ, so it spans every store by nature and a mirrored row has no owner to borrow. Under the default " +
+		"RoleReader actor those reads answer zero rows and no error, and builtin storeStatisticsCheck admits this " +
+		"principal and no other caller in its Go handler besides, so without it every run is refused and no fact is " +
+		"ever proven: an erased customer's scrubbed rows would stay in the figures as they were before the erasure",
 	"geoCountryRefreshSweep": "the daily check that downloads DB-IP's monthly country database into edge_geo_country " +
 		"(the 2026-11-08 statistics design). The table is a dedicated one no row admission ever sees, and builtin " +
 		"geoCountryRefresh admits this principal and no other caller in its Go handler. Without it the automation's " +
