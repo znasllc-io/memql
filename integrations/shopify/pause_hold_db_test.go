@@ -160,7 +160,7 @@ func (r *pauseRig) setStatus(status string) {
 func (r *pauseRig) setRecording(recording bool) {
 	r.t.Helper()
 	builtinReply(r.t, r.eng, clientCall(r.owner, auth.RoleDeveloper),
-		fmt.Sprintf("builtin shopifyStoreSetRecording(storeId: %q, recording: %t)", r.storeID, recording))
+		"builtin "+renderCall("shopifyStoreSetRecording", map[string]any{"storeId": r.storeID, "recording": recording}))
 }
 
 // holds writes a product the mirror holds, read an hour ago.

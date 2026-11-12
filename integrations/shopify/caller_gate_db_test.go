@@ -87,7 +87,7 @@ func TestAStoresOwnerWhoIsNotAClusterOwnerPausesAndResumesIt(t *testing.T) {
 	person := clientCall(owner, auth.RoleDeveloper)
 	set := func(recording bool) map[string]any {
 		t.Helper()
-		return builtinReply(t, eng, person, fmt.Sprintf("builtin shopifyStoreSetRecording(storeId: %q, recording: %t)", storeID, recording))
+		return builtinReply(t, eng, person, "builtin "+renderCall("shopifyStoreSetRecording", map[string]any{"storeId": storeID, "recording": recording}))
 	}
 
 	if got := status(); got != StatusConfigured {
@@ -102,7 +102,7 @@ func TestAStoresOwnerWhoIsNotAClusterOwnerPausesAndResumesIt(t *testing.T) {
 
 	// Somebody else holding the same part is refused, and nothing moves.
 	if _, err := eng.Execute(clientCall("dbtest-recording-other-"+suffix, auth.RoleDeveloper),
-		fmt.Sprintf("builtin shopifyStoreSetRecording(storeId: %q, recording: false)", storeID)); err == nil ||
+		"builtin "+renderCall("shopifyStoreSetRecording", map[string]any{"storeId": storeID, "recording": false})); err == nil ||
 		!strings.Contains(err.Error(), "shopify: shopifyStoreSetRecording "+actRefusal) {
 		t.Fatalf("another developer: err = %v, want the refusal", err)
 	}
@@ -150,7 +150,7 @@ func TestAStoresOwnerWhoIsNotAClusterOwnerPausesAndResumesIt(t *testing.T) {
 
 	// The next verdict says when the store left paused, and the next watch
 	// pass records it.
-	reply := builtinReply(t, eng, person, fmt.Sprintf("builtin shopifyStoreVerdict(storeId: %q)", storeID))
+	reply := builtinReply(t, eng, person, "builtin "+renderCall("shopifyStoreVerdict", map[string]any{"storeId": storeID}))
 	if reply["state"] == VerdictPaused || reply["resumedAt"] != now.Format(time.RFC3339) {
 		t.Errorf("the next verdict = state %v, resumedAt %v; want resumed at %s", reply["state"], reply["resumedAt"], now.Format(time.RFC3339))
 	}
