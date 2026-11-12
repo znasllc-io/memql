@@ -228,6 +228,12 @@ connector does not have. The refusals the dispatcher makes before it asks the
 connector -- another tier's secret, no verified signature, metadata that does
 not parse -- are facts about the stored row, and are not tried again either.
 
+A connector may also fail a try on purpose, to be asked again: the Shopify
+connector does so when Shopify answers nothing for a record the mirror holds,
+and believes the deletion only when the next try answers nothing too. The
+dispatcher tells each try whether the one before it ended that way; a delivery
+put back in line starts that count again.
+
 **Four tries at most**, the first included:
 
 | Try | When |
@@ -254,8 +260,10 @@ mirror, the connector's reconciliation sweep is the net under all four tries.
 given-up delivery of one source back in line: its tries start again from none
 and it is due now, so the next pass -- within a minute -- tries it. A
 delivery still waiting for its next try is not given up, and is left as it
-is. The builtin is for a cluster owner. For one Shopify store, the store's
-owner or a cluster owner can do the same from its Store page
+is. The builtin is for a cluster owner or the engine itself; anybody else is
+refused with "datasync: requeueInbound is for a cluster owner". For one
+Shopify store, the store's owner or a cluster owner can do the same from its
+Store page, where the connector makes the call
 ([the Shopify connector](shopify-connector.md#the-storefronts-store-panel)).
 
 **In MemQL OS.** **Cluster > Data** has a panel, "Changes that could not be
@@ -263,7 +271,9 @@ recorded", that reads nothing until you press "Check": the question is one
 read, and on a healthy cluster the answer is empty. It then lists one line per
 source, with how many of its deliveries used all four tries ("At least" when
 the list was not read to its end) and the latest error, each with "Try
-again", which runs `datasyncRequeueInbound` for that source. With nothing
+again", which runs `datasyncRequeueInbound` for that source -- so it works
+for a cluster owner, and for anybody else shows "The cluster refused, and
+nothing changed." with that reason. With nothing
 given up it says "No change has used all four tries." A refused requeue says
 "The cluster refused, and nothing changed.", with the reason.
 

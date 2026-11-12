@@ -330,6 +330,11 @@ store they own, and otherwise refused.
 | `shopifyStoreHealth` | answers every store for a cluster owner or a caller who may read store rows, their own store for a store's owner, and an empty list -- not a refusal -- for anybody else |
 | `shopifyEnsureSubscriptions`, `shopifyRunComplianceJobs` | their scheduled automations, or a cluster owner running them by hand |
 | `shopifyStoreAlertWaitSet` | cluster owner |
+| `datasyncStartBackfill`, `datasyncSetSyncPaused`, `datasyncRequeueInbound`, `datasyncRetryOutboxEntry`, `datasyncDiscardOutboxEntry` (the acts of [Cluster > Data](#cluster--data)) | cluster owner, or the engine itself; anybody else is refused with "datasync: <name> is for a cluster owner" |
+
+`shopifyStoreRetryDeliveries` -- the Store page's "Try again" -- puts the
+store's given-up deliveries back in line by making that requeue itself, as
+the engine, so it works for the store's owner who is not a cluster owner.
 
 Below developer a store read answers **zero rows, not an error**: the binding
 guard and the deploy path read "not readable" off an empty result. The read
@@ -518,27 +523,49 @@ returns the rows; the runtime applies them under the version guard, so a
 write whose `updatedAt` is older than the stored row's is recorded as *stale*
 and dropped.
 
-**Changes are kept in order.** Every record the mirror writes carries a
-version in `updatedAt`, and `versionSource` says where it came from:
+**Changes are kept in order: two questions, two clocks.**
 
-- `origin` -- Shopify's own last-changed time for the record. A child that
-  has none of its own, such as an order's line, carries its parent's.
-- `read` -- for a kind Shopify publishes no version for, the time MemQL read
-  it. For those kinds "older" means "read earlier": the last read wins.
+- **Which of two versions of a record is newer** is decided by Shopify's own
+  last-changed time for it (`updatedAt`; a child with none of its own, such as
+  an order's line, takes its parent's). A write older than the record held is
+  refused on every path -- a delivery, the periodic check, a full re-list and
+  a history download alike -- so an older snapshot that arrives late cannot
+  replace a newer change. For a kind Shopify publishes no version for, the
+  later read wins.
+- **Whether a record still exists** is decided by when Shopify was last read
+  for it, never by its last-changed time, which does not move when a record
+  is deleted. A deletion stands against every read made before it, and a
+  later read that finds the record brings it back. A history download counts
+  as read when its export was started, so an export started before a deletion
+  does not bring the deleted record back.
 
-A write older than the record held is refused on every path -- a delivery,
-the periodic check, a full re-list and a history download alike -- so an
-older snapshot that arrives late cannot replace a newer change, nor bring
-back a record deleted since. A deletion carries a version too: a delete
-topic's own event time, the time a fetch found the record gone, or a second
-before the re-list that missed it began.
+**How a deletion is believed.**
+
+- **A deletion Shopify announces** (a delete notice) is believed at once.
+  It is undone only by a read of the record made more than 60 seconds after
+  the notice was received; the 60 seconds allow for the clocks of two nodes.
+- **A deletion Shopify does not announce** -- a notice about a record that
+  Shopify, when asked, no longer has -- is believed only when Shopify answers
+  nothing for it **twice in a row** for the same notice. The first empty
+  answer retires nothing: the delivery fails, to be asked again, on the
+  delivery retry's waits -- one minute after the first try, five after the
+  second, thirty after the third, so at most thirty minutes between two tries.
+  If the tries run out without two empty answers in a row, the delivery is
+  given up and the Store page says "1 change could not be recorded."; its
+  "Try again" asks again, and the count of empty answers starts again.
+- **Nothing else retires a record.** An answer with any error, a refusal of
+  protected customer data, and a partial answer (Shopify refused part of what
+  was asked, and what is left has no record) are not deletions. An empty
+  answer for a record the mirror does not hold yet writes nothing; the record
+  arrives with the next read that finds it.
+- **A record wrongly seen as gone** comes back on the next read that finds it.
 
 **After upgrading to this version**, each store's domains are read once more
 from the start, because a history read under the earlier version may have put
 an older snapshot over a newer change. At boot, every domain of a store being
-recorded whose backfill completed under the earlier version is queued again,
-and a backfill still running reads its domain once more when it reaches its
-end. Each store reads "Starting" while this runs, then "Recording" again. The
+recorded whose backfill completed under the earlier version is queued again.
+A backfill an earlier version left running does not finish first: at its next
+step it begins again from the start. Each store reads "Starting" while this runs, then "Recording" again. The
 first periodic check that reads a record written under the earlier version
 rewrites it once, to add its `versionSource`, so `driftLast` can read high for
 that one pass. It happens
@@ -575,10 +602,11 @@ A full re-list that hits its page cap tombstones **nothing**. Tombstoning is
 an argument from absence, and the argument is only valid if the walk was
 complete.
 
-So a record is marked deleted three ways: by a delete topic; by a delivery
-whose fetch finds the record gone; and by a complete full re-list that no
-longer lists it -- never from a partial listing such as an `updated_at:>`
-page. A record written after the re-list began is not marked deleted by it.
+So a record is marked deleted three ways: by a delete notice; by a notice
+whose record Shopify answers nothing for twice in a row (see "How a deletion
+is believed", above); and by a complete full re-list that no longer lists it
+-- never from a partial listing such as an `updated_at:>` page. A record read
+after the re-list began is not marked deleted by it.
 When the mirror holds more of a domain than one pass reads back, its oldest
 records are kept that pass. Some kinds are never marked deleted by a re-list
 at all, because their listing is not the whole set: fulfillment orders (open
@@ -950,6 +978,14 @@ holding `app:cluster/origins`. For Shopify:
   store's id; connectors that keep no stores apart share one group at the
   top. Each row is one domain of that store, with its lag, drift, outbox
   depth, dead letters and last error.
+- **Who may act.** Every act on this page -- "Backfill now", "Pause",
+  "Resume", "Try again" under "Changes that could not be recorded", and a dead
+  letter's "Retry" and "Discard" -- is for a cluster owner (or the engine
+  itself). Somebody who holds the page's part but is not a cluster owner sees
+  the buttons, and pressing one shows "The cluster refused, and nothing
+  changed." with the engine's reason, such as "datasync: startBackfill is for
+  a cluster owner". A store's owner retries that store's changes from its
+  Store page instead, where the connector makes the call for them.
 - **"Backfill now", "Pause" and "Resume" act on that one store's domain** --
   never on every store. "Backfill now" starts a failed backfill again from the
   start, and carries any other on from where it stopped. They are not drawn until the connector health has
@@ -982,9 +1018,10 @@ holding `app:cluster/origins`. For Shopify:
   nothing counts a running total.)
 - **lagSeconds** -- for the domain's last applied delivery, the seconds from
   the record's version to when MemQL applied it. For a record with Shopify's
-  own version that is how far behind Shopify the mirror was; for a kind
-  Shopify publishes no version for, the version is the read time, so it reads
-  about zero. Cluster > Data shows it as "Lag".
+  own last-changed time, that is how far behind Shopify the mirror was. For a
+  kind Shopify publishes no version for, the version is the time it was read,
+  and for a deletion it is when the notice was received or when Shopify was
+  read and had nothing, so both read about zero. Cluster > Data shows it as "Lag".
 - **outboxDepth** -- the pending and failed outbox entries waiting to be
   pushed to the store.
 - **phase** -- `idle`, `backfilling` (a backfill queued or running),
