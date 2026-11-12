@@ -267,7 +267,7 @@ func TestAStoreWithNoCurrentDocumentIsDocumentsUnavailable(t *testing.T) {
 // waiting application is link_expired; once the application is rejected it is
 // link_closed, expired or not; once the link is used it is link_used, rejected
 // and expired or not.
-func TestATermsLinkIsJudgedUsedThenClosedThenExpired(t *testing.T) {
+func TestATermsLinkIsJudgedUsedThenClosedThenExpiredThroughTheShopperPath(t *testing.T) {
 	eng := liveWholesaleEngine(t)
 	s, token := termsStore(t, eng, "order")
 	past := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
