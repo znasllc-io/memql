@@ -197,8 +197,9 @@ has read it. That design moves three things to later pieces:
 - The `accountIds` lists are narrowed to the row's own account, not removed.
   Dropping the field goes to sign-in and separation, which decides what sharing
   inside an account looks like.
-- `campaignAccountId` stops being written in the export piece's push and is
-  dropped in the push after it.
+- `campaignAccountId` is kept. It is the account a send was queued for, which the
+  send worker compares at send time, and not a copy of the row's own account
+  (account export design, section J).
 
 ### 3. Sign-in and separation
 

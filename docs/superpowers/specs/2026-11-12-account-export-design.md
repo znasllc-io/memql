@@ -481,10 +481,10 @@ count. The Export tab shows them, and the run checks them again when it starts.
 | Condition | Read from |
 |---|---|
 | Recording is on, and the node that answers is not held | `account_stamping_storage`, `MEMQL_ACCOUNT_STAMPING_ACTIVATE` |
-| The first assignment has finished for every kind the engine records | `account_assignment_progress` |
+| The first assignment has finished for every kind the engine records, and no requested pass is unfinished | `account_assignment_progress` |
 | Every loaded concept declares | the concept registry |
 | No row awaiting a decision names this account | `account_assignment_conflict` |
-| No row is still following a moved parent into or out of this account | `account_follow_tasks` (section I) |
+| No row is still following a moved parent into or out of this account | `account_follow_tasks` (section I): no change record naming the account is unsettled |
 
 It also reports, without blocking, how many rows of account-scoped kinds are in
 no account.
@@ -643,26 +643,53 @@ are. The runner that works exports is wired on agent nodes only.
   rules, as today; and a destination that is unknown or the same.
 - **In place.** Like the assignment, it writes the account on the newest version
   and on the observation copy, appends no version, publishes no event and runs
-  no automation. It invalidates the kind's cached reads.
+  no automation. It invalidates the kind's cached reads. It checks afterwards
+  that the version it wrote is still the newest, and writes a newer one too.
+- **Refused while recording is off.** The hold exists to keep the account off
+  rows, and the act honours it.
 - **Recorded.** One line per moved root in `account_row_moves` (from, to, who,
-  when, how many followed, a note), and an audit event.
+  when, a note), and an audit event.
+- **It names what follows, and does not count it.** The act answers the kinds
+  whose rows hang off what it moved. Counting them would mean finding them, and
+  that is the background pass below.
 
 ### Followers follow
 
 Today nothing carries a row's children when its account changes: a goal moves and
-its runs stay behind. From this piece, whenever a row's recorded account changes,
-by the act, by a re-tag of a list row, or by an organization change in its own
-app, the engine records a follow task. The assignment runner works tasks off in
-batches: every row whose `via` field names the changed row, and whose own account
-is the one the row left, takes the new one, and so on down the chain. Placing a
-row that states its own account also places the rows the organization rules tie
-to it, where they have none.
+its runs stay behind. From this piece they follow, and the assignment job is what
+carries them.
 
-A row attached to a parent from another account stays where it is. Row ownership
-allows that on purpose, and it is why a follower is recognized by the account it
-shares with its parent, not by the link alone.
+- **A change is recorded.** Whenever a row's recorded account changes from one
+  account to another, by the act, by a re-tag of a list row, or by an
+  organization change in its own app, the engine writes a change record
+  (`account_follow_tasks`: the row, the account it left, the account it went to)
+  in the same transaction, and asks the job for a full pass of the kinds whose
+  rows can hang off it.
+- **The job carries.** For every row it reads, the job looks at the row's parent.
+  A row whose account is the one its parent left, where the parent is now in
+  another account, takes the parent's account as it is at that moment, gets a
+  change record of its own, and so brings its own children in the next pass.
+- **A row attached from another account stays.** Row ownership allows that on
+  purpose, and it is why a follower is recognized by the account it shares with
+  the one its parent left, not by the link alone.
+- **A placement needs no record.** A row placed from no account has children with
+  no account, and the job's existing rule gives such a row its parent's account.
+  The act asks for the pass. So does a kind's own mutation the first time it
+  states an account. A row whose first account the engine itself records asks
+  for nothing: its children were already waiting on it.
+- **A stale write is repaired.** An ordinary write that read a row before it
+  moved appends a version naming the account the row left. That version is new,
+  so the job's next pass reads it: a follower is carried again because its
+  parent's record stands, and a moved root goes back to where its latest line in
+  `account_row_moves` put it. No lock is added to ordinary writes.
 
-An export waits while a task is pending for its account.
+Placing a row that states its own account also places, in the same call, the
+rows the organization rules tie to it, where they have none.
+
+How long it takes is how long a pass of the kind takes, not how many rows moved.
+An export waits while a change record that names its account is not settled,
+which it is once every kind that can hang off the row has finished a full pass
+begun after the record was written.
 
 ### Rows awaiting a decision
 
@@ -697,11 +724,13 @@ While recording is off, the lists behave as they did.
 
 ## J. Smaller items
 
-- **`campaigns.sendJob.campaignAccountId`.** Nothing writes it after this push.
-  Its readers take `accountId` and fall back to the campaign's own account, which
-  covers rows written before and an instance with the hold on. The field stays
-  declared and is dropped in the next piece's push. A field can only be dropped
-  one release after its last writer stops, and piece 1 kept the writers.
+- **`campaigns.sendJob.campaignAccountId` stays.** The program planned to stop
+  writing it here and drop it in the next push, as a copy of the account the
+  engine now records on the job. It is not a copy. It is the account a send was
+  queued for, and the send worker compares it with the campaign's account when
+  the send runs, refusing a send whose campaign changed organization in between.
+  The job's own account follows its campaign, and no job has one while recording
+  is off, so it cannot stand in ("Decided without asking").
 - **`accountIds`.** The field is dropped by the sign-in piece, which decides what
   sharing inside an account looks like. Its last writer stops then, and the strip
   follows one release later.
@@ -779,7 +808,7 @@ both modes, wide and narrow, empty and populated, before it is called done.
 | `belongs_to_stays_unknown`, `belongs_to_via_stays`, `field_annotation_type` | A declaration is refused at load |
 | `belongs_to_undeclared` | From 0.34, a mounted concept with no declaration |
 | `memql_account_exports_total{outcome}` | Exports by outcome |
-| `memql_account_follow_tasks` | Follow tasks pending |
+| `memql_account_follow_tasks` | Change records not settled |
 | `memql_dsl_deprecated_uses_total{rule="concept_belongs_to_undeclared"}` | Undeclared mounted concepts, per load |
 
 ## M. Testing
@@ -813,9 +842,11 @@ both modes, wide and narrow, empty and populated, before it is called done.
   late commit is found; the timeout names the kinds.
 - **The run:** each failure leaves no file; a cancelled run leaves nothing
   staged; the passphrase is cleared at every final state.
-- **Followers:** a moved goal carries its runs and steps; a row attached from
-  another account stays; a re-tag carries followers; an export waits for a
-  pending task.
+- **Followers:** a moved goal carries its runs and steps through the job's
+  passes; a row attached from another account stays; a parent moved twice takes
+  its followers to where it is; a version appended by a write that read the row
+  before it moved is put right by the next pass; a re-tag carries followers; an
+  export waits for an unsettled record.
 - **The lists:** each of the write rules, the job's rewrite, older versions
   trimmed, and nothing changed while recording is off.
 
@@ -921,6 +952,10 @@ recommended. They are listed so the owner can read and overturn any of them.
 | The reuse evidence on a learned procedure keeps listing account ids | Changing it reaches into procedure learning, outside this piece; it is a known limit in section O |
 | `@bytes` takes a required `under`, and a reference outside it is refused, not read | A row names its own bytes, and the export must not read whatever a row names. Each existing reader already holds its own kind to such a place |
 | A place needs a placeholder, a placeholder names the row's id or its owner field, and ids are compared as `core/librarykey` compares them | A place that does not tie the bytes to the row is no place at all |
+| `campaignAccountId` is not retired. This departs from the program record | It is the account a send was queued for, which the send worker compares to refuse a send whose campaign changed organization since. Stopping its writers would have switched that check off on every installation that has the hold on |
+| Followers are carried by the assignment job's passes, through change records, not by a runner of their own; and the move names the kinds that follow without counting them | Finding a row's children means reading a field inside every candidate's payload, which on the owner's installation is hundreds of thousands of rows per parent. The job already walks a kind by id in bounded batches. And a version appended by a write that read a row before it moved is a new version, so the job's next pass repairs it, with no lock added to ordinary writes |
+| The move is refused while recording is off | The hold exists to keep the account off rows |
+| Where a list decides a row's account, the person's right to write to that account is checked on every write, not only on one that names the list | A list stored before this piece may name an account its tagger was never in |
 | Attachment bytes are counted in a file's report and not carried. This departs from E10's list | An attachment's key holds a partition and a digest of the run that made it, and neither is a field of the row, so no declaration can tie the key to the row. No bundle of the three installations at hand can create an attachment row, so nothing is lost today; carrying them needs the key recorded on the row first |
 | An export may not carry a row larger than 64 MiB in one version, and its checker bounds every member it reads | The checker will read files from outside once import exists; the writer refuses what the checker would |
 | A deleted row is decided like any other: by its newest version, which is its deletion | The reader has one rule, and a kind that deletes by an update keeps its account on that version |

@@ -457,8 +457,8 @@ Changed on 2026-11-12 by the
 the list is narrowed to the row's own account and `@rowAuthz` keeps reading it,
 because sharing by `accountId` would open every one of these rows to all members
 of its account. Dropping the list goes to the sign-in piece, and
-`campaignAccountId` is dropped one push after its writers stop. What follows is
-the plan as it stood.
+`campaignAccountId` is kept: it is the account a send was queued for, which the
+send worker compares at send time. What follows is the plan as it stood.
 
 - `@rowAuthz` moves to `accountId`.
 - `accountIds` is stripped from every stored version by a migration scoped by
