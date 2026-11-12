@@ -55,73 +55,91 @@ func (s wholesaleState) isWholesale(email string) bool {
 	return folded != "" && s.Granted[folded]
 }
 
-// A RUN HAS A BUDGET, AND A HARD DEADLINE ABOVE IT.
+// A RUN HAS A BUDGET, A STORE'S TURN HAS ONE, AND THE HARD DEADLINE IS MINUTES.
 //
 // runBudget paces a run: once it is spent, the run takes up no new store and
 // ends normally (rollup.go, "One long store does not starve the others"). It
-// is the schedule's period, a minute, less a margin of ten seconds for the
-// store under way to finish its own work and the run to log, so the next
-// minute's tick seldom finds the run still going; when it does, that tick
-// stands down at Info.
+// is the schedule's period, a minute, less ten seconds for the store under
+// way to finish and the run to log.
+//
+// turnBudget paces a store's turn: once it is spent, the turn asks no new
+// page of any source and starts no new purge batch, and ends normally
+// (rollup.go, "A turn has a budget"). A turn's work is then at most its
+// budget plus the one unit under way when the budget ran out.
+//
+// txTimeout bounds every transaction of the package (tx.go): a page's write
+// makes statements in proportion to its rows, so a count of statements cannot
+// bound it and a time can.
 //
 // runDeadline is a safety bound for a run that hangs -- a read that never
 // answers, a seam deaf to its context -- not the pacing. It cancels the run's
 // context, and a run that has not answered runUnwind later is left behind,
-// its hold released, so the next minute runs. It sits above the budget plus
-// the most one store's turn can take from the limits the walk and the
-// housekeeping keep (storeTurnBound), so a store under way is never cut off
-// by it. Variables so a test can make a run outlast them.
+// its hold released, so the next minute runs. It sits at or above
+// runDeadlineBound, which a test holds at or below fifteen minutes: work
+// added to a store's turn -- the wholesale pass and the periodic check come
+// next -- asks turnSpent between its units, so that what is under way when
+// the budget runs out stays one unit, rather than adding a term to a sum.
+// Variables so a test can make a run outlast them.
 var (
 	runBudget   = 50 * time.Second
-	runDeadline = runBudget + storeTurnBound() + time.Minute
+	turnBudget  = 30 * time.Second
+	runDeadline = runDeadlineBound() + time.Minute
 	runUnwind   = 5 * time.Second
 )
 
-// The limits a store's turn is bounded by, beyond those walk.go and store.go
-// name.
+// clockForTests is nil outside tests. When a test sets it, it is the clock the
+// run's and the turn's budgets read (budgetNow), so a test drives a budget
+// past its end without sleeping.
+// TestNoProductionCodeSetsOnlyStoresForTests holds that only a test file sets
+// it.
+var clockForTests func() time.Time
+
+// The bounds a run's hard deadline is worked out from.
 const (
-	// statementBound is the longest one statement can take: pgdriver's client
+	// readBound is the longest one engine read can take: pgdriver's client
 	// read deadline, ten seconds, which ends a statement before or when the
 	// request pool's eight-second statement timeout does.
-	statementBound = 10 * time.Second
-	// walkSourcesPerStore are the sources a store's turn walks: orders, lines
-	// and refunds (walk.go). A task that adds a walk to a store's turn -- the
-	// wholesale pass, the check -- raises this or adds its own term below.
-	walkSourcesPerStore = 3
-	// foldStatementsPerPage is an allowance for the statements one page's
-	// write transaction makes -- the lock, the generation, the facts, their
-	// derivation, the watermark and the walked mark -- with room over. The
-	// fold sets the real count here when it lands.
-	foldStatementsPerPage = 8
-	// housekeepingStatements are a store's own statements outside its walk:
-	// its row (two), what is kept about it (eight), its generation (one), the
-	// end of a rebuild (three), and its floor's read and write (four), with
-	// room over.
-	housekeepingStatements = 24
+	readBound = 10 * time.Second
+	// wholesaleReadsBound is the most reads wholesaleFor may make in a run
+	// (Task 15's wholesaleOf pages two reads); more must be read across runs.
+	wholesaleReadsBound = 10
+	// unbudgetedTransactions are the transactions a store's turn makes that
+	// no budget is asked between, counted from the code: its row
+	// (ensureStore, 1); keepStore's purging read, its keeping and a purge
+	// batch under way (3); its generation (1); the walk's purging read (1);
+	// the floor's read and write (2); each source's watermark read (3); and
+	// the walked mark (1).
+	unbudgetedTransactions = 12
+	// unbudgetedReads are the engine reads a turn makes that no budget is
+	// asked between: the shop, the verdict and the floor's probes.
+	unbudgetedReads = 2 + floorProbes
 )
 
-// storeTurnBound is the most one store's turn can take, from its limits:
+// runDeadlineBound is the most a run can take, its budgets spent, line by
+// line:
 //
-//	engine reads:  floorProbes (14) + the shop and the verdict (2)
-//	               + walkSourcesPerStore (3) x maxReadsPerRun (400)       = 1,216
-//	statements:    walkSourcesPerStore (3) x maxReadsPerRun (400)
-//	                 x foldStatementsPerPage (8)                          = 9,600
-//	               + purgeBudget (20) x (the lock, the purging read, one
-//	                 delete for each of the 4 fact tables, the clear: 7)  =   140
-//	               + housekeepingStatements                               =    24
-//	                                                              total  10,980
+//	the stores read:      maxStorePages (20) reads x readBound (10 s)       200 s
+//	the wholesale read:   wholesaleReadsBound (10) x readBound (10 s)        100 s
+//	the run's budget:     runBudget, after which no store is taken up         50 s
+//	the turn's budget:    turnBudget, of the last store taken up              30 s
+//	the unit under way:   the largest of
+//	  one page            one read (10 s) + its transaction (txTimeout 20 s)   30 s
+//	  one purge batch     its transaction (txTimeout 20 s), BEGIN to COMMIT    20 s
+//	  the store's keeping unbudgetedTransactions (12) x txTimeout (20 s)
+//	                      + unbudgetedReads (16) x readBound (10 s)          400 s
+//	                                                               total     780 s
 //
-// each at most statementBound (10 s): 109,800 s, about 30.5 hours. The
-// verdict is one builtin call, counted as one read, though it reads more. It
-// is not what a turn takes: a read is milliseconds, and a page that outlasts
-// a read ends its source for the run (walk.go). It is the bound the run's
-// hard deadline must sit above so that it never cuts off a store the limits
-// still allow.
-func storeTurnBound() time.Duration {
-	reads := floorProbes + 2 + walkSourcesPerStore*maxReadsPerRun
-	statements := walkSourcesPerStore*maxReadsPerRun*foldStatementsPerPage +
-		purgeBudget*(3+len(factTables)) + housekeepingStatements
-	return time.Duration(reads+statements) * statementBound
+// The keeping is the largest unit: a turn asks no budget before its first
+// page or batch, so when the budget is spent at the turn's start the whole of
+// it runs, and a page or a batch is one transaction of it. The purge is
+// counted as it runs: a turn can purge twice, a batch at a time, the budget
+// asked before each, so one batch is under way at most; each transaction is
+// timed BEGIN to COMMIT by txTimeout. Thirteen minutes, and runDeadline adds
+// a minute over it.
+func runDeadlineBound() time.Duration {
+	keeping := unbudgetedTransactions*txTimeout + unbudgetedReads*readBound
+	unit := max(readBound+txTimeout, txTimeout, keeping)
+	return maxStorePages*readBound + wholesaleReadsBound*readBound + runBudget + turnBudget + unit
 }
 
 // aRun is one run of the rollup on this node, held while it runs.

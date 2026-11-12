@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/uptrace/bun"
 )
@@ -46,6 +47,15 @@ import (
 // source: a transaction is opened here and nowhere else, writeTx's first
 // statement is the lock, and every function that writes is named there and
 // writes through the bun.Tx it is handed.
+
+// txTimeout bounds every transaction this package opens, BEGIN to COMMIT: a
+// transaction that outlasts it is rolled back, its statement cut off by the
+// cancelled context, and its work is done again by a later turn. A page's
+// write makes statements in proportion to its rows, and a purge batch
+// deletes thousands, so no count bounds them; twenty seconds is far above
+// what either takes and is what the run's hard deadline counts
+// (integration.go, runDeadlineBound). A variable so a test can outlast it.
+var txTimeout = 20 * time.Second
 
 // anyGeneration is the generation a write names when it is right whatever the
 // store's generation: its own row, a rebuild, a batch of a delete.
@@ -96,6 +106,8 @@ func writeTx(ctx context.Context, db *bun.DB, storeID string, generation int64, 
 	if db == nil {
 		return errors.New("this node has no database handle, so the store statistics cannot be written")
 	}
+	ctx, cancel := context.WithTimeout(ctx, txTimeout)
+	defer cancel()
 	return db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if err := lockWrites(ctx, tx); err != nil {
 			return err
@@ -136,5 +148,7 @@ func readTx(ctx context.Context, db *bun.DB, fn func(ctx context.Context, tx bun
 	if db == nil {
 		return errors.New("this node has no database handle, so the store statistics cannot be read")
 	}
+	ctx, cancel := context.WithTimeout(ctx, txTimeout)
+	defer cancel()
 	return db.RunInTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead}, fn)
 }

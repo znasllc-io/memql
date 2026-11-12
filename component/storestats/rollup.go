@@ -34,6 +34,16 @@ import (
 // failed. errRebuilt is no failure: the store was rebuilt under its walk, and
 // the next run walks it under the new generation.
 //
+// # A turn has a budget
+//
+// A store's turn has a time budget, turnBudget, carried in the context the
+// run hands it (withTurn). Once it is spent the turn asks no new page of any
+// source (walk.go) and starts no new purge batch (store.go), and ends
+// normally: where each source stands is kept as for any partial read, the
+// store is not a failure, and its next turn carries on. turnSpent is the one
+// place that answers whether it is spent. Work a later task adds to a turn
+// asks it between its units.
+//
 // # Who is wholesale
 //
 // A run asks wholesaleFor once, after it has listed the stores and before it
@@ -128,8 +138,11 @@ var changedReads = map[string]string{
 }
 
 // maxStorePages bounds the stores read: a cursor that never ends is an error,
-// never a loop.
-const maxStorePages = 10000
+// never a loop. Twenty pages of storesPageSize is two thousand stores, and
+// the reads are counted in the run's hard deadline (integration.go,
+// runDeadlineBound): a cluster past that fails the listing with this bound
+// named, and the bound is raised with the deadline's sum.
+const maxStorePages = 20
 
 // What storeState answers of a store; any other answer keeps it.
 const (
@@ -194,12 +207,12 @@ func runRollup(ctx context.Context, i *Integration, now time.Time) (RollupReport
 	// Each store in turn from the one after the store the last run took up
 	// last, wrapping round, and no new one once the budget is spent. See
 	// "One long store does not starve the others".
-	began := time.Now()
+	began := budgetNow()
 	first := i.firstToTake(stores)
 	for k := range stores {
 		store := stores[(first+k)%len(stores)]
 		id := store["id"].(string)
-		if k > 0 && time.Since(began) >= runBudget {
+		if k > 0 && !budgetNow().Before(began.Add(runBudget)) {
 			rep.NotReached = len(stores) - k
 			break
 		}
@@ -218,6 +231,7 @@ func runRollup(ctx context.Context, i *Integration, now time.Time) (RollupReport
 // housekeeping runs, and its facts are not walked.
 func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[string]any, now time.Time, wholesale wholesaleState, walk bool, rep *RollupReport) error {
 	id := store["id"].(string)
+	ctx = withTurn(ctx)
 	// keepStore makes the store's row itself, and gives a store whose data
 	// was removed none (store.go).
 	if i.storeState == nil {
@@ -252,6 +266,33 @@ func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[strin
 		return nil
 	}
 	return i.walkStore(ctx, store, generation, now, wholesale, rep)
+}
+
+// budgetNow is the clock the run's and the turn's budgets read: the time, or
+// clockForTests in a test that drives it.
+func budgetNow() time.Time {
+	if clockForTests != nil {
+		return clockForTests()
+	}
+	return time.Now()
+}
+
+// turnKey keys the end of a store's turn in the context the run hands the
+// turn.
+type turnKey struct{}
+
+// withTurn starts a store's turn: the context carries the instant its budget
+// ends. See "A turn has a budget".
+func withTurn(ctx context.Context) context.Context {
+	return context.WithValue(ctx, turnKey{}, budgetNow().Add(turnBudget))
+}
+
+// turnSpent reports whether the turn ctx belongs to has spent its budget: the
+// one place a page loop and a purge loop ask. A context with no turn -- a test
+// that calls the walk or the purge directly -- has no budget to spend.
+func turnSpent(ctx context.Context) bool {
+	ends, ok := ctx.Value(turnKey{}).(time.Time)
+	return ok && !budgetNow().Before(ends)
 }
 
 // firstToTake is the index in stores, which are in bare-id order, of the

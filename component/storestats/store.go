@@ -667,7 +667,7 @@ func purgeStore(ctx context.Context, i *Integration, storeID string, budget int)
 	if i.bunDB != nil {
 		db = i.bunDB()
 	}
-	for n := 0; n < budget; n++ {
+	for n := 0; n < budget && !turnSpent(ctx); n++ {
 		if err := writeTx(ctx, db, storeID, anyGeneration, func(ctx context.Context, tx bun.Tx) error {
 			var err error
 			done, err = purgeBatch(ctx, tx, storeID)
