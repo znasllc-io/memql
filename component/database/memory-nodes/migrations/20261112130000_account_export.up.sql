@@ -63,7 +63,8 @@ CREATE TABLE account_exports (
  removed_at timestamptz,
  removed_by text NOT NULL DEFAULT ''
 );
-CREATE INDEX account_exports_account_idx ON account_exports (account_id, requested_at DESC, id);
+-- The list of an account's exports, newest first, in the order it pages.
+CREATE INDEX account_exports_account_idx ON account_exports (account_id, requested_at DESC, id DESC);
 -- An account has at most one export that is prepared, queued or running.
 CREATE UNIQUE INDEX account_exports_one_active_idx ON account_exports (account_id)
  WHERE state IN ('draft', 'queued', 'running');
@@ -88,20 +89,28 @@ CREATE TABLE account_row_moves (
 );
 CREATE INDEX account_row_moves_to_idx ON account_row_moves (to_account, moved_at DESC, id);
 CREATE INDEX account_row_moves_from_idx ON account_row_moves (from_account, moved_at DESC, id);
+-- The assignment job reads a batch of rows' latest lines by concept and id, to
+-- put back a row whose newest version names the account it was moved out of.
+CREATE INDEX account_row_moves_row_idx ON account_row_moves (concept, row_id, moved_at DESC, id DESC);
 
--- FOLLOWERS FOLLOW. When a row's recorded account changes, the rows that hang
--- off it in the account it left have to take the new one. The change records a
--- task here, and the assignment runner works tasks off in batches
--- (component/memql/account_follow.go): for each kind that follows the parent's
--- kind, the rows whose `via` field names the parent and whose own account is
--- from_account take to_account, and each of those that has followers of its own
--- records a task in turn.
+-- FOLLOWERS FOLLOW. When a row's recorded account changes from one account to
+-- another, the rows that hang off it in the account it left have to take the
+-- new one. This table is the record of such changes: one row per row whose
+-- account changed (a moved root, a re-tagged list row, a kind's own mutation,
+-- and each row the assignment job carried). The job carries followers
+-- (component/memql/account_assignment_rules.go): a row whose account is the
+-- one its parent left, where the parent is now in another account and has a
+-- record here, takes the parent's account as it stands, and gets a record of
+-- its own. The table keeps its first name; the rows are change records.
 --
---  cursor_concept, cursor_id   where the task stands, so a batch that is cut
---                              short resumes and any replica can continue.
---  done_at                     set when no kind has a row left to follow.
+--  parent_concept, parent_id   the row whose account changed.
+--  from_account, to_account    the account it left and the one it went to.
+--  done_at                     set when every kind that can hang off the row
+--                              has finished a full pass begun after created_at.
+--  cursor_concept, cursor_id, followed, next_at   not used.
 --
--- An export waits while a task that names its account is not done.
+-- An export waits while a record that names its account is not settled.
+-- Settled records are deleted ninety days later.
 CREATE TABLE account_follow_tasks (
  id bigserial PRIMARY KEY,
  parent_concept text NOT NULL,
@@ -115,7 +124,13 @@ CREATE TABLE account_follow_tasks (
  next_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  done_at timestamptz
 );
-CREATE INDEX account_follow_tasks_pending_idx ON account_follow_tasks (next_at, id) WHERE done_at IS NULL;
+-- Records not settled: the count an export's readiness reads, and the job's
+-- settling.
+CREATE INDEX account_follow_tasks_pending_idx ON account_follow_tasks (parent_concept, created_at) WHERE done_at IS NULL;
+-- The job reads a batch of parents' records by concept and id.
+CREATE INDEX account_follow_tasks_parent_idx ON account_follow_tasks (parent_concept, parent_id);
+-- The job deletes settled records by age.
+CREATE INDEX account_follow_tasks_done_idx ON account_follow_tasks (done_at) WHERE done_at IS NOT NULL;
 
 -- A CONFLICT RECORDS ITS CANDIDATES. The accounts a row the job will not guess
 -- at could belong to, so "does a conflict name this account" is a lookup and

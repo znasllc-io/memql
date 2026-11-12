@@ -9,6 +9,32 @@ package memql
 //
 //  0. A row whose newest version is a deletion marker is skipped: it is a
 //     tombstone, and its schema admits no other key.
+//
+// Then two rules that change an account a row already has, both for rows that
+// a change elsewhere left behind (account_follow.go, account_move.go):
+//
+//   - RE-APPLY A MOVE. The row's latest ledger line (account_row_moves) moved
+//     or placed it from X to Y, its newest version was created after that line
+//     (less assignmentLateCommitSlack, because a writer sets createdAt before it
+//     commits) and names X again, and no change record of the row's own leaves
+//     Y after the line: it goes back to Y. This repairs the stale append of an
+//     ordinary write that read the row before the move committed and wrote a
+//     new version carrying the account it read. A later change of the row's own
+//     (a re-tag, which records itself) is not undone.
+//   - FOLLOW. The row follows a parent P through `via`, its newest version
+//     names X, P's newest names another account Y, and a change record of P
+//     says it left X: the row goes to P's CURRENT account Y, never to the
+//     account a record names as its target, so a parent moved twice carries
+//     its followers to where it is. The row gets a change record of its own, so
+//     its followers follow it, and a batch that carried any asks once for a
+//     full pass of the kind's follower kinds. A row attached to P from a third
+//     account is untouched: no record says P left that account.
+//
+// Both are judged on every row a pass reads, full or incremental, so a stale
+// append, being a new version, is repaired by the next incremental pass. The
+// ledger lines and change records are read once per batch by id arrays, and a
+// parent's records only when its account differs from a child's.
+//
 //  1. It already has an account (bareAccount: the empty string is none, R6):
 //     KEPT.
 //  2. The concept still declares the list `accountIds` and the row's list is
@@ -127,6 +153,13 @@ type assignmentDecision struct {
 	detail  string // outcomeConflict
 	// candidates are the accounts the row could belong to (outcomeConflict).
 	candidates []string
+	// from is the account the row holds now, which the write is guarded on:
+	// "" for an assignment, the account it leaves for the follow and re-apply
+	// rules (assignmentWrite.From).
+	from string
+	// carried: the follow rule moved the row, so it gets a change record of its
+	// own and its followers follow in turn.
+	carried bool
 	// moveChannelAccount: rewrite the old Shopify value into sourceAccountId
 	// before anything else is written to the row.
 	moveChannelAccount bool
@@ -184,6 +217,29 @@ type assignmentLookups struct {
 	accounts map[string]bool
 	// conflicts is the recorded conflicts of the batch's rows, by stored id.
 	conflicts map[string]recordedConflict
+	// moves is the latest ledger line (account_row_moves) of each of the
+	// batch's rows, by stored id, for the re-apply rule.
+	moves map[string]ledgerLine
+	// changedAway is, per row with a ledger line, the change records written
+	// for it after that line, by stored id: a later change of its own, which
+	// the re-apply rule must not undo.
+	changedAway map[string][]changeRecord
+	// parentLeft maps parent concept -> bare parent id -> the accounts its
+	// change records say it LEFT, for the follow rule. Read only for parents
+	// whose account differs from a child's in the batch.
+	parentLeft map[string]map[string]map[string]bool
+}
+
+// ledgerLine is one row of account_row_moves.
+type ledgerLine struct {
+	from, to string
+	at       time.Time
+}
+
+// changeRecord is one row of account_follow_tasks.
+type changeRecord struct {
+	from, to string
+	at       time.Time
 }
 
 // recordedConflict is what account_assignment_conflict holds about one row:
@@ -221,6 +277,12 @@ func (e *MemQLEngine) judgeAssignmentRowsAt(ctx context.Context, q AccountQuerie
 		return nil, nil, err
 	}
 	if err := lk.loadConflicts(meta, rows); err != nil {
+		return nil, nil, err
+	}
+	if err := lk.loadMoves(meta, rows); err != nil {
+		return nil, nil, err
+	}
+	if err := lk.loadParentChanges(meta, rows); err != nil {
 		return nil, nil, err
 	}
 	out := make([]assignmentDecision, 0, len(rows))
@@ -268,8 +330,30 @@ func (lk *assignmentLookups) judge(meta *memorynodes.Concept, row assignmentRow)
 		}
 	}
 
+	current := bareAccount(row.Payload[accountField])
+
+	// Re-apply a move (file header).
+	if line, ok := lk.moves[row.ID]; ok && current == line.from && line.to != current &&
+		!row.At.Before(line.at.Add(-assignmentLateCommitSlack)) && !lk.changedAwayFrom(row.ID, line) {
+		d = assignTo(d, line.to)
+		d.from = current
+		return d, nil
+	}
+
+	// Follow (file header).
+	if current != "" {
+		if parentConcept, parentID := assignmentParent(meta, row); parentConcept != "" {
+			if account, exists := lk.parents[parentConcept][parentID]; exists && account != "" && account != current &&
+				lk.parentLeft[parentConcept][parentID][current] {
+				d = assignTo(d, account)
+				d.from, d.carried = current, true
+				return d, nil
+			}
+		}
+	}
+
 	// Rule 1.
-	if bareAccount(row.Payload[accountField]) != "" {
+	if current != "" {
 		d.outcome = outcomeKept
 		return d, nil
 	}
@@ -427,6 +511,125 @@ func (lk *assignmentLookups) loadParents(meta *memorynodes.Concept, rows []assig
 			return err
 		}
 		lk.parents[concept] = byID
+	}
+	return nil
+}
+
+// loadMoves reads the latest ledger line of each of the batch's rows, and the
+// change records written for the rows that have one: one statement each, by id
+// array.
+//
+// staged-data: MUST-NOT-GATE -- reads the move ledger and the change records, not the row table.
+func (lk *assignmentLookups) loadMoves(meta *memorynodes.Concept, rows []assignmentRow) error {
+	lk.moves = map[string]ledgerLine{}
+	lk.changedAway = map[string][]changeRecord{}
+	if len(rows) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	result, err := lk.q.QueryContext(lk.ctx, `SELECT DISTINCT ON (row_id) row_id, from_account, to_account, moved_at
+		  FROM account_row_moves WHERE concept = $1 AND row_id = ANY($2::text[])
+		 ORDER BY row_id, moved_at DESC, id DESC`, meta.Name, pq.Array(ids))
+	if err != nil {
+		return fmt.Errorf("account assignment: reading the moves of %s: %w", meta.Name, err)
+	}
+	var moved []string
+	for result.Next() {
+		var id string
+		var line ledgerLine
+		if err := result.Scan(&id, &line.from, &line.to, &line.at); err != nil {
+			result.Close()
+			return err
+		}
+		line.from, line.to = bareAccount(line.from), bareAccount(line.to)
+		lk.moves[id] = line
+		moved = append(moved, id)
+	}
+	err = result.Err()
+	result.Close()
+	if err != nil || len(moved) == 0 {
+		return err
+	}
+	records, err := lk.q.QueryContext(lk.ctx, `SELECT parent_id, from_account, to_account, created_at FROM account_follow_tasks
+		WHERE parent_concept = $1 AND parent_id = ANY($2::text[])`, meta.Name, pq.Array(moved))
+	if err != nil {
+		return fmt.Errorf("account assignment: reading the change records of %s: %w", meta.Name, err)
+	}
+	defer records.Close()
+	for records.Next() {
+		var id string
+		var r changeRecord
+		if err := records.Scan(&id, &r.from, &r.to, &r.at); err != nil {
+			return err
+		}
+		lk.changedAway[id] = append(lk.changedAway[id], r)
+	}
+	return records.Err()
+}
+
+// changedAwayFrom reports whether the row changed account after its ledger
+// line by a change of its own (a re-tag, a later move): a record that leaves
+// the account the line moved it to, written after the line.
+func (lk *assignmentLookups) changedAwayFrom(id string, line ledgerLine) bool {
+	for _, r := range lk.changedAway[id] {
+		if bareAccount(r.from) == line.to && r.at.After(line.at) {
+			return true
+		}
+	}
+	return false
+}
+
+// loadParentChanges reads, per parent concept, which accounts each parent LEFT
+// according to its change records, for the parents whose account differs from
+// a child's in the batch: in the steady state a child agrees with its parent
+// and nothing is read. Both spellings of an id are asked for, as loadParents
+// does.
+//
+// staged-data: MUST-NOT-GATE -- reads the change records, not the row table.
+func (lk *assignmentLookups) loadParentChanges(meta *memorynodes.Concept, rows []assignmentRow) error {
+	lk.parentLeft = map[string]map[string]map[string]bool{}
+	wanted := map[string][]string{}
+	for _, row := range rows {
+		current := bareAccount(row.Payload[accountField])
+		if current == "" {
+			continue
+		}
+		concept, id := assignmentParent(meta, row)
+		if concept == "" {
+			continue
+		}
+		if account, exists := lk.parents[concept][id]; exists && account != "" && account != current {
+			wanted[concept] = append(wanted[concept], concept+":"+id, id)
+		}
+	}
+	for concept, ids := range wanted {
+		result, err := lk.q.QueryContext(lk.ctx, `SELECT parent_id, from_account FROM account_follow_tasks
+			WHERE parent_concept = $1 AND parent_id = ANY($2::text[])`, concept, pq.Array(distinctIds(ids)))
+		if err != nil {
+			return fmt.Errorf("account assignment: reading the change records in %s: %w", concept, err)
+		}
+		byID := map[string]map[string]bool{}
+		for result.Next() {
+			var id, from string
+			if err := result.Scan(&id, &from); err != nil {
+				result.Close()
+				return err
+			}
+			bare := BareShortId(id)
+			if byID[bare] == nil {
+				byID[bare] = map[string]bool{}
+			}
+			byID[bare][bareAccount(from)] = true
+		}
+		err = result.Err()
+		result.Close()
+		if err != nil {
+			return err
+		}
+		lk.parentLeft[concept] = byID
 	}
 	return nil
 }

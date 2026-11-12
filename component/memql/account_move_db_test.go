@@ -90,7 +90,7 @@ func conceptWith(t *testing.T, pred func(*memorynodes.Concept) bool) string {
 }
 
 func TestAccountMoveRefusesWhatItMayNotMove(t *testing.T) {
-	engine, db, _ := readMergeTestEngine(t)
+	engine, db := recordingEngine(t)
 	ctx := context.Background()
 	f := newMoveFixture(t, db, t.Name())
 
@@ -131,34 +131,55 @@ func TestAccountMoveRefusesWhatItMayNotMove(t *testing.T) {
 	require.Empty(t, moveLedger(t, db, goalA, goalB, runA, campaign))
 }
 
+// followerLine finds one kind's line in Followers.
+func followerLine(res MoveResult, concept string) (MoveLine, bool) {
+	for _, l := range res.Followers {
+		if l.Concept == concept {
+			return l, true
+		}
+	}
+	return MoveLine{}, false
+}
+
+// Followers are named, not counted: each line but a tied kind's has Rows zero.
+func requireFollowersNamed(t *testing.T, res MoveResult, kinds ...string) {
+	t.Helper()
+	for _, kind := range kinds {
+		l, ok := followerLine(res, kind)
+		require.True(t, ok, "%s is not named among the followers: %v", kind, res.Followers)
+		require.Zero(t, l.Rows, "followers of %s were counted", kind)
+	}
+}
+
 func TestAccountMovePreviewWritesNothing(t *testing.T) {
-	engine, db, _ := readMergeTestEngine(t)
+	engine, db := recordingEngine(t)
 	ctx := context.Background()
 	f := newMoveFixture(t, db, t.Name())
 	g := f.goal(t, db, "goal", f.a)
 	r1 := f.run(t, db, "run1", g, f.a)
-	f.run(t, db, "run2", g, f.a)
 	f.row(t, db, "v1:work:step", "step", map[string]any{"ownerUserId": f.owner, "runId": r1, "accountId": f.a})
-	f.run(t, db, "foreign", g, f.c)
 	before := snapshotPayloads(t, db, []string{g, r1})
+	requested := 0
+	accountFullPassRequested = func([]string) { requested++ }
+	t.Cleanup(func() { accountFullPassRequested = nil })
 
 	res, err := engine.MoveAccountRows(ctx, db, MoveRequest{Rows: []AccountRowRef{{Concept: "v1:work:goal", ID: g}}, To: f.b, By: f.owner, Preview: true})
 	require.NoError(t, err)
 	require.Equal(t, []MoveLine{{Concept: "v1:work:goal", Rows: 1}}, res.Moved)
-	require.Equal(t, []MoveLine{{Concept: "v1:work:run", Rows: 2}, {Concept: "v1:work:step", Rows: 1}}, res.Followers)
+	requireFollowersNamed(t, res, "v1:work:run", "v1:work:step")
 	require.Empty(t, res.Refused)
 	require.Equal(t, before, snapshotPayloads(t, db, []string{g, r1}))
 	require.Empty(t, moveLedger(t, db, g))
 	require.Zero(t, pendingFor(t, db, f.b))
+	require.Zero(t, requested, "a preview asked the job for passes")
 }
 
-func TestAccountMoveMovesRootsAndTheirFollowers(t *testing.T) {
-	engine, db, _ := readMergeTestEngine(t)
+func TestAccountMoveMovesRoots(t *testing.T) {
+	engine, db := recordingEngine(t)
 	ctx := context.Background()
 	f := newMoveFixture(t, db, t.Name())
 	g1, g2 := f.goal(t, db, "goal1", f.a), f.goal(t, db, "goal2", f.a)
-	r1 := f.run(t, db, "run1", g1, f.a)
-	r2 := f.run(t, db, "run2", g2, f.a)
+	f.run(t, db, "run1", g1, f.a)
 
 	res, err := engine.MoveAccountRows(ctx, db, MoveRequest{
 		Rows: []AccountRowRef{{Concept: "v1:work:goal", ID: g1}, {Concept: "v1:work:goal", ID: g2}},
@@ -166,32 +187,37 @@ func TestAccountMoveMovesRootsAndTheirFollowers(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, []MoveLine{{Concept: "v1:work:goal", Rows: 2}}, res.Moved)
-	require.Equal(t, []MoveLine{{Concept: "v1:work:run", Rows: 2}}, res.Followers)
+	requireFollowersNamed(t, res, "v1:work:run")
 	require.Equal(t, f.b, newestPayload(t, db, g1)["accountId"])
 	require.Equal(t, f.b, newestPayload(t, db, g2)["accountId"])
-	require.Equal(t, []string{g1 + " " + f.a + ">" + f.b + " 1", g2 + " " + f.a + ">" + f.b + " 1"}, moveLedger(t, db, g1, g2))
+	require.Equal(t, []string{g1 + " " + f.a + ">" + f.b + " 0", g2 + " " + f.a + ">" + f.b + " 0"}, moveLedger(t, db, g1, g2))
 	var note, by string
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT note, moved_by FROM account_row_moves WHERE row_id = ?`, g1).Scan(&note, &by))
 	require.Equal(t, "client handover", note)
 	require.Equal(t, f.owner, by)
-	require.EqualValues(t, 2, pendingFor(t, db, f.b))
-
-	runFollowUntilDone(t, engine, db)
-	require.Equal(t, f.b, newestPayload(t, db, r1)["accountId"])
-	require.Equal(t, f.b, newestPayload(t, db, r2)["accountId"])
+	require.EqualValues(t, 2, pendingFor(t, db, f.b), "one change record per root")
 }
 
 func TestAccountMovePlacesRowsWithNoAccount(t *testing.T) {
-	engine, db, _ := readMergeTestEngine(t)
+	engine, db := recordingEngine(t)
 	ctx := context.Background()
 	f := newMoveFixture(t, db, t.Name())
-	todo := f.row(t, db, "v1:todos:todo", "todo", map[string]any{"ownerUserId": f.owner, "title": "t"})
+	todo1 := f.row(t, db, "v1:todos:todo", "todo1", map[string]any{"ownerUserId": f.owner, "title": "t"})
+	todo2 := f.row(t, db, "v1:todos:todo", "todo2", map[string]any{"ownerUserId": f.owner, "title": "t"})
+	var requests [][]string
+	accountFullPassRequested = func(concepts []string) { requests = append(requests, concepts) }
+	t.Cleanup(func() { accountFullPassRequested = nil })
 
-	res, err := engine.MoveAccountRows(ctx, db, MoveRequest{Rows: []AccountRowRef{{Concept: "v1:todos:todo", ID: todo}}, To: f.b, By: f.owner})
+	res, err := engine.MoveAccountRows(ctx, db, MoveRequest{Rows: []AccountRowRef{
+		{Concept: "v1:todos:todo", ID: todo1}, {Concept: "v1:todos:todo", ID: todo2},
+	}, To: f.b, By: f.owner})
 	require.NoError(t, err)
-	require.Equal(t, []MoveLine{{Concept: "v1:todos:todo", Rows: 1}}, res.Moved)
-	require.Equal(t, f.b, newestPayload(t, db, todo)["accountId"])
-	require.Equal(t, []string{todo + " >" + f.b + " 0"}, moveLedger(t, db, todo))
+	require.Equal(t, []MoveLine{{Concept: "v1:todos:todo", Rows: 2}}, res.Moved)
+	require.Equal(t, f.b, newestPayload(t, db, todo1)["accountId"])
+	require.Equal(t, []string{todo1 + " >" + f.b + " 0", todo2 + " >" + f.b + " 0"}, moveLedger(t, db, todo1, todo2))
+	require.Len(t, requests, 1, "one request per call, however many roots")
+	require.Equal(t, followerKindsClosure("v1:todos:todo"), requests[0])
+	require.Zero(t, pendingFor(t, db, f.b), "a placement writes no change record")
 
 	t.Run("a stated root carries the rows tied to it that have none", func(t *testing.T) {
 		audience := f.row(t, db, "v1:campaigns:audience", "audience", map[string]any{"name": "a"})
@@ -202,17 +228,55 @@ func TestAccountMovePlacesRowsWithNoAccount(t *testing.T) {
 		res, err := engine.MoveAccountRows(ctx, db, MoveRequest{Rows: []AccountRowRef{{Concept: "v1:campaigns:campaign", ID: campaign}}, To: f.b, By: f.owner})
 		require.NoError(t, err)
 		require.Equal(t, []MoveLine{{Concept: "v1:campaigns:campaign", Rows: 1}}, res.Moved)
-		require.Equal(t, []MoveLine{{Concept: "v1:campaigns:audience", Rows: 1}}, res.Followers)
+		l, ok := followerLine(res, "v1:campaigns:audience")
+		require.True(t, ok)
+		require.EqualValues(t, 1, l.Rows, "the tied rows are counted")
 		require.Equal(t, accountCanonicalPrefix+f.b, newestPayload(t, db, campaign)["accountId"], "a stated kind keeps its writers' spelling")
 		require.Equal(t, accountCanonicalPrefix+f.b, newestPayload(t, db, audience)["accountId"])
 		require.Equal(t, accountCanonicalPrefix+f.c, newestPayload(t, db, template)["accountId"], "a tied row with an account is not moved")
+		require.Equal(t, []string{campaign + " >" + f.b + " 1"}, moveLedger(t, db, campaign))
 	})
+
+	t.Run("a row whose parent has no account either follows it", func(t *testing.T) {
+		goal := f.goal(t, db, "unplaced-goal", "")
+		run := f.row(t, db, "v1:work:run", "unplaced-run", map[string]any{"ownerUserId": f.owner, "goalId": goal})
+		res, err := engine.MoveAccountRows(ctx, db, MoveRequest{Rows: []AccountRowRef{{Concept: "v1:work:run", ID: run}}, To: f.b, By: f.owner})
+		require.NoError(t, err)
+		require.Equal(t, []MoveRefusal{{Concept: "v1:work:run", ID: run, Reason: "follows_parent"}}, res.Refused)
+	})
+}
+
+// Placing a row awaiting a decision resolves its conflict in the move's own
+// transaction, so an export of the accounts it named stops waiting on it; a
+// preview resolves nothing.
+func TestAccountMovePlacingAConflictResolvesIt(t *testing.T) {
+	engine, db := recordingEngine(t)
+	ctx := context.Background()
+	f := newMoveFixture(t, db, t.Name())
+	todo := f.row(t, db, "v1:todos:todo", "todo", map[string]any{"ownerUserId": f.owner, "title": "t"})
+	_, err := db.ExecContext(ctx, `INSERT INTO account_assignment_conflict (concept, row_id, kind, detail, candidates)
+		VALUES ('v1:todos:todo', ?, 'store_bound_twice', 'test', ?::text[])`, todo, pq.Array([]string{f.b, f.c}))
+	require.NoError(t, err)
+	naming := func() int64 {
+		n, err := ConflictsNaming(ctx, db.DB, f.c)
+		require.NoError(t, err)
+		return n
+	}
+	require.EqualValues(t, 1, naming())
+
+	_, err = engine.MoveAccountRows(ctx, db, MoveRequest{Rows: []AccountRowRef{{Concept: "v1:todos:todo", ID: todo}}, To: f.b, By: f.owner, Preview: true})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, naming(), "a preview resolved a conflict")
+
+	_, err = engine.MoveAccountRows(ctx, db, MoveRequest{Rows: []AccountRowRef{{Concept: "v1:todos:todo", ID: todo}}, To: f.b, By: f.owner})
+	require.NoError(t, err)
+	require.Zero(t, naming(), "a placed row still holds the export of the accounts its conflict named")
 }
 
 // A row whose account changed between the move's read and its write is left
 // as the other writer left it, and nothing records a move of it.
 func TestAccountMoveGuardSkipsARowChangedMeanwhile(t *testing.T) {
-	engine, db, _ := readMergeTestEngine(t)
+	engine, db := recordingEngine(t)
 	ctx := context.Background()
 	f := newMoveFixture(t, db, t.Name())
 	g := f.goal(t, db, "goal", f.a)
@@ -228,4 +292,76 @@ func TestAccountMoveGuardSkipsARowChangedMeanwhile(t *testing.T) {
 	require.Equal(t, f.c, newestPayload(t, db, g)["accountId"])
 	require.Empty(t, moveLedger(t, db, g))
 	require.Zero(t, pendingFor(t, db, f.b))
+}
+
+// An ordinary write that read the row before the move APPENDS a version naming
+// the account the row is leaving. The move's own re-check writes that version
+// too, and the row ends in the destination.
+func TestAccountMoveRewritesAVersionAppendedMeanwhile(t *testing.T) {
+	engine, db := recordingEngine(t)
+	ctx := context.Background()
+	f := newMoveFixture(t, db, t.Name())
+	g := f.goal(t, db, "goal", f.a)
+	accountMoveBeforeWrite = func() {
+		seedRawRow(t, context.Background(), db, "v1:work:goal", g, time.Now(), "move-test",
+			map[string]any{"ownerUserId": f.owner, "title": "appended", "accountId": f.a})
+	}
+	t.Cleanup(func() { accountMoveBeforeWrite = nil })
+
+	res, err := engine.MoveAccountRows(ctx, db, MoveRequest{Rows: []AccountRowRef{{Concept: "v1:work:goal", ID: g}}, To: f.b, By: f.owner})
+	require.NoError(t, err)
+	require.Equal(t, []MoveLine{{Concept: "v1:work:goal", Rows: 1}}, res.Moved)
+	require.Equal(t, "appended", newestPayload(t, db, g)["title"], "fixture: the appended version is the newest")
+	require.Equal(t, f.b, newestPayload(t, db, g)["accountId"])
+	require.Len(t, moveLedger(t, db, g), 1)
+}
+
+// While this node does not record accounts the move refuses outright and
+// writes nothing.
+func TestAccountMoveIsRefusedWhileRecordingIsOff(t *testing.T) {
+	engine, db := recordingEngine(t)
+	ctx := context.Background()
+	f := newMoveFixture(t, db, t.Name())
+	g := f.goal(t, db, "goal", f.a)
+	engine.SetAccountStampingEnabled(false)
+
+	_, err := engine.MoveAccountRows(ctx, db, MoveRequest{Rows: []AccountRowRef{{Concept: "v1:work:goal", ID: g}}, To: f.b, By: f.owner})
+	require.ErrorIs(t, err, ErrAccountRecordingOff)
+	require.Equal(t, f.a, newestPayload(t, db, g)["accountId"])
+	require.Empty(t, moveLedger(t, db, g))
+	require.Zero(t, pendingFor(t, db, f.b))
+}
+
+// The rule the lists mark rows by is the rule the move refuses them by.
+func TestAccountRowsFollowingTheirParentAgreesWithTheMove(t *testing.T) {
+	engine, db := recordingEngine(t)
+	ctx := context.Background()
+	f := newMoveFixture(t, db, t.Name())
+	g := f.goal(t, db, "goal", f.a)
+	unplaced := f.goal(t, db, "unplaced", "")
+	rows := map[string]string{
+		f.run(t, db, "same", g, f.a):      "follows its goal in a",
+		f.run(t, db, "other", g, f.c):     "attached from c",
+		f.row(t, db, "v1:work:run", "none", map[string]any{"ownerUserId": f.owner, "goalId": unplaced}): "both in no account",
+		f.row(t, db, "v1:work:run", "orphan", map[string]any{"ownerUserId": f.owner, "goalId": "v1:work:goal:gone-" + f.s, "accountId": f.a}): "a parent that does not exist",
+		f.row(t, db, "v1:work:run", "root", map[string]any{"ownerUserId": f.owner, "accountId": f.a}): "no parent",
+	}
+	var page []RowPayload
+	for id := range rows {
+		page = append(page, RowPayload{ID: id, Payload: newestPayload(t, db, id)})
+	}
+	links, err := RowsFollowingTheirParent(ctx, db.DB, "v1:work:run", page)
+	require.NoError(t, err)
+	require.Len(t, links, len(page))
+	for i, link := range links {
+		require.Equal(t, page[i].ID, link.ID)
+		_, reason, err := engine.judgeMoveRoot(ctx, db.DB, AccountRowRef{Concept: "v1:work:run", ID: link.ID}, f.b)
+		require.NoError(t, err)
+		require.Equal(t, reason == "follows_parent", link.FollowsParent, "%s (%s): the list and the move disagree", link.ID, rows[link.ID])
+		want := rows[link.ID] == "follows its goal in a" || rows[link.ID] == "both in no account"
+		require.Equal(t, want, link.FollowsParent, "%s (%s)", link.ID, rows[link.ID])
+		if rows[link.ID] != "no parent" {
+			require.Equal(t, "v1:work:goal", link.ParentConcept, "%s", rows[link.ID])
+		}
+	}
 }

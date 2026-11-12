@@ -606,6 +606,106 @@ func TestAccountStampListIsHeldToThePersonsAccounts(t *testing.T) {
 	})
 }
 
+// TestAccountStampListHeldOnWritesThatDoNotNameIt: where the stored list would
+// decide a row's account, a person's right to write to that account is asked on
+// every write they make, naming the list or not. Not naming it, the list then
+// decides nothing and the other sources apply.
+func TestAccountStampListHeldOnWritesThatDoNotNameIt(t *testing.T) {
+	f := newStampFixture(t, "stamp-list-unnamed")
+	member := f.person(f.member, auth.RoleWriter)
+	legacy := conceptGoal + ":" + f.id("goal")
+	seedRawRow(t, context.Background(), f.db, conceptGoal, legacy, time.Now().Add(-time.Hour), "stamp-test",
+		map[string]any{"statement": "legacy", "origin": "user", "status": "open", "ownerUserId": f.member, "accountIds": []string{f.beta}})
+	f.mustInsert(member, conceptGoal, BareShortId(legacy), map[string]any{"status": "active"})
+	require.NotEqual(t, f.beta, f.accountOf(conceptGoal, legacy), "a person's write filed a row in an account they may not write to, through a stored list")
+
+	t.Run("one the person may write to decides", func(t *testing.T) {
+		own := conceptGoal + ":" + f.id("goal")
+		seedRawRow(t, context.Background(), f.db, conceptGoal, own, time.Now().Add(-time.Hour), "stamp-test",
+			map[string]any{"statement": "legacy", "origin": "user", "status": "open", "ownerUserId": f.member, "accountIds": []string{f.acme}})
+		f.mustInsert(member, conceptGoal, BareShortId(own), map[string]any{"status": "active"})
+		require.Equal(t, f.acme, f.accountOf(conceptGoal, own))
+	})
+}
+
+// TestAccountStampRestatingTheListIsNotARetag: a write that restates the list it
+// found (a whole-row re-insert does) changes nothing about who the row is for.
+func TestAccountStampRestatingTheListIsNotARetag(t *testing.T) {
+	f := newStampFixture(t, "stamp-list-restate")
+	a, b := "a-"+f.suffix, "b-"+f.suffix
+	row := conceptGoal + ":" + f.id("goal")
+	seedRawRow(t, context.Background(), f.db, conceptGoal, row, time.Now().Add(-time.Hour), "stamp-test",
+		map[string]any{"statement": "legacy", "origin": "user", "status": "open", "accountId": a, "accountIds": []string{b}})
+	restated := goalPayload()
+	restated["accountIds"] = []string{b}
+	f.mustInsert(f.trusted(b), conceptGoal, BareShortId(row), restated)
+	require.Equal(t, a, f.accountOf(conceptGoal, row), "restating the list it found moved the row")
+	require.Zero(t, f.followTasksFor(row))
+}
+
+// TestAccountStampFirstStampOfALegacyRowAsksNothing: an engine-managed row
+// getting its first account writes no change record and asks for no pass; its
+// children were waiting on it, and the job's own passes assign them.
+func TestAccountStampFirstStampOfALegacyRowAsksNothing(t *testing.T) {
+	f := newStampFixture(t, "stamp-first-stamp")
+	goal := f.mustInsert(f.trusted(f.acme), conceptGoal, f.id("goal"), goalPayload())
+	run := conceptRun + ":" + f.id("run")
+	legacy := runPayload(goal)
+	seedRawRow(t, context.Background(), f.db, conceptRun, run, time.Now().Add(-time.Hour), "stamp-test", legacy)
+	var requests [][]string
+	accountFullPassRequested = func(concepts []string) { requests = append(requests, concepts) }
+	t.Cleanup(func() { accountFullPassRequested = nil })
+
+	f.mustInsert(f.trusted(f.beta), conceptRun, BareShortId(run), map[string]any{"status": "succeeded"})
+	require.Equal(t, f.acme, f.accountOf(conceptRun, run), "fixture: the update stamped the run from its goal")
+	require.Zero(t, f.followTasksFor(run))
+	require.Empty(t, requests, "a first stamp asked the job for passes")
+}
+
+// TestAccountStampStatedFirstAccountAsksForItsFollowersPasses: a row of a kind
+// that states its own account, given its first account through its own
+// mutation, asks for full passes of the kinds below it, and its children then
+// take its account. The job had left them alone while it had none.
+func TestAccountStampStatedFirstAccountAsksForItsFollowersPasses(t *testing.T) {
+	f := newStampFixture(t, "stamp-stated-first")
+	ctx := context.Background()
+	for _, account := range []string{f.acme} {
+		seedRawRow(t, ctx, f.db, conceptAccountsAccount, conceptAccountsAccount+":"+account,
+			time.Now().Add(-2*time.Hour), "stamp-test", map[string]any{"name": account, "status": "active"})
+	}
+	at := time.Now().Add(-time.Hour)
+	canonical := conceptAccountsAccount + ":" + f.acme
+	audience := conceptAudience + ":" + f.id("audience")
+	seedRawRow(t, ctx, f.db, conceptAudience, audience, at, "stamp-test", map[string]any{"name": "a", "ownerUserId": f.member, "accountId": canonical})
+	template := "v1:campaigns:template:" + f.id("template")
+	seedRawRow(t, ctx, f.db, "v1:campaigns:template", template, at, "stamp-test", map[string]any{"name": "t", "ownerUserId": f.member, "accountId": canonical})
+	campaign := "v1:campaigns:campaign:" + f.id("campaign")
+	seedRawRow(t, ctx, f.db, "v1:campaigns:campaign", campaign, at, "stamp-test", map[string]any{
+		"name": "c", "ownerUserId": f.member, "audienceId": audience, "templateId": template, "status": "draft",
+	})
+	job := "v1:campaigns:sendJob:" + f.id("job")
+	seedRawRow(t, ctx, f.db, "v1:campaigns:sendJob", job, at, "stamp-test", map[string]any{
+		"campaignId": campaign, "campaignOwnerUserId": f.member, "audienceId": audience, "templateId": template, "status": "scheduled",
+	})
+	_, order, err := assignmentConcepts()
+	require.NoError(t, err)
+	require.NoError(t, ensureAssignmentProgressRows(ctx, f.db, order))
+	var requests [][]string
+	accountFullPassRequested = func(concepts []string) { requests = append(requests, concepts) }
+	t.Cleanup(func() { accountFullPassRequested = nil })
+
+	f.mustInsert(f.trusted(""), "v1:campaigns:campaign", BareShortId(campaign), map[string]any{"accountId": canonical})
+	require.Equal(t, f.acme, f.accountOf("v1:campaigns:campaign", campaign), "fixture: the campaign took its account")
+	require.Len(t, requests, 1)
+	require.Contains(t, requests[0], "v1:campaigns:sendJob")
+	require.Zero(t, f.followTasksFor(campaign), "a first account writes no change record")
+
+	runJobUntil(t, f.engine, f.db, "the send jobs' requested pass finished", func() bool {
+		return !fullPassPending(t, f.engine, f.db, "v1:campaigns:sendJob")
+	})
+	require.Equal(t, f.acme, f.accountOf("v1:campaigns:sendJob", job))
+}
+
 // TestAccountStampListUnchangedWhileTheSwitchIsOff: before recording is on the
 // list behaves as it did, a list of several accounts included.
 func TestAccountStampListUnchangedWhileTheSwitchIsOff(t *testing.T) {

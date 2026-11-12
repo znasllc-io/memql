@@ -29,7 +29,7 @@ package memql
 //     (design D9). The list holds at most one account (stampAccountList; the
 //     account export's design record, section I): one entry files the row in
 //     that account, on a create, on a row with no account yet, and on a write
-//     that CHANGES the list, which is a re-tag and records a follow task; an
+//     that CHANGES the list, which is a re-tag and records a change; an
 //     empty list leaves the row private to its owner and decides nothing. A
 //     list of several is refused, and so is a person naming an account they may
 //     not write to. Whatever the write did, the stored list is left empty or
@@ -469,12 +469,15 @@ func sameAccountList(a, b []string) bool {
 //     export exists to rule out;
 //   - one naming an account a person may not write to is refused
 //     (organization_forbidden), where until this piece such a tag was stored
-//     and the row was quietly filed under the person's own account. Server
+//     and the row was quietly filed under the person's own account; and a
+//     person's write that does NOT name the list, where the stored list would
+//     decide, is asked the same, and the list then decides nothing. Server
 //     writes (internal origin, or an actor that is not a person) name it for
 //     the system and are not held, as the list never held them before;
 //   - one naming an account the caller may write to files the row there. When
-//     that changes the row's account it is a re-tag, and executeWrite records
-//     the follow task that carries the row's followers;
+//     that changes the row's account it is a re-tag, and executeWrite writes
+//     its change record and asks the job for the passes that carry the row's
+//     followers (account_follow.go);
 //   - an empty list decides nothing: the row keeps the account the sources
 //     below give it.
 //
@@ -499,8 +502,16 @@ func (e *MemQLEngine) stampAccountList(ctx context.Context, conceptMeta *memoryn
 		return false, nil
 	}
 	named := listed[0]
+	// THE PERSON IS ASKED ON EVERY WRITE THE LIST DECIDES, naming it or not: a
+	// stored list a person did not write would otherwise file the row, on any
+	// edit of theirs, in an account they may not write to. Naming the list,
+	// they are refused; not naming it, the list decides nothing and the
+	// sources below apply.
 	ac, _ := auth.AccessFromContext(ctx)
-	if delta.namedList && !auth.OriginFromContext(ctx).IsInternal() && actorIsAPerson(ac) && !e.callerMayWriteAccount(ctx, named) {
+	if !auth.OriginFromContext(ctx).IsInternal() && actorIsAPerson(ac) && !e.callerMayWriteAccount(ctx, named) {
+		if !delta.namedList {
+			return false, nil
+		}
 		return false, fmt.Errorf("organization_forbidden: you are not a member of the account this %s row is shared with",
 			conceptMeta.Name)
 	}

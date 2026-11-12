@@ -43,10 +43,20 @@ func ConflictsNaming(ctx context.Context, q AccountQuerier, account string) (int
 // (startAssignmentPass); the concept is made due now. A concept with no
 // progress row yet is left alone: its first pass is a full pass already.
 func RequestAccountFullPass(ctx context.Context, db *bun.DB, concepts []string) error {
+	return RequestAccountFullPassIn(ctx, db, concepts)
+}
+
+// RequestAccountFullPassIn is RequestAccountFullPass in the caller's
+// transaction (or any handle), so a change and the passes it asks for commit
+// together (account_follow.go, What a change asks of the job).
+func RequestAccountFullPassIn(ctx context.Context, tx bun.IDB, concepts []string) error {
 	if len(concepts) == 0 {
 		return nil
 	}
-	_, err := db.ExecContext(ctx, `UPDATE account_assignment_progress
+	if hook := accountFullPassRequested; hook != nil {
+		hook(concepts)
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE account_assignment_progress
 		   SET full_pass_requested_at = clock_timestamp(), next_at = LEAST(next_at, clock_timestamp())
 		 WHERE concept = ANY(?::text[])`, pq.Array(concepts))
 	if err != nil {
@@ -55,26 +65,36 @@ func RequestAccountFullPass(ctx context.Context, db *bun.DB, concepts []string) 
 	return nil
 }
 
+// accountFullPassRequested, when set, is told of every request. A seam for the
+// test that a call asks once however many rows it moves; nothing else sets it.
+var accountFullPassRequested func(concepts []string)
+
 // AccountAssignmentState is where the job stands on one concept.
 type AccountAssignmentState struct {
 	Concept           string
 	FirstPassFinished bool
 	VerifiedThrough   time.Time // zero until the first pass finishes
 	Waiting           int64
+	// FullPassPending: a full pass was requested for the kind and no full pass
+	// that STARTED after the request has finished yet. Followers of a row that
+	// changed account are carried by such a pass (account_follow.go).
+	FullPassPending bool
 }
 
 // AccountAssignmentStates has one line per engine-managed concept of the
 // registry, in assignment order. A concept with no progress row yet reads
 // FirstPassFinished false. VerifiedThrough is the point before which every
 // row's newest version was judged (account_assignment.go, Passes); Waiting is
-// the rows left waiting on a parent by the last full pass plus any found since.
+// the rows left waiting on a parent by the last full pass plus any found since;
+// FullPassPending is a requested full pass not yet done.
 func (e *MemQLEngine) AccountAssignmentStates(ctx context.Context, q AccountQuerier) ([]AccountAssignmentState, error) {
 	_, order, err := assignmentConcepts()
 	if err != nil {
 		return nil, err
 	}
-	rows, err := q.QueryContext(ctx, `SELECT concept, verified_through, waiting FROM account_assignment_progress
-		WHERE concept = ANY($1::text[])`, pq.Array(order))
+	rows, err := q.QueryContext(ctx, `SELECT concept, verified_through, waiting,
+		       full_pass_requested_at IS NOT NULL AND (full_pass_at IS NULL OR full_pass_at < full_pass_requested_at)
+		  FROM account_assignment_progress WHERE concept = ANY($1::text[])`, pq.Array(order))
 	if err != nil {
 		return nil, fmt.Errorf("account assignment: reading progress: %w", err)
 	}
@@ -83,7 +103,7 @@ func (e *MemQLEngine) AccountAssignmentStates(ctx context.Context, q AccountQuer
 	for rows.Next() {
 		var st AccountAssignmentState
 		var verified sql.NullTime
-		if err := rows.Scan(&st.Concept, &verified, &st.Waiting); err != nil {
+		if err := rows.Scan(&st.Concept, &verified, &st.Waiting, &st.FullPassPending); err != nil {
 			return nil, err
 		}
 		st.FirstPassFinished, st.VerifiedThrough = verified.Valid, verified.Time

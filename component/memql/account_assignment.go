@@ -28,7 +28,16 @@ package memql
 //     exception is the list of accounts on the five kinds that carry one: on a
 //     row that has an account, every version's list is held to that account
 //     (trimAccountLists, account_assignment_write.go), because every version
-//     travels with the row and none may carry another account's id.
+//     travels with the row and none may carry another account's id. That is a
+//     FULL pass's work, once per row, for the rows one array-shaped read per
+//     batch finds holding a stray list; the newest version's list is held by
+//     the stamp on every write.
+//   - Mostly rows with NO account. The two rules that change an account a row
+//     already has (account_assignment_rules.go: re-apply a move, follow) carry
+//     rows a change elsewhere left behind; this is how followers follow a
+//     parent whose account changed, and why a change asks for a full pass of
+//     its follower kinds (account_follow.go). A full pass that finishes
+//     settles the change records whose follower kinds have all been read since.
 //   - It is raw SQL on the node table, so no version is appended, no event is
 //     published and no automation runs. A row's assignment is not news.
 //
@@ -213,6 +222,14 @@ func (e *MemQLEngine) runAccountAssignmentBatch(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// The gauge of change records not settled, once per call, read through the
+	// table's partial index; a failed read leaves the gauge as it was.
+	defer func() {
+		if n, err := AccountFollowPending(ctx, db.DB, ""); err == nil {
+			metrics.SetAccountFollowTasks(n)
+		}
+	}()
 
 	started := time.Now()
 	budget := assignmentBatchIds
@@ -522,7 +539,7 @@ func (e *MemQLEngine) assignOneBatch(ctx context.Context, db *bun.DB, candidates
 					return err
 				}
 			}
-			counts, changed, err = applyAssignmentPlan(ctx, tx, meta, plan)
+			counts, changed, err = applyAssignmentPlan(ctx, tx, meta, plan, p.passFull)
 			if err != nil {
 				return err
 			}
@@ -532,6 +549,13 @@ func (e *MemQLEngine) assignOneBatch(ctx context.Context, db *bun.DB, candidates
 		}
 		if finished {
 			e.logHorizonHeldBack(ctx, tx, p)
+			if p.passFull {
+				// A finished full pass may settle change records whose
+				// followers it was the last kind to read (account_follow.go).
+				if err := settleAccountChangeRecords(ctx, tx); err != nil {
+					return err
+				}
+			}
 		}
 		result = assignmentBatchResult{concept: p.concept, examined: len(ids), changed: changed, counts: counts}
 		return nil
@@ -724,7 +748,7 @@ func oldestOpenWriteStart(ctx context.Context, tx bun.Tx) (sql.NullTime, error) 
 // horizon may have finished since), at most one line per pass, and no metric.
 // A failure to read the view is not the batch's failure; it is only logged.
 func (e *MemQLEngine) logHorizonHeldBack(ctx context.Context, tx bun.Tx, p assignmentProgress) {
-	if !p.passHorizon.Valid || p.passStartedAt.Time.Sub(p.passHorizon.Time) <= assignmentHorizonWarnAge || e.Logger == nil {
+	if !p.passHorizon.Valid || p.passStartedAt.Time.Sub(p.passHorizon.Time) <= assignmentHorizonWarnAge || e.Component == nil || e.Logger == nil {
 		return
 	}
 	var pid sql.NullInt64

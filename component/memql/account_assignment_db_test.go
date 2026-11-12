@@ -845,6 +845,50 @@ func TestAccountAssignmentTrimsAccountLists(t *testing.T) {
 	require.Equal(t, settledBefore, snapshotPayloads(t, db, []string{settled}))
 }
 
+// Older versions' lists are trimmed by a full pass only, once per row, and a
+// batch that only trims lists counts as a change, so the kind's cached reads
+// are invalidated: the list decides who may read the row.
+func TestAccountAssignmentTrimsOlderListsOnFullPassesOnly(t *testing.T) {
+	engine, db, _ := readMergeTestEngine(t)
+	ctx := context.Background()
+	s := uniqueSuffix(t.Name())
+	const goal = "v1:work:goal"
+	a, b := "ta-"+s, "tb-"+s
+	_, order, err := assignmentConcepts()
+	require.NoError(t, err)
+	require.NoError(t, ensureAssignmentProgressRows(ctx, db, order))
+	require.NoError(t, RequestAccountFullPass(ctx, db, []string{goal}))
+	runOnePassOf(t, engine, db, goal) // every other goal settled first
+
+	row := goal + ":trim-" + s
+	seedRawRow(t, ctx, db, goal, row, time.Now().Add(-2*time.Hour), "assignment-test",
+		map[string]any{"title": "old", "accountIds": []string{b, a}})
+	seedRawRow(t, ctx, db, goal, row, time.Now(), "assignment-test",
+		map[string]any{"title": "new", "accountId": a, "accountIds": []string{a}})
+
+	makeDue(t, db, goal)
+	runOnePassOf(t, engine, db, goal)
+	require.False(t, assignmentProgressOf(t, db, goal).passFull)
+	require.Equal(t, []string{`["` + b + `", "` + a + `"]`, `["` + a + `"]`}, listsOf(t, db, row),
+		"an incremental pass trimmed an older version")
+
+	require.NoError(t, RequestAccountFullPass(ctx, db, []string{goal}))
+	changed := false
+	for i := 0; i < 1000; i++ {
+		result, err := engine.assignOneBatch(ctx, db, []string{goal}, assignmentBatchIds)
+		require.NoError(t, err)
+		changed = changed || result.changed
+		var open bool
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT pass_finished_at IS NULL OR pass_finished_at < pass_started_at
+			FROM account_assignment_progress WHERE concept = ?`, goal).Scan(&open))
+		if !open {
+			break
+		}
+	}
+	require.Equal(t, []string{`["` + a + `"]`, `["` + a + `"]`}, listsOf(t, db, row))
+	require.True(t, changed, "a batch that only trimmed lists did not count as a change, so no cached read was invalidated")
+}
+
 // A full pass asked for is the next pass of that concept, whatever its last
 // full pass's age; a concept nobody asked about keeps its schedule; and a
 // requested pass of a concept waits for the requested pass of the concept it

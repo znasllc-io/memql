@@ -3,10 +3,10 @@ package memql
 // account_assignment_write.go -- the statements the assignment of existing rows
 // writes with (account_assignment.go): the account stamped into a row's newest
 // version in place, the channel conversion, the account lists held to the row's
-// own account, and the conflicts recorded with their candidates. The move and
-// the follow tasks (account_move.go, account_follow.go) write a row's account
-// through the same stamp statement, so every in-place account write, and every
-// compressed chunk it reaches, is handled one way.
+// own account, and the conflicts recorded with their candidates. The governed
+// move (account_move.go) and the job's follow and re-apply rules write a row's
+// account through the same stamp statement, so every in-place account write,
+// and every compressed chunk it reaches, is handled one way.
 //
 // # In place, guarded, and silent
 //
@@ -34,6 +34,7 @@ package memql
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -57,10 +58,10 @@ func isLibraryFenceRefusal(err error) bool {
 // none), whether the channel conversion runs first, and the account the row
 // must still hold for the stamp to land (From, bare; "" for none). The
 // assignment writes with From "": it only ever gives an account to a row that
-// has none. The move and the follow tasks (account_move.go, account_follow.go)
-// write with the account they read the row in, so a row whose account changed
-// since that read is left as it is: the same statement, guarded on what was
-// read, for every in-place account write.
+// has none. The move and the job's follow and re-apply rules write with the
+// account they read the row in, so a row whose account changed since that read
+// is left as it is: the same statement, guarded on what was read, for every
+// in-place account write.
 type assignmentWrite struct {
 	ID      string `json:"id"`
 	At      string `json:"at"`
@@ -76,8 +77,14 @@ type assignmentConflict struct {
 }
 
 // applyAssignmentPlan writes a batch's decisions and returns its counts and
-// whether any row changed.
-func applyAssignmentPlan(ctx context.Context, tx bun.Tx, meta *memorynodes.Concept, plan []assignmentDecision) (assignmentCounts, bool, error) {
+// whether any row changed: an account written, a list trimmed. fullPass says
+// the batch belongs to a full pass, the only pass that trims older versions'
+// lists (trimAccountLists).
+//
+// A row the follow rule carried gets a change record of its own, so its own
+// followers follow, and a batch that carried any asks once for a full pass of
+// the kind's follower kinds (account_follow.go).
+func applyAssignmentPlan(ctx context.Context, tx bun.Tx, meta *memorynodes.Concept, plan []assignmentDecision, fullPass bool) (assignmentCounts, bool, error) {
 	var counts assignmentCounts
 	var writes []assignmentWrite
 	var conflicts []assignmentConflict
@@ -98,7 +105,7 @@ func applyAssignmentPlan(ctx context.Context, tx bun.Tx, meta *memorynodes.Conce
 		if d.outcome == outcomeAssigned || d.moveChannelAccount {
 			writes = append(writes, assignmentWrite{
 				ID: d.row.ID, At: versionKey(d.row.At),
-				Account: d.account, Move: d.moveChannelAccount,
+				Account: d.account, Move: d.moveChannelAccount, From: d.from,
 			})
 		}
 	}
@@ -123,14 +130,36 @@ func applyAssignmentPlan(ctx context.Context, tx bun.Tx, meta *memorynodes.Conce
 	}
 	counts.conflicts = len(conflicts)
 
-	if conceptDeclaresField(meta, accountListField) {
+	stamped := map[string]bool{}
+	for _, id := range written.stamped {
+		stamped[id] = true
+	}
+	carried := false
+	for _, d := range plan {
+		if !d.carried || !stamped[d.row.ID] {
+			continue
+		}
+		carried = true
+		if err := EnqueueAccountFollow(ctx, tx, AccountRowRef{Concept: meta.Name, ID: d.row.ID}, d.from, d.account); err != nil {
+			return counts, false, err
+		}
+	}
+	if carried {
+		if err := RequestAccountFullPassIn(ctx, tx, followerKindNames(meta.Name)); err != nil {
+			return counts, false, err
+		}
+	}
+
+	if fullPass && conceptDeclaresField(meta, accountListField) {
 		refusedIDs := map[string]bool{}
 		for _, w := range written.refused {
 			refusedIDs[w.ID] = true
 		}
-		if err := trimAccountLists(ctx, tx, meta.Name, listTrimsFor(plan, applied, refusedIDs)); err != nil {
+		trimmed, err := trimAccountLists(ctx, tx, meta.Name, listTrimsFor(plan, applied, refusedIDs))
+		if err != nil {
 			return counts, false, err
 		}
+		changed += trimmed
 	}
 
 	if err := recordAssignmentConflicts(ctx, tx, meta.Name, conflicts); err != nil {
@@ -238,36 +267,83 @@ func listTrimsFor(plan []assignmentDecision, applied []assignmentWrite, refused 
 // like the stamp, and guarded on the list not already being as the rule leaves
 // it, so running it twice changes nothing. A row the Library fence refuses is
 // stepped around as writeInPlaceAroundFence does, and left as it is.
-func trimAccountLists(ctx context.Context, tx bun.Tx, concept string, trims []listTrim) error {
-	if len(trims) == 0 {
-		return nil
+func trimAccountLists(ctx context.Context, tx bun.Tx, concept string, trims []listTrim) (int, error) {
+	trims, err := listTrimsNeeded(ctx, tx, concept, trims)
+	if err != nil || len(trims) == 0 {
+		return 0, err
 	}
-	err := trimAccountListsGuarded(ctx, tx, concept, trims)
+	n, err := trimAccountListsGuarded(ctx, tx, concept, trims)
 	if !isLibraryFenceRefusal(err) {
-		return err
+		return n, err
 	}
+	n = 0
 	for _, one := range trims {
-		if err := trimAccountListsGuarded(ctx, tx, concept, []listTrim{one}); err != nil && !isLibraryFenceRefusal(err) {
-			return err
+		m, err := trimAccountListsGuarded(ctx, tx, concept, []listTrim{one})
+		if err != nil && !isLibraryFenceRefusal(err) {
+			return 0, err
 		}
+		n += m
 	}
-	return nil
+	return n, nil
 }
 
-func trimAccountListsGuarded(ctx context.Context, tx bun.Tx, concept string, trims []listTrim) error {
+// listTrimsNeeded narrows a batch's trims to the rows that hold a version, or
+// an observation copy, whose list is neither empty nor the row's own account:
+// one array-shaped read for the batch, so the write below touches only rows
+// that need it and a row already as the rule leaves it costs no write.
+//
+// staged-data: MUST-NOT-GATE -- the job trims every row of the concept, staged or not (assignmentBatchIdsFor).
+func listTrimsNeeded(ctx context.Context, tx bun.Tx, concept string, trims []listTrim) ([]listTrim, error) {
+	if len(trims) == 0 {
+		return nil, nil
+	}
+	ids := make([]string, 0, len(trims))
+	accounts := make([]string, 0, len(trims))
+	byID := make(map[string]listTrim, len(trims))
+	for _, t := range trims {
+		ids = append(ids, t.ID)
+		accounts = append(accounts, t.Account)
+		byID[t.ID] = t
+	}
+	rows, err := tx.Tx.QueryContext(ctx, `SELECT DISTINCT n.id FROM (
+		    SELECT id, payload FROM "MemoryNodes" WHERE concept = $1 AND id = ANY($2::text[])
+		    UNION ALL
+		    SELECT id, payload FROM memory_liveness WHERE concept = $1 AND id = ANY($2::text[])
+		  ) n JOIN unnest($2::text[], $3::text[]) AS k(id, account) ON k.id = n.id
+		 WHERE jsonb_typeof(n.payload->'accountIds') = 'array'
+		   AND n.payload->'accountIds' <> '[]'::jsonb
+		   AND n.payload->'accountIds' <> jsonb_build_array(k.account)`, concept, pq.Array(ids), pq.Array(accounts))
+	if err != nil {
+		return nil, fmt.Errorf("account assignment: reading the lists of %s: %w", concept, err)
+	}
+	defer rows.Close()
+	var out []listTrim
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, byID[id])
+	}
+	return out, rows.Err()
+}
+
+func trimAccountListsGuarded(ctx context.Context, tx bun.Tx, concept string, trims []listTrim) (int, error) {
 	raw, err := json.Marshal(trims)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if _, err := tx.ExecContext(ctx, `SAVEPOINT account_list_trim`); err != nil {
-		return err
+		return 0, err
 	}
+	changed := 0
 	tables := []string{`"MemoryNodes"`}
 	if memorynodes.HasLiveness(concept) {
 		tables = append(tables, `memory_liveness`)
 	}
-	for _, table := range tables {
-		_, err = tx.ExecContext(ctx, `UPDATE `+table+` AS n
+	for i, table := range tables {
+		var res sql.Result
+		res, err = tx.ExecContext(ctx, `UPDATE `+table+` AS n
 			   SET payload = jsonb_set(n.payload, '{accountIds}',
 			         CASE WHEN k.account <> '' AND (jsonb_exists(n.payload->'accountIds', k.account)
 			                                    OR jsonb_exists(n.payload->'accountIds', ? || k.account))
@@ -281,15 +357,18 @@ func trimAccountListsGuarded(ctx context.Context, tx bun.Tx, concept string, tri
 		if err != nil {
 			break
 		}
+		if n, rerr := res.RowsAffected(); rerr == nil && i == 0 {
+			changed += int(n)
+		}
 	}
 	if err != nil {
 		if _, rbErr := tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT account_list_trim`); rbErr != nil {
-			return fmt.Errorf("%w (and the rollback to the savepoint failed: %v)", err, rbErr)
+			return 0, fmt.Errorf("%w (and the rollback to the savepoint failed: %v)", err, rbErr)
 		}
-		return err
+		return 0, err
 	}
 	_, err = tx.ExecContext(ctx, `RELEASE SAVEPOINT account_list_trim`)
-	return err
+	return changed, err
 }
 
 // writeAssignmentsGuarded runs writeAssignments under a savepoint, so a refusal

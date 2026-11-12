@@ -1819,13 +1819,13 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// Other writes retain the single-statement path below.
 	var result memorynodes.Node
 	observationOnly := false
-	// A WRITE THAT CHANGES A ROW'S RECORDED ACCOUNT carries the rows that
-	// follow it: a follow task is recorded in the write's own transaction, so
-	// the change and the obligation to move its followers commit together
-	// (account_follow.go). That is a re-tag of a row that carries the list of
-	// accounts and a `stated` kind's own mutation; the governed move records its
-	// own (account_move.go).
-	follow := accountFollowFor(e, conceptMeta, organizationPrior, payload)
+	// A WRITE THAT CHANGES A ROW'S RECORDED ACCOUNT owes its followers a change
+	// record and a full pass of their kinds, written in the write's own
+	// transaction so the change and what it asks of the assignment job commit
+	// together (account_follow.go, accountChangeFor). That is a re-tag of a row
+	// that carries the list of accounts and a kind's own mutation; the governed
+	// move writes its own (account_move.go).
+	follow := accountChangeFor(e, conceptMeta, organizationPrior, payload)
 	if targets := outboxTargetsFor(conceptMeta.Name); len(targets) > 0 || len(rowVersionFences(ctx)) > 0 || follow != nil {
 		retire := outboxPayloadRetires(payload)
 		txErr := e.runInWriteTx(ctx, func(txStore memorynodes.Store) error {
@@ -1850,7 +1850,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 				return nil
 			}
 			if follow != nil {
-				if err := follow.enqueue(ctx, txStore, created.ID); err != nil {
+				if err := follow.apply(ctx, txStore, created.ID); err != nil {
 					return err
 				}
 			}

@@ -1,73 +1,74 @@
 package memql
 
-// account_follow.go -- FOLLOWERS FOLLOW (design record
+// account_follow.go -- FOLLOWERS FOLLOW: the change records, and what a write
+// that changes a row's account asks of the assignment job (design record
 // docs/superpowers/specs/2026-11-12-account-export-design.md, section I,
 // "Followers follow").
 //
 // A row whose `via` field names another row belongs to that row's account (the
-// stamp's source 4, the assignment's rule 3). Until this file nothing carried
-// those rows when the parent's account CHANGED: a goal moved and its runs stayed
-// behind. Now every write that changes a row's recorded account records a
-// FOLLOW TASK (EnqueueAccountFollow): the governed move (account_move.go), a
-// re-tag of a row that carries the list of accounts, and a `stated` kind's own
-// mutation (executeWrite). AccountOwnershipRunner works the tasks off after its
-// assignment batch, one bounded batch per tick.
+// stamp's source 4, the assignment's rule 3). When the parent's account
+// CHANGES, its followers -- the rows naming it, in the account it left -- have
+// to take the new one. Nothing here moves them. The assignment job does, by two
+// rules of its own (account_assignment_rules.go, "Follow" and "Re-apply a
+// move"), because it already walks each kind by id in bounded batches and reads
+// each batch's parents by id arrays, which is the one shape of read that stays
+// cheap on the row table (a hypertable whose old chunks are compressed, and a
+// compressed chunk has no id index). This file holds the record those rules
+// read, and the decisions about what to ask of the job.
 //
-// # Who follows
+// # Change records
 //
-// A FOLLOWER of row R is a row of an engine-managed kind whose `via` field names
-// R and whose own account, decided by its newest version (newestAccountSQL,
-// account_rows.go), is the account R LEFT. A row attached to R from another
-// account is not a follower and stays where it is: row ownership allows a row
-// to point at a parent of another account on purpose, so what marks a follower
-// is the account it shares with its parent, not the link alone. A follower that
-// has followers of its own records a task in turn, so a goal carries its runs,
-// and each run its steps, one generation per task.
+// account_follow_tasks holds one row per row whose recorded account CHANGED
+// from one account to another: parent_concept, parent_id, from_account,
+// to_account, created_at. Its cursor columns (cursor_concept, cursor_id,
+// followed, next_at) are unused: they belonged to a follow runner that walked
+// follower kinds itself, and that is gone. A record is written
 //
-// The kinds that may follow R are those whose `via` resolves to R's concept,
-// and those whose `via` resolves to no single concept (a Library index row's
-// reference names its target's concept in the id), in name order.
+//   - by the governed move, for each root it moves from an account to another
+//     (account_move.go; a placement, from no account, writes none);
+//   - by the write path (executeWrite, through accountChangeFor), when a kind's
+//     own mutation or a re-tag of a row that carries the list of accounts
+//     changes a row's account from one account to another;
+//   - by the assignment job, for each row it carries by its follow rule, so the
+//     row's own followers follow in turn.
 //
-// # How a task reads, and why so
+// The follow rule reads a parent's records to know which account it LEFT; the
+// account it is in now is read off the parent itself, so a parent moved twice
+// carries its followers to where it is, never to where it once went.
 //
-// The row table is a hypertable whose old chunks are compressed by concept, so
-// a compressed chunk has no id index and a probe per row would read whole
-// chunks. So a task never probes row by row:
+// # What a change asks of the job
 //
-//   - When R left an account, the candidates come from the account index,
-//     idx_memorynodes_account, for (the account R left, the follower kind),
-//     filtered by the via field, at most accountFollowBatchRows ids after the
-//     task's cursor. The observation store is asked the same.
-//   - When R had no account (a placement), the index has nothing to offer:
-//     "names no account" is what it leaves out. The task then walks the
-//     follower kind's ids in order, a bounded batch at a time, which costs a
-//     read of the kind once per placement and is why placements are rare acts.
+// Followers are reached by a FULL pass of their kind, which the change asks for
+// (RequestAccountFullPassIn, in the change's own transaction). "The follower
+// kinds of K" is every engine-managed kind whose `via` can name a row of K: the
+// kinds whose `via` resolves to K, and the Library's index kind, whose
+// reference names any kind (followerKinds). A request names the whole chain
+// below K (followerKindsClosure), because a grandchild can only follow once its
+// parent has, and the job already orders requested passes parents first
+// (assignmentCandidates).
 //
-// Each candidate is decided by its newest version: its account through
-// newestAccountSQL, the one rule every account reader uses, and its via field
-// through readNewestVersions, the shape every newest-version read takes. Then
-// it is written in place by the assignment's own statement (writeAssignments),
-// guarded on the account it was read with, so a row that changed since is left
-// alone: no version is appended, no event is published, no automation runs, and
-// the kind's cached reads are invalidated after the commit.
+//   - An engine-managed row getting its FIRST account asks nothing: its
+//     children were already waiting on it, and the job's own passes assign them.
+//   - A row of a kind that states its own account going from none to an
+//     account asks for the passes: the job had left its children alone.
+//   - Any row going from one account to another writes a change record and
+//     asks for the passes.
 //
-// # The batch
+// # Settled
 //
-// One call claims the oldest due task FOR UPDATE SKIP LOCKED, works at most
-// accountFollowBatchRows candidate ids of it, and advances its cursor
-// (cursor_concept, cursor_id) in the same transaction, so a crash rolls both
-// back and any replica resumes from the last committed batch. A task is done
-// when every follower kind has been walked to its end. A call goes on to further
-// tasks while accountFollowCallBudget allows. A Library row the retirement fence
-// refuses is left in the account it was in and logged; nothing else can move
-// it either.
+// A record is SETTLED (done_at) once every follower kind of its row's kind has
+// finished a full pass that STARTED after the record was written: such a pass
+// read every follower, and carried each one the record applies to. The job
+// settles records whenever one of its full passes finishes
+// (settleAccountChangeRecords), and deletes settled records older than
+// accountChangeRecordRetention, a bounded delete per finished pass. An export
+// waits while a record naming its account is not settled (AccountFollowPending).
 //
-// Tests: account_follow_db_test.go.
+// Tests: account_follow_db_test.go, account_move_db_test.go.
 
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -77,51 +78,47 @@ import (
 	"github.com/uptrace/bun"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
-	"github.com/znasllc-io/memql/component/metrics"
 )
 
 // AccountRowRef names one row: its concept and its id as stored.
 type AccountRowRef struct{ Concept, ID string }
 
-// accountFollowBatchRows bounds one batch: the candidate ids a call examines
-// for one task. A variable only so a test can cut a task into batches of one;
-// nothing else changes it.
-var accountFollowBatchRows = 200
+const (
+	// accountChangeRecordRetention is how long a settled change record is kept.
+	// The follow rule reads a parent's records to repair a stale append that
+	// re-stamps a follower with the account its parent left; past this age such
+	// an append is not expected any more.
+	accountChangeRecordRetention = 90 * 24 * time.Hour
+	// accountChangeRecordPurgeBatch bounds the delete one finished pass makes.
+	accountChangeRecordPurgeBatch = 500
+)
 
-// accountFollowCallBudget stops a call from starting another batch once it has
-// run this long, as assignmentCallBudget does for the assignment. Shorter,
-// because the call runs after the assignment batch in the same tick deadline
-// (AccountOwnershipRunner.tick).
-const accountFollowCallBudget = time.Second
-
-// EnqueueAccountFollow records that the row's account changed from `from` ("" =
-// none) to `to`. tx is the write's own transaction where there is one, so the
-// change and the obligation to carry its followers commit together. Nothing is
-// recorded when the account did not change, when the row was left with none
-// (nothing to give its followers), or when no kind can follow the row's.
+// EnqueueAccountFollow writes the change record of a row whose account changed
+// from `from` to `to` (file header, Change records). tx is the change's own
+// transaction, so the change and its record commit together. Nothing is
+// written unless the row went from one account to ANOTHER: a first account
+// (from "") has no account its followers could have been left in, and a row
+// left with none has nothing to give them.
 func EnqueueAccountFollow(ctx context.Context, tx bun.IDB, row AccountRowRef, from, to string) error {
 	from, to = bareAccount(from), bareAccount(to)
-	if from == to || to == "" || row.Concept == "" || strings.TrimSpace(row.ID) == "" {
-		return nil
-	}
-	if len(followerKinds(row.Concept)) == 0 {
+	if from == "" || to == "" || from == to || row.Concept == "" || strings.TrimSpace(row.ID) == "" {
 		return nil
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO account_follow_tasks (parent_concept, parent_id, from_account, to_account)
 		VALUES (?, ?, ?, ?)`, row.Concept, row.ID, from, to); err != nil {
-		return fmt.Errorf("account follow: recording the followers of %s: %w", row.ID, err)
+		return fmt.Errorf("account follow: recording the change of %s: %w", row.ID, err)
 	}
 	return nil
 }
 
-// AccountFollowPending counts tasks not done that name the account as from or
-// to; "" counts all.
+// AccountFollowPending counts the change records not yet settled that name the
+// account as from or to; "" counts all (file header, Settled).
 func AccountFollowPending(ctx context.Context, q AccountQuerier, account string) (int64, error) {
 	bare := bareAccount(account)
 	rows, err := q.QueryContext(ctx, `SELECT count(*) FROM account_follow_tasks
 		WHERE done_at IS NULL AND ($1 = '' OR from_account = $1 OR to_account = $1)`, bare)
 	if err != nil {
-		return 0, fmt.Errorf("account follow: counting pending tasks: %w", err)
+		return 0, fmt.Errorf("account follow: counting change records not settled: %w", err)
 	}
 	defer rows.Close()
 	var n int64
@@ -134,7 +131,7 @@ func AccountFollowPending(ctx context.Context, q AccountQuerier, account string)
 }
 
 // followerKinds is the engine-managed kinds whose rows may follow a row of the
-// concept, in name order (file header, Who follows).
+// concept, in name order (file header, What a change asks of the job).
 func followerKinds(parent string) []*memorynodes.Concept {
 	var out []*memorynodes.Concept
 	for _, c := range memorynodes.All() {
@@ -149,149 +146,37 @@ func followerKinds(parent string) []*memorynodes.Concept {
 	return out
 }
 
-// followTask is one row of account_follow_tasks, read under its lock.
-type followTask struct {
-	id                     int64
-	parentConcept          string
-	parentID               string
-	from, to               string
-	cursorConcept, cursorID string
+// followerKindNames is followerKinds' names.
+func followerKindNames(parent string) []string {
+	kinds := followerKinds(parent)
+	out := make([]string, 0, len(kinds))
+	for _, k := range kinds {
+		out = append(out, k.Name)
+	}
+	return out
 }
 
-// runAccountFollowBatch is one call of the follow tasks; see the file header.
-// It returns nil when nothing is due.
-func (e *MemQLEngine) runAccountFollowBatch(ctx context.Context) error {
-	db := e.database()
-	if db == nil {
-		return nil
-	}
-	started := time.Now()
-	for time.Since(started) < accountFollowCallBudget && ctx.Err() == nil {
-		worked, changed, err := e.followOneBatch(ctx, db)
-		if err != nil {
-			return err
-		}
-		for concept := range changed {
-			e.InvalidateCacheForConcept(concept)
-		}
-		if !worked {
-			break
-		}
-	}
-	pending, err := AccountFollowPending(ctx, db.DB, "")
-	if err == nil {
-		metrics.SetAccountFollowTasks(pending)
-	}
-	return nil
-}
-
-// followOneBatch claims one due task and works one batch of it. worked is
-// false when nothing was claimable; changed is the kinds whose rows moved.
-func (e *MemQLEngine) followOneBatch(ctx context.Context, db *bun.DB) (bool, map[string]bool, error) {
-	worked := false
-	changed := map[string]bool{}
-	err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		worked = false
-		clear(changed)
-		var t followTask
-		err := tx.QueryRowContext(ctx, `SELECT id, parent_concept, parent_id, from_account, to_account, cursor_concept, cursor_id
-			  FROM account_follow_tasks
-			 WHERE done_at IS NULL AND next_at <= clock_timestamp()
-			 ORDER BY next_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`).
-			Scan(&t.id, &t.parentConcept, &t.parentID, &t.from, &t.to, &t.cursorConcept, &t.cursorID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("account follow: claiming a task: %w", err)
-		}
-		worked = true
-
-		budget := accountFollowBatchRows
-		followed := 0
-		done := true
-		cursorConcept, cursorID := t.cursorConcept, t.cursorID
-		for _, kind := range followerKinds(t.parentConcept) {
-			if kind.Name < cursorConcept {
-				continue
-			}
-			if kind.Name != cursorConcept {
-				cursorID = ""
-			}
-			cursorConcept = kind.Name
-			if budget <= 0 {
-				done = false
-				break
-			}
-			scanned, moved, err := e.followKindBatch(ctx, tx, t, kind, cursorID, budget)
-			if err != nil {
-				return err
-			}
-			followed += moved
-			if moved > 0 {
-				changed[kind.Name] = true
-			}
-			if len(scanned) == budget {
-				// The batch filled on this kind: more of it may be left.
-				cursorID = scanned[len(scanned)-1]
-				done = false
-				break
-			}
-			budget -= len(scanned)
-			cursorID = ""
-		}
-		if done {
-			_, err = tx.ExecContext(ctx, `UPDATE account_follow_tasks
-				   SET cursor_concept = '', cursor_id = '', followed = followed + ?, done_at = clock_timestamp()
-				 WHERE id = ?`, followed, t.id)
-		} else {
-			_, err = tx.ExecContext(ctx, `UPDATE account_follow_tasks
-				   SET cursor_concept = ?, cursor_id = ?, followed = followed + ?, next_at = clock_timestamp()
-				 WHERE id = ?`, cursorConcept, cursorID, followed, t.id)
-		}
-		if err != nil {
-			return fmt.Errorf("account follow: advancing task %d: %w", t.id, err)
-		}
-		return nil
-	})
-	if err != nil {
-		return false, nil, err
-	}
-	return worked, changed, nil
-}
-
-// followKindBatch reads at most limit candidate ids of one follower kind after
-// afterID, moves those that follow, and records a task for each moved row that
-// has followers of its own. scanned is every candidate id read, in order, for
-// the cursor; moved is how many rows took the new account.
-func (e *MemQLEngine) followKindBatch(ctx context.Context, tx bun.Tx, t followTask, kind *memorynodes.Concept,
-	afterID string, limit int) (scanned []string, moved int, err error) {
-	rows, scanned, err := followersOf(ctx, tx.Tx, AccountRowRef{Concept: t.parentConcept, ID: t.parentID}, t.from, kind, afterID, limit)
-	if err != nil || len(rows) == 0 {
-		return scanned, 0, err
-	}
-	account := accountValueFor(kind, t.to)
-	writes := make([]assignmentWrite, 0, len(rows))
-	for _, row := range rows {
-		writes = append(writes, assignmentWrite{ID: row.ID, At: versionKey(row.At), Account: account, From: t.from})
-	}
-	written, err := writeInPlaceAroundFence(ctx, tx, kind.Name, writes)
-	if err != nil {
-		return scanned, 0, err
-	}
-	for _, w := range written.refused {
-		e.Logger.Warn("account follow: the Library retirement fence refused a follower; it stays in the account it was in",
-			"concept", kind.Name, "id", w.ID, "account", t.from)
-	}
-	grandchildren := len(followerKinds(kind.Name)) > 0
-	for _, id := range written.stamped {
-		if grandchildren {
-			if err := EnqueueAccountFollow(ctx, tx, AccountRowRef{Concept: kind.Name, ID: id}, t.from, t.to); err != nil {
-				return scanned, 0, err
+// followerKindsClosure is the follower kinds of every given kind, and theirs in
+// turn, sorted: the chain a change below these kinds can reach.
+func followerKindsClosure(concepts ...string) []string {
+	seen := map[string]bool{}
+	queue := append([]string{}, concepts...)
+	for len(queue) > 0 {
+		next := queue[0]
+		queue = queue[1:]
+		for _, name := range followerKindNames(next) {
+			if !seen[name] {
+				seen[name] = true
+				queue = append(queue, name)
 			}
 		}
 	}
-	return scanned, len(written.stamped), nil
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // accountValueFor is how a kind stores an account: a `stated` kind's own
@@ -304,77 +189,117 @@ func accountValueFor(kind *memorynodes.Concept, bare string) string {
 	return bare
 }
 
-// followCandidatesFromIndexSQL is the ids of a follower kind naming the parent
-// in its via field ($4) on a version that names the account the parent left,
-// through the account index, and the observation store asked the same.
-//
-// staged-data: MUST-NOT-GATE -- carrying a row to the account its parent moved to; a staged follower is the account's all the same.
-const followCandidatesFromIndexSQL = `SELECT id FROM (
-    SELECT id FROM "MemoryNodes"
-     WHERE ` + accountNamedSQL + `
-       AND (payload->>'accountId') IN ($1, $2) AND concept = $3
-       AND (payload->>$4) = ANY($5::text[]) AND id > $6
-    UNION
-    SELECT id FROM memory_liveness
-     WHERE concept = $3 AND (payload->>'accountId') IN ($1, $2)
-       AND (payload->>$4) = ANY($5::text[]) AND id > $6
-  ) k ORDER BY id LIMIT $7`
-
-// followCandidatesWalkSQL is the next ids of a follower kind in id order, for a
-// parent that had no account (file header, How a task reads).
-//
-// staged-data: MUST-NOT-GATE -- the followCandidatesFromIndexSQL reason.
-const followCandidatesWalkSQL = `SELECT DISTINCT id FROM "MemoryNodes"
- WHERE concept = $1 AND id > $2 ORDER BY id LIMIT $3`
-
-func followCandidates(ctx context.Context, q AccountQuerier, concept, via string, parent []string, from, afterID string, limit int) ([]string, error) {
-	if from == "" {
-		return scanIDs(ctx, q, followCandidatesWalkSQL, concept, afterID, limit)
-	}
-	return scanIDs(ctx, q, followCandidatesFromIndexSQL, from, accountCanonicalPrefix+from, concept, via, pq.Array(parent), afterID, limit)
-}
-
-// idsWithNewestAccountSQL keeps the ids whose newest version names the account
-// (either spelling), or names none when the account is "".
-//
-// staged-data: MUST-NOT-GATE -- deciding whose a row is (newestAccountSQL).
-const idsWithNewestAccountSQL = `SELECT c.id FROM (SELECT $1::text AS concept, unnest($2::text[]) AS id) c
- WHERE COALESCE(` + newestAccountSQL + `, '') IN ($3, $4)
- ORDER BY c.id`
-
-func idsWithNewestAccount(ctx context.Context, q AccountQuerier, concept string, ids []string, account string) ([]string, error) {
-	canonical := ""
-	if account != "" {
-		canonical = accountCanonicalPrefix + account
-	}
-	return scanIDs(ctx, q, idsWithNewestAccountSQL, concept, pq.Array(ids), account, canonical)
-}
-
-// accountFollowChange is a write's change of a row's recorded account, to be
-// recorded in the write's transaction (executeWrite).
-type accountFollowChange struct {
+// accountChange is what a write that changes a row's recorded account owes
+// (file header, What a change asks of the job): a change record, a request for
+// full passes of the kinds below it, or both.
+type accountChange struct {
 	concept, from, to string
+	record            bool
+	passes            []string
 }
 
-// accountFollowFor is the follow task a write owes, or nil: recording is on,
-// the row existed, its kind is account-scoped, and its account changes to one
-// (bare compare, so a respelling is no change) that a kind can follow.
-func accountFollowFor(e *MemQLEngine, meta *memorynodes.Concept, prior, payload map[string]any) *accountFollowChange {
+// accountChangeFor is what the write owes, or nil: recording is on, the row
+// existed, its kind is account-scoped, and its account changes (bare compare,
+// so a respelling is no change) to one.
+func accountChangeFor(e *MemQLEngine, meta *memorynodes.Concept, prior, payload map[string]any) *accountChange {
 	if !e.AccountStampingEnabled() || prior == nil || !meta.AccountScoped() {
 		return nil
 	}
 	from, to := bareAccount(prior[accountField]), bareAccount(payload[accountField])
-	if from == to || to == "" || len(followerKinds(meta.Name)) == 0 {
+	if from == to || to == "" {
 		return nil
 	}
-	return &accountFollowChange{concept: meta.Name, from: from, to: to}
+	if from == "" && meta.AccountEngineManaged() {
+		return nil // its children were waiting on it; the job assigns them
+	}
+	passes := followerKindsClosure(meta.Name)
+	if len(passes) == 0 && from == "" {
+		return nil
+	}
+	return &accountChange{concept: meta.Name, from: from, to: to, record: from != "", passes: passes}
 }
 
-// enqueue records the task through the write transaction's store.
-func (c *accountFollowChange) enqueue(ctx context.Context, store memorynodes.Store, id string) error {
+// apply writes the record and the requests through the write transaction's
+// store.
+func (c *accountChange) apply(ctx context.Context, store memorynodes.Store, id string) error {
 	bs, ok := store.(*bunStore)
 	if !ok {
 		return fmt.Errorf("account follow: the write's store is not the database's")
 	}
-	return EnqueueAccountFollow(ctx, bs.db, AccountRowRef{Concept: c.concept, ID: id}, c.from, c.to)
+	if c.record {
+		if err := EnqueueAccountFollow(ctx, bs.db, AccountRowRef{Concept: c.concept, ID: id}, c.from, c.to); err != nil {
+			return err
+		}
+	}
+	return RequestAccountFullPassIn(ctx, bs.db, c.passes)
+}
+
+// settleAccountChangeRecords marks settled every record whose row's follower
+// kinds have each finished a full pass that started after the record was
+// written, and deletes a bounded batch of settled records past their retention
+// (file header, Settled). The job calls it when a full pass finishes, in that
+// batch's transaction.
+//
+// It reads the kinds with records outstanding through the table's partial index
+// on records not settled, and each kind's progress rows by name: no read of the
+// row table.
+func settleAccountChangeRecords(ctx context.Context, tx bun.Tx) error {
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT parent_concept FROM account_follow_tasks WHERE done_at IS NULL`)
+	if err != nil {
+		return fmt.Errorf("account follow: reading the records to settle: %w", err)
+	}
+	var parents []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			rows.Close()
+			return err
+		}
+		parents = append(parents, p)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, parent := range parents {
+		kinds := followerKindNames(parent)
+		// The earliest start of the last finished full pass among the follower
+		// kinds: a record written before it has been read past by every one.
+		// A kind with no finished full pass (or no progress row) settles nothing.
+		var through *time.Time
+		if len(kinds) > 0 {
+			var settledThrough sql.NullTime
+			if err := tx.QueryRowContext(ctx, `SELECT CASE WHEN count(*) = ? AND bool_and(full_pass_at IS NOT NULL)
+				   THEN min(full_pass_at) END
+				  FROM account_assignment_progress WHERE concept = ANY(?::text[])`, len(kinds), pq.Array(kinds)).
+				Scan(&settledThrough); err != nil {
+				return fmt.Errorf("account follow: reading the passes of the followers of %s: %w", parent, err)
+			}
+			if settledThrough.Valid {
+				through = &settledThrough.Time
+			}
+		}
+		if len(kinds) > 0 && through == nil {
+			continue
+		}
+		var err error
+		if through == nil {
+			_, err = tx.ExecContext(ctx, `UPDATE account_follow_tasks SET done_at = clock_timestamp()
+				WHERE done_at IS NULL AND parent_concept = ?`, parent)
+		} else {
+			_, err = tx.ExecContext(ctx, `UPDATE account_follow_tasks SET done_at = clock_timestamp()
+				WHERE done_at IS NULL AND parent_concept = ? AND created_at < ?`, parent, *through)
+		}
+		if err != nil {
+			return fmt.Errorf("account follow: settling the records of %s: %w", parent, err)
+		}
+	}
+	_, err = tx.ExecContext(ctx, `DELETE FROM account_follow_tasks WHERE id IN (
+		  SELECT id FROM account_follow_tasks WHERE done_at < clock_timestamp() - ?::interval LIMIT ?)`,
+		fmt.Sprintf("%d seconds", int64(accountChangeRecordRetention.Seconds())), accountChangeRecordPurgeBatch)
+	if err != nil {
+		return fmt.Errorf("account follow: deleting settled records: %w", err)
+	}
+	return nil
 }
