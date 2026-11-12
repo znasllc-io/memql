@@ -217,7 +217,7 @@ U2 comes first: U3 and U6 are wrong without it as soon as a cluster holds two st
 | Situation | What happens |
 | --- | --- |
 | Retries pile up behind a store that is down | A row has four tries at most, and a tick dispatches a bounded batch. Deliveries are still deduplicated on Shopify's webhook id. |
-| Backfills compete for Shopify's budget | Shopify runs one bulk operation for a store at a time. A domain waits its turn; the continuing pass takes one domain of a store on each tick. |
+| Backfills compete for Shopify's budget | Shopify runs one bulk operation for a store at a time. A domain waits its turn; the continuing pass works one domain of a store at a time, and goes on to the store's next within the same pass once that one is complete. |
 | The alert cannot be delivered | The owner's address is not on the outbound allowlist. The Store page says the alert could not be sent and why. |
 | A wider grant is stolen | `write_customers` adds what the connection can change. The connector uses it only for the wholesale tag and for creating a customer; this is stated in the connector's doc beside the scope. |
 | More personal data is held | Declaring name, email and address is Shopify's Level 2. Its requirements (encryption, retention, test data kept apart, an incident procedure) are the operator's, and the privacy topics already redact on request. |
@@ -322,8 +322,10 @@ this record names and settled what it left open. Where the two differ, the plan 
 - **A retried delivery fetches again.** The connector forgets a webhook id whose apply
   failed, or its own 15-minute duplicate guard would swallow the retries at 1 and 5
   minutes.
-- **The continuing pass** runs one domain of a store on a tick and yields when a
-  running bulk operation made no progress.
+- **The continuing pass** works in rounds for up to four minutes of each five-minute
+  tick: one domain of a store at a time, the store's next once that one is complete.
+  When every store with work left is only waiting on Shopify to prepare an export, it
+  waits ten seconds before it asks again.
 - **"Try again"** for deliveries sits beside the dead letters in Cluster > Data, one line
   for each store, because a delivery belongs to a store and not to a domain.
 - **The alert wait** is read and set through two builtins and one field on Settings >
