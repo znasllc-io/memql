@@ -2,7 +2,9 @@ package shopify
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math/rand/v2"
 	"sort"
 	"strings"
 	"time"
@@ -400,39 +402,88 @@ func (c *Connector) recordSubscriptionHealth(ctx context.Context, store Store, r
 		map[string]any{"subscriptionsCheckedAt": report.At.Format(time.RFC3339)})
 }
 
-// recordStoreHealthKey writes ONE key of a store's health: it re-reads the
-// store row fresh and writes the health back with that key replaced, and
-// every other key as the row holds it. extra carries the mutation's other
-// arguments.
+// recordStoreHealthKey writes ONE key of a store's health: it reads the store
+// row fresh and writes the health back with that key replaced, and every other
+// key as the row holds it. extra carries the mutation's other arguments.
 //
 // recordStoreHealth replaces the whole object, and each writer used to send
 // the health of the copy of the store it held. The connect's webhook pass
 // holds the store as it was before the connect, so whatever another writer
 // added meanwhile -- the ordersFrom stamp, a verdict -- was erased by the
-// next pass. Every writer of a health key goes through here instead. The read
-// and the write are still two statements, so two writers of the same moment
-// can race; what no longer happens is a writer erasing a key it never read.
+// next pass. Every writer of a health key goes through here instead.
+//
+// THE WRITE IS FENCED ON THE VERSION IT READ. The read and the write are two
+// statements, and the writers run at once: the watch, the subscription pass
+// and a connect each write their own key of one row. A write of another key
+// that landed between this writer's read and its write was put back as this
+// writer had read it. For the watch's key that is an older verdict, whose
+// mailedFor says the episode was never mailed, and its owner was mailed
+// again. So the write carries a row-version fence on the version the read
+// answered (memql.ContextWithRowVersionFence); one another writer overtook is
+// refused, and this writer reads again and re-applies ITS OWN KEY ONLY, at
+// most maxHealthKeyAttempts times -- the pattern of the sync runtime's
+// PatchSyncState. A store with no row yet is fenced on its absence.
 func (c *Connector) recordStoreHealthKey(ctx context.Context, storeID, key string, value any, extra map[string]any) error {
 	opCtx := operatorContext(ctx)
-	store, _, err := c.storeByID(memql.ContextWithFreshRead(opCtx), storeID)
-	if err != nil {
-		return err
+	for attempt := 0; attempt < maxHealthKeyAttempts; attempt++ {
+		if attempt > 0 {
+			healthKeyRetryWait(attempt)
+		}
+		held, version, err := c.storeHealthForWrite(opCtx, storeID)
+		if err != nil {
+			return err
+		}
+		health := map[string]any{}
+		for k, v := range held {
+			health[k] = v
+		}
+		health[key] = value
+		args := map[string]any{"storeId": storeID, "health": health}
+		for k, v := range extra {
+			args[k] = v
+		}
+		fenced := memql.ContextWithRowVersionFence(opCtx, conceptShopifyStore, storeID, version)
+		_, err = c.engine.Execute(fenced, renderCall("recordStoreHealth", args))
+		if errors.Is(err, memql.ErrRowVersionChanged) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		c.stores.Invalidate()
+		return nil
 	}
-	health := map[string]any{}
-	for k, v := range store.Health {
-		health[k] = v
-	}
-	health[key] = value
-	args := map[string]any{"storeId": storeID, "health": health}
-	for k, v := range extra {
-		args[k] = v
-	}
-	if _, err := c.engine.Execute(opCtx, renderCall("recordStoreHealth", args)); err != nil {
-		return err
-	}
-	c.stores.Invalidate()
-	return nil
+	return fmt.Errorf("shopify: the row of store %q kept changing under %d writes of its health key %q; nothing was written", storeID, maxHealthKeyAttempts, key)
 }
+
+// storeHealthForWrite reads a store's health fresh, with the version of the
+// row it was read from: the witness a write decided on it is fenced on. No
+// row answers no health and the zero version.
+func (c *Connector) storeHealthForWrite(ctx context.Context, storeID string) (map[string]any, time.Time, error) {
+	res, err := c.engine.Execute(memql.ContextWithFreshRead(ctx), renderCall("storeById", map[string]any{"storeId": storeID}))
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	rows := memql.MaterializeRows(res)
+	if len(rows) == 0 {
+		return nil, time.Time{}, nil
+	}
+	health, _ := rowValue(rows[0], "health").(map[string]any)
+	return health, rowTime(rows[0], "createdAt"), nil
+}
+
+// healthKeyRetryWait is the pause before a health-key write that lost its
+// fence is decided again: a few milliseconds, longer each time and jittered,
+// so two writers that lost to each other do not decide again in step. The
+// four waits of one write add up to less than a tenth of a second.
+func healthKeyRetryWait(attempt int) {
+	base := 2 * time.Millisecond << (attempt - 1)
+	time.Sleep(base + time.Duration(rand.Int64N(int64(base))))
+}
+
+// maxHealthKeyAttempts bounds how often a write of one health key that another
+// writer of the store row overtook is decided again.
+const maxHealthKeyAttempts = 5
 
 func toAny(in []string) []any {
 	out := make([]any, 0, len(in))

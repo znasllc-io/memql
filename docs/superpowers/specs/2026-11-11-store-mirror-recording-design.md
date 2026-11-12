@@ -97,7 +97,7 @@ Every step is a fixed rule.
 | D7 | The watermark is the time the sweep started, less two minutes. | F8. Apply is version-guarded, so reading a row twice writes nothing. |
 | D8 | The verdict is computed in the engine, by one builtin, from the store row, its sync state and its deliveries. A reason is a code with one sentence and at most one act. | M3. The shell keeps no copy of the rules, as with `storeHasStorefrontToken`. |
 | D9 | The storefront's Store slot and Store page show the verdict. Cluster > Data keeps the per-domain detail, now grouped by store. | F4. The person managing a storefront looks at the storefront. |
-| D10 | When a store's verdict has needed attention for the alert wait, one email goes to the store's owner through the transactional outbox, and one more when it recovers. The alert wait is 30 minutes unless the operator sets another, from 1 minute to 24 hours. The request id is derived from the store and the episode, so nothing is sent twice. | M4. No new delivery lane: the address is a cluster user's and must be on the outbound allowlist, like every operational email. A tester sets five minutes to walk it and puts it back, as with a campaign's wait (the owner's direction, 2026-11-10). |
+| D10 | When a store has needed attention, or been not connected, for the alert wait, one email goes to the store's owner through the transactional outbox, and one more when it recovers. The email says which of the two it is, for the state the store is in when it is staged. Not connected: subject `<store domain> is not being recorded`, opening "MemQL has not been recording <store domain> since <the episode's start, RFC 1123, UTC>." Needs attention: subject `<store domain> needs attention`, opening "MemQL is not recording everything from <store domain>, since <the episode's start, RFC 1123, UTC>." The recovery, for every episode: subject `<store domain> is being recorded again`, body "MemQL is recording <store domain> in full again. It needed attention from <the mailed episode's start> to <now>." A store the watch sees for the first time already not connected is never mailed about that outage, which is older than the watch. The alert wait is 30 minutes unless the operator sets another, from 1 minute to 24 hours. The request id is derived from the store and the episode, so nothing is sent twice. | M4. No new delivery lane: the address is a cluster user's and must be on the outbound allowlist, like every operational email. A store that needs attention is still recorded in part, so telling its owner it "is not being recorded" was untrue. A tester sets five minutes to walk it and puts it back, as with a campaign's wait (the owner's direction, 2026-11-10). |
 | D11 | `read_all_orders` is not requested. A store's history begins 60 days before it connects, and the Store page says since when. | It needs Shopify's approval. Whether a merchant's full history is wanted is decided with that merchant. |
 | D12 | The mirror stores what Shopify returns. A field Shopify withholds is `null` and is named on the Store page as withheld, which is not an error. | `fieldsDenied` already tracks it. |
 
@@ -234,8 +234,14 @@ U2 comes first: U3 and U6 are wrong without it as soon as a cluster holds two st
   the next sweep.
 - **U6.** Each reason from a fixture of store, sync state and deliveries. The alert
   is staged once after the alert wait, not again in the same episode, and once on
-  recovery. With no value set the wait is 30 minutes; a value of five is honoured; zero
-  and 25 hours are refused.
+  recovery. Its subject and body are the exact copy of D10 for the state the store is
+  in: "needs attention" and "MemQL is not recording everything from ..." for a store
+  that needs attention, "is not being recorded" and "MemQL has not been recording ..."
+  for one that is not connected; the recovery reads "MemQL is recording <store domain>
+  in full again. It needed attention from ... to ...". A store first seen already not
+  connected is never mailed, and neither is its reconnection; one first seen needing
+  attention is mailed after the wait. With no value set the wait is 30 minutes; a
+  value of five is honoured; zero and 25 hours are refused.
 - **U7.** The Store page for each state and reason, in both themes and at both
   widths; "not part of this connection" never draws as an error; a person without the
   store part sees none of it.

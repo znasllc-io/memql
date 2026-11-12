@@ -39,6 +39,9 @@ import (
 // before the next pass: that pass dates the episode anew. `since`
 // stays what it is, when the current state began: the Store page reads it.
 //
+// A store the watch sees for the first time already not connected is never
+// mailed about that outage (recordOf): it is older than the watch.
+//
 // WHAT TO MAIL is planWatch's, a pure function of the verdict last recorded,
 // the verdict computed now, the wait and the time. The pass executes the plan
 // and records the outcome -- only when a recorded field changed, because each
@@ -185,8 +188,19 @@ func alertable(state string) bool {
 // none). When a new episode begins, the alert goes back to none: it
 // describes the episode it was written for. It is not cleared when the store
 // records, so the read-back of a staged alert still finishes.
+//
+// A STORE FIRST SEEN ALREADY NOT CONNECTED IS NOT NEWS. With no verdict
+// recorded on its row, the watch has never looked at the store, and one it
+// finds uninstalled or purged was so before anybody watched: the first pass
+// of a release that brings the watch would otherwise date an episode "now"
+// for every such store and mail each owner after the wait about something
+// they did long ago. Its episode is recorded as told and as recovered, so no
+// alert is owed for it and no recovery when the store is connected again. A
+// store first seen needing attention is told as any other: a release that
+// asks every store for more permissions is news to each of them.
 func recordOf(v Verdict, previous map[string]any) recordedVerdict {
 	r := readRecorded(previous)
+	firstSeen := mapString(previous, "state") == ""
 	switch {
 	case !alertable(v.State):
 		r.Episode = ""
@@ -195,6 +209,9 @@ func recordOf(v Verdict, previous map[string]any) recordedVerdict {
 	default:
 		r.Episode = verdictStamp(v.Since)
 		r.AlertState, r.AlertReason = AlertNone, ""
+		if firstSeen && v.State == VerdictNotConnected {
+			r.MailedFor, r.RecoveredFor = r.Episode, r.Episode
+		}
 	}
 	r.State = v.State
 	r.Reasons = []string{}
@@ -326,12 +343,22 @@ func planWatch(previous map[string]any, v Verdict, wait time.Duration, now time.
 	return plan
 }
 
-// alertEmail is the alert's subject and body, since the episode's start.
-// Each reason travels as its sentence alone, ending in a full stop: a detail
-// is the engine's or Shopify's own text, which a mailbox is not the place for.
+// alertEmail is the alert's subject and body, since the episode's start, for
+// the state the store is in when the alert is staged. The two states are not
+// one outage: a store that is not connected is not recorded at all, and one
+// that needs attention is still recorded in part, so each is told as what it
+// is. Each reason travels as its sentence alone, ending in a full stop: a
+// detail is the engine's or Shopify's own text, which a mailbox is not the
+// place for.
 func alertEmail(v Verdict, episode string, osBase string) (string, string) {
+	subject := v.Domain + " is not being recorded"
+	opening := "MemQL has not been recording " + v.Domain + " since " + stampRFC1123(episode) + "."
+	if v.State == VerdictNeedsAttention {
+		subject = v.Domain + " needs attention"
+		opening = "MemQL is not recording everything from " + v.Domain + ", since " + stampRFC1123(episode) + "."
+	}
 	var b strings.Builder
-	b.WriteString("MemQL has not been recording " + v.Domain + " since " + stampRFC1123(episode) + ".\n\n")
+	b.WriteString(opening + "\n\n")
 	if len(v.Reasons) > 0 {
 		for _, reason := range v.Reasons {
 			b.WriteString(fullStop(reason.Sentence) + "\n")
@@ -342,14 +369,15 @@ func alertEmail(v Verdict, episode string, osBase string) (string, string) {
 		b.WriteString("Open the storefront's Store page in MemQL OS to see what fixes it: " + osBase + "/\n\n")
 	}
 	b.WriteString("This email carries no order and nothing about a customer.")
-	return v.Domain + " is not being recorded", b.String()
+	return subject, b.String()
 }
 
 // recoveryEmail is the recovery's subject and body, from the mailed
-// episode's recorded since to now.
+// episode's start to now. One sentence for every episode, whichever of the
+// two states it passed through: the store is recorded in full again.
 func recoveryEmail(domain, stamp string, now time.Time) (string, string) {
 	return domain + " is being recorded again",
-		"MemQL is recording " + domain + " again. It was not recording from " + stampRFC1123(stamp) + " to " + now.UTC().Format(time.RFC1123) + "."
+		"MemQL is recording " + domain + " in full again. It needed attention from " + stampRFC1123(stamp) + " to " + now.UTC().Format(time.RFC1123) + "."
 }
 
 // stampRFC1123 is a recorded stamp as the mail writes it, RFC 1123 in UTC.

@@ -38,9 +38,17 @@ func verdictIn(state string, since time.Time) Verdict {
 	return v
 }
 
-// recordedAs is health.verdict as a pass recorded it for v, with edits.
+// watchedBefore is the verdict of a store the watch had already recorded,
+// recording, before the pass a test is about: a store's first sighting is
+// its own case (TestAStoreFirstSeenAlreadyNotConnectedIsNeverMailed).
+func watchedBefore(v Verdict) map[string]any {
+	return map[string]any{"state": VerdictRecording, "since": verdictStamp(v.Since.Add(-24 * time.Hour))}
+}
+
+// recordedAs is health.verdict as a pass recorded it for v, a store the watch
+// already knew, with edits.
 func recordedAs(v Verdict, edits ...func(map[string]any)) map[string]any {
-	rec := recordOf(v, nil).payload()
+	rec := recordOf(v, watchedBefore(v)).payload()
 	for _, edit := range edits {
 		edit(rec)
 	}
@@ -457,11 +465,14 @@ func TestTheAlertCarriesNoOrderAndNoCustomer(t *testing.T) {
 	since := time.Date(2026, 11, 11, 10, 15, 0, 0, time.UTC)
 	v := verdictIn(VerdictNeedsAttention, since)
 	v.Reasons = append(v.Reasons, VerdictReason{Code: ReasonCheckFailing, Sentence: "The last check of orders failed", Detail: "HTTP 500."})
+
+	// A store that needs attention is still being recorded, in part: the
+	// alert says so, and names what holds it there.
 	subject, body := alertEmail(v, verdictStamp(since), "https://os.example.test")
-	if subject != "acme-widgets.myshopify.com is not being recorded" {
+	if subject != "acme-widgets.myshopify.com needs attention" {
 		t.Errorf("subject = %q", subject)
 	}
-	wantBody := "MemQL has not been recording acme-widgets.myshopify.com since Wed, 11 Nov 2026 10:15:00 UTC.\n" +
+	wantBody := "MemQL is not recording everything from acme-widgets.myshopify.com, since Wed, 11 Nov 2026 10:15:00 UTC.\n" +
 		"\n" +
 		"Shopify is not sending every change.\n" +
 		"3 changes could not be recorded.\n" +
@@ -480,11 +491,34 @@ func TestTheAlertCarriesNoOrderAndNoCustomer(t *testing.T) {
 		t.Error("the body carries a reason's detail; only its sentence travels")
 	}
 
+	// A store that is not connected is not being recorded at all, and carries
+	// no reasons.
+	gone := verdictIn(VerdictNotConnected, since)
+	subject, body = alertEmail(gone, verdictStamp(since), "https://os.example.test")
+	if subject != "acme-widgets.myshopify.com is not being recorded" {
+		t.Errorf("not connected: subject = %q", subject)
+	}
+	wantBody = "MemQL has not been recording acme-widgets.myshopify.com since Wed, 11 Nov 2026 10:15:00 UTC.\n" +
+		"\n" +
+		"Open the storefront's Store page in MemQL OS to see what fixes it: https://os.example.test/\n" +
+		"\n" +
+		"This email carries no order and nothing about a customer."
+	if body != wantBody {
+		t.Errorf("not connected: body =\n%s\nwant\n%s", body, wantBody)
+	}
+	// The state is the one the store is in when the alert is staged: an
+	// episode that began as needs attention and is not connected now is told
+	// as not connected, since the episode's start.
+	if subject, body := alertEmail(gone, verdictStamp(since.Add(-time.Hour)), ""); subject != "acme-widgets.myshopify.com is not being recorded" ||
+		body != "MemQL has not been recording acme-widgets.myshopify.com since Wed, 11 Nov 2026 09:15:00 UTC.\n\nThis email carries no order and nothing about a customer." {
+		t.Errorf("with no OS address: subject %q, body\n%s", subject, body)
+	}
+
 	rsubject, rbody := recoveryEmail(watchDomain, verdictStamp(since), time.Date(2026, 11, 11, 13, 40, 0, 0, time.UTC))
 	if rsubject != "acme-widgets.myshopify.com is being recorded again" {
 		t.Errorf("recovery subject = %q", rsubject)
 	}
-	if want := "MemQL is recording acme-widgets.myshopify.com again. It was not recording from Wed, 11 Nov 2026 10:15:00 UTC to Wed, 11 Nov 2026 13:40:00 UTC."; rbody != want {
+	if want := "MemQL is recording acme-widgets.myshopify.com in full again. It needed attention from Wed, 11 Nov 2026 10:15:00 UTC to Wed, 11 Nov 2026 13:40:00 UTC."; rbody != want {
 		t.Errorf("recovery body =\n%s\nwant\n%s", rbody, want)
 	}
 
@@ -502,7 +536,8 @@ func TestTheAlertCarriesNoOrderAndNoCustomer(t *testing.T) {
 	id := "shopify-store-alert-acme-20261111T101500Z"
 	for _, want := range []string{
 		`requestId: "` + id + `"`, `dedupeKey: "` + id + `"`, `medium: "email"`, `target: "owner@example.com"`,
-		`requestedBy: "shopify:storeWatch"`, `subject: "acme-widgets.myshopify.com is not being recorded"`,
+		`requestedBy: "shopify:storeWatch"`, `subject: "acme-widgets.myshopify.com needs attention"`,
+		"MemQL is not recording everything from acme-widgets.myshopify.com, since Wed, 11 Nov 2026 10:15:00 UTC.",
 		"https://os.example.test/",
 	} {
 		if !strings.Contains(staged[0], want) {
@@ -520,6 +555,18 @@ func TestTheAlertCarriesNoOrderAndNoCustomer(t *testing.T) {
 		t.Errorf("the staged alert is not recorded:\n%s", writes[0])
 	}
 
+	// A store not connected for the wait is staged with its own copy.
+	hg := watchHarness(t, "user-1", recordedAs(gone))
+	hg.now = since.Add(45 * time.Minute)
+	if err := hg.conn.watchStoreVerdict(context.Background(), hg.store(t), gone, defaultStoreAlertWait); err != nil {
+		t.Fatal(err)
+	}
+	if gstaged := hg.engine.callsTo("stageServerOutboundRequest"); len(gstaged) != 1 ||
+		!strings.Contains(gstaged[0], `subject: "acme-widgets.myshopify.com is not being recorded"`) ||
+		!strings.Contains(gstaged[0], "MemQL has not been recording acme-widgets.myshopify.com since Wed, 11 Nov 2026 10:15:00 UTC.") {
+		t.Errorf("not connected staged = %v", gstaged)
+	}
+
 	// And the recovery, once the store is recording again.
 	back := verdictIn(VerdictRecording, since.Add(3*time.Hour))
 	hr := watchHarness(t, "user-1", recordedAs(v, mailedFor(since)))
@@ -529,7 +576,8 @@ func TestTheAlertCarriesNoOrderAndNoCustomer(t *testing.T) {
 	}
 	rstaged := hr.engine.callsTo("stageServerOutboundRequest")
 	if len(rstaged) != 1 || !strings.Contains(rstaged[0], `requestId: "shopify-store-recovered-acme-20261111T101500Z"`) ||
-		!strings.Contains(rstaged[0], `subject: "acme-widgets.myshopify.com is being recorded again"`) {
+		!strings.Contains(rstaged[0], `subject: "acme-widgets.myshopify.com is being recorded again"`) ||
+		!strings.Contains(rstaged[0], "MemQL is recording acme-widgets.myshopify.com in full again. It needed attention from Wed, 11 Nov 2026 10:15:00 UTC to Wed, 11 Nov 2026 13:40:00 UTC.") {
 		t.Errorf("recovery staged = %v", rstaged)
 	}
 	if w := hr.engine.callsTo("recordStoreHealth"); len(w) != 1 || !strings.Contains(w[0], `"recoveredFor": "2026-11-11T10:15:00Z"`) {
@@ -993,5 +1041,124 @@ func TestTheReplyServesTheAlertOnlyWhileBothStatesAreInAnEpisode(t *testing.T) {
 	}
 	if got := recordedAlert(recorded(VerdictNeedsAttention, AlertFailed, noOwnerToTell), VerdictNotConnected); got["state"] != AlertFailed || got["reason"] != noOwnerToTell {
 		t.Errorf("both states in an episode: the reply's alert = %v, want the recorded one", got)
+	}
+}
+
+// ---- an outage older than the watch is not news (ruling 71) ----
+
+// A store the watch sees for the first time -- no verdict recorded on its row
+// -- that is already not connected was uninstalled or purged before anybody
+// watched it. Its owner knows. It is recorded as told and as recovered for
+// that episode: no alert however long it lasts, and no recovery when the
+// store is connected again.
+func TestAStoreFirstSeenAlreadyNotConnectedIsNeverMailed(t *testing.T) {
+	for name, previous := range map[string]map[string]any{"no verdict": nil, "an empty verdict": {}} {
+		gone := verdictIn(VerdictNotConnected, watchNow)
+		plan := planWatch(previous, gone, defaultStoreAlertWait, watchNow)
+		if plan.Alert || plan.Recover != "" || plan.ReadBack {
+			t.Fatalf("%s: the first pass planned %+v, want nothing", name, plan)
+		}
+		rec := plan.Record
+		if rec.Episode != verdictStamp(watchNow) || rec.MailedFor != rec.Episode || rec.RecoveredFor != rec.Episode || rec.AlertState != AlertNone {
+			t.Fatalf("%s: recorded %+v, want the episode told and recovered, with no alert", name, rec)
+		}
+		// Every later pass of the same outage: nothing, and nothing to write.
+		recorded := rec.payload()
+		for _, at := range []time.Time{watchNow.Add(31 * time.Minute), watchNow.Add(3 * time.Hour), watchNow.Add(72 * time.Hour)} {
+			later := planWatch(recorded, gone, defaultStoreAlertWait, at)
+			if later.Alert || later.Recover != "" || later.ReadBack {
+				t.Errorf("%s: at %s the pass planned %+v, want nothing", name, at, later)
+			}
+			if verdictRecordChanged(recorded, later.Record) {
+				t.Errorf("%s: at %s the record changed: %+v", name, at, later.Record)
+			}
+		}
+		// Connected again: through starting to recording, and straight to it.
+		at := watchNow.Add(96 * time.Hour)
+		starting, afterStarting := passAt(t, recorded, VerdictStarting, at, at)
+		recording, _ := passAt(t, afterStarting, VerdictRecording, at.Add(10*time.Minute), at.Add(10*time.Minute))
+		straight, _ := passAt(t, recorded, VerdictRecording, at, at)
+		for step, p := range map[string]watchPlan{"starting": starting, "recording after starting": recording, "recording": straight} {
+			if p.Alert || p.Recover != "" || p.ReadBack {
+				t.Errorf("%s: reconnected, %s: the pass planned %+v, want nothing", name, step, p)
+			}
+		}
+		// It is the same episode while the store only moves between the two
+		// states, so needing attention straight after is not alerted either.
+		if moved, _ := passAt(t, recorded, VerdictNeedsAttention, at, at.Add(time.Hour)); moved.Alert {
+			t.Errorf("%s: a move to needs attention inside the episode nobody is told about was alerted", name)
+		}
+	}
+
+	// A store first seen NEEDING ATTENTION is told after the wait, as before:
+	// a release that asks for more permissions is news to every store.
+	troubled := verdictIn(VerdictNeedsAttention, watchNow)
+	first := planWatch(nil, troubled, defaultStoreAlertWait, watchNow)
+	if first.Alert || first.Record.MailedFor != "" || first.Record.RecoveredFor != "" {
+		t.Fatalf("a store first seen needing attention: %+v, want nothing yet and nothing marked told", first)
+	}
+	if !planWatch(first.Record.payload(), troubled, defaultStoreAlertWait, watchNow.Add(30*time.Minute)).Alert {
+		t.Error("a store first seen needing attention was not alerted after the wait")
+	}
+
+	// And a store the watch knew that then disconnects is told as before.
+	gone := verdictIn(VerdictNotConnected, watchNow)
+	known := planWatch(watchedBefore(gone), gone, defaultStoreAlertWait, watchNow)
+	if known.Record.MailedFor != "" {
+		t.Fatalf("a store the watch knew, now not connected: %+v, want an episode not yet told", known.Record)
+	}
+	if !planWatch(known.Record.payload(), gone, defaultStoreAlertWait, watchNow.Add(30*time.Minute)).Alert {
+		t.Error("a store the watch knew was not alerted for disconnecting")
+	}
+}
+
+// The same through the pass: a store uninstalled before the watch existed.
+func TestTheWatchStagesNothingForAStoreItFirstSeesNotConnected(t *testing.T) {
+	h := watchHarness(t, "user-1", nil)
+	row := h.engine.rows["stores"][0]
+	row["uninstalledAt"] = watchNow.Add(-90 * 24 * time.Hour).Format(time.RFC3339)
+	engine := &watchedEngine{fakeEngine: h.engine, h: h, row: row, states: map[string]string{}}
+	connected := Store{ID: testStoreID, Domain: watchDomain, AdminTokenRef: "ACME_ADMIN", Status: StatusLive}
+	for _, concept := range verdictDomains(connected) {
+		engine.states[memqlsync.StateID(concept, ConnectorName, string(memqlsync.DirectionInbound), testStoreID)] = concept
+	}
+	h.conn.engine = engine
+	h.conn.stores.engine = engine
+
+	start := watchNow
+	pass := func(at time.Time) {
+		t.Helper()
+		h.now = at
+		if err := h.conn.WatchStores(context.Background()); err != nil {
+			t.Fatalf("pass at %s: %v", at, err)
+		}
+	}
+	staged := func() []string { return h.engine.callsTo("stageServerOutboundRequest") }
+
+	pass(start)
+	for _, at := range []time.Time{start.Add(35 * time.Minute), start.Add(3 * time.Hour), start.Add(48 * time.Hour)} {
+		pass(at)
+	}
+	if got := staged(); len(got) != 0 {
+		t.Fatalf("a store first seen not connected staged %v, want nothing however long it stays so", got)
+	}
+	if w := h.engine.callsTo("recordStoreHealth"); len(w) != 1 {
+		t.Errorf("the verdict was written %d times over four passes, want once: nothing changes after the first", len(w))
+	}
+
+	// Reconnected, and recording.
+	delete(row, "uninstalledAt")
+	pass(start.Add(49 * time.Hour))
+	pass(start.Add(49*time.Hour + 5*time.Minute))
+	if got := staged(); len(got) != 0 {
+		t.Fatalf("the reconnect of a store nobody was told about staged %v, want nothing", got)
+	}
+
+	// The next time it disconnects, the watch knows it: that is news.
+	row["uninstalledAt"] = start.Add(50 * time.Hour).Format(time.RFC3339)
+	pass(start.Add(50 * time.Hour))
+	pass(start.Add(50*time.Hour + 35*time.Minute))
+	if got := staged(); len(got) != 1 || !strings.Contains(got[0], "shopify-store-alert-acme-") || !strings.Contains(got[0], "is not being recorded") {
+		t.Fatalf("a later disconnection staged %v, want its one alert", got)
 	}
 }
