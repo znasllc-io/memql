@@ -132,7 +132,7 @@ the actor, because a caller-supplied decider on an append-only log is a way
 to attribute somebody else's approval to them permanently, with no later
 write able to correct it.
 
-Four things the pack guarantees here, so you do not have to:
+Five things the pack guarantees here, so you do not have to:
 
 - **A Provider operator is refused.** `principalKind` admits only `client`.
 - **`storeId` is copied off the application**, never supplied — and the read
@@ -144,6 +144,15 @@ Four things the pack guarantees here, so you do not have to:
   application with its own log.
 - **Nothing is overwritten.** A decision is a new row, so the reason for the
   first one survives the second.
+- **One approved application per address on a store.** An `approve` is
+  refused while another application of the same address (compared trimmed and
+  lower-cased) on the same store is approved, with the sentence
+  "Application `<id>` of this address is already approved on this store.
+  Remove that buyer before approving this application, or reject this one."
+  Two posts in one instant can both be written; this is where the second
+  approval is stopped, so a revoke of one never takes the buyer's tag off
+  while the other still reads granted. A `reject` or a `revoke` is never
+  refused by it.
 
 ## 3. Choose an entitlement adapter
 
@@ -241,6 +250,16 @@ write, against your own concept, from your own route. See
 Submissions are refused when this store's `applicationsOpen` is false, and
 **absent settings are closed**: a merchant who has never touched their wholesale
 settings has not asked the internet for their customers' business details.
+
+**One open application per address on a store.** A post from an address that
+already has a `submitted` or `approved` application on the store — compared
+trimmed and lower-cased, the same rule a staff member's *Add buyer* is refused
+by — writes nothing, your extension's row included, and is answered exactly as
+an accepted post: the same `303` to `/wholesale/thank-you`. Telling the poster
+"this address already applied" would tell anybody typing somebody else's
+address who your wholesale buyers are. Your staff see one log line naming the
+store and the open application, never the address. A `rejected` or `revoked`
+application blocks nothing: the business applies again.
 
 ## 5. There is no public read of an application
 
