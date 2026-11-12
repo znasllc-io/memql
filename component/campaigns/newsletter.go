@@ -140,6 +140,16 @@ func (w *Worker) handleConfigureNewsletter(ctx context.Context, args map[string]
 	if !ok {
 		return nil, fmt.Errorf("choose whether to accept newsletter signups")
 	}
+	// Enabling turns the site's public forms on when they are off, and that
+	// switch asks the publish part (siteFieldParts,
+	// component/memql/organization_action_capabilities.go). Asked here first,
+	// before anything is written, so a member who may send the organization's
+	// email but not publish its deployables reads why rather than the engine's
+	// code; the engine still decides at the write.
+	// TestASignupFormThatTurnsTheFormsOnAsksPublishInWords.
+	if enabled && !booleanOr(site, "shopperForms", false) && !w.store.engine.OrganizationCapable(ctx, account, auth.VerbExecute, "app:deployables/publish") {
+		return nil, fmt.Errorf("connecting a signup form turns on this deployable's public forms, which requires permission to publish it")
+	}
 	values := map[string]any{
 		"newsletterId": newsletterID(siteID), "siteId": siteID, "accountId": account,
 		"audienceId": bare(argString(args, "audienceId")), "templateId": bare(argString(args, "templateId")),
@@ -182,9 +192,9 @@ func (w *Worker) handleConfigureNewsletter(ctx context.Context, args map[string]
 	// Turning on the shared public-form carrier is an explicit part of Enable.
 	// Disabling this newsletter leaves other declared forms on the site alone.
 	// The switch is written as the person saving, so on a site whose forms are
-	// off it asks the publish part like any other change to what visitors get
-	// (siteFieldParts, component/memql/organization_action_capabilities.go);
-	// it is refused before the newsletter row is written, so nothing half-saves.
+	// off it asks the publish part like any other change to what visitors get;
+	// the check after `enabled` above words that refusal, and the write comes
+	// before the newsletter row's, so nothing half-saves.
 	if enabled && !booleanOr(site, "shopperForms", false) {
 		if err = w.store.exec(ctx, call("mutation", "updateSiteShopperForms", arg{"siteId", siteID}, arg{"shopperForms", true})); err != nil {
 			return nil, err

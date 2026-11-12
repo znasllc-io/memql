@@ -691,7 +691,10 @@ must be a MemQL deployable with the public-form carrier available.
 Enabling the connection also enables that deployable's public forms. Turning the
 newsletter off stops enrollment and blocks pending welcomes; it leaves other
 declared forms alone. Current organization write authority and access to the
-deployable are required. A draft or archived welcome and a disabled sender may
+deployable are required. When the deployable's public forms are off, enabling
+also needs permission to publish it, because switching them on changes what its
+visitors get ([runtime settings](deployables.md#runtime-settings)); without it the save is refused
+in those words and nothing is written. A draft or archived welcome and a disabled sender may
 remain selected while turning an existing connection off.
 
 The server derives the organization, audience, sender and live store binding.
