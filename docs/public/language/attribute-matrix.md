@@ -369,7 +369,7 @@ Written after a field's type in the body of a `concept`.
 
 | Annotation | Written as | Example |
 |---|---|---|
-| [`@bytes`](#bytes) | no arguments or keyword arguments | `@bytes(under="library/{ownerUserId}")` |
+| [`@bytes`](#bytes) | no arguments or keyword arguments | `@bytes(tree, under="sites/{id}")` |
 | [`@description`](#description) | one string | `@description("The ticket's one-line title.")` |
 | [`@internal`](#internal) | no arguments | `@internal` |
 | [`@maximum`](#maximum) | one number | `@maximum(100)` |
@@ -570,7 +570,7 @@ Declares WHICH ACCOUNT this concept's rows belong to, or that they belong to non
 
 | On | Written as | Example |
 |---|---|---|
-| [concept field](#concept-field) | no arguments or keyword arguments | `@bytes(under="library/{ownerUserId}")` |
+| [concept field](#concept-field) | no arguments or keyword arguments | `@bytes(tree, under="sites/{id}")` |
 
 `@bytes` takes these keys. A key of type `flag` is written bare, and every other as `key=value`.
 

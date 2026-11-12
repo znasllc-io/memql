@@ -87,9 +87,7 @@ package accounts
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -912,7 +910,7 @@ type snapshot struct {
 	// schemaDocs are the shared schema documents the carried kinds' versions
 	// were written under, read once before the walk; versionRules holds each
 	// one's secret paths, and each distinct inline schema's, by fingerprint or
-	// by content digest.
+	// by the schema's own text.
 	schemaDocs   map[string]json.RawMessage
 	versionRules map[string]*secretRules
 }
@@ -1403,8 +1401,9 @@ func (s *snapshot) versionRulesFor(c *memorynodes.Concept, n memorynodes.MemoryN
 		if len(bytes.TrimSpace(n.Schema)) == 0 {
 			return &secretRules{}, nil
 		}
-		sum := sha256.Sum256(n.Schema)
-		key = "inline:" + hex.EncodeToString(sum[:])
+		// A schema stored on the row is its own key: the few distinct
+		// documents a kind was written under are parsed once each.
+		key = "inline:" + string(n.Schema)
 		if r, ok := s.versionRules[key]; ok {
 			return r, nil
 		}

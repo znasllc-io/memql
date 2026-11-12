@@ -433,7 +433,8 @@ func readConflicts(ctx context.Context, db *bun.DB) ([]memorynodes.MemoryNode, e
 // read each version's account, and only the payload holds it: on a bench with
 // payloads of installation size (about 3 KB, stored out of line) that
 // statement took 6.2 s, past this deadline, because evaluating the account on
-// a version fetches and unpacks its whole payload (task report, round 3). Per
+// a version fetches and unpacks its whole payload (the design record,
+// "Measured on a test table"). Per
 // account, the account is matched by the account index instead. The loop stops
 // at the deadline, and the status then answers without totals, as it does for
 // any failure here.
@@ -445,8 +446,8 @@ func readConflicts(ctx context.Context, db *bun.DB) ([]memorynodes.MemoryNode, e
 //
 // Each account costs five round trips (the plan settings read and set, the
 // probe that chooses the statement's shape, the count, the settings put back).
-// Measured in the task report's fix round: on the bench's 22 accounts the loop
-// does not fit the deadline, and the status shows no totals there.
+// Measured on the same test table: with its 22 accounts the loop does not fit
+// the deadline, and the status shows no totals there.
 func (i *Integration) accountTotals(ctx context.Context, db *bun.DB) ([]memorynodes.MemoryNode, error) {
 	ctx, cancel := context.WithTimeout(ctx, i.totalsDeadline)
 	defer cancel()

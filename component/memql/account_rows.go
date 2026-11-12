@@ -64,9 +64,10 @@ package memql
 // runs on the request pool, on the export's snapshot session, or in a test's
 // transaction alike.
 //
-// Measurements behind these shapes: the account export task report, rounds 2
-// and 3. Tests: account_rows_db_test.go, account_rows_plan_db_test.go, and
-// integrations/accounts/accounts_db_test.go.
+// Measurements behind these shapes: the account export's design record
+// (docs/superpowers/specs/2026-11-12-account-export-design.md, "Measured on a
+// test table"). Tests: account_rows_db_test.go, account_rows_plan_db_test.go,
+// and integrations/accounts/accounts_db_test.go.
 
 import (
 	"context"
@@ -302,8 +303,8 @@ SELECT ` + versionColumnsSQL + `, true
 
 // AccountKindVersionBatch is how many ids AccountKindVersions reads the
 // versions of in one statement. A variable so a test can cross a batch
-// boundary with a small fixture. Chosen on the bench (round 3 of the task
-// report): one batch's statement sorts only that batch's versions.
+// boundary with a small fixture. Chosen on the test table the design record
+// describes: one batch's statement sorts only that batch's versions.
 var AccountKindVersionBatch = 5000
 
 // AccountKindVersions calls each for every version of every row of `concept`
@@ -511,12 +512,12 @@ func AccountRowCounts(ctx context.Context, q AccountQuerier, account string, con
 // account: named.at = latest.at, unless the observation decides.
 //
 // It comes in two shapes, because no one plan serves a small account and the
-// big one (round 3 of the task report). FEW restricts latest to the account's
-// candidate rows, which the planner answers with a probe of the id index per
-// candidate per chunk: a few milliseconds for a small account, 40 s for one
-// holding 85% of a 2-million-version bench. MANY reads latest for the whole kind in one pass of
-// the index and joins: the right plan for a large account and wasteful for a
-// small one. accountDecisionShape chooses with a bounded count of the
+// big one (the design record's measurements). FEW restricts latest to the
+// account's candidate rows, which the planner answers with a probe of the id
+// index per candidate per chunk: a few milliseconds for a small account, 40 s
+// for one holding 85% of a test table of 2 million versions. MANY reads latest
+// for the whole kind in one pass of the index and joins: the right plan for a
+// large account and wasteful for a small one. accountDecisionShape chooses with a bounded count of the
 // account's index entries; the planner's own estimate of the account's share
 // was measured off by a factor of thirty, so it is not trusted to choose.
 //

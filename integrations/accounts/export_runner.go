@@ -63,7 +63,7 @@ package accounts
 //
 // Tests: export_db_test.go (TestExportRun*, TestExportStale*,
 // TestExportSecondExportWaitsWhileOneRuns, TestExportRunIsTakenOverByAnotherNode)
-// and export_fix_db_test.go (the fence, the bounded heartbeat, the discard,
+// and export_record_db_test.go (the fence, the bounded heartbeat, the discard,
 // the hand-back, the unsealing failure, two claims at once).
 
 import (

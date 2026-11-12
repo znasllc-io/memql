@@ -957,7 +957,7 @@ func TestExportRunRefusesABytesReferenceItsDeclarationDoesNotAdmit(t *testing.T)
 }
 
 // ---------------------------------------------------------------------------
-// Fix round 1
+// Secrets, references, people and counted fields
 
 // withConcepts runs the export over the registry with some kinds replaced.
 func (f *runFixture) withConcepts(replace ...*memorynodes.Concept) {
@@ -1233,7 +1233,7 @@ func TestExportRunRecordsAReferenceTheReaderRefusesAndFailsOnAStorageError(t *te
 }
 
 // ---------------------------------------------------------------------------
-// Fix round 2
+// A version's own schema, kinds that stay, and rows the file carries
 
 func TestExportRunRemovesASecretTheVersionsOwnSchemaMarked(t *testing.T) {
 	f := newRunFixture(t)

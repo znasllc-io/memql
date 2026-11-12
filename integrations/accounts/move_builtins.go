@@ -56,6 +56,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lib/pq"
 	"github.com/uptrace/bun"
@@ -69,12 +70,15 @@ import (
 
 const (
 	// rowsPageDefault and rowsPageMax bound a page of accountRows and of
-	// accountMoves (decision B of the task).
+	// accountMoves.
 	rowsPageDefault = 50
 	rowsPageMax     = 200
 	// moveMaxRows is the engine's own bound on one act (account_move.go's
 	// moveMaxRoots), refused here first so the screen gets a sentence.
 	moveMaxRows = 500
+	// moveNoteMax bounds the note, in characters: it is stored once with every
+	// row a move changes and once in the audit event.
+	moveNoteMax = 500
 
 	auditTargetAccount     = "account"
 	auditRowsMoved         = "account_rows_moved"
@@ -510,6 +514,9 @@ func (m *Moves) handleRowsMove(ctx context.Context, args map[string]any, _ int) 
 		return nil, err
 	}
 	note := stringArg(args, "note")
+	if utf8.RuneCountInString(note) > moveNoteMax {
+		return nil, fmt.Errorf("A note is at most %d characters.", moveNoteMax)
+	}
 	result, err := m.mover.MoveAccountRows(ctx, db, memql.MoveRequest{Rows: refs, To: to, By: by, Note: note, Preview: preview})
 	if errors.Is(err, memql.ErrAccountRecordingOff) {
 		// The act refuses outright until this node records which account a

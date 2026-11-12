@@ -1,8 +1,8 @@
 package accounts
 
-// export_fix2_db_test.go -- the second review's cases: a panic in the owners'
-// email, a renewal that never returns, and a lookup that fails while a start
-// is refused. Fixture: export_db_test.go.
+// export_record_faults_db_test.go -- three faults around the export's record:
+// a panic in the owners' email, a renewal that never returns, and a lookup
+// that fails while a start is refused. Fixture: export_db_test.go.
 
 import (
 	"context"

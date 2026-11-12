@@ -55,6 +55,7 @@ import (
 	"github.com/znasllc-io/memql/component/metrics"
 	"github.com/znasllc-io/memql/component/secret"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // The audit vocabulary. `accountExport` is declared on v1:identity:auditEvent's
@@ -75,11 +76,15 @@ const (
 	auditWriteTimeout = 5 * time.Second
 )
 
-// The list's page bounds (the brief: default 20, at most 100).
+// The list's page bounds.
 const (
 	exportListDefault = 20
 	exportListMax     = 100
 )
+
+// downloadRangeMax is how much of a request's Range header the download's
+// audit event keeps.
+const downloadRangeMax = 200
 
 // primaryAccountName names the installation's own account when it has no row.
 const primaryAccountName = "Primary account"
@@ -232,6 +237,13 @@ func boolArg(args map[string]any, key string) bool {
 	return v
 }
 
+// intArg reads a whole-number argument, or def when the call does not carry it.
+//
+// narrowing: SATURATE -- both callers read a page size and bound it themselves
+// (a size above the page's maximum is the maximum; one below 1 is the default
+// in the export list and a refusal in the rows list). A number too large for
+// an int has to stay "too large" for those bounds to see, and must never come
+// back negative.
 func intArg(args map[string]any, key string, def int) (int, error) {
 	switch v := args[key].(type) {
 	case nil:
@@ -241,18 +253,13 @@ func intArg(args map[string]any, key string, def int) (int, error) {
 	case int32:
 		return int(v), nil
 	case int64:
-		if v > math.MaxInt32 {
-			return exportListMax, nil
-		}
-		return int(v), nil
+		return num.ClampInt64(v), nil
 	case float64:
+		// NaN is not equal to its own truncation, so it is refused here too.
 		if v != math.Trunc(v) {
 			return 0, fmt.Errorf("%s must be a whole number", key)
 		}
-		if v > math.MaxInt32 {
-			return exportListMax, nil
-		}
-		return int(v), nil
+		return num.ClampFloat64(v), nil
 	default:
 		return 0, fmt.Errorf("%s must be a number", key)
 	}
@@ -609,6 +616,11 @@ func (s *Exports) OpenExport(ctx context.Context, x Export, offset, length int64
 // the range as sent. Unlike the other events its failure is returned: the
 // route serves no byte without its record.
 func (s *Exports) RecordExportDownload(ctx context.Context, x Export, userID, rangeAsked string) error {
+	// As sent, to the length a real header has: a Range is a few dozen
+	// characters, and the trail keeps no more of one that is not.
+	if len(rangeAsked) > downloadRangeMax {
+		rangeAsked = strings.ToValidUTF8(rangeAsked[:downloadRangeMax], "")
+	}
 	return s.writeAudit(ctx, auditEntry{Action: auditExportDownloaded, Export: x, ActorID: userID,
 		Detail: map[string]any{"range": rangeAsked}})
 }

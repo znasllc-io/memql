@@ -306,6 +306,33 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// decision writes: auditEvent's create admits a cluster owner or
 		// server code (memql#5624), and an admin managing groups is neither.
 		"integrations/groups": "the group and membership writers -- their rows are unowned, so a client-origin write has no tier to pass through; one stamping site, downstream of the per-caller capability and rank guards (epic memql#5165)",
+		// integrations/accounts: the account export and the move of rows
+		// between accounts (design record 2026-11-12-account-export-design).
+		// REQUEST-DERIVED. Three stamps, each the argument of one Execute and
+		// handed to nothing else:
+		//   - export_builtins.go's writeAudit and move_builtins.go's
+		//     writeMoveAudit, on the one createAuditEvent an act writes.
+		//     auditEvent's create admits a cluster owner or server code
+		//     (memql#5624), and a developer exporting or moving rows is
+		//     neither. An event is written AFTER the act it records. Every
+		//     act is behind its part, which the engine checks before the
+		//     handler runs (execute app:accounts/export, app:accounts/move),
+		//     and behind auth.RequirePersonSession, its handler's first line;
+		//     the download's record is written by the route after its own
+		//     person, part and file checks. The actor an event names is the
+		//     caller's, unchanged. What a caller chose of its detail is a
+		//     note of at most 500 characters and 200 of a Range header. The
+		//     same write records an export a node ended, under the system
+		//     actor, with no request behind it.
+		//   - export_notice.go's activeOwnerEmails, on a fixed statement with
+		//     no argument of the caller's: activeUsers(role: "owner"),
+		//     @serverOnly, read once an export's start is committed so every
+		//     owner is told. Its answer goes to the email sender and never to
+		//     the caller.
+		// integrations/accounts/internal_origin_db_test.go holds the stamps to
+		// those two statements and drives the callers the person gate
+		// refuses, who reach the engine with no statement at all.
+		"integrations/accounts": "the account export's and the row move's audit event, and the owners' addresses for the email an export's start sends -- REQUEST-DERIVED; three inline stamps: the two createAuditEvent writes, each downstream of the part and of auth.RequirePersonSession and after the act it records, with the caller's actor unchanged, and one fixed @serverOnly read whose answer goes only to the email sender (asserted by integrations/accounts/internal_origin_db_test.go)",
 		// REQUEST-DERIVED, and the FOURTH exception. Ownership transfer
 		// (memql#4838): one stamp, in reassignRow, on the single Execute that
 		// writes the new owner onto one row.

@@ -24,11 +24,14 @@ import (
 	"github.com/znasllc-io/memql/integrations/email"
 )
 
-// IntegrationName is the plug-in's registered name.
+// IntegrationName is the plug-in's registered name, for the code that looks the
+// provider up. The registration below spells the same word as a literal: the
+// gate that classifies every plug-in (module_taxonomy_test.go) reads the name
+// off the call and cannot follow a constant.
 const IntegrationName = "accounts"
 
 func init() {
-	memql.RegisterPlugin(IntegrationName, func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
+	memql.RegisterPlugin("accounts", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
 		// The same reading AccountOwnershipRunner takes (component/memql/
 		// account_ownership_runner.go), which already refuses the boot on a
 		// value that is not a boolean. Read here rather than asked of the

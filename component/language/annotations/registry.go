@@ -451,7 +451,7 @@ var placementTable = concat(
 
 	// ---- ConceptField ---------------------------------------------------
 	[]Placement{
-		{Receiver: ConceptField, Name: "bytes", Forms: FormFlag | FormKeywords, Keys: bytesKeys, Example: `@bytes(under="library/{ownerUserId}")`},
+		{Receiver: ConceptField, Name: "bytes", Forms: FormFlag | FormKeywords, Keys: bytesKeys, Example: `@bytes(tree, under="sites/{id}")`},
 		{Receiver: ConceptField, Name: "description", Forms: FormString, Example: `@description("The ticket's one-line title.")`, Doc: "The field's description, emitted into the concept schema."},
 		{Receiver: ConceptField, Name: "internal", Forms: FormFlag, Example: "@internal"},
 		{Receiver: ConceptField, Name: "maxLength", Forms: FormNumber, Example: "@maxLength(120)"},

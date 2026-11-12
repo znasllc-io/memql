@@ -216,7 +216,7 @@ func TestExportRunRowsPhaseIsBounded(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Fix round 1
+// A pass still owed, a panic, a file that cannot be read back, a cancel
 
 func (f *runFixture) setPending(concept string, pending bool) {
 	f.mu.Lock()
@@ -328,7 +328,7 @@ func TestExportRunCancelInTheMiddleOfAKindStopsPromptly(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Fix round 2
+// A cancel after the rows
 
 func TestExportRunCancelledAfterTheRowsCommitsNothing(t *testing.T) {
 	for _, phase := range []string{phaseBytes, phaseSealing} {

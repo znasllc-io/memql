@@ -76,6 +76,13 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 		// Release artifact digests are standard SHA-256 over the exact blob
 		// bytes, independently verifiable with sha256sum and OCI tooling.
 		// core/id's content address is a different algorithm/representation.
+		// An account export is one file a person checks with sha256sum: the
+		// checksum beside its download is the standard SHA-256 of the bytes as
+		// stored, taken while they are written. core/id's fingerprint is
+		// another algorithm.
+		"azureblob/account_exports.go":                  "streams the standard SHA-256 of an account export's exact stored bytes, the checksum shown beside its download and compared with sha256sum; not a MemQL identifier",
+		"azureblob/account_exports_test.go":             "independently computes the standard SHA-256 of the staged blocks to check the export stream's digest",
+		"accounts/export_run_db_test.go":                "the test's own export stream computes the standard SHA-256 the real one does, and the run's file checksum is checked against the bytes it stored",
 		"azureblob/verified_stream.go":                  "verifies externally supplied standard SHA-256 digests of immutable artifact bytes, never MemQL row identifiers",
 		"azureblob/receipt_stream.go":                   "verifies external artifact bytes against a provider-version-bound SHA-256 receipt before EOF",
 		"azureblob/receipt_stream_test.go":              "independently hashes artifact byte fixtures for receipt-stream integrity checks",

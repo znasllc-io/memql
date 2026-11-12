@@ -1,6 +1,6 @@
 package accounts
 
-// export_fix_db_test.go -- the cases the first review asked for: an unknown
+// export_record_db_test.go -- the export's record at its edges: an unknown
 // account, the owners' email off the request, the node that fences itself,
 // the result nothing records, the expired draft, the people's names, the
 // attempt limit at the claim, two claims at once, the hand-back on stop, and a
