@@ -204,3 +204,24 @@ CREATE TABLE IF NOT EXISTS store_sales_check (
     last_disagreeing      INTEGER NOT NULL DEFAULT 0,
     clean_at              TIMESTAMPTZ                      -- when a pass last ended with nothing mismatched
 );
+
+--bun:split
+
+-- THE ROWS THAT COULD NOT BE READ. A mirrored row the statistics' rules
+-- cannot read writes no fact; it is kept here instead, so the read can say how
+-- many rows a figure leaves out rather than show a smaller one. A record
+-- exists exactly while the newest version the walk has met of its row could
+-- not be read. It is keyed by the mirror row's own id (bare), since a row can
+-- be unreadable for having no Shopify id at all. field is the NAME of the field
+-- the rules stopped on, never a value.
+CREATE TABLE IF NOT EXISTS store_sales_unreadable (
+    store_id    TEXT NOT NULL,
+    source      TEXT NOT NULL,                 -- order, line or refund
+    row_id      TEXT NOT NULL,                 -- the mirror row's own id, bare
+    gid         TEXT NOT NULL DEFAULT '',      -- the row's Shopify id, when it has one
+    version     TIMESTAMPTZ NOT NULL,          -- the write time of the version that could not be read
+    field       TEXT NOT NULL DEFAULT '',      -- the name of the field the rules stopped on
+    recorded_at TIMESTAMPTZ NOT NULL,
+    checked_at  TIMESTAMPTZ,
+    PRIMARY KEY (store_id, source, row_id)
+);

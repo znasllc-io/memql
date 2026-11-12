@@ -27,6 +27,7 @@ var storeSalesTables = []string{
 	"store_sales_refund_line_fact",
 	"store_sales_store",
 	"store_sales_watermark",
+	"store_sales_unreadable",
 }
 
 // storeSalesPrimaryKeys is every table's primary key columns, in key order.
@@ -38,6 +39,7 @@ var storeSalesPrimaryKeys = map[string]string{
 	"store_sales_store":            "store_id",
 	"store_sales_watermark":        "store_id,source",
 	"store_sales_check":            "store_id",
+	"store_sales_unreadable":       "store_id,source,row_id",
 }
 
 // storeSalesColumns is every column of every table, in column order, written
@@ -155,6 +157,16 @@ var storeSalesColumns = map[string][]string{
 		"through|timestamp with time zone|not null|",
 		"window_seconds|integer|not null|86400",
 		"walked_through|timestamp with time zone|null|",
+	},
+	"store_sales_unreadable": {
+		"store_id|text|not null|",
+		"source|text|not null|",
+		"row_id|text|not null|",
+		"gid|text|not null|''::text",
+		"version|timestamp with time zone|not null|",
+		"field|text|not null|''::text",
+		"recorded_at|timestamp with time zone|not null|",
+		"checked_at|timestamp with time zone|null|",
 	},
 	"store_sales_check": {
 		"store_id|text|not null|",

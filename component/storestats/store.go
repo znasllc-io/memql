@@ -92,6 +92,7 @@ var storeSalesTables = []statsTable{
 	{"store_sales_line_fact", true},
 	{"store_sales_refund_fact", true},
 	{"store_sales_refund_line_fact", true},
+	{"store_sales_unreadable", true}, // the rows that could not be read: as many as a store's facts, at worst
 	{"store_sales_watermark", false},
 	{"store_sales_check", false},
 	{"store_sales_store", false},
@@ -107,7 +108,7 @@ func statsTableNames() []string {
 }
 
 // factTables are the batched tables of storeSalesTables: the four that hold
-// a store's facts.
+// a store's facts, and its records of the rows that could not be read.
 var factTables = func() []string {
 	var out []string
 	for _, t := range storeSalesTables {

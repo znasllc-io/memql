@@ -160,6 +160,7 @@ func everyTableOf(t *testing.T, id string) {
 		VALUES (?, 'r-1', 0, 'o-1', 'l-1', 1, 0, 0)`, id)
 	exec(t, `INSERT INTO store_sales_watermark (store_id, source, through) VALUES (?, 'order', now())`, id)
 	exec(t, `INSERT INTO store_sales_check (store_id) VALUES (?)`, id)
+	exec(t, `INSERT INTO store_sales_unreadable (store_id, source, row_id, version, recorded_at) VALUES (?, 'order', 'shp-1', now(), now())`, id)
 	exec(t, `INSERT INTO store_sales_store (store_id) VALUES (?) ON CONFLICT DO NOTHING`, id)
 	for table, n := range rowsOf(t, id, statsTableNames()...) {
 		if n == 0 {
@@ -746,7 +747,8 @@ func TestARebuildClearsWhatItShouldAndKeepsTheRest(t *testing.T) {
 	}
 	got := rowsOf(t, id, statsTableNames()...)
 	want := map[string]int{"store_sales_order_fact": 1, "store_sales_line_fact": 1, "store_sales_refund_fact": 1,
-		"store_sales_refund_line_fact": 1, "store_sales_store": 1, "store_sales_watermark": 0, "store_sales_check": 0}
+		"store_sales_refund_line_fact": 1, "store_sales_store": 1, "store_sales_watermark": 0, "store_sales_check": 0,
+		"store_sales_unreadable": 1} // batched with the facts: the purge deletes it
 	if !maps.Equal(got, want) {
 		t.Errorf("after a rebuild the store's rows are %v, want %v: facts kept, watermarks and check row gone", got, want)
 	}

@@ -1,3 +1,7 @@
+DROP TABLE IF EXISTS store_sales_unreadable;
+
+--bun:split
+
 DROP TABLE IF EXISTS store_sales_check;
 
 --bun:split
