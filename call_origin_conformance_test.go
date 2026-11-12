@@ -217,6 +217,14 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// run is refused and every email figure reads as not measured. Nothing
 		// it reads leaves the package except as keyed facts in its own table.
 		"component/emailstats": "the email statistics rollup -- server-initiated under the emailStatisticsRollupSweep maintenance principal, checked before the walk; one stamp, for its five @serverOnly reads (three source walks and two attribution lookups), and it writes only its own fact and watermark tables",
+		// The store statistics (the 2026-11-11 store statistics design).
+		// SERVER-INITIATED: its callers are the engine's two maintenance
+		// principals for it, the rollup's and the check's, each checked in
+		// its handler -- with internal origin -- before its walk, and no
+		// request reaches either. The stamp is in ONE place, walkContext, for
+		// the @serverOnly store statistics reads and the store's verdict; the
+		// package writes only its own store_sales_* tables, through writeTx.
+		"component/storestats": "the store statistics rollup and check -- server-initiated under their two maintenance principals, each checked before its walk; one stamp, in walkContext, for the @serverOnly reads and the verdict; it writes only its own store_sales_* tables",
 		// The custom-domain reconciliation sweep (epic memql#4805). SERVER-
 		// INITIATED, and not one of the request-derived exceptions: the caller
 		// is a scheduled automation, not an HTTP handler, and the six writes it

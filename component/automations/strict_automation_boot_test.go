@@ -292,7 +292,10 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 205 -> 206: watchShopifyStores, the five-minute pass that records every
 // store's verdict and tells its owner when it stops being recorded and when it
 // is back (2026-11-11). One added, none removed; measured by the strict loader.
-const shippedAutomationCount = 206
+// 206 -> 207: storeStatisticsRollupSweep, the one-minute walk of every store's
+// mirrored orders, lines and refunds into the store statistics facts
+// (2026-11-12). One added, none removed; measured by the strict loader.
+const shippedAutomationCount = 207
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

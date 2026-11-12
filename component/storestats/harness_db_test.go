@@ -1,0 +1,268 @@
+package storestats
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/driver/pgdriver"
+
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/database/dbtest"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql"
+)
+
+// harness_db_test.go -- the store statistics against a real engine and a real
+// database, the harness every database test of this package uses.
+//
+// The stores are written by the store mutation the connector and Connect
+// Shopify write with, and read back through the engine the way the scheduled
+// run reads them: through the @serverOnly store statistics reads, under the
+// automation's maintenance principal. A fake engine would assert its own rows;
+// what is worth proving is that the engine's own paging, its id spellings and
+// its locks give what the walk says.
+//
+// THE DATABASE IS SHARED, so every assertion is about the stores its own test
+// made (each newStore is a store of its own, named by a fresh suffix). A run
+// lists every store in the database, other tests' included, and gives each a
+// row; nothing here asserts about those.
+//
+// WHAT THE READS GUARANTEE, which every consumer of them relies on: a walk's
+// page is ordered by write time, ties broken by id; a row rewritten while a
+// walk is under way comes back on a later page, so a consumer dedupes by id;
+// `since` is inclusive; a version that commits late can land behind a
+// watermark already passed, so a consumer reads with an overlap; and the
+// pack's reads refuse an empty list of store ids while a blank member also
+// matches rows with no store id, so neither is ever passed.
+//
+// Postgres-gated. CI's db-tests lane runs this package with MEMQL_REQUIRE_DB=1,
+// so a skip there is a failure rather than a green.
+
+func quietLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
+}
+
+// statsEngine builds one engine over the real database per process, with this
+// package's provider registered on it, or skips.
+//
+// ONE BOOT PER PROCESS, the email statistics harness's rule: an engine boot
+// loads the whole DSL tree. The Once records its own failure so every caller
+// reports it rather than the first one swallowing it.
+var statsEngineState struct {
+	once    sync.Once
+	eng     *memql.MemQLEngine
+	db      *bun.DB
+	pingErr error
+	bootErr error
+}
+
+func statsEngine(t *testing.T) (*memql.MemQLEngine, *bun.DB) {
+	t.Helper()
+	s := &statsEngineState
+	s.once.Do(func() {
+		if _, err := dbtest.EnsureSchema(context.Background()); err != nil {
+			s.pingErr = err
+			return
+		}
+		db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()))), pgdialect.New())
+		if err := db.PingContext(context.Background()); err != nil {
+			s.pingErr = err
+			_ = db.Close()
+			return
+		}
+		// The one hook storeSalesQueries records through: bun has no way to
+		// take a hook off a handle, so it is added once and a test registers
+		// a recorder with it for as long as it runs.
+		db.AddQueryHook(statementRecorders)
+		if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
+			s.bootErr = fmt.Errorf("LoadUnifiedConcepts: %w", err)
+			_ = db.Close()
+			return
+		}
+		eng, err := memql.New(db)
+		if err != nil {
+			s.bootErr = fmt.Errorf("New: %w", err)
+			_ = db.Close()
+			return
+		}
+		eng.Logger = quietLogger()
+		if err := eng.Init(memorynodes.DefaultRegistry()); err != nil {
+			s.bootErr = fmt.Errorf("Init: %w", err)
+			_ = db.Close()
+			return
+		}
+		// The provider as a node registers it, so `builtin
+		// storeStatisticsRollup()` dispatches here exactly as the scheduled
+		// automation's run does.
+		if err := eng.RegisterIntegration(NewIntegration(eng, func() *bun.DB { return db }, quietLogger())); err != nil {
+			s.bootErr = fmt.Errorf("RegisterIntegration: %w", err)
+			_ = db.Close()
+			return
+		}
+		s.eng, s.db = eng, db
+	})
+	if s.pingErr != nil {
+		dbtest.Unreachable(t, "the store statistics", dbtest.DSN(), s.pingErr)
+		return nil, nil
+	}
+	if s.bootErr != nil {
+		t.Fatalf("the statistics engine failed to boot: %v", s.bootErr)
+	}
+	return s.eng, s.db
+}
+
+// testIntegration is an Integration over the shared engine and database whose
+// seams a test sets itself. The registered provider keeps its own.
+func testIntegration(t *testing.T) *Integration {
+	t.Helper()
+	eng, db := statsEngine(t)
+	if eng == nil {
+		t.FailNow()
+	}
+	return NewIntegration(eng, func() *bun.DB { return db }, quietLogger())
+}
+
+// principalCtx is the context a scheduled automation runs its builtin under:
+// the cluster's maintenance principal for the automation named, with the
+// claims and token component/automations stamps beside it. Internal origin is
+// the caller's to add, as the automation runner adds it.
+func principalCtx(t *testing.T, automation string) context.Context {
+	t.Helper()
+	actor := auth.MaintenanceActor(automation)
+	if actor == nil {
+		t.Fatalf("%s is not on the maintenance list, so its automation runs as a reader and every run is refused", automation)
+	}
+	claims := map[string]any{"sub": actor.UserId, "email": actor.UserId, "role": string(actor.Role)}
+	ctx := auth.ContextWithClaims(context.Background(), claims)
+	ctx = auth.ContextWithToken(ctx, auth.BuildTokenInfo(claims))
+	return auth.ContextWithAccess(ctx, actor)
+}
+
+// ownerCtx is a person who is a cluster owner, signed in.
+func ownerCtx() context.Context {
+	claims := map[string]any{"sub": "dbtest-storestats-owner", "role": "owner"}
+	ctx := auth.ContextWithClaims(context.Background(), claims)
+	ctx = auth.ContextWithToken(ctx, auth.BuildTokenInfo(claims))
+	return auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: "dbtest-storestats-owner", Role: auth.RoleOwner})
+}
+
+// newStore writes a store of the test's own through createStore, as its owner,
+// and answers its bare id. The store's graph rows and its store_sales_store
+// row are deleted when the test ends.
+func newStore(t *testing.T) string {
+	t.Helper()
+	eng, db := statsEngine(t)
+	if eng == nil {
+		t.FailNow()
+	}
+	storeID := fmt.Sprintf("dbtest-storestats-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = db.ExecContext(ctx, `DELETE FROM store_sales_store WHERE store_id = ?`, storeID)
+		_, _ = db.ExecContext(ctx, `DELETE FROM "MemoryNodes" WHERE concept = 'v1:shopify:store' AND id = ?`, "v1:shopify:store:"+storeID)
+	})
+	call := fmt.Sprintf(`mutation createStore(storeId: %s, domain: %s, name: %s, adminTokenRef: "test-admin", apiVersion: "2026-07")`,
+		langparser.QuoteString(storeID), langparser.QuoteString(storeID+".myshopify.com"), langparser.QuoteString("Store "+storeID))
+	if _, err := eng.Execute(ownerCtx(), call); err != nil {
+		t.Fatalf("write the store %s: %v", storeID, err)
+	}
+	return storeID
+}
+
+// storeRow is the store's store_sales_store row, or nil when it has none.
+func storeRow(t *testing.T, storeID string) map[string]any {
+	t.Helper()
+	_, db := statsEngine(t)
+	row := map[string]any{}
+	err := db.NewSelect().Table("store_sales_store").Where("store_id = ?", storeID).Scan(context.Background(), &row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("read the store_sales_store row of %s: %v", storeID, err)
+	}
+	return row
+}
+
+// storeSalesQueries records, from now until the test ends, the statements the
+// shared handle runs that name a store_sales_ table, and answers a function
+// that hands back the ones recorded since it was last called.
+func storeSalesQueries(t *testing.T) func() []string {
+	t.Helper()
+	statsEngine(t)
+	r := &statementRecorder{}
+	statementRecorders.add(r)
+	t.Cleanup(func() { statementRecorders.remove(r) })
+	return r.take
+}
+
+// statementRecorders is the one hook on the shared handle; it hands each
+// statement to the recorders registered at the time.
+var statementRecorders = &recorderHook{}
+
+type recorderHook struct {
+	mu        sync.Mutex
+	recorders []*statementRecorder
+}
+
+func (h *recorderHook) add(r *statementRecorder) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.recorders = append(h.recorders, r)
+}
+
+func (h *recorderHook) remove(r *statementRecorder) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i, x := range h.recorders {
+		if x == r {
+			h.recorders = append(h.recorders[:i], h.recorders[i+1:]...)
+			return
+		}
+	}
+}
+
+func (h *recorderHook) BeforeQuery(ctx context.Context, _ *bun.QueryEvent) context.Context {
+	return ctx
+}
+
+func (h *recorderHook) AfterQuery(_ context.Context, ev *bun.QueryEvent) {
+	if !strings.Contains(ev.Query, "store_sales_") {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, r := range h.recorders {
+		r.record(ev.Query)
+	}
+}
+
+type statementRecorder struct {
+	mu   sync.Mutex
+	seen []string
+}
+
+func (r *statementRecorder) record(q string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seen = append(r.seen, q)
+}
+
+func (r *statementRecorder) take() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := r.seen
+	r.seen = nil
+	return out
+}

@@ -378,3 +378,13 @@ builtin shopifyAccountConnectBegin {
   signedQuery string!
   returnPath string
 }
+
+/// The store statistics rollup (the 2026-11-11 store statistics design). NO @sdk: it is the
+/// storeStatisticsRollupSweep automation's work, and its handler admits that automation's
+/// maintenance principal at internal origin and no other caller, a cluster owner included. It reads
+/// the stores and their mirror rows from Go, never as statements of the automation, and answers
+/// counts: the engine's work journal keeps what an automation step answers, and two of the walk's
+/// reads carry a buyer's email.
+@executor("integration.storeStats.rollup")
+@description("Keep every store's statistics. Lists every configured store through the engine, gives each its row in the store statistics tables, and walks each in turn, one store's failure leaving the next walked; one run at a time on a node. Answers {stores, rows, facts, unreadable, behind, rebuilt, removed}: counts, and the ids of the stores the lists name, never a row.")
+builtin storeStatisticsRollup { }
