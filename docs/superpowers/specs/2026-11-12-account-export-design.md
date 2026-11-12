@@ -74,7 +74,7 @@ describe what was built.
 | Row ownership D12, R17 | The deprecation-window entry is left to this piece | Entered (E5) |
 | Row ownership section F | A write that commits more than a minute late is not caught, and that is accepted | Closed (section F), because E2 depends on it |
 | Row ownership section C | Re-tagging a list row moves that row alone, and a tag for an account the tagger is not in is stored without moving the row | The row's children follow it, and such a tag is refused (section I) |
-| Row ownership section H | The inventory counts a row under any account one of its versions names | It counts a row once, under the account its newest account-naming version names (section B, "Two readings") |
+| Row ownership section H | The inventory counts a row under any account one of its versions names | It counts a row once, under the account its newest version names, as an export decides it (section B, "One rule, read from the index") |
 
 ## Words
 
@@ -102,11 +102,16 @@ describe what was built.
   the six: `v1:platform:customDomain` and `v1:pipelines:run`. Nothing routes an
   account-scoped concept to the secret table today.
 - **How the row table is stored.** `"MemoryNodes"` is a hypertable on `createdAt`
-  with seven-day chunks. Chunks older than ninety days are compressed, segmented
-  by concept and ordered by `createdAt`
-  (`20260609000000_document_version_history`). A compressed chunk has no index on
-  id and none on the account: a read by id filters the concept's batches there,
-  and a read by account decompresses the concept's segment. A read of one id's
+  with seven-day chunks. A migration declares compression for chunks older than
+  ninety days, segmented by concept and ordered by `createdAt`
+  (`20260609000000_document_version_history`), but no installation built from
+  this tree has a compressed chunk: a trigger the table carries makes TimescaleDB
+  refuse it (`component/database/memory_nodes_compression.go`). A compressed
+  chunk would have no index on id and none on the account: a read by id filters
+  the concept's batches there, and a read by account decompresses the concept's
+  segment (section O). A version's payload averages about 3 KB and is stored out
+  of line, so reading `accountId` out of one row's payload fetches and unpacks
+  the whole payload. A read of one id's
   newest version written `ORDER BY "createdAt" DESC LIMIT 1` was planned as an
   ordered walk of the chunks and read a whole chunk on an installation; the shape
   that is safe matches the id with `= ANY` and sorts by the id first
@@ -161,24 +166,32 @@ two things are said here once. A staged concept's rows are the account's all the
 same and are carried; and the capability in section H is the wall, so no per-row
 admission is applied.
 
-**Two readings.** The rule above is exact: the newest version decides, whatever
-it says. Deciding it for one row costs a read of that row in every chunk (section
-A), so the reader never does that once per row of an account.
+**One rule, read from the index.** The rule above is exact: the newest version
+decides, whatever it says. Every reader uses it: the export, the move, the lists
+and the counts on screen. What differs between them is cost, never the answer.
 
-- **The export** reads a kind in one statement: it finds the kind's rows whose
-  newest version names the account and streams every version of them in
-  `(id, createdAt)` order. Its second count is one grouped statement over the
-  same kinds: rows and versions per kind, and the rows whose newest version names
-  no account. Both are exact, and both cost a pass over the kind, which a run
-  that takes minutes can afford.
-- **The move** decides the rows a person selected, at most 500, one read each.
-  A list of a kind's rows decides one page.
+- **Deciding without a payload.** Reading the account out of a version's payload
+  fetches and unpacks about 3 KB per version (section A), so no reader does that
+  once per row of an account. The decision is made from narrow columns: a row's
+  newest `createdAt` from the id index, and the newest `createdAt` among its
+  versions that name the account, found through the account index. The row is
+  the account's when the two are equal, or when the observation copy decides.
+  Payloads are then read once, and only for the account's rows.
+- **The export** finds a kind's rows that way, then reads every version of them
+  in batches of ids, in `(id, createdAt)` order. Its second count is the census:
+  rows and versions per kind, and the rows whose newest version names no account,
+  read through the same narrow columns. Both are exact.
+- **The move** decides the rows a person selected, at most 500, one probe each.
+  A list of a kind's rows decides one page the same way.
 - **Counts on screen** (the inventory, the totals beside the assignment status)
-  are read from the account index with no read per row. A row counts once, under
-  the account its newest version that names an account names. That differs from
-  the exact rule for one kind of row only: one whose account a later version
-  removed is in no export, and is still counted on screen under the account it
-  last named. A moved row is counted once, in its new account.
+  are the census's counts taken for the account's own rows only. They are exact,
+  and on an account that holds most of a large installation they take seconds
+  and can pass their deadline (section O).
+
+An earlier version of this section gave the counts on screen a second, cheaper
+reading that differed from the rule for a row whose account a later version
+removed. Once the decision was made from narrow columns it served the screen
+too, and the second reading was dropped.
 
 The reader covers the row table and the observation store. Nothing writes an
 account-scoped kind to the secret table, and nothing routes a concept there by
@@ -419,9 +432,11 @@ acme-2026-11-12.memql-account/
   set, the account's id and name, whether it is the primary account, whether the
   file is protected, the declaration of every kind in the file (its `@belongsTo`
   form, and `@origin` or `@mirroredTo` where it has one, so an import knows a
-  mirror from an origin), the language line of every mounted DSL domain with its
-  content hash where the engine holds one, the payload-repairing migrations
-  applied at that instant (program P22), and the embedder in use.
+  mirror from an origin). Three more fields are reserved in the format and not
+  filled in this piece, because nothing reads them until there is an importer:
+  the language line of every mounted DSL domain with its content hash, the
+  payload-repairing migrations applied at that instant (program P22), and the
+  embedder in use.
 - **A row line** follows the backup's row shape: kind, concept, id, `createdAt`,
   `createdBy`, type, schema, payload, metadata, provenance. JSON columns travel
   as raw JSON, untouched, with the two exceptions section B names. A version
@@ -522,7 +537,7 @@ A person prepares and starts an export (section H). An agent node runs it.
 
 | Phase | What happens |
 |---|---|
-| Checking | The five conditions, then "Caught up" |
+| Checking | The five conditions, then "Caught up". The two that can change while a run waits (a row awaiting a decision, a row still following a moved parent) are read again inside the snapshot, and the run refuses if either holds |
 | Rows | One read-only snapshot on a maintenance session: the count, the account's row, each kind in name order, schemas, people, references, connections, hand-overs |
 | Bytes | After the snapshot is released: each object or tree the rows named |
 | Sealing | The report, the README, the checksum list; the object is committed |
@@ -542,7 +557,18 @@ A person prepares and starts an export (section H). An agent node runs it.
   heartbeat is two minutes old is taken by another agent replica and started
   again from the beginning, three attempts at most. A snapshot cannot be handed
   over, so nothing is resumed part-way.
+- **A file always has a record.** An attempt writes under a key of its own and
+  records that key on the row just before it commits the object, so storage
+  never holds a file that no record names; a node that dies between the two
+  leaves a key that names nothing. Whoever takes a stopped run over, hands one
+  back or ends one deletes the recorded object. Ending a run never waits on that delete: the
+  row keeps the key and the runner tries again each tick until storage answers.
+  A run that would be queued again does wait, because its next attempt would
+  write over the only record of the old object; cancelling it ends it. Only a
+  complete export is ever served.
 - **Cancel** is offered throughout. It stops the run and removes what was staged.
+  A running export is cancelled by its own node at its next heartbeat, and the
+  screen says "Cancelling" until then.
 - **Kept until deleted.** A complete file stays until a person removes it. The
   record of the export stays for good, with who started, downloaded and removed
   it.
@@ -579,10 +605,17 @@ save bytes that arrive over HTTP and the stream carries no large answer.
 - **An ordinary authenticated route**, declared by `server.AccountExportPaths()`
   so the front door's generated path list carries it.
 - **Who.** A signed-in person (section H) who holds `execute app:accounts/export`.
-  Every refusal answers 404.
-- **How.** The bytes are streamed through the bff from blob storage, with a single
-  `Range` honored, never a redirect and never a signed link. It uses the Library
-  route's download deadlines (`core/httpstream`).
+  A person who may not, and an export that does not exist, was removed or is not
+  complete, answer 404. A request with no sign-in is refused by the server's own
+  authentication before the route, and a method other than GET answers 405.
+- **How.** The bytes are streamed through the bff from blob storage, never a
+  redirect and never a signed link. The route has a ceiling of its own, six
+  hours for one transfer, because the Library caps a file at 4 GiB and an export
+  has no such cap; the idle write deadline is the Library's
+  (`core/httpstream`). It sends a strong `ETag` made from the file's checksum
+  and honors one `Range`, with `If-Range`, so a client can resume. MemQL OS does
+  not resume yet: an interrupted download starts again from the beginning
+  (section O).
 - **Only a complete file** that has not been removed.
 - **Audited** on every request, with the range asked for.
 - **From the OS** the page fetches `/_memql/accounts/exports/{id}/content` with
@@ -678,8 +711,12 @@ carries them.
   another account, takes the parent's account as it is at that moment, gets a
   change record of its own, and so brings its own children in the next pass.
 - **Only rows that were there.** A record carries a row only if the row's first
-  version is older than the record. A row attached to the parent afterwards was
-  filed by the rules in force when it was written.
+  version is older than the moment the job first read the record, which it can
+  only do once the change has committed. A row attached to the parent after
+  that was filed by the rules in force when it was written. The record's own
+  time would be too early a line to draw: a row written while the change was
+  still uncommitted read the parent's old account, was filed there, and has to
+  follow.
 - **A row attached from another account stays.** Row ownership allows that on
   purpose, and it is why a follower is recognized by the account it shares with
   the one its parent left, not by the link alone.
@@ -710,8 +747,8 @@ rows the organization rules tie to it, where they have none.
 **When it is done.** A full pass covers what was committed before its safe
 point: the earlier of its start and the job's late-commit horizon. A change
 record is settled once every kind that can hang off its row has finished a full
-pass whose safe point is later than the record. An export waits while a record
-that names its account is not settled.
+pass whose safe point is later than the moment the job first read the record.
+An export waits while a record that names its account is not settled.
 
 **How long it takes** is how long a pass of the kind takes, not how many rows
 moved. A requested pass waits for no other kind and does not run at one batch a
@@ -719,11 +756,13 @@ tick: its batches run back to back inside each call of the job. The kinds with
 a requested pass take turns, and between them use at most half of a call while
 a kind without one is due.
 
-**Clocks.** "Older than the record" compares a row's time, set by the node that
-wrote it, with the record's, set by the database. Within the skew between the
-two the judgment can be wrong either way: a row that was there is left behind,
-or one written just after the move is carried. Nothing later repairs either, and
-an owner places the first and moves the second back.
+**Clocks.** "Older than the moment the job read the record" compares a row's
+time, set by the node that wrote it, with a time set by the database. Within the
+skew between the two, and in the window between a change's commit and the job's
+next tick (a few seconds while the job runs, longer if it was stopped), the
+judgment can be wrong either way: a row that was there is left behind, or one
+written just after the move is carried. Nothing later repairs either, and an
+owner moves the row.
 
 ### Rows awaiting a decision
 
@@ -768,7 +807,7 @@ While recording is off, the lists behave as they did.
 - **`accountIds`.** The field is dropped by the sign-in piece, which decides what
   sharing inside an account looks like. Its last writer stops then, and the strip
   follows one release later.
-- **The inventory** counts through the reader of section B ("Two readings"), so
+- **The inventory** counts through the reader of section B, by the one rule, so
   a moved row is counted once, in its new account.
 - **Load on scroll** (program P40) arrives in the kit as one control, used by this
   piece's lists: it loads the next page as the end comes into view, holds its
@@ -959,6 +998,18 @@ under piece 1's rule, which moves a row without its children.
 - **A deleted row travels when its deletion is a version that still names the
   account**, which is how the DSL's kinds delete. A deletion marker that names no
   account leaves its row in no account.
+- **MemQL OS does not resume a download.** The route supports it; the OS saves
+  the file as it arrives and starts an interrupted download again from the
+  beginning.
+- **A field that only an older schema marked secret** is removed from the
+  versions written under that schema, as every secret is. The readers that
+  follow a reference, name a person or read bytes go by the kind's current
+  schema, and they read the newest version only, so such a field is not
+  followed there either unless the current schema stopped calling it secret.
+- **A write that spans two changes of one row** (it read the row before a person
+  moved it, the row was then carried again with its parent, and only then did
+  the write append its version) leaves the row in the account the write read.
+  The job puts a row back after one change, not after two.
 
 **Measured on a test table, not on an installation**
 
@@ -980,6 +1031,9 @@ Three limits follow from it:
   installation take several seconds and can pass their deadline, in which case
   the tab says the account is too large to count. The export does not depend on
   them.
+- **The list of rows in no account** costs about the size of the kind for each
+  page, not the size of the page: about half a second a page on a kind of
+  300,000 rows on the test table. It reads no payload.
 - **The totals beside the assignment status** will usually be missing on a large
   installation. A wider index does not help: PostgreSQL will not answer from an
   index alone when the query names an expression over a column the index does
@@ -1012,8 +1066,9 @@ recommended. They are listed so the owner can read and overturn any of them.
 |---|---|
 | The download route of section G is built | The owner approved it by name while this design was settled (E17) |
 | A run waits ten minutes for rows to get their account, its rows phase may take sixty minutes, a dead run is restarted three times at most, and a prepared export that is not started within fifteen minutes is removed | Each needs a number, and these fail safe: a run that stops says why and can be started again |
-| The report's count of rows in no account is exact for every kind, taken by the same statement that counts the file's rows | The export reads each kind in one pass anyway (section B, "Two readings"), so the exact count costs nothing more |
-| The reader has two readings of one rule: the export and the move decide by a row's newest version; counts on screen are read from the account index and decide by the newest version that names an account | Deciding the exact rule for every row of an account costs a read per row in every chunk of the row table, and the oldest chunks are compressed. On the owner's installation that is minutes to hours for a count a person is waiting for. The two differ only for a row whose account a later version removed |
+| The report's count of rows in no account is exact for every kind, taken by the same statement that counts the file's rows | The census reads every row of the kinds through narrow columns anyway (section B), so the exact count costs nothing more |
+| The reader has one rule for every read, decided from index columns and never from a payload per row: the export, the move, the lists and the counts on screen all answer by a row's newest version. An earlier answer, two readings with a cheaper one for the screen, was dropped | A version's payload is about 3 KB and stored out of line, so a decision that reads it once per row reads the whole account. Once the decision used narrow columns only it served the screen too, and one rule cannot disagree with itself |
+| The download route has a ceiling of its own, six hours for one transfer, and sends a strong `ETag` and honors `If-Range`. Section G first gave it the Library's deadlines | The Library caps a file at 4 GiB and an export has no cap, so the Library's thirty minutes would cut a large file short every time, with no way to continue |
 | A row awaiting a decision can be left out for good, and that is recorded on the conflict with who decided | Section I needs a second way to resolve a conflict that cannot be placed |
 | The move's history (`accountMoves`) has a call and no screen | The audit trail already shows it, and no screen was designed for it |
 | The reuse evidence on a learned procedure keeps listing account ids | Changing it reaches into procedure learning, outside this piece; it is a known limit in section O |

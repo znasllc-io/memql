@@ -55,7 +55,8 @@ every export until someone places them (see [Moving rows](#moving-rows)).
 
 The plus on the Exports heading opens **Export this account**:
 
-1. **Contents.** What the account holds, by kind, and what a file leaves out.
+1. **Contents.** How much the account holds (its kinds, its rows and the
+   bytes of its files), and what a file leaves out.
 2. **Protection.** On unless you switch it off. A protected file is encrypted
    and cannot be opened without its passphrase.
 3. **Passphrase.** The installation makes the passphrase and shows it once.
@@ -225,16 +226,23 @@ an email when an export starts.
 
 ## The download
 
-`GET /accounts/exports/{id}/content`, on the API host. It is an authenticated
-route for a signed-in owner or developer, and it answers "not found" to anyone
-else. The bytes are streamed. An interrupted download resumes: the route sends
-an `ETag` made from the file's checksum and honours one `Range` with
-`If-Range`. A single transfer may take up to six hours. MemQL OS reaches the
-route on its own origin and saves the file as it arrives.
+`GET /accounts/exports/{id}/content`, on the API host. It is a route for an
+owner or developer signed in from a browser. A signed-in person who may not
+export gets "not found", and so does a request for an export that does not
+exist, was removed or is not finished. A request with no sign-in is refused
+before the route is reached.
+
+The bytes are streamed, and a single transfer may take up to six hours. The
+route sends an `ETag` made from the file's checksum and honours one `Range`
+with `If-Range`, so a client that asks for a range can continue an interrupted
+transfer. MemQL OS does not do that yet: it reaches the route on its own origin
+and saves the file as it arrives, and an interrupted download starts again from
+the beginning.
 
 ## Limits
 
 - No importer exists yet.
+- MemQL OS starts an interrupted download again from the beginning.
 - Journals that system automations wrote before recording was on have no owner,
   so they are in the primary account, including those that ran on another
   account's rows.
