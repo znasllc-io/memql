@@ -216,6 +216,9 @@ describe("the Store statistics page", () => {
     const all = captions(page).join(" ");
     for (const text of ["Prices in", "Days in", "Orders since", "Last order change"]) expect(all).not.toContain(text);
     expect(page.querySelector('[aria-busy="true"]')).toBeNull();
+    // No series, so no chart, and no figure offered as a choice that changes nothing.
+    expect(page.querySelector(".os-time-chart")).toBeNull();
+    expect(within(page).queryByRole("radio")).toBeNull();
   });
 
   it("never breaks the context line inside one of its phrases", async () => {

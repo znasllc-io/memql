@@ -277,7 +277,9 @@ function StoreBody({ stats, onShowAll }: { stats: StoreStatistics | null; onShow
       ) : null}
 
       <div className="deployable-statistics-figures">
-        <StatFigures label="Sales figures" figures={salesFigures(stats)} selected={selected} onSelect={(id) => setSelected(id as FigureId)} />
+        {/* With no series there is no chart, and a figure that would choose
+            nothing stands as a plain figure (DESIGN.md "Statistics"). */}
+        <StatFigures label="Sales figures" figures={salesFigures(stats)} selected={selected} onSelect={stats === null || hasSeries(stats) ? (id) => setSelected(id as FigureId) : undefined} />
         <SalesChart stats={stats} selected={selected} />
       </div>
 
@@ -319,7 +321,7 @@ function StoreBody({ stats, onShowAll }: { stats: StoreStatistics | null; onShow
 function SalesChart({ stats, selected }: { stats: StoreStatistics | null; selected: FigureId }) {
   const spec = SALES_FIGURES.find((candidate) => candidate.id === selected && candidate.series !== undefined) ?? SALES_FIGURES[0]!;
   if (stats === null) return <TimeChartSkeleton label={`Loading ${spec.label.toLowerCase()} over time`} />;
-  if (stats.bucket === null || stats.series.length === 0 || spec.series === undefined) return null;
+  if (!hasSeries(stats) || stats.bucket === null || spec.series === undefined) return null;
   const key = spec.series;
   const intake = broughtIn(stats);
   return (
@@ -332,6 +334,11 @@ function SalesChart({ stats, selected }: { stats: StoreStatistics | null; select
       timeZone={stats.periodZone ?? undefined}
     />
   );
+}
+
+/** Whether the answer has buckets to chart: a store with no row yet has none. */
+function hasSeries(stats: StoreStatistics): boolean {
+  return stats.bucket !== null && stats.series.length > 0;
 }
 
 /** New, Returning, No customer recorded; none when no order was counted. */
