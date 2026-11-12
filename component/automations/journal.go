@@ -879,10 +879,10 @@ func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution, c
 		// attempt manufactures an ever-growing queue with no human owner.
 		// User-owned goals and ordinary automations retain their approval and
 		// retry lifecycle, even when they share a maintenance automation name:
-		// the attempt is the maintenance principal's when the run HOLDS that
-		// principal, which the executor grants by origin, not by name.
-		if actor, ok := auth.AccessFromContext(ctx); ok &&
-			exec.TriggeredBy == "schedule" && auth.IsMaintenancePrincipal(actor) {
+		// the attempt is the maintenance automation's when the run HOLDS that
+		// automation's own principal -- which the executor grants by origin,
+		// not by name -- and not when it holds another listed automation's.
+		if scheduledUnderItsOwnMaintenancePrincipal(ctx, exec) {
 			if run, adopted := common.RunFromContext(ctx); !adopted || (run.OwnerUserId == "" && run.GoalId == "") {
 				j.closeRunRecord(ctx, exec, chainHead)
 				return
@@ -1181,4 +1181,16 @@ func runFailure(exec *AutomationExecution) error {
 		return nil
 	}
 	return errors.New(exec.Error)
+}
+
+// scheduledUnderItsOwnMaintenancePrincipal reports whether exec is a scheduled
+// run that holds its own automation's maintenance principal -- the one the
+// executor granted the engine's listed automation of that name -- rather than
+// any listed automation's, or none.
+func scheduledUnderItsOwnMaintenancePrincipal(ctx context.Context, exec *AutomationExecution) bool {
+	if exec == nil || exec.TriggeredBy != "schedule" {
+		return false
+	}
+	actor, ok := auth.AccessFromContext(ctx)
+	return ok && auth.IsMaintenancePrincipalOf(actor, exec.AutomationName)
 }

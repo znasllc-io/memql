@@ -398,7 +398,7 @@ func sweepRows(ctx context.Context, i *Integration, rows []map[string]any, now t
 	orig := i.rowsInFlight
 	i.rowsInFlight = stub.read
 	defer func() { i.rowsInFlight = orig }()
-	res, _ := i.SweepWaiting(auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: "system:maintenance:sweepWaitingWorkRuns", Role: auth.RoleOwner, Unranked: true, Synthetic: true}), olderThan)
+	res, _ := i.SweepWaiting(auth.ContextWithAccess(ctx, auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns")), olderThan)
 	return res
 }
 

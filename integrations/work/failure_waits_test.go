@@ -415,7 +415,7 @@ func merged(row, write map[string]any) map[string]any {
 func sweepWithVersions(t *testing.T, i *Integration, rows ...map[string]any) WaitSweepResult {
 	t.Helper()
 	i.rowsInFlight = (&stubRowSource{rows: rows}).read
-	res, err := i.SweepWaiting(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "system:maintenance:sweepWaitingWorkRuns", Role: auth.RoleOwner, Unranked: true, Synthetic: true}), time.Minute)
+	res, err := i.SweepWaiting(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns")), time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

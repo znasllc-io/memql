@@ -140,7 +140,7 @@ func (i *Integration) read(ctx context.Context, args map[string]any, _ int) ([]m
 
 func (i *Integration) sweep(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	actor, ok := auth.AccessFromContext(ctx)
-	if !ok || actor == nil || actor.UserId != "system:maintenance:checkDeployableHealth" || !actor.IsClusterOwner() {
+	if !ok || !auth.IsMaintenancePrincipalOf(actor, "checkDeployableHealth") {
 		return nil, fmt.Errorf("website health checks require the engine maintenance principal")
 	}
 	if !i.running.CompareAndSwap(false, true) {

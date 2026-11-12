@@ -82,7 +82,7 @@ func (i *Integration) ReconcileReleaseSeeds(ctx context.Context, index bool) err
 	}
 	if run, ok := common.RunFromContext(ctx); ok && run.IsRun() {
 		actor, _ := auth.AccessFromContext(ctx)
-		if run.OwnerUserId != "" || run.GoalId != "" || run.RerunRequestId != "" || run.Mode != common.RunModeLive || actor == nil || actor.UserId != "system:automation:reconcileReleaseKnowledge" {
+		if run.OwnerUserId != "" || run.GoalId != "" || run.RerunRequestId != "" || run.Mode != common.RunModeLive || !auth.IsEngineAutomationActor(actor, "reconcileReleaseKnowledge") {
 			return fmt.Errorf("release knowledge is a server lifecycle operation")
 		}
 	}

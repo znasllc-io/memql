@@ -28,9 +28,33 @@ func TestTheMaintenancePrincipalIsTheEnginesOwn(t *testing.T) {
 		"the principal's id, not synthetic": {UserId: "system:maintenance:" + names[0], Role: RoleOwner},
 		"an unlisted maintenance id":        {UserId: "system:maintenance:routes", Role: RoleOwner, Synthetic: true, Unranked: true},
 		"a person who owns the cluster":     {UserId: "user-owner", Role: RoleOwner},
+		// Spelled exactly like the principal, by hand: the system actor of a
+		// listed name, and every exported field of the real one.
+		"a system actor with a listed name": SystemActor("maintenance:" + names[0]),
+		"the principal's fields, by hand":   {UserId: "system:maintenance:" + names[0], Role: RoleOwner, Synthetic: true, Unranked: true},
 	} {
 		if IsMaintenancePrincipal(ac) {
 			t.Errorf("%s reads as the maintenance principal", label)
+		}
+	}
+}
+
+// The ordinary actor of an automation carries the engine's mark only when the
+// automation is the engine's own, and a hand-built actor with its id carries
+// none.
+func TestTheEngineAutomationActorIsTheEnginesOwn(t *testing.T) {
+	if !IsEngineAutomationActor(AutomationActor(AutomationOriginEngine, "zzSweep"), "zzSweep") {
+		t.Fatal("the engine's automation's own actor is not recognised")
+	}
+	for label, ac := range map[string]*AccessContext{
+		"another source, same name": AutomationActor(AutomationOriginOther, "zzSweep"),
+		"another engine automation": AutomationActor(AutomationOriginEngine, "zzOther"),
+		"built with its id":         {UserId: "system:automation:zzSweep", Role: RoleReader, Synthetic: true, Unranked: true},
+		"a system actor spelled so": SystemActor("automation:zzSweep"),
+		"nobody":                    nil,
+	} {
+		if IsEngineAutomationActor(ac, "zzSweep") {
+			t.Errorf("%s reads as the engine's automation", label)
 		}
 	}
 }

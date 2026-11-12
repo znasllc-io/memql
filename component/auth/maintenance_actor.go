@@ -319,6 +319,9 @@ func MaintenanceActor(origin AutomationOrigin, automationName string) *AccessCon
 	return &AccessContext{
 		UserId: maintenanceUserIdPrefix + name,
 		Role:   RoleOwner,
+		// The mark IsMaintenancePrincipal decides on. Nothing but this
+		// constructor can set it.
+		minted: mintedAutomation{kind: mintedMaintenance, automation: name},
 		// Not a principal, so the rank rules do not govern it (D4, epic
 		// memql#4832). RoleOwner above is what buys the cluster-owner
 		// escape; it is NOT a claim to rank 400, and without this flag a
@@ -332,16 +335,76 @@ func MaintenanceActor(origin AutomationOrigin, automationName string) *AccessCon
 }
 
 // IsMaintenancePrincipal reports whether ac IS the maintenance principal of a
-// listed automation -- the actor MaintenanceActor builds -- as opposed to any
-// actor that merely runs under a listed name. It answers from the principal a
-// run actually holds, which the executor grants by origin, so a decision made
-// from it is made from the origin too.
+// listed automation -- the actor MaintenanceActor built -- as opposed to any
+// actor that merely carries its id: it decides on the mark only MaintenanceActor
+// sets, so a system actor named like the principal, or an AccessContext built by
+// hand with its UserId, is not it. It answers from the principal a run actually
+// holds, which the executor grants by origin, so a decision made from it is made
+// from the origin too.
 func IsMaintenancePrincipal(ac *AccessContext) bool {
-	if ac == nil || !ac.Synthetic || !ac.IsClusterOwner() || !strings.HasPrefix(ac.UserId, maintenanceUserIdPrefix) {
-		return false
-	}
-	_, ok := maintenanceAutomations[strings.TrimPrefix(ac.UserId, maintenanceUserIdPrefix)]
+	_, ok := maintenancePrincipalOf(ac)
 	return ok
+}
+
+// IsMaintenancePrincipalOf reports whether ac is the maintenance principal of
+// the named automation, and of no other.
+func IsMaintenancePrincipalOf(ac *AccessContext, automationName string) bool {
+	name, ok := maintenancePrincipalOf(ac)
+	return ok && name == strings.TrimSpace(automationName)
+}
+
+// maintenancePrincipalOf answers the automation ac is the maintenance principal
+// of.
+func maintenancePrincipalOf(ac *AccessContext) (string, bool) {
+	if ac == nil || ac.minted.kind != mintedMaintenance || !ac.Synthetic || !ac.IsClusterOwner() {
+		return "", false
+	}
+	name := ac.minted.automation
+	if ac.UserId != maintenanceUserIdPrefix+name {
+		return "", false
+	}
+	if _, ok := maintenanceAutomations[name]; !ok {
+		return "", false
+	}
+	return name, true
+}
+
+// automationUserIdPrefix is the prefix of an automation's ordinary actor's
+// UserId. The prefix makes a log line legible; it is not what any decision
+// reads (AccessContext.minted is).
+const automationUserIdPrefix = "system:automation:"
+
+// AutomationActor builds the ORDINARY actor an automation runs under when it
+// is not granted the maintenance principal: the cluster acting as the
+// automation, a reader. For an automation of the engine's own tree (origin
+// AutomationOriginEngine) it carries the mark IsEngineAutomationActor decides
+// on; for any other origin it carries none, so a handler that admits one of
+// the engine's own automations admits no other automation of the same name.
+func AutomationActor(origin AutomationOrigin, automationName string) *AccessContext {
+	name := strings.TrimSpace(automationName)
+	ac := &AccessContext{
+		UserId: automationUserIdPrefix + name,
+		Role:   RoleReader,
+		// D4 (epic memql#4832): an automation's system actor is the cluster
+		// acting, not a principal. Its role decides what it may reach; it is
+		// not a rung, and the rank rules skip it.
+		Unranked: true,
+		// And SYNTHETIC: an automation is the cluster acting, so a row it
+		// creates is not owned by the automation.
+		Synthetic: true,
+	}
+	if origin == AutomationOriginEngine && name != "" {
+		ac.minted = mintedAutomation{kind: mintedEngineAutomation, automation: name}
+	}
+	return ac
+}
+
+// IsEngineAutomationActor reports whether ac is the ordinary actor of the named
+// automation of the engine's own tree, as AutomationActor minted it.
+func IsEngineAutomationActor(ac *AccessContext, automationName string) bool {
+	name := strings.TrimSpace(automationName)
+	return ac != nil && name != "" && ac.minted.kind == mintedEngineAutomation &&
+		ac.minted.automation == name && ac.UserId == automationUserIdPrefix+name && ac.Synthetic
 }
 
 // MaintenanceAutomationNames returns the listed automations, sorted. For gates

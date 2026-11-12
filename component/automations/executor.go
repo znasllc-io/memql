@@ -77,41 +77,33 @@ const systemActorPrefix = "system:automation:"
 func contextWithSystemActor(ctx context.Context, automation *Automation) context.Context {
 	_, inherited := auth.AccessFromContext(ctx)
 
-	automationName := automation.Name
-	actorId := systemActorPrefix + automationName
+	// The actor is the one the constructor minted, used as it was minted:
+	// the maintenance principal for a listed automation of the engine's own
+	// tree, and otherwise the ordinary automation actor, which carries the
+	// engine's mark only when the automation is the engine's. Rebuilding it
+	// field by field would drop the mark every decision about it reads.
+	actor := auth.AutomationActor(maintenanceOrigin(automation), automation.Name)
 	role := "system"
-	accessRole := auth.RoleReader
 	// Gated on !inherited as well as on the list. Elevating the CLAIMS while
 	// leaving an inherited AccessContext alone would leave the two surfaces
 	// describing different principals -- and the surface that decides row
 	// authz is the one we would not have touched.
 	if !inherited {
-		if ma := auth.MaintenanceActor(maintenanceOrigin(automation), automationName); ma != nil {
-			actorId = ma.UserId
+		if ma := auth.MaintenanceActor(maintenanceOrigin(automation), automation.Name); ma != nil {
+			actor = ma
 			role = string(ma.Role)
-			accessRole = ma.Role
 		}
 	}
 	claims := map[string]any{
-		"sub":   actorId,
-		"email": actorId,
+		"sub":   actor.UserId,
+		"email": actor.UserId,
 		"role":  role,
 	}
 	token := auth.BuildTokenInfo(claims)
 	ctx = auth.ContextWithClaims(ctx, claims)
 	ctx = auth.ContextWithToken(ctx, token)
 	if !inherited {
-		ctx = auth.ContextWithAccess(ctx, &auth.AccessContext{
-			UserId: actorId,
-			Role:   accessRole,
-			// D4 (epic memql#4832): an automation's system actor is the
-			// cluster acting, not a principal. accessRole above decides what
-			// it may reach; it is not a rung, and the rank rules skip it.
-			Unranked: true,
-			// And SYNTHETIC: an automation is the cluster acting, so a row it
-			// creates is not owned by the automation.
-			Synthetic: true,
-		})
+		ctx = auth.ContextWithAccess(ctx, actor)
 	}
 	return ctx
 }

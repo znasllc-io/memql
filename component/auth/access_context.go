@@ -145,7 +145,33 @@ type AccessContext struct {
 	// on the node that restored the owner (integrations/agents/agent_turn.go)
 	// -- and a hop that ever carried one would need the field on the wire.
 	RoleStandIn bool
+
+	// minted is the mark only this package's automation constructors set:
+	// which of the engine's own automations this actor was minted for, and as
+	// what (MaintenanceActor, AutomationActor). It is unexported, so an actor
+	// a caller builds field by field, or decodes from the wire, carries none --
+	// and a decision made on it is made on the constructor that granted it,
+	// never on the text of the UserId, which anybody can spell.
+	minted mintedAutomation
 }
+
+// mintedAutomation is AccessContext.minted.
+type mintedAutomation struct {
+	kind       mintedKind
+	automation string
+}
+
+type mintedKind uint8
+
+const (
+	mintedNone mintedKind = iota
+	// mintedMaintenance: the maintenance principal of a listed engine
+	// automation (MaintenanceActor).
+	mintedMaintenance
+	// mintedEngineAutomation: the ordinary actor of an automation of the
+	// engine's own tree (AutomationActor).
+	mintedEngineAutomation
+)
 
 // AccessContextKey is the context key for AccessContext values.
 const AccessContextKey contextKey = "accessContext"

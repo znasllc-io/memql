@@ -104,6 +104,9 @@ func (l *Loader) LoadFromTree(tree fs.FS) ([]*Automation, error) {
 	// list in a single boot attempt rather than peeling them off one per
 	// restart.
 	var problems []automationLoadProblem
+	// Every name the engine's own tree declares, whether or not the
+	// declaration compiles (engineNamesWin).
+	engineDeclared := map[string]struct{}{}
 	// This walker reads the tree itself, so it reads each file through the
 	// front end of the edition the file's domain declares (memql#5358), as
 	// baseloader.ReadAll does for every other construct kind.
@@ -192,6 +195,14 @@ func (l *Loader) LoadFromTree(tree fs.FS) ([]*Automation, error) {
 		}
 		authoredFile := source
 		slices, unextracted := extractAutomationSlicesReporting(source)
+		if memqldsl.SourceOf(tree, path) == memqldsl.SourceEngine {
+			for _, s := range slices {
+				engineDeclared[s.Name] = struct{}{}
+			}
+			for _, name := range unextracted {
+				engineDeclared[name] = struct{}{}
+			}
+		}
 		for _, name := range unextracted {
 			if l.logger != nil {
 				l.logger.Warn("unified automation loader: automation header could not be extracted",
@@ -294,7 +305,7 @@ func (l *Loader) LoadFromTree(tree fs.FS) ([]*Automation, error) {
 	// Not a load problem: a package staged before its analysis refused such a
 	// name must not stop a node from starting. The package analysis is where
 	// it is refused (component/packages, dsl_automation_name_taken).
-	out, leftOut := engineNamesWin(out)
+	out, leftOut := engineNamesWin(out, engineDeclared)
 	for _, a := range leftOut {
 		if l.logger != nil {
 			l.logger.Error("unified automation loader: automation left out: its name is one of the engine's own automations",
@@ -302,7 +313,7 @@ func (l *Loader) LoadFromTree(tree fs.FS) ([]*Automation, error) {
 				"automation", a.Name,
 				"path", a.Origin,
 				"source", a.Source.String(),
-				"effect", "the engine's automation of this name runs and this one does not; rename it in the DSL that declares it")
+				"effect", "the name is the engine's automation's and this one does not run; rename it in the DSL that declares it")
 		}
 	}
 

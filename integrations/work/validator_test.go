@@ -185,9 +185,7 @@ func journalRun(e *judgeEngine, triggeredBy, statement string) {
 // under internal origin (a trusted automation with a payload no caller
 // supplied).
 func validatorCaller() context.Context {
-	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{
-		UserId: validatorAutomationActor, Role: auth.RoleReader, Unranked: true, Synthetic: true,
-	})
+	ctx := auth.ContextWithAccess(context.Background(), auth.AutomationActor(auth.AutomationOriginEngine, validatorAutomation))
 	return auth.ContextWithInternalOrigin(ctx)
 }
 
@@ -436,9 +434,11 @@ func TestTheValidatorAdmitsOnlyItsAutomation(t *testing.T) {
 	}{
 		{"the automation", validatorCaller(), owner, true},
 		{"a client naming an owner", callerContext("u-mallory"), owner, false},
-		{"the automation's actor without internal origin", auth.ContextWithAccess(context.Background(), &auth.AccessContext{
-			UserId: validatorAutomationActor, Role: auth.RoleReader, Synthetic: true, Unranked: true,
-		}), owner, false},
+		{"the automation's actor without internal origin", auth.ContextWithAccess(context.Background(), auth.AutomationActor(auth.AutomationOriginEngine, validatorAutomation)), owner, false},
+		{"an automation of another source with the same name", auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), auth.AutomationActor(auth.AutomationOriginOther, validatorAutomation))), owner, false},
+		{"an actor built with the automation's id", auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), &auth.AccessContext{
+			UserId: "system:automation:" + validatorAutomation, Role: auth.RoleReader, Synthetic: true, Unranked: true,
+		})), owner, false},
 		{"another automation", auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), &auth.AccessContext{
 			UserId: "system:automation:somethingElse", Role: auth.RoleReader, Synthetic: true, Unranked: true,
 		})), owner, false},

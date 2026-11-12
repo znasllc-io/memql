@@ -9,8 +9,16 @@ import memqldsl "github.com/znasllc-io/memql/dsl"
 // The order of in does not matter: an engine automation keeps its name whether
 // it was read before or after the automation that carries the same one.
 // Automations of two other layers that share a name are both kept, as before.
-func engineNamesWin(in []*Automation) (kept, leftOut []*Automation) {
-	engine := make(map[string]struct{}, len(in))
+//
+// engineDeclared holds the names the engine's own tree DECLARES, compiled or
+// not: an engine automation that failed to compile -- which only a node under
+// the MEMQL_DSL_ALLOW_SKIPS break-glass loads past -- still owns its name, so
+// no other automation of that name is kept in its place.
+func engineNamesWin(in []*Automation, engineDeclared map[string]struct{}) (kept, leftOut []*Automation) {
+	engine := make(map[string]struct{}, len(in)+len(engineDeclared))
+	for name := range engineDeclared {
+		engine[name] = struct{}{}
+	}
 	for _, a := range in {
 		if a != nil && a.Source == memqldsl.SourceEngine {
 			engine[a.Name] = struct{}{}

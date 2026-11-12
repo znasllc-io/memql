@@ -59,10 +59,10 @@ import (
 )
 
 const (
-	// validatorAutomationActor is the synthetic actor the validateGoalAnswer
-	// automation runs under (component/automations' system actor prefix and
-	// the automation's name).
-	validatorAutomationActor = "system:automation:validateGoalAnswer"
+	// validatorAutomation is the engine automation the check runs under; the
+	// admission decides on the actor the automation executor minted for the
+	// engine's own automation of this name (auth.IsEngineAutomationActor).
+	validatorAutomation = "validateGoalAnswer"
 	// validatorPrompt is the prompt the check renders.
 	validatorPrompt = "validateStepAnswer"
 	// validatorClaimName names the cross-replica claim on one answer
@@ -126,7 +126,7 @@ func validatorOwner(ctx context.Context, args map[string]any) (string, error) {
 		return "", fmt.Errorf("work: validateAnswer needs the run's ownerUserId")
 	}
 	switch {
-	case ac.Synthetic && ac.UserId == validatorAutomationActor:
+	case auth.IsEngineAutomationActor(ac, validatorAutomation):
 	case ac.Synthetic && ac.IsClusterOwner():
 	case !ac.Synthetic && sameUserId(ac.UserId, owner):
 	default:

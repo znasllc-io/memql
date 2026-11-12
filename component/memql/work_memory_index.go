@@ -43,7 +43,10 @@ func (e *MemQLEngine) indexConversationMemoryBuiltin(ctx context.Context, args m
 	}
 	if access.Synthetic {
 		owner := stringArg(args, "ownerUserId")
-		trusted := access.UserId == "system:automation:indexConversationMemoryOnUpdate" || access.UserId == "system:automation:indexCompletedWorkMemory"
+		// The engine's own triggers, as the automation executor minted
+		// their actor: an automation of any other source with the same name
+		// carries the same id and is not one of them.
+		trusted := auth.IsEngineAutomationActor(access, "indexConversationMemoryOnUpdate") || auth.IsEngineAutomationActor(access, "indexCompletedWorkMemory")
 		if !auth.OriginFromContext(ctx).IsInternal() || !trusted || owner == "" {
 			return nil, fmt.Errorf("only the source-update trigger may supply a memory owner")
 		}

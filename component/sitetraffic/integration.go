@@ -65,7 +65,11 @@ const rollupConcept = "integration:siteTraffic:rollup"
 // rollupPrincipal is the only caller the rollup admits: the maintenance
 // principal its scheduled automation runs under
 // (auth.MaintenanceActor(auth.AutomationOriginEngine, "siteStatisticsRollupSweep")).
-const rollupPrincipal = "system:maintenance:siteStatisticsRollupSweep"
+const rollupPrincipal = "system:maintenance:" + rollupAutomation
+
+// rollupAutomation is the engine automation whose maintenance principal the
+// rollup admits, decided on the principal its constructor minted.
+const rollupAutomation = "siteStatisticsRollupSweep"
 
 // countryRefreshConcept is the concept of the one node the country refresh
 // answers with, its report; like rollupConcept it is stored nowhere.
@@ -73,7 +77,11 @@ const countryRefreshConcept = "integration:siteTraffic:countryRefresh"
 
 // countryRefreshPrincipal is the only caller the country refresh admits: the
 // maintenance principal of its daily automation.
-const countryRefreshPrincipal = "system:maintenance:geoCountryRefreshSweep"
+const countryRefreshPrincipal = "system:maintenance:" + countryRefreshAutomation
+
+// countryRefreshAutomation is the engine automation whose maintenance principal
+// the country refresh admits.
+const countryRefreshAutomation = "geoCountryRefreshSweep"
 
 // Integration exposes the two reads, the rollup and the country refresh.
 type Integration struct {
@@ -193,7 +201,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 // first run answers the opener's own refusal.
 func (i *Integration) handleRollup(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	actor, ok := auth.AccessFromContext(ctx)
-	if !ok || actor == nil || actor.UserId != rollupPrincipal || !actor.IsClusterOwner() {
+	if !ok || !auth.IsMaintenancePrincipalOf(actor, rollupAutomation) {
 		return nil, fmt.Errorf("site statistics rollup requires the engine maintenance principal")
 	}
 	if i.maintenance == nil {
@@ -249,7 +257,7 @@ func (i *Integration) handleRollup(ctx context.Context, _ map[string]any, _ int)
 // error, because that is a wiring fault and not a transient one.
 func (i *Integration) handleCountryRefresh(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	actor, ok := auth.AccessFromContext(ctx)
-	if !ok || actor == nil || actor.UserId != countryRefreshPrincipal || !actor.IsClusterOwner() {
+	if !ok || !auth.IsMaintenancePrincipalOf(actor, countryRefreshAutomation) {
 		return nil, fmt.Errorf("country refresh requires the engine maintenance principal")
 	}
 	var db *bun.DB

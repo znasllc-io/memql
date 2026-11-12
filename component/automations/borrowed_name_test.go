@@ -218,7 +218,7 @@ func TestTheEnginesAutomationKeepsItsNameWhateverTheOrder(t *testing.T) {
 	pack := &Automation{Name: borrowedName, Origin: "unified:zzpack/automations.memql:" + borrowedName, Source: memqldsl.SourcePack}
 	own := &Automation{Name: "zzOwnName", Source: memqldsl.SourceRuntime}
 	for _, order := range [][]*Automation{{engine, other, pack, own}, {own, pack, other, engine}} {
-		kept, left := engineNamesWin(order)
+		kept, left := engineNamesWin(order, nil)
 		if len(kept) != 2 || len(left) != 2 {
 			t.Fatalf("kept %d and left out %d, want the engine's and the unrelated one kept", len(kept), len(left))
 		}
@@ -234,7 +234,7 @@ func TestTheEnginesAutomationKeepsItsNameWhateverTheOrder(t *testing.T) {
 		}
 	}
 	a, b := &Automation{Name: "zzShared", Source: memqldsl.SourceRuntime}, &Automation{Name: "zzShared", Source: memqldsl.SourcePack}
-	if kept, left := engineNamesWin([]*Automation{a, b}); len(kept) != 2 || len(left) != 0 {
+	if kept, left := engineNamesWin([]*Automation{a, b}, nil); len(kept) != 2 || len(left) != 0 {
 		t.Errorf("two automations of other layers sharing a name: kept %d, left out %d; want both kept", len(kept), len(left))
 	}
 }
@@ -274,5 +274,16 @@ func TestTheLoaderRecordsWhereAnAutomationCameFrom(t *testing.T) {
 				t.Fatalf("Snapshot: source %v, error %v; want %s", snap, err, a.Source)
 			}
 		}
+	}
+}
+
+// An engine automation that failed to compile -- which a node loads past only
+// under the break-glass -- still owns its name: the copy of another source is
+// not kept in its place.
+func TestAnEngineNameIsTheEnginesEvenWhenItsAutomationDidNotCompile(t *testing.T) {
+	other := &Automation{Name: borrowedName, Origin: "unified:" + borrowedDomain + "/automations.memql:" + borrowedName, Source: memqldsl.SourceRuntime}
+	kept, left := engineNamesWin([]*Automation{other}, map[string]struct{}{borrowedName: {}})
+	if len(kept) != 0 || len(left) != 1 || left[0] != other {
+		t.Fatalf("kept %v, left out %v: the runtime copy took a name the engine declares", kept, left)
 	}
 }

@@ -318,7 +318,7 @@ func (i *Integration) handleLearnFromRun(ctx context.Context, args map[string]an
 		// hint; neither a caller-supplied automation nor an arbitrary system
 		// actor gains a cross-owner lookup through this builtin.
 		owner := strings.TrimSpace(argString(args, "ownerUserId"))
-		if !auth.OriginFromContext(ctx).IsInternal() || ac.UserId != "system:automation:learnFromSucceededRun" || owner == "" {
+		if !auth.OriginFromContext(ctx).IsInternal() || !auth.IsEngineAutomationActor(ac, "learnFromSucceededRun") || owner == "" {
 			return nil, fmt.Errorf("procedure.learnFromRun: only the trusted completion trigger may supply an owner")
 		}
 		ctx = ownerActor(ctx, owner)

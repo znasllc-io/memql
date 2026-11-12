@@ -362,15 +362,20 @@ func TestMaintenanceActorIsNotMintableFromARequest(t *testing.T) {
 
 // TestTheMaintenanceListIsNeverAskedWithANameAlone is the source gate on the
 // rule above: the maintenance principal follows an automation's ORIGIN, so
-// nothing in the tree may ask the list with a name alone.
+// nothing in the tree may ask the list with a name alone -- nor with an origin
+// it did not read from the automation.
 //
 // Three things are scanned, and each closes a way the rule could come back
 // with every behavioural test still green:
 //
-//  1. Every call, anywhere in the repository, to auth.MaintenanceActor or
-//     auth.IsMaintenanceAutomation passes an origin first: an
-//     AutomationOrigin* constant, or maintenanceOrigin(automation), which
-//     reads the origin the tree loader recorded.
+//  1. Every call, anywhere in the repository, that asks with an origin
+//     (maintenanceAsks) states the origin truthfully (maintenanceAskOffence):
+//     read from the loaded automation's own source through
+//     maintenanceOrigin(a), or the engine's origin stated as a constant for a
+//     name fixed at compile time -- the engine's own Go acting as one of its
+//     automations. A constant engine origin with a name that is not a
+//     constant, a conversion of anything to the origin type, and any other
+//     expression are offences.
 //  2. In component/auth, the list itself is read only by the functions that
 //     either take an origin or do not grant: a new reader of the map is a new
 //     way to be granted, and it has to be argued here.
@@ -378,9 +383,9 @@ func TestMaintenanceActorIsNotMintableFromARequest(t *testing.T) {
 //     name: the origin can only come from the automation.
 func TestTheMaintenanceListIsNeverAskedWithANameAlone(t *testing.T) {
 	root := filepath.Join("..", "..")
-	asks := map[string]bool{"MaintenanceActor": true, "IsMaintenanceAutomation": true}
 	var offenders []string
 	calls := 0
+	consts := map[string]map[string]bool{}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -398,42 +403,16 @@ func TestTheMaintenanceListIsNeverAskedWithANameAlone(t *testing.T) {
 		if readErr != nil {
 			return readErr
 		}
-		if !strings.Contains(string(body), "MaintenanceActor(") && !strings.Contains(string(body), "IsMaintenanceAutomation(") {
+		if !mentionsMaintenanceAsk(string(body)) {
 			return nil
 		}
-		fset := token.NewFileSet()
-		file, parseErr := goparser.ParseFile(fset, path, body, goparser.SkipObjectResolution)
-		if parseErr != nil {
-			return fmt.Errorf("parse %s: %w", path, parseErr)
+		dir := filepath.Dir(path)
+		if consts[dir] == nil {
+			consts[dir] = packageStringConsts(t, dir)
 		}
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			name := ""
-			switch fn := call.Fun.(type) {
-			case *ast.SelectorExpr:
-				name = fn.Sel.Name
-			case *ast.Ident:
-				name = fn.Name
-			}
-			if !asks[name] {
-				return true
-			}
-			calls++
-			// The one pass-through: MaintenanceActor hands IsMaintenanceAutomation
-			// the origin it was itself given.
-			passThrough := false
-			if id, ok := call.Args[0].(*ast.Ident); ok && id.Name == "origin" &&
-				filepath.ToSlash(path) == "../../component/auth/maintenance_actor.go" {
-				passThrough = true
-			}
-			if len(call.Args) != 2 || (!passThrough && !isOriginExpr(call.Args[0])) {
-				offenders = append(offenders, fmt.Sprintf("%s:%d %s", path, fset.Position(call.Pos()).Line, name))
-			}
-			return true
-		})
+		found, offences := maintenanceAskOffences(path, body, consts[dir])
+		calls += found
+		offenders = append(offenders, offences...)
 		return nil
 	})
 	if err != nil {
@@ -445,7 +424,7 @@ func TestTheMaintenanceListIsNeverAskedWithANameAlone(t *testing.T) {
 		t.Fatalf("found only %d calls to the maintenance list, expected 20+ -- the scan is broken, not the tree", calls)
 	}
 	if len(offenders) > 0 {
-		t.Errorf("the maintenance list is asked without an origin (want auth.AutomationOrigin* or maintenanceOrigin(a) first):\n  %s",
+		t.Errorf("the maintenance list is asked with an origin that is not read from the automation:\n  %s",
 			strings.Join(offenders, "\n  "))
 	}
 
@@ -453,6 +432,7 @@ func TestTheMaintenanceListIsNeverAskedWithANameAlone(t *testing.T) {
 	readers := map[string]bool{
 		"IsMaintenanceAutomation":     true, // takes the origin; MaintenanceActor goes through it
 		"IsMaintenancePrincipal":      true, // answers from a principal the executor granted by origin
+		"maintenancePrincipalOf":      true, // the same answer, read off the mark only MaintenanceActor sets
 		"MaintenanceAutomationNames":  true, // names, for gates and messages; grants nothing
 		"MaintenanceAutomationReason": true, // a reason string; grants nothing
 	}
@@ -525,24 +505,180 @@ func TestTheMaintenanceListIsNeverAskedWithANameAlone(t *testing.T) {
 	}
 }
 
-// isOriginExpr reports whether e states an automation's origin: an
-// AutomationOrigin* constant, a conversion to AutomationOrigin, or
-// maintenanceOrigin(...).
-func isOriginExpr(e ast.Expr) bool {
-	switch x := e.(type) {
-	case *ast.SelectorExpr:
-		return strings.HasPrefix(x.Sel.Name, "AutomationOrigin")
-	case *ast.Ident:
-		return strings.HasPrefix(x.Name, "AutomationOrigin")
-	case *ast.CallExpr:
-		switch fn := x.Fun.(type) {
-		case *ast.Ident:
-			return fn.Name == "maintenanceOrigin" || fn.Name == "AutomationOrigin"
-		case *ast.SelectorExpr:
-			return fn.Sel.Name == "AutomationOrigin"
+// maintenanceAsks are the functions asked with an automation's origin first.
+var maintenanceAsks = map[string]bool{"MaintenanceActor": true, "IsMaintenanceAutomation": true, "AutomationActor": true}
+
+func mentionsMaintenanceAsk(body string) bool {
+	for name := range maintenanceAsks {
+		if strings.Contains(body, name+"(") {
+			return true
 		}
 	}
 	return false
+}
+
+// maintenanceAskOffences parses one Go file and answers how many asks it makes
+// and which of them offend (maintenanceAskOffence). consts are the package's
+// top-level string constants.
+func maintenanceAskOffences(path string, body []byte, consts map[string]bool) (int, []string) {
+	fset := token.NewFileSet()
+	file, err := goparser.ParseFile(fset, path, body, goparser.SkipObjectResolution)
+	if err != nil {
+		return 0, []string{fmt.Sprintf("%s: does not parse: %v", path, err)}
+	}
+	calls := 0
+	var out []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		name := ""
+		switch fn := call.Fun.(type) {
+		case *ast.SelectorExpr:
+			name = fn.Sel.Name
+		case *ast.Ident:
+			name = fn.Name
+		}
+		if !maintenanceAsks[name] {
+			return true
+		}
+		calls++
+		if why := maintenanceAskOffence(path, call, consts); why != "" {
+			out = append(out, fmt.Sprintf("%s:%d %s: %s", path, fset.Position(call.Pos()).Line, name, why))
+		}
+		return true
+	})
+	return calls, out
+}
+
+// maintenanceAskOffence says what is wrong with one ask, or "".
+func maintenanceAskOffence(path string, call *ast.CallExpr, consts map[string]bool) string {
+	if len(call.Args) != 2 {
+		return "does not pass an origin and a name"
+	}
+	origin, name := call.Args[0], call.Args[1]
+	// MaintenanceActor hands IsMaintenanceAutomation the origin it was itself
+	// given.
+	if id, ok := origin.(*ast.Ident); ok && id.Name == "origin" &&
+		filepath.ToSlash(filepath.Clean(path)) == "../../component/auth/maintenance_actor.go" {
+		return ""
+	}
+	// A test builds principals on purpose, to see what each handler does
+	// with them; the rule is the production code's. A test may state either
+	// constant origin for any name, and the zero origin as a literal.
+	test := strings.HasSuffix(path, "_test.go")
+	switch x := origin.(type) {
+	case *ast.CallExpr:
+		if fn, ok := x.Fun.(*ast.Ident); ok && fn.Name == "maintenanceOrigin" && len(x.Args) == 1 {
+			return "" // read from the loaded automation's own source
+		}
+		if lit, ok := singleArg(x).(*ast.BasicLit); test && ok && lit.Kind == token.INT {
+			return ""
+		}
+		return "the origin is not read from the loaded automation (only maintenanceOrigin(a) reads it); a conversion or a call is not an origin"
+	case *ast.SelectorExpr, *ast.Ident:
+		constant := ""
+		if sel, ok := x.(*ast.SelectorExpr); ok {
+			constant = sel.Sel.Name
+		} else {
+			constant = x.(*ast.Ident).Name
+		}
+		switch constant {
+		case "AutomationOriginOther":
+			return "" // grants nothing, whatever the name
+		case "AutomationOriginEngine":
+			if test || isCompileTimeName(name, consts) {
+				return "" // the engine's own Go acting as one of its automations
+			}
+			return "the engine's origin is stated as a constant for a name that is not one: a name read at run time must come with the origin read from its automation, maintenanceOrigin(a)"
+		}
+	}
+	return "the origin is neither maintenanceOrigin(a) nor an AutomationOrigin constant"
+}
+
+func singleArg(call *ast.CallExpr) ast.Expr {
+	if len(call.Args) != 1 {
+		return nil
+	}
+	return call.Args[0]
+}
+
+// isCompileTimeName reports whether e is a string fixed at compile time: a
+// literal, one of the package's string constants, or a sum of them.
+func isCompileTimeName(e ast.Expr, consts map[string]bool) bool {
+	switch x := e.(type) {
+	case *ast.BasicLit:
+		return x.Kind == token.STRING
+	case *ast.Ident:
+		return consts[x.Name]
+	case *ast.ParenExpr:
+		return isCompileTimeName(x.X, consts)
+	case *ast.BinaryExpr:
+		return x.Op == token.ADD && isCompileTimeName(x.X, consts) && isCompileTimeName(x.Y, consts)
+	}
+	return false
+}
+
+// packageStringConsts collects the names of the top-level constants declared
+// in dir's Go files.
+func packageStringConsts(t *testing.T, dir string) map[string]bool {
+	t.Helper()
+	out := map[string]bool{}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
+			continue
+		}
+		file, err := goparser.ParseFile(token.NewFileSet(), filepath.Join(dir, e.Name()), nil, goparser.SkipObjectResolution)
+		if err != nil {
+			continue
+		}
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				for _, n := range spec.(*ast.ValueSpec).Names {
+					out[n.Name] = true
+				}
+			}
+		}
+	}
+	return out
+}
+
+// TestTheSourceGateRefusesAnOriginNotReadFromTheAutomation shows the gate
+// failing on each form an untrue origin takes, and passing the true ones.
+func TestTheSourceGateRefusesAnOriginNotReadFromTheAutomation(t *testing.T) {
+	consts := map[string]bool{"listedSweep": true}
+	for src, wantOffence := range map[string]bool{
+		`auth.MaintenanceActor(auth.AutomationOriginEngine, a.Name)`:                 true,
+		`auth.MaintenanceActor(auth.AutomationOrigin(1), "sweep")`:                   true,
+		`auth.MaintenanceActor(auth.AutomationOrigin(a.Source), a.Name)`:             true,
+		`auth.MaintenanceActor(originOf(a), a.Name)`:                                 true,
+		`auth.MaintenanceActor(origin, a.Name)`:                                      true,
+		`auth.IsMaintenanceAutomation(auth.AutomationOriginEngine, name)`:            true,
+		`auth.AutomationActor(auth.AutomationOriginEngine, a.Name)`:                  true,
+		`auth.MaintenanceActor(auth.AutomationOriginEngine)`:                         true,
+		`auth.MaintenanceActor(maintenanceOrigin(a), a.Name)`:                        false,
+		`auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns")`: false,
+		`auth.MaintenanceActor(auth.AutomationOriginEngine, listedSweep)`:            false,
+		`auth.MaintenanceActor(auth.AutomationOriginOther, a.Name)`:                  false,
+	} {
+		body := []byte("package probe\n\nfunc probe() { _ = " + src + " }\n")
+		n, offences := maintenanceAskOffences("probe.go", body, consts)
+		if n != 1 {
+			t.Fatalf("%s: the scan found %d asks, want 1", src, n)
+		}
+		if got := len(offences) > 0; got != wantOffence {
+			t.Errorf("%s: offence=%v (%v), want %v", src, got, offences, wantOffence)
+		}
+	}
 }
 
 func firstParamIs(fn *ast.FuncDecl, typeName string) bool {

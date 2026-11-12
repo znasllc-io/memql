@@ -205,7 +205,7 @@ func personCtx(userId string) context.Context {
 // origin a tree-loaded automation runs under.
 func triggerCtx() context.Context {
 	return auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(),
-		&auth.AccessContext{UserId: "system:automation:learnFromSucceededRun", Synthetic: true}))
+		auth.AutomationActor(auth.AutomationOriginEngine, "learnFromSucceededRun")))
 }
 
 // TestTheCompletionTriggerLearnsAsTheRunsOwner is G10, closed the narrow way.
