@@ -233,24 +233,35 @@ func TestACallerWhoIsNotAClusterOwnerGetsAnAnswer(t *testing.T) {
 	storeID, site := servedStore(t)
 	read := storeSalesQueries(t)
 	answer := mustAsk(t, memberCtx(t, site, true), site, storeID, "7d")
-	if answer["storeId"] != storeID || answer["siteId"] != site || answer["destination"] != "production" {
-		t.Fatalf("answer = %v, want the store, the site and production", answer)
+	if answer["storeId"] != storeID || answer["siteId"] != site || answer["destination"] != "binding" {
+		t.Fatalf("answer = %v, want the store, the site and binding", answer)
 	}
 	if len(read()) == 0 {
 		t.Fatal("the answer read no store_sales_ table")
 	}
 }
 
-func TestASiteBoundOnlyThroughItsPreviewBindingIsAnsweredAsTesting(t *testing.T) {
-	storeID := newStore(t)
-	storeFrame(t, storeID, recordingFrame(nil))
-	previewOnly := siteFor(t, storeID, map[string]any{"binding": map[string]any{}, "previewBinding": map[string]any{"storeId": storeID}})
-	if got := mustAsk(t, ownerCtx(), previewOnly, storeID, "7d")["destination"]; got != "testing" {
-		t.Errorf("a store bound through the preview binding is answered as %v, want testing", got)
+// TestTheDestinationIsTheBindingThatNamesTheStore: destination is the name of
+// the site row's field that names the store asked for, binding or
+// previewBinding, or both when the two name the one store. The engine has no
+// word of its own for a site's two destinations; the page names them.
+func TestTheDestinationIsTheBindingThatNamesTheStore(t *testing.T) {
+	bound, preview := newStore(t), newStore(t)
+	storeFrame(t, bound, recordingFrame(nil))
+	storeFrame(t, preview, recordingFrame(nil))
+	twoStores := siteFor(t, bound, map[string]any{"previewBinding": map[string]any{"storeId": preview}})
+	for store, want := range map[string]string{bound: "binding", preview: "previewBinding"} {
+		if got := mustAsk(t, ownerCtx(), twoStores, store, "7d")["destination"]; got != want {
+			t.Errorf("a site whose bindings name two stores, asked for %s: destination %v, want %s", store, got, want)
+		}
 	}
-	both := siteFor(t, storeID, map[string]any{"previewBinding": map[string]any{"storeId": storeID}})
-	if got := mustAsk(t, ownerCtx(), both, storeID, "7d")["destination"]; got != "both" {
-		t.Errorf("a store both bindings name is answered as %v, want both", got)
+	oneStore := siteFor(t, bound, map[string]any{"previewBinding": map[string]any{"storeId": bound}})
+	if got := mustAsk(t, ownerCtx(), oneStore, bound, "7d")["destination"]; got != "both" {
+		t.Errorf("a site whose two bindings name one store: destination %v, want both", got)
+	}
+	previewOnly := siteFor(t, preview, map[string]any{"binding": map[string]any{}, "previewBinding": map[string]any{"storeId": preview}})
+	if got := mustAsk(t, ownerCtx(), previewOnly, preview, "7d")["destination"]; got != "previewBinding" {
+		t.Errorf("a site bound only through its preview binding: destination %v, want previewBinding", got)
 	}
 }
 
@@ -259,7 +270,7 @@ func TestASiteBoundUnderTheCanonicalFormOfTheStoreIdStillServesIt(t *testing.T) 
 	storeFrame(t, storeID, recordingFrame(nil))
 	canonical := "v1:shopify:store:" + storeID
 	boundCanonical := siteFor(t, canonical, nil)
-	if got := mustAsk(t, ownerCtx(), boundCanonical, storeID, "7d"); got["storeId"] != storeID || got["destination"] != "production" {
+	if got := mustAsk(t, ownerCtx(), boundCanonical, storeID, "7d"); got["storeId"] != storeID || got["destination"] != "binding" {
 		t.Errorf("a site bound canonically, asked bare, answered %v", got)
 	}
 	boundBare := siteFor(t, storeID, nil)
@@ -561,8 +572,8 @@ func TestAStoreTheWalkHasNotSeenYetIsAnsweredAsStarting(t *testing.T) {
 	storeID := newStore(t) // no store_sales_store row
 	site := siteFor(t, storeID, nil)
 	got := mustAsk(t, ownerCtx(), site, storeID, "7d")
-	if got["storeId"] != storeID || got["siteId"] != site || got["destination"] != "production" {
-		t.Errorf("ids = %v %v %v, want the store's, the site's and production", got["storeId"], got["siteId"], got["destination"])
+	if got["storeId"] != storeID || got["siteId"] != site || got["destination"] != "binding" {
+		t.Errorf("ids = %v %v %v, want the store's, the site's and binding", got["storeId"], got["siteId"], got["destination"])
 	}
 	if r := recordingOf(t, got); r["state"] != "starting" || r["blocked"] != false {
 		t.Errorf("recording = %v, want starting", r)

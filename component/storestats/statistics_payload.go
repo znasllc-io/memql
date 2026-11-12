@@ -24,8 +24,9 @@ import (
 // is null or empty until then.
 type Statistics struct {
 	StoreID, SiteID string
-	// Destination is "production", "testing" or "both": which of the site's
-	// bindings names the store.
+	// Destination is "binding", "previewBinding" or "both": the name of the
+	// field of the site's row that names the store, or both when the two
+	// name the one store.
 	Destination string
 
 	StoreName, StoreDomain, Currency *string

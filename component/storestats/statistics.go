@@ -89,11 +89,14 @@ const (
 	stateRebuilding = "rebuilding"
 )
 
-// The destinations, as the answer spells them.
+// The destinations, as the answer spells them: the name of the field of the
+// site's row that names the store asked for, or both when the two name the
+// one store. The engine has no word of its own for a site's two
+// destinations; the page names them.
 const (
-	destinationProduction = "production"
-	destinationTesting    = "testing"
-	destinationBoth       = "both"
+	destinationBinding        = "binding"
+	destinationPreviewBinding = "previewBinding"
+	destinationBoth           = "both"
 )
 
 // requirementJudge is what the handler asks the engine of the caller: the
@@ -107,7 +110,7 @@ type requirementJudge interface {
 var salesRequirement = memql.CapabilityRequirement{Verb: auth.VerbExecute, Resource: salesPart}
 
 type statisticsRequest struct {
-	SiteID, StoreID, Destination string // StoreID bare; Destination one of production, testing, both
+	SiteID, StoreID, Destination string // StoreID bare; Destination one of binding, previewBinding, both: the site field that names the store
 	Period                       statsperiod.Period
 }
 
@@ -188,9 +191,9 @@ func (i *Integration) servedRequest(ctx context.Context, siteID, storeID string)
 	case bound && preview:
 		req.Destination = destinationBoth
 	case bound:
-		req.Destination = destinationProduction
+		req.Destination = destinationBinding
 	case preview:
-		req.Destination = destinationTesting
+		req.Destination = destinationPreviewBinding
 	default:
 		return statisticsRequest{}, false
 	}
