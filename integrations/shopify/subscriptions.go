@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -471,7 +472,15 @@ func (c *Connector) recordStoreHealthKeys(ctx context.Context, storeID string, s
 	}
 	keys = append(keys, drop...)
 	sort.Strings(keys)
-	return fmt.Errorf("shopify: the row of store %q kept changing under %d writes of its health key %q; nothing was written", storeID, maxHealthKeyAttempts, strings.Join(keys, ", "))
+	named := "key"
+	if len(keys) > 1 {
+		named = "keys"
+	}
+	quoted := make([]string, len(keys))
+	for i, k := range keys {
+		quoted[i] = strconv.Quote(k)
+	}
+	return fmt.Errorf("shopify: the row of store %q kept changing under %d writes of its health %s %s; nothing was written", storeID, maxHealthKeyAttempts, named, strings.Join(quoted, ", "))
 }
 
 // storeHealthForWrite reads a store's health fresh, with the version of the

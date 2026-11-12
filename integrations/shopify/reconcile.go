@@ -271,16 +271,14 @@ func uniqueSorted(in []string) []string {
 	return out
 }
 
-// reconcileStore sweeps one store's domain. An order sweep of a store that
-// still owes the read of every order once more is that read
-// (reconcileRefundDetail, refund_detail.go).
+// reconcileStore sweeps one store's domain. An order sweep is the ordinary
+// check and then, for a store that owes it, a piece of the read of every
+// order (reconcileOrders, refund_detail.go).
 func (c *Connector) reconcileStore(ctx context.Context, store Store, spec *generated.TypeSpec, since time.Time) (memqlsync.ReconcileReport, error) {
 	switch spec.Reconcile {
 	case generated.ReconcileUpdatedAt:
 		if spec.Concept == refundDetailConcept {
-			if owed, cursor, began := c.refundDetailOwed(ctx, store); owed {
-				return c.reconcileRefundDetail(ctx, store, spec, since, cursor, began)
-			}
+			return c.reconcileOrders(ctx, store, spec, since)
 		}
 		return c.reconcileByUpdatedAt(ctx, store, spec, since)
 	case generated.ReconcileFullRelist:
@@ -323,28 +321,52 @@ func (c *Connector) reconcileByUpdatedAt(ctx context.Context, store Store, spec 
 		// error before the origin reads anything else.
 		filter = "updated_at:>'" + since.UTC().Format(time.RFC3339) + "'"
 	}
-	report, _, cut, err := c.sweepListing(ctx, store, spec, filter, "", relistRowCap)
-	if cut {
+	swept, err := c.sweepListing(ctx, store, spec, filter, "", relistRowCap, false)
+	if err != nil {
+		return swept.report, err
+	}
+	if swept.cut || swept.stalled {
 		c.logger.Warn("shopify: updated_at sweep hit the row budget",
 			"store", store.ID, "concept", spec.Concept, "rows", relistRowCap)
 	}
-	return report, err
+	return swept.report, unwritten(swept.failed)
+}
+
+// listingSweep is how a sweepListing ended.
+type listingSweep struct {
+	report memqlsync.ReconcileReport
+	// next is the cursor to go on from: the one after the last page read,
+	// or, when the listing stopped at a page, the one that page was read
+	// from. "" when the listing ended.
+	next string
+	// cut: stopped at the row budget with more to read.
+	cut bool
+	// stalled: the origin answered an empty page and promised more.
+	stalled bool
+	// failed is the rows read that the mirror did not take.
+	failed int
 }
 
 // sweepListing pages spec's listing under filter from the cursor after ("" is
 // the listing's start), completes and heals each row, and stops after budget
-// rows. cut is true when it stopped there with more to read, and next is then
-// the cursor to go on from; a listing that promised more and answered an empty
-// page is cut where it stalled. err is a page or a child read that failed,
-// answered at once, or else the rows the mirror did not take (unwritten).
+// rows. A page or a child read that failed is the error, answered at once,
+// with next the cursor of the page that failed.
+//
+// stopAtLoss decides what a row the mirror did not take does. Without it (the
+// ordinary sweep) every other row is still healed and the listing goes on;
+// the caller answers the count (unwritten). With it (the read of every order)
+// the listing stops at the end of that row's page, and next is the cursor
+// that page was read from: every page before it was written whole, so a
+// cursor kept there loses none of them, and the next try reads that page
+// again and no more.
 //
 // The last page asks for no more than the budget has left, so a listing is
 // cut at its budget exactly and the cursor names the first row not read.
-func (c *Connector) sweepListing(ctx context.Context, store Store, spec *generated.TypeSpec, filter, after string, budget int) (report memqlsync.ReconcileReport, next string, cut bool, err error) {
+func (c *Connector) sweepListing(ctx context.Context, store Store, spec *generated.TypeSpec, filter, after string, budget int, stopAtLoss bool) (listingSweep, error) {
+	var out listingSweep
 	if spec.ListQuery == "" || spec.ListOp == "" {
-		return report, "", false, nil
+		return out, nil
 	}
-	failed := 0
 	for rows := 0; rows < budget; {
 		first := c.pageSizeFor(store, spec)
 		if left := budget - rows; left < first {
@@ -361,33 +383,43 @@ func (c *Connector) sweepListing(ctx context.Context, store Store, spec *generat
 		readAt := c.now()
 		nodes, end, hasNext, err := c.listPage(ctx, store, spec, vars)
 		if err != nil {
-			return report, after, false, err
+			out.next = after
+			return out, err
 		}
 		rows += len(nodes)
 		if len(nodes) == 0 && hasNext {
 			// A page with nothing on it and more promised: the origin is
 			// not advancing, and neither should this loop.
-			return report, after, true, unwritten(failed)
+			out.next, out.stalled = after, true
+			return out, nil
 		}
+		lost := 0
 		for _, obj := range nodes {
-			report.Checked++
+			out.report.Checked++
 			if err := c.completeChildren(ctx, store, spec, obj); err != nil {
-				return report, after, false, err
+				out.next = after
+				return out, err
 			}
 			writes := mapObject(spec, store.ID, obj, "", readAt)
-			healed, lost := c.heal(ctx, writes)
-			failed += lost
+			healed, failed := c.heal(ctx, writes)
+			lost += failed
 			if healed > 0 {
-				report.Drifted++
-				report.Healed++
+				out.report.Drifted++
+				out.report.Healed++
 			}
 		}
+		out.failed += lost
+		if lost > 0 && stopAtLoss {
+			out.next = after
+			return out, nil
+		}
 		if !hasNext || end == "" {
-			return report, "", false, unwritten(failed)
+			return out, nil
 		}
 		after = end
 	}
-	return report, after, true, unwritten(failed)
+	out.next, out.cut = after, true
+	return out, nil
 }
 
 // unwritten is the failure of a sweep or a re-list that read rows the mirror
@@ -611,8 +643,13 @@ func (c *Connector) listPage(ctx context.Context, store Store, spec *generated.T
 			first, _ := vars["first"].(int)
 			next := shrinkPage(first, cost, limit)
 			if next < first && shrinks < maxPageShrinks {
+				if first == c.pageSizeFor(store, spec) {
+					// Only a page asked at the domain's own size teaches
+					// it one: a page capped smaller (sweepListing's last,
+					// at what its budget had left) is shrunk for itself.
+					c.pageSizes.Store(pageSizeKey(store, spec), next)
+				}
 				vars["first"] = next
-				c.pageSizes.Store(pageSizeKey(store, spec), next)
 				c.logger.Info("shopify: page shrunk to fit the query cost ceiling",
 					"store", store.ID, "concept", spec.Concept, "from", first, "to", next, "cost", cost, "limit", limit)
 				continue

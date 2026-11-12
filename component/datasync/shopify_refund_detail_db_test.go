@@ -348,11 +348,123 @@ func TestARefundMirroredBeforeItsDetailGetsItAtTheNextSweep(t *testing.T) {
 			lists = append(lists, req)
 		}
 	}
-	if len(lists) != 2 {
-		t.Fatalf("the two sweeps listed the orders %d times, want twice", len(lists))
+	if len(lists) != 3 {
+		t.Fatalf("the two sweeps listed the orders %d times, want the check and the read, then the check alone", len(lists))
 	}
-	if q, want := lists[1].Variables["query"], "updated_at:>'"+read.UTC().Format(time.RFC3339)+"'"; q != want {
+	if q, want := lists[0].Variables["query"], "updated_at:>'"+r.at.UTC().Format(time.RFC3339)+"'"; q != want {
+		t.Errorf("the first sweep's check was sent %v, want only what changed, %q", q, want)
+	}
+	if q, present := lists[1].Variables["query"]; present {
+		t.Errorf("the read was sent the filter %v, want none", q)
+	}
+	if q, want := lists[2].Variables["query"], "updated_at:>'"+read.UTC().Format(time.RFC3339)+"'"; q != want {
 		t.Errorf("the sweep after the read was sent %v, want only what changed, %q", q, want)
 	}
 	r.requireDetail(s)
+}
+
+// listOrders answers the order listing: what changed since a watermark with
+// nothing, and the whole listing with these orders.
+func (r *holdRig) listOrders(updatedAt string, stores ...refundStore) {
+	r.origin.replyWith("ShopifyListOrder", func(vars map[string]any) any {
+		if q, _ := vars["query"].(string); q != "" {
+			return originListPage("orders", false, "")
+		}
+		nodes := make([]map[string]any, 0, len(stores))
+		for _, s := range stores {
+			nodes = append(nodes, s.node(updatedAt))
+		}
+		return originListPage("orders", false, "", nodes...)
+	})
+}
+
+// sweepFrom runs a sweep of orders at `at` from the watermark since.
+func (r *holdRig) sweepFrom(at, since time.Time) {
+	r.t.Helper()
+	r.clock = func() time.Time { return at }
+	if _, err := r.conn.ReconcilePartition(context.Background(), r.storeID, generated.ConceptID("order"), since); err != nil {
+		r.t.Fatalf("the sweep of orders at %s: %v", at, err)
+	}
+}
+
+// rowVersions is how many versions the mirror holds of a row of a concept.
+func (r *holdRig) rowVersions(concept, gid string) int {
+	r.t.Helper()
+	var n int
+	if err := r.db.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM "MemoryNodes" WHERE concept = $1 AND payload->>'gid' = $2 AND payload->>'storeId' = $3`,
+		generated.ConceptID(concept), gid, r.storeID).Scan(&n); err != nil {
+		r.t.Fatalf("count the versions of %s: %v", gid, err)
+	}
+	return n
+}
+
+// A ROW THE READ FINDS UNCHANGED IS NOT WRITTEN AGAIN. The order and its
+// refunds were recorded by the order's own fetch, with their detail; the read
+// lists the same order, and the real write path skips every row of it.
+func TestARowTheReadFindsUnchangedIsNotWrittenAgain(t *testing.T) {
+	r := newHoldRig(t)
+	if r == nil {
+		return
+	}
+	const updated = "2026-11-10T09:00:00Z"
+	s := newRefundStore(6)
+	r.clock = func() time.Time { return r.at }
+	r.origin.reply("ShopifyFetchOrder", map[string]any{"node": func() map[string]any {
+		n := s.node(updated)
+		n["__typename"] = "Order"
+		return n
+	}()})
+	if res := r.dispatch(r.stage("fetched", "orders/updated", s.order)); res.Applied == 0 {
+		t.Fatalf("the fetch of the order applied nothing: %+v", res)
+	}
+	r.requireDetail(s)
+	gids := map[string]string{s.order: "order", s.lineRefund: "refund", s.shippingRefund: "refund", s.amountRefund: "refund"}
+	before := map[string]int{}
+	for gid, concept := range gids {
+		before[gid] = r.rowVersions(concept, gid)
+	}
+
+	r.listOrders(updated, s)
+	r.sweepFrom(r.at.Add(time.Minute), r.at)
+	if got := r.store().Health["refundDetailFrom"]; got == nil {
+		t.Fatal("the read did not end, so this test proves nothing")
+	}
+	for gid, concept := range gids {
+		if got := r.rowVersions(concept, gid); got != before[gid] {
+			t.Errorf("%s %s has %d versions after the read, want the %d it had: the read wrote a row it found unchanged", concept, gid, got, before[gid])
+		}
+	}
+}
+
+// RULING B: THE STAMP DOES NOT OUTLIVE THE ROWS IT DESCRIBES. A store whose
+// read ended has its orders backfilled again (a purge and a reconnect, or an
+// operator's backfill), and the export writes an order the mirror did not
+// hold, with no refund detail. The next sweep reads every order once more.
+func TestAStampedStoreWhoseOrderBackfillCompletesLaterGetsTheReadAgain(t *testing.T) {
+	r := newHoldRig(t)
+	if r == nil {
+		return
+	}
+	const updated = "2026-11-10T09:00:00Z"
+	r.listOrders(updated)
+	r.sweepFrom(r.at, r.at.Add(-time.Hour))
+	first, _ := r.store().Health["refundDetailFrom"].(string)
+	if first == "" {
+		t.Fatal("the store's first read was not stamped")
+	}
+
+	s := newRefundStore(7)
+	r.backfillOrders(s, updated, r.at.Add(time.Hour), 7)
+	if row := r.refundRow(s.lineRefund); row == nil || row["refundLineItems"] != nil {
+		t.Fatalf("the backfill's refund = %v, want one without its lines", row)
+	}
+
+	r.listOrders(updated, s)
+	later := r.at.Add(2 * time.Hour)
+	r.sweepFrom(later, r.at)
+	r.requireDetail(s)
+	if got := r.store().Health["refundDetailFrom"]; got != later.UTC().Format(time.RFC3339) {
+		t.Errorf("the store's health refundDetailFrom = %v, want the new read's start %s (the first was %s)", got, later.UTC().Format(time.RFC3339), first)
+	}
 }
