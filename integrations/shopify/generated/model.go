@@ -48,7 +48,19 @@ type FieldSpec struct {
 	// field that is not an object or a list of objects, and for an object
 	// that keeps none.
 	GidsInside []string
+	// Page is the page an inlined connection (KindInlineList) is read with,
+	// from cmd/shopifyschema/allowlist.yaml, its one owner: a list holding a
+	// full page may hold more than was read. Zero for every other field.
+	Page int
+	// Holds is what an inlined connection keeps of each node, one entry a
+	// field the allowlist names. Nil for every other field.
+	Holds []HeldField
 }
+
+// HeldField is one field an inlined connection keeps of each node: its name,
+// its kind (KindScalar, KindEnum, KindObject for a money object, KindGid for a
+// reference, kept as {id}) and its Admin type.
+type HeldField struct{ Name, Kind, AdminType string }
 
 // Field kinds.
 const (
@@ -60,6 +72,11 @@ const (
 	KindRefs       = "refs"
 	KindMetafields = "metafields"
 	KindGid        = "gid"
+	// KindInlineList is a connection carried in the row as a []object, each
+	// element holding only the fields its Holds name. A document that did not
+	// select it (a bulk line) leaves it out of the write: not read is not
+	// empty.
+	KindInlineList = "inlineList"
 )
 
 // ChildSpec is a data-carrying connection materialised as its own concept.
@@ -4619,8 +4636,11 @@ query ShopifyFetchOrder($id: ID!) {
         duties { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } originalDuty { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
         legacyResourceId
         note
+        orderAdjustments(first: 10) { nodes { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } reason } }
         order { id }
         processedAt
+        refundLineItems(first: 50) { nodes { lineItem { id } quantity subtotalSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } totalTaxSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
+        refundShippingLines(first: 10) { nodes { subtotalAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
         createdAt
         return { id }
         staffMember { id }
@@ -4873,8 +4893,11 @@ query ShopifyListOrder($first: Int!, $after: String, $query: String) {
         duties { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } originalDuty { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
         legacyResourceId
         note
+        orderAdjustments(first: 10) { nodes { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } reason } }
         order { id }
         processedAt
+        refundLineItems(first: 50) { nodes { lineItem { id } quantity subtotalSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } totalTaxSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
+        refundShippingLines(first: 10) { nodes { subtotalAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
         createdAt
         return { id }
         staffMember { id }
@@ -6600,8 +6623,11 @@ query ShopifyFetchQuantityRule($id: ID!) {
 			{Name: "duties", GraphQL: "duties", Kind: "objectList", DSLType: "[]object", Extract: "duties", AdminType: "RefundDuty"},
 			{Name: "legacyResourceId", GraphQL: "legacyResourceId", Kind: "scalar", DSLType: "string", Extract: "legacyResourceId", AdminType: "UnsignedInt64"},
 			{Name: "note", GraphQL: "note", Kind: "scalar", DSLType: "string", Extract: "note", AdminType: "String"},
+			{Name: "orderAdjustments", GraphQL: "orderAdjustments", Kind: "inlineList", DSLType: "[]object", Extract: "orderAdjustments.nodes[]", AdminType: "OrderAdjustment", Page: 10, Holds: []HeldField{{Name: "amountSet", Kind: "object", AdminType: "MoneyBag"}, {Name: "taxAmountSet", Kind: "object", AdminType: "MoneyBag"}, {Name: "reason", Kind: "enum", AdminType: "OrderAdjustmentDiscrepancyReason"}}},
 			{Name: "orderGid", GraphQL: "order", Kind: "gid", DSLType: "string", Extract: "order.id", AdminType: "Order"},
 			{Name: "processedAt", GraphQL: "processedAt", Kind: "scalar", DSLType: "string", Extract: "processedAt", AdminType: "DateTime"},
+			{Name: "refundLineItems", GraphQL: "refundLineItems", Kind: "inlineList", DSLType: "[]object", Extract: "refundLineItems.nodes[]", AdminType: "RefundLineItem", GidsInside: []string{"LineItem"}, Page: 50, Holds: []HeldField{{Name: "lineItem", Kind: "gid", AdminType: "LineItem"}, {Name: "quantity", Kind: "scalar", AdminType: "Int"}, {Name: "subtotalSet", Kind: "object", AdminType: "MoneyBag"}, {Name: "totalTaxSet", Kind: "object", AdminType: "MoneyBag"}}},
+			{Name: "refundShippingLines", GraphQL: "refundShippingLines", Kind: "inlineList", DSLType: "[]object", Extract: "refundShippingLines.nodes[]", AdminType: "RefundShippingLine", Page: 10, Holds: []HeldField{{Name: "subtotalAmountSet", Kind: "object", AdminType: "MoneyBag"}, {Name: "taxAmountSet", Kind: "object", AdminType: "MoneyBag"}}},
 			{Name: "sourceCreatedAt", GraphQL: "createdAt", Kind: "scalar", DSLType: "string", Extract: "createdAt", AdminType: "DateTime"},
 			{Name: "sourceReturnGid", GraphQL: "return", Kind: "gid", DSLType: "string", Extract: "return.id", AdminType: "Return"},
 			{Name: "staffMemberGid", GraphQL: "staffMember", Kind: "gid", DSLType: "string", Extract: "staffMember.id", AdminType: "StaffMember"},
@@ -6623,8 +6649,11 @@ query ShopifyFetchRefund($id: ID!) {
       duties { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } originalDuty { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
       legacyResourceId
       note
+      orderAdjustments(first: 10) { nodes { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } reason } }
       order { id }
       processedAt
+      refundLineItems(first: 50) { nodes { lineItem { id } quantity subtotalSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } totalTaxSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
+      refundShippingLines(first: 10) { nodes { subtotalAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
       createdAt
       return { id }
       staffMember { id }

@@ -208,8 +208,11 @@ query ShopifyFetchOrder($id: ID!) {
         duties { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } originalDuty { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
         legacyResourceId
         note
+        orderAdjustments(first: 10) { nodes { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } reason } }
         order { id }
         processedAt
+        refundLineItems(first: 50) { nodes { lineItem { id } quantity subtotalSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } totalTaxSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
+        refundShippingLines(first: 10) { nodes { subtotalAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
         createdAt
         return { id }
         staffMember { id }
@@ -462,8 +465,11 @@ query ShopifyListOrder($first: Int!, $after: String, $query: String) {
         duties { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } originalDuty { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
         legacyResourceId
         note
+        orderAdjustments(first: 10) { nodes { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } reason } }
         order { id }
         processedAt
+        refundLineItems(first: 50) { nodes { lineItem { id } quantity subtotalSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } totalTaxSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
+        refundShippingLines(first: 10) { nodes { subtotalAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
         createdAt
         return { id }
         staffMember { id }

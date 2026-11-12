@@ -265,7 +265,8 @@ func (f *fakeAdmin) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 	}
 	envelope := map[string]any{
 		"extensions": map[string]any{"cost": map[string]any{
-			"actualQueryCost": 10,
+			"requestedQueryCost": 12,
+			"actualQueryCost":    10,
 			"throttleStatus": map[string]any{
 				"maximumAvailable":   throttle.MaximumAvailable,
 				"currentlyAvailable": throttle.CurrentlyAvailable,

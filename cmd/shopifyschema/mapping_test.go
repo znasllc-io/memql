@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -541,5 +543,175 @@ func TestAListedReconcileNeedsAQuery(t *testing.T) {
 	}}
 	if err := al.validate(); err == nil || !strings.Contains(err.Error(), "query") {
 		t.Fatalf("a full re-list with nothing to page was accepted: %v", err)
+	}
+}
+
+// --- inlined connections ------------------------------------------------
+
+// recordedPlanWith plans an allowlist of the test's own against the recorded
+// fixture, so an inline rule is tested on the types Shopify really ships.
+func recordedPlanWith(t *testing.T, types ...Entry) ([]*TypePlan, error) {
+	t.Helper()
+	schema, err := ReadSchemaFile(filepath.Join(repoRoot(), "cmd", "shopifyschema", "testdata", "schema-2026-07.json"))
+	if err != nil {
+		t.Fatalf("recorded schema: %v", err)
+	}
+	al := &Allowlist{APIVersion: "2026-07", Types: types}
+	if err := al.validate(); err != nil {
+		return nil, err
+	}
+	return NewPlanner(schema, al).Plan()
+}
+
+// recordedField is one field of the recorded plan of a type, by its GraphQL
+// name.
+func recordedField(t *testing.T, plans []*TypePlan, typeName, graphql string) FieldPlan {
+	t.Helper()
+	for _, p := range plans {
+		if p.GraphQLType != typeName {
+			continue
+		}
+		if f, ok := fieldByGraphQLName(p, graphql); ok {
+			return f
+		}
+		t.Fatalf("%s has no field %s (have %v)", typeName, graphql, fieldNames(p))
+	}
+	t.Fatalf("no plan for %s", typeName)
+	return FieldPlan{}
+}
+
+// A refund's shipping lines, selected whole, would carry the order's shipping
+// line and the phone number at the buyer's delivery address into every refund
+// row. Inlined, they carry the two amounts the allowlist names and nothing
+// else.
+func TestAnInlinedConnectionCarriesOnlyTheFieldsItNames(t *testing.T) {
+	_, plans := recordedPlans(t)
+	f := recordedField(t, plans, "Refund", "refundShippingLines")
+	money := "{ shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }"
+	want := FieldPlan{
+		Kind: KindInlineList, DSLType: "[]object", OmitFromBulk: true, Page: 10,
+		Extract:   "refundShippingLines.nodes[]",
+		Selection: "refundShippingLines(first: 10) { nodes { subtotalAmountSet " + money + " taxAmountSet " + money + " } }",
+	}
+	if f.Kind != want.Kind || f.DSLType != want.DSLType || f.Required || !f.OmitFromBulk || f.Page != want.Page || f.Extract != want.Extract {
+		t.Errorf("refundShippingLines planned as kind %q type %q required %t omitFromBulk %t page %d extract %q, want %q %q false true %d %q",
+			f.Kind, f.DSLType, f.Required, f.OmitFromBulk, f.Page, f.Extract, want.Kind, want.DSLType, want.Page, want.Extract)
+	}
+	if f.Selection != want.Selection {
+		t.Errorf("selection\n  %s\nwant\n  %s", f.Selection, want.Selection)
+	}
+	for _, never := range []string{"shippingLine", "phone"} {
+		if strings.Contains(f.Selection, never+" ") || strings.Contains(f.Selection, never+"{") {
+			t.Errorf("the inlined selection carries %s: %s", never, f.Selection)
+		}
+	}
+}
+
+// What an inlined connection holds is said in the plan, so the erasure can
+// check each held field without reading the selection.
+func TestAnInlinedConnectionSaysWhatItHolds(t *testing.T) {
+	_, plans := recordedPlans(t)
+	f := recordedField(t, plans, "Refund", "refundLineItems")
+	if f.Kind != KindInlineList || f.AdminType != "RefundLineItem" || f.Page != 50 {
+		t.Errorf("refundLineItems is kind %q of %q, page %d; want %q of RefundLineItem, page 50", f.Kind, f.AdminType, f.Page, KindInlineList)
+	}
+	if got := strings.Join(f.GidsInside, ","); got != "LineItem" {
+		t.Errorf("refundLineItems keeps the GIDs of %q, want LineItem", got)
+	}
+	want := []HeldField{
+		{Name: "lineItem", Kind: KindGid, AdminType: "LineItem"},
+		{Name: "quantity", Kind: KindScalar, AdminType: "Int"},
+		{Name: "subtotalSet", Kind: KindObject, AdminType: "MoneyBag"},
+		{Name: "totalTaxSet", Kind: KindObject, AdminType: "MoneyBag"},
+	}
+	if fmt.Sprint(f.Holds) != fmt.Sprint(want) {
+		t.Errorf("refundLineItems holds %+v, want %+v", f.Holds, want)
+	}
+	if !strings.Contains(f.Selection, "lineItem { id }") {
+		t.Errorf("the line a refund line names is not kept as a reference: %s", f.Selection)
+	}
+	adj := recordedField(t, plans, "Refund", "orderAdjustments")
+	if got := fmt.Sprint(adj.Holds); got != fmt.Sprint([]HeldField{
+		{Name: "amountSet", Kind: KindObject, AdminType: "MoneyBag"},
+		{Name: "taxAmountSet", Kind: KindObject, AdminType: "MoneyBag"},
+		{Name: "reason", Kind: KindEnum, AdminType: "OrderAdjustmentDiscrepancyReason"},
+	}) {
+		t.Errorf("orderAdjustments holds %s", got)
+	}
+	if adj.GidsInside != nil {
+		t.Errorf("orderAdjustments says it keeps the GIDs of %v", adj.GidsInside)
+	}
+}
+
+// What a person typed is never inlined: a shipping line (an object that
+// holds the phone at the delivery address) and a string are both refused,
+// naming the entry, the connection and the field.
+func TestAnInlinedFieldThatIsTextOrAnObjectIsRefused(t *testing.T) {
+	for _, tc := range []struct{ connection, field string }{
+		{"refundShippingLines", "shippingLine"},
+		{"transactions", "gateway"},
+	} {
+		_, err := recordedPlanWith(t, Entry{Type: "Refund", Concept: "refund", Reconcile: ReconcileNone,
+			Inline: []Inline{{Connection: tc.connection, Page: 10, Fields: []string{tc.field}}}})
+		if err == nil {
+			t.Errorf("inline %s with %s was accepted", tc.connection, tc.field)
+			continue
+		}
+		for _, want := range []string{"Refund", tc.connection, tc.field, "nothing a person typed"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q does not name %s", err, want)
+			}
+		}
+	}
+}
+
+func TestAnInlineWithNoFieldsIsRefused(t *testing.T) {
+	_, err := recordedPlanWith(t, Entry{Type: "Refund", Concept: "refund", Reconcile: ReconcileNone,
+		Inline: []Inline{{Connection: "refundShippingLines", Page: 10}}})
+	if err == nil || !strings.Contains(err.Error(), "Refund.refundShippingLines") || !strings.Contains(err.Error(), "no fields") {
+		t.Fatalf("an inline naming no fields was accepted, or the error does not say so: %v", err)
+	}
+}
+
+// A mirrored node is a child or a reference, never a second copy inline.
+func TestAnInlinedConnectionWhoseNodeIsMirroredIsRefused(t *testing.T) {
+	_, err := recordedPlanWith(t,
+		Entry{Type: "Order", Concept: "order", Reconcile: ReconcileNone,
+			Inline: []Inline{{Connection: "lineItems", Page: 10, Fields: []string{"quantity"}}}},
+		Entry{Type: "LineItem", Concept: "orderLineItem", Reconcile: ReconcileNone},
+	)
+	if err == nil || !strings.Contains(err.Error(), "Order.lineItems") || !strings.Contains(err.Error(), "LineItem") {
+		t.Fatalf("an inlined connection of a mirrored node was accepted, or the error does not name it: %v", err)
+	}
+}
+
+func TestAConnectionNamedTwiceOnOneEntryIsRefused(t *testing.T) {
+	_, err := recordedPlanWith(t, Entry{Type: "Refund", Concept: "refund", Reconcile: ReconcileNone,
+		References: []string{"refundLineItems"},
+		Inline:     []Inline{{Connection: "refundLineItems", Page: 10, Fields: []string{"quantity"}}}})
+	if err == nil || !strings.Contains(err.Error(), "Refund.refundLineItems") || !strings.Contains(err.Error(), "twice") {
+		t.Fatalf("a connection that is both a reference and inline was accepted, or the error does not say so: %v", err)
+	}
+}
+
+func TestAnInlinePageOutsideOneToTwoHundredFiftyIsRefused(t *testing.T) {
+	entry := func(page int) Entry {
+		return Entry{Type: "Refund", Concept: "refund", Reconcile: ReconcileNone,
+			Inline: []Inline{{Connection: "refundShippingLines", Page: page, Fields: []string{"subtotalAmountSet"}}}}
+	}
+	plans, err := recordedPlanWith(t, entry(0))
+	if err != nil {
+		t.Fatalf("an inline with no page was refused: %v", err)
+	}
+	if f := recordedField(t, plans, "Refund", "refundShippingLines"); f.Page != 25 || !strings.HasPrefix(f.Selection, "refundShippingLines(first: 25) ") {
+		t.Errorf("an inline with no page reads %d (%s), want 25", f.Page, f.Selection)
+	}
+	for _, page := range []int{-1, 251} {
+		if _, err := recordedPlanWith(t, entry(page)); err == nil || !strings.Contains(err.Error(), "Refund.refundShippingLines") {
+			t.Errorf("an inline page of %d was accepted, or the error does not name the connection: %v", page, err)
+		}
+	}
+	if _, err := recordedPlanWith(t, entry(250)); err != nil {
+		t.Errorf("an inline page of 250 was refused: %v", err)
 	}
 }

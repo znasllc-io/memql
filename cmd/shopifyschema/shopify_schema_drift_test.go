@@ -158,7 +158,7 @@ func TestEveryPlannedFieldSaysWhatItsValueIs(t *testing.T) {
 			} else if schema.Lookup(f.AdminType) == nil {
 				t.Errorf("%s.%s says its value is a %q, which the schema does not have", p.Concept, f.Name, f.AdminType)
 			}
-			if len(f.GidsInside) > 0 && f.Kind != KindObject && f.Kind != KindObjectList {
+			if len(f.GidsInside) > 0 && f.Kind != KindObject && f.Kind != KindObjectList && f.Kind != KindInlineList {
 				t.Errorf("%s.%s is a %s and says it keeps GIDs inside; only an object or a list of objects can", p.Concept, f.Name, f.Kind)
 			}
 			for _, kept := range f.GidsInside {

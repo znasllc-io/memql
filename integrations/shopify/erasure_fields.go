@@ -305,7 +305,11 @@ const (
 // when EVERYTHING it holds is about the sale (the golden prints what each
 // holds): an order's shipping line is the title and the amounts of the
 // shipping and also the phone number at the delivery address, so it goes, and
-// the shipping's amounts stay in the order's totals.
+// the shipping's amounts stay in the order's totals. An inlined list (a
+// refund's lines, shipping lines and adjustments) holds only the fields the
+// generator's allowlist names, each a figure, a moment, an enum, money or a
+// reference (TestNoInlinedListHoldsAFieldAnErasureWouldScrub holds it), so a
+// refund's shipping keeps its two amounts and never the shipping line itself.
 //
 // The customer's own row has no entry and can have none. Neither has a row
 // that is about a buyer and not about a sale (a company, its contacts and
@@ -353,6 +357,9 @@ var erasureKeepList = map[string]map[string]string{
 	"refund": keepFields(
 		keep(keepMoney, "totalRefundedSet"),
 		keep("refunded duties: amounts and the goods' customs codes", "duties"),
+		keep("the refunded lines: which line, how many, and their amounts", "refundLineItems"),
+		keep("the refunded shipping: its amounts and nothing else", "refundShippingLines"),
+		keep("the refund's adjustments: their amounts and a reason that is an enum", "orderAdjustments"),
 	),
 	"fulfillment": keepFields(
 		keep("the fulfilment's number, made from the order's", "name"),

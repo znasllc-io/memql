@@ -46,6 +46,22 @@ func TestTheClientPacesOnTheReportedBucket(t *testing.T) {
 	}
 }
 
+// A response says what the query was charged before it ran: Shopify's
+// requestedQueryCost, which is a property of the document, and the one a
+// single query must keep under the 1,000-point ceiling. The actual cost is
+// what the bucket is charged after.
+func TestTheResponseSaysWhatTheQueryCost(t *testing.T) {
+	h := newHarness(t)
+	h.admin.reply("Probe", map[string]any{"shop": map[string]any{"id": "gid://shopify/Shop/1"}})
+	resp, err := h.conn.adminCall(context.Background(), h.store(t), "query Probe { shop { id } }", "Probe", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.RequestedCost != 12 || resp.QueryCost != 10 {
+		t.Errorf("requested %v, actual %v; want the fake's 12 and 10", resp.RequestedCost, resp.QueryCost)
+	}
+}
+
 func TestTheClientDoesNotWaitWithAFullBucket(t *testing.T) {
 	h := newHarness(t)
 	h.admin.reply("Probe", map[string]any{"shop": map[string]any{"id": "x"}})

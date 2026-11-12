@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -924,7 +925,7 @@ func TestEveryFieldOfTheModelCarriesItsAdminType(t *testing.T) {
 			if f.AdminType == "" {
 				t.Errorf("%s.%s carries no Admin type: the generator emitted a field without saying what its value is (cmd/shopifyschema, planField)", concept, f.Name)
 			}
-			if len(f.GidsInside) > 0 && f.Kind != generated.KindObject && f.Kind != generated.KindObjectList {
+			if len(f.GidsInside) > 0 && f.Kind != generated.KindObject && f.Kind != generated.KindObjectList && f.Kind != generated.KindInlineList {
 				t.Errorf("%s.%s is a %s and says it keeps gids inside: only an object or a list of objects can", concept, f.Name, f.Kind)
 			}
 		}
@@ -966,5 +967,96 @@ func TestSomeFieldsAreScrubbedAlthoughTheirKindWouldKeepThem(t *testing.T) {
 	f, _ := fieldNamed(generated.Types["order"], "customerAcceptsMarketing")
 	if got := erasureDecisionFor("order", f, false).Fate; got != fateRemoved {
 		t.Errorf("her consent on an order is %q, want its key removed", got)
+	}
+}
+
+// inlinedListsAnErasureWouldScrub says, of every inlined connection of the
+// model, what an erasure would do wrong with it: a kept list must be kept by
+// the list, with a reason, on a concept an erasure reaches (scrubbed to [] it
+// would read as a refund with nothing on it); and each field it holds must be
+// one the erasure's own rule keeps by its kind and Admin type, or a money
+// object. A kept list is kept whole, so a held field the rule would scrub is
+// a person's words that survive her erasure.
+func inlinedListsAnErasureWouldScrub(types map[string]*generated.TypeSpec) (problems []string, inlined int) {
+	reach := erasureReach()
+	for concept, spec := range types {
+		for _, f := range spec.Fields {
+			if f.Kind != generated.KindInlineList {
+				continue
+			}
+			inlined++
+			name := concept + "." + f.Name
+			if len(reach[concept].Links) > 0 {
+				if d := erasureDecisionFor(concept, f, false); d.Fate != fateKept || strings.TrimSpace(d.ByList) == "" {
+					problems = append(problems, name+" is an inlined list an erasure does not keep by the list")
+				}
+			}
+			if len(f.Holds) == 0 {
+				problems = append(problems, name+" is an inlined list that says nothing of what it holds")
+			}
+			for _, h := range f.Holds {
+				if h.Kind == generated.KindObject && (h.AdminType == "MoneyBag" || h.AdminType == "MoneyV2") {
+					continue
+				}
+				if _, kept := erasureKeptByKind(generated.FieldSpec{Kind: h.Kind, AdminType: h.AdminType}); !kept {
+					problems = append(problems, fmt.Sprintf("%s holds %s, a %s %s, which an erasure would scrub", name, h.Name, h.Kind, h.AdminType))
+				}
+			}
+		}
+	}
+	sort.Strings(problems)
+	return problems, inlined
+}
+
+// AN INLINED LIST HOLDS NOTHING AN ERASURE WOULD SCRUB. The generator refuses
+// a string, a URL, a JSON value and any object but money in an inline
+// (cmd/shopifyschema, inlineHeldField); this holds the model it emitted to the
+// erasure's own rule, so the two cannot drift apart unseen.
+func TestNoInlinedListHoldsAFieldAnErasureWouldScrub(t *testing.T) {
+	problems, inlined := inlinedListsAnErasureWouldScrub(generated.Types)
+	for _, p := range problems {
+		t.Error(p)
+	}
+	if inlined == 0 {
+		t.Fatal("the model has no inlined list, so this test examined nothing")
+	}
+	// The rule can still say otherwise: a refund whose shipping line held a
+	// note, a string a person typed, fails it.
+	spec := *generated.Types["refund"]
+	spec.Fields = append([]generated.FieldSpec(nil), spec.Fields...)
+	changed := false
+	for i, f := range spec.Fields {
+		if f.Name != "refundShippingLines" {
+			continue
+		}
+		holds := append([]generated.HeldField(nil), f.Holds...)
+		holds[0] = generated.HeldField{Name: "note", Kind: generated.KindScalar, AdminType: "String"}
+		spec.Fields[i].Holds = holds
+		changed = true
+	}
+	if !changed {
+		t.Fatal("the refund has no inlined refundShippingLines to change")
+	}
+	got, _ := inlinedListsAnErasureWouldScrub(map[string]*generated.TypeSpec{"refund": &spec})
+	if !slices.ContainsFunc(got, func(p string) bool { return strings.Contains(p, "refund.refundShippingLines holds note") }) {
+		t.Errorf("a refund's shipping line holding a note was not told: %v", got)
+	}
+}
+
+// AN ERASED REFUND KEEPS ITS DETAIL. Scrubbed to three empty lists, a refund
+// would read as "read, and nothing on it", and its whole amount would count
+// as a refund of items. Its note, which a person typed, is still marked.
+func TestAnErasedRefundKeepsItsDetail(t *testing.T) {
+	plan := erasurePlanFor(generated.Types["refund"], false)
+	for _, name := range []string{"refundLineItems", "refundShippingLines", "orderAdjustments"} {
+		if !slices.Contains(plan.Keep, name) {
+			t.Errorf("an erasure does not keep refund.%s (keeps %v, empties %v)", name, plan.Keep, plan.Empty)
+		}
+		if got := ErasureDecision("refund", name); got != "kept by the list" {
+			t.Errorf("ErasureDecision(refund, %s) = %q, want kept by the list", name, got)
+		}
+	}
+	if !slices.Contains(plan.Mark, "note") {
+		t.Errorf("an erasure does not mark refund.note (marks %v)", plan.Mark)
 	}
 }

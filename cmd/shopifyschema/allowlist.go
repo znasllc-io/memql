@@ -56,6 +56,30 @@ type Child struct {
 	Page int `yaml:"page,omitempty"`
 }
 
+// Inline is a connection whose nodes are carried inside the row as a
+// []object, each node holding the fields named here and nothing else. It is
+// for a connection whose node is not mirrored and whose rows a reader needs:
+// a refund's lines, its shipping lines and its adjustments.
+//
+// An inlined connection NAMES what it keeps and never takes its node's full
+// selection: a refund's shipping line selected whole would carry the order's
+// shipping line, and with it the phone number at the buyer's delivery
+// address, into every refund row. What may be named is checked where the
+// field is planned (inlineHeldField): a figure or a moment, an enum, a money
+// object, or a reference to a mirrored row -- nothing a person typed.
+type Inline struct {
+	// Connection is the field name on the entry's type (e.g. "refundLineItems").
+	Connection string `yaml:"connection"`
+	// Page is how many nodes a fetch reads: 1 to 250, inlinePageSize when
+	// omitted. The connection is read one page deep, never paged further.
+	Page int `yaml:"page"`
+	// Fields are the node's fields each element keeps. Required.
+	Fields []string `yaml:"fields"`
+}
+
+// maxInlinePage is the most nodes Shopify answers for one connection page.
+const maxInlinePage = 250
+
 // Entry is one allowlisted root type.
 type Entry struct {
 	// Type is the GraphQL object (or interface) type name.
@@ -90,6 +114,9 @@ type Entry struct {
 	// discountApplications) has no GID to keep, and is carried inline as
 	// a []object instead.
 	References []string `yaml:"references,omitempty"`
+	// Inline are connections whose nodes are carried in the row as a
+	// []object, each holding only the fields it names (see Inline).
+	Inline []Inline `yaml:"inline,omitempty"`
 	// Skip names fields to omit even though they map cleanly: the ones
 	// whose cost or churn is not worth mirroring.
 	Skip []string `yaml:"skip,omitempty"`
@@ -167,6 +194,9 @@ func (a *Allowlist) validate() error {
 				return fmt.Errorf("%s: topic %s has action %q (want %q or %q)", e.Type, topic, action, ActionUpsert, ActionDelete)
 			}
 		}
+		if err := e.validateConnections(); err != nil {
+			return err
+		}
 		concepts[e.Concept] = e.Type
 		a.byType[e.Type] = e
 	}
@@ -198,6 +228,49 @@ func (a *Allowlist) validate() error {
 				return fmt.Errorf("topic %s is claimed by both %s and %s", topic, prev, e.Type)
 			}
 			owner[topic] = e.Type
+		}
+	}
+	return nil
+}
+
+// validateConnections checks what the entry says of its connections without
+// the schema: a connection is named at most once across children, references
+// and inline (two answers for one field would be two fields of one name, or a
+// field that is both a row of its own and a copy inside this one), and each
+// inline names its fields and a page Shopify answers. What the schema decides
+// -- that the field is a connection, of an unmirrored node, and what each
+// named field is -- is checked where the field is planned.
+func (e *Entry) validateConnections() error {
+	named := map[string]string{}
+	claim := func(conn, as string) error {
+		if prev, dup := named[conn]; dup {
+			return fmt.Errorf("%s.%s is named twice, as %s and as %s -- a connection is a child, a reference or inline, once", e.Type, conn, prev, as)
+		}
+		named[conn] = as
+		return nil
+	}
+	for _, ch := range e.Children {
+		if err := claim(ch.Connection, "a child"); err != nil {
+			return err
+		}
+	}
+	for _, r := range e.References {
+		if err := claim(r, "a reference"); err != nil {
+			return err
+		}
+	}
+	for _, in := range e.Inline {
+		if strings.TrimSpace(in.Connection) == "" {
+			return fmt.Errorf("%s: an inline entry names no connection", e.Type)
+		}
+		if err := claim(in.Connection, "inline"); err != nil {
+			return err
+		}
+		if len(in.Fields) == 0 {
+			return fmt.Errorf("%s.%s: inline names no fields -- an inlined connection keeps the fields it names and never its node's whole selection", e.Type, in.Connection)
+		}
+		if in.Page < 0 || in.Page > maxInlinePage {
+			return fmt.Errorf("%s.%s: inline page %d is outside 1 to %d (omit it for %d)", e.Type, in.Connection, in.Page, maxInlinePage, inlinePageSize)
 		}
 	}
 	return nil

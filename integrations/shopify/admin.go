@@ -62,11 +62,18 @@ type costExtension struct {
 
 // AdminResponse is a decoded Admin GraphQL reply.
 type AdminResponse struct {
-	Data       json.RawMessage
-	Errors     []GraphQLError
-	Throttle   ThrottleStatus
-	QueryCost  float64
-	StatusCode int
+	Data     json.RawMessage
+	Errors   []GraphQLError
+	Throttle ThrottleStatus
+	// QueryCost is what the query was charged after it ran, Shopify's
+	// actualQueryCost.
+	QueryCost float64
+	// RequestedCost is what Shopify reckoned the query would cost before it
+	// ran, its requestedQueryCost: a property of the document, the same for
+	// every object it reads, and the number a single query must keep under
+	// the 1,000-point ceiling or be refused.
+	RequestedCost float64
+	StatusCode    int
 }
 
 // GraphQLError is one entry of the errors array.
@@ -462,10 +469,11 @@ func (c *AdminClient) once(ctx context.Context, store Store, token, document, op
 		return nil, &AdminError{StatusCode: resp.StatusCode, Errors: envelope.Errors, Data: envelope.Data}
 	}
 	return &AdminResponse{
-		Data:       envelope.Data,
-		Throttle:   envelope.Extensions.Cost.ThrottleStatus,
-		QueryCost:  envelope.Extensions.Cost.ActualQueryCost,
-		StatusCode: resp.StatusCode,
+		Data:          envelope.Data,
+		Throttle:      envelope.Extensions.Cost.ThrottleStatus,
+		QueryCost:     envelope.Extensions.Cost.ActualQueryCost,
+		RequestedCost: envelope.Extensions.Cost.RequestedQueryCost,
+		StatusCode:    resp.StatusCode,
 	}, nil
 }
 
