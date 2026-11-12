@@ -7,13 +7,15 @@ import { createRoot } from "react-dom/client";
  * own scheduler, not under act() -- and resolves on the microtask straight
  * after React commits it, before that commit's passive effects have run.
  *
- * THAT MOMENT IS REAL IN THE SUITE. Testing Library turns act off while a
- * `findBy*` waits, so a list that arrives from a read is committed in one
- * scheduler task and runs its effects in a later one, and a test that resumes
- * in between acts on components whose mount effects are still to come. A
- * mount effect that sets state then lands after whatever the test caused
- * first. Under act() the effects run with the commit, and the moment does not
- * exist.
+ * THAT MOMENT IS REAL. Testing Library turns act off while a `findBy*` waits,
+ * so a list that arrives from a read is committed in one scheduler task and
+ * runs its effects in a later one, and whatever happens in between acts on
+ * components whose mount effects are still to come. A mount effect that sets
+ * state then lands after it. A `findBy*` used to hand a test back in between
+ * about once in 300 runs on an idle machine, and far more often on a loaded
+ * runner. It now waits for those effects first (test/setup.ts), so this
+ * helper is how a test gets there, on purpose and every time. Under act() the
+ * effects run with the commit, and the moment does not exist.
  *
  * It proves the moment was reached: a probe committed with `ui` must not have
  * run its effect yet, or this throws rather than let a test pass by never
