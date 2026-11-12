@@ -76,7 +76,11 @@ type Connector interface {
 	// Apply turns one staged inbound delivery into version-stamped
 	// mirror writes. Returning zero writes is a normal outcome: a
 	// delivery this connector does not recognise is skipped, not
-	// failed.
+	// failed. Two of its errors are answers rather than failures, and
+	// the runtime acts on each: ErrRecordingPaused, for a delivery of a
+	// tenant a person paused, which is held until the tenant resumes;
+	// and ErrAnsweredNothing, for a record the origin answered nothing
+	// for, which is asked once more.
 	Apply(ctx context.Context, req InboundRequest) ([]MirrorWrite, error)
 
 	// Backfill returns one resumable page of the origin's current

@@ -17,7 +17,9 @@ import (
 // The five builtins behind Cluster > Data's buttons are @sdk with no
 // @requiresCapability, and a builtin with neither has no rank floor: every
 // signed-in caller reaches its handler. The page's part only hides the
-// buttons. So each handler asks who is calling, before anything is read.
+// buttons. So each handler asks who is calling, before anything is read. A
+// sixth, returnHeldInbound, is a connector's call as the operator and asks the
+// same.
 
 // operatorActsFixture is one fake engine behind the store, the runner and the
 // dispatcher, and one connector bound under a name of this test's own, so a
@@ -56,7 +58,7 @@ func newOperatorActsFixture(t *testing.T) *operatorActsFixture {
 // capabilityHandler is the shape every capability handler has.
 type capabilityHandler func(context.Context, map[string]any, int) ([]memorynodes.MemoryNode, error)
 
-// operatorAct is one of the five: its capability name, its handler and the
+// operatorAct is one of them: its capability name, its handler and the
 // arguments a caller would send.
 type operatorAct struct {
 	name    string
@@ -86,6 +88,8 @@ func operatorActs() []operatorAct {
 				return map[string]any{"entryId": "entry-1", "reason": "the row was removed at the origin"}
 			}},
 		{"requeueInbound", func(i *Integration) capabilityHandler { return i.handleRequeueInbound },
+			func(f *operatorActsFixture) map[string]any { return map[string]any{"source": f.c.name} }},
+		{"returnHeldInbound", func(i *Integration) capabilityHandler { return i.handleReturnHeldInbound },
 			func(f *operatorActsFixture) map[string]any { return map[string]any{"source": f.c.name} }},
 	}
 }
