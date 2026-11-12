@@ -128,6 +128,9 @@ type linkReader struct {
 	reviews   map[string]map[string]any // by id
 	decisions []map[string]any
 	site      map[string]any
+	noSite    bool  // siteById answers no row
+	siteFault error // siteById fails
+	readFault error // reviewSettingsForStore fails
 }
 
 func (l *linkReader) Rows(_ context.Context, query string, args map[string]string) ([]map[string]any, error) {
@@ -142,7 +145,17 @@ func (l *linkReader) Rows(_ context.Context, query string, args map[string]strin
 		}
 	case "reviewDecisionsForReview":
 		return l.decisions, nil
+	case "reviewSettingsForStore":
+		if l.readFault != nil {
+			return nil, l.readFault
+		}
 	case "siteById":
+		if l.siteFault != nil {
+			return nil, l.siteFault
+		}
+		if l.noSite {
+			return nil, nil
+		}
 		// THE STORE'S SITE, owned by the request's merchant: the site a form
 		// post arrives through. A test's own fields are laid over it.
 		site := map[string]any{"id": args["siteId"], "ownerUserId": "merchant-1",
@@ -359,5 +372,73 @@ func TestIssuingALinkIsForOperatorsAndWritesAsTheSiteOwner(t *testing.T) {
 	}
 	if token := strings.TrimPrefix(answer["url"], "https://shop.example.com/reviews/write?product=floss-picks&t="); tokenHash(token) != row["tokenHash"] {
 		t.Fatal("the link's token does not hash to the stored hash: the buyer's link would be refused")
+	}
+}
+
+// A FAULT IS NOT A REFUSAL. A read that fails while the site is admitted --
+// the site's own row, or the store's settings -- is no answer about the site,
+// so it is not link_invalid: it reaches the handler as an error no form
+// declares, which the handler tells the shopper as its general failure, and
+// nothing is written.
+func TestAFaultWhileTheSiteIsAdmittedIsTheGeneralFailure(t *testing.T) {
+	fault := errors.New("database unavailable")
+	for name, r := range map[string]*linkReader{
+		"the site's read":    {request: openRequest(), siteFault: fault},
+		"the settings' read": {request: openRequest(), readFault: fault},
+	} {
+		p, w := linkProvider(r)
+		_, err := p.submitFromLink(linkCaller(), linkArgs(), 0)
+		if err == nil {
+			t.Fatalf("%s failed and the post was accepted", name)
+		}
+		if code, declared := memql.ShopperRefusalCode(err, LinkRefusals); declared {
+			t.Errorf("%s failed and was answered as the refusal %q: %v", name, code, err)
+		}
+		w.none(t)
+	}
+}
+
+// THE REFUSALS STAY ONE ANSWER: no such site, a site of another store and a
+// caller who is not the site's owner are link_invalid with the same sentence,
+// whatever the token.
+func TestTheSiteRefusalsAreOneAnswerWhateverTheToken(t *testing.T) {
+	expired := openRequest()
+	expired["expiresAt"] = linkNow.Add(-time.Minute).Format(time.RFC3339Nano)
+	answers := map[string]bool{}
+	for _, c := range []struct {
+		name string
+		ctx  context.Context
+		r    func(req map[string]any) *linkReader
+	}{
+		{"no such site", linkCaller(), func(req map[string]any) *linkReader { return &linkReader{request: req, noSite: true} }},
+		{"a site of another store", linkCaller(), func(req map[string]any) *linkReader {
+			return &linkReader{request: req, site: map[string]any{"binding": map[string]any{"storeId": "store-other"}}}
+		}},
+		{"not the site's owner", auth.ContextWithUserActor(context.Background(), "someone-else"),
+			func(req map[string]any) *linkReader { return &linkReader{request: req} }},
+	} {
+		for tokenName, change := range map[string]func(map[string]any){
+			"valid":    nil,
+			"nonsense": func(a map[string]any) { a["requestToken"] = "nonsense" },
+		} {
+			for _, req := range []map[string]any{openRequest(), expired} {
+				p, w := linkProvider(c.r(req))
+				args := linkArgs()
+				if change != nil {
+					change(args)
+				}
+				_, err := p.submitFromLink(c.ctx, args, 0)
+				if code, _ := memql.ShopperRefusalCode(err, LinkRefusals); code != RefusalLinkInvalid {
+					t.Errorf("%s with a %s token: %v, want link_invalid", c.name, tokenName, err)
+				}
+				if err != nil {
+					answers[err.Error()] = true
+				}
+				w.none(t)
+			}
+		}
+	}
+	if len(answers) != 1 {
+		t.Errorf("the site refusals were answered %d ways: %v", len(answers), answers)
 	}
 }

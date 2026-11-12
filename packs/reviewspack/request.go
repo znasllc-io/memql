@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -282,7 +283,8 @@ func (p *Provider) submitFromLink(ctx context.Context, args map[string]any, _ in
 // owner and the pack admits it for the store (siteForStore): a site that serves
 // the store and belongs to the store's organization. Every other case -- no
 // site, no such site, a site of another store or organization, a caller who is
-// not its owner, no session -- is one refusal, NotThisSitesLink.
+// not its owner, no session -- is one refusal, NotThisSitesLink. A read that
+// fails is returned as the fault it is.
 func (p *Provider) sitePostedThrough(ctx context.Context, siteID, storeID string) (map[string]any, error) {
 	notThis := refuse(RefusalLinkInvalid, NotThisSitesLink)
 	access, ok := auth.AccessFromContext(ctx)
@@ -290,7 +292,16 @@ func (p *Provider) sitePostedThrough(ctx context.Context, siteID, storeID string
 		return nil, notThis
 	}
 	site, err := p.siteForStore(ctx, siteID, storeID)
-	if err != nil || site == nil || !sameUser(asString(site["ownerUserId"]), access.UserId) {
+	if errors.Is(err, errSiteNotAdmitted) {
+		return nil, notThis
+	}
+	// A FAULT IS NOT A REFUSAL: it goes back as it is, and the shopper handler
+	// tells the shopper its general failure. It depends on nothing about which
+	// site was named or whose it is, so it reveals neither.
+	if err != nil {
+		return nil, err
+	}
+	if !sameUser(asString(site["ownerUserId"]), access.UserId) {
 		return nil, notThis
 	}
 	return site, nil
@@ -324,16 +335,30 @@ func (p *Provider) draftForLink(ctx context.Context, args map[string]any, _ int)
 	return receipt("v1:reviews:draft", lk.reviewID, body)
 }
 
-// siteRow reads one site under the caller's actor; nil when it cannot.
+// siteRow reads one site under the caller's actor; nil when it cannot, a
+// failed read included. For a caller that refuses on nil (reviewsIssueRequest).
 func (p *Provider) siteRow(ctx context.Context, siteID string) map[string]any {
-	if siteID == "" {
+	site, err := p.siteRowErr(ctx, siteID)
+	if err != nil {
 		return nil
+	}
+	return site
+}
+
+// siteRowErr reads one site under the caller's actor: nil and no error when no
+// such site is readable, and the read's own error when the read failed.
+func (p *Provider) siteRowErr(ctx context.Context, siteID string) (map[string]any, error) {
+	if siteID == "" {
+		return nil, nil
 	}
 	rows, err := p.rowsFor(ctx, "siteById", map[string]string{"siteId": siteID})
-	if err != nil || len(rows) == 0 {
-		return nil
+	if err != nil {
+		return nil, fmt.Errorf("reviews: reading site %q: %w", siteID, err)
 	}
-	return rows[0]
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return rows[0], nil
 }
 
 // ---------------------------------------------------------------- issuing
