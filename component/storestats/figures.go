@@ -96,17 +96,31 @@ func readFigures(ctx context.Context, tx bun.Tx, s *Statistics) error {
 	}
 
 	// The previous period, when it is answered, is read in the same two
-	// statements as a leading bucket: it ends where this period starts.
+	// statements as leading buckets: [PrevStart, PrevEnd) is bucket 1, and
+	// when PrevEnd is before the period's start the stretch between them is
+	// bucket 2, read and left out. A previous period that ran past the
+	// period's start is read on its own.
 	comparable := s.comparable()
 	readFrom, readStarts, lead := from, starts, 0
-	if comparable {
-		readFrom, readStarts, lead = b.PrevStart, append([]time.Time{b.PrevStart}, starts...), 1
+	if comparable && !b.PrevEnd.After(from) {
+		lead = 1
+		readStarts = []time.Time{b.PrevStart}
+		if b.PrevEnd.Before(from) {
+			readStarts, lead = append(readStarts, b.PrevEnd), 2
+		}
+		readFrom, readStarts = b.PrevStart, append(readStarts, starts...)
 	}
 	both, err := readSums(ctx, tx, scope, readStarts, readFrom, until)
 	if err != nil {
 		return err
 	}
-	period, prev := both.split(lead)
+	period, before := both.split(lead)
+	prev := before.only(1)
+	if comparable && b.PrevEnd.After(from) {
+		if prev, err = readSums(ctx, tx, scope, []time.Time{b.PrevStart}, b.PrevStart, b.PrevEnd); err != nil {
+			return err
+		}
+	}
 	all := period.total()
 	s.Figures = scope.figures(all, true)
 	s.IncompleteOrders, s.IncompleteRefunds, s.RefundsNotRead = countOf(all.incompleteOrders), countOf(all.incompleteRefunds), countOf(all.notRead)
@@ -278,6 +292,17 @@ func (p periodSums) split(lead int) (period, before periodSums) {
 		period[sideKey{k.bucket - lead, k.wholesale}] = v
 	}
 	return period, before
+}
+
+// only is the sums of bucket i alone.
+func (p periodSums) only(i int) periodSums {
+	out := periodSums{}
+	for k, v := range p {
+		if k.bucket == i {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 func (p periodSums) bucket(i int) sums {

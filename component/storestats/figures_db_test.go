@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/uptrace/bun"
 )
 
 // figures_db_test.go -- the figures of builtin storeStatistics (figures.go)
@@ -649,6 +651,59 @@ func TestAProductIsTitledByItsNewestLineSoldInThePeriod(t *testing.T) {
 		if titles[key] != want {
 			t.Errorf("product %s is titled %q, want %q", key, titles[key], want)
 		}
+	}
+}
+
+// THE NULL RULES HOLD INSIDE THE PREVIOUS PERIOD, and leave the period's own
+// figures alone.
+func TestThePreviousPeriodKeepsItsOwnNullRules(t *testing.T) {
+	prevDay := local(madrid, 2025, 10, 29, 12, 0)
+	storeID, site := salesStore(t, nil)
+	sell(t, storeID, one(1, local(madrid, 2025, 10, 27, 12, 0), "40.00"))
+	refundOf(t, storeID, refund{gid: refundGID(1), order: orderGID(1), at: prevDay, amount: "40.00", notRead: true})
+	sell(t, storeID, one(2, nov(3), "10.00"))
+	got := ask(t, storeID, site)
+	wantValues(t, "a refund not read last week", figuresIn(t, got, "previous"), map[string]any{"refunds": nil, "netSales": nil,
+		"totalSales": nil, "unitsSold": nil, "orders": 1, "grossSales": "40.00"})
+	wantValues(t, "this week", figuresIn(t, got, "figures"), map[string]any{"refunds": "0", "netSales": "10.00", "totalSales": "10.00", "unitsSold": 1})
+	wantValues(t, "this week's counts", got, map[string]any{"refundsNotRead": 0, "productsBySales": []any{
+		map[string]any{"key": "gid://shopify/Product/2", "title": "An inner tube", "value": "10.00"}}})
+
+	incomplete, incompleteSite := salesStore(t, nil)
+	s := one(1, prevDay, "40.00")
+	s.missing = 1
+	sell(t, incomplete, s)
+	sell(t, incomplete, one(2, nov(3), "10.00"))
+	got = ask(t, incomplete, incompleteSite)
+	wantValues(t, "an incomplete order last week", got, map[string]any{"floors": map[string]any{}, "incompleteOrders": 0})
+	wantValues(t, "last week", figuresIn(t, got, "previous"), map[string]any{"orders": 1, "grossSales": "40.00"})
+}
+
+// THE PREVIOUS PERIOD ENDS WHERE ITS BOUNDS SAY, read from PrevEnd and never
+// taken to be the period's start.
+func TestThePreviousPeriodEndsAtItsOwnEnd(t *testing.T) {
+	storeID, _ := salesStore(t, nil)
+	sell(t, storeID, one(1, local(madrid, 2025, 10, 28, 12, 0), "25.00"))
+	sell(t, storeID, one(2, local(madrid, 2025, 10, 31, 12, 0), "7.00"))
+	sell(t, storeID, one(3, nov(3), "10.00"))
+	_, db := statsEngine(t)
+	var stats Statistics
+	if err := readTx(context.Background(), db, func(ctx context.Context, tx bun.Tx) error {
+		var err error
+		if stats, err = readFrame(ctx, tx, statisticsRequest{StoreID: storeID, Period: "7d"}, madridNow); err != nil {
+			return err
+		}
+		// A previous period that ends a day and a half before this one starts.
+		stats.Bounds.PrevEnd = local(madrid, 2025, 10, 30, 0, 0)
+		return readFigures(ctx, tx, &stats)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if stats.Previous == nil || stats.Previous.Orders == nil || *stats.Previous.Orders != 1 || stats.Previous.GrossSales.String() != "25.00" {
+		t.Errorf("previous = %+v, want the Oct 28 order alone: the period ends at PrevEnd", stats.Previous)
+	}
+	if stats.Figures.Orders == nil || *stats.Figures.Orders != 1 {
+		t.Errorf("figures = %+v, want this week's one order", stats.Figures)
 	}
 }
 
