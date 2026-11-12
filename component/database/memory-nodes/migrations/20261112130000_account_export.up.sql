@@ -132,3 +132,13 @@ ALTER TABLE account_assignment_conflict ADD COLUMN left_out_by text NOT NULL DEF
 -- for a full pass of their kind instead of waiting a day for the next one. The
 -- job honors a request newer than the kind's last full pass at once.
 ALTER TABLE account_assignment_progress ADD COLUMN full_pass_requested_at timestamptz;
+
+-- LATE COMMITS ARE NOT MISSED. A row inserted in a transaction that is still
+-- open is invisible to the pass reading past it, so a pass must not advance
+-- verified_through past the start of the oldest transaction open while it
+-- read. Each batch reads that start from pg_stat_activity; this column keeps
+-- the earliest one any batch of the current pass saw, because a transaction
+-- open during an early batch may have committed before the last. NULL when no
+-- batch saw one. Reset when a pass starts; at the pass's end verified_through
+-- is the earlier of the pass's start and this.
+ALTER TABLE account_assignment_progress ADD COLUMN pass_horizon_at timestamptz;

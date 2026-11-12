@@ -68,15 +68,20 @@ package memql
 //     concept.
 //   - verified_through is the START of the finished pass (never its finish,
 //     which would skip a row written while the pass ran), or, when it is
-//     earlier, the start of the oldest transaction that had written and was
-//     still open when the pass's last batch began (oldestOpenWriteStart, read
-//     from pg_stat_activity: every node connects as one role, so its sessions
-//     are every writer). A row inserted in a transaction that is still open is
-//     invisible to the pass; held back to that transaction's start, the cursor
-//     is still behind the row when it commits, and the next pass reads it. A
-//     transaction that has written nothing has no transaction id and is not
-//     counted, so the export's long read-only snapshot holds nothing back. If
-//     the view cannot be read the batch fails and nothing advances.
+//     earlier, the pass's HORIZON: the start of the oldest transaction any
+//     batch of the pass saw open. Each batch reads that start from
+//     pg_stat_activity before it reads a row (oldestOpenWriteStart: every node
+//     connects as one role, so its sessions are every writer) and keeps the
+//     earliest in account_assignment_progress.pass_horizon_at, which a pass
+//     resets when it starts. A row inserted in a transaction that is open
+//     while some batch reads past it is invisible to that batch; held back to
+//     that transaction's start, the cursor is still behind the row once it
+//     commits, and the next pass reads it -- whether the transaction is still
+//     open at the pass's last batch or committed between two batches, and on a
+//     full pass as on a later one. Every open transaction counts, one that has
+//     not written yet included, except the account export's snapshot, which
+//     names itself (AccountExportApplicationName) and writes nothing. If the
+//     view cannot be read the batch fails and nothing advances.
 //   - A later pass is a FULL pass again when a full pass was REQUESTED after the
 //     last one began (RequestAccountFullPass, account_assignment_api.go: the
 //     export asks for one of a kind with rows waiting, instead of waiting a day),
@@ -86,9 +91,16 @@ package memql
 //     pass would see it; a re-walk is what reaches it. A concept with nothing
 //     waiting and no request never re-walks: walking every id of a table of tens
 //     of millions of rows once a day to find nothing would be hours of reads a
-//     day. `waiting` therefore counts the rows left waiting by the last full
-//     pass PLUS any found waiting since; it is reset only when a full pass
-//     starts, where the other counts reset every pass.
+//     day.
+//   - `waiting` counts the rows that follow a parent with no account which can
+//     still get one from the job (account_assignment_rules.go, rule 3), left by
+//     the last full pass PLUS any found since; it is reset only when a full
+//     pass starts, where the other counts reset every pass. A row following a
+//     parent that will never get one from the job (of a stated or shared
+//     concept with no account, in conflict, left out) is LEFT ALONE: counted in
+//     `shared` with the other rows kept without an account on purpose, and it
+//     brings no full pass by itself. So "nothing waiting" means nothing the
+//     job will still assign is held up behind a parent.
 //   - A requested full pass waits for the requested full pass of the concept it
 //     takes its account from, as a first pass does (assignmentCandidates):
 //     before it, a child would find its parent unassigned and be left waiting.
@@ -97,16 +109,16 @@ package memql
 //     so a conflict recorded before candidates existed gains them on the next
 //     pass rather than at a full pass that may never come.
 //
-// WHAT THIS DOES NOT CATCH, accepted: a row of a later pass that takes more
-// than one batch, written without an account in a transaction that was open
-// when an earlier batch of the pass read past it and committed before the
-// pass's last batch began, with a createdAt more than assignmentLateCommitSlack
-// before the pass started. The horizon is read per batch and not kept between batches, so the
-// last batch no longer sees that transaction. It takes a write path that
-// bypasses the stamp, a transaction stalled for longer than the slack, and a
-// later pass of more than assignmentBatchIds versions; the row stays unassigned
-// until it is written again or a full pass of its concept, requested or due,
-// reaches it.
+// WHAT THIS DOES NOT CATCH, accepted: a row whose writer set its createdAt more
+// than assignmentLateCommitSlack before its transaction began, and that a pass
+// read past before the transaction began: the horizon starts at the
+// transaction, the slack covers the minute before it, and nothing records the
+// time a writer took before it opened one. A writer that holds a timestamp for
+// over a minute before beginning its transaction is a stalled process, and it
+// is a write path that bypasses the stamp; the row stays unassigned until it
+// is written again or a full pass of its concept, requested or due, reaches
+// it. Also, the export's session is trusted to write nothing while it carries
+// AccountExportApplicationName.
 //
 // Running it twice changes nothing: a row that has an account is kept, and the
 // write itself is guarded on the row still having none.
@@ -158,8 +170,18 @@ const (
 // stamped a little before its transaction began, or before the horizon was
 // read, would otherwise fall just behind the cursor (file header, Passes). A
 // variable only so a test can watch a late commit without holding a
-// transaction open for longer than a minute; nothing else changes it.
+// transaction open for longer than a minute; nothing else changes it. That is
+// safe as a package variable because no test of this package runs the job
+// beside the tests that change it: none of them calls t.Parallel, and the
+// runner's tests drive tick synchronously rather than starting the runner
+// (checked when the variable was introduced).
 var assignmentLateCommitSlack = time.Minute
+
+// AccountExportApplicationName is the application_name the account export
+// sets on its snapshot session, so the assignment's late-commit horizon does
+// not count that long transaction (oldestOpenWriteStart). A session that names
+// itself so must write no row of the node table while it does.
+const AccountExportApplicationName = "memql-account-export"
 
 // runAccountAssignmentBatch is one call of the job; see the file header. It
 // returns nil when there is nothing due, and an error only for a transaction
@@ -363,6 +385,9 @@ type assignmentProgress struct {
 	waiting int
 	// fullPassRequestedAt is the last RequestAccountFullPass for the concept.
 	fullPassRequestedAt sql.NullTime
+	// passHorizon is the start of the oldest transaction any batch of the
+	// current pass saw open (file header, Passes).
+	passHorizon sql.NullTime
 	// batchSize is this concept's own bound on a batch (file header, One call).
 	batchSize int
 }
@@ -415,13 +440,13 @@ func (e *MemQLEngine) assignOneBatch(ctx context.Context, db *bun.DB, candidates
 		result = assignmentBatchResult{}
 		var p assignmentProgress
 		err := tx.QueryRowContext(ctx, `SELECT concept, cursor_id, cursor_at, verified_through, pass_full,
-			       full_pass_at, pass_started_at, pass_finished_at, waiting, batch_size, full_pass_requested_at
+			       full_pass_at, pass_started_at, pass_finished_at, waiting, batch_size, full_pass_requested_at, pass_horizon_at
 			  FROM account_assignment_progress
 			 WHERE concept = ANY(?::text[]) AND next_at <= clock_timestamp()
 			 ORDER BY array_position(?::text[], concept)
 			 LIMIT 1 FOR UPDATE SKIP LOCKED`, pq.Array(candidates), pq.Array(candidates)).
 			Scan(&p.concept, &p.cursorID, &p.cursorAt, &p.verifiedThrough, &p.passFull,
-				&p.fullPassAt, &p.passStartedAt, &p.passFinishedAt, &p.waiting, &p.batchSize, &p.fullPassRequestedAt)
+				&p.fullPassAt, &p.passStartedAt, &p.passFinishedAt, &p.waiting, &p.batchSize, &p.fullPassRequestedAt, &p.passHorizon)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -451,6 +476,7 @@ func (e *MemQLEngine) assignOneBatch(ctx context.Context, db *bun.DB, candidates
 		if !p.inPass() {
 			p = startAssignmentPass(p, now)
 		}
+		p.passHorizon = earlierTime(p.passHorizon, horizon)
 
 		ids, nextID, nextAt, err := assignmentBatchIdsFor(ctx, tx, p, limit)
 		if err != nil {
@@ -490,7 +516,7 @@ func (e *MemQLEngine) assignOneBatch(ctx context.Context, db *bun.DB, candidates
 				return err
 			}
 		}
-		if err := advanceAssignmentProgress(ctx, tx, p, now, horizon, finished, nextID, nextAt, counts); err != nil {
+		if err := advanceAssignmentProgress(ctx, tx, p, now, finished, nextID, nextAt, counts); err != nil {
 			return err
 		}
 		result = assignmentBatchResult{concept: p.concept, examined: len(ids), changed: changed, counts: counts}
@@ -561,7 +587,16 @@ func startAssignmentPass(p assignmentProgress, now time.Time) assignmentProgress
 	p.passFull = neverFull || waitingDue || p.fullPassRequested()
 	p.passStartedAt = sql.NullTime{Time: now, Valid: true}
 	p.cursorID, p.cursorAt = sql.NullString{}, sql.NullTime{}
+	p.passHorizon = sql.NullTime{}
 	return p
+}
+
+// earlierTime is the earlier of two times, either of which may be absent.
+func earlierTime(a, b sql.NullTime) sql.NullTime {
+	if !a.Valid || (b.Valid && b.Time.Before(a.Time)) {
+		return b
+	}
+	return a
 }
 
 // assignmentBatchIdsFor reads the next ids of the pass and where the cursor
@@ -640,13 +675,18 @@ func distinctIds(ids []string) []string {
 	return out
 }
 
-// oldestOpenWriteStart is the start of the oldest transaction on the database
-// that has written something and not yet committed, among this role's sessions
-// other than this one; invalid when there is none. Every engine node connects
-// as the one role, so this sees every writer of the node table. A transaction
-// with no transaction id has written nothing (the export's read-only snapshot
-// among them), so no row of it can commit late, and counting it would hold
-// every concept's cursor back for the length of the snapshot.
+// oldestOpenWriteStart is the start of the oldest transaction still open on
+// this database among this role's sessions, other than this one and the
+// account export's snapshot; invalid when there is none. Every engine node
+// connects as the one role, so this sees every writer of the node table.
+//
+// Every open transaction counts, not only one that has written already: a
+// transaction that has not written yet may still insert a row whose createdAt
+// it took earlier, and would then commit it behind the cursor. The one long
+// transaction that never writes a row is the export's snapshot, open for up to
+// an hour; counting it would hold every concept's cursor back for that hour,
+// so it names itself (AccountExportApplicationName) and is left out. Another
+// long reader costs re-reads while it is open, never a missed row.
 //
 // An error here fails the batch and nothing advances: a pass that could not
 // tell whether a write is still open must not move verified_through past it,
@@ -654,20 +694,20 @@ func distinctIds(ids []string) []string {
 func oldestOpenWriteStart(ctx context.Context, tx bun.Tx) (sql.NullTime, error) {
 	var oldest sql.NullTime
 	err := tx.QueryRowContext(ctx, `SELECT min(xact_start) FROM pg_stat_activity
-		WHERE usename = current_user AND pid <> pg_backend_pid()
-		  AND backend_xid IS NOT NULL AND xact_start IS NOT NULL`).Scan(&oldest)
+		WHERE usename = current_user AND datname = current_database() AND pid <> pg_backend_pid()
+		  AND application_name <> ? AND xact_start IS NOT NULL`, AccountExportApplicationName).Scan(&oldest)
 	if err != nil {
 		return oldest, fmt.Errorf("account assignment: reading the open transactions: %w", err)
 	}
 	return oldest, nil
 }
 
-// advanceAssignmentProgress writes the cursor and the batch's counts, and on
-// the last batch of a pass closes it: verified_through becomes the pass's
-// START, or the start of the oldest write still open when the batch began if
-// that is earlier (file header, Passes), the cursor is cleared, and the concept
-// is next due a minute later.
-func advanceAssignmentProgress(ctx context.Context, tx bun.Tx, p assignmentProgress, now time.Time, horizon sql.NullTime, finished bool,
+// advanceAssignmentProgress writes the cursor, the pass's horizon and the
+// batch's counts, and on the last batch of a pass closes it: verified_through
+// becomes the pass's START, or the pass's horizon if that is earlier (file
+// header, Passes), the cursor and the horizon are cleared, and the concept is
+// next due a minute later.
+func advanceAssignmentProgress(ctx context.Context, tx bun.Tx, p assignmentProgress, now time.Time, finished bool,
 	nextID sql.NullString, nextAt sql.NullTime, c assignmentCounts) error {
 	// A batch that starts the pass resets the counts, so the row reads as the
 	// current pass -- except `waiting`, which only a FULL pass resets: it is
@@ -680,13 +720,11 @@ func advanceAssignmentProgress(ctx context.Context, tx bun.Tx, p assignmentProgr
 	if nextID.Valid {
 		cursorID, cursorAt = nextID, nextAt
 	}
-	verified, fullAt, finishedAt := p.verifiedThrough, p.fullPassAt, p.passFinishedAt
+	verified, fullAt, finishedAt, passHorizon := p.verifiedThrough, p.fullPassAt, p.passFinishedAt, p.passHorizon
 	nextDue := now
 	if finished {
-		verified = p.passStartedAt
-		if horizon.Valid && horizon.Time.Before(verified.Time) {
-			verified = horizon
-		}
+		verified = earlierTime(p.passStartedAt, p.passHorizon)
+		passHorizon = sql.NullTime{}
 		if p.passFull {
 			fullAt = p.passStartedAt
 		}
@@ -696,7 +734,7 @@ func advanceAssignmentProgress(ctx context.Context, tx bun.Tx, p assignmentProgr
 	}
 	_, err := tx.ExecContext(ctx, `UPDATE account_assignment_progress SET
 		    cursor_id = ?, cursor_at = ?, verified_through = ?, pass_full = ?, full_pass_at = ?,
-		    pass_started_at = ?, pass_finished_at = ?, next_at = ?,
+		    pass_started_at = ?, pass_finished_at = ?, next_at = ?, pass_horizon_at = ?,
 		    assigned  = CASE WHEN ? THEN 0 ELSE assigned END + ?,
 		    kept      = CASE WHEN ? THEN 0 ELSE kept END + ?,
 		    shared    = CASE WHEN ? THEN 0 ELSE shared END + ?,
@@ -704,7 +742,7 @@ func advanceAssignmentProgress(ctx context.Context, tx bun.Tx, p assignmentProgr
 		    waiting   = CASE WHEN ? THEN 0 ELSE waiting END + ?,
 		    batch_size = LEAST(?, batch_size + GREATEST(1, batch_size / 4))
 		  WHERE concept = ?`,
-		cursorID, cursorAt, verified, p.passFull, fullAt, p.passStartedAt, finishedAt, nextDue,
+		cursorID, cursorAt, verified, p.passFull, fullAt, p.passStartedAt, finishedAt, nextDue, passHorizon,
 		fresh, c.assigned, fresh, c.kept, fresh, c.shared, fresh, c.conflicts, freshWaiting, c.waiting,
 		assignmentBatchIds, p.concept)
 	if err != nil {

@@ -19,12 +19,18 @@ package memql
 //     left the list decides nothing. A row whose owner cannot be asked about
 //     has its tags taken as written (placeableTags).
 //  3. It has a `via` parent that exists: the parent's account. A parent that
-//     exists with no account leaves the row WAITING: assigning it from its
+//     exists with no account gives the row none either: assigning it from its
 //     owner now would disagree with the parent once the parent is assigned
-//     (the stamp's R5 rule, for the same reason). When the parent is a stated
-//     or shared concept that will never be assigned, waiting is the row's final
-//     state, which is right: it is cluster-provided like its parent, or its
-//     parent's owner has to place it.
+//     (the stamp's R5 rule, for the same reason). The row is WAITING when the
+//     parent can still get an account from the job (parentCanStillGetAccount:
+//     it is engine-managed, not in conflict, and the rules would assign it or
+//     it waits in turn on a parent that can). Otherwise -- a parent of a stated
+//     or shared concept with no account, one in conflict or left out -- the
+//     row is LEFT ALONE: it is cluster-provided like its parent, or somebody
+//     has to place the parent, and nothing the job does will change that. Only
+//     a waiting row is counted in `waiting`, so only it brings the daily full
+//     pass (account_assignment.go, Passes); a row left alone is counted with
+//     the rows kept without an account (`shared`).
 //  4. A Shopify store: the account of the site whose binding or previewBinding
 //     names it. Sites of two different accounts are a CONFLICT
 //     (store_bound_twice): which client a store belongs to is not something to
@@ -101,10 +107,15 @@ const (
 	outcomeKept
 	outcomeAssigned
 	outcomeShared
+	// outcomeWaiting: the row follows a parent with no account that can still
+	// get one from the job.
 	outcomeWaiting
 	outcomeConflict
 	// outcomeLeftOut: an owner decided the row stays in no account.
 	outcomeLeftOut
+	// outcomeLeftAlone: the row follows a parent with no account that will
+	// never get one from the job; somebody has to place the parent.
+	outcomeLeftAlone
 )
 
 // assignmentDecision is the judgment of one row.
@@ -189,8 +200,17 @@ func (e *MemQLEngine) judgeAssignmentBatch(ctx context.Context, q AccountQuerier
 
 // judgeAssignmentRows is judgeAssignmentBatch that also hands back the lookups
 // it read, for a caller that asks more of the same rows (the export's judge
-// asks whether a waiting row's parent can still get an account).
+// reads the recorded conflicts).
 func (e *MemQLEngine) judgeAssignmentRows(ctx context.Context, q AccountQuerier, meta *memorynodes.Concept, rows []assignmentRow) (*assignmentLookups, []assignmentDecision, error) {
+	return e.judgeAssignmentRowsAt(ctx, q, meta, rows, 0, map[string]bool{})
+}
+
+// judgeAssignmentRowsAt is the judgment at a depth of the walk up waiting
+// parents, sharing the walk's memo of parents' prospects. A row the rules
+// leave WAITING is waiting only while its parent can still get an account
+// (parentCanStillGetAccount); otherwise it is LEFT ALONE (file header, rule 3).
+func (e *MemQLEngine) judgeAssignmentRowsAt(ctx context.Context, q AccountQuerier, meta *memorynodes.Concept, rows []assignmentRow,
+	depth int, memo map[string]bool) (*assignmentLookups, []assignmentDecision, error) {
 	lk := &assignmentLookups{
 		e:      e,
 		q:      q,
@@ -208,6 +228,16 @@ func (e *MemQLEngine) judgeAssignmentRows(ctx context.Context, q AccountQuerier,
 		d, err := lk.judge(meta, row)
 		if err != nil {
 			return nil, nil, err
+		}
+		if d.outcome == outcomeWaiting {
+			parent, parentID := assignmentParent(meta, row)
+			can, err := e.parentCanStillGetAccount(ctx, q, parent, parentID, depth, memo)
+			if err != nil {
+				return nil, nil, err
+			}
+			if !can {
+				d.outcome = outcomeLeftAlone
+			}
 		}
 		out = append(out, d)
 	}
@@ -575,4 +605,68 @@ func (lk *assignmentLookups) isAccount(id string) (bool, error) {
 		}
 	}
 	return lk.accounts[id], nil
+}
+
+// assignableParentDepth bounds the walk up a chain of waiting parents. `via`
+// chains are acyclic (belongsToViaGraph) and a few deep; a chain longer than
+// this is answered "cannot", which leaves the row alone rather than looping.
+const assignableParentDepth = 16
+
+// parentCanStillGetAccount reports whether the row a row follows will get an
+// account from the job: its concept is engine-managed, it has no recorded
+// conflict, and the rules would assign it now, or it waits in turn on a parent
+// that can. A parent of a stated or shared concept with no account, one in
+// conflict or left out, or one gone, leaves its follower for a person to
+// place: that follower is LEFT ALONE, not waiting (file header, rule 3).
+// Answers are memoized by concept and bare id for the judgment that asks.
+//
+// staged-data: MUST-NOT-GATE -- a parent's prospects are a fact about the
+// parent, staged or not (loadParents).
+func (e *MemQLEngine) parentCanStillGetAccount(ctx context.Context, q AccountQuerier, concept, bareID string, depth int, memo map[string]bool) (bool, error) {
+	if concept == "" || depth >= assignableParentDepth {
+		return false, nil
+	}
+	key := concept + "\x00" + bareID
+	if answer, done := memo[key]; done {
+		return answer, nil
+	}
+	answer, err := e.judgeParentProspect(ctx, q, concept, bareID, depth, memo)
+	if err != nil {
+		return false, err
+	}
+	memo[key] = answer
+	return answer, nil
+}
+
+// judgeParentProspect is parentCanStillGetAccount's judgment of one parent.
+func (e *MemQLEngine) judgeParentProspect(ctx context.Context, q AccountQuerier, concept, bareID string, depth int, memo map[string]bool) (bool, error) {
+	meta, err := memorynodes.Get(concept)
+	if err != nil || meta == nil || !meta.AccountEngineManaged() {
+		return false, nil
+	}
+	// Both spellings, as loadParents asks; the newest of them is the row.
+	rows, err := readNewestVersions(ctx, q, concept, []string{concept + ":" + bareID, bareID})
+	if err != nil || len(rows) == 0 {
+		return false, err
+	}
+	row := rows[0]
+	for _, r := range rows[1:] {
+		if r.At.After(row.At) {
+			row = r
+		}
+	}
+	lk, plan, err := e.judgeAssignmentRowsAt(ctx, q, meta, []assignmentRow{row}, depth+1, memo)
+	if err != nil || len(plan) == 0 {
+		return false, err
+	}
+	if lk.conflicts[row.ID].open {
+		return false, nil
+	}
+	// A waiting parent was judged with its own parent's prospects already
+	// (judgeAssignmentRowsAt), so waiting here means it can still get one.
+	switch plan[0].outcome {
+	case outcomeAssigned, outcomeKept, outcomeWaiting:
+		return true, nil
+	}
+	return false, nil
 }

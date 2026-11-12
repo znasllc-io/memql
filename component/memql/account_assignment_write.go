@@ -74,7 +74,8 @@ func applyAssignmentPlan(ctx context.Context, tx bun.Tx, meta *memorynodes.Conce
 		case outcomeKept:
 			counts.kept++
 			placed = append(placed, d.row.ID)
-		case outcomeShared:
+		case outcomeShared, outcomeLeftAlone, outcomeLeftOut:
+			// The rows the job keeps without an account on purpose.
 			counts.shared++
 		case outcomeWaiting:
 			counts.waiting++
@@ -101,7 +102,7 @@ func applyAssignmentPlan(ctx context.Context, tx bun.Tx, meta *memorynodes.Conce
 					// row there is what the job would have done.
 					conflicts = append(conflicts, assignmentConflict{ID: w.ID, Kind: conflictLibraryFenceRefused,
 						Detail:     "the Library retirement fence refused the update: the file's bytes were permanently retired",
-						Candidates: []string{w.Account}})
+						Candidates: fenceRefusalCandidates(w.Account)})
 					continue
 				}
 				if err != nil {
@@ -130,6 +131,16 @@ func applyAssignmentPlan(ctx context.Context, tx bun.Tx, meta *memorynodes.Conce
 		return counts, false, err
 	}
 	return counts, changed > 0, nil
+}
+
+// fenceRefusalCandidates is the candidates of a row the Library fence refused.
+// A write that chose no account (a conversion alone) names none: an empty
+// string in the list would be an account nobody can look up.
+func fenceRefusalCandidates(account string) []string {
+	if account == "" {
+		return []string{}
+	}
+	return []string{account}
 }
 
 // writeAssignmentsGuarded runs writeAssignments under a savepoint, so a refusal

@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -426,21 +427,56 @@ func runOnePassOf(t *testing.T, engine *MemQLEngine, db *bun.DB, concept string)
 	return examined
 }
 
+// seedWaitingRun writes, after the job has settled, a goal the job has not
+// reached and a run that follows it, both an hour old: behind every later pass
+// of their concepts, as a row written before the switch and missed would be. A
+// requested full pass of the run then finds its goal unassigned but able to get
+// an account (its owner's), so the run is left WAITING.
+func seedWaitingRun(t *testing.T, engine *MemQLEngine, db *bun.DB, owner, name string) (goalID, runID string) {
+	t.Helper()
+	ctx := context.Background()
+	const goal, run = "v1:work:goal", "v1:work:run"
+	goalID, runID = goal+":"+name+"-goal", run+":"+name+"-run"
+	seedRawRow(t, ctx, db, goal, goalID, time.Now().Add(-time.Hour), "assignment-test",
+		map[string]any{"ownerUserId": owner, "title": "g"})
+	seedRawRow(t, ctx, db, run, runID, time.Now().Add(-time.Hour), "assignment-test",
+		map[string]any{"ownerUserId": owner, "goalId": goalID})
+	require.NoError(t, RequestAccountFullPass(ctx, db, []string{run}))
+	runOnePassOf(t, engine, db, run)
+	require.Positive(t, assignmentProgressOf(t, db, run).waiting)
+	_, has := newestPayload(t, db, runID)["accountId"]
+	require.False(t, has, "the run of an unassigned goal was assigned")
+	return goalID, runID
+}
+
+// sharedCountOf reads the rows the concept's last pass left without an account
+// on purpose.
+func sharedCountOf(t *testing.T, db *bun.DB, concept string) int {
+	t.Helper()
+	var n int
+	require.NoError(t, db.QueryRowContext(context.Background(), `SELECT shared FROM account_assignment_progress WHERE concept = ?`,
+		concept).Scan(&n))
+	return n
+}
+
 // A concept is walked in full again only while its last full pass left rows
-// waiting on a parent, a day after that pass; one with nothing waiting is never
-// re-walked, and its later passes look only at what was written since.
+// waiting on a parent that can still get an account, a day after that pass;
+// one with nothing waiting is never re-walked, and its later passes look only
+// at what was written since. A row following a parent that will never get an
+// account from the job is left alone, not waiting.
 func TestAccountAssignmentRewalksOnlyWhileRowsWait(t *testing.T) {
 	engine, db, _ := readMergeTestEngine(t)
 	ctx := context.Background()
 	s := uniqueSuffix(t.Name())
-	const todo, grant = "v1:todos:todo", "v1:platform:sitePreviewGrant"
-	seedPrincipal(t, engine, "rewalk-owner-"+s, auth.RoleOwner)
+	const todo, grant, run = "v1:todos:todo", "v1:platform:sitePreviewGrant", "v1:work:run"
+	owner := "rewalk-owner-" + s
+	seedPrincipal(t, engine, owner, auth.RoleOwner)
 	seedRawRow(t, ctx, db, todo, todo+":rewalk-"+s, time.Now().Add(-time.Hour), "assignment-test",
-		map[string]any{"ownerUserId": "rewalk-owner-" + s, "title": "t"})
-	// A site of a stated concept with no account yet, and a grant that follows it.
+		map[string]any{"ownerUserId": owner, "title": "t"})
+	// A site of a stated concept with no account, and a grant that follows it.
 	site := conceptPlatformSite + ":rewalk-site-" + s
 	seedRawRow(t, ctx, db, conceptPlatformSite, site, time.Now().Add(-time.Hour), "assignment-test",
-		map[string]any{"ownerUserId": "rewalk-owner-" + s})
+		map[string]any{"ownerUserId": owner})
 	child := grant + ":rewalk-grant-" + s
 	seedRawRow(t, ctx, db, grant, child, time.Now().Add(-time.Hour), "assignment-test",
 		map[string]any{"siteId": "rewalk-site-" + s})
@@ -449,7 +485,15 @@ func TestAccountAssignmentRewalksOnlyWhileRowsWait(t *testing.T) {
 	runAssignmentUntilSettled(t, engine, db, forceFullPasses(t, db).Add(-time.Hour))
 	require.Equal(t, "self", newestPayload(t, db, todo+":rewalk-"+s)["accountId"])
 	_, has := newestPayload(t, db, child)["accountId"]
-	require.False(t, has, "the child of an unassigned parent was assigned")
+	require.False(t, has, "the child of a parent that states no account was assigned")
+
+	t.Run("a row following a parent that cannot get an account is left alone", func(t *testing.T) {
+		require.Zero(t, assignmentProgressOf(t, db, grant).waiting, "a row the job leaves alone counted as waiting")
+		require.Positive(t, sharedCountOf(t, db, grant), "the row left alone is counted with the rows kept without an account")
+		ageLastFullPass(t, db, grant)
+		runOnePassOf(t, engine, db, grant)
+		require.False(t, assignmentProgressOf(t, db, grant).passFull, "a row left alone brought a full pass")
+	})
 
 	t.Run("nothing waiting: a day later the pass is incremental", func(t *testing.T) {
 		require.Zero(t, assignmentProgressOf(t, db, todo).waiting)
@@ -466,24 +510,23 @@ func TestAccountAssignmentRewalksOnlyWhileRowsWait(t *testing.T) {
 	})
 
 	t.Run("a row waiting: a day later the pass is full and assigns it", func(t *testing.T) {
-		require.Positive(t, assignmentProgressOf(t, db, grant).waiting)
-		// An owner places the parent in between, a write the child never sees.
+		goalID, runID := seedWaitingRun(t, engine, db, owner, "rewalk-"+s)
+		// An owner places the goal in between, a write the run never sees.
 		_, err := db.ExecContext(ctx, `UPDATE "MemoryNodes" SET payload = jsonb_set(payload, '{accountId}', '"rewalk-acct"')
-			WHERE id = ?`, site)
+			WHERE id = ?`, goalID)
 		require.NoError(t, err)
 
-		// Before the day is up the later pass does not reach the child.
-		_, err = db.ExecContext(ctx, `UPDATE account_assignment_progress SET next_at = clock_timestamp() WHERE concept = ?`, grant)
-		require.NoError(t, err)
-		runOnePassOf(t, engine, db, grant)
-		require.False(t, assignmentProgressOf(t, db, grant).passFull)
-		_, has := newestPayload(t, db, child)["accountId"]
+		// Before the day is up the later pass does not reach the run.
+		makeDue(t, db, run)
+		runOnePassOf(t, engine, db, run)
+		require.False(t, assignmentProgressOf(t, db, run).passFull)
+		_, has := newestPayload(t, db, runID)["accountId"]
 		require.False(t, has)
 
-		ageLastFullPass(t, db, grant)
-		runOnePassOf(t, engine, db, grant)
-		require.True(t, assignmentProgressOf(t, db, grant).passFull, "rows were waiting, so the pass should be full")
-		require.Equal(t, "rewalk-acct", newestPayload(t, db, child)["accountId"])
+		ageLastFullPass(t, db, run)
+		runOnePassOf(t, engine, db, run)
+		require.True(t, assignmentProgressOf(t, db, run).passFull, "rows were waiting, so the pass should be full")
+		require.Equal(t, "rewalk-acct", newestPayload(t, db, runID)["accountId"])
 	})
 }
 
@@ -539,6 +582,171 @@ func TestAccountAssignmentCatchesALateCommit(t *testing.T) {
 	require.Equal(t, "self", newestPayload(t, db, late)["accountId"], "the row whose transaction committed late was never assigned")
 }
 
+// openLateWrite begins a transaction that inserts one to-do without an account
+// and stays open, as a stalled write would.
+func openLateWrite(t *testing.T, db *bun.DB, id, owner string) bun.Tx {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	var createdAt time.Time
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&createdAt))
+	_, err = tx.NewInsert().Model(&memorynodes.MemoryNode{
+		ID: id, Concept: "v1:todos:todo", CreatedBy: "assignment-test", CreatedAt: createdAt.UTC(),
+		Payload:    json.RawMessage(`{"ownerUserId":"` + owner + `","title":"late"}`),
+		Provenance: json.RawMessage(`{"kind":"direct","name":"late-commit-test"}`),
+	}).Exec(ctx)
+	require.NoError(t, err)
+	time.Sleep(20 * time.Millisecond)
+	return tx
+}
+
+// A pass of several batches: the write is open while the first batch reads
+// past its row, and commits before the last batch begins. The horizon the
+// first batch read is kept on the progress row, so the pass still does not
+// advance past the write's start, and the next pass reads the row. Batch size
+// 1, slack 0.
+func TestAccountAssignmentHorizonHoldsAcrossBatches(t *testing.T) {
+	engine, db, _ := readMergeTestEngine(t)
+	ctx := context.Background()
+	s := uniqueSuffix(t.Name())
+	const todo = "v1:todos:todo"
+	owner := "horizon-owner-" + s
+	seedPrincipal(t, engine, owner, auth.RoleOwner)
+	saved := assignmentLateCommitSlack
+	assignmentLateCommitSlack = 0
+	t.Cleanup(func() { assignmentLateCommitSlack = saved })
+	_, order, err := assignmentConcepts()
+	require.NoError(t, err)
+	require.NoError(t, ensureAssignmentProgressRows(ctx, db, order))
+	smallBatches := func() {
+		_, err := db.ExecContext(ctx, `UPDATE account_assignment_progress SET batch_size = 1, next_at = clock_timestamp()
+			WHERE concept = ?`, todo)
+		require.NoError(t, err)
+	}
+
+	t.Run("a later pass", func(t *testing.T) {
+		makeDue(t, db, todo)
+		runOnePassOf(t, engine, db, todo)
+
+		late := todo + ":late-later-" + s
+		tx := openLateWrite(t, db, late, owner)
+		// Two committed rows after it, so the pass takes more than one batch.
+		for i := 0; i < 2; i++ {
+			var now time.Time
+			require.NoError(t, db.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&now))
+			seedRawRow(t, ctx, db, todo, fmt.Sprintf("%s:after-%d-%s", todo, i, s), now, "assignment-test",
+				map[string]any{"ownerUserId": owner, "title": "after"})
+		}
+		smallBatches()
+		first, err := engine.assignOneBatch(ctx, db, []string{todo}, assignmentBatchIds)
+		require.NoError(t, err)
+		require.Equal(t, 1, first.examined)
+		require.False(t, assignmentProgressOf(t, db, todo).passFull)
+		require.NoError(t, tx.Commit())
+		runOnePassOf(t, engine, db, todo)
+
+		makeDue(t, db, todo)
+		runOnePassOf(t, engine, db, todo)
+		require.Equal(t, "self", newestPayload(t, db, late)["accountId"], "the row committed between batches was never assigned")
+	})
+
+	t.Run("a full pass", func(t *testing.T) {
+		// The id sorts before every id the tree writes, so the first batch
+		// of the full pass, which reads the lowest committed id, passes it
+		// while it is still uncommitted. It is deleted afterwards, or the next
+		// run's row would sort after this one; the cursor check below says so
+		// should the order ever not hold.
+		late := "!late-full-" + s
+		t.Cleanup(func() {
+			_, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE id = ?`, late)
+		})
+		tx := openLateWrite(t, db, late, owner)
+		require.NoError(t, RequestAccountFullPass(ctx, db, []string{todo}))
+		smallBatches()
+		first, err := engine.assignOneBatch(ctx, db, []string{todo}, assignmentBatchIds)
+		require.NoError(t, err)
+		require.Equal(t, 1, first.examined)
+		require.True(t, assignmentProgressOf(t, db, todo).passFull)
+		var passed bool
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT cursor_id > ? FROM account_assignment_progress WHERE concept = ?`,
+			late, todo).Scan(&passed))
+		require.True(t, passed, "the first batch did not read past the open write's row")
+		require.NoError(t, tx.Commit())
+		runOnePassOf(t, engine, db, todo)
+
+		makeDue(t, db, todo)
+		runOnePassOf(t, engine, db, todo)
+		require.Equal(t, "self", newestPayload(t, db, late)["accountId"], "the row committed between batches of a full pass was never assigned")
+	})
+}
+
+// The horizon counts a transaction that has not written yet, because it may
+// still insert a row whose createdAt it took before the pass; and it does not
+// count the account export's snapshot, which names itself and never writes.
+func TestAccountAssignmentHorizonCountsEveryOpenTransactionButTheExport(t *testing.T) {
+	engine, db, _ := readMergeTestEngine(t)
+	ctx := context.Background()
+	s := uniqueSuffix(t.Name())
+	const todo = "v1:todos:todo"
+	owner := "unwritten-owner-" + s
+	seedPrincipal(t, engine, owner, auth.RoleOwner)
+	saved := assignmentLateCommitSlack
+	assignmentLateCommitSlack = 0
+	t.Cleanup(func() { assignmentLateCommitSlack = saved })
+	_, order, err := assignmentConcepts()
+	require.NoError(t, err)
+	require.NoError(t, ensureAssignmentProgressRows(ctx, db, order))
+	makeDue(t, db, todo)
+	runOnePassOf(t, engine, db, todo)
+
+	t.Run("a transaction that has not written yet", func(t *testing.T) {
+		late := todo + ":unwritten-" + s
+		tx, err := db.BeginTx(ctx, nil)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = tx.Rollback() })
+		var createdAt time.Time
+		require.NoError(t, tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&createdAt))
+		time.Sleep(20 * time.Millisecond)
+
+		makeDue(t, db, todo)
+		runOnePassOf(t, engine, db, todo)
+		_, err = tx.NewInsert().Model(&memorynodes.MemoryNode{
+			ID: late, Concept: todo, CreatedBy: "assignment-test", CreatedAt: createdAt.UTC(),
+			Payload:    json.RawMessage(`{"ownerUserId":"` + owner + `","title":"late"}`),
+			Provenance: json.RawMessage(`{"kind":"direct","name":"late-commit-test"}`),
+		}).Exec(ctx)
+		require.NoError(t, err)
+		require.NoError(t, tx.Commit())
+
+		makeDue(t, db, todo)
+		runOnePassOf(t, engine, db, todo)
+		require.Equal(t, "self", newestPayload(t, db, late)["accountId"], "a row written after the pass with an earlier createdAt was never assigned")
+	})
+
+	t.Run("the export's snapshot is not counted", func(t *testing.T) {
+		conn, err := db.Conn(ctx)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = conn.Close() })
+		_, err = conn.ExecContext(ctx, `SELECT set_config('application_name', ?, false)`, AccountExportApplicationName)
+		require.NoError(t, err)
+		snapshot, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = snapshot.Rollback() })
+		var opened time.Time
+		require.NoError(t, snapshot.QueryRowContext(ctx, `SELECT now()`).Scan(&opened))
+		time.Sleep(20 * time.Millisecond)
+
+		makeDue(t, db, todo)
+		runOnePassOf(t, engine, db, todo)
+		var verified time.Time
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT verified_through FROM account_assignment_progress WHERE concept = ?`, todo).Scan(&verified))
+		require.True(t, verified.After(opened), "the export's snapshot held the cursor back: verified %v, snapshot opened %v", verified, opened)
+		require.NoError(t, snapshot.Rollback())
+	})
+}
+
 // A full pass asked for is the next pass of that concept, whatever its last
 // full pass's age; a concept nobody asked about keeps its schedule; and a
 // requested pass of a concept waits for the requested pass of the concept it
@@ -547,40 +755,35 @@ func TestAccountAssignmentFullPassOnRequest(t *testing.T) {
 	engine, db, _ := readMergeTestEngine(t)
 	ctx := context.Background()
 	s := uniqueSuffix(t.Name())
-	const todo, grant = "v1:todos:todo", "v1:platform:sitePreviewGrant"
-	seedPrincipal(t, engine, "request-owner-"+s, auth.RoleOwner)
-	site := conceptPlatformSite + ":request-site-" + s
-	seedRawRow(t, ctx, db, conceptPlatformSite, site, time.Now().Add(-time.Hour), "assignment-test",
-		map[string]any{"ownerUserId": "request-owner-" + s})
-	child := grant + ":request-grant-" + s
-	seedRawRow(t, ctx, db, grant, child, time.Now().Add(-time.Hour), "assignment-test",
-		map[string]any{"siteId": "request-site-" + s})
+	const todo, run = "v1:todos:todo", "v1:work:run"
+	owner := "request-owner-" + s
+	seedPrincipal(t, engine, owner, auth.RoleOwner)
 
 	resetAssignmentProgress(t, db)
 	runAssignmentUntilSettled(t, engine, db, forceFullPasses(t, db).Add(-time.Hour))
-	require.Positive(t, assignmentProgressOf(t, db, grant).waiting)
+	goalID, runID := seedWaitingRun(t, engine, db, owner, "request-"+s)
 	_, err := db.ExecContext(ctx, `UPDATE "MemoryNodes" SET payload = jsonb_set(payload, '{accountId}', '"request-acct"')
-		WHERE id = ?`, site)
+		WHERE id = ?`, goalID)
 	require.NoError(t, err)
 
 	// Both have rows waiting and a full pass an hour old: neither is due a
 	// full pass by the schedule alone.
 	_, err = db.ExecContext(ctx, `UPDATE account_assignment_progress
 		SET full_pass_at = clock_timestamp() - interval '1 hour', next_at = clock_timestamp(),
-		    waiting = GREATEST(waiting, 1) WHERE concept = ANY(?::text[])`, pq.Array([]string{grant, todo}))
+		    waiting = GREATEST(waiting, 1) WHERE concept = ANY(?::text[])`, pq.Array([]string{run, todo}))
 	require.NoError(t, err)
-	require.NoError(t, RequestAccountFullPass(ctx, db, []string{grant}))
+	require.NoError(t, RequestAccountFullPass(ctx, db, []string{run}))
 
-	runOnePassOf(t, engine, db, grant)
-	require.True(t, assignmentProgressOf(t, db, grant).passFull, "the requested pass was not full")
-	require.Equal(t, "request-acct", newestPayload(t, db, child)["accountId"])
+	runOnePassOf(t, engine, db, run)
+	require.True(t, assignmentProgressOf(t, db, run).passFull, "the requested pass was not full")
+	require.Equal(t, "request-acct", newestPayload(t, db, runID)["accountId"])
 
 	runOnePassOf(t, engine, db, todo)
 	require.False(t, assignmentProgressOf(t, db, todo).passFull, "a concept nobody asked about was walked in full")
 
-	makeDue(t, db, grant)
-	runOnePassOf(t, engine, db, grant)
-	require.False(t, assignmentProgressOf(t, db, grant).passFull, "a request already honored was honored again")
+	makeDue(t, db, run)
+	runOnePassOf(t, engine, db, run)
+	require.False(t, assignmentProgressOf(t, db, run).passFull, "a request already honored was honored again")
 
 	t.Run("parents first", func(t *testing.T) {
 		const goal, run = "v1:work:goal", "v1:work:run"
@@ -708,12 +911,18 @@ func TestAccountAssignmentRowsStillAssignable(t *testing.T) {
 	raw(grant, "judge-grant-"+s, map[string]any{"siteId": "judge-site-" + s})
 	// A cluster-provided row of a shared kind: left alone.
 	raw(skill, "judge-skill-"+s, map[string]any{"ownerUserId": "", "slug": "judge-skill-" + s})
-	// Two to-dos the owner rule would assign, one of them with a recorded
-	// conflict: only the other counts.
+	// To-dos the owner rule would assign, one with a recorded conflict and one
+	// an owner left out: only the plain one counts.
 	raw(todo, "judge-todo-"+s, map[string]any{"ownerUserId": owner, "title": "t"})
 	conflicted := raw(todo, "judge-todo-conflicted-"+s, map[string]any{"ownerUserId": owner, "title": "c"})
 	_, err := db.ExecContext(ctx, `INSERT INTO account_assignment_conflict (concept, row_id, kind, detail, candidates)
 		VALUES (?, ?, 'store_bound_twice', 'test', '{self}')`, todo, conflicted)
+	require.NoError(t, err)
+	// A to-do whose conflict an owner left out: left alone for good.
+	leftOut := raw(todo, "judge-todo-left-out-"+s, map[string]any{"ownerUserId": owner, "title": "l"})
+	_, err = db.ExecContext(ctx, `INSERT INTO account_assignment_conflict
+		(concept, row_id, kind, detail, candidates, resolved_at, left_out_at, left_out_by)
+		VALUES (?, ?, 'store_bound_twice', 'test', '{self}', clock_timestamp(), clock_timestamp(), 'an-owner')`, todo, leftOut)
 	require.NoError(t, err)
 
 	counts, err := engine.AccountRowsStillAssignable(ctx, db.DB, since, []string{goal, run, todo, grant, skill, conceptPlatformSite})

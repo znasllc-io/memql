@@ -108,11 +108,6 @@ func (e *MemQLEngine) AccountAssignmentStates(ctx context.Context, q AccountQuer
 // reads are read per chunk.
 const assignableJudgeChunk = assignmentBatchIds
 
-// assignableParentDepth bounds the walk up a chain of waiting parents. `via`
-// chains are acyclic (belongsToViaGraph) and a few deep; a chain longer than
-// this is answered "cannot", which leaves the row uncounted rather than looping.
-const assignableParentDepth = 16
-
 // AccountRowsStillAssignable judges, without writing, the rows of the given
 // concepts whose newest version was written at or after `since` and names no
 // account. It counts, per concept, the rows the job's rules would assign, or
@@ -127,7 +122,6 @@ const assignableParentDepth = 16
 // assigns its rows, so none of them is waiting for it.
 func (e *MemQLEngine) AccountRowsStillAssignable(ctx context.Context, q AccountQuerier, since time.Time, concepts []string) (map[string]int64, error) {
 	out := map[string]int64{}
-	prospects := map[string]bool{}
 	for _, name := range concepts {
 		meta, err := memorynodes.Get(name)
 		if err != nil || meta == nil || !meta.AccountEngineManaged() {
@@ -148,18 +142,10 @@ func (e *MemQLEngine) AccountRowsStillAssignable(ctx context.Context, q AccountQ
 				if lk.conflicts[d.row.ID].open {
 					continue // a recorded conflict waits for a person, not for the job
 				}
-				switch d.outcome {
-				case outcomeAssigned:
+				// outcomeWaiting already means a parent that can still get an
+				// account; a row whose parent cannot is outcomeLeftAlone.
+				if d.outcome == outcomeAssigned || d.outcome == outcomeWaiting {
 					n++
-				case outcomeWaiting:
-					parent, parentID := assignmentParent(meta, d.row)
-					ok, err := e.parentCanStillGetAccount(ctx, q, parent, parentID, 0, prospects)
-					if err != nil {
-						return nil, err
-					}
-					if ok {
-						n++
-					}
 				}
 			}
 		}
@@ -190,64 +176,4 @@ func recentRowsWithoutAccount(ctx context.Context, q AccountQuerier, concept str
 		return nil, fmt.Errorf("account assignment: reading the recent rows of %s: %w", concept, err)
 	}
 	return scanAssignmentRows(rows)
-}
-
-// parentCanStillGetAccount reports whether the row a waiting row follows will
-// get an account from the job: its concept is engine-managed, it has no
-// recorded conflict, and the rules would assign it now, or it waits in turn on
-// a parent that can. A parent of a stated or shared concept with no account,
-// one in conflict or left out, or one gone, leaves its follower waiting for a
-// person, which is not what "caught up" waits for. Answers are memoized by
-// concept and bare id for the call.
-//
-// staged-data: MUST-NOT-GATE -- a parent's prospects are a fact about the
-// parent, staged or not (loadParents).
-func (e *MemQLEngine) parentCanStillGetAccount(ctx context.Context, q AccountQuerier, concept, bareID string, depth int, memo map[string]bool) (bool, error) {
-	if concept == "" || depth >= assignableParentDepth {
-		return false, nil
-	}
-	key := concept + "\x00" + bareID
-	if answer, done := memo[key]; done {
-		return answer, nil
-	}
-	answer, err := e.judgeParentProspect(ctx, q, concept, bareID, depth, memo)
-	if err != nil {
-		return false, err
-	}
-	memo[key] = answer
-	return answer, nil
-}
-
-// judgeParentProspect is parentCanStillGetAccount's judgment of one parent.
-func (e *MemQLEngine) judgeParentProspect(ctx context.Context, q AccountQuerier, concept, bareID string, depth int, memo map[string]bool) (bool, error) {
-	meta, err := memorynodes.Get(concept)
-	if err != nil || meta == nil || !meta.AccountEngineManaged() {
-		return false, nil
-	}
-	// Both spellings, as loadParents asks; the newest of them is the row.
-	rows, err := readNewestVersions(ctx, q, concept, []string{concept + ":" + bareID, bareID})
-	if err != nil || len(rows) == 0 {
-		return false, err
-	}
-	row := rows[0]
-	for _, r := range rows[1:] {
-		if r.At.After(row.At) {
-			row = r
-		}
-	}
-	lk, plan, err := e.judgeAssignmentRows(ctx, q, meta, []assignmentRow{row})
-	if err != nil || len(plan) == 0 {
-		return false, err
-	}
-	if lk.conflicts[row.ID].open {
-		return false, nil
-	}
-	switch plan[0].outcome {
-	case outcomeAssigned, outcomeKept:
-		return true, nil
-	case outcomeWaiting:
-		parent, parentID := assignmentParent(meta, row)
-		return e.parentCanStillGetAccount(ctx, q, parent, parentID, depth+1, memo)
-	}
-	return false, nil
 }
