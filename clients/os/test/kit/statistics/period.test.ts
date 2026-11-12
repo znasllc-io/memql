@@ -128,6 +128,8 @@ describe("a bucket in a store's time zone", () => {
   it("labels a month by the zone's own month", () => {
     expect(bucketLabel("2025-10-31T23:00:00Z", "month", "Europe/Madrid")).toBe("Nov 2025");
     expect(bucketLabel("2025-10-31T23:00:00Z", "month")).toBe("Oct 2025");
+    expect(bucketLabel("2024-10-31T23:00:00Z", "month", "Europe/Madrid")).toBe("Nov 2024");
+    expect(bucketLabel("2024-10-31T23:00:00Z", "month")).toBe("Oct 2024");
     expect(bucketMoment("2025-10-31T23:00:00Z", "month", "Europe/Madrid")).toBe("Nov 2025");
   });
 
