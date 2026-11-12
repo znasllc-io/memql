@@ -33,8 +33,16 @@ const exportFormat = "memql.wholesale.export/v1"
 // tokenHashField is the field a credential's digest is kept in.
 const tokenHashField = "tokenHash"
 
-func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+// exportAdmission is wholesaleExportStore's own check before it reads
+// anything: the site must serve the store (admitStore). wholesaleStoreSettings'
+// may.export is this check, called.
+func (p *Provider) exportAdmission(ctx context.Context, args map[string]any) (string, error) {
 	storeID, _, err := p.admitStore(ctx, args)
+	return storeID, err
+}
+
+func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	storeID, err := p.exportAdmission(ctx, args)
 	if err != nil {
 		return nil, err
 	}
@@ -72,6 +80,33 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 	if err != nil {
 		return nil, err
 	}
+	// EACH EMAIL AS THE LANE SAYS IT STANDS (effectiveSend), with the lane's
+	// record of its delivery: a deferral the lane later sent is sent, at its
+	// time. Read once per organization, a hundred request ids at a time.
+	byAccount := map[string][]string{}
+	for _, app := range apps {
+		account := bareID(trimmed(app["accountId"]))
+		for _, send := range sends[bareID(trimmed(app["id"]))] {
+			byAccount[account] = append(byAccount[account], trimmed(send["requestId"]))
+		}
+	}
+	// A STATUS THAT CANNOT BE READ does not refuse the export: each attempt of
+	// that organization says, in its own field, that its delivery could not be
+	// read, and is exported as it was recorded.
+	deliveries := map[string]map[string]any{}
+	unreadable := map[string]bool{}
+	for account, requestIDs := range byAccount {
+		got, err := p.laneDeliveries(ctx, map[string]any{"accountId": account}, requestIDs)
+		if err != nil {
+			for _, id := range requestIDs {
+				unreadable[id] = true
+			}
+			continue
+		}
+		for id, d := range got {
+			deliveries[id] = d
+		}
+	}
 	termsRequired, err := p.termsRequiredAt(sys, storeID)
 	if err != nil {
 		return nil, err
@@ -106,6 +141,11 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 		if versions := ents[bareID(id)]; len(versions) > 0 {
 			row := withoutTokenHash(versions[0])
 			row["applicationId"] = id
+			// WHY ACCESS IS NOT ON, as the application's page and the buyers list say
+			// it: a sentence for a person (accessReason), never the record's own text.
+			if asString(row["error"]) != "" {
+				row["error"] = accessReason(versions[0])
+			}
 			entitlements = append(entitlements, row)
 		}
 		if rows := accs[bareID(id)]; len(rows) > 0 {
@@ -114,8 +154,15 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 			acceptances = append(acceptances, row)
 		}
 		for _, send := range sends[bareID(id)] {
-			row := withoutTokenHash(send)
+			d := deliveries[trimmed(send["requestId"])]
+			row := withoutTokenHash(p.effectiveSend(send, d, !unreadable[trimmed(send["requestId"])]))
 			row["applicationId"] = id
+			row["deliveryUnreadable"] = unreadable[trimmed(send["requestId"])]
+			if d != nil {
+				row["delivery"] = d
+			} else {
+				row["delivery"] = nil
+			}
 			emailSends = append(emailSends, row)
 		}
 	}

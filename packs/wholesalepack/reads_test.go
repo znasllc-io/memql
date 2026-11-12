@@ -619,6 +619,47 @@ func TestTheBuyersAreTheApprovedApplicationsWithTheirAccess(t *testing.T) {
 	}
 }
 
+// THE LISTS SAY WHETHER THE CALLER IS ONE OF THE CLUSTER'S OPERATORS, by the
+// rule wholesaleGet answers it by.
+func TestTheListsAnswerWhetherTheCallerIsAnOperator(t *testing.T) {
+	f := newStoreFake()
+	f.app(1, "Alpha", "A", "a@example.com", 1)
+	p := f.provider()
+	store := map[string]any{"siteId": readsSite, "storeId": readsStore}
+	for who, c := range map[string]struct {
+		ctx  context.Context
+		want bool
+	}{"a member": {staffReads(), false}, "an operator": {operatorCtx("op-1"), true}} {
+		for name, call := range map[string]func(context.Context, map[string]any, int) ([]memorynodes.MemoryNode, error){
+			"wholesaleList": p.list, "wholesaleBuyers": p.buyers,
+		} {
+			got := decodedBy(t)(call(c.ctx, store, 0))
+			if got["operator"] != c.want || got["operator"] != isClusterOperator(c.ctx) {
+				t.Errorf("%s read by %s answered operator %v, want %v", name, who, got["operator"], c.want)
+			}
+		}
+	}
+}
+
+// A BUYER WHOSE ACCESS IS NOT ON SAYS WHY on the buyers list, in the sentence
+// the application's page shows.
+func TestABuyerWhoseAccessIsNotOnSaysWhyAsTheApplicationDoes(t *testing.T) {
+	f := newStoreFake()
+	failed := f.app(1, "Failed Access", "A", "a@example.com", 1)
+	f.decide(applicationRef(failed), TransitionApprove, 10, true)
+	sentence := "This store's plan does not include B2B companies."
+	f.ents = append(f.ents, map[string]any{"applicationId": applicationRef(failed), "state": EntitlementFailed,
+		"errorCode": ErrorPlanCeiling, "error": sentence, "ownerUserId": "v1:identity:user:merchant-1",
+		"createdAt": readsClock.Add(11 * time.Minute)})
+	p := f.provider()
+	rows := rowsOf(t, decodedBy(t)(p.buyers(staffReads(), map[string]any{"siteId": readsSite, "storeId": readsStore}, 0)))
+	page := decodedBy(t)(p.get(staffReads(), map[string]any{"applicationId": failed}, 0))
+	ent, _ := page["entitlement"].(map[string]any)
+	if len(rows) != 1 || rows[0]["error"] != sentence || ent["error"] != sentence {
+		t.Fatalf("the buyer row says %v, the application's page %v; want both %q", rows, ent, sentence)
+	}
+}
+
 // A STORE-WIDE READ CHECKS THE SITE BEFORE IT READS THE STORE.
 func TestAStoreWideReadRefusesASiteThatDoesNotServeTheStore(t *testing.T) {
 	f := newStoreFake()

@@ -119,7 +119,14 @@ func automatedWholesaleEngine(t *testing.T) *memql.MemQLEngine {
 	t.Cleanup(func() { memqldsl.UnregisterTree(clientContoso) })
 
 	eng := liveWholesaleEngine(t)
+	startScheduler(t, eng, clientContoso)
+	return eng
+}
 
+// startScheduler runs the automation scheduler on the engine's own event bus,
+// its log kept and printed with a failure (the lines naming client).
+func startScheduler(t *testing.T, eng *memql.MemQLEngine, client string) {
+	t.Helper()
 	// ONE BUS: the engine publishes graph.node.created.* on it and the
 	// scheduler subscribes on it (examples/referencepack's live harness).
 	bus := events.NewBus()
@@ -131,7 +138,7 @@ func automatedWholesaleEngine(t *testing.T) *memql.MemQLEngine {
 	schedLog := &lockedBuffer{}
 	t.Cleanup(func() {
 		if t.Failed() {
-			t.Logf("automation scheduler log (fixture lines):\n%s", schedLog.lines("contoso"))
+			t.Logf("automation scheduler log (fixture lines):\n%s", schedLog.lines(client))
 		}
 	})
 	sched, err := automations.NewScheduler(automations.SchedulerOptions{
@@ -153,7 +160,6 @@ func automatedWholesaleEngine(t *testing.T) *memql.MemQLEngine {
 	case <-time.After(60 * time.Second):
 		t.Fatal("the automation scheduler was not ready within 60s")
 	}
-	return eng
 }
 
 // THE CLIENT'S GRANT AUTOMATION PROVISIONS AN APPROVED APPLICATION. The

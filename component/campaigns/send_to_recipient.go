@@ -55,6 +55,20 @@ import (
 
 var errCampaignRateLimited = errors.New("campaigns.sendToRecipient: the send-rate limit is exhausted; try again shortly")
 
+// errNoEmailSender is a single send on a node with no email sender registered.
+// One value, so a caller that answers a refusal by what it is (the row lane's
+// code for it, send_row.go) reads it without reading its text.
+var errNoEmailSender = errors.New("campaigns.sendToRecipient: no email sender is registered on this node")
+
+// templateUnreadable is a single send whose template its caller cannot read:
+// it does not exist, or it is not theirs. A type, for the same reason; its text
+// is what the send has always said.
+type templateUnreadable struct{ id string }
+
+func (e templateUnreadable) Error() string {
+	return fmt.Sprintf("campaigns.sendToRecipient: template %q is not readable", e.id)
+}
+
 // undecidedSend is an error that says nothing about the message. Something the
 // send needed -- a read, the record that an attempt began -- failed, or was cut
 // short, before the attempt began: the database was slow, a statement timed out, a
@@ -141,6 +155,17 @@ type uncertainSend struct {
 
 func (e uncertainSend) Unwrap() error { return e.error }
 
+// UncertainSend reports whether err is an uncertain hand-over (uncertainSend):
+// the provider may have accepted the message, and nothing submits it again
+// until the provider's record says it did not. A pack that records what the row
+// lane answered reads one through here -- the type is this package's own -- so
+// it can tell the store's people "not known yet" apart from a send that failed.
+// The error's text is the transport's and is not for them.
+func UncertainSend(err error) bool {
+	var u uncertainSend
+	return errors.As(err, &u)
+}
+
 // uncertain is err, a send whose receipt keeps saying an attempt began, as an
 // uncertainSend that says whether its transport keeps a record to ask.
 func (w *Worker) uncertain(ctx context.Context, receipt *singleSendReceipt, err error) error {
@@ -169,7 +194,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		return nil, fmt.Errorf("campaigns.sendToRecipient: %s", reason)
 	}
 	if w.resolveSender() == nil {
-		return nil, errors.New("campaigns.sendToRecipient: no email sender is registered on this node")
+		return nil, errNoEmailSender
 	}
 
 	// Resolve both resources under the caller's identity. After checking that
@@ -180,7 +205,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		return nil, undecided(fmt.Errorf("campaigns.sendToRecipient: %w", err))
 	}
 	if !found {
-		return nil, fmt.Errorf("campaigns.sendToRecipient: template %q is not readable", templateID)
+		return nil, templateUnreadable{id: templateID}
 	}
 	// Every send to a list's member comes through here (a journey's step, an
 	// event rule's marketing lane, a signup's welcome, an order message and the

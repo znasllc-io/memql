@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -76,6 +77,10 @@ const (
 	ActResendTerms = "resendTerms"
 	// ActResendApproved sends the approval email again.
 	ActResendApproved = "resendApproved"
+	// ActResendRejected sends the rejection email again.
+	ActResendRejected = "resendRejected"
+	// ActResendRevoked sends the removal email again.
+	ActResendRevoked = "resendRevoked"
 )
 
 // extensionReader is the engine's read of a client's own fields on a row of
@@ -88,12 +93,10 @@ type extensionReader interface {
 type ActsInput struct {
 	Stage, AccessState          string
 	EntitlementExists, Operator bool
-	// TermsRequired and TermsTemplateChosen are the store's: whether it requires
-	// its terms, and whether it chose a template for the terms email.
-	TermsRequired, TermsTemplateChosen bool
-	// ApprovedEmailSent is whether the store's automation has sent the approval
-	// email (an approved emailSend row exists).
-	ApprovedEmailSent bool
+	// Emails is where each of the applicant's emails stands, by kind
+	// (EmailStanding): what a resend of it is judged on. A kind it says nothing
+	// of is not offered.
+	Emails map[string]EmailStanding
 }
 
 // ActsFor is the acts open on one application.
@@ -106,10 +109,12 @@ type ActsInput struct {
 // (ruling 30): a retry is not a decision (X26).
 //
 // A person of the store also sends an email again (U9): the terms email on an
-// application waiting for its terms, while the store requires them and chose a
-// template for it, after reject; the approval email to a buyer whose access is
-// granted once the store's automation has sent it, after remove. An operator
-// sends none.
+// application waiting for its terms, after reject; the approval email to a
+// buyer whose access is granted, after remove; the rejection or the removal
+// email on a rejected or removed application. EACH IS OFFERED EXACTLY WHEN THE
+// RESEND WOULD NOT BE REFUSED: the one function wholesaleResendEmail refuses
+// by (resendRefusal) is asked here, of the standing the input carries for the
+// kind. An operator sends none.
 func ActsFor(in ActsInput) []string {
 	retry := (in.Stage == StateApproved && in.AccessState != EntitlementGranted) ||
 		(in.Stage == StateRevoked && in.EntitlementExists && in.AccessState != EntitlementRevoked)
@@ -120,10 +125,14 @@ func ActsFor(in ActsInput) []string {
 		}
 		return acts
 	}
+	resend := func(kind string) bool {
+		standing, judged := in.Emails[kind]
+		return judged && resendRefusal(kind, in.Stage, in.AccessState, standing) == ""
+	}
 	switch in.Stage {
 	case StageWaitingForTerms:
 		acts = append(acts, ActReject)
-		if in.TermsRequired && in.TermsTemplateChosen {
+		if resend(EmailTerms) {
 			acts = append(acts, ActResendTerms)
 		}
 	case StageReadyToReview:
@@ -132,15 +141,153 @@ func ActsFor(in ActsInput) []string {
 		acts = append(acts, ActRemove)
 		if retry {
 			acts = append(acts, ActRetryAccess)
-		} else if in.AccessState == EntitlementGranted && in.ApprovedEmailSent {
+		}
+		if resend(EmailApproved) {
 			acts = append(acts, ActResendApproved)
+		}
+	case StateRejected:
+		if resend(EmailRejected) {
+			acts = append(acts, ActResendRejected)
 		}
 	case StateRevoked:
 		if retry {
 			acts = append(acts, ActRetryAccess)
 		}
+		if resend(EmailRevoked) {
+			acts = append(acts, ActResendRevoked)
+		}
 	}
 	return acts
+}
+
+// resendKindOf is the email a person could send again on an application in
+// each stage; a stage it does not name has none.
+var resendKindOf = map[string]string{StageWaitingForTerms: EmailTerms, StateApproved: EmailApproved,
+	StateRejected: EmailRejected, StateRevoked: EmailRevoked}
+
+// resendStandings is ActsInput.Emails for one application: the standing of the
+// one email its stage could send again, read off its emails as the page shows
+// them. An operator sends none, so nothing is read for one.
+//
+// THE STORE'S READINESS IS ASKED LAST, and only when everything else admits the
+// resend: it is a read of the store's sites and of the lane (emailBlocker),
+// made as the person a send of this application runs as.
+func (p *Provider) resendStandings(ctx context.Context, settings Settings, app map[string]any, stage, access string, operator bool,
+	emails []map[string]any) map[string]EmailStanding {
+	kind := resendKindOf[stage]
+	if operator || kind == "" {
+		return nil
+	}
+	standing := emailStandingOf(emails, kind)
+	if resendRefusal(kind, stage, access, standing) == "" {
+		standing.Blocker, _ = p.emailBlocker(ctx, settings, app, kind)
+	}
+	return map[string]EmailStanding{kind: standing}
+}
+
+// What a person reads of an access record whose cause the route does not name,
+// and what is left off the words of one the pack's own routes recorded.
+const (
+	// storeRefusedLead comes before the store's own words, given as it gave them.
+	storeRefusedLead = "The store refused this change. Its answer was: "
+	// StoreRefusedSentence is a refusal the store gave no words for.
+	StoreRefusedSentence = "The store refused this change."
+	// AccessUnconfirmedSentence is anything else that kept a change from being
+	// recorded as done: the store could not be reached, or what it answered
+	// could not be read. It says what a person can do next, and nothing of the
+	// error.
+	AccessUnconfirmedSentence = "This change could not be confirmed with the store, so it is not recorded as done. Retry access; if it still does not go through, the cluster's operators can say why."
+	// connectorPrefix is how the Shopify connector, which the pack's own two
+	// routes ask, begins the text of a refusal: its package's name.
+	connectorPrefix = "shopify: "
+)
+
+// accessReason is why an application's access is not on, AS A PERSON READS IT.
+// The buyers list, the application's page and the export all answer it, so they
+// say one thing.
+//
+// The access record keeps what the route's attempt came to as the text of an
+// error (its error field: the pack's own prefix, and for a refusal the route's
+// name, before the words) beside the cause it names (errorCode). That text is
+// the record's, not a reader's:
+//
+//   - A CAUSE THE ROUTE NAMES -- no settings, no route, the store's permissions,
+//     its plan's ceiling, a refusal for want of a connector or of anything to
+//     undo -- reads as the sentence recorded for it, with no prefix of the
+//     pack's.
+//   - A REFUSAL WHOSE CAUSE THE ROUTE DOES NOT NAME -- the store said no to the
+//     change itself (customer_refused, which is also what a refusal under a code
+//     this build does not know is recorded as), or a refusal recorded before
+//     records named their cause -- reads "The store refused this change. Its
+//     answer was: " and the store's words as it gave them.
+//   - ANYTHING ELSE -- an outage, an answer nobody could read: what is recorded
+//     is an error's chain, which names the constructs that failed. It is never
+//     answered; the pack's own sentence is (AccessUnconfirmedSentence).
+//
+// THE PACK'S OWN TWO ROUTES ASK THE SHOPIFY CONNECTOR, whose refusal is itself
+// an error's text and begins with the connector's package name
+// (connectorPrefix): that name is no part of the words, and is left off. A
+// route of a client's own is given word for word -- the pack cannot tell a
+// package's name from a store's own words that begin with a word and a colon.
+func accessReason(ent map[string]any) string {
+	recorded := strings.TrimSpace(asString(ent["error"]))
+	if recorded == "" {
+		return ""
+	}
+	words, prefixed := strings.CutPrefix(recorded, "wholesale: ")
+	reason, refusal := "", false
+	if prefixed {
+		reason, refusal = refusalWords(words)
+	}
+	if route := trimmed(ent["adapter"]); refusal && (route == AdapterShopifyB2B || route == AdapterCustomerTag) {
+		reason = strings.TrimPrefix(reason, connectorPrefix)
+	}
+	asGiven := func(said string) string {
+		if said = strings.TrimSpace(said); said == "" {
+			return StoreRefusedSentence
+		}
+		switch last, _ := utf8.DecodeLastRuneInString(said); last {
+		case '.', '!', '?':
+			return storeRefusedLead + said
+		}
+		return storeRefusedLead + said + "."
+	}
+	// named is a cause the route names, in the sentence recorded for it; one
+	// recorded with no words has none to give.
+	named := func(sentence string) string {
+		if sentence = wholeSentence(sentence); sentence != "" {
+			return sentence
+		}
+		return AccessUnconfirmedSentence
+	}
+	switch code := trimmed(ent["errorCode"]); {
+	case code == ErrorCustomerRefused:
+		if refusal {
+			return asGiven(reason)
+		}
+		return asGiven(words)
+	case code == ErrorNoSettings, code == ErrorNoRoute, code == ErrorScopeMissing, code == ErrorPlanCeiling:
+		if refusal {
+			return named(reason)
+		}
+		return named(words)
+	case refusal && code == ErrorShopifyError:
+		return named(reason)
+	case refusal:
+		return asGiven(reason)
+	}
+	return AccessUnconfirmedSentence
+}
+
+// refusalWords reads the words of a route's refusal out of what a record keeps
+// of one, once the pack's own prefix is off it: "<the route's name> refused:
+// <the words>" (AdapterRefusal). False for anything else.
+func refusalWords(recorded string) (string, bool) {
+	route, words, found := strings.Cut(recorded, " refused:")
+	if !found || route == "" || strings.ContainsAny(route, " \t:") {
+		return "", false
+	}
+	return strings.TrimSpace(words), true
 }
 
 // staged is one application the caller reads, with the state its whole log
@@ -298,7 +445,8 @@ func (p *Provider) list(ctx context.Context, args map[string]any, _ int) ([]memo
 			"createdAt":      timeText(a.row["createdAt"]),
 		})
 	}
-	return confirm("wholesale:list", map[string]any{"rows": rows, "counts": counts, "next": next, "truncated": truncated})
+	return confirm("wholesale:list", map[string]any{"rows": rows, "counts": counts, "next": next, "truncated": truncated,
+		"operator": isClusterOperator(ctx)})
 }
 
 // get answers wholesaleGet.
@@ -377,7 +525,7 @@ func (p *Provider) get(ctx context.Context, args map[string]any, _ int) ([]memor
 		entitlement = map[string]any{
 			"state":             access,
 			"errorCode":         trimmed(ent["errorCode"]),
-			"error":             asString(ent["error"]),
+			"error":             accessReason(ent),
 			"adapter":           trimmed(ent["adapter"]),
 			"shopifyCustomerId": trimmed(ent["shopifyCustomerId"]),
 			"customerCreated":   customerCreated,
@@ -386,6 +534,7 @@ func (p *Provider) get(ctx context.Context, args map[string]any, _ int) ([]memor
 	}
 	operator := isClusterOperator(ctx)
 	addedBy := trimmed(app["addedBy"])
+	emails := p.emailsView(ctx, app, sends)
 	return confirm("wholesale:application", map[string]any{
 		"application": map[string]any{
 			"id":             trimmed(app["id"]),
@@ -406,11 +555,11 @@ func (p *Provider) get(ctx context.Context, args map[string]any, _ int) ([]memor
 		"entitlement": entitlement,
 		"acceptance":  acceptanceShown,
 		"termsLink":   termsLink,
-		"emails":      p.emailsView(ctx, app, sends),
+		"emails":      emails,
 		"operator":    operator,
+		// EACH RESEND IS OFFERED EXACTLY WHEN IT WOULD NOT BE REFUSED (resendRefusal).
 		"acts": ActsFor(ActsInput{Stage: stage, AccessState: access, EntitlementExists: ent != nil, Operator: operator,
-			TermsRequired: termsRequired, TermsTemplateChosen: settings.TermsTemplateID != "",
-			ApprovedEmailSent: highestAttempt(sends, EmailApproved) > 0}),
+			Emails: p.resendStandings(ctx, settings, app, stage, access, operator, emails)}),
 	})
 }
 
@@ -550,9 +699,12 @@ func (p *Provider) buyers(ctx context.Context, args map[string]any, _ int) ([]me
 		if err != nil {
 			return nil, err
 		}
-		access, code, grantedAt, customer := AccessNone, "", "", ""
+		// WHY ACCESS IS NOT ON is the entitlement's own sentence, the one the
+		// application's page shows (wholesaleGet's entitlement.error): accessReason.
+		access, code, reason, grantedAt, customer := AccessNone, "", "", "", ""
 		if ent != nil {
 			access, code, customer = trimmed(ent["state"]), trimmed(ent["errorCode"]), trimmed(ent["shopifyCustomerId"])
+			reason = accessReason(ent)
 			if access == EntitlementGranted {
 				grantedAt = timeText(ent["createdAt"])
 			}
@@ -563,11 +715,13 @@ func (p *Provider) buyers(ctx context.Context, args map[string]any, _ int) ([]me
 			"applicantEmail":    asString(a.row["applicantEmail"]),
 			"accessState":       access,
 			"errorCode":         code,
+			"error":             reason,
 			"grantedAt":         grantedAt,
 			"shopifyCustomerId": customer,
 		})
 	}
-	return confirm("wholesale:buyers", map[string]any{"rows": rows, "next": next, "truncated": truncated})
+	return confirm("wholesale:buyers", map[string]any{"rows": rows, "next": next, "truncated": truncated,
+		"operator": isClusterOperator(ctx)})
 }
 
 // admitStore reads a store-wide read's store and site and checks the site is

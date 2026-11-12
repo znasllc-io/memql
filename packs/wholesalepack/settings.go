@@ -168,8 +168,9 @@ type Settings struct {
 	LinkLifetimeDays int
 	// AcceptanceText is the row's, or DefaultAcceptanceText when it is blank.
 	AcceptanceText string
-	// SenderIdentityID is the sender the applicant's emails go out from; empty
-	// is the organization's configured sender. The cluster's operators choose it.
+	// SenderIdentityID is the sender the applicant's emails go out from. Empty
+	// sends nothing for an organization other than the installation's (the lane
+	// resolves no sender for it). The cluster's operators choose it.
 	SenderIdentityID string
 	// The template of each of the applicant's emails; empty sends none.
 	TermsTemplateID, ApprovedTemplateID, RejectedTemplateID, RevokedTemplateID string
@@ -585,6 +586,16 @@ func (p *Provider) storeSettings(ctx context.Context, args map[string]any, _ int
 	if err != nil {
 		return nil, err
 	}
+	_, _, _, publishErr := p.publishAdmission(ctx, trimmed(args["siteId"]), storeID)
+	publishAllowed := publishErr == nil
+	_, exportErr := p.exportAdmission(ctx, args)
+	exportAllowed := exportErr == nil
+	// THE SENDER, AND WHETHER EACH EMAIL WOULD BE SENT, ARE ASKED AS A SEND OF THE
+	// STORE ASKS: as the store's merchant -- the person who owns the site that
+	// serves the store now -- resolved by the one function a send resolves that
+	// person by (asStoreMerchant), never as whoever is reading. One reading of
+	// the lane answers the line and all four kinds.
+	sender := p.readSender(ctx, s, storeID, nil)
 	choices := make([]map[string]any, 0, len(templates))
 	for _, t := range templates {
 		choices = append(choices, map[string]any{"id": t.id, "name": t.name})
@@ -600,6 +611,8 @@ func (p *Provider) storeSettings(ctx context.Context, args map[string]any, _ int
 		"linkLifetimeDays":   s.LinkLifetimeDays,
 		"acceptanceText":     s.AcceptanceText,
 		"senderIdentityId":   s.SenderIdentityID,
+		"sender":             sender.view(),
+		"emailsWouldSend":    emailsWouldSend(s, sender),
 		"termsTemplateId":    s.TermsTemplateID,
 		"approvedTemplateId": s.ApprovedTemplateID,
 		"rejectedTemplateId": s.RejectedTemplateID,
@@ -615,9 +628,28 @@ func (p *Provider) storeSettings(ctx context.Context, args map[string]any, _ int
 			"setUp": !s.Exists && isClusterOperator(ctx),
 			// And its sender is chosen by them alone.
 			"setSender": isClusterOperator(ctx),
+			// THE BUILTINS' OWN CHECKS, called: whatever they would refuse, this
+			// answers false.
+			"publish": publishAllowed,
+			"export":  exportAllowed,
 		},
 	})
 }
+
+// NotSetUpEmailsSentence is why a store that is not set up sends no email.
+const NotSetUpEmailsSentence = "The store is not set up, so it sends no email."
+
+// notSetUpEmails is emailsWouldSend for a store that is not set up.
+func notSetUpEmails() map[string]any {
+	out := map[string]any{}
+	for _, kind := range EmailKinds {
+		out[kind] = map[string]any{"wouldSend": false, "reason": NotSetUpEmailsSentence}
+	}
+	return out
+}
+
+// NotSetUpSenderSentence is the sender of a store that is not set up.
+const NotSetUpSenderSentence = "The store is not set up, so it has no sender."
 
 // notSetUpSettings is wholesaleStoreSettings' reply for a store that is not set
 // up: exists false, every setting its default, each document null, the routes
@@ -640,6 +672,8 @@ func notSetUpSettings(ctx context.Context) ([]memorynodes.MemoryNode, error) {
 		"linkLifetimeDays":   s.LinkLifetimeDays,
 		"acceptanceText":     s.AcceptanceText,
 		"senderIdentityId":   "",
+		"sender":             map[string]any{"ready": false, "fromName": "", "address": "", "reason": NotSetUpSenderSentence},
+		"emailsWouldSend":    notSetUpEmails(),
 		"termsTemplateId":    "",
 		"approvedTemplateId": "",
 		"rejectedTemplateId": "",
@@ -647,7 +681,10 @@ func notSetUpSettings(ctx context.Context) ([]memorynodes.MemoryNode, error) {
 		"templates":          []map[string]any{},
 		"documents":          documents,
 		"adapters":           AdapterNames(),
-		"may":                map[string]any{"update": false, "setUp": isClusterOperator(ctx), "setSender": false},
+		// publish and export: both builtins refuse a store that is not set up
+		// (siteForStore), so neither is open here.
+		"may": map[string]any{"update": false, "setUp": isClusterOperator(ctx), "setSender": false,
+			"publish": false, "export": false},
 	})
 }
 

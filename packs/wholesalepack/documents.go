@@ -128,21 +128,9 @@ func (p *Provider) publishDocument(ctx context.Context, args map[string]any, _ i
 	if len(body) == 0 || len(body) > maxDocumentBytes {
 		return nil, fmt.Errorf("wholesale: a document's body is 1 to %d bytes; this one is %d", maxDocumentBytes, len(body))
 	}
-	publisher := ""
-	if ac, ok := auth.AccessFromContext(ctx); ok {
-		publisher = userRef(ac.UserId)
-	}
-	if publisher == "" {
-		return nil, errors.New("wholesale: a document is published by a signed-in person")
-	}
-	site, err := p.siteForStore(ctx, trimmed(args["siteId"]), storeID)
+	publisher, site, owner, err := p.publishAdmission(ctx, trimmed(args["siteId"]), storeID)
 	if err != nil {
 		return nil, err
-	}
-	owner := userRef(trimmed(site["ownerUserId"]))
-	if owner == "" {
-		return nil, fmt.Errorf("wholesale: site %q names no owner, so there is no merchant to own store %q's documents",
-			trimmed(args["siteId"]), storeID)
 	}
 	digest := sha256Hex(body)
 	// EVERY ARGUMENT NAMED, nothing left for the mutation to stamp.
@@ -161,6 +149,31 @@ func (p *Provider) publishDocument(ctx context.Context, args map[string]any, _ i
 		return nil, err
 	}
 	return confirm("wholesale:document:published", map[string]any{"documentVersionId": id, "sha256": digest})
+}
+
+// publishAdmission is wholesalePublishDocument's own check of its caller and
+// its store, before anything is written: a signed-in person, a site that serves
+// the store (siteForStore), and a site owner to own the document. It answers
+// the publisher, the site and its owner. wholesaleStoreSettings' may.publish is
+// this check, called.
+func (p *Provider) publishAdmission(ctx context.Context, siteID, storeID string) (string, map[string]any, string, error) {
+	publisher := ""
+	if ac, ok := auth.AccessFromContext(ctx); ok {
+		publisher = userRef(ac.UserId)
+	}
+	if publisher == "" {
+		return "", nil, "", errors.New("wholesale: a document is published by a signed-in person")
+	}
+	site, err := p.siteForStore(ctx, siteID, storeID)
+	if err != nil {
+		return "", nil, "", err
+	}
+	owner := userRef(trimmed(site["ownerUserId"]))
+	if owner == "" {
+		return "", nil, "", fmt.Errorf("wholesale: site %q names no owner, so there is no merchant to own store %q's documents",
+			siteID, storeID)
+	}
+	return publisher, site, owner, nil
 }
 
 // documents answers wholesaleDocuments: every kind with its current version and

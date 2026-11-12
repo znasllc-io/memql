@@ -9089,10 +9089,14 @@
           "terms"
         ],
         "state": [
+          "deferred",
           "failed",
+          "held",
           "pending",
+          "sending",
           "sent",
-          "skipped"
+          "skipped",
+          "uncertain"
         ]
       }
     },

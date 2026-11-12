@@ -811,15 +811,15 @@ func (e *engineCaller) Call(ctx context.Context, construct string, args map[stri
 	return rows[0], nil
 }
 
-// CallRows runs one named BUILTIN that answers a row per thing asked -- the
-// row lane's status read, one row per request id -- and answers every row.
+// CallRows runs one named BUILTIN that answers rows -- the row lane's status
+// read, one row per request id, and its sender read, one row -- and answers
+// every row.
 //
 // ONE INLINE STAMP OF INTERNAL ORIGIN, on its one Execute: the lane's status
 // read is a trusted job's and refuses a call without it. It carries NO pack
 // mark -- that is Call's alone, for the Shopify wholesale builtins -- because
-// the status read does not ask for one. Its one caller (emailsView) has been
-// admitted by the organization gate and has read the application under the
-// caller's own actor first.
+// neither lane read asks for one. Its callers are listed with the stamp's
+// reason in call_origin_conformance_test.go: each has admitted its caller first.
 func (e *engineCaller) CallRows(ctx context.Context, construct string, args map[string]any) ([]map[string]any, error) {
 	if e == nil || e.engine == nil {
 		return nil, fmt.Errorf("wholesale: the pack has no engine handle, so %q cannot be called", construct)

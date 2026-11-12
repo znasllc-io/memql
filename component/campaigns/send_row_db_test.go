@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // send_row_db_test.go -- the transactional row lane against a real engine and a
@@ -113,9 +114,22 @@ func TestAHardBounceSkipsARowMessage(t *testing.T) {
 			}
 			if got := l.send(t, "blocked"); got["skipped"] != true || got["reason"] != tc.reason || l.sender.count() != 0 {
 				t.Fatalf("result %v, %d sent", got, l.sender.count())
+			} else if got["skipSentence"] != SkipSentence(tc.reason) || got["skipSentence"] == tc.reason {
+				t.Fatalf("the skip answered the sentence %q, want the lane's words for %s", got["skipSentence"], tc.reason)
 			}
 			if row := l.ledger(t, "blocked"); str(row, "status") != "skipped" || str(row, "skipReason") != tc.reason {
 				t.Fatalf("the ledger row: %v", row)
+			}
+			// THE STATUS READ SAYS THE SAME, from the ledger: the code, and beside it
+			// the sentence a person reads.
+			nodes, err := l.worker.handleRowMessageStatus(auth.ContextWithInternalOrigin(l.owner),
+				map[string]any{"requestIds": []any{l.suffix + "-blocked"}, "accountId": l.org}, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status := decodeResult(t, nodes); status["status"] != "skipped" || status["skipReason"] != tc.reason ||
+				status["skipSentence"] != SkipSentence(tc.reason) {
+				t.Fatalf("the status read answered %v", status)
 			}
 		})
 	}
@@ -196,10 +210,14 @@ func TestRowMessageStatusAnswersEachRequestId(t *testing.T) {
 	if len(nodes) != 3 {
 		t.Fatalf("%d answers for 3 request ids", len(nodes))
 	}
-	want := []struct{ status, reason string }{{"sent", ""}, {"skipped", "the application was withdrawn"}, {"", ""}}
+	// A WITHDRAWAL'S SENTENCE IS THE ROW'S OWN, answered as it was given; a
+	// message that was not skipped has none.
+	want := []struct{ status, reason, sentence string }{{"sent", "", ""},
+		{"skipped", "the application was withdrawn", "the application was withdrawn"}, {"", "", ""}}
 	for i, node := range nodes {
 		got := decodeResult(t, nodes[i:i+1])
-		if got["requestId"] != ids[i] || got["status"] != want[i].status || got["skipReason"] != want[i].reason {
+		if got["requestId"] != ids[i] || got["status"] != want[i].status || got["skipReason"] != want[i].reason ||
+			got["skipSentence"] != want[i].sentence {
 			t.Fatalf("answer %d: %v", i, got)
 		}
 		if i == 0 && str(got, "sentAt") == "" {
@@ -207,7 +225,7 @@ func TestRowMessageStatusAnswersEachRequestId(t *testing.T) {
 		}
 		for key := range got {
 			switch key {
-			case "id", "requestId", "status", "skipReason", "providerStatus", "sentAt":
+			case "id", "requestId", "status", "skipReason", "skipSentence", "providerStatus", "sentAt":
 			default:
 				t.Fatalf("the status reply carries %q: %v", key, got)
 			}
@@ -317,5 +335,39 @@ func TestABlockOnAnAddressIsNeverWeakenedByALaterUnsubscribe(t *testing.T) {
 	}
 	if sup, _, _ := l.store.SuppressionByDigest(l.system, EmailDigest(other)); sup.Reason != "hard_bounce" {
 		t.Fatalf("an unsubscribe then a hard bounce reads %q", sup.Reason)
+	}
+}
+
+// A MESSAGE THE PROVIDER DID NOT TAKE, against the real ledger: the send answers
+// its code and the lane's sentence, and nothing of the provider's own words --
+// which here quote the address the message went to. Those words are kept on the
+// delivery's ledger row (lastError), the lane's own record, and the status read
+// answers that the message failed and none of them.
+func TestAProvidersRefusalOfARowMessageStaysOnTheLedgerAndIsAnsweredAsASentence(t *testing.T) {
+	l := newRowLane(t, "lane-refused")
+	l.sender.fail = func(int) error {
+		return &email.SendError{StatusCode: 550, Permanent: true, NotAccepted: true,
+			Detail: "550 5.1.1 <" + l.address + ">: Recipient address rejected"}
+	}
+	_, err := l.worker.handleSendRowMessage(auth.ContextWithInternalOrigin(l.owner), l.args("refused"), 0)
+	code, sentence, failed := RowSendFailure(err)
+	if !failed || code != RowSendProviderRefused || sentence != RowSendSentence(RowSendProviderRefused) || err.Error() != sentence {
+		t.Fatalf("a message the provider refused answered %v (failed %v, code %q)", err, failed, code)
+	}
+	if strings.Contains(err.Error(), l.address) || strings.Contains(err.Error(), "Recipient address rejected") {
+		t.Fatalf("the answer carries the provider's words: %v", err)
+	}
+	row := l.ledger(t, "refused")
+	if str(row, "status") != "failed" || !strings.Contains(str(row, "lastError"), "Recipient address rejected") {
+		t.Fatalf("the ledger row does not keep the provider's answer: %v", row)
+	}
+	nodes, err := l.worker.handleRowMessageStatus(auth.ContextWithInternalOrigin(l.owner),
+		map[string]any{"requestIds": []any{l.suffix + "-refused"}, "accountId": l.org}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := decodeResult(t, nodes)
+	if status["status"] != "failed" || strings.Contains(fmt.Sprint(status), l.address) || strings.Contains(fmt.Sprint(status), "Recipient address rejected") {
+		t.Fatalf("the status read answered %v, want failed and nothing of the provider's words", status)
 	}
 }
