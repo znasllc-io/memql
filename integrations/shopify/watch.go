@@ -207,13 +207,20 @@ func alertable(state string) bool {
 // alert is owed for it and no recovery when the store is connected again. A
 // store first seen needing attention is told as any other: a release that
 // asks every store for more permissions is news to each of them.
+//
+// THAT EPISODE ENDS WITH THE RECONNECTION (unseenOutageEnds). A store connected
+// again straight into needs attention, with no pass seeing it starting or
+// recording in between, would otherwise stay inside an episode marked as told,
+// and its owner would never hear of a store that needs them. It begins a new
+// episode, at its since, owed its alert after the wait like any other. A store
+// the watch knew keeps its one episode across the two states, as before.
 func recordOf(v Verdict, previous map[string]any) recordedVerdict {
 	r := readRecorded(previous)
 	firstSeen := mapString(previous, "state") == ""
 	switch {
 	case !alertable(v.State):
 		r.Episode = ""
-	case alertable(r.State) && r.Episode != "":
+	case alertable(r.State) && r.Episode != "" && !unseenOutageEnds(r, v):
 		// Still the same episode.
 	default:
 		r.Episode = verdictStamp(v.Since)
@@ -230,6 +237,15 @@ func recordOf(v Verdict, previous map[string]any) recordedVerdict {
 	r.Since = verdictStamp(v.Since)
 	r.ResumedAt = timeOrEmpty(v.ResumedAt)
 	return r
+}
+
+// unseenOutageEnds reports whether v leaves a not-connected episode that
+// carries the first-sight marking -- told and recovered for its own start,
+// which no pass writes for an episode a store is still in -- for a state that
+// is not "not connected".
+func unseenOutageEnds(r recordedVerdict, v Verdict) bool {
+	return r.State == VerdictNotConnected && v.State != VerdictNotConnected &&
+		r.MailedFor == r.Episode && r.RecoveredFor == r.Episode
 }
 
 // payload is the record as it is written to health.verdict.

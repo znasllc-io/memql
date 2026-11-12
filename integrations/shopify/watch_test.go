@@ -1055,7 +1055,9 @@ func TestTheReplyServesTheAlertOnlyWhileBothStatesAreInAnEpisode(t *testing.T) {
 // -- that is already not connected was uninstalled or purged before anybody
 // watched it. Its owner knows. It is recorded as told and as recovered for
 // that episode: no alert however long it lasts, and no recovery when the
-// store is connected again.
+// store is connected again. The episode ends with the reconnection: a store
+// connected again straight into needs attention begins a new one, told after
+// the wait.
 func TestAStoreFirstSeenAlreadyNotConnectedIsNeverMailed(t *testing.T) {
 	for name, previous := range map[string]map[string]any{"no verdict": nil, "an empty verdict": {}} {
 		gone := verdictIn(VerdictNotConnected, watchNow)
@@ -1088,10 +1090,27 @@ func TestAStoreFirstSeenAlreadyNotConnectedIsNeverMailed(t *testing.T) {
 				t.Errorf("%s: reconnected, %s: the pass planned %+v, want nothing", name, step, p)
 			}
 		}
-		// It is the same episode while the store only moves between the two
-		// states, so needing attention straight after is not alerted either.
-		if moved, _ := passAt(t, recorded, VerdictNeedsAttention, at, at.Add(time.Hour)); moved.Alert {
-			t.Errorf("%s: a move to needs attention inside the episode nobody is told about was alerted", name)
+		// Connected again straight into needs attention: the outage nobody was
+		// told about ENDED when the store was connected again, and a store that
+		// needs its owner is news. A new episode begins at the reconnection,
+		// and its alert is owed after the wait, as for any other.
+		reconnected, afterReconnect := passAt(t, recorded, VerdictNeedsAttention, at, at)
+		if reconnected.Alert || reconnected.Record.Episode != verdictStamp(at) {
+			t.Fatalf("%s: reconnected into needs attention: %+v, want a new episode begun at %s and nothing yet", name, reconnected, verdictStamp(at))
+		}
+		if early, _ := passAt(t, afterReconnect, VerdictNeedsAttention, at, at.Add(29*time.Minute)); early.Alert {
+			t.Errorf("%s: reconnected into needs attention: alerted before the wait", name)
+		}
+		late, _ := passAt(t, afterReconnect, VerdictNeedsAttention, at, at.Add(30*time.Minute))
+		if !late.Alert || late.Record.Episode != verdictStamp(at) {
+			t.Errorf("%s: reconnected into needs attention: %+v, want the alert after the wait, dated from the reconnection", name, late)
+		}
+		if id := alertRequestID(testStoreID, late.Record.Episode); id != alertRequestID(testStoreID, verdictStamp(at)) {
+			t.Errorf("%s: the alert is %s, want it named by the reconnection", name, id)
+		}
+		// Even when no pass saw the needs attention before the wait was over.
+		if straightOn, _ := passAt(t, recorded, VerdictNeedsAttention, at, at.Add(time.Hour)); !straightOn.Alert || straightOn.Record.Episode != verdictStamp(at) {
+			t.Errorf("%s: first seen needing attention an hour after the reconnection: %+v, want the alert", name, straightOn)
 		}
 	}
 
@@ -1114,6 +1133,22 @@ func TestAStoreFirstSeenAlreadyNotConnectedIsNeverMailed(t *testing.T) {
 	}
 	if !planWatch(known.Record.payload(), gone, defaultStoreAlertWait, watchNow.Add(30*time.Minute)).Alert {
 		t.Error("a store the watch knew was not alerted for disconnecting")
+	}
+
+	// A store the watch knew that goes from not connected to needs attention
+	// stays in its one episode, mailed or not: only an episode nobody was told
+	// about ends with the reconnection.
+	back := watchNow.Add(2 * time.Hour)
+	unmailed, _ := passAt(t, known.Record.payload(), VerdictNeedsAttention, back, back)
+	if unmailed.Record.Episode != verdictStamp(watchNow) || !unmailed.Alert {
+		t.Errorf("a known store, not connected and then needing attention, not yet mailed: %+v, want its one episode begun at %s, alerted", unmailed, verdictStamp(watchNow))
+	}
+	mailed, afterMail := passAt(t, known.Record.payload(), VerdictNotConnected, watchNow, watchNow.Add(30*time.Minute))
+	if !mailed.Alert {
+		t.Fatalf("a known store not connected for the wait: %+v, want its alert", mailed)
+	}
+	if moved, _ := passAt(t, afterMail, VerdictNeedsAttention, back, back); moved.Alert || moved.Record.Episode != verdictStamp(watchNow) {
+		t.Errorf("a known store, mailed for not connected, then needing attention: %+v, want the one episode kept and no second alert", moved)
 	}
 }
 
