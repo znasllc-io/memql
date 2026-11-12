@@ -132,9 +132,17 @@ CREATE INDEX IF NOT EXISTS store_sales_refund_line_fact_line_idx ON store_sales_
 
 --bun:split
 
+-- ONE SEQUENCE FOR EVERY STORE'S GENERATION. A store's row draws its first
+-- generation from it, and a rebuild or a removal draws the next, so a value is
+-- never held twice: a row remade after a removal never holds a generation a
+-- walk read before it, and two stores never hold the same one.
+CREATE SEQUENCE IF NOT EXISTS store_sales_generation;
+
+--bun:split
+
 CREATE TABLE IF NOT EXISTS store_sales_store (
     store_id                 TEXT PRIMARY KEY,
-    generation               BIGINT NOT NULL DEFAULT 0,       -- raised by a rebuild and by a removal: a page read under an older one writes nothing
+    generation               BIGINT NOT NULL DEFAULT nextval('store_sales_generation'),  -- raised by a rebuild and by a removal, from the one sequence: a page read under an older one writes nothing
     purging                  BOOLEAN NOT NULL DEFAULT false,  -- the store's facts are being deleted in batches; nothing is folded meanwhile
     store_domain             TEXT NOT NULL DEFAULT '',
     store_name               TEXT NOT NULL DEFAULT '',
@@ -152,6 +160,7 @@ CREATE TABLE IF NOT EXISTS store_sales_store (
     verdict_state            TEXT NOT NULL DEFAULT '',
     verdict_reasons          JSONB NOT NULL DEFAULT '[]',
     verdict_since            TIMESTAMPTZ,                     -- the verdict's own since, as last read
+    verdict_read_at          TIMESTAMPTZ,                     -- the last run that read the verdict: an unreadable one changes nothing for a while after it
     recording_blocked        BOOLEAN NOT NULL DEFAULT false,  -- at the last verdict read, something stood in the way of the walked concepts, or the store was paused or not connected
     last_clear_at            TIMESTAMPTZ,                     -- the last run at which nothing stood in the way: what the figures are as of while recording_blocked
     last_change_at           TIMESTAMPTZ,

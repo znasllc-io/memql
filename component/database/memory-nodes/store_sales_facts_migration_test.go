@@ -123,7 +123,7 @@ var storeSalesColumns = map[string][]string{
 	},
 	"store_sales_store": {
 		"store_id|text|not null|",
-		"generation|bigint|not null|0",
+		"generation|bigint|not null|nextval('store_sales_generation'::regclass)",
 		"purging|boolean|not null|false",
 		"store_domain|text|not null|''::text",
 		"store_name|text|not null|''::text",
@@ -141,6 +141,7 @@ var storeSalesColumns = map[string][]string{
 		"verdict_state|text|not null|''::text",
 		"verdict_reasons|jsonb|not null|'[]'::jsonb",
 		"verdict_since|timestamp with time zone|null|",
+		"verdict_read_at|timestamp with time zone|null|",
 		"recording_blocked|boolean|not null|false",
 		"last_clear_at|timestamp with time zone|null|",
 		"last_change_at|timestamp with time zone|null|",
@@ -245,22 +246,29 @@ func (s *storeSalesTx) exec(q string, args ...any) {
 	}
 }
 
+// storeSalesSequences is every sequence the migration creates: the one every
+// store's generation is drawn from.
+var storeSalesSequences = []string{"store_sales_generation"}
+
 var (
-	storeSalesCreateTable = regexp.MustCompile(`(?m)^CREATE TABLE`)
-	storeSalesCommentLine = regexp.MustCompile(`(?m)^\s*--.*$`)
+	storeSalesCreateTable    = regexp.MustCompile(`(?m)^CREATE TABLE`)
+	storeSalesCreateSequence = regexp.MustCompile(`(?m)^CREATE SEQUENCE`)
+	storeSalesCommentLine    = regexp.MustCompile(`(?m)^\s*--.*$`)
 )
 
 // run applies every statement of a migration file, with each statement that
-// starts CREATE TABLE rewritten to CREATE TEMP TABLE so nothing outside the
-// transaction is touched. Only a line that starts the statement is rewritten,
+// starts CREATE TABLE rewritten to CREATE TEMP TABLE, and CREATE SEQUENCE to
+// CREATE TEMP SEQUENCE, so nothing outside the transaction is touched. Only a line that starts the statement is rewritten,
 // so comment text is left alone; a CREATE TABLE anywhere else in the code of a
 // statement would escape the rewrite, and fails the test instead.
 func (s *storeSalesTx) run(file string) {
 	s.t.Helper()
 	for _, st := range storeSalesStatements(file) {
 		temp := storeSalesCreateTable.ReplaceAllString(st, "CREATE TEMP TABLE")
-		if strings.Contains(storeSalesCommentLine.ReplaceAllString(temp, ""), "CREATE TABLE") {
-			s.t.Fatalf("a CREATE TABLE that does not start its line would escape the TEMP rewrite:\n%s", st)
+		temp = storeSalesCreateSequence.ReplaceAllString(temp, "CREATE TEMP SEQUENCE")
+		code := storeSalesCommentLine.ReplaceAllString(temp, "")
+		if strings.Contains(code, "CREATE TABLE") || strings.Contains(code, "CREATE SEQUENCE") {
+			s.t.Fatalf("a CREATE TABLE or CREATE SEQUENCE that does not start its line would escape the TEMP rewrite:\n%s", st)
 		}
 		s.exec(temp)
 	}
@@ -290,6 +298,11 @@ func (s *storeSalesTx) strings(q string) []string {
 // tables names the store_sales_* tables in this session's temporary schema.
 func (s *storeSalesTx) tables() []string {
 	return s.strings(`SELECT c.relname FROM pg_class c WHERE c.relnamespace = pg_my_temp_schema() AND c.relkind = 'r' AND c.relname LIKE 'store\_sales\_%' ORDER BY 1`)
+}
+
+// sequences names the store_sales_* sequences in this session's temporary schema.
+func (s *storeSalesTx) sequences() []string {
+	return s.strings(`SELECT c.relname FROM pg_class c WHERE c.relnamespace = pg_my_temp_schema() AND c.relkind = 'S' AND c.relname LIKE 'store\_sales\_%' ORDER BY 1`)
 }
 
 var storeSalesTempSchema = regexp.MustCompile(`pg_temp(_[0-9]+)?\.`)
@@ -339,6 +352,9 @@ func (s *storeSalesTx) wantShape(step string) {
 	if got := s.tables(); !reflect.DeepEqual(got, storeSalesSorted(storeSalesTables)) {
 		s.t.Fatalf("%s: tables\n got %v\nwant %v", step, got, storeSalesSorted(storeSalesTables))
 	}
+	if got := s.sequences(); !reflect.DeepEqual(got, storeSalesSorted(storeSalesSequences)) {
+		s.t.Fatalf("%s: sequences\n got %v\nwant %v", step, got, storeSalesSorted(storeSalesSequences))
+	}
 	if got := s.indexes(); !reflect.DeepEqual(got, storeSalesIndexDefinitions) {
 		s.t.Fatalf("%s: index definitions\n got %q\nwant %q", step, got, storeSalesIndexDefinitions)
 	}
@@ -372,12 +388,15 @@ func (s *storeSalesTx) wantNothing(step string) {
 	if got := s.indexes(); len(got) != 0 {
 		s.t.Fatalf("%s: indexes left behind: %v", step, got)
 	}
+	if got := s.sequences(); len(got) != 0 {
+		s.t.Fatalf("%s: sequences left behind: %v", step, got)
+	}
 }
 
 // TestStoreSalesFactsMigrationRoundTrips runs up, down, up over TEMP copies in
 // one transaction it rolls back: after the first and the third step the seven
-// tables, their primary keys and the six named indexes exist, and after the
-// second none does.
+// tables, their primary keys, the six named indexes and the generation
+// sequence exist, and after the second none does.
 func TestStoreSalesFactsMigrationRoundTrips(t *testing.T) {
 	up, down := readStoreSalesFile(t, storeSalesUpFile), readStoreSalesFile(t, storeSalesDownFile)
 	s := newStoreSalesTx(t)
