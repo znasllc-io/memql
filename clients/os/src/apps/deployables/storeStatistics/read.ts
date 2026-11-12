@@ -123,10 +123,13 @@ export interface StoreStatistics {
   productsBySales: StoreProduct[] | null;
   productsByUnits: StoreProduct[] | null;
   productCount: number | null;
+  productSalesCount: number | null;
+  productUnitsCount: number | null;
   refundsWithoutItem: number | null;
   incompleteOrders: number | null;
   incompleteRefunds: number | null;
   refundsNotRead: number | null;
+  refundsTooOldToRead: number | null;
   buyers: StoreBuyers | null;
   wholesale: { wholesale: StoreSide; retail: StoreSide } | null;
   otherCurrencies: { currency: string; orders: number | null }[];
@@ -265,10 +268,13 @@ export function parseStoreStatistics(row: Row, requested: Period): StoreStatisti
     productsBySales: productsFrom(row["productsBySales"]),
     productsByUnits: productsFrom(row["productsByUnits"]),
     productCount: figure(row["productCount"]),
+    productSalesCount: figure(row["productSalesCount"]),
+    productUnitsCount: figure(row["productUnitsCount"]),
     refundsWithoutItem: figure(row["refundsWithoutItem"]),
     incompleteOrders: figure(row["incompleteOrders"]),
     incompleteRefunds: figure(row["incompleteRefunds"]),
     refundsNotRead: figure(row["refundsNotRead"]),
+    refundsTooOldToRead: figure(row["refundsTooOldToRead"]),
     buyers: buyers === null ? null : { new: figure(buyers["new"]), returning: figure(buyers["returning"]), unknown: figure(buyers["unknown"]) },
     wholesale: wholesale === null ? null : { wholesale: sideFrom(wholesale["wholesale"]), retail: sideFrom(wholesale["retail"]) },
     otherCurrencies: list(row["otherCurrencies"]).flatMap((entry) => {

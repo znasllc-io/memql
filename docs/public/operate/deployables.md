@@ -873,7 +873,10 @@ store.", "This store is not connected.", or "Whether this store is recording is
 not known."); every reason the engine gives for the store, in the engine's own
 sentence, in any state; "These figures are as of" a moment, or "No figure can
 be given until this is fixed."; and "N refunds are still being read from
-Shopify." while some are. For a store that is paused, not connected or needs
+Shopify." while some are. Refunds whose orders are too old for the
+connection to read are counted separately: "N refunds in this period are on
+orders too old for this store's connection to read, so these figures cannot
+be given for it." For a store that is paused, not connected or needs
 attention it adds "The Store page of this deployable says what fixes it." The
 notice holds no act: the acts are on the [Store page](#the-store-slot-and-the-store-page).
 
@@ -890,17 +893,21 @@ previous period is shown. A store that has had no such run gives no figure at
 all, and says "No figure can be given until this is fixed." A store whose
 recording state could not be read for more than fifteen minutes is treated the
 same way, with the reason "The store's recording state could not be read."
+An otherwise current store whose statistics have not advanced for fifteen
+minutes also reads as of its last run, with "This store's figures are not up
+to date." This includes stores whose turns are more than fifteen minutes apart.
 
 **When every figure is absent.** No figure, chart point or list is given:
 
 - while the store's orders are being brought in -- the store has no
-  statistics yet, the mirror reads it Starting, the statistics have not yet
+  statistics yet, the mirror has order, line, refund or shop history queued or
+  running (even beside another reason for attention), the statistics have not yet
   read each of its orders, lines and refunds up to the present, it is being
   [rebuilt](shopify-connector.md#rebuilding-a-store), or its facts are being
   deleted -- with "The store's orders are still being brought in.";
 - while the store's time zone has not been recorded, with "The store's time
-  zone has not been recorded yet.", or the zone it recorded does not load: no
-  day of it can be cut;
+  zone has not been recorded yet.", or the zone it recorded does not load,
+  with "The store's time zone could not be read, so its figures cannot be given.";
 - while something stands in the way and the last run at which nothing did is
   not after the period's start, or there was none (above).
 
@@ -912,7 +919,7 @@ reason is a hover away:
 | every money figure | the store's currency is not recorded | "The store's currency has not been recorded yet." |
 | Refunds, Net sales, Total sales, Units sold | a refund in the period has not had its detail read from Shopify, whatever its order's currency | "1 refund is still being read from Shopify." (or "N refunds are ...") |
 | Units sold | a refund in the period holds a full page of lines, so it may hold more | "A refund in this period has more lines than were recorded." |
-| Average order value | the period has no order in the store's currency | "No orders in this period." when Orders is zero |
+| Average order value | the period has no order in the store's currency | "No orders in this period." when Orders is zero; "No orders in this period are in the store's currency." when all counted orders use other currencies |
 | Gross sales, Discounts, Net sales, Total sales, Average order value, Units sold | an order in the period has fewer lines recorded than it holds | none: shown with "or more", a floor and not an exact sum |
 
 A refund not read is counted whatever its order's currency, so one on an order
@@ -926,13 +933,20 @@ its order's side of the split. A figure
 can be below zero: a day on which more was refunded than sold hangs below the
 chart's zero line.
 
+When an unread refund belongs to an order the connection can no longer read,
+the same four figures remain absent for each period containing that refund.
+Waiting for another sweep cannot complete it. The limitation ends when the
+refund leaves the selected period, or the connection gains permission to read
+all orders and their detail is fetched. A 90-day or twelve-month view can
+therefore retain these gaps for months after an upgrade.
+
 **Records that could not be read.** A mirrored row the statistics cannot make
 a figure from -- an amount that is not an amount, a missing date -- makes no
 new figure. If an earlier version of it was read, that version stays in the
 figures until a readable version arrives; if none was, the row is in no
 figure. Either way it is counted, and the notice says how many in every state:
-"1 record of this store could not be read and is left out of these figures."
-(or "N records ... are left out of these figures.").
+"1 record of this store could not be read and is left out of its figures."
+(or "N records ... are left out of its figures.").
 
 **The figures and the lists.** Eight figures: Total sales, Net sales, Orders,
 Average order value; Gross sales, Discounts, Refunds, Units sold. Choosing one
@@ -941,8 +955,11 @@ but the average draws it over the period. Then:
 - **Products**, by Net sales or by Units: the leading 8, and "All products",
   which opens the whole list the engine answers, the leading 25, under the same
   trail and the same notice. Its footer says "The 8 best-selling of N
-  products." when there are more, and, when they apply, "Refunds of" an amount
-  "name no product, so they are in Net sales and not here." and "N orders have
+  products." when there are more in the selected list (sales and units have
+  their own counts), and, when they apply, "Refunds of" an amount
+  "name no product, so they are in Net sales and not here." A negative amount
+  instead reads "Fees of X kept from refunds are in Net sales and not here."
+  Incomplete orders add "N orders have
   more lines than were recorded, so these are floors."
 - **Buyers**: New, Returning and "No customer recorded".
 - **Wholesale and retail**, by Net sales or by Orders, only when the wholesale

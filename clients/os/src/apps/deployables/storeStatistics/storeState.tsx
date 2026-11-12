@@ -52,6 +52,19 @@ export function refundsUnreadSentence(count: number): string {
   return count === 1 ? "1 refund is still being read from Shopify." : `${formatCount(count)} refunds are still being read from Shopify.`;
 }
 
+/** These refunds cannot be completed under the store's recorded order grant. */
+export function refundsTooOldSentence(count: number): string {
+  const subject = count === 1 ? "1 refund in this period is on an order" : `${formatCount(count)} refunds in this period are on orders`;
+  return `${subject} too old for this store's connection to read, so these figures cannot be given for it.`;
+}
+
+function refundReasons(stats: StoreStatistics): string[] {
+  const lines: string[] = [];
+  if ((stats.refundsNotRead ?? 0) > 0) lines.push(refundsUnreadSentence(stats.refundsNotRead!));
+  if ((stats.refundsTooOldToRead ?? 0) > 0) lines.push(refundsTooOldSentence(stats.refundsTooOldToRead!));
+  return lines;
+}
+
 export type FigureId = keyof StoreFigures;
 
 /** The figures that are money: with no currency they cannot be written. */
@@ -74,10 +87,17 @@ export function absentReason(stats: StoreStatistics, id: FigureId): string {
   // A store with no row yet has recorded nothing at all; its zone is not missing, it is not read yet.
   if (stats.timezone === null && stats.start !== null) return NO_ZONE_REASON;
   if (broughtIn(stats)) return BROUGHT_IN_LINE;
+  const zoneReason = stats.recording.reasons.find((reason) => reason.code === "statistics_timezone_unavailable");
+  if (zoneReason !== undefined) return zoneReason.sentence;
   if (MONEY.has(id) && stats.currency === null) return NO_CURRENCY_REASON;
-  if ((stats.refundsNotRead ?? 0) > 0 && BLANKED_BY_UNREAD_REFUNDS.has(id)) return refundsUnreadSentence(stats.refundsNotRead ?? 0);
+  if (BLANKED_BY_UNREAD_REFUNDS.has(id) && refundReasons(stats).length > 0) return refundReasons(stats).join(" ");
   if (id === "unitsSold" && (stats.incompleteRefunds ?? 0) > 0) return INCOMPLETE_REFUND_REASON;
   if (id === "averageOrderValue" && stats.figures.orders === 0) return NO_ORDERS;
+  if (id === "averageOrderValue" && stats.figures.orders !== null && stats.figures.orders > 0 &&
+      stats.otherCurrencies.every((other) => other.orders !== null) &&
+      stats.otherCurrencies.reduce((sum, other) => sum + (other.orders ?? 0), 0) === stats.figures.orders) {
+    return "No orders in this period are in the store's currency.";
+  }
   if (stats.recording.blocked && stats.asOf === null) return NO_FIGURE_LINE;
   return "";
 }
@@ -94,7 +114,7 @@ export function noticeLines(stats: StoreStatistics): { lines: string[]; next?: s
   for (const reason of stats.recording.reasons) lines.push(reason.sentence);
   if (!intake && stats.asOf !== null) lines.push(`These figures are as of ${formatMoment(stats.asOf)}.`);
   else if (!intake && stats.recording.blocked) lines.push(NO_FIGURE_LINE);
-  if ((stats.refundsNotRead ?? 0) > 0) lines.push(refundsUnreadSentence(stats.refundsNotRead ?? 0));
+  lines.push(...refundReasons(stats));
   const fixable = state === "paused" || state === "not connected" || state === "needs attention";
   return fixable && !intake && lines.length > 0 ? { lines, next: STORE_PAGE_NEXT } : { lines };
 }
@@ -161,5 +181,6 @@ export function rowValue(value: number | null): number {
  */
 export function refundsWithoutItemSentence(stats: StoreStatistics): string | null {
   if (broughtIn(stats) || stats.currency === null || stats.refundsWithoutItem === null || stats.refundsWithoutItem === 0) return null;
+  if (stats.refundsWithoutItem < 0) return `Fees of ${formatMoney(stats.currency)(-stats.refundsWithoutItem)} kept from refunds are in Net sales and not here.`;
   return `Refunds of ${formatMoney(stats.currency)(stats.refundsWithoutItem)} name no product, so they are in Net sales and not here.`;
 }

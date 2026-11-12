@@ -492,7 +492,7 @@ describe("the Store statistics figures, chart and lists", () => {
 
   it("says how many products there are and opens all of them as a page under the trail", async () => {
     const products = Array.from({ length: 25 }, (_, i) => ({ key: `gid://shopify/Product/${i + 1}`, title: `Inner tube ${i + 1}`, value: String(100 - i) }));
-    const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: products, productsByUnits: products, productCount: 31 }));
+    const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: products, productsByUnits: products, productCount: 31, productSalesCount: 31, productUnitsCount: 31 }));
     await figures(page);
     expect(list(page, "Products").querySelectorAll(".os-ranked-label")).toHaveLength(8);
     expect(list(page, "Products").querySelector(".os-ranked-footer")?.textContent).toContain("The 8 best-selling of 31 products.");
@@ -504,7 +504,7 @@ describe("the Store statistics figures, chart and lists", () => {
   });
 
   it("ranks products by units when Units is chosen", async () => {
-    const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: [{ key: "a", title: "City bike", value: "80.00" }, { key: "b", title: "Bell", value: "19.99" }], productsByUnits: [{ key: "b", title: "Bell", value: 5 }, { key: "a", title: "City bike", value: 2 }], productCount: 2 }));
+    const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: [{ key: "a", title: "City bike", value: "80.00" }, { key: "b", title: "Bell", value: "19.99" }], productsByUnits: [{ key: "b", title: "Bell", value: 5 }, { key: "a", title: "City bike", value: 2 }], productCount: 2, productSalesCount: 2, productUnitsCount: 2 }));
     await figures(page);
     expect(list(page, "Products").querySelector(".os-ranked-label")?.textContent).toBe("City bike");
     await click(within(within(page).getByRole("navigation", { name: "Products by" })).getByRole("button", { name: "Units" }));
@@ -513,7 +513,7 @@ describe("the Store statistics figures, chart and lists", () => {
   });
 
   it("writes the refunds that name no product as money, and says how many orders are short of lines", async () => {
-    const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: [{ key: "a", title: "City bike", value: "80.00" }], productCount: 1, refundsWithoutItem: "12.00", incompleteOrders: 3, floors: { grossSales: true } }));
+    const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: [{ key: "a", title: "City bike", value: "80.00" }], productCount: 1, productSalesCount: 1, productUnitsCount: 1, refundsWithoutItem: "12.00", incompleteOrders: 3, floors: { grossSales: true } }));
     await figures(page);
     const footer = list(page, "Products").querySelector(".os-ranked-footer")?.textContent ?? "";
     expect(footer).toContain("Refunds of €12.00 name no product, so they are in Net sales and not here.");
@@ -523,7 +523,7 @@ describe("the Store statistics figures, chart and lists", () => {
 
   it("says nothing of refunds that name no product when they come to zero", async () => {
     for (const zero of ["0", "0.00"]) {
-      const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: [{ key: "a", title: "City bike", value: "80.00" }], productCount: 1, refundsWithoutItem: zero }));
+      const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: [{ key: "a", title: "City bike", value: "80.00" }], productCount: 1, productSalesCount: 1, productUnitsCount: 1, refundsWithoutItem: zero }));
       await figures(page);
       expect(list(page, "Products").querySelector(".os-ranked-footer")).toBeNull();
       cleanup();
@@ -568,7 +568,7 @@ describe("the Store statistics figures, chart and lists", () => {
   });
 
   it("draws no divider between rows and no pill, badge or toast", async () => {
-    const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: [{ key: "a", title: "City bike", value: "80.00" }], productCount: 1 }));
+    const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: [{ key: "a", title: "City bike", value: "80.00" }], productCount: 1, productSalesCount: 1, productUnitsCount: 1 }));
     await figures(page);
     expect(page.querySelector("hr, .os-divider, .os-pill, .os-badge, .os-chip, .os-toast")).toBeNull();
   });
@@ -605,10 +605,10 @@ const INCOMPLETE_REFUND = "A refund in this period has more lines than were reco
  * answers it: units sold, both lists of products, their count and the refunds
  * that name no product are null; the money figures stay measured.
  */
-const SHORT_OF_LINES = { incompleteRefunds: 1, figures: { ...WEEK.figures, unitsSold: null }, productsBySales: null, productsByUnits: null, productCount: null, refundsWithoutItem: null };
+const SHORT_OF_LINES = { incompleteRefunds: 1, figures: { ...WEEK.figures, unitsSold: null }, productsBySales: null, productsByUnits: null, productCount: null, productSalesCount: null, productUnitsCount: null, refundsWithoutItem: null };
 
 /** Opens All products on a store with 25 products, answering `over` first. */
-async function openAllProducts(over: Partial<Row> = {}, s: FakeSeed = seed({ ...WEEK, productsBySales: MANY, productsByUnits: MANY, productCount: 31, ...over })) {
+async function openAllProducts(over: Partial<Row> = {}, s: FakeSeed = seed({ ...WEEK, productsBySales: MANY, productsByUnits: MANY, productCount: 31, productSalesCount: 31, productUnitsCount: 31, ...over })) {
   const { page } = await openStoreStatistics(s);
   await figures(page);
   await click(within(list(page, "Products")).getByRole("button", { name: "All products" }));
@@ -633,7 +633,7 @@ describe("what a Store statistics list says when it has no rows", () => {
   });
 
   it("draws the products by sales of a store with no currency as absent for that reason, beside its orders", async () => {
-    const { page } = await openStoreStatistics(seed({ ...WEEK, currency: null, figures: { ...WEEK.figures, totalSales: null, netSales: null, averageOrderValue: null, grossSales: null, discounts: null, refunds: null }, productsBySales: [], productsByUnits: [{ key: "a", title: "Bell", value: 3 }], productCount: 1 }));
+    const { page } = await openStoreStatistics(seed({ ...WEEK, currency: null, figures: { ...WEEK.figures, totalSales: null, netSales: null, averageOrderValue: null, grossSales: null, discounts: null, refunds: null }, productsBySales: [], productsByUnits: [{ key: "a", title: "Bell", value: 3 }], productCount: 1, productSalesCount: 1, productUnitsCount: 1 }));
     const group = await figures(page);
     expect(figure(group, "Orders").value).toBe("2");
     expect(emptyOf(list(page, "Products"))).toMatchObject({ dash: true, text: `${DASH} The store's currency has not been recorded yet.` });
@@ -667,7 +667,7 @@ describe("what a Store statistics list says when it has no rows", () => {
   });
 
   it("draws a row whose value the answer left out with the kit's dash, never two hyphens", async () => {
-    const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: [{ key: "a", title: "City bike", value: "80.00" }, { key: "b", title: "Bell", value: null }], productCount: 2, wholesale: { wholesale: { orders: 1, netSales: null }, retail: { orders: 1, netSales: "10.00" } } }));
+    const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: [{ key: "a", title: "City bike", value: "80.00" }, { key: "b", title: "Bell", value: null }], productCount: 2, productSalesCount: 2, productUnitsCount: 2, wholesale: { wholesale: { orders: 1, netSales: null }, retail: { orders: 1, netSales: "10.00" } } }));
     await figures(page);
     expect([...list(page, "Products").querySelectorAll(".os-ranked-value")].map((v) => v.textContent)).toEqual(["€80.00", DASH]);
     expect([...list(page, "Wholesale and retail").querySelectorAll(".os-ranked-value")].map((v) => v.textContent)).toEqual([DASH, "€10.00"]);
@@ -675,13 +675,13 @@ describe("what a Store statistics list says when it has no rows", () => {
   });
 
   it("says which refunds name no product even when there is no product to list", async () => {
-    const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: [], productCount: 0, refundsWithoutItem: "12.00" }));
+    const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: [], productCount: 0, productSalesCount: 0, productUnitsCount: 0, refundsWithoutItem: "12.00" }));
     await figures(page);
     expect(list(page, "Products").parentElement?.textContent ?? "").toContain("Refunds of €12.00 name no product, so they are in Net sales and not here.");
   });
 
   it("writes nothing of refunds that name no product when the store's currency is not known, never a bare number", async () => {
-    const { page } = await openStoreStatistics(seed({ ...WEEK, currency: null, figures: { ...WEEK.figures, totalSales: null, netSales: null, averageOrderValue: null, grossSales: null, discounts: null, refunds: null }, productsBySales: null, productsByUnits: [{ key: "a", title: "Bell", value: 3 }], productCount: 1, refundsWithoutItem: "12.00" }));
+    const { page } = await openStoreStatistics(seed({ ...WEEK, currency: null, figures: { ...WEEK.figures, totalSales: null, netSales: null, averageOrderValue: null, grossSales: null, discounts: null, refunds: null }, productsBySales: null, productsByUnits: [{ key: "a", title: "Bell", value: 3 }], productCount: 1, productSalesCount: 1, productUnitsCount: 1, refundsWithoutItem: "12.00" }));
     await figures(page);
     expect(emptyOf(list(page, "Products"))).toMatchObject({ dash: true, text: `${DASH} The store's currency has not been recorded yet.` });
     expect(page.textContent ?? "").not.toContain("name no product");
@@ -720,7 +720,7 @@ describe("the All products page in every state", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     for (const state of ["starting", "purging", "rebuilding"]) {
       const { all, s } = await openAllProducts();
-      await answerNext(s, { ...WEEK, productsBySales: MANY, productsByUnits: MANY, productCount: 31, rebuilding: state === "rebuilding", recording: { state, reasons: [], since: "2026-11-08T09:00:00Z", blocked: state !== "starting" } });
+      await answerNext(s, { ...WEEK, productsBySales: MANY, productsByUnits: MANY, productCount: 31, productSalesCount: 31, productUnitsCount: 31, rebuilding: state === "rebuilding", recording: { state, reasons: [], since: "2026-11-08T09:00:00Z", blocked: state !== "starting" } });
       await waitFor(() => expect(all.querySelector(".os-notice-line")?.textContent).toBe(BROUGHT_IN));
       expect(emptyOf(all)).toMatchObject({ rows: 0, dash: true });
       expect(all.querySelector(".os-ranked-list")?.textContent ?? "").toContain(BROUGHT_IN);
@@ -740,7 +740,7 @@ describe("the All products page in every state", () => {
   it("draws the whole list absent when the next answer sends it as null", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const { all, s } = await openAllProducts();
-    await answerNext(s, { ...WEEK, productsBySales: null, productsByUnits: null, productCount: null });
+    await answerNext(s, { ...WEEK, productsBySales: null, productsByUnits: null, productCount: null, productSalesCount: null, productUnitsCount: null });
     await waitFor(() => expect(emptyOf(all)).toMatchObject({ rows: 0, dash: true, text: `${DASH} ${NOT_REPORTED}` }));
   });
 });

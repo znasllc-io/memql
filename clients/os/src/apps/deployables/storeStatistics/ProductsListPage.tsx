@@ -58,9 +58,10 @@ function productFormat(stats: StoreStatistics, by: ProductsBy): (value: number) 
  * neither list, so there are no rows for a footer to stand under, and the
  * absent list says it (productsAbsentReason).
  */
-function productsFooter(stats: StoreStatistics, shown: number): ReactNode {
+function productsFooter(stats: StoreStatistics, by: ProductsBy, shown: number): ReactNode {
   const lines: string[] = [];
-  if (stats.productCount !== null && stats.productCount > shown) lines.push(`The ${formatCount(shown)} best-selling of ${formatCount(stats.productCount)} products.`);
+  const count = by === "sales" ? stats.productSalesCount : stats.productUnitsCount;
+  if (count !== null && count > shown) lines.push(`The ${formatCount(shown)} best-selling of ${formatCount(count)} products.`);
   const refunds = refundsWithoutItemSentence(stats);
   if (refunds !== null) lines.push(refunds);
   const orders = stats.incompleteOrders ?? 0;
@@ -96,7 +97,7 @@ export function ProductsBlock({ stats, by, onBy, title, limit, onShowAll }: {
         format={stats === null ? formatCount : productFormat(stats, by)}
         onShowAll={onShowAll}
         showAllLabel="All products"
-        footer={stats === null ? undefined : productsFooter(stats, Math.min(limit, rows.length))}
+        footer={stats === null ? undefined : productsFooter(stats, by, Math.min(limit, rows.length))}
         control={
           // The tabs switch one list in place, so the shared tabs' return to
           // the top of the page does not apply.

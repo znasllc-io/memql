@@ -593,7 +593,12 @@ starts an export at or after the read began, since an export writes rows with
 no detail, and no piece runs while that backfill is queued or running. It
 cannot reach an order Shopify no longer shows -- without `read_all_orders`,
 every order older than sixty days -- so a refund of such an order never gets
-its detail.
+its detail. The statistics count those refunds separately from ones still
+being read. Their four affected figures stay absent while the selected period
+contains them, until the connection can read all orders and their detail is
+fetched, or the refunds leave the period. `refundDetailFrom` is the start of
+the completed detail scan; without `read_all_orders`, its readable order
+window starts sixty days before that instant.
 
 **The shop.** The shop row is a singleton with no sweep, so a store whose
 settings never changed would have none, and with it no currency and no time
@@ -1273,8 +1278,8 @@ twice, or by two nodes at once, changes nothing.
   date, amounts in two currencies -- makes no new fact. If an earlier version
   of the row was read, that version's fact stays in the figures, and the walk
   and the check both keep it, until a readable version arrives; if none was,
-  the row is in no figure. Either way it is recorded, logged with its id and
-  the name of the field and never a value, and the page's notice says how many
+  the row is in no figure. Either way it is recorded, logged as a count once
+  per store per run, and the page's notice says how many
   records are in that state. A record goes once a readable version of its row
   is read, or once a whole check pass no longer meets the row.
 - **The verdict.** Each turn reads the store's verdict
@@ -1283,7 +1288,10 @@ twice, or by two nodes at once, changes nothing.
   not connected, the figures are drawn as of the walk's last run at which
   nothing stood in the way. A verdict that cannot be read for more than
   fifteen minutes does the same, with "The store's recording state could not
-  be read."
+  be read." An otherwise current store whose statistics have not advanced
+  for fifteen minutes is also answered as of its last run, with "This store's
+  figures are not up to date." Arriving order, line, refund or shop history
+  keeps all figures absent even when the verdict lists another reason.
 
 ### What counts
 
@@ -1431,8 +1439,8 @@ A run carries each store's pass on by at most 40 pages of each of the three. A
 run has thirty minutes in all and each store a turn of thirty seconds within
 it, so a small store's pass ends within one run unless its turn or the run's
 time runs out first, and a larger store's is carried over several hourly runs.
-A store is checked only when its walk is within ten
-minutes of the present and it is not being rebuilt, not having its facts
+A store is checked only when its last walk reached the end of every source
+in that turn, and it is not being rebuilt, not having its facts
 deleted, and not in the middle of judging its wholesale orders again. A row
 written in the five minutes before a pass began is the walk's to fold, not the
 check's. When the wholesale pack's state cannot be read, no store is checked
@@ -1509,8 +1517,9 @@ It answers the store's id and `rebuildingSince`. The store's watermarks and
 check are dropped, its facts are deleted in batches, and the walk reads its
 history again from the start; a page the walk read before the rebuild writes
 nothing after it. Meanwhile the Store statistics page says "The store's orders
-are still being brought in." and gives no figure. When the walk is within five
-minutes of the present the rebuild ends, the figures come back, and a check
+are still being brought in." and gives no figure. The turn that reads every
+source to its clock ends the rebuild, even when turns are far apart. The
+figures come back, and a check
 pass begins; `storeStatisticsCheckState` says when it ended, and `cleanAt`
 moves to that moment when it ended clean. The refusals are the check state's,
 with "store statistics rebuild is for a cluster owner". A release that changes
@@ -1533,7 +1542,10 @@ group only after, for the store their storefront fronts:
 
 - **At most 2,000 stores a cluster** are listed for statistics: 20 pages of
   100. On a cluster with more, the walk's run and the check's run each fail
-  with that bound named, and walk or check no store.
+  with that bound named, and walk or check no store. The read then marks
+  figures as out of date after fifteen minutes. Rebuild completion does not
+  require turns to be less than five minutes apart: it follows the work
+  completed in each turn.
 - **The wholesale state is read within ten seconds a run.** When it cannot
   be read in time, or at all, no store's facts move that run and the check
   checks no store; each store's own row, verdict, deletion and removal still
@@ -1558,7 +1570,10 @@ group only after, for the store their storefront fronts:
   age stays counted. The page says so in that sentence.
 - **A refund of an order Shopify no longer shows** never gets its detail, so
   Refunds, Net sales, Total sales and Units sold stay absent for good for the
-  periods it falls in.
+  periods it falls in. The page says those refunds are on orders too old
+  for the connection to read, rather than describing them as pending. The
+  gaps end when the refunds leave the period, or when all-order permission
+  allows their detail to be fetched.
 - **A refund line naming a line the store has since deleted** is taken for no
   item return: its amount stays in Refunds, and in the refunds that name no
   product, whatever kind of line it was -- a deleted gift-card line included,
@@ -2067,7 +2082,11 @@ what an installation holds too. Before you roll it out:
   once more" in [Step 4](#step-4----what-happens-next)). Until a store's read
   has reached a refund, Refunds, Net sales, Total sales and Units sold are
   absent for the periods it falls in, with "N refunds are still being read
-  from Shopify."
+  from Shopify." Once the completed scan proves an order too old for
+  the connection to read, the page counts its refunds separately and says
+  that these figures cannot be given. The gaps can last for months on the
+  90-day and twelve-month views, until those refunds leave the period or
+  the connection gains all-order access and their detail is fetched.
 - **Each store's shop is read** at the first boot when the mirror holds no
   shop row for it, so its currency and time zone are known.
 - **Every store's statistics fill from nothing.** A store's first fill is a

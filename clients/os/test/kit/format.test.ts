@@ -77,6 +77,9 @@ describe("a zero amount", () => {
     expect(formatMoney("EUR")(-0)).toBe("\u20ac0.00");
     expect(formatMoney("EUR")(-0.004)).toBe("\u20ac0.00");
     expect(formatMoney("JPY")(-0.4)).toBe("\u00a50");
+    expect(formatMoney("KWD")(-0.0004)).toBe("KWD\u00a00.000");
+    expect(formatMoneyAxis("KWD")(-0.0004)).toBe("KWD\u00a00.000");
+    expect(formatMoney("KWD")(-0.0005)).toBe("-KWD\u00a00.001");
     expect(formatMoneyAxis("EUR")(-0)).toBe("\u20ac0");
     expect(formatMoneyAxis("EUR")(-0.004)).toBe("\u20ac0.00");
     // A real negative keeps its sign.

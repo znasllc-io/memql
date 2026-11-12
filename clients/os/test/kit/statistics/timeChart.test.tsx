@@ -166,6 +166,18 @@ describe("the axes", () => {
 });
 
 describe("below zero", () => {
+  it("keeps nonpositive current buckets below a positive previous period on one scale", () => {
+    const { container } = render(<TimeChart label="Net sales" bucket="day" points={days([-10, 0, -20])} previous={days([20, 40, 30], "2026-10-30")} format={count} />);
+    const zero = Number(container.querySelector('.os-time-chart-grid[data-zero="true"]')?.getAttribute("y1"));
+    const values = (series: "current" | "previous") => [...(seriesPath(container, series)?.getAttribute("d") ?? "").matchAll(/[ML][\d.]+ ([\d.]+)/g)].map((match) => Number(match[1]));
+    expect(zero).toBeGreaterThan(0);
+    expect(zero).toBeLessThan(160);
+    expect(values("current")).toHaveLength(3);
+    expect(values("current").every((y) => y >= zero)).toBe(true);
+    expect(values("previous")).toHaveLength(3);
+    expect(values("previous").every((y) => y < zero)).toBe(true);
+  });
+
   it("draws a bucket below zero below the zero rule, and a series with nothing below zero as before", () => {
     const below = render(<TimeChart label="Net sales" bucket="day" points={days([20, -36, 55])} format={count} />).container;
     // The axis runs from -50 to 100 over 160: zero falls at 106.67, 20 at 85.33, -36 at 145.07, 55 at 48.
