@@ -114,13 +114,25 @@ export function StoreNotice({ stats }: { stats: StoreStatistics }) {
 export type ListAnswer = { kind: "rows"; rows: RankedRow[] } | { kind: "empty"; empty: ReactNode };
 
 /**
+ * Why an absent list of products is absent: the reason of the figure it is
+ * ranked by, and otherwise, when a refund in the period has more lines than
+ * were recorded -- the engine then sends neither list -- the sentence Units
+ * sold carries for that case, word for word.
+ */
+export function productsAbsentReason(stats: StoreStatistics, kind: FigureId): string {
+  const reason = absentReason(stats, kind);
+  if (reason !== "" || (stats.incompleteRefunds ?? 0) === 0) return reason;
+  return absentReason(stats, "unitsSold");
+}
+
+/**
  * A list as the page draws it. `rows` is null when the list is absent (the
  * engine sent none, or it cannot be written); `kind` names the figure whose
- * reason an absent list carries.
+ * reason an absent list carries, unless `reason` is given.
  */
-export function listAnswer(stats: StoreStatistics, rows: RankedRow[] | null, kind: FigureId): ListAnswer {
+export function listAnswer(stats: StoreStatistics, rows: RankedRow[] | null, kind: FigureId, reason: string = absentReason(stats, kind)): ListAnswer {
   if (broughtIn(stats) || rows === null) {
-    const figure = absent("unmeasured", absentReason(stats, kind));
+    const figure = absent("unmeasured", reason);
     return { kind: "empty", empty: <><Measure figure={figure} /> {figure.kind === "absent" ? absentSentence(figure) : ""}</> };
   }
   if (rows.length > 0) return { kind: "rows", rows };
@@ -142,11 +154,12 @@ export function rowValue(value: number | null): number {
 
 /**
  * "Refunds of €12.00 name no product, so they are in Net sales and not
- * here.", when the answer carries such refunds; null otherwise, and while
- * the store is being brought in. An empty sum can arrive as "0" and a
- * computed one as "0.00": both are zero.
+ * here.", when the answer carries such refunds and the store's currency is
+ * known; null otherwise, and while the store is being brought in. Without a
+ * currency the amount would be a bare number. An empty sum can arrive as "0"
+ * and a computed one as "0.00": both are zero.
  */
 export function refundsWithoutItemSentence(stats: StoreStatistics): string | null {
-  if (broughtIn(stats) || stats.refundsWithoutItem === null || stats.refundsWithoutItem === 0) return null;
-  return `Refunds of ${formatMoney(stats.currency ?? "")(stats.refundsWithoutItem)} name no product, so they are in Net sales and not here.`;
+  if (broughtIn(stats) || stats.currency === null || stats.refundsWithoutItem === null || stats.refundsWithoutItem === 0) return null;
+  return `Refunds of ${formatMoney(stats.currency)(stats.refundsWithoutItem)} name no product, so they are in Net sales and not here.`;
 }
