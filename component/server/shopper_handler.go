@@ -368,6 +368,10 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 			UserAgent:     cutUTF8(r.UserAgent(), shopperUserAgentMaxBytes),
 		})
 	}
+	// THE OUTCOME, for a construct that accepts a post and writes nothing
+	// (memql.ShopperOutcome): the poster is answered as for any accepted post,
+	// and no extension row is written about a submission that does not exist.
+	ctx, outcome := memql.ContextWithShopperOutcome(ctx)
 	if _, err := h.engine.Execute(ctx, call); err != nil {
 		h.logger.Warn("shopper surface: the write was refused",
 			"component", "server", "pack", pack, "form", name,
@@ -387,8 +391,9 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 	// succeeded. A refusal above ends the request: the pack holds the gate
 	// -- wholesale's applicationsOpen lives inside its construct -- so a
 	// client row written past a refusal would be a row about an application
-	// that does not exist.
-	if ext != nil {
+	// that does not exist. So would one written past a post the construct
+	// accepted and did not write; the poster's answer is the same either way.
+	if ext != nil && !outcome.Unwritten() {
 		h.runExtension(ctx, ext, extArgs, stamp, site, submissionID)
 	}
 	h.redirect(w, r, form.RedirectOK, "")
@@ -402,9 +407,11 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 // application it can act on with its client fields visibly blank, and a
 // person emails the applicant for the missing one. The alternative sends
 // somebody who has just typed seventeen fields to an error page, from
-// which they resubmit -- and the pack has no dedupe on applications, so one
-// business becomes two rows, one with fields and one without. That is a
-// worse outcome from the same fault.
+// which they resubmit -- and a pack with no dedupe on its rows turns one
+// business into two, one with fields and one without. That is a worse
+// outcome from the same fault. (Wholesale now writes no second open
+// application for one address, and answers the resubmission as accepted with
+// no row, so the blank-fields application stands alone.)
 //
 // It is also the stance the pack itself already takes one level up: when
 // entitlement provisioning fails, "the application STAYS APPROVED -- an

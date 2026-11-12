@@ -26,6 +26,9 @@ type shopperRecordingExecutor struct {
 	// extension's partial-write test needs: the pack's construct succeeds
 	// and the client's does not (design record 2026-09-21, D5).
 	errForCall func(n int, query string) error
+	// onCall runs on each call's context before it answers, as a construct
+	// that reads or marks the context does.
+	onCall func(n int, ctx context.Context)
 }
 
 // shopperNoAccount is what the recording executor notes for a call whose
@@ -45,6 +48,9 @@ func (e *shopperRecordingExecutor) Execute(ctx context.Context, query string) (a
 		account = shopperNoAccount
 	}
 	e.account = append(e.account, account)
+	if e.onCall != nil {
+		e.onCall(len(e.calls)-1, ctx)
+	}
 	if e.errForCall != nil {
 		if err := e.errForCall(len(e.calls)-1, query); err != nil {
 			return nil, err

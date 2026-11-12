@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"regexp"
 	"strings"
@@ -141,6 +142,28 @@ func TestAPackRefusalStopsTheExtension(t *testing.T) {
 			"pack refused: %v", len(exec.calls), exec.calls)
 	}
 	assertRedirect(t, rec, "/reviews/problem", "failed")
+}
+
+// A post the pack's construct ACCEPTED AND DID NOT WRITE (memql.ShopperOutcome)
+// is answered as an accepted one, and the client's row is not written about a
+// submission that does not exist.
+func TestAnAcceptedPostThePackDidNotWriteStopsTheExtension(t *testing.T) {
+	h, exec, _ := shopperFixture(t)
+	extendReviews(t)
+	exec.onCall = func(n int, ctx context.Context) {
+		if n == 0 {
+			memql.MarkShopperSubmissionUnwritten(ctx)
+		}
+	}
+
+	rec := shopperPost(h, "/forms/reviews/review",
+		"productHandle=boot&body=nice&address=12+Main+St", goodStamp())
+
+	if len(exec.calls) != 1 {
+		t.Fatalf("Execute was called %d times, want 1: the extension must not run after the "+
+			"pack wrote nothing: %v", len(exec.calls), exec.calls)
+	}
+	assertRedirect(t, rec, "/reviews/thanks", "")
 }
 
 // The stamp is the server's. A form that could supply its own submission id
