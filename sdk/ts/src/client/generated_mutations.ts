@@ -4184,30 +4184,6 @@ QueryClient.prototype.markResponsibilityIntakePending = function (this: QueryCli
   return this.executeNamed("markResponsibilityIntakePending", buildMarkResponsibilityIntakePending(args), opts);
 };
 
-/** Stamp the shop/redact purge. The row stays: it is the audit record that a purge happened, and the domain must not be re-registered silently -- only a reinstall Shopify verified clears it (markStoreReconnected), and that reinstall is audited. */
-// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["markStoreRedacted"] in generated_concepts.ts).
-export interface MarkStoreRedactedArgs {
-  storeId: string;
-  redactedAt: string;
-}
-
-export function buildMarkStoreRedacted(args: MarkStoreRedactedArgs): string {
-  const parts: string[] = [];
-  parts.push("storeId: " + renderMemQLValue(args.storeId));
-  parts.push("redactedAt: " + renderMemQLValue(args.redactedAt));
-  return "mutation markStoreRedacted(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    markStoreRedacted(args: MarkStoreRedactedArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.markStoreRedacted = function (this: QueryClient, args: MarkStoreRedactedArgs = {} as MarkStoreRedactedArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("markStoreRedacted", buildMarkStoreRedacted(args), opts);
-};
-
 /** Mint a new v1:skills:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/skills/seeds/*.memql. originatingGoalId + mintedByRunId carry the work provenance. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check. */
 // Bound concept: v1:skills:skill (machine-readable: BoundConcepts["mintSkill"] in generated_concepts.ts).
 export interface MintSkillArgs {

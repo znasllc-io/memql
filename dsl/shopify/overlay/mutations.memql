@@ -125,6 +125,15 @@ mutation store recordStoreHealth {
 /// a purge happened, and the domain must not be re-registered silently --
 /// only a reinstall Shopify verified clears it (markStoreReconnected), and
 /// that reinstall is audited.
+///
+/// Server-only, and actor.userId scoping is not the fix: the caller is the
+/// privacy runner writing as the deployment, on a schedule that has no user,
+/// so actor.userId names nobody. And the stamp is not a person's to make: it
+/// pauses the store and says its data was erased, which is true only after a
+/// purge the runner made. The store's row would otherwise admit a cluster
+/// owner or a developer calling it as a client, pausing any store and
+/// recording an erasure that never happened.
+@serverOnly
 mutation store markStoreRedacted {
   args {
     storeId     string!

@@ -1732,9 +1732,17 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// the connector, after a pass that has no user. Client-callable, it
 		// would let a caller silence a store's alert or mark erasure work
 		// done that never ran.
+		//
+		// markStoreRedacted stamps a shop's erasure and pauses the store. Its
+		// one caller is the privacy runner, after a purge it made and behind
+		// the fence on the row it read before purging. A store has no owner a
+		// filter could scope the stamp to; client-callable, it would let a
+		// cluster owner or a developer pause any store and record an erasure
+		// that never happened.
 		{Path: "shopify/overlay/mutations.memql", Name: "markStoreUninstalled"}:        true,
 		{Path: "shopify/overlay/mutations.memql", Name: "markStoreReconnected"}:        true,
 		{Path: "shopify/overlay/mutations.memql", Name: "markStoreConnected"}:          true,
+		{Path: "shopify/overlay/mutations.memql", Name: "markStoreRedacted"}:           true,
 		{Path: "shopify/overlay/mutations.memql", Name: "recordStoreHealth"}:           true,
 		{Path: "platform/mutations.memql", Name: "markExternalConnectionDisconnected"}: true,
 		// epic memql#4434, the release-cut pair. One argument covers both, and it

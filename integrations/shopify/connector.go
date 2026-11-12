@@ -109,10 +109,8 @@ func connectorContext(ctx context.Context) context.Context {
 // `actor.isClusterOwner` conjunct and the clusterOwner tier are both asking),
 // Unranked and Synthetic. INTERNAL ORIGIN is again the @serverOnly axis --
 // `recordStoreHealth`, the compliance mutations and the stamps of a store's
-// uninstall, reconnect and connect are all server-only, and the identity
-// alone does not satisfy that. (`markStoreRedacted` is not: the store's row
-// authorization admits it for a cluster owner or a developer. The connector's
-// own call of it carries internal origin like every other.)
+// uninstall, reconnect, connect and redaction are all server-only, and the
+// identity alone does not satisfy that.
 //
 // It is composed here rather than inside auth.ContextWithSystemActor on
 // purpose: whose authority a call runs under, and whether the engine is the one

@@ -7630,34 +7630,6 @@ func MarkResponsibilityIntakePendingBuild(args MarkResponsibilityIntakePendingAr
 	return b.String()
 }
 
-// MarkStoreRedacted -- Stamp the shop/redact purge. The row stays: it is the audit record that a purge happened, and the domain must not be re-registered silently -- only a reinstall Shopify verified clears it (markStoreReconnected), and that reinstall is audited.
-//
-// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["markStoreRedacted"] in generated_concepts.go).
-type MarkStoreRedactedArgs struct {
-	StoreId    string
-	RedactedAt string
-}
-
-// MarkStoreRedacted calls the engine mutation markStoreRedacted.
-func (qc *QueryClient) MarkStoreRedacted(ctx context.Context, args MarkStoreRedactedArgs) (*Result, error) {
-	call := MarkStoreRedactedBuild(args)
-	return qc.executeNamed(ctx, "markStoreRedacted", call)
-}
-
-func MarkStoreRedactedBuild(args MarkStoreRedactedArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation markStoreRedacted(")
-	b.WriteString("storeId: ")
-	b.WriteString(quoteMemQL(args.StoreId))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("redactedAt: ")
-	b.WriteString(quoteMemQL(args.RedactedAt))
-	b.WriteString(")")
-	return b.String()
-}
-
 // MintSkill -- Mint a new v1:skills:skill catalog row from a Planner Agent mintSkill action (Phase 3 / memql#159). The caller is the planner integration; it has already run the authority gate (action='mintSkill' on the planner's agentAuthorization + tier in skillTierAllowlist) and the catalog-search heuristic (no existing skill covers >60% of the requested bundle) before invoking this. predefined is hard-stamped false -- the runtime mint surface is for user-/planner-created rows only; the predefined catalog stays in dsl/skills/seeds/*.memql. originatingGoalId + mintedByRunId carry the work provenance. Server-side enforcement: the tier-validation rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it rejects with the same error path as the load-time check.
 //
 // Bound concept: v1:skills:skill (machine-readable: BoundConcepts["mintSkill"] in generated_concepts.go).

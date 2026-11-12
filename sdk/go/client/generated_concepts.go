@@ -674,7 +674,6 @@ var BoundConcepts = map[string]string{
 	"markQuoteSent":                                    "v1:commerce:quote",
 	"markReorderListOrdered":                           "v1:commerce:reorderList",
 	"markResponsibilityIntakePending":                  "v1:planner:responsibility",
-	"markStoreRedacted":                                "v1:shopify:store",
 	"measurementsForCaller":                            "v1:platform:modelMeasurement",
 	"measurementsForMachine":                           "v1:platform:modelMeasurement",
 	"measurementsForModel":                             "v1:platform:modelMeasurement",
