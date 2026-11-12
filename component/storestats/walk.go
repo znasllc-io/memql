@@ -31,6 +31,13 @@ import (
 // daily -- so floorOf asks for the store row as of the clock less 1, 2, 4, 8
 // ... days, floorProbes times at most, and answers the first instant at which
 // there was no row; when one answers at every probe, the last instant asked.
+//
+// THE CLOCK IS ASKED FIRST. An unknown or mistyped id, a caller the read does
+// not admit and a row that is gone all answer no row, as a store not written
+// yet does; taken for "not written yet", that would give a floor of a day
+// ago, kept for good, and every older row hidden. So no store row at the clock
+// is the source's error, nothing is kept, and the next run asks again: only a
+// store that exists now gets a floor.
 // That is at most twice the store's age too early, which costs a few reads of
 // empty windows and loses nothing. ensureFloor does it once and keeps it in
 // history_floor, which nothing overwrites, a rebuild included.
@@ -39,7 +46,9 @@ import (
 // versions pruned the probe would find the oldest one kept, the floor would
 // move forward, and the rows written before it would never be walked.
 // v1:shopify:store declares no retention, and
-// TestTheStoreConceptKeepsEveryVersion fails when it does.
+// TestTheStoreConceptKeepsEveryVersion fails when it does. It relies, too, on a
+// store's row not being deleted while its mirror rows remain (an uninstall
+// marks the store disconnected and keeps the row).
 //
 // # Windows
 //
@@ -55,7 +64,12 @@ import (
 //   - When until is within the overlap of the clock, the read is to the clock.
 //     Its pages move Through to the newest createdAt read, never back and never
 //     past the clock, and its last page is caught up at the clock that page
-//     was asked by. The walk ends there.
+//     was asked by. That page also moves Through to at least that clock less
+//     the overlap, and Width back to defaultWindow: every row written before
+//     then that was visible was read, and one that was not yet visible was
+//     written within the overlap of it (the bound below). So a quiet store's
+//     next run reads twice the overlap and the time since, not the weeks since
+//     its newest row. The walk ends there.
 //   - Otherwise the window is past, and read as of its end (asOf, the form the
 //     email walk's walkQuery writes), so the engine collapses only the versions
 //     written up to it. Its last page sets Through to until and doubles Width
@@ -79,6 +93,33 @@ import (
 // behind where the walk stands, and that overlap is the room a late commit
 // has.
 //
+// # What the overlap rests on
+//
+// Nothing in the engine bounds how late a version becomes visible after its
+// write time is taken, so watermarkOverlap is an assumption, stated here:
+//
+//   - row.createdAt is the writer's clock, taken in Concept.Create
+//     (component/database/memory-nodes/concept.go) before the INSERT is sent;
+//   - the statement then runs under the request pool's statement timeout, 8 s
+//     by default (component/database/database.go, defaultStatementTimeoutMs,
+//     MEMQL_DB_STATEMENT_TIMEOUT_MS);
+//   - on the transactional write path (component/memql/outbox_append.go,
+//     runInWriteTx) a session can sit idle between statements up to the
+//     idle-in-transaction bound, 60 s by default (database.go,
+//     defaultIdleInTxTimeoutMs; 15 s when fenced);
+//   - and, with no bound the engine sets, the wait for a pool connection under
+//     the caller's context, a pause of the writer's process, and the skew
+//     between the writer's clock and the reader's.
+//
+// The overlap is five minutes because the bounded parts sum to 68 s, under
+// half of it: TestTheOverlapHoldsTheEnginesOwnBoundsOnALateCommit reads both
+// defaults from the engine's code and fails when they reach half the overlap.
+// An installation that switches the statement timeout off (0) configures a
+// lateness the walk cannot bound, as do the unbounded parts. What a walk
+// misses by more than the overlap is found by the periodic check (a later task
+// of the store statistics design), which re-reads a store's rows from its
+// floor.
+//
 // # Bounded work
 //
 // Every read counts against maxReadsPerRun; a page counts against the caller's
@@ -92,8 +133,17 @@ import (
 // A page that outlasts a read halves Width, down to minWindow, and ends the
 // source for the run with no error: the halved width is in next and the caller
 // keeps it. At minWindow it is the source's error. A read to the clock that
-// times out sets Width to half the span it tried, so the next run reads a past
-// window that far.
+// times out sets Width to half the span it tried, or half Width when that is
+// narrower, so the next run reads a past window that far; one that times out
+// at minWindow is the source's error too. So consecutive runs that time out
+// end in an error within clockTimeoutRuns, never in silence.
+//
+// MORE VERSIONS INSIDE ONE OVERLAP THAN A RUN MAY READ. A run that reads
+// maxReadsPerRun pages without moving past where it began has read nothing but
+// rows at or behind it: more than maxReadsPerRun x walkPageSize versions of
+// the store within the overlap. Every run would read the same pages and stop
+// at the same place, so it is errOverlapTooDense, which says so and the
+// limit, and is not a transient failure.
 //
 // # Errors
 //
@@ -102,7 +152,8 @@ import (
 // in it: two of the shapes the walk reads carry a buyer's email.
 //
 // Every read is made under walkContext (rollup.go): internal origin, fresh and
-// roots-only. Never as a journaled automation step, for the same reason as the
+// roots-only. The statements are written out by name in rollup.go, beside the
+// stamp, so test/dslconformance sees each call and its stamp in one file. Never as a journaled automation step, for the same reason as the
 // errors: the work journal keeps what a step answers, rows included.
 
 const (
@@ -117,7 +168,13 @@ const (
 	defaultWindow    = 24 * time.Hour
 	maxWindow        = 32 * 24 * time.Hour
 	minWindow        = time.Minute
-	floorProbes      = 14 // the clock less 1, 2, 4, ... 8192 days
+	floorProbes      = 14 // the clock less 1, 2, 4, ... 8192 days, after the clock itself
+
+	// clockTimeoutRuns bounds the consecutive runs in which a store's reads
+	// time out before the walk answers an error: the halvings from maxWindow
+	// to minWindow (32 days is 46,080 minutes, under 2^16), and the run at
+	// minWindow that is the error.
+	clockTimeoutRuns = 17
 )
 
 // floorForTests is zero outside tests. When a test sets it, it is every store's floor and no store row is asked for.
@@ -135,19 +192,9 @@ type walkPage struct {
 	CaughtUp time.Time        // not zero on the last page of a read to the clock: the clock that page was asked by
 }
 
-// The walk's statements. Each takes the read's name, which the caller passes
-// and walkSource checks is a bare name: the three changed-row reads, and for
-// the floor storeAtRead. Formats, so walk.go names no read in a literal of its
-// own; its calls are stamped by walkContext, which
-// TestEveryReadOfTheWalkIsMadeUnderWalkContext holds to.
-const (
-	walkRead    = "paginate(query %s(storeId: %s, since: %s), %d)"
-	pastRead    = "asOf(%s, %s)"
-	storeAtCall = "query %s(storeId: %s, at: %s)"
-	storeAtRead = "storeStatisticsStoreAt"
-)
-
-var readName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+// pastRead reads a past window as of its end: the form the email walk's
+// walkQuery writes. The statements it wraps are in rollup.go (changedReads).
+const pastRead = "asOf(%s, %s)"
 
 // quoteInstant is an instant as a query argument.
 func quoteInstant(t time.Time) string {
@@ -158,6 +205,10 @@ func quoteInstant(t time.Time) string {
 // member also matches rows with no store id.
 var errNoStore = errors.New("no store id: a blank one would also match rows with no store")
 
+// errOverlapTooDense: see "More versions inside one overlap than a run may
+// read".
+var errOverlapTooDense = errors.New("more versions were written inside one overlap than a run may read")
+
 // floorOf answers an instant at which the store's row did not exist yet.
 func floorOf(ctx context.Context, engine Engine, storeID string, now time.Time) (time.Time, error) {
 	if strings.TrimSpace(storeID) == "" {
@@ -167,14 +218,28 @@ func floorOf(ctx context.Context, engine Engine, storeID string, now time.Time) 
 		return time.Time{}, errors.New("find a store's history floor: this node has no engine handle")
 	}
 	ctx = walkContext(ctx)
+	exists := func(at time.Time) (bool, error) {
+		res, err := engine.Execute(ctx, fmt.Sprintf(storeAtRead, langparser.QuoteString(storeID), quoteInstant(at)))
+		if err != nil {
+			return false, fmt.Errorf("store %s, storeStatisticsStoreAt: %w", storeID, err)
+		}
+		return len(memql.MaterializeRows(res)) > 0, nil
+	}
+	// The clock first: see "The clock is asked first".
+	if ok, err := exists(now); err != nil {
+		return time.Time{}, err
+	} else if !ok {
+		return time.Time{}, fmt.Errorf("store %s, storeStatisticsStoreAt: no store row at the clock -- an unknown id, a caller "+
+			"the read does not admit, or a row that is gone; no floor is kept, and the next run asks again", storeID)
+	}
 	var at time.Time
 	for probe := 0; probe < floorProbes; probe++ {
 		at = now.Add(-time.Duration(1<<probe) * 24 * time.Hour)
-		res, err := engine.Execute(ctx, fmt.Sprintf(storeAtCall, storeAtRead, langparser.QuoteString(storeID), quoteInstant(at)))
+		ok, err := exists(at)
 		if err != nil {
-			return time.Time{}, fmt.Errorf("store %s, %s: %w", storeID, storeAtRead, err)
+			return time.Time{}, err
 		}
-		if len(memql.MaterializeRows(res)) == 0 {
+		if !ok {
 			return at, nil
 		}
 	}
@@ -262,8 +327,8 @@ func walkSource(ctx context.Context, engine Engine, query, storeID string, floor
 	switch {
 	case strings.TrimSpace(storeID) == "":
 		return w, time.Time{}, fmt.Errorf("walk a store's rows: %w", errNoStore)
-	case !readName.MatchString(query):
-		return w, time.Time{}, fmt.Errorf("walk a store's rows: %q is not the name of a read", query)
+	case changedReads[query] == "":
+		return w, time.Time{}, fmt.Errorf("walk a store's rows: %q is not one of the walk's reads", query)
 	case engine == nil:
 		return w, time.Time{}, fail("this node has no engine handle")
 	case w.Through.IsZero() && floor.IsZero():
@@ -286,7 +351,7 @@ func walkSource(ctx context.Context, engine Engine, query, storeID string, floor
 		since := start.Add(-watermarkOverlap)
 		until := start.Add(w.Width)
 		toClock := !until.Before(clock().Add(-watermarkOverlap))
-		call := fmt.Sprintf(walkRead, query, langparser.QuoteString(storeID), quoteInstant(since), walkPageSize)
+		call := fmt.Sprintf(changedReads[query], langparser.QuoteString(storeID), quoteInstant(since), walkPageSize)
 		if !toClock {
 			call = fmt.Sprintf(pastRead, call, quoteInstant(until))
 		}
@@ -300,7 +365,9 @@ func walkSource(ctx context.Context, engine Engine, query, storeID string, floor
 			}
 			if reads >= maxReadsPerRun {
 				if !w.Through.After(began) {
-					return w, time.Time{}, fail("read %d pages without moving past where the walk stood; it stops here rather than reading the same rows again", reads)
+					return w, time.Time{}, fail("%w: more than %d versions (%d pages of %d) were written at or behind where the walk stands, "+
+						"within the %v overlap. Every run reads the same pages and stops here, so this does not pass on its own",
+						errOverlapTooDense, maxReadsPerRun*walkPageSize, maxReadsPerRun, walkPageSize, watermarkOverlap)
 				}
 				return w, time.Time{}, nil
 			}
@@ -309,12 +376,12 @@ func walkSource(ctx context.Context, engine Engine, query, storeID string, floor
 			reads++
 			if err != nil {
 				if ctx.Err() == nil && isPageTimeout(err) {
-					if toClock {
-						w.Width = windowWidth(askedAt.Sub(since) / 2)
-						return w, time.Time{}, nil
-					}
 					if w.Width <= minWindow {
 						return w, time.Time{}, fail("a page of a window of %v outlasted a read, and no window is narrower: %w", minWindow, err)
+					}
+					if toClock {
+						w.Width = windowWidth(min(askedAt.Sub(since), w.Width) / 2)
+						return w, time.Time{}, nil
 					}
 					w.Width = windowWidth(w.Width / 2)
 					return w, time.Time{}, nil
@@ -353,6 +420,10 @@ func walkSource(ctx context.Context, engine Engine, query, storeID string, floor
 			last := more == ""
 			if last && toClock {
 				page.CaughtUp = askedAt
+				if caught := askedAt.Add(-watermarkOverlap); caught.After(page.Through) {
+					page.Through = caught
+				}
+				page.Width = defaultWindow
 			}
 			if last && !toClock {
 				if until.After(page.Through) {
