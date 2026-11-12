@@ -113,7 +113,7 @@ func foldStore(t *testing.T) string {
 	}
 	id := fmt.Sprintf("dbtest-storestats-fold-%d", time.Now().UnixNano())
 	t.Cleanup(func() {
-		for _, table := range storeSalesTables {
+		for _, table := range statsTableNames() {
 			_, _ = db.ExecContext(context.Background(), "DELETE FROM "+table+" WHERE store_id = ?", id)
 		}
 	})

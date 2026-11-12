@@ -90,8 +90,8 @@ func generationOf(ctx context.Context, db *bun.DB, storeID string) (int64, error
 
 // writeTx runs fn in one transaction that begins with lockWrites and then,
 // unless generation is anyGeneration, reads the store's generation under the
-// lock. When that is not the one named, or the store has no row, fn is not
-// run, nothing is written, and errRebuilt is answered.
+// lock. When that is not the one named, the store has no row, or the store
+// is purging, fn is not run, nothing is written, and errRebuilt is answered.
 func writeTx(ctx context.Context, db *bun.DB, storeID string, generation int64, fn func(ctx context.Context, tx bun.Tx) error) error {
 	if db == nil {
 		return errors.New("this node has no database handle, so the store statistics cannot be written")
@@ -109,6 +109,17 @@ func writeTx(ctx context.Context, db *bun.DB, storeID string, generation int64, 
 				return err
 			}
 			if stored != generation {
+				return errRebuilt
+			}
+			// Nothing but the purge's own batches (anyGeneration) is written
+			// to a store whose facts are being deleted, read under the same
+			// lock: a page written now would be deleted by the next batch
+			// and its watermark kept.
+			purging, err := storePurging(ctx, tx, storeID)
+			if err != nil {
+				return err
+			}
+			if purging {
 				return errRebuilt
 			}
 		}

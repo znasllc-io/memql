@@ -106,6 +106,7 @@ const (
 	outcomeRebuilt = "rebuilt"
 	outcomeRemoved = "removed" // the walk leaves the store
 	outcomePurging = "purging" // its facts are still being deleted; the walk leaves the store for this run
+	outcomeLeft    = "left"    // nothing is done for the store this run, and nothing is reported of it
 )
 
 // walkContext is the context every read of the run is made under, and the
@@ -172,8 +173,9 @@ func runRollup(ctx context.Context, i *Integration, now time.Time) (RollupReport
 // rollStore is one store's turn.
 func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[string]any, now time.Time, wholesale wholesaleState, rep *RollupReport) error {
 	id := store["id"].(string)
-	// A store whose data was removed is given no new row (store.go).
-	if !storeDataRemoved(store) {
+	// keepStore makes the store's row itself, and gives a store whose data
+	// was removed none (store.go).
+	if i.storeState == nil {
 		if err := writeTx(ctx, db, id, anyGeneration, func(ctx context.Context, tx bun.Tx) error {
 			return ensureStore(ctx, tx, id)
 		}); err != nil {
@@ -191,7 +193,7 @@ func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[strin
 		case outcomeRemoved:
 			rep.Removed = append(rep.Removed, id)
 			return nil
-		case outcomePurging:
+		case outcomePurging, outcomeLeft:
 			return nil
 		}
 	}
@@ -201,15 +203,10 @@ func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[strin
 	if err != nil {
 		return err
 	}
-	if i.walkStore != nil {
-		if err := i.walkStore(ctx, store, generation, now, wholesale, rep); err != nil {
-			return err
-		}
+	if i.walkStore == nil {
+		return nil
 	}
-	// A rebuild is over once the walk is within rebuildCaughtUp of the clock.
-	return writeTx(ctx, db, id, generation, func(ctx context.Context, tx bun.Tx) error {
-		return clearRebuilding(ctx, tx, id, now)
-	})
+	return i.walkStore(ctx, store, generation, now, wholesale, rep)
 }
 
 // wholesaleStates asks wholesaleFor once for every store the run rolls. A nil
