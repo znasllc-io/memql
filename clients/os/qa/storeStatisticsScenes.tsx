@@ -19,6 +19,10 @@ import { fakeConnection, siteRow, storeFigures, storeStatisticsRow, withSession,
 //   view=storefront-draft-store-statistics     a draft storefront: no Statistics, Store statistics after Logs
 //   view=store-statistics                      one store (binding: Production), a full week: figures, chart, every list
 //   view=store-statistics-products             the same, with All products pressed: the whole list under the trail
+//   view=store-statistics-products-paused      All products of a paused store: its notice, as of the last clear run
+//   view=store-statistics-products-frozen      All products of a store that needs attention, as of its last clear run
+//   view=store-statistics-products-rebuilding  All products open when the next answer says the store is rebuilding
+//   view=store-statistics-products-absent      All products open when the next answer sends no product list
 //   view=store-statistics-two-stores           two stores, Production read: the Destination control
 //   view=store-statistics-both                 both destinations name one store: "Production and Testing", no control
 //   view=store-statistics-development          only Testing has a store (previewBinding): the development store
@@ -63,39 +67,79 @@ const NAMES = { siteId: "site-bikes", storeName: "A city bike shop", storeDomain
 const DAYS = ["02", "03", "04", "05", "06", "07", "08"];
 const at = (day: string) => `2026-11-${day}T00:00:00+01:00`;
 
-/** A full week of an invented bike shop. */
-const WEEK_FIGURES = { totalSales: "1482.40", netSales: "1206.10", orders: 14, averageOrderValue: "93.29", grossSales: "1388.00", discounts: "81.90", refunds: "100.00", unitsSold: 31 };
-const WEEK_SERIES = DAYS.map((day, i) => {
-  const net = ["118.00", "260.50", "96.40", "-40.00", "301.20", "212.00", "258.00"][i]!;
-  const gross = ["130.00", "280.00", "105.00", "0.00", "320.00", "255.00", "298.00"][i]!;
-  return {
-    at: at(day), netSales: net, grossSales: gross,
-    totalSales: ["142.80", "318.10", "117.60", "-46.20", "364.40", "256.50", "329.20"][i]!,
-    discounts: ["12.00", "19.50", "8.60", "0.00", "18.80", "8.00", "15.00"][i]!,
-    refunds: ["0.00", "0.00", "0.00", "40.00", "0.00", "35.00", "25.00"][i]!,
-    orders: [2, 3, 1, 0, 3, 2, 3][i]!, unitsSold: [4, 7, 2, -1, 8, 5, 6][i]!,
-  };
-});
-const TITLES = ["City bike", "Folding bike", "Bell", "Lights set", "Pannier", "Helmet", "Lock", "Pump", "Inner tube", "Saddle", "Bottle cage", "Mudguards", "Kickstand", "Basket", "Chain oil", "Gloves", "Rain cape", "Mirror", "Tyre", "Brake pads", "Grips", "Pedals", "Child seat", "Phone mount", "Repair kit"];
-const BY_SALES = TITLES.map((title, i) => ({ key: `product-${i + 1}`, title, value: (Math.round((620 / (i + 1)) * 100) / 100).toFixed(2) }));
-const BY_UNITS = TITLES.map((title, i) => ({ key: `product-${i + 1}`, title, value: Math.max(1, 12 - i) }));
-const WEEK: Partial<Row> = {
-  figures: WEEK_FIGURES,
-  previous: { ...WEEK_FIGURES, totalSales: "1210.00", netSales: "1004.00", orders: 11, grossSales: "1150.00", discounts: "70.00", refunds: "76.00", unitsSold: 25 },
-  series: WEEK_SERIES,
-  productsBySales: BY_SALES,
-  productsByUnits: BY_UNITS,
-  productCount: 31,
-  refundsWithoutItem: "15.00",
-  buyers: { new: 8, returning: 5, unknown: 1 },
-  wholesale: { wholesale: { orders: 3, netSales: "512.00" }, retail: { orders: 11, netSales: "694.10" } },
-  otherCurrencies: [{ currency: "USD", orders: 2 }],
+// EVERY SCENE IS AN ANSWER THE ENGINE COULD SEND: the figures are the sums of
+// the days the series holds, Net sales is Gross less Discounts and Refunds,
+// the products add up to Net sales and the refunds that name none, the units
+// to Units sold, and the two sides of wholesale to Net sales and Orders. The
+// scenes add in cents, so the fixtures carry no rounding of their own.
+
+/** A week of an invented bike shop, by day, in cents. */
+const DAY = {
+  gross: [13000, 28000, 10500, 0, 32000, 25500, 29800],
+  discounts: [1200, 1950, 860, 0, 1880, 800, 1500],
+  refunds: [0, 0, 0, 4000, 0, 3500, 2500],
+  // Net plus shipping, tax and duties, less those refunded.
+  total: [14280, 31810, 11760, -4620, 36440, 25650, 32920],
+  orders: [2, 3, 1, 0, 3, 2, 3],
+  units: [7, 11, 4, -1, 13, 8, 9],
 };
+const amount = (cents: number) => (cents / 100).toFixed(2);
+const sum = (values: readonly number[]) => values.reduce((a, b) => a + b, 0);
+const TITLES = ["City bike", "Folding bike", "Bell", "Lights set", "Pannier", "Helmet", "Lock", "Pump", "Inner tube", "Saddle", "Bottle cage", "Mudguards", "Kickstand", "Basket", "Chain oil", "Gloves", "Rain cape", "Mirror", "Tyre", "Brake pads", "Grips", "Pedals", "Child seat", "Phone mount", "Repair kit", "Bar tape", "Spokes", "Reflectors", "Cable lock", "Seat post", "Front rack"];
+
+/** `total` split over `count` shares falling as 1, 1/2, 1/3 ...; whole units, the remainder on the first. */
+function shares(total: number, count: number): number[] {
+  const weights = Array.from({ length: count }, (_, i) => 1 / (i + 1));
+  const whole = sum(weights);
+  const parts = weights.map((w) => Math.floor((total * w) / whole));
+  parts[0]! += total - sum(parts);
+  return parts;
+}
+
+/**
+ * The answer for the days before `upTo` (later days are null, as a frozen
+ * store's are), with `otherOrders` of the orders in another currency (in
+ * Orders, not in the average), and refunds of `withoutItem` cents naming no
+ * product.
+ */
+function week(upTo = 7, { otherOrders = 0, withoutItem = 1500 } = {}): Partial<Row> {
+  const kept = <T,>(values: readonly T[]) => values.slice(0, upTo);
+  const gross = sum(kept(DAY.gross)), discounts = sum(kept(DAY.discounts)), refunds = sum(kept(DAY.refunds));
+  const net = gross - discounts - refunds, orders = sum(kept(DAY.orders)), units = sum(kept(DAY.units));
+  const noProduct = refunds >= withoutItem ? withoutItem : 0;
+  const count = Math.min(TITLES.length, units);
+  const bySales = shares(net + noProduct, count);
+  // Every product listed sold at least one unit.
+  const byUnits = shares(units - count, count).map((value) => value + 1);
+  const listed = (values: number[], money: boolean) => values.slice(0, 25).map((value, i) => ({ key: `product-${i + 1}`, title: TITLES[i]!, value: money ? amount(value) : value }));
+  const wholesaleOrders = Math.floor(orders / 4);
+  const wholesaleNet = wholesaleOrders === 0 ? 0 : Math.round(net * 0.4);
+  const fresh = Math.ceil(orders * 0.6), unknown = orders >= 3 ? 1 : 0;
+  return {
+    figures: {
+      totalSales: amount(sum(kept(DAY.total))), netSales: amount(net), orders, grossSales: amount(gross), discounts: amount(discounts), refunds: amount(refunds), unitsSold: units,
+      averageOrderValue: orders - otherOrders > 0 ? amount(Math.round((gross - discounts) / (orders - otherOrders))) : null,
+    },
+    previous: { totalSales: "1210.00", netSales: "1004.00", orders: 11, averageOrderValue: "98.18", grossSales: "1150.00", discounts: "70.00", refunds: "76.00", unitsSold: 25 },
+    series: DAYS.map((day, i) => i < upTo
+      ? { at: at(day), grossSales: amount(DAY.gross[i]!), discounts: amount(DAY.discounts[i]!), refunds: amount(DAY.refunds[i]!), netSales: amount(DAY.gross[i]! - DAY.discounts[i]! - DAY.refunds[i]!), totalSales: amount(DAY.total[i]!), orders: DAY.orders[i]!, unitsSold: DAY.units[i]! }
+      : { at: at(day), grossSales: null, discounts: null, refunds: null, netSales: null, totalSales: null, orders: null, unitsSold: null }),
+    productsBySales: listed(bySales, true),
+    productsByUnits: listed(byUnits, false),
+    productCount: count,
+    refundsWithoutItem: noProduct === 0 ? null : amount(noProduct),
+    buyers: { new: fresh, returning: orders - fresh - unknown, unknown },
+    wholesale: { wholesale: { orders: wholesaleOrders, netSales: amount(wholesaleNet) }, retail: { orders: orders - wholesaleOrders, netSales: amount(net - wholesaleNet) } },
+    otherCurrencies: otherOrders > 0 ? [{ currency: "USD", orders: otherOrders }] : [],
+  };
+}
+
 const CONTEXT = { ...NAMES, historySince: "2026-09-11T22:00:00Z", lastChangeAt: "2026-11-08T10:13:00+01:00" };
 const BLANK = storeFigures();
-const BLANK_SERIES = DAYS.map((day) => ({ at: at(day), totalSales: null, netSales: null, grossSales: null, discounts: null, refunds: null, orders: null, unitsSold: null }));
+const FULL = week(7, { otherOrders: 2 });
+const blankSeries = (series: unknown, keys: readonly string[]) => (series as Row[]).map((point) => ({ ...point, ...Object.fromEntries(keys.map((key) => [key, null])) }));
 
-const CURRENT = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, ...WEEK, taxesIncluded: true, olderOrderChangesNotRecorded: true });
+const CURRENT = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, ...FULL, taxesIncluded: true, olderOrderChangesNotRecorded: true });
 const DEV = storeStatisticsRow({
   storeId: "store-bikes-dev", siteId: "site-bikes", storeName: "A city bike shop (development)", storeDomain: "acme-widgets-dev.myshopify.com", destination: "previewBinding", development: true,
   historySince: "2026-10-20T00:00:00+02:00", figures: { totalSales: "64.00", netSales: "52.00", orders: 2, averageOrderValue: "26.00", grossSales: "56.00", discounts: "4.00", refunds: "0.00", unitsSold: 3 },
@@ -103,36 +147,71 @@ const DEV = storeStatisticsRow({
   productsBySales: [{ key: "p1", title: "Bell", value: "40.00" }, { key: "p2", title: "Lock", value: "12.00" }], productsByUnits: [{ key: "p1", title: "Bell", value: 2 }, { key: "p2", title: "Lock", value: 1 }], productCount: 2,
   buyers: { new: 1, returning: 0, unknown: 1 },
 });
-const PAUSED = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, ...WEEK, asOf: "2026-11-06T09:00:00+01:00", recording: { state: "paused", reasons: [], since: "2026-11-06T09:00:00+01:00", blocked: true },
-  series: WEEK_SERIES.map((point, i) => (i >= 4 ? { ...BLANK_SERIES[i]!, at: point.at } : point)) });
-const FROZEN = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, ...WEEK, asOf: "2026-11-04T09:59:15+01:00", recording: { state: "needs attention", reasons: [
+// Paused on Nov 6 at 09:00: Nov 6's bucket began before then and is kept, the days after are null.
+const PAUSED = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, ...week(5), asOf: "2026-11-06T09:00:00+01:00", recording: { state: "paused", reasons: [], since: "2026-11-06T09:00:00+01:00", blocked: true } });
+// The order check failed on Nov 4 at 09:59: the figures are as of then.
+const FROZEN = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, ...week(3), asOf: "2026-11-04T09:59:15+01:00", recording: { state: "needs attention", reasons: [
   { code: "privacy_request_failing", sentence: "A privacy request for this store could not be completed." },
   { code: "check_failing", sentence: "The last check of orders failed." },
-], since: "2026-11-02T08:00:00+01:00", blocked: true }, series: WEEK_SERIES.map((point, i) => (i >= 3 ? { ...BLANK_SERIES[i]!, at: point.at } : point)) });
-const BLOCKED = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, asOf: null, recording: { state: "needs attention", reasons: [{ code: "check_failing", sentence: "The last check of orders failed." }], since: "2026-11-07T09:00:00+01:00", blocked: true } });
-const CURRENT_REASON = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, ...WEEK, recording: { state: "recording", reasons: [{ code: "statistics_rows_unreadable", sentence: "Some of this store's orders could not be read and are left out of these figures." }], since: "2026-11-02T08:00:00+01:00", blocked: false } });
-const UNKNOWN = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, ...WEEK, recording: { state: "", reasons: [], since: null, blocked: false } });
-const intake = (state: string) => storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, rebuilding: state === "rebuilding", recording: { state, reasons: [], since: "2026-11-08T09:00:00+01:00", blocked: true } });
-const REFUNDS_UNREAD = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, ...WEEK, refundsNotRead: 2,
-  figures: { ...WEEK_FIGURES, refunds: null, netSales: null, totalSales: null, unitsSold: null }, previous: null });
-const NO_CURRENCY = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, ...WEEK, currency: null,
-  figures: { ...BLANK, orders: 14, unitsSold: 31 }, previous: null, wholesale: null, otherCurrencies: [],
-  productsBySales: [], series: WEEK_SERIES.map((point) => ({ ...point, totalSales: null, netSales: null, grossSales: null, discounts: null, refunds: null })) });
-const NO_ZONE = storeStatisticsRow({ storeId: "store-bikes", ...NAMES, timezone: null, periodZone: "UTC", start: "2026-11-02T00:00:00Z", end: "2026-11-09T00:00:00Z", historySince: "2026-09-12T00:00:00Z",
-  series: DAYS.map((day) => ({ ...BLANK_SERIES[0]!, at: `2026-11-${day}T00:00:00Z` })) });
-const ZONE_NOT_LOADED = storeStatisticsRow({ storeId: "store-bikes", ...NAMES, ...WEEK, timezone: "Europe/Atlantis", periodZone: "UTC", start: "2026-11-02T00:00:00Z", end: "2026-11-09T00:00:00Z", historySince: "2026-09-12T00:00:00Z",
-  series: WEEK_SERIES.map((point, i) => ({ ...point, at: `2026-11-${DAYS[i]}T00:00:00Z` })) });
+], since: "2026-11-02T08:00:00+01:00", blocked: true } });
+// Blocked before any clear run, and no zone recorded: no figure and no list is known.
+const UNKNOWN_LISTS = { productsBySales: null, productsByUnits: null, productCount: null };
+const BLOCKED = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, ...UNKNOWN_LISTS, asOf: null, recording: { state: "needs attention", reasons: [{ code: "check_failing", sentence: "The last check of orders failed." }], since: "2026-11-07T09:00:00+01:00", blocked: true } });
+const CURRENT_REASON = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, ...FULL, recording: { state: "recording", reasons: [{ code: "statistics_rows_unreadable", sentence: "Some of this store's orders could not be read and are left out of these figures." }], since: "2026-11-02T08:00:00+01:00", blocked: false } });
+const UNKNOWN = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, ...FULL, recording: { state: "", reasons: [], since: null, blocked: false } });
+const intake = (state: string, over: Partial<Row> = {}) => storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, ...over, rebuilding: state === "rebuilding", recording: { state, reasons: [], since: "2026-11-08T09:00:00+01:00", blocked: true } });
+// Two refunds not read yet: the four figures they blank, their buckets, and
+// the lists that subtract refunds are not known.
+const REFUNDS_UNREAD = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, ...FULL, refundsNotRead: 2, previous: null,
+  figures: { ...(FULL.figures as Row), refunds: null, netSales: null, totalSales: null, unitsSold: null },
+  series: blankSeries(FULL.series, ["refunds", "netSales", "totalSales", "unitsSold"]),
+  productsBySales: null, productsByUnits: null, productCount: null, refundsWithoutItem: null,
+  wholesale: { wholesale: { orders: 3, netSales: null }, retail: { orders: 11, netSales: null } } });
+// No currency: every amount is null, counts stand.
+const NO_CURRENCY = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, ...week(7), currency: null, previous: null,
+  figures: { ...BLANK, orders: 14, unitsSold: 51 },
+  series: blankSeries(week(7).series, ["grossSales", "discounts", "refunds", "netSales", "totalSales"]),
+  productsBySales: null, refundsWithoutItem: null, wholesale: null });
+const NO_ZONE = storeStatisticsRow({ storeId: "store-bikes", ...NAMES, ...UNKNOWN_LISTS, timezone: null, periodZone: "UTC", start: "2026-11-02T00:00:00Z", end: "2026-11-09T00:00:00Z", historySince: "2026-09-12T00:00:00Z",
+  series: DAYS.map((day) => ({ at: `2026-11-${day}T00:00:00Z`, totalSales: null, netSales: null, grossSales: null, discounts: null, refunds: null, orders: null, unitsSold: null })) });
+const ZONE_NOT_LOADED = storeStatisticsRow({ storeId: "store-bikes", ...NAMES, ...FULL, timezone: "Europe/Atlantis", periodZone: "UTC", start: "2026-11-02T00:00:00Z", end: "2026-11-09T00:00:00Z", historySince: "2026-09-12T00:00:00Z",
+  series: (FULL.series as Row[]).map((point, i) => ({ ...point, at: `2026-11-${DAYS[i]}T00:00:00Z` })) });
 const ZERO = { totalSales: "0.00", netSales: "0", orders: 0, averageOrderValue: null, grossSales: "0.00", discounts: "0.00", refunds: "0.00", unitsSold: 0 };
-const EMPTY = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, figures: ZERO, previous: { ...ZERO }, buyers: { new: 0, returning: 0, unknown: 0 },
+const EMPTY = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, figures: ZERO, previous: { ...ZERO }, buyers: { new: 0, returning: 0, unknown: 0 }, productCount: 0,
   series: DAYS.map((day) => ({ at: at(day), totalSales: "0.00", netSales: "0.00", grossSales: "0.00", discounts: "0.00", refunds: "0.00", orders: 0, unitsSold: 0 })) });
-const BELOW_ZERO = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT, ...WEEK,
-  figures: { ...WEEK_FIGURES, totalSales: "-58.20", netSales: "-52.00", unitsSold: -2 },
-  series: WEEK_SERIES.map((point, i) => ({ ...point, totalSales: ["12.00", "0.00", "-120.00", "0.00", "36.40", "0.00", "13.40"][i]! })) });
+// A week whose refunds outweighed its sales: a City bike from an earlier
+// order came back on Nov 4, and two small orders sold.
+const BELOW_ZERO = storeStatisticsRow({ storeId: "store-bikes", ...CONTEXT,
+  figures: { totalSales: "-58.20", netSales: "-52.00", orders: 2, averageOrderValue: "60.00", grossSales: "120.00", discounts: "0.00", refunds: "172.00", unitsSold: 2 },
+  previous: { totalSales: "210.00", netSales: "180.00", orders: 3, averageOrderValue: "60.00", grossSales: "180.00", discounts: "0.00", refunds: "0.00", unitsSold: 4 },
+  series: DAYS.map((day, i) => ({ at: at(day),
+    grossSales: ["40.00", "0.00", "0.00", "0.00", "80.00", "0.00", "0.00"][i]!, discounts: "0.00", refunds: i === 2 ? "172.00" : "0.00",
+    netSales: ["40.00", "0.00", "-172.00", "0.00", "80.00", "0.00", "0.00"][i]!, totalSales: ["44.00", "0.00", "-190.00", "0.00", "87.80", "0.00", "0.00"][i]!,
+    orders: [1, 0, 0, 0, 1, 0, 0][i]!, unitsSold: [2, 0, -1, 0, 1, 0, 0][i]! })),
+  productsBySales: [{ key: "p2", title: "Lock", value: "80.00" }, { key: "p1", title: "Bell", value: "40.00" }, { key: "p3", title: "City bike", value: "-172.00" }],
+  productsByUnits: [{ key: "p1", title: "Bell", value: 2 }, { key: "p2", title: "Lock", value: 1 }, { key: "p3", title: "City bike", value: -1 }], productCount: 3,
+  buyers: { new: 1, returning: 1, unknown: 0 },
+  wholesale: { wholesale: { orders: 0, netSales: "0.00" }, retail: { orders: 2, netSales: "-52.00" } } });
 const STARTING = storeStatisticsRow({
   storeId: "store-bikes", siteId: "site-bikes", storeName: null, storeDomain: null, currency: null, timezone: null, periodZone: null, development: null, taxesIncluded: null,
   olderOrderChangesNotRecorded: null, bucket: null, start: null, end: null, prevStart: null, historySince: null, lastChangeAt: null,
   recording: { state: "starting", reasons: [], since: null, blocked: false }, rebuilding: null, series: [],
 });
+
+/**
+ * A connection that answers `first`, then `later` once the window is focused
+ * again 5 seconds in, after "All products" is pressed: how a page that is
+ * open meets the next answer.
+ */
+function changingConnection(site: Row, first: Row, later: Row) {
+  const answers: Record<string, Row> = { "store-bikes": first };
+  const connection = fakeConnection({ sites: [site], stores: STORES, storeStatistics: answers });
+  window.setTimeout(() => {
+    answers["store-bikes"] = later;
+    window.dispatchEvent(new Event("focus"));
+  }, 5000);
+  return connection;
+}
 
 /** A connection whose store statistics read never answers. */
 function pendingConnection(seed: FakeSeed) {
@@ -167,6 +246,10 @@ export function storeStatisticsScenes(Frame: Frame) {
     "storefront-draft-store-statistics": scene(DRAFT, both),
     "store-statistics": page(CURRENT),
     "store-statistics-products": page(CURRENT),
+    "store-statistics-products-paused": page(PAUSED),
+    "store-statistics-products-frozen": page(FROZEN),
+    "store-statistics-products-rebuilding": scene(PRODUCTION_ONLY, {}, "storeStatistics", ALL_PARTS, () => changingConnection(PRODUCTION_ONLY, CURRENT, intake("rebuilding", { ...FULL }))),
+    "store-statistics-products-absent": scene(PRODUCTION_ONLY, {}, "storeStatistics", ALL_PARTS, () => changingConnection(PRODUCTION_ONLY, CURRENT, { ...CURRENT, productsBySales: null, productsByUnits: null, productCount: null })),
     "store-statistics-two-stores": scene(BIKES, both, "storeStatistics"),
     "store-statistics-both": scene(ONE_STORE, { storeStatistics: { "store-bikes": { ...CURRENT, destination: "both" } } }, "storeStatistics"),
     "store-statistics-development": scene(TESTING_ONLY, { storeStatistics: { "store-bikes-dev": DEV } }, "storeStatistics"),
@@ -192,4 +275,8 @@ export function storeStatisticsScenes(Frame: Frame) {
 /** Views reached by pressing: `click=` is set for them, so a one-shot capture opens them. */
 export const STORE_STATISTICS_CLICKS: Record<string, string> = {
   "store-statistics-products": "All products",
+  "store-statistics-products-paused": "All products",
+  "store-statistics-products-frozen": "All products",
+  "store-statistics-products-rebuilding": "All products",
+  "store-statistics-products-absent": "All products",
 };

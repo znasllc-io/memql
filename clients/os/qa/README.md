@@ -318,7 +318,9 @@ harness): `view=storefront-with-store-statistics` (the button after
 Statistics), `storefront-without-sales` (no button without the sales part),
 `storefront-draft-store-statistics` (a draft: the button after Logs), then the
 page, one view per state: `store-statistics` (a full week: figures, chart and
-every list), `store-statistics-products` (All products pressed),
+every list), `store-statistics-products` (All products pressed; also
+`-products-paused`, `-products-frozen`, `-products-rebuilding` and
+`-products-absent`, the last two answered anew five seconds after the press),
 `-two-stores` (the Destination control), `-both` (one store on both
 destinations), `-development` (only Testing has a store), `-paused`,
 `-frozen` (as of the last clear run), `-blocked` (no figure can be given),
