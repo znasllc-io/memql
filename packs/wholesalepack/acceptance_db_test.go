@@ -367,7 +367,8 @@ func TestARemintedLinkClearsItsUsedAt(t *testing.T) {
 }
 
 // THE PRICE-SHEET ROUTE through the real handler: the link stores no expiry,
-// opens while the buyer is approved and granted, and is link_used after a revoke.
+// opens while the buyer is approved and granted, and is link_closed before the
+// grant and after a revoke.
 func TestAPriceSheetLinkOpensThroughTheShopperPathWhileApprovedAndGranted(t *testing.T) {
 	eng := liveWholesaleEngine(t)
 	s, token := termsStore(t, eng, "pricesheet")
@@ -386,7 +387,7 @@ func TestAPriceSheetLinkOpensThroughTheShopperPathWhileApprovedAndGranted(t *tes
 	if asString(link["expiresAt"]) != "" || asString(link["usedAt"]) != "" {
 		t.Fatalf("the price-sheet link is %+v, want no expiry", link)
 	}
-	if code, body := shopperGet(t, eng, s, "priceSheet", sheet); code != http.StatusUnprocessableEntity || !strings.Contains(body, wholesalepack.RefusalLinkUsed) {
+	if code, body := shopperGet(t, eng, s, "priceSheet", sheet); code != http.StatusUnprocessableEntity || !strings.Contains(body, wholesalepack.RefusalLinkClosed) {
 		t.Fatalf("before access is granted the price sheet answered %d %s", code, body)
 	}
 	// A GRANTED ENTITLEMENT, seeded at internal origin in test code only: the
@@ -404,7 +405,7 @@ func TestAPriceSheetLinkOpensThroughTheShopperPathWhileApprovedAndGranted(t *tes
 		`, transition: "revoke", note: "account closed")`); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
-	if code, body := shopperGet(t, eng, s, "priceSheet", sheet); code != http.StatusUnprocessableEntity || !strings.Contains(body, wholesalepack.RefusalLinkUsed) {
+	if code, body := shopperGet(t, eng, s, "priceSheet", sheet); code != http.StatusUnprocessableEntity || !strings.Contains(body, wholesalepack.RefusalLinkClosed) {
 		t.Fatalf("after the revoke the price sheet answered %d %s", code, body)
 	}
 }

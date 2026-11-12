@@ -57,8 +57,8 @@ func registerShopperSurface() {
 		Construct: "wholesaleSubmitApplication",
 		Kind:      memql.ShopperReadKindBuiltin,
 		Description: "A business applies for trade terms on this store. Plain HTML form " +
-			"post, no JavaScript; answers 303. Refused when this store's " +
-			"applicationsOpen is false.",
+			"post, no JavaScript; answers 303. Refused as applications_closed when this store " +
+			"takes no application through this site.",
 		Fields: applicationFields(),
 		// The application records the organization of the site it arrived on,
 		// in its own accountId, so the construct asks the handler for it.
@@ -68,6 +68,9 @@ func registerShopperSurface() {
 		// happened, rather than in ours.
 		RedirectOK:    "/wholesale/thank-you",
 		RedirectError: "/wholesale/problem",
+		// A CLOSED PROGRAM BY NAME, alike for every reason it is closed; every
+		// other refusal stays the surface's failed.
+		Refusals: ApplicationRefusals,
 	})
 	memql.RegisterShopperForm(acceptanceForm())
 	memql.RegisterShopperRead(termsRead())
@@ -168,6 +171,6 @@ func priceSheetRead() memql.ShopperRead {
 		Description: "The store's current price sheet for an approved buyer whose access is granted.",
 		Fields:      []memql.ShopperField{tokenField()},
 		Private:     true,
-		Refusals:    LinkRefusals,
+		Refusals:    PriceSheetRefusals,
 	}
 }

@@ -49,22 +49,47 @@ const (
 	LinkPurposePriceSheet = "priceSheet"
 )
 
-// The refusals a link answers by name.
+// The refusals a link answers by name. A storefront page knows a refusal only
+// by its code, so each code means one thing (ruling 62).
 const (
+	// RefusalLinkInvalid: the token is no link of this store -- unknown,
+	// malformed, replaced or of another store, never told apart -- or the link's
+	// application cannot be read.
 	RefusalLinkInvalid = "link_invalid"
+	// RefusalLinkExpired: a terms link at or past its expiry, of an application
+	// still waiting for its terms.
 	RefusalLinkExpired = "link_expired"
-	RefusalLinkUsed    = "link_used"
+	// RefusalLinkUsed: the terms were accepted through this application's link.
+	// Only a terms link answers it.
+	RefusalLinkUsed = "link_used"
+	// RefusalLinkClosed: the link is real, and its application is no longer, or
+	// not at the moment, in the state the link serves: a terms link of an
+	// application that is not submitted and has no acceptance; a price-sheet
+	// link of an application that is not approved, or whose access is not
+	// granted.
+	RefusalLinkClosed = "link_closed"
+	// RefusalDocumentsUnavailable: the store has no current version of a
+	// document the link shows (the terms or the MAP policy, the price sheet). A
+	// new link would not help.
+	RefusalDocumentsUnavailable = "documents_unavailable"
 	// RefusalTermsChanged refuses an acceptance whose page showed a version that
 	// is no longer current (ruling 49).
 	RefusalTermsChanged = "terms_changed"
 )
 
-// LinkRefusals is every code the two link reads may refuse with.
-var LinkRefusals = []string{RefusalLinkExpired, RefusalLinkUsed, RefusalLinkInvalid}
+// LinkRefusals is every code the terms read may refuse with.
+var LinkRefusals = []string{RefusalLinkExpired, RefusalLinkUsed, RefusalLinkClosed, RefusalLinkInvalid, RefusalDocumentsUnavailable}
+
+// PriceSheetRefusals is every code the price-sheet read may refuse with: a
+// price-sheet link neither expires nor is used.
+var PriceSheetRefusals = []string{RefusalLinkClosed, RefusalLinkInvalid, RefusalDocumentsUnavailable}
 
 // AcceptanceRefusals is every code the acceptance form may refuse with: the
-// link's, and a version that changed under the page.
-var AcceptanceRefusals = []string{RefusalLinkExpired, RefusalLinkUsed, RefusalLinkInvalid, RefusalTermsChanged}
+// terms read's, and a version that changed under the page. The construct's
+// own invalid is the surface's code, which a form may not declare; the
+// surface's field rules answer it before the construct runs.
+var AcceptanceRefusals = []string{RefusalLinkExpired, RefusalLinkUsed, RefusalLinkClosed, RefusalLinkInvalid,
+	RefusalDocumentsUnavailable, RefusalTermsChanged}
 
 // refusalInvalid is the surface's own invalid, which a construct may answer for
 // a field that breaks a rule its declaration cannot state.
@@ -185,9 +210,10 @@ func (p *Provider) putLink(ctx context.Context, rowID string, link map[string]an
 // answers the link (without its hash) and its application.
 //
 // NOTHING IS READ BEFORE THE TOKEN MATCHES A LINK OF THIS STORE, and every miss
-// is errNoSuchLink. Then: a terms link that was used, or whose application is
-// no longer submitted, is link_used, and one at or past its expiry is
-// link_expired; a price-sheet link is link_used unless its application is
+// is errNoSuchLink. Then, for a terms link and in this order: one that was
+// used, or whose application has an acceptance, is link_used; one whose
+// application is no longer submitted is link_closed; one at or past its expiry
+// is link_expired. A price-sheet link is link_closed unless its application is
 // approved and its entitlement granted. An application that cannot be read is
 // link_invalid to the shopper and one line for the operator.
 func (p *Provider) linkFor(ctx context.Context, storeID, token, purpose string, now time.Time) (map[string]any, map[string]any, error) {
@@ -235,21 +261,21 @@ func (p *Provider) linkFor(ctx context.Context, storeID, token, purpose string, 
 			return nil, nil, refuseLink(RefusalLinkUsed, "the application has accepted the terms")
 		}
 		if state != StateSubmitted {
-			return nil, nil, refuseLink(RefusalLinkUsed, "the application is "+state)
+			return nil, nil, refuseLink(RefusalLinkClosed, "the application is "+state)
 		}
 		if expires := rowTime(link["expiresAt"]); expires.IsZero() || !now.Before(expires) {
 			return nil, nil, refuseLink(RefusalLinkExpired, "the link expired at "+timeText(link["expiresAt"]))
 		}
 	case LinkPurposePriceSheet:
 		if state != StateApproved {
-			return nil, nil, refuseLink(RefusalLinkUsed, "the application is "+state)
+			return nil, nil, refuseLink(RefusalLinkClosed, "the application is "+state)
 		}
 		ent, err := p.entitlementRow(sys, applicationID)
 		if err != nil {
 			return nil, nil, err
 		}
 		if ent == nil || trimmed(ent["state"]) != EntitlementGranted {
-			return nil, nil, refuseLink(RefusalLinkUsed, "the buyer's access is not granted")
+			return nil, nil, refuseLink(RefusalLinkClosed, "the buyer's access is not granted")
 		}
 	}
 	return link, app, nil
@@ -258,9 +284,22 @@ func (p *Provider) linkFor(ctx context.Context, storeID, token, purpose string, 
 // linkProblem is a link the shopper is told is invalid and the operator is told
 // why, by the application's id. Never the token.
 func (p *Provider) linkProblem(applicationID, reason string) error {
+	p.logLinkProblem(applicationID, reason)
+	return refuseLink(RefusalLinkInvalid, reason)
+}
+
+// documentsUnavailable is a link the shopper is told has no document to show
+// and the operator is told which is missing, by the application's id.
+func (p *Provider) documentsUnavailable(applicationID, reason string) error {
+	p.logLinkProblem(applicationID, reason)
+	return refuseLink(RefusalDocumentsUnavailable, reason)
+}
+
+// logLinkProblem is the operator's one line for a link that could not be
+// served. Never the token.
+func (p *Provider) logLinkProblem(applicationID, reason string) {
 	p.log().Warn("wholesale: a private link could not be served",
 		"component", "wholesale", "applicationId", applicationID, "reason", reason)
-	return refuseLink(RefusalLinkInvalid, reason)
 }
 
 // log is the pack's logger, or the default one.
@@ -288,7 +327,7 @@ func (p *Provider) termsForLink(ctx context.Context, args map[string]any, _ int)
 			return nil, err
 		}
 		if brief == nil {
-			return nil, p.linkProblem(trimmed(app["id"]), "the store has no current "+kind+" version")
+			return nil, p.documentsUnavailable(trimmed(app["id"]), "the store has no current "+kind+" version")
 		}
 		v, err := p.documentVersionByID(sys, brief)
 		if err != nil {
@@ -326,7 +365,7 @@ func (p *Provider) priceSheetForLink(ctx context.Context, args map[string]any, _
 		return nil, err
 	}
 	if brief == nil {
-		return nil, p.linkProblem(trimmed(app["id"]), "the store has no current price sheet")
+		return nil, p.documentsUnavailable(trimmed(app["id"]), "the store has no current price sheet")
 	}
 	v, err := p.documentVersionByID(sys, brief)
 	if err != nil {

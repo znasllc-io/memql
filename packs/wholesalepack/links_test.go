@@ -6,7 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"log/slog"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -374,14 +379,57 @@ func TestAUsedTermsLinkIsRefusedAsLinkUsed(t *testing.T) {
 	}
 }
 
-func TestATermsLinkOfARejectedApplicationIsRefusedAsLinkUsed(t *testing.T) {
-	w := newLinkWorld()
-	p := w.provider()
-	token := w.mint(t, p, LinkPurposeTerms)
-	w.decisions = append(w.decisions, map[string]any{"id": "dec-1", "applicationId": applicationConcept + ":" + linkApp,
-		"transition": TransitionReject, "createdAt": linkClock})
-	if _, err := p.termsForLink(shopper(), termsArgs(token), 0); refusalCode(err) != RefusalLinkUsed {
-		t.Fatalf("a rejected application's link: %v, want %s", err, RefusalLinkUsed)
+// A TERMS LINK WHOSE APPLICATION IS NO LONGER WAITING, and has no acceptance,
+// is link_closed: rejected, or approved without an acceptance, or removed.
+func TestATermsLinkOfAnApplicationNoLongerWaitingIsRefusedAsLinkClosed(t *testing.T) {
+	for name, transitions := range map[string][]string{
+		"rejected": {TransitionReject},
+		"approved": {TransitionApprove},
+		"removed":  {TransitionApprove, TransitionRevoke},
+	} {
+		w := newLinkWorld()
+		p := w.provider()
+		token := w.mint(t, p, LinkPurposeTerms)
+		for i, transition := range transitions {
+			w.decisions = append(w.decisions, map[string]any{"id": fmt.Sprint("dec-", i), "applicationId": applicationConcept + ":" + linkApp,
+				"transition": transition, "createdAt": linkClock.Add(time.Duration(i) * time.Minute)})
+		}
+		if _, err := p.termsForLink(shopper(), termsArgs(token), 0); refusalCode(err) != RefusalLinkClosed {
+			t.Fatalf("a %s application's link: %v, want %s", name, err, RefusalLinkClosed)
+		}
+		if _, err := p.acceptTerms(shopper(), w.acceptArgs(token), 0); refusalCode(err) != RefusalLinkClosed {
+			t.Fatalf("an acceptance on a %s application's link: %v, want %s", name, err, RefusalLinkClosed)
+		}
+	}
+}
+
+// THE ORDER OF A TERMS LINK'S CHECKS: used, then closed, then expired. An
+// application that accepted and was then approved is link_used on its link.
+func TestATermsLinkIsJudgedUsedThenClosedThenExpired(t *testing.T) {
+	reject := func(w *linkWorld) {
+		w.decisions = append(w.decisions, map[string]any{"id": "dec-reject", "applicationId": applicationConcept + ":" + linkApp,
+			"transition": TransitionReject, "createdAt": linkClock})
+	}
+	for name, c := range map[string]struct {
+		setup func(w *linkWorld)
+		want  string
+	}{
+		"expired":                    {func(w *linkWorld) {}, RefusalLinkExpired},
+		"expired and rejected":       {reject, RefusalLinkClosed},
+		"expired, rejected and used": {func(w *linkWorld) { reject(w); w.termsLink()["usedAt"] = linkClock.Format(time.RFC3339Nano) }, RefusalLinkUsed},
+		"expired, approved, accepted": {func(w *linkWorld) {
+			w.acceptances[AcceptanceRowID(linkApp)] = map[string]any{"applicationId": applicationConcept + ":" + linkApp, "ownerUserId": linkMerchant}
+			w.approve(EntitlementGranted)
+		}, RefusalLinkUsed},
+	} {
+		w := newLinkWorld()
+		p := w.provider()
+		token := w.mint(t, p, LinkPurposeTerms)
+		c.setup(w)
+		w.clock = linkClock.Add(400 * 24 * time.Hour)
+		if _, err := p.termsForLink(shopper(), termsArgs(token), 0); refusalCode(err) != c.want {
+			t.Fatalf("%s: %v, want %s", name, err, c.want)
+		}
 	}
 }
 
@@ -447,28 +495,31 @@ func TestTheTermsReadShowsNoEmailNoIdAndNoHash(t *testing.T) {
 	}
 }
 
-// A STORE WITH NO CURRENT TERMS OR MAP VERSION, or an application that cannot
-// be read, is link_invalid to the shopper and one line for the operator naming
-// the application -- never the token.
-func TestALinkWithNothingToShowIsLinkInvalidAndLogged(t *testing.T) {
-	for name, break_ := range map[string]func(w *linkWorld){
-		"no terms": func(w *linkWorld) { w.docs = docsMatching(w.docs, linkStore, DocumentMap) },
-		"no map":   func(w *linkWorld) { w.docs = docsMatching(w.docs, linkStore, DocumentTerms) },
-		"no application": func(w *linkWorld) {
-			w.apps = nil
-		},
+// A STORE WITH NO CURRENT TERMS OR MAP VERSION is documents_unavailable to the
+// shopper, and an application that cannot be read is link_invalid; each is one
+// line for the operator naming the application and what is missing -- never the
+// token.
+func TestALinkWithNothingToShowIsRefusedAndLogged(t *testing.T) {
+	for name, c := range map[string]struct {
+		break_ func(w *linkWorld)
+		want   string
+		line   string
+	}{
+		"no terms":       {func(w *linkWorld) { w.docs = docsMatching(w.docs, linkStore, DocumentMap) }, RefusalDocumentsUnavailable, "terms"},
+		"no map":         {func(w *linkWorld) { w.docs = docsMatching(w.docs, linkStore, DocumentTerms) }, RefusalDocumentsUnavailable, "map"},
+		"no application": {func(w *linkWorld) { w.apps = nil }, RefusalLinkInvalid, "cannot be read"},
 	} {
 		w := newLinkWorld()
 		p := w.provider()
 		token := w.mint(t, p, LinkPurposeTerms)
-		break_(w)
-		if _, err := p.termsForLink(shopper(), termsArgs(token), 0); refusalCode(err) != RefusalLinkInvalid {
-			t.Fatalf("%s: %v, want %s", name, err, RefusalLinkInvalid)
+		c.break_(w)
+		if _, err := p.termsForLink(shopper(), termsArgs(token), 0); refusalCode(err) != c.want {
+			t.Fatalf("%s: %v, want %s", name, err, c.want)
 		}
-		if _, err := p.acceptTerms(shopper(), w.acceptArgs(token), 0); refusalCode(err) != RefusalLinkInvalid {
-			t.Fatalf("%s, accepting: %v, want %s", name, err, RefusalLinkInvalid)
+		if _, err := p.acceptTerms(shopper(), w.acceptArgs(token), 0); refusalCode(err) != c.want {
+			t.Fatalf("%s, accepting: %v, want %s", name, err, c.want)
 		}
-		if !strings.Contains(w.log.String(), linkApp) || strings.Contains(w.log.String(), token) {
+		if !strings.Contains(w.log.String(), linkApp) || !strings.Contains(w.log.String(), c.line) || strings.Contains(w.log.String(), token) {
 			t.Fatalf("%s: the operator's line is %q", name, w.log.String())
 		}
 		if w.count("putAcceptanceRow") != 0 {
@@ -802,15 +853,19 @@ func TestAPriceSheetLinkOpensOnlyWhileApprovedAndGranted(t *testing.T) {
 		setup func(w *linkWorld)
 		want  string
 	}{
-		"submitted":            {func(w *linkWorld) {}, RefusalLinkUsed},
-		"approved, no access":  {func(w *linkWorld) { w.approve("") }, RefusalLinkUsed},
-		"approved, pending":    {func(w *linkWorld) { w.approve(EntitlementPending) }, RefusalLinkUsed},
+		"submitted": {func(w *linkWorld) {}, RefusalLinkClosed},
+		"rejected": {func(w *linkWorld) {
+			w.decisions = append(w.decisions, map[string]any{"id": "dec-reject", "applicationId": applicationConcept + ":" + linkApp,
+				"transition": TransitionReject, "createdAt": linkClock})
+		}, RefusalLinkClosed},
+		"approved, no access":  {func(w *linkWorld) { w.approve("") }, RefusalLinkClosed},
+		"approved, pending":    {func(w *linkWorld) { w.approve(EntitlementPending) }, RefusalLinkClosed},
 		"approved and granted": {func(w *linkWorld) { w.approve(EntitlementGranted) }, ""},
 		"revoked": {func(w *linkWorld) {
 			w.approve(EntitlementGranted)
 			w.decisions = append(w.decisions, map[string]any{"id": "dec-revoke", "applicationId": applicationConcept + ":" + linkApp,
 				"transition": TransitionRevoke, "createdAt": linkClock.Add(time.Minute)})
-		}, RefusalLinkUsed},
+		}, RefusalLinkClosed},
 	} {
 		w := newLinkWorld()
 		p := w.provider()
@@ -866,8 +921,12 @@ func TestAPriceSheetLinkShowsTheCurrentVersion(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTheTermsAndPriceSheetReadsArePrivate(t *testing.T) {
-	for _, r := range []memql.ShopperRead{termsRead(), priceSheetRead()} {
-		if !r.Private || r.Kind != memql.ShopperReadKindBuiltin || strings.Join(r.Refusals, ",") != strings.Join(LinkRefusals, ",") {
+	for _, c := range []struct {
+		read     memql.ShopperRead
+		refusals []string
+	}{{termsRead(), LinkRefusals}, {priceSheetRead(), PriceSheetRefusals}} {
+		r, refusals := c.read, c.refusals
+		if !r.Private || r.Kind != memql.ShopperReadKindBuiltin || strings.Join(r.Refusals, ",") != strings.Join(refusals, ",") {
 			t.Fatalf("%s: %+v", r.Name, r)
 		}
 		if len(r.Fields) != 1 || r.Fields[0].Name != "requestToken" || !r.Fields[0].Required {
@@ -910,6 +969,195 @@ func TestTheTermsAndPriceSheetReadsArePrivate(t *testing.T) {
 	}
 	if strings.Join(AcceptanceRefusals, ",") != strings.Join(append(append([]string{}, LinkRefusals...), RefusalTermsChanged), ",") {
 		t.Fatalf("AcceptanceRefusals = %v", AcceptanceRefusals)
+	}
+}
+
+// EVERY REFUSAL A LINK ROUTE'S CONSTRUCT ANSWERS IS A CODE THE ROUTE DECLARES,
+// and every code it declares is one it answers: a code the route does not
+// declare reaches the page as the surface's failed, and one it declares but
+// never answers is copy a page was written for in vain. Each path is walked.
+// The acceptance's own invalid is the surface's code, which no route may
+// declare; the surface answers it before the construct runs (its field rules).
+func TestEveryRefusalALinkRouteAnswersIsOneItDeclares(t *testing.T) {
+	type path struct {
+		name  string
+		setup func(w *linkWorld)
+		token func(w *linkWorld, token string) string
+		args  func(w *linkWorld, args map[string]any)
+	}
+	reject := func(w *linkWorld) {
+		w.decisions = append(w.decisions, map[string]any{"id": "dec-reject", "applicationId": applicationConcept + ":" + linkApp,
+			"transition": TransitionReject, "createdAt": linkClock})
+	}
+	unknown := func(*linkWorld, string) string { return "an-unknown-token" }
+	termsPaths := []path{
+		{name: "an unknown token", token: unknown},
+		{name: "an application that cannot be read", setup: func(w *linkWorld) { w.apps = nil }},
+		{name: "a used link", setup: func(w *linkWorld) { w.termsLink()["usedAt"] = linkClock.Format(time.RFC3339Nano) }},
+		{name: "an acceptance", setup: func(w *linkWorld) {
+			w.acceptances[AcceptanceRowID(linkApp)] = map[string]any{"applicationId": applicationConcept + ":" + linkApp, "ownerUserId": linkMerchant}
+		}},
+		{name: "a rejected application", setup: reject},
+		{name: "an expired link", setup: func(w *linkWorld) { w.clock = linkClock.Add(400 * 24 * time.Hour) }},
+		{name: "no current MAP version", setup: func(w *linkWorld) { w.docs = docsMatching(w.docs, linkStore, DocumentTerms) }},
+	}
+	acceptancePaths := append(append([]path{}, termsPaths...),
+		path{name: "a changed version", args: func(w *linkWorld, a map[string]any) { a["termsSha256"] = strings.Repeat("a", 64) }},
+		path{name: "a changed sentence", args: func(w *linkWorld, a map[string]any) { a["statementSha256"] = strings.Repeat("a", 64) }},
+		path{name: "a lost fence", setup: func(w *linkWorld) {
+			fired := false
+			w.afterAcceptanceRead = func() {
+				if !fired {
+					fired = true
+					w.acceptances[AcceptanceRowID(linkApp)] = map[string]any{"applicationId": "elsewhere", "ownerUserId": linkMerchant}
+				}
+			}
+		}},
+		path{name: "a box not on", args: func(w *linkWorld, a map[string]any) { a["acceptMap"] = "off" }},
+		path{name: "an empty name", args: func(w *linkWorld, a map[string]any) { a["signedName"] = "  " }},
+		path{name: "a fingerprint that is not one", args: func(w *linkWorld, a map[string]any) { a["mapSha256"] = "zz" }},
+	)
+	sheetPaths := []path{
+		{name: "an unknown token", token: unknown},
+		{name: "an application that cannot be read", setup: func(w *linkWorld) { w.apps = nil }},
+		{name: "a submitted application"},
+		{name: "a rejected application", setup: reject},
+		{name: "an approved application whose access is pending", setup: func(w *linkWorld) { w.approve(EntitlementPending) }},
+		{name: "an approved application with no access", setup: func(w *linkWorld) { w.approve("") }},
+		{name: "a revoked application", setup: func(w *linkWorld) {
+			w.approve(EntitlementGranted)
+			w.decisions = append(w.decisions, map[string]any{"id": "dec-revoke", "applicationId": applicationConcept + ":" + linkApp,
+				"transition": TransitionRevoke, "createdAt": linkClock.Add(time.Minute)})
+		}},
+		{name: "no current price sheet", setup: func(w *linkWorld) {
+			w.approve(EntitlementGranted)
+			w.docs = docsMatching(w.docs, linkStore, DocumentTerms)
+		}},
+	}
+	for _, route := range []struct {
+		name     string
+		purpose  string
+		declared []string
+		paths    []path
+		call     func(p *Provider, w *linkWorld, args map[string]any) error
+	}{
+		{"the terms read", LinkPurposeTerms, termsRead().Refusals, termsPaths, func(p *Provider, _ *linkWorld, args map[string]any) error {
+			_, err := p.termsForLink(shopper(), args, 0)
+			return err
+		}},
+		{"the acceptance", LinkPurposeTerms, acceptanceForm().Refusals, acceptancePaths, func(p *Provider, w *linkWorld, args map[string]any) error {
+			_, err := p.acceptTerms(shopper(), args, 0)
+			return err
+		}},
+		{"the price-sheet read", LinkPurposePriceSheet, priceSheetRead().Refusals, sheetPaths, func(p *Provider, _ *linkWorld, args map[string]any) error {
+			_, err := p.priceSheetForLink(shopper(), args, 0)
+			return err
+		}},
+	} {
+		answered := map[string]bool{}
+		for _, c := range route.paths {
+			w := newLinkWorld()
+			p := w.provider()
+			token := w.mint(t, p, route.purpose)
+			if c.setup != nil {
+				c.setup(w)
+			}
+			if c.token != nil {
+				token = c.token(w, token)
+			}
+			args := w.acceptArgs(token)
+			if c.args != nil {
+				c.args(w, args)
+			}
+			err := route.call(p, w, args)
+			code := refusalCode(err)
+			if code == "" {
+				t.Fatalf("%s, %s: %v, want a refusal by name", route.name, c.name, err)
+			}
+			if code == refusalInvalid && route.name == "the acceptance" {
+				continue
+			}
+			if !slices.Contains(route.declared, code) {
+				t.Fatalf("%s, %s: answered %s, which it does not declare (%v)", route.name, c.name, code, route.declared)
+			}
+			answered[code] = true
+		}
+		for _, code := range route.declared {
+			if !answered[code] {
+				t.Fatalf("%s declares %s and no path answers it", route.name, code)
+			}
+		}
+	}
+}
+
+// EVERY CODE A CONSTRUCT REFUSES WITH BY NAME, in the pack's source, is one of
+// the declared codes (or the surface's invalid): a new refusal path that names
+// a code no route declares fails here before it reaches a page as failed.
+func TestEveryRefusalCodeInThePacksSourceIsDeclared(t *testing.T) {
+	declared := map[string]bool{refusalInvalid: true}
+	for _, list := range [][]string{LinkRefusals, PriceSheetRefusals, AcceptanceRefusals, ApplicationRefusals} {
+		for _, code := range list {
+			declared[code] = true
+		}
+	}
+	values := map[string]string{"RefusalLinkInvalid": RefusalLinkInvalid, "RefusalLinkExpired": RefusalLinkExpired,
+		"RefusalLinkUsed": RefusalLinkUsed, "RefusalLinkClosed": RefusalLinkClosed, "RefusalTermsChanged": RefusalTermsChanged,
+		"RefusalDocumentsUnavailable": RefusalDocumentsUnavailable, "RefusalApplicationsClosed": RefusalApplicationsClosed,
+		"refusalInvalid": refusalInvalid}
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	seen := 0
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || len(call.Args) == 0 {
+				return true
+			}
+			switch fn := call.Fun.(type) {
+			case *ast.Ident:
+				if fn.Name != "refuseLink" && fn.Name != "documentsUnavailable" {
+					return true
+				}
+				if fn.Name == "documentsUnavailable" {
+					seen++
+					return true
+				}
+			case *ast.SelectorExpr:
+				if fn.Sel.Name != "NewShopperRefusal" {
+					return true
+				}
+			default:
+				return true
+			}
+			seen++
+			// LinkRefusal.Unwrap forwards the code refuseLink was named with,
+			// which this scan judges at refuseLink's own call.
+			if sel, ok := call.Args[0].(*ast.SelectorExpr); ok && sel.Sel.Name == "Code" {
+				return true
+			}
+			arg, ok := call.Args[0].(*ast.Ident)
+			if !ok {
+				t.Errorf("%s: a refusal names its code with %T, want a named constant", fset.Position(call.Pos()), call.Args[0])
+				return true
+			}
+			if value, known := values[arg.Name]; !known || !declared[value] {
+				t.Errorf("%s: a refusal with %s, which no route declares", fset.Position(call.Pos()), arg.Name)
+			}
+			return true
+		})
+	}
+	if seen == 0 {
+		t.Fatal("no refusal was found in the pack's source")
 	}
 }
 
@@ -1188,18 +1436,18 @@ func (f failingWriter) Insert(ctx context.Context, mutation string, args map[str
 	return f.inner.Insert(ctx, mutation, args)
 }
 
-// A STORE WITH NO CURRENT PRICE SHEET is link_invalid on a price-sheet link,
-// and one line for the operator.
-func TestAPriceSheetLinkWithNoPriceSheetIsLinkInvalidAndLogged(t *testing.T) {
+// A STORE WITH NO CURRENT PRICE SHEET is documents_unavailable on a price-sheet
+// link, and one line for the operator.
+func TestAPriceSheetLinkWithNoPriceSheetIsDocumentsUnavailableAndLogged(t *testing.T) {
 	w := newLinkWorld()
 	p := w.provider()
 	w.approve(EntitlementGranted)
 	token := w.mint(t, p, LinkPurposePriceSheet)
 	w.docs = append(docsMatching(w.docs, linkStore, DocumentTerms), docsMatching(w.docs, linkStore, DocumentMap)...)
-	if _, err := p.priceSheetForLink(shopper(), termsArgs(token), 0); refusalCode(err) != RefusalLinkInvalid {
-		t.Fatalf("no price sheet: %v, want %s", err, RefusalLinkInvalid)
+	if _, err := p.priceSheetForLink(shopper(), termsArgs(token), 0); refusalCode(err) != RefusalDocumentsUnavailable {
+		t.Fatalf("no price sheet: %v, want %s", err, RefusalDocumentsUnavailable)
 	}
-	if !strings.Contains(w.log.String(), linkApp) || strings.Contains(w.log.String(), token) {
+	if !strings.Contains(w.log.String(), linkApp) || !strings.Contains(w.log.String(), "price sheet") || strings.Contains(w.log.String(), token) {
 		t.Fatalf("the operator's line is %q", w.log.String())
 	}
 }

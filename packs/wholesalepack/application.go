@@ -397,10 +397,33 @@ func formatNoun(format string) string {
 	return "in the format " + format
 }
 
+// RefusalApplicationsClosed is the application form's one refusal by name: the
+// store takes no application through this site now (ruling 62). It is answered
+// alike for every reason -- the switch is off, the store is not set up, the
+// site is not one the store admits, or the store requires its terms and a
+// document is missing -- so a visitor cannot tell one from another.
+const RefusalApplicationsClosed = "applications_closed"
+
+// ApplicationRefusals is every code the application form may refuse with.
+var ApplicationRefusals = []string{RefusalApplicationsClosed}
+
 // errNotAccepting is a shopper's refusal by a store that takes no application
 // now: closed, requiring terms it has not published, not set up, or reached
-// through a site that is not of its program's organization.
-var errNotAccepting = errors.New("wholesale: this store is not accepting applications")
+// through a site that is not of its program's organization. One value, so none
+// of them can be told from another; the shopper surface reads it as
+// applications_closed.
+var errNotAccepting error = &notAccepting{}
+
+// notAccepting is errNotAccepting's type: its text is the pack's, and it
+// unwraps to the named refusal the shopper handler forwards on ?reason=.
+type notAccepting struct{}
+
+func (*notAccepting) Error() string { return "wholesale: this store is not accepting applications" }
+
+// Unwrap is the refusal as the shopper surface reads it.
+func (*notAccepting) Unwrap() error {
+	return memql.NewShopperRefusal(RefusalApplicationsClosed, "the store is not accepting applications")
+}
 
 // storefrontAdmits refuses a submission, as a store that is not accepting
 // applications refuses it, unless all of these hold, UNCONDITIONALLY:

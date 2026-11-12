@@ -268,7 +268,8 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 		{
 			Name: "termsForLink",
 			Description: "The terms link's read: the store's current terms and MAP policy for the applicant whose " +
-				"token this is. The token is the authority; refused by name as link_invalid, link_expired or link_used.",
+				"token this is. The token is the authority; refused by name as link_invalid, link_used, link_closed, " +
+				"link_expired or documents_unavailable.",
 			Handler: p.termsForLink,
 			ArgsSchema: map[string]string{
 				"requestToken": "string (required) - the link's token",
@@ -279,7 +280,8 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 		{
 			Name: "acceptTerms",
 			Description: "The acceptance form's construct: an applicant accepts the terms and MAP policy shown on " +
-				"their terms link, once. A version that changed under the page is terms_changed.",
+				"their terms link, once. Refused by name as the terms read is, and a version that changed under the " +
+				"page is terms_changed.",
 			Handler: p.acceptTerms,
 			ArgsSchema: map[string]string{
 				"requestToken":    "string (required) - the link's token",
@@ -296,7 +298,8 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 		{
 			Name: "priceSheetForLink",
 			Description: "The price-sheet link's read: the store's current price sheet for an approved buyer whose " +
-				"access is granted. The token is the authority; refused by name as link_invalid or link_used.",
+				"access is granted. The token is the authority; refused by name as link_invalid, link_closed or " +
+				"documents_unavailable.",
 			Handler: p.priceSheetForLink,
 			ArgsSchema: map[string]string{
 				"requestToken": "string (required) - the link's token",

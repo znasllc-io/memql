@@ -91,8 +91,10 @@ func (p *Provider) acceptTerms(ctx context.Context, args map[string]any, _ int) 
 		return nil, err
 	}
 	terms, mapv := current[DocumentTerms], current[DocumentMap]
-	if terms == nil || mapv == nil {
-		return nil, p.linkProblem(applicationID, "the store has no current terms or MAP version")
+	for _, kind := range []string{DocumentTerms, DocumentMap} {
+		if current[kind] == nil {
+			return nil, p.documentsUnavailable(applicationID, "the store has no current "+kind+" version")
+		}
 	}
 	if !strings.EqualFold(postedTerms, trimmed(terms["sha256"])) || !strings.EqualFold(postedMap, trimmed(mapv["sha256"])) {
 		return nil, refuseLink(RefusalTermsChanged, "a version the page showed is no longer current")
