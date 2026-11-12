@@ -32,6 +32,7 @@ import (
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/streaming"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 )
@@ -121,6 +122,11 @@ const (
 )
 
 // Create opens a stream to object. Nothing is visible at object until Commit.
+//
+// Each attempt writes to a key of its own. A failed or cancelled attempt ends
+// with Abort, which leaves the key writable; Delete is only for a person's
+// removal of a finished file, and retires the key for good, so a later Create
+// of the same key is refused at its first block.
 //
 // ctx governs every block the stream stages from Write, which has no context of
 // its own (io.Writer). Commit and Abort take their own.
@@ -317,8 +323,10 @@ func (s *AccountExportStore) OpenRange(ctx context.Context, object string, offse
 // Its ledger entry is retired, not released: a run on another replica that
 // lost its claim may still hold a stream to the same key, and a retired key
 // refuses that stream's next block instead of letting it bring the file back
-// (storagequota.Guard.Retired). An export's key is never reused, so nothing
-// legitimate writes there again.
+// (storagequota.Guard.Retired). The key stays retired for good: any later
+// write to it is refused. So a caller writes each attempt to a key of its own,
+// ends a failed or cancelled attempt with Abort, and calls Delete only when a
+// person removes a finished file.
 func (s *AccountExportStore) Delete(ctx context.Context, object string) error {
 	container, err := s.target(object)
 	if err != nil {
@@ -366,69 +374,145 @@ func openObject(ctx context.Context, u *AzureBlobUploader, container, object str
 // AccountBytesReader reads the bytes an account's rows point at, for the
 // export run only. It writes nothing, takes no container, and opens only
 // objects in the configured one.
+//
+// A row's reference is not believed. Every method takes `under`, the places the
+// row's bytes may live in, which the CALLER derives from the concept's
+// @bytes(under=...) declaration and the row's own values (design section C);
+// the resolved key or tree must lie strictly inside one of them. Beneath that
+// the reader holds a floor of its own, whatever `under` says: a key is judged
+// segment by segment after decoding, nothing under `exports` is read in any
+// spelling, and no tree is shallower than two segments. So a wrong `under` can
+// widen a read to a wrong place in the container, but never to an export file
+// and never to the whole of a top-level area.
 type AccountBytesReader struct{ u *AzureBlobUploader }
 
 // AccountBytes reads the bytes an account's rows point at.
 func (u *AzureBlobUploader) AccountBytes() *AccountBytesReader { return &AccountBytesReader{u: u} }
 
-// accountBytesKey is an object a row's bytes may name. Export files are left
-// out: they are the cluster's, and no account's row points at one, so a
-// reference that does is refused rather than copied into another export.
-func accountBytesKey(key string) bool {
-	return plainObjectKey(key) && !strings.HasPrefix(key, "exports/")
+// minTreeSegments is the shallowest tree the reader lists: `sites/<id>`, never
+// `sites` or `library` alone, which would be every account's bytes at once.
+const minTreeSegments = 2
+
+// keySegments judges a container-relative key by its segments and answers them.
+// It refuses an empty key or segment (so a leading, doubled or trailing slash),
+// a `.` or `..` segment, surrounding space, a backslash or control separator,
+// an encoded separator in any case (the raw text is checked, so a value decoded
+// once already cannot hide a second encoding), and a first segment of
+// `exports`, however it is cased: blob names are case-sensitive, so `EXPORTS`
+// is a different object, but nothing an account owns is spelled that way and
+// refusing every spelling costs nothing.
+func keySegments(key string) ([]string, bool) {
+	if key == "" || key != strings.TrimSpace(key) || strings.ContainsAny(key, "\\\x00\r\n") {
+		return nil, false
+	}
+	lower := strings.ToLower(key)
+	if strings.Contains(lower, "%2f") || strings.Contains(lower, "%5c") {
+		return nil, false
+	}
+	segments := strings.Split(key, "/")
+	for _, seg := range segments {
+		if seg == "" || seg == "." || seg == ".." || strings.Contains(seg, "://") {
+			return nil, false
+		}
+	}
+	if strings.EqualFold(segments[0], "exports") {
+		return nil, false
+	}
+	return segments, true
 }
 
-// resolve turns a stored reference into a container-relative key.
+// insidePlace reports whether segments lie STRICTLY inside one of the places,
+// compared segment by segment: `library/u1/f1` is inside `library/u1`, while
+// `library/u10/f1` and `library/u1` itself are not. A place is judged by the
+// same floor as a key, so a malformed or `exports` place matches nothing, and
+// no place at all refuses everything.
+func insidePlace(segments []string, under []string) bool {
+	for _, place := range under {
+		prefix, ok := keySegments(place)
+		if !ok || len(segments) <= len(prefix) {
+			continue
+		}
+		match := true
+		for i, seg := range prefix {
+			if segments[i] != seg {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+// resolve turns a stored reference into a container-relative key, judged by
+// the floor and by `under`. A tree's key ends in "/"; an object's never does.
 //
 //   - file://...      shipped inside the engine image, not in storage at all;
 //   - blob://<prefix>  every object under <prefix>/ (a site bundle), tree;
-//   - a URL           as the uploader stores it (splitStoredURL), and only in
-//     the configured container;
-//   - anything else   a bare key (a Library file, an attachment), opened in
-//     the configured container, which is the only one it can reach.
-func (r *AccountBytesReader) resolve(ref string) (container, key string, tree, shipped bool, err error) {
+//   - a URL           as the uploader stores it (splitStoredURL, which decodes
+//     the path once), and only in the configured container;
+//   - anything else   a bare key (a Library file, an attachment), judged as
+//     written, in the configured container, the only one it can reach.
+func (r *AccountBytesReader) resolve(ref string, under []string) (container, key string, tree, shipped bool, err error) {
 	container, err = configuredContainer(r.u)
 	if err != nil {
 		return "", "", false, false, err
 	}
 	ref = strings.TrimSpace(ref)
+	refused := func() (string, string, bool, bool, error) {
+		return "", "", false, false, fmt.Errorf("bytes reference %q names nothing this reader may read in the place it was given", ref)
+	}
+	var object string
 	switch {
 	case ref == "":
 		return "", "", false, false, errors.New("empty bytes reference")
 	case strings.HasPrefix(ref, "file://"):
+		// Nothing is read for a shipped reference, so no place is needed.
 		return container, "", false, true, nil
 	case strings.HasPrefix(ref, "blob://"):
-		prefix := strings.TrimSuffix(strings.TrimPrefix(ref, "blob://"), "/")
-		if !accountBytesKey(prefix) {
-			return "", "", false, false, fmt.Errorf("bytes reference %q names no tree in this storage", ref)
-		}
-		return container, prefix + "/", true, false, nil
+		// One trailing slash is how a tree is written; the opener adds it when
+		// it is missing, so its absence is not a different tree.
+		object, tree = strings.TrimSuffix(strings.TrimPrefix(ref, "blob://"), "/"), true
 	case strings.Contains(ref, "://"):
-		got, object, ok := r.u.splitStoredURL(ref)
-		if !ok || got != container || !accountBytesKey(object) {
-			return "", "", false, false, fmt.Errorf("bytes reference %q names no object in the configured container", ref)
+		lower := strings.ToLower(ref)
+		if strings.Contains(lower, "%2f") || strings.Contains(lower, "%5c") {
+			return refused()
 		}
-		return container, object, false, false, nil
+		got, decoded, ok := r.u.splitStoredURL(ref)
+		if !ok || got != container {
+			return refused()
+		}
+		object = decoded
+	default:
+		object = ref
 	}
-	if !accountBytesKey(ref) {
-		return "", "", false, false, fmt.Errorf("bytes reference %q names no object in this storage", ref)
+	segments, ok := keySegments(object)
+	if !ok || (tree && len(segments) < minTreeSegments) || !insidePlace(segments, under) {
+		return refused()
 	}
-	return container, ref, false, false, nil
+	if tree {
+		return container, object + "/", true, false, nil
+	}
+	return container, object, false, false, nil
 }
 
 // Stat resolves a reference (a stored URL, a bare key, or blob://<prefix>/ for a tree) to its object.
 // ok is false when the object does not exist. A file:// reference answers shipped == true.
 //
-// A tree answers its prefix as the key and the sum of its objects' sizes; it
-// exists when anything is under it. A retired object holds no bytes and answers
+// under is the places the reference may resolve into (see AccountBytesReader);
+// a reference outside them is an error, not a missing object. A tree answers
+// its prefix as the key and the sum of its live objects' sizes; it exists when
+// a live object is under it. A retired object holds no bytes and answers
 // ok == false, as a missing one does.
-func (r *AccountBytesReader) Stat(ctx context.Context, ref string) (info BlobInfo, ok, shipped bool, err error) {
-	container, key, tree, shipped, err := r.resolve(ref)
+func (r *AccountBytesReader) Stat(ctx context.Context, ref string, under []string) (info BlobInfo, ok, shipped bool, err error) {
+	container, key, tree, shipped, err := r.resolve(ref, under)
 	if err != nil || shipped {
 		return BlobInfo{}, false, shipped, err
 	}
 	if tree {
-		objects, err := r.u.ListPrefixWithSizes(ctx, container, key)
+		objects, err := r.listTree(ctx, container, key)
 		if err != nil {
 			return BlobInfo{}, false, false, err
 		}
@@ -460,26 +544,69 @@ func (r *AccountBytesReader) Stat(ctx context.Context, ref string) (info BlobInf
 }
 
 // Open streams one object by the key Stat or List answered: a bare,
-// container-relative key, never a URL or a tree.
-func (r *AccountBytesReader) Open(ctx context.Context, key string) (io.ReadCloser, error) {
+// container-relative key, never a URL or a tree, inside one of under.
+func (r *AccountBytesReader) Open(ctx context.Context, key string, under []string) (io.ReadCloser, error) {
 	container, err := configuredContainer(r.u)
 	if err != nil {
 		return nil, err
 	}
-	if !accountBytesKey(key) {
-		return nil, fmt.Errorf("%q is not an object key in this storage", key)
+	segments, ok := keySegments(key)
+	if !ok || !insidePlace(segments, under) {
+		return nil, fmt.Errorf("%q is not an object key this reader may open in the place it was given", key)
 	}
 	return openObject(ctx, r.u, container, key, nil)
 }
 
-// List answers every object under a blob://<prefix>/ tree, with its size.
-func (r *AccountBytesReader) List(ctx context.Context, treeRef string) ([]BlobInfo, error) {
+// List answers every live object under a blob://<prefix>/ tree, with its size.
+// The tree must lie inside one of under and be at least two segments deep.
+func (r *AccountBytesReader) List(ctx context.Context, treeRef string, under []string) ([]BlobInfo, error) {
 	if !strings.HasPrefix(strings.TrimSpace(treeRef), "blob://") {
 		return nil, fmt.Errorf("%q is not a blob:// tree", treeRef)
 	}
-	container, key, _, _, err := r.resolve(treeRef)
+	container, key, _, _, err := r.resolve(treeRef, under)
 	if err != nil {
 		return nil, err
 	}
-	return r.u.ListPrefixWithSizes(ctx, container, key)
+	return r.listTree(ctx, container, key)
+}
+
+// listTree lists prefix (ending in "/") and keeps only what lies inside it.
+//
+// The service's prefix filter is not taken on trust: every name is judged again
+// by the same floor and must start with the prefix, so a listing that answered
+// more than it was asked can never hand the caller an export file or another
+// place's key. Retired objects are skipped, as every other reader skips them:
+// a tombstone holds no bytes, and Open would refuse it with ErrBlobRetired.
+// Listing asks for metadata so the retirement marker is visible here without a
+// read per object. Bounded by maxListedBlobs, as ListPrefix is.
+func (r *AccountBytesReader) listTree(ctx context.Context, container, prefix string) ([]BlobInfo, error) {
+	var out []BlobInfo
+	pager := r.u.client.NewListBlobsFlatPager(container, &azblob.ListBlobsFlatOptions{
+		Prefix: &prefix, Include: azblob.ListBlobsInclude{Metadata: true},
+	})
+	seen := 0
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list azure blobs under %q: %w", prefix, err)
+		}
+		for _, item := range page.Segment.BlobItems {
+			if item == nil || item.Name == nil {
+				continue
+			}
+			if seen++; seen > maxListedBlobs {
+				return nil, fmt.Errorf("more than %d blobs under %q; refusing to list further", maxListedBlobs, prefix)
+			}
+			name := *item.Name
+			if _, ok := keySegments(name); !ok || !strings.HasPrefix(name, prefix) || hasRetirementMarker(item.Metadata) {
+				continue
+			}
+			info := BlobInfo{Key: name}
+			if item.Properties != nil && item.Properties.ContentLength != nil {
+				info.Size = *item.Properties.ContentLength
+			}
+			out = append(out, info)
+		}
+	}
+	return out, nil
 }

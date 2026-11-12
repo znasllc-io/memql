@@ -31,10 +31,15 @@ type memoryBlobService struct {
 	staged    map[string]map[string][]byte
 	maxBlock  int
 	stages    int
+	// retired objects carry the retirement marker, as a tombstone does.
+	retired map[string]bool
+	// listExtra is listed whatever prefix is asked for: a listing that
+	// answers more than it should, which the reader must not pass on.
+	listExtra []string
 }
 
 func newMemoryBlobService() *memoryBlobService {
-	return &memoryBlobService{committed: map[string][]byte{}, staged: map[string]map[string][]byte{}}
+	return &memoryBlobService{committed: map[string][]byte{}, staged: map[string]map[string][]byte{}, retired: map[string]bool{}}
 }
 
 func (m *memoryBlobService) put(container, object string, body []byte) {
@@ -81,11 +86,18 @@ func (m *memoryBlobService) do(r *http.Request) (*http.Response, error) {
 			}
 		}
 		sort.Strings(names)
+		for _, name := range m.listExtra {
+			names = append(names, path+"/"+name)
+		}
 		var out strings.Builder
 		out.WriteString(`<?xml version="1.0" encoding="utf-8"?><EnumerationResults><Blobs>`)
 		for _, key := range names {
 			name := strings.TrimPrefix(key, path+"/")
-			fmt.Fprintf(&out, `<Blob><Name>%s</Name><Properties><Content-Length>%d</Content-Length><BlobType>BlockBlob</BlobType></Properties></Blob>`, name, len(m.committed[key]))
+			meta := ""
+			if m.retired[key] && strings.Contains(q.Get("include"), "metadata") {
+				meta = `<Metadata><memql_retired_stream>marker</memql_retired_stream></Metadata>`
+			}
+			fmt.Fprintf(&out, `<Blob><Name>%s</Name><Properties><Content-Length>%d</Content-Length><BlobType>BlockBlob</BlobType></Properties>%s</Blob>`, name, len(m.committed[key]), meta)
 		}
 		out.WriteString(`</Blobs><NextMarker/></EnumerationResults>`)
 		return respond(http.StatusOK, http.Header{"Content-Type": {"application/xml"}}, []byte(out.String()))
@@ -137,6 +149,9 @@ func (m *memoryBlobService) do(r *http.Request) (*http.Response, error) {
 			return missing("BlobNotFound")
 		}
 		resp, err := respond(http.StatusOK, http.Header{"Etag": {`"v1"`}, "X-Ms-Blob-Type": {"BlockBlob"}}, nil)
+		if m.retired[key] {
+			resp.Header.Set("X-Ms-Meta-Memql_retired_stream", "marker")
+		}
 		resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
 		return resp, err
 	case r.Method == http.MethodGet:
@@ -152,7 +167,11 @@ func (m *memoryBlobService) do(r *http.Request) (*http.Response, error) {
 			}
 		}
 		if rng == "" {
-			return respond(http.StatusOK, http.Header{"Etag": {`"v1"`}}, bytes.Clone(body))
+			headers := http.Header{"Etag": {`"v1"`}}
+			if m.retired[key] {
+				headers.Set("X-Ms-Meta-Memql_retired_stream", "marker")
+			}
+			return respond(http.StatusOK, headers, bytes.Clone(body))
 		}
 		var start, end int
 		if _, err := fmt.Sscanf(rng, "bytes=%d-%d", &start, &end); err != nil {
@@ -327,40 +346,77 @@ func TestAccountExportOpenRangeAndDelete(t *testing.T) {
 	}
 }
 
+// The places a row's bytes may live in, as the export run derives them from a
+// concept's @bytes(under=...) and the row's own values.
+var (
+	libraryPlace = []string{"library/u1"}
+	spacesPlace  = []string{"spaces/s1"}
+	sitePlace    = []string{"sites/site-1"}
+)
+
 func TestAccountBytesStat(t *testing.T) {
 	ctx := context.Background()
 	m := newMemoryBlobService()
 	m.put(exportTestContainer, "library/u1/f1/report.pdf", []byte("pdf-bytes"))
+	m.put(exportTestContainer, "library/u1/f1/v2/report.pdf", []byte("v2"))
+	m.put(exportTestContainer, "library/u1/f1/old.pdf", []byte("retired"))
+	m.retired[exportTestContainer+"/library/u1/f1/old.pdf"] = true
+	m.put(exportTestContainer, "library/u2/f9/theirs.pdf", []byte("someone else's"))
 	m.put(exportTestContainer, "spaces/s1/attachments/a1/note.txt", []byte("note"))
+	m.put(exportTestContainer, "exports/accounts/e1/account.memqlx", []byte("an export"))
 	m.put("elsewhere", "library/u1/f1/report.pdf", []byte("other container"))
 	reader := exportTestClient(t, m).AccountBytes()
 
 	for _, tc := range []struct {
-		name, ref, key string
-		size           int64
-		ok, shipped    bool
-		wantErr        bool
+		name, ref string
+		under     []string
+		key       string
+		size      int64
+		ok        bool
+		shipped   bool
+		wantErr   bool
 	}{
-		{name: "stored URL", ref: "https://blob.test/memql/library/u1/f1/report.pdf", key: "library/u1/f1/report.pdf", size: 9, ok: true},
-		{name: "bare library key", ref: "library/u1/f1/report.pdf", key: "library/u1/f1/report.pdf", size: 9, ok: true},
-		{name: "bare attachment key", ref: "spaces/s1/attachments/a1/note.txt", key: "spaces/s1/attachments/a1/note.txt", size: 4, ok: true},
-		{name: "missing object", ref: "library/u1/f2/gone.pdf"},
-		{name: "missing via URL", ref: "https://blob.test/memql/library/u1/f2/gone.pdf"},
-		{name: "shipped in the image", ref: "file:///app/os", shipped: true},
-		{name: "tree", ref: "blob://library/u1/f1/", key: "library/u1/f1/", size: 9, ok: true},
-		{name: "empty tree", ref: "blob://sites/s9/v000000000000/", key: "sites/s9/v000000000000/"},
-		{name: "another container", ref: "https://blob.test/elsewhere/library/u1/f1/report.pdf", wantErr: true},
-		{name: "escape", ref: "library/u1/../../etc/passwd", wantErr: true},
-		{name: "escape in a tree", ref: "blob://sites/../library/", wantErr: true},
-		{name: "an export", ref: "exports/accounts/exp-1/account.memqlx", wantErr: true},
-		{name: "blank", ref: "  ", wantErr: true},
-		{name: "unknown scheme", ref: "gs://bucket/library/u1/f1/report.pdf", wantErr: true},
+		{name: "stored URL", ref: "https://blob.test/memql/library/u1/f1/report.pdf", under: libraryPlace, key: "library/u1/f1/report.pdf", size: 9, ok: true},
+		{name: "bare library key", ref: "library/u1/f1/report.pdf", under: libraryPlace, key: "library/u1/f1/report.pdf", size: 9, ok: true},
+		{name: "bare attachment key", ref: "spaces/s1/attachments/a1/note.txt", under: spacesPlace, key: "spaces/s1/attachments/a1/note.txt", size: 4, ok: true},
+		{name: "missing object", ref: "library/u1/f2/gone.pdf", under: libraryPlace},
+		{name: "missing via URL", ref: "https://blob.test/memql/library/u1/f2/gone.pdf", under: libraryPlace},
+		{name: "retired object", ref: "library/u1/f1/old.pdf", under: libraryPlace},
+		{name: "shipped in the image", ref: "file:///app/os", under: sitePlace, shipped: true},
+		{name: "tree skips a retired object", ref: "blob://library/u1/f1/", under: libraryPlace, key: "library/u1/f1/", size: 11, ok: true},
+		{name: "tree without its slash", ref: "blob://library/u1/f1", under: libraryPlace, key: "library/u1/f1/", size: 11, ok: true},
+		{name: "empty tree", ref: "blob://sites/site-1/v000000000000/", under: sitePlace, key: "sites/site-1/v000000000000/"},
+
+		{name: "outside its place", ref: "library/u2/f9/theirs.pdf", under: libraryPlace, wantErr: true},
+		{name: "its place itself as a tree", ref: "blob://library/u1", under: libraryPlace, wantErr: true},
+		{name: "a sibling sharing a prefix string", ref: "library/u10/f1/x", under: libraryPlace, wantErr: true},
+		{name: "no place given", ref: "library/u1/f1/report.pdf", wantErr: true},
+		{name: "an empty place", ref: "library/u1/f1/report.pdf", under: []string{""}, wantErr: true},
+		{name: "another container", ref: "https://blob.test/elsewhere/library/u1/f1/report.pdf", under: libraryPlace, wantErr: true},
+		{name: "escape", ref: "library/u1/../../etc/passwd", under: libraryPlace, wantErr: true},
+		{name: "dot segment", ref: "library/u1/./f1/report.pdf", under: libraryPlace, wantErr: true},
+		{name: "empty segment", ref: "library/u1//f1/report.pdf", under: libraryPlace, wantErr: true},
+		{name: "leading slash", ref: "/library/u1/f1/report.pdf", under: libraryPlace, wantErr: true},
+		{name: "encoded slash in a key", ref: "library/u1%2Ff1/report.pdf", under: libraryPlace, wantErr: true},
+		{name: "encoded slash in a URL", ref: "https://blob.test/memql/library/u1%2Ff1%2Freport.pdf", under: libraryPlace, wantErr: true},
+		{name: "encoded dot segment in a URL", ref: "https://blob.test/memql/library/u1/%2E%2E/u2/f9/theirs.pdf", under: libraryPlace, wantErr: true},
+		{name: "escape in a tree", ref: "blob://sites/../library/", under: sitePlace, wantErr: true},
+		{name: "an export key", ref: "exports/accounts/e1/account.memqlx", under: []string{"exports/accounts"}, wantErr: true},
+		{name: "an export tree", ref: "blob://exports", under: []string{"exports"}, wantErr: true},
+		{name: "an export tree with its slash", ref: "blob://exports/", under: []string{"exports"}, wantErr: true},
+		{name: "exports spelled otherwise", ref: "EXPORTS/accounts/e1/account.memqlx", under: []string{"EXPORTS"}, wantErr: true},
+		{name: "exports climbed into", ref: "blob://EXPORTS/..", under: []string{"EXPORTS"}, wantErr: true},
+		{name: "exports by URL", ref: "https://blob.test/memql/exports/accounts/e1/account.memqlx", under: []string{"exports/accounts"}, wantErr: true},
+		{name: "a top-level tree", ref: "blob://library", under: []string{"library"}, wantErr: true},
+		{name: "a top-level tree with its slash", ref: "blob://sites/", under: []string{"sites"}, wantErr: true},
+		{name: "blank", ref: "  ", under: libraryPlace, wantErr: true},
+		{name: "unknown scheme", ref: "gs://bucket/library/u1/f1/report.pdf", under: libraryPlace, wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			info, ok, shipped, err := reader.Stat(ctx, tc.ref)
+			info, ok, shipped, err := reader.Stat(ctx, tc.ref, tc.under)
 			if tc.wantErr {
 				if err == nil {
-					t.Fatalf("Stat(%q) resolved: %+v ok=%v", tc.ref, info, ok)
+					t.Fatalf("Stat(%q, %q) resolved: %+v ok=%v", tc.ref, tc.under, info, ok)
 				}
 				return
 			}
@@ -377,11 +433,16 @@ func TestAccountBytesListAndOpen(t *testing.T) {
 	const tree = "sites/site-1/v0123456789ab/"
 	m.put(exportTestContainer, tree+"index.html", []byte("<html>"))
 	m.put(exportTestContainer, tree+"assets/app.js", []byte("js"))
+	m.put(exportTestContainer, tree+"stale.js", []byte("retired"))
+	m.retired[exportTestContainer+"/"+tree+"stale.js"] = true
 	m.put(exportTestContainer, "sites/site-1/v0123456789abc/other.html", []byte("a sibling prefix"))
+	m.put(exportTestContainer, "exports/accounts/e1/account.memqlx", []byte("an export"))
 	m.put("elsewhere", tree+"index.html", []byte("other container"))
+	// A listing that answers beyond the tree: the reader passes none of it on.
+	m.listExtra = []string{"exports/accounts/e1/account.memqlx", "library/u2/f9/theirs.pdf", tree + "../escape"}
 	reader := exportTestClient(t, m).AccountBytes()
 
-	got, err := reader.List(ctx, "blob://"+strings.TrimSuffix(tree, "/"))
+	got, err := reader.List(ctx, "blob://"+strings.TrimSuffix(tree, "/"), sitePlace)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +450,7 @@ func TestAccountBytesListAndOpen(t *testing.T) {
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("List = %v, want %v", got, want)
 	}
-	r, err := reader.Open(ctx, got[1].Key)
+	r, err := reader.Open(ctx, got[1].Key, sitePlace)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,18 +459,55 @@ func TestAccountBytesListAndOpen(t *testing.T) {
 	if string(body) != "<html>" {
 		t.Fatalf("Open = %q", body)
 	}
-	for _, ref := range []string{"library/u1/f1/report.pdf", "file:///app/os", "blob://", "blob://../x/", "https://blob.test/memql/sites/"} {
-		if _, err := reader.List(ctx, ref); err == nil {
-			t.Errorf("List(%q) was accepted", ref)
+
+	for _, tc := range []struct {
+		ref   string
+		under []string
+	}{
+		{"library/u1/f1/report.pdf", []string{"library/u1"}},
+		{"file:///app/os", sitePlace},
+		{"blob://", sitePlace},
+		{"blob://../x/", sitePlace},
+		{"https://blob.test/memql/sites/", sitePlace},
+		{"blob://" + tree, nil},
+		{"blob://" + tree, []string{"sites/site-2"}},
+		{"blob://sites/site-1", sitePlace},
+		{"blob://sites", []string{"sites"}},
+		{"blob://sites/", []string{"sites"}},
+		{"blob://exports", []string{"exports"}},
+		{"blob://exports/", []string{"exports"}},
+		{"blob://exports/accounts", []string{"exports"}},
+		{"blob://Exports/accounts", []string{"Exports"}},
+		{"blob://sites%2Fsite-1/v0123456789ab", sitePlace},
+	} {
+		if _, err := reader.List(ctx, tc.ref, tc.under); err == nil {
+			t.Errorf("List(%q, %q) was accepted", tc.ref, tc.under)
 		}
 	}
-	for _, key := range []string{"blob://" + tree, "https://blob.test/elsewhere/" + tree + "index.html", "../x", "exports/accounts/e/f", ""} {
-		if _, err := reader.Open(ctx, key); err == nil {
-			t.Errorf("Open(%q) was accepted", key)
+	for _, tc := range []struct {
+		key   string
+		under []string
+	}{
+		{"blob://" + tree, sitePlace},
+		{"https://blob.test/elsewhere/" + tree + "index.html", sitePlace},
+		{"https://blob.test/memql/" + tree + "index.html", sitePlace},
+		{"../x", sitePlace},
+		{"exports/accounts/e1/account.memqlx", []string{"exports/accounts"}},
+		{"", sitePlace},
+		{tree + "index.html", nil},
+		{tree + "index.html", []string{"sites/site-2"}},
+		{"sites/site-1", sitePlace},
+		{tree + "index.html/", sitePlace},
+	} {
+		if _, err := reader.Open(ctx, tc.key, tc.under); err == nil {
+			t.Errorf("Open(%q, %q) was accepted", tc.key, tc.under)
 		}
 	}
-	if _, err := reader.Open(ctx, "library/u1/none"); !IsBlobAbsent(err) {
+	if _, err := reader.Open(ctx, "library/u1/none", []string{"library/u1"}); !IsBlobAbsent(err) {
 		t.Fatalf("open of a missing object: %v", err)
+	}
+	if _, err := reader.Open(ctx, tree+"stale.js", sitePlace); !errors.Is(err, ErrBlobRetired) {
+		t.Fatalf("open of a retired object: %v", err)
 	}
 }
 
@@ -417,7 +515,7 @@ func TestAccountBytesNeedsTheConfiguredContainer(t *testing.T) {
 	m := newMemoryBlobService()
 	u := exportTestClient(t, m)
 	u.libraryContainer = ""
-	if _, _, _, err := u.AccountBytes().Stat(context.Background(), "library/u1/f1/report.pdf"); err == nil {
+	if _, _, _, err := u.AccountBytes().Stat(context.Background(), "library/u1/f1/report.pdf", libraryPlace); err == nil {
 		t.Fatal("a reader with no configured container resolved a key")
 	}
 	if _, err := u.AccountExports().Create(context.Background(), "exports/accounts/e/f"); err == nil {
