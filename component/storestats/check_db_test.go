@@ -14,6 +14,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/integrations/shopify"
 )
 
@@ -30,11 +31,7 @@ const checkAhead = 6 * time.Minute
 // check's maintenance principal.
 func checkCtx(t *testing.T) context.Context {
 	t.Helper()
-	actor := &auth.AccessContext{UserId: checkPrincipal, Role: auth.RoleOwner, Unranked: true, Synthetic: true}
-	claims := map[string]any{"sub": actor.UserId, "email": actor.UserId, "role": string(actor.Role)}
-	ctx := auth.ContextWithClaims(context.Background(), claims)
-	ctx = auth.ContextWithToken(ctx, auth.BuildTokenInfo(claims))
-	return auth.ContextWithAccess(ctx, actor)
+	return principalCtx(t, "storeStatisticsCheckSweep")
 }
 
 // settle runs the rollup until the store's first fill is over: its walk at
@@ -649,8 +646,14 @@ var (
 
 // checksPrincipal is the check's maintenance principal, as its automation
 // runs under it.
-func checksPrincipal() *auth.AccessContext {
-	return &auth.AccessContext{UserId: checkPrincipal, Role: auth.RoleOwner, Unranked: true, Synthetic: true}
+func checksPrincipal() *auth.AccessContext { return auth.MaintenanceActor("storeStatisticsCheckSweep") }
+
+// personCtx is a person signed in with this role, as a client calls.
+func personCtx(ac *auth.AccessContext) context.Context {
+	claims := map[string]any{"sub": ac.UserId, "role": string(ac.Role)}
+	ctx := auth.ContextWithClaims(context.Background(), claims)
+	ctx = auth.ContextWithToken(ctx, auth.BuildTokenInfo(claims))
+	return auth.ContextWithAccess(ctx, ac)
 }
 
 // THE CHECK IS THE ENGINE'S. A cluster owner by hand, the automation's reader
@@ -680,6 +683,23 @@ func TestOnlyTheChecksPrincipalRunsIt(t *testing.T) {
 	}
 	if engine.asked() != 0 || touched {
 		t.Errorf("a refused call asked %d queries and reached for the database %v; want neither", engine.asked(), touched)
+	}
+	if checksPrincipal() == nil {
+		t.Fatal("storeStatisticsCheckSweep is not on the maintenance list, so its automation runs as a reader and every run is refused")
+	}
+
+	// Through the engine, as the automation calls it: the builtin dispatches
+	// here, and the principal at client origin is refused.
+	eng, _ := statsEngine(t)
+	if err := eng.AuditIntegrationExecutors(); err != nil {
+		t.Fatalf("the engine's boot-time executor audit refuses this wiring: %v", err)
+	}
+	if _, err := eng.Execute(checkCtx(t), "builtin storeStatisticsCheck()"); err == nil ||
+		!strings.Contains(err.Error(), "store statistics check requires the engine maintenance principal") {
+		t.Errorf("the engine ran the check for the principal at client origin: %v", err)
+	}
+	if _, err := eng.Execute(auth.ContextWithInternalOrigin(checkCtx(t)), "builtin storeStatisticsCheck()"); err != nil {
+		t.Errorf("the engine refused the check's principal: %v", err)
 	}
 
 	i, id := runStore(t)
@@ -714,6 +734,16 @@ func TestOnlyAPersonWhoIsAClusterOwnerRebuilds(t *testing.T) {
 	if k := keptRow(t, id); k.generation != before.generation || k.rebuildingSince.Valid || k.purging {
 		t.Errorf("a refused rebuild marked the store: generation %d (was %d), rebuilding %v, purging %v",
 			k.generation, before.generation, k.rebuildingSince.Valid, k.purging)
+	}
+	// Called by name through the engine, which has no gate of its own for it:
+	// the handler's.
+	eng, _ := statsEngine(t)
+	call := "builtin storeStatisticsRebuild(storeId: " + langparser.QuoteString(id) + ")"
+	if _, err := eng.Execute(personCtx(aDeveloper), call); err == nil || !strings.Contains(err.Error(), "store statistics rebuild is for a cluster owner") {
+		t.Errorf("a developer calling the builtin by name: %v, want the rebuild's refusal", err)
+	}
+	if k := keptRow(t, id); k.generation != before.generation {
+		t.Errorf("a refused rebuild through the engine moved the generation")
 	}
 	nodes, err := i.handleRebuild(ownerCtx(), map[string]any{"storeId": id}, 0)
 	if err != nil {
@@ -862,6 +892,11 @@ func TestOnlyAPersonWhoIsAClusterOwnerReadsTheCheckState(t *testing.T) {
 		if err == nil || nodes != nil || err.Error() != "store statistics check state is for a cluster owner" {
 			t.Errorf("%s: got %d nodes and error %v, want the check state's refusal", name, len(nodes), err)
 		}
+	}
+	eng, _ := statsEngine(t)
+	call := "builtin storeStatisticsCheckState(storeId: " + langparser.QuoteString(id) + ")"
+	if _, err := eng.Execute(personCtx(aDeveloper), call); err == nil || !strings.Contains(err.Error(), "store statistics check state is for a cluster owner") {
+		t.Errorf("a developer calling the builtin by name: %v, want the check state's refusal", err)
 	}
 	for _, form := range []string{id, "v1:shopify:store:" + id} {
 		if s := checkState(t, i, form); s["storeId"] != id {

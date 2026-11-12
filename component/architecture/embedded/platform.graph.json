@@ -178,6 +178,7 @@
 {"id":"automation:schedulePipelines","kind":"automation","label":"schedulePipelines","attrs":{"origin":"pipelines/automations.memql","schedule":"0 30 3 * * *","stratum":"0"}},
 {"id":"automation:seedSelfAccount","kind":"automation","label":"seedSelfAccount","attrs":{"origin":"accounts/automations.memql","stratum":"0","trigger":"system.startup","writes":"v1:accounts:account"}},
 {"id":"automation:siteStatisticsRollupSweep","kind":"automation","label":"siteStatisticsRollupSweep","attrs":{"origin":"platform/automations.memql","schedule":"0 */5 * * * *","stratum":"0"}},
+{"id":"automation:storeStatisticsCheckSweep","kind":"automation","label":"storeStatisticsCheckSweep","attrs":{"origin":"shopify/overlay/automations.memql","schedule":"0 40 * * * *","stratum":"0"}},
 {"id":"automation:storeStatisticsRollupSweep","kind":"automation","label":"storeStatisticsRollupSweep","attrs":{"origin":"shopify/overlay/automations.memql","schedule":"15 * * * * *","stratum":"0"}},
 {"id":"automation:sweepAbandonedPackageDeployments","kind":"automation","label":"sweepAbandonedPackageDeployments","attrs":{"origin":"platform/automations.memql","schedule":"0 */2 * * * *","stratum":"0"}},
 {"id":"automation:sweepConstructReuse","kind":"automation","label":"sweepConstructReuse","attrs":{"origin":"procedure/automations.memql","schedule":"0 20 */6 * * *","stratum":"0"}},

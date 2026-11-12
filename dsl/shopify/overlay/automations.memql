@@ -67,3 +67,21 @@ automation runShopifyComplianceJobs {
 automation storeStatisticsRollupSweep {
   roll := builtin storeStatisticsRollup()
 }
+
+/// Check every store's statistics against its mirror (the 2026-11-11 store statistics design): every
+/// hour on the cron leader, at minute 40, where no other hourly sweep begins. Each run carries every
+/// caught-up store's pass on, comparing each fact with what its mirrored row gives now by version and
+/// by content -- the walk trusts versions, and a customer's erasure rewrites rows in place where no
+/// walk looks -- writing again what differs and, at the end of a pass, deleting the facts no row
+/// answers for.
+///
+/// THE WORK IS A BUILTIN, builtin storeStatisticsCheck in component/storestats, for the rollup's
+/// reasons: it reads the mirror rows from Go and its one step answers counts, so no row of a store's
+/// mirror is kept in this automation's journal.
+///
+/// A MAINTENANCE automation (component/auth/maintenance_actor.go): the builtin admits this
+/// automation's maintenance principal and no other caller.
+@trigger(schedule="0 40 * * * *")
+automation storeStatisticsCheckSweep {
+  check := builtin storeStatisticsCheck()
+}
