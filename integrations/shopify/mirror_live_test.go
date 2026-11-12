@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"os"
 	"regexp"
 	"slices"
@@ -47,21 +48,23 @@ import (
 //	MEMQL_TEST_SHOPIFY_ADMIN_TOKEN_2   its token
 //
 //	MEMQL_DATABASE_DSN=... MEMQL_TEST_SHOPIFY_STORE_DOMAIN=... MEMQL_TEST_SHOPIFY_ADMIN_TOKEN=... \
-//	  go test -count=1 -timeout 30m ./integrations/shopify/ -run 'TestLive' -v
+//	  go test -count=1 -timeout 45m ./integrations/shopify/ -run 'TestLive' -v
 //
-// -timeout 30m is part of the command: five tests of up to four minutes each
+// -timeout 45m is part of the command: nine tests of up to four minutes each
 // exceed go test's ten-minute default, and a timeout panic skips t.Cleanup,
 // which is what removes the orders.
 //
 // What a run does in the store, and only to what it made itself: a draft
 // order completed as paid, tagged memql-live-test with the run's time in its
 // note and an invented buyer at example.com; for the change test an edit, a
-// refund of one unit and a cancellation. Cleanup cancels what is still open
-// (restocking), deletes the order, the completed draft and the invented
-// customer, and logs whatever Shopify would not delete, so a leftover is
-// recognisable by its tag. The refund is NO_RESTOCK, so a run of the change
-// test is expected to leave the variant one unit lower; the other tests
-// should leave it where it was.
+// refund of one unit and a cancellation; for the refund-detail tests a refund
+// of one unit, or of an amount with no line and, on a store whose prices
+// include tax, an order with a shipping line whose shipping is refunded.
+// Cleanup cancels what is still open (restocking), deletes the order, the
+// completed draft and the invented customer, and logs whatever Shopify would
+// not delete, so a leftover is recognisable by its tag. A refund of a unit is
+// NO_RESTOCK, so each test that makes one is expected to leave the variant one
+// unit lower; the other tests should leave it where it was.
 //
 // The setup calls go through the connector's own Admin client (adminCall), so
 // they are paced against the same cost bucket as the mirror's reads.
@@ -76,7 +79,10 @@ import (
 // which holds no Mutation type and no input fields: every mutation here --
 // draftOrderCreate, draftOrderComplete, orderEditBegin, orderEditSetQuantity,
 // orderEditCommit, refundCreate, orderCancel, orderDelete, draftOrderDelete,
-// customerDelete -- and their inputs. Two are uncertain at the pinned version:
+// customerDelete -- and their inputs. Three are uncertain at the pinned version:
+//   - the draft order's shippingLine: ShippingLineInput's `priceWithCurrency`
+//     ({amount, currencyCode}) is sent; if the version refuses it, send the
+//     older `price` with the amount alone;
 //   - orderCancel's `refund: Boolean`: later versions prefer
 //     `refundMethod: { originalPaymentMethodsRefund: false }`; if the first
 //     live run refuses `refund`, send that instead.
@@ -406,6 +412,34 @@ const liveSuggestedRefundDoc = `query LiveTestSuggestedRefund($id: ID!, $refundL
   }
 }`
 
+// liveSuggestedShippingRefundDoc asks what refunding the whole shipping would
+// refund.
+const liveSuggestedShippingRefundDoc = `query LiveTestSuggestedShippingRefund($id: ID!) {
+  order(id: $id) {
+    suggestedRefund(refundShipping: true) {
+      suggestedTransactions {
+        gateway
+        kind
+        parentTransaction { id }
+        amountSet { shopMoney { amount } }
+      }
+    }
+  }
+}`
+
+// liveOrderTransactionsDoc reads the payments an amount can be refunded from.
+const liveOrderTransactionsDoc = `query LiveTestOrderTransactions($id: ID!) {
+  order(id: $id) {
+    transactions { id kind status gateway }
+  }
+}`
+
+// liveShopTaxesDoc reads whether the store's prices include tax, and its
+// currency, for an order with shipping.
+const liveShopTaxesDoc = `query LiveTestShopTaxes {
+  shop { taxesIncluded currencyCode }
+}`
+
 const liveRefundCreateDoc = `mutation LiveTestRefundCreate($input: RefundInput!) {
   refundCreate(input: $input) {
     refund { id }
@@ -518,6 +552,13 @@ func (h *liveHarness) grantedScopes(t *testing.T, store Store) []string {
 // else can fail.
 func (h *liveHarness) createPaidOrder(t *testing.T, store Store) *liveOrder {
 	t.Helper()
+	return h.createPaidOrderShipped(t, store, nil)
+}
+
+// createPaidOrderShipped is createPaidOrder with a shipping line on the draft
+// (nil for none).
+func (h *liveHarness) createPaidOrderShipped(t *testing.T, store Store, shippingLine map[string]any) *liveOrder {
+	t.Helper()
 	have := grantIncludes(h.grantedScopes(t, store))
 	var lacking []string
 	for _, s := range liveSetupScopes {
@@ -545,13 +586,17 @@ func (h *liveHarness) createPaidOrder(t *testing.T, store Store) *liveOrder {
 	}
 	t.Cleanup(func() { h.remove(t, o) })
 
+	draftInput := map[string]any{
+		"lineItems": []any{map[string]any{"variantId": variantGID, "quantity": 2}},
+		"email":     o.email,
+		"tags":      []any{liveTag},
+		"note":      "memql live test, run " + runAt.Format(time.RFC3339),
+	}
+	if shippingLine != nil {
+		draftInput["shippingLine"] = shippingLine
+	}
 	created := h.mutate(t, store, liveDraftOrderCreateDoc, "LiveTestDraftOrderCreate", "draftOrderCreate", map[string]any{
-		"input": map[string]any{
-			"lineItems": []any{map[string]any{"variantId": variantGID, "quantity": 2}},
-			"email":     o.email,
-			"tags":      []any{liveTag},
-			"note":      "memql live test, run " + runAt.Format(time.RFC3339),
-		},
+		"input": draftInput,
 	})
 	draft, _ := created["draftOrder"].(map[string]any)
 	o.draftGID, _ = draft["id"].(string)
@@ -830,6 +875,187 @@ func liveOrderMirrored(o *liveOrder) func([]memqlsync.MirrorWrite) (string, bool
 	}
 }
 
+// --- refunds ------------------------------------------------------------
+
+// suggestedTransactions reads the refund transactions Shopify suggests for an
+// order, as refundCreate's input takes them. Empty when Shopify suggests none
+// with an amount and a parent (an order paid by nothing refundable).
+func (h *liveHarness) suggestedTransactions(t *testing.T, o *liveOrder, document, op string, vars map[string]any) []any {
+	t.Helper()
+	suggested := h.query(t, o.store, document, op, vars)
+	var transactions []any
+	order, _ := suggested["order"].(map[string]any)
+	refund, _ := order["suggestedRefund"].(map[string]any)
+	list, _ := refund["suggestedTransactions"].([]any)
+	for _, s := range list {
+		m, _ := s.(map[string]any)
+		amount := liveString(m, "amountSet", "shopMoney", "amount")
+		parent := liveString(m, "parentTransaction", "id")
+		if amount == "" || parent == "" {
+			continue
+		}
+		transactions = append(transactions, map[string]any{
+			"orderId": o.orderGID, "parentId": parent, "amount": amount,
+			"gateway": liveString(m, "gateway"), "kind": "REFUND",
+		})
+	}
+	return transactions
+}
+
+// createRefund runs refundCreate with input, sending the idempotency
+// directive only when Shopify answers that the version requires it.
+func (h *liveHarness) createRefund(t *testing.T, o *liveOrder, input map[string]any) {
+	t.Helper()
+	input["orderId"] = o.orderGID
+	input["note"] = "memql live test, run " + o.runAt.Format(time.RFC3339)
+	input["notify"] = false
+	if _, err := h.tryMutate(h.ctx, o.store, liveRefundCreateDoc, "LiveTestRefundCreate", "refundCreate", map[string]any{"input": input}); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "idempot") {
+			t.Fatal(err)
+		}
+		h.mutate(t, o.store, liveRefundCreateIdempotentDoc, "LiveTestRefundCreate", "refundCreate",
+			map[string]any{"input": input, "key": fmt.Sprintf("memql-live-test-%d", time.Now().UnixNano())})
+	}
+}
+
+// refundUnits refunds qty units of one line, NO_RESTOCK, with the money
+// Shopify suggests, and says whether money was refunded with them.
+func (h *liveHarness) refundUnits(t *testing.T, o *liveOrder, lineGID string, qty int) bool {
+	t.Helper()
+	transactions := h.suggestedTransactions(t, o, liveSuggestedRefundDoc, "LiveTestSuggestedRefund", map[string]any{
+		"id": o.orderGID, "refundLineItems": []any{map[string]any{"lineItemId": lineGID, "quantity": qty}},
+	})
+	input := map[string]any{
+		"refundLineItems": []any{map[string]any{"lineItemId": lineGID, "quantity": qty, "restockType": "NO_RESTOCK"}},
+	}
+	if len(transactions) > 0 {
+		input["transactions"] = transactions
+	}
+	h.createRefund(t, o, input)
+	return len(transactions) > 0
+}
+
+// refundShipping refunds the order's whole shipping, with the money Shopify
+// suggests for it.
+func (h *liveHarness) refundShipping(t *testing.T, o *liveOrder) {
+	t.Helper()
+	transactions := h.suggestedTransactions(t, o, liveSuggestedShippingRefundDoc, "LiveTestSuggestedShippingRefund", map[string]any{"id": o.orderGID})
+	input := map[string]any{"shipping": map[string]any{"fullRefund": true}}
+	if len(transactions) > 0 {
+		input["transactions"] = transactions
+	}
+	h.createRefund(t, o, input)
+}
+
+// refundAmount refunds an amount of the order's payment with no line and no
+// shipping: the refund Shopify records as an order adjustment.
+func (h *liveHarness) refundAmount(t *testing.T, o *liveOrder, amount string) {
+	t.Helper()
+	data := h.query(t, o.store, liveOrderTransactionsDoc, "LiveTestOrderTransactions", map[string]any{"id": o.orderGID})
+	order, _ := data["order"].(map[string]any)
+	list, _ := order["transactions"].([]any)
+	parent, gateway := "", ""
+	for _, item := range list {
+		m, _ := item.(map[string]any)
+		if (m["kind"] == "SALE" || m["kind"] == "CAPTURE") && m["status"] == "SUCCESS" {
+			parent, gateway = liveString(m, "id"), liveString(m, "gateway")
+			break
+		}
+	}
+	if parent == "" {
+		t.Fatalf("the order has no successful sale to refund an amount of: %v", list)
+	}
+	h.createRefund(t, o, map[string]any{"transactions": []any{map[string]any{
+		"orderId": o.orderGID, "parentId": parent, "amount": amount, "gateway": gateway, "kind": "REFUND",
+	}}})
+}
+
+// fetchOrder reads the order with the mirror's own generated fetch document,
+// and returns Shopify's answer with its cost.
+func (h *liveHarness) fetchOrder(t *testing.T, o *liveOrder) (*AdminResponse, map[string]any) {
+	t.Helper()
+	spec := generated.Types["order"]
+	ctx, cancel := context.WithTimeout(h.ctx, liveCallTimeout)
+	defer cancel()
+	resp, err := h.conn.adminCall(ctx, o.store, spec.FetchDocument, spec.FetchOp, map[string]any{"id": o.orderGID})
+	if err != nil {
+		t.Fatalf("%s: %s", spec.FetchOp, liveRefusal(err))
+	}
+	data, err := resp.DataMap()
+	if err != nil {
+		t.Fatalf("%s answered data that is not an object: %v", spec.FetchOp, err)
+	}
+	return resp, data
+}
+
+// liveRefundWith delivers orders/updated until the mirror writes a refund
+// under the order that satisfies ok, and returns it.
+func (h *liveHarness) liveRefundWith(t *testing.T, o *liveOrder, what string, ok func(map[string]any) bool) map[string]any {
+	t.Helper()
+	var found map[string]any
+	h.deliverUntil(t, o.store, "orders/updated", o.orderGID, what, func(writes []memqlsync.MirrorWrite) (string, bool) {
+		refunds := liveChildrenOf(writes, "refund", o.orderGID)
+		for _, r := range refunds {
+			if ok(r) {
+				found = r
+				return "found", true
+			}
+		}
+		return fmt.Sprintf("%d refund rows, none %s", len(refunds), what), false
+	})
+	return found
+}
+
+// liveFirstLine is the gid of the order's one line, as the mirror wrote it.
+func liveFirstLine(t *testing.T, writes []memqlsync.MirrorWrite, o *liveOrder) string {
+	t.Helper()
+	lines := liveChildrenOf(writes, "orderLineItem", o.orderGID)
+	if len(lines) == 0 {
+		t.Fatal("the order was mirrored with no line")
+	}
+	return liveString(lines[0], "gid")
+}
+
+// liveList is a mirrored list field's elements.
+func liveList(p map[string]any, key string) []map[string]any {
+	var out []map[string]any
+	list, _ := p[key].([]any)
+	for _, item := range list {
+		if m, ok := item.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// liveAmountRE is an amount as plain decimal text: no exponent, no grouping.
+var liveAmountRE = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?$`)
+
+// liveAmounts is every "amount" inside a value, by its path.
+func liveAmounts(v any, path string, into map[string]any) {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, item := range x {
+			if k == "amount" {
+				into[path+"."+k] = item
+				continue
+			}
+			liveAmounts(item, path+"."+k, into)
+		}
+	case []any:
+		for i, item := range x {
+			liveAmounts(item, fmt.Sprintf("%s[%d]", path, i), into)
+		}
+	}
+}
+
+// liveSameAmount compares two decimal texts exactly.
+func liveSameAmount(a, b string) bool {
+	x, okA := new(big.Rat).SetString(a)
+	y, okB := new(big.Rat).SetString(b)
+	return okA && okB && x.Cmp(y) == 0
+}
+
 // --- the tests ------------------------------------------------------------
 
 // TestLiveTheGrantHoldsTheCommerceSet reads the token's own access scopes
@@ -929,49 +1155,14 @@ func TestLiveAnEditARefundAndACancellationFollow(t *testing.T) {
 	lineGID := liveString(liveChildrenOf(edited, "orderLineItem", o.orderGID)[0], "gid")
 
 	// The refund: one unit of the line, with the money Shopify suggests.
-	refundLines := []any{map[string]any{"lineItemId": lineGID, "quantity": 1, "restockType": "NO_RESTOCK"}}
-	suggested := h.query(t, store, liveSuggestedRefundDoc, "LiveTestSuggestedRefund", map[string]any{
-		"id": o.orderGID, "refundLineItems": []any{map[string]any{"lineItemId": lineGID, "quantity": 1}},
-	})
-	var transactions []any
-	order, _ := suggested["order"].(map[string]any)
-	refund, _ := order["suggestedRefund"].(map[string]any)
-	list, _ := refund["suggestedTransactions"].([]any)
-	for _, s := range list {
-		m, _ := s.(map[string]any)
-		amount := liveString(m, "amountSet", "shopMoney", "amount")
-		parent := liveString(m, "parentTransaction", "id")
-		if amount == "" || parent == "" {
-			continue
-		}
-		transactions = append(transactions, map[string]any{
-			"orderId": o.orderGID, "parentId": parent, "amount": amount,
-			"gateway": liveString(m, "gateway"), "kind": "REFUND",
-		})
-	}
-	input := map[string]any{
-		"orderId":         o.orderGID,
-		"note":            "memql live test, run " + o.runAt.Format(time.RFC3339),
-		"notify":          false,
-		"refundLineItems": refundLines,
-	}
-	if len(transactions) > 0 {
-		input["transactions"] = transactions
-	}
-	if _, err := h.tryMutate(h.ctx, store, liveRefundCreateDoc, "LiveTestRefundCreate", "refundCreate", map[string]any{"input": input}); err != nil {
-		if !strings.Contains(strings.ToLower(err.Error()), "idempot") {
-			t.Fatal(err)
-		}
-		h.mutate(t, store, liveRefundCreateIdempotentDoc, "LiveTestRefundCreate", "refundCreate",
-			map[string]any{"input": input, "key": fmt.Sprintf("memql-live-test-%d", o.runAt.UnixNano())})
-	}
+	moneyed := h.refundUnits(t, o, lineGID, 1)
 	refunded := h.deliverUntil(t, store, "orders/updated", o.orderGID, "the refund row under the order",
 		func(writes []memqlsync.MirrorWrite) (string, bool) {
 			refunds := liveChildrenOf(writes, "refund", o.orderGID)
 			return fmt.Sprintf("%d refund rows", len(refunds)), len(refunds) == 1
 		})
 	liveRequirePartition(t, refunded, store.ID)
-	if len(transactions) > 0 {
+	if moneyed {
 		p := liveOrderPayload(refunded, o.orderGID)
 		if amt := liveString(p, "totalRefundedSet", "shopMoney", "amount"); amt == "" || amt == "0.0" || amt == "0" {
 			t.Errorf("totalRefundedSet = %v after a refund with money, want it above zero", p["totalRefundedSet"])
@@ -1136,5 +1327,189 @@ func TestLiveASecondStoreKeepsItsOwnState(t *testing.T) {
 	})
 	if mismatch != "" {
 		t.Error(mismatch)
+	}
+}
+
+// --- a refund's detail (store statistics, Task 2) ---------------------------
+
+// TestLiveTheOrderFetchStaysUnderTheQueryCostCeiling measures what the
+// mirror's own order fetch costs, now that it reads each refund's lines,
+// shipping lines and adjustments (O2, L11). The requested cost is a property
+// of the document, the same for every order, and past Shopify's 1,000 points
+// every order fetch would be refused. If it fails, lower the page of
+// refundLineItems in cmd/shopifyschema/allowlist.yaml to 25, then 10, and
+// regenerate.
+func TestLiveTheOrderFetchStaysUnderTheQueryCostCeiling(t *testing.T) {
+	creds := liveEnv(t, envLiveDomain, envLiveToken)
+	h := newLiveHarness(t, creds)
+	store := h.store(t, 0)
+	o := h.createPaidOrder(t, store)
+	h.probe(t, o)
+	created := h.deliverUntil(t, store, "orders/create", o.orderGID, "the order paid with its lines, payment and buyer", liveOrderMirrored(o))
+	h.refundUnits(t, o, liveFirstLine(t, created, o), 1)
+
+	resp, _ := h.fetchOrder(t, o)
+	t.Logf("MEASURED: %s requested %.0f points and was charged %.0f", generated.Types["order"].FetchOp, resp.RequestedCost, resp.QueryCost)
+	if resp.RequestedCost <= 0 {
+		t.Fatal("Shopify answered no requested cost for the order fetch, so the ceiling was not measured")
+	}
+	if resp.RequestedCost > 1000 {
+		t.Errorf("the order fetch requests %.0f points, over Shopify's single-query ceiling of 1,000: every order fetch would be refused", resp.RequestedCost)
+	}
+}
+
+// TestLiveARefundIsMirroredWithItsLinesAndItsShipping holds the refund the
+// change test's flow makes (one unit of the line) to what Shopify answers the
+// inlined selection with: the refunded line's quantity and subtotal, and in
+// every element of the three lists nothing but the fields the allowlist names.
+func TestLiveARefundIsMirroredWithItsLinesAndItsShipping(t *testing.T) {
+	creds := liveEnv(t, envLiveDomain, envLiveToken)
+	h := newLiveHarness(t, creds)
+	store := h.store(t, 0)
+	o := h.createPaidOrder(t, store)
+	h.probe(t, o)
+	created := h.deliverUntil(t, store, "orders/create", o.orderGID, "the order paid with its lines, payment and buyer", liveOrderMirrored(o))
+	lineGID := liveFirstLine(t, created, o)
+	h.refundUnits(t, o, lineGID, 1)
+
+	refund := h.liveRefundWith(t, o, "with one refunded line", func(r map[string]any) bool {
+		return len(liveList(r, "refundLineItems")) == 1
+	})
+	h.requireNothingDenied(t, store)
+	line := liveList(refund, "refundLineItems")[0]
+	if got := liveString(line, "quantity"); got != "1" {
+		t.Errorf("the refunded line's quantity = %s, want 1", got)
+	}
+	if got := liveString(line, "lineItem", "id"); got != lineGID {
+		t.Errorf("the refunded line names %s, want the order's line %s", got, lineGID)
+	}
+	if got := liveString(line, "subtotalSet", "shopMoney", "amount"); !liveAmountRE.MatchString(got) {
+		t.Errorf("the refunded line's subtotal is %q, want an amount", got)
+	}
+	spec := generated.Types["refund"]
+	for _, name := range []string{"refundLineItems", "refundShippingLines", "orderAdjustments"} {
+		f, ok := spec.FieldByGraphQL(name)
+		if !ok {
+			t.Fatalf("the generated refund has no %s", name)
+		}
+		if _, present := refund[f.Name].([]any); !present {
+			t.Errorf("the refund's %s = %v, want a list: the fetch selects it", f.Name, refund[f.Name])
+		}
+		named := map[string]bool{}
+		for _, held := range f.Holds {
+			named[held.Name] = true
+		}
+		for _, element := range liveList(refund, f.Name) {
+			for key := range element {
+				if !named[key] {
+					t.Errorf("an element of %s carries %s, which the allowlist does not name", f.Name, key)
+				}
+			}
+		}
+	}
+}
+
+// TestLiveAnAmountOnlyRefundSaysHowAnAdjustmentIsSigned refunds an amount with
+// no line (L4, L12) and reads how Shopify writes the adjustment that records
+// it. Task 10 assumes an adjustment's tax is never below zero; this fails if
+// it is. On a store whose prices include tax it also refunds the shipping,
+// and fails unless the refunded shipping's subtotal is the shipping charged
+// with its tax (L13); on any other store it says it cannot answer that.
+func TestLiveAnAmountOnlyRefundSaysHowAnAdjustmentIsSigned(t *testing.T) {
+	creds := liveEnv(t, envLiveDomain, envLiveToken)
+	h := newLiveHarness(t, creds)
+	store := h.store(t, 0)
+	shop := h.query(t, store, liveShopTaxesDoc, "LiveTestShopTaxes", nil)
+	taxesIncluded := liveString(shop, "shop", "taxesIncluded") == "true"
+	var shipping map[string]any
+	if taxesIncluded {
+		shipping = map[string]any{"title": "Standard", "priceWithCurrency": map[string]any{
+			"amount": "5.00", "currencyCode": liveString(shop, "shop", "currencyCode"),
+		}}
+	}
+	o := h.createPaidOrderShipped(t, store, shipping)
+	h.probe(t, o)
+	h.deliverUntil(t, store, "orders/create", o.orderGID, "the order paid with its lines, payment and buyer", liveOrderMirrored(o))
+
+	h.refundAmount(t, o, "1.00")
+	refund := h.liveRefundWith(t, o, "with an adjustment", func(r map[string]any) bool {
+		return len(liveList(r, "orderAdjustments")) > 0
+	})
+	adjustments := liveList(refund, "orderAdjustments")
+	if len(adjustments) != 1 {
+		t.Fatalf("the amount-only refund holds %d adjustments, want 1: %v", len(adjustments), adjustments)
+	}
+	amount := liveString(adjustments[0], "amountSet", "shopMoney", "amount")
+	tax := liveString(adjustments[0], "taxAmountSet", "shopMoney", "amount")
+	t.Logf("MEASURED: an amount-only refund of 1.00 is an adjustment with amountSet %s, taxAmountSet %s, reason %v, and the refund's lines %d",
+		amount, tax, adjustments[0]["reason"], len(liveList(refund, "refundLineItems")))
+	if tax != "" {
+		if v, ok := new(big.Rat).SetString(tax); !ok || v.Sign() < 0 {
+			t.Errorf("the adjustment's taxAmountSet is %s, below zero or not an amount: Task 10 assumes it is not", tax)
+		}
+	}
+
+	if !taxesIncluded {
+		t.Log("MEASURED: this store's prices do not include tax, so it cannot say whether a refunded shipping's subtotal carries its tax (L13)")
+		return
+	}
+	h.refundShipping(t, o)
+	shipped := h.liveRefundWith(t, o, "with refunded shipping", func(r map[string]any) bool {
+		return len(liveList(r, "refundShippingLines")) > 0
+	})
+	order := h.query(t, store, `query LiveTestShippingCharged($id: ID!) {
+  order(id: $id) { totalShippingPriceSet { shopMoney { amount } } }
+}`, "LiveTestShippingCharged", map[string]any{"id": o.orderGID})
+	charged := liveString(order, "order", "totalShippingPriceSet", "shopMoney", "amount")
+	line := liveList(shipped, "refundShippingLines")[0]
+	subtotal := liveString(line, "subtotalAmountSet", "shopMoney", "amount")
+	t.Logf("MEASURED: on a store whose prices include tax, shipping charged %s is refunded with subtotalAmountSet %s and taxAmountSet %s",
+		charged, subtotal, liveString(line, "taxAmountSet", "shopMoney", "amount"))
+	if !liveSameAmount(subtotal, charged) {
+		t.Errorf("the refunded shipping's subtotal is %s and the shipping charged with its tax was %s (L13)", subtotal, charged)
+	}
+}
+
+// TestLiveShopifyWritesAmountsAsPlainDecimals reads every amount of an order
+// and its refund as the mirror's fetch receives it (L16): each is plain
+// decimal text, no exponent and no grouping, and its scale is logged -- a
+// whole amount may come as 35.0.
+func TestLiveShopifyWritesAmountsAsPlainDecimals(t *testing.T) {
+	creds := liveEnv(t, envLiveDomain, envLiveToken)
+	h := newLiveHarness(t, creds)
+	store := h.store(t, 0)
+	o := h.createPaidOrder(t, store)
+	h.probe(t, o)
+	created := h.deliverUntil(t, store, "orders/create", o.orderGID, "the order paid with its lines, payment and buyer", liveOrderMirrored(o))
+	h.refundUnits(t, o, liveFirstLine(t, created, o), 1)
+
+	_, data := h.fetchOrder(t, o)
+	amounts := map[string]any{}
+	liveAmounts(data, "", amounts)
+	if len(amounts) == 0 {
+		t.Fatal("the order fetch carried no amount")
+	}
+	paths := make([]string, 0, len(amounts))
+	for path := range amounts {
+		paths = append(paths, path)
+	}
+	slices.Sort(paths)
+	refundAmounts := 0
+	for _, path := range paths {
+		text, isText := amounts[path].(string)
+		scale := 0
+		if i := strings.IndexByte(text, '.'); i >= 0 {
+			scale = len(text) - i - 1
+		}
+		if strings.Contains(path, ".refunds[") {
+			refundAmounts++
+		}
+		t.Logf("MEASURED: %s = %q, scale %d", path, text, scale)
+		if !isText || !liveAmountRE.MatchString(text) {
+			t.Errorf("%s is %#v, not an amount as plain decimal text", path, amounts[path])
+		}
+	}
+	if refundAmounts == 0 {
+		t.Error("the fetched order carried no amount of its refund")
 	}
 }
