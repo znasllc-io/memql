@@ -195,6 +195,7 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 		written.Domain = state.ShopDomain
 	}
 	c.queueConnectBackfills(ctx, prior, found, written)
+	c.retryRefusedDomains(ctx, written)
 
 	// 12d. The store as its status now stands, for the shop read in step 15's
 	// job (shop.go): a store created here is configured (createStore), a
@@ -617,4 +618,46 @@ func (c *Connector) attachStore(ctx, opCtx context.Context, state *componentIden
 		return false
 	}
 	return true
+}
+
+// retryRefusedDomains is step 12c's second half (ledger ruling 17): every
+// domain of the connection whose scopes the grant now recorded holds is
+// offered a fresh try, through the sync runtime's builtin, under
+// operatorContext. The runtime decides on the domain's row whether it stands
+// refused as not granted and, only then, queues its backfill or clears the
+// refusal and makes it due for the next pass of the periodic check; any other
+// row it leaves as it is. So an owner who has just approved is not told to
+// approve again until the refused domains' next sweeps, and a domain the
+// origin refuses again reads refused again. This integration reads no domain
+// row to decide and writes none. A retry that fails is logged and the rest
+// still run; the domain then keeps its refusal until its next sweep.
+func (c *Connector) retryRefusedDomains(ctx context.Context, store Store) {
+	for _, id := range verdictDomains(store) {
+		if len(scopesMissingFor(store, generated.Types[generated.ConceptFromID(id)])) > 0 {
+			continue
+		}
+		_, err := c.engine.Execute(operatorContext(ctx), "builtin "+renderCall("datasyncRetryRefused", map[string]any{
+			"connector":    ConnectorName,
+			"conceptId":    id,
+			"partitionKey": store.ID,
+		}))
+		if err != nil {
+			c.logger.Warn("shopify: Connect could not ask for a refused domain to be tried again; it is tried at its next sweep", "store", store.ID, "concept", id, "error", err.Error())
+		}
+	}
+}
+
+// RetryableRefusal says, for the sync runtime's retry of a refused domain
+// (datasyncRetryRefused), whether a not-granted refusal recorded on a domain's
+// row is one a wider grant can answer. Shopify's protected-customer-data
+// refusal is not: it is data_not_declared's, and a grant does not change it.
+// Every other not-granted refusal names a scope, the store's or the origin's.
+func (c *Connector) RetryableRefusal(_ string, lastError string) bool {
+	return !protectedDataRefusal(lastError)
+}
+
+// BackfillsDomain says whether a domain's past is read by a bulk backfill,
+// which is then what the runtime's retry queues.
+func (c *Connector) BackfillsDomain(conceptID string) bool {
+	return bulkDomain(generated.Types[generated.ConceptFromID(conceptID)])
 }
