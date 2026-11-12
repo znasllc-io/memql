@@ -12,7 +12,7 @@ import (
 
 func organizationDeployableCapability(resource string) bool {
 	switch resource {
-	case "app:deployables/deploy", "app:deployables/publish", "app:deployables/retire", "app:pipelines/repositories", "app:deployables/preview", "app:deployables/store", "app:deployables/access", "app:deployables/reviews":
+	case "app:deployables/deploy", "app:deployables/publish", "app:deployables/retire", "app:pipelines/repositories", "app:deployables/preview", "app:deployables/store", "app:deployables/access", "app:deployables/reviews", "app:deployables/sales":
 		return true
 	}
 	return false
@@ -62,6 +62,10 @@ func organizationCapabilityTarget(fn *Function) (concept, argument string) {
 		// mutation beneath them is @serverOnly
 		// (TestEveryClientCallableAccessCodeActIsAGatedBuiltin).
 		case "siteAccessCodeCreate", "siteAccessGuestPassCreate", "siteAccessGates", "siteAccessCodesForSite":
+			return "v1:platform:site", "siteId"
+		// A storefront's sales figures (the sales part): asked about the SITE the
+		// store statistics are read for.
+		case "storeStatistics":
 			return "v1:platform:site", "siteId"
 		case "siteAccessCodeRegenerate", "siteAccessCodeSetExpiry", "siteAccessCodeRemove":
 			return "v1:platform:siteAccessCode", "codeId"

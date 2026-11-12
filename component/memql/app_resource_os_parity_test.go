@@ -145,7 +145,7 @@ func assertKnownResourcesNameEveryApp(t *testing.T, known []string) {
 			t.Errorf("knownResources does not list %s", resource)
 		}
 	}
-	for _, part := range []string{"deploy", "publish", "retire", "domains", "store", "access", "reviews"} {
+	for _, part := range []string{"deploy", "publish", "retire", "domains", "store", "access", "reviews", "sales"} {
 		if !vocabularyHas(known, "app:deployables/"+part) {
 			t.Errorf("knownResources does not list app:deployables/%s; the Deployables part is not seeded on any role", part)
 		}
