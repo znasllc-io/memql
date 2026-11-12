@@ -194,6 +194,13 @@ func erasureGoldenHeader() string {
 		"# (an order since moved to another person), is scrubbed by itself: that version only, not the row's\n" +
 		"# newest version and not what hangs from the row.\n" +
 		"#\n" +
+		"# AN ORDER THE REQUEST NAMES is a seed only when its newest version names the customer or names no\n" +
+		"# customer. One that names another customer now is that person's: it is decided as a row that moved.\n" +
+		"#\n" +
+		"# A DELETED CUSTOMER ROW WHOSE LAST ORDER IS IN SCOPE is scrubbed BY ITSELF: nothing is reached from it\n" +
+		"# (not its orders, not what names it) and it is never in an export. It may be a record merged into\n" +
+		"# the customer, or another deleted person whose stale pointer names an order that is hers now.\n" +
+		"#\n" +
 		"# TWO THINGS AN ERASURE DOES NOT REACH, accepted in writing:\n" +
 		"#   - a row that carries the person only by an email address, with no customer on it: a guest's\n" +
 		"#     abandoned checkout\n" +
@@ -637,6 +644,15 @@ func TestEveryObjectThatCanHoldACustomerIsDecided(t *testing.T) {
 	for concept, fields := range erasureCustomerTakenOut {
 		for field := range fields {
 			outs = append(outs, concept+"."+field)
+			// A free-form value is on this list too; the model cannot say
+			// what it holds (TestEveryFreeFormValueIsDecided).
+			if spec := generated.Types[concept]; spec != nil {
+				for _, f := range spec.Fields {
+					if f.Name == field && f.Kind == generated.KindScalar && f.AdminType == "JSON" {
+						inModel[concept+"."+field] = true
+					}
+				}
+			}
 			if !inModel[concept+"."+field] {
 				t.Errorf("erasureCustomerTakenOut names %s.%s, which the model does not say can keep a customer's gid", concept, field)
 			}
@@ -645,8 +661,48 @@ func TestEveryObjectThatCanHoldACustomerIsDecided(t *testing.T) {
 	if got := strings.Join(sortedStrings(links), ","); got != "draftOrder.purchasingEntity,giftCard.recipientAttributes,order.purchasingEntity" {
 		t.Errorf("the objects that make a row hers are %s", got)
 	}
-	if got := strings.Join(sortedStrings(outs), ","); got != "metaobject.fields,metaobject.thumbnailField" {
+	if got := strings.Join(sortedStrings(outs), ","); got != "metaobject.fields,metaobject.thumbnailField,metaobject.values" {
 		t.Errorf("the objects an entry is taken out of are %s", got)
+	}
+}
+
+// A free-form value can hold anything, a customer's gid included, and the
+// generated model cannot say what is inside one: its Admin type is JSON. So
+// each such field is decided by a person: an entry that names her is taken
+// out of it (erasureCustomerTakenOut), or it is said why it is left
+// (erasureFreeFormLeft). A regenerated model that adds one fails here until
+// somebody decides. A metaobject's values was the one nobody had decided: it
+// holds the object's fields a second time, and kept her gid after her erasure.
+func TestEveryFreeFormValueIsDecided(t *testing.T) {
+	seen := map[string]bool{}
+	for concept, spec := range generated.Types {
+		for _, f := range spec.Fields {
+			if f.Kind != generated.KindScalar || f.AdminType != "JSON" {
+				continue
+			}
+			name := concept + "." + f.Name
+			seen[name] = true
+			_, out := erasureCustomerTakenOut[concept][f.Name]
+			why, left := erasureFreeFormLeft[concept][f.Name]
+			switch {
+			case out && left:
+				t.Errorf("%s is both taken out of and said to be left", name)
+			case !out && !left:
+				t.Errorf("%s is a free-form value nobody has decided: put it on erasureCustomerTakenOut (an entry that names her is taken out) or on erasureFreeFormLeft with the reason", name)
+			case left && strings.TrimSpace(why) == "":
+				t.Errorf("%s is left without the reason", name)
+			}
+		}
+	}
+	for concept, fields := range erasureFreeFormLeft {
+		for field := range fields {
+			if !seen[concept+"."+field] {
+				t.Errorf("erasureFreeFormLeft names %s.%s, which is not a free-form value of the model", concept, field)
+			}
+		}
+	}
+	if len(seen) != 2 || !seen["metaobject.values"] || !seen["orderTransaction.receiptJson"] {
+		t.Errorf("the model's free-form values are %v; this test was written for a metaobject's values and a transaction's receipt", seen)
 	}
 }
 
@@ -689,7 +745,7 @@ func TestTheReachOfAnErasureIsItsLinks(t *testing.T) {
 	if got := strings.Join(reach["companyContact"].Links, "; "); got != "gid field customerGid naming customer" {
 		t.Errorf("a company's contact is reached as %q, want only as the erased person's own contact row", got)
 	}
-	if got := strings.Join(reach["customer"].Links, "; "); got != "the customer's row; gid field lastOrderGid naming order, from a deleted row only" {
+	if got := strings.Join(reach["customer"].Links, "; "); got != "the customer's row; gid field lastOrderGid naming order, from a deleted row only, which is scrubbed by itself" {
 		t.Errorf("a customer's row is reached as %q, want only as the erased customer's own and as an earlier record merged into it", got)
 	}
 	if got := strings.Join(reach["giftCard"].Links, "; "); got != "gid field customerGid naming customer; the customer inside object recipientAttributes" {
@@ -700,7 +756,7 @@ func TestTheReachOfAnErasureIsItsLinks(t *testing.T) {
 	}
 	// An entry that names her is taken out of a metaobject, and the
 	// metaobject is not hers.
-	if r := reach["metaobject"]; len(r.Links) != 0 || strings.Join(r.TakenOut, ",") != "fields,thumbnailField" {
+	if r := reach["metaobject"]; len(r.Links) != 0 || strings.Join(r.TakenOut, ",") != "fields,thumbnailField,values" {
 		t.Errorf("a metaobject is reached as %+v, want no link and an entry taken out of fields and thumbnailField", r)
 	}
 	for _, concept := range []string{"product", "productVariant", "collection", "location", "shop", "staffMember", "inventoryItem", "discountNode"} {

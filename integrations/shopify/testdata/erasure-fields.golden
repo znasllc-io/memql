@@ -27,6 +27,13 @@
 # (an order since moved to another person), is scrubbed by itself: that version only, not the row's
 # newest version and not what hangs from the row.
 #
+# AN ORDER THE REQUEST NAMES is a seed only when its newest version names the customer or names no
+# customer. One that names another customer now is that person's: it is decided as a row that moved.
+#
+# A DELETED CUSTOMER ROW WHOSE LAST ORDER IS IN SCOPE is scrubbed BY ITSELF: nothing is reached from it
+# (not its orders, not what names it) and it is never in an export. It may be a record merged into
+# the customer, or another deleted person whose stale pointer names an order that is hers now.
+#
 # TWO THINGS AN ERASURE DOES NOT REACH, accepted in writing:
 #   - a row that carries the person only by an email address, with no customer on it: a guest's
 #     abandoned checkout
@@ -231,7 +238,7 @@ concept companyLocation (CompanyLocation)
   totalSpent                               object      MoneyV2                            scrubbed: the key is removed
 
 concept customer (Customer)
-  reach: the customer's row; gid field lastOrderGid naming order, from a deleted row only
+  reach: the customer's row; gid field lastOrderGid naming order, from a deleted row only, which is scrubbed by itself
   every customer row in scope is the person's own (the erased customer's, or an earlier record merged into it) and keeps nothing but its structural fields
   amountSpent                              object      MoneyV2                            scrubbed: the key is removed
   canDelete                                scalar      Boolean                            scrubbed: the key is removed
@@ -245,7 +252,7 @@ concept customer (Customer)
   identityProviderSubjects                 objectList  IdentityProviderSubject            scrubbed: becomes []
   image                                    object      Image                              scrubbed: the key is removed
   lastName                                 scalar      String                             scrubbed: becomes "[redacted]"
-  lastOrderGid                             gid         Order                              scrubbed: the key is removed; NOT A LINK: another person's row can name an order that has since moved to the erased customer; a live customer row is another person; A LINK FROM A DELETED ROW: a deleted customer whose last order is in scope was merged into the erased one: the same person's earlier record
+  lastOrderGid                             gid         Order                              scrubbed: the key is removed; NOT A LINK: another person's row can name an order that has since moved to the erased customer; a live customer row is another person; A LINK FROM A DELETED ROW: a deleted customer whose last order is in scope may be a record merged into the erased one; the row is scrubbed by itself, and nothing is reached from it, because it may as well be another deleted person whose pointer is stale
   legacyResourceId                         scalar      UnsignedInt64                      scrubbed: the key is removed
   lifetimeDuration                         scalar      String                             scrubbed: becomes "[redacted]"
   locale                                   scalar      String                             scrubbed: becomes "[redacted]"
@@ -604,7 +611,7 @@ concept metafieldDefinition (MetafieldDefinition)
   validations                              objectList  MetafieldDefinitionValidation      scrubbed: becomes []
 
 concept metaobject (Metaobject)
-  reach: not in scope; an entry that names the customer is taken out of fields, thumbnailField and nothing else in the row changes
+  reach: not in scope; an entry that names the customer is taken out of fields, thumbnailField, values and nothing else in the row changes
   capabilities                             object      MetaobjectCapabilityData           scrubbed: the key is removed
   createdByApp                             object      App                                scrubbed: the key is removed
   createdByStaffGid                        gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember
