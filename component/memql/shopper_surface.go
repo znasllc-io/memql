@@ -127,9 +127,12 @@ const (
 	ShopperSubmissionIDArg = "submissionId"
 
 	// ShopperAccountIDArg is the argument name the bff stamps the
-	// organization of the site the request arrived on into: always into the
-	// pack's construct, and into a client extension's mutation when that
-	// mutation declares it (ShopperExtension.AcceptsAccount).
+	// organization of the site the request arrived on into: into the
+	// construct of a form that asks for it (ShopperForm.AcceptsAccount), and
+	// into a client extension's mutation when that mutation declares it
+	// (ShopperExtension.AcceptsAccount). A construct that does not ask is
+	// handed no such argument; the account it acts in is on its context
+	// either way (auth.ContextWithCallAccount).
 	//
 	// RESERVED, like the store: a form that could supply its own would tie a
 	// row to an organization the site is not in, and a row tier with an
@@ -176,7 +179,7 @@ const (
 var reservedShopperFieldNames = map[string]string{
 	"storeId":     "stamped from the binding the request arrived through (design D9)",
 	"siteId":      "stamped from the site the request arrived on",
-	"accountId":   "stamped from the organization of the site the request arrived on",
+	"accountId":   "stamped from the organization of the site the request arrived on, for a form that asks for it",
 	"ownerUserId": "stamped from the site owner, whose authority the write borrows",
 	"id":          "the row id, derived server-side",
 	"concept":     "a row intrinsic",
@@ -324,6 +327,14 @@ type ShopperForm struct {
 	// anything else, so a pack cannot put an arbitrary error on the
 	// merchant's page -- only a code the merchant's page was written for.
 	Refusals []string
+	// AcceptsAccount asks the handler to hand the construct the account of the
+	// site the form was posted on, as the argument ShopperAccountIDArg,
+	// stamped after the declared fields the way the store and the site are.
+	// For a construct that writes rows whose own field records that account.
+	// A form that does not ask is handed none, and since the name is reserved
+	// no field a shopper posts can stand in for it: no argument of that name
+	// reaches its construct at all.
+	AcceptsAccount bool
 	// Evidence asks the handler to put what the request itself says about where
 	// it came from on the context the construct runs under (ShopperEvidence):
 	// the address the edge saw and the browser's User-Agent. For a construct

@@ -60,6 +60,9 @@ func registerShopperSurface() {
 			"post, no JavaScript; answers 303. Refused when this store's " +
 			"applicationsOpen is false.",
 		Fields: applicationFields(),
+		// The application records the organization of the site it arrived on,
+		// in its own accountId, so the construct asks the handler for it.
+		AcceptsAccount: true,
 		// SITE-RELATIVE, and the merchant owns both pages. A refusal renders
 		// in their design and their language with ?reason= naming what
 		// happened, rather than in ours.

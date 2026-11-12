@@ -465,22 +465,55 @@ func assertRedirect(t *testing.T, rec *httptest.ResponseRecorder, path, reason s
 	}
 }
 
-// THE SITE'S ORGANIZATION IS STAMPED INTO THE PACK'S ARGUMENTS, the way its
-// store and its id are, so every row a shopper writes carries the organization
-// whose people may read it.
-func TestTheHandlerStampsTheSitesAccountIntoThePacksArguments(t *testing.T) {
+// accountForm registers a form whose construct asks for the site's account,
+// beside the fixture's review form, which does not.
+func accountForm(t *testing.T) {
+	t.Helper()
+	memql.RegisterShopperForm(memql.ShopperForm{
+		Pack: "trade", Name: "apply", Construct: "submitTradeApplication",
+		Fields:         []memql.ShopperField{{Name: "company", Required: true, MaxLength: 200}},
+		AcceptsAccount: true,
+		RedirectOK:     "/trade/thanks", RedirectError: "/trade/problem",
+	})
+}
+
+// THE SITE'S ORGANIZATION IS STAMPED INTO THE ARGUMENTS OF A FORM THAT ASKS
+// FOR IT, the way its store and its id are, so the rows its construct writes
+// carry the organization whose people may read them.
+func TestTheHandlerStampsTheSitesAccountIntoAFormThatAcceptsIt(t *testing.T) {
 	h, exec, sites := shopperFixture(t)
+	accountForm(t)
 	sites.site.AccountID = "acct-north"
 
-	rec := shopperPost(h, "/forms/reviews/review", "productHandle=boot&body=nice", goodStamp())
+	rec := shopperPost(h, "/forms/trade/apply", "company=North+Ltd", goodStamp())
 
 	if len(exec.calls) != 1 {
 		t.Fatalf("executed %v, want one call", exec.calls)
 	}
 	if !strings.Contains(exec.calls[0], `accountId: "acct-north"`) {
-		t.Fatalf("the site's organization was not stamped into the pack's construct: %q", exec.calls[0])
+		t.Fatalf("the site's organization was not stamped into the construct of a form that asks for it: %q", exec.calls[0])
 	}
-	assertRedirect(t, rec, "/reviews/thanks", "")
+	assertRedirect(t, rec, "/trade/thanks", "")
+}
+
+// A FORM THAT DOES NOT ASK IS HANDED NONE: its construct's arguments carry no
+// accountId, whatever the site's account is. The account it acts in is on the
+// context (TestAShopperCallActsInTheSitesAccount holds that).
+func TestAFormThatDoesNotAskForTheAccountIsHandedNone(t *testing.T) {
+	h, exec, sites := shopperFixture(t)
+	sites.site.AccountID = "acct-north"
+
+	shopperPost(h, "/forms/reviews/review", "productHandle=boot&body=nice", goodStamp())
+
+	if len(exec.calls) != 1 {
+		t.Fatalf("executed %v, want one call", exec.calls)
+	}
+	if strings.Contains(exec.calls[0], "accountId") {
+		t.Fatalf("a form that does not ask was handed an accountId: %q", exec.calls[0])
+	}
+	if exec.account[0] != "acct-north" {
+		t.Fatalf("the construct acts in account %q, want the site's", exec.account[0])
+	}
 }
 
 // A POSTED accountId LOSES TO THE SITE'S. It is not a declared field, so it is
@@ -488,9 +521,10 @@ func TestTheHandlerStampsTheSitesAccountIntoThePacksArguments(t *testing.T) {
 // win even if it got that far.
 func TestAFormCannotSupplyItsOwnAccountId(t *testing.T) {
 	h, exec, sites := shopperFixture(t)
+	accountForm(t)
 	sites.site.AccountID = "acct-north"
 
-	shopperPost(h, "/forms/reviews/review", "productHandle=boot&body=nice&accountId=acct-other", goodStamp())
+	shopperPost(h, "/forms/trade/apply", "company=North+Ltd&accountId=acct-other", goodStamp())
 
 	if len(exec.calls) != 1 {
 		t.Fatalf("executed %v, want one call", exec.calls)

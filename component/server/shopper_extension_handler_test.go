@@ -228,8 +228,15 @@ func TestAnExtensionWithoutAnAccountArgumentIsNotHandedOne(t *testing.T) {
 	if strings.Contains(exec.calls[1], "accountId") {
 		t.Fatalf("an extension that declares no accountId was handed one: %s", exec.calls[1])
 	}
-	if !strings.Contains(exec.calls[0], `accountId: "acct-north"`) {
-		t.Fatalf("the pack's construct lost its account: %s", exec.calls[0])
+	// Each asks for itself: the review form does not ask either, and is
+	// handed none; both still act in the site's account.
+	if strings.Contains(exec.calls[0], "accountId") {
+		t.Fatalf("the form's construct was handed an accountId it did not ask for: %s", exec.calls[0])
+	}
+	for i, account := range exec.account {
+		if account != "acct-north" {
+			t.Fatalf("call %d acts in account %q, want the site's", i, account)
+		}
 	}
 	assertRedirect(t, rec, "/reviews/thanks", "")
 }

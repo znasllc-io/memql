@@ -131,8 +131,9 @@ type ShopperSite struct {
 	// answered to anybody. It has two uses. It says which account a declared
 	// construct acts in (shopperContext), so what a shopper submits is
 	// recorded in the account of the storefront they submitted it on. And it
-	// is stamped into the rows a shopper writes through a form that takes it
-	// (memql.ShopperAccountIDArg), so the people of that organization may read
+	// is handed, as the argument memql.ShopperAccountIDArg, to the construct
+	// of a form that asks for it and to an extension whose mutation declares
+	// it, so the rows they write carry the organization whose people may read
 	// them; a site with none writes those rows with none.
 	AccountID string
 }
@@ -335,7 +336,14 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 	args["storeId"] = stamp.storeID
 	args["siteId"] = site.ID
 	args[memql.ShopperSubmissionIDArg] = submissionID
-	args[memql.ShopperAccountIDArg] = site.AccountID
+	// THE ACCOUNT ONLY FOR A FORM THAT ASKED FOR IT, as an extension is handed
+	// it only when its mutation declares it. The name is reserved, so for a
+	// form that did not ask nothing posted and nothing stamped puts an
+	// accountId among its construct's arguments; the account the construct
+	// acts in is on the context below either way.
+	if form.AcceptsAccount {
+		args[memql.ShopperAccountIDArg] = site.AccountID
+	}
 
 	call, err := dslCall(memql.ShopperCallPrefix(form.Kind)+form.Construct, args)
 	if err != nil {
