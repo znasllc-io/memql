@@ -141,7 +141,7 @@
 {"id":"automation:reconcileAccountDomains","kind":"automation","label":"reconcileAccountDomains","attrs":{"origin":"accounts/automations.memql","schedule":"0 */2 * * * *","stratum":"0"}},
 {"id":"automation:reconcileAccountFrontDoors","kind":"automation","label":"reconcileAccountFrontDoors","attrs":{"origin":"platform/automations.memql","schedule":"0 */2 * * * *","stratum":"0"}},
 {"id":"automation:reconcileCustomDomains","kind":"automation","label":"reconcileCustomDomains","attrs":{"origin":"platform/automations.memql","schedule":"0 */2 * * * *","stratum":"0"}},
-{"id":"automation:reconcileMirroredDomains","kind":"automation","label":"reconcileMirroredDomains","attrs":{"origin":"platform/automations.memql","schedule":"0 */10 * * * *","stratum":"0"}},
+{"id":"automation:reconcileMirroredDomains","kind":"automation","label":"reconcileMirroredDomains","attrs":{"mode":"single","origin":"platform/automations.memql","schedule":"0 */10 * * * *","stratum":"0"}},
 {"id":"automation:reconcileReleaseKnowledge","kind":"automation","label":"reconcileReleaseKnowledge","attrs":{"origin":"knowledge/automations.memql","schedule":"0 */2 * * * *","stratum":"0"}},
 {"id":"automation:reconcileShopifySubscriptions","kind":"automation","label":"reconcileShopifySubscriptions","attrs":{"origin":"shopify/overlay/automations.memql","schedule":"0 15 3 * * *","stratum":"0"}},
 {"id":"automation:recordPreviewOrderObservation","kind":"automation","label":"recordPreviewOrderObservation","attrs":{"origin":"platform/automations.memql","stratum":"0","trigger":"graph.node.created.v1:shopify:order","triggerConcept":"v1:shopify:order","triggerKind":"node.created"}},

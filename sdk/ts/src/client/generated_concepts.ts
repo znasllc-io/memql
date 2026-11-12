@@ -1081,7 +1081,6 @@ export const BoundConcepts = {
   syncStateById: "v1:platform:syncState",
   syncStateFor: "v1:platform:syncState",
   syncStatesAll: "v1:platform:syncState",
-  syncStatesBackfilling: "v1:platform:syncState",
   systemActiveAuthoringBundles: "v1:authoring:bundle",
   takeBooking: "v1:calendar:booking",
   templateAtRevision: "v1:campaigns:template",

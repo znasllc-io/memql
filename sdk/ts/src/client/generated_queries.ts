@@ -13281,28 +13281,6 @@ QueryClient.prototype.syncStatesAll = function (this: QueryClient, args: SyncSta
   return this.executeNamed("syncStatesAll", buildSyncStatesAll(args), opts);
 };
 
-/** One connector's backfills that are queued or running, oldest first: what the continuing pass has still to do, for MemQL OS to show. Each row at its current version. The pass itself reads each domain's row by id rather than this list, because the engine finds the current versions by enumerating the concept's history, and every page of every backfill adds to it. */
-// Bound concept: v1:platform:syncState (machine-readable: BoundConcepts["syncStatesBackfilling"] in generated_concepts.ts).
-export interface SyncStatesBackfillingArgs {
-  connector: string;
-}
-
-export function buildSyncStatesBackfilling(args: SyncStatesBackfillingArgs): string {
-  const parts: string[] = [];
-  parts.push("connector: " + renderMemQLValue(args.connector));
-  return "query syncStatesBackfilling(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    syncStatesBackfilling(args: SyncStatesBackfillingArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.syncStatesBackfilling = function (this: QueryClient, args: SyncStatesBackfillingArgs = {} as SyncStatesBackfillingArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("syncStatesBackfilling", buildSyncStatesBackfilling(args), opts);
-};
-
 /** ADMIN/SYSTEM: every active authoring bundle across ALL owners (NOT owner-scoped). Cluster-owner gated. Backs the boot-time authored-runtime re-arm (#1039) that re-registers active bundles' automations after a restart. */
 // Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["systemActiveAuthoringBundles"] in generated_concepts.ts).
 export interface SystemActiveAuthoringBundlesArgs {

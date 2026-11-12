@@ -14513,28 +14513,6 @@ func SyncStatesAllBuild(args SyncStatesAllArgs) string {
 	return b.String()
 }
 
-// SyncStatesBackfilling -- One connector's backfills that are queued or running, oldest first: what the continuing pass has still to do, for MemQL OS to show. Each row at its current version. The pass itself reads each domain's row by id rather than this list, because the engine finds the current versions by enumerating the concept's history, and every page of every backfill adds to it.
-//
-// Bound concept: v1:platform:syncState (machine-readable: BoundConcepts["syncStatesBackfilling"] in generated_concepts.go).
-type SyncStatesBackfillingArgs struct {
-	Connector string
-}
-
-// SyncStatesBackfilling calls the engine query syncStatesBackfilling.
-func (qc *QueryClient) SyncStatesBackfilling(ctx context.Context, args SyncStatesBackfillingArgs) (*Result, error) {
-	call := SyncStatesBackfillingBuild(args)
-	return qc.executeNamed(ctx, "syncStatesBackfilling", call)
-}
-
-func SyncStatesBackfillingBuild(args SyncStatesBackfillingArgs) string {
-	var b strings.Builder
-	b.WriteString("query syncStatesBackfilling(")
-	b.WriteString("connector: ")
-	b.WriteString(quoteMemQL(args.Connector))
-	b.WriteString(")")
-	return b.String()
-}
-
 // SystemActiveAuthoringBundles -- ADMIN/SYSTEM: every active authoring bundle across ALL owners (NOT owner-scoped). Cluster-owner gated. Backs the boot-time authored-runtime re-arm (#1039) that re-registers active bundles' automations after a restart.
 //
 // Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["systemActiveAuthoringBundles"] in generated_concepts.go).
