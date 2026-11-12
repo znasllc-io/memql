@@ -424,6 +424,13 @@ func (c *Connector) recordSubscriptionHealth(ctx context.Context, store Store, r
 // most maxHealthKeyAttempts times -- the pattern of the sync runtime's
 // PatchSyncState. A store with no row yet is fenced on its absence.
 func (c *Connector) recordStoreHealthKey(ctx context.Context, storeID, key string, value any, extra map[string]any) error {
+	return c.recordStoreHealthKeys(ctx, storeID, map[string]any{key: value}, nil, extra)
+}
+
+// recordStoreHealthKeys is recordStoreHealthKey for several keys in one fenced
+// write: each key of set replaced, each key of drop removed, every other key as
+// the row holds it.
+func (c *Connector) recordStoreHealthKeys(ctx context.Context, storeID string, set map[string]any, drop []string, extra map[string]any) error {
 	opCtx := operatorContext(ctx)
 	for attempt := 0; attempt < maxHealthKeyAttempts; attempt++ {
 		if attempt > 0 {
@@ -437,7 +444,12 @@ func (c *Connector) recordStoreHealthKey(ctx context.Context, storeID, key strin
 		for k, v := range held {
 			health[k] = v
 		}
-		health[key] = value
+		for k, v := range set {
+			health[k] = v
+		}
+		for _, k := range drop {
+			delete(health, k)
+		}
 		args := map[string]any{"storeId": storeID, "health": health}
 		for k, v := range extra {
 			args[k] = v
@@ -453,7 +465,13 @@ func (c *Connector) recordStoreHealthKey(ctx context.Context, storeID, key strin
 		c.stores.Invalidate()
 		return nil
 	}
-	return fmt.Errorf("shopify: the row of store %q kept changing under %d writes of its health key %q; nothing was written", storeID, maxHealthKeyAttempts, key)
+	keys := make([]string, 0, len(set)+len(drop))
+	for k := range set {
+		keys = append(keys, k)
+	}
+	keys = append(keys, drop...)
+	sort.Strings(keys)
+	return fmt.Errorf("shopify: the row of store %q kept changing under %d writes of its health key %q; nothing was written", storeID, maxHealthKeyAttempts, strings.Join(keys, ", "))
 }
 
 // storeHealthForWrite reads a store's health fresh, with the version of the

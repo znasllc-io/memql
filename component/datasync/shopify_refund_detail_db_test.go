@@ -295,3 +295,64 @@ func TestABulkLineDoesNotEraseDetailAFetchRecorded(t *testing.T) {
 	}
 	r.requireDetail(s)
 }
+
+// A REFUND MIRRORED BEFORE ITS DETAIL GETS IT AT THE NEXT SWEEP. The backfill's
+// bulk line wrote the refunds without their lists, and the store has a
+// watermark, so its ordinary sweep asks only for what changed since, and the
+// order did not change. The store's first order sweep under this version reads
+// every order once more all the same, and the one after it is the ordinary
+// sweep again.
+func TestARefundMirroredBeforeItsDetailGetsItAtTheNextSweep(t *testing.T) {
+	r := newHoldRig(t)
+	if r == nil {
+		return
+	}
+	const updated = "2026-11-10T09:00:00Z"
+	s := newRefundStore(5)
+	r.backfillOrders(s, updated, r.at, 5)
+	row := r.refundRow(s.lineRefund)
+	if row == nil {
+		t.Fatal("the backfill wrote no refund")
+	}
+	if _, present := row["refundLineItems"]; present {
+		t.Fatalf("the backfill wrote the refund's lines %v, so this test proves nothing", row["refundLineItems"])
+	}
+
+	// Shopify answers what changed since the watermark with nothing, and the
+	// whole listing with the order.
+	r.origin.replyWith("ShopifyListOrder", func(vars map[string]any) any {
+		if q, _ := vars["query"].(string); q != "" {
+			return originListPage("orders", false, "")
+		}
+		return originListPage("orders", false, "", s.node(updated))
+	})
+	sweep := func(at, since time.Time) {
+		t.Helper()
+		r.clock = func() time.Time { return at }
+		if _, err := r.conn.ReconcilePartition(context.Background(), r.storeID, generated.ConceptID("order"), since); err != nil {
+			t.Fatalf("the sweep of orders at %s: %v", at, err)
+		}
+	}
+	read := r.at.Add(time.Minute)
+	sweep(read, r.at)
+	r.requireDetail(s)
+	if got := r.store().Health["refundDetailFrom"]; got != read.UTC().Format(time.RFC3339) {
+		t.Errorf("the store's health refundDetailFrom = %v, want when the read began, %s", got, read.UTC().Format(time.RFC3339))
+	}
+
+	next := r.at.Add(time.Hour)
+	sweep(next, read)
+	var lists []originRequest
+	for _, req := range r.origin.seen() {
+		if req.Operation == "ShopifyListOrder" {
+			lists = append(lists, req)
+		}
+	}
+	if len(lists) != 2 {
+		t.Fatalf("the two sweeps listed the orders %d times, want twice", len(lists))
+	}
+	if q, want := lists[1].Variables["query"], "updated_at:>'"+read.UTC().Format(time.RFC3339)+"'"; q != want {
+		t.Errorf("the sweep after the read was sent %v, want only what changed, %q", q, want)
+	}
+	r.requireDetail(s)
+}

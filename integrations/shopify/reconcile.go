@@ -271,10 +271,17 @@ func uniqueSorted(in []string) []string {
 	return out
 }
 
-// reconcileStore sweeps one store's domain.
+// reconcileStore sweeps one store's domain. An order sweep of a store that
+// still owes the read of every order once more is that read
+// (reconcileRefundDetail, refund_detail.go).
 func (c *Connector) reconcileStore(ctx context.Context, store Store, spec *generated.TypeSpec, since time.Time) (memqlsync.ReconcileReport, error) {
 	switch spec.Reconcile {
 	case generated.ReconcileUpdatedAt:
+		if spec.Concept == refundDetailConcept {
+			if owed, cursor, began := c.refundDetailOwed(ctx, store); owed {
+				return c.reconcileRefundDetail(ctx, store, spec, since, cursor, began)
+			}
+		}
 		return c.reconcileByUpdatedAt(ctx, store, spec, since)
 	case generated.ReconcileFullRelist:
 		return c.relist(ctx, store, spec)
@@ -308,10 +315,6 @@ func (c *Connector) reconcileStore(ctx context.Context, store Store, spec *gener
 // nothing about which changes are still unread. Ordering the listing is the
 // generator's to do.
 func (c *Connector) reconcileByUpdatedAt(ctx context.Context, store Store, spec *generated.TypeSpec, since time.Time) (memqlsync.ReconcileReport, error) {
-	var report memqlsync.ReconcileReport
-	if spec.ListQuery == "" || spec.ListOp == "" {
-		return report, nil
-	}
 	filter := ""
 	if !since.IsZero() && spec.ListFilterable {
 		// Only a connection that takes `query:` gets the watermark. The
@@ -320,10 +323,34 @@ func (c *Connector) reconcileByUpdatedAt(ctx context.Context, store Store, spec 
 		// error before the origin reads anything else.
 		filter = "updated_at:>'" + since.UTC().Format(time.RFC3339) + "'"
 	}
-	after := ""
+	report, _, cut, err := c.sweepListing(ctx, store, spec, filter, "", relistRowCap)
+	if cut {
+		c.logger.Warn("shopify: updated_at sweep hit the row budget",
+			"store", store.ID, "concept", spec.Concept, "rows", relistRowCap)
+	}
+	return report, err
+}
+
+// sweepListing pages spec's listing under filter from the cursor after ("" is
+// the listing's start), completes and heals each row, and stops after budget
+// rows. cut is true when it stopped there with more to read, and next is then
+// the cursor to go on from; a listing that promised more and answered an empty
+// page is cut where it stalled. err is a page or a child read that failed,
+// answered at once, or else the rows the mirror did not take (unwritten).
+//
+// The last page asks for no more than the budget has left, so a listing is
+// cut at its budget exactly and the cursor names the first row not read.
+func (c *Connector) sweepListing(ctx context.Context, store Store, spec *generated.TypeSpec, filter, after string, budget int) (report memqlsync.ReconcileReport, next string, cut bool, err error) {
+	if spec.ListQuery == "" || spec.ListOp == "" {
+		return report, "", false, nil
+	}
 	failed := 0
-	for rows := 0; rows < relistRowCap; {
-		vars := map[string]any{"first": c.pageSizeFor(store, spec)}
+	for rows := 0; rows < budget; {
+		first := c.pageSizeFor(store, spec)
+		if left := budget - rows; left < first {
+			first = left
+		}
+		vars := map[string]any{"first": first}
 		if after != "" {
 			vars["after"] = after
 		}
@@ -332,20 +359,20 @@ func (c *Connector) reconcileByUpdatedAt(ctx context.Context, store Store, spec 
 		}
 		// When this page was read: the read time every row on it carries.
 		readAt := c.now()
-		nodes, next, hasNext, err := c.listPage(ctx, store, spec, vars)
+		nodes, end, hasNext, err := c.listPage(ctx, store, spec, vars)
 		if err != nil {
-			return report, err
+			return report, after, false, err
 		}
 		rows += len(nodes)
 		if len(nodes) == 0 && hasNext {
 			// A page with nothing on it and more promised: the origin is
 			// not advancing, and neither should this loop.
-			break
+			return report, after, true, unwritten(failed)
 		}
 		for _, obj := range nodes {
 			report.Checked++
 			if err := c.completeChildren(ctx, store, spec, obj); err != nil {
-				return report, err
+				return report, after, false, err
 			}
 			writes := mapObject(spec, store.ID, obj, "", readAt)
 			healed, lost := c.heal(ctx, writes)
@@ -355,14 +382,12 @@ func (c *Connector) reconcileByUpdatedAt(ctx context.Context, store Store, spec 
 				report.Healed++
 			}
 		}
-		if !hasNext || next == "" {
-			return report, unwritten(failed)
+		if !hasNext || end == "" {
+			return report, "", false, unwritten(failed)
 		}
-		after = next
+		after = end
 	}
-	c.logger.Warn("shopify: updated_at sweep hit the row budget",
-		"store", store.ID, "concept", spec.Concept, "rows", relistRowCap)
-	return report, unwritten(failed)
+	return report, after, true, unwritten(failed)
 }
 
 // unwritten is the failure of a sweep or a re-list that read rows the mirror
