@@ -1,17 +1,6 @@
 // reviews pack builtins -- Go-backed write/export/read (memql#4139, epic
 // memql#5532).
 
-@executor("integration.reviews.recordModerationAction")
-@args(profile="object")
-@description("Append a moderation decision. principalKind must be client; a Provider operator is refused. criterion is a closed enum. Tokens and operator identity never become a criterion. storeId is read off the review being moderated rather than supplied, so a decision can never be scoped to a store its subject is not on.")
-builtin reviewsRecordModerationAction {
-  reviewId        string  @required  @description("Review id to moderate.")
-  criterion       string  @required  @description("Closed criterion: spam, profanity, harassment, off_topic, illegal, copyright.")
-  principalKind   string  @required  @description("Must be client. provider is inexpressible.")
-  decidedBy       string  @required  @description("Client principal user id.")
-  note            string  @description("Optional client note.")
-}
-
 @executor("integration.reviews.exportReview")
 @args(profile="object")
 @description("Export a review including image FILES (bytes + filename). A URL-only image is refused -- export is bytes, not a link.")

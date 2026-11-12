@@ -30,9 +30,6 @@ const ContractVersion = memql.PluginContractVersion
 
 const integrationName = "reviews"
 
-// PrincipalClient is the only expressible decidedBy kind.
-const PrincipalClient = "client"
-
 // DefaultEnabled is what this pack ships as when no v1:platform:packState
 // row governs it (epic memql#5532, issue memql#5549).
 //
@@ -41,9 +38,6 @@ const PrincipalClient = "client"
 // on every deployable whose shopperForms is on. That is a decision an
 // operator makes, not one an upgrade makes for them.
 const DefaultEnabled = false
-
-// ClosedCriteria is the closed moderation enum. No "other", no sentiment.
-var ClosedCriteria = []string{"spam", "profanity", "harassment", "off_topic", "illegal", "copyright"}
 
 //go:embed all:dsl
 var packFS embed.FS
@@ -95,18 +89,6 @@ func (p *Provider) IntegrationName() string { return integrationName }
 
 func (p *Provider) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
-		{
-			Name:        "recordModerationAction",
-			Description: "Append a closed-criterion moderation decision. Client principal only.",
-			Handler:     p.recordModerationAction,
-			ArgsSchema: map[string]string{
-				"reviewId":      "string (required)",
-				"criterion":     "string (required) - closed enum",
-				"principalKind": "string (required) - must be client",
-				"decidedBy":     "string (required) - client user id",
-				"note":          "string (optional)",
-			},
-		},
 		{
 			Name:        "exportReview",
 			Description: "Export a review including image files (bytes), not URLs.",
@@ -295,73 +277,6 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 	}
-}
-
-// ClientMayModerate reports whether principalKind may author a moderation action.
-// Provider operators are inexpressible: only "client" is admitted.
-func ClientMayModerate(principalKind string) error {
-	if strings.TrimSpace(principalKind) != PrincipalClient {
-		return fmt.Errorf("reviews: decidedBy must be a Client principal")
-	}
-	return nil
-}
-
-// ValidCriterion reports whether criterion is in the closed enum.
-func ValidCriterion(criterion string) error {
-	c := strings.TrimSpace(criterion)
-	for _, want := range ClosedCriteria {
-		if c == want {
-			return nil
-		}
-	}
-	return fmt.Errorf("reviews: criterion %q is not in the closed enum", criterion)
-}
-
-func (p *Provider) recordModerationAction(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	if err := ClientMayModerate(asString(args["principalKind"])); err != nil {
-		return nil, err
-	}
-	if err := ValidCriterion(asString(args["criterion"])); err != nil {
-		return nil, err
-	}
-	reviewID := asString(args["reviewId"])
-	decidedBy := asString(args["decidedBy"])
-	if reviewID == "" || decidedBy == "" {
-		return nil, fmt.Errorf("reviews: reviewId and decidedBy are required")
-	}
-	// THE STORE IS READ OFF THE REVIEW, never supplied (design D9, issue
-	// memql#5552). A decision must be scoped to the same store its subject
-	// is on, or a read scoped to one store would go on showing a review the
-	// other store's merchant had already hidden -- and an argument for it
-	// would be a way to record a decision against somebody else's store.
-	//
-	// The read runs under the CALLER'S own actor, so a caller who cannot
-	// read the review cannot moderate it either. That is a narrowing this
-	// capability did not have before and it is the right one: the previous
-	// version would happily append a decision naming a review id that did
-	// not exist.
-	storeID, err := p.storeOfReview(ctx, reviewID)
-	if err != nil {
-		return nil, err
-	}
-	payload, err := json.Marshal(map[string]any{
-		"reviewId":      reviewID,
-		"storeId":       storeID,
-		"criterion":     asString(args["criterion"]),
-		"decidedBy":     decidedBy,
-		"principalKind": PrincipalClient,
-		"note":          asString(args["note"]),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("reviews: marshal moderation: %w", err)
-	}
-	return []memorynodes.MemoryNode{{
-		ID:        fmt.Sprintf("reviews:moderation:%s:%d", reviewID, time.Now().UTC().UnixNano()),
-		Concept:   "v1:reviews:moderationAction",
-		Type:      memorynodes.NodeTypeObject,
-		CreatedAt: time.Now().UTC(),
-		Payload:   payload,
-	}}, nil
 }
 
 func (p *Provider) exportReview(_ context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

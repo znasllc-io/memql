@@ -54,54 +54,31 @@ func TestClosedCriterionEnum(t *testing.T) {
 			t.Fatalf("sentiment must not be a field: %s", trim)
 		}
 	}
-	for _, c := range reviewspack.ClosedCriteria {
+	for _, c := range []string{"spam", "profanity", "harassment", "off_topic", "illegal", "copyright"} {
 		if !strings.Contains(src, `"`+c+`"`) {
 			t.Fatalf("closed criterion %q missing from concepts.memql", c)
 		}
 	}
-	if err := reviewspack.ValidCriterion("other"); err == nil {
-		t.Fatal("other must be inexpressible")
-	}
-	if err := reviewspack.ValidCriterion("spam"); err != nil {
-		t.Fatal(err)
-	}
 }
 
-func TestProviderOperatorCannotModerate(t *testing.T) {
-	if err := reviewspack.ClientMayModerate("provider"); err == nil {
-		t.Fatal("provider operator must be refused")
-	}
-	if err := reviewspack.ClientMayModerate("client"); err != nil {
-		t.Fatal(err)
-	}
+// THE LEGACY MODERATION CAPABILITY IS GONE. It accepted any signed-in caller
+// and persisted nothing; a decision is recorded only through reviewsDecide.
+func TestTheLegacyModerationCapabilityIsGone(t *testing.T) {
 	provider, err := reviewspack.NewProvider(memql.PluginContext{Logger: slog.Default()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var handler func(context.Context, map[string]any, int) ([]memorynodes.MemoryNode, error)
 	for _, c := range provider.Capabilities() {
 		if c.Name == "recordModerationAction" {
-			handler = c.Handler
+			t.Fatal("recordModerationAction is still a capability of the pack")
 		}
 	}
-	if handler == nil {
-		t.Fatal("recordModerationAction missing")
+	raw, err := fs.ReadFile(reviewspack.Tree(), "builtins.memql")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := handler(context.Background(), map[string]any{
-		"reviewId": "r1", "criterion": "spam", "principalKind": "provider", "decidedBy": "op-1",
-	}, 0); err == nil {
-		t.Fatal("expected provider refusal")
-	}
-	// A CLIENT PRINCIPAL GETS PAST THE FIRST GATE AND THEN NEEDS A REVIEW TO
-	// MODERATE. The capability reads the review to copy its storeId (design
-	// D9), so with no engine it refuses rather than appending a decision
-	// scoped to no store -- which would hide nothing while looking like it
-	// had. The provider-refusal above is the assertion this test is named
-	// for and it is unchanged; this half pins the new narrowing.
-	if _, err := handler(context.Background(), map[string]any{
-		"reviewId": "r1", "criterion": "spam", "principalKind": "client", "decidedBy": "user-1",
-	}, 0); err == nil {
-		t.Fatal("a decision against an unresolvable review must be refused, not scoped to no store")
+	if strings.Contains(string(raw), "reviewsRecordModerationAction") {
+		t.Fatal("reviewsRecordModerationAction is still declared")
 	}
 }
 
