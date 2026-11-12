@@ -663,6 +663,66 @@ func TestTheWriterStampsInternalOriginOnItsOneCall(t *testing.T) {
 	}
 }
 
+// replyingEngine records the origin and the text of every Execute, and
+// answers each with one row.
+type replyingEngine struct {
+	memql.IntegrationEngineAccess
+	origins []auth.CallOrigin
+	calls   []string
+}
+
+func (e *replyingEngine) Execute(ctx context.Context, q string) (*memql.ExecuteResult, error) {
+	e.origins = append(e.origins, auth.OriginFromContext(ctx))
+	e.calls = append(e.calls, q)
+	return memql.NewResultWithOutput(map[string]any{"status": "ok"}), nil
+}
+
+// THE CALLER STAMPS INTERNAL ORIGIN ON ITS ONE CALL, because the Shopify
+// wholesale builtins admit the pack's call alone -- and the stamp is inline,
+// so the caller's own context, and every read and write around the call, is
+// untouched.
+func TestTheCallerStampsInternalOriginOnItsOneCall(t *testing.T) {
+	eng := &replyingEngine{}
+	c := &engineCaller{engine: eng}
+	ctx := auth.ContextWithClientOrigin(auth.ContextWithUserActor(context.Background(), "merchant-1"))
+	reply, err := c.Call(ctx, "shopifyTagWholesaleCustomer", map[string]any{"storeId": "store-live"})
+	if err != nil || reply["status"] != "ok" {
+		t.Fatalf("Call = %v, %v", reply, err)
+	}
+	if len(eng.origins) != 1 {
+		t.Fatalf("the caller made %d engine calls, want 1", len(eng.origins))
+	}
+	if !eng.origins[0].IsInternal() {
+		t.Fatalf("the builtin ran at origin %v, want internal", eng.origins[0])
+	}
+	if auth.OriginFromContext(ctx).IsInternal() {
+		t.Fatal("the stamp leaked into the caller's own context")
+	}
+}
+
+// THE TAG ADAPTER PASSES THE BUYER'S NAME, so a buyer with no customer gets
+// one with their name on it, and reads the customer back off the reply.
+func TestTheTagAdapterPassesTheBuyersName(t *testing.T) {
+	caller := &fakeCaller{replies: map[string]map[string]any{
+		"shopifyTagWholesaleCustomer": {
+			"status": "ok", "reference": "customer=gid://shopify/Customer/5;tag=memql-wholesale",
+			"customerId": "gid://shopify/Customer/5", "customerCreated": true,
+		},
+	}}
+	out, err := NewCustomerTagAdapter("").Provision(context.Background(), caller, Grant{
+		StoreID: "store-live", BuyerName: "Ada Example", BuyerEmail: "ada@example.com",
+	})
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	if len(caller.args) != 1 || caller.args[0]["buyerName"] != "Ada Example" || caller.args[0]["buyerEmail"] != "ada@example.com" {
+		t.Fatalf("the adapter sent %v, want the buyer's name and address", caller.args)
+	}
+	if out.CustomerID != "gid://shopify/Customer/5" || !out.CustomerCreated {
+		t.Fatalf("outcome = %+v, want the customer the reply names, created", out)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // An approval that grants nothing says why (U2)
 // ---------------------------------------------------------------------------

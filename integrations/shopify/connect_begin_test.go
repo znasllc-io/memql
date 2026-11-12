@@ -85,8 +85,10 @@ func TestBeginWritesAShopifyStateAndAnswersTheAuthorizeURL(t *testing.T) {
 		t.Fatalf("scope decodes to %q", got)
 	}
 	for _, scope := range strings.Split(u.Query().Get("scope"), ",") {
-		if strings.HasPrefix(scope, "write_") && scope != "write_products" {
-			t.Fatalf("product-content delivery requested unrelated Admin write scope %q", scope)
+		// write_products is product-content delivery; write_customers is the
+		// wholesale pack's customer tag, which creates and tags a customer.
+		if strings.HasPrefix(scope, "write_") && scope != "write_products" && scope != "write_customers" {
+			t.Fatalf("Connect requested unrelated Admin write scope %q", scope)
 		}
 	}
 	if !strings.Contains(","+u.Query().Get("scope")+",", ",write_products,") {

@@ -9214,7 +9214,7 @@ func ShopifyFetchProductBuild(args ShopifyFetchProductArgs) string {
 	return b.String()
 }
 
-// ShopifyProvisionWholesale -- Create or find one buyer's B2B account: a company stamped with the MemQL application id, its location, the buyer as a company contact, and an ACTIVE catalog with a price list. Idempotent -- a second call for one application finds the first company rather than making a twin. Refuses BEFORE creating anything when the store is below Plus and already holds its three company-location catalogs, answering {status: refused, reason} rather than an error so the caller can tell a ceiling from an outage. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked.
+// ShopifyProvisionWholesale -- Create or find one buyer's B2B account: a company stamped with the MemQL application id, its location, the buyer as a company contact, and an ACTIVE catalog with a price list. Idempotent -- a second call for one application finds the first company rather than making a twin. Refuses BEFORE creating anything when the store is below Plus and already holds its three company-location catalogs, answering {status: refused, code: plan_ceiling, reason} rather than an error so the caller can tell a ceiling from an outage; a store whose grant does not reach its customers answers code scope_missing, and one that refuses to create the buyer's customer customer_refused. The company is looked for under the application id it is given and under that id's bare form, so a store first provisioned under either finds its one company; a new company is made under the id given. Called by the wholesale pack alone, which stamps internal origin on its one call after its own checks; a call without internal origin is refused before the store is read or Shopify is asked.
 type ShopifyProvisionWholesaleArgs struct {
 	// The store to provision on.
 	StoreId string
@@ -9292,7 +9292,7 @@ func ShopifyProvisionWholesaleBuild(args ShopifyProvisionWholesaleArgs) string {
 	return b.String()
 }
 
-// ShopifyRevokeWholesale -- End a B2B entitlement by setting its catalog to DRAFT. DELETES NOTHING: the company, its location, its contact, the price list and every order placed under them are untouched, because revoking trade terms is ending a discount rather than erasing a customer -- and deleting a company would take its order history's association with it. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked.
+// ShopifyRevokeWholesale -- End a B2B entitlement by setting its catalog to DRAFT. DELETES NOTHING: the company, its location, its contact, the price list and every order placed under them are untouched, because revoking trade terms is ending a discount rather than erasing a customer -- and deleting a company would take its order history's association with it. A reference that holds no catalog (a first grant that failed) granted nothing, so it is a success that sends nothing. Called by the wholesale pack alone, which stamps internal origin on its one call after its own checks; a call without internal origin is refused before the store is read or Shopify is asked.
 type ShopifyRevokeWholesaleArgs struct {
 	// The store.
 	StoreId string
@@ -9554,12 +9554,14 @@ func ShopifyStorefrontTokenSetBuild(args ShopifyStorefrontTokenSetArgs) string {
 	return b.String()
 }
 
-// ShopifyTagWholesaleCustomer -- The plan-independent grant: add one tag to the buyer's customer record. Writes the tag and NOTHING else -- what the tag does is the merchant's own automatic discount, which this connector deliberately does not create on their behalf. Refuses when no customer on the store has that email, because a tag on an account that does not exist entitles nobody. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked.
+// ShopifyTagWholesaleCustomer -- The plan-independent grant: add one tag to the buyer's customer record. A buyer with no customer on the store gets one created (the address and the name, no marketing consent) and tagged; a create refused because the address was taken a moment ago reads the customer again and tags it. Writes the customer and the tag and NOTHING else -- what the tag does is the merchant's own automatic discount, which this connector deliberately does not create on their behalf. A tag the customer already carries is not sent again. Answers {status: ok, reference, customerId, customerCreated, detail}, or {status: refused, code, reason} with code customer_refused (the store refused to create the customer) or scope_missing (the store's grant does not reach its customers); any other failure is an error, an outage the pack retries. Called by the wholesale pack alone, which stamps internal origin on its one call after its own checks; a call without internal origin is refused before the store is read or Shopify is asked.
 type ShopifyTagWholesaleCustomerArgs struct {
 	// The store.
 	StoreId string
-	// The customer to tag.
+	// The customer to tag, compared trimmed and lower-cased. Created when the store has none; when the store has two, the one Shopify lists first is tagged and the detail says so.
 	BuyerEmail string
+	// The applicant's name, for a customer created here: split on the last space into the two fields Shopify wants.
+	BuyerName string
 	// Defaults to memql-wholesale. Prefixed with ours so this connector never removes a tag somebody else put there.
 	Tag string
 }
@@ -9580,6 +9582,13 @@ func ShopifyTagWholesaleCustomerBuild(args ShopifyTagWholesaleCustomerArgs) stri
 	}
 	b.WriteString("buyerEmail: ")
 	b.WriteString(quoteMemQL(args.BuyerEmail))
+	if args.BuyerName != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("buyerName: ")
+		b.WriteString(quoteMemQL(args.BuyerName))
+	}
 	if args.Tag != "" {
 		if b.Len() > 36 {
 			b.WriteString(", ")
@@ -9591,7 +9600,7 @@ func ShopifyTagWholesaleCustomerBuild(args ShopifyTagWholesaleCustomerArgs) stri
 	return b.String()
 }
 
-// ShopifyUntagWholesaleCustomer -- The plan-independent revoke: remove that one tag from the buyer's customer record. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked.
+// ShopifyUntagWholesaleCustomer -- The plan-independent revoke: remove that one tag from the buyer's customer record when it carries it. An address with no customer on the store, or a customer without the tag, is a success that sends nothing but the read. Called by the wholesale pack alone, which stamps internal origin on its one call after its own checks; a call without internal origin is refused before the store is read or Shopify is asked.
 type ShopifyUntagWholesaleCustomerArgs struct {
 	// The store.
 	StoreId string
@@ -9628,7 +9637,7 @@ func ShopifyUntagWholesaleCustomerBuild(args ShopifyUntagWholesaleCustomerArgs) 
 	return b.String()
 }
 
-// ShopifyWholesaleCatalogHeadroom -- How many more company-location catalogs this store may hold: -1 on Plus, which is unlimited, and otherwise three minus what it already has. Since 2026-04-02 companies, payment terms, volume pricing and up to three catalogs are available BELOW Plus, so the ceiling is real and this is what lets an adapter REPORT it rather than discover it at the fourth grant, in a merchant's live store. For the engine's own call (internal origin), the store's owner or a cluster owner; anybody else is refused before the store is read or Shopify is asked.
+// ShopifyWholesaleCatalogHeadroom -- How many more company-location catalogs this store may hold: -1 on Plus, which is unlimited, and otherwise three minus what it already has. Since 2026-04-02 companies, payment terms, volume pricing and up to three catalogs are available BELOW Plus, so the ceiling is real and this is what lets an adapter REPORT it rather than discover it at the fourth grant, in a merchant's live store. Called by the wholesale pack alone, which stamps internal origin on its one call after its own checks; a call without internal origin is refused before the store is read or Shopify is asked.
 type ShopifyWholesaleCatalogHeadroomArgs struct {
 	// The store to measure.
 	StoreId string

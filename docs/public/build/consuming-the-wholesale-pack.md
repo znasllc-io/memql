@@ -206,8 +206,8 @@ carry them end to end.
 | Row state | What happened | What to do |
 |---|---|---|
 | `granted` | The adapter reported success | Nothing |
-| `pending` | The push failed transiently | Call `wholesaleProvisionEntitlement` again |
-| `failed` | The adapter **refused** — a catalog ceiling, a buyer with no customer account | Fix the cause; retrying alone will not help |
+| `pending` | The push failed transiently — an outage, not a refusal | Press Retry access on the application in the OS (`wholesaleRetryAccess`) |
+| `failed` | The adapter **refused**, and the row names the code: `plan_ceiling` (a catalog ceiling), `customer_refused` (the store refused to create the buyer's customer), `scope_missing` (the store's grant does not reach its customers). A buyer with no customer is not a refusal: the customer-tag route creates one and tags it | Fix the cause; retrying alone will not help |
 | `revoked` | A revoke decision was recorded and acted on | Nothing |
 
 **A failed push never un-approves an application.** An approval is a decision

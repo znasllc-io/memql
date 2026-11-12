@@ -105,13 +105,19 @@ var StorefrontScopes = []string{
 // then the Admin scopes the mirror, webhooks and product-content delivery need.
 // The generated mirror only reads products; productContent also writes their
 // metafields, so its grant must be write_products (which includes read_products).
-// A missing Admin scope is shown, never refused. A copy, so a caller cannot edit it.
+// The mirror only reads customers; the wholesale pack's customer tag also creates
+// and tags them, so the grant is write_customers (which includes read_customers),
+// as the managed app's list asks. A missing Admin scope is shown, never refused.
+// A copy, so a caller cannot edit it.
 func ConnectScopes() []string {
 	out := make([]string, 0, len(StorefrontScopes)+len(generated.Scopes))
 	out = append(out, StorefrontScopes...)
 	for _, scope := range generated.Scopes {
-		if scope == "read_products" {
+		switch scope {
+		case "read_products":
 			scope = "write_products"
+		case "read_customers":
+			scope = "write_customers"
 		}
 		out = append(out, scope)
 	}

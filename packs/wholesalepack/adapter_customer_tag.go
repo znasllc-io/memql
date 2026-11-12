@@ -115,7 +115,9 @@ func (a *customerTagAdapter) Provision(ctx context.Context, call Caller, g Grant
 	reply, err := call.Call(ctx, "shopifyTagWholesaleCustomer", map[string]any{
 		"storeId":    g.StoreID,
 		"buyerEmail": g.BuyerEmail,
-		"tag":        a.tag,
+		// A buyer with no customer on the store gets one, with this name.
+		"buyerName": g.BuyerName,
+		"tag":       a.tag,
 	})
 	if err != nil {
 		return Outcome{}, err

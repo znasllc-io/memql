@@ -486,10 +486,14 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 	if applyErr != nil {
 		// PENDING, NOT FAILED, BY DEFAULT. The decision stands and the push
 		// is what is outstanding, so the row says what is true: somebody
-		// decided this and the push has not landed yet. `failed` is for an
-		// adapter that REFUSED rather than errored -- a ceiling, a buyer
-		// with no customer account, a plan nobody can read -- which will
-		// fail identically for ever, and which AdapterRefusal marks.
+		// decided this and the push has not landed yet, and Retry access in
+		// the OS (wholesaleRetryAccess) tries it again. `failed` is for an
+		// adapter that REFUSED rather than errored -- a ceiling, a store
+		// that refused to create the buyer's customer, a grant that does not
+		// reach customers, a plan nobody can read -- which will fail
+		// identically for ever, and which AdapterRefusal marks with its code.
+		// A buyer with no customer is not a refusal: the customer-tag route
+		// creates one and tags it.
 		//
 		// On a REVOKE a `pending` row means the un-grant has not landed.
 		// The application is already revoked in the decision log either
@@ -732,7 +736,20 @@ func isAdapterRefusal(err error) bool {
 }
 
 // engineCaller is the production Caller: it renders a construct call and
-// runs it through the engine under the caller's own actor.
+// runs it through the engine under the caller's own actor, AT INTERNAL ORIGIN.
+//
+// The Shopify wholesale builtins admit the pack's call alone (internal
+// origin), so a person's act -- an approval reaching the automation, a staff
+// member pressing Retry access -- reaches them only through here. The stamp
+// comes AFTER the pack's own checks, which are the authority: every path to a
+// Call has decided who the caller is and what they may do first
+// (wholesaleProvisionEntitlement and wholesaleRevokeEntitlement admit only a
+// caller already at internal origin; wholesaleRetryAccess is gated by the
+// wholesale part in the application's organization and reads the application
+// under the caller), and applyEntitlement then lets the decision log decide
+// whether there is anything to grant or take back. It is INLINE on the one
+// Execute, so it escapes nothing else: no read or write around the call
+// carries it.
 type engineCaller struct {
 	engine memql.IntegrationEngineAccess
 }
@@ -746,7 +763,8 @@ func (e *engineCaller) Call(ctx context.Context, construct string, args map[stri
 	if e == nil || e.engine == nil {
 		return nil, fmt.Errorf("wholesale: the pack has no engine handle, so %q cannot be called", construct)
 	}
-	result, err := e.engine.Execute(ctx, renderBuiltinCall(construct, args))
+	// INLINE, so the internal stamp dies with this one builtin call.
+	result, err := e.engine.Execute(auth.ContextWithInternalOrigin(ctx), renderBuiltinCall(construct, args))
 	if err != nil {
 		return nil, fmt.Errorf("wholesale: %s: %w", construct, err)
 	}
