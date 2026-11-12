@@ -7,6 +7,12 @@
  * next. */
 [data-os-dividers="none"] .os-details-section { border-top: 0; }
 .os-details-section > .os-subhead { margin: 8px 0 0; font-size: var(--os-text-base); font-weight: 600; }
+/* A heading with its own Add control: the control stands at the heading's
+   end, on its line, and the pair stays at the top of the section. The line
+   is the control's height, so the heading's words are centred on it and meet
+   the first fact's line without the plain heading's top margin. */
+.os-details-section > .os-head { align-self: start; gap: 8px; margin: 0; }
+.os-details-section > .os-head > .os-subhead { margin: 0; font-size: var(--os-text-base); font-weight: 600; }
 .os-details-section-body, .os-setting-value { min-width: 0; }
 .os-details .os-facts { grid-template-columns: 160px minmax(0, 1fr); gap: 2px 24px; margin: 0; }
 .os-details .os-facts dt, .os-details .os-facts dd { font-size: var(--os-text-sm); line-height: 1.6; padding-block: 7px; margin: 0; }
