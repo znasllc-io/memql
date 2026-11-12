@@ -170,7 +170,7 @@ func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[strin
 	}
 	// After storeState, which may itself have started a rebuild, and before
 	// any page of the store is asked.
-	generation, err := storeGeneration(ctx, db, id)
+	generation, err := generationOf(ctx, db, id)
 	if err != nil {
 		return err
 	}

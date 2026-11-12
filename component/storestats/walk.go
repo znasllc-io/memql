@@ -197,8 +197,10 @@ func ensureFloor(ctx context.Context, i *Integration, storeID string, now time.T
 		return time.Time{}, errors.New("this node has no database handle, so a store's history floor cannot be kept")
 	}
 	var kept sql.NullTime
-	err := db.NewSelect().Table("store_sales_store").Column("history_floor").
-		Where("store_id = ?", storeID).Scan(ctx, &kept)
+	err := readTx(ctx, db, func(ctx context.Context, tx bun.Tx) error {
+		return tx.NewSelect().Table("store_sales_store").Column("history_floor").
+			Where("store_id = ?", storeID).Scan(ctx, &kept)
+	})
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return time.Time{}, fmt.Errorf("read the history floor of store %s: %w", storeID, err)
 	}

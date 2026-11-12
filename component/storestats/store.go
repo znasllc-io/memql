@@ -276,8 +276,12 @@ func (i *Integration) keepStore(ctx context.Context, store map[string]any, now t
 		return i.removeStore(ctx, db, id, now)
 	}
 
-	purging, err := storePurging(ctx, db, id)
-	if err != nil {
+	var purging bool
+	if err := readTx(ctx, db, func(ctx context.Context, tx bun.Tx) error {
+		var err error
+		purging, err = storePurging(ctx, tx, id)
+		return err
+	}); err != nil {
 		return "", err
 	}
 	if purging {
@@ -508,9 +512,9 @@ func rebuildStore(ctx context.Context, tx bun.Tx, storeID string, now time.Time)
 
 // storePurging reads whether the store's facts are being deleted. A store
 // with no row is not.
-func storePurging(ctx context.Context, db bun.IDB, storeID string) (bool, error) {
+func storePurging(ctx context.Context, tx bun.Tx, storeID string) (bool, error) {
 	var purging bool
-	err := db.NewSelect().Table("store_sales_store").Column("purging").
+	err := tx.NewSelect().Table("store_sales_store").Column("purging").
 		Where("store_id = ?", storeID).Scan(ctx, &purging)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
@@ -588,16 +592,19 @@ func purgeBatch(ctx context.Context, tx bun.Tx, storeID string) (done bool, err 
 // removeStore is a turn of a store whose data was removed. See "A store whose
 // data was removed".
 func (i *Integration) removeStore(ctx context.Context, db *bun.DB, id string, now time.Time) (string, error) {
-	var exists bool
-	if err := db.NewSelect().Table("store_sales_store").ColumnExpr("true").
-		Where("store_id = ?", id).Scan(ctx, &exists); errors.Is(err, sql.ErrNoRows) {
+	var exists, purging bool
+	if err := readTx(ctx, db, func(ctx context.Context, tx bun.Tx) error {
+		if err := tx.NewSelect().Table("store_sales_store").ColumnExpr("true").
+			Where("store_id = ?", id).Scan(ctx, &exists); err != nil {
+			return err
+		}
+		var err error
+		purging, err = storePurging(ctx, tx, id)
+		return err
+	}); errors.Is(err, sql.ErrNoRows) {
 		return outcomeRemoved, nil
 	} else if err != nil {
 		return "", fmt.Errorf("read the row of store %s: %w", id, err)
-	}
-	purging, err := storePurging(ctx, db, id)
-	if err != nil {
-		return "", err
 	}
 	if !purging {
 		if err := writeTx(ctx, db, id, anyGeneration, func(ctx context.Context, tx bun.Tx) error {

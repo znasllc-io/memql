@@ -65,16 +65,27 @@ func lockWrites(ctx context.Context, tx bun.Tx) error {
 	return nil
 }
 
-// storeGeneration reads the store's generation. A store with no row answers
-// an error that wraps sql.ErrNoRows.
-func storeGeneration(ctx context.Context, db bun.IDB, storeID string) (int64, error) {
+// storeGeneration reads the store's generation inside tx. A store with no row
+// answers an error that wraps sql.ErrNoRows.
+func storeGeneration(ctx context.Context, tx bun.Tx, storeID string) (int64, error) {
 	var generation int64
-	err := db.NewSelect().Table("store_sales_store").Column("generation").
+	err := tx.NewSelect().Table("store_sales_store").Column("generation").
 		Where("store_id = ?", storeID).Scan(ctx, &generation)
 	if err != nil {
 		return 0, fmt.Errorf("read the generation of store %s: %w", storeID, err)
 	}
 	return generation, nil
+}
+
+// generationOf reads the store's generation in a transaction of its own.
+func generationOf(ctx context.Context, db *bun.DB, storeID string) (int64, error) {
+	var generation int64
+	err := readTx(ctx, db, func(ctx context.Context, tx bun.Tx) error {
+		var err error
+		generation, err = storeGeneration(ctx, tx, storeID)
+		return err
+	})
+	return generation, err
 }
 
 // writeTx runs fn in one transaction that begins with lockWrites and then,

@@ -133,7 +133,7 @@ func TestAWriteUnderAnOlderGenerationWritesNothing(t *testing.T) {
 	ensureRow(t, db, storeID)
 	ctx := context.Background()
 
-	read, err := storeGeneration(ctx, db, storeID)
+	read, err := generationOf(ctx, db, storeID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestAWriteUnderAnOlderGenerationWritesNothing(t *testing.T) {
 		t.Error("a write under an older generation wrote")
 	}
 
-	current, err := storeGeneration(ctx, db, storeID)
+	current, err := generationOf(ctx, db, storeID)
 	if err != nil {
 		t.Fatal(err)
 	}
