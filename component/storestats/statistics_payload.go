@@ -29,8 +29,9 @@ type Statistics struct {
 	Destination string
 
 	StoreName, StoreDomain, Currency *string
-	// Timezone is the zone the store recorded, as recorded, whether or not it
-	// loads; nil when it recorded none.
+	// Timezone is the zone the store recorded, with the spaces around it
+	// trimmed (as PeriodZone is), whether or not it loads; nil when it
+	// recorded none.
 	Timezone *string
 	// PeriodZone is the zone the period was cut in: the store's zone when it
 	// loads, otherwise "UTC"; "" for a store the walk holds no row for. A

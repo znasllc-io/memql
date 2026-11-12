@@ -35,8 +35,9 @@ import (
 //
 // A read makes the same statements whatever the store holds: the orders of
 // the period by bucket and by wholesale side, its refunds the same way, the
-// other currencies, the buyers, the products, the same two sums for the
-// previous period, and the count of rows the fold could not read. Buckets are
+// other currencies, the buyers, the products, and the count of rows the fold
+// could not read. The previous period is the leading buckets of the first
+// two, not statements of its own (readFigures). Buckets are
 // cut with width_bucket over the bucket starts Go computed for the store's
 // zone (statsperiod), compared as instants: no AT TIME ZONE, so every boundary
 // comes from the one zone database that cut the period.
@@ -319,7 +320,11 @@ func (p periodSums) side(wholesale bool) sums {
 	return t
 }
 
-// figures turns sums into figures, by the null rules:
+// figures turns sums into figures. A refund not read and one with a full
+// page of lines are counted over the orders of every currency, as the floors
+// are, so one of an order in another currency blanks the store-currency
+// figures until its detail is read: the brief's wording, and the cautious
+// side. The null rules:
 //   - with no currency, no money figure;
 //   - with a counted refund whose detail is not read, no Refunds, Net sales,
 //     Total sales or Units sold (D22);
