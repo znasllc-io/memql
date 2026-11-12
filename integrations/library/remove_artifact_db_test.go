@@ -324,48 +324,77 @@ func TestTheRemovalTakesTheSourceReferenceAndFindsABareOne(t *testing.T) {
 }
 
 // Another person's index row that names the export is not the export's. A
-// signed-in person who learned an export's id could file an index row of
-// another kind that names it, and the removal, seeing a kind it does not
-// remove, refused: an erasure blocked for ever by a stranger. Only the index
-// rows of the output's own owner count; a foreign row is neither removed nor a
-// reason to refuse.
+// signed-in person who learned an export's id can file an index row of their
+// own, of another kind, that names it by its bare id; the removal, seeing a
+// kind it does not remove, refused: an erasure blocked for ever by a
+// stranger. Only the index rows of the output's own owner count; a foreign
+// row is neither removed nor a reason to refuse.
+//
+// What a person CANNOT do is write under the id of the owner's own index row
+// (the id is made from the full reference): row authorization refuses it, and
+// refuses a version of the output too. The test holds both: what a person can
+// file does not stop the removal and stays; and should a version under the
+// owner's index row id be another's all the same, which only an engine-origin
+// write could leave, it stays and the owner's versions go.
 func TestAnotherPersonsIndexRowDoesNotStopTheRemoval(t *testing.T) {
-	f := newRemovalFixture(t)
-	if f == nil {
-		return
-	}
-	output, _ := f.files("named-by-a-stranger", `{"customer":"a person's whole export"}`)
-	ref := "v1:library:generatedOutput:" + output
-	stranger := f.owner + "-stranger"
-	t.Cleanup(func() {
-		_, _ = f.db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept LIKE 'v1:library:%' AND payload->>'ownerUserId' LIKE '%' || $1`, stranger)
-	})
-	strangers := auth.ContextWithInternalOrigin(revisionActor(stranger, auth.RoleWriter))
-	if _, err := f.engine.Execute(strangers, fmt.Sprintf(`mutation createArtifact(sourceConceptRef: %s, ownerUserId: %s, lens: "artifact", kind: "note", source: "user_created", title: "mine", summary: "", format: "text", mimeType: "text/plain", live: false, partitionId: "", agentId: "", producedByPlanId: "", producedByWorkerId: "", producedByWorkerName: "")`,
-		langparser.QuoteString(ref), langparser.QuoteString(stranger))); err != nil {
-		t.Fatalf("the stranger's index row: %v", err)
-	}
-	foreign := f.rows(`SELECT id FROM "MemoryNodes" WHERE concept = 'v1:library:artifact' AND payload->>'sourceConceptRef' = $1 AND payload->>'ownerUserId' LIKE '%' || $2`, ref, stranger)
-	if len(foreign) == 0 {
-		t.Skip("the engine did not let another person index the export; there is nothing to refuse")
-	}
+	const note = `, lens: "artifact", kind: "note", source: "user_created", title: "mine", summary: "", format: "text", mimeType: "text/plain", live: false, partitionId: "", agentId: "", producedByPlanId: "", producedByWorkerId: "", producedByWorkerName: "")`
+	for name, asThePerson := range map[string]bool{
+		"a row a person filed, naming the export by its bare id":                    true,
+		"a version under the owner's index row id that only the engine could leave": false,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newRemovalFixture(t)
+			if f == nil {
+				return
+			}
+			output, _ := f.files("named-by-a-stranger", `{"customer":"a person's whole export"}`)
+			ref := "v1:library:generatedOutput:" + output
+			stranger := f.owner + "-stranger"
+			t.Cleanup(func() {
+				_, _ = f.db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept LIKE 'v1:library:%' AND payload->>'ownerUserId' LIKE '%' || $1`, stranger)
+			})
+			person := revisionActor(stranger, auth.RoleWriter)
+			file := func(ctx context.Context, named string) error {
+				_, err := f.engine.Execute(ctx, fmt.Sprintf(`mutation createArtifact(sourceConceptRef: %s, ownerUserId: %s`+note, langparser.QuoteString(named), langparser.QuoteString(stranger)))
+				return err
+			}
+			// Under the owner's index row id, a person is refused.
+			if err := file(person, ref); err == nil || !strings.Contains(err.Error(), "row-authz") {
+				t.Fatalf("a person filing under the id of another's index row answered %v, want row authorization to refuse it", err)
+			}
+			named := output
+			if asThePerson {
+				if err := file(person, output); err != nil {
+					t.Fatalf("a person's own index row naming the export by its bare id: %v", err)
+				}
+			} else {
+				named = ref
+				if err := file(auth.ContextWithInternalOrigin(person), ref); err != nil {
+					t.Fatalf("the engine-origin write of another person's version: %v", err)
+				}
+			}
+			foreign := f.rows(`SELECT id FROM "MemoryNodes" WHERE concept = 'v1:library:artifact' AND payload->>'sourceConceptRef' = $1 AND payload->>'ownerUserId' LIKE '%' || $2`, named, stranger)
+			if len(foreign) != 1 {
+				t.Fatalf("the fixture left %d foreign index row version(s) naming the export, want the one", len(foreign))
+			}
 
-	nodes, err := f.first.handleRemoveArtifact(auth.ContextWithInternalOrigin(context.Background()), map[string]any{"sourceConceptRef": ref}, 0)
-	if err != nil {
-		t.Fatalf("the removal was stopped by another person's index row: %v", err)
-	}
-	if answer := removalAnswer(t, nodes); fmt.Sprint(answer["removed"]) != "9" || fmt.Sprint(answer["remaining"]) != "0" {
-		t.Errorf("the removal answers %v, want the owner's nine row versions and none remaining", answer)
-	}
-	if left := f.rows(`SELECT id FROM "MemoryNodes" WHERE concept = 'v1:library:generatedOutput' AND id = $1`, ref); len(left) != 0 {
-		t.Errorf("the output is still in the table")
-	}
-	// An index row's id is made from what it indexes, so the stranger's row
-	// is a version under the same id as the owner's: theirs stays, and the
-	// owner's versions are gone.
-	kept := f.rows(`SELECT payload->>'ownerUserId' FROM "MemoryNodes" WHERE id = $1`, foreign[0])
-	if len(kept) != 1 || !strings.HasSuffix(kept[0], stranger) {
-		t.Errorf("under the index row's id the table holds the versions of %v, want the stranger's one and none of the owner's", kept)
+			nodes, err := f.first.handleRemoveArtifact(auth.ContextWithInternalOrigin(context.Background()), map[string]any{"sourceConceptRef": ref}, 0)
+			if err != nil {
+				t.Fatalf("the removal was stopped by another person's index row: %v", err)
+			}
+			if answer := removalAnswer(t, nodes); fmt.Sprint(answer["removed"]) != "9" || fmt.Sprint(answer["remaining"]) != "0" {
+				t.Errorf("the removal answers %v, want the owner's nine row versions and none remaining", answer)
+			}
+			if left := f.rows(`SELECT id FROM "MemoryNodes" WHERE concept = 'v1:library:generatedOutput' AND id = $1`, ref); len(left) != 0 {
+				t.Errorf("the output is still in the table")
+			}
+			// The foreign row is as it was, and nothing of the owner's is left
+			// under its id.
+			kept := f.rows(`SELECT payload->>'ownerUserId' FROM "MemoryNodes" WHERE id = $1`, foreign[0])
+			if len(kept) != 1 || !strings.HasSuffix(kept[0], stranger) {
+				t.Errorf("under the foreign row's id the table holds the versions of %v, want the stranger's one and none of the owner's", kept)
+			}
+		})
 	}
 }
 

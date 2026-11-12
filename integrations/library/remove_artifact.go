@@ -191,11 +191,11 @@ const ownerOf = `regexp_replace(COALESCE(payload->>'ownerUserId', ''), '^v1:iden
 // are ITS OWNER'S.
 //
 // ONLY THE OWNER'S INDEX ROWS COUNT. An index row is anybody's to file, and it
-// names what it indexes by a reference its writer chose. A row another person
-// filed that names this output is not this artifact: it is neither removed,
-// nor looked at for its kind. Were it, a signed-in person who learned an
-// export's id could file a row of another kind that names it, and the removal
-// would refuse for ever.
+// names what it indexes by a reference its writer chose: a person can file a
+// row of their own that names this output by its bare id. Such a row is not
+// this artifact: it is neither removed, nor looked at for its kind. Were it, a
+// signed-in person who learned an export's id could file a row of another
+// kind that names it, and the removal would refuse for ever.
 //
 // staged-data: MUST-NOT-GATE -- a staged index row or output not seen here is
 // left behind by the removal, and publishes later as if nothing was removed.
@@ -288,9 +288,11 @@ func (f foundArtifact) parts() []artifactPart {
 		artifactPart{`id = $2`, []any{conceptGeneratedOutput, f.output}})
 	if len(f.artifacts) > 0 {
 		// The owner's versions of the index row, and no other's. An index
-		// row's id is made from what it indexes, so another person who files
-		// a row naming this output writes a version under the SAME id; that
-		// version is theirs and stays.
+		// row's id is made from what it indexes, so a row filed for the same
+		// reference would be a version under the SAME id. Row authorization
+		// refuses a person who is not the owner that write, so such a
+		// version could only be the engine's own doing; if one is there it
+		// is not the owner's, and it stays.
 		parts = append(parts, artifactPart{`id IN (SELECT jsonb_array_elements_text($2::jsonb)) AND ` + ownerOf + ` = $3`,
 			[]any{conceptArtifact, jsonList(f.artifacts), f.owner}})
 	}
