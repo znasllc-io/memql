@@ -18,6 +18,7 @@ import (
 // here, which is the decision that it goes through writeTx.
 var writersThroughWriteTx = []string{
 	"ensureStore",
+	"keepFloor",
 }
 
 // writeCalls are the calls that write: the bun builders, and NewRaw and

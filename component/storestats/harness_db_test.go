@@ -3,6 +3,7 @@ package storestats
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -21,6 +22,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/integrations/shopify"
 )
 
 // harness_db_test.go -- the store statistics against a real engine and a real
@@ -178,6 +180,40 @@ func newStore(t *testing.T) string {
 		t.Fatalf("write the store %s: %v", storeID, err)
 	}
 	return storeID
+}
+
+// mirror writes one mirror row of the store, as the Shopify connector writes
+// it: a raw insert of concept (a full id, "v1:shopify:order") under the
+// connector's actor, at the id shopify.MirrorRowID(storeID, gid). storeId and
+// gid are always the ones named; deleted is false, and updatedAt and syncedAt
+// are the clock, unless payload says otherwise (the mirror's schema requires
+// updatedAt). Writing the same gid again writes a newer version of the same
+// row. Every version is deleted when the test ends.
+func mirror(t *testing.T, concept, storeID, gid string, payload map[string]any) {
+	t.Helper()
+	eng, db := statsEngine(t)
+	if eng == nil {
+		t.FailNow()
+	}
+	rowID := shopify.MirrorRowID(storeID, gid)
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept = ? AND id = ?`, concept, concept+":"+rowID)
+	})
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	body := map[string]any{"deleted": false, "updatedAt": stamp, "syncedAt": stamp}
+	for k, v := range payload {
+		body[k] = v
+	}
+	body["storeId"], body["gid"] = storeID, gid
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connector := auth.ContextWithInternalOrigin(auth.ContextWithConnectorActor(context.Background(), "shopify"))
+	if _, err := eng.Execute(connector, fmt.Sprintf(`insert(%s, id=%s, payload=%s)`,
+		langparser.QuoteString(concept), langparser.QuoteString(rowID), raw)); err != nil {
+		t.Fatalf("write the mirror row %s of %s: %v", gid, concept, err)
+	}
 }
 
 // storeRow is the store's store_sales_store row, or nil when it has none.
