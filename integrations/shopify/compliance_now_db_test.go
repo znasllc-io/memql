@@ -65,6 +65,19 @@ func (e *queuedBackfills) Execute(ctx context.Context, query string) (*memql.Exe
 	return e.IntegrationEngineAccess.Execute(ctx, query)
 }
 
+// withTheSyncRuntime puts the sync runtime's stand-in under the fixture's own
+// connector and answers it: what the connector asks the runtime to queue is
+// recorded there, and answered as queued. A test that expects backfills to be
+// queued asks for it. Without it the builtin has nothing to answer it in this
+// package's engine and a run that queues fails, which is how every other test
+// says that it expects none.
+func (r *runnerFixture) withTheSyncRuntime() *queuedBackfills {
+	r.t.Helper()
+	queued := &queuedBackfills{IntegrationEngineAccess: r.narrowed()}
+	r.conn = r.connectorOn(queued, nil)
+	return queued
+}
+
 // connectorOn is the fixture's connector over another engine: the same store
 // registry, the same origin and the same clock, and an Admin client that does
 // not wait between its tries.
@@ -565,7 +578,8 @@ func TestAStoreThatReconnectsDuringARunIsNotPurged(t *testing.T) {
 	// An earlier job of the same run.
 	r.queue(TopicRedact, eraCustomerGID("9201"), nil, r.at.Add(-2*time.Hour))
 
-	hook := &hookEngine{IntegrationEngineAccess: r.narrowed()}
+	queued := &queuedBackfills{IntegrationEngineAccess: r.narrowed()}
+	hook := &hookEngine{IntegrationEngineAccess: queued}
 	hook.match = func(q string) bool { return strings.HasPrefix(q, "recordComplianceJob(") }
 	hook.fire = func() {
 		// The owner reconnects the store while the first job is being
@@ -583,8 +597,11 @@ func TestAStoreThatReconnectsDuringARunIsNotPurged(t *testing.T) {
 	if got := strings.Join(r.mirrorKeys(), ", "); got != "product "+before+", product "+after {
 		t.Errorf("after the run the mirror holds [%s], want both products: the store came back before its purge", got)
 	}
-	if job := r.job(TopicShopRedact, ""); job["status"] != "done" || job["outcome"] != "skipped: the store is reachable again" {
-		t.Errorf("the shop's erasure is %v: %v, want it skipped", job["status"], job["outcome"])
+	// The purge is skipped, and the skip queues what the store has not
+	// started to read: the fixture's reconnect queued nothing itself.
+	want := fmt.Sprintf("skipped: the store is reachable again; queued %d backfill(s) of the store that had not started", len(queued.calls))
+	if job := r.job(TopicShopRedact, ""); job["status"] != "done" || len(queued.calls) == 0 || job["outcome"] != want {
+		t.Errorf("the shop's erasure is %v: %v, want it skipped, saying %q", job["status"], job["outcome"], want)
 	}
 	fresh, found, err := conn.storeByID(memql.ContextWithFreshRead(operatorContext(context.Background())), r.store)
 	if err != nil || !found || fresh.RedactedAt != "" || !fresh.Ingests() {
@@ -1316,10 +1333,11 @@ func TestADataRequestThatEndsDoneBlanksItsDelivery(t *testing.T) {
 	}
 }
 
-// A shop's erasure blanks the delivery that asked for it as well: at each
-// purge, and when the job ends because the store came back. The purge deletes
-// the deliveries of the store's own source; a managed store's shop/redact is
-// on the app-level source, where only its row id finds it.
+// A shop's erasure deals with the delivery that asked for it as well: it is
+// blanked at the first purge, and deleted when the job ends because the store
+// came back (ruling 96). The purge deletes the deliveries of the store's own
+// source; a managed store's shop/redact is on the app-level source, where
+// only its row id finds it.
 func TestAShopsErasureBlanksTheDeliveryThatAskedForIt(t *testing.T) {
 	for name, back := range map[string]bool{"the store is purged": false, "the store came back": true} {
 		t.Run(name, func(t *testing.T) {
@@ -1329,6 +1347,8 @@ func TestAShopsErasureBlanksTheDeliveryThatAskedForIt(t *testing.T) {
 			}
 			r.hasStore()
 			if back {
+				// A purge that is skipped queues the store's unstarted backfills.
+				r.withTheSyncRuntime()
 				r.admin.reply("ShopifyReachable", map[string]any{"shop": map[string]any{"id": "gid://shopify/Shop/1"}})
 			} else {
 				r.mutate("markStoreUninstalled", map[string]any{"storeId": r.store, "uninstalledAt": r.at.Format(time.RFC3339)})
@@ -1345,7 +1365,11 @@ func TestAShopsErasureBlanksTheDeliveryThatAskedForIt(t *testing.T) {
 			if job := r.job(TopicShopRedact, ""); back != (job["status"] == "done") {
 				t.Fatalf("the job is %v: %v", job["status"], job["outcome"])
 			}
-			for i, body := range r.deliveryBodies(asked) {
+			left := r.deliveryBodies(asked)
+			if back != (len(left) == 0) {
+				t.Errorf("the delivery that asked has %d version(s) left; want it there after a first purge, and gone when the job has ended", len(left))
+			}
+			for i, body := range left {
 				if body != "" {
 					t.Errorf("version %d of the delivery that asked for the shop's erasure still holds its body: %s", i, body)
 				}
@@ -1451,12 +1475,14 @@ func TestACustomersErasureRemovesTheExportsHerDataRequestsFiled(t *testing.T) {
 		t.Errorf("the outcome does not say the export was removed: %v", job["outcome"])
 	}
 
-	// A data request that ends between the passes files another; the second
-	// pass removes it too. It is a request that has not filed yet: one that
-	// has is not answered a second time.
-	r.mutate("recordComplianceJob", map[string]any{"jobId": ComplianceJobID(r.store, TopicDataRequest, eraCustomerGID("9801")+"\x00"+"42429801"), "status": "pending", "exportId": ""})
-	if ran := r.run(r.conn); ran != 1 {
-		t.Fatalf("the data request made again: ran %d", ran)
+	// An export that lands between the passes: the filing of a slow pass of
+	// her data request, made after the first pass's removal. The second pass
+	// removes it too. (A data request that RUNS between the passes files
+	// nothing, because her erasure has been made by then:
+	// TestADataRequestForACustomerWhoHasBeenErasedFilesNothing.)
+	late := ComplianceJob{StoreID: r.store, Topic: TopicDataRequest, CustomerGID: eraCustomerGID("9801"), RequestID: "42429801"}
+	if err := r.conn.writeExportArtifact(context.Background(), Store{ID: r.store, OwnerUserID: "dbtest-owner"}, late, []byte(`{"rows":{}}`)); err != nil {
+		t.Fatalf("file the export again: %v", err)
 	}
 	if got := r.libraryRowsOf(hers); len(got) == 0 {
 		t.Fatal("the fixture did not file the export again")
@@ -1626,6 +1652,8 @@ func TestAPurgeAsksTheOriginUnlessTheRowRecordsTheUninstall(t *testing.T) {
 				return
 			}
 			r.hasStore()
+			// A purge that is skipped queues the store's unstarted backfills.
+			queued := r.withTheSyncRuntime()
 			r.write("product", map[string]any{"id": product, "updatedAt": "2026-10-01T10:00:00Z", "title": "Road bicycle"}, seen)
 			tc.arrange(r)
 			id := r.queue(TopicShopRedact, "", nil, r.at.Add(-time.Minute))
@@ -1644,6 +1672,9 @@ func TestAPurgeAsksTheOriginUnlessTheRowRecordsTheUninstall(t *testing.T) {
 			job := r.job(TopicShopRedact, "")
 			if !tc.purged && (job["status"] != "done" || !strings.Contains(fmt.Sprint(job["outcome"]), "reachable again")) {
 				t.Errorf("the job is %v: %v, want it done and skipped", job["status"], job["outcome"])
+			}
+			if got := len(queued.calls) > 0; got == tc.purged {
+				t.Errorf("%d backfill(s) were queued; want the unstarted ones of a store that was not purged, and none for one that was", len(queued.calls))
 			}
 		})
 	}
@@ -1856,6 +1887,79 @@ func TestAnOvertakenPurgeWhoseBackfillsCouldNotBeQueuedQueuesThemWhenRunAgain(t 
 	}
 }
 
+// What an overtaken purge owes the store must not hang on the sentence its
+// failure left: any later failure writes another over it. The purge is
+// overtaken and cannot queue the backfills; the next run cannot ask the origin
+// at all; the run after that finds the store answering. That run used to end
+// "skipped: the store is reachable again" with nothing queued, and the
+// reconnected store's mirror stayed empty with nothing saying so. A purge that
+// is skipped because the store answers queues the store's unstarted backfills
+// every time, and says how many.
+func TestOwedBackfillsAreQueuedAfterAnInterveningFailure(t *testing.T) {
+	r := newRunnerFixture(t)
+	if r == nil {
+		return
+	}
+	r.uninstalledWithAProduct("gid://shopify/Product/3591")
+	refusing := &refusingEngine{IntegrationEngineAccess: r.narrowed(), prefix: "builtin datasyncQueueBackfill("}
+	hook := &afterReadEngine{IntegrationEngineAccess: refusing}
+	hook.match = func(q string) bool { return strings.HasPrefix(q, "storeById(") }
+	hook.fire = func() {
+		r.mutate("markStoreReconnected", map[string]any{"storeId": r.store, "status": StatusConfigured})
+		r.mutate("updateStore", map[string]any{"storeId": r.store, "adminTokenRef": "EXAMPLE_ADMIN"})
+		r.admin.reply("ShopifyReachable", map[string]any{"shop": map[string]any{"id": "gid://shopify/Shop/1"}})
+	}
+	if ran := r.run(r.connectorOn(hook, nil)); ran != 0 || refusing.refused == 0 {
+		t.Fatalf("the overtaken purge: ran %d with %d queueing(s) refused, want it failed on the backfills", ran, refusing.refused)
+	}
+
+	// The origin cannot be asked: another failure, and another sentence.
+	r.admin.httpStatus("ShopifyReachable", http.StatusServiceUnavailable)
+	r.at = r.at.Add(time.Hour)
+	if ran := r.run(r.connectorOn(r.narrowed(), nil)); ran != 0 {
+		t.Fatalf("a run on which the origin answers 503 ran %d", ran)
+	}
+	if job := r.job(TopicShopRedact, ""); job["status"] != "failed" || job["lastError"] != failReach {
+		t.Fatalf("the job is %v: %q, want it failed for want of the origin's answer", job["status"], job["lastError"])
+	}
+
+	// The origin answers.
+	r.admin.httpStatus("ShopifyReachable", 0)
+	queued := &queuedBackfills{IntegrationEngineAccess: r.narrowed()}
+	r.at = r.at.Add(time.Hour)
+	if ran := r.run(r.connectorOn(queued, nil)); ran != 1 {
+		t.Fatalf("the run on which the store answers ran %d (%v)", ran, r.job(TopicShopRedact, "")["lastError"])
+	}
+	if len(queued.calls) == 0 {
+		t.Error("the store answers and its purge is skipped, with no backfill queued: nothing reads again what the earlier purge removed")
+	}
+	job := r.job(TopicShopRedact, "")
+	said := fmt.Sprintf("queued %d backfill(s)", len(queued.calls))
+	if job["status"] != "done" || !strings.Contains(fmt.Sprint(job["outcome"]), "skipped: the store is reachable again") || !strings.Contains(fmt.Sprint(job["outcome"]), said) {
+		t.Errorf("the job is %v: %v, want it done, the purge skipped, saying it %s", job["status"], job["outcome"], said)
+	}
+
+	// A purge skipped again, with every backfill started, queues nothing and
+	// says nothing of it.
+	for _, call := range queued.calls {
+		concept := call[strings.Index(call, `conceptId: "`)+len(`conceptId: "`):]
+		concept = concept[:strings.Index(concept, `"`)]
+		r.mutate("upsertSyncState", map[string]any{
+			"stateId": memqlsync.StateID(concept, ConnectorName, string(memqlsync.DirectionInbound), r.store), "conceptId": concept, "connector": ConnectorName,
+			"direction": "inbound", "partitionKey": r.store, "backfillStatus": "queued",
+		})
+	}
+	r.mutate("reopenComplianceJob", map[string]any{"jobId": ComplianceJobID(r.store, TopicShopRedact, "\x00"), "dueAt": r.at.Format(time.RFC3339)})
+	again := &queuedBackfills{IntegrationEngineAccess: r.narrowed()}
+	r.at = r.at.Add(time.Hour)
+	if ran := r.run(r.connectorOn(again, nil)); ran != 1 {
+		t.Fatalf("the skip made again ran %d (%v)", ran, r.job(TopicShopRedact, "")["lastError"])
+	}
+	if job := r.job(TopicShopRedact, ""); len(again.calls) != 0 || job["outcome"] != "skipped: the store is reachable again" {
+		t.Errorf("with every backfill started the skip queued %d and says %q, want none queued and the sentence alone", len(again.calls), job["outcome"])
+	}
+}
+
 // The store's row can move between the read and the stamp without the store
 // having been connected again: the uninstall's own notice arrives late, or the
 // watch writes another key of the row's health. Neither is a reconnect, and a
@@ -2027,7 +2131,9 @@ func TestTheDeliveriesThatAskedAreDeletedWhenTheJobEndsDone(t *testing.T) {
 		t.Errorf("after the erasure ended done its delivery is still a row, of %d version(s)", len(left))
 	}
 
-	// A shop's erasure that ends because the store came back.
+	// A shop's erasure that ends because the store came back. Skipped, it
+	// queues the store's unstarted backfills.
+	r.withTheSyncRuntime()
 	r.admin.reply("ShopifyReachable", map[string]any{"shop": map[string]any{"id": "gid://shopify/Shop/1"}})
 	r.deliversAs(r.conn, ConnectorName, shop, TopicShopRedact, "")
 	r.at = r.at.Add(ShopRedactHold + time.Hour)
@@ -2112,18 +2218,121 @@ func TestADataRequestDeliveredAgainWhileItIsAnsweredLeavesNoDelivery(t *testing.
 	if ran := r.run(r.connectorOn(hook, nil)); ran != 1 || !hook.fired {
 		t.Fatalf("ran %d, and the request was delivered again before the job was recorded: %v", ran, hook.fired)
 	}
-	if job := r.job(TopicDataRequest, customer); job["status"] != "pending" {
-		t.Fatalf("the job is %v after the same request reached it while it ran, want it opened again: its row holds a delivery nothing else deletes", job["status"])
+	opened := r.job(TopicDataRequest, customer)
+	if opened["status"] != "pending" {
+		t.Fatalf("the job is %v after the same request reached it while it ran, want it opened again: its row holds a delivery nothing else deletes", opened["status"])
+	}
+	// THE JOB KEEPS THE EXPORT IT FILED across the reopening. Without it the
+	// run that follows found none and filed the export a second time; and if
+	// that landed after the customer's erasure had made both its passes, the
+	// second export stayed in the owner's Library.
+	export, _ := opened["exportId"].(string)
+	if export == "" || export != exportIDOf(r.store, ComplianceJob{CustomerGID: customer, RequestID: "42423981"}) {
+		t.Fatalf("the job opened again names the export %v, want the one its pass filed", opened["exportId"])
+	}
+	filed := r.libraryRowsOf(export)
+	if len(filed) != 1 {
+		t.Fatalf("the pass filed %v, want the one export", filed)
 	}
 	r.at = r.at.Add(time.Hour)
 	if ran := r.run(r.conn); ran != 1 {
 		t.Fatalf("the next run ran %d (%v)", ran, r.job(TopicDataRequest, customer)["lastError"])
 	}
-	if job := r.job(TopicDataRequest, customer); job["status"] != "done" {
-		t.Errorf("the job is %v: %v", job["status"], job["lastError"])
+	if job := r.job(TopicDataRequest, customer); job["status"] != "done" || job["exportId"] != export {
+		t.Errorf("the job is %v and names the export %v: %v", job["status"], job["exportId"], job["lastError"])
 	}
 	if left := r.deliveryBodies(request); len(left) != 0 {
 		t.Errorf("the delivery that arrived while the request was answered is still a row, of %d version(s)", len(left))
+	}
+	if now := r.libraryRowsOf(export); strings.Join(now, "\n") != strings.Join(filed, "\n") {
+		t.Errorf("the run that followed the reopening filed the export again: the Library held %d row version(s) of it and holds %d", len(filed), len(now))
+	}
+}
+
+// A data request whose customer has been erased files nothing, and removes
+// what it finds. The erasure's own removal of her exports runs on both its
+// passes, which covers an export filed before them; what it cannot cover is a
+// data request that runs after them. Three ways one does: it was answered
+// before her erasure and is delivered again; it runs for the first time when
+// her erasure is done; and an export of it is in the Library when it runs.
+func TestADataRequestForACustomerWhoHasBeenErasedFilesNothing(t *testing.T) {
+	for name, tc := range map[string]struct {
+		answeredBefore bool
+		planted        bool
+		betweenPasses  bool
+	}{
+		"answered before her erasure, and delivered again": {answeredBefore: true},
+		"run for the first time after her erasure":         {},
+		"run between the two passes of her erasure":        {betweenPasses: true},
+		"an export of it is there when it runs":            {answeredBefore: true, planted: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRunnerFixture(t)
+			if r == nil {
+				return
+			}
+			store := r.hasStore()
+			store.OwnerUserID = "dbtest-owner"
+			r.withTheLibrary()
+			const n = "3991"
+			customer := eraCustomerGID(n)
+			r.write("customer", adaCustomer(n, "2026-10-01T10:00:00Z"), seen)
+			request := r.onTheAppSource("data-request-erased")[0]
+			asked := ComplianceJob{StoreID: r.store, Topic: TopicDataRequest, CustomerGID: customer, RequestID: "4242" + n}
+			export := exportIDOf(r.store, asked)
+			if tc.answeredBefore {
+				r.deliversAs(r.conn, ConnectorName, request, TopicDataRequest, n)
+				if ran := r.run(r.conn); ran != 1 || len(r.libraryRowsOf(export)) == 0 {
+					t.Fatalf("the data request: ran %d and filed %v", ran, r.libraryRowsOf(export))
+				}
+			}
+
+			// Her erasure: both passes, or the first alone.
+			r.queue(TopicRedact, customer, nil, r.at.Add(-time.Minute))
+			if ran := r.run(r.conn); ran != 1 {
+				t.Fatalf("the erasure's first pass: ran %d (%v)", ran, r.job(TopicRedact, customer)["lastError"])
+			}
+			if !tc.betweenPasses {
+				r.at = r.at.Add(ErasureSecondPassAfter + time.Second)
+				if ran := r.run(r.conn); ran != 1 || r.job(TopicRedact, customer)["status"] != "done" {
+					t.Fatalf("the erasure's second pass: ran %d, and the erasure is %v", ran, r.job(TopicRedact, customer)["status"])
+				}
+			}
+			if left := r.libraryRowsOf(export); len(left) != 0 {
+				t.Fatalf("her erasure left the export her data request filed: %v", left)
+			}
+			if tc.planted {
+				// An export of the request is in the Library all the same, as a
+				// filing that landed after the erasure's last pass left one.
+				if err := r.conn.writeExportArtifact(context.Background(), store, asked, []byte(`{"rows":{}}`)); err != nil {
+					t.Fatalf("plant the export: %v", err)
+				}
+				if len(r.libraryRowsOf(export)) == 0 {
+					t.Fatal("the fixture planted no export")
+				}
+			}
+
+			// The data request runs now: delivered again, or for the first
+			// time. (Between the passes the clock stays inside the hour, so
+			// the erasure's second pass is not due and does not run with it.)
+			if !tc.betweenPasses {
+				r.at = r.at.Add(time.Hour)
+			}
+			r.deliversAs(r.conn, ConnectorName, request, TopicDataRequest, n)
+			if ran := r.run(r.conn); ran != 1 {
+				t.Fatalf("the data request after her erasure: ran %d (%v)", ran, r.job(TopicDataRequest, customer)["lastError"])
+			}
+			job := r.job(TopicDataRequest, customer)
+			if job["status"] != "done" || !strings.Contains(fmt.Sprint(job["outcome"]), "erased") {
+				t.Errorf("the data request is %v: %v, want it done, saying the customer has been erased", job["status"], job["outcome"])
+			}
+			if left := r.libraryRowsOf(export); len(left) != 0 {
+				t.Errorf("a data request for a customer who has been erased left an export in the Library: %v", left)
+			}
+			if left := r.deliveryBodies(request); len(left) != 0 {
+				t.Errorf("its delivery is still a row, of %d version(s)", len(left))
+			}
+		})
 	}
 }
 
@@ -2205,6 +2414,93 @@ func TestTheUninstallsDeliveryIsRememberedAndDeletedAtReconnect(t *testing.T) {
 	}
 	if now, _, _ := r.conn.storeByID(memql.ContextWithFreshRead(operatorContext(context.Background())), r.store); now.UninstalledAt == "" {
 		t.Error("the second identical uninstall did not disconnect the store again")
+	}
+}
+
+// The deliveries a store's row remembers as having carried its uninstall are
+// deleted at its reconnect and at its purge. What an id there names is not
+// taken on trust: the row's health is written by the connector, and nothing
+// on the row can show that an id in it was put there by the uninstall's
+// handler. So that path deletes a delivery only if it is one of this
+// connector's, for this store, and an uninstall: on the store's own source,
+// or on the app-level source naming the shop. Anything else an id names is
+// left: another connector's delivery, a delivery of the store's that is not
+// an uninstall, another shop's uninstall.
+func TestTheRememberedIdsDeleteOnlyTheStoresOwnUninstallDeliveries(t *testing.T) {
+	for name, purged := range map[string]bool{"at the reconnect": false, "at the purge": true} {
+		t.Run(name, func(t *testing.T) {
+			r := newRunnerFixture(t)
+			if r == nil {
+				return
+			}
+			store := r.hasStore()
+			own, another := storeInboundSource(r.store), "dbtest-another-connector"
+			t.Cleanup(func() {
+				_, _ = r.db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept = 'v1:platform:inboundRequest' AND payload->>'source' IN ($1, $2)`, own, another)
+			})
+			ids := r.onTheAppSource("the-uninstall", "not-an-uninstall", "another-shops-uninstall")
+			tag := strings.TrimPrefix(r.store, "dbtest-era-")
+			stage := func(source, id, topic, domain string) {
+				t.Helper()
+				r.mutate("stageInboundRequest", map[string]any{
+					"requestId": id, "source": source, "medium": "webhook", "body": `{"id":548380009,"myshopify_domain":"` + domain + `","name":"Example Bicycles"}`, "contentType": "application/json",
+					"headersJson": `{"x-shopify-shop-domain":"` + domain + `","x-shopify-topic":"` + topic + `"}`, "signatureVerified": true, "verifiedBy": "connector", "receivedAt": r.at.Format(time.RFC3339),
+				})
+				r.mutate("updateInboundRequestStatus", map[string]any{"requestId": id, "status": "processed", "attempts": 1})
+			}
+			// The uninstall, through its own handler: its delivery is remembered.
+			body := `{"id":548380009,"myshopify_domain":"` + store.Domain + `","name":"Example Bicycles"}`
+			r.mutate("stageInboundRequest", map[string]any{
+				"requestId": ids[0], "source": ConnectorName, "medium": "webhook", "body": body, "contentType": "application/json",
+				"headersJson": `{"x-shopify-topic":"app/uninstalled"}`, "signatureVerified": true, "verifiedBy": "connector", "receivedAt": r.at.Format(time.RFC3339),
+			})
+			r.admin.httpStatus("ShopifyReachable", http.StatusUnauthorized)
+			current, _, _ := r.conn.storeByID(memql.ContextWithFreshRead(operatorContext(context.Background())), r.store)
+			if err := r.conn.applyUninstall(context.Background(), current, memqlsync.InboundRequest{RequestId: ids[0], Source: ConnectorName, Topic: TopicAppUninstalled, Body: []byte(body), ReceivedAt: r.at}); err != nil {
+				t.Fatalf("the uninstall: %v", err)
+			}
+			// What a write of the row's health that is not the connector's
+			// could add to what it remembers.
+			planted := map[string]string{
+				"another connector's delivery":                   tag + "-another-connectors",
+				"a delivery of the store's that is no uninstall": tag + "-own-order",
+				"an app-level delivery that is no uninstall":     ids[1],
+				"another shop's uninstall":                       ids[2],
+			}
+			stage(another, planted["another connector's delivery"], TopicAppUninstalled, store.Domain)
+			stage(own, planted["a delivery of the store's that is no uninstall"], "orders/create", store.Domain)
+			stage(ConnectorName, ids[1], "shop/update", store.Domain)
+			stage(ConnectorName, ids[2], TopicAppUninstalled, "another-shop.example.com")
+			remembered := []string{ids[0]}
+			for _, id := range planted {
+				remembered = append(remembered, id)
+			}
+			r.mutate("recordStoreHealth", map[string]any{"storeId": r.store, "health": map[string]any{healthUninstallDeliveries: remembered}})
+			prior, _, _ := r.conn.storeByID(memql.ContextWithFreshRead(operatorContext(context.Background())), r.store)
+			if got := uninstallDeliveriesOf(prior); len(got) != len(remembered) {
+				t.Fatalf("the store's row remembers %v, want the %d ids the fixture put there", got, len(remembered))
+			}
+
+			if purged {
+				r.queue(TopicShopRedact, "", nil, r.at.Add(-time.Minute))
+				if ran := r.run(r.conn); ran != 1 {
+					t.Fatalf("the purge: ran %d (%v)", ran, r.job(TopicShopRedact, "")["lastError"])
+				}
+				// The purge deletes every delivery of the store's own source
+				// with its mirror, whatever it is: that one is not this path's.
+				delete(planted, "a delivery of the store's that is no uninstall")
+			} else if err := r.conn.markReconnected(context.Background(), operatorContext(context.Background()), r.store, prior, "dbtest-owner"); err != nil {
+				t.Fatalf("the reconnect: %v", err)
+			}
+			if left := r.deliveryBodies(ids[0]); len(left) != 0 {
+				t.Errorf("the delivery that carried the store's uninstall is still a row, of %d version(s)", len(left))
+			}
+			for what, id := range planted {
+				if left := r.deliveryBodies(id); len(left) == 0 {
+					t.Errorf("%s was deleted because the store's row named its id", what)
+				}
+			}
+		})
 	}
 }
 

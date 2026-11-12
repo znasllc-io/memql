@@ -263,7 +263,11 @@ mutation complianceJob queueComplianceJob {
 /// A data request is opened again too, when it is delivered again after it
 /// was answered: not to answer it a second time (a job that has filed its
 /// export files nothing), but because the job is what deletes the delivery
-/// that brought it back.
+/// that brought it back. The export a data request filed is kept across a
+/// reopening: the row's exportId is not stamped away, and the runner passes
+/// it (exportId) when it opens again a job whose pass has just filed one and
+/// has not recorded it yet. A job opened again without it would file the
+/// export a second time.
 ///
 /// Server-only, and actor.userId scoping is not the fix: the caller is the
 /// connector reacting to a verified webhook, or its hourly runner, and
@@ -279,9 +283,10 @@ mutation complianceJob reopenComplianceJob {
     requestedAt  datetime
     deliveryIds  []string
     outcome      string
+    exportId     string
   }
   update {
-    accept { dueAt, orderGids, requestedAt, deliveryIds, outcome }
+    accept { dueAt, orderGids, requestedAt, deliveryIds, outcome, exportId }
     stamp {
       id:          args.jobId
       status:      "pending"

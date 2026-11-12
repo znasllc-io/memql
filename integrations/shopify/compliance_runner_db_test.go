@@ -531,8 +531,15 @@ func TestAShopsErasureIsMadeTwiceUnlessTheStoreCameBack(t *testing.T) {
 		r.admin.reply("ShopifyReachable", map[string]any{"shop": map[string]any{"id": "gid://shopify/Shop/1"}})
 		r.write("product", product("93", "City bicycle"), seen)
 		r.at = first.Add(ErasureSecondPassAfter + time.Second)
+		// A purge that is skipped queues the store's unstarted backfills: the
+		// first purge removed the store's sync state, and this fixture's
+		// reconnect queued nothing itself.
+		queued := r.withTheSyncRuntime()
 		if ran := r.run(r.conn); ran != 1 {
 			t.Fatalf("the second run ran %d jobs, want the job ended", ran)
+		}
+		if len(queued.calls) == 0 {
+			t.Error("the second pass was skipped with no backfill queued for a store the first purge emptied")
 		}
 		if left := r.allTexts(); len(left) != 1 {
 			t.Errorf("a store that came back was purged a second time: %d row(s) left, want the one its reconnect read", len(left))

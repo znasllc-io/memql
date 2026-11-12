@@ -72,9 +72,6 @@ type ComplianceJob struct {
 	ScrubbedAt time.Time `json:"scrubbedAt,omitempty"`
 	// RequestedAt is when a request for the job was last recorded on its row.
 	RequestedAt time.Time `json:"requestedAt,omitempty"`
-	// LastError is the sentence its last failed run left on its row, empty
-	// once a run has not failed.
-	LastError string `json:"lastError,omitempty"`
 	// DeliveryIDs are the row ids of the staged deliveries that asked for
 	// the job; ExportID is what a data request filed in the owner's Library.
 	DeliveryIDs []string       `json:"deliveryIds,omitempty"`
@@ -156,13 +153,14 @@ const (
 	failRequeue     = "rows an earlier erasure wrongly scrubbed could not be queued to be read again"
 	failPurge       = "the store's mirror could not be deleted"
 	failStamp       = "the store's mirror was deleted, but the store did not say whether the app is still installed, so it is not marked redacted yet"
-	failReadAgain   = "the store was connected again while it was being purged, and the backfills that read it again could not be queued"
+	failReadAgain   = "the store is connected again, but its backfills that had not started could not be queued"
 	failOlder       = "the erasure ran, but the shop's uninstall or older privacy deliveries could not be deleted"
 	failRestart     = "the erasure ran, but a backfill in flight could not be started again"
 	failDropExport  = "the erasure ran, but a failed backfill's old export could not be dropped"
 	failExportRead  = "the customer's rows could not be read for the export"
 	failExportOwner = "the store names no owner to file the export under"
 	failExportWrite = "the export could not be filed in the store owner's library"
+	failErasedRead  = "whether the customer has been erased could not be read, so nothing was filed"
 	failUnknown     = "the job could not be run"
 )
 
@@ -671,10 +669,13 @@ func (c *Connector) recordJobStep(ctx context.Context, job ComplianceJob, versio
 	for try := 0; ; try++ {
 		var err error
 		if again {
-			err = c.writeJob(ctx, "reopenComplianceJob", job.ID, version, map[string]any{
-				"jobId":   job.ID,
-				"outcome": step.Outcome + meanwhile,
-			})
+			reopen := map[string]any{"jobId": job.ID, "outcome": step.Outcome + meanwhile}
+			// The export the pass filed stays on the job: the run that
+			// follows the reopening must find it, or it files a second one.
+			if step.ExportID != "" {
+				reopen["exportId"] = step.ExportID
+			}
+			err = c.writeJob(ctx, "reopenComplianceJob", job.ID, version, reopen)
 		} else {
 			err = c.writeJob(ctx, "recordComplianceJob", job.ID, version, args)
 		}
@@ -781,12 +782,49 @@ func (r *privacyRun) job(ctx context.Context, store Store, found bool, job Compl
 //
 // A REQUEST IS ANSWERED ONCE. A job that has filed its export (exportId) and
 // is run again -- the same request was delivered again after it was answered
-// -- files nothing: the Library holds the export, or an erasure of the
-// customer has removed it since, and neither is undone by a redelivery. It
-// deletes the delivery that brought it back, and is done again.
+// -- files nothing: the Library holds the export, and a redelivery does not
+// make another. It deletes the delivery that brought it back, and is done
+// again.
+//
+// A CUSTOMER WHO HAS BEEN ERASED IS NOT EXPORTED. Her erasure removes the
+// exports her data requests filed, at each of its two passes, and that covers
+// every export filed before its second pass. What it cannot cover is a data
+// request that runs AFTER her erasure: one delivered again, one that failed
+// and is run again, one whose export a slow pass filed late. So a data
+// request first asks whether her erasure has been made (customerErased); if
+// it has, it files nothing, removes whatever export of hers is in the Library
+// (the erasure's own removal, removeExports), deletes its deliveries and is
+// done. The two orders of events end the same way, with no export of her:
+//
+//   - the data request first, her erasure after: the erasure's passes remove
+//     what was filed;
+//   - her erasure first, the data request after: the data request files
+//     nothing and removes what it finds.
+//
+// An erasure that is waiting for its hold has not been made: a data request
+// that runs then files, and the erasure removes it when it runs.
 func (r *privacyRun) dataRequest(ctx context.Context, store Store, found bool, job ComplianceJob) (jobStep, error) {
 	c := r.c
 	now := c.now()
+	if job.CustomerGID != "" {
+		erased, err := c.customerErased(ctx, job)
+		if err != nil {
+			return jobStep{}, failedJob(failErasedRead, err)
+		}
+		if erased {
+			const since = "the customer has been erased, so nothing is filed"
+			removed, err := c.removeExports(ctx, job)
+			if err != nil {
+				return jobStep{}, err
+			}
+			asked, err := r.finishAsked(ctx, job, true)
+			if err != nil {
+				return jobStep{}, err
+			}
+			_ = c.auditCompliance(ctx, job.StoreID, "shopify_data_request_customer_erased", job, now, since+removed)
+			return jobStep{Status: jobDone, Outcome: since + removed + asked}, nil
+		}
+	}
 	if job.ExportID != "" {
 		const before = "the request was answered before, and its export is not filed again"
 		asked, err := r.finishAsked(ctx, job, true)
@@ -837,6 +875,23 @@ func (r *privacyRun) dataRequest(ctx context.Context, store Store, found bool, j
 	}
 	_ = c.auditCompliance(ctx, job.StoreID, "shopify_data_request_exported", job, now, what)
 	return jobStep{Status: jobDone, Outcome: what + asked, ExportID: exportIDOf(store.ID, job)}, nil
+}
+
+// customerErased reports whether the erasure of a data request's customer has
+// been made, in that store: a customers/redact job of hers whose first pass
+// has run, or that is done. One that is waiting for its hold has not.
+func (c *Connector) customerErased(ctx context.Context, job ComplianceJob) (bool, error) {
+	erased := false
+	erasures := renderCall("complianceJobsOfCustomer", map[string]any{"storeId": job.StoreID, "topic": TopicRedact, "customerGid": job.CustomerGID})
+	err := memql.WalkQueryPages(memql.ContextWithFreshRead(operatorContext(ctx)), c.engine.Execute, erasures, complianceJobPages, func(res *memql.ExecuteResult) error {
+		for _, row := range memql.MaterializeRows(res) {
+			if erasure := complianceJobOf(row); erasure.Status == jobDone || !erasure.ScrubbedAt.IsZero() {
+				erased = true
+			}
+		}
+		return nil
+	})
+	return erased, err
 }
 
 // customerErasure is one pass of a customer's erasure: the scrub of the
@@ -979,21 +1034,25 @@ func (r *privacyRun) shopErasure(ctx context.Context, store Store, found bool, j
 		}
 		if back {
 			c.logger.Info("shopify: skipping shop/redact purge, the store is reachable again", "store", store.ID, "secondPass", second)
-			// A RUN BEFORE THIS ONE MAY OWE THE STORE ITS BACKFILLS: it purged
-			// the store, found it connected again at the stamp, and could not
-			// queue what reads it again (failReadAgain). This run does not
-			// purge, and is the one that pays: without it the job would end
-			// here and nothing would ever read the store again.
+			// THE STORE'S UNSTARTED BACKFILLS ARE QUEUED EVERY TIME A PURGE IS
+			// SKIPPED. A run before this one may have purged the store, found
+			// it connected again at the stamp, and failed to queue what reads
+			// it again; and nothing on the job's row can be trusted to say
+			// so, because a later failure writes its own sentence over that
+			// one. This run does not purge, and is the one that pays. Queueing
+			// is safe to do twice and leaves a kind whose backfill has
+			// started, so a store that is whole has nothing queued, and the
+			// outcome then says nothing of it.
+			queued, err := c.queueBackfillsAPurgeOwes(ctx, store.ID)
+			if err != nil {
+				return jobStep{}, failedJob(failReadAgain, err)
+			}
 			owed := ""
-			if job.LastError == failReadAgain {
-				queued, err := c.queueBackfillsAPurgeOwes(ctx, store.ID)
-				if err != nil {
-					return jobStep{}, failedJob(failReadAgain, err)
-				}
-				owed = fmt.Sprintf("; %d backfill(s) were queued to read again what an earlier run's purge removed", queued)
+			if queued > 0 {
+				owed = fmt.Sprintf("; queued %d backfill(s) of the store that had not started", queued)
 			}
 			// The job ends here, and the deliveries that asked go as any done
-			// job's do. Its outcome is otherwise the fixed sentence.
+			// job's do. Its outcome is the fixed sentence, and what was queued.
 			if _, err := r.finishAsked(ctx, job, true); err != nil {
 				return jobStep{}, err
 			}
@@ -1029,9 +1088,15 @@ func (r *privacyRun) shopErasure(ctx context.Context, store Store, found bool, j
 	}
 	if found {
 		// The delivery that carried the store's uninstall goes with the
-		// purge, and so, once, do the shop's privacy and uninstall deliveries
-		// from before a job remembered them.
-		gone, err := deleteDeliveries(ctx, s, uninstallDeliveriesOf(store))
+		// purge (its own uninstall deliveries among the ids the row
+		// remembers, and nothing else those ids name), and so, once, do the
+		// shop's privacy and uninstall deliveries from before a job
+		// remembered them.
+		var gone int64
+		var err error
+		if statement, args, ok := rememberedUninstalls(store); ok {
+			gone, err = s.exec(ctx, statement, args...)
+		}
 		if err == nil && mapString(store.Health, healthOldErasureRepaired) == "" {
 			var older int64
 			older, err = deleteOlderPrivacyDeliveries(ctx, s, store, job.DeliveryIDs)
@@ -1058,7 +1123,7 @@ func (r *privacyRun) shopErasure(ctx context.Context, store Store, found bool, j
 			queued, err := c.queueBackfillsAPurgeOwes(ctx, store.ID)
 			if err != nil {
 				// The job is run again, and that run finds the store answering
-				// and does not purge it: it queues them (above, owed).
+				// and does not purge it: it queues them, as every skip does.
 				return jobStep{}, failedJob(failReadAgain, err)
 			}
 			if _, err := r.finishAsked(ctx, job, true); err != nil {
@@ -1169,6 +1234,10 @@ func showsAConnect(read, now Store) bool {
 // queued or started since is left to it. It is the purge's own count of what
 // it queued, read from the store as it is now; queueUnstartedBackfillsOf
 // (plugin.go) is the boot's and the resume's, for a store already in hand.
+//
+// It is asked for at two moments: when a purge finds at its stamp that the
+// store was connected again, and every time a purge is skipped because the
+// store answers (shopErasure says why every time).
 func (c *Connector) queueBackfillsAPurgeOwes(ctx context.Context, storeID string) (int, error) {
 	store, _, found, err := c.storeAsItIs(ctx, storeID)
 	if err != nil || !found {
@@ -2017,8 +2086,7 @@ func deleteOlderPrivacyDeliveries(ctx context.Context, s *privacySession, store 
 		  GROUP BY v.id
 		 HAVING (array_agg(v.status ORDER BY v."createdAt" DESC))[1] = 'processed'`,
 		conceptInboundRequest, ConnectorName, storeInboundSource(store.ID),
-		`%"x-shopify-shop-domain":"`+likeEscape(strings.ToLower(store.Domain))+`"%`,
-		`"(shop_domain|myshopify_domain)"\s*:\s*"`+regexp.QuoteMeta(store.Domain)+`"`)
+		shopInHeaders(store.Domain), shopInBody(store.Domain))
 	if err != nil {
 		return 0, err
 	}
@@ -2040,6 +2108,60 @@ func deleteOlderPrivacyDeliveries(ctx context.Context, s *privacySession, store 
 		ids = ids[n:]
 	}
 	return total, nil
+}
+
+// shopInHeaders is the LIKE pattern that finds a shop's domain among the
+// headers the receiver staged with a delivery (lowercased), and shopInBody the
+// case-insensitive expression that finds it in the delivery's signed body, in
+// the field the connector binds an app-level delivery to its store by
+// (deleteOlderPrivacyDeliveries says why a copy inside another value does not
+// match).
+func shopInHeaders(domain string) string {
+	return `%"x-shopify-shop-domain":"` + likeEscape(strings.ToLower(domain)) + `"%`
+}
+
+func shopInBody(domain string) string {
+	return `"(shop_domain|myshopify_domain)"\s*:\s*"` + regexp.QuoteMeta(domain) + `"`
+}
+
+// rememberedUninstalls is the delete of the deliveries a store's row remembers
+// as having carried its uninstall (uninstallDeliveriesOf), every version: the
+// statement and its arguments, or false when there is nothing to delete.
+//
+// WHAT AN ID THERE NAMES IS NOT TAKEN ON TRUST. The ids are a key of the
+// store's health, and nothing on the row can show that the uninstall's handler
+// is what put an id in it. A delete by id alone would delete whatever a
+// write of that key named: another connector's delivery, an order's. So the
+// delete is bounded to what this path is for. A row goes only if it is
+//
+//   - named by an id the store remembers; and
+//   - an uninstall, by the topic the receiver staged with it; and
+//   - this connector's, for this store: on the store's own source, or on the
+//     app-level source and the shop's, by the domain in its staged headers or
+//     in its signed body.
+//
+// Anything else an id names is left where it is.
+//
+// staged-data: MUST-NOT-GATE -- the row left in place is the one a second
+// identical uninstall lands on, processed, and is never worked.
+func rememberedUninstalls(store Store) (string, []any, bool) {
+	rows := deliveryRowIDs(uninstallDeliveriesOf(store))
+	if len(rows) == 0 || store.ID == "" {
+		return "", nil, false
+	}
+	return `DELETE FROM "MemoryNodes" d
+	         WHERE d.concept = $1
+	           AND d.id IN (
+	             SELECT m.id FROM "MemoryNodes" m
+	              WHERE m.concept = $1
+	                AND m.id IN (SELECT jsonb_array_elements_text($2::jsonb))
+	                AND lower(COALESCE(m.payload->>'headersJson', '')) LIKE $3
+	                AND (m.payload->>'source' = $4
+	                     OR (m.payload->>'source' = $5 AND $6 <> ''
+	                         AND (lower(COALESCE(m.payload->>'headersJson', '')) LIKE $7 OR COALESCE(m.payload->>'body', '') ~* $8))))`,
+		[]any{conceptInboundRequest, jsonArray(rows),
+			`%"x-shopify-topic":"` + likeEscape(strings.ToLower(TopicAppUninstalled)) + `"%`,
+			storeInboundSource(store.ID), ConnectorName, store.Domain, shopInHeaders(store.Domain), shopInBody(store.Domain)}, true
 }
 
 // rememberUninstallDelivery records on the store the delivery that carried
@@ -2067,20 +2189,18 @@ func (c *Connector) rememberUninstallDelivery(ctx context.Context, store Store, 
 // uninstall, every version, and clears the key that remembered them: the
 // store is connected again, and the same notice arriving after another
 // uninstall must be a new delivery. A row or two by their ids, on the handle
-// Connect holds.
-//
-// staged-data: MUST-NOT-GATE -- the row left in place is the one a second
-// identical uninstall lands on, processed, and is never worked.
+// Connect holds; and only the store's own uninstall deliveries among what
+// the ids name (rememberedUninstalls).
 func (c *Connector) forgetUninstallDelivery(ctx context.Context, prior Store) {
-	rows := deliveryRowIDs(uninstallDeliveriesOf(prior))
-	if len(rows) == 0 {
+	statement, args, ok := rememberedUninstalls(prior)
+	if !ok {
 		return
 	}
 	if c.db == nil || c.db() == nil {
 		c.logger.Warn("shopify: a reconnected store's uninstall delivery could not be deleted: no database handle", "store", prior.ID)
 		return
 	}
-	if _, err := c.db().ExecContext(ctx, `DELETE FROM "MemoryNodes" WHERE concept = $1 AND id IN (SELECT jsonb_array_elements_text($2::jsonb))`, conceptInboundRequest, jsonArray(rows)); err != nil {
+	if _, err := c.db().ExecContext(ctx, statement, args...); err != nil {
 		c.logger.Warn("shopify: a reconnected store's uninstall delivery could not be deleted", "store", prior.ID, "class", errorClass(err))
 		return
 	}
@@ -2325,7 +2445,6 @@ func complianceJobOf(row map[string]any) ComplianceJob {
 		Status:      mapString(row, "status"),
 		ScrubbedAt:  rowTime(row, "scrubbedAt"),
 		RequestedAt: rowTime(row, "requestedAt"),
-		LastError:   mapString(row, "lastError"),
 		DeliveryIDs: mapStringSlice(row, "deliveryIds"),
 		ExportID:    mapString(row, "exportId"),
 	}
