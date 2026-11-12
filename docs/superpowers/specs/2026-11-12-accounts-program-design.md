@@ -121,14 +121,17 @@ findings that shape a decision are kept here.
 |---|---|---|
 | P8 | One export covers one account: complete for that account, with nothing from any other account or from the cluster itself | approved 2026-11-11 |
 | P9 | What a person makes inside an account is that account's and travels with it. For rows written before row ownership exists, the assignment rules in the row-ownership spec decide | approved 2026-11-11, restated 2026-11-12 |
-| P10 | A password is optional. With one, the whole file is encrypted and the portable secrets travel. Without one, the file carries no secrets. Either way the import ends with a list of connections to set up again | approved 2026-11-11 |
-| P11 | No sign-in material ever travels: no passkeys, tokens, sessions or link requests. People sign in on the target by email link and register a new passkey | proposed |
-| P12 | The request context stored on each row (email, IP address, node) is not exported for writes made by primary users | proposed |
-| P13 | Export runs from the Accounts app in the primary account's desktop, for owners and developers only, and is audited | approved 2026-11-11 |
+| P10 | A password is optional. With one, the whole file is encrypted and the portable secrets travel. Without one, the file carries no secrets. Either way the import ends with a list of connections to set up again | approved 2026-11-11; refined 2026-11-12: protection is on unless switched off, the engine makes the passphrase, and no secret value travels until the import piece decides how |
+| P11 | No sign-in material ever travels: no passkeys, tokens, sessions or link requests. People sign in on the target by email link and register a new passkey | approved 2026-11-12. A site's access codes travel: they are stored as digests |
+| P12 | The request context stored on each row (email, IP address, node) is not exported for writes made by primary users | approved 2026-11-12, extended: an owner or developer who is not a member of the account appears as an id only |
+| P13 | Export runs from the Accounts app in the primary account's desktop, for owners and developers only, and is audited | approved 2026-11-11; 2026-11-12: a signed-in person only, and every owner is mailed when one starts |
 | P14 | Moving a row from one account to another is a governed act, and it arrives with export | approved 2026-11-12 |
-| P15 | An export is a copy. Nothing is removed from the source cluster | proposed |
-| P16 | Not a SQL dump. A versioned, self-describing archive: every version of every row, the file bytes, and a manifest with checksums, following the whole-cluster backup's row shape and its one-directional promise | proposed |
-| P17 | Data held outside the row table (site statistics and similar) is classified by the export piece | approved 2026-11-12 |
+| P15 | An export is a copy. Nothing is removed from the source cluster | approved 2026-11-12 |
+| P16 | Not a SQL dump. A versioned, self-describing archive: every version of every row, the file bytes, and a manifest with checksums, following the whole-cluster backup's row shape and its one-directional promise | approved 2026-11-12: a tar file, wrapped with age when protected |
+| P17 | Data held outside the row table (site statistics and similar) is classified by the export piece | approved 2026-11-12; classified in the export design |
+
+The [account export design](2026-11-12-account-export-design.md) settles P8 to
+P17 in detail. Its own decisions are numbered E1 to E22.
 
 ### Import and top-ups
 
@@ -185,16 +188,17 @@ Spec: [account row ownership](2026-11-12-account-row-ownership-design.md).
 
 ### 2. Export
 
-The client's file. Decided: P8 to P17. Still to design:
+The client's file. Decided: P8 to P17. Designed in
+[account export](2026-11-12-account-export-design.md), a draft until the owner
+has read it. That design moves three things to later pieces:
 
-- The archive's exact format and whether the encrypted form uses a standard
-  container a client can open with stock tools.
-- Which account-owned concepts are left out on purpose (in-flight work, sealed
-  transport state) and which tables outside the row table travel.
-- Following references from account rows to the secrets they name.
-- The governed "move to another account" act and where it is offered.
-- The account page rebuilt to the tabbed layout, with its Export tab.
-- Retiring `accountIds` and `campaignAccountId`, which rides in this piece's push.
+- Carrying secret values goes to import, which has to seal them again on the
+  target. The file lists the connections and reserves the place.
+- The `accountIds` lists are narrowed to the row's own account, not removed.
+  Dropping the field goes to sign-in and separation, which decides what sharing
+  inside an account looks like.
+- `campaignAccountId` stops being written in the export piece's push and is
+  dropped in the push after it.
 
 ### 3. Sign-in and separation
 
@@ -210,6 +214,10 @@ Decided: P24 to P36. Still to design:
   machines): which account they act in.
 - Whether cluster sign-in administration that has no screen today (the owner
   recovery key) gets one in Identity.
+- What sharing inside an account looks like, and with it the end of the
+  `accountIds` field (left by the export design).
+- How a grant is scoped to an account, so that an export can carry what an
+  account's groups may do.
 
 ### 4. Shell
 
@@ -221,7 +229,9 @@ so most lists change in one place.
 ### 5. Import and top-ups
 
 Decided: P18 to P23. It is built last so that it lands people on the new sign-in
-model instead of being built twice.
+model instead of being built twice. The export design leaves it two things: which
+secret values a protected file may carry and how they are sealed again, and how
+work that was running or queued when the file was taken is landed.
 
 ## The app split
 

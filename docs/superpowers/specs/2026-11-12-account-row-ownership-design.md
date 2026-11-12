@@ -452,6 +452,14 @@ list `accountIds` today.
 
 **In the export piece's push**
 
+Changed on 2026-11-12 by the
+[account export design](2026-11-12-account-export-design.md), E7 and section J:
+the list is narrowed to the row's own account and `@rowAuthz` keeps reading it,
+because sharing by `accountId` would open every one of these rows to all members
+of its account. Dropping the list goes to the sign-in piece, and
+`campaignAccountId` is dropped one push after its writers stop. What follows is
+the plan as it stood.
+
 - `@rowAuthz` moves to `accountId`.
 - `accountIds` is stripped from every stored version by a migration scoped by
   concept, and recorded in the `retired` ledger of
