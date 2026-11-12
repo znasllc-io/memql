@@ -305,6 +305,27 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 		}
 		return nil, err
 	}
+	// ONE OPEN APPLICATION PER ADDRESS ON A STORE (ruling 59), by the staff
+	// add's own rule (openApplicationOf). Judged after every refusal above, so a
+	// store that would refuse a first post refuses this one too, and before any
+	// write. A post from an address with a submitted or approved application
+	// WRITES NOTHING and is ANSWERED EXACTLY AS AN ACCEPTED ONE: the same receipt
+	// -- the id the caller named, the store, the company it sent -- and, through
+	// the shopper outcome, the same success page with no extension row. A
+	// refusal would tell anybody posting somebody else's address who the store's
+	// buyers are. The store's people see it in the one line below, which names
+	// the store and the open application and never the address. Timing is not
+	// equalized: this answer returns before a write a first post makes.
+	open, err := p.openApplicationOf(ctx, storeID, email)
+	if err != nil {
+		return nil, err
+	}
+	if open != "" {
+		p.log().Info(OpenApplicationNotWrittenLine,
+			"component", "wholesale", "storeId", storeID, "openApplicationId", bareID(open))
+		memql.MarkShopperSubmissionUnwritten(ctx)
+		return acceptedReceipt(applicationID, storeID, company)
+	}
 	fenced := memql.ContextWithRowVersionFence(ctx, applicationConcept, applicationID, time.Time{})
 	// accountId IS THE ADMITTED SITE'S ORGANIZATION, which is the organization
 	// the store's program is tied to, and the owner is that site's owner:
@@ -328,6 +349,14 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 		}
 		return nil, err
 	}
+	return acceptedReceipt(applicationID, storeID, company)
+}
+
+// acceptedReceipt answers a storefront submission that was accepted: the id
+// the caller named, the store and the company it sent. A post written and a
+// post from an address with an open application (not written) are answered
+// with it alike, so the two cannot be told apart.
+func acceptedReceipt(applicationID, storeID, company string) ([]memorynodes.MemoryNode, error) {
 	return confirm("wholesale:application:accepted", map[string]any{
 		"applicationId": applicationID,
 		"storeId":       storeID,
@@ -499,6 +528,23 @@ func (p *Provider) recordDecision(ctx context.Context, args map[string]any, _ in
 	}
 	if transition == TransitionApprove && termsRequired && !accepted {
 		return nil, errors.New(NotAcceptedSentence)
+	}
+	// ONE APPROVED APPLICATION PER ADDRESS ON A STORE (ruling 61). Two posts in
+	// one instant both pass the storefront's check, as do rows written before
+	// it; two approved applications of one buyer would let a revoke of either
+	// take the store-wide tag off while the other still reads granted. So an
+	// approve is refused here, naming the other, by the same address rule
+	// (applicationOfAddress), read as the system. A reject or a revoke is never
+	// refused by it.
+	if transition == TransitionApprove {
+		other, err := p.applicationOfAddress(ctx, trimmed(app["storeId"]), asString(app["applicantEmail"]),
+			trimmed(app["id"]), StateApproved)
+		if err != nil {
+			return nil, err
+		}
+		if other != "" {
+			return nil, errors.New(AnotherApprovedSentence(other))
+		}
 	}
 	if err := p.appendDecision(ctx, app, transition, asString(args["note"])); err != nil {
 		return nil, err

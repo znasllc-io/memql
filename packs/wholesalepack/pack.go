@@ -106,7 +106,8 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 			Name: "recordDecision",
 			Description: "Append one decision to an application's log. A person on the store's side " +
 				"decides -- the cluster's operators are refused -- and is recorded as the decider; " +
-				"refuses an illegal transition by name; copies storeId off the application.",
+				"refuses an illegal transition by name, and an approve while another application of " +
+				"the same address on the store is approved; copies storeId off the application.",
 			Handler: p.recordDecision,
 			ArgsSchema: map[string]string{
 				"applicationId": "string (required) - the application being decided",

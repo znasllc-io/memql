@@ -47,6 +47,19 @@ import (
 // approved application on the store.
 const AlreadyAppliedSentence = "This address already has an application on this store."
 
+// OpenApplicationNotWrittenLine is the staff's trace of a storefront post that
+// was not written because its address has an open application on the store
+// (ruling 59). The line names the store and the open application, never the
+// address.
+const OpenApplicationNotWrittenLine = "wholesale: an application from an address with an open application on this store was not written"
+
+// AnotherApprovedSentence refuses an approve while another application of the
+// same address on the store is approved (ruling 61), naming that application.
+func AnotherApprovedSentence(approvedID string) string {
+	return "Application " + bareID(approvedID) + " of this address is already approved on this store. " +
+		"Remove that buyer before approving this application, or reject this one."
+}
+
 // staffApplicationPrefix begins the id of an application a person of the store
 // added.
 const staffApplicationPrefix = "wholesale-staff-"
@@ -101,11 +114,13 @@ func (p *Provider) addBuyer(ctx context.Context, args map[string]any, _ int) ([]
 	if err := p.termsRuleRefusal(sys, storeID, true, EffectiveSettings(settings).TermsRequired); err != nil {
 		return nil, err
 	}
-	taken, err := p.addressHasOpenApplication(ctx, storeID, email)
+	open, err := p.openApplicationOf(ctx, storeID, email)
 	if err != nil {
 		return nil, err
 	}
-	if taken {
+	// THE STAFF MEMBER IS TOLD, being entitled to know who the store's buyers
+	// are; a shopper posting the same address is not (submitApplication).
+	if open != "" {
 		return nil, errors.New(AlreadyAppliedSentence)
 	}
 	applicationID := staffApplicationPrefix + id.NewShortId()
@@ -130,33 +145,55 @@ func (p *Provider) addBuyer(ctx context.Context, args map[string]any, _ int) ([]
 	return confirm("wholesale:buyer:added", map[string]any{"applicationId": applicationID})
 }
 
-// addressHasOpenApplication reports whether email, trimmed and lower-cased, has
-// a submitted or an approved application on the store, in any form the store id
-// is held in. A rejected or revoked application is final and blocks nothing: a
-// new application is how somebody tries again.
+// sameAddress is THE ONE RULE of when two applications are of the same address
+// (rulings 59 and 61): compared trimmed and lower-cased. The staff add, the
+// storefront form and the approve decision all ask it, through
+// applicationOfAddress; there is no second rule. An empty address is no address
+// and matches nothing.
+func sameAddress(a, b string) bool {
+	x := strings.ToLower(strings.TrimSpace(a))
+	return x != "" && x == strings.ToLower(strings.TrimSpace(b))
+}
+
+// openApplicationOf is the id of an OPEN application of email's address on the
+// store -- submitted, in whatever stage, or approved -- or "" when there is
+// none. A rejected or revoked application is final and blocks nothing: a new
+// application is how somebody tries again.
+func (p *Provider) openApplicationOf(ctx context.Context, storeID, email string) (string, error) {
+	return p.applicationOfAddress(ctx, storeID, email, "", StateSubmitted, StateApproved)
+}
+
+// applicationOfAddress is the id of an application on the store, other than
+// exceptID, whose address is email's (sameAddress) and whose derived state is
+// one of states; "" when there is none. The store id is matched in every form
+// it is held in.
 //
 // Every one of the store's applications is read, with no cap, as the system:
-// a duplicate the check could not see would split one person's history.
-func (p *Provider) addressHasOpenApplication(ctx context.Context, storeID, email string) (bool, error) {
+// a duplicate the check could not see would split one person's history, and
+// an application the caller cannot read still counts. It answers an id, which
+// its callers use only to name the application to the store's own people.
+func (p *Provider) applicationOfAddress(ctx context.Context, storeID, email, exceptID string, states ...string) (string, error) {
 	sys := auth.ContextWithSystemActor(ctx, duplicateCheckActor)
 	apps, _, err := p.storeApplications(sys, storeID, false)
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	want := strings.ToLower(strings.TrimSpace(email))
 	for _, app := range apps {
-		if strings.ToLower(trimmed(app["applicantEmail"])) != want {
+		id := trimmed(app["id"])
+		if !sameAddress(asString(app["applicantEmail"]), email) || (exceptID != "" && bareID(id) == bareID(exceptID)) {
 			continue
 		}
-		state, err := p.stateOf(sys, trimmed(app["id"]))
+		state, err := p.stateOf(sys, id)
 		if err != nil {
-			return false, err
+			return "", err
 		}
-		if state == StateSubmitted || state == StateApproved {
-			return true, nil
+		for _, s := range states {
+			if state == s {
+				return id, nil
+			}
 		}
 	}
-	return false, nil
+	return "", nil
 }
 
 // removeBuyer answers wholesaleRemoveBuyer: a revoke of an approved buyer,
