@@ -14,6 +14,12 @@ const VARIABLE = "MEMQL_PIPELINES_SECURITY";
 const ROW_ID = "var-global-memql-pipelines-security";
 const storedRow = (enabled: boolean, id = ROW_ID): Row => ({ id, name: VARIABLE, value: JSON.stringify({ enabled }) });
 
+// The switch is saved through `pipelinesSecuritySettingsSave`, which carries the
+// switch alone: the engine owns the variable's row (its name, which row a save
+// updates and the stored JSON: component/pipelinerun settings.go and its
+// tests). The fake below does with a save what the engine does, and fails the
+// test if the page ever writes the variable's row itself.
+
 /** Exercise generated wire calls, with a cluster that can refuse or lose a save. */
 function mount(initial: Row | null, faults: { refuse?: string; drop?: boolean; readError?: string; hold?: Promise<void>; duplicate?: Row } = {}) {
   const fake = fakeConnection();
@@ -26,13 +32,14 @@ function mount(initial: Row | null, faults: { refuse?: string; drop?: boolean; r
       if (faults.readError) throw new Error(faults.readError);
       return rowsResult([...(row ? [row] : []), ...(faults.duplicate ? [faults.duplicate] : [])]);
     }
-    if (parsed.name === "setGlobalVariable" && parsed.args["name"] === VARIABLE) {
+    if (parsed.name === "pipelinesSecuritySettingsSave") {
       writes.push(parsed.args);
       if (faults.hold) await faults.hold;
       if (faults.refuse) throw new Error(faults.refuse);
-      if (!faults.drop) row = parsed.args;
+      if (!faults.drop) row = storedRow(parsed.args["enabled"] === true, (row?.["id"] as string | undefined) ?? ROW_ID);
       return rowsResult([]);
     }
+    if (parsed.name === "setGlobalVariable") throw new Error("the page wrote the variable row itself: " + call);
     return base(name, call, opts as never);
   };
   h.connection = fake;
@@ -57,21 +64,22 @@ describe("security opt-in", () => {
     expect(cluster.writes).toEqual([]);
     await click(toggle);
     await waitFor(() => expect(toggle.checked).toBe(true));
-    expect(cluster.writes[0]).toMatchObject({ id: ROW_ID, name: VARIABLE, value: '{"enabled":true}', active: true });
+    // The switch and nothing else: the row's name, id and JSON are the engine's.
+    expect(cluster.writes[0]).toEqual({ enabled: true });
     await click(toggle);
     await waitFor(() => expect(toggle.checked).toBe(false));
     expect(cluster.row()?.["value"]).toBe('{"enabled":false}');
-    expect(cluster.writes).toHaveLength(2);
+    expect(cluster.writes).toEqual([{ enabled: true }, { enabled: false }]);
   });
 
-  it("updates the existing row, without creating a second variable", async () => {
+  it("turns an enabled setting off with the switch alone", async () => {
     const cluster = mount(storedRow(true, "existing-security-variable"));
     render(<PipelinesSecuritySettings />);
     const toggle = await switchControl();
     expect(toggle.checked).toBe(true);
     await click(toggle);
     await waitFor(() => expect(toggle.checked).toBe(false));
-    expect(cluster.writes[0]?.["id"]).toBe("existing-security-variable");
+    expect(cluster.writes).toEqual([{ enabled: false }]);
   });
 
   it.each([
@@ -96,13 +104,14 @@ describe("security opt-in", () => {
   });
 
   it("keeps a refused change off and permits an explicit retry", async () => {
-    const cluster = mount(null, { refuse: "capability_not_held: write globalVariable" });
+    const refusal = "capability_not_held: \"pipelinesSecuritySettingsSave\" requires execute on app:pipelines/settings";
+    const cluster = mount(null, { refuse: refusal });
     render(<PipelinesSecuritySettings />);
     const toggle = await switchControl();
     await click(toggle);
     await screen.findByText("The change was not saved.");
     expect(toggle.checked).toBe(false);
-    expect(screen.getByText("capability_not_held: write globalVariable")).toBeTruthy();
+    expect(screen.getByText(refusal)).toBeTruthy();
     cluster.faults.refuse = undefined;
     await click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(toggle.checked).toBe(true));

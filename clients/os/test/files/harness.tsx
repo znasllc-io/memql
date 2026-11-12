@@ -100,6 +100,8 @@ export interface FakeSeed {
    *  answers. */
   compositions?: Row[];
   byId?: Record<string, Row>;
+  /** The account choices -- what `clientAccountsAll` answers. */
+  accounts?: Row[];
   /** Refusal sentences, keyed by construct name (e.g. archiveArtifact). */
   refuse?: Record<string, string>;
 }
@@ -152,6 +154,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         for (const row of rows) { const id = String(row.folderId ?? ""); folders.set(id, (folders.get(id) ?? 0) + 1); }
         return rowsResult([{ folders: [...folders].map(([folderId, count]) => ({ folderId, count })), labelGroups: rows.map(row => row.labels ?? []) }]);
       }
+      if (name === "clientAccountsAll") return rowsResult(seed.accounts ?? []);
       if (name === "libraryFilesByIds") return rowsResult((seed.files ?? []).filter(row => (args.fileIds as string[] ?? []).includes(String(row.id))));
       if (name === "compositionOutputIndex") return rowsResult((seed.compositions ?? []).filter(row => args.fileIds == null || (args.fileIds as string[]).includes(String(row.outputFileId))).map(row => ({ id: row.id, ownerUserId: row.ownerUserId, name: row.name, status: row.status, outputFileId: row.outputFileId, format: row.format, archived: row.archived })));
       if (name === "libraryArtifactsInFolders") return page([...(seed.artifacts ?? []), ...(seed.archived ?? [])].filter(row => (args.folderIds as string[] ?? []).includes(String(row.folderId))), 50);

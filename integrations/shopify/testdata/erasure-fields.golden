@@ -40,7 +40,7 @@
 #   - the buyer's message inside a gift card another person holds: the card is its holder's
 #
 # FIELDS. Every version of a row in scope is rewritten. The structural fields are never touched:
-#   storeId, gid, updatedAt, versionSource, syncedAt, versionReadAt, deleted, parentGid
+#   storeId, gid, updatedAt, versionSource, syncedAt, versionReadAt, deleted, parentGid, accountId
 # Every other field, and any key the model does not know, is decided below:
 #   kept by kind            a gid, a list of references, an enum, or a scalar whose Admin type is one of:
 #                           BigInt (an integer), Boolean (a boolean), Date (a date),
@@ -150,7 +150,6 @@ concept catalog (Catalog)
 
 concept channel (Channel)
   reach: not reachable
-  accountId                                scalar      String                             scrubbed: becomes "[redacted]"
   accountName                              scalar      String                             scrubbed: becomes "[redacted]"
   activeRegions                            scalarList  CountryCode                        scrubbed: becomes []
   app                                      object      App                                scrubbed: the key is removed
@@ -159,6 +158,7 @@ concept channel (Channel)
   name                                     scalar      String                             scrubbed: becomes "[redacted]"
   productsCount                            object      Count                              scrubbed: the key is removed
   resourceFeedback                         object      AppFeedback                        scrubbed: the key is removed
+  sourceAccountId                          scalar      String                             scrubbed: becomes "[redacted]"
   specificationHandle                      scalar      String                             scrubbed: becomes "[redacted]"
   supportsFuturePublishing                 scalar      Boolean                            kept by kind: a boolean
 

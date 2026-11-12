@@ -60,6 +60,13 @@ func TestSiteAccessLookupIndexesBuildAndRepairChunkCoverage(t *testing.T) {
 		t.Run(index, func(t *testing.T) { testWorkIndex(t, index, database.EnsureSiteAccessLookupIndexes) })
 	}
 }
+
+// The account index is partial on a present account, so the fixture's rows
+// (which carry none) leave every chunk index empty; coverage is still judged
+// per chunk, which is what this test drives.
+func TestAccountIndexBuildsAndRepairsChunkCoverage(t *testing.T) {
+	testWorkIndex(t, "idx_memorynodes_account", database.EnsureAccountIndex)
+}
 func testWorkIndex(t *testing.T, indexName string, build func(context.Context, *bun.DB, *slog.Logger, string) error) {
 	admin := conceptIndexDB(t)
 	ctx := context.Background()

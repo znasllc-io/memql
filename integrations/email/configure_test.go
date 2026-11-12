@@ -10,10 +10,16 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
-type recordingWriter struct{ calls []string }
+// recordingWriter records each statement and whether the context it arrived on
+// carried internal origin.
+type recordingWriter struct {
+	calls    []string
+	internal []bool
+}
 
-func (w *recordingWriter) Execute(_ context.Context, q string) (any, error) {
+func (w *recordingWriter) Execute(ctx context.Context, q string) (any, error) {
 	w.calls = append(w.calls, q)
+	w.internal = append(w.internal, auth.OriginFromContext(ctx).IsInternal())
 	return nil, nil
 }
 
@@ -120,6 +126,54 @@ func TestConfigureSealsACredential(t *testing.T) {
 	}
 	if _, ok := w2.find("mutation setGlobalVariable"); !ok {
 		t.Errorf("a non-secret slot did not go to globalVariable: %v", w2.calls)
+	}
+}
+
+// THE ROW WRITE IS THE ONE STATEMENT THAT CARRIES INTERNAL ORIGIN.
+//
+// Both rows this handler writes are the deployment's: v1:platform:globalSecret
+// declares the cluster-owner tier, and a v1:platform:globalVariable row is
+// written by a cluster owner or by stamped server code (component/memql's
+// variable write rule). This section admits a developer as well as an owner
+// (configureAuthorized), so the value has to be written the way server code
+// writes for a caller it has already authorized: internal origin, stamped for
+// that one write. Everything else the handler sends keeps the caller's own
+// origin -- readinessRecompute is asked as the caller on purpose
+// (handleConfigure says why a developer's is refused).
+//
+// The stamp is downstream of configureAuthorized: TestConfigureIsOwnerOrDeveloperOnly
+// holds that a refused role reaches no statement at all.
+func TestConfigureStampsInternalOriginOnItsRowWriteOnly(t *testing.T) {
+	t.Setenv("MEMQL_MASTER_KEY", strings.Repeat("ab", 32))
+	for _, role := range []auth.Role{auth.RoleOwner, auth.RoleDeveloper} {
+		for slot, credential := range map[string]bool{"clientSecret": true, "senderAddress": false} {
+			w := &recordingWriter{}
+			if _, err := newConfigurableIntegration(w).handleConfigure(configureCtx(role), map[string]any{
+				"slot": slot, "value": "value-for-" + slot,
+			}, 0); err != nil {
+				t.Fatalf("role %q, slot %s: %v", role, slot, err)
+			}
+			if len(w.calls) == 0 {
+				t.Fatalf("role %q, slot %s: nothing was written", role, slot)
+			}
+			rowWrites := 0
+			for n, call := range w.calls {
+				isRowWrite := strings.HasPrefix(call, "mutation setGlobalSecret(") || strings.HasPrefix(call, "mutation setGlobalVariable(")
+				if isRowWrite {
+					rowWrites++
+				}
+				if isRowWrite != w.internal[n] {
+					t.Errorf("role %q, slot %s: internal origin = %v on %.40s...; it belongs on the row write and on nothing else",
+						role, slot, w.internal[n], call)
+				}
+			}
+			if rowWrites != 1 {
+				t.Errorf("role %q, slot %s: %d row writes went out, want the one", role, slot, rowWrites)
+			}
+			if _, wrote := w.find("mutation setGlobalSecret("); wrote != credential {
+				t.Errorf("role %q, slot %s: a sealed write went out = %v, want %v", role, slot, wrote, credential)
+			}
+		}
 	}
 }
 

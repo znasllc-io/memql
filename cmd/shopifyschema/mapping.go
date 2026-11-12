@@ -51,9 +51,14 @@ const (
 // mirrorOwnFields are the columns every mirror row carries. A Shopify field
 // of the same name is renamed rather than dropped -- losing a field silently
 // is the one outcome the generator must not have.
+//
+// `accountId` is the account a mirror row belongs to, which the engine stamps
+// from the row's store. Shopify has a field of that name too (Channel's), and
+// it means something else, so it lands as `sourceAccountId`.
 var mirrorOwnFields = map[string]bool{
 	"storeId": true, "gid": true, "updatedAt": true, "versionSource": true,
 	"syncedAt": true, "versionReadAt": true, "deleted": true, "parentGid": true,
+	"accountId": true,
 }
 
 // engineReservedFields mirrors component/database/memory-nodes'

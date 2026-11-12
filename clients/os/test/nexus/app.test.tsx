@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { readTheBar } from "../readTheBar";
+import { chooseOption } from "../selectControl";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -190,7 +191,7 @@ describe("a new goal", () => {
     });
   });
 
-  it("tags the goal with the accounts the person picked", async () => {
+  it("tags the goal with the one account the person picked", async () => {
     // The tag is a RECORD of who the work is for. It narrows no read and
     // grants no access -- so the test asserts it reaches createGoal, and the
     // label asserts it does not read as permissions.
@@ -203,7 +204,9 @@ describe("a new goal", () => {
     fireEvent.change(screen.getByLabelText("The goal, in your own words"), {
       target: { value: "Reconcile the ledger" },
     });
-    fireEvent.click(await screen.findByRole("button", { name: "Acme Ltd" }));
+    // A single choice (account row ownership, section G), sent as a
+    // one-element list.
+    await waitFor(() => chooseOption(screen.getByLabelText("Who this work is for"), "Acme Ltd"));
     fireEvent.click(screen.getByText("Start work"));
     await waitFor(() => expect(conn.query.createGoal).toHaveBeenCalled());
     expect(conn.query.createGoal.mock.calls[0]?.[0]).toMatchObject({

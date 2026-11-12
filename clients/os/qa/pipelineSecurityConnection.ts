@@ -15,9 +15,12 @@ export function pipelineSecurityConnection(state: "off" | "on" | "unavailable" |
       if (state === "unavailable") throw new Error("The cluster could not read its saved configuration.");
       return rowsResult(row ? [row] : []);
     }
-    if (parsed.name === "setGlobalVariable" && parsed.args["name"] === "MEMQL_PIPELINES_SECURITY") {
+    if (parsed.name === "pipelinesSecuritySettingsSave") {
       if (state === "refused") throw new Error("You do not have permission to change this installation's settings.");
-      row = parsed.args;
+      row = {
+        id: "var-global-memql-pipelines-security", name: "MEMQL_PIPELINES_SECURITY",
+        value: JSON.stringify({ enabled: parsed.args["enabled"] === true }),
+      };
       return rowsResult([]);
     }
     return base(name, call, opts as never);

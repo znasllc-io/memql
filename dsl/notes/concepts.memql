@@ -20,12 +20,14 @@ use identity.concepts.{ user }
 /// read gates on `row.ownerUserId == actor.userId`.
 @displayCard(primary="title", secondary="body", tertiary="updatedAt")
 @rowAuthz(owner="ownerUserId")
+@belongsTo(account)
 concept note {
   ownerUserId  string!  @description("v1:identity:user.id that owns this note. Stamped from actor.userId at create time; re-stamped from actor.userId on every update so ownership can never be reassigned by a caller. The load-bearing per-row authz key.")
   title        string    @description("Optional short title / heading for the note. Absence is allowed -- a note can be body-only. The primary display field when present.")
   body         string!  @description("The note's freeform text content. The substring search operation matches against this field.")
   tags         []string  @description("Optional list of user-supplied tags for grouping / filtering. The frontend renders these as chips; the search tool can narrow by a single tag.")
   updatedAt    datetime  @description("RFC3339 watermark of the most recent edit. Stamped to `now` on every create / update so the frontend can sort by recency. The authoritative version order is still the row's createdAt history; this is a denormalized convenience for the most-recent version.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }

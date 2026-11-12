@@ -19,6 +19,7 @@
 @origin("memql")
 @rowAuthz(clusterOwner, rankFloor="developer")
 @displayCard(primary="domain", secondary="name", tertiary="apiVersion", status="status")
+@belongsTo(account)
 concept store {
   /// The myshopify.com domain, e.g. "acme-widgets.myshopify.com". The one
   /// identifier Shopify never changes; the storefront's public domain does.
@@ -113,6 +114,7 @@ concept store {
   /// it is bound to: without it two rows sit in one list with nothing saying
   /// which belongs to which.
   developmentOfStoreId  string
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="references", as="developmentOf", field="developmentOfStoreId", target=store, direction="outgoing")
 }
@@ -133,6 +135,7 @@ concept store {
 @origin("memql")
 @rowAuthz(clusterOwner)
 @displayCard(primary="topic", secondary="storeId", tertiary="customerGid", status="status")
+@belongsTo(account, via="storeId", parent="v1:shopify:store")
 concept complianceJob {
   /// The store the request concerns.
   storeId      string!
@@ -196,4 +199,5 @@ concept complianceJob {
   /// customer removes it. Empty on any other job, and on a data request that
   /// filed nothing or ran before the field existed.
   exportId     string
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }

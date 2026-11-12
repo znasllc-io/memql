@@ -19,11 +19,13 @@ use wholesale.concepts.{ application }
 @description("Northwind's own field on a wholesale application: the federal tax identifier a US distributor is required to collect. Northwind's, not the pack's -- the next client will not collect one.")
 @displayCard(primary="ein", secondary="applicationId")
 @rowAuthz(owner="ownerUserId", clusterOwner)
+@belongsTo(account, via="applicationId", parent="v1:wholesale:application")
 concept northwindTaxDetail {
   ownerUserId    string!  @description("The merchant this detail belongs to.")
   applicationId  string!  @description("The v1:wholesale:application this is about.")
   storeId        string!  @description("The store, copied from the application it relates to (design D9).")
   ein            string!  @description("The applicant's federal Employer Identification Number, as they typed it. Unverified.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="references", field="applicationId", target=application, direction="outgoing")
 }

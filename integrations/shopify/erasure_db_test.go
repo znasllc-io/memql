@@ -344,6 +344,48 @@ func TestAnErasedCustomersRowKeepsNothingButItsStructure(t *testing.T) {
 	}
 }
 
+// Every mirror row records the account it belongs to, its store's, in
+// accountId. The engine fills it in and the connector never states it, so it
+// is in no write the mapper makes; it says whose row this is and nothing about
+// a person. An erasure rebuilds each version from the fields its plan names,
+// and a plan that named only what the connector writes would take every row
+// it touched out of its account. The account is set here as the engine's own
+// assignment of existing rows sets it: in place, on the stored row.
+func TestAnErasureKeepsTheAccountARowBelongsTo(t *testing.T) {
+	f := newErasureFixture(t)
+	if f == nil {
+		return
+	}
+	customer, order := eraCustomerGID("151"), eraOrderGID("5151")
+	f.write("customer", adaCustomer("151", "2026-10-01T10:00:00Z"), seen)
+	f.write("customer", adaCustomer("151", "2026-10-02T10:00:00Z"), seen.Add(24*time.Hour))
+	f.write("order", bikeOrder("5151", customer, "2026-10-01T10:00:00Z"), seen)
+	const account = "account-of-the-erasure-test"
+	if _, err := f.db.ExecContext(context.Background(),
+		`UPDATE "MemoryNodes" SET payload = payload || jsonb_build_object('accountId', $2::text) WHERE payload->>'storeId' = $1`,
+		f.store, account); err != nil {
+		t.Fatal(err)
+	}
+
+	res := f.erase(customer)
+
+	if res.Versions == 0 {
+		t.Fatalf("the erasure changed nothing: %+v", res)
+	}
+	f.holdsNoWordOf("customer", customer, adaWords)
+	for _, row := range []struct{ concept, gid string }{{"customer", customer}, {"order", order}} {
+		versions := f.versions(row.concept, row.gid)
+		if len(versions) == 0 {
+			t.Fatalf("the mirror holds no %s %s", row.concept, row.gid)
+		}
+		for i, v := range versions {
+			if v["accountId"] != account {
+				t.Errorf("%s version %d: accountId = %v after the erasure, want %q: the row left its account", row.concept, i, v["accountId"], account)
+			}
+		}
+	}
+}
+
 // Customer 123 is erased. Customer 1234, whose id only begins the same, and an
 // order of customer 1234, are untouched byte for byte: the old match was a
 // substring of the row's text.

@@ -11,6 +11,7 @@
 // constant. A display card with no status slot says nothing about health,
 // which is the true statement.
 @displayCard(primary="name", secondary="provider", tertiary="region")
+@belongsTo(cluster)
 concept cluster {
   name              string! @description("Cluster name (e.g., 'development', 'staging-us-central1').")
   region            string  @description("Cloud region (e.g., 'us-central1') or 'local' for development.")
@@ -63,6 +64,7 @@ concept cluster {
 /// re-add this field.
 @displayCard(primary="dbName", secondary="engine", tertiary="host")
 @rowAuthz(clusterOwner)
+@belongsTo(cluster)
 concept database {
   host              string! @description("Database hostname (e.g., 'postgres', 'tiger-cloud-abc.timescaledb.io').")
   port              int @description("Database port.")
@@ -98,6 +100,7 @@ concept database {
 /// named writer and a stated staleness contract.
 @displayCard(primary="name", secondary="providerType", tertiary="issuerUrl")
 @rowAuthz(clusterOwner)
+@belongsTo(cluster)
 concept identityProvider {
   name              string! @description("Provider name (e.g., 'MemQL Identity').")
   providerType      enum("oidc", "saml", "ldap")! @description("Authentication protocol.")
@@ -116,6 +119,7 @@ concept identityProvider {
 /// mirror the NodeHealthStatus enum defined in component/node/node.proto -- that proto is the
 /// source of truth.
 @displayCard(primary="id", secondary="nodeType", tertiary="address", status="health")
+@belongsTo(cluster)
 concept node {
   nodeType      string! @description("Node role: bff, agent, planner, workbench.")
   flavor        string  @description("Domain flavor within the node type. Empty for single-flavor types.")
@@ -133,6 +137,7 @@ concept node {
 
 /// Definition of a node type and its expected capabilities.
 @displayCard(primary="name", secondary="description", tertiary="image")
+@belongsTo(cluster)
 concept nodeType {
   name          string! @description("Node type identifier: one of the roles in component/node/roles.go (e.g. agent).")
   description   string  @description("Human-readable description of this node type's purpose.")
@@ -145,6 +150,7 @@ concept nodeType {
 /// Lifecycle event recording node state transitions (started, stopped, failed). Used for audit
 /// trail and cluster state recovery. Legacy name retained for data compatibility.
 @displayCard(primary="action", secondary="nodeId", tertiary="reason", status="action")
+@belongsTo(cluster)
 concept spawnEvent {
   nodeId        string! @description("ID of the node this event pertains to.")
   nodeType      string! @description("Type of the node: one of the roles in component/node/roles.go (e.g. agent).")
@@ -192,6 +198,7 @@ concept spawnEvent {
 /// and the registry is the only thing that knows.
 @displayCard(primary="version", secondary="bump", tertiary="requestedByEmail", status="status")
 @rowAuthz(clusterOwner)
+@belongsTo(cluster)
 concept releaseCut {
   version        string!  @description("The version cut, in git-tag form (vX.Y.Z). ALSO the row id: one timeline per cut, so the append-only status transitions of one version stay one row's history. The image tags carry the BARE form without the leading v (memql#4061's two-conventions rule) -- this field is the tag, never the image tag.")
   bump           enum("major", "minor", "patch")!  @description("Which part of the previous version was incremented to reach this one. Recorded because it is the operator's INTENT, and intent is not recoverable from the two versions alone once a hand-cut tag lands between them.")

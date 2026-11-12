@@ -11247,7 +11247,7 @@ func SetEmailRuleStatusBuild(args SetEmailRuleStatusArgs) string {
 	return b.String()
 }
 
-// SetGlobalSecret -- Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.
+// SetGlobalSecret -- Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. Cluster owner only: the concept's row tier judges the write.
 //
 // Bound concept: v1:platform:globalSecret (machine-readable: BoundConcepts["setGlobalSecret"] in generated_concepts.go).
 type SetGlobalSecretArgs struct {
@@ -11320,7 +11320,7 @@ func SetGlobalSecretBuild(args SetGlobalSecretArgs) string {
 	return b.String()
 }
 
-// SetGlobalVariable -- Persist an instance-wide (global) plaintext variable row in v1:platform:globalVariable.
+// SetGlobalVariable -- Persist an instance-wide (global) plaintext variable row in v1:platform:globalVariable. Cluster owner, or server code stamped for the write: the engine judges the write itself.
 //
 // Bound concept: v1:platform:globalVariable (machine-readable: BoundConcepts["setGlobalVariable"] in generated_concepts.go).
 type SetGlobalVariableArgs struct {
@@ -11616,7 +11616,7 @@ func SetPackageSourceRemovedBuild(args SetPackageSourceRemovedArgs) string {
 	return b.String()
 }
 
-// SetPartitionSecret -- Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.
+// SetPartitionSecret -- Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. Cluster owner only: the concept's row tier judges the write.
 //
 // Bound concept: v1:platform:partitionSecret (machine-readable: BoundConcepts["setPartitionSecret"] in generated_concepts.go).
 type SetPartitionSecretArgs struct {
@@ -11689,7 +11689,7 @@ func SetPartitionSecretBuild(args SetPartitionSecretArgs) string {
 	return b.String()
 }
 
-// SetPartitionVariable -- Persist a partition-scoped plaintext variable row in v1:platform:partitionVariable.
+// SetPartitionVariable -- Persist a partition-scoped plaintext variable row in v1:platform:partitionVariable. Cluster owner, or server code stamped for the write: the engine judges the write itself.
 //
 // Bound concept: v1:platform:partitionVariable (machine-readable: BoundConcepts["setPartitionVariable"] in generated_concepts.go).
 type SetPartitionVariableArgs struct {

@@ -54,6 +54,7 @@
       "concept": "v1:actions:action",
       "file": "actions/concepts.memql",
       "fields": [
+        "accountId",
         "argTemplate",
         "calls",
         "capability",
@@ -151,6 +152,7 @@
       "concept": "v1:agents:agent",
       "file": "agents/concepts.memql",
       "fields": [
+        "accountId",
         "active",
         "capabilities",
         "colorIndex",
@@ -189,6 +191,7 @@
       "concept": "v1:agents:agentAuthorization",
       "file": "agents/concepts.memql",
       "fields": [
+        "accountId",
         "action",
         "active",
         "agentId",
@@ -228,6 +231,7 @@
       "concept": "v1:agents:agentRole",
       "file": "agents/concepts.memql",
       "fields": [
+        "accountId",
         "active",
         "availableSkillIds",
         "category",
@@ -278,6 +282,7 @@
       "concept": "v1:agents:operatorMemory",
       "file": "agents/concepts.memql",
       "fields": [
+        "accountId",
         "entries",
         "lastUpdatedAt",
         "userId"
@@ -290,6 +295,7 @@
       "concept": "v1:agents:skillChangeEvent",
       "file": "agents/concepts.memql",
       "fields": [
+        "accountId",
         "actorAgentId",
         "actorUserId",
         "after",
@@ -315,6 +321,7 @@
       "concept": "v1:authoring:bundle",
       "file": "authoring/concepts.memql",
       "fields": [
+        "accountId",
         "activatedAt",
         "dryRunReport",
         "failureReason",
@@ -351,6 +358,7 @@
       "concept": "v1:authoring:construct",
       "file": "authoring/concepts.memql",
       "fields": [
+        "accountId",
         "bundleId",
         "canaryMatches",
         "catalogKey",
@@ -436,6 +444,7 @@
       "concept": "v1:authoring:dependencyEdge",
       "file": "authoring/concepts.memql",
       "fields": [
+        "accountId",
         "bundleId",
         "fromConstruct",
         "fromKind",
@@ -616,6 +625,7 @@
       "concept": "v1:calendar:booking",
       "file": "calendar/concepts.memql",
       "fields": [
+        "accountId",
         "bookerEmail",
         "bookerName",
         "endsAt",
@@ -645,6 +655,7 @@
       "concept": "v1:calendar:bookingHours",
       "file": "calendar/concepts.memql",
       "fields": [
+        "accountId",
         "endLocal",
         "label",
         "ownerUserId",
@@ -678,6 +689,7 @@
       "concept": "v1:calendar:calendarEvent",
       "file": "calendar/concepts.memql",
       "fields": [
+        "accountId",
         "allDay",
         "deleted",
         "endsAt",
@@ -1226,6 +1238,7 @@
       "concept": "v1:campaigns:sendJob",
       "file": "campaigns/concepts.memql",
       "fields": [
+        "accountId",
         "audienceId",
         "campaignAccountId",
         "campaignId",
@@ -1631,6 +1644,7 @@
       "concept": "v1:commerce:approvalChain",
       "file": "commerce/concepts.memql",
       "fields": [
+        "accountId",
         "companyGid",
         "currencyCode",
         "decidedAt",
@@ -1658,6 +1672,7 @@
       "concept": "v1:commerce:companyLocationNote",
       "file": "commerce/concepts.memql",
       "fields": [
+        "accountId",
         "authoredBy",
         "companyLocationGid",
         "note",
@@ -1680,6 +1695,7 @@
       "concept": "v1:commerce:creditLimit",
       "file": "commerce/concepts.memql",
       "fields": [
+        "accountId",
         "companyGid",
         "companyLocationGid",
         "currencyCode",
@@ -1710,6 +1726,7 @@
       "concept": "v1:commerce:customerNote",
       "file": "commerce/concepts.memql",
       "fields": [
+        "accountId",
         "authoredBy",
         "customerGid",
         "note",
@@ -1732,6 +1749,7 @@
       "concept": "v1:commerce:productContent",
       "file": "commerce/concepts.memql",
       "fields": [
+        "accountId",
         "authoredBy",
         "blocks",
         "description",
@@ -1757,6 +1775,7 @@
       "concept": "v1:commerce:quote",
       "file": "commerce/concepts.memql",
       "fields": [
+        "accountId",
         "approvalChainId",
         "companyContactGid",
         "companyGid",
@@ -1794,6 +1813,7 @@
       "concept": "v1:commerce:reorderList",
       "file": "commerce/concepts.memql",
       "fields": [
+        "accountId",
         "active",
         "companyContactGid",
         "companyGid",
@@ -1813,6 +1833,7 @@
       "concept": "v1:commerce:salesRep",
       "file": "commerce/concepts.memql",
       "fields": [
+        "accountId",
         "active",
         "displayName",
         "email",
@@ -1829,6 +1850,7 @@
       "concept": "v1:commerce:territory",
       "file": "commerce/concepts.memql",
       "fields": [
+        "accountId",
         "active",
         "companyGids",
         "companyLocationGids",
@@ -1844,6 +1866,7 @@
       "concept": "v1:common:attachment",
       "file": "common/concepts.memql",
       "fields": [
+        "accountId",
         "blobUrl",
         "fileName",
         "fileSize",
@@ -1872,6 +1895,7 @@
       "concept": "v1:compose:composeTemplate",
       "file": "compose/concepts.memql",
       "fields": [
+        "accountId",
         "accountIds",
         "archived",
         "description",
@@ -1903,6 +1927,7 @@
       "concept": "v1:compose:composition",
       "file": "compose/concepts.memql",
       "fields": [
+        "accountId",
         "accountIds",
         "archived",
         "deployableKind",
@@ -1963,6 +1988,7 @@
       "concept": "v1:compose:compositionInput",
       "file": "compose/concepts.memql",
       "fields": [
+        "accountId",
         "compositionId",
         "ownerUserId",
         "request"
@@ -1977,6 +2003,7 @@
       "concept": "v1:compose:recipe",
       "file": "compose/concepts.memql",
       "fields": [
+        "accountId",
         "accountIds",
         "archived",
         "description",
@@ -2012,6 +2039,7 @@
       "concept": "v1:data:log",
       "file": "data/concepts.memql",
       "fields": [
+        "accountId",
         "action",
         "active",
         "fromState",
@@ -2057,6 +2085,7 @@
       "concept": "v1:data:policy",
       "file": "data/concepts.memql",
       "fields": [
+        "accountId",
         "active",
         "checkedDataUsable",
         "partitionId",
@@ -2081,6 +2110,7 @@
       "concept": "v1:data:record",
       "file": "data/concepts.memql",
       "fields": [
+        "accountId",
         "active",
         "checkCount",
         "confidence",
@@ -2165,6 +2195,7 @@
       "concept": "v1:forge:project",
       "file": "forge/concepts.memql",
       "fields": [
+        "accountId",
         "createdByUserId",
         "description",
         "name",
@@ -2190,6 +2221,7 @@
       "concept": "v1:forge:request",
       "file": "forge/concepts.memql",
       "fields": [
+        "accountId",
         "approvedByUserId",
         "attachmentIds",
         "body",
@@ -2257,6 +2289,7 @@
       "concept": "v1:forge:requestEvent",
       "file": "forge/concepts.memql",
       "fields": [
+        "accountId",
         "actorRole",
         "actorUserId",
         "fromStatus",
@@ -2288,6 +2321,7 @@
       "concept": "v1:healing:healedOverride",
       "file": "healing/concepts.memql",
       "fields": [
+        "accountId",
         "active",
         "baseConstructId",
         "blastRadius",
@@ -3044,6 +3078,7 @@
       "concept": "v1:knowledge:documentChunk",
       "file": "knowledge/concepts.memql",
       "fields": [
+        "accountId",
         "documentId",
         "domainId",
         "seq",
@@ -3112,6 +3147,7 @@
       "concept": "v1:library:artifact",
       "file": "library/concepts.memql",
       "fields": [
+        "accountId",
         "accountIds",
         "agentId",
         "archived",
@@ -3200,6 +3236,7 @@
       "concept": "v1:library:documentComment",
       "file": "library/concepts.memql",
       "fields": [
+        "accountId",
         "anchor",
         "artifactId",
         "attachments",
@@ -3233,6 +3270,7 @@
       "concept": "v1:library:documentVersion",
       "file": "library/concepts.memql",
       "fields": [
+        "accountId",
         "attachmentId",
         "authorId",
         "authorKind",
@@ -3268,6 +3306,7 @@
       "concept": "v1:library:file",
       "file": "library/concepts.memql",
       "fields": [
+        "accountId",
         "archived",
         "backupPath",
         "backupWorkerId",
@@ -3348,6 +3387,7 @@
       "concept": "v1:library:fileChunk",
       "file": "library/concepts.memql",
       "fields": [
+        "accountId",
         "artifactId",
         "fileId",
         "ownerUserId",
@@ -3367,6 +3407,7 @@
       "concept": "v1:library:fileVersion",
       "file": "library/concepts.memql",
       "fields": [
+        "accountId",
         "blobUrl",
         "fileId",
         "format",
@@ -3411,6 +3452,7 @@
       "concept": "v1:library:folder",
       "file": "library/concepts.memql",
       "fields": [
+        "accountId",
         "archived",
         "deleted",
         "name",
@@ -3426,6 +3468,7 @@
       "concept": "v1:library:generatedOutput",
       "file": "library/concepts.memql",
       "fields": [
+        "accountId",
         "attachmentId",
         "body",
         "format",
@@ -3469,6 +3512,7 @@
       "concept": "v1:library:memory",
       "file": "library/concepts.memql",
       "fields": [
+        "accountId",
         "agentId",
         "content",
         "kind",
@@ -3497,6 +3541,7 @@
       "concept": "v1:library:uploadSession",
       "file": "library/concepts.memql",
       "fields": [
+        "accountId",
         "backupWatchId",
         "blobPath",
         "chunkSize",
@@ -3535,6 +3580,7 @@
       "concept": "v1:library:watchedFolder",
       "file": "library/concepts.memql",
       "fields": [
+        "accountId",
         "archived",
         "bytesSeen",
         "excludeGlobs",
@@ -3578,6 +3624,7 @@
       "concept": "v1:memory:belief",
       "file": "memory/concepts.memql",
       "fields": [
+        "accountId",
         "confidence",
         "content",
         "embedding",
@@ -3615,6 +3662,7 @@
       "concept": "v1:memory:consolidationCursor",
       "file": "memory/concepts.memql",
       "fields": [
+        "accountId",
         "episodesSeen",
         "lastRunAt",
         "ownerUserId",
@@ -3630,6 +3678,7 @@
       "concept": "v1:memory:conversationEvidence",
       "file": "memory/conversation.memql",
       "fields": [
+        "accountId",
         "content",
         "conversationId",
         "domainId",
@@ -3652,6 +3701,7 @@
       "concept": "v1:memory:workAcknowledgement",
       "file": "memory/acknowledgement.memql",
       "fields": [
+        "accountId",
         "acknowledgement",
         "domainId",
         "expiresAt",
@@ -3763,6 +3813,7 @@
       "concept": "v1:notes:note",
       "file": "notes/concepts.memql",
       "fields": [
+        "accountId",
         "body",
         "ownerUserId",
         "tags",
@@ -3906,6 +3957,7 @@
       "concept": "v1:observability:siteTraffic",
       "file": "observability/concepts.memql",
       "fields": [
+        "accountId",
         "bucket",
         "bytesTotal",
         "clientErrorCount",
@@ -3937,6 +3989,7 @@
       "concept": "v1:os:askConversation",
       "file": "os/ask.memql",
       "fields": [
+        "accountId",
         "ownerUserId",
         "title",
         "transcript"
@@ -3965,6 +4018,7 @@
       "concept": "v1:os:desktop",
       "file": "os/concepts.memql",
       "fields": [
+        "accountId",
         "document",
         "ownerUserId",
         "revision"
@@ -4164,6 +4218,7 @@
       "concept": "v1:planner:responsibility",
       "file": "planner/concepts.memql",
       "fields": [
+        "accountId",
         "assignedAgentId",
         "assignedRoleSlug",
         "condition",
@@ -4728,6 +4783,7 @@
       "concept": "v1:platform:outboxEntry",
       "file": "platform/concepts.memql",
       "fields": [
+        "accountId",
         "action",
         "attempts",
         "conceptId",
@@ -5087,6 +5143,7 @@
       "concept": "v1:platform:siteAccessSession",
       "file": "platform/concepts.memql",
       "fields": [
+        "accountId",
         "codeId",
         "endedAt",
         "generation",
@@ -5108,6 +5165,7 @@
       "concept": "v1:platform:siteHealth",
       "file": "platform/concepts.memql",
       "fields": [
+        "accountId",
         "bundleRef",
         "checkedAt",
         "durationMs",
@@ -5139,6 +5197,7 @@
       "concept": "v1:platform:sitePreviewGrant",
       "file": "platform/concepts.memql",
       "fields": [
+        "accountId",
         "candidateRef",
         "expiresAt",
         "issuedAt",
@@ -5162,6 +5221,7 @@
       "concept": "v1:platform:sitePreviewObservation",
       "file": "platform/concepts.memql",
       "fields": [
+        "accountId",
         "detail",
         "durationMs",
         "failure",
@@ -5387,6 +5447,7 @@
       "concept": "v1:reviews:moderationAction",
       "file": "packs/reviewspack/dsl/concepts.memql",
       "fields": [
+        "accountId",
         "criterion",
         "decidedBy",
         "note",
@@ -5745,6 +5806,7 @@
       "concept": "v1:safety:approvalRequest",
       "file": "safety/concepts.memql",
       "fields": [
+        "accountId",
         "action",
         "agentId",
         "argsRedacted",
@@ -5773,6 +5835,7 @@
       "concept": "v1:safety:classification",
       "file": "safety/concepts.memql",
       "fields": [
+        "accountId",
         "action",
         "agentId",
         "argsRedacted",
@@ -5803,6 +5866,7 @@
       "concept": "v1:safety:outputScreening",
       "file": "safety/concepts.memql",
       "fields": [
+        "accountId",
         "agentId",
         "categories",
         "confidence",
@@ -5833,6 +5897,7 @@
       "file": "shopify/generated/abandonedCheckout.memql",
       "fields": [
         "abandonedCheckoutUrl",
+        "accountId",
         "billingAddress",
         "completedAt",
         "customAttributes",
@@ -5870,6 +5935,7 @@
       "concept": "v1:shopify:article",
       "file": "shopify/generated/article.memql",
       "fields": [
+        "accountId",
         "author",
         "blogGid",
         "body",
@@ -5906,6 +5972,7 @@
       "concept": "v1:shopify:articleComment",
       "file": "shopify/generated/articleComment.memql",
       "fields": [
+        "accountId",
         "articleGid",
         "author",
         "body",
@@ -5946,6 +6013,7 @@
       "concept": "v1:shopify:blog",
       "file": "shopify/generated/blog.memql",
       "fields": [
+        "accountId",
         "articlesCount",
         "commentPolicy",
         "deleted",
@@ -5981,6 +6049,7 @@
       "concept": "v1:shopify:businessEntity",
       "file": "shopify/generated/businessEntity.memql",
       "fields": [
+        "accountId",
         "address",
         "archived",
         "companyName",
@@ -6007,6 +6076,7 @@
       "concept": "v1:shopify:catalog",
       "file": "shopify/generated/catalog.memql",
       "fields": [
+        "accountId",
         "deleted",
         "gid",
         "operations",
@@ -6049,6 +6119,7 @@
         "name",
         "productsCount",
         "resourceFeedback",
+        "sourceAccountId",
         "specificationHandle",
         "storeId",
         "supportsFuturePublishing",
@@ -6068,6 +6139,7 @@
       "concept": "v1:shopify:collection",
       "file": "shopify/generated/collection.memql",
       "fields": [
+        "accountId",
         "activeOperations",
         "availablePublicationsCount",
         "deleted",
@@ -6119,6 +6191,7 @@
       "concept": "v1:shopify:company",
       "file": "shopify/generated/company.memql",
       "fields": [
+        "accountId",
         "contactsCount",
         "customerSince",
         "defaultCursor",
@@ -6155,6 +6228,7 @@
       "concept": "v1:shopify:companyContact",
       "file": "shopify/generated/companyContact.memql",
       "fields": [
+        "accountId",
         "companyGid",
         "customerGid",
         "deleted",
@@ -6183,6 +6257,7 @@
       "concept": "v1:shopify:companyLocation",
       "file": "shopify/generated/companyLocation.memql",
       "fields": [
+        "accountId",
         "billingAddress",
         "buyerExperienceConfiguration",
         "catalogsCount",
@@ -6224,6 +6299,7 @@
       "concept": "v1:shopify:complianceJob",
       "file": "shopify/overlay/concepts.memql",
       "fields": [
+        "accountId",
         "completedAt",
         "customerGid",
         "deliveryIds",
@@ -6257,6 +6333,7 @@
       "concept": "v1:shopify:customer",
       "file": "shopify/generated/customer.memql",
       "fields": [
+        "accountId",
         "amountSpent",
         "canDelete",
         "companyContactProfilesGids",
@@ -6324,6 +6401,7 @@
       "concept": "v1:shopify:customerPaymentMethod",
       "file": "shopify/generated/customerPaymentMethod.memql",
       "fields": [
+        "accountId",
         "customerGid",
         "deleted",
         "gid",
@@ -6373,6 +6451,7 @@
       "concept": "v1:shopify:deliveryCarrierService",
       "file": "shopify/generated/deliveryCarrierService.memql",
       "fields": [
+        "accountId",
         "active",
         "callbackUrl",
         "deleted",
@@ -6398,6 +6477,7 @@
       "concept": "v1:shopify:deliveryCustomization",
       "file": "shopify/generated/deliveryCustomization.memql",
       "fields": [
+        "accountId",
         "deleted",
         "enabled",
         "errorHistory",
@@ -6423,6 +6503,7 @@
       "concept": "v1:shopify:deliveryProfile",
       "file": "shopify/generated/deliveryProfile.memql",
       "fields": [
+        "accountId",
         "activeMethodDefinitionsCount",
         "coversAllItems",
         "deleted",
@@ -6453,6 +6534,7 @@
       "concept": "v1:shopify:discountNode",
       "file": "shopify/generated/discountNode.memql",
       "fields": [
+        "accountId",
         "deleted",
         "discount",
         "gid",
@@ -6475,6 +6557,7 @@
       "file": "shopify/generated/draftOrder.memql",
       "fields": [
         "acceptAutomaticDiscounts",
+        "accountId",
         "allVariantPricesOverridden",
         "allowDiscountCodesInCheckout",
         "amountDueLaterSet",
@@ -6554,6 +6637,7 @@
       "concept": "v1:shopify:fulfillment",
       "file": "shopify/generated/fulfillment.memql",
       "fields": [
+        "accountId",
         "deleted",
         "deliveredAt",
         "displayStatus",
@@ -6620,6 +6704,7 @@
       "concept": "v1:shopify:fulfillmentOrder",
       "file": "shopify/generated/fulfillmentOrder.memql",
       "fields": [
+        "accountId",
         "assignedLocation",
         "deleted",
         "deliveryMethod",
@@ -6677,6 +6762,7 @@
       "concept": "v1:shopify:giftCard",
       "file": "shopify/generated/giftCard.memql",
       "fields": [
+        "accountId",
         "balance",
         "crossCurrencyRedemptionStrategy",
         "customerGid",
@@ -6719,6 +6805,7 @@
       "concept": "v1:shopify:inventoryItem",
       "file": "shopify/generated/inventoryItem.memql",
       "fields": [
+        "accountId",
         "countryCodeOfOrigin",
         "deleted",
         "duplicateSkuCount",
@@ -6753,6 +6840,7 @@
       "concept": "v1:shopify:inventoryLevel",
       "file": "shopify/generated/inventoryLevel.memql",
       "fields": [
+        "accountId",
         "canDeactivate",
         "deactivationAlert",
         "deleted",
@@ -6780,6 +6868,7 @@
       "concept": "v1:shopify:inventoryShipment",
       "file": "shopify/generated/inventoryShipment.memql",
       "fields": [
+        "accountId",
         "barcode",
         "dateCreated",
         "dateReceived",
@@ -6820,6 +6909,7 @@
       "concept": "v1:shopify:inventoryTransfer",
       "file": "shopify/generated/inventoryTransfer.memql",
       "fields": [
+        "accountId",
         "dateCreated",
         "deleted",
         "destination",
@@ -6862,6 +6952,7 @@
       "concept": "v1:shopify:location",
       "file": "shopify/generated/location.memql",
       "fields": [
+        "accountId",
         "activatable",
         "address",
         "addressVerified",
@@ -6901,6 +6992,7 @@
       "concept": "v1:shopify:market",
       "file": "shopify/generated/market.memql",
       "fields": [
+        "accountId",
         "catalogsCount",
         "conditions",
         "currencySettings",
@@ -6944,6 +7036,7 @@
       "concept": "v1:shopify:marketWebPresence",
       "file": "shopify/generated/marketWebPresence.memql",
       "fields": [
+        "accountId",
         "alternateLocales",
         "defaultLocale",
         "deleted",
@@ -6970,6 +7063,7 @@
       "concept": "v1:shopify:marketingActivity",
       "file": "shopify/generated/marketingActivity.memql",
       "fields": [
+        "accountId",
         "activityListUrl",
         "adSpend",
         "app",
@@ -7076,6 +7170,7 @@
       "concept": "v1:shopify:marketingEvent",
       "file": "shopify/generated/marketingEvent.memql",
       "fields": [
+        "accountId",
         "app",
         "channelHandle",
         "deleted",
@@ -7135,6 +7230,7 @@
       "concept": "v1:shopify:menu",
       "file": "shopify/generated/menu.memql",
       "fields": [
+        "accountId",
         "deleted",
         "gid",
         "handle",
@@ -7159,6 +7255,7 @@
       "file": "shopify/generated/metafieldDefinition.memql",
       "fields": [
         "access",
+        "accountId",
         "capabilities",
         "constraints",
         "deleted",
@@ -7227,6 +7324,7 @@
       "concept": "v1:shopify:metaobject",
       "file": "shopify/generated/metaobject.memql",
       "fields": [
+        "accountId",
         "capabilities",
         "createdByApp",
         "createdByStaffGid",
@@ -7259,6 +7357,7 @@
       "file": "shopify/generated/metaobjectDefinition.memql",
       "fields": [
         "access",
+        "accountId",
         "capabilities",
         "createdByApp",
         "createdByStaffGid",
@@ -7290,6 +7389,7 @@
       "concept": "v1:shopify:onlineStoreTheme",
       "file": "shopify/generated/onlineStoreTheme.memql",
       "fields": [
+        "accountId",
         "deleted",
         "gid",
         "name",
@@ -7326,6 +7426,7 @@
       "concept": "v1:shopify:order",
       "file": "shopify/generated/order.memql",
       "fields": [
+        "accountId",
         "additionalFees",
         "agreementsGids",
         "alerts",
@@ -7501,6 +7602,7 @@
       "concept": "v1:shopify:orderLineItem",
       "file": "shopify/generated/orderLineItem.memql",
       "fields": [
+        "accountId",
         "contractGid",
         "currentQuantity",
         "customAttributes",
@@ -7558,6 +7660,7 @@
       "concept": "v1:shopify:orderTransaction",
       "file": "shopify/generated/orderTransaction.memql",
       "fields": [
+        "accountId",
         "accountNumber",
         "amountRoundingSet",
         "amountSet",
@@ -7630,6 +7733,7 @@
       "concept": "v1:shopify:page",
       "file": "shopify/generated/page.memql",
       "fields": [
+        "accountId",
         "body",
         "bodySummary",
         "defaultCursor",
@@ -7659,6 +7763,7 @@
       "concept": "v1:shopify:paymentTermsTemplate",
       "file": "shopify/generated/paymentTermsTemplate.memql",
       "fields": [
+        "accountId",
         "deleted",
         "description",
         "dueInDays",
@@ -7692,6 +7797,7 @@
       "concept": "v1:shopify:priceList",
       "file": "shopify/generated/priceList.memql",
       "fields": [
+        "accountId",
         "catalogGid",
         "currency",
         "deleted",
@@ -7716,6 +7822,7 @@
       "concept": "v1:shopify:priceListPrice",
       "file": "shopify/generated/priceListPrice.memql",
       "fields": [
+        "accountId",
         "compareAtPrice",
         "deleted",
         "gid",
@@ -7747,6 +7854,7 @@
       "concept": "v1:shopify:product",
       "file": "shopify/generated/product.memql",
       "fields": [
+        "accountId",
         "availablePublicationsCount",
         "bundleConsolidatedOptions",
         "category",
@@ -7823,6 +7931,7 @@
       "concept": "v1:shopify:productFeed",
       "file": "shopify/generated/productFeed.memql",
       "fields": [
+        "accountId",
         "channelId",
         "country",
         "deleted",
@@ -7852,6 +7961,7 @@
       "concept": "v1:shopify:productVariant",
       "file": "shopify/generated/productVariant.memql",
       "fields": [
+        "accountId",
         "availableForSale",
         "availablePublicationsCount",
         "barcode",
@@ -7907,6 +8017,7 @@
       "concept": "v1:shopify:publication",
       "file": "shopify/generated/publication.memql",
       "fields": [
+        "accountId",
         "autoPublish",
         "catalogGid",
         "deleted",
@@ -7931,6 +8042,7 @@
       "concept": "v1:shopify:quantityRule",
       "file": "shopify/generated/quantityRule.memql",
       "fields": [
+        "accountId",
         "deleted",
         "gid",
         "increment",
@@ -7964,6 +8076,7 @@
       "concept": "v1:shopify:refund",
       "file": "shopify/generated/refund.memql",
       "fields": [
+        "accountId",
         "deleted",
         "duties",
         "gid",
@@ -7994,6 +8107,7 @@
       "concept": "v1:shopify:reverseDelivery",
       "file": "shopify/generated/reverseDelivery.memql",
       "fields": [
+        "accountId",
         "deleted",
         "deliverable",
         "gid",
@@ -8017,6 +8131,7 @@
       "concept": "v1:shopify:reverseFulfillmentOrder",
       "file": "shopify/generated/reverseFulfillmentOrder.memql",
       "fields": [
+        "accountId",
         "deleted",
         "gid",
         "orderGid",
@@ -8048,6 +8163,7 @@
       "concept": "v1:shopify:segment",
       "file": "shopify/generated/segment.memql",
       "fields": [
+        "accountId",
         "creationDate",
         "deleted",
         "gid",
@@ -8071,6 +8187,7 @@
       "concept": "v1:shopify:sellingPlan",
       "file": "shopify/generated/sellingPlan.memql",
       "fields": [
+        "accountId",
         "billingPolicy",
         "category",
         "deleted",
@@ -8111,6 +8228,7 @@
       "concept": "v1:shopify:sellingPlanGroup",
       "file": "shopify/generated/sellingPlanGroup.memql",
       "fields": [
+        "accountId",
         "appId",
         "deleted",
         "description",
@@ -8142,6 +8260,7 @@
       "concept": "v1:shopify:shop",
       "file": "shopify/generated/shop.memql",
       "fields": [
+        "accountId",
         "accountOwnerGid",
         "alerts",
         "allProductCategoriesList",
@@ -8224,6 +8343,7 @@
       "concept": "v1:shopify:shopLocale",
       "file": "shopify/generated/shopLocale.memql",
       "fields": [
+        "accountId",
         "deleted",
         "gid",
         "locale",
@@ -8248,6 +8368,7 @@
       "concept": "v1:shopify:shopPolicy",
       "file": "shopify/generated/shopPolicy.memql",
       "fields": [
+        "accountId",
         "body",
         "deleted",
         "gid",
@@ -8284,6 +8405,7 @@
       "concept": "v1:shopify:shopifyPaymentsBalanceTransaction",
       "file": "shopify/generated/shopifyPaymentsBalanceTransaction.memql",
       "fields": [
+        "accountId",
         "adjustmentReason",
         "adjustmentsOrders",
         "amount",
@@ -8327,6 +8449,7 @@
       "concept": "v1:shopify:shopifyPaymentsDispute",
       "file": "shopify/generated/shopifyPaymentsDispute.memql",
       "fields": [
+        "accountId",
         "amount",
         "deleted",
         "disputeEvidence",
@@ -8371,6 +8494,7 @@
       "concept": "v1:shopify:shopifyPaymentsPayout",
       "file": "shopify/generated/shopifyPaymentsPayout.memql",
       "fields": [
+        "accountId",
         "businessEntityGid",
         "deleted",
         "externalTraceId",
@@ -8410,6 +8534,7 @@
       "concept": "v1:shopify:shopifyReturn",
       "file": "shopify/generated/shopifyReturn.memql",
       "fields": [
+        "accountId",
         "closedAt",
         "decline",
         "deleted",
@@ -8452,6 +8577,7 @@
       "concept": "v1:shopify:staffMember",
       "file": "shopify/generated/staffMember.memql",
       "fields": [
+        "accountId",
         "accountType",
         "active",
         "avatar",
@@ -8496,6 +8622,7 @@
       "concept": "v1:shopify:store",
       "file": "shopify/overlay/concepts.memql",
       "fields": [
+        "accountId",
         "adminTokenRef",
         "apiVersion",
         "appClientId",
@@ -8538,6 +8665,7 @@
       "concept": "v1:shopify:storeCreditAccount",
       "file": "shopify/generated/storeCreditAccount.memql",
       "fields": [
+        "accountId",
         "balance",
         "deleted",
         "gid",
@@ -8561,6 +8689,7 @@
       "concept": "v1:shopify:subscriptionContract",
       "file": "shopify/generated/subscriptionContract.memql",
       "fields": [
+        "accountId",
         "app",
         "appAdminUrl",
         "billingPolicy",
@@ -8618,6 +8747,7 @@
       "concept": "v1:shopify:tenderTransaction",
       "file": "shopify/generated/tenderTransaction.memql",
       "fields": [
+        "accountId",
         "amount",
         "deleted",
         "gid",
@@ -8645,6 +8775,7 @@
       "concept": "v1:shopify:urlRedirect",
       "file": "shopify/generated/urlRedirect.memql",
       "fields": [
+        "accountId",
         "deleted",
         "gid",
         "path",
@@ -8666,6 +8797,7 @@
       "concept": "v1:skills:skill",
       "file": "skills/concepts.memql",
       "fields": [
+        "accountId",
         "active",
         "category",
         "constructRefs",
@@ -8734,6 +8866,7 @@
       "concept": "v1:skills:skillEdge",
       "file": "skills/concepts.memql",
       "fields": [
+        "accountId",
         "edgeType",
         "evidence",
         "fromSkillId",
@@ -8770,6 +8903,7 @@
       "concept": "v1:todos:todo",
       "file": "todos/concepts.memql",
       "fields": [
+        "accountId",
         "done",
         "dueAt",
         "ownerUserId",
@@ -8793,6 +8927,7 @@
       "concept": "v1:wholesale:application",
       "file": "packs/wholesalepack/dsl/concepts.memql",
       "fields": [
+        "accountId",
         "applicantEmail",
         "applicantName",
         "companyName",
@@ -8812,6 +8947,7 @@
       "concept": "v1:wholesale:applicationDecision",
       "file": "packs/wholesalepack/dsl/concepts.memql",
       "fields": [
+        "accountId",
         "applicationId",
         "decidedBy",
         "note",
@@ -8841,6 +8977,7 @@
       "concept": "v1:wholesale:entitlement",
       "file": "packs/wholesalepack/dsl/concepts.memql",
       "fields": [
+        "accountId",
         "adapter",
         "applicationId",
         "buyerEmail",
@@ -8871,6 +9008,7 @@
       "concept": "v1:wholesale:wholesaleSettings",
       "file": "packs/wholesalepack/dsl/concepts.memql",
       "fields": [
+        "accountId",
         "applicationsOpen",
         "entitlementAdapter",
         "introText",
@@ -8887,6 +9025,7 @@
       "concept": "v1:work:approval",
       "file": "work/concepts.memql",
       "fields": [
+        "accountId",
         "answer",
         "artifactHash",
         "continuedAt",
@@ -8948,6 +9087,7 @@
       "file": "work/concepts.memql",
       "fields": [
         "acceptance",
+        "accountId",
         "accountIds",
         "ceilings",
         "closeReason",
@@ -8996,6 +9136,7 @@
       "concept": "v1:work:modelCall",
       "file": "work/concepts.memql",
       "fields": [
+        "accountId",
         "cost",
         "decision",
         "error",
@@ -9035,6 +9176,7 @@
       "concept": "v1:work:observation",
       "file": "work/concepts.memql",
       "fields": [
+        "accountId",
         "content",
         "data",
         "embedding",
@@ -9062,6 +9204,7 @@
       "concept": "v1:work:run",
       "file": "work/concepts.memql",
       "fields": [
+        "accountId",
         "actualFootprint",
         "automationName",
         "callerSuppliedPayload",
@@ -9145,6 +9288,7 @@
       "concept": "v1:work:step",
       "file": "work/concepts.memql",
       "fields": [
+        "accountId",
         "actualFootprint",
         "approvalId",
         "artifactFileIds",
@@ -9225,6 +9369,7 @@
       "concept": "v1:workbench:executionBinding",
       "file": "workbench/concepts.memql",
       "fields": [
+        "accountId",
         "expiresAt",
         "generation",
         "machineId",
@@ -9255,6 +9400,7 @@
       "concept": "v1:workbench:workspace",
       "file": "workbench/concepts.memql",
       "fields": [
+        "accountId",
         "lastUsedAt",
         "nodeId",
         "ownerUserId",

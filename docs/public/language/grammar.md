@@ -134,9 +134,9 @@ Edition `2026`, grammar version `2026.11-case-insensitive-substring-bceec6b9`.
 <builtin-annotation>  ::= ( "@alias" | "@args" | "@description" | "@disabled"
                         | "@executor" | "@requiresCapability" | "@sdk" ) [ <annotation-args> ]
 <capability-annotation> ::= ( "@description" | "@disabled" | "@sideEffect" ) [ <annotation-args> ]
-<concept-annotation>  ::= ( "@composable" | "@description" | "@displayCard"
-                        | "@mirroredTo" | "@origin" | "@retention" | "@rowAuthz"
-                        | "@serverWritten" | "@type" | "@version" ) [ <annotation-args> ]
+<concept-annotation>  ::= ( "@belongsTo" | "@composable" | "@description"
+                        | "@displayCard" | "@mirroredTo" | "@origin" | "@retention"
+                        | "@rowAuthz" | "@serverWritten" | "@type" | "@version" ) [ <annotation-args> ]
 <logic-annotation>    ::= ( "@actor" | "@description" | "@disabled" | "@eventField"
                         | "@requiresCapability" | "@requiresRank" ) [ <annotation-args> ]
 <mutation-annotation> ::= ( "@accessGate" | "@actor" | "@addToSet" | "@appendFields"

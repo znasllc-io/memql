@@ -41,6 +41,13 @@ func ForwardedAuthorityToProto(a auth.ForwardedAuthority, originNodeId, originNo
 		// same on a row this hop writes as on one the user writes directly.
 		FirstName: a.FirstName,
 		LastName:  a.LastName,
+		// The account the call acts in, when the producer stated one (see the
+		// field comment on auth.ForwardedAuthority). Carried so a row this hop
+		// writes records the account the originating node was acting in. A
+		// mapping that dropped it would fail silently and in the quiet
+		// direction: the far node would resolve an account from the actor, and
+		// for a run a row triggered that is no account at all.
+		AccountId: a.AccountId,
 	}
 	switch a.Kind {
 	case auth.ForwardedPrincipalUser:
@@ -83,6 +90,10 @@ func ForwardedAuthorityFromProto(p *nodev1.ForwardedAuthority) auth.ForwardedAut
 		// them and the AccessContext it returns has nowhere to put them.
 		FirstName: p.GetFirstName(),
 		LastName:  p.GetLastName(),
+		// Not an authorization input either: VerifyForwardedAuthority does not
+		// read it, and auth.BindForwardedContext binds it under its own key.
+		// Whatever spelling arrives, that bind stores the bare id.
+		AccountId: p.GetAccountId(),
 	}
 	switch p.GetPrincipalKind() {
 	case nodev1.ForwardedPrincipalKind_FORWARDED_PRINCIPAL_KIND_USER:

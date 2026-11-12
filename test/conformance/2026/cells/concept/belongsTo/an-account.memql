@@ -1,0 +1,8 @@
+/// A support ticket raised by a customer. Each ticket belongs to one account.
+@belongsTo(account)
+concept ticket {
+  accountId    string
+  ownerUserId  string
+  title        string
+  status       string
+}

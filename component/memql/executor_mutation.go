@@ -756,6 +756,16 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		return nil, meta, fmt.Errorf("%s: @serverWritten requires internal origin; use the concept's authorized capability", conceptMeta.Name)
 	}
 
+	// A CONFIGURATION VARIABLE'S ROW is the deployment's to write: a cluster
+	// owner, or server code stamped for the write (a settings save). Here,
+	// beside the check above and for its reasons: the answer is a property of
+	// the concept and the caller, so it covers the named mutation and the raw
+	// literal alike and a refused write reads nothing. Reads are not this
+	// rule's; see platform_variable_write_guard.go for why it is not a tier.
+	if err := guardPlatformVariableWrite(ctx, conceptMeta.Name); err != nil {
+		return nil, meta, err
+	}
+
 	// RETIRED CONCEPT: registered, readable, CLOSED TO NEW WRITES (memql#3756).
 	// A promoted concept demoted while rows already existed under it keeps its
 	// registry entry precisely so those rows stay readable -- which means the
@@ -909,6 +919,11 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// stamped", and an update whose delta never mentioned the owner stamped
 	// nothing. See the pipeline case in site_owner_stamp_pipeline_update_test.go.
 	_, deltaNamedOwner := payload["ownerUserId"]
+	// WHAT THIS WRITE'S DELTA SAID ABOUT THE ACCOUNT, captured here for the same
+	// reason: after the read-merge a stored `accountId` and a restated one are
+	// one map entry, and the account stamp refuses a raw write that names a
+	// different account than the stored one. See account_stamp.go.
+	accountDeltaBefore := captureAccountDelta(payload)
 	// WHETHER THIS WRITE ASKED FOR A RESERVED NAME, captured here for the same
 	// reason: after the read-merge a stored `memqlDomain` and a requested one
 	// are one map entry, and the operator normalization (memql#5792) clears
@@ -1277,6 +1292,24 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		ownerBefore.restore(payload)
 	}
 
+	// THE ACCOUNT STAMP (design record 2026-11-12 account row ownership). A
+	// concept declared `@belongsTo(account)` records which account each row
+	// belongs to, and the engine fills that in here rather than every mutation
+	// having to: from the row's parent, else from the account the call acts
+	// in. It leaves a concept whose own writers state the account
+	// (`@belongsTo(account, stated)`, which is every organization-owned concept
+	// validateOrganizationOwnership judged above) exactly as it found it, and
+	// it does nothing until the cluster's account-stamping switch is on.
+	//
+	// Placed HERE for the reasons the owner stamp is: after the read-merge, so
+	// it sees the stored account and is not discarded by it, and before
+	// canonicalizeRelationshipFields, because it writes the bare id and a
+	// concept that declares a relationship on the field gets the canonical
+	// spelling from that step. See account_stamp.go.
+	if err := e.stampAccount(ctx, conceptMeta, payload, organizationPrior, accountDeltaBefore, mutation.FromTemplate); err != nil {
+		return nil, meta, err
+	}
+
 	// A MACHINE'S SHARING IS ITS OWNER'S CONSENT (memql#5658), server-written
 	// only. Here rather than beside the construct ladder above for one reason:
 	// it also judges the OWNER, and the owner this write lands is only final
@@ -1290,6 +1323,17 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	}
 	if conceptMeta.Name == WorkerRegistrationConcept {
 		if err := validateWorkerConsentServerOnly(ctx, organizationPrior, payload); err != nil {
+			return nil, meta, err
+		}
+	}
+	// A SOURCE CREDENTIAL'S ROW is the engine's account of a value it sealed:
+	// server code creates it and writes every field but the revocation. Here,
+	// beside the consent guard and for its reason: it judges the OWNER too,
+	// which is final only after the stamps above, and compares it before
+	// canonicalization. The writers' @serverOnly never sees a raw insert() or
+	// an inline update{}. See platform_source_credential_write_guard.go.
+	if conceptMeta.Name == conceptPlatformSourceCredential {
+		if err := validateSourceCredentialServerOnly(ctx, organizationPrior, payload); err != nil {
 			return nil, meta, err
 		}
 	}

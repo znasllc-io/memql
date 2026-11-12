@@ -25,6 +25,7 @@
 /// per-step record of what the run placed on this machine and whether the machine already had it,
 /// which is the only evidence uninstall has that an artifact is ours to remove.
 @displayCard(primary="graph", secondary="status", tertiary="runId", status="status")
+@belongsTo(cluster)
 concept installRun {
   runId          string! @description("Stable id for this run; also the concept row id, so every step transition appends to one timeline.")
   graph          enum("install", "uninstall", "rebuild") @description("Which step-graph document this run executes (scripts/install/graph/install.json, uninstall.json or rebuild.json).")

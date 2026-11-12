@@ -101,8 +101,7 @@ export function PeoplePicker({
 /**
  * One or several groups, as toggles.
  *
- * TOGGLES RATHER THAN A `<select multiple>`, the reasoning `AccountLabelPicker`
- * records: a native multi-select drops every selection the moment somebody
+ * TOGGLES RATHER THAN A `<select multiple>`: a native multi-select drops every selection the moment somebody
  * clicks without a modifier, on a control whose job is "one or two groups".
  *
  * Archived groups are offered only when already chosen -- a person being

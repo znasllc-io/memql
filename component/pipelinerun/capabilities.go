@@ -139,6 +139,18 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema:  map[string]string{},
 		},
 		{
+			Name:        "aiSettingsSave",
+			Description: "Save both installation-wide pipeline AI switches (Pipelines > Settings > AI) to their own variable row. Needs the settings part; applies to the next review or failure. Answers {setting, review, diagnosis}.",
+			Handler:     i.handleAISettingsSave,
+			ArgsSchema:  map[string]string{"review": "boolean (required) -- AI review of pull requests", "diagnosis": "boolean (required) -- AI diagnosis of failed runs"},
+		},
+		{
+			Name:        "securitySettingsSave",
+			Description: "Save the installation-wide weekly security scans switch (Pipelines > Settings > Security) to its own variable row. Needs the settings part; applies to the next scan. Answers {setting, enabled}.",
+			Handler:     i.handleSecuritySettingsSave,
+			ArgsSchema:  map[string]string{"enabled": "boolean (required) -- weekly security scans"},
+		},
+		{
 			Name:        "status",
 			Description: "The pipelines readiness report: GitHub App and repository configuration, plus each known workbench's runner and last isolation proof, read through the authenticated mesh. No credential values; starts no builds or probes.",
 			Handler:     i.handleStatus,

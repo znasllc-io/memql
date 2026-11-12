@@ -5,6 +5,7 @@ use agents.builtins.{ runAgentTurn }
 /// A requested research brief and the draft saved for its owner to review.
 @rowAuthz(owner="ownerUserId")
 @displayCard(primary="question", status="status")
+@belongsTo(account)
 concept researchBrief {
   ownerUserId string!
   question    string!
@@ -12,6 +13,7 @@ concept researchBrief {
   status      enum("requested", "draft", "no_sources")!
   answer      string
   sources     []object
+  accountId   string
 }
 
 /// Select the fields a draft reader needs.

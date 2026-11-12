@@ -33,4 +33,5 @@ var (
 	EnsureWorkRunRevisionLookupIndex  = ensureWorkRunRevisionLookupIndex
 	EnsureSiteAccessLookupIndexes     = ensureSiteAccessLookupIndexes
 	EnsureInboundFailedLookupIndex    = ensureInboundFailedLookupIndex
+	EnsureAccountIndex                = ensureAccountIndex
 )

@@ -853,7 +853,18 @@ func (h *AccessHandler) serveCall(w http.ResponseWriter, r *http.Request, stamp 
 	// The owner owns what is written through their site, and the visitor is data on it.
 	// Never internal origin: that would put every @serverOnly construct in reach of
 	// anybody holding a code.
-	result, err := h.engine.Execute(auth.ContextWithUserActor(r.Context(), site.OwnerUserID), call)
+	//
+	// IN THE SITE'S ACCOUNT, which is the row's as well and a separate fact from whose
+	// authority is lent. The owner's own account is not a stand-in for it: an operator
+	// owns the deployables of several clients and acts in the primary account, and a
+	// person in more than one account acts in the one they joined first, so a row a
+	// visitor's call writes would be recorded in an account this deployable does not
+	// belong to. It is the account the code that opened this session was already held to
+	// (codeOpensSite), a field of the row resolveSite read as the cluster and held to the
+	// stamp; nothing the visitor sent reaches it. A site with none states none, and the
+	// engine resolves the account from the borrowed owner as it did before.
+	ctx := auth.ContextWithCallAccount(auth.ContextWithUserActor(r.Context(), site.OwnerUserID), site.AccountID)
+	result, err := h.engine.Execute(ctx, call)
 	if err != nil {
 		// NOT THE ERROR. It can repeat the statement, and the statement is every argument
 		// the visitor sent and every id this handler stamped. The site and the construct

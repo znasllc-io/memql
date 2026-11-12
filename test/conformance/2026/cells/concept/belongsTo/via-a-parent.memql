@@ -1,0 +1,17 @@
+/// A support ticket raised by a customer. Each ticket belongs to one account.
+@belongsTo(account)
+concept ticket {
+  accountId  string
+  title      string
+  status     string
+}
+
+/// A reply on a ticket. It belongs to the account its ticket belongs to.
+@belongsTo(account, via="ticketId")
+concept ticketReply {
+  accountId  string
+  ticketId   string
+  body       string
+
+  @relationship(type="parent", field="ticketId", target=ticket, direction="outgoing")
+}

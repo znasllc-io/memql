@@ -28,6 +28,7 @@ use router.concepts.{ call }
 /// goal that has been re-run, forked or repaired still reads as one thing.
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountIds")
 @displayCard(primary="statement", secondary="origin", tertiary="requestedVia", status="status")
+@belongsTo(account)
 concept goal {
   ownerUserId       string  @serverSet  @description("v1:identity:user.id of the person this goal belongs to, stamped from the actor; present-and-empty for a cluster-owned goal.")
   statement         string!  @description("The goal in the person's own words.")
@@ -43,6 +44,7 @@ concept goal {
   acceptance        object @description("Owner acceptance receipt: {runId, runVersion, acceptedBy, acceptedAt, feedback}. A model cannot write its own acceptance.")
   closeReason       string  @description("Why it closed, in words a person can read.")
   routing           object  @description("The owner's routing choice for every run of this goal -- the Ask route picker's: {source, level, by}. source is empty (the rules decide), a pinned source (app:<id>, app:*, fleet:strongest, fleet:fastest, fleet:<modelId>, federation:cheapest, federation:strongest) or a route (policy:<name>); level is empty or fast, strong, reasoning; by is the owner, stamped by the server. Each run copies it onto its own row, which is what the executing nodes read. Deliberately NOT in input: the input is what the model reads. Absent when nobody chose, which routes by the rules.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", as="forResponsibility", field="responsibilityId", target=responsibility, direction="outgoing")
@@ -53,6 +55,7 @@ concept goal {
 /// fields follow the deployment-run pattern (exactly-once per replica, the abandoned sweep in A2).
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="automationName", secondary="status", tertiary="goalId", status="status")
+@belongsTo(account, via="goalId")
 concept run {
   providerAccountingVersion int @serverSet @description("Native provider accounting contract at run creation; absent on legacy runs with unknown historical attempts.")
   spine object @description("Immutable planning workflow closure, contract and source fingerprint captured at goal admission.")
@@ -104,6 +107,7 @@ concept run {
   rerun                  object  @description("The pending re-run of this run (epic memql#5414, D18 and D19): {requestId, reason: rerun|headMove|branch|replan, stepKey, override, overrideRequestedAt, snapshot, workspace, requestedBy, requestedAt}. A failure retry preserves its failed version's override; overrideRequestedAt keeps inherited instructions older than later owner corrections while requestedAt dates the new execution. Written on the node the act arrived at and served on the agent that executes the run -- the request rides the ROW because the executing replica holds none of the originating one's memory. Cleared to {} when the run closes.")
   routing                object  @description("The owner's routing choice every model call of this run honours, on every node that executes it -- copied from the goal when the run opens, inherited by a fork, a replay and a branch: {source, level, by} (see v1:work:goal.routing). The planner's compile claim and the agent's dispatch stamp it onto the run context they build from THIS row, so neither needs anything from the node that took the turn. A pinned source is the owner's own pin and never substituted; a route fails over along its chain; the level binds the calls the run's steps make. Absent when nobody chose.")
   validation             object  @description("The answer validator's summary (epic memql#5414, design D22): {verdict: pass|flag, stepKey, version, observationId, level, at}. A PRE-FILTER, never a certification: it is shown beside the person's own verdict, it never counts as a like and it never moves a procedure's ladder. The detail -- a verdict per axis and the reason -- is the decision observation it names.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="goalId", target=goal, direction="outgoing")
@@ -116,6 +120,7 @@ concept run {
 /// resolved secrets); `call` names what ran, `result` is the trimmed result shape.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="key", secondary="stepType", tertiary="runId", status="status")
+@belongsTo(account, via="runId")
 concept step {
   ownerUserId        string  @serverSet  @description("Copied from the run's owner; present-and-empty for a system run.")
   runId              string!  @description("v1:work:run.id this step belongs to.")
@@ -154,6 +159,7 @@ concept step {
   authoredBy         string  @description("The v1:identity:user.id of the person who WROTE this version's prompt or inputs (D20). A version a person authored is marked as such and is never a recording of the app. Empty when the version's input is the system's own, including a re-run that changed only the level, model or effort.")
   logFileId          string  @description("The v1:library:file holding this step's full log, when the runner that executed it captured one (epic memql#5477: a pipeline step's output, archived from the log store). A plain string FK, not a @relationship: it is copied from the runner's receipt, and a relationship would canonicalize -- and refuse an id of the wrong shape -- on the receipt's own write, so a runner's mistake would leave the step without a receipt instead of with a wrong link. Empty when the step kept no log.")
   artifactFileIds    []string  @description("The Library files this step produced as artifacts -- a pipeline step's declared `artifacts:` paths, uploaded and owned by the pipeline's owner (epic memql#5477). Copied from the runner's receipt, like logFileId. Empty when the step produced none.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="runId", target=run, direction="outgoing")
@@ -163,6 +169,7 @@ concept step {
 /// hypertable with retention (epic A2), never broadcast.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="model", secondary="served", tertiary="runId")
+@belongsTo(account, via="runId")
 concept modelCall {
   ownerUserId   string  @serverSet  @description("Copied from the run's owner.")
   runId         string!  @description("v1:work:run.id the call was made for.")
@@ -182,6 +189,7 @@ concept modelCall {
   error         string  @description("The provider's error, when there was one.")
   routerCallId  string  @description("The v1:router:call row that records the attempt this call ended on -- the decision record behind it. Empty on a row served from the journal, where no source was asked, and on a call no router wrapped.")
   decision      object  @description("The routing decision behind the source that answered: {level, requestedLevel, servedLevel, degraded, rule, policy, door, outcome, minContextTokens, considered: [{entry, door, reason}]}. `considered` is every source the route passed over, in order and with why -- an app source this node cannot open, a machine that was asleep -- and ends with the one that served. Empty wherever routerCallId is.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="runId", target=run, direction="outgoing")
@@ -192,6 +200,7 @@ concept modelCall {
 /// artifact, because resume compares artifactHash. It broadcasts.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="kind", secondary="decision", tertiary="runId", status="decision")
+@belongsTo(account, via="runId")
 concept approval {
   ownerUserId   string  @serverSet  @description("Copied from the run's owner: the person whose decision this is.")
   runId         string  @description("v1:work:run.id parked on this approval. REQUIRED IN EFFECT for every kind but one, and the exception is why the bang is gone: `routingReview` (epic memql#5146, D5) is raised by a nightly FOLD rather than by a run, so there is no run to park -- and a synthetic one would be a run that never ran, sitting in every list of runs forever. component/work's approval builder refuses an empty runId for every other kind, so the invariant is enforced where it can name the kind rather than by a schema that cannot.")
@@ -211,6 +220,7 @@ concept approval {
   continuedAt   datetime  @description("Native receipt that an optional information wait ended without an answer. Grants no permission and leaves late answers available.")
   permissionUsedAt datetime @description("When one exact dispatch consumed a typed one-time computer permission.")
   permissionRevokedAt datetime @description("When the person revoked a saved computer permission.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="runId", target=run, direction="outgoing")
@@ -220,6 +230,7 @@ concept approval {
 /// embedding source for recall, so the journal is the episodic memory. Never broadcast.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="kind", secondary="stepKey", tertiary="runId")
+@belongsTo(account, via="runId")
 concept observation {
   ownerUserId  string  @serverSet  @description("Copied from the run's owner.")
   runId        string!  @description("v1:work:run.id the observation belongs to.")
@@ -228,6 +239,7 @@ concept observation {
   data         object  @description("Structured per-kind data. Named data, not payload, because payload is a reserved row intrinsic. A tool_result from the agent's own loop carries {tool, seq, isError, args, argsTruncated}. A tool_result recorded from a delegated APP SESSION (epic memql#5396, design D5 and D12) carries the app's own evidence: appActionId (the id the app gave the call, which is how a recording keys back to its transcript), sessionId, seq, cwd, exitCode, isError, args (WHOLE up to the ceiling -- an action is only reproducible from its arguments, so a shortened one reproduces a DIFFERENT call), argsRef (the Library file the arguments spilled to when they exceeded it), argsTruncated, resultDigest and resultType (the result is a digest plus an inferred JSON type rather than the result itself, so the spine stays about actions), contentRefs (Library file ids of the contents the action read or wrote) and contentOmitted (a content above the per-file cap, or a Library write that failed -- recorded, never fatal to the session). An ABSENT key is a fact nobody measured, which is not the same as zero. A `feedback` observation (epic memql#5414, D21) carries {verdict: like|dislike|neutral, axes: {product, process, performance}, reason, target: {stepKey, version} -- no stepKey means the run --, goalSignature, validatorDisagrees, validatorObservationId}; a dislike always names at least one axis, and a later verdict is a NEW row, never a rewrite. The validator's `decision` observation (D22) carries {validator: {axes, reason, verdict: pass|flag}, target: {stepKey, version}, level, model}, where an axis set to true is a problem found on it.")
   content      string!  @description("The text rendering -- the embedding source, so observations are recall-able.")
   embedding    []float  @description("The embedding vector for content, populated lazily by the embed hook.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="runId", target=run, direction="outgoing")
@@ -258,6 +270,7 @@ concept observation {
 /// `reader`, viewer's alias, because the load-time floor check runs before the rbac catalog is
 /// readable and `viewer` would rank 0 there.
 @rowAuthz(clusterOwner, rankFloor="reader")
+@belongsTo(cluster)
 concept feedbackPolicy {
   validateAnswers          bool!  @description("Whether the answer validator (design D22) checks a goal run's answer against its description before a person sees it. One bounded model call per finished goal run requested through Nexus or the API, at the run's own level; it is a PRE-FILTER that never certifies anything. The seeded value is true.")
   reusableAfterSignatures  int!   @minimum(1)  @description("How many DISTINCT goal signatures, within one owner's work, must have used a construct before the evidence labels it reusable (design D24). One goal keeps it goal-specific; a single account tie makes it account-specific. The seeded value is 2.")

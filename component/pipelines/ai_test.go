@@ -22,3 +22,17 @@ func TestParseAISettingsIsOffUnlessTurnedOn(t *testing.T) {
 		t.Errorf("diagnosis only: %+v", got)
 	}
 }
+
+// What a save writes is what the engine reads back, for every position of the
+// two switches -- and both keys are always written, in the order the Settings
+// page wrote them before the save moved server-side.
+func TestTheSavedAISettingsReadBack(t *testing.T) {
+	if got := (AISettings{Review: true}).Encode(); got != `{"review":true,"diagnosis":false}` {
+		t.Errorf("Encode writes %s; want both keys, review first", got)
+	}
+	for _, s := range []AISettings{{}, {Review: true}, {Diagnosis: true}, {Review: true, Diagnosis: true}} {
+		if got := ParseAISettings(s.Encode()); got != s {
+			t.Errorf("%+v was saved as %s, which reads back as %+v", s, s.Encode(), got)
+		}
+	}
+}

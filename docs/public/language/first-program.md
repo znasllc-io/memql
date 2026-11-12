@@ -24,10 +24,12 @@ from the engine's core DSL to keep your tutorial definitions distinct.
 /// A reading-list item owned by the signed-in person.
 @rowAuthz(owner="ownerUserId")
 @displayCard(primary="title", status="finished")
+@belongsTo(account)
 concept readingItem {
   ownerUserId  string!
   title        string!
   finished     bool
+  accountId    string
 }
 
 /// Add an item. Ownership comes from the authenticated actor.
@@ -68,7 +70,9 @@ tool listReadingItems {
 
 - **Concept:** the fields every reading item can hold. `!` makes a field required.
   The engine supplies intrinsic fields such as `id` and `createdAt`; do not
-  redeclare them.
+  redeclare them. `@belongsTo(account)` says each item belongs to an account,
+  and the engine fills in `accountId`: the mutation never mentions it. See
+  [which account a row belongs to](memql.md#which-account-a-row-belongs-to).
 - **Mutation:** `accept` copies the listed argument; `stamp` supplies the id,
   authenticated owner, and initial completion state. The caller cannot choose
   someone else's owner id.

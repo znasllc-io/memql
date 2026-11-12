@@ -190,6 +190,12 @@ func everyStoreCall(s Store, value string) []struct {
 				RequestID: value, Medium: "email", Target: value, Subject: value, Body: value, DedupeKey: value, RequestedBy: value,
 			})
 		}},
+		// The settings port (settings.go), which the production store also
+		// implements: the same rendered-call rules hold for its two calls.
+		{"ActiveSettingRows", func() error { _, err := s.(SettingsStore).ActiveSettingRows(ctx, value); return err }},
+		{"SaveSetting", func() error {
+			return s.(SettingsStore).SaveSetting(ctx, SettingRow{ID: value, Name: value, Value: value, Description: value})
+		}},
 	}
 }
 
@@ -281,6 +287,7 @@ func TestEveryCallNamesAConstructAndArgumentsTheDSLDeclares(t *testing.T) {
 		mCreatePipeline, mUpdatePipeline, mCreatePipelineRun, mUpdatePipelineRun, qPackageByID, qInboundRequestByID,
 		qPipelineChannelsForOwner, qPipelineChannelForOwnerByName, qPipelineRunsForPipelineEvent, mCreatePipelineChannel, mUpdatePipelineChannel,
 		mStageServerOutboundRequest, mStageOutboundRequestToSecret, qOutboundRequestByID, qLibraryFileByID,
+		qGlobalVariable, mSetGlobalVariable,
 	} {
 		if !seen[want] {
 			t.Errorf("%s is named in store_dsl.go and no Store method calls it", want)

@@ -888,3 +888,16 @@ func TestAnArgumentCapIsFoundWhereverItStandsAmongTheAnnotations(t *testing.T) {
 		}
 	}
 }
+
+// An order message's footer says the person bought from the sender, in both
+// parts; every other message keeps "subscribed to" (TestFooterNamesTheSender
+// ThenTheOrganization).
+func TestAnOrderFooterSaysBoughtFrom(t *testing.T) {
+	msg := renderLinks(t, Template{ID: "t1", Subject: "s", TextBody: "Body", HTMLBody: "<p>Body</p>"},
+		RenderOptions{SenderName: "Acme", Order: true})
+	for part, body := range map[string]string{"text": msg.TextBody, "html": msg.HTMLBody} {
+		if !strings.Contains(body, "you bought from Acme.") || strings.Contains(body, "subscribed") {
+			t.Errorf("%s footer of an order message: %q", part, body)
+		}
+	}
+}

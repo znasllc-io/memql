@@ -152,6 +152,104 @@ owners read every store; everyone below reads **zero rows, not an error**.
 `TestADeveloperCannotChangeAStoreThatExists`
 (`component/memql/store_read_floor_db_test.go`) hold all three halves.
 
+### The two secret concepts
+
+`v1:platform:globalSecret` and `v1:platform:partitionSecret` -- the
+deployment's sealed credentials -- declare plain `@rowAuthz(clusterOwner)`.
+They carry no owner field, because a secret is the deployment's row, and no
+`rankFloor`, because a row's fields are a ciphertext and the last characters
+of what it seals.
+
+- **The row is the cluster owner's; the value is the resolver's.** Below the
+  cluster owner a read returns **zero rows, not an error**, and a
+  subscription delivers nothing. Code that needs the VALUE calls
+  `ResolveSecret` / `ResolveSystemSecret` (`secret()` / `systemSecret()` in a
+  body), and that lookup runs as the deployment -- `auth.SystemActor`, stamped
+  in `component/memql/engine_variables.go` -- whatever context it was handed:
+  a visitor's request at the edge, a webhook with no identity, a send
+  triggered by a person of any role. Who may ask for a value stays where it
+  was: with the Go that calls the resolver, and with who may author a body.
+- **A write is the tier's, named or raw.** `setGlobalSecret` and
+  `setPartitionSecret` carry no gate of their own. The write guard judges a
+  write over a stored row and the create floor judges a fresh id
+  (`component/memql/create_rank_floor.go`), so the raw `insert(...)` literal
+  is held to the same rule. A cluster owner writes -- the operator
+  credential's stream is one, which is how `scripts/secrets` seeds -- and so
+  does server code that has authorized its caller and stamps internal origin
+  for the one write: the Integrations section's credential save, which admits
+  a developer, and the Shopify connector.
+- **`@secret` is not the gate.** The annotation keeps a rejected value out of
+  validation messages. A query returns the field in full to whoever the row
+  is returned to, so the audience is the tier's to name.
+  `TestEveryConceptWithASealedFieldDeclaresARowTier`
+  (`component/memql/platform_secret_tier_test.go`) fails the build on a
+  concept that carries the annotation and declares no tier naming one.
+
+`component/memql/platform_secret_tier_db_test.go` holds the tier and the
+resolvers against a real engine and database, and
+`component/grpc/secret_tier_wire_db_test.go` holds it through the request
+handler a client's query lands in.
+
+### The two variable concepts
+
+`v1:platform:globalVariable` and `v1:platform:partitionVariable` -- the
+deployment's plaintext configuration -- declare **no tier, on purpose**, and
+their writes are held by a rule of their own.
+
+- **Reads stay open.** MemQL OS, DSL logic and engine readers that hold no
+  caller identity all read these rows. A tier decides reads as well as writes,
+  and the cluster-owner tier's `rankFloor` opens a read only down to a rung of
+  the role ladder: a caller with no identity and an account-scoped role stand
+  below every rung and would read **zero rows**, which is the answer for a
+  setting nobody made.
+- **A write is the deployment's.** The resolver reads a row by name ahead of
+  the environment, so `executeWrite` admits a write to either concept for a
+  cluster owner, or for server code that has authorized its caller and stamps
+  internal origin for the one write, and refuses everyone else
+  (`component/memql/platform_variable_write_guard.go`). The named mutations
+  and the raw `insert(...)` literal meet the same rule, on a fresh id and over
+  a stored row.
+- **A settings surface is that server code.** `integrationConfigure`,
+  `providerFederationSet`, `pipelinesAISettingsSave` and
+  `pipelinesSecuritySettingsSave` each authorize the caller, derive the row's
+  name and id themselves, and stamp the one write. The person who triggered a
+  save holds nothing afterwards: their own `setGlobalVariable` is refused.
+
+`TestEveryConceptAResolverReadsHasItsWritersDecided`
+(`component/memql/platform_config_write_guards_test.go`) reads the resolver's
+source and fails the build on a concept it reads by name whose writers nothing
+decides. `component/memql/platform_variable_write_db_test.go` holds the rule,
+and the unchanged reads, against a real engine and database;
+`component/grpc/variable_write_wire_db_test.go` holds it through the request
+handler.
+
+### Source credentials are server-written
+
+`v1:platform:sourceCredential` declares the composite owner tier, which
+answers whose row it is. What a write may put on the row is a second rule
+(`component/memql/platform_source_credential_write_guard.go`), because every
+field but the revocation is the engine's account of something only the engine
+did: sealed a value, refreshed it, asked GitHub which installations a grant
+reaches.
+
+- **A row is created only under internal origin**, by the capability that
+  seals its value: `sourceCredentialCreate` for a pasted token, the GitHub
+  connect callback for a grant.
+- **A person's own write may revoke the credential and nothing else.** Without
+  internal origin a write may change `status` to `revoked` and stamp
+  `revokedAt`. That is `revokeSourceCredential`, the row owner's, and a
+  cluster owner's through the tier's escape. A revoked credential is replaced
+  and not reactivated; a reconnect is server code.
+- **The writers' `@serverOnly` is not this rule.** It decides who may call a
+  named construct and never sees a raw `insert(...)` or an inline `update{}`,
+  so the engine judges the row about to be written against the stored one.
+
+`TestEverySourceCredentialFieldHasAWriter` fails the build on a field the
+concept declares and the rule does not name, so a field added later is
+server-written until someone decides otherwise.
+`component/memql/platform_source_credential_write_db_test.go` holds the rule
+against a real engine and database.
+
 The two reported states that are not buckets: **`srvOnly`**, checked
 first as above, and **`other`** — everything the classifier did not
 place. `other` is by far the largest column and is not a finding.

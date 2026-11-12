@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lib/pq"
 	"github.com/uptrace/bun"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -156,7 +157,7 @@ func (s *bunStore) QueryMemoryNodes(ctx context.Context, params memorynodes.Quer
 	var nodes []memorynodes.MemoryNode
 	query := s.db.NewSelect().Model(&nodes).ModelTableExpr(memorynodes.ObservedRowsSQL + " AS mn")
 
-	if len(params.IDs) > 0 {
+	if len(params.IDs) > 1 {
 		query = query.Where("id IN (?)", bun.In(params.IDs))
 	}
 
@@ -168,8 +169,11 @@ func (s *bunStore) QueryMemoryNodes(ctx context.Context, params memorynodes.Quer
 		query = query.Where(`"createdBy" = ?`, createdBy)
 	}
 
-	switch params.Order {
-	case memorynodes.QueryOrderCreatedAtAsc:
+	ascending := params.Order == memorynodes.QueryOrderCreatedAtAsc
+	switch {
+	case len(params.IDs) == 1:
+		query = versionsOfOneID(query, params.IDs[0], ascending)
+	case ascending:
 		query = query.OrderExpr(`"createdAt" ASC`)
 	default:
 		query = query.OrderExpr(`"createdAt" DESC`)
@@ -187,6 +191,29 @@ func (s *bunStore) QueryMemoryNodes(ctx context.Context, params memorynodes.Quer
 		return nil, err
 	}
 	return nodes, nil
+}
+
+// versionsOfOneID narrows q, a select over memorynodes.ObservedRowsSQL, to the
+// versions of one id, newest first (oldest first when ascending), for a read
+// that takes the first of them.
+//
+// The id leads the sort. With "createdAt" alone in the ORDER BY of a LIMIT,
+// TimescaleDB's ordered append walks the chunks in time order and costs the
+// walk by its first chunk, so the planner may give an older chunk a scan of
+// its createdAt index that filters on the id: the cheapest scan to start, and
+// a read of the whole chunk when the id has no version there, as for a row
+// about to be created. On an installation that read ran past the statement
+// timeout and no pipeline run could be created. Sorting by the id first rules
+// ordered append out, since it needs the time column first, so every chunk is
+// read through an index the id leads and only the id's own versions are read.
+// The id is matched with = ANY because an equality makes it a constant, which
+// PostgreSQL drops from the sort. For one id the order is the same.
+func versionsOfOneID(q *bun.SelectQuery, id string, ascending bool) *bun.SelectQuery {
+	q = q.Where("id = ANY(?::text[])", pq.Array([]string{id}))
+	if ascending {
+		return q.OrderExpr(`id ASC, "createdAt" ASC`)
+	}
+	return q.OrderExpr(`id DESC, "createdAt" DESC`)
 }
 
 func (e *MemQLEngine) evaluateExpression(ctx context.Context, expr ExpressionNode, timestamp *time.Time, limit int, sorter *compiledSort) ([]memorynodes.MemoryNode, error) {

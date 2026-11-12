@@ -2,24 +2,30 @@ import { AccountDomainsPanel } from "./DomainSetup";
 import { ContentSkeleton } from "../../kit/ContentSkeleton";
 import { RecordList, RecordRow } from "../../kit/RecordRow";
 import { InPlaceAsk } from "../../kit/pressHold";
-import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
-import { FileText, GraduationCap, Rocket, Send, UserPlus, UserRound } from "lucide-react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { UserPlus, UserRound } from "lucide-react";
 
-import { Button, Caption, Check, Fact, Facts, Input, Notice, Panel, Subhead,
+import { Button, Caption, Check, Details, Fact, Facts, Input, Notice, Panel, Subhead,
   PeerRowReadOnly,
 } from "../../kit";
 import { rowString } from "@znasllc-io/memql-sdk-core/client";
 import { flatten } from "../../kit/rows";
-import { useAccountCampaignsRollup } from "../email/useEmail";
 import type { ArchiveAccountState, UpdateAccountState } from "./actions";
 import { accountIsArchived, accountIsSelf, accountName, type AccountRow } from "./rows";
 import { useSession } from "../../chrome/access";
+import { holds } from "../../system/roles";
 import { AccountDomainRail } from "./AccountDomainRail";
+import { ExistingDataSection, InventorySection } from "./AccountInventory";
 import { frontDoorFromRow, type FrontDoorRow } from "./frontDoor";
 import { useAccountFrontDoors } from "./useAccountFrontDoors";
 import { useLiveView } from "../../live/liveView";
-import { useAccountPeople, useAccountRollups, type Rollup } from "./useAccounts";
+import {
+  useAccountAssignmentStatus,
+  useAccountGuests,
+  useAccountInventory,
+  useAccountPeople,
+  type Rollup,
+} from "./useAccounts";
 
 // One client: their facts, and everything of this cluster's that is theirs.
 //
@@ -29,19 +35,22 @@ import { useAccountPeople, useAccountRollups, type Rollup } from "./useAccounts"
 // Every other app in the OS lists things the cluster OWNS -- machines, sites,
 // files, people, domains. This one lists the people the cluster works FOR, and
 // the question that only it can answer is the second half: what of all that is
-// theirs. The four bands below are that question, answered in one place, and
-// they are the only surface in the OS that crosses app boundaries.
+// theirs. The ledger below is that question, answered in one place, and it is
+// the only surface in the OS that crosses app boundaries.
 //
-// They are drawn as one object rather than four panels because the thing they
-// add up to is a single fact -- this client's footprint on this instance --
-// and four separate cards would read as four unrelated lists that happen to
-// share a heading.
+// TWO HALVES (account row ownership, section H). The People and Guests bands
+// say WHO: the people in the client's groups and the guests invited to it.
+// The inventory says WHAT: every concept holding rows recorded under the
+// account, by area, from one builtin (`accountInventory`). It replaced four
+// bands that each listed one population from its own query; their counts are
+// the inventory's now, and the rows they named are listed in their own apps.
 //
-// EACH BAND IS PRESENTATION OVER ENGINE TRUTH (D1). The counts are of rows the
-// caller could already read; a band is not narrowed by the account and the
-// account narrows nothing. Two people opening the same client can therefore
-// see different numbers, and that is correct: the client is shared, the rows
-// are not.
+// THE INVENTORY IS THE ACCOUNT'S, NOT THE VIEWER'S. It counts rows by the
+// account recorded on them, which is why it is drawn only for a holder of
+// `execute app:accounts/inventory` (owner and developer by seed): it reports
+// rows a viewer may not be able to read one by one. The two bands remain
+// presentation over the caller's own reads, so two people opening the same
+// client can still see different numbers there.
 
 // A stable empty array: useSyncExternalStore compares snapshots by identity,
 // and a fresh `[]` on every read is an infinite render loop.
@@ -49,6 +58,7 @@ const EMPTY_DOORS: FrontDoorRow[] = [];
 
 export function AccountDetail({
   account,
+  accounts = [],
   update,
   archive,
   onArchived,
@@ -57,15 +67,24 @@ export function AccountDetail({
 }: {
   onConfigureDomains?: () => void;
   account: AccountRow;
+  /** The accounts the app already holds, to name an account by. */
+  accounts?: readonly AccountRow[];
   update: UpdateAccountState;
   archive: ArchiveAccountState;
   onArchived: () => void;
   /** Opens the Users app on one of this client's groups. */
   onOpenGroup?: (groupId: string) => void;
 }) {
-  const rollups = useAccountRollups(account.id);
   const archived = accountIsArchived(account);
   const self = accountIsSelf(account);
+  // WHO MAY SEE THE INVENTORY AND THE ASSIGNMENT. Both builtins carry the
+  // part; this is the courtesy half, so a non-holder is offered nothing that
+  // would only be refused (DESIGN.md rule 12: absent, not disabled).
+  // `accessEpoch` is the reactivity signal: the held set is read out of band,
+  // and a grant written in this browser bumps it.
+  const { accessEpoch } = useSession();
+  const canInventory = useMemo(() => holds("execute", "app:accounts/inventory"), [accessEpoch]);
+  const assignment = useAccountAssignmentStatus(canInventory && self);
 
   // The front doors, live (epic memql#5168). RETAINED here rather than inside
   // the rail: a collection does nothing until retain() (clients/os/README.md),
@@ -115,7 +134,15 @@ export function AccountDetail({
         doors={doors}
         canReadDoors={canReadDoors}
       />
-      <Ledger account={account} rollups={rollups} onOpenGroup={onOpenGroup} />
+      <Ledger account={account} canInventory={canInventory} onOpenGroup={onOpenGroup} />
+      {/* EXISTING DATA, ON THE PRIMARY ACCOUNT ONLY. Assigning rows written
+          before accounts were recorded is the cluster's work, not any one
+          client's, and the primary account is the cluster's own page. */}
+      {self && canInventory ? (
+        <Details>
+          <ExistingDataSection reading={assignment} accounts={accounts} />
+        </Details>
+      ) : null}
       {/* NO CREDENTIALS PANEL HERE, AND THAT IS THE POINT (memql#5013).
           A credential is minted against a `v1:identity:account` -- the paying
           account of the isolation model -- and `mintAccountToken` gates on
@@ -322,113 +349,26 @@ function Field({
 // The ledger
 // ---------------------------------------------------------------------------
 
-interface BandSpec {
-  key: string;
-  title: string;
-  /** What one row IS, in the reader's words. Used for the empty line. */
-  noun: string;
-  icon: ReactNode;
-  rollup: Rollup;
-  /** The app that owns this population, named so the reader knows where to go. */
-  owner: string;
-  line: (row: Row) => string;
-}
-
 function Ledger({
   account,
-  rollups,
+  canInventory,
   onOpenGroup,
 }: {
   account: AccountRow;
-  rollups: ReturnType<typeof useAccountRollups>;
+  canInventory: boolean;
   onOpenGroup?: (groupId: string) => void;
 }) {
-  // THE PEOPLE BAND'S OWN READ. It is not a Rollup: the other five count rows,
-  // and this one is two numbers over two reads -- distinct people, across the
-  // groups that grant this client. It prints the same shared read time.
+  // THE PEOPLE BAND'S OWN READ: two numbers over two reads -- distinct
+  // people, across the groups that grant this client.
   const people = useAccountPeople(account.id);
-  // THE FIFTH BAND, AND ITS READ LIVES IN THE EMAIL APP. `tie.tsx` states
-  // the rule for the other direction -- a tie surface belongs to the domain
-  // that owns the concept -- and this is the same rule read the other way
-  // round: the ledger renders the band, and the read that fills it is the
-  // Email app's to own. It answers in this ledger's own `Rollup`
-  // vocabulary so five bands can settle independently and print one read time
-  // between them.
-  //
-  // IT IS ON-DEMAND EVEN THOUGH `v1:campaigns:campaign` DOES BROADCAST, and
-  // that is the ledger's stated consistency reason rather than a liveness one.
-  // `v1:knowledge:knowledgeDomain` carries no rule and nothing broadcasts it,
-  // so the Knowledge band could never be live -- and a ledger where four bands
-  // move and the fifth silently does not is worse than one where none do,
-  // because the reader has no way to tell which kind of band they are looking
-  // at. Consistency across a composite surface beat liveness on part of it.
-  const campaigns = useAccountCampaignsRollup(account.id);
+  const guests = useAccountGuests(account.id);
+  // Asked only of a holder: for anyone else the builtin would refuse, and the
+  // page draws no inventory at all.
+  const inventory = useAccountInventory(account.id, canInventory);
 
-  const bands: BandSpec[] = useMemo(
-    () => [
-      {
-        key: "sites",
-        title: "Deployables",
-        noun: "site",
-        icon: <Rocket size={15} aria-hidden />,
-        rollup: rollups.sites,
-        owner: "Deployables",
-        line: (row) => rowString(flatten(row), "hostname") || rowString(flatten(row), "title"),
-      },
-      {
-        key: "files",
-        title: "Files",
-        noun: "file",
-        icon: <FileText size={15} aria-hidden />,
-        rollup: rollups.files,
-        owner: "Files",
-        line: (row) => rowString(flatten(row), "title"),
-      },
-      {
-        key: "domains",
-        title: "Knowledge",
-        noun: "domain",
-        icon: <GraduationCap size={15} aria-hidden />,
-        rollup: rollups.domains,
-        owner: "Training",
-        line: (row) => rowString(flatten(row), "name") || rowString(flatten(row), "id"),
-      },
-      {
-        key: "invites",
-        title: "Guests",
-        noun: "invitation",
-        icon: <UserPlus size={15} aria-hidden />,
-        rollup: rollups.invites,
-        owner: "Users",
-        line: (row) => rowString(flatten(row), "inviteeEmail"),
-      },
-      {
-        key: "campaigns",
-        title: "Campaigns",
-        noun: "campaign",
-        icon: <Send size={15} aria-hidden />,
-        // Shaped into this ledger's vocabulary. The campaigns reader answers
-        // with the same {value, state, error, readAt} triple the four above
-        // use, so the refusal case renders identically -- A REFUSAL IS NOT A
-        // ZERO holds for this band exactly as it does for the guests one.
-        rollup: {
-          rows: campaigns.value,
-          state: campaigns.state,
-          error: campaigns.error,
-          readAt: campaigns.readAt,
-        },
-        owner: "Email",
-        // It counts CAMPAIGNS and not sends: a band reading "4,182" would be
-        // counting delivery rows, which is a number about one busy week rather
-        // than about the client.
-        line: (row) => rowString(flatten(row), "name"),
-      },
-    ],
-    [rollups, campaigns],
-  );
-
-  const readAt =
-    [people.readAt, ...bands.map((b) => b.rollup.readAt)].filter((t) => t !== "")[0] ?? "";
+  // ONE READ TIME AND ONE RE-READ for the whole ledger, so the page says once
+  // that none of it is live.
+  const readAt = inventory.at?.toISOString() ?? (people.readAt || guests.readAt);
 
   return (
     <section className="os-account-ledger" aria-label={`What belongs to ${accountName(account)}`}>
@@ -436,8 +376,9 @@ function Ledger({
         <Subhead>What is theirs</Subhead>
         <Button
           onClick={() => {
-            rollups.reload();
-            campaigns.reload();
+            people.reload();
+            guests.reload();
+            inventory.reread();
           }}
         >
           Re-read
@@ -445,20 +386,20 @@ function Ledger({
       </div>
 
       <div className="os-account-bands">
-        {/* FIRST, because it is the band the other five are about: the people
-            are who the deployables, the files, the knowledge and the campaigns
-            are for. */}
+        {/* FIRST, because they are who everything in the inventory is for. */}
         <PeopleBand people={people} onOpenGroup={onOpenGroup} />
-        {bands.map((band) => (
-          <Band key={band.key} band={band} />
-        ))}
+        <GuestsBand rollup={guests} />
       </div>
 
-      {/* A READ THAT SAYS WHEN IT HAPPENED. These four are on-demand reads,
-          not live feeds (see useAccounts.ts for why), so the honest thing is
-          to print the time rather than let a static number read as a live
-          one. The Training app's knowledge surfaces set this precedent for
-          the same reason. */}
+      {canInventory ? (
+        <Details>
+          <InventorySection reading={inventory} />
+        </Details>
+      ) : null}
+
+      {/* A READ THAT SAYS WHEN IT HAPPENED. These are on-demand reads, not
+          live feeds (see useAccounts.ts for why), so the honest thing is to
+          print the time rather than let a static number read as a live one. */}
       {readAt === "" ? null : (
         <Caption>
           Read at {new Date(readAt).toLocaleTimeString()}. These are not live -- re-read to see
@@ -542,19 +483,23 @@ function PeopleBand({
   );
 }
 
-function Band({ band }: { band: BandSpec }) {
-  const { rollup } = band;
-
-  // A REFUSAL IS NOT A ZERO. The guest-invitation rollup carries
-  // `@requiresRank("developer")`, so below that floor the engine refuses the read --
-  // and rendering that as "0 invitations" would be this window inventing a
-  // fact about a client. The server's own sentence goes on screen instead.
+/**
+ * Who has been invited to this client and has not joined yet.
+ *
+ * The inventory counts invitations under People; this band says WHO, which
+ * the count cannot, and which the People band (members only) never shows.
+ */
+function GuestsBand({ rollup }: { rollup: Rollup }) {
+  // A REFUSAL IS NOT A ZERO. The guest-invitation read carries
+  // `@requiresRank("developer")`, so below that floor the engine refuses the
+  // read -- and rendering that as "0 invitations" would be this window
+  // inventing a fact about a client. The server's own sentence goes on screen.
   if (rollup.state === "error") {
     return (
       <article className="os-account-band" data-state="refused">
         <header className="os-account-band-head">
-          {band.icon}
-          <h4 className="os-account-band-title">{band.title}</h4>
+          <UserPlus size={15} aria-hidden />
+          <h4 className="os-account-band-title">Guests</h4>
         </header>
         <p className="os-account-band-refused">Not yours to read</p>
         <p className="os-account-band-detail os-mono">{rollup.error}</p>
@@ -566,8 +511,8 @@ function Band({ band }: { band: BandSpec }) {
     return (
       <article className="os-account-band" data-state="loading">
         <header className="os-account-band-head">
-          {band.icon}
-          <h4 className="os-account-band-title">{band.title}</h4>
+          <UserPlus size={15} aria-hidden />
+          <h4 className="os-account-band-title">Guests</h4>
         </header>
         <p className="os-account-band-count" aria-hidden>
           --
@@ -581,29 +526,22 @@ function Band({ band }: { band: BandSpec }) {
   return (
     <article className="os-account-band" data-state={count === 0 ? "empty" : "ready"}>
       <header className="os-account-band-head">
-        {band.icon}
-        <h4 className="os-account-band-title">{band.title}</h4>
+        <UserPlus size={15} aria-hidden />
+        <h4 className="os-account-band-title">Guests</h4>
       </header>
-      {/* The count in the shell's display face -- the same one the desk
-          numeral uses. It is the only place in APP content where that face
-          appears, and it earns the exception: this number IS the thing the
-          band is for, and the echo ties the ledger to the shell's own way of
-          saying "how many". */}
       <p className="os-account-band-count">{count}</p>
       <p className="os-account-band-note">
-        {count === 0 ? `No ${band.noun}s yet` : count === 1 ? band.noun : `${band.noun}s`}
+        {count === 0 ? "No invitations yet" : count === 1 ? "invitation" : "invitations"}
       </p>
       {count === 0 ? (
-        <p className="os-account-band-owner">{band.owner} is where these are added.</p>
+        <p className="os-account-band-owner">Users is where these are added.</p>
       ) : (
-        <RecordList density="compact"><ul className="os-account-band-rows" aria-label={`${band.title} for this client`}>
+        <RecordList density="compact"><ul className="os-account-band-rows" aria-label="Guests for this client">
           {rollup.rows.slice(0, LEDGER_ROWS).map((row, i) => (
-            <li key={rowString(flatten(row), "id") || String(i)}><RecordRow name={band.line(row) || "--"} /></li>
+            <li key={rowString(flatten(row), "id") || String(i)}><RecordRow name={rowString(flatten(row), "inviteeEmail") || "--"} /></li>
           ))}
           {count > LEDGER_ROWS ? (
-            <li className="os-account-band-more">
-              and {count - LEDGER_ROWS} more, in {band.owner}
-            </li>
+            <li className="os-account-band-more">and {count - LEDGER_ROWS} more, in Users</li>
           ) : null}
         </ul></RecordList>
       )}
@@ -612,12 +550,10 @@ function Band({ band }: { band: BandSpec }) {
 }
 
 /**
- * How many rows a band lists before it stops naming them.
+ * How many guests the band names before it stops.
  *
- * A band is a COUNT with evidence, not a table -- the app that owns each
- * population is where somebody goes to work with it, and four unbounded lists
- * in one panel is four scroll regions competing with the profile above them.
- * Five is enough to recognize what the count is made of.
+ * A band is a COUNT with evidence, not a table -- Users is where somebody
+ * goes to work with invitations. Five is enough to recognize who they are.
  */
 const LEDGER_ROWS = 5;
 

@@ -29,6 +29,7 @@
 @description("A storefront product review. Merchandising stays on the store; this row is the review body plus optional image attachment ids. Images export as files (bytes), not URLs. Whether it is shown is NOT a field: it is derived from the append-only reviewDecision log against the revision the row holds now.")
 @displayCard(primary="title", secondary="body", tertiary="productHandle")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept review {
   ownerUserId         string!   @description("v1:identity:user.id of the MERCHANT this review belongs to -- the owner of the deployable it was submitted through, NOT its author. A shopper is nobody to MemQL: they have no user row, no session and no actor, so a review's author is authorName and authorEmail below and nothing else (epic memql#5532, issue memql#5550). This is the single most important sentence in the pack. On the shopper path it is stamped from actor.userId under the site owner's BORROWED authority -- the campaigns precedent, where the drain worker runs everything owned under a userId copied off a row the starting caller had already read. On the authenticated path it is the calling user, which is what an operator or an importing job writes as.")
   storeId             string!   @description("The v1:shopify:store this review was written against (design D9). Stamped server-side from the binding the write arrived through -- the serving binding, or the PREVIEW binding when the submission was made while exercising a candidate version -- and never accepted from a form: component/memql/shopper_surface.go refuses a declared field with this name, and the bff stamps it after the declared fields so a form-supplied copy cannot win. Every storefront read filters on it, which is what keeps a review written under preview out of the live storefront.")
@@ -53,6 +54,7 @@ concept review {
 @description("Append-only moderation decision for a review. A new row is a new decision; there is no in-place update and no undo-by-overwrite. decidedBy is a Client principal -- a Provider operator cannot author one. Criterion is a closed enum: no other, no sentiment.")
 @displayCard(primary="criterion", secondary="reviewId", tertiary="decidedBy")
 @rowAuthz(owner="decidedBy", clusterOwner)
+@belongsTo(account, via="reviewId", parent="v1:reviews:review")
 concept moderationAction {
   reviewId    string!  @description("v1:reviews:review.id this decision applies to.")
   storeId     string!  @description("The store the moderated review belongs to (design D9), copied from that review by the Go capability rather than supplied. A decision is scoped to the same store its subject is, or a read scoped to one store would show a review the other store's merchant had already hidden.")
@@ -60,12 +62,14 @@ concept moderationAction {
   decidedBy   string!  @description("v1:identity:user.id of the Client principal that authored this action. Provider operators are refused on the write path.")
   principalKind enum("client")!  @description("The only expressible principal kind is client. provider is inexpressible -- the enum does not contain it.")
   note        string   @description("Optional client-visible note. Not a criterion and not a sentiment score.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 }
 
 @version("1.0.0")
 @description("One moderation decision on one review, append-only: a new row is a new decision, there is no update and no undo-by-overwrite. A review's state (waiting, published, declined, removed, erased) is DERIVED from these rows against the revision the review holds now. decidedBy is a person on the store's side; the cluster's operators are refused on the write path.")
 @displayCard(primary="action", secondary="reviewId", tertiary="decidedBy")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept reviewDecision {
   ownerUserId  string!  @description("v1:identity:user.id of the MERCHANT the review belongs to, copied off the review -- not the person who decided (that is decidedBy). OWNED BY THE MERCHANT ON PURPOSE: the public read runs under the site owner's borrowed authority, and a decision that only its author could read would hide or publish nothing (the legacy moderationAction, owned by decidedBy, had exactly that flaw).")
   reviewId   string!  @description("v1:reviews:review.id this decision is about.")
@@ -83,6 +87,7 @@ concept reviewDecision {
 @description("One buyer's review link: a product line of a paid order, at an id derived from (store, order, product) so a line is one link. The link is /reviews/write?product=<handle>&t=<token> on the store's own site; the token is never stored, only its SHA-256. A review written through it is verified. The link closes when its review is published, removed or erased -- read off the review's state, so publishing writes nothing here -- and at expiresAt.")
 @displayCard(primary="productHandle", secondary="orderName", tertiary="expiresAt")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept reviewRequest {
   ownerUserId    string!    @description("v1:identity:user.id of the MERCHANT -- the store's site owner, whose borrowed authority the shopper path reads this row under. Stamped by writing as that person.")
   storeId        string!    @description("The store the order was placed on (design D9).")
@@ -105,6 +110,7 @@ concept reviewRequest {
 @description("Runtime reviews settings for one store. The public display toggle lives here as data so a client can hide or show reviews without a deploy or .memql edit.")
 @displayCard(primary="publicDisplay", secondary="storeId")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept reviewSettings {
   ownerUserId    string!  @description("v1:identity:user.id of the Client that owns this storefront's review settings.")
   storeId        string!  @description("The store these settings govern (design D9). ONE ROW PER STORE, at the derived id v1:reviews:reviewSettings:<storeId>, because a merchant with a live store and a development store must be able to show reviews on one while they are still hidden on the other -- which is the whole of what previewing a storefront means.")

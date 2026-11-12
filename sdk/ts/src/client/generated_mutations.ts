@@ -6470,7 +6470,7 @@ QueryClient.prototype.setEmailRuleStatus = function (this: QueryClient, args: Se
   return this.executeNamed("setEmailRuleStatus", buildSetEmailRuleStatus(args), opts);
 };
 
-/** Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. */
+/** Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. Cluster owner only: the concept's row tier judges the write. */
 // Bound concept: v1:platform:globalSecret (machine-readable: BoundConcepts["setGlobalSecret"] in generated_concepts.ts).
 export interface SetGlobalSecretArgs {
   id: string;
@@ -6506,7 +6506,7 @@ QueryClient.prototype.setGlobalSecret = function (this: QueryClient, args: SetGl
   return this.executeNamed("setGlobalSecret", buildSetGlobalSecret(args), opts);
 };
 
-/** Persist an instance-wide (global) plaintext variable row in v1:platform:globalVariable. */
+/** Persist an instance-wide (global) plaintext variable row in v1:platform:globalVariable. Cluster owner, or server code stamped for the write: the engine judges the write itself. */
 // Bound concept: v1:platform:globalVariable (machine-readable: BoundConcepts["setGlobalVariable"] in generated_concepts.ts).
 export interface SetGlobalVariableArgs {
   id: string;
@@ -6723,7 +6723,7 @@ QueryClient.prototype.setPackageSourceRemoved = function (this: QueryClient, arg
   return this.executeNamed("setPackageSourceRemoved", buildSetPackageSourceRemoved(args), opts);
 };
 
-/** Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. */
+/** Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. Cluster owner only: the concept's row tier judges the write. */
 // Bound concept: v1:platform:partitionSecret (machine-readable: BoundConcepts["setPartitionSecret"] in generated_concepts.ts).
 export interface SetPartitionSecretArgs {
   id: string;
@@ -6759,7 +6759,7 @@ QueryClient.prototype.setPartitionSecret = function (this: QueryClient, args: Se
   return this.executeNamed("setPartitionSecret", buildSetPartitionSecret(args), opts);
 };
 
-/** Persist a partition-scoped plaintext variable row in v1:platform:partitionVariable. */
+/** Persist a partition-scoped plaintext variable row in v1:platform:partitionVariable. Cluster owner, or server code stamped for the write: the engine judges the write itself. */
 // Bound concept: v1:platform:partitionVariable (machine-readable: BoundConcepts["setPartitionVariable"] in generated_concepts.ts).
 export interface SetPartitionVariableArgs {
   id: string;

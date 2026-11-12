@@ -21,10 +21,13 @@ use common.traits.{ isNotDeleted }
 /// business data, not per-user data (design D5).
 @origin("shopify")
 @rowAuthz(clusterOwner)
+@belongsTo(account, via="storeId", parent="v1:shopify:store")
 @displayCard(primary="gid", secondary="name", status="deleted")
 concept draftOrder {
   /// The v1:shopify:store row this mirror belongs to. Every read is store-scoped.
   storeId    string!
+  /// The account this row belongs to: its store's. The engine fills it in; the connector never supplies it.
+  accountId  string
   /// Shopify's own identity, gid://shopify/<Type>/<id>. Stable across renames.
   gid        string!
   /// The ORIGIN's version. A write whose updatedAt is older than the stored one is refused as stale.

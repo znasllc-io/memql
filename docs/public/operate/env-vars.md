@@ -191,6 +191,57 @@ The `_system` partition is reserved for global concepts -- platform
 secrets and variables live there regardless of which partition the
 caller is in.
 
+### Who reads and writes a secret row
+
+The two secret concepts declare the cluster-owner row tier
+(`@rowAuthz(clusterOwner)`). A row -- its name, ciphertext and fingerprint --
+is read and written by a cluster owner. The operator credential admits a
+stream as one, so `scripts/secrets` seeds through the same rule.
+
+- **A value is read through the resolvers, never off the row.** Code that
+  needs a secret calls `ResolveSecret` / `ResolveSystemSecret`, or `secret()`
+  / `systemSecret()` in a body. The lookup runs as the deployment whatever
+  context it was handed, so a send, an inbound webhook and a storefront
+  request resolve the same secret regardless of who triggered them.
+- **A write is judged where every write lands.** `setGlobalSecret`,
+  `setPartitionSecret` and the raw `insert(...)` literal are held to the same
+  tier, on a fresh id and over a stored row.
+- **A surface that lets someone else save a credential does it server-side.**
+  The Integrations section admits a developer: `integrationConfigure`
+  authorizes the caller, seals the value on the node and writes the row with
+  internal origin. A client calling `setGlobalSecret` itself is refused unless
+  it is a cluster owner's.
+
+[The row-authorization reference](auth/per-row-authz-audit.md#the-two-secret-concepts)
+has the rule and the tests that hold it.
+
+### Who reads and writes a variable row
+
+A variable row is plaintext configuration, and it is read by everyone signed
+in: MemQL OS draws settings from these rows, and DSL logic reads its windows
+and graces through `globalVariable(name: ...)`. The two variable concepts
+declare no row tier for that reason.
+
+Writing one is narrower, because the resolver reads a row by name ahead of the
+environment, so a row decides what a name means on every node:
+
+- **A cluster owner writes a row directly.** `setGlobalVariable`,
+  `setPartitionVariable` and the raw `insert(...)` literal are admitted for a
+  cluster owner. The operator credential admits a stream as one, so
+  `scripts/secrets` seeds through the same rule, and an automation of the
+  loaded DSL tree writes as the deployment.
+- **Everyone else saves through the surface that owns the value.** A settings
+  save authorizes its caller, derives the row's name and id itself, and writes
+  with internal origin: `integrationConfigure` for the email settings and
+  `providerFederationSet` for a vendor's federation ids (owner or developer),
+  and `pipelinesAISettingsSave` / `pipelinesSecuritySettingsSave` for the
+  Pipelines switches (the `settings` part of the Pipelines app).
+- **A client calling `setGlobalVariable` itself is refused** unless it is a
+  cluster owner's, on a fresh id and over a stored row.
+
+[The row-authorization reference](auth/per-row-authz-audit.md#the-two-variable-concepts)
+has the rule and the tests that hold it.
+
 ### Encryption
 
 Secrets are sealed with **NaCl secretbox** (XSalsa20-Poly1305) under
@@ -644,6 +695,7 @@ delivery).
 | `MEMQL_TOOL_LOOP_MAX_ITERATIONS`                | `120`   | Max AI tool-calling iterations per turn. Shared by the engine-level tool loop and the agent-node streaming loop. |
 | `MEMQL_DSL_PATH`                                | unset   | Optional on-disk root for the .memql tree. When set and `<root>/<typeName>` exists, that DSL type reads from disk instead of the embedded copy. Per-type partial overrides supported. |
 | `MEMQL_MESH_OUTBOX_RETENTION`                  | `24h`   | Max-age watermark (Go duration string) for the mesh delivery substrate's `mesh_outbox` rows and stale `mesh_cursor` rows; an hourly per-node sweep deletes rows older than this. `0` or negative disables the sweep; an unparsable value falls back to the default. `mesh_key_seq` is never swept (seq-restart hazard). |
+| `MEMQL_ACCOUNT_STAMPING_ACTIVATE`               | `true`  | The operator's hold on account stamping: the engine recording, in `accountId`, the account each row belongs to, and assigning the rows written before. Stamping turns on by itself, once for the cluster, when every node that has not stopped runs an engine that advertises it, and nothing turns it off again. `false` holds it on that node: the node still advertises itself, so releasing the hold takes effect at its next check, but it never turns the switch on, and it neither stamps nor assigns even after another replica has. Set `false` on **every** replica to keep the way back to the previous release open: one replica without it turns the switch on, and a row it stamps cannot be updated by an engine older than the release that added the field. Read at startup, so a change reaches a node when its pods roll. A value that is not a boolean refuses startup. |
 
 #### Hosted deployables: runtime settings and the request log
 
@@ -776,7 +828,7 @@ Stored in `v1:platform:globalVariable`.
 
 These aren't in the manifest yet -- operators add them by writing the
 `v1:platform:globalVariable` row directly (the `setGlobalVariable`
-mutation) -- but they're documented here because they live in that
+mutation, as a cluster owner) -- but they're documented here because they live in that
 concept and are read by the product frontend's runtime config layer
 (its publicConfig whitelist):
 
@@ -802,7 +854,8 @@ concept and are read by the product frontend's runtime config layer
 The exact name on the MemQL side has to match the entry in the
 frontend's publicConfig whitelist exactly. To add a new one: add it to
 the whitelist, then either append it to the manifest and re-seed, or
-call `setGlobalVariable(name: "...", value: "...")` directly.
+call `setGlobalVariable(name: "...", value: "...")` directly as a cluster
+owner ([who writes a variable row](#who-reads-and-writes-a-variable-row)).
 
 ### Per-tenant overrides
 
@@ -1023,14 +1076,15 @@ deploy-config change every time it rotates.
 
 1. Append a row to `scripts/secrets/manifest.yaml` under `variables:`
    and seed it the same way, *or* write the row directly with the
-   `setGlobalVariable(name: "YOUR_NAME", value: "...")` mutation.
+   `setGlobalVariable(name: "YOUR_NAME", value: "...")` mutation, as a
+   cluster owner.
 2. The DSL resolver returns it from `resolveVariable("YOUR_NAME")` or
    the same `env()` chain in provider auth.
 
 ### Adding a per-tenant (partition-scoped) entry
 
-Call `setPartitionSecret` / `setPartitionVariable` directly. The
-seeder writes global rows only -- the manifest carries no
+Call `setPartitionSecret` / `setPartitionVariable` directly, as a cluster
+owner. The seeder writes global rows only -- the manifest carries no
 partition-scoped entries -- and the partition dimension itself is
 being retired (#56), so treat these two concepts as legacy surface
 rather than the place to put new config.
@@ -1124,8 +1178,9 @@ Check the resolver chain in order:
 
 ### Local override without touching the env file
 
-`setGlobalSecret` / `setGlobalVariable` write directly to the running
-MemQL without modifying the env file. Useful for one-off experiments.
+`setGlobalSecret` / `setGlobalVariable`, called as a cluster owner, write
+directly to the running MemQL without modifying the env file. Useful for
+one-off experiments.
 Note that the next `make down && make up` recreates the database, and a
 re-seed replaces the value with whatever is in the env file -- so put it
 there too if you want it to last.

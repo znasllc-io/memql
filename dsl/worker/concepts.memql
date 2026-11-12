@@ -34,6 +34,7 @@ use work.concepts.{ run, step }
 /// `actor.isClusterOwner==true` so the arrangement is legible at the read.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="action", secondary="tool", tertiary="workerId", status="outcome")
+@belongsTo(cluster)
 concept invocation {
   ownerUserId    string!  @serverSet  @description("v1:identity:user.id of the user who requested this call. For a shared Fleet workbench this is the borrower, not the machine owner; denormalized so each user reads their own invocation details. THE ROW-AUTHZ OWNER FIELD (memql#4406), stamped from actor.userId by createWorkerInvocation and never accepted from caller args -- @serverSet makes that a load-time rejection rather than a convention, and TestDeclaredOwnerFieldsAreServerStamped fails the build on a mutation that writes it from args. Both Go writers (component/worker/store.go, integrations/agent/worker/store.go) already know the owner and run the create under auth.ContextWithUserActor for it.")
   workerId       string!  @description("v1:worker:registration.id the call dispatched to.")
@@ -84,6 +85,7 @@ concept invocation {
 /// the interceptor before any of this runs -- never from the Register message.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="name", secondary="version", tertiary="lastSeenAt", status="buildTag")
+@belongsTo(cluster)
 concept registration {
   modelSetup object @description("Owner-selected model purposes and revision. Written only by fleetSetModelSetup after capacity validation, and emptied only by fleetClearModelSetup. No revision, whether the block is absent or empty, means automatic routing; a revision with an empty choices map disables model routing on this machine.")
   ownerUserId    string!  @serverSet  @description("v1:identity:user.id who owns this worker. THE ROW-AUTHZ OWNER FIELD, stamped from actor.userId by createWorkerRegistration and never accepted from caller args -- @serverSet makes that a load-time rejection rather than a convention, and TestDeclaredOwnerFieldsAreServerStamped fails the build on a mutation that writes it from args. The worker authenticates as worker:<id>, not as its owner, so component/worker's store runs the create under auth.ContextWithUserActor for the owner the worker_token's identity row named. Dispatch-time access check: caller's session-owner must equal this value.")
@@ -189,6 +191,7 @@ concept registration {
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @retention(ttl="1d", keepLatest=true, archive="none")
 @displayCard(primary="app", secondary="kind", tertiary="startedAt", status="status")
+@belongsTo(cluster)
 concept appSession {
   toolScope object @description("Server-created delegated tool contract and original execution context. Written only when the session opens; never supplied by the app.")
   ownerUserId    string!  @description("v1:identity:user.id the session runs AS. The back-channel credential is minted with this as its subject, so everything the app reads over MCP is what this user could read -- row authz applies to a delegated app exactly as it does to a browser.")
@@ -239,6 +242,7 @@ concept appSession {
 /// when none is. A plan never waits for a laptop to wake up.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="ownerUserId", secondary="workspaceRoot", tertiary="updatedAt", status="preferSubscriptionApps")
+@belongsTo(cluster)
 concept delegationPolicy {
   ownerUserId    string!  @description("v1:identity:user.id this policy belongs to. One row per user; the id is derived from the user id so a second write updates rather than forks.")
   preferSubscriptionApps  bool  @description("The master switch. False means never delegate, whatever else the row says -- so a user who has not opted in is not surprised by an agent running on their laptop.")
@@ -268,6 +272,7 @@ concept delegationPolicy {
 /// failure mode this design does not have.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="strategy", secondary="fallback", tertiary="ownerUserId", status="active")
+@belongsTo(cluster)
 concept routingPolicy {
   ownerUserId    string!  @serverSet  @description("v1:identity:user.id whose fleet this policy routes. THE ROW-AUTHZ OWNER FIELD -- stamped from actor.userId by createRoutingPolicy, never from args.")
   strategy       enum("firstFit", "roundRobin", "leastLoaded", "labelMatch")!  @description("How the router orders the candidates that survived the requireLabels filter. firstFit = registration order, the pre-policy behaviour. roundRobin = oldest lastSelectedAt first, so two agent replicas rotate identically without a shared counter. leastLoaded = lowest activeCount against the capability's concurrency cap. labelMatch = most preferLabels hits first, then registration order.")
@@ -306,6 +311,7 @@ concept routingPolicy {
 /// made up, and it would be wrong in a way nobody could see.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="model", secondary="workerId", tertiary="requestedAt", status="status")
+@belongsTo(cluster)
 concept modelPull {
   ownerUserId    string!  @serverSet  @description("v1:identity:user.id who asked. THE ROW-AUTHZ OWNER FIELD -- stamped from the caller's actor by fleetModelPull, never from an argument. A pull writes gigabytes to this person's own machine, so the owner of the row and the owner of the hardware are the same by construction.")
   workerId       string!  @description("v1:worker:registration.id of the machine being pulled to. A pull names ONE machine because a person pressed Pull on that machine's page; there is no routing here and no second machine to fall through to.")
@@ -346,6 +352,7 @@ concept modelPull {
 /// else has a reason to read it.
 @rowAuthz(owner="ownerUserId")
 @displayCard(primary="app", secondary="workerId", tertiary="requestedAt", status="status")
+@belongsTo(cluster)
 concept appSignIn {
   ownerUserId    string!  @serverSet  @description("v1:identity:user.id who asked, and who owns the machine. THE ROW-AUTHZ OWNER FIELD, stamped from the caller's actor by fleetAppSignIn, never from an argument.")
   workerId       string!  @description("v1:worker:registration.id of the machine being signed in.")
@@ -386,6 +393,7 @@ concept appSignIn {
 /// TIER: the composite owner, clusterOwner, matching the pull and the registration it names.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="model", secondary="workerId", tertiary="requestedAt", status="status")
+@belongsTo(cluster)
 concept modelProbe {
   ownerUserId    string!  @serverSet  @description("v1:identity:user.id who asked. THE ROW-AUTHZ OWNER FIELD -- stamped from the caller's actor by fleetModelProbe, never from an argument. A probe spends minutes of this person's own machine, so the owner of the row and the owner of the hardware are the same by construction.")
   workerId       string!  @description("v1:worker:registration.id of the machine being measured. A probe names ONE machine because a measurement OF A DIFFERENT MACHINE answers a question nobody asked -- the whole content of a figure is which hardware produced it.")
@@ -412,6 +420,7 @@ concept modelProbe {
 /// Shared model calls expose only their model and state to the hardware owner.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="label", secondary="kind", status="status")
+@belongsTo(cluster)
 concept activity {
   ownerUserId string! @serverSet
   workerId string!
@@ -429,6 +438,7 @@ concept activity {
 /// neither shared registrations nor public evidence exports carry it.
 // @no-displayCard: private settings have no public identity; use the identifier fallback without exposing location fields.
 @rowAuthz(owner="ownerUserId")
+@belongsTo(cluster)
 concept energyProfile {
   ownerUserId string! @serverSet
   registrationId string!

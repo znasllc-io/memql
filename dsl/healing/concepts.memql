@@ -50,6 +50,7 @@ use identity.concepts.{ user }
 /// shared Postgres + the cache.invalidate broadcast.
 @displayCard(primary="baseConstructId", secondary="tier", tertiary="reason", status="validationStatus")
 @rowAuthz(owner="ownerUserId")
+@belongsTo(account)
 concept healedOverride {
   ownerUserId      string!  @description("v1:identity:user.id that owns this override -- the user whose construct was healed. Stamped from actor.userId at create time and re-stamped on every update so ownership can never be reassigned by a caller. The load-bearing per-row authz key. For an embedded tier=base row materialized by the SeedMaterializer this is the system owner.")
   baseConstructId  string!  @description("Stable id of the BASE construct this row defines or overrides -- the automation name, precondition id, guard id, or literal key the healing loop targets (e.g. 'deployStaging' or 'deployStaging.envIsStaging'). The resolution key: resolveConstruct(baseConstructId) prefers the newest VALID overlay override with this baseConstructId and falls back to the base. Mirrors how v1:rbac:capability.roleSlug + role.slug join a grant to its role by a stable string, not a node id.")
@@ -65,6 +66,7 @@ concept healedOverride {
   validatedBy      string  @description("v1:identity:user.id of the human who validated (or rejected) this override. Stamped from actor.userId by the validate/reject mutation. Empty while proposed. The audit trail for who accepted a heal at what blast radius.")
   validatedAt      datetime  @description("RFC3339 timestamp of the validation/rejection decision. Empty while proposed.")
   rejectionReason  string  @description("Human-readable reason a validator REJECTED this override. Empty unless validationStatus=rejected. Kept for audit so a rejected proposal is recorded, not silently dropped.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }

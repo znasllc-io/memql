@@ -24,12 +24,19 @@ package automations
 // statements can no longer write that last form -- the compiler refuses a
 // dotted `event.<field>` read and names `args.<field>` -- so in practice a
 // projected run records its declared args; the path is still read so an
-// expression that reaches the analysis another way is not dropped. Everything
-// that reads a recorded trigger back sees what it reads:
+// expression that reaches the analysis another way is not dropped. One key is
+// kept beside those whatever the body reads, because its reader is the executor
+// and not the body: `accountId`, the triggering row's account (recordedTrigger).
+// Everything that reads a recorded trigger back sees what it reads:
 //
 //   - resume (resume.go) rebinds args from the recorded payload and sets it as
 //     the `event` root; adoption (ExecuteAdopted, a run with no steps yet)
 //     re-executes from it.
+//   - the run's account: a run acts in the account of the row that triggered
+//     it, and a resumed or adopted run reads that account back off the recorded
+//     payload, with the concept taken from the recorded topic
+//     (contextWithTriggerAccount). Projected away, the second attempt would act
+//     in no account where the first acted in one.
 //   - the cause: a root run re-derives its correlation id from the WHOLE
 //     payload's fingerprint (rootCorrelation), so a projected root run records
 //     the correlation its first attempt derived as its cause
@@ -228,11 +235,24 @@ func logicCallsLeaveTheEventAlone(calls []string, source FunctionSource, visitin
 func recordedTrigger(automation *Automation, triggeredBy string, ev *events.Event, parent events.Cause) map[string]any {
 	payload, projected := ev.Payload, false
 	if automation != nil && automation.JournalTriggerReads != nil && isEventFiring(triggeredBy) && ev.Payload != nil {
-		payload, projected = make(map[string]any, len(automation.JournalTriggerReads)), true
+		payload, projected = make(map[string]any, len(automation.JournalTriggerReads)+1), true
 		for _, key := range automation.JournalTriggerReads {
 			if v, ok := ev.Payload[key]; ok {
 				payload[key] = v
 			}
+		}
+		// THE ROW'S ACCOUNT IS KEPT WHATEVER THE BODY READS. It is not one of
+		// the run's reads, so it is added here rather than to
+		// JournalTriggerReads, which stays the answer to "what can the body
+		// see": the executor reads it, to place a resumed or adopted run in
+		// the account its first attempt acted in (contextWithTriggerAccount).
+		// Kept as the row had it and only when the row had it, so a row with no
+		// account records no key rather than an empty one. Whether it MEANS an
+		// account is decided when it is read back, from the concept on the
+		// recorded topic; a cluster-wide row's field of the same name is
+		// recorded and never consulted.
+		if v, ok := ev.Payload[triggerAccountField]; ok {
+			payload[triggerAccountField] = v
 		}
 	}
 	trigger := map[string]any{

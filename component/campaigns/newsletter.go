@@ -248,7 +248,10 @@ func (w *Worker) newsletterPreflight(ctx context.Context, row map[string]any, se
 // subscribeBinding reads the storefront's newsletter binding and checks it against
 // the form that was posted: enabled, owned by the caller, the store the form
 // names, and the revision the visitor saw. It returns the newsletter row, whose
-// audience is the one the signup is for. Two single-row reads and a capability
+// audience is the one the signup is for. The caller is compared BARE: through the
+// shopper surface it is the owner the edge stamps, the site row's ownerUserId as a
+// read returns it -- canonical v1:identity:user:<id> (TestAStorefrontSignupBorrows
+// TheOwnerTheEdgeStamps). Two single-row reads and a capability
 // check, so it runs twice -- before the locks, to learn the audience, and under
 // them, where the binding must be exactly what the form was built from.
 func (w *Worker) subscribeBinding(ctx context.Context, args map[string]any, siteID string) (map[string]any, error) {
@@ -260,7 +263,7 @@ func (w *Worker) subscribeBinding(ctx context.Context, args map[string]any, site
 	if err != nil {
 		return nil, err
 	}
-	if row == nil || site == nil || !booleanOr(row, "enabled", false) || !booleanOr(site, "shopperForms", false) || str(site, "status") == "disabled" || bare(str(site, "ownerUserId")) != callerUserID(ctx) || !sameOrganization(str(row, "accountId"), str(site, "accountId")) || bare(argString(args, "storeId")) != bare(str(row, "storeId")) || bare(str(objectField(site, "binding"), "storeId")) != bare(str(row, "storeId")) {
+	if row == nil || site == nil || !booleanOr(row, "enabled", false) || !booleanOr(site, "shopperForms", false) || str(site, "status") == "disabled" || bare(str(site, "ownerUserId")) != bare(callerUserID(ctx)) || !sameOrganization(str(row, "accountId"), str(site, "accountId")) || bare(argString(args, "storeId")) != bare(str(row, "storeId")) || bare(str(objectField(site, "binding"), "storeId")) != bare(str(row, "storeId")) {
 		return nil, fmt.Errorf("newsletter signups are unavailable for this deployable")
 	}
 	if !templateTime(row["createdAt"]).Equal(templateTime(args["consentRevision"])) {

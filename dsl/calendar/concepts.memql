@@ -23,6 +23,7 @@ use identity.concepts.{ user }
 /// expansion into concrete occurrences is a downstream concern, not stored here.
 @displayCard(primary="title", secondary="startsAt", tertiary="location", status="source")
 @rowAuthz(owner="ownerUserId")
+@belongsTo(account)
 concept calendarEvent {
   ownerUserId  string! @description("v1:identity:user.id who owns this event. Stamped from actor.userId at create time. Every read self-scopes on this field; it is the load-bearing per-row authz guard.")
   title        string! @description("Human-readable event title, e.g. 'Karate class' or 'Dentist'. Shown as the primary line on the event card and in agent-facing listings.")
@@ -35,6 +36,7 @@ concept calendarEvent {
   source       enum("native", "externalSync")! @description("Provenance discriminator. native = created in-app (the only writer in v1; the calendar tool + frontend stamp this). externalSync = mirrored from an external calendar (Google / CalDAV) by a sync that does not exist yet -- the knowledge:liveConnector path once planned for it was retired in memql#5432; such rows would carry externalRef and be owned by the sync, not hand-edited.")
   externalRef  string  @description("When source=externalSync: the upstream event id (e.g. the Google Calendar event id) this row mirrors. Used by the future sync reconciler for idempotent upsert + deletion-propagation. Empty for native events.")
   deleted      bool @description("Soft-delete flag. The calendar delete action stamps this true rather than hard-deleting so the time-series history survives and a future external-sync reconciler can propagate the deletion upstream. Queries filter it out via isNotDeleted.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
@@ -44,6 +46,7 @@ concept calendarEvent {
 /// `published` does not require a rebuild. Per-row authz: owned by the host.
 @displayCard(primary="weekday", secondary="startLocal", tertiary="timezone", status="published")
 @rowAuthz(owner="ownerUserId")
+@belongsTo(account)
 concept bookingHours {
   ownerUserId   string!  @description("v1:identity:user.id of the host who publishes these hours. Stamped from actor.userId.")
   weekday       enum("sun", "mon", "tue", "wed", "thu", "fri", "sat")!  @description("Day of week these hours apply, in the host's timezone.")
@@ -53,6 +56,7 @@ concept bookingHours {
   slotMinutes   int  @description("Booking slot length in minutes. Data, not source.")
   published     bool!    @description("When true, these hours are offered for booking. Flipped at runtime.")
   label         string   @description("Optional host-facing label, e.g. \"Office hours\".")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
@@ -63,6 +67,7 @@ concept bookingHours {
 /// new version of this id -- there is no silent overwrite of history.
 @displayCard(primary="bookerName", secondary="startsAt", tertiary="status", status="status")
 @rowAuthz(owner="ownerUserId")
+@belongsTo(account, via="hoursId")
 concept booking {
   ownerUserId      string!  @description("v1:identity:user.id of the host. Stamped from actor.userId. The per-row authz key.")
   hoursId          string   @description("Optional v1:calendar:bookingHours.id this slot was taken from.")
@@ -73,6 +78,7 @@ concept booking {
   status           enum("booked", "cancelled", "rescheduled")!  @description("Lifecycle. booked is the active hold; cancelled and rescheduled are terminal for this version. A reschedule writes a new booked row and stamps this one rescheduled.")
   notes            string   @description("Optional host or booker note.")
   rescheduledToId  string   @description("When status=rescheduled, the v1:calendar:booking.id of the replacement.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="hoursId", target=bookingHours, direction="outgoing")

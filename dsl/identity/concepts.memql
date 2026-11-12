@@ -13,6 +13,7 @@ use agents.concepts.{ agent }
 /// IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS has elapsed without a decision. Global scope so admins in
 /// any partition (typically owners of the cluster) can review the queue.
 @displayCard(primary="email", secondary="name", tertiary="reviewedBy", status="status")
+@belongsTo(cluster)
 concept accessRequest {
   email             string!  @description("Email address the requester wants to register with. Same value flows into the eventual v1:identity:user.primaryEmail on approval.")
   name              string  @description("Display name supplied at submission time. Optional (some flows ask, some don't).")
@@ -70,6 +71,7 @@ concept accessRequest {
 /// recorded, while a caller writing their own trail entry directly is refused.
 @rowAuthz(clusterOwner)
 @displayCard(primary="action", secondary="category", tertiary="actorEmail", status="outcome")
+@belongsTo(cluster)
 concept auditEvent {
   occurredAt      datetime!  @description("When the event happened. May lag createdAt by milliseconds because the row is written after the event completes.")
   category        enum("auth", "identity", "authorization", "configuration", "admin", "data")!  @description("Coarse grouping for filtering and retention policy hooks.")
@@ -127,6 +129,7 @@ concept auditEvent {
 /// on its own account.
 @rowAuthz(owner="actorUserId", clusterOwner)
 @displayCard(primary="action", secondary="clientLabel", tertiary="actorEmail", status="outcome")
+@belongsTo(cluster)
 concept authActivity {
   occurredAt      datetime!  @description("When the mechanic happened. Written by the identity service at the moment it completes, so it is within milliseconds of the row's createdAt -- the retention job leans on that (it prunes on the hypertable's partition key and confirms against this field).")
   action          enum("session_refreshed", "session_refresh_blocked", "grace_window_accept", "pat_auth_accepted")!  @description("What happened. CLOSED, and each value has exactly one writer: session_refreshed and session_refresh_blocked are refresh.Rotator's two outcomes; grace_window_accept is the Rotator accepting the immediately-previous hash inside its 30s window (a legitimate mid-rotation retry, NEVER reuse -- see memql#4329); pat_auth_accepted is the PAT verifier, once per PAT-authenticated request. Every value here must also be accepted by createAuthActivity, and every value a Go writer emits must be here.")
@@ -174,6 +177,7 @@ concept authActivity {
 //   ~60s TTL. There is no human-facing identity to promote, and giving a
 //   credential a browsable-looking label in a row list is the wrong
 //   affordance.
+@belongsTo(cluster)
 concept authCode {
   codeHash            string!  @description("SHA-256 hex digest of the plaintext code. Primary lookup key in the token-exchange path -- avoids equality lookups on the plaintext.")
   clientId            string!  @description("OAuth client identifier the code was minted for. Token-exchange MUST verify the redeeming client matches; mismatched client = reject and audit as code_misuse.")
@@ -206,6 +210,7 @@ concept authCode {
 //   v1:identity:workerPairingCode: two secret hashes plus a poll clock. There is no
 //   human-facing identity to promote, and clientId is identical across every row a
 //   given client mints.
+@belongsTo(cluster)
 concept deviceCode {
   clientId            string!  @description("OAuth client_id the device authorization was requested for. The token-grant redemption MUST verify the polling client matches; a mismatch is rejected and audited.")
   deviceCodeHash      string!  @description("SHA-256 hex digest of the plaintext `mql_dvc_<...>` device_code. Primary lookup key on the polling path. The plaintext is returned once in the POST /device/code response and never persisted.")
@@ -237,6 +242,7 @@ concept deviceCode {
 /// privilege: corsOriginsJSON is the one field here an owner/admin has to write deliberately, and
 /// it is written by nothing on the /register path (memql#3716).
 @displayCard(primary="clientName", secondary="clientId", tertiary="tokenEndpointAuthMethod")
+@belongsTo(cluster)
 concept oauthClient {
   clientId                string!  @description("Public OAuth client_id issued at dynamic registration (RFC 7591). Lookup key in /authorize + /oauth/token.")
   clientName              string  @description("Human-readable client_name from the registration request.")
@@ -253,6 +259,7 @@ concept oauthClient {
 /// revocation; rows past expiresAt are tombstoned by GC, not by user action. Global scope: lives in
 /// _system so any partition's middleware can resolve a session.
 @displayCard(primary="subject", secondary="clientLabel", tertiary="lastActivityAt", status="source")
+@belongsTo(cluster)
 concept authSession {
   userId          string  @description("Owning v1:identity:user. Optional because rows are written at token-issuance time, which can race ahead of the magic-link verifier's user-row insert on first-time logins. Subject is the canonical lookup key.")
   identityId      string  @description("v1:identity:identity the session was minted from (typically the magic_link variant). Same caveat as userId.")
@@ -281,6 +288,7 @@ concept authSession {
 /// edits. Global scope so the configuration is reachable from every binary that needs it (identity
 /// itself plus future per-node verifier middleware).
 @displayCard(primary="clusterDomain", secondary="brandName", tertiary="bootstrapEmail", status="registrationMode")
+@belongsTo(cluster)
 concept clusterSettings {
   clusterDomain                   string  @description("The deployment-wide hostname suffix the operator entered at /setup (or supplied via MEMQL_IDENTITY_BOOTSTRAP_DOMAIN). Examples: memql.localhost, staging.acme.com, acme.com. Every public service URL the cluster builds derives from it: app.<clusterDomain> for the SPA, identity.<clusterDomain> for sign-in, bff.<clusterDomain> for the API, agent.<clusterDomain> for worker registration. Empty before the wizard runs.")
   registrationMode                enum("open", "domain_restricted", "invite_only", "waitlist")!  @description("Who can self-register. Mirror of MEMQL_IDENTITY_REGISTRATION_MODE.")
@@ -314,6 +322,7 @@ concept clusterSettings {
 /// ceiling, scope set, and lifetime. Global scope: lives in _system and is readable from any
 /// partition so cross-partition agent work does not require per-partition delegation rows.
 @displayCard(primary="identitySubject", secondary="agentId", tertiary="roleCeiling", status="active")
+@belongsTo(cluster)
 concept delegation {
   identityId         string!  @description("Node ID of the v1:identity:identity granting authority. Through its userId the delegation resolves back to a v1:identity:user.")
   identitySubject    string!  @description("authenticated subject id of the delegating identity (denormalized for fast lookup on the auth hot path).")
@@ -381,6 +390,7 @@ concept delegation {
 // owner="userId" and machine credentials carry clusterOwner. (b) is a data
 // migration plus a wire-contract change, not an annotation.
 @displayCard(primary="label", secondary="identityType", tertiary="userId", status="active")
+@belongsTo(cluster)
 concept identity {
   active          bool  @description("Soft-delete flag. Revoked credentials stay around for audit but are inactive.")
   userId          string!  @description("Owning v1:identity:user. Every identity must belong to exactly one user; a user can own many identities.")
@@ -483,6 +493,7 @@ concept identity {
 /// the user invitation, which is what the MemQL OS Users app issues. `kind` keeps its "guest"
 /// value for rows already written; nothing produces one.
 @displayCard(primary="inviteeEmail", secondary="kind", tertiary="inviterName", status="status")
+@belongsTo(account, stated)
 concept invitation {
   active        bool                                                                          @description("Whether the invitation is active. Set false to soft-cancel.")
   expiresAt     datetime                                                                      @description("Absolute expiration timestamp. Set for both kinds since memql#4270: a user invitation that never expires is a standing credential nobody remembers issuing.")
@@ -517,6 +528,7 @@ concept invitation {
 /// the row is also rejected. Global scope so the public unauthenticated /auth/magic-link/consume
 /// endpoint can resolve the row regardless of which partition the eventual user belongs to.
 @displayCard(primary="email", secondary="sourceIP", tertiary="expiresAt")
+@belongsTo(cluster)
 concept magicLinkRequest {
   email           string!  @description("Email address the magic link was sent to. Drives the user-lookup / first-time-registration path on consume.")
   tokenHash       string!  @description("SHA-256 hex digest of the plain magic-link token. Primary lookup key on consume; the plaintext token is delivered in the email link and never stored server-side.")
@@ -596,6 +608,7 @@ concept magicLinkRequest {
 // prerequisite for closing the browse hole, which is why #3350 shipped
 // without them.
 @displayCard(primary="displayName", secondary="role", tertiary="primaryEmail", status="active")
+@belongsTo(cluster)
 concept user {
   active          bool  @description("Whether the user account is active.")
   displayName     string!  @pii  @description("Display name shown in the UI. By convention this is firstName + ' ' + lastName when both are populated; the admin / setup wizard maintain that invariant. Standalone field (rather than a derived computed view) because legacy rows pre-date the firstName/lastName split and we want a stable display value to fall back on.")
@@ -652,6 +665,7 @@ concept user {
 // @no-displayCard: Single-use credential row, same reasoning as v1:identity:authCode: a
 //   secret hash plus foreign keys. `clusterURL` is identical on every row in a
 //   cluster, so promoting it would distinguish nothing.
+@belongsTo(cluster)
 concept workerPairingCode {
   ownerUserId  string!  @description("v1:identity:user.id who minted the code (and who will own the resulting worker_token + v1:worker:registration). The redeem handler reads this and uses it as the registeredBy for the new worker_token credential.")
   codeHash     string!  @description("SHA-256 hex digest of the plain XXXX-XXXX code. Plaintext is shown to the user ONCE on the frontend's Settings card and never persisted.")
@@ -693,6 +707,7 @@ concept workerPairingCode {
 // component/memql/rowauthz_undeclared_gate_test.go naming this issue as its reason.
 // @no-displayCard: single-use credential row -- a secret hash plus foreign keys, same reasoning as
 //   v1:identity:workerPairingCode and v1:identity:authCode.
+@belongsTo(cluster)
 concept enrolmentToken {
   userId          string!    @description("v1:identity:user.id this token enrols. The redeem path resolves the passkey owner from THIS field and never from a caller-supplied argument, so a leaked token can only ever add a credential to the account it was minted for.")
   tokenHash       string!    @description("SHA-256 hex digest of the plain mql_enr_<...> token. The plaintext is returned to the issuer ONCE, embedded in the enrolment link, and is never persisted or logged.")
@@ -730,6 +745,7 @@ concept enrolmentToken {
 /// tier of each concept, and a group with no account ties them to nothing.
 @displayCard(primary="name", secondary="description", status="status")
 @rowAuthz(owner="ownerUserId", rankVisible, unowned="admin", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept group {
   ownerUserId  string   @description("ALWAYS EMPTY: this is the deployment's row, not a principal's (D2). Present so the owned tier reads at all -- an ABSENT owner key is denied at every rank, and only a PRESENT-and-empty one is the deliberate statement of cluster ownership that `unowned=\"admin\"` then makes readable. Nothing writes a value here, and a row that carried one would be readable by that principal alone.")
   name         string!  @description("Display name of the group, as a person would say it. For the group the automation makes per account this is the account's own name; for a custom group it is whatever the operator called it.")
@@ -774,6 +790,7 @@ concept group {
 /// role's test persona in that organization's group -- never by a mutation a caller can reach.
 @displayCard(primary="userId", secondary="origin", status="status")
 @rowAuthz(owner="ownerUserId", rankVisible, unowned="admin", clusterOwner, account="accountId")
+@belongsTo(account, stated)
 concept groupMembership {
   accountId    string   @description("Organization inherited from the membership group. Absent on historic rows until repaired from their group; empty for a custom group with no organization. Never supplied by a client.")
   ownerUserId  string   @description("ALWAYS EMPTY (D2). See v1:identity:group.ownerUserId for why the field is present and never written.")
@@ -805,6 +822,7 @@ concept groupMembership {
 /// NOT sufficient, are recorded in docs/internal/design/account-isolation-model.md.
 @displayCard(primary="name", secondary="description", tertiary="primaryContactEmail", status="status")
 @rowAuthz(owner="ownerUserId")
+@belongsTo(cluster)
 concept account {
   ownerUserId          string!  @serverSet  @description("v1:identity:user.id of the operator principal that manages this customer. THE ROW-AUTHZ OWNER FIELD: stamped from actor.userId on create and re-stamped on every update so ownership can never be reassigned by a caller, and @serverSet turns 'never accepted from caller args' into a LOAD-TIME rejection rather than a convention. Because the concept declares @rowAuthz(owner=\"ownerUserId\"), this field is also what the engine compares against on the read path and in the write guard -- it is not merely documentation of an intent each query has to restate.")
   name                 string!  @description("Display name of the customer, as the operator refers to them. The primary display field. Not unique -- the engine enforces no uniqueness constraint on any payload field, so two accounts may share a name and the row id is the only identity.")
@@ -834,6 +852,7 @@ concept account {
 /// setAccountEntitlement mints a deterministic id (accountEntitlement-<hash(accountId)>) so each
 /// set appends a new time-series version and the latest wins.
 @displayCard(primary="accountId", secondary="accountKind", tertiary="note", status="tier")
+@belongsTo(cluster)
 concept accountEntitlement {
   accountId          string! @description("The paying account this entitlement applies to. v1: a v1:identity:user.id (accountKind='user'). The admission controller (#904) resolves a Plan's account via Plan.requestedBy and reads the effective cap from the matching row here.")
   accountKind        enum("user", "org")! @description("Whether accountId names a user or an org. v1 is always 'user' (per-user account); 'org' is reserved for the future per-organization concurrency rollup where many users share one paying account's pool of slots.")
@@ -892,6 +911,7 @@ concept accountEntitlement {
 // @no-displayCard: single-use credential row -- a secret digest plus a user id
 //   and a TTL, the same reasoning as v1:identity:enrolmentToken and
 //   v1:identity:workerPairingCode.
+@belongsTo(cluster)
 concept githubConnectState {
   sessionId string @description("Originating browser auth session; callback must prove the same live session via its HTTP-only refresh cookie.")
   pkceVerifier string @description("Sealed PKCE verifier; decrypted only on the callback replica for the code exchange.")

@@ -875,6 +875,10 @@ func TestTheExportedReadOfThePolicy(t *testing.T) {
 		{"order", "updatedAt", "kept as structure"},
 		{"order", "gid", "kept as structure"},
 		{"order", "storeId", "kept as structure"},
+		// The account a row belongs to is the engine's own stamp, on every
+		// mirror concept: structure, on the erased customer's own row too.
+		{"order", "accountId", "kept as structure"},
+		{"customer", "accountId", "kept as structure"},
 		{"orderLineItem", "parentGid", "kept as structure"},
 		{"order", "parentGid", "no such field"},
 		// The erased customer's own row keeps nothing but its structure.

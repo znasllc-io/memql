@@ -71,11 +71,17 @@ type erasureDecision struct {
 }
 
 // erasureStructuralFields are the fields every mirror row carries for itself
-// (the mapper writes them; the generator's mirrorOwnFields is the same list).
-// An erasure never touches them: they say which row this is and when it was
-// read, and nothing about a person.
+// (the generator's mirrorOwnFields is the same list). The mapper writes all
+// of them but the last: accountId, the account the row belongs to, is filled
+// in by the engine from the row's store and is in no write the connector
+// makes. An erasure never touches them: they say which row this is, whose
+// account it is in and when it was read, and nothing about a person. The
+// scrub rebuilds a row from the keys its plan names and drops every other,
+// so a field of this kind that is missing here is taken off every row an
+// erasure rewrites.
 var erasureStructuralFields = []string{
 	"storeId", "gid", "updatedAt", "versionSource", "syncedAt", "versionReadAt", "deleted", "parentGid",
+	"accountId",
 }
 
 // erasureKeptScalars are the Admin scalar types a field is kept for, with what
