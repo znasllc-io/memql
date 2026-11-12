@@ -99,6 +99,11 @@ func liveWholesaleEngine(t *testing.T, disabled ...string) *memql.MemQLEngine {
 		t.Fatalf("NewMemoryNodesDatabase: %v", err)
 	}
 	mnd.Start(context.Background())
+	// EACH TEST'S POOLS ARE HANDED BACK when it ends, or the package's engines
+	// hold their connections to the end of the run and a long tree exhausts
+	// the server's clients. Registered first, so it runs after every cleanup
+	// that may still use the engine.
+	t.Cleanup(func() { mnd.ClosePool(context.Background()) })
 	select {
 	case <-mnd.Ready():
 	case <-time.After(60 * time.Second):
