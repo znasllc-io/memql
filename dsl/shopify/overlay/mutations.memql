@@ -95,6 +95,18 @@ mutation store setStoreStatus {
 /// Record what the connector last observed about a store. Health is a
 /// single object so the connector can publish a shape the portal renders
 /// without a schema change every time a new counter is worth showing.
+///
+/// Server-only, and actor.userId scoping is not the fix: the caller is the
+/// connector writing as the deployment, after a pass that has no user at
+/// all (the watch, the subscription reconcile, an uninstall's handler, the
+/// privacy runner), so actor.userId names nobody. And health is not a
+/// person's to say. It holds what the connector decides on: the verdict's
+/// record, which says whether an owner was mailed; the mark that a store's
+/// once-only erasure work ran; the deliveries an uninstall arrived by, which
+/// are deleted when the store is connected again. A client-callable version
+/// would let a caller silence a store's alert, or mark erasure work done that
+/// never ran.
+@serverOnly
 mutation store recordStoreHealth {
   args {
     storeId                 string!

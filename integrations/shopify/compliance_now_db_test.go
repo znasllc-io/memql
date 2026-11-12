@@ -2504,6 +2504,35 @@ func TestTheRememberedIdsDeleteOnlyTheStoresOwnUninstallDeliveries(t *testing.T)
 	}
 }
 
+// A store's health is the connector's to write and nobody else's: it holds
+// what the connector decides on. The mutation is server-only, so a cluster
+// owner who calls it as a client is refused and the row is as it was; the
+// connector's own write of a key goes through.
+func TestAStoresHealthIsWrittenByTheConnectorAlone(t *testing.T) {
+	r := newRunnerFixture(t)
+	if r == nil {
+		return
+	}
+	r.hasStore()
+	planted := renderCall("recordStoreHealth", map[string]any{"storeId": r.store, "health": map[string]any{
+		healthUninstallDeliveries: []string{"somebody-elses-delivery"}, healthOldErasureRepaired: "2026-01-01T00:00:00Z",
+	}})
+	if _, err := r.eng.Execute(auth.ContextWithClientOrigin(ownerCtx()), planted); err == nil || !strings.Contains(err.Error(), "server-only") {
+		t.Errorf("a cluster owner calling recordStoreHealth as a client answered %v, want it refused as server-only", err)
+	}
+	store, _, _ := r.conn.storeByID(memql.ContextWithFreshRead(operatorContext(context.Background())), r.store)
+	if len(uninstallDeliveriesOf(store)) != 0 || mapString(store.Health, healthOldErasureRepaired) != "" {
+		t.Errorf("the store's health holds %v after a refused write", store.Health)
+	}
+	if err := r.conn.recordStoreHealthKey(context.Background(), r.store, healthOldErasureRepaired, r.at.Format(time.RFC3339), nil); err != nil {
+		t.Fatalf("the connector's own write of a health key: %v", err)
+	}
+	store, _, _ = r.conn.storeByID(memql.ContextWithFreshRead(operatorContext(context.Background())), r.store)
+	if mapString(store.Health, healthOldErasureRepaired) == "" {
+		t.Error("the connector's own write of a health key did not land")
+	}
+}
+
 // An uninstall notice a reinstall superseded changes nothing of the store, and
 // its delivery is remembered all the same: it too is a row the same notice
 // would land on after a later uninstall, and remembered it goes at the next

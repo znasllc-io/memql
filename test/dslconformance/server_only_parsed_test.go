@@ -1725,9 +1725,17 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// borrowed identity, so actor.userId scoping would pass; what it
 		// asserts -- that the provider ended the grant -- is the verified
 		// delivery's to say, never the person's.
+		//
+		// recordStoreHealth writes what the connector observed and decided
+		// on: the verdict's record, the mark that a store's once-only erasure
+		// work ran, the deliveries an uninstall arrived by. Its one caller is
+		// the connector, after a pass that has no user. Client-callable, it
+		// would let a caller silence a store's alert or mark erasure work
+		// done that never ran.
 		{Path: "shopify/overlay/mutations.memql", Name: "markStoreUninstalled"}:        true,
 		{Path: "shopify/overlay/mutations.memql", Name: "markStoreReconnected"}:        true,
 		{Path: "shopify/overlay/mutations.memql", Name: "markStoreConnected"}:          true,
+		{Path: "shopify/overlay/mutations.memql", Name: "recordStoreHealth"}:           true,
 		{Path: "platform/mutations.memql", Name: "markExternalConnectionDisconnected"}: true,
 		// epic memql#4434, the release-cut pair. One argument covers both, and it
 		// is not "the caller is a machine" -- the caller here is a signed-in
