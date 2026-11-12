@@ -28,17 +28,42 @@ import (
 )
 
 // putRequest writes a request row the way the pack does: its @serverOnly
-// mutation, internal origin for the one call, AS THE SITE OWNER.
+// mutation, internal origin for the one call, AS THE SITE OWNER -- and in the
+// shape the pack's own issue paths write (reviewsIssueRequest, the daily ask):
+// the site the link points at and that site's organization, copied off the
+// store's site, so the people of the store's organization read it as they read
+// a real one.
 func putRequest(t *testing.T, eng *memql.MemQLEngine, merchant, store, requestID, handle, token string, expires time.Time) {
 	t.Helper()
 	call := `putReviewRequest(requestId: ` + quote(requestID) + `, storeId: ` + quote(store) +
 		`, orderGid: "gid://shopify/Order/1", productHandle: ` + quote(handle) +
 		`, email: "buyer@example.com", tokenHash: ` + quote(reviewspack.TokenHashForTest(token)) +
 		`, issuedAt: ` + quote(time.Now().UTC().Format(time.RFC3339Nano)) +
-		`, expiresAt: ` + quote(expires.UTC().Format(time.RFC3339Nano)) + `)`
+		`, expiresAt: ` + quote(expires.UTC().Format(time.RFC3339Nano))
+	if site, account := storeSite(t, store); site != "" {
+		call += `, siteId: ` + quote(site)
+		if account != "" {
+			call += `, accountId: ` + quote(account)
+		}
+	}
+	call += `)`
 	if _, err := eng.Execute(auth.ContextWithInternalOrigin(asMerchant(merchant)), call); err != nil {
 		t.Fatalf("putReviewRequest: %v", err)
 	}
+}
+
+// storeSite is the newest site bound to the store, and its organization, read
+// off the table: what the pack's issue paths copy onto a request.
+func storeSite(t *testing.T, store string) (site, account string) {
+	t.Helper()
+	var id, acct string
+	err := liveDB.DB.QueryRowContext(context.Background(),
+		`SELECT id, coalesce(payload->>'accountId','') FROM "MemoryNodes" WHERE concept = 'v1:platform:site' AND payload->'binding'->>'storeId' = $1 ORDER BY "createdAt" DESC LIMIT 1`,
+		store).Scan(&id, &acct)
+	if err != nil {
+		return "", ""
+	}
+	return strings.TrimPrefix(id, "v1:platform:site:"), acct
 }
 
 func submitThrough(eng *memql.MemQLEngine, merchant, store, handle, token, body string) error {
