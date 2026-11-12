@@ -44,7 +44,8 @@ export function isZip(name: string, mime = "", bytes?: Uint8Array): boolean {
 export interface OpenDocument {
   resource: Resource; lease: ConnectionLease; content: Uint8Array; mime: string;
   sourceId: string; kind: string; version: number; revision?: string;
-  template?: { name: string; accountId: string; status: string };
+  /** A template's own: its name, organization and status, and its purpose when it has one (none is marketing). */
+  template?: { name: string; accountId: string; status: string; purpose?: string };
   /** A template MemQL wrote (or is writing) from a description; the others have none. */
   composition?: Composition;
   /** The organizations a Library file is labelled with (artifacts only; empty when it has none). */
@@ -116,7 +117,7 @@ export class Documents {
       if (!revision) throw new Error("The cluster did not return the template revision.");
       const content = new TextEncoder().encode(templateText(row));
       return { resource, lease, content, mime: "application/json", sourceId: resource.id, kind: "campaign_template", version: 0, revision,
-        template: { name: text(row,"name"), accountId: text(row,"accountId"), status: text(row,"status") },
+        template: { name: text(row,"name"), accountId: text(row,"accountId"), status: text(row,"status"), ...(text(row,"purpose") ? { purpose: text(row,"purpose") } : {}) },
         ...(readComposition(row.composition) ? { composition: readComposition(row.composition) } : {}) };
     }
     const artifact = (await this.api.execute(lease, "libraryArtifactById", buildLibraryArtifactById({ artifactId: resource.id })))[0];

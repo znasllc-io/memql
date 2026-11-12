@@ -42,8 +42,20 @@ export interface PublishPorts {
   state: { get<T>(key: string): T | undefined; update(key: string, value: unknown): PromiseLike<void> };
 }
 
-/** A template as the cluster keeps it. `document` is the copy it stores, which sameEmail compares an open email with. */
-export interface TemplateState { templateId: string; status: string; revision: string; document?: Record<string, unknown> }
+/**
+ * A template as the cluster keeps it. `document` is the copy it stores, which sameEmail compares an open email with;
+ * `purpose` is its stored purpose, when it has one (none is marketing).
+ */
+export interface TemplateState { templateId: string; status: string; revision: string; document?: Record<string, unknown>; purpose?: string }
+
+/**
+ * The purpose a preview names for an email: its template's, so that the preview's issues are the ones a save of it answers
+ * (emailRender's purpose). Only transactional is named; a marketing template, and an email no template holds yet, name
+ * none, which is marketing.
+ */
+export function previewPurpose(template: TemplateState | undefined): "transactional" | undefined {
+  return template?.purpose === "transactional" ? "transactional" : undefined;
+}
 
 /** Something that keeps an email from being sent, as the cluster names it (an emailRender issue, or one a save reported). */
 export interface EmailIssue { code: string; block?: string; message: string }
@@ -134,7 +146,8 @@ export async function templateFor(target: EmailTarget, organization: Organizatio
   if (!templateId) throw new Error(NO_TEMPLATE_ID);
   const row = (await ports.execute("templateById", buildTemplateById({ templateId })))[0];
   if (row === undefined) return undefined;
-  return { templateId, status: text(row, "status"), revision: text(row, "createdAt"), ...(isRecord(row.document) ? { document: row.document } : {}) };
+  return { templateId, status: text(row, "status"), revision: text(row, "createdAt"), ...(isRecord(row.document) ? { document: row.document } : {}),
+    ...(text(row, "purpose") ? { purpose: text(row, "purpose") } : {}) };
 }
 
 // -- The action bar -----------------------------------------------------------

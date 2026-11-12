@@ -189,8 +189,9 @@ func (w *Worker) handleComposeRender(ctx context.Context, args map[string]any, _
 	}
 	// In the slot the material was read in. The composed email holds data:
 	// pictures only (the kit's and the material's), so the render reads nothing
-	// from the Library.
-	result, err := emaildoc.Render(ctx, doc, nil, emaildoc.RenderOptions{Preview: true})
+	// from the Library. It is judged by the template's purpose, as the submit
+	// judges it (renderComposed).
+	result, err := emaildoc.Render(ctx, doc, nil, emaildoc.RenderOptions{Preview: true, Transactional: t.purpose == purposeTransactional})
 	if err != nil {
 		if errors.Is(err, emaildoc.ErrTooLarge) {
 			return nil, errPreviewTooLarge

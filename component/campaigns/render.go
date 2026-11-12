@@ -186,8 +186,9 @@ type RenderOptions struct {
 	// required, no List-Unsubscribe pair is set and no footer is appended. A
 	// template that still carries {{unsubscribeUrl}} or {{preferencesUrl}} (one
 	// published before the save-time check existed) is refused rather than sent
-	// with an empty link. Only the row lane sets it; RequireUnsubscribe is not
-	// consulted on that path.
+	// with an empty link. Only the row lane sets it, and the author's test send
+	// of a transactional template, which is tested as the lane sends it;
+	// RequireUnsubscribe is not consulted on either path.
 	Transactional bool
 }
 

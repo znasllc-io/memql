@@ -101,16 +101,6 @@ func (w *Worker) handleTestSend(ctx context.Context, args map[string]any, _ int)
 	if err := w.requireSendAuthority(ctx, campaign.AccountID); err != nil {
 		return nil, err
 	}
-	if reason := w.cfg.RequireUnsubscribe(); reason != "" {
-		// The same precondition a real send has. A test message is a real
-		// message to a real mailbox, and one without a working opt-out is the
-		// thing this deployment refuses to emit.
-		return nil, fmt.Errorf("campaigns.testSend: %s", reason)
-	}
-	if w.resolveSender() == nil {
-		return nil, errors.New("campaigns.testSend: no email sender is registered on this node")
-	}
-
 	tmpl, found, err := w.store.TemplateByID(ctx, campaign.TemplateID)
 	if err != nil {
 		return nil, fmt.Errorf("campaigns.testSend: %w", err)
@@ -120,6 +110,24 @@ func (w *Worker) handleTestSend(ctx context.Context, args map[string]any, _ int)
 	}
 	if !sameOrganization(campaign.AccountID, tmpl.AccountID) {
 		return nil, errors.New("campaigns.testSend: campaign and template must belong to the same organization")
+	}
+	// A transactional template is tested as the row lane sends it (send_row.go):
+	// it carries no unsubscribe, so whether one is configured is not its
+	// question, and one that still carries the unsubscribe or preferences tag is
+	// held there, so it is not sent here either: the author reads the lane's
+	// sentence.
+	transactional := tmpl.Transactional()
+	if transactional && carriesListLink(tmpl) {
+		return nil, errors.New(listLinkHeld(tmpl))
+	}
+	if reason := w.cfg.RequireUnsubscribe(); reason != "" && !transactional {
+		// The same precondition a real send has. A test message is a real
+		// message to a real mailbox, and one without a working opt-out is the
+		// thing this deployment refuses to emit.
+		return nil, fmt.Errorf("campaigns.testSend: %s", reason)
+	}
+	if w.resolveSender() == nil {
+		return nil, errors.New("campaigns.testSend: no email sender is registered on this node")
 	}
 	// NO template-status check, unlike the send preflight. Refusing a draft
 	// is what stops half-written copy reaching an audience; a test send to
@@ -148,7 +156,7 @@ func (w *Worker) handleTestSend(ctx context.Context, args map[string]any, _ int)
 		w.logger.Debug("campaigns.testSend: could not resolve the account name", "campaign", campaign.ID, "error", err)
 	}
 
-	msg, err := renderMessage(campaign, tmpl, recipient, RenderOptions{
+	opts := RenderOptions{
 		ReplyTo:       replyToFor(campaign, identity),
 		AccountName:   accountName,
 		SenderName:    identity.SendAs.FromName,
@@ -157,7 +165,14 @@ func (w *Worker) handleTestSend(ctx context.Context, args map[string]any, _ int)
 		// Tracking is left ZERO. There is no delivery row to attribute a hit
 		// to, so a pixel here would record against an id nobody holds -- and
 		// the operator's own open would land in the campaign's numbers.
-	})
+	}
+	if transactional {
+		// The lane's options: no footer, no List-Unsubscribe pair and no links
+		// of the engine's own. The merge fields are the synthetic recipient's,
+		// as for every test send.
+		opts.Links, opts.Transactional = MessageLinks{}, true
+	}
+	msg, err := renderMessage(campaign, tmpl, recipient, opts)
 	if err != nil {
 		return nil, fmt.Errorf("campaigns.testSend: %w", err)
 	}

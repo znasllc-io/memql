@@ -172,6 +172,13 @@ func templateNamed(t Template) string {
 	return "“" + name + "”"
 }
 
+// listLinkHeld is why a transactional template that still carries the
+// unsubscribe or preferences tag is not sent: the row lane holds it, and the
+// author's test send of it says the same.
+func listLinkHeld(t Template) string {
+	return templateNamed(t) + " cannot be sent. " + emaildoc.UnsubscribePresentMessage
+}
+
 // sendRow is sendToRecipient for a row send, from the point its template is
 // known to be a published transactional template. The order is the decision's:
 // the receipt has answered (sendToRecipientHeld), the template is held or not
@@ -187,7 +194,7 @@ func (w *Worker) sendRow(ctx context.Context, args map[string]any, receipt *sing
 	}
 	account := bare(row.AccountID)
 	if carriesListLink(tmpl) {
-		return nil, sendHeld{reason: templateNamed(tmpl) + " cannot be sent. " + emaildoc.UnsubscribePresentMessage}
+		return nil, sendHeld{reason: listLinkHeld(tmpl)}
 	}
 	if account == "" || !sameOrganization(tmpl.AccountID, account) {
 		return nil, errors.New("campaigns.sendRowMessage: the template must belong to the row's organization")

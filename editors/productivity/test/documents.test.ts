@@ -173,6 +173,9 @@ test("a template row that carries a document opens as that document", async () =
   assert.equal(opened.kind, "campaign_template");
   assert.equal(opened.revision, "2026-10-01T12:00:00Z");
   assert.deepEqual(opened.template, { name: "Welcome", accountId: "client-org", status: "draft" });
+  // The stored purpose is kept with the template when it has one, for the preview to judge the email by.
+  const transactional = await openTemplate({ id: "template", name: "Welcome", accountId: "client-org", status: "draft", createdAt: "2026-10-01T12:00:00Z", document, purpose: "transactional" });
+  assert.deepEqual(transactional.template, { name: "Welcome", accountId: "client-org", status: "draft", purpose: "transactional" });
   assert.equal(opened.accountIds, undefined, "a template's organization is its account, not a label");
   // A document that is not an object is not a document: the row opens as the custom email it also carries.
   for (const document of [null, "text", 7, ["x"]]) {
