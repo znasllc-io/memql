@@ -311,7 +311,7 @@ All `@serverOnly`. Existing ones keep their names and gain arguments.
 | `writeEntitlementRow` | `@serverOnly`; gains `ownerUserId` (argument, replacing the actor stamp), `accountId`, `errorCode`, `shopifyCustomerId`, `customerCreated`. |
 | `setWholesaleSettingsRow` | `@serverOnly`, kept for the old builtin. |
 | `putWholesaleSettingsRow` (new) | The whole merged settings row at `SettingsRowID(storeId)`, every field of 5.1, as `putReviewSettings` does. |
-| `appendDocumentVersion` (new) | Insert with a generated id. |
+| `appendWholesaleDocumentVersion` (new) | Insert with a generated id. The library domain already declares `appendDocumentVersion`, and a bare mutation name must be unique. |
 | `putPrivateLinkRow` (new) | Insert at the derived id. |
 | `putAcceptanceRow` (new) | Insert at the derived id; the caller fences it to an absent row (5.1). |
 | `putEmailSendRow` (new) | Insert at the derived id. |
