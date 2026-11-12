@@ -32,7 +32,7 @@ use work.concepts.{ run }
 /// the parent plan's requestedBy at provision time and never from a caller argument.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="runId", secondary="storageRoot", tertiary="lastUsedAt", status="status")
-@belongsTo(account, via="runId")
+@belongsTo(account, via="runId", stays="machine")
 concept workspace {
   runId           string! @description("v1:work:run.id this workspace belongs to. One workspace per run; the unique key. Was planId until memql#5053: a run is the unit of execution the spine dispatches, and a workspace is torn down when its run reaches a terminal status. A fork or a replay is a DIFFERENT run and therefore gets a clean tree, which is what replay means.")
   status          enum("provisioned", "released")! @description("Lifecycle. provisioned = workspace directory exists and is mountable. released = run reached terminal, directory torn down.")
@@ -59,7 +59,7 @@ concept workspace {
 /// explicit recovery advances the ephemeral generation after reported loss.
 @serverWritten
 @rowAuthz(owner="ownerUserId")
-@belongsTo(account, via="runId")
+@belongsTo(account, via="runId", stays="machine")
 concept executionBinding {
   runId string!
   resource enum("cloud", "fleet")!

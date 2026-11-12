@@ -493,7 +493,7 @@ concept identity {
 /// the user invitation, which is what the MemQL OS Users app issues. `kind` keeps its "guest"
 /// value for rows already written; nothing produces one.
 @displayCard(primary="inviteeEmail", secondary="kind", tertiary="inviterName", status="status")
-@belongsTo(account, stated)
+@belongsTo(account, stated, stays="signin")
 concept invitation {
   active        bool                                                                          @description("Whether the invitation is active. Set false to soft-cancel.")
   expiresAt     datetime                                                                      @description("Absolute expiration timestamp. Set for both kinds since memql#4270: a user invitation that never expires is a standing credential nobody remembers issuing.")

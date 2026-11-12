@@ -322,7 +322,7 @@ concept file {
 
   sha256       string  @description("Lowercase hex SHA-256 of the stored bytes. A DEDUP HINT and an integrity check -- NEVER an access key: knowing it grants nothing, because the download route resolves the artifact under the caller's own actor and there are no signed URLs anywhere in this design. OPTIONAL since memql#4782: a one-shot upload computes it inline, but a chunked upload's handler never holds the whole file, so the row lands in 'stored' with this ABSENT and the analysis pass stamps it by streaming the committed blob once. Absent means 'not measured yet', never 'no hash exists' -- readers render a dash, not an error.")
 
-  blobUrl      string!  @description("Where the bytes live: 'library/{userId}/{fileId}/{name}', composed server-side from the owner's id. A STORAGE PATH, not a URL a browser can fetch -- the bytes only ever reach a viewer through GET /artifacts/{id}/content, which re-checks row admission and streams them; it never redirects.")
+  blobUrl      string!  @bytes @description("Where the bytes live: 'library/{userId}/{fileId}/{name}', composed server-side from the owner's id. A STORAGE PATH, not a URL a browser can fetch -- the bytes only ever reach a viewer through GET /artifacts/{id}/content, which re-checks row admission and streams them; it never redirects.")
 
   source       enum("uploaded", "exported", "agent_generated", "derived", "app_session", "vision_input", "pipeline")!  @description("Provenance -- how the file came to be. uploaded = a person put it there; exported = written out of another artifact by the export route; agent_generated = an agent produced it as a standalone deliverable; derived = computed from another file; app_session = a delegated app session recorded a file it read or wrote, or the session's own transcript (epic memql#5396, design D5); the content is addressed by its digest, so two identical writes are one file referenced twice. vision_input = an image the ENGINE staged into a delegated app session's workspace so a vision call could reference it by name (epic memql#5391 follow-up, issue memql#5523) -- an INPUT to a turn rather than something the person kept, which is why it is its own value and not app_session: it is archived when the session ends, so a person's Files app does not fill with the images of every vision turn. pipeline = a pipeline step's archived log or one of its artifacts (epic memql#5478, issue memql#5495), filed under the pipeline owner's own actor and bound to the work run and step that produced it through producedByRunId and producedByStepKey; never content-addressed, because each file belongs to the run that made it. Copied onto the artifact index row's own source field at promotion.")
 
@@ -420,7 +420,7 @@ concept fileVersion {
 
   sha256       string  @description("Lowercase hex SHA-256 of THIS version's bytes, when it was measured. Absent means 'not measured', never 'no hash exists' -- a chunked upload's handler never holds the whole file, so the head can be superseded before the analysis pass has streamed the blob. Readers render a dash. A dedup hint and an integrity check, NEVER an access key: knowing it grants nothing, because the content route resolves the version under the caller's own actor and there are no signed URLs anywhere in this design.")
 
-  blobUrl      string!  @description("Where THIS version's bytes live: 'library/{userId}/{fileId}/v{n}/{name}'. A STORAGE PATH, not a URL a browser can fetch -- the bytes only ever reach a viewer through GET /artifacts/{id}/content?version={n}, which re-checks row admission and streams them. The reason the version mutations are @serverOnly: a caller-authored blobUrl could name another user's object, and the content route would then serve it.")
+  blobUrl      string!  @bytes @description("Where THIS version's bytes live: 'library/{userId}/{fileId}/v{n}/{name}'. A STORAGE PATH, not a URL a browser can fetch -- the bytes only ever reach a viewer through GET /artifacts/{id}/content?version={n}, which re-checks row admission and streams them. The reason the version mutations are @serverOnly: a caller-authored blobUrl could name another user's object, and the content route would then serve it.")
 
   format       enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other")  @description("High-level content classification of THIS version, derived from its own mimeType by the writer that knew it. Frozen with the version for the same reason name and mimeType are.")
 
@@ -578,7 +578,7 @@ concept folder {
 /// Azure's ~7-day clock and no sweeper exists. Per-row authz: the composite tier (memql#4312),
 /// matching every other Library concept.
 @rowAuthz(owner="ownerUserId", clusterOwner)
-@belongsTo(account)
+@belongsTo(account, stays="transit")
 concept uploadSession {
   backupWatchId string @description("The explicitly authorized directory backup for this upload; absent means an independent upload.")
   ownerUserId  string!  @serverSet  @description("v1:identity:user.id that opened this session. Stamped from actor.userId on every write and never accepted as a mutation arg (@serverSet, memql#3175). The per-row authz key, and therefore the WHOLE per-chunk authorization: chunk PUTs resolve the session under the caller's actor, and a session that is not theirs does not resolve.")
@@ -666,7 +666,7 @@ concept uploadSession {
 /// being able to rewrite it.
 @displayCard(primary="localPath", secondary="workerId", tertiary="lastSweepAt", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner)
-@belongsTo(account)
+@belongsTo(account, stays="machine")
 concept watchedFolder {
   mode enum("retain", "sync") @description("Absent or retain preserves deleted originals in Files. Sync moves confirmed local deletions to the Bin; Bin storage remains charged until purged.")
   intervalMinutes int @minimum(5) @maximum(525600) @description("Minutes between directory backups. Absent preserves the existing five-minute schedule. Missed runs are combined into one run when the machine is available.")

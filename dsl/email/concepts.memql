@@ -12,7 +12,7 @@ concept capturedMessage {
 /// gated email capabilities only; plaintext credentials never enter the feed.
 // @no-displayCard: Private encrypted connection state has no human-facing identity; the gated setup capability supplies its display fields.
 @rowAuthz(clusterOwner)
-@belongsTo(account, shared, stated)
+@belongsTo(account, shared, stated, stays="transit")
 concept connectionState {
   purpose string
   accountId string
@@ -24,7 +24,7 @@ concept connectionState {
 /// projecting status; addresses, message content and credentials are not stored.
 // @no-displayCard: Internal transport journal; the gated connection detail shows processing status.
 @rowAuthz(clusterOwner)
-@belongsTo(account, shared, stated)
+@belongsTo(account, shared, stated, stays="transit")
 concept sendOperation {
   accountId string!
   providerMessageId string @description("Opaque ACS operation/message identity used to correlate authenticated delivery reports. Content and mailboxes remain absent.")

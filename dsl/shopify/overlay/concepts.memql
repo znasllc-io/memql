@@ -31,14 +31,14 @@ concept store {
   /// Name of the v1:platform:globalSecret row holding the Admin API access
   /// token. A REFERENCE, never the token: the store row is read by the
   /// portal and the token is not something a portal read should return.
-  adminTokenRef       string
+  adminTokenRef       string  @secretName
   /// Name of the globalSecret row holding the Storefront API token, which
   /// the headless storefront's site binding consumes.
-  storefrontTokenRef  string
+  storefrontTokenRef  string  @secretName
   /// Name of the globalSecret row holding the webhook signing secret. The
   /// inbound receiver resolves this per store, which is what lets two
   /// stores verify independently.
-  webhookSecretRef    string
+  webhookSecretRef    string  @secretName
   /// The Admin API version this store is pinned to. It must match the
   /// version the mirror was generated from; a mismatch returns fields the
   /// concepts do not declare and omits fields they require.
