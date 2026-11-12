@@ -54,10 +54,10 @@ type Statistics struct {
 	// Rebuilding is nil for a store the walk holds no row for.
 	Rebuilding *bool
 
-	Figures            Figures
-	Previous           *Figures
-	Floors             map[string]bool
-	Series             []Bucket
+	Figures  Figures
+	Previous *Figures
+	Floors   map[string]bool
+	Series   []Bucket
 	// ProductsBySales, ProductsByUnits and OtherCurrencies are nil, answered
 	// null, when not measured, and empty when measured and empty.
 	ProductsBySales    []Product
