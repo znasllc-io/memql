@@ -276,11 +276,14 @@ func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[strin
 		return nil
 	}
 	err = i.walkStore(ctx, store, generation, now, wholesale, rep)
-	if errors.Is(err, errRebuilt) {
+	var noFloor floorFailed
+	if errors.Is(err, errRebuilt) || errors.As(err, &noFloor) {
 		return err
 	}
 	// After the walk, which judged the orders it wrote: the pass judges again
-	// those written before the granted set changed (wholesale.go).
+	// those written before the granted set changed (wholesale.go). Not after
+	// a walk that failed on the store's floor, which the pass needs too: it
+	// would probe again and report the same failure.
 	perr := wholesalePass(ctx, i, id, generation, wholesale, i.walkClock(), maxPagesPerRun)
 	if errors.Is(perr, errRebuilt) {
 		return perr

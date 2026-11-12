@@ -2,6 +2,7 @@ package storestats
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -580,7 +581,7 @@ func TestNoEmailReachesATableOrALog(t *testing.T) {
 			got, rep.Unreadable)
 	}
 	rows, err := db.QueryContext(context.Background(), `SELECT table_name, column_name FROM information_schema.columns
-		WHERE table_schema = current_schema() AND table_name LIKE 'store\_sales\_%' AND data_type IN ('text', 'character varying', 'json', 'jsonb')
+		WHERE table_schema = current_schema() AND table_name LIKE 'store\_sales\_%' AND data_type IN ('text', 'character varying', 'character', 'json', 'jsonb', 'ARRAY')
 		ORDER BY table_name, column_name`)
 	if err != nil {
 		t.Fatal(err)
@@ -595,6 +596,14 @@ func TestNoEmailReachesATableOrALog(t *testing.T) {
 		columns = append(columns, c)
 	}
 	_ = rows.Close()
+	// The report as the run's node carries it: counts and ids only.
+	raw, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "@") {
+		t.Errorf("the run's report holds an address: %s", raw)
+	}
 	tables := map[string]bool{}
 	for _, c := range columns {
 		tables[c.table] = true
@@ -712,5 +721,105 @@ func TestAWholesaleReadPastItsBudgetSkipsTheWalkAndKeepsTheHousekeeping(t *testi
 	}
 	if storeRow(t, id) == nil {
 		t.Error("the store has no row: its housekeeping did not run")
+	}
+}
+
+// AN UNREADABLE CURSOR RESTARTS THE PASS FROM THE FLOOR. Only this package
+// writes wholesale_cursor, but one that is not an instant must not stop the
+// store's pass until its set changes: the pass starts again from the floor
+// (a judgement is the same however often it is made), says so once at Warn
+// naming the store and nothing of the cursor, and ends.
+func TestAnUnreadableCursorRestartsThePassFromTheFloor(t *testing.T) {
+	floor := time.Now().Add(-time.Hour).UTC()
+	i, id, generation := passStore(t, floor)
+	logs := captureLogs(i)
+	st := enabledWith(buyerOne)
+	exec(t, `UPDATE store_sales_store SET wholesale_enabled = true, wholesale_digest = ?, wholesale_cursor = 'not-an-instant' WHERE store_id = ?`, st.Digest, id)
+	engine := &pagingEngine{inner: i.engine}
+	i.engine = engine
+	if err := wholesalePass(walkCtx(t), i, id, generation, st, time.Now, maxPagesPerRun); err != nil {
+		t.Fatalf("a pass with an unreadable cursor answered %v, want it to heal", err)
+	}
+	reads := buyersReads(engine)
+	if len(reads) == 0 {
+		t.Fatal("the pass read no buyers")
+	}
+	if since := sinceOf(t, reads[0]); !since.Equal(floor.Add(-watermarkOverlap)) {
+		t.Errorf("the pass read from %v, want the floor %v less the overlap", since, floor)
+	}
+	if c := storeRow(t, id)["wholesale_cursor"]; c != "" {
+		t.Errorf("after the pass the cursor is %q, want the pass ended", c)
+	}
+	warned := 0
+	for _, line := range logs() {
+		if strings.Contains(line, "not-an-instant") {
+			t.Errorf("a log line holds the cursor's text: %s", line)
+		}
+		if strings.Contains(line, `"level":"WARN"`) && strings.Contains(line, id) {
+			warned++
+		}
+	}
+	if warned != 1 {
+		t.Errorf("the pass wrote %d Warn lines naming the store, want one", warned)
+	}
+}
+
+// failingRead is the integration's engine, refusing every read whose
+// statement names read, counting what it asked.
+func failingRead(i *Integration, read string) (asked func(name string) int) {
+	var calls []string
+	i.engine = &hookEngine{inner: i.engine, before: func(query string) error {
+		calls = append(calls, query)
+		if strings.Contains(query, read) {
+			return errors.New("the read " + read + " failed")
+		}
+		return nil
+	}}
+	return func(name string) int {
+		n := 0
+		for _, q := range calls {
+			if strings.Contains(q, name) {
+				n++
+			}
+		}
+		return n
+	}
+}
+
+// A WALK THAT FAILED ON THE FLOOR MAKES NO PASS: the pass would ask the
+// floor's probes again and report the same failure twice.
+func TestAWalkThatFailedOnTheFloorMakesNoPass(t *testing.T) {
+	i, id := wholesaleStore(t)
+	settingsFor(t, id, id)
+	asked := failingRead(i, "storeStatisticsStoreAt")
+	_, err := run(t, i)
+	if err == nil {
+		t.Fatal("a run whose floor could not be found answered no error")
+	}
+	if n := strings.Count(err.Error(), "the read storeStatisticsStoreAt failed"); n != 1 {
+		t.Errorf("the floor's failure is reported %d times, want once: %v", n, err)
+	}
+	if n := asked("storeStatisticsStoreAt"); n != 1 {
+		t.Errorf("the floor was probed %d times in the turn, want once", n)
+	}
+	if n := asked("storeStatisticsOrderBuyers"); n != 0 {
+		t.Errorf("the pass read the buyers %d times after the walk failed on the floor, want none", n)
+	}
+}
+
+// A WALK THAT FAILED OTHERWISE STILL MAKES ITS PASS: a source that fails does
+// not hold back the wholesale split.
+func TestAWalkThatFailedOtherwiseStillMakesItsPass(t *testing.T) {
+	i, id := wholesaleStore(t)
+	settingsFor(t, id, id)
+	asked := failingRead(i, "storeStatisticsOrdersChanged")
+	if _, err := run(t, i); err == nil {
+		t.Fatal("a run whose order read failed answered no error")
+	}
+	if asked("storeStatisticsOrderBuyers") == 0 {
+		t.Error("the pass did not run after the walk's order source failed")
+	}
+	if row := storeRow(t, id); row["wholesale_enabled"] != true || row["wholesale_cursor"] != "" {
+		t.Errorf("after the run the store is enabled %v with cursor %q; want enabled and the pass ended", row["wholesale_enabled"], row["wholesale_cursor"])
 	}
 }

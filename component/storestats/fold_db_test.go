@@ -1889,8 +1889,9 @@ func TestARefundLineNamingADeletedOrGiftCardLineIsNoItemReturn(t *testing.T) {
 // The wholesale pass (wholesale.go) adds nothing to either, in both cases
 // here: a store the pack is off for and kept not enabled, and an enabled
 // store whose granted set is the one it was last judged against, with no pass
-// under way. Each reads its row's wholesale columns once, a read that takes
-// no lock, and then has nothing to do. The pack's own two reads are the run's,
+// under way. Each reads its row's wholesale columns once (wholesalePass's
+// wholesaleKept), a read that takes no lock and asks no engine, and then has
+// nothing to do: one unlocked read a turn, asserted below. The pack's own two reads are the run's,
 // made once for every store before the first turn (rollup.go, "Who is
 // wholesale"), and are not a turn's.
 func TestAQuietStoresWalkCosts(t *testing.T) {
@@ -1927,15 +1928,21 @@ func TestAQuietStoresWalkCosts(t *testing.T) {
 			if err := i.rollStore(sweepCtx(t), db, storeOf(id, nil), time.Now(), c.state, true, &rep); err != nil {
 				t.Fatal(err)
 			}
-			locks := 0
+			locks, wholesaleReads := 0, 0
 			for _, q := range queries() {
 				if strings.HasPrefix(q, "LOCK TABLE") {
 					locks++
+				}
+				if strings.HasPrefix(q, "SELECT") && strings.Contains(q, "wholesale_cursor") {
+					wholesaleReads++
 				}
 			}
 			if locks != 5 || engine.asked()+verdicts != 5 {
 				t.Errorf("a quiet store's turn with its walk took %d locked transactions and %d engine and %d verdict reads; want 5 and 5 in all",
 					locks, engine.asked(), verdicts)
+			}
+			if wholesaleReads != 1 {
+				t.Errorf("the turn read the store's wholesale columns %d times, want once, unlocked", wholesaleReads)
 			}
 		})
 	}

@@ -316,11 +316,24 @@ func wholesalePass(ctx context.Context, i *Integration, storeID string, generati
 	if !starting && kept.cursor == "" {
 		return nil
 	}
+	w := walkWindow{Width: kept.width}
+	if !starting {
+		// Only this file writes the cursor; one that is not an instant
+		// starts the pass again from the floor, which judges every order the
+		// same way again, rather than stopping the store's pass for good.
+		// The line names the store and nothing of the cursor.
+		through, err := time.Parse(time.RFC3339Nano, kept.cursor)
+		if err != nil {
+			i.logger.Warn("Store statistics: a store's wholesale pass stood at a cursor that could not be read; the pass starts again from the store's floor",
+				"component", "storestats", "storeId", storeID)
+			starting = true
+		}
+		w.Through = through.UTC()
+	}
 	floor, err := ensureFloor(ctx, i, storeID, clock())
 	if err != nil {
 		return err
 	}
-	w := walkWindow{Width: kept.width}
 	if starting {
 		if err := writeTx(ctx, db, storeID, generation, func(ctx context.Context, tx bun.Tx) error {
 			return startWholesalePass(ctx, tx, storeID, digest, floor)
@@ -328,12 +341,6 @@ func wholesalePass(ctx context.Context, i *Integration, storeID string, generati
 			return passError(storeID, "start the wholesale pass", err)
 		}
 		w = walkWindow{Through: floor, Width: defaultWindow}
-	} else {
-		through, err := time.Parse(time.RFC3339Nano, kept.cursor)
-		if err != nil {
-			return fmt.Errorf("store %s: the wholesale pass's cursor is not an instant", storeID)
-		}
-		w.Through = through.UTC()
 	}
 
 	stored := w
