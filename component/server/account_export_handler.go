@@ -92,7 +92,7 @@ func (h *AccountExportHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	ctx := r.Context()
 
 	// A person's own session first, then the part for that person. The order
-	// does not leak anything (both refuse with the same 404); it keeps the
+	// tells a caller nothing (both refuse with the same 404); it keeps the
 	// capability question from ever being asked for a machine credential.
 	userID, err := auth.RequirePersonSession(ctx)
 	if err != nil {

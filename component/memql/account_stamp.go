@@ -465,8 +465,8 @@ func sameAccountList(a, b []string) bool {
 //
 //   - a write naming more than one account in the list is refused
 //     (account_list_single), on every surface: a list of several would file
-//     the row in one account and share it into others, which is the leak the
-//     export exists to rule out;
+//     the row in one account and share it with others, and a file has to hold
+//     one account's rows and nobody else's;
 //   - one naming an account a person may not write to is refused
 //     (organization_forbidden), where until this piece such a tag was stored
 //     and the row was quietly filed under the person's own account; and a
