@@ -9320,40 +9320,6 @@ func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 	return b.String()
 }
 
-// RecordStoreHealth -- Record what the connector last observed about a store. Health is a single object so the connector can publish a shape the portal renders without a schema change every time a new counter is worth showing.
-//
-// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["recordStoreHealth"] in generated_concepts.go).
-type RecordStoreHealthArgs struct {
-	StoreId                string
-	Health                 map[string]any
-	SubscriptionsCheckedAt string
-}
-
-// RecordStoreHealth calls the engine mutation recordStoreHealth.
-func (qc *QueryClient) RecordStoreHealth(ctx context.Context, args RecordStoreHealthArgs) (*Result, error) {
-	call := RecordStoreHealthBuild(args)
-	return qc.executeNamed(ctx, "recordStoreHealth", call)
-}
-
-func RecordStoreHealthBuild(args RecordStoreHealthArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation recordStoreHealth(")
-	b.WriteString("storeId: ")
-	b.WriteString(quoteMemQL(args.StoreId))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("health: ")
-	b.WriteString(renderMemQLValue(args.Health))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("subscriptionsCheckedAt: ")
-	b.WriteString(quoteMemQL(args.SubscriptionsCheckedAt))
-	b.WriteString(")")
-	return b.String()
-}
-
 // RecordSuppression -- ENGINE: add an address to the cluster-wide do-not-mail list. The argument is the SHA-256 hex digest of the normalized address -- the address itself never reaches this mutation, which is what makes a cluster-wide list safe to keep. The digest is the row id, so re-suppressing an address appends a version to the same row rather than creating a second one, and the newest reason wins.
 // suppressedAt is stamped from the engine clock rather than threaded by the caller. That is the opposite of `setRecipientSubscription`, and deliberately: a recipient's unsubscribedAt can legitimately record something that happened hours earlier, but a suppression takes effect when it is written and dating it earlier would claim a protection that was not in force.
 // clusterOwner tier: a caller who could write this could silently suppress a competitor's audience.

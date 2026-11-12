@@ -807,7 +807,6 @@ export const BoundConcepts = {
   recordRequestEvent: "v1:forge:requestEvent",
   recordResponsibilityEvaluation: "v1:planner:responsibility",
   recordRouterCall: "v1:router:call",
-  recordStoreHealth: "v1:shopify:store",
   recordSuppression: "v1:campaigns:suppression",
   recordWarmupState: "v1:campaigns:warmupState",
   recordsByState: "v1:data:record",

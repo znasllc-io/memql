@@ -5046,32 +5046,6 @@ QueryClient.prototype.recordRouterCall = function (this: QueryClient, args: Reco
   return this.executeNamed("recordRouterCall", buildRecordRouterCall(args), opts);
 };
 
-/** Record what the connector last observed about a store. Health is a single object so the connector can publish a shape the portal renders without a schema change every time a new counter is worth showing. */
-// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["recordStoreHealth"] in generated_concepts.ts).
-export interface RecordStoreHealthArgs {
-  storeId: string;
-  health: Record<string, unknown>;
-  subscriptionsCheckedAt?: string;
-}
-
-export function buildRecordStoreHealth(args: RecordStoreHealthArgs): string {
-  const parts: string[] = [];
-  parts.push("storeId: " + renderMemQLValue(args.storeId));
-  parts.push("health: " + renderMemQLValue(args.health));
-  if (args.subscriptionsCheckedAt !== undefined) parts.push("subscriptionsCheckedAt: " + renderMemQLValue(args.subscriptionsCheckedAt));
-  return "mutation recordStoreHealth(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    recordStoreHealth(args: RecordStoreHealthArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.recordStoreHealth = function (this: QueryClient, args: RecordStoreHealthArgs = {} as RecordStoreHealthArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("recordStoreHealth", buildRecordStoreHealth(args), opts);
-};
-
 /** ENGINE: add an address to the cluster-wide do-not-mail list. The argument is the SHA-256 hex digest of the normalized address -- the address itself never reaches this mutation, which is what makes a cluster-wide list safe to keep. The digest is the row id, so re-suppressing an address appends a version to the same row rather than creating a second one, and the newest reason wins.
 suppressedAt is stamped from the engine clock rather than threaded by the caller. That is the opposite of `setRecipientSubscription`, and deliberately: a recipient's unsubscribedAt can legitimately record something that happened hours earlier, but a suppression takes effect when it is written and dating it earlier would claim a protection that was not in force.
 clusterOwner tier: a caller who could write this could silently suppress a competitor's audience. */
