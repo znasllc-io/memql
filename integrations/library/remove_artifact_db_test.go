@@ -12,6 +12,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -65,10 +66,10 @@ func (f *removalFixture) exec(statement string) *memql.ExecuteResult {
 func (f *removalFixture) files(name, body string) (output, artifact string) {
 	f.t.Helper()
 	output = f.owner + "-" + name
-	f.exec(fmt.Sprintf(`mutation createGeneratedOutput(outputId: %q, title: %q, summary: "an export for a customer", body: %q, format: "text", mimeType: "application/json", source: "derived")`, output, name+".json", body))
+	f.exec(fmt.Sprintf(`mutation createGeneratedOutput(outputId: %s, title: %s, summary: "an export for a customer", body: %s, format: "text", mimeType: "application/json", source: "derived")`, langparser.QuoteString(output), langparser.QuoteString(name+".json"), langparser.QuoteString(body)))
 	ref := "v1:library:generatedOutput:" + output
 	// The index row, as indexGeneratedOutputOnCreate writes it.
-	f.exec(fmt.Sprintf(`mutation createArtifact(sourceConceptRef: %q, ownerUserId: %q, lens: "artifact", kind: "generated_output", source: "derived", title: %q, summary: "an export for a customer", format: "text", mimeType: "application/json", live: false, partitionId: "", agentId: "", producedByPlanId: "", producedByWorkerId: "", producedByWorkerName: "")`, ref, f.owner, name+".json"))
+	f.exec(fmt.Sprintf(`mutation createArtifact(sourceConceptRef: %s, ownerUserId: %s, lens: "artifact", kind: "generated_output", source: "derived", title: %s, summary: "an export for a customer", format: "text", mimeType: "application/json", live: false, partitionId: "", agentId: "", producedByPlanId: "", producedByWorkerId: "", producedByWorkerName: "")`, langparser.QuoteString(ref), langparser.QuoteString(f.owner), langparser.QuoteString(name+".json")))
 	rows := f.rows(`SELECT id FROM "MemoryNodes" WHERE concept = 'v1:library:artifact' AND payload->>'sourceConceptRef' = $1 LIMIT 1`, ref)
 	if len(rows) != 1 {
 		f.t.Fatalf("the fixture's output %s has no index row", name)
@@ -137,11 +138,11 @@ func (f *removalFixture) reads(output, artifact string) map[string]int {
 	f.t.Helper()
 	out := map[string]int{}
 	for name, statement := range map[string]string{
-		"generatedOutputById":               fmt.Sprintf(`query generatedOutputById(outputId: %q)`, output),
-		"libraryArtifactById":               fmt.Sprintf(`query libraryArtifactById(artifactId: %q)`, memql.BareShortId(artifact)),
-		"libraryArtifactBySourceConceptRef": fmt.Sprintf(`query libraryArtifactBySourceConceptRef(sourceConceptRef: %q)`, "v1:library:generatedOutput:"+output),
-		"documentVersions":                  fmt.Sprintf(`query documentVersions(documentId: %q)`, output),
-		"documentCommentsForArtifact":       fmt.Sprintf(`query documentCommentsForArtifact(artifactId: %q)`, memql.BareShortId(artifact)),
+		"generatedOutputById":               fmt.Sprintf(`query generatedOutputById(outputId: %s)`, langparser.QuoteString(output)),
+		"libraryArtifactById":               fmt.Sprintf(`query libraryArtifactById(artifactId: %s)`, langparser.QuoteString(memql.BareShortId(artifact))),
+		"libraryArtifactBySourceConceptRef": fmt.Sprintf(`query libraryArtifactBySourceConceptRef(sourceConceptRef: %s)`, langparser.QuoteString("v1:library:generatedOutput:"+output)),
+		"documentVersions":                  fmt.Sprintf(`query documentVersions(documentId: %s)`, langparser.QuoteString(output)),
+		"documentCommentsForArtifact":       fmt.Sprintf(`query documentCommentsForArtifact(artifactId: %s)`, langparser.QuoteString(memql.BareShortId(artifact))),
 	} {
 		// Some of these reads are server-only: they are asked as the owner,
 		// by the engine.
@@ -257,7 +258,7 @@ func TestTheRemovalRefusesACallThatIsNotTheEnginesOwn(t *testing.T) {
 		t.Errorf("a refused removal changed the table:\n  before: %v\n  after:  %v", before, after)
 	}
 	// And through the engine, as a client reaches a builtin.
-	if _, err := f.engine.Execute(f.ctx, fmt.Sprintf(`builtin libraryRemoveArtifact(sourceConceptRef: %q)`, "v1:library:generatedOutput:"+output)); err == nil || !strings.Contains(err.Error(), "refuses") {
+	if _, err := f.engine.Execute(f.ctx, fmt.Sprintf(`builtin libraryRemoveArtifact(sourceConceptRef: %s)`, langparser.QuoteString("v1:library:generatedOutput:"+output))); err == nil || !strings.Contains(err.Error(), "refuses") {
 		t.Errorf("the builtin called by the artifact's owner answered %v, want it refused", err)
 	}
 }
@@ -272,7 +273,7 @@ func TestTheRemovalRefusesAnArtifactWhoseContentIsElsewhere(t *testing.T) {
 		return
 	}
 	ref := "v1:library:file:" + f.owner + "-a-file"
-	f.exec(fmt.Sprintf(`mutation createArtifact(sourceConceptRef: %q, ownerUserId: %q, lens: "artifact", kind: "file", source: "uploaded", title: "a file", summary: "", format: "pdf", mimeType: "application/pdf", live: false, partitionId: "", agentId: "", producedByPlanId: "", producedByWorkerId: "", producedByWorkerName: "")`, ref, f.owner))
+	f.exec(fmt.Sprintf(`mutation createArtifact(sourceConceptRef: %s, ownerUserId: %s, lens: "artifact", kind: "file", source: "uploaded", title: "a file", summary: "", format: "pdf", mimeType: "application/pdf", live: false, partitionId: "", agentId: "", producedByPlanId: "", producedByWorkerId: "", producedByWorkerName: "")`, langparser.QuoteString(ref), langparser.QuoteString(f.owner)))
 	before := f.held(f.owner + "-a-file")
 	if len(before) == 0 {
 		t.Fatal("the fixture's file has no index row")
