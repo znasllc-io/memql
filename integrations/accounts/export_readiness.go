@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
@@ -31,6 +32,32 @@ const (
 	conditionDecided   = "decided"
 	conditionFollowed  = "followed"
 )
+
+// conditionLabels are the words the Export tab names each condition with
+// (clients/os/src/apps/accounts/exports.ts, CONDITION_LABEL). A refusal a
+// person reads names an unmet condition the same way the tab does, never by
+// its name on the wire.
+var conditionLabels = map[string]string{
+	conditionRecording: "Accounts recorded on rows",
+	conditionAssigned:  "Existing rows assigned",
+	conditionDeclared:  "Every kind says whose it is",
+	conditionDecided:   "Rows awaiting a decision",
+	conditionFollowed:  "Rows following a moved parent",
+}
+
+// notReadyDetail is the export_not_ready sentence for the unmet conditions,
+// in answer order.
+func notReadyDetail(unmet []string) string {
+	words := make([]string, 0, len(unmet))
+	for _, name := range unmet {
+		label, ok := conditionLabels[name]
+		if !ok {
+			label = "Another condition"
+		}
+		words = append(words, label)
+	}
+	return "This account cannot be exported yet. Not met: " + strings.Join(words, "; ") + "."
+}
 
 // Readiness is the answer for one account.
 type Readiness struct {

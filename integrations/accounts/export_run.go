@@ -189,6 +189,9 @@ type exportWork struct {
 
 	files func() (exportFiles, error)
 	bytes func() (accountBytesSource, error)
+	// recordObject is Exports.recordObject: the committed file's key, written
+	// on the row by a statement guarded on this attempt.
+	recordObject func(ctx context.Context, x Export, key string) (bool, error)
 
 	engineVersion, domain, clusterID string
 
@@ -218,6 +221,7 @@ func newExportWork(x *Exports, pctx memql.PluginContext) *exportWork {
 		db:              x.inv.database,
 		openSession:     pctx.OpenMaintenanceSession,
 		states:          x.assignmentStates,
+		recordObject:    x.recordObject,
 		census:          memql.AccountCensus,
 		handOvers:       accountexport.HandOvers,
 		engineVersion:   buildinfo.Version(),
@@ -438,7 +442,7 @@ func (a *attempt) checkReady(ctx context.Context) error {
 		unmet = append(unmet, name)
 	}
 	if len(unmet) > 0 {
-		return failure(FailureNotReady, "This account cannot be exported yet. Not met: %s.", strings.Join(unmet, ", "))
+		return failure(FailureNotReady, "%s", notReadyDetail(unmet))
 	}
 	return nil
 }
@@ -524,6 +528,16 @@ func (a *attempt) caughtUp(ctx context.Context, conn *sql.Conn) error {
 				return err
 			}
 			if len(still) == 0 {
+				// Two conditions can change during the wait, and the full
+				// passes this run asked for are what change the first: a pass
+				// records a conflict for a row whose candidates are ambiguous,
+				// and a move writes a change record. Both are read again here,
+				// on the snapshot's own connection, so the file is taken from
+				// an instant at which both still hold.
+				if err := a.stillReady(ctx, conn); err != nil {
+					_ = a.endSnapshot(conn)
+					return err
+				}
 				return nil
 			}
 			// A row written since T0 is one the job would still assign:
@@ -544,6 +558,35 @@ func (a *attempt) caughtUp(ctx context.Context, conn *sql.Conn) error {
 		case <-time.After(a.w.caughtUpPoll):
 		}
 	}
+}
+
+// stillReady asks, inside the open snapshot, the two conditions the wait can
+// change: no open conflict names the account (decided), and no change record
+// naming it is unsettled (followed). Either unmet fails the run export_not_ready
+// in the words the Export tab uses; an unwired count fails closed.
+func (a *attempt) stillReady(ctx context.Context, q memql.AccountQuerier) error {
+	if a.w.exports == nil || a.w.exports.followPending == nil {
+		return errors.New("the export's readiness is not wired on this node")
+	}
+	conflicts, err := memql.ConflictsNaming(ctx, q, a.account)
+	if err != nil {
+		return err
+	}
+	pending, err := a.w.exports.followPending(ctx, q, a.account)
+	if err != nil {
+		return fmt.Errorf("count the change records naming the account: %w", err)
+	}
+	var unmet []string
+	if conflicts > 0 {
+		unmet = append(unmet, conditionDecided)
+	}
+	if pending > 0 {
+		unmet = append(unmet, conditionFollowed)
+	}
+	if len(unmet) > 0 {
+		return failure(FailureNotReady, "%s", notReadyDetail(unmet))
+	}
+	return nil
 }
 
 // Why a kind holds the run back, other than rows waiting on a parent.
@@ -824,6 +867,22 @@ func (a *attempt) seal(ctx context.Context) (int64, string, error) {
 		return 0, "", fmt.Errorf("commit the export's file: %w", err)
 	}
 	a.committed = true
+	// The key goes on the record before anything else is done with the file.
+	// Reading it back takes as long as writing it did, and a node that dies in
+	// that window runs no cleanup: the recorded key is what lets the take-over
+	// delete the file (export_store.go, reclaimStale). A statement that
+	// matches nothing means this attempt no longer holds the run, so the file
+	// is deleted by the cleanup and nothing more is done.
+	if a.w.recordObject == nil {
+		return 0, "", errors.New("the export's record cannot be written on this node")
+	}
+	recorded, err := a.w.recordObject(ctx, a.x, a.key)
+	if err != nil {
+		return 0, "", fmt.Errorf("record the export's file: %w", err)
+	}
+	if !recorded {
+		return 0, "", errExportLeaseLost
+	}
 	return size, sum, nil
 }
 
@@ -1563,14 +1622,66 @@ type secretRules struct {
 
 // secretCache holds each concept's rules by pointer: a kind is read once, and
 // two concepts of one name (a test's copy) never share an answer.
-var secretCache sync.Map // *memorynodes.Concept -> *secretRules
+//
+// IT IS BOUNDED, NOT PER RUN. A registry reload (a pack enabled, a bundle
+// reloaded) builds new concept values, so a cache keyed by pointer and never
+// emptied would keep a full set for every reload for the life of the process.
+// The rules are asked for by functions that hold only the concept (the
+// readers of references, people and bytes, and SecretPaths, which a build gate
+// calls), and an entry is a pure function of the concept it is keyed by, so a
+// cache that is emptied when it reaches secretCacheMax entries answers the
+// same as one per run, without a run's cache threaded through each of them.
+// secretCacheMax is far above the number of kinds one registry holds; the
+// price of emptying it is reading each kind's schema once more.
+const secretCacheMax = 1024
+
+type rulesCache struct {
+	mu      sync.Mutex
+	entries map[*memorynodes.Concept]*secretRules
+}
+
+func (c *rulesCache) load(k *memorynodes.Concept) (*secretRules, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	r, ok := c.entries[k]
+	return r, ok
+}
+
+// store keeps r unless another caller stored one first, emptying the cache
+// when it is full, and answers the entry kept.
+func (c *rulesCache) store(k *memorynodes.Concept, r *secretRules) *secretRules {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if have, ok := c.entries[k]; ok {
+		return have
+	}
+	if c.entries == nil || len(c.entries) >= secretCacheMax {
+		c.entries = map[*memorynodes.Concept]*secretRules{}
+	}
+	c.entries[k] = r
+	return r
+}
+
+func (c *rulesCache) reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries = nil
+}
+
+func (c *rulesCache) size() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.entries)
+}
+
+var secretCache rulesCache
 
 func rulesFor(c *memorynodes.Concept) *secretRules {
 	if c == nil {
 		return &secretRules{}
 	}
-	if r, ok := secretCache.Load(c); ok {
-		return r.(*secretRules)
+	if r, ok := secretCache.load(c); ok {
+		return r
 	}
 	r := &secretRules{}
 	if raw := c.Schemas["definition"]; len(raw) > 0 {
@@ -1579,8 +1690,7 @@ func rulesFor(c *memorynodes.Concept) *secretRules {
 	collectSecretPaths(r.root, "", &r.paths)
 	sort.Strings(r.paths)
 	r.paths = dedupe(r.paths)
-	actual, _ := secretCache.LoadOrStore(c, r)
-	return actual.(*secretRules)
+	return secretCache.store(c, r)
 }
 
 func dedupe(in []string) []string {

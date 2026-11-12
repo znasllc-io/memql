@@ -11,10 +11,14 @@ package accounts
 //
 // # Every tick (every five seconds)
 //
-//  1. Drafts not started within fifteen minutes are deleted.
+//  1. Drafts not started within fifteen minutes are deleted, and the files
+//     still recorded on failed or cancelled exports are deleted again
+//     (export_store.go, sweepKeptObjects).
 //  2. A running export whose heartbeat is two minutes old is queued again (its
 //     node stopped), or failed after its third attempt, or cancelled when a
-//     person asked to.
+//     person asked to. A file its attempt committed and recorded is deleted
+//     first; a run that ends does not wait on that delete, a run that would be
+//     queued again does (export_store.go, reclaimStale).
 //  3. When this node runs nothing, it claims the oldest queued export, but
 //     only when no export is running anywhere: one at a time on the whole
 //     installation (claim's advisory lock makes that one decision). A queued
@@ -48,8 +52,9 @@ package accounts
 //   - a person cancelled: cancelled, whatever the work answered.
 //   - the node is stopping: the attempt is handed back (queued) for another
 //     node to start at once, its attempt still counted (the claim refuses a row
-//     at the limit, so rolling restarts cannot run one export without end). A
-//     run that dies without stopping is caught by the take-over instead.
+//     at the limit, so rolling restarts cannot run one export without end), or
+//     ended cancelled when a person asked to cancel it. A run that dies without
+//     stopping is caught by the take-over instead.
 //
 // WHO REMOVES WHAT. The work cleans up an attempt that fails or is cancelled
 // before it returns. A result it returned that the runner cannot record (the
@@ -57,7 +62,10 @@ package accounts
 // stopping, or the final write matched nothing) is removed by the runner
 // through the blob store (discard), so no file is left that no record names. A
 // final write that errored is ambiguous -- it may have landed -- so its object
-// is kept and its key logged at error level instead.
+// is kept and its key logged at error level instead. A node that dies after the
+// commit runs none of this: the run records the key on the row as soon as the
+// commit lands, and the take-over, the claim and the hand-back delete a
+// recorded file before they requeue or end its row.
 //
 // Every final state clears the sealed passphrase in the same statement.
 //
@@ -170,6 +178,9 @@ func (r *ExportRunner) tick(ctx context.Context) {
 	log := r.exports.logger
 	if err := r.exports.sweepDrafts(ctx); err != nil {
 		log.Warn("account export: sweep failed", "error", err)
+	}
+	if err := r.exports.sweepKeptObjects(ctx); err != nil {
+		log.Warn("account export: sweep of kept files failed", "error", err)
 	}
 	if err := r.exports.reclaimStale(ctx); err != nil {
 		log.Warn("account export: take-over failed", "error", err)
@@ -384,7 +395,7 @@ func (r *ExportRunner) supervise(parent context.Context, x Export, sealed, node 
 		if ok, err := s.requeue(ctx, x, node); err != nil {
 			log.Warn("account export: could not hand the run back; the take-over will", "error", err)
 		} else if ok {
-			log.Info("account export: the node is stopping; the run is queued again for another node")
+			log.Info("account export: the node is stopping; the run is handed back")
 		}
 		discardUnless(false, false)
 	case err == nil:

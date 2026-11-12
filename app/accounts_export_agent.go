@@ -22,8 +22,9 @@ import (
 //
 // Registered as a dependency, so it starts after the engine and stops before
 // it; a stop hands a running attempt back to the queue for another replica.
-// Until the run task installs the work function (Exports.SetExportWork) the
-// runner sweeps and takes over but claims nothing, and says so once.
+// The plug-in installs the work function (Exports.SetExportWork) when it
+// materializes; a runner over an Exports with none sweeps and takes over but
+// claims nothing, and says so once.
 func (a *App) wireAccountExportRunner() {
 	if a.engine == nil {
 		return

@@ -58,12 +58,26 @@ func newOwnerNotice(owners func(context.Context) ([]string, error), sender func(
 			logger.Warn("account export: this node has no email sender, so the owners were not mailed", "exportId", x.ID, "owners", len(addresses))
 			return
 		}
+		// A failure is logged once, with the export and how many addresses
+		// failed, and never with an address: the log store keeps what is
+		// logged here. A provider's error may quote the address it refused,
+		// so each address is taken out of the error text too.
 		msg := exportNoticeMessage(x, startedBy)
+		failed := 0
+		var last error
 		for _, to := range addresses {
 			msg.To = to
 			if err := s.Send(ctx, msg, email.SendAs{}); err != nil {
-				logger.Warn("account export: the owner could not be mailed", "exportId", x.ID, "to", to, "error", err)
+				failed++
+				last = err
 			}
+		}
+		if failed > 0 {
+			text := last.Error()
+			for _, a := range addresses {
+				text = strings.ReplaceAll(text, a, "[address]")
+			}
+			logger.Warn("account export: owners could not be mailed", "exportId", x.ID, "failed", failed, "owners", len(addresses), "error", text)
 		}
 	}
 }

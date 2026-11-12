@@ -80,17 +80,23 @@ func (r *recordingExecutor) audits(action string) []string {
 	return out
 }
 
-// fakeBlobs is the export blob store.
+// fakeBlobs is the export blob store. failDelete makes every Delete fail, as
+// storage that cannot be reached does.
 type fakeBlobs struct {
-	mu      sync.Mutex
-	deleted []string
-	content map[string][]byte
+	mu         sync.Mutex
+	deleted    []string
+	content    map[string][]byte
+	failDelete bool
 }
 
 func (f *fakeBlobs) Delete(_ context.Context, key string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failDelete {
+		return errors.New("storage is unavailable")
+	}
 	f.deleted = append(f.deleted, key)
+	delete(f.content, key)
 	return nil
 }
 
@@ -447,7 +453,7 @@ func TestExportPrepareRefusesWhenNotReady(t *testing.T) {
 	_, err := f.x.handlePrepare(person(exportPerson), map[string]any{"accountId": acme, "protect": true}, 0)
 	require.Error(t, err)
 	require.True(t, strings.HasPrefix(err.Error(), "export_not_ready: "), err.Error())
-	require.Contains(t, err.Error(), "followed")
+	require.Contains(t, err.Error(), "Rows following a moved parent")
 	var n int
 	require.NoError(t, f.db.QueryRowContext(context.Background(), `SELECT count(*) FROM account_exports`).Scan(&n))
 	require.Zero(t, n)

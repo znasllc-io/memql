@@ -91,9 +91,14 @@ const (
 	totalsDeadline = 4 * time.Second
 )
 
-// inventoryTooLarge is the refusal the panel shows when the inventory's
-// deadline passes.
-const inventoryTooLarge = "This account holds too many rows to count in one read. Try again; a narrower read is coming with export."
+// codeInventoryTooLarge prefixes the refusal the panel shows when the
+// inventory's deadline passes: the screen keys on the code and shows the
+// sentence after it as a note, since the limit is a documented one and not a
+// fault.
+const codeInventoryTooLarge = "account_inventory_too_large"
+
+// inventoryTooLarge is the sentence after the code.
+const inventoryTooLarge = "This account holds too many rows to count here. An export does not depend on these counts."
 
 // Integration is the plug-in.
 type Integration struct {
@@ -249,7 +254,7 @@ func (i *Integration) handleInventory(ctx context.Context, args map[string]any, 
 	// caller who went away keeps the plain error.
 	tooLarge := func(err error, what string) error {
 		if countCtx.Err() != nil && ctx.Err() == nil {
-			return errors.New(inventoryTooLarge)
+			return errors.New(codeInventoryTooLarge + ": " + inventoryTooLarge)
 		}
 		return fmt.Errorf("accountInventory: %s: %w", what, err)
 	}

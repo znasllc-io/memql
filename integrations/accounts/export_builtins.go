@@ -89,13 +89,19 @@ const downloadRangeMax = 200
 // primaryAccountName names the installation's own account when it has no row.
 const primaryAccountName = "Primary account"
 
-// ExportWork is what a claimed export runs. The run task supplies the real one;
-// a node with none set claims nothing. x.Attempt is part of what it receives
-// because each attempt writes under a storage key of its own.
+// ExportWork is what a claimed export runs: the plug-in installs the run of
+// export_run.go on every node it materializes on, and a runner on a node with
+// none set claims nothing. x.Attempt is part of what it receives because each
+// attempt writes under a storage key of its own, and x.ClaimedBy because the
+// key is recorded on the row under that attempt's guard once the file is
+// committed.
 //
 // WHO REMOVES WHAT. The work cleans up an attempt that FAILS, or is cancelled,
 // before it returns: it returns an error and leaves nothing behind. A result it
-// returns (err == nil, ObjectKey set) is the runner's from then on. The runner
+// returns (err == nil, ObjectKey set) is the runner's from then on. A node that
+// dies between the commit and the return runs neither: the key recorded on the
+// row is what the take-over deletes the file by (export_store.go,
+// reclaimStale). The runner
 // records it, or -- when it cannot, because the lease was lost, a cancel landed
 // after the work finished, the node is stopping, or the final write matched
 // nothing -- removes the object through the blob store, so no file is left that
@@ -158,7 +164,8 @@ type Exports struct {
 	seal          func(string) (string, error)
 	open          func(string) (string, error)
 
-	// work is what a claimed export runs, set by the run task's wiring.
+	// work is what a claimed export runs, installed by the plug-in
+	// (plugin.go, SetExportWork).
 	work atomic.Pointer[ExportWork]
 
 	// notices counts the owners' emails still being sent, off the request; a
@@ -377,7 +384,7 @@ func (s *Exports) handlePrepare(ctx context.Context, args map[string]any, _ int)
 		return nil, err
 	}
 	if unmet := ready.unmet(); len(unmet) > 0 {
-		return nil, fmt.Errorf("%s: This account cannot be exported yet. Not met: %s.", FailureNotReady, strings.Join(unmet, ", "))
+		return nil, fmt.Errorf("%s: %s", FailureNotReady, notReadyDetail(unmet))
 	}
 
 	protect := boolArg(args, "protect")
@@ -394,6 +401,14 @@ func (s *Exports) handlePrepare(ctx context.Context, args map[string]any, _ int)
 			return nil, fmt.Errorf("accountExportPrepare: the passphrase could not be sealed: %w", err)
 		}
 		sealed = sql.NullString{String: ct, Valid: true}
+	}
+	// Drafts never started are swept here as well as by the runner, so a
+	// cluster where no runner runs still drops them and their sealed
+	// passphrases, and an expired draft of this account does not hold the
+	// one-active place. A failed sweep does not refuse the prepare: the
+	// insert below answers for itself.
+	if err := s.sweepDrafts(ctx); err != nil {
+		s.logger.Warn("account export: sweep on prepare failed", "error", err)
 	}
 	x, err := s.insertDraft(ctx, Export{
 		ID: "aex-" + id.NewShortId(), AccountID: account, AccountName: name, RequestedBy: userID, Protected: protect,
@@ -579,7 +594,9 @@ func (s *Exports) blobStore() (ExportBlobs, error) {
 // The download route's three methods (component/server/account_export_handler.go).
 
 // ResolveExportForDownload answers ok only for a complete export whose file was
-// not removed.
+// not removed. A running, failed or cancelled row may carry the key its attempt
+// recorded once the file was committed; that key is the take-over's to delete,
+// and it is never served.
 func (s *Exports) ResolveExportForDownload(ctx context.Context, exportID string) (Export, bool, error) {
 	x, ok, err := s.get(ctx, strings.TrimSpace(exportID))
 	if err != nil || !ok {

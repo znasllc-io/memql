@@ -175,7 +175,7 @@ func TestExportRunRefusesAnAccountThatIsNotReady(t *testing.T) {
 	f.x.followPending = func(context.Context, memql.AccountQuerier, string) (int64, error) { return 1, nil }
 	_, err := f.run(t, f.export(acme, false), "")
 	fail := requireFailure(t, err, FailureNotReady)
-	require.Contains(t, fail.Detail, conditionFollowed)
+	require.Contains(t, fail.Detail, "Rows following a moved parent")
 	require.Empty(t, f.store.created)
 }
 
@@ -347,4 +347,75 @@ func TestExportRunCancelledAfterTheRowsCommitsNothing(t *testing.T) {
 			require.Len(t, f.store.aborted, 1)
 		})
 	}
+}
+
+// The run records its file's key on the row as soon as the commit lands,
+// before it reads the file back: a node that stops in between leaves a key
+// the take-over deletes.
+func TestExportRunRecordsTheKeyRightAfterTheCommit(t *testing.T) {
+	f := newRunFixture(t)
+	f.seedAcme(t)
+	var recorded []string
+	f.work.recordObject = func(_ context.Context, x Export, key string) (bool, error) {
+		f.store.mu.Lock()
+		_, committed := f.store.committed[key]
+		f.store.mu.Unlock()
+		require.True(t, committed, "the key is recorded once the file is committed")
+		require.Equal(t, "exp-acme", x.ID)
+		recorded = append(recorded, key)
+		return true, nil
+	}
+	res, err := f.run(t, f.export(acme, false), "")
+	require.NoError(t, err)
+	require.Equal(t, []string{res.ObjectKey}, recorded)
+}
+
+// An attempt that can no longer record its key no longer holds the run: it
+// deletes the file it committed and stops.
+func TestExportRunThatCannotRecordItsKeyDeletesTheFile(t *testing.T) {
+	f := newRunFixture(t)
+	f.seedAcme(t)
+	f.work.recordObject = func(context.Context, Export, string) (bool, error) { return false, nil }
+	_, err := f.run(t, f.export(acme, false), "")
+	require.Error(t, err)
+	require.Empty(t, f.store.committed)
+	require.Len(t, f.store.deleted, 1)
+}
+
+// A conflict recorded during the wait, by the very full pass the run asked
+// for, is read again inside the snapshot.
+func TestExportRunRereadsConflictsInsideTheSnapshot(t *testing.T) {
+	f := newRunFixture(t)
+	f.seedAcme(t)
+	f.setWaiting("v1:todos:todo", 2)
+	pass := f.work.requestFullPass
+	f.work.requestFullPass = func(ctx context.Context, concepts []string) error {
+		_, err := f.db.ExecContext(ctx, `INSERT INTO account_assignment_conflict (concept, row_id, kind, detail, candidates)
+			VALUES ('v1:todos:todo', 'v1:todos:todo:conflicted', 'store_bound_twice', 'test', ?)`, "{"+acme+",other}")
+		require.NoError(t, err)
+		return pass(ctx, concepts)
+	}
+	_, err := f.run(t, f.export(acme, false), "")
+	fail := requireFailure(t, err, FailureNotReady)
+	require.Contains(t, fail.Detail, "Rows awaiting a decision")
+	require.Empty(t, f.store.created, "no file is started")
+}
+
+// A change record written during the wait is read again inside the snapshot.
+func TestExportRunRereadsChangeRecordsInsideTheSnapshot(t *testing.T) {
+	f := newRunFixture(t)
+	f.seedAcme(t)
+	f.x.followPending = memql.AccountFollowPending
+	f.setWaiting("v1:todos:todo", 2)
+	pass := f.work.requestFullPass
+	f.work.requestFullPass = func(ctx context.Context, concepts []string) error {
+		_, err := f.db.ExecContext(ctx, `INSERT INTO account_follow_tasks (parent_concept, parent_id, from_account, to_account)
+			VALUES ('v1:todos:todo', 'v1:todos:todo:moved', 'other', ?)`, acme)
+		require.NoError(t, err)
+		return pass(ctx, concepts)
+	}
+	_, err := f.run(t, f.export(acme, false), "")
+	fail := requireFailure(t, err, FailureNotReady)
+	require.Contains(t, fail.Detail, "Rows following a moved parent")
+	require.Empty(t, f.store.created)
 }

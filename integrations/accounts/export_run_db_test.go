@@ -362,9 +362,12 @@ func newRunFixture(t *testing.T) *runFixture {
 			}
 			return nil
 		},
-		census:          memql.AccountCensus,
-		handOvers:       accountexport.HandOvers,
-		files:           func() (exportFiles, error) { return f.store, nil },
+		census:    memql.AccountCensus,
+		handOvers: accountexport.HandOvers,
+		files:     func() (exportFiles, error) { return f.store, nil },
+		// The fixture's exports are not rows of the record, so the key is
+		// taken as recorded; export_object_db_test.go holds the guard itself.
+		recordObject:    func(context.Context, Export, string) (bool, error) { return true, nil },
 		bytes:           func() (accountBytesSource, error) { return memBytes{f.store}, nil },
 		engineVersion:   "0.32.0-test",
 		domain:          "memql.example",

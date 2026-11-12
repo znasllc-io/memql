@@ -365,5 +365,5 @@ func TestAccountInventoryPastItsDeadlineRefusesInWords(t *testing.T) {
 	i := New(func() *bun.DB { return db }, fixtureLister, false, nil)
 	i.inventoryDeadline = time.Nanosecond
 	_, err := i.handleInventory(context.Background(), map[string]any{"accountId": "acme"}, 0)
-	require.EqualError(t, err, inventoryTooLarge)
+	require.EqualError(t, err, "account_inventory_too_large: This account holds too many rows to count here. An export does not depend on these counts.")
 }

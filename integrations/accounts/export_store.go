@@ -21,7 +21,31 @@ package accounts
 // the same statement. The plain passphrase never passes through here: Prepare
 // seals it before insertDraft and the runner opens it after claim.
 //
-// Tests: export_db_test.go.
+// # The file a stopped attempt committed
+//
+// object_key is written twice: by the run once its file is committed
+// (recordObject), and with the complete state. Between the two, a node that
+// dies leaves a whole file that only that key names. The rules for such a key:
+//
+//   - The take-over, the claim and the hand-back delete a recorded file
+//     through the blob store, and clear the key when the delete succeeds.
+//   - ENDING a row never waits on that delete. A row past its attempt limit or
+//     with a cancel requested ends failed or cancelled, its sealed passphrase
+//     cleared, whether or not the delete succeeded; when it failed the row
+//     keeps its key. One undeletable file cannot hold the installation's
+//     one-at-a-time queue, and a person's cancel always ends a run.
+//   - REQUEUEING a row waits for the delete. The next attempt needs storage
+//     anyway, and it would record its own key over the only record of the old
+//     file. Such a row stays as it is (running with no lease after a take-over,
+//     running under its node after a hand-back) and is tried again each tick.
+//   - The runner's sweep (sweepKeptObjects) tries again, each tick, to delete
+//     the file of a failed or cancelled row that still has a key: a bounded
+//     number, oldest first, the key cleared (guarded on itself) once the
+//     delete succeeds. That also covers a run whose own cleanup could not
+//     delete its file before it returned.
+//   - Only a complete row's key is ever served (ResolveExportForDownload).
+//
+// Tests: export_db_test.go, export_object_db_test.go.
 
 import (
 	"context"
@@ -96,6 +120,9 @@ type Export struct {
 	FailureDetail   string          `json:"failureDetail"`
 	RemovedAt       *time.Time      `json:"removedAt,omitempty"`
 	RemovedBy       string          `json:"removedBy"`
+	// ClaimedBy is the node holding a running attempt; the run's own writes
+	// are guarded on it. Server-side only.
+	ClaimedBy string `json:"-"`
 }
 
 // active reports whether the export is prepared, queued or running: the states
@@ -116,7 +143,7 @@ func (f *ExportFailure) Error() string { return f.Code + ": " + f.Detail }
 const exportColumns = `id, account_id, account_name, requested_by, requested_at, state, phase, protected,
 	attempt, cancel_requested, started_at, finished_at, kinds_total, kinds_done, rows_written, versions_written,
 	bytes_total, bytes_done, object_key, file_name, size_bytes, sha256, report, failure_code, failure_detail,
-	removed_at, removed_by`
+	removed_at, removed_by, claimed_by`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -127,7 +154,7 @@ func scanExport(r rowScanner, extra ...any) (Export, error) {
 	dest := []any{&x.ID, &x.AccountID, &x.AccountName, &x.RequestedBy, &x.RequestedAt, &x.State, &x.Phase, &x.Protected,
 		&x.Attempt, &x.CancelRequested, &started, &finished, &x.KindsTotal, &x.KindsDone, &x.RowsWritten, &x.VersionsWritten,
 		&x.BytesTotal, &x.BytesDone, &x.ObjectKey, &x.FileName, &x.SizeBytes, &x.SHA256, &report, &x.FailureCode, &x.FailureDetail,
-		&removed, &x.RemovedBy}
+		&removed, &x.RemovedBy, &x.ClaimedBy}
 	if err := r.Scan(append(dest, extra...)...); err != nil {
 		return Export{}, err
 	}
@@ -333,6 +360,34 @@ func (s *Exports) sweepDrafts(ctx context.Context) error {
 	return nil
 }
 
+// keptObjectsPerTick bounds how many kept files one sweep tries to delete, so
+// storage that answers slowly cannot stretch a tick without end.
+const keptObjectsPerTick = 20
+
+// sweepKeptObjects tries again to delete the file of a row that ended failed or
+// cancelled and still records one: a delete that failed when it ended (the
+// take-over, the claim or the hand-back), or one the run's own cleanup could
+// not finish. Oldest first, at most keptObjectsPerTick a tick; the key is
+// cleared, guarded on itself, once the delete succeeds, and a failure is
+// logged with the export's id and tried again at the next tick. A complete
+// row's key is its file, served and removed by a person, and is never touched
+// here.
+func (s *Exports) sweepKeptObjects(ctx context.Context) error {
+	db, err := s.inv.database()
+	if err != nil {
+		return err
+	}
+	if err := s.dropRecordedObjects(ctx, db,
+		`SELECT id, object_key FROM account_exports
+		 WHERE state IN ('failed', 'cancelled') AND object_key <> ''
+		 ORDER BY finished_at NULLS FIRST, id LIMIT $1`,
+		`UPDATE account_exports SET object_key = ''
+		 WHERE id = $1 AND object_key = $2 AND state IN ('failed', 'cancelled')`, keptObjectsPerTick); err != nil {
+		return fmt.Errorf("account export: sweep kept files: %w", err)
+	}
+	return nil
+}
+
 // reclaimStale takes back every running export whose heartbeat is older than
 // exportStaleAfter: the node running it stopped. A snapshot cannot be handed
 // over, so the run is queued again and starts from the beginning on whichever
@@ -340,10 +395,35 @@ func (s *Exports) sweepDrafts(ctx context.Context) error {
 // person asked to cancel is cancelled. Both final states clear the sealed
 // passphrase in the same statement. The rows that ended are audited and
 // counted by the caller.
+//
+// A STOPPED ATTEMPT MAY HAVE COMMITTED ITS FILE. The run records the key the
+// moment the commit lands (recordObject), so a node that died while reading
+// the file back left a whole file that only that key names. For such a row, in
+// this order: its lease is taken (claimed_by cleared, so no late write of the
+// stopped node lands, and it cannot finish the run over a file being deleted),
+// the file is deleted through the blob store, and the key is cleared. Then:
+//
+//   - a row that ENDS (a cancel requested, or its last attempt) ends whether
+//     or not the delete succeeded, keeping its key when it did not; the sweep
+//     of kept files tries again (sweepKeptObjects).
+//   - a row that would be REQUEUED waits for the delete: it stays running with
+//     its key and no lease, and the next take-over tries again. The next
+//     attempt needs storage anyway, and it writes under a key of its own, so
+//     requeueing would leave nothing to reach the old file. A person's cancel
+//     turns it into a row that ends, which frees the installation's queue.
 func (s *Exports) reclaimStale(ctx context.Context) error {
 	db, err := s.inv.database()
 	if err != nil {
 		return err
+	}
+	stale := exportStaleAfter.Seconds()
+	if err := s.dropRecordedObjects(ctx, db,
+		`UPDATE account_exports SET claimed_by = ''
+		 WHERE state = 'running' AND object_key <> '' AND heartbeat_at < clock_timestamp() - make_interval(secs => $1)
+		 RETURNING id, object_key`,
+		`UPDATE account_exports SET object_key = ''
+		 WHERE id = $1 AND object_key = $2 AND state = 'running' AND claimed_by = ''`, stale); err != nil {
+		return fmt.Errorf("account export: take over stale runs: %w", err)
 	}
 	rows, err := db.DB.QueryContext(ctx, `UPDATE account_exports SET
 		   state = CASE WHEN cancel_requested THEN 'cancelled'
@@ -355,7 +435,8 @@ func (s *Exports) reclaimStale(ctx context.Context) error {
 		   sealed_passphrase = CASE WHEN cancel_requested OR attempt >= $2 THEN NULL ELSE sealed_passphrase END,
 		   claimed_by = '', heartbeat_at = NULL, phase = ''
 		 WHERE state = 'running' AND heartbeat_at < clock_timestamp() - make_interval(secs => $1)
-		 RETURNING `+exportColumns, exportStaleAfter.Seconds(), exportMaxAttempts, FailureFailed)
+		   AND (object_key = '' OR cancel_requested OR attempt >= $2)
+		 RETURNING `+exportColumns, stale, exportMaxAttempts, FailureFailed)
 	if err != nil {
 		return fmt.Errorf("account export: take over stale runs: %w", err)
 	}
@@ -383,6 +464,58 @@ func (s *Exports) reclaimStale(ctx context.Context) error {
 	return nil
 }
 
+// dropRecordedObjects deletes the file each row named by find records, then
+// clears the row's key with clear ($1 the id, $2 the key, guarded so a key that
+// changed meanwhile is left alone). find's own arguments are args. A delete
+// that fails keeps the key and is logged with the export's id; the row is left
+// for the next pass, which tries again.
+func (s *Exports) dropRecordedObjects(ctx context.Context, db *bun.DB, find, clear string, args ...any) error {
+	rows, err := db.DB.QueryContext(ctx, find, args...)
+	if err != nil {
+		return err
+	}
+	type recorded struct{ id, key string }
+	var found []recorded
+	for rows.Next() {
+		var r recorded
+		if err := rows.Scan(&r.id, &r.key); err != nil {
+			rows.Close()
+			return err
+		}
+		found = append(found, r)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, r := range found {
+		if !s.deleteRecordedObject(ctx, r.id, r.key) {
+			continue
+		}
+		if _, err := db.DB.ExecContext(ctx, clear, r.id, r.key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// deleteRecordedObject deletes one recorded file through the blob store Remove
+// uses, which answers a missing object as done, and reports whether it did.
+func (s *Exports) deleteRecordedObject(ctx context.Context, id, key string) bool {
+	blobs, err := s.blobStore()
+	if err == nil {
+		err = blobs.Delete(ctx, key)
+	}
+	if err != nil {
+		s.logger.Error("account export: the file of an attempt that did not finish could not be deleted; its key stays on the record and it is tried again",
+			"exportId", id, "objectKey", key, "error", err)
+		return false
+	}
+	s.logger.Info("account export: deleted the file of an attempt that did not finish", "exportId", id)
+	return true
+}
+
 // exportClaimLock is the transaction-level advisory lock the claim takes, so
 // "no export is running" and "this one is now running" are one decision across
 // replicas. Two nodes that each saw nothing running would otherwise each take
@@ -399,8 +532,17 @@ const exportClaimLock = `hashtext('memql.accounts.export.claim')`
 // keeps its attempt counted (requeue), so a queued row can already be at the
 // limit. Such a row is failed export_failed in this transaction, its sealed
 // passphrase cleared in the same statement, and is never claimed: rolling
-// restarts cannot run one export without end. The rows it failed are audited
-// and counted after the commit.
+// restarts cannot run one export without end. A queued row a person asked to
+// cancel is cancelled the same way, never claimed and never failed. The rows it
+// ended are audited and counted after the commit.
+//
+// A queued row that still records a file (an earlier attempt's, which the
+// hand-back and the take-over delete before they requeue, so this is the
+// leftover of a delete that failed) has the file deleted and the key cleared
+// first. One the claim ends is ended either way, keeping its key for the sweep
+// of kept files when the delete failed; one it would run is not claimed while
+// its key stays, since a new attempt would record its own key over the only
+// record of the old file.
 //
 // Every value goes as a server parameter on the transaction's own *sql.Tx, as
 // every other statement here does.
@@ -408,6 +550,11 @@ func (s *Exports) claim(ctx context.Context, nodeID string) (Export, string, boo
 	db, err := s.inv.database()
 	if err != nil {
 		return Export{}, "", false, err
+	}
+	if err := s.dropRecordedObjects(ctx, db,
+		`SELECT id, object_key FROM account_exports WHERE state = 'queued' AND object_key <> ''`,
+		`UPDATE account_exports SET object_key = '' WHERE id = $1 AND object_key = $2 AND state = 'queued'`); err != nil {
+		return Export{}, "", false, fmt.Errorf("account export: claim: %w", err)
 	}
 	var out Export
 	var sealed sql.NullString
@@ -431,10 +578,12 @@ func (s *Exports) claim(ctx context.Context, nodeID string) (Export, string, boo
 			return nil
 		}
 		rows, err := tx.QueryContext(ctx, `UPDATE account_exports SET
-			   state = 'failed', failure_code = $2,
-			   failure_detail = 'This export was started three times and did not finish.',
+			   state = CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END,
+			   failure_code = CASE WHEN cancel_requested THEN failure_code ELSE $2 END,
+			   failure_detail = CASE WHEN cancel_requested THEN failure_detail
+			                         ELSE 'This export was started three times and did not finish.' END,
 			   finished_at = clock_timestamp(), sealed_passphrase = NULL, claimed_by = '', heartbeat_at = NULL, phase = ''
-			 WHERE state = 'queued' AND attempt >= $1
+			 WHERE state = 'queued' AND (cancel_requested OR attempt >= $1)
 			 RETURNING `+exportColumns, exportMaxAttempts, FailureFailed)
 		if err != nil {
 			return err
@@ -458,6 +607,7 @@ func (s *Exports) claim(ctx context.Context, nodeID string) (Export, string, boo
 			   started_at = COALESCE(started_at, clock_timestamp()), phase = '',
 			   kinds_total = 0, kinds_done = 0, rows_written = 0, versions_written = 0, bytes_total = 0, bytes_done = 0
 			 WHERE id = (SELECT id FROM account_exports WHERE state = 'queued' AND attempt < $2
+			                AND NOT cancel_requested AND object_key = ''
 			              ORDER BY requested_at, id LIMIT 1 FOR UPDATE SKIP LOCKED)
 			 RETURNING `+exportColumns+`, sealed_passphrase`, nodeID, exportMaxAttempts), &sealed)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -473,7 +623,9 @@ func (s *Exports) claim(ctx context.Context, nodeID string) (Export, string, boo
 		return Export{}, "", false, fmt.Errorf("account export: claim: %w", err)
 	}
 	for _, x := range exhausted {
-		s.logger.Warn("account export: a run reached its attempt limit and is failed", "exportId", x.ID, "attempt", x.Attempt)
+		if x.State == exportFailed {
+			s.logger.Warn("account export: a run reached its attempt limit and is failed", "exportId", x.ID, "attempt", x.Attempt)
+		}
 		s.finished(ctx, x)
 	}
 	return out, sealed.String, claimed, nil
@@ -539,12 +691,74 @@ func (s *Exports) finishCancelled(ctx context.Context, x Export, nodeID string) 
 		x.ID, nodeID, x.Attempt)
 }
 
+// recordObject writes the key of the file this attempt has just committed,
+// guarded on the attempt as every write of a running attempt is (id, the node
+// holding it, attempt, running). It answers false when the attempt no longer
+// holds the run; the caller then deletes the file it committed and stops, as
+// for any lost lease. An attempt that names no node holds nothing: the
+// take-over clears claimed_by while it deletes a stopped attempt's file, and
+// an empty guard would match that row.
+func (s *Exports) recordObject(ctx context.Context, x Export, key string) (bool, error) {
+	if strings.TrimSpace(x.ClaimedBy) == "" || strings.TrimSpace(key) == "" {
+		return false, nil
+	}
+	db, err := s.inv.database()
+	if err != nil {
+		return false, err
+	}
+	res, err := db.DB.ExecContext(ctx, `UPDATE account_exports SET object_key = $4
+		 WHERE id = $1 AND claimed_by = $2 AND attempt = $3 AND state = 'running'`,
+		x.ID, x.ClaimedBy, x.Attempt, key)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
 // requeue hands this node's attempt back when the node is stopping, so another
 // replica starts it at once instead of after the stale window. The attempt
-// stays counted.
+// stays counted. A run a person asked to cancel ends cancelled instead, its
+// sealed passphrase cleared in the same statement, and is audited here.
+//
+// A file the attempt recorded is deleted first and the key cleared with the
+// hand-back. When the delete fails, a cancelled run still ends (keeping its key
+// for the sweep of kept files), and one that would be queued again is not
+// handed back (false): the row stays running with its key, and the take-over
+// deals with it once the lease is stale.
 func (s *Exports) requeue(ctx context.Context, x Export, nodeID string) (bool, error) {
-	_, ok, err := s.update(ctx, `UPDATE account_exports SET state = 'queued', claimed_by = '', heartbeat_at = NULL, phase = ''
-		 WHERE id = $1 AND claimed_by = $2 AND attempt = $3 AND state = 'running'`,
-		x.ID, nodeID, x.Attempt)
-	return ok, err
+	db, err := s.inv.database()
+	if err != nil {
+		return false, err
+	}
+	var key string
+	var cancelRequested bool
+	err = db.DB.QueryRowContext(ctx, `SELECT object_key, cancel_requested FROM account_exports
+		 WHERE id = $1 AND claimed_by = $2 AND attempt = $3 AND state = 'running'`, x.ID, nodeID, x.Attempt).Scan(&key, &cancelRequested)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	deleted := key == "" || s.deleteRecordedObject(ctx, x.ID, key)
+	if !deleted && !cancelRequested {
+		return false, nil
+	}
+	out, ok, err := s.update(ctx, `UPDATE account_exports SET
+		   state = CASE WHEN cancel_requested THEN 'cancelled' ELSE 'queued' END,
+		   finished_at = CASE WHEN cancel_requested THEN clock_timestamp() ELSE finished_at END,
+		   sealed_passphrase = CASE WHEN cancel_requested THEN NULL ELSE sealed_passphrase END,
+		   object_key = CASE WHEN $5 THEN '' ELSE object_key END,
+		   claimed_by = '', heartbeat_at = NULL, phase = ''
+		 WHERE id = $1 AND claimed_by = $2 AND attempt = $3 AND state = 'running' AND object_key = $4
+		   AND (cancel_requested OR $5)`,
+		x.ID, nodeID, x.Attempt, key, deleted)
+	if err != nil || !ok {
+		return ok, err
+	}
+	if out.State == exportCancelled {
+		s.finished(ctx, out)
+	}
+	return true, nil
 }
