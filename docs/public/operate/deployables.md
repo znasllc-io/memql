@@ -792,6 +792,162 @@ engine serves a store's state and reasons only to its owner, a cluster owner,
 or a caller who may read store rows. Every state, reason, act and
 email is in [the Shopify connector](shopify-connector.md#operating-it).
 
+### Store statistics
+
+**Store statistics** is a page of the storefront's: the sales of the store it
+fronts, for a chosen period, summed by the engine from the orders, lines and
+refunds the mirror records. What is recorded, how each figure is computed, and
+where a figure stops being right are in
+[the Shopify connector](shopify-connector.md#store-statistics-what-is-computed-from-the-mirror).
+This section is the page.
+
+**The button.** "Store statistics" is in the bar of the deployable's page,
+after Statistics; on a draft, where Statistics is absent, it follows the Logs
+button, because the figures are the store's sales and do not wait for the site
+to be published. It is drawn when all three hold, and is absent otherwise:
+
+- you hold the sales part in the organization the site belongs to;
+- the deployable is a `shopify_storefront` that is not system-owned;
+- Production or Testing names a store.
+
+**The sales part** is `execute app:deployables/sales`. It is seeded on the
+owner and developer roles, so the cluster's own developers can read every
+client's sales figures. A client's people are given it through their
+organization's group: grant the group `allow` on `execute
+app:deployables/sales`, beside `allow` on `read app:deployables`
+([how a grant is resolved](auth/access-model.md#how-a-decision-is-resolved)).
+The part is judged in the organization of the site, by MemQL OS to draw the
+button and by the engine again on every read. MemQL OS draws a part of
+Deployables -- this one, as every other -- only for a person who also holds
+`read data`, `read app:deployables` and `update data` in that organization, so
+a group that may only read is answered by the engine and shown no button.
+Grant it to a client's group only after the store's check has ended clean once
+and the figures have been compared with the store's own Shopify reports
+([Granting the sales part](shopify-connector.md#granting-the-sales-part)).
+
+The page reads one builtin, `storeStatistics(siteId, storeId, period)`. Before
+it reads anything of a store it checks, in Go, that the period is one of the
+five, that the call is made in the person's own session, that the caller can
+read the site and holds the part in its organization, that the site is a
+`shopify_storefront` that is not system-owned, and that the store asked for is
+the site's Production or Testing store. A period that is not one of the five
+is refused in the period's own sentence; every other refusal is one sentence,
+"This deployable does not serve that store for you.", so a refusal says nothing
+about what exists. A caller the engine's own gate refuses first gets its
+`capability_not_held` refusal. The figures are read from the statistics' own
+tables, never from an order row, so the caller needs no right to read store
+rows or orders. A holder of the sales part therefore reads, in the notice, the
+mirror's own sentences for why a store is not being recorded, without holding
+the store part.
+
+**Destination.** When Production and Testing name two stores, a "Destination"
+select stands at the right of the head, before the period, with "Production"
+and "Testing". The page opens on Production when Production has a store, else
+on Testing, and the choice is not remembered: it opens there again next time.
+When the two name one store, the select is not drawn and the context line says
+"Production and Testing". The period is the same remembered choice as the
+website's [Statistics](#reading-the-statistics): 24 hours, 7, 30 or 90 days, or
+12 months.
+
+**The context.** Under the head, one line names what the answer holds, each
+part only when it is known, joined by " · ": the store's name (or its domain),
+"Production and Testing" when both destinations name it, "Prices in" the
+store's currency, "Days in" the zone the days are cut in, "Orders since" the
+first day the store's history covers, and "Last order change recorded" with how
+long ago the mirror recorded the newest order or refund change the figures
+hold. The days are cut in the store's own time zone when it loads, and in UTC
+otherwise, and the line names the one used. Then, each on its own line and
+only when it applies:
+
+- "This is a development store: every order on it is a test order, and they
+  are counted."
+- "Prices on this store include tax."
+- "Refunds, edits and cancellations of orders placed more than 60 days ago are
+  not recorded." -- drawn when the store's recorded grant lacks
+  `read_all_orders`, which is every store connected through the shared app.
+
+**The notice.** When something stands in the way, one notice above the figures
+says it, a line each, in this order: the state the page words itself ("The
+store's orders are still being brought in.", "Recording is paused for this
+store.", "This store is not connected.", or "Whether this store is recording is
+not known."); every reason the engine gives for the store, in the engine's own
+sentence, in any state; "These figures are as of" a moment, or "No figure can
+be given until this is fixed."; and "N refunds are still being read from
+Shopify." while some are. For a store that is paused, not connected or needs
+attention it adds "The Store page of this deployable says what fixes it." The
+notice holds no act: the acts are on the [Store page](#the-store-slot-and-the-store-page).
+
+**"As of".** The figures are current unless something stands in the way of
+the data they are made from: the store is paused or not connected, or a reason
+of the store's verdict concerns its orders, lines, refunds or shop. A reason
+about anything else -- a privacy request, a permission the figures do not use
+-- is listed in the notice and changes nothing. While something stands in the
+way, the figures are those of the statistics' last run (one runs every minute)
+at which nothing did, and the notice says "These figures are as of" that
+moment. Every day, hour or month of the chart that begins at or after it is
+blank, the figures are summed only up to it, and no change against the
+previous period is shown. A store that has had no such run gives no figure at
+all, and says "No figure can be given until this is fixed." A store whose
+recording state could not be read for more than fifteen minutes is treated the
+same way, with the reason "The store's recording state could not be read."
+
+**When every figure is absent.** No figure, chart point or list is given:
+
+- while the store's orders are being brought in -- the store has no
+  statistics yet, the mirror reads it Starting, the statistics have not yet
+  read each of its orders, lines and refunds up to the present, it is being
+  [rebuilt](shopify-connector.md#rebuilding-a-store), or its facts are being
+  deleted -- with "The store's orders are still being brought in.";
+- while the store's time zone has not been recorded, with "The store's time
+  zone has not been recorded yet.", or the zone it recorded does not load: no
+  day of it can be cut;
+- while something stands in the way and the last run at which nothing did is
+  not after the period's start, or there was none (above).
+
+**Absent is never zero.** A figure that is not known is the kit's dash, and the
+reason is a hover away:
+
+| Figure | Absent, or a floor, when | Its reason |
+|---|---|---|
+| every money figure | the store's currency is not recorded | "The store's currency has not been recorded yet." |
+| Refunds, Net sales, Total sales, Units sold | a refund in the period has not had its detail read from Shopify | "1 refund is still being read from Shopify." (or "N refunds are ...") |
+| Units sold | a refund in the period holds a full page of lines, so it may hold more | "A refund in this period has more lines than were recorded." |
+| Average order value | the period has no order in the store's currency | "No orders in this period." when Orders is zero |
+| Gross sales, Discounts, Net sales, Total sales, Average order value, Units sold | an order in the period has fewer lines recorded than it holds | none: shown with "or more", a floor and not an exact sum |
+
+A refund not read leaves both lists of products absent too, and a refund with
+a full page of lines the list by units. A figure can be below zero: a day on
+which more was refunded than sold hangs below the chart's zero line.
+
+**Records that could not be read.** A mirrored row the statistics cannot make
+a figure from -- an amount that is not an amount, a missing date -- is
+counted and left out of every figure, and the notice says so in every state:
+"1 record of this store could not be read and is left out of these figures."
+(or "N records ... are left out of these figures.").
+
+**The figures and the lists.** Eight figures: Total sales, Net sales, Orders,
+Average order value; Gross sales, Discounts, Refunds, Units sold. Choosing one
+but the average draws it over the period. Then:
+
+- **Products**, by Net sales or by Units: the leading 8, and "All products",
+  which opens the whole list the engine answers, the leading 25, under the same
+  trail and the same notice. Its footer says "The 8 best-selling of N
+  products." when there are more, and, when they apply, "Refunds of" an amount
+  "name no product, so they are in Net sales and not here.", "N orders have
+  more lines than were recorded, so these are floors." and "N refunds have more
+  lines than were recorded, so units are not exact."
+- **Buyers**: New, Returning and "No customer recorded".
+- **Wholesale and retail**, by Net sales or by Orders, only when the wholesale
+  pack is enabled and set up for the store. An order is wholesale when its
+  buyer holds granted wholesale access in the pack now, so a buyer whose access
+  ends moves, with every past order, to retail.
+
+A list sent empty says "No orders in this period." when Orders is zero, and
+"Nothing to list for this period." otherwise. Orders in a currency other than
+the store's are counted, never summed, and named under the lists, as in "2
+orders in USD are not in these sums." The page's help says in short what each
+figure means and where it differs from Shopify's own reports.
+
 ---
 
 ## TLS
