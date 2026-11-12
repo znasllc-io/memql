@@ -152,6 +152,44 @@ owners read every store; everyone below reads **zero rows, not an error**.
 `TestADeveloperCannotChangeAStoreThatExists`
 (`component/memql/store_read_floor_db_test.go`) hold all three halves.
 
+### The two secret concepts
+
+`v1:platform:globalSecret` and `v1:platform:partitionSecret` -- the
+deployment's sealed credentials -- declare plain `@rowAuthz(clusterOwner)`.
+They carry no owner field, because a secret is the deployment's row, and no
+`rankFloor`, because a row's fields are a ciphertext and the last characters
+of what it seals.
+
+- **The row is the cluster owner's; the value is the resolver's.** Below the
+  cluster owner a read returns **zero rows, not an error**, and a
+  subscription delivers nothing. Code that needs the VALUE calls
+  `ResolveSecret` / `ResolveSystemSecret` (`secret()` / `systemSecret()` in a
+  body), and that lookup runs as the deployment -- `auth.SystemActor`, stamped
+  in `component/memql/engine_variables.go` -- whatever context it was handed:
+  a visitor's request at the edge, a webhook with no identity, a send
+  triggered by a person of any role. Who may ask for a value stays where it
+  was: with the Go that calls the resolver, and with who may author a body.
+- **A write is the tier's, named or raw.** `setGlobalSecret` and
+  `setPartitionSecret` carry no gate of their own. The write guard judges a
+  write over a stored row and the create floor judges a fresh id
+  (`component/memql/create_rank_floor.go`), so the raw `insert(...)` literal
+  is held to the same rule. A cluster owner writes -- the operator
+  credential's stream is one, which is how `scripts/secrets` seeds -- and so
+  does server code that has authorized its caller and stamps internal origin
+  for the one write: the Integrations section's credential save, which admits
+  a developer, and the Shopify connector.
+- **`@secret` is not the gate.** The annotation keeps a rejected value out of
+  validation messages. A query returns the field in full to whoever the row
+  is returned to, so the audience is the tier's to name.
+  `TestEveryConceptWithASealedFieldDeclaresARowTier`
+  (`component/memql/platform_secret_tier_test.go`) fails the build on a
+  concept that carries the annotation and declares no tier naming one.
+
+`component/memql/platform_secret_tier_db_test.go` holds the tier and the
+resolvers against a real engine and database, and
+`component/grpc/secret_tier_wire_db_test.go` holds it through the request
+handler a client's query lands in.
+
 The two reported states that are not buckets: **`srvOnly`**, checked
 first as above, and **`other`** — everything the classifier did not
 place. `other` is by far the largest column and is not a finding.

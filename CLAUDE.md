@@ -1884,7 +1884,13 @@ does not say.
   that pass the part and the organization gate, and only a digest is stored. Also
   `globalSecret` / `globalVariable`, `outboundRequest` /
   `inboundRequest`, `missingCapability`, and `dataOrigin` (a VIRTUAL projection,
-  never persisted).
+  never persisted). **`globalSecret` and `partitionSecret` declare plain
+  `@rowAuthz(clusterOwner)`**: the ROW is the cluster owner's, and a VALUE is
+  read only through `ResolveSecret` / `ResolveSystemSecret`, whose lookup runs
+  as the deployment whatever context it was handed (`secretReadContext`,
+  `component/memql/engine_variables.go`). A writer that is not a cluster owner
+  authorizes its caller, then stamps internal origin for the one write
+  ([the two secret concepts](docs/public/operate/auth/per-row-authz-audit.md#the-two-secret-concepts)).
 - **Library** (`dsl/library/concepts.memql`) -- `artifact` is a thin INDEX row
   owning no content (memql#693); `file` is the only backing row with bytes
   (memql#4340); `fileChunk` holds its embeddings. All three declare

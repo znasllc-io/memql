@@ -6520,7 +6520,7 @@ QueryClient.prototype.setEmailRuleStatus = function (this: QueryClient, args: Se
   return this.executeNamed("setEmailRuleStatus", buildSetEmailRuleStatus(args), opts);
 };
 
-/** Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. */
+/** Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. Cluster owner only: the concept's row tier judges the write. */
 // Bound concept: v1:platform:globalSecret (machine-readable: BoundConcepts["setGlobalSecret"] in generated_concepts.ts).
 export interface SetGlobalSecretArgs {
   id: string;
@@ -6773,7 +6773,7 @@ QueryClient.prototype.setPackageSourceRemoved = function (this: QueryClient, arg
   return this.executeNamed("setPackageSourceRemoved", buildSetPackageSourceRemoved(args), opts);
 };
 
-/** Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. */
+/** Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. Cluster owner only: the concept's row tier judges the write. */
 // Bound concept: v1:platform:partitionSecret (machine-readable: BoundConcepts["setPartitionSecret"] in generated_concepts.ts).
 export interface SetPartitionSecretArgs {
   id: string;

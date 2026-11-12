@@ -191,6 +191,30 @@ The `_system` partition is reserved for global concepts -- platform
 secrets and variables live there regardless of which partition the
 caller is in.
 
+### Who reads and writes a secret row
+
+The two secret concepts declare the cluster-owner row tier
+(`@rowAuthz(clusterOwner)`). A row -- its name, ciphertext and fingerprint --
+is read and written by a cluster owner. The operator credential admits a
+stream as one, so `scripts/secrets` seeds through the same rule.
+
+- **A value is read through the resolvers, never off the row.** Code that
+  needs a secret calls `ResolveSecret` / `ResolveSystemSecret`, or `secret()`
+  / `systemSecret()` in a body. The lookup runs as the deployment whatever
+  context it was handed, so a send, an inbound webhook and a storefront
+  request resolve the same secret regardless of who triggered them.
+- **A write is judged where every write lands.** `setGlobalSecret`,
+  `setPartitionSecret` and the raw `insert(...)` literal are held to the same
+  tier, on a fresh id and over a stored row.
+- **A surface that lets someone else save a credential does it server-side.**
+  The Integrations section admits a developer: `integrationConfigure`
+  authorizes the caller, seals the value on the node and writes the row with
+  internal origin. A client calling `setGlobalSecret` itself is refused unless
+  it is a cluster owner's.
+
+[The row-authorization reference](auth/per-row-authz-audit.md#the-two-secret-concepts)
+has the rule and the tests that hold it.
+
 ### Encryption
 
 Secrets are sealed with **NaCl secretbox** (XSalsa20-Poly1305) under

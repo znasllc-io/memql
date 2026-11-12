@@ -35,13 +35,17 @@ import (
 //
 // # No internal-origin stamp on the WRITES
 //
-// setGlobalVariable and setGlobalSecret are not @serverOnly: what they store is
-// already sealed or already public, and what authorizes the write is the
-// caller. Here that caller is either a cluster owner (githubAppRemove, under
-// their own actor) or the identity service's own owner-role system actor (the
-// app-setup callback, which a browser redirect reaches with no MemQL bearer --
-// see SystemActorMiddleware). Neither needs the gate opened, so neither opens
-// it. The one stamp in this file is RecomputeGithubAppReadiness, which says why.
+// setGlobalVariable and setGlobalSecret are not @serverOnly, and what
+// authorizes the write is the caller. For the three credentials that is the
+// row tier's own rule: v1:platform:globalSecret declares @rowAuthz(clusterOwner),
+// which admits a cluster owner. Here the caller is one either way -- a cluster
+// owner (githubAppRemove, under their own actor) or the identity service's own
+// owner-role system actor (the app-setup callback, which a browser redirect
+// reaches with no MemQL bearer -- see SystemActorMiddleware). Neither needs the
+// gate opened, so neither opens it; a caller of this store that is NOT a
+// cluster owner would be refused at the credential rows, which is the tier
+// working. The one stamp in this file is RecomputeGithubAppReadiness, which
+// says why.
 
 // githubAppRowDescription is what each row says about itself in the stores'
 // own surfaces, where an operator looking at cluster configuration will meet

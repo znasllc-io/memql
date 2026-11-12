@@ -15,7 +15,17 @@ use worker.concepts.{ registration }
 /// under MEMQL_MASTER_KEY and a short fingerprint for UI display. Used for instance-level API keys,
 /// OAuth client secrets, Azure/Graph credentials, etc. For per-tenant overrides (BYOK) use
 /// v1:platform:partitionSecret; the resolver falls back partition -> global automatically.
+///
+/// clusterOwner tier, plain: a secret is the deployment's own row, with no owner field and no
+/// reader below the cluster owner. Nothing else reads the ROW -- every other reader wants the
+/// VALUE, and gets it from the engine's resolvers (ResolveSecret / ResolveSystemSecret, and
+/// secret() / systemSecret() in a body), which read as the deployment whatever context they were
+/// handed. A write is the cluster owner's, the operator credential's, or server code that has
+/// authorized its caller and stamps internal origin for the one write; the raw insert literal is
+/// judged by the same tier. No rankFloor, deliberately: the fields are a ciphertext and the last
+/// characters of what it seals.
 @displayCard(primary="name", secondary="kind", tertiary="fingerprint", status="active")
+@rowAuthz(clusterOwner)
 concept globalSecret {
   name            string!  @description("Secret name (uppercase with underscores by convention).")
   encryptedValue  string!  @secret  @description("Base64-encoded nonce || NaCl-secretbox ciphertext, sealed under MEMQL_MASTER_KEY. Opaque -- never rendered to humans. @secret redacts a rejected value in the function-args validator ONLY, and matches by ARGUMENT NAME, so a mutation writing encryptedValue: args.somethingElse is not covered -- see Concept.SecretFields for the full scope.")
@@ -58,8 +68,11 @@ concept globalVariable {
 //     tool, invoked internally by MemQL's dev-refresh flow, that reads a
 //     .env file and upserts manifest-listed entries as v1:platform:global*
 //     rows against a running memql.
-//   * The setGlobalSecret / setPartitionSecret mutations directly, e.g.
-//     from an admin surface.
+//   * The setGlobalSecret / setPartitionSecret mutations directly, for the
+//     audience the concepts' cluster-owner tier names: a cluster owner (which
+//     is what the operator credential admits), or server code that has
+//     authorized its caller and stamps internal origin for the one write (the
+//     Integrations section's credential save, the Shopify connector).
 // `make secrets` (scripts/k3d/seed-secrets.sh) is a DIFFERENT layer: it
 // seeds the k8s Secret objects nodes envFrom at boot (MEMQL_MASTER_KEY,
 // DATABASE_DSN, TLS certs, ...), not graph rows. Seeding a secret at the
@@ -75,7 +88,11 @@ concept globalVariable {
 /// MEMQL_MASTER_KEY and a fingerprint. When the partition-scoped resolver (resolveSecret) cannot
 /// find a row, it falls back to v1:platform:globalSecret so a tenant's BYOK key wins over the
 /// instance default but the instance default is always available.
+///
+/// clusterOwner tier, plain, for the reason written on v1:platform:globalSecret: the row is the
+/// deployment's, its value is read through the resolvers, and its fields are sealed.
 @displayCard(primary="name", secondary="kind", tertiary="fingerprint", status="active")
+@rowAuthz(clusterOwner)
 concept partitionSecret {
   name            string!  @description("Secret name (uppercase with underscores by convention).")
   encryptedValue  string!  @secret  @description("Base64-encoded nonce || NaCl-secretbox ciphertext, sealed under MEMQL_MASTER_KEY. Opaque -- never rendered to humans. @secret redacts a rejected value in the function-args validator ONLY, and matches by ARGUMENT NAME, so a mutation writing encryptedValue: args.somethingElse is not covered -- see Concept.SecretFields for the full scope.")

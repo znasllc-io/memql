@@ -778,9 +778,16 @@ func (c *Concept) PIIFields() []string {
 // the schema, not through an argument name.)
 //
 // NOT COVERED -- query results. A @secret value is returned in full by any
-// query projecting it. That is an authorization decision needing a definition
-// of "elevated", and it interacts with the per-row authz model deferred under
-// memql#2803.
+// query projecting it, to every caller the row is returned to. The annotation
+// is a statement about what a validation message may quote, not about who may
+// read: WHO REACHES THE ROW is the concept's @rowAuthz to decide, so a concept
+// carrying @secret must also declare a tier that names an audience.
+// component/memql's TestEveryConceptWithASealedFieldDeclaresARowTier fails the
+// build on one that does not -- v1:platform:globalSecret and
+// v1:platform:partitionSecret declare the cluster-owner tier, and
+// v1:platform:sourceCredential an owned one. Within that audience the value is
+// still not redacted, and a projection that leaves the field out is the only
+// thing that withholds it.
 //
 // NOT COVERED -- length, everywhere and deliberately. "value too long (%d
 // runes, max %d)" (function_validator.go, args_binding.go) and the jsonschema

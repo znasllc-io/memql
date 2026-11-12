@@ -16,10 +16,20 @@
 //
 // The encryptedValue + fingerprint are produced by
 // component/secret.Encrypt before this mutation is called.
+//
+// WHO MAY CALL IT is the concept's to say, not this mutation's:
+// v1:platform:globalSecret declares @rowAuthz(clusterOwner), and the engine
+// judges every write to it at the write seam -- this mutation and the raw
+// insert literal alike, on a fresh id or over a stored row. A cluster owner
+// (the operator credential's stream is one) and server code stamping internal
+// origin for the write are admitted; anyone else is refused. It carries no
+// @serverOnly because the operator CLI calls it by name over the wire, and no
+// @requiresRank because a floor here would be a second place for the tier's
+// rule to drift (create_rank_floor.go).
 
 /// Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The
 /// encryptedValue and fingerprint are produced by the backend secret helper; this mutation only
-/// stores them.
+/// stores them. Cluster owner only: the concept's row tier judges the write.
 mutation globalSecret setGlobalSecret {
   args {
     id              string!
@@ -78,10 +88,13 @@ mutation globalVariable setGlobalVariable {
 //
 // Deterministic id means re-submitting rotates the value; the prior
 // ciphertext remains in the time-series history under the same id.
+//
+// Who may call it is the concept's to say, exactly as for setGlobalSecret
+// above: v1:platform:partitionSecret declares @rowAuthz(clusterOwner).
 
 /// Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The
 /// encryptedValue and fingerprint are produced by the backend secret helper; this mutation only
-/// stores them.
+/// stores them. Cluster owner only: the concept's row tier judges the write.
 mutation partitionSecret setPartitionSecret {
   args {
     id              string!
