@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -98,5 +99,98 @@ func TestRequirePersonSessionRefusesEverythingElse(t *testing.T) {
 				t.Fatalf("IsPersonSessionRequired did not recognise its own refusal: %v", err)
 			}
 		})
+	}
+}
+
+// forwardedSession is a person's request as a mesh receiver binds it: the
+// claims rebuilt from the assertion carry no class, no pat_id and no
+// delegation, so only the assertion itself says what credential it came from.
+func forwardedSession(t *testing.T, class string, subject string, ceiling Role, expires time.Time) context.Context {
+	t.Helper()
+	ac := &AccessContext{UserId: subject, Role: RoleDeveloper}
+	if class == RoleTestClass {
+		ac.RoleTestSessionID = "session"
+	}
+	if ceiling != "" {
+		ac.Role = ceiling
+	}
+	a, err := ForwardedAuthorityForUser(ac, class, ceiling, expires, time.Now())
+	if err != nil {
+		t.Fatalf("class %q: %v", class, err)
+	}
+	verified, err := VerifyForwardedAuthority(a, time.Now())
+	if err != nil {
+		t.Fatalf("class %q: %v", class, err)
+	}
+	return BindForwardedContext(context.Background(), a.Principal().Claims, verified, a)
+}
+
+// A forwarded hop is admitted only when the assertion says a user's session:
+// the credential class travels on the assertion and nowhere else.
+func TestRequirePersonSessionReadsTheForwardedAssertion(t *testing.T) {
+	soon := time.Now().Add(time.Minute)
+	id, err := RequirePersonSession(forwardedSession(t, ForwardedClassUser, sessionPerson, "", time.Time{}))
+	if err != nil || id != sessionPerson {
+		t.Fatalf("a person's forwarded session: id=%q err=%v", id, err)
+	}
+	persona := "v1:identity:user:" + RoleTestUserPrefix + "p"
+	refused := map[string]context.Context{
+		"pat":         forwardedSession(t, ForwardedClassPat, sessionPerson, "", time.Time{}),
+		"app session": forwardedSession(t, ForwardedClassAppSession, sessionPerson, "", soon),
+		"badge":       forwardedSession(t, ForwardedClassBadge, sessionPerson, RoleReader, soon),
+		"role test":   forwardedSession(t, RoleTestClass, persona, "", soon),
+		// What a refused binding leaves on the context (component/grpc
+		// work_authority.go): an assertion present but zero.
+		"zero assertion": ContextWithForwardedAuthority(session("", nil), ForwardedAuthority{}),
+	}
+	resolver := NewIdentityResolver(QueryRunnerFunc(func(context.Context, string) (any, error) {
+		return map[string]any{"role": string(RoleOwner)}, nil
+	}), nil)
+	persisted, err := ContextWithPersistedOwner(context.Background(), sessionPerson,
+		map[string]any{"roleCeiling": string(RoleOwner), "credentialClass": ForwardedClassPat}, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused["persisted pat"] = persisted
+	ungranted, err := ContextWithPersistedOwner(context.Background(), sessionPerson, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused["persisted with no grant"] = ungranted
+	for name, ctx := range refused {
+		t.Run(name, func(t *testing.T) {
+			id, err := RequirePersonSession(ctx)
+			if err == nil || id != "" || !IsPersonSessionRequired(err) {
+				t.Fatalf("id=%q err=%v", id, err)
+			}
+		})
+	}
+}
+
+// A badge is a person signed in under a ceiling, not a machine, and the
+// refusal says so.
+func TestRequirePersonSessionNamesABadgeAsABadge(t *testing.T) {
+	_, err := RequirePersonSession(session(ForwardedClassBadge, nil))
+	if err == nil || strings.Contains(err.Error(), "machine") || !strings.Contains(err.Error(), "badge") {
+		t.Fatalf("badge refusal = %v", err)
+	}
+	_, err = RequirePersonSession(forwardedSession(t, ForwardedClassBadge, sessionPerson, RoleReader, time.Now().Add(time.Minute)))
+	if err == nil || !strings.Contains(err.Error(), "badge") {
+		t.Fatalf("forwarded badge refusal = %v", err)
+	}
+}
+
+// The ids are compared as they are: a subject or a user id with stray
+// whitespace is not a person's own session trimmed into one.
+func TestRequirePersonSessionComparesIdsExactly(t *testing.T) {
+	for name, ctx := range map[string]context.Context{
+		"padded subject": ContextWithAccess(ContextWithClaims(context.Background(), map[string]any{"sub": " " + sessionPerson}),
+			&AccessContext{UserId: sessionPerson, Role: RoleOwner}),
+		"padded user id": ContextWithAccess(ContextWithClaims(context.Background(), map[string]any{"sub": sessionPerson + " "}),
+			&AccessContext{UserId: sessionPerson + " ", Role: RoleOwner}),
+	} {
+		if id, err := RequirePersonSession(ctx); err == nil {
+			t.Errorf("%s: admitted as %q", name, id)
+		}
 	}
 }

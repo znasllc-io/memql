@@ -14,7 +14,7 @@ import (
 // (MEMQL_IDENTITY_ENABLED=false). ai_forward.go keys the worker
 // "local-dev" propagation marker off this exact value, so keep them in
 // sync.
-const LocalDevSubject = "local-dev"
+const LocalDevSubject = auth.LocalDevSubject
 
 // LocalDevEmail is the synthetic principal email in no-auth dev mode.
 const LocalDevEmail = "local-dev@memql.local"

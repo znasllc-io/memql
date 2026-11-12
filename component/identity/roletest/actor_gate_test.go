@@ -40,7 +40,13 @@ func TestRoleTestingRefusesWhatIsNotAPersonsOwnSession(t *testing.T) {
 		"connector":             auth.ContextWithConnectorActor(context.Background(), "shopify"),
 		"anonymous":             auth.ContextWithAnonymousActor(context.Background()),
 		"system actor":          auth.ContextWithSystemActor(context.Background(), "edge"),
-		"inside a run":          common.ContextWithRun(session(nil), common.RunContext{RunId: "v1:work:run:r"}),
+		// The old comparison was exact, and stays so: whitespace is not trimmed
+		// into a match.
+		"padded subject": session(map[string]any{"sub": " " + person}),
+		"padded user id": auth.ContextWithAccess(
+			auth.ContextWithClaims(context.Background(), map[string]any{"sub": person + " "}),
+			&auth.AccessContext{UserId: person + " ", Role: auth.RoleOwner}),
+		"inside a run": common.ContextWithRun(session(nil), common.RunContext{RunId: "v1:work:run:r"}),
 		// A persona is refused by role testing itself, after the shared gate:
 		// a test session never starts another.
 		"a test persona": auth.ContextWithAccess(
