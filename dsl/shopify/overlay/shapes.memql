@@ -61,5 +61,7 @@ shape complianceJob complianceJobStored {
   scrubbedAt
   completedAt
   requestedAt
+  deliveryIds
+  exportId
   row.createdAt
 }

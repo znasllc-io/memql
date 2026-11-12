@@ -178,4 +178,17 @@ concept complianceJob {
   /// failed adds its orders and leaves dueAt where it is. Empty on a job
   /// queued before the field existed.
   requestedAt  datetime
+  /// The staged deliveries that asked for this job, as the row ids of their
+  /// v1:platform:inboundRequest rows; one is added at each request. A
+  /// privacy delivery's body holds the customer's email address and phone
+  /// number, and a managed store's arrive on the app-level source, where
+  /// nothing that is done to the store's own deliveries reaches them. So the
+  /// job remembers them, and their bodies are blanked at each pass of an
+  /// erasure and when a job ends done.
+  deliveryIds  []string
+  /// What a data request filed in the store owner's Library: the id of the
+  /// v1:library:generatedOutput that holds the export. An erasure of the same
+  /// customer removes it. Empty on any other job, and on a data request that
+  /// filed nothing or ran before the field existed.
+  exportId     string
 }

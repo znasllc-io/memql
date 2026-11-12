@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
+	"github.com/znasllc-io/memql/integrations/library"
 	"github.com/znasllc-io/memql/integrations/shopify/generated"
 )
 
@@ -93,23 +95,82 @@ func (r *runnerFixture) narrowed() memql.IntegrationEngineAccess {
 // orders the request names by theirs.
 func (r *runnerFixture) delivers(conn *Connector, topic, customer string, orders ...string) {
 	r.t.Helper()
+	r.deliversAs(conn, "", "", topic, customer, orders...)
+}
+
+// deliversAs is delivers for a delivery that is staged: source is where it
+// was staged and id its row's id there, which the connector is told as the
+// dispatcher tells it. The row is written first, with the body the connector
+// is handed, and stamped processed as the dispatcher stamps it afterwards.
+func (r *runnerFixture) deliversAs(conn *Connector, source, id, topic, customer string, orders ...string) {
+	r.t.Helper()
 	domain := r.store + ".example.com"
 	body := map[string]any{"shop_domain": domain}
 	if topic != TopicShopRedact {
-		body["customer"] = map[string]any{"id": json.Number(customer), "email": adaEmail}
+		body["customer"] = map[string]any{"id": json.Number(customer), "email": adaEmail, "phone": adaPhone}
 		named := []any{}
 		for _, order := range orders {
 			named = append(named, json.Number(order))
 		}
-		body["orders_to_redact"] = named
+		if topic == TopicDataRequest {
+			body["orders_requested"], body["data_request"] = named, map[string]any{"id": json.Number("4242" + customer)}
+		} else {
+			body["orders_to_redact"] = named
+		}
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	if err := conn.enqueueComplianceJob(context.Background(), Store{ID: r.store, Domain: domain}, topic, memqlsync.InboundRequest{Body: raw, ReceivedAt: r.at}); err != nil {
+	if id != "" {
+		r.mutate("stageInboundRequest", map[string]any{
+			"requestId": id, "source": source, "medium": "webhook", "body": string(raw), "contentType": "application/json",
+			"headersJson": `{"x-shopify-topic":"` + topic + `"}`, "signatureVerified": true, "verifiedBy": "connector", "receivedAt": r.at.Format(time.RFC3339),
+		})
+		r.mutate("updateInboundRequestStatus", map[string]any{"requestId": id, "status": "processing", "attempts": 1})
+	}
+	if err := conn.enqueueComplianceJob(context.Background(), Store{ID: r.store, Domain: domain}, topic, memqlsync.InboundRequest{RequestId: id, Source: source, Body: raw, ReceivedAt: r.at}); err != nil {
 		r.t.Fatalf("the %s delivery was not recorded: %v", topic, err)
 	}
+	if id != "" {
+		r.mutate("updateInboundRequestStatus", map[string]any{"requestId": id, "status": "processed", "attempts": 1, "processedAt": r.at.Format(time.RFC3339)})
+	}
+}
+
+// deliveryBodies is the body of every stored version of one staged delivery,
+// oldest first.
+func (r *runnerFixture) deliveryBodies(id string) []string {
+	r.t.Helper()
+	rows, err := queryRows(context.Background(), r.db,
+		`SELECT COALESCE(payload->>'body', '<no body key>') FROM "MemoryNodes" WHERE concept = 'v1:platform:inboundRequest' AND id = $1 ORDER BY "createdAt"`,
+		"v1:platform:inboundRequest:"+id)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	var out []string
+	for _, row := range rows {
+		out = append(out, row[0])
+	}
+	return out
+}
+
+// onTheAppSource names deliveries of this test on the app-level source, where
+// a managed store's privacy deliveries arrive, and removes them afterwards.
+func (r *runnerFixture) onTheAppSource(names ...string) []string {
+	r.t.Helper()
+	tag := strings.TrimPrefix(r.store, "dbtest-era-")
+	var ids []string
+	for _, name := range names {
+		ids = append(ids, tag+"-"+name)
+	}
+	clean := func() {
+		for _, id := range ids {
+			_, _ = r.db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept = 'v1:platform:inboundRequest' AND id = $1`, "v1:platform:inboundRequest:"+id)
+		}
+	}
+	clean()
+	r.t.Cleanup(clean)
+	return ids
 }
 
 func ordersOf(row map[string]any) string {
@@ -954,6 +1015,55 @@ func TestTwoOldErasuresOfOneStoreRepairItOnce(t *testing.T) {
 	}
 }
 
+// The repair runs once a store, ever. The store's row says that it ran, and
+// no erasure after that looks through the store again: what the old erasure
+// left cannot be left anew, and the look reads every row of the store in
+// every kind. So damage of the old kind that appears afterwards (here planted
+// by hand) is not repaired: nothing reads for it.
+func TestTheRepairRunsOnceAStoreEver(t *testing.T) {
+	r := newRunnerFixture(t)
+	if r == nil {
+		return
+	}
+	r.oldErasureOf123()
+	r.oldDone(eraCustomerGID("123"))
+	queued := &queuedBackfills{IntegrationEngineAccess: r.narrowed()}
+	conn := r.connectorOn(queued, nil)
+	if ran := r.run(conn); ran != 1 {
+		t.Fatalf("ran %d", ran)
+	}
+	first := len(queued.calls)
+	if _, present := r.newest("order", eraOrderGID("51234"))["billingAddress"]; present || first == 0 {
+		t.Fatalf("a store never repaired was not repaired at its first erasure (%d backfill(s) queued)", first)
+	}
+	store, found, err := conn.storeByID(memql.ContextWithFreshRead(operatorContext(context.Background())), r.store)
+	if err != nil || !found || mapString(store.Health, healthOldErasureRepaired) == "" {
+		t.Fatalf("the store's row does not say its repair ran: %v (%v, %v)", store.Health, found, err)
+	}
+
+	// Later: the same damage on another customer's order, and another erasure.
+	other := adaCustomer("8801", "2026-10-01T10:00:00Z")
+	other["lastOrder"], other["orders"] = nil, nil
+	r.write("customer", other, seen)
+	r.write("order", bikeOrder("58801", eraCustomerGID("8801"), "2026-10-01T10:00:00Z"), seen)
+	r.leftByTheOldErasure(eraCustomerGID("8801"))
+	r.write("customer", adaCustomer("8802", "2026-10-01T10:00:00Z"), seen)
+	r.queue(TopicRedact, eraCustomerGID("8802"), nil, r.at.Add(-time.Minute))
+	r.at = r.at.Add(2 * time.Hour)
+	if ran := r.run(conn); ran < 1 {
+		t.Fatalf("the later run ran %d", ran)
+	}
+	if got := r.newest("order", eraOrderGID("58801"))["billingAddress"]; got != RedactionMarker {
+		t.Errorf("a later erasure looked through a store that was repaired once: the planted marker reads %v", got)
+	}
+	if len(queued.calls) != first {
+		t.Errorf("a later erasure queued %d more backfill(s) for a repair", len(queued.calls)-first)
+	}
+	if job := r.job(TopicRedact, eraCustomerGID("8802")); strings.Contains(fmt.Sprint(job["outcome"]), "an earlier erasure") {
+		t.Errorf("a later erasure's outcome speaks of a repair: %v", job["outcome"])
+	}
+}
+
 // ---- Item 6: what an erasure also holds elsewhere (ruling 90) ----
 
 // staged stages one delivery under a source as the receiver does, and stamps
@@ -1122,6 +1232,275 @@ func TestAShopsErasureDeletesTheStoresStagedDeliveries(t *testing.T) {
 	}
 	if left := r.bodies(own); len(left) != 0 {
 		t.Errorf("after the second purge %d of its deliveries remain", len(left))
+	}
+}
+
+// ---- Ruling 95: the deliveries that asked ----
+
+// A privacy job remembers the deliveries that asked for it, and their bodies
+// are blanked when it has done its work. A managed store's privacy deliveries
+// arrive on the app-level source, which blanking "the store's own source"
+// never reaches; and the body of customers/redact holds the customer's email
+// address and her phone number. So the delivery that asks for an erasure kept
+// both after it.
+func TestAnErasureBlanksTheDeliveriesThatAskedForIt(t *testing.T) {
+	r := newRunnerFixture(t)
+	if r == nil {
+		return
+	}
+	r.hasStore()
+	customer := eraCustomerGID("9601")
+	r.write("customer", adaCustomer("9601", "2026-10-01T10:00:00Z"), seen)
+	ids := r.onTheAppSource("redact-1", "redact-2", "somebody-elses")
+	first, second, theirs := ids[0], ids[1], ids[2]
+	// Another store's privacy delivery on the same source, which no job of
+	// this store remembers.
+	r.staged(ConnectorName, theirs, "processed", 1)
+
+	r.deliversAs(r.conn, ConnectorName, first, TopicRedact, "9601")
+	if held := r.deliveryBodies(first); len(held) < 3 || !strings.Contains(held[0], adaEmail) || !strings.Contains(held[0], adaPhone) {
+		t.Fatalf("the fixture's delivery is %v, want her email and phone in every version", held)
+	}
+	// She asks again while the first request waits: its delivery is remembered too.
+	r.at = r.at.Add(time.Hour)
+	r.deliversAs(r.conn, ConnectorName, second, TopicRedact, "9601", "59601")
+	job := r.job(TopicRedact, customer)
+	if got := fmt.Sprint(job["deliveryIds"]); !strings.Contains(got, first) || !strings.Contains(got, second) {
+		t.Fatalf("the job remembers the deliveries %v, want both that asked for it", job["deliveryIds"])
+	}
+
+	r.at = r.at.Add(25 * time.Hour)
+	if ran := r.run(r.conn); ran != 1 {
+		t.Fatalf("the first pass: ran %d", ran)
+	}
+	for _, id := range []string{first, second} {
+		for i, body := range r.deliveryBodies(id) {
+			if body != "" {
+				t.Errorf("version %d of the delivery %s that asked for the erasure still holds its body: %s", i, id, body)
+			}
+		}
+	}
+	if held := r.deliveryBodies(theirs); len(held) == 0 || !strings.Contains(held[0], adaEmail) {
+		t.Errorf("a delivery no job of this store remembers was blanked: %v", held)
+	}
+	if job := r.job(TopicRedact, customer); !strings.Contains(fmt.Sprint(job["outcome"]), "that asked for it") {
+		t.Errorf("the outcome does not say the deliveries that asked were blanked: %v", job["outcome"])
+	}
+}
+
+// A data request's delivery holds the customer's email and phone as well, and
+// is blanked when the request ends done: there is no pass of an erasure to do
+// it.
+func TestADataRequestThatEndsDoneBlanksItsDelivery(t *testing.T) {
+	r := newRunnerFixture(t)
+	if r == nil {
+		return
+	}
+	r.hasStore()
+	customer := eraCustomerGID("9701")
+	r.write("customer", adaCustomer("9701", "2026-10-01T10:00:00Z"), seen)
+	asked := r.onTheAppSource("data-request")[0]
+	r.deliversAs(r.conn, ConnectorName, asked, TopicDataRequest, "9701")
+	t.Cleanup(func() { r.removeLibraryRowsOf("dbtest-owner") })
+	if ran := r.run(r.conn); ran != 1 {
+		t.Fatalf("ran %d", ran)
+	}
+	if job := r.job(TopicDataRequest, customer); job["status"] != "done" {
+		t.Fatalf("the data request is %v: %v", job["status"], job["lastError"])
+	}
+	for i, body := range r.deliveryBodies(asked) {
+		if body != "" {
+			t.Errorf("version %d of the data request's delivery still holds its body: %s", i, body)
+		}
+	}
+}
+
+// A shop's erasure blanks the delivery that asked for it as well: at each
+// purge, and when the job ends because the store came back. The purge deletes
+// the deliveries of the store's own source; a managed store's shop/redact is
+// on the app-level source, where only its row id finds it.
+func TestAShopsErasureBlanksTheDeliveryThatAskedForIt(t *testing.T) {
+	for name, back := range map[string]bool{"the store is purged": false, "the store came back": true} {
+		t.Run(name, func(t *testing.T) {
+			r := newRunnerFixture(t)
+			if r == nil {
+				return
+			}
+			r.hasStore()
+			if back {
+				r.admin.reply("ShopifyReachable", map[string]any{"shop": map[string]any{"id": "gid://shopify/Shop/1"}})
+			} else {
+				r.mutate("markStoreUninstalled", map[string]any{"storeId": r.store, "uninstalledAt": r.at.Format(time.RFC3339)})
+			}
+			asked := r.onTheAppSource("shop-redact")[0]
+			r.deliversAs(r.conn, ConnectorName, asked, TopicShopRedact, "")
+			if held := r.deliveryBodies(asked); len(held) < 3 || !strings.Contains(held[0], "shop_domain") {
+				t.Fatalf("the fixture's delivery is %v", held)
+			}
+			r.at = r.at.Add(ShopRedactHold + time.Hour)
+			if ran := r.run(r.conn); ran != 1 {
+				t.Fatalf("ran %d (%v)", ran, r.job(TopicShopRedact, "")["lastError"])
+			}
+			if job := r.job(TopicShopRedact, ""); back != (job["status"] == "done") {
+				t.Fatalf("the job is %v: %v", job["status"], job["outcome"])
+			}
+			for i, body := range r.deliveryBodies(asked) {
+				if body != "" {
+					t.Errorf("version %d of the delivery that asked for the shop's erasure still holds its body: %s", i, body)
+				}
+			}
+		})
+	}
+}
+
+// removeLibraryRowsOf removes what a test filed in an owner's Library.
+func (r *runnerFixture) removeLibraryRowsOf(owner string) {
+	_, _ = r.db.ExecContext(context.Background(),
+		`DELETE FROM "MemoryNodes" WHERE concept LIKE 'v1:library:%' AND regexp_replace(payload->>'ownerUserId', '^v1:identity:user:', '') = $1`, owner)
+}
+
+// ---- Ruling 93: the exports a data request filed ----
+
+// withTheLibrary registers the Library on the fixture's engine, with the raw
+// handle its removal deletes on, as a node's plug-in does.
+func (r *runnerFixture) withTheLibrary() {
+	r.t.Helper()
+	lib := library.NewIntegration(r.eng)
+	lib.SetDatabase(func() *sql.DB { return r.db })
+	if err := r.eng.RegisterIntegration(lib); err != nil {
+		r.t.Fatalf("register the Library: %v", err)
+	}
+	r.t.Cleanup(func() { r.removeLibraryRowsOf("dbtest-owner") })
+}
+
+// exported runs a data request for a customer to its end and answers the id
+// of the export it filed. The index row is written as the Library's
+// automation writes it when an output is created; no automation runs here.
+func (r *runnerFixture) exported(customer string) string {
+	r.t.Helper()
+	r.delivers(r.conn, TopicDataRequest, customer)
+	if ran := r.run(r.conn); ran != 1 {
+		r.t.Fatalf("the data request of customer %s: ran %d", customer, ran)
+	}
+	job := r.job(TopicDataRequest, eraCustomerGID(customer))
+	id, _ := job["exportId"].(string)
+	if job["status"] != "done" || id == "" {
+		r.t.Fatalf("the data request of customer %s is %v and says it filed %q", customer, job["status"], id)
+	}
+	owner := auth.ContextWithInternalOrigin(auth.ContextWithUserActor(context.Background(), "dbtest-owner"))
+	if _, err := r.eng.Execute(owner, renderCall("createArtifact", map[string]any{
+		"sourceConceptRef": "v1:library:generatedOutput:" + id, "ownerUserId": "dbtest-owner", "lens": "artifact", "kind": "generated_output",
+		"source": "derived", "title": "an export", "summary": "Shopify customers/data_request export for " + eraCustomerGID(customer), "format": "text",
+		"mimeType": "application/json", "live": false, "partitionId": "", "agentId": "", "producedByPlanId": "", "producedByWorkerId": "", "producedByWorkerName": "",
+	})); err != nil {
+		r.t.Fatalf("index the export: %v", err)
+	}
+	return id
+}
+
+// libraryRowsOf is the Library's rows for one export: the output's own and
+// the index row's, as "concept id", every version.
+func (r *runnerFixture) libraryRowsOf(export string) []string {
+	r.t.Helper()
+	rows, err := queryRows(context.Background(), r.db,
+		`SELECT concept || ' ' || id FROM "MemoryNodes"
+		  WHERE (concept = 'v1:library:generatedOutput' AND id = $1) OR (concept = 'v1:library:artifact' AND payload->>'sourceConceptRef' = $1)
+		  ORDER BY concept, id, "createdAt"`, "v1:library:generatedOutput:"+export)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	var out []string
+	for _, row := range rows {
+		out = append(out, row[0])
+	}
+	return out
+}
+
+// A customer's erasure removes the exports her data requests filed. A data
+// request files everything MemQL holds on the person in the store owner's
+// Library, and the index row's summary names her; the erasure scrubbed the
+// mirror and left that document where it was. It is removed by the Library's
+// own removal, whole, and checked; another customer's export stays.
+func TestACustomersErasureRemovesTheExportsHerDataRequestsFiled(t *testing.T) {
+	r := newRunnerFixture(t)
+	if r == nil {
+		return
+	}
+	r.hasStore()
+	r.withTheLibrary()
+	r.write("customer", adaCustomer("9801", "2026-10-01T10:00:00Z"), seen)
+	r.write("customer", adaCustomer("9802", "2026-10-01T10:00:00Z"), seen)
+	hers, theirs := r.exported("9801"), r.exported("9802")
+	if got := r.libraryRowsOf(hers); len(got) != 2 {
+		t.Fatalf("the fixture's export is %v, want the output and its index row", got)
+	}
+	other := r.libraryRowsOf(theirs)
+
+	r.queue(TopicRedact, eraCustomerGID("9801"), nil, r.at.Add(-time.Minute))
+	if ran := r.run(r.conn); ran != 1 {
+		t.Fatalf("the erasure's first pass: ran %d (%v)", ran, r.job(TopicRedact, eraCustomerGID("9801"))["lastError"])
+	}
+	if left := r.libraryRowsOf(hers); len(left) != 0 {
+		t.Errorf("after her erasure the export her data request filed is still in the Library: %v", left)
+	}
+	if got := r.libraryRowsOf(theirs); strings.Join(got, "\n") != strings.Join(other, "\n") {
+		t.Errorf("another customer's export was touched: %v, was %v", got, other)
+	}
+	if job := r.job(TopicRedact, eraCustomerGID("9801")); !strings.Contains(fmt.Sprint(job["outcome"]), "export") {
+		t.Errorf("the outcome does not say the export was removed: %v", job["outcome"])
+	}
+
+	// A data request that ends between the passes files another; the second
+	// pass removes it too.
+	r.mutate("recordComplianceJob", map[string]any{"jobId": ComplianceJobID(r.store, TopicDataRequest, eraCustomerGID("9801")+"\x00"+"42429801"), "status": "pending"})
+	if ran := r.run(r.conn); ran != 1 {
+		t.Fatalf("the data request made again: ran %d", ran)
+	}
+	if got := r.libraryRowsOf(hers); len(got) == 0 {
+		t.Fatal("the fixture did not file the export again")
+	}
+	r.at = r.at.Add(ErasureSecondPassAfter + time.Second)
+	if ran := r.run(r.conn); ran != 1 {
+		t.Fatalf("the erasure's second pass: ran %d", ran)
+	}
+	if left := r.libraryRowsOf(hers); len(left) != 0 {
+		t.Errorf("after the second pass an export filed between the passes is still in the Library: %v", left)
+	}
+	if job := r.job(TopicRedact, eraCustomerGID("9801")); job["status"] != "done" {
+		t.Errorf("the erasure ends %v: %v", job["status"], job["lastError"])
+	}
+}
+
+// An export that cannot be removed fails the pass, with a sentence that says
+// so and nothing of the cause; the next run makes the pass again.
+func TestAnExportThatCannotBeRemovedFailsThePass(t *testing.T) {
+	r := newRunnerFixture(t)
+	if r == nil {
+		return
+	}
+	r.hasStore()
+	r.withTheLibrary()
+	r.write("customer", adaCustomer("9901", "2026-10-01T10:00:00Z"), seen)
+	hers := r.exported("9901")
+	r.queue(TopicRedact, eraCustomerGID("9901"), nil, r.at.Add(-time.Minute))
+
+	refusing := &refusingEngine{IntegrationEngineAccess: r.narrowed(), prefix: "builtin libraryRemoveArtifact("}
+	if ran := r.run(r.connectorOn(refusing, nil)); ran != 0 || refusing.refused == 0 {
+		t.Fatalf("ran %d job(s) with %d removal(s) refused, want the pass failed on the export", ran, refusing.refused)
+	}
+	if job := r.job(TopicRedact, eraCustomerGID("9901")); job["status"] != "failed" || job["lastError"] != failExports {
+		t.Errorf("the job is %v: %q, want it failed for the export", job["status"], job["lastError"])
+	}
+	for _, action := range r.audits() {
+		if strings.HasPrefix(action, "shopify_customer_redacted") {
+			t.Errorf("a pass that left an export was audited as %s", action)
+		}
+	}
+	if ran := r.run(r.conn); ran != 1 {
+		t.Fatalf("the next run ran %d", ran)
+	}
+	if left := r.libraryRowsOf(hers); len(left) != 0 {
+		t.Errorf("after the pass was made again the export is still in the Library: %v", left)
 	}
 }
 

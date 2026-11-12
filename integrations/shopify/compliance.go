@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"slices"
 	"strings"
@@ -69,7 +70,11 @@ type ComplianceJob struct {
 	Status     string    `json:"status,omitempty"`
 	ScrubbedAt time.Time `json:"scrubbedAt,omitempty"`
 	// RequestedAt is when a request for the job was last recorded on its row.
-	RequestedAt time.Time      `json:"requestedAt,omitempty"`
+	RequestedAt time.Time `json:"requestedAt,omitempty"`
+	// DeliveryIDs are the row ids of the staged deliveries that asked for
+	// the job; ExportID is what a data request filed in the owner's Library.
+	DeliveryIDs []string       `json:"deliveryIds,omitempty"`
+	ExportID    string         `json:"exportId,omitempty"`
 	Raw         map[string]any `json:"-"`
 }
 
@@ -102,6 +107,8 @@ type jobStep struct {
 	// ScrubbedAt and DueAt are set by the first pass of an erasure: when it
 	// ran, and when the second is due.
 	ScrubbedAt, DueAt time.Time
+	// ExportID is what a data request filed in the owner's Library.
+	ExportID string
 }
 
 // jobFailure is a run that failed: one sentence for the job's row, and the
@@ -139,6 +146,8 @@ const (
 	failReach       = "the store did not say whether the app is still installed, so nothing was deleted"
 	failScrub       = "the customer's rows could not be scrubbed"
 	failDeliveries  = "the customer's rows were scrubbed, but the store's processed deliveries could not be blanked"
+	failAsked       = "the job's work was done, but the deliveries that asked for it could not be blanked"
+	failExports     = "the customer's rows were scrubbed, but an export a data request filed for her could not be removed"
 	failRepair      = "the customer's rows were scrubbed, but rows an earlier erasure left unwritable could not be repaired"
 	failRequeue     = "rows an earlier erasure wrongly scrubbed could not be queued to be read again"
 	failPurge       = "the store's mirror could not be deleted"
@@ -233,6 +242,12 @@ func (c *Connector) enqueueComplianceJob(ctx context.Context, store Store, topic
 		return err
 	}
 	job.ID = ComplianceJobID(store.ID, job.Topic, job.CustomerGID+"\x00"+job.RequestID)
+	// The delivery that asks is remembered on the job (ruling 95): its body
+	// holds the customer's email and phone, and is blanked when the job has
+	// done its work.
+	if req.RequestId != "" {
+		job.DeliveryIDs = []string{req.RequestId}
+	}
 	for try := 0; ; try++ {
 		err := c.recordRequest(ctx, job)
 		if err == nil {
@@ -271,11 +286,24 @@ func (c *Connector) recordRequest(ctx context.Context, job ComplianceJob) error 
 			"orderGids":   append([]string{}, job.OrderGIDs...),
 			"dueAt":       job.DueAt.UTC().Format(time.RFC3339),
 			"requestedAt": now,
+			"deliveryIds": append([]string{}, job.DeliveryIDs...),
 		}))
 		return err
 	}
+	deliveries := unionOf(existing.DeliveryIDs, job.DeliveryIDs)
 	if job.Topic == TopicDataRequest {
-		return nil
+		// The same request again. Its row is left as it is, but for a
+		// delivery it does not remember yet.
+		if len(deliveries) == len(existing.DeliveryIDs) {
+			return nil
+		}
+		_, err := c.engine.Execute(fenced, renderCall("extendComplianceJob", map[string]any{
+			"jobId":       job.ID,
+			"orderGids":   append([]string{}, existing.OrderGIDs...),
+			"requestedAt": now,
+			"deliveryIds": deliveries,
+		}))
+		return err
 	}
 	orders := unionOf(existing.OrderGIDs, job.OrderGIDs)
 	if existing.Status == jobDone {
@@ -284,6 +312,7 @@ func (c *Connector) recordRequest(ctx context.Context, job ComplianceJob) error 
 			"dueAt":       job.DueAt.UTC().Format(time.RFC3339),
 			"orderGids":   orders,
 			"requestedAt": now,
+			"deliveryIds": deliveries,
 		}))
 		return err
 	}
@@ -291,6 +320,7 @@ func (c *Connector) recordRequest(ctx context.Context, job ComplianceJob) error 
 		"jobId":       job.ID,
 		"orderGids":   orders,
 		"requestedAt": now,
+		"deliveryIds": deliveries,
 	}))
 	return err
 }
@@ -563,6 +593,9 @@ func (c *Connector) recordJobStep(ctx context.Context, job ComplianceJob, versio
 	if step.Status == jobDone {
 		args["completedAt"] = c.now().UTC().Format(time.RFC3339)
 	}
+	if step.ExportID != "" {
+		args["exportId"] = step.ExportID
+	}
 	ends := step.Status == jobDone && (job.Topic == TopicRedact || job.Topic == TopicShopRedact)
 	again := ends && !job.RequestedAt.IsZero() && !job.RequestedAt.Before(started)
 	for try := 0; ; try++ {
@@ -674,8 +707,12 @@ func (r *privacyRun) dataRequest(ctx context.Context, store Store, found bool, j
 	now := c.now()
 	if !found {
 		const nothing = "the store is no longer configured; nothing to export"
+		asked, err := r.blankAsked(ctx, job)
+		if err != nil {
+			return jobStep{}, err
+		}
 		_ = c.auditCompliance(ctx, job.StoreID, "shopify_data_request_not_exported", job, now, nothing)
-		return jobStep{Status: jobDone, Outcome: nothing}, nil
+		return jobStep{Status: jobDone, Outcome: nothing + asked}, nil
 	}
 	if job.CustomerGID == "" {
 		return jobStep{}, failedJob(failNoCustomer, nil)
@@ -701,8 +738,14 @@ func (r *privacyRun) dataRequest(ctx context.Context, store Store, found bool, j
 		return jobStep{}, failedJob(failExportWrite, err)
 	}
 	what := fmt.Sprintf("exported %d bytes", len(artifact))
+	// The request has what it asked for; the delivery that asked holds the
+	// customer's email and phone, and has no further use.
+	asked, err := r.blankAsked(ctx, job)
+	if err != nil {
+		return jobStep{}, err
+	}
 	_ = c.auditCompliance(ctx, job.StoreID, "shopify_data_request_exported", job, now, what)
-	return jobStep{Status: jobDone, Outcome: what}, nil
+	return jobStep{Status: jobDone, Outcome: what + asked, ExportID: exportIDOf(store.ID, job)}, nil
 }
 
 // customerErasure is one pass of a customer's erasure: the scrub of the
@@ -740,13 +783,35 @@ func (r *privacyRun) customerErasure(ctx context.Context, store Store, found boo
 	if blanked > 0 {
 		what += fmt.Sprintf("; blanked the body of %d version(s) of the store's processed deliveries", blanked)
 	}
-	if !second && !r.repaired[job.StoreID] {
+	asked, err := r.blankAsked(ctx, job)
+	if err != nil {
+		return jobStep{}, err
+	}
+	what += asked
+	exports, err := c.removeExports(ctx, job)
+	if err != nil {
+		return jobStep{}, err
+	}
+	what += exports
+	// ONCE A STORE, EVER. What the old erasure left cannot be left anew, and
+	// the look reads every row of the store in every kind; so the store's row
+	// records that it ran, and no later erasure looks again. A store whose
+	// row is gone has nowhere to record it, and is looked through once a run.
+	if !second && !r.repaired[job.StoreID] && !(found && mapString(store.Health, healthOldErasureRepaired) != "") {
 		repaired, err := r.repairOldErasure(ctx, s, store, found, job.StoreID, scope)
 		if err != nil {
 			return jobStep{}, err
 		}
 		r.repaired[job.StoreID] = true
 		what += repaired
+		if found {
+			// One key of the store's health, by the fenced write every such
+			// key is written by. Not recorded, the repair runs again at the
+			// next erasure, which costs a look and changes nothing.
+			if err := c.recordStoreHealthKey(ctx, store.ID, healthOldErasureRepaired, c.now().UTC().Format(time.RFC3339), nil); err != nil {
+				c.logger.Warn("shopify: could not record that a store was looked through for what an earlier erasure left; the next erasure looks again", "store", store.ID, "class", errorClass(err))
+			}
+		}
 	}
 	after, err := c.afterErasure(ctx, store, found, !second)
 	if err != nil {
@@ -780,6 +845,11 @@ func (r *privacyRun) shopErasure(ctx context.Context, store Store, found bool, j
 		}
 		if back {
 			c.logger.Info("shopify: skipping shop/redact purge, the store is reachable again", "store", store.ID, "secondPass", second)
+			// The job ends here, and the delivery that asked is blanked as
+			// any done job's is. Its outcome stays the fixed sentence.
+			if _, err := r.blankAsked(ctx, job); err != nil {
+				return jobStep{}, err
+			}
 			if second {
 				const kept = "second pass: the store is reachable again and was not purged a second time; its reconnect reads everything again"
 				_ = c.auditCompliance(ctx, job.StoreID, "shopify_shop_redact_second_pass_skipped", job, c.now(), kept)
@@ -808,6 +878,11 @@ func (r *privacyRun) shopErasure(ctx context.Context, store Store, found bool, j
 	if purged.Deliveries > 0 {
 		what += fmt.Sprintf(" and %d version(s) of the store's staged deliveries", purged.Deliveries)
 	}
+	asked, err := r.blankAsked(ctx, job)
+	if err != nil {
+		return jobStep{}, err
+	}
+	what += asked
 	after, err := c.afterErasure(ctx, store, found, !second)
 	if err != nil {
 		return jobStep{}, err
@@ -1005,10 +1080,7 @@ func (c *Connector) storeAnswers(ctx context.Context, store Store) (bool, error)
 // writeExportArtifact puts the data-request export in the Library, under
 // the store's owner, and records the Shopify request id with it.
 func (c *Connector) writeExportArtifact(ctx context.Context, store Store, job ComplianceJob, body []byte) error {
-	name := fmt.Sprintf("shopify-data-request-%s-%s.json", store.ID, job.RequestID)
-	if job.RequestID == "" {
-		name = fmt.Sprintf("shopify-data-request-%s-%s.json", store.ID, job.ReceivedAt.Format("20060102T150405Z"))
-	}
+	name := exportNameOf(store.ID, job)
 	if store.OwnerUserID == "" {
 		// Refused rather than filed somewhere. The export is a document
 		// about a real person and the Library is owner-tier; the
@@ -1023,7 +1095,7 @@ func (c *Connector) writeExportArtifact(ctx context.Context, store Store, job Co
 	// belong to the connector.
 	ownerCtx := auth.ContextWithUserActor(ctx, store.OwnerUserID)
 	call := renderCall("createGeneratedOutput", map[string]any{
-		"outputId": "shpdr" + MirrorRowID(store.ID, name),
+		"outputId": exportIDOf(store.ID, job),
 		"title":    name,
 		"summary":  fmt.Sprintf("Shopify customers/data_request export for %s (request %s).", job.CustomerGID, job.RequestID),
 		"body":     string(body),
@@ -1035,6 +1107,21 @@ func (c *Connector) writeExportArtifact(ctx context.Context, store Store, job Co
 		return fmt.Errorf("shopify: write export artifact: %w", err)
 	}
 	return nil
+}
+
+// exportNameOf is the title a data request's export is filed under, and
+// exportIDOf the id of the Library row that holds it: both made of the store
+// and the request, so the same request files the same row, and an erasure of
+// the customer can name what her data requests filed.
+func exportNameOf(storeID string, job ComplianceJob) string {
+	if job.RequestID == "" {
+		return fmt.Sprintf("shopify-data-request-%s-%s.json", storeID, job.ReceivedAt.Format("20060102T150405Z"))
+	}
+	return fmt.Sprintf("shopify-data-request-%s-%s.json", storeID, job.RequestID)
+}
+
+func exportIDOf(storeID string, job ComplianceJob) string {
+	return "shpdr" + MirrorRowID(storeID, exportNameOf(storeID, job))
 }
 
 func parseComplianceJob(topic string, store Store, req memqlsync.InboundRequest, now time.Time) (ComplianceJob, error) {
@@ -1338,6 +1425,140 @@ func blankProcessedDeliveries(ctx context.Context, s *privacySession, storeID st
 	}
 }
 
+// removeExports removes from the Library every export a data request of the
+// erased customer filed for this store, and answers what it did as part of
+// the job's outcome (ruling 93).
+//
+// A data request files everything MemQL holds on the person in the store
+// owner's Library, and the index row's summary names her. Scrubbing the
+// mirror leaves that document where it is, so her erasure removes it: on both
+// passes, because a data request can end between them.
+//
+// WHICH EXPORTS. Each data-request job of this store and customer says what
+// it filed (exportId); one that ran before the field existed filed under the
+// id made of the store and the request (exportIDOf), which is asked for as
+// well. A job that filed nothing has nothing there, and the removal says so.
+//
+// BY THE LIBRARY'S OWN REMOVAL, libraryRemoveArtifact: the Library's rows are
+// the Library's to find, and the connector deletes none of them. It removes
+// every version of the export, its index row, its history and the comments on
+// it, and answers what a second look still found. Anything but "nothing
+// remains" fails the pass, which is then made again.
+func (c *Connector) removeExports(ctx context.Context, job ComplianceJob) (string, error) {
+	var filed []string
+	requests := renderCall("complianceJobsOfCustomer", map[string]any{"storeId": job.StoreID, "topic": TopicDataRequest, "customerGid": job.CustomerGID})
+	err := memql.WalkQueryPages(memql.ContextWithFreshRead(operatorContext(ctx)), c.engine.Execute, requests, complianceJobPages, func(res *memql.ExecuteResult) error {
+		for _, row := range memql.MaterializeRows(res) {
+			request := complianceJobOf(row)
+			for _, id := range []string{request.ExportID, exportIDOf(job.StoreID, request)} {
+				if id != "" && !slices.Contains(filed, id) {
+					filed = append(filed, id)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return "", failedJob(failExports, fmt.Errorf("read the customer's data requests: %w", err))
+	}
+	var removed, exports int64
+	for _, id := range filed {
+		res, err := c.engine.Execute(operatorContext(ctx), "builtin "+renderCall("libraryRemoveArtifact", map[string]any{"sourceConceptRef": "v1:library:generatedOutput:" + id}))
+		if err != nil {
+			return "", failedJob(failExports, err)
+		}
+		rows := memql.MaterializeRows(res)
+		if len(rows) != 1 {
+			return "", failedJob(failExports, fmt.Errorf("the Library's removal answered %d row(s)", len(rows)))
+		}
+		gone, remaining := wholeNumber(rows[0]["removed"]), wholeNumber(rows[0]["remaining"])
+		if gone < 0 || remaining != 0 {
+			return "", failedJob(failExports, fmt.Errorf("the Library's removal answered removed %v, remaining %v", rows[0]["removed"], rows[0]["remaining"]))
+		}
+		if gone > 0 {
+			exports++
+			removed += gone
+		}
+	}
+	if exports == 0 {
+		return "", nil
+	}
+	return fmt.Sprintf("; removed %d export(s) her data requests had filed in the owner's Library (%d row version(s))", exports, removed), nil
+}
+
+// wholeNumber is a count as a builtin answers one, or -1 for anything that
+// is not a whole number: a missing answer must not read as zero.
+//
+// narrowing: GUARDED -- a count is a whole number from 0 to 2^53, the range a
+// float carries exactly; anything outside it, a fraction or a negative number
+// reads as "no answer" (-1). core/num's helpers would saturate or answer 0,
+// and 0 is the one answer that must not be invented here: it says nothing of
+// the export remains.
+func wholeNumber(v any) int64 {
+	const most = 1 << 53
+	switch n := v.(type) {
+	case int:
+		if n >= 0 {
+			return int64(n)
+		}
+	case int64:
+		if n >= 0 && n <= most {
+			return n
+		}
+	case float64:
+		if n >= 0 && n <= most && n == math.Trunc(n) {
+			return int64(n)
+		}
+	case json.Number:
+		if i, err := n.Int64(); err == nil && i >= 0 && i <= most {
+			return i
+		}
+	}
+	return -1
+}
+
+// blankAsked blanks the bodies of the deliveries that asked for a job, by
+// their row ids, in every version and whatever their status, and answers
+// what it did as part of the job's outcome (ruling 95).
+//
+// A privacy delivery's body holds the customer's id, her email address and
+// her phone number. The job holds what the delivery asked, so once the job's
+// work is done the body has no use. And blanking "the store's own source"
+// never reaches these for a managed store: its privacy deliveries arrive on
+// the app-level source. So a job remembers the deliveries that asked for it,
+// and they are blanked at each pass of an erasure and when any job ends done.
+//
+// staged-data: MUST-NOT-GATE -- a delivery's row skipped here keeps the
+// customer's email and phone after the request that named her is done.
+func (r *privacyRun) blankAsked(ctx context.Context, job ComplianceJob) (string, error) {
+	if len(job.DeliveryIDs) == 0 {
+		return "", nil
+	}
+	s, err := r.open(ctx)
+	if err != nil {
+		return "", err
+	}
+	ids := make([]string, 0, len(job.DeliveryIDs))
+	for _, id := range job.DeliveryIDs {
+		if !strings.HasPrefix(id, conceptInboundRequest+":") {
+			id = conceptInboundRequest + ":" + id
+		}
+		ids = append(ids, id)
+	}
+	n, err := s.exec(ctx,
+		`UPDATE "MemoryNodes" m SET payload = jsonb_set(m.payload, '{body}', '""'::jsonb, true)
+		  WHERE m.concept = $1 AND m.id IN (SELECT jsonb_array_elements_text($2::jsonb))
+		    AND COALESCE(m.payload->>'body', '') <> ''`,
+		conceptInboundRequest, jsonArray(ids))
+	if err != nil {
+		return "", failedJob(failAsked, err)
+	}
+	if n == 0 {
+		return "", nil
+	}
+	return fmt.Sprintf("; blanked the body of %d version(s) of the deliveries that asked for it", n), nil
+}
+
 // repairOldErasure looks through a store's rows for what the erasure before
 // this one left, repairs it, and answers what it did as part of the job's
 // outcome (ruling 84, refined).
@@ -1458,6 +1679,12 @@ func (r *privacyRun) repairOldErasure(ctx context.Context, s *privacySession, st
 	return fmt.Sprintf("; repaired %d row(s) an earlier erasure left unwritable", total) + note, nil
 }
 
+// healthOldErasureRepaired is the key of a store's health that says the
+// store's rows were looked through for what the erasure before this one left,
+// and when (repairOldErasure). A store that has it is not looked through
+// again.
+const healthOldErasureRepaired = "oldErasureRepairedAt"
+
 // oldMarkerFields is the fields of a concept in which the string marker is
 // not a value the field can hold as free text: the lists, which are emptied,
 // and every other one, whose key is removed.
@@ -1556,6 +1783,8 @@ func complianceJobOf(row map[string]any) ComplianceJob {
 		Status:      mapString(row, "status"),
 		ScrubbedAt:  rowTime(row, "scrubbedAt"),
 		RequestedAt: rowTime(row, "requestedAt"),
+		DeliveryIDs: mapStringSlice(row, "deliveryIds"),
+		ExportID:    mapString(row, "exportId"),
 	}
 	if job.ID == "" {
 		// The default projection is payload-only, so the row id is not in

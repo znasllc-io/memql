@@ -366,6 +366,25 @@ query complianceJob complianceJobById {
   shape   complianceJobStored
 }
 
+/// The privacy jobs of one topic for one customer of one store, newest first.
+/// A customer's erasure reads her data requests through it, to remove the
+/// exports they filed: each such job says what it filed (exportId).
+@actor
+query complianceJob complianceJobsOfCustomer {
+  args {
+    storeId      string!
+    topic        string!
+    customerGid  string!
+  }
+  filter    row => row.storeId == args.storeId
+                && row.topic == args.topic
+                && row.customerGid == args.customerGid
+                && actor.isClusterOwner == true
+  sort      "row.createdAt", "desc"
+  paginate  100
+  shape     complianceJobFull
+}
+
 /// A store's privacy jobs that are failed and were due before a given time,
 /// oldest due first. The store's verdict reads its first page to say that a
 /// privacy request for the store could not be completed, how many, and since

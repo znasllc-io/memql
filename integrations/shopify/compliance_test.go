@@ -469,3 +469,27 @@ func (e sqlStateError) Field(k byte) string {
 	}
 	return e.text
 }
+
+// A count the Library's removal answers is read as a whole number or not at
+// all: an answer that is missing, or is not a number, must never read as
+// "nothing remains".
+func TestACountThatIsNotThereIsNotZero(t *testing.T) {
+	for name, tc := range map[string]struct {
+		answer any
+		want   int64
+	}{
+		"an integer":        {int64(9), 9},
+		"a whole float":     {float64(0), 0},
+		"a JSON number":     {json.Number("12"), 12},
+		"nothing":           {nil, -1},
+		"a word":            {"0", -1},
+		"a fraction":        {0.5, -1},
+		"a negative number": {float64(-1), -1},
+		"a number past what a float carries exactly": {1e30, -1},
+		"a number that is not one":                   {json.Number("x"), -1},
+	} {
+		if got := wholeNumber(tc.answer); got != tc.want {
+			t.Errorf("%s: read as %d, want %d", name, got, tc.want)
+		}
+	}
+}

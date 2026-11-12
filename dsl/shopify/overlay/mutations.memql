@@ -216,7 +216,7 @@ mutation store markStoreConnected {
 /// or extendComplianceJob. Called blind on an existing row, this neither
 /// moves a hold nor drops an order.
 @serverOnly
-@createOnly("status", "outcome", "lastError", "dueAt", "orderGids", "requestedAt")
+@createOnly("status", "outcome", "lastError", "dueAt", "orderGids", "requestedAt", "deliveryIds")
 mutation complianceJob queueComplianceJob {
   args {
     jobId        string!
@@ -228,6 +228,7 @@ mutation complianceJob queueComplianceJob {
     orderGids    []string
     dueAt        datetime!
     requestedAt  datetime
+    deliveryIds  []string
   }
   insert {
     accept { requestedAt }
@@ -239,6 +240,7 @@ mutation complianceJob queueComplianceJob {
       requestId:   args.requestId ?? ""
       shopDomain:  args.shopDomain ?? ""
       orderGids:   args.orderGids ?? []
+      deliveryIds: args.deliveryIds ?? []
       dueAt:       args.dueAt
       status:      "pending"
       outcome:     ""
@@ -268,10 +270,11 @@ mutation complianceJob reopenComplianceJob {
     dueAt        datetime
     orderGids    []string
     requestedAt  datetime
+    deliveryIds  []string
     outcome      string
   }
   update {
-    accept { dueAt, orderGids, requestedAt, outcome }
+    accept { dueAt, orderGids, requestedAt, deliveryIds, outcome }
     stamp {
       id:          args.jobId
       status:      "pending"
@@ -297,9 +300,10 @@ mutation complianceJob extendComplianceJob {
     jobId        string!
     orderGids    []string!
     requestedAt  datetime!
+    deliveryIds  []string
   }
   update {
-    accept { orderGids, requestedAt }
+    accept { orderGids, requestedAt, deliveryIds }
     stamp {
       id:  args.jobId
     }
@@ -329,9 +333,10 @@ mutation complianceJob recordComplianceJob {
     scrubbedAt   datetime
     dueAt        datetime
     completedAt  datetime
+    exportId     string
   }
   update {
-    accept { status, outcome, lastError, scrubbedAt, dueAt, completedAt }
+    accept { status, outcome, lastError, scrubbedAt, dueAt, completedAt, exportId }
     stamp {
       id:  args.jobId
     }
