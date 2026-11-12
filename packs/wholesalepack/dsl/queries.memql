@@ -123,6 +123,7 @@ query store storePlanById {
 @description("Internal statistics read of the buyers granted wholesale on a list of stores. actor.userId scoping would answer only one merchant's grants, and the walk figures every organization's stores; the clusterOwner predicate and internal origin are both mandatory, and the statistics walk's maintenance principal is the one caller.")
 @serverOnly
 @actor
+@cache(0)
 query entitlement wholesaleStatisticsGranted {
   args {
     storeIds  []string!
@@ -136,6 +137,7 @@ query entitlement wholesaleStatisticsGranted {
 @description("Internal statistics read of which of a list of stores have wholesale settings. actor.userId scoping would answer only one merchant's stores, and the walk figures every organization's; the clusterOwner predicate and internal origin are both mandatory, and the statistics walk's maintenance principal is the one caller.")
 @serverOnly
 @actor
+@cache(0)
 query wholesaleSettings wholesaleStatisticsSettings {
   args {
     storeIds  []string!
