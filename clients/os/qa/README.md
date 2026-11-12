@@ -313,6 +313,16 @@ empty). Hover the chart, then Tab into it and
 use the arrow keys: one readout above the plot follows both. Check `mode=light`
 and `mode=dark`, and `width=narrow`, where five figures stand two to a row.
 
+A storefront's Store statistics (`qa/storeStatisticsScenes.tsx`, in the main
+harness): `view=storefront-with-store-statistics` (the button after
+Statistics), `storefront-without-sales` (no button without the sales part),
+`storefront-draft-store-statistics` (a draft: the button after Logs), then the
+page's head and context: `store-statistics` (two stores, the Destination
+control, the tax and older-orders lines), `store-statistics-both` (one store
+on both destinations), `store-statistics-testing` (only Testing has a store),
+`store-statistics-no-zone` ("Days in UTC"), `store-statistics-starting` (no
+row yet), `store-statistics-pending` and `store-statistics-refused`.
+
 ## GitHub repository creation
 
 Use `connected` for a populated repository picker and `connected-empty` for a

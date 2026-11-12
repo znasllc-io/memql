@@ -17,6 +17,7 @@ import { profileScenes } from "./profileScenes";
 import { fleetDeviceScenes } from "./fleetDeviceScenes";
 import { mapScenes } from "./mapScenes";
 import { deployableStatisticsScenes } from "./deployableStatisticsScenes";
+import { storeStatisticsScenes } from "./storeStatisticsScenes";
 import { storeVerdictScenes } from "./storeVerdictScenes";
 import { originsByStoreScenes } from "./originsByStoreScenes";
 import { emailOverviewScenes } from "./emailOverviewScenes";
@@ -1062,6 +1063,8 @@ const VIEWS: Record<
   ...mapScenes(WindowBody),
   // A deployable's Statistics and the Overview's Websites (deployableStatisticsScenes.tsx).
   ...deployableStatisticsScenes(WindowBody),
+  // A storefront's Store statistics: the button and the page's head and context (storeStatisticsScenes.tsx).
+  ...storeStatisticsScenes(WindowBody),
   // The Store page saying whether a store is being recorded (storeVerdictScenes.tsx).
   ...storeVerdictScenes(WindowBody),
   // Cluster > Data, by store (originsByStoreScenes.tsx).
