@@ -92,7 +92,7 @@ export { formatBytes, formatCount, formatDuration, formatFreshness, formatMoment
 // a number it does not have (epic memql#5153, D3). Promoted from
 // src/cluster/; the pure half is importable on its own as "kit/measure" so a
 // .ts module need not pull JSX through this barrel.
-export { Measure } from "./MeasureView";
+export { Absent, Measure } from "./MeasureView";
 export {
   absent,
   absentSentence,
