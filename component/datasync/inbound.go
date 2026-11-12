@@ -70,6 +70,9 @@ type Applier struct {
 	store  *Store
 	writer MirrorWriter
 	now    func() time.Time
+	// retryWait is the pause before a write that lost its row-version fence
+	// is judged again (applyOne); a test replaces it so it does not sleep.
+	retryWait func(attempt int)
 }
 
 // MirrorWriter performs one write into a mirror. Narrow on purpose: the
@@ -100,8 +103,13 @@ type StoredMirrorRow struct {
 
 // NewApplier builds the shared write path.
 func NewApplier(store *Store, writer MirrorWriter) *Applier {
-	return &Applier{store: store, writer: writer, now: time.Now}
+	return &Applier{store: store, writer: writer, now: time.Now,
+		retryWait: func(attempt int) { time.Sleep(retryWaitFor(attempt)) }}
 }
+
+// maxMirrorWriteTries bounds how often one mirror write is tried: once, and
+// again after each time the row moved under it (applyOne).
+const maxMirrorWriteTries = 5
 
 // ApplyResult is what one batch of mirror writes did.
 type ApplyResult struct {
@@ -155,11 +163,20 @@ func (a *Applier) Apply(
 // replaced by the older one this write was admitted against. So the write
 // carries the judged row's version (memql.ContextWithRowVersionFence; a row
 // that did not exist must still not exist), and the engine refuses it when the
-// row has moved. The row is then read and judged again, ONCE: skipped as
-// stale, or written against the row as it is now. A second loss is returned,
-// and the delivery or the page is tried again like any other failure.
+// row has moved. The row is then read and judged again: skipped as stale, or
+// written against the row as it is now.
+//
+// TRIED UP TO maxMirrorWriteTries TIMES IN ALL, each repeat after a short
+// jittered wait, as Store.PatchSyncState decides a health write again. A loss
+// is another writer's commit to the same row, and those come in bursts: the
+// origin sends several notices for one change, and their writes land within a
+// fraction of a second of each other. Given up at the first repeat, a write
+// that met such a burst would fail its batch -- and the batch of a backfill
+// page fails the backfill, which nothing starts again (Runner.backfillOne). A
+// write that loses every time is returned as the failure it then is: a
+// delivery is tried again, a backfill ends failed.
 func (a *Applier) applyOne(ctx context.Context, connector string, spec memqlsync.DomainSpec, w memqlsync.MirrorWrite) (bool, error) {
-	for try := 0; ; try++ {
+	for try := 1; ; try++ {
 		stored, err := a.writer.StoredRow(ctx, spec, w.RowId)
 		if err != nil {
 			return false, err
@@ -171,7 +188,10 @@ func (a *Applier) applyOne(ctx context.Context, connector string, spec memqlsync
 		if err == nil {
 			return true, nil
 		}
-		if try == 0 && errors.Is(err, memql.ErrRowVersionChanged) {
+		if try < maxMirrorWriteTries && errors.Is(err, memql.ErrRowVersionChanged) {
+			if a.retryWait != nil {
+				a.retryWait(try)
+			}
 			continue
 		}
 		return false, fmt.Errorf("datasync: applying %s %q from %q: %w", w.Concept, w.RowId, connector, err)

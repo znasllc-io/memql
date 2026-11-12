@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -18,19 +17,24 @@ import (
 // say that the version the guard read is the one its fence compares, and that
 // a write the row moved under is refused. db-gated.
 
-// overtakingEngine is the real engine with another writer in it: just before
-// the first mirror write of one row reaches the engine, `meanwhile` runs --
+// overtakingEngine is the real engine with other writers in it: just before
+// each of the first `burst` mirror writes of one row reaches the engine (one,
+// when burst is not set), `meanwhile` runs with that write's number --
 // another node's commit landing between the guard's read and the write.
 type overtakingEngine struct {
 	engineSeam
 	rowID     string
-	meanwhile func()
-	once      sync.Once
+	meanwhile func(n int)
+	burst     int
+	inserts   int
 }
 
 func (e *overtakingEngine) Execute(ctx context.Context, q string) (any, error) {
 	if strings.HasPrefix(q, "insert(") && strings.Contains(q, e.rowID) {
-		e.once.Do(e.meanwhile)
+		e.inserts++
+		if e.inserts <= max(e.burst, 1) {
+			e.meanwhile(e.inserts)
+		}
 	}
 	return e.engineSeam.Execute(ctx, q)
 }
@@ -96,7 +100,7 @@ func TestAWriteOvertakenBetweenTheGuardAndTheWriteDoesNotPutTheMirrorBack(t *tes
 				}
 			}
 			racing := &overtakingEngine{engineSeam: engineSeam{eng}, rowID: rowID}
-			racing.meanwhile = func() {
+			racing.meanwhile = func(int) {
 				if res, err := plain.Apply(ctx, "shopify", specs, []memqlsync.MirrorWrite{versionGuardWrite(rowID, tc.meanwhile, "meanwhile")}); err != nil || res.Applied != 1 {
 					t.Errorf("the other writer's commit: %+v, %v", res, err)
 				}
@@ -117,6 +121,56 @@ func TestAWriteOvertakenBetweenTheGuardAndTheWriteDoesNotPutTheMirrorBack(t *tes
 				t.Fatalf("the mirror holds version %q (%v), want %q", got, err, tc.wantVersion)
 			}
 		})
+	}
+}
+
+// A BURST OF OTHER WRITERS IS OUTLASTED. The origin sends several notices for
+// one change, and their writes land within a fraction of a second of each
+// other. A write that gave up at the first repeat would fail its batch, and
+// the batch of a backfill page fails the backfill, which nothing starts again
+// (Runner.backfillOne). Three other writers commit here, each just before this
+// write's next try; it is judged again each time and written on the fourth,
+// over the last of them.
+func TestAMirrorWriteOutlastsABurstOfOtherWriters(t *testing.T) {
+	eng, db := healthEngine(t)
+	if eng == nil {
+		return
+	}
+	ctx := auth.ContextWithConnectorActor(context.Background(), "shopify")
+	specs := versionGuardSpecs()
+	plain := NewApplier(NewStore(engineSeam{eng}), NewEngineMirrorWriter(engineSeam{eng}))
+	rowID := fmt.Sprintf("shpdbtestfenceburst%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept = $1 AND payload->>'gid' = $2`,
+			versionGuardConcept, "gid://shopify/Product/"+rowID)
+	})
+	if res, err := plain.Apply(ctx, "shopify", specs, []memqlsync.MirrorWrite{versionGuardWrite(rowID, "2026-08-23T10:00:00Z", "held")}); err != nil || res.Applied != 1 {
+		t.Fatalf("seed the held row: %+v, %v", res, err)
+	}
+	const burst = 3
+	racing := &overtakingEngine{engineSeam: engineSeam{eng}, rowID: rowID, burst: burst}
+	racing.meanwhile = func(n int) {
+		// Each of the others is newer than the one before it and older than
+		// the write under test, so every one of them moves the row and none
+		// makes this write stale.
+		at := fmt.Sprintf("2026-08-23T10:%02d:00Z", 10*n)
+		if res, err := plain.Apply(ctx, "shopify", specs, []memqlsync.MirrorWrite{versionGuardWrite(rowID, at, "meanwhile")}); err != nil || res.Applied != 1 {
+			t.Errorf("the other writer's commit %d: %+v, %v", n, res, err)
+		}
+	}
+	applier := NewApplier(NewStore(racing), NewEngineMirrorWriter(racing))
+	res, err := applier.Apply(ctx, "shopify", specs, []memqlsync.MirrorWrite{versionGuardWrite(rowID, "2026-08-23T12:00:00Z", "this write")})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if res.Applied != 1 || res.Stale != 0 {
+		t.Fatalf("applied %d, stale %d; want the write applied", res.Applied, res.Stale)
+	}
+	if racing.inserts != burst+1 {
+		t.Fatalf("the write reached the engine %d times, want %d: once for each writer that overtook it, and once more", racing.inserts, burst+1)
+	}
+	if got := storedTitle(t, db, rowID); got != "this write" {
+		t.Fatalf("the mirror holds %q, want this write", got)
 	}
 }
 
