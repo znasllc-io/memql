@@ -103,6 +103,15 @@ func (i *Integration) open(ctx context.Context, d Deps, p Pipeline, o Opening) (
 // create, not for a mint. When GitHub refuses the create (403) or no token
 // could be had, the run opens anyway with checkRunState saying so.
 //
+// A RUN ROW THAT COULD NOT BE CREATED FAILS ITS CHECK RUN. The check run
+// exists by then, queued, and no row names it, so no driver, recovery or
+// republish will ever move it: the commit would show it queued for good, and
+// a required check holds a merge on it. Once the gate is released the opening
+// completes it as failed (failUnsavedCheckRun), and still answers the
+// create's error, so a retry opens again, with a newer check run of the same
+// name. A create that landed anyway, its answer lost, leaves the check run to
+// the run that names it.
+//
 // A pull request's new head SUPERSEDES the pull request's earlier runs, and a
 // push to the default branch, where the installation opted into the push lane,
 // the waiting push runs it covers (supersede.go): they are read before the
@@ -263,6 +272,9 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 	}
 	var result OpenResult
 	var initialReceipt *CheckRunWrite
+	// unsaved is the run whose check run this opening created and whose row
+	// it then could not create.
+	var unsaved *Run
 	gateKey := OpenGateKey(key)
 	if o.Qualification != nil {
 		gateKey = OpenGateKey("qualification:" + p.ID)
@@ -423,12 +435,26 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 				run.Notes = withNote(run.Notes, *w.Note)
 			}
 			if err := d.Store.CreateRun(gctx, run); err != nil {
+				// Its check run is failed once the gate is released. The
+				// create may still have landed, its answer lost: then the row
+				// names the check run and its driver moves it. Only a fresh
+				// read that finds the row says so; one that fails says nothing.
+				// A fork's check run was created completed: nothing is queued.
+				if w.ID > 0 && !run.Finished() {
+					if saved, rerr := d.Store.RunByID(memql.ContextWithFreshRead(gctx), run.ID); rerr != nil || saved == nil {
+						failed := run
+						unsaved = &failed
+					}
+				}
 				return err
 			}
 		}
 		result = OpenResult{Run: run, Opened: true}
 		return nil
 	})
+	if err != nil && unsaved != nil {
+		failUnsavedCheckRun(ctx, d, p, *unsaved, token, err)
+	}
 	if err == nil && initialReceipt != nil {
 		// Never nest the opening and lifecycle gates. If cancellation or another
 		// replica progressed while POST was in flight, the queued report cannot

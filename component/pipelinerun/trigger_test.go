@@ -3,6 +3,9 @@ package pipelinerun
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -596,6 +599,117 @@ func TestNoTokenOpensTheRunWithTheCheckRunUnavailable(t *testing.T) {
 	}
 	if n := len(h.github.createdRuns()); n != 0 {
 		t.Errorf("no token, no check run: %d created", n)
+	}
+}
+
+// An ordinary opening creates its queued check run, then the run row that
+// names it. When that create fails -- a database that timed the write out --
+// there is no row for a driver, a recovery or a republish to read, and nothing
+// would ever move the check run again: the commit would show it queued for
+// good. So the opening completes it as failed, with no gate held, saying
+// nothing ran and what to do, and without the database's own error text: a
+// public repository's check runs are public. The opening still answers the
+// error, so the trigger's retry tries again.
+func TestARunRowThatCouldNotBeCreatedFailsItsCheckRun(t *testing.T) {
+	timeout := errors.New("ERROR: canceling statement due to statement timeout (SQLSTATE 57014)")
+	for name, readErr := range map[string]error{
+		"the create fails": nil,
+		// Whatever timed the create out times out the read that would say
+		// whether it landed, too: a read that answers nothing is no row.
+		"the create and the read after it fail": timeout,
+	} {
+		t.Run(name, func(t *testing.T) {
+			testAFailedRunRowCreateFailsItsCheckRun(t, timeout, readErr)
+		})
+	}
+}
+
+func testAFailedRunRowCreateFailsItsCheckRun(t *testing.T, createErr, readErr error) {
+	h := newHarness(t)
+	logs := &lockedBuffer{}
+	h.integ.Configure(func(d *Deps) { d.Logger = slog.New(slog.NewTextHandler(logs, nil)) })
+	h.store.addPipeline(testPipeline(DeliveryWebhook))
+	h.store.failCreateRun, h.store.failRunByID = createErr, readErr
+
+	id := h.stage(t, "push", "d1", pushDelivery(t, "refs/heads/main", shaA, shaB, testInstallation))
+	if _, err := h.integ.Trigger(automationCtx(), id); err == nil {
+		t.Fatal("a run that could not be created is the trigger's error, so its retry tries again")
+	}
+	if n := len(h.store.allRuns()); n != 0 {
+		t.Fatalf("runs = %d; the create failed", n)
+	}
+	created := h.github.createdRuns()
+	if len(created) != 1 || created[0].Run.Status != StatusQueued {
+		t.Fatalf("the opening creates one queued check run before its row: %+v", created)
+	}
+	updated := h.github.updatedRuns()
+	if len(updated) != 1 {
+		t.Fatalf("check run writes after the create = %d; the queued check run must not be left queued", len(updated))
+	}
+	got := updated[0]
+	if got.ID != created[0].ID || got.Token != created[0].Token {
+		t.Errorf("moved check run %d with token %q; want the opening's own, %d with %q", got.ID, got.Token, created[0].ID, created[0].Token)
+	}
+	if got.Run.Status != StatusCompleted || got.Run.Conclusion != "failure" || got.Run.CompletedAt.IsZero() {
+		t.Errorf("status %q conclusion %q completed %v; want completed, failure, and when", got.Run.Status, got.Run.Conclusion, got.Run.CompletedAt)
+	}
+	out := got.Run.Output
+	if out == nil || !strings.HasPrefix(out.Title, "Failed: ") || !strings.Contains(out.Summary, "No step ran.") {
+		t.Fatalf("the check run must say the run failed before any step, and why: %+v", out)
+	}
+	if text := out.Title + out.Summary + out.Text; strings.Contains(text, "SQLSTATE") || strings.Contains(text, "statement timeout") {
+		t.Errorf("the database's error reached a public check run: %q", text)
+	}
+	// The check run sends a person to the cluster's log for the reason.
+	if line := logs.String(); !strings.Contains(line, "statement timeout") || !strings.Contains(line, fmt.Sprintf("checkRunId=%d", created[0].ID)) {
+		t.Errorf("the log must say why the run could not be saved, and which check run it failed:\n%s", line)
+	}
+}
+
+// A create can land and still answer an error: the write committed and its
+// acknowledgment was lost on the way back. Then a row names the check run, a
+// driver will claim that run and move its check run itself, and failing it
+// here would put a failure on a commit whose run is about to start. A fresh
+// read decides -- a cached absence from before the create proves nothing --
+// and only a check run no row names is failed.
+func TestACreateThatLandedDespiteItsErrorLeavesTheCheckRunToItsRun(t *testing.T) {
+	h := newHarness(t)
+	h.store.addPipeline(testPipeline(DeliveryWebhook))
+	h.store.failCreateRunAfterWrite = errors.New("connection reset by peer")
+
+	id := h.stage(t, "push", "d1", pushDelivery(t, "refs/heads/main", shaA, shaB, testInstallation))
+	if _, err := h.integ.Trigger(automationCtx(), id); err == nil {
+		t.Fatal("the create answered an error, and so does the opening")
+	}
+	runs, created := h.store.allRuns(), h.github.createdRuns()
+	if len(runs) != 1 || len(created) != 1 || runs[0].CheckRunID != created[0].ID {
+		t.Fatalf("the row landed naming the check run: runs %+v, check runs %+v", runs, created)
+	}
+	if updated := h.github.updatedRuns(); len(updated) != 0 {
+		t.Errorf("a saved run's check run is its driver's to move; it was written: %+v", updated[0].Run)
+	}
+	if reads := h.store.freshCalls("RunByID"); len(reads) == 0 || slices.Contains(reads, false) {
+		t.Errorf("whether the row landed is read fresh: %v", reads)
+	}
+}
+
+// A fork's check run is created completed, failing with its refusal (decision
+// 15), so a row that could not be created leaves nothing queued to complete:
+// the check run is written once, and its refusal is the last word.
+func TestAForksRefusalStandsWhenItsRunRowCouldNotBeCreated(t *testing.T) {
+	h := newHarness(t)
+	h.store.addPipeline(testPipeline(DeliveryWebhook))
+	h.store.failCreateRun = errors.New("database unavailable")
+
+	id := h.stage(t, "pull_request", "d1", prDelivery(t, "opened", 7, shaA, "mallory/shop", testInstallation))
+	if _, err := h.integ.Trigger(automationCtx(), id); err == nil {
+		t.Fatal("a run that could not be created is the trigger's error")
+	}
+	if created := h.github.createdRuns(); len(created) != 1 || created[0].Run.Status != StatusCompleted {
+		t.Fatalf("a fork's check run is created completed: %+v", created)
+	}
+	if updated := h.github.updatedRuns(); len(updated) != 0 {
+		t.Errorf("a check run created completed was written again: %+v", updated[0].Run.Output)
 	}
 }
 

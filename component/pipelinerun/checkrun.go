@@ -11,6 +11,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/packages"
 	"github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/core/logger"
 )
 
 // checkrun.go -- the ONE place a run becomes a GitHub check run, for both
@@ -25,7 +26,8 @@ import (
 // the run, and NEVER stops the run.
 //
 // A CHECK RUN IS WRITTEN OUTSIDE EVERY GATE -- by the driver, by a cancel, by
-// recovery: a call to GitHub never holds a gate's connection (ids.go,
+// recovery, by an opening whose run row could not be created (open.go): a
+// call to GitHub never holds a gate's connection (ids.go,
 // lease.go's driverGate). The row write that records its answer is the gated
 // part, as a fresh read and one write. The one exception is the CREATE an
 // opening makes under its run key's gate, with a token minted before it
@@ -287,6 +289,33 @@ func writeCheckRunAttempt(ctx context.Context, d Deps, p Pipeline, r Run, report
 		return CheckRunWrite{ID: id, State: CheckRunWritten}
 	}
 	return classifyCheckRunError(err)
+}
+
+// unsavedRunMessage is the reason the check run of a run that could not be
+// saved states. The database's own error is the log's, never the check run's:
+// a public repository's check runs are public.
+const unsavedRunMessage = "This run could not be saved, so nothing ran.\nPush again to start a new run; the cluster's log has the reason."
+
+// failUnsavedCheckRun completes, as failed, the check run an opening created
+// for a run whose row it then could not create (cause). No row names that
+// check run, so no driver, recovery or republish will ever move it: left
+// alone, the commit shows it queued for good. Called with no gate held, under
+// the token the opening created it with, and on a context the opening's own
+// cancellation does not reach: a create cut short by it is one of the causes.
+// The log carries the cause the check run leaves out.
+func failUnsavedCheckRun(ctx context.Context, d Deps, p Pipeline, r Run, token string, cause error) {
+	r.Status, r.Conclusion, r.FinishedAt = StatusCompleted, ConclusionFailure, d.now()
+	r.FailureMessage = unsavedRunMessage
+	callCtx, done := context.WithTimeout(context.WithoutCancel(ctx), githubCallTimeout)
+	w := writeCheckRun(callCtx, d, p, r, ReportFor(p, r, nil), token, nil)
+	done()
+	log := d.Logger.With("component", "pipelinerun", logger.Subject(RunConcept, r.ID), "pipeline", p.ID,
+		"repository", p.Repository, "checkRunId", r.CheckRunID, "error", cause)
+	if w.Err != nil {
+		log.Warn("pipelines: a run could not be saved, and its check run is still queued", "checkRunError", w.Err)
+		return
+	}
+	log.Warn("pipelines: a run could not be saved; its check run now fails, saying nothing ran")
 }
 
 // recordFinalCheckRun records what a concluded run's final check-run write,

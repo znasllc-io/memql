@@ -69,10 +69,15 @@ type memStore struct {
 	channelUpdates  []channelUpdate
 	staged          []NotificationRequest
 
-	// Injected failures.
-	failCreateRun error
-	failUpdateRun error
-	failStage     error
+	// Injected failures. failCreateRunAfterWrite fails each CreateRun AFTER
+	// its row is stored: a create that landed and answered an error anyway,
+	// its acknowledgment lost on the way back. failRunByID is every RunByID
+	// call's answer when set.
+	failCreateRun           error
+	failCreateRunAfterWrite error
+	failRunByID             error
+	failUpdateRun           error
+	failStage               error
 	// failStageAt fails the n-th StageNotification call (1-based) and no
 	// other; failOutboundRead every OutboundStatuses call; failPreviousRuns
 	// every PreviousRuns call.
@@ -496,9 +501,13 @@ func (s *memStore) RunsFinalCheckRunUnavailable(_ context.Context, since time.Ti
 	return out, nil
 }
 
-func (s *memStore) RunByID(_ context.Context, runID string) (*Run, error) {
+func (s *memStore) RunByID(ctx context.Context, runID string) (*Run, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.noteFresh(ctx, "RunByID")
+	if s.failRunByID != nil {
+		return nil, s.failRunByID
+	}
 	r, ok := s.runs[bareID(runID)]
 	if !ok {
 		return nil, nil
@@ -642,7 +651,7 @@ func (s *memStore) CreateRun(_ context.Context, r Run) error {
 		r.Status, r.Conclusion, r.CheckRunState, r.CancelRequested = prev.Status, prev.Conclusion, prev.CheckRunState, prev.CancelRequested
 	}
 	s.runs[id] = r
-	return nil
+	return s.failCreateRunAfterWrite
 }
 
 func (s *memStore) UpdateRun(_ context.Context, owner, runID string, patch RunPatch) error {
