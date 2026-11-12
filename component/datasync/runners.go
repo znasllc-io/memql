@@ -100,6 +100,10 @@ type BackfillResult struct {
 	// kind and took none of this one. The row is left queued (or running,
 	// when it already was) with no error, and the continuing pass asks again.
 	Waiting bool
+	// WaitingFor is why it waits, in the connector's own words: the reason
+	// its busy answer carried (memqlsync.BusyReason), "" when it gave none.
+	// When several partitions wait, each reason once, in the order met.
+	WaitingFor string
 	// Abandoned says the row stopped being this invocation's while it ran --
 	// queued again from the start, or taken by another invocation -- and the
 	// invocation stopped, writing nothing more and recording no error.
@@ -144,6 +148,7 @@ func (r *Runner) StartBackfill(ctx context.Context, connectorName, conceptID, pa
 		}
 		if res.Waiting {
 			out.Waiting = true
+			out.WaitingFor = joinReason(out.WaitingFor, res.WaitingFor)
 		}
 		if res.Abandoned {
 			out.Abandoned = true
@@ -153,6 +158,24 @@ func (r *Runner) StartBackfill(ctx context.Context, connectorName, conceptID, pa
 		}
 	}
 	return out, errors.Join(errs...)
+}
+
+// joinReason adds one partition's reason for waiting to those already
+// gathered, once.
+func joinReason(gathered, reason string) string {
+	reason = strings.TrimSpace(reason)
+	switch {
+	case reason == "":
+		return gathered
+	case gathered == "":
+		return reason
+	}
+	for _, have := range strings.Split(gathered, "; ") {
+		if have == reason {
+			return gathered
+		}
+	}
+	return gathered + "; " + reason
 }
 
 // errBackfillRunning refuses to start a running backfill again from the start:
@@ -415,7 +438,7 @@ func (r *Runner) backfillFrom(ctx context.Context, connector memqlsync.Connector
 			}
 			r.logger.Info("datasync backfill: the origin cannot take this now; it waits and is asked again",
 				"connector", connectorName, "concept", conceptID, "partition", partition, "reason", pageErr.Error())
-			out.Cursor, out.Waiting = cursor, true
+			out.Cursor, out.Waiting, out.WaitingFor = cursor, true, memqlsync.BusyReason(pageErr)
 			return out, nil
 		}
 		if pageErr != nil && (memqlsync.IsNotGranted(pageErr) || memqlsync.IsNotRequested(pageErr)) {

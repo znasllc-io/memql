@@ -64,14 +64,38 @@ func IsNotRequested(err error) bool { return errors.Is(err, ErrNotRequested) }
 // error and asks again on its next tick.
 var ErrBusy = errors.New("connector: busy")
 
-// Busy says the origin is busy with other work of the same kind, and why.
+// Busy says the origin cannot take the request now, and why: it is busy with
+// other work of the same kind, or -- the reason says which -- the tenant asked
+// about does not take the request at present. The reason is the connector's
+// own sentence and is kept apart from the words around it (BusyReason), so
+// whoever asked can be told it and not a guess.
 func Busy(connector, reason string) error {
-	if strings.TrimSpace(reason) == "" {
-		return fmt.Errorf("%w: %s is busy with another operation", ErrBusy, connector)
-	}
-	return fmt.Errorf("%w: %s: %s", ErrBusy, connector, reason)
+	return &busy{connector: connector, reason: strings.TrimSpace(reason)}
 }
+
+// busy is ErrBusy with the connector's reason.
+type busy struct{ connector, reason string }
+
+func (b *busy) Error() string {
+	if b.reason == "" {
+		return fmt.Sprintf("%s: %s is busy with another operation", ErrBusy.Error(), b.connector)
+	}
+	return fmt.Sprintf("%s: %s: %s", ErrBusy.Error(), b.connector, b.reason)
+}
+
+func (b *busy) Unwrap() error { return ErrBusy }
 
 // IsBusy reports whether a failure is the origin being busy, which a later
 // attempt can change.
 func IsBusy(err error) bool { return errors.Is(err, ErrBusy) }
+
+// BusyReason is the reason a busy answer carries, in the connector's own
+// words: "" when the connector gave none, and for an error that is not a busy
+// answer.
+func BusyReason(err error) string {
+	var b *busy
+	if errors.As(err, &b) {
+		return b.reason
+	}
+	return ""
+}

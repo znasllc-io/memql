@@ -1171,8 +1171,9 @@ func TestAnOperatorStartOnABusyStoreEndsQueuedNotFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a busy store failed the operator's start: %v", err)
 	}
-	if len(nodes) != 1 || !strings.Contains(string(nodes[0].Payload), "waiting behind another export") {
-		t.Errorf("the answer does not say the backfill is waiting: %v", nodes)
+	if len(nodes) != 1 || !strings.Contains(string(nodes[0].Payload), `"outcome":"waiting"`) ||
+		!strings.Contains(string(nodes[0].Payload), "a bulk query is already running for this shop") {
+		t.Errorf("the answer does not say the backfill is waiting, and why in the connector's words: %v", nodes)
 	}
 	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "queued" || st.LastError != "" {
 		t.Errorf("row = %s, lastError %q; want queued, so the continuing pass starts it", st.BackfillStatus, st.LastError)

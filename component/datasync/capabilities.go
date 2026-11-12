@@ -457,6 +457,14 @@ func (i *Integration) handleStartBackfill(ctx context.Context, args map[string]a
 		return resultNode("abandoned", "the backfill was not run to its end: its row was queued again, or another backfill of this domain holds it; nothing more was written")
 	}
 	if res.Waiting {
+		// WHY IT WAITS IS THE CONNECTOR'S TO SAY. A busy answer is not always
+		// another export of the origin: a store that does not ingest now is
+		// answered the same way, and the operator who pressed the button is
+		// told that reason, not a guess. The sentence below is for an answer
+		// that gave none.
+		if res.WaitingFor != "" {
+			return resultNode("waiting", res.WaitingFor)
+		}
 		return resultNode("waiting", fmt.Sprintf("the backfill is waiting behind another export of this origin; it is queued and the continuing pass starts it (pages=%d applied=%d)", res.Pages, res.Applied))
 	}
 	return resultNode("backfill", fmt.Sprintf("pages=%d applied=%d stale=%d done=%t", res.Pages, res.Applied, res.Stale, res.Done))
