@@ -555,6 +555,18 @@ func TestTheAnswerNamesTheZoneItsPeriodWasCutIn(t *testing.T) {
 	}
 }
 
+// TestOneRecordedZoneIsSpelledOneWay: timezone and periodZone are the one
+// recorded zone written the same way, so a page that compares them reads a
+// zone recorded with spaces around it as the zone that loaded.
+func TestOneRecordedZoneIsSpelledOneWay(t *testing.T) {
+	storeID := newStore(t)
+	storeFrame(t, storeID, recordingFrame(map[string]any{"timezone": " Europe/Madrid "}))
+	got := mustAsk(t, ownerCtx(), siteFor(t, storeID, nil), storeID, "7d")
+	if got["timezone"] != "Europe/Madrid" || got["periodZone"] != "Europe/Madrid" {
+		t.Errorf("recorded \" Europe/Madrid \": timezone %q, periodZone %q; want both \"Europe/Madrid\"", got["timezone"], got["periodZone"])
+	}
+}
+
 func TestAGrantWithoutAllOrdersSaysOlderChangesAreNotRecorded(t *testing.T) {
 	storeID := newStore(t)
 	approval := []any{map[string]any{"code": "approval_outdated", "sentence": "Approve the app's new permissions in Shopify."}}

@@ -287,7 +287,9 @@ func readFrame(ctx context.Context, tx bun.Tx, req statisticsRequest, now time.T
 	}
 
 	stats.StoreName, stats.StoreDomain, stats.Currency = nonEmpty(row.StoreName), nonEmpty(row.StoreDomain), nonEmpty(row.Currency)
-	stats.Timezone = nonEmpty(row.Timezone)
+	// The recorded zone, trimmed as periodZone is, so one zone is spelled one
+	// way in the answer.
+	stats.Timezone = nonEmpty(strings.TrimSpace(row.Timezone))
 	stats.PeriodZone = "UTC"
 	if loc := storeZone(row.Timezone); loc != nil {
 		stats.Loc = loc
