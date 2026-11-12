@@ -55,19 +55,74 @@ func (s wholesaleState) isWholesale(email string) bool {
 	return folded != "" && s.Granted[folded]
 }
 
-// A RUN HAS A DEADLINE OF ITS OWN. The brief gives no budget for a whole run,
-// so it is the schedule's period, a minute, less a margin: a run that is still
-// going when the next minute fires makes that one stand down, and a run stuck
-// for good -- a read that never answers, a seam deaf to its context -- would
-// make every later minute stand down with it. At runDeadline the run's context
-// is cancelled; a run that has not answered runUnwind later is left behind,
-// its flag released, and the next minute runs. Variables so a test can make a
-// run outlast them. Ten seconds is the margin: the unwind and its log line, and
-// a minute's clock skew between ticks.
+// A RUN HAS A BUDGET, AND A HARD DEADLINE ABOVE IT.
+//
+// runBudget paces a run: once it is spent, the run takes up no new store and
+// ends normally (rollup.go, "One long store does not starve the others"). It
+// is the schedule's period, a minute, less a margin of ten seconds for the
+// store under way to finish its own work and the run to log, so the next
+// minute's tick seldom finds the run still going; when it does, that tick
+// stands down at Info.
+//
+// runDeadline is a safety bound for a run that hangs -- a read that never
+// answers, a seam deaf to its context -- not the pacing. It cancels the run's
+// context, and a run that has not answered runUnwind later is left behind,
+// its hold released, so the next minute runs. It sits above the budget plus
+// the most one store's turn can take from the limits the walk and the
+// housekeeping keep (storeTurnBound), so a store under way is never cut off
+// by it. Variables so a test can make a run outlast them.
 var (
-	runDeadline = 50 * time.Second
+	runBudget   = 50 * time.Second
+	runDeadline = runBudget + storeTurnBound() + time.Minute
 	runUnwind   = 5 * time.Second
 )
+
+// The limits a store's turn is bounded by, beyond those walk.go and store.go
+// name.
+const (
+	// statementBound is the longest one statement can take: pgdriver's client
+	// read deadline, ten seconds, which ends a statement before or when the
+	// request pool's eight-second statement timeout does.
+	statementBound = 10 * time.Second
+	// walkSourcesPerStore are the sources a store's turn walks: orders, lines
+	// and refunds (walk.go). A task that adds a walk to a store's turn -- the
+	// wholesale pass, the check -- raises this or adds its own term below.
+	walkSourcesPerStore = 3
+	// foldStatementsPerPage is an allowance for the statements one page's
+	// write transaction makes -- the lock, the generation, the facts, their
+	// derivation, the watermark and the walked mark -- with room over. The
+	// fold sets the real count here when it lands.
+	foldStatementsPerPage = 8
+	// housekeepingStatements are a store's own statements outside its walk:
+	// its row (two), what is kept about it (eight), its generation (one), the
+	// end of a rebuild (three), and its floor's read and write (four), with
+	// room over.
+	housekeepingStatements = 24
+)
+
+// storeTurnBound is the most one store's turn can take, from its limits:
+//
+//	engine reads:  floorProbes (14) + the shop and the verdict (2)
+//	               + walkSourcesPerStore (3) x maxReadsPerRun (400)       = 1,216
+//	statements:    walkSourcesPerStore (3) x maxReadsPerRun (400)
+//	                 x foldStatementsPerPage (8)                          = 9,600
+//	               + purgeBudget (20) x (the lock, the purging read, one
+//	                 delete for each of the 4 fact tables, the clear: 7)  =   140
+//	               + housekeepingStatements                               =    24
+//	                                                              total  10,980
+//
+// each at most statementBound (10 s): 109,800 s, about 30.5 hours. The
+// verdict is one builtin call, counted as one read, though it reads more. It
+// is not what a turn takes: a read is milliseconds, and a page that outlasts
+// a read ends its source for the run (walk.go). It is the bound the run's
+// hard deadline must sit above so that it never cuts off a store the limits
+// still allow.
+func storeTurnBound() time.Duration {
+	reads := floorProbes + 2 + walkSourcesPerStore*maxReadsPerRun
+	statements := walkSourcesPerStore*maxReadsPerRun*foldStatementsPerPage +
+		purgeBudget*(3+len(factTables)) + housekeepingStatements
+	return time.Duration(reads+statements) * statementBound
+}
 
 // aRun is one run of the rollup on this node, held while it runs.
 type aRun struct{ started time.Time }
@@ -101,6 +156,10 @@ type Integration struct {
 	// the one lock and checks the store's generation (tx.go).
 	runningMu sync.Mutex
 	running   *aRun
+	// lastTaken is the store the last run on this node took up last: the
+	// next run begins with the store after it (rollup.go, "One long store
+	// does not starve the others"). In memory, under runningMu.
+	lastTaken string
 }
 
 // NewIntegration wires the handles. The db getter is resolved at call time,

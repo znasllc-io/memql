@@ -677,14 +677,28 @@ func TestTheWholesaleStateIsAskedOncePerRun(t *testing.T) {
 	}
 }
 
-// A WHOLESALE STATE THAT CANNOT BE READ ROLLS NO STORE. The brief is silent
-// on it, so no store's facts are folded under a judgement that would be
-// wrong: the run answers the error and walks no store.
-func TestAWholesaleStateThatCannotBeReadRollsNoStore(t *testing.T) {
+// A WHOLESALE STATE THAT CANNOT BE READ SKIPS ONLY THE WALK. Housekeeping is
+// not the wholesale pack's to hold up: a store being purged has its purge
+// carried on, a store that is not is not walked, and no fact is folded under
+// a judgement that would be wrong. The run answers the error once.
+func TestAWholesaleStateThatCannotBeReadSkipsOnlyTheWalk(t *testing.T) {
 	i := testIntegration(t)
+	answerVerdict(i, verdictReply("recording", time.Now()))
+	lower(t, &deleteBatch, 2)
+	lower(t, &purgeBudget, 1)
+	id := keptStore(t)
+	keep(t, i, storeOf(id, nil), time.Now()) // the first fill
+	for n := 1; n <= 5; n++ {
+		orderFact(t, id, fmt.Sprintf("o-%d", n), at("2025-10-01T10:00:00Z"), false)
+	}
+	markRebuild(t, id, time.Now())
+	before := rowsOf(t, id, "store_sales_order_fact")["store_sales_order_fact"]
+	// And a store that is not being purged, which a run would walk.
 	newStore(t)
+
+	const failure = "the wholesale settings could not be read"
 	i.wholesaleFor = func(context.Context, []string) (map[string]wholesaleState, error) {
-		return nil, errors.New("the wholesale settings could not be read")
+		return nil, errors.New(failure)
 	}
 	walked := 0
 	i.walkStore = func(context.Context, map[string]any, int64, time.Time, wholesaleState, *RollupReport) error {
@@ -692,11 +706,75 @@ func TestAWholesaleStateThatCannotBeReadRollsNoStore(t *testing.T) {
 		return nil
 	}
 	_, err := runRollup(principalCtx(t, "storeStatisticsRollupSweep"), i, time.Now())
-	if err == nil || !strings.Contains(err.Error(), "the wholesale settings could not be read") {
-		t.Errorf("the run answered %v, want the wholesale read's error", err)
+	if err == nil || strings.Count(err.Error(), failure) != 1 {
+		t.Errorf("the run answered %v, want the wholesale read's error, once", err)
 	}
 	if walked != 0 {
 		t.Errorf("the run walked %d stores with no wholesale judgement, want none", walked)
+	}
+	if after := rowsOf(t, id, "store_sales_order_fact")["store_sales_order_fact"]; after >= before {
+		t.Errorf("the store's purge did not move on: %d facts before the run, %d after", before, after)
+	}
+}
+
+// lowerRunBudget gives a run d before it takes up no new store, for the rest
+// of the test.
+func lowerRunBudget(t *testing.T, d time.Duration) {
+	t.Helper()
+	was := runBudget
+	runBudget = d
+	t.Cleanup(func() { runBudget = was })
+}
+
+// ONE LONG STORE DOES NOT STARVE THE OTHERS. The first store's roll takes
+// longer than the run's budget: the run takes up no other store, ends
+// normally and says how many it did not reach, and the next run begins with
+// the store after it, reaches the other two, and wraps round to the first.
+func TestALongStoreDoesNotStarveTheOthers(t *testing.T) {
+	i := testIntegration(t)
+	lowerRunBudget(t, 200*time.Millisecond)
+	stores := []string{newStore(t), newStore(t), newStore(t)}
+	sort.Strings(stores)
+	var order []string
+	i.walkStore = func(_ context.Context, store map[string]any, _ int64, _ time.Time, _ wholesaleState, _ *RollupReport) error {
+		id, _ := store["id"].(string)
+		order = append(order, id)
+		if id == stores[0] {
+			time.Sleep(400 * time.Millisecond)
+		}
+		return nil
+	}
+	ctx := auth.ContextWithInternalOrigin(principalCtx(t, "storeStatisticsRollupSweep"))
+	runs := [][]string{}
+	reports := []RollupReport{}
+	for run := 0; run < 2; run++ {
+		order = nil
+		nodes, err := i.handleRollup(ctx, nil, 0)
+		if err != nil || len(nodes) != 1 {
+			t.Fatalf("run %d answered %d nodes and error %v, want its report", run+1, len(nodes), err)
+		}
+		var rep RollupReport
+		if err := json.Unmarshal(nodes[0].Payload, &rep); err != nil {
+			t.Fatal(err)
+		}
+		runs = append(runs, slices.Clone(order))
+		reports = append(reports, rep)
+	}
+	if !slices.Equal(runs[0], stores[:1]) || reports[0].NotReached != 2 {
+		t.Errorf("the first run took up %v and did not reach %d, want only %s and 2 not reached", runs[0], reports[0].NotReached, stores[0])
+	}
+	if want := []string{stores[1], stores[2], stores[0]}; !slices.Equal(runs[1], want) || reports[1].NotReached != 0 {
+		t.Errorf("the second run took up %v and did not reach %d, want %v, wrapping round, and none not reached", runs[1], reports[1].NotReached, want)
+	}
+}
+
+// THE HARD DEADLINE IS ABOVE ONE STORE'S TURN. A run's context is cancelled
+// only well past anything one store's own limits can add up to after the
+// budget is spent, so a store under way is never cut off by the pacing. Not
+// a database test.
+func TestTheRunDeadlineIsASafetyBoundAboveOneStoresTurn(t *testing.T) {
+	if b := storeTurnBound(); b <= 0 || runDeadline <= runBudget+b {
+		t.Errorf("the run deadline is %s, the budget %s and one store's turn at most %s; want the deadline above the two together", runDeadline, runBudget, b)
 	}
 }
 
@@ -709,19 +787,27 @@ func lowerRunDeadline(t *testing.T, d, unwind time.Duration) {
 	t.Cleanup(func() { runDeadline, runUnwind = wasD, wasU })
 }
 
-// A RUN HAS A DEADLINE. A walk stuck past it, deaf to its context, does not
+// A HUNG STORE IS CUT OFF AT THE HARD DEADLINE, AND THE OTHERS ARE STILL
+// SERVED. A walk stuck past the deadline, deaf to its context, does not
 // silence every later minute: the run answers an error that names the
 // deadline, its context is cancelled, and the next run is a run, not a stand
-// down.
+// down, and begins with the stores after the one that hung.
 func TestARunThatOutlastsItsDeadlineIsCancelledAndTheNextRuns(t *testing.T) {
 	i := testIntegration(t)
-	newStore(t)
+	stores := []string{newStore(t), newStore(t), newStore(t)}
+	sort.Strings(stores)
 	lowerRunDeadline(t, 300*time.Millisecond, 200*time.Millisecond)
 	release := make(chan struct{})
 	stuck := make(chan error, 1)
-	var calls atomic.Int32
-	i.walkStore = func(ctx context.Context, _ map[string]any, _ int64, _ time.Time, _ wholesaleState, _ *RollupReport) error {
-		if calls.Add(1) == 1 {
+	var hung atomic.Int32
+	var mu sync.Mutex
+	var order []string
+	i.walkStore = func(ctx context.Context, store map[string]any, _ int64, _ time.Time, _ wholesaleState, _ *RollupReport) error {
+		id, _ := store["id"].(string)
+		mu.Lock()
+		order = append(order, id)
+		mu.Unlock()
+		if id == stores[0] && hung.Add(1) == 1 {
 			<-release
 			stuck <- ctx.Err()
 		}
@@ -753,9 +839,18 @@ func TestARunThatOutlastsItsDeadlineIsCancelledAndTheNextRuns(t *testing.T) {
 	if took := time.Since(began); took > 10*time.Second {
 		t.Errorf("the stuck run answered after %s, want about its deadline", took)
 	}
+	mu.Lock()
+	order = nil
+	mu.Unlock()
 	nodes, err = i.handleRollup(ctx, nil, 0)
 	if err != nil || len(nodes) != 1 {
 		t.Errorf("the run after a stuck one answered %d nodes and error %v, want its report", len(nodes), err)
+	}
+	mu.Lock()
+	served := slices.Clone(order)
+	mu.Unlock()
+	if len(served) < 2 || served[0] != stores[1] || served[1] != stores[2] {
+		t.Errorf("the run after a store hung took up %v, want %s and %s first", served, stores[1], stores[2])
 	}
 	close(release)
 	select {

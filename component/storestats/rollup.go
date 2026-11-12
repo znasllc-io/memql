@@ -41,9 +41,24 @@ import (
 // walk that store's own state, a value (wholesaleState.isWholesale), the zero
 // one when wholesaleFor is nil or names none for the store: the walk folds every
 // order it reads with it. When wholesaleFor cannot answer, the run answers
-// that error and walks no store: a store walked with "nobody is wholesale"
-// would write its granted buyers' new orders retail, and nothing would read
-// them again until the next change of the granted set.
+// that error once and walks no store's facts: a store walked with "nobody is
+// wholesale" would write its granted buyers' new orders retail, and nothing
+// would read them again until the next change of the granted set. Every
+// store's housekeeping -- its row, its verdict, its purge and its removal --
+// runs as usual: an outage of an optional pack holds back no erasure.
+//
+// # One long store does not starve the others
+//
+// A run has a budget, runBudget: once it is spent, the run takes up no new
+// store and ends normally, and says how many stores it did not reach
+// (RollupReport.NotReached). A store under way finishes within its own
+// limits. The next run begins with the store after the last one this node's
+// run took up, in bare-id order, and wraps round, so every store gets its turn
+// however long one of them takes. Where it stands is kept in the
+// integration's memory (lastTaken): a new cron leader begins at the first
+// store, which costs only that store an early turn. The last store taken up is
+// the last one finished, unless the run was cut off at its hard deadline
+// (runDeadline), and then the store that hung is not taken up first again.
 //
 // # The reads are called from here, never as steps
 //
@@ -69,9 +84,10 @@ type RollupReport struct {
 	Rows       map[string]int `json:"rows"`
 	Facts      int            `json:"facts"`
 	Unreadable int            `json:"unreadable"`
-	Behind     []string       `json:"behind,omitempty"`  // "<store>/<source>"
-	Rebuilt    []string       `json:"rebuilt,omitempty"` // stores storeState rebuilt this run
-	Removed    []string       `json:"removed,omitempty"` // stores storeState removed this run
+	Behind     []string       `json:"behind,omitempty"`     // "<store>/<source>"
+	Rebuilt    []string       `json:"rebuilt,omitempty"`    // stores storeState rebuilt this run
+	Removed    []string       `json:"removed,omitempty"`    // stores storeState removed this run
+	NotReached int            `json:"notReached,omitempty"` // stores the run did not take up: its budget was spent
 }
 
 // storesPageSize is how many stores one page of the stores read holds: the
@@ -150,17 +166,30 @@ func runRollup(ctx context.Context, i *Integration, now time.Time) (RollupReport
 	}
 	rep.Stores = len(stores)
 
-	// The wholesale state, once a run, for the stores the run rolls. See
-	// "Who is wholesale".
+	// The wholesale state, once a run, for the stores the run rolls. When it
+	// cannot be read, every store's housekeeping still runs and only the walk
+	// of facts is skipped. See "Who is wholesale".
+	var failures []error
 	wholesale, err := i.wholesaleStates(ctx, stores)
+	walk := err == nil
 	if err != nil {
-		return rep, err
+		failures = append(failures, err)
 	}
 
-	var failures []error
-	for _, store := range stores {
+	// Each store in turn from the one after the store the last run took up
+	// last, wrapping round, and no new one once the budget is spent. See
+	// "One long store does not starve the others".
+	began := time.Now()
+	first := i.firstToTake(stores)
+	for k := range stores {
+		store := stores[(first+k)%len(stores)]
 		id := store["id"].(string)
-		if err := i.rollStore(ctx, db, store, now, wholesale[id], &rep); err != nil && !errors.Is(err, errRebuilt) {
+		if k > 0 && time.Since(began) >= runBudget {
+			rep.NotReached = len(stores) - k
+			break
+		}
+		i.tookUp(id)
+		if err := i.rollStore(ctx, db, store, now, wholesale[id], walk, &rep); err != nil && !errors.Is(err, errRebuilt) {
 			i.logger.Warn("Store statistics for a store were not kept this run; the next run carries on",
 				"component", "storestats", "storeId", id, "error", err)
 			failures = append(failures, &storeFailure{StoreID: id, Err: err})
@@ -170,7 +199,9 @@ func runRollup(ctx context.Context, i *Integration, now time.Time) (RollupReport
 }
 
 // rollStore is one store's turn.
-func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[string]any, now time.Time, wholesale wholesaleState, rep *RollupReport) error {
+// walk is false when the run could not read the wholesale state: the store's
+// housekeeping runs, and its facts are not walked.
+func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[string]any, now time.Time, wholesale wholesaleState, walk bool, rep *RollupReport) error {
 	id := store["id"].(string)
 	// A store whose data was removed is given no new row (store.go).
 	if !storeDataRemoved(store) {
@@ -201,6 +232,9 @@ func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[strin
 	if err != nil {
 		return err
 	}
+	if !walk {
+		return nil
+	}
 	if i.walkStore != nil {
 		if err := i.walkStore(ctx, store, generation, now, wholesale, rep); err != nil {
 			return err
@@ -210,6 +244,30 @@ func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[strin
 	return writeTx(ctx, db, id, generation, func(ctx context.Context, tx bun.Tx) error {
 		return clearRebuilding(ctx, tx, id, now)
 	})
+}
+
+// firstToTake is the index in stores, which are in bare-id order, of the
+// first store after the one the last run on this node took up last, or 0.
+func (i *Integration) firstToTake(stores []map[string]any) int {
+	i.runningMu.Lock()
+	last := i.lastTaken
+	i.runningMu.Unlock()
+	if last == "" {
+		return 0
+	}
+	for k, store := range stores {
+		if store["id"].(string) > last {
+			return k
+		}
+	}
+	return 0
+}
+
+// tookUp records the store a run is taking up.
+func (i *Integration) tookUp(id string) {
+	i.runningMu.Lock()
+	i.lastTaken = id
+	i.runningMu.Unlock()
 }
 
 // wholesaleStates asks wholesaleFor once for every store the run rolls. A nil
@@ -225,7 +283,7 @@ func (i *Integration) wholesaleStates(ctx context.Context, stores []map[string]a
 	}
 	states, err := i.wholesaleFor(ctx, ids)
 	if err != nil {
-		return nil, fmt.Errorf("read the stores' wholesale state, so no store is walked this run: %w", err)
+		return nil, fmt.Errorf("read the stores' wholesale state, so no store's facts are walked this run: %w", err)
 	}
 	return states, nil
 }
