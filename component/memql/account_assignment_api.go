@@ -42,21 +42,18 @@ func ConflictsNaming(ctx context.Context, q AccountQuerier, account string) (int
 // one under way, which is then full whatever the age of the last full pass
 // (startAssignmentPass); the concept is made due now. A concept with no
 // progress row yet is left alone: its first pass is a full pass already.
+//
+// It is the export's call, on a connection of its own. Nothing in the engine's
+// write paths calls it: a change writes a change record, and the job folds the
+// records into requests itself (account_follow.go).
 func RequestAccountFullPass(ctx context.Context, db *bun.DB, concepts []string) error {
-	return RequestAccountFullPassIn(ctx, db, concepts)
-}
-
-// RequestAccountFullPassIn is RequestAccountFullPass in the caller's
-// transaction (or any handle), so a change and the passes it asks for commit
-// together (account_follow.go, What a change asks of the job).
-func RequestAccountFullPassIn(ctx context.Context, tx bun.IDB, concepts []string) error {
 	if len(concepts) == 0 {
 		return nil
 	}
 	if hook := accountFullPassRequested; hook != nil {
 		hook(concepts)
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE account_assignment_progress
+	_, err := db.ExecContext(ctx, `UPDATE account_assignment_progress
 		   SET full_pass_requested_at = clock_timestamp(), next_at = LEAST(next_at, clock_timestamp())
 		 WHERE concept = ANY(?::text[])`, pq.Array(concepts))
 	if err != nil {
@@ -65,8 +62,9 @@ func RequestAccountFullPassIn(ctx context.Context, tx bun.IDB, concepts []string
 	return nil
 }
 
-// accountFullPassRequested, when set, is told of every request. A seam for the
-// test that a call asks once however many rows it moves; nothing else sets it.
+// accountFullPassRequested, when set, is told of every RequestAccountFullPass.
+// A seam for the tests that no engine write path asks for passes; nothing else
+// sets it.
 var accountFullPassRequested func(concepts []string)
 
 // AccountAssignmentState is where the job stands on one concept.

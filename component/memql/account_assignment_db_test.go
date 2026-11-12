@@ -889,10 +889,47 @@ func TestAccountAssignmentTrimsOlderListsOnFullPassesOnly(t *testing.T) {
 	require.True(t, changed, "a batch that only trimmed lists did not count as a change, so no cached read was invalidated")
 }
 
+// A requested full pass runs its batches back to back within one call's time
+// budget, instead of one batch a tick: 2,000 rows in batches from 100 finish
+// in one call when the budget allows.
+func TestAccountAssignmentRequestedPassRunsBackToBack(t *testing.T) {
+	engine, db, _ := readMergeTestEngine(t)
+	ctx := context.Background()
+	s := uniqueSuffix(t.Name())
+	const todo = "v1:todos:todo"
+	_, order, err := assignmentConcepts()
+	require.NoError(t, err)
+	require.NoError(t, ensureAssignmentProgressRows(ctx, db, order))
+	_, err = db.ExecContext(ctx, `INSERT INTO "MemoryNodes" (id, concept, "createdBy", "createdAt", payload, provenance, schema, type)
+		SELECT ? || g, ?, 'assignment-test', clock_timestamp() - interval '1 hour',
+		       jsonb_build_object('title', 't', 'accountId', 'self'), '{"kind":"direct","name":"back-to-back"}'::jsonb,
+		       n.schema, n.type
+		  FROM generate_series(1, 2000) g,
+		       (SELECT schema, type FROM "MemoryNodes" WHERE concept = ? LIMIT 1) n`,
+		todo+":bulk-"+s+"-", todo, todo)
+	require.NoError(t, err)
+	// Only the to-dos are due, with a pass asked for and batches of 100.
+	_, err = db.ExecContext(ctx, `UPDATE account_assignment_progress SET next_at = clock_timestamp() + interval '1 hour' WHERE concept <> ?`, todo)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `UPDATE account_assignment_progress SET next_at = clock_timestamp()`)
+	})
+	require.NoError(t, RequestAccountFullPass(ctx, db, []string{todo}))
+	_, err = db.ExecContext(ctx, `UPDATE account_assignment_progress SET batch_size = 100 WHERE concept = ?`, todo)
+	require.NoError(t, err)
+
+	callCtx, cancel := context.WithTimeout(ctx, accountOwnershipDeadline)
+	defer cancel()
+	require.NoError(t, engine.runAccountAssignmentBatch(callCtx))
+	var open bool
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT pass_finished_at IS NULL OR pass_finished_at < pass_started_at
+		FROM account_assignment_progress WHERE concept = ?`, todo).Scan(&open))
+	require.False(t, open, "a requested pass of 2,000 rows did not finish in one call")
+}
+
 // A full pass asked for is the next pass of that concept, whatever its last
 // full pass's age; a concept nobody asked about keeps its schedule; and a
-// requested pass of a concept waits for the requested pass of the concept it
-// takes its account from, as a first pass does.
+// requested pass waits for no other kind's.
 func TestAccountAssignmentFullPassOnRequest(t *testing.T) {
 	engine, db, _ := readMergeTestEngine(t)
 	ctx := context.Background()
@@ -927,7 +964,10 @@ func TestAccountAssignmentFullPassOnRequest(t *testing.T) {
 	runOnePassOf(t, engine, db, run)
 	require.False(t, assignmentProgressOf(t, db, run).passFull, "a request already honored was honored again")
 
-	t.Run("parents first", func(t *testing.T) {
+	t.Run("a child kind does not wait on its parent kind's requested pass", func(t *testing.T) {
+		// A stream of requests on a parent kind must not starve the kinds
+		// below it (incremental passes included): order is put right by the
+		// change records a carrying pass writes, not by holding kinds back.
 		const goal, run = "v1:work:goal", "v1:work:run"
 		require.NoError(t, RequestAccountFullPass(ctx, db, []string{goal, run}))
 		managed, order, err := assignmentConcepts()
@@ -935,14 +975,10 @@ func TestAccountAssignmentFullPassOnRequest(t *testing.T) {
 		candidates, err := assignmentCandidates(ctx, db, managed, order)
 		require.NoError(t, err)
 		require.Contains(t, candidates, goal)
-		require.NotContains(t, candidates, run, "a child's requested pass started before its parent's")
-
-		runOnePassOf(t, engine, db, goal)
-		candidates, err = assignmentCandidates(ctx, db, managed, order)
-		require.NoError(t, err)
-		require.Contains(t, candidates, run)
+		require.Contains(t, candidates, run, "a child kind waited on its parent kind's requested pass")
 		runOnePassOf(t, engine, db, run)
 		require.True(t, assignmentProgressOf(t, db, run).passFull)
+		runOnePassOf(t, engine, db, goal)
 	})
 }
 

@@ -652,14 +652,12 @@ func TestAccountStampFirstStampOfALegacyRowAsksNothing(t *testing.T) {
 	run := conceptRun + ":" + f.id("run")
 	legacy := runPayload(goal)
 	seedRawRow(t, context.Background(), f.db, conceptRun, run, time.Now().Add(-time.Hour), "stamp-test", legacy)
-	var requests [][]string
-	accountFullPassRequested = func(concepts []string) { requests = append(requests, concepts) }
-	t.Cleanup(func() { accountFullPassRequested = nil })
+	before := progressXmins(t, f.db)
 
 	f.mustInsert(f.trusted(f.beta), conceptRun, BareShortId(run), map[string]any{"status": "succeeded"})
 	require.Equal(t, f.acme, f.accountOf(conceptRun, run), "fixture: the update stamped the run from its goal")
-	require.Zero(t, f.followTasksFor(run))
-	require.Empty(t, requests, "a first stamp asked the job for passes")
+	require.Zero(t, f.followTasksFor(run), "a first stamp wrote a change record")
+	require.Equal(t, before, progressXmins(t, f.db), "a write updated the job's progress rows")
 }
 
 // TestAccountStampStatedFirstAccountAsksForItsFollowersPasses: a row of a kind
@@ -690,20 +688,16 @@ func TestAccountStampStatedFirstAccountAsksForItsFollowersPasses(t *testing.T) {
 	_, order, err := assignmentConcepts()
 	require.NoError(t, err)
 	require.NoError(t, ensureAssignmentProgressRows(ctx, f.db, order))
-	var requests [][]string
-	accountFullPassRequested = func(concepts []string) { requests = append(requests, concepts) }
-	t.Cleanup(func() { accountFullPassRequested = nil })
+	before := progressXmins(t, f.db)
 
 	f.mustInsert(f.trusted(""), "v1:campaigns:campaign", BareShortId(campaign), map[string]any{"accountId": canonical})
 	require.Equal(t, f.acme, f.accountOf("v1:campaigns:campaign", campaign), "fixture: the campaign took its account")
-	require.Len(t, requests, 1)
-	require.Contains(t, requests[0], "v1:campaigns:sendJob")
-	require.Zero(t, f.followTasksFor(campaign), "a first account writes no change record")
+	require.Equal(t, 1, f.followTasksFor(campaign), "a stated first account writes a record, which is the request")
+	require.Equal(t, before, progressXmins(t, f.db), "a write updated the job's progress rows")
 
-	runJobUntil(t, f.engine, f.db, "the send jobs' requested pass finished", func() bool {
-		return !fullPassPending(t, f.engine, f.db, "v1:campaigns:sendJob")
+	runJobUntil(t, f.engine, f.db, "the send job took its campaign's account", func() bool {
+		return f.accountOf("v1:campaigns:sendJob", job) == f.acme
 	})
-	require.Equal(t, f.acme, f.accountOf("v1:campaigns:sendJob", job))
 }
 
 // TestAccountStampListUnchangedWhileTheSwitchIsOff: before recording is on the
@@ -882,4 +876,62 @@ func registerRelatedAccountNote(t *testing.T) string {
 	memorynodes.MergeAll(map[string]*memorynodes.Concept{name: fixture})
 	t.Cleanup(func() { memorynodes.DefaultRegistry().(*memorynodes.MemoryRegistry).Remove(name) })
 	return name
+}
+
+// TestAccountReapplyDoesNotUndoAPersonsReTag: a root moved from a to b and then
+// re-tagged back to a by a person is not sent to b by a later ordinary write.
+// The re-tag writes a ledger line of its own, which is what the re-apply rule
+// reads, and change records are never deleted, so nothing is forgotten with
+// age either.
+func TestAccountReapplyDoesNotUndoAPersonsReTag(t *testing.T) {
+	f := newStampFixture(t, "stamp-retag-ledger")
+	ctx := context.Background()
+	for _, account := range []string{f.acme, f.beta} {
+		seedRawRow(t, ctx, f.db, conceptAccountsAccount, conceptAccountsAccount+":"+account,
+			time.Now().Add(-2*time.Hour), "stamp-test", map[string]any{"name": account, "status": "active"})
+	}
+	_, order, err := assignmentConcepts()
+	require.NoError(t, err)
+	require.NoError(t, ensureAssignmentProgressRows(ctx, f.db, order))
+	operator := f.person("stamp-retag-operator-"+f.suffix, auth.RoleOwner)
+	p := goalPayload()
+	p["accountIds"] = []string{f.acme}
+	goal := f.mustInsert(f.trusted(""), conceptGoal, f.id("goal"), p)
+	require.Equal(t, f.acme, f.accountOf(conceptGoal, goal))
+
+	res, err := f.engine.MoveAccountRows(ctx, f.db, MoveRequest{Rows: []AccountRowRef{{Concept: conceptGoal, ID: goal}}, To: f.beta, By: "a-person"})
+	require.NoError(t, err)
+	require.Len(t, res.Moved, 1)
+	before := progressXmins(t, f.db)
+	f.mustInsert(operator, conceptGoal, BareShortId(goal), map[string]any{"accountIds": []string{f.acme}})
+	require.Equal(t, f.acme, f.accountOf(conceptGoal, goal), "fixture: the re-tag put it back in acme")
+	require.Equal(t, before, progressXmins(t, f.db), "a re-tag updated the job's progress rows")
+	require.Equal(t, []string{goal + " " + f.beta + ">" + f.acme + " 0"}, latestLedger(t, f.db, goal), "a re-tag writes a ledger line")
+
+	check := func(t *testing.T) {
+		t.Helper()
+		f.mustInsert(f.trusted(""), conceptGoal, BareShortId(goal), map[string]any{"status": "active"})
+		makeDue(t, f.db, conceptGoal)
+		runOnePassOf(t, f.engine, f.db, conceptGoal)
+		require.Equal(t, f.acme, f.accountOf(conceptGoal, goal), "the job undid a person's re-tag")
+	}
+	check(t)
+
+	t.Run("with every change record older than a year", func(t *testing.T) {
+		_, err := f.db.ExecContext(ctx, `UPDATE account_follow_tasks SET created_at = created_at - interval '400 days',
+			done_at = COALESCE(done_at, clock_timestamp()) - interval '400 days' WHERE parent_id = ?`, goal)
+		require.NoError(t, err)
+		require.NoError(t, RequestAccountFullPass(ctx, f.db, []string{conceptGoal}))
+		runOnePassOf(t, f.engine, f.db, conceptGoal) // a full pass finishing used to purge old records
+		check(t)
+	})
+}
+
+// latestLedger is a row's latest ledger line, as moveLedger prints them.
+func latestLedger(t *testing.T, db *bun.DB, id string) []string {
+	t.Helper()
+	var line string
+	require.NoError(t, db.QueryRowContext(context.Background(), `SELECT row_id || ' ' || from_account || '>' || to_account || ' ' || followers::text
+		FROM account_row_moves WHERE row_id = ? ORDER BY moved_at DESC, id DESC LIMIT 1`, id).Scan(&line))
+	return []string{line}
 }

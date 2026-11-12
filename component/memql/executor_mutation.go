@@ -1825,7 +1825,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// together (account_follow.go, accountChangeFor). That is a re-tag of a row
 	// that carries the list of accounts and a kind's own mutation; the governed
 	// move writes its own (account_move.go).
-	follow := accountChangeFor(e, conceptMeta, organizationPrior, payload)
+	follow := accountChangeFor(e, conceptMeta, organizationPrior, payload, accountDeltaBefore.namedList, actingPerson(ctx))
 	if targets := outboxTargetsFor(conceptMeta.Name); len(targets) > 0 || len(rowVersionFences(ctx)) > 0 || follow != nil {
 		retire := outboxPayloadRetires(payload)
 		txErr := e.runInWriteTx(ctx, func(txStore memorynodes.Store) error {

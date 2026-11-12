@@ -81,9 +81,11 @@ type assignmentConflict struct {
 // the batch belongs to a full pass, the only pass that trims older versions'
 // lists (trimAccountLists).
 //
-// A row the follow rule carried gets a change record of its own, so its own
-// followers follow, and a batch that carried any asks once for a full pass of
-// the kind's follower kinds (account_follow.go).
+// A row the follow rule carried, or the re-apply rule put back, gets a change
+// record of its own, so its own followers follow: the record is also the
+// request for their kinds' passes, which the job folds in at the start of its
+// next call (account_follow.go). No batch writes a progress row of another
+// kind.
 func applyAssignmentPlan(ctx context.Context, tx bun.Tx, meta *memorynodes.Concept, plan []assignmentDecision, fullPass bool) (assignmentCounts, bool, error) {
 	var counts assignmentCounts
 	var writes []assignmentWrite
@@ -134,18 +136,11 @@ func applyAssignmentPlan(ctx context.Context, tx bun.Tx, meta *memorynodes.Conce
 	for _, id := range written.stamped {
 		stamped[id] = true
 	}
-	carried := false
 	for _, d := range plan {
 		if !d.carried || !stamped[d.row.ID] {
 			continue
 		}
-		carried = true
 		if err := EnqueueAccountFollow(ctx, tx, AccountRowRef{Concept: meta.Name, ID: d.row.ID}, d.from, d.account); err != nil {
-			return counts, false, err
-		}
-	}
-	if carried {
-		if err := RequestAccountFullPassIn(ctx, tx, followerKindNames(meta.Name)); err != nil {
 			return counts, false, err
 		}
 	}
@@ -341,7 +336,7 @@ func trimAccountListsGuarded(ctx context.Context, tx bun.Tx, concept string, tri
 	if memorynodes.HasLiveness(concept) {
 		tables = append(tables, `memory_liveness`)
 	}
-	for i, table := range tables {
+	for _, table := range tables {
 		var res sql.Result
 		res, err = tx.ExecContext(ctx, `UPDATE `+table+` AS n
 			   SET payload = jsonb_set(n.payload, '{accountIds}',
@@ -357,7 +352,9 @@ func trimAccountListsGuarded(ctx context.Context, tx bun.Tx, concept string, tri
 		if err != nil {
 			break
 		}
-		if n, rerr := res.RowsAffected(); rerr == nil && i == 0 {
+		// Both stores count: a trim of the observation copy alone changes
+		// what the list admits as much as one of the versioned row.
+		if n, rerr := res.RowsAffected(); rerr == nil {
 			changed += int(n)
 		}
 	}
@@ -443,8 +440,17 @@ func writeAssignments(ctx context.Context, tx bun.Tx, concept string, writes []a
 			}
 			changed += int(n)
 		}
+		// THE LIST GOES WITH THE ACCOUNT, in the same statement: on a kind that
+		// carries `accountIds`, a list that named any account becomes exactly
+		// the new one, and an empty list stays empty. The list decides who may
+		// read the row, so members of the account a row left must stop reading
+		// it when it leaves, not at the next full pass (trimAccountLists holds
+		// the older versions there). A kind with no list has no such key, and
+		// the CASE leaves it alone.
 		rows, err := tx.QueryContext(ctx, `UPDATE `+table+` AS n
-			   SET payload = jsonb_set(n.payload, '{accountId}', to_jsonb(k.account), true)
+			   SET payload = CASE WHEN jsonb_typeof(n.payload->'accountIds') = 'array' AND n.payload->'accountIds' <> '[]'::jsonb
+			                 THEN jsonb_set(jsonb_set(n.payload, '{accountId}', to_jsonb(k.account), true), '{accountIds}', jsonb_build_array(k.account))
+			                 ELSE jsonb_set(n.payload, '{accountId}', to_jsonb(k.account), true) END
 			  FROM jsonb_to_recordset(?::jsonb) AS k(id text, at timestamptz, account text, move boolean, held text)
 			 WHERE k.account <> '' AND n.concept = ? AND n.id = k.id`+version+`
 			   AND COALESCE(n.payload->>'accountId', '') IN (k.held, CASE WHEN k.held = '' THEN '' ELSE ? || k.held END)

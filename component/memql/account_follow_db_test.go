@@ -68,6 +68,15 @@ func (f followFixture) accounts(t *testing.T, db *bun.DB) map[string]any {
 	return out
 }
 
+// foldRequests folds the change records into requests, as each job call does
+// first.
+func foldRequests(t *testing.T, db *bun.DB) {
+	t.Helper()
+	managed, _, err := assignmentConcepts()
+	require.NoError(t, err)
+	require.NoError(t, foldAccountChangeRequests(context.Background(), db, managed))
+}
+
 // recordingEngine is an engine that records accounts, put back when the test ends.
 func recordingEngine(t *testing.T) (*MemQLEngine, *bun.DB) {
 	t.Helper()
@@ -144,8 +153,8 @@ func TestAccountFollowersFollowTheirParent(t *testing.T) {
 	moveOne(t, engine, db, "v1:work:goal", f.goal, f.b)
 	require.Equal(t, []string{f.a + ">" + f.b}, changeRecordsFor(t, db, f.goal))
 	require.EqualValues(t, 1, pendingFor(t, db, f.b), "the move records the goal's change")
-	require.True(t, fullPassPending(t, engine, db, "v1:work:run"), "the move asks for a full pass of the runs")
-	require.True(t, fullPassPending(t, engine, db, "v1:work:step"), "and of the kinds below them")
+	foldRequests(t, db)
+	require.True(t, fullPassPending(t, engine, db, "v1:work:run"), "the job folds the record into a request for the runs' pass")
 
 	runJobUntil(t, engine, db, "the followers' passes finished", func() bool {
 		n, err := AccountFollowPending(ctx, db.DB, f.b)
@@ -230,4 +239,177 @@ func TestAccountAssignmentReappliesAMoveAfterAStaleAppend(t *testing.T) {
 		runOnePassOf(t, engine, db, "v1:work:goal")
 		require.Equal(t, f.a, newestPayload(t, db, f.goal)["accountId"])
 	})
+}
+
+// progressXmins is each progress row's xmin: a row any statement updated has a
+// new one.
+func progressXmins(t *testing.T, db *bun.DB) map[string]string {
+	t.Helper()
+	rows, err := db.QueryContext(context.Background(), `SELECT concept, xmin::text FROM account_assignment_progress`)
+	require.NoError(t, err)
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var concept, xmin string
+		require.NoError(t, rows.Scan(&concept, &xmin))
+		out[concept] = xmin
+	}
+	return out
+}
+
+// A root that a stale append put back AFTER its followers' pass ran: re-apply
+// moves it again and records that, so the followers' kind is read once more and
+// they end with the root.
+func TestAccountFollowersFollowARootPutBackByReapply(t *testing.T) {
+	engine, db := recordingEngine(t)
+	ctx := context.Background()
+	f := newFollowFixture(t, db, t.Name())
+	moveOne(t, engine, db, "v1:work:goal", f.goal, f.b)
+	// The stale append lands before the runs' pass reads the runs.
+	seedRawRow(t, ctx, db, "v1:work:goal", f.goal, time.Now(), "follow-test",
+		map[string]any{"ownerUserId": f.owner, "title": "stale", "accountId": f.a})
+	foldRequests(t, db)
+	runOnePassOf(t, engine, db, "v1:work:run")
+	require.Equal(t, f.a, newestPayload(t, db, f.run1)["accountId"], "fixture: the runs were read while the goal was back in a")
+
+	makeDue(t, db, "v1:work:goal")
+	runOnePassOf(t, engine, db, "v1:work:goal")
+	require.Equal(t, f.b, newestPayload(t, db, f.goal)["accountId"], "fixture: re-apply put the goal back in b")
+	require.Equal(t, []string{f.a + ">" + f.b, f.a + ">" + f.b}, changeRecordsFor(t, db, f.goal), "re-apply records what it did")
+
+	runJobUntil(t, engine, db, "the followers ended with the root", func() bool {
+		return newestPayload(t, db, f.run1)["accountId"] == f.b && newestPayload(t, db, f.step1)["accountId"] == f.b
+	})
+}
+
+// A child whose own explicit change put it back in the account its parent
+// left, after the parent's record, keeps it; a child the job carried and a
+// stale append then re-stamped is carried again (the second is
+// TestAccountFollowerReStampedByAStaleAppendIsCarriedAgain).
+func TestAccountFollowLeavesAChildsOwnReTag(t *testing.T) {
+	engine, db := recordingEngine(t)
+	ctx := context.Background()
+	f := newFollowFixture(t, db, t.Name())
+	moveOne(t, engine, db, "v1:work:goal", f.goal, f.b)
+	runJobUntil(t, engine, db, "the followers' passes finished", func() bool { return pendingFor(t, db, f.b) == 0 })
+	require.Equal(t, f.b, newestPayload(t, db, f.run1)["accountId"])
+
+	// The run's owner puts it back in a: a new version, and the change record
+	// every explicit change writes.
+	seedRawRow(t, ctx, db, "v1:work:run", f.run1, time.Now(), "follow-test",
+		map[string]any{"ownerUserId": f.owner, "goalId": f.goal, "accountId": f.a, "status": "re-tagged"})
+	require.NoError(t, EnqueueAccountFollow(ctx, db, AccountRowRef{Concept: "v1:work:run", ID: f.run1}, f.b, f.a))
+
+	makeDue(t, db, "v1:work:run")
+	runOnePassOf(t, engine, db, "v1:work:run")
+	require.Equal(t, f.a, newestPayload(t, db, f.run1)["accountId"], "the follow rule undid the run's own change")
+}
+
+// A parent's record carries only rows that existed before it: a row attached
+// to the moved parent afterwards, filed under the account the parent left, is
+// not this record's to move. The same holds for an account the parent once left
+// and a row attached from it later.
+func TestAccountFollowCarriesOnlyRowsThatExistedBeforeTheChange(t *testing.T) {
+	engine, db := recordingEngine(t)
+	ctx := context.Background()
+	f := newFollowFixture(t, db, t.Name())
+	moveOne(t, engine, db, "v1:work:goal", f.goal, f.b)
+	time.Sleep(10 * time.Millisecond)
+	late := "v1:work:run:late-" + uniqueSuffix(t.Name())
+	seedRawRow(t, ctx, db, "v1:work:run", late, time.Now(), "follow-test",
+		map[string]any{"ownerUserId": f.owner, "goalId": f.goal, "accountId": f.a})
+
+	runJobUntil(t, engine, db, "the followers' passes finished", func() bool { return pendingFor(t, db, f.b) == 0 })
+	require.Equal(t, f.b, newestPayload(t, db, f.run1)["accountId"], "a run that existed before the move was not carried")
+	require.Equal(t, f.a, newestPayload(t, db, late)["accountId"], "a run attached after the move was carried")
+}
+
+// An in-place change of account holds the list with it, so members of the
+// account a row left stop reading it when it leaves: on the moved root, and on
+// a carried Library index row. The index rows here have parents of two kinds,
+// a goal and a to-do, both moved.
+func TestAccountMovedAndCarriedRowsHoldTheirList(t *testing.T) {
+	engine, db := recordingEngine(t)
+	ctx := context.Background()
+	s := uniqueSuffix(t.Name())
+	f := newFollowFixture(t, db, t.Name())
+	at := time.Now().Add(-time.Hour)
+	tagged := "v1:work:goal:tagged-" + s
+	seedRawRow(t, ctx, db, "v1:work:goal", tagged, at, "follow-test",
+		map[string]any{"ownerUserId": f.owner, "title": "t", "accountId": f.a, "accountIds": []string{f.a}})
+	todo := "v1:todos:todo:parent-" + s
+	seedRawRow(t, ctx, db, "v1:todos:todo", todo, at, "follow-test",
+		map[string]any{"ownerUserId": f.owner, "title": "t", "accountId": f.a})
+	const index = "v1:library:artifact"
+	ofGoal, ofTodo := index+":of-goal-"+s, index+":of-todo-"+s
+	seedRawRow(t, ctx, db, index, ofGoal, at, "follow-test",
+		map[string]any{"ownerUserId": f.owner, "sourceConceptRef": tagged, "accountId": f.a, "accountIds": []string{f.a}})
+	seedRawRow(t, ctx, db, index, ofTodo, at, "follow-test",
+		map[string]any{"ownerUserId": f.owner, "sourceConceptRef": todo, "accountId": f.a, "accountIds": []string{f.a}})
+
+	moveOne(t, engine, db, "v1:work:goal", tagged, f.b)
+	require.Equal(t, []any{f.b}, newestPayload(t, db, tagged)["accountIds"], "the moved root's list still names the account it left")
+	moveOne(t, engine, db, "v1:todos:todo", todo, f.b)
+
+	runJobUntil(t, engine, db, "the index rows followed", func() bool {
+		return newestPayload(t, db, ofGoal)["accountId"] == f.b && newestPayload(t, db, ofTodo)["accountId"] == f.b
+	})
+	require.Equal(t, []any{f.b}, newestPayload(t, db, ofGoal)["accountIds"], "a carried row's list still names the account it left")
+	require.Equal(t, []any{f.b}, newestPayload(t, db, ofTodo)["accountIds"])
+}
+
+// A change record written in a transaction that commits after a full pass of
+// its follower kind began is not settled by that pass, and the kind's pass
+// stays pending: the pass could not see the record's followers as they were.
+func TestAccountChangeRecordCommittedLateIsNotSettledByAPassAlreadyRunning(t *testing.T) {
+	engine, db := recordingEngine(t)
+	ctx := context.Background()
+	f := newFollowFixture(t, db, t.Name())
+	const run = "v1:work:run"
+	runJobUntil(t, engine, db, "no pass pending", func() bool { return !fullPassPending(t, engine, db, run) })
+
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	require.NoError(t, EnqueueAccountFollow(ctx, tx, AccountRowRef{Concept: "v1:work:goal", ID: f.goal}, f.a, f.b))
+	time.Sleep(20 * time.Millisecond)
+
+	// A full pass of the runs begins while the record is uncommitted, and
+	// finishes after it commits.
+	require.NoError(t, RequestAccountFullPass(ctx, db, []string{run}))
+	_, err = db.ExecContext(ctx, `UPDATE account_assignment_progress SET batch_size = 1 WHERE concept = ?`, run)
+	require.NoError(t, err)
+	first, err := engine.assignOneBatch(ctx, db, []string{run}, assignmentBatchIds)
+	require.NoError(t, err)
+	require.True(t, first.requested && !first.finished, "fixture: the pass takes more than one batch")
+	require.NoError(t, tx.Commit())
+	runOnePassOf(t, engine, db, run)
+	// Every other follower kind of a goal passes in full after the commit, so
+	// only the runs' pass stands between the record and settling.
+	for _, kind := range followerKindNames("v1:work:goal") {
+		if kind == run {
+			continue
+		}
+		require.NoError(t, RequestAccountFullPass(ctx, db, []string{kind}))
+		runOnePassOf(t, engine, db, kind)
+	}
+
+	var settled bool
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT done_at IS NOT NULL FROM account_follow_tasks WHERE parent_id = ?`, f.goal).Scan(&settled))
+	require.False(t, settled, "a pass that began before the record committed settled it")
+	foldRequests(t, db)
+	require.True(t, fullPassPending(t, engine, db, run), "the runs' pass was not owed again")
+}
+
+// A follower whose parent was deleted stays in the account the parent left: a
+// tombstone is no parent, so the follow rule has nothing to follow.
+func TestAccountFollowerOfADeletedParentStays(t *testing.T) {
+	engine, db := recordingEngine(t)
+	ctx := context.Background()
+	f := newFollowFixture(t, db, t.Name())
+	moveOne(t, engine, db, "v1:work:goal", f.goal, f.b)
+	seedRawRow(t, ctx, db, "v1:work:goal", f.goal, time.Now(), "follow-test", map[string]any{"deleted": true, "accountId": f.b})
+
+	runJobUntil(t, engine, db, "the record settled", func() bool { return pendingFor(t, db, f.b) == 0 })
+	require.Equal(t, f.a, newestPayload(t, db, f.run1)["accountId"])
 }

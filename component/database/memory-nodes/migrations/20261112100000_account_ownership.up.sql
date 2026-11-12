@@ -51,9 +51,13 @@ CREATE TABLE account_stamping_readers (node_id text PRIMARY KEY, seen_at timesta
 --                         time, which would skip rows written during the pass.
 --                         NULL until the first full pass finishes.
 --  pass_full              whether the current or next pass walks every id.
---  full_pass_at           the start of the last finished full pass; a full pass
---                         is due again a day after it, for rows that were
---                         waiting on a parent.
+--  full_pass_at           the safe point of the last finished full pass: the
+--                         earlier of its start and its late-commit horizon,
+--                         so everything committed before it was read by that
+--                         pass. A full pass is due again a day after it, for
+--                         rows that were waiting on a parent; a requested pass
+--                         is pending, and a change record unsettled, until a
+--                         full pass finishes whose safe point is later.
 --  pass_started_at/_finished_at, next_at
 --                         when the current pass began, when the last one ended,
 --                         and when the row may next be claimed (a minute after

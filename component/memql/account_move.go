@@ -45,7 +45,8 @@ package memql
 //
 // For each root that ends in the destination: one line in account_row_moves
 // (from, to, who, a note, and how many tied rows were placed with it); a change
-// record when it left an account (account_follow.go); and its open conflicts in
+// record (account_follow.go), with no from_account for a placement, which is
+// also the request for the passes that carry its followers; and its open conflicts in
 // account_assignment_conflict are resolved, as the job resolves those of a row
 // it assigns, so an export of the accounts a conflict named does not wait on a
 // row that has been decided. A `stated` root that is PLACED also places, at
@@ -54,10 +55,10 @@ package memql
 // for the root to be edited again at all. Those are counted.
 //
 // Followers are NOT counted. They are carried in the background by the
-// assignment job, and the move asks it, once per call and in its transaction,
-// for full passes of every kind below the kinds it moved or placed a root of
-// (RequestAccountFullPassIn, followerKindsClosure). MoveResult.Followers names
-// the kinds that will follow, each with Rows zero.
+// assignment job, which folds the move's change records into requests for full
+// passes of the kinds below (foldAccountChangeRequests); the move itself writes
+// no progress row, so it never waits on a batch that holds one.
+// MoveResult.Followers names the kinds that will follow, each with Rows zero.
 //
 // Everything is one transaction. A preview runs every read and judgment, and
 // writes and asks for nothing.
@@ -143,11 +144,12 @@ const moveRecheckRounds = 3
 var ErrAccountRecordingOff = errors.New("account move: this node does not record accounts yet, so no row can be moved or placed")
 
 // accountMoveBeforeWrite, when set, runs between the act's reads and its
-// writes; accountMoveAfterWrite after the writes, before the commit. Seams for
-// the tests of a row another writer changes meanwhile; nothing else sets them.
+// writes; accountMoveAfterRound after each in-place write of a root's version.
+// Seams for the tests of a row another writer changes meanwhile; nothing else
+// sets them.
 var (
 	accountMoveBeforeWrite func()
-	accountMoveAfterWrite  func()
+	accountMoveAfterRound  func()
 )
 
 // moveRoot is one root the act will write.
@@ -235,13 +237,7 @@ func (e *MemQLEngine) MoveAccountRows(ctx context.Context, db *bun.DB, req MoveR
 			followers[kind] = n
 		}
 		result.Moved, result.Followers = moveLines(moved), followerLines(followers)
-		if req.Preview || len(rootKinds) == 0 {
-			return nil
-		}
-		if accountMoveAfterWrite != nil {
-			accountMoveAfterWrite()
-		}
-		return RequestAccountFullPassIn(ctx, tx, followerKindsClosure(rootKinds...))
+		return nil
 	})
 	if err != nil {
 		return MoveResult{}, err
@@ -317,6 +313,9 @@ func (e *MemQLEngine) writeMoveRoot(ctx context.Context, tx bun.Tx, root moveRoo
 		if err != nil {
 			return false, err
 		}
+		if accountMoveAfterRound != nil {
+			accountMoveAfterRound()
+		}
 		if len(written.stamped) == 0 || round+1 >= moveRecheckRounds {
 			break
 		}
@@ -347,6 +346,9 @@ func (e *MemQLEngine) writeMoveRoot(ctx context.Context, tx bun.Tx, root moveRoo
 		if len(tiedWrite.stamped) > 0 {
 			placed++
 			if err := resolveAssignmentConflicts(ctx, tx, tied.meta.Name, []string{tied.row.ID}); err != nil {
+				return false, err
+			}
+			if err := EnqueueAccountFollow(ctx, tx, AccountRowRef{Concept: tied.meta.Name, ID: tied.row.ID}, "", to); err != nil {
 				return false, err
 			}
 		}

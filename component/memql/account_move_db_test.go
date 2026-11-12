@@ -204,9 +204,6 @@ func TestAccountMovePlacesRowsWithNoAccount(t *testing.T) {
 	f := newMoveFixture(t, db, t.Name())
 	todo1 := f.row(t, db, "v1:todos:todo", "todo1", map[string]any{"ownerUserId": f.owner, "title": "t"})
 	todo2 := f.row(t, db, "v1:todos:todo", "todo2", map[string]any{"ownerUserId": f.owner, "title": "t"})
-	var requests [][]string
-	accountFullPassRequested = func(concepts []string) { requests = append(requests, concepts) }
-	t.Cleanup(func() { accountFullPassRequested = nil })
 
 	res, err := engine.MoveAccountRows(ctx, db, MoveRequest{Rows: []AccountRowRef{
 		{Concept: "v1:todos:todo", ID: todo1}, {Concept: "v1:todos:todo", ID: todo2},
@@ -215,9 +212,8 @@ func TestAccountMovePlacesRowsWithNoAccount(t *testing.T) {
 	require.Equal(t, []MoveLine{{Concept: "v1:todos:todo", Rows: 2}}, res.Moved)
 	require.Equal(t, f.b, newestPayload(t, db, todo1)["accountId"])
 	require.Equal(t, []string{todo1 + " >" + f.b + " 0", todo2 + " >" + f.b + " 0"}, moveLedger(t, db, todo1, todo2))
-	require.Len(t, requests, 1, "one request per call, however many roots")
-	require.Equal(t, followerKindsClosure("v1:todos:todo"), requests[0])
-	require.Zero(t, pendingFor(t, db, f.b), "a placement writes no change record")
+	require.Equal(t, []string{">" + f.b}, changeRecordsFor(t, db, todo1), "a placement's record names no account it left; it is also the request")
+	require.EqualValues(t, 2, pendingFor(t, db, f.b))
 
 	t.Run("a stated root carries the rows tied to it that have none", func(t *testing.T) {
 		audience := f.row(t, db, "v1:campaigns:audience", "audience", map[string]any{"name": "a"})
@@ -364,4 +360,42 @@ func TestAccountRowsFollowingTheirParentAgreesWithTheMove(t *testing.T) {
 			require.Equal(t, "v1:work:goal", link.ParentConcept, "%s", rows[link.ID])
 		}
 	}
+}
+
+// The move writes no row of the job's progress: its change records are the
+// requests, and the job folds them in itself.
+func TestAccountMoveWritesNoProgressRow(t *testing.T) {
+	engine, db := recordingEngine(t)
+	ctx := context.Background()
+	f := newMoveFixture(t, db, t.Name())
+	g := f.goal(t, db, "goal", f.a)
+	before := progressXmins(t, db)
+	_, err := engine.MoveAccountRows(ctx, db, MoveRequest{Rows: []AccountRowRef{{Concept: "v1:work:goal", ID: g}}, To: f.b, By: f.owner})
+	require.NoError(t, err)
+	require.Equal(t, before, progressXmins(t, db))
+}
+
+// The move chases at most moveRecheckRounds newer versions; past that it
+// reports the row not moved, and writes no ledger line for it.
+func TestAccountMoveChasesAtMostThreeVersions(t *testing.T) {
+	engine, db := recordingEngine(t)
+	ctx := context.Background()
+	f := newMoveFixture(t, db, t.Name())
+	g := f.goal(t, db, "goal", f.a)
+	writes := 0
+	appendOne := func() {
+		seedRawRow(t, context.Background(), db, "v1:work:goal", g, time.Now(), "move-test",
+			map[string]any{"ownerUserId": f.owner, "title": "appended", "accountId": f.a})
+		time.Sleep(2 * time.Millisecond)
+	}
+	accountMoveBeforeWrite = appendOne
+	accountMoveAfterRound = func() { writes++; appendOne() }
+	t.Cleanup(func() { accountMoveBeforeWrite, accountMoveAfterRound = nil, nil })
+
+	res, err := engine.MoveAccountRows(ctx, db, MoveRequest{Rows: []AccountRowRef{{Concept: "v1:work:goal", ID: g}}, To: f.b, By: f.owner})
+	require.NoError(t, err)
+	require.Equal(t, 3, writes, "the move chased a number of versions other than three")
+	require.Empty(t, res.Moved)
+	require.Equal(t, f.a, newestPayload(t, db, g)["accountId"])
+	require.Empty(t, moveLedger(t, db, g))
 }

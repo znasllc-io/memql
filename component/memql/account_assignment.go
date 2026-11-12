@@ -35,9 +35,10 @@ package memql
 //   - Mostly rows with NO account. The two rules that change an account a row
 //     already has (account_assignment_rules.go: re-apply a move, follow) carry
 //     rows a change elsewhere left behind; this is how followers follow a
-//     parent whose account changed, and why a change asks for a full pass of
-//     its follower kinds (account_follow.go). A full pass that finishes
-//     settles the change records whose follower kinds have all been read since.
+//     parent whose account changed, and why a change writes a change record,
+//     which the job folds into requests for full passes of its follower kinds
+//     (account_follow.go). A full pass that finishes settles the change
+//     records its safe point covers.
 //   - It is raw SQL on the node table, so no version is appended, no event is
 //     published and no automation runs. A row's assignment is not news.
 //
@@ -98,7 +99,7 @@ package memql
 //     finishes with its horizon more than assignmentHorizonWarnAge before its
 //     start logs one WARN naming the oldest open session (logHorizonHeldBack).
 //   - A later pass is a FULL pass again when a full pass was REQUESTED after the
-//     last one began (RequestAccountFullPass, account_assignment_api.go: the
+//     last one's safe point (below) (RequestAccountFullPass, account_assignment_api.go: the
 //     export asks for one of a kind with rows waiting, instead of waiting a day),
 //     or when the concept's last full pass left rows WAITING on a parent
 //     (`waiting` > 0) and began at least assignmentFullPassInterval ago. A
@@ -116,9 +117,17 @@ package memql
 //     `shared` with the other rows kept without an account on purpose, and it
 //     brings no full pass by itself. So "nothing waiting" means nothing the
 //     job will still assign is held up behind a parent.
-//   - A requested full pass waits for the requested full pass of the concept it
-//     takes its account from, as a first pass does (assignmentCandidates):
-//     before it, a child would find its parent unassigned and be left waiting.
+//   - A requested full pass waits for no other kind (assignmentCandidates): a
+//     carrying pass writes change records, which request the next generation,
+//     so a child kind that ran too early runs again. It does not crawl either:
+//     its batches run back to back within the call's time budget
+//     (runAccountAssignmentBatch).
+//   - A finished full pass keeps its SAFE POINT in full_pass_at: the earlier of
+//     its start and its horizon, the value verified_through takes. A request
+//     or change record newer than it is not covered by the pass.
+//   - Each call first folds the change records not settled into requests for
+//     their follower kinds (foldAccountChangeRequests): nothing outside the
+//     job writes a progress row.
 //   - The first batch of a later pass also judges again the rows of the
 //     concept's open conflicts that name no candidate (conflictsWithoutCandidates),
 //     so a conflict recorded before candidates existed gains them on the next
@@ -231,6 +240,10 @@ func (e *MemQLEngine) runAccountAssignmentBatch(ctx context.Context) error {
 		}
 	}()
 
+	if err := foldAccountChangeRequests(ctx, db, managed); err != nil {
+		return err
+	}
+
 	started := time.Now()
 	budget := assignmentBatchIds
 	for len(candidates) > 0 && budget > 0 && time.Since(started) < assignmentCallBudget && ctx.Err() == nil {
@@ -248,7 +261,15 @@ func (e *MemQLEngine) runAccountAssignmentBatch(ctx context.Context) error {
 			// concept takes hours, and its readers should not wait for the end.
 			e.InvalidateCacheForConcept(result.concept)
 		}
-		budget -= result.examined
+		// A REQUESTED full pass does not crawl at one batch a tick: its batches
+		// run back to back within the call's time budget, each its own short
+		// transaction, and do not spend the id budget the other kinds share.
+		if result.requested && !result.finished {
+			continue
+		}
+		if !result.requested {
+			budget -= result.examined
+		}
 		candidates = removeCandidate(candidates, result.concept)
 	}
 	return nil
@@ -288,20 +309,22 @@ func ensureAssignmentProgressRows(ctx context.Context, db bun.IDB, order []strin
 }
 
 // assignmentCandidates is the order filtered to the concepts a call may claim:
-// those with no full pass owed, and those whose owed full pass may start or go
-// on because every concept they take their account from has finished its own.
-// A full pass is owed while the first pass has not finished, and while a full
-// pass was requested after the last one began (fullPassRequested): a requested
-// pass of a child that ran before its parent's would find the parent still
-// unassigned and leave the child waiting, which is what the request was for.
-// Whether a row is due (next_at) is left to the claim, which reads it under the
-// lock.
+// those whose first pass is finished, and those whose first pass may start or
+// go on because every concept they take their account from has finished its
+// own. Whether a row is due (next_at) is left to the claim, which reads it
+// under the lock.
+//
+// A REQUESTED full pass waits for nothing. Once requests could hold a child
+// kind back while its parent kind had one outstanding, a steady stream of
+// requests on a parent kind starved every kind below it, incremental passes
+// included. Order does not have to be right the first time: a pass that
+// carries rows writes change records, the records request the next generation
+// (foldAccountChangeRequests), and a child kind that ran too early runs again.
+// Only a kind's FIRST pass waits, once, for the kinds it takes its account
+// from, so the first assignment of an installation is not left waiting a day.
 func assignmentCandidates(ctx context.Context, db bun.IDB, managed map[string]*memorynodes.Concept, order []string) ([]string, error) {
 	rows, err := db.QueryContext(ctx, `SELECT concept FROM account_assignment_progress
-		WHERE concept = ANY(?::text[])
-		  AND (verified_through IS NULL
-		       OR (full_pass_requested_at IS NOT NULL
-		           AND (full_pass_at IS NULL OR full_pass_requested_at > full_pass_at)))`, pq.Array(order))
+		WHERE concept = ANY(?::text[]) AND verified_through IS NULL`, pq.Array(order))
 	if err != nil {
 		return nil, fmt.Errorf("account assignment: reading progress: %w", err)
 	}
@@ -441,6 +464,10 @@ type assignmentBatchResult struct {
 	examined int
 	changed  bool
 	counts   assignmentCounts
+	// requested: the batch belongs to a full pass that was asked for, so the
+	// call runs the kind's next batch straight after (runAccountAssignmentBatch).
+	requested bool
+	finished  bool
 }
 
 // assignmentCounts is the judgments of one batch.
@@ -557,7 +584,8 @@ func (e *MemQLEngine) assignOneBatch(ctx context.Context, db *bun.DB, candidates
 				}
 			}
 		}
-		result = assignmentBatchResult{concept: p.concept, examined: len(ids), changed: changed, counts: counts}
+		result = assignmentBatchResult{concept: p.concept, examined: len(ids), changed: changed, counts: counts,
+			requested: p.passFull && p.fullPassRequested(), finished: finished}
 		return nil
 	})
 	if err != nil && claimed != "" {
@@ -792,7 +820,10 @@ func advanceAssignmentProgress(ctx context.Context, tx bun.Tx, p assignmentProgr
 		verified = earlierTime(p.passStartedAt, p.passHorizon)
 		passHorizon = sql.NullTime{}
 		if p.passFull {
-			fullAt = p.passStartedAt
+			// THE SAFE POINT, not the start: a record or a request written in a
+			// transaction that was open when the pass began, and committed
+			// after, is not covered by this pass (account_follow.go, Settled).
+			fullAt = verified
 		}
 		finishedAt = sql.NullTime{Time: now, Valid: true}
 		cursorID, cursorAt = sql.NullString{}, sql.NullTime{}
