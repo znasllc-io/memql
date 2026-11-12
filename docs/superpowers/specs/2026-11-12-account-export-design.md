@@ -1,7 +1,7 @@
 ---
 title: Account export -- one account's rows and bytes in one file another instance can import
 audience: internal
-status: draft
+status: approved
 area: design
 sinceVersion: 0.31.35
 owner: znas
@@ -29,8 +29,10 @@ through each concept's `@belongsTo` declaration and never by a field name.
 at a time: seven about refinements of piece 1 that they had not read, and fourteen
 about this design. Each answer is a row of the table below. The owner then approved
 the rest of the design as it was summarized (E22) and asked for this record. The
-HTTP route in section G was approved explicitly (E17). The record is a draft until
-the owner has read it.
+HTTP route in section G was approved explicitly (E17). The owner then asked for the
+piece to be built end to end with no further questions. Every decision taken on the
+way is in [Decided without asking](#decided-without-asking), and the sections below
+describe what was built.
 
 ## Locked decisions
 
@@ -663,33 +665,65 @@ carries them.
   account to another, by the act, by a re-tag of a list row, or by an
   organization change in its own app, the engine writes a change record
   (`account_follow_tasks`: the row, the account it left, the account it went to)
-  in the same transaction, and asks the job for a full pass of the kinds whose
-  rows can hang off it.
+  in the same transaction. A change a person made is also a line in
+  `account_row_moves`: the act and a placement always were, and a list re-tag
+  writes one too. Neither kind of record is ever deleted, because the rules
+  below may need one for as long as the row exists.
+- **The record is the request.** Nothing but the job writes the job's own
+  progress. At the start of each tick the job reads the records that are not
+  settled and asks itself for a full pass of every kind whose rows can hang off
+  them.
 - **The job carries.** For every row it reads, the job looks at the row's parent.
   A row whose account is the one its parent left, where the parent is now in
   another account, takes the parent's account as it is at that moment, gets a
   change record of its own, and so brings its own children in the next pass.
+- **Only rows that were there.** A record carries a row only if the row's first
+  version is older than the record. A row attached to the parent afterwards was
+  filed by the rules in force when it was written.
 - **A row attached from another account stays.** Row ownership allows that on
   purpose, and it is why a follower is recognized by the account it shares with
   the one its parent left, not by the link alone.
-- **A placement needs no record.** A row placed from no account has children with
-  no account, and the job's existing rule gives such a row its parent's account.
-  The act asks for the pass. So does a kind's own mutation the first time it
-  states an account. A row whose first account the engine itself records asks
-  for nothing: its children were already waiting on it.
+- **A person's own decision about a child stands.** A child that a person moved
+  or re-tagged into the account it is in, after its parent left that account,
+  stays there: its own latest line in `account_row_moves` says so. A record the
+  job wrote protects nothing.
+- **A placement names no account left.** A row placed from no account has
+  children with no account, and the job's existing rule gives such a row its
+  parent's account. The placement's record asks for the pass. So does a kind's
+  own mutation the first time it states an account. A row whose first account
+  the engine itself records asks for nothing: its children were already waiting
+  on it.
 - **A stale write is repaired.** An ordinary write that read a row before it
   moved appends a version naming the account the row left. That version is new,
   so the job's next pass reads it: a follower is carried again because its
-  parent's record stands, and a moved root goes back to where its latest line in
-  `account_row_moves` put it. No lock is added to ordinary writes.
+  parent's record stands, and a row a person moved goes back to where its latest
+  line in `account_row_moves` put it. Putting a row back writes a change record
+  too, so its children are judged again. No lock is added to ordinary writes.
+- **The list moves with the account.** On the five kinds that carry
+  `accountIds` (below), every in-place write of the account writes the list in
+  the same statement, so the members of the account a row left stop reading it
+  when it leaves.
 
 Placing a row that states its own account also places, in the same call, the
 rows the organization rules tie to it, where they have none.
 
-How long it takes is how long a pass of the kind takes, not how many rows moved.
-An export waits while a change record that names its account is not settled,
-which it is once every kind that can hang off the row has finished a full pass
-begun after the record was written.
+**When it is done.** A full pass covers what was committed before its safe
+point: the earlier of its start and the job's late-commit horizon. A change
+record is settled once every kind that can hang off its row has finished a full
+pass whose safe point is later than the record. An export waits while a record
+that names its account is not settled.
+
+**How long it takes** is how long a pass of the kind takes, not how many rows
+moved. A requested pass waits for no other kind and does not run at one batch a
+tick: its batches run back to back inside each call of the job. The kinds with
+a requested pass take turns, and between them use at most half of a call while
+a kind without one is due.
+
+**Clocks.** "Older than the record" compares a row's time, set by the node that
+wrote it, with the record's, set by the database. Within the skew between the
+two the judgment can be wrong either way: a row that was there is left behind,
+or one written just after the move is carried. Nothing later repairs either, and
+an owner places the first and moves the second back.
 
 ### Rows awaiting a decision
 
@@ -992,6 +1026,10 @@ recommended. They are listed so the owner can read and overturn any of them.
 | Attachment bytes are counted in a file's report and not carried. This departs from E10's list | An attachment's key holds a partition and a digest of the run that made it, and neither is a field of the row, so no declaration can tie the key to the row. No bundle of the three installations at hand can create an attachment row, so nothing is lost today; carrying them needs the key recorded on the row first |
 | An export may not carry a row larger than 64 MiB in one version, and its checker bounds every member it reads | The checker will read files from outside once import exists; the writer refuses what the checker would |
 | A deleted row is decided like any other: by its newest version, which is its deletion | The reader has one rule, and a kind that deletes by an update keeps its account on that version |
+| A change record carries only the rows that existed before it, a child that a person moved or re-tagged afterwards stays where they put it, and no change record or move line is ever deleted | A row written after its parent moved was filed by the rules of that moment, and a person's decision about one row outranks a rule about its parent. Section I |
+| The kinds with a requested pass run their batches back to back, in turns, and between them use at most half of a call of the job while another kind is due | A moved row's children should not take hours to follow, and a pass that follows must not hold up the job's ordinary work |
+| A move's note is at most 500 characters, and a download's audit event keeps 200 characters of the request's `Range` | The note is stored once with every row moved; neither text has a reason to be longer |
+| The audit events of an export and of a move, and the read of the owners' addresses for the start email, are made by server code on the person's behalf, and the package is listed for it in the repository's gate | The audit event's create admits a cluster owner or server code, and a developer is neither. Each write comes after the part, the person check and the act it records |
 | The spec and the plan were not reviewed by the owner before the build | The owner's instruction |
 
 ## P. Out of scope

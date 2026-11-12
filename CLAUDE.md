@@ -1941,9 +1941,11 @@ runbook [account-export.md](docs/public/operate/account-export.md)).
 - **A row's children follow it, and the assignment job carries them.** A change
   of a row's account is recorded (`account_row_moves` for a person's explicit
   change, `account_follow_tasks` for every change), and the job gives a row
-  whose parent left its account the parent's account as it stands. Nothing
-  locks ordinary writes: a version appended by a write that read the row before
-  it moved is repaired by the job's next pass.
+  whose parent left its account the parent's account as it stands. **Neither
+  record is ever deleted**: a record carries only rows older than itself, and
+  a child's own `account_row_moves` line is what keeps a person's decision
+  about it. Nothing locks ordinary writes: a version appended by a write that
+  read the row before it moved is repaired by the job's next pass.
 - **`campaigns.sendJob.campaignAccountId` is not a copy of `accountId`.** It is
   the account a send was queued for, which the send worker compares at send
   time. Do not retire it.

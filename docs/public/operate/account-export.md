@@ -183,6 +183,10 @@ that can follow and does not count them. On a large installation following can
 take as long as a pass over the kind, and an export waits until it has
 finished.
 
+What follows is what hung off the row when it moved. A row added to it
+afterwards is filed where it is written. A row that a person has since moved or
+shared somewhere else stays where they put it.
+
 The same act **places** a row that is in no account. On the primary account's
 Data tab, rows awaiting a decision and rows in no account are listed; each can
 be placed in an account, and a row awaiting a decision can also be left out for
