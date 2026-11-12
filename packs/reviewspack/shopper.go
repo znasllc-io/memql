@@ -12,9 +12,15 @@ import "github.com/znasllc-io/memql/component/memql"
 // else, on a deployable whose shopperForms is on, under the site owner's
 // borrowed authority, scoped to the store that deployable is bound to.
 //
-// Everything else the pack ships -- createReview, setReviewDisplay,
-// recordModerationAction, the export capability, the merchant's own lists
-// -- is untouched by this and stays exactly as unreachable as it was.
+// Everything else the pack ships -- the moderation and settings builtins,
+// the export capability, the merchant's own lists -- is untouched by this and
+// stays exactly as unreachable as it was.
+//
+// The form's construct is the pack's own Go, never a mutation: every reviews
+// concept is @serverWritten, and the handler runs a construct under the site
+// owner's borrowed authority WITHOUT internal origin, so a mutation a form
+// named could write nothing. reviewsSubmitFromLink checks the link and then
+// writes through writer.go, whose one inline stamp is the only way in.
 //
 // # Two routes, and the asymmetry between them is the point
 //

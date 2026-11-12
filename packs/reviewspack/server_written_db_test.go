@@ -423,7 +423,10 @@ func TestARefusedPlantChangesNothingThePackShows(t *testing.T) {
 }
 
 // NO MUTATION OF THE PACK IS CALLABLE BY NAME by any caller with arguments of
-// their choosing, and none writes the row it names.
+// their choosing, and none writes the row it names. createReview, submitReview
+// and setReviewDisplay are removed (no product path called them) and stay in
+// the list, so a removed mutation brought back would be caught; the rest are
+// the @serverOnly writes the builtins render.
 func TestNoReviewsMutationIsCallableByName(t *testing.T) {
 	w := newWrittenWorld(t, "srvw-named")
 	now := time.Now().UTC()
