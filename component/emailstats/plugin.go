@@ -44,8 +44,13 @@ const rollupConcept = "integration:emailStats:rollup"
 
 // rollupPrincipal is the only caller the rollup admits: the maintenance
 // principal its scheduled automation runs under
-// (auth.MaintenanceActor("emailStatisticsRollupSweep")).
-const rollupPrincipal = "system:maintenance:emailStatisticsRollupSweep"
+// (auth.MaintenanceActor(auth.AutomationOriginEngine, "emailStatisticsRollupSweep")).
+const rollupPrincipal = "system:maintenance:" + rollupAutomation
+
+// rollupAutomation is the engine automation whose maintenance principal the
+// rollup admits; the admission decides on the principal its constructor
+// minted, never on the id's text.
+const rollupAutomation = "emailStatisticsRollupSweep"
 
 // Integration exposes the rollup and the statistics read.
 type Integration struct {
@@ -220,7 +225,7 @@ func namedIDsArg(args map[string]any, key string) []string {
 // from that source's watermark.
 func (i *Integration) handleRollup(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	actor, ok := auth.AccessFromContext(ctx)
-	if !ok || actor == nil || actor.UserId != rollupPrincipal || !actor.IsClusterOwner() {
+	if !ok || !auth.IsMaintenancePrincipalOf(actor, rollupAutomation) {
 		return nil, fmt.Errorf("email statistics rollup requires the engine maintenance principal")
 	}
 	if !i.rollupRunning.CompareAndSwap(false, true) {

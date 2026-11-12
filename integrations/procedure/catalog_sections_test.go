@@ -27,7 +27,7 @@ const (
 // automation runs with.
 func catalogCtx() context.Context {
 	return auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(),
-		&auth.AccessContext{UserId: catalogAutomationActor, Synthetic: true}))
+		auth.AutomationActor(auth.AutomationOriginEngine, catalogAutomation)))
 }
 
 // sectionFx is one section automation of the run's draft, written the way
@@ -335,12 +335,14 @@ func TestADislikedOrStaleRunCataloguesNothing(t *testing.T) {
 // nothing.
 func TestTheCatalogGateAdmitsOnlyItsAutomation(t *testing.T) {
 	for name, ctx := range map[string]context.Context{
-		"the run's owner":         personCtx(testOwner),
-		"another automation":      auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "system:automation:learnFromSucceededRun", Synthetic: true})),
-		"the maintenance actor":   auth.ContextWithInternalOrigin(maintenanceCtx("sweepConstructReuse")),
-		"no internal origin":      auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: catalogAutomationActor, Synthetic: true}),
-		"a person under internal": auth.ContextWithInternalOrigin(personCtx(testOwner)),
-		"no actor":                context.Background(),
+		"the run's owner":            personCtx(testOwner),
+		"another automation":         auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "system:automation:learnFromSucceededRun", Synthetic: true})),
+		"the maintenance actor":      auth.ContextWithInternalOrigin(maintenanceCtx("sweepConstructReuse")),
+		"no internal origin":         auth.ContextWithAccess(context.Background(), auth.AutomationActor(auth.AutomationOriginEngine, catalogAutomation)),
+		"another source, same name":  auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), auth.AutomationActor(auth.AutomationOriginOther, catalogAutomation))),
+		"an actor built with its id": auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "system:automation:" + catalogAutomation, Synthetic: true})),
+		"a person under internal":    auth.ContextWithInternalOrigin(personCtx(testOwner)),
+		"no actor":                   context.Background(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := newCatalogWorld(t)

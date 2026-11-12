@@ -112,6 +112,14 @@ const COPY: Record<string, RefusalCopy> = {
     title: "This package ships MemQL under a name the engine owns",
     next: "",
   },
+  dsl_automation_name_taken: {
+    // An automation is found by its name alone across the cluster, so a name
+    // belongs to one automation. The server's sentence names the automation
+    // and what holds the name; this supplies the headline and that nothing
+    // was deployed.
+    title: "An automation in this package has a name that is already taken",
+    next: "Nothing was deployed. Give the automation a name of its own, then deploy again.",
+  },
   dsl_refuses_boot: {
     title: "This package's MemQL would stop a node starting",
     next: "These are the same checks a node runs at boot, so nothing was deployed. Fix them in the source and deploy again.",

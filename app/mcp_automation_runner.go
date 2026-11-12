@@ -111,36 +111,27 @@ func (r *mcpAutomationRunner) RunAutomation(ctx context.Context, owner, name str
 	}
 
 	if dryRun {
-		// Fetch the resolved automation's source by its CANONICAL name -- the
-		// dry-run sandbox re-parses the source, and resolving via LoadByName
-		// first guarantees the same construct the live path would execute.
+		// The dry run is asked for BY NAME, the resolved automation's
+		// canonical one, and with no source: the sandbox then runs the
+		// loader's own copy, the automation the live branch below executes,
+		// and not a text read back out of the tree and compiled a second
+		// time. It runs under the same envelope as the live branch, so the
+		// preview acts as whoever the run it predicts acts as: the session's
+		// owner when there is one, the automation's own actor when there is
+		// none.
 		//
-		// Trust is NOT carried across: CompileSource leaves Automation.Trusted
-		// at its false zero value, so the dry-run's steps run with client
-		// origin, matching the live branch below (ExecuteWithClientEvent, per
-		// memql#2888). Do not "fix" the dry-run to compile as trusted -- that
-		// would make the preview MORE permissive than the run it predicts.
-		//
-		// In-run origin is not the whole story, and checking it alone is how
-		// memql#2890 was nearly closed as a non-issue. executeWithEvent also
-		// PERSISTS exec.CallerSuppliedPayload onto any checkpoint the run
-		// mints, and resume.go recomputes trust from that flag -- so a preview
-		// that stamped it false handed POST /automations/resume a token it
-		// could promote to INTERNAL origin with this caller's `input`. That is
-		// closed in component/automations/steps/dryrun.go, which drives the
-		// dry-run through ExecuteWithClientEvent for exactly this reason
-		// (memql#2890). If that call is ever changed back, this path is
-		// exploitable again and nothing here will show it.
-		src, ok := memql.DSLConstructSource(r.logger, "automation", auto.Name)
-		if !ok {
-			return nil, fmt.Errorf("automation %q resolved but its source was not found in the DSL tree (dry-run needs its source)", auto.Name)
-		}
+		// The loader's copy is Trusted, as it is on the live branch, and the
+		// steps still run with client origin for the live branch's reason:
+		// the sandbox drives the run through ExecuteWithClientEvent
+		// (component/automations/steps/dryrun.go), because `input` is
+		// caller-supplied here too (memql#2888, memql#2890). That call is
+		// what keeps the preview no more permissive than the run it predicts;
+		// TestADryRunByNameRunsAtClientOrigin holds it.
 		req := memql.DryRunRequest{
-			AutomationName:   auto.Name,
-			AutomationSource: src,
-			TriggerEvent:     &memql.DryRunTriggerEvent{Topic: "mcp.run." + auto.Name, Kind: "manual", Payload: input},
+			AutomationName: auto.Name,
+			TriggerEvent:   &memql.DryRunTriggerEvent{Topic: "mcp.run." + auto.Name, Kind: "manual", Payload: input},
 		}
-		report, err := memql.RunBundleDryRun(ctx, r.engine, req)
+		report, err := memql.RunBundleDryRun(r.ownerEnvelope(ctx, owner), r.engine, req)
 		if err != nil {
 			return nil, err
 		}

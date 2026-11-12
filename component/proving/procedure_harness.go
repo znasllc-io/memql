@@ -390,7 +390,7 @@ func (l *engineLadder) ShadowCompare(ctx context.Context, owner, runId string) (
 }
 
 func (l *engineLadder) DecidePromotion(ctx context.Context, _ string, approvalId string) (LadderMove, error) {
-	actor := auth.MaintenanceActor(promotionAutomation)
+	actor := auth.MaintenanceActor(auth.AutomationOriginEngine, promotionAutomation)
 	if actor == nil {
 		return LadderMove{}, fmt.Errorf("proving: %s is not a maintenance automation, so nothing can apply a promotion decision as it", promotionAutomation)
 	}

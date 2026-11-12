@@ -18,7 +18,7 @@ func TestNamesNoPersonTellsSynthesizedActorsFromPeople(t *testing.T) {
 		{"   ", false},
 		{SystemActor("edge").UserId, false},
 		{"system:automation:workerAppSessionStaleSweep", false},
-		{MaintenanceActor("auditEventRetentionSweep").UserId, false},
+		{MaintenanceActor(AutomationOriginEngine, "auditEventRetentionSweep").UserId, false},
 		{ConnectorActor("shopify").UserId, false},
 		{AnonymousUserId, false},
 		// The cluster's own principals: the proving suite, the work journal

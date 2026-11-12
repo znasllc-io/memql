@@ -84,7 +84,7 @@ func TestLedgerRowNamesTheKindOfCallerEvenWithNoPerson(t *testing.T) {
 		{"a signed-in person", auth.ContextWithAccess(context.Background(),
 			&auth.AccessContext{UserId: "alice", Role: auth.RoleWriter}), "alice", auth.CallerKindUser},
 		{"the cluster's own sweep", auth.ContextWithAccess(context.Background(),
-			auth.MaintenanceActor("auditEventRetentionSweep")), "", auth.CallerKindSystem},
+			auth.MaintenanceActor(auth.AutomationOriginEngine, "auditEventRetentionSweep")), "", auth.CallerKindSystem},
 		{"nobody stamped anything", context.Background(), "", auth.CallerKindUnattributed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -307,7 +307,7 @@ func TestWithNoResolvedScopeTheRankBranchWithholds(t *testing.T) {
 // stops it -- and a sweep that retires nothing looks exactly like a sweep with
 // nothing to retire.
 func TestEveryNonPrincipalActorIsUnranked(t *testing.T) {
-	if ac := auth.MaintenanceActor("auditEventRetentionSweep"); ac == nil || !ac.Unranked {
+	if ac := auth.MaintenanceActor(auth.AutomationOriginEngine, "auditEventRetentionSweep"); ac == nil || !ac.Unranked {
 		t.Fatal("auth.MaintenanceActor is not marked Unranked; every retention sweep on a " +
 			"rank-strict concept would be refused as a peer-write")
 	}
@@ -345,7 +345,7 @@ func TestRankStrictWithdrawsTheClusterOwnerEscapeExceptForUnrankedActors(t *test
 		t.Fatal("the cluster-owner escape was withdrawn from a concept that declares no rank " +
 			"rule; the withdrawal must be scoped to rankStrict or ~130 declarations change meaning")
 	}
-	sweep := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("auditEventRetentionSweep"))
+	sweep := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "auditEventRetentionSweep"))
 	if _, escaped := rowAuthzWriteEscapeFor(sweep, strict); !escaped {
 		t.Fatal("an unranked actor lost the escape on a rank-strict concept (D4). Every retention " +
 			"sweep and boot seed on that concept would stop, silently")
@@ -359,7 +359,7 @@ func TestRankStrictWithdrawsTheClusterOwnerEscapeExceptForUnrankedActors(t *test
 // The stamp-undo three files claimed and nothing implemented.
 func TestANonPrincipalActorDoesNotOwnTheRowItCreates(t *testing.T) {
 	rankFixture(t, false, "admin")
-	seed := auth.MaintenanceActor("seedSelfAccount")
+	seed := auth.MaintenanceActor(auth.AutomationOriginEngine, "seedSelfAccount")
 	ctx := auth.ContextWithAccess(context.Background(), seed)
 
 	payload := map[string]any{"ownerUserId": seed.UserId, "name": "My company"}
@@ -419,7 +419,7 @@ func TestBorrowedAuthorityStillOwnsTheRowsItCreates(t *testing.T) {
 // reason about (memql#4817).
 func TestTheSyntheticActorsCarryBothFlags(t *testing.T) {
 	for name, ac := range map[string]*auth.AccessContext{
-		"MaintenanceActor":      auth.MaintenanceActor("seedSelfAccount"),
+		"MaintenanceActor":      auth.MaintenanceActor(auth.AutomationOriginEngine, "seedSelfAccount"),
 		"the seed materializer": mustAccess(t, systemActorContext(context.Background())),
 	} {
 		if ac == nil {
@@ -443,7 +443,7 @@ func mustAccess(t *testing.T, ctx context.Context) *auth.AccessContext {
 // quietly un-own every row any automation ever created on somebody's behalf.
 func TestTheOwnerUndoNeverTouchesAThirdPartysRow(t *testing.T) {
 	rankFixture(t, false, "admin")
-	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("seedSelfAccount"))
+	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "seedSelfAccount"))
 	payload := map[string]any{"ownerUserId": "a-real-user"}
 	undoNonPrincipalOwnerStamp(ctx, declaredRankConcept, payload, rowOwnerBefore{})
 	if payload["ownerUserId"] != "a-real-user" {
@@ -579,7 +579,7 @@ func TestTheCompositeBypassDoesNotUndoRankStrictOnWrites(t *testing.T) {
 		t.Fatalf("the caller's OWN row was refused a write (%v)", got)
 	}
 	// An UNRANKED actor keeps the escape (D4), or every sweep stops.
-	sweepCtx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("seedSelfAccount"))
+	sweepCtx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "seedSelfAccount"))
 	if _, escaped := rowAuthzWriteEscapeFor(sweepCtx, decl); !escaped {
 		t.Fatal("an unranked actor lost the escape on a rankStrict+clusterOwner concept")
 	}

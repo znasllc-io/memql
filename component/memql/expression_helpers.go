@@ -125,8 +125,9 @@ func cloneExpressionNode(expr ExpressionNode) ExpressionNode {
 		return &SpecReferenceExpression{Name: node.Name}
 	case *BuiltinFunctionExpression:
 		clone := &BuiltinFunctionExpression{
-			Name:     node.Name,
-			Executor: node.Executor,
+			Name:      node.Name,
+			Executor:  node.Executor,
+			Construct: node.Construct,
 		}
 		if len(node.Args) > 0 {
 			clone.Args = make(map[string]any, len(node.Args))

@@ -2751,6 +2751,10 @@ explicit recovery authorization.
 
 A dry-run preview executes a builtin only when its executor is classified as a metadata read or a computation without side effects. Unclassified executors, including integration builtins, stop the preview with a refusal. This also applies to builtins called from a query or nested logic; a stopped preview does not claim successful execution.
 
+A dry run is asked for in one of two ways, and they differ in what runs and so in who it runs as. Asked for **by name**, with no text, it runs the tree's own copy of the automation, the copy a live run executes. That run acts as the caller when the request carries a caller's identity, and otherwise as the actor a live run gives the automation, which for one of the engine's own maintenance automations is the cluster's maintenance principal. Asked for **with a text**, it compiles that text and runs it as its caller, or as the ordinary automation actor when the request carries no identity. A supplied text never runs with the engine's authority, whatever name it gives its automation, because an automation's principal follows where it was loaded from and never its name. A name the tree does not hold, and a `@disabled` automation, are refused. Either way the steps run with client origin, so a `@serverOnly` construct refuses the preview as it refuses a run a caller starts by name.
+
+The report says who ran: `ranAs` is the acting user id. When the engine's own automation of that name acts under the maintenance principal and the run did not hold it, `authority` says what ran, as whom, and that the engine's own run acts with the engine's authority and this one did not, so a run that found nothing to do because of who it ran as is not read as a clean run with nothing to do. The MCP `run_automation` dry run asks by name; `run_inline_automation` supplies a text.
+
 A statement's value depends on its kind:
 
 - a query's is its rows: each row reads `row.id` and the other intrinsics from the row, and every other name from its payload (`rows.first().email`);

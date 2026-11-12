@@ -33,7 +33,7 @@ func TestInferenceStartupRestoresOnlyAutomaticOwnedWaitTimers(t *testing.T) {
 	if _, err := i.RestoreInferenceWaits(actorCtx("ordinary-user")); err == nil {
 		t.Fatal("startup cross-owner scan accepted ordinary caller")
 	}
-	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns"))
+	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns"))
 	count, err := i.RestoreInferenceWaits(ctx)
 	if err != nil || count != 1 {
 		t.Fatalf("restored %d: %v", count, err)

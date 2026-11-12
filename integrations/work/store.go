@@ -136,7 +136,11 @@ func requireClusterOwner(ctx context.Context) error {
 	if !ok || ac == nil {
 		return fmt.Errorf("work: no authenticated caller")
 	}
-	if ac.IsClusterOwner() {
+	// The scheduled automation's maintenance principal, decided on the mark
+	// its constructor set; or a PERSON who owns the cluster, running a sweep
+	// by hand. A synthetic owner that is not the maintenance principal -- a
+	// system actor named like it -- is neither.
+	if auth.IsMaintenancePrincipal(ac) || (ac.IsClusterOwner() && !ac.Synthetic) {
 		return nil
 	}
 	return fmt.Errorf("work: role %q may not run this sweep; it is reserved to a cluster owner (the scheduled automation runs under the cluster's maintenance principal)", string(ac.Role))

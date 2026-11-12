@@ -280,7 +280,9 @@ design note `docs/internal/design/authored-automations-954.md`.
   handles schedule-driven automations (no input row) and event-driven ones
   (pass the row as `input`) uniformly.
 - `dry_run: true` executes without committing writes — a safe preview of what
-  the automation would do.
+  the automation would do. It asks the sandbox by the automation's name, so it
+  previews the loader's own copy under the session's identity, as the live run
+  executes it; inline execution supplies a text, which runs as its caller.
 - **Inline automation execution (Tier 3)** reuses this same action-chain path:
   submit automation DSL + input, run directly, never persist.
 - Synthesize-event execution (fabricate the triggering row and let the normal

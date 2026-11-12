@@ -195,7 +195,7 @@ func TestLadderPolicyIsReadableFromTheReaderRungAndRefusedBelowIt(t *testing.T) 
 		// is how the ladder reads the policy on an owner's behalf.
 		{"a borrowed owner actor", auth.ContextWithUserActor(context.Background(), "ladder-owner-"+suffix)},
 		// The sweeps' principal.
-		{"the maintenance principal", auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("demoteProcedures"))},
+		{"the maintenance principal", auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "demoteProcedures"))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, 1, rowsOf(t, tc.ctx),

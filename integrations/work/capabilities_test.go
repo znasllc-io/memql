@@ -95,12 +95,12 @@ func TestSweepAutomationsAreOnTheMaintenanceList(t *testing.T) {
 		t.Fatalf("expected 2 scheduled automations in dsl/work/automations.memql, found %v (of %v)", scheduled, names)
 	}
 	for _, name := range scheduled {
-		if !auth.IsMaintenanceAutomation(name) {
+		if !auth.IsMaintenanceAutomation(auth.AutomationOriginEngine, name) {
 			t.Errorf("automation %q is not on component/auth/maintenance_actor.go's list; under the default reader actor its reads answer ZERO ROWS AND NO ERROR, and a sweep that does nothing looks exactly like a cluster with nothing to do", name)
 		}
 	}
 	for _, name := range names {
-		if name == "validateGoalAnswer" && auth.IsMaintenanceAutomation(name) {
+		if name == "validateGoalAnswer" && auth.IsMaintenanceAutomation(auth.AutomationOriginEngine, name) {
 			t.Errorf("validateGoalAnswer borrows the owner its event carries and must not hold the maintenance principal")
 		}
 	}

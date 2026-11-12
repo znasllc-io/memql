@@ -14,11 +14,12 @@ import (
 // TestDryRunCompileResolvesLogicConstructUseImports is the regression guard for
 // memql#1681.
 //
-// Background: the MCP run_automation dry-run path fetches an automation's source
-// via memql.DSLConstructSource (memql#1663), which -- like ExtractFunctionSlices
-// -- prepends the file-top `use <ns>.<construct>.{ ... }` imports to the
-// automation slice. The unified-tree load path instead STRIPS those imports, so
-// only the dry-run / inline-compile path exercised the use-resolution branch.
+// Background: a dry run of an automation's text reads that text with
+// memql.DSLConstructSource (memql#1663; the MCP run_automation dry run did,
+// before it asked by name), which -- like ExtractFunctionSlices -- prepends
+// the file-top `use <ns>.<construct>.{ ... }` imports to the automation slice.
+// The unified-tree load path instead STRIPS those imports, so only the
+// dry-run / inline-compile path exercised the use-resolution branch.
 //
 // The bug: the automation loader's resolveFileUseDeclarations treated every
 // `use` declaration's dotted PATH as a concept id (legacy Form A), so a Form-B

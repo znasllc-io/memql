@@ -155,7 +155,7 @@ func TestDispatchDB_SweepRecoversDueTimersAndInferenceWaits(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	result, err := i.SweepWaiting(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns")), time.Minute)
+	result, err := i.SweepWaiting(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns")), time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestDispatchDB_ADueRetryIsServedByExactlyOneOfTwoReplicas(t *testing.T) {
 		r.SetDispatcher(d)
 		r.SetRunClaimer(automations.NewClusterExecutionGuard(func() *bun.DB { return db }, logger).StrictClaimer())
 	}
-	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns"))
+	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns"))
 	for _, r := range []*Integration{a, b} {
 		if _, err := r.SweepWaiting(maintenance, time.Minute); err != nil {
 			t.Fatal(err)
@@ -305,7 +305,7 @@ func TestDispatchDB_ARetryNobodyServedRunsOnceUnderANonAgentLeader(t *testing.T)
 		t.Fatal("could not stand in for the failing execution's claim")
 	}
 
-	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns"))
+	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns"))
 	res, err := leader.SweepWaiting(maintenance, time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -403,7 +403,7 @@ func TestDispatchDB_SweepLeavesAProcedureReplayRunToItsRunner(t *testing.T) {
 		}
 	}
 
-	result, err := i.SweepWaiting(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns")), time.Minute)
+	result, err := i.SweepWaiting(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns")), time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,7 +481,7 @@ func TestDispatchDB_SweepLeavesAPipelineRunToItsRunner(t *testing.T) {
 	// The journal stamps the run's start as it opens it; a one-nanosecond
 	// window makes it as silent as the control, so only its trigger can keep
 	// the sweep off it.
-	result, err := i.SweepWaiting(auth.ContextWithAccess(ctx, auth.MaintenanceActor("sweepWaitingWorkRuns")), time.Nanosecond)
+	result, err := i.SweepWaiting(auth.ContextWithAccess(ctx, auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns")), time.Nanosecond)
 	if err != nil {
 		t.Fatal(err)
 	}

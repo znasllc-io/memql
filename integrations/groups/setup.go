@@ -84,7 +84,7 @@ func (i *Integration) ConfigureSelfAccount(ctx context.Context, name, ownerUserI
 	// claim supplied a real owner. Only that unconfigured placeholder may be
 	// replaced; another principal or any configured ownership stays protected.
 	seedOwner := account != nil && rowString(account, "configuredAt") == "" &&
-		memql.BareShortId(rowString(account, "ownerUserId")) == auth.MaintenanceActor("seedSelfAccount").UserId
+		memql.BareShortId(rowString(account, "ownerUserId")) == auth.MaintenanceActor(auth.AutomationOriginEngine, "seedSelfAccount").UserId
 	if account != nil && rowString(account, "ownerUserId") != "" && memql.BareShortId(rowString(account, "ownerUserId")) != ownerUserID && !seedOwner {
 		return fmt.Errorf("the cluster organization already belongs to a different owner")
 	}

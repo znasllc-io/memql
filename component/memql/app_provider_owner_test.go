@@ -53,8 +53,8 @@ func ownerlessCallers() []struct {
 	}{
 		{"no actor at all", "", context.Background()},
 		{"a scheduled automation", "system:automation:workerAppSessionStaleSweep", sweep},
-		{"the maintenance principal", auth.MaintenanceActor("auditEventRetentionSweep").UserId,
-			auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("auditEventRetentionSweep"))},
+		{"the maintenance principal", auth.MaintenanceActor(auth.AutomationOriginEngine, "auditEventRetentionSweep").UserId,
+			auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "auditEventRetentionSweep"))},
 		{"a connector", auth.ConnectorActor("shopify").UserId,
 			auth.ContextWithConnectorActor(context.Background(), "shopify")},
 		{"the anonymous actor", auth.AnonymousUserId, context.Background()},

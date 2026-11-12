@@ -154,8 +154,8 @@ func TestOrganizationSetupOnlyReplacesUnconfiguredSeedIdentity(t *testing.T) {
 		name, previous, configured string
 		allowed                    bool
 	}{
-		{"legacy seed", auth.MaintenanceActor("seedSelfAccount").UserId, "", true},
-		{"configured seed", auth.MaintenanceActor("seedSelfAccount").UserId, "2026-09-22T00:00:00Z", false},
+		{"legacy seed", auth.MaintenanceActor(auth.AutomationOriginEngine, "seedSelfAccount").UserId, "", true},
+		{"configured seed", auth.MaintenanceActor(auth.AutomationOriginEngine, "seedSelfAccount").UserId, "2026-09-22T00:00:00Z", false},
 		{"other system actor", "system:maintenance:other", "", false},
 		{"real owner", "different-owner", "", false},
 	} {

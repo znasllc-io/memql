@@ -398,7 +398,7 @@ func sweepRows(ctx context.Context, i *Integration, rows []map[string]any, now t
 	orig := i.rowsInFlight
 	i.rowsInFlight = stub.read
 	defer func() { i.rowsInFlight = orig }()
-	res, _ := i.SweepWaiting(auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: "system:maintenance:sweepWaitingWorkRuns", Role: auth.RoleOwner, Unranked: true, Synthetic: true}), olderThan)
+	res, _ := i.SweepWaiting(auth.ContextWithAccess(ctx, auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns")), olderThan)
 	return res
 }
 
@@ -679,7 +679,7 @@ func TestMissingApprovalReadFailurePreservesSystemWait(t *testing.T) {
 	engine.refuse("workApprovalById", fmt.Errorf("database unavailable"))
 	now := time.Now().UTC()
 	run := map[string]any{"id": "v1:work:run:orphan", "ownerUserId": "", "goalId": "", "triggeredBy": "schedule", "waitingOn": map[string]any{"kind": "approval", "subject": "v1:work:approval:missing", "since": rfc(now.Add(-time.Hour))}}
-	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns"))
+	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns"))
 	closed, err := i.closeOrphanedSystemApprovalWait(ctx, run, now)
 	if err == nil || closed {
 		t.Fatalf("read failure closed a wait: %v %v", closed, err)

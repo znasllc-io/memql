@@ -293,7 +293,7 @@ func TestTheServerStillReadsAccessCodesAndSessions(t *testing.T) {
 			require.NoError(t, err)
 			payloads[concept] = memorynodes.MemoryNode{ID: row.id, Concept: concept, Payload: raw}
 		}
-		sweep := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("retireDeclaredConceptVersions"))
+		sweep := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "retireDeclaredConceptVersions"))
 		for concept, node := range payloads {
 			require.True(t, AdmitSourceRow(sweep, node), "the sweep's principal is refused a %s row", concept)
 			require.False(t, AdmitSourceRow(rankActorCtx(f.owner, auth.RoleWriter), node),
@@ -382,7 +382,7 @@ func TestBorrowedAuthorityReadsAccessCodesAndSessionsOnlyWithInternalOrigin(t *t
 
 	t.Run("the cluster acting still reads, with no origin at all", func(t *testing.T) {
 		// The retention sweep's principal.
-		sweep := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("retireDeclaredConceptVersions"))
+		sweep := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "retireDeclaredConceptVersions"))
 		for concept, node := range nodes {
 			require.True(t, AdmitSourceRow(sweep, node), "the sweep's principal is refused a %s row", concept)
 		}

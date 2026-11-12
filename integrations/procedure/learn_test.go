@@ -193,7 +193,7 @@ func TestMarkConsumed_ADigestOnlyResultIsStillRecognised(t *testing.T) {
 // --- gap G10: the automations can act ---------------------------------------
 
 func maintenanceCtx(automation string) context.Context {
-	return auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(automation))
+	return auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, automation))
 }
 
 func personCtx(userId string) context.Context {
@@ -205,7 +205,7 @@ func personCtx(userId string) context.Context {
 // origin a tree-loaded automation runs under.
 func triggerCtx() context.Context {
 	return auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(),
-		&auth.AccessContext{UserId: "system:automation:learnFromSucceededRun", Synthetic: true}))
+		auth.AutomationActor(auth.AutomationOriginEngine, "learnFromSucceededRun")))
 }
 
 // TestTheCompletionTriggerLearnsAsTheRunsOwner is G10, closed the narrow way.

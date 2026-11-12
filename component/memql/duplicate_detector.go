@@ -50,12 +50,14 @@ package memql
 
 import (
 	"fmt"
+	"io/fs"
 	"sort"
 	"strings"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
 	"github.com/znasllc-io/memql/core/dslfs"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // DuplicateConstruct is one (group, name) collision: the same construct
@@ -197,6 +199,87 @@ func DetectDuplicateConstructs(files []baseloader.RawFile) []DuplicateConstruct 
 		}
 		if out[i].Namespace != out[j].Namespace {
 			return out[i].Namespace < out[j].Namespace
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+// AutomationNameConflict is one automation declared in a candidate's domain
+// whose name another domain of the tree also declares.
+//
+// The per-namespace detector above is right for every registry keyed
+// `<namespace>.<name>`, and automations are not one of them: the scheduler, a
+// call by name, a sub-automation step and a resume all find an automation by
+// its bare name across the whole tree. So two domains declaring one automation
+// name collide even though their namespaces differ: a name belongs to one
+// automation.
+type AutomationNameConflict struct {
+	// Name is the automation's name.
+	Name string
+	// File is the candidate's file that declares it.
+	File string
+	// Engine reports that one of the other declarations is the engine's own
+	// (dsl.SourceEngine). At boot the engine's keeps the name and the
+	// candidate's is left out (component/automations, engineNamesWin).
+	Engine bool
+	// EngineFile is the engine's declaring file when Engine is set. The other
+	// declarations' files are not carried: outside the engine's tree they may
+	// be another package's, which is not this candidate's to read.
+	EngineFile string
+}
+
+// AutomationNameConflicts reports every automation declared in one of the
+// candidate's domains (candidate: top-level domain directories) whose name is
+// also declared in another namespace of tree. Declarations are read where the
+// automation loader reads them (dsl.LoaderReadsConstruct), and the engine's own
+// are told apart by the layer of tree that serves them (dsl.SourceOf), never by
+// a directory's name.
+//
+// A name declared twice in ONE namespace is the per-namespace detector's
+// (DetectDuplicateConstructs), and is not reported again here.
+func AutomationNameConflicts(tree fs.FS, files []baseloader.RawFile, candidate []string) []AutomationNameConflict {
+	own := make(map[string]struct{}, len(candidate))
+	for _, d := range candidate {
+		own[d] = struct{}{}
+	}
+	type declaration struct{ path, namespace string }
+	byName := map[string][]declaration{}
+	for _, f := range files {
+		if !memqldsl.LoaderReadsConstruct("automation", f.Path) {
+			continue
+		}
+		for _, sl := range ExtractKeywordSlices(f.Content, "automation") {
+			if sl.Name != "" {
+				byName[sl.Name] = append(byName[sl.Name], declaration{f.Path, dslfs.NamespaceFromFilePath(f.Path)})
+			}
+		}
+	}
+	var out []AutomationNameConflict
+	for name, decls := range byName {
+		for _, d := range decls {
+			if _, mine := own[dslfs.RootDomainFromFilePath(d.path)]; !mine {
+				continue
+			}
+			c := AutomationNameConflict{Name: name, File: d.path}
+			clash := false
+			for _, other := range decls {
+				if other.namespace == d.namespace {
+					continue
+				}
+				clash = true
+				if !c.Engine && memqldsl.SourceOf(tree, other.path) == memqldsl.SourceEngine {
+					c.Engine, c.EngineFile = true, other.path
+				}
+			}
+			if clash {
+				out = append(out, c)
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].File != out[j].File {
+			return out[i].File < out[j].File
 		}
 		return out[i].Name < out[j].Name
 	})

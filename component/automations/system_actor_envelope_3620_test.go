@@ -27,7 +27,7 @@ import (
 // name is honest; writing "" is not.
 
 func TestSystemActorStampsABindableAccessContext(t *testing.T) {
-	ctx := contextWithSystemActor(context.Background(), "routeRequest")
+	ctx := contextWithSystemActor(context.Background(), &Automation{Name: "routeRequest"})
 
 	ac, ok := auth.AccessFromContext(ctx)
 	if !ok || ac == nil {
@@ -54,7 +54,7 @@ func TestSystemActorStampsABindableAccessContext(t *testing.T) {
 // is the ENTIRE gate on the admin-tier constructs; that guarantee must not
 // weaken now that background automations have a caller.
 func TestSystemActorIsNotAClusterOwner(t *testing.T) {
-	ctx := contextWithSystemActor(context.Background(), "anything")
+	ctx := contextWithSystemActor(context.Background(), &Automation{Name: "anything"})
 	ac, _ := auth.AccessFromContext(ctx)
 	if ac.IsClusterOwner() {
 		t.Fatal("the automation principal must never be a cluster owner -- that bit is the " +
@@ -77,7 +77,7 @@ func TestSystemActorIsNotAClusterOwner(t *testing.T) {
 // exact opposite of that helper's purpose.
 func TestSystemActorDoesNotClobberAnAuthorsAccessContext(t *testing.T) {
 	authored := AuthorContext(context.Background(), "user-author-3620")
-	ctx := contextWithSystemActor(authored, "someAuthoredAutomation")
+	ctx := contextWithSystemActor(authored, &Automation{Name: "someAuthoredAutomation"})
 
 	ac, ok := auth.AccessFromContext(ctx)
 	if !ok || ac.UserId != "user-author-3620" {
@@ -90,7 +90,7 @@ func TestSystemActorDoesNotClobberAnAuthorsAccessContext(t *testing.T) {
 // the engine's "no actor found in context" check read those, and this change
 // must not disturb either.
 func TestSystemActorStillStampsTheTokenSurfaces(t *testing.T) {
-	ctx := contextWithSystemActor(context.Background(), "cronSweep")
+	ctx := contextWithSystemActor(context.Background(), &Automation{Name: "cronSweep"})
 
 	actor := auth.ActorFromContext(ctx)
 	if !strings.HasPrefix(actor, systemActorPrefix) {

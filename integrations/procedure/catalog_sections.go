@@ -64,10 +64,10 @@ import (
 	"github.com/znasllc-io/memql/integrations/planner"
 )
 
-// catalogAutomationActor is the synthetic actor the catalogSucceededSections
-// automation runs under (component/automations' system actor prefix and the
-// automation's name).
-const catalogAutomationActor = "system:automation:catalogSucceededSections"
+// catalogAutomation is the engine automation the cataloguing runs under; the
+// admission decides on the actor the automation executor minted for the
+// engine's own automation of this name (auth.IsEngineAutomationActor).
+const catalogAutomation = "catalogSucceededSections"
 
 // maxSectionTitleRunes bounds a catalogued section's bundle title.
 const maxSectionTitleRunes = 120
@@ -131,7 +131,7 @@ func (i *Integration) handleCatalogSections(ctx context.Context, args map[string
 // the owner whose authority it borrows. See the file header.
 func catalogSectionsOwner(ctx context.Context, args map[string]any) (string, error) {
 	ac, ok := auth.AccessFromContext(ctx)
-	if !ok || ac == nil || !ac.Synthetic || ac.UserId != catalogAutomationActor || !auth.OriginFromContext(ctx).IsInternal() {
+	if !ok || ac == nil || !auth.IsEngineAutomationActor(ac, catalogAutomation) || !auth.OriginFromContext(ctx).IsInternal() {
 		return "", fmt.Errorf("procedure.catalogSections: only the catalogSucceededSections automation catalogues a run's sections -- " +
 			"a catalogued section is served to a later goal by its signature without being planned, and no caller may assert that equivalence")
 	}

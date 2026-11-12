@@ -128,7 +128,7 @@ func (i *Integration) sweep(ctx context.Context, args map[string]any, _ int) ([]
 	// The cluster-owner check above is what makes this elevation safe: only a caller
 	// who could already ask for the pass gets it, it is the same pass the hourly
 	// automation runs, and it reads nothing back to the caller beyond the report.
-	maintenance := auth.MaintenanceActor(maintenanceAutomation)
+	maintenance := auth.MaintenanceActor(auth.AutomationOriginEngine, maintenanceAutomation)
 	if maintenance == nil {
 		return nil, fmt.Errorf("concept retention has no maintenance principal")
 	}

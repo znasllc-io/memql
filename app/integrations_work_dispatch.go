@@ -129,7 +129,7 @@ func (a *App) wireWorkRunDispatcher() {
 // node readiness. On exhaustion, report the failure and leave the unchanged
 // waits to their events or the normal sweep. No provider call runs in this scope.
 func (a *App) restoreInferenceWaits(work *workspine.Integration) {
-	ctx, cancel := context.WithTimeout(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns")), time.Minute)
+	ctx, cancel := context.WithTimeout(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns")), time.Minute)
 	defer cancel()
 	for {
 		count, err := work.RestoreInferenceWaits(ctx)

@@ -563,9 +563,10 @@ func (v *functionValidator) expandFunctionCall(call *FunctionCallExpression) (Ex
 	// unexpanded user function.
 	if fn.Executor != "" && fn.Expr == nil {
 		return &BuiltinFunctionExpression{
-			Name:     fn.Name,
-			Executor: fn.Executor,
-			Args:     args,
+			Name:      fn.Name,
+			Executor:  fn.Executor,
+			Args:      args,
+			Construct: BuiltinConstructKey(fn),
 		}, nil
 	}
 
@@ -1222,9 +1223,10 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 	case *BuiltinFunctionExpression:
 		// Builtin functions are handled directly by the executor
 		return &BuiltinFunctionExpression{
-			Name:     node.Name,
-			Executor: node.Executor,
-			Args:     node.Args,
+			Name:      node.Name,
+			Executor:  node.Executor,
+			Args:      node.Args,
+			Construct: node.Construct,
 		}, nil
 
 	case *CollectionMethodExpression:

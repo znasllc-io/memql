@@ -99,6 +99,17 @@ const (
 	// embedded tree must win, and wrong here, where the author believes they
 	// shipped that domain. Analysis refuses instead.
 	CodeDslDomainReserved = "dsl_domain_reserved"
+	// CodeDslAutomationNameTaken: a discovered domain declares an automation
+	// under a name another domain of the cluster already declares. Automations
+	// are found by their bare name across the whole cluster -- the scheduler, a
+	// call by name, a sub-automation step, a resume -- so a name belongs to one
+	// automation. When the other is the engine's own, boot keeps the engine's
+	// and leaves the package's out; when it is another installed domain's, the
+	// two would contend for the name. Either way the package's would not be the
+	// automation its name reaches, so analysis refuses it, scoped to the file
+	// that declares it. Boot refuses nothing for it, which is why it is not
+	// CodeDslRefusesBoot.
+	CodeDslAutomationNameTaken = "dsl_automation_name_taken"
 	// CodeDslRefusesBoot: the package's DSL does not survive the Init-grade
 	// gates strict boot runs. Carries the construct-level errors boot would
 	// print.

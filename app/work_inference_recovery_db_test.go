@@ -110,7 +110,7 @@ func TestWorkDBInferenceWaitRecoversAfterRestartWithoutReplayingPrefix(t *testin
 				write("createWorkApproval", map[string]any{"approvalId": approval, "runId": runID, "stepKey": "deliver", "kind": "inferenceUnavailable", "subject": map[string]any{"code": "every_door_shut"}, "artifactHash": "fixture", "question": "Use paid provider?", "requestedAt": stamp, "expiresAt": now.Add(time.Hour).Format(time.RFC3339Nano)})
 				leader := newPeer(writer)
 				if !startup {
-					result, e := leader.SweepWaiting(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns")), time.Minute)
+					result, e := leader.SweepWaiting(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns")), time.Minute)
 					require.NoError(t, e)
 					require.GreaterOrEqual(t, result.Redispatched, 1)
 				}
@@ -145,7 +145,7 @@ func TestWorkDBInferenceWaitRecoversAfterRestartWithoutReplayingPrefix(t *testin
 				if startup {
 					// The old scheduler does nothing and the original event was lost.
 					// Agents read the durable wait after they join, using native maintenance authority.
-					maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns"))
+					maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns"))
 					for _, peer := range peers {
 						_, err := peer.RestoreInferenceWaits(maintenance)
 						require.NoError(t, err)

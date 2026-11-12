@@ -329,7 +329,7 @@ func TestAnAccountsReadCarriesTheTierForOperatorsOnly(t *testing.T) {
 	}
 	// The maintenance actor is an operator (unranked cluster owner) but never
 	// staff: a sweep keeps reading accounts through the tier, as it did before.
-	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("seedSelfAccount"))
+	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "seedSelfAccount"))
 	if accountsStaff(maintenance) {
 		t.Fatal("the unranked maintenance actor counts as accounts staff")
 	}

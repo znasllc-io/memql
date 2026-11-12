@@ -14,6 +14,7 @@ import (
 	"github.com/znasllc-io/memql/core/env"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/core/logger"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // ComponentName identifies this package in logs and environment variable lookups.
@@ -71,6 +72,18 @@ type Automation struct {
 	// that has not explicitly declared its source trusted is treated as
 	// caller-supplied. Only the unified tree loader sets it.
 	Trusted bool `json:"-"`
+
+	// Source is the layer of the DSL tree the loader read this automation from
+	// (dsl.SourceOf): the engine's own tree, a compiled pack, or a runtime
+	// domain -- which is what a package staged through Deployables is. Set by
+	// the tree loader from the tree that served the file, never from the
+	// automation's source, and copied by Snapshot.
+	//
+	// It decides one thing: only SourceEngine is granted the cluster's
+	// maintenance principal (maintenanceOrigin, executor.go). The zero value is
+	// SourceUnknown, so an automation built by any other path -- compiled from
+	// a caller's source, built in Go, decoded from JSON -- is not the engine's.
+	Source memqldsl.Source `json:"-"`
 
 	// Name is the unique identifier for this automation (camelCase).
 	Name string `json:"name"`
@@ -688,6 +701,11 @@ type AutomationExecution struct {
 	// which is exactly how memql#2888's first fix was bypassable.
 	CallerSuppliedPayload bool `json:"-"`
 
+	// Actor is who this run acted as, recorded by the executor where it
+	// installs the run's actor. The zero value means no actor was installed:
+	// the run was refused or skipped before it started.
+	Actor RunActor `json:"-"`
+
 	// ID is a unique identifier for this execution.
 	ID string `json:"id"`
 
@@ -790,6 +808,24 @@ type AutomationExecution struct {
 
 	journalFingerprint string
 	cancelRecorded     bool
+}
+
+// RunActor says who a run acted as. The executor records it from the context
+// it has just installed the run's actor on (installRunActor), so anything that
+// reports on a run states its actor from the run itself and does not derive it
+// a second time.
+type RunActor struct {
+	// UserId is the acting actor's user id.
+	UserId string
+	// Role is its role.
+	Role string
+	// Inherited is true when the identity came with the context the run was
+	// started under -- a caller's, an author's -- and false when the executor
+	// gave the automation its own actor.
+	Inherited bool
+	// MaintenancePrincipal is true when the run held its own automation's
+	// maintenance principal (auth.IsMaintenancePrincipalOf).
+	MaintenancePrincipal bool
 }
 
 // NewExecution creates a new automation execution.

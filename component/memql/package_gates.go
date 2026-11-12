@@ -30,6 +30,7 @@ import (
 	"strings"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql/baseloader"
 	"github.com/znasllc-io/memql/core/component"
 	"github.com/znasllc-io/memql/core/dslfs"
 	memqldsl "github.com/znasllc-io/memql/dsl"
@@ -83,6 +84,14 @@ type PackageDSLResult struct {
 	// owns (SkippedCore) is not mounted and has none, and a pin that names one
 	// is left out of the entry it would have been in.
 	Namespaces map[string][]string
+
+	// AutomationNameConflicts are the automations the candidate declares under
+	// a name another domain of the tree also declares (AutomationNameConflicts).
+	// NOT in Diagnostics: boot does not refuse them -- the engine's automation
+	// keeps its name and the other is left out -- so a deploy must not be told
+	// they "would refuse boot". The caller refuses the deploy for them under a
+	// code of their own.
+	AutomationNameConflicts []AutomationNameConflict
 }
 
 // AnalyzePackageDSL validates the product-DSL half of a candidate package.
@@ -106,6 +115,10 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 		// A warning of its own: boot refuses nothing for it (lint_parity.go).
 		result.UnreadRootManifest = &LintDiagnostic{File: dslfs.ManifestFile, Message: msg, Severity: LintSeverityWarning}
 	}
+
+	// Read from the candidate's own view, before anything is built: a name is
+	// a fact of the files, and the answer does not wait on the tree loading.
+	result.AutomationNameConflicts = AutomationNameConflicts(tree, baseloader.ReadAllFrom(tree, logger), mounted)
 
 	concepts, origins, conceptSkips, err := buildUnifiedConceptsWithOrigins(logger, tree)
 

@@ -297,13 +297,15 @@ func callerContext(userId string) context.Context {
 	})
 }
 
-// clusterOwnerContext is what the maintenance principal and a hand-running
-// owner both look like to a handler.
+// clusterOwnerContext is the maintenance principal, as its constructor mints
+// it, for a `system:maintenance:<name>` id, and otherwise a person who owns
+// the cluster running a handler by hand.
 func clusterOwnerContext(userId string) context.Context {
+	if name, ok := strings.CutPrefix(userId, "system:maintenance:"); ok {
+		return auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, name))
+	}
 	return auth.ContextWithAccess(context.Background(), &auth.AccessContext{
-		UserId:    userId,
-		Role:      auth.RoleOwner,
-		Unranked:  true,
-		Synthetic: true,
+		UserId: userId,
+		Role:   auth.RoleOwner,
 	})
 }

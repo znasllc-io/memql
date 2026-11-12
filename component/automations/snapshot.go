@@ -20,7 +20,7 @@ func (l *Loader) Snapshot(source *Automation) (*Automation, error) {
 	if err != nil {
 		return nil, err
 	}
-	owned.Trusted, owned.Origin = source.Trusted, source.Origin
+	owned.Trusted, owned.Origin, owned.Source = source.Trusted, source.Origin, source.Source
 	var copySecrets func([]*ArgsField, []*ArgsField)
 	copySecrets = func(dst, src []*ArgsField) {
 		for i, field := range src {

@@ -73,7 +73,7 @@ func TestTheRetentionSweepAdmitsSessionRows(t *testing.T) {
 	}
 	row := memorynodes.MemoryNode{ID: "v1:platform:siteAccessSession:s", Concept: "v1:platform:siteAccessSession", Payload: payload}
 
-	sweep := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("retireDeclaredConceptVersions"))
+	sweep := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "retireDeclaredConceptVersions"))
 	if !AdmitSourceRow(sweep, row) {
 		t.Error("the retention sweep's principal is refused a session row, so the sweep would preserve every session and fail every hour")
 	}

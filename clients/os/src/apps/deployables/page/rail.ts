@@ -269,6 +269,7 @@ const STOP_FOR_CODE: Readonly<Record<string, StopId>> = {
   // one code, so one of them always sent a person to the wrong stop.
   deployable_hostname_unchosen: "whereItLives",
   dsl_domain_reserved: "whatItIs",
+  dsl_automation_name_taken: "whatItIs",
   dsl_refuses_boot: "whatItIs",
   // A gate the package cannot open is a question about what its MemQL IS, and
   // the repair is in the source, as dsl_refuses_boot's is.

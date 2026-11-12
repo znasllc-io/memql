@@ -64,7 +64,7 @@ func TestObservationStorageAndAuthorizedRead(t *testing.T) {
 	}
 	e := &visibleEngine{sites: []Site{{"one", "one.example.com", "blob://one", "live"}}}
 	i := &Integration{engine: e, db: func() *bun.DB { return db }, checker: measuredChecker{}}
-	maintenance := auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: "system:maintenance:checkDeployableHealth", Role: auth.RoleOwner})
+	maintenance := auth.ContextWithAccess(ctx, auth.MaintenanceActor(auth.AutomationOriginEngine, "checkDeployableHealth"))
 	for range 2 {
 		if _, err := i.sweep(maintenance, nil, 0); err != nil {
 			t.Fatal(err)

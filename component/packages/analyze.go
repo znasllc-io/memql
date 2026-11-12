@@ -229,6 +229,21 @@ func analyzeDSL(tree fs.FS, rep *Report, logger *slog.Logger) {
 			d), true))
 	}
 
+	// An automation is found by its bare name across the whole cluster, so a
+	// name belongs to one automation.
+	for _, c := range result.AutomationNameConflicts {
+		scope := path.Join(DslRoot, c.File)
+		if c.Engine {
+			rep.add(problemFrom(refuseScoped(CodeDslAutomationNameTaken, scope,
+				"automation %q has the name of one of the engine's own automations (%s). The engine's automation keeps its name, so this one would never load. Rename the automation.",
+				c.Name, c.EngineFile), true))
+			continue
+		}
+		rep.add(problemFrom(refuseScoped(CodeDslAutomationNameTaken, scope,
+			"automation %q has a name another DSL domain on this cluster already declares. Automations are found by their name alone, so only one of the two could be the automation the name reaches. Rename the automation.",
+			c.Name), true))
+	}
+
 	domains := make([]string, 0, len(result.Mounted)+len(result.SkippedCore))
 	domains = append(domains, result.Mounted...)
 	domains = append(domains, result.SkippedCore...)

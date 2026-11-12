@@ -89,12 +89,14 @@ func TestLoadByName_CanonicalResolution(t *testing.T) {
 	}
 }
 
-// TestLoadByName_LiveAndDryRunResolveSameConstruct proves the live and dry-run
-// run_automation paths resolve the SAME construct with NO divergence: the live
-// path resolves via LoadByName, then the dry-run path fetches that resolved
-// automation's source via DSLConstructSource(kind="automation", canonicalName).
-// Before #1663 the dry-run source lookup returned false (kind hardcoded against
-// an extractor that never emitted automation slices), so the two paths diverged.
+// TestLoadByName_LiveAndDryRunResolveSameConstruct proves a name resolves to
+// the SAME construct as an automation and as a text: LoadByName resolves it --
+// the resolution both run_automation paths use, the dry run asking the sandbox
+// by that resolved name -- and DSLConstructSource(kind="automation",
+// canonicalName) answers that automation's text, which is what a dry run of a
+// supplied text is handed.
+// Before #1663 the source lookup returned false (kind hardcoded against
+// an extractor that never emitted automation slices), so the two diverged.
 func TestLoadByName_LiveAndDryRunResolveSameConstruct(t *testing.T) {
 	loader := newResolverLoader(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -112,8 +114,7 @@ func TestLoadByName_LiveAndDryRunResolveSameConstruct(t *testing.T) {
 				t.Fatalf("live LoadByName(%q): resolved %q, want expireDelegations", input, auto.Name)
 			}
 
-			// Dry-run source fetch by the resolved canonical name (exactly what
-			// the runner's dry-run path does).
+			// The text of the resolved automation, by its canonical name.
 			src, ok := memql.DSLConstructSource(logger, "automation", auto.Name)
 			if !ok {
 				t.Fatalf("dry-run DSLConstructSource(automation, %q): not found (the #1663 gap)", auto.Name)

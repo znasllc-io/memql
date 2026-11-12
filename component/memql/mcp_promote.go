@@ -223,9 +223,13 @@ func jsonSchemaType(t string) string {
 
 // DSLConstructSource returns the raw `.memql` source slice for a named
 // construct (query / mutation / logic / automation) by scanning the
-// embedded/override DSL tree. Used by the MCP run_automation dry-run path,
-// which feeds the source into the Gate-2 behavioral sandbox.
+// embedded/override DSL tree: the first slice of that (kind, name) in any file.
 // Returns false when no slice with that (kind, name) is found.
+//
+// It answers a TEXT, and a text is a copy: an automation compiled from it has
+// no recorded origin and runs as its caller. A dry run of the tree's own
+// automation is asked for by name instead (DryRunRequest), which is what the
+// MCP run_automation dry run does.
 //
 // Automations are NOT function-registry constructs, so ExtractFunctionSlices
 // deliberately skips them (the function-parse pipeline has no automation case).

@@ -77,7 +77,7 @@ func TestTheSweepKeepsOnlyTheNewestVersionOfAStatusRowPastADay(t *testing.T) {
 			// A finished row whose only version is a week old.
 			f.insert(t, "MemoryNodes", quiet, 7*24*time.Hour, payload(5))
 
-			scheduled := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("retireDeclaredConceptVersions"))
+			scheduled := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "retireDeclaredConceptVersions"))
 			nodes, err := integration.sweep(scheduled, map[string]any{}, 0)
 			require.NoError(t, err, "the scheduled sweep was refused a %s row: its tier does not admit the maintenance principal", concept)
 			report := sweepReport(t, nodes)

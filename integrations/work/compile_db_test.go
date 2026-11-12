@@ -227,7 +227,7 @@ func TestCompileDB_SweepRecoversAnUnclaimedRunAfterLostEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := planners[0].SweepWaiting(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns")), time.Minute)
+	res, err := planners[0].SweepWaiting(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns")), time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,7 +383,7 @@ func TestCompileDB_HeartbeatKeepsLongCompileAliveWithoutLeaseTakeover(t *testing
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	res, err := planners[1].SweepWaiting(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns")), time.Minute)
+	res, err := planners[1].SweepWaiting(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns")), time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +460,7 @@ func TestCompileDB_UnclaimedRunDoesNotReportNodeLoss(t *testing.T) {
 		t.Fatal(err)
 	}
 	bff.SetNow(time.Now)
-	res, err := bff.SweepWaiting(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns")), time.Minute)
+	res, err := bff.SweepWaiting(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns")), time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -488,7 +488,7 @@ func TestCompileDB_SweepDoesNotCloseAPlannerClaimInProgress(t *testing.T) {
 	}
 	// Stop between PostgreSQL arbitration and the first ownership heartbeat.
 	// A sweep on another node must not close the run in this gap.
-	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns"))
+	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns"))
 	res, err := bff.SweepWaiting(maintenance, time.Minute)
 	if err != nil || res.Abandoned != 0 {
 		t.Fatalf("sweep raced the planner's ownership write: %+v, %v", res, err)

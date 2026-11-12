@@ -597,7 +597,7 @@ func (e *Executor) ResumeFrom(
 	}
 
 	// Inject system actor for automation execution
-	ctx = contextWithSystemActor(ctx, automation.Name)
+	ctx, actor := installRunActor(ctx, automation)
 
 	// As executeWithEvent does: a resumed run acts in the account its first
 	// attempt acted in, the triggering row's. A resume does not pass through the
@@ -616,6 +616,7 @@ func (e *Executor) ResumeFrom(
 	// Create new execution tracking the resume
 	triggeredBy := fmt.Sprintf("resumed:%s", journal.RunId)
 	exec := NewExecution(automation.Name, triggeredBy)
+	exec.Actor = actor
 	exec.journalFingerprint = automation.DefinitionFingerprint(fingerprintEngine)
 	// The resumed run IS the original run: same id, new versions of its rows.
 	exec.ID = journal.RunId

@@ -365,7 +365,7 @@ func TestNonPrincipalActorsAreNotGovernedByRank(t *testing.T) {
 		name string
 		ctx  context.Context
 	}{
-		{"a maintenance actor", auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("seedSelfAccount"))},
+		{"a maintenance actor", auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "seedSelfAccount"))},
 		{"the seed materializer", systemActorContext(context.Background())},
 	} {
 		t.Run(c.name, func(t *testing.T) {

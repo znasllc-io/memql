@@ -335,7 +335,7 @@ func TestProcedureLifecycleDB_RecordedToTrustedAndBackToShadow(t *testing.T) {
 	if !decided {
 		t.Fatal("integrations/work offers no decideApproval capability")
 	}
-	tr, err := integ.DecidePromotion(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("onProcedurePromotionDecided")), approvalId)
+	tr, err := integ.DecidePromotion(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "onProcedurePromotionDecided")), approvalId)
 	if err != nil {
 		t.Fatalf("DecidePromotion: %v", err)
 	}

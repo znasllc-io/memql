@@ -60,7 +60,7 @@ func TestCallerlessPromptRequestSaysWhichKindOfCallerItWas(t *testing.T) {
 		want string
 	}{
 		{"maintenance sweep", func() context.Context {
-			return auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("auditEventRetentionSweep"))
+			return auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "auditEventRetentionSweep"))
 		}, auth.CallerKindSystem},
 		{"connector", func() context.Context {
 			return auth.ContextWithConnectorActor(context.Background(), "shopify")

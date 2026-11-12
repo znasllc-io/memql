@@ -42,7 +42,9 @@ func TestLearningTriggerBorrowsOnlyTheRecordedOwnerAcrossReplicas(t *testing.T) 
 		{"missing actor", context.Background(), "alice", true, 0},
 		{"untrusted source", auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "system:automation:learnFromSucceededRun", Synthetic: true}), "alice", true, 0},
 		{"different system", auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(context.Background(), "other")), "alice", true, 0},
-		{"remote trusted event", auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "system:automation:learnFromSucceededRun", Synthetic: true})), "alice", false, 1},
+		{"remote trusted event", auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), auth.AutomationActor(auth.AutomationOriginEngine, "learnFromSucceededRun"))), "alice", false, 1},
+		{"another source, same name", auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), auth.AutomationActor(auth.AutomationOriginOther, "learnFromSucceededRun"))), "alice", true, 0},
+		{"an actor built with its id", auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "system:automation:learnFromSucceededRun", Synthetic: true})), "alice", true, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &ownerLearningEngine{status: "succeeded"}

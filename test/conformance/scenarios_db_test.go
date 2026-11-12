@@ -501,11 +501,13 @@ func (r *scenarioRig) dryRun(t *testing.T, sc scenarioCase) {
 	if len(sc.Seed) > 0 && len(before) == 0 {
 		t.Fatalf("dryRun: the seeds wrote no row a snapshot reads (a seed id is written {\"$id\": ...}), so \"nothing changed\" would hold vacuously")
 	}
-	src, ok := memql.DSLConstructSource(r.quiet, "automation", f.Automation)
-	if !ok {
-		t.Fatalf("dryRun: the tree holds no source for automation %s", f.Automation)
-	}
-	req := memql.DryRunRequest{AutomationName: f.Automation, AutomationSource: src}
+	// By NAME, with no text: the sandbox runs the tree loader's own copy of
+	// the shipped automation, the object the live variant fires, under the
+	// actor a live run gives it. A text read back out of the tree would be a
+	// copy, and a copy runs as its caller, never as the engine's automation.
+	// checkScenarioShape holds that the fire names an automation the tree
+	// ships, so there is no scenario left to hand a text.
+	req := memql.DryRunRequest{AutomationName: f.Automation}
 	if f.Event != nil {
 		ev := v.event(f.Event)
 		req.TriggerEvent = &memql.DryRunTriggerEvent{Topic: ev.Topic, Kind: ev.Kind.String(), Payload: ev.Payload}

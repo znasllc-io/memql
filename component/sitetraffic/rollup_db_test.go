@@ -764,7 +764,7 @@ func TestEachFailedDayIsLoggedOnceByName(t *testing.T) {
 	logs := &recordedLogs{}
 	i := NewIntegration(nil, func() *bun.DB { return db }, testSession, slog.New(logs))
 	i.now = func() time.Time { return now }
-	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("siteStatisticsRollupSweep"))
+	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "siteStatisticsRollupSweep"))
 	if _, err := i.handleRollup(ctx, nil, 0); err == nil {
 		t.Fatal("a run with two failed days answered no error")
 	}
@@ -1142,7 +1142,7 @@ func mustDay(t *testing.T, s string) time.Time {
 // with any other role, any other automation's principal, a cluster owner by
 // hand and an ordinary user are all refused before the database is touched.
 func TestTheBuiltinRefusesAnyoneButItsMaintenancePrincipal(t *testing.T) {
-	principal := auth.MaintenanceActor("siteStatisticsRollupSweep")
+	principal := auth.MaintenanceActor(auth.AutomationOriginEngine, "siteStatisticsRollupSweep")
 	if principal == nil {
 		t.Fatal("siteStatisticsRollupSweep is not on the maintenance list, so its automation runs as a reader and every run is refused")
 	}
@@ -1152,7 +1152,7 @@ func TestTheBuiltinRefusesAnyoneButItsMaintenancePrincipal(t *testing.T) {
 	for name, ac := range map[string]*auth.AccessContext{
 		"an ordinary user":              {UserId: "user-ordinary", Role: auth.RoleWriter},
 		"a cluster owner by hand":       {UserId: "user-owner", Role: auth.RoleOwner},
-		"another automation's":          auth.MaintenanceActor("checkDeployableHealth"),
+		"another automation's":          auth.MaintenanceActor(auth.AutomationOriginEngine, "checkDeployableHealth"),
 		"the principal's id as reader":  {UserId: principal.UserId, Role: auth.RoleReader},
 		"the ordinary automation actor": {UserId: "system:automation:siteStatisticsRollupSweep", Role: auth.RoleReader},
 	} {
@@ -1198,7 +1198,7 @@ func TestASecondRollupInTheSameProcessIsSkipped(t *testing.T) {
 	touched := false
 	i := NewIntegration(nil, func() *bun.DB { touched = true; return nil }, touchingSession(&touched), quietLogger())
 	i.rollupRunning.Store(true)
-	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("siteStatisticsRollupSweep"))
+	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "siteStatisticsRollupSweep"))
 	nodes, err := i.handleRollup(ctx, nil, 0)
 	if err != nil || nodes != nil || touched {
 		t.Errorf("got %d nodes, error %v, database touched %v; want a quiet skip", len(nodes), err, touched)

@@ -183,7 +183,17 @@ func TestConversationSemanticEvidenceAcrossReplicasAndSourceChanges(t *testing.T
 	}}
 	background, _, _ := readMergeTestEngine(t)
 	require.NoError(t, background.integrations.Register(backgroundStore))
-	trusted := auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), auth.SystemActor("automation:indexConversationMemoryOnUpdate")))
+	// A system actor spelled with the trigger's id, and the actor an automation
+	// of another source with the trigger's name runs as, are not the engine's
+	// trigger: the handler decides on the actor the executor minted.
+	for _, notTheTrigger := range []*auth.AccessContext{
+		auth.SystemActor("automation:indexConversationMemoryOnUpdate"),
+		auth.AutomationActor(auth.AutomationOriginOther, "indexConversationMemoryOnUpdate"),
+	} {
+		_, err = background.indexConversationMemoryBuiltin(auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), notTheTrigger)), map[string]any{"conversationId": conversation, "ownerUserId": owner.UserId}, 0)
+		require.Error(t, err, "%s supplied a memory owner", notTheTrigger.UserId)
+	}
+	trusted := auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), auth.AutomationActor(auth.AutomationOriginEngine, "indexConversationMemoryOnUpdate")))
 	_, err = background.indexConversationMemoryBuiltin(trusted, map[string]any{"conversationId": conversation, "ownerUserId": owner.UserId}, 0)
 	require.NoError(t, err)
 	require.True(t, backgroundEmbedded)
