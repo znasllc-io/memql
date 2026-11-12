@@ -97,32 +97,9 @@ func Bootstrap(ctx context.Context, i *Integration, logger *slog.Logger) {
 
 // queueUnstartedBackfills is how a store connected before backfills were
 // queued gets its past: for each store that ingests, every bulk domain of its
-// connection that was never backfilled is queued for the continuing pass.
-//
-// Never backfilled is no row of that store's own, OR a row no backfill ever
-// wrote: no status or `none`, no cursor, and no refusal on it. A sweep or a
-// pause can write a domain's row before this pass reaches it, and "no row"
-// alone would leave that store without its past for good. A row queued,
-// running or failed, complete under the rule below, or carrying the origin's
-// refusal, is left alone, so a second boot and a second node queue nothing
-// more.
-//
-// It also queues, once, a domain READ BEFORE EVERY WRITE CARRIED THE ORIGIN'S
-// VERSION (readBeforeOriginVersions): complete, from a backfill an earlier
-// build began. Such a backfill stamped each bulk line with the time it was
-// streamed, so a snapshot older than a delivery could replace what the
-// delivery recorded, and nothing corrects it until the origin changes that
-// record again. The queue reads the domain again from the start; the backfill
-// it starts completes with a cursor naming the rule, so neither a second boot
-// nor a second node queues it again. A backfill RUNNING at boot is left alone
-// here -- the queue never touches a running one -- and reads the domain once
-// more itself when it reaches its end (finished in backfill.go).
-//
-// When it queues the orders under a grant without read_all_orders, it stamps
-// ordersFrom as a connect does, if the store has none.
-//
-// Each domain's row is read BY ID (memqlsync.StateID), as store health reads
-// it, never by walking syncStatesAll: those rows are the append-only history.
+// connection that was never backfilled is queued for the continuing pass
+// (queueUnstartedBackfillsOf). A store that does not ingest is left out; a
+// paused one gets the same pass when it resumes (resumeStore).
 func (c *Connector) queueUnstartedBackfills(ctx context.Context) {
 	stores, err := c.stores.Stores(ctx)
 	if err != nil {
@@ -130,31 +107,62 @@ func (c *Connector) queueUnstartedBackfills(ctx context.Context) {
 		return
 	}
 	for _, store := range stores {
-		if !store.Ingests() {
+		if store.Ingests() {
+			c.queueUnstartedBackfillsOf(ctx, store)
+		}
+	}
+}
+
+// queueUnstartedBackfillsOf queues, for one store, every bulk domain of its
+// connection that was never backfilled. The boot pass asks it of every store
+// that ingests, and a resume of the store that resumed.
+//
+// Never backfilled is no row of that store's own, OR a row no backfill ever
+// wrote: no status or `none`, no cursor, and no refusal on it. A sweep or a
+// pause can write a domain's row before this pass reaches it, and "no row"
+// alone would leave that store without its past for good. A row queued,
+// running or failed, complete under the rule below, or carrying the origin's
+// refusal, is left alone, so a second boot, a second node and a second resume
+// queue nothing more.
+//
+// It also queues, once, a domain READ BEFORE EVERY WRITE CARRIED THE ORIGIN'S
+// VERSION (readBeforeOriginVersions): complete, from a backfill an earlier
+// build began. Such a backfill stamped each bulk line with the time it was
+// streamed, so a snapshot older than a delivery could replace what the
+// delivery recorded, and nothing corrects it until the origin changes that
+// record again. The queue reads the domain again from the start; the backfill
+// it starts completes with a cursor naming the rule, so it is not queued
+// again. A backfill RUNNING under the earlier rule is left alone here -- the
+// queue never touches a running one -- and begins again by itself, under the
+// rule, at its next step (BackfillStore).
+//
+// When it queues the orders under a grant without read_all_orders, it stamps
+// ordersFrom as a connect does, if the store has none.
+//
+// Each domain's row is read BY ID (memqlsync.StateID), as store health reads
+// it, never by walking syncStatesAll: those rows are the append-only history.
+func (c *Connector) queueUnstartedBackfillsOf(ctx context.Context, store Store) {
+	for _, concept := range generated.ApplyOrder {
+		spec := generated.Types[concept]
+		if !bulkDomain(spec) || !domainInConnection(store, spec) {
 			continue
 		}
-		for _, concept := range generated.ApplyOrder {
-			spec := generated.Types[concept]
-			if !bulkDomain(spec) || !domainInConnection(store, spec) {
-				continue
-			}
-			stateID := memqlsync.StateID(generated.ConceptID(concept), ConnectorName, string(memqlsync.DirectionInbound), store.ID)
-			res, err := c.engine.Execute(operatorContext(ctx), renderCall("syncStateById", map[string]any{"stateId": stateID}))
-			if err != nil {
-				c.logger.Warn("shopify: could not read a domain's sync state at boot; it is not queued", "store", store.ID, "concept", concept, "error", err.Error())
-				continue
-			}
-			if rows := memql.MaterializeRows(res); len(rows) > 0 && mapString(rows[0], "conceptId") != "" &&
-				!neverBackfilled(rows[0]) && !readBeforeOriginVersions(rows[0]) {
-				continue
-			}
-			if err := c.queueBackfill(ctx, store.ID, concept, false); err != nil {
-				c.logger.Warn("shopify: could not queue a backfill at boot", "store", store.ID, "concept", concept, "error", err.Error())
-				continue
-			}
-			if concept == "order" {
-				c.stampOrdersFrom(ctx, store, false)
-			}
+		stateID := memqlsync.StateID(generated.ConceptID(concept), ConnectorName, string(memqlsync.DirectionInbound), store.ID)
+		res, err := c.engine.Execute(operatorContext(ctx), renderCall("syncStateById", map[string]any{"stateId": stateID}))
+		if err != nil {
+			c.logger.Warn("shopify: could not read a domain's sync state; its backfill is not queued", "store", store.ID, "concept", concept, "error", err.Error())
+			continue
+		}
+		if rows := memql.MaterializeRows(res); len(rows) > 0 && mapString(rows[0], "conceptId") != "" &&
+			!neverBackfilled(rows[0]) && !readBeforeOriginVersions(rows[0]) {
+			continue
+		}
+		if err := c.queueBackfill(ctx, store.ID, concept, false); err != nil {
+			c.logger.Warn("shopify: could not queue a backfill", "store", store.ID, "concept", concept, "error", err.Error())
+			continue
+		}
+		if concept == "order" {
+			c.stampOrdersFrom(ctx, store, false)
 		}
 	}
 }

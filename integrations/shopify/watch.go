@@ -514,6 +514,10 @@ func (c *Connector) watchStoreVerdict(ctx context.Context, store Store, v Verdic
 		}
 	}
 
+	if err := c.resumeSeenByWatch(ctx, store, previous, v); err != nil {
+		// Not recorded: the next pass still sees the store resume (resume.go).
+		return errors.Join(append(errs, err)...)
+	}
 	if verdictRecordChanged(previous, rec) {
 		if err := c.recordStoreHealthKey(ctx, store.ID, "verdict", rec.payload(), nil); err != nil {
 			errs = append(errs, fmt.Errorf("shopify: record the verdict: %w", err))

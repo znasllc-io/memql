@@ -192,8 +192,12 @@ const notConnectedRefusal = "shopify: a store that is not connected cannot be pa
 // store's owner or a cluster owner, before anything but the store row is read
 // -- and the write runs as the operator, so the row's own gate is not widened.
 // The person is kept on an audit event of their own, one per pause or resume.
-// It changes the status only: the next verdict says the store resumed, and the
-// next watch pass records it.
+// The next verdict says the store resumed, and the next watch pass records it.
+//
+// A RESUME THEN DOES WHAT IT OWES THE STORE (resumeStore): the deliveries held
+// while it was paused go back in line, and the backfills it never started are
+// queued. A pause does nothing more than write the status: its deliveries are
+// held as they arrive.
 func (i *Integration) handleStoreSetRecording(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	c := i.connector
 	if c == nil {
@@ -216,7 +220,19 @@ func (i *Integration) handleStoreSetRecording(ctx context.Context, args map[stri
 	}
 	switch {
 	case recording && paused:
-		err = c.writeRecording(ctx, store, StatusLive, "shopify_store_resumed")
+		if err = c.writeRecording(ctx, store, StatusLive, "shopify_store_resumed"); err == nil {
+			// What the resume owes the store: the deliveries held during the
+			// pause go back in line, and the backfills it never started are
+			// queued. The resume stands whether or not this finishes -- the
+			// status is written and audited -- and the watch does the rest on
+			// the pass that records the store resumed.
+			resumed := store
+			resumed.Status = StatusLive
+			if resumeErr := c.resumeStore(ctx, resumed); resumeErr != nil {
+				c.logger.Warn("shopify: a resumed store's held deliveries are not all back in line; the store watch returns the rest",
+					"store", store.ID, "error", resumeErr.Error())
+			}
+		}
 	case !recording && !paused:
 		err = c.writeRecording(ctx, store, StatusPaused, "shopify_store_paused")
 	}

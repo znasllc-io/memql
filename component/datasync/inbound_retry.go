@@ -31,7 +31,7 @@ var inboundRetryAfter = [3]time.Duration{time.Minute, 5 * time.Minute, 30 * time
 // mid-dispatch leaves the row due again when the window passes.
 const inboundRetryClaim = 10 * time.Minute
 
-// maxRequeuePages bounds one Requeue call: fifty rows a page.
+// maxRequeuePages bounds one Requeue or ReturnHeld call: fifty rows a page.
 const maxRequeuePages = 100
 
 // RetryResult is what one retry pass did.
@@ -40,6 +40,9 @@ type RetryResult struct {
 	Tried int
 	// Recovered counts the ones of those a connector worked.
 	Recovered int
+	// Held counts the ones of those a connector held: its tenant's recording
+	// is paused, and the delivery waits for the resume.
+	Held int
 }
 
 // RetryDue tries again ONE page of the failed deliveries whose next try has
@@ -95,7 +98,10 @@ func (d *Dispatcher) RetryDue(ctx context.Context) (RetryResult, error) {
 		}
 		out.Tried++
 		res, err := d.DispatchStaged(ctx, staged)
-		if err == nil && res.Handled {
+		switch {
+		case err == nil && res.Held:
+			out.Held++
+		case err == nil && res.Handled:
 			out.Recovered++
 		}
 	}
@@ -130,36 +136,76 @@ func (d *Dispatcher) definitelyUnclaimed(ctx context.Context, source string) boo
 // Requeue puts every given-up delivery of one source back in line -- failed,
 // with its four tries spent -- and returns how many. Its tries start again from
 // none and it is due now. A delivery still waiting for its next try is not
-// given up and is left as it is. The given-up page is read again until it
-// holds nothing this call has not already requeued, so a write that did not
-// take cannot keep the call reading.
+// given up and is left as it is. A call that stops at its bound returns what it
+// did; an operator presses again for the rest.
 func (d *Dispatcher) Requeue(ctx context.Context, source string) (int, error) {
+	n, _, err := d.backInLine(ctx, source, "requeueInbound", "given-up", d.store.InboundRequestsGivenUp)
+	return n, err
+}
+
+// ReturnHeld puts every HELD delivery of one source back in line -- the ones a
+// connector would not apply while its tenant's recording was paused (hold) --
+// and returns how many. A connector calls it when the tenant resumes. Like a
+// requeued delivery, each has its tries set to none and is due now, and the
+// retry pass works it; one whose tenant is still paused is held again.
+//
+// A return that stopped at its bound with deliveries still held answers an
+// error beside the count. Nobody presses this one again: its caller must know
+// the job is not done, or the rest would stay held until the next resume.
+func (d *Dispatcher) ReturnHeld(ctx context.Context, source string) (int, error) {
+	n, more, err := d.backInLine(ctx, source, "returnHeldInbound", "held", d.store.InboundRequestsHeld)
+	if err == nil && more {
+		err = fmt.Errorf("datasync: %d held deliveries of %q were put back in line and more remain; it is to be run again", n, strings.TrimSpace(source))
+	}
+	return n, err
+}
+
+// backInLine puts the deliveries `page` answers for one source back in line:
+// no tries counted, due now. It returns how many, and whether it stopped at
+// its bound of maxRequeuePages reads with the last one still answering rows.
+//
+// The page is read again until it holds nothing this call has not already
+// moved, so a write that did not take cannot keep the call reading. Each write
+// is fenced on the version the read returned (Store.RequeueInboundRequest): a
+// row another writer has moved since -- a second call's requeue, the retry
+// pass's claim of a row the first call put back -- is left to that writer and
+// not counted. Without the fence a second call could make due again a row a
+// pass is working, and the delivery would be dispatched from two places.
+func (d *Dispatcher) backInLine(ctx context.Context, source, builtin, what string, page func(context.Context, string) ([]StagedRequest, error)) (int, bool, error) {
 	source = strings.TrimSpace(source)
 	if source == "" {
-		return 0, fmt.Errorf("datasync: requeueInbound needs the source whose given-up deliveries go back in line")
+		return 0, false, fmt.Errorf("datasync: %s needs the source whose %s deliveries go back in line", builtin, what)
 	}
 	opCtx := OperatorContext(ctx)
 	at := d.now().UTC()
-	done := map[string]bool{}
-	for page := 0; page < maxRequeuePages; page++ {
-		rows, err := d.store.InboundRequestsGivenUp(opCtx, source)
+	seen := map[string]bool{}
+	moved := 0
+	for read := 0; read < maxRequeuePages; read++ {
+		if err := ctx.Err(); err != nil {
+			return moved, true, err
+		}
+		rows, err := page(opCtx, source)
 		if err != nil {
-			return len(done), err
+			return moved, false, err
 		}
 		progressed := false
 		for _, r := range rows {
-			if done[r.RequestId] || strings.TrimSpace(r.Source) != source {
+			if seen[r.RequestId] || strings.TrimSpace(r.Source) != source {
 				continue
 			}
-			if err := d.store.RequeueInboundRequest(opCtx, r.RequestId, at); err != nil {
-				return len(done), err
-			}
-			done[r.RequestId] = true
+			seen[r.RequestId] = true
 			progressed = true
+			won, err := d.store.RequeueInboundRequest(opCtx, r, at)
+			if err != nil {
+				return moved, false, err
+			}
+			if won {
+				moved++
+			}
 		}
 		if !progressed {
-			break
+			return moved, false, nil
 		}
 	}
-	return len(done), nil
+	return moved, true, nil
 }

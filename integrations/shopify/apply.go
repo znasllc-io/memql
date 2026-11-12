@@ -149,9 +149,21 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 		return nil, c.applyUninstall(ctx, store, req)
 	}
 	if !store.Ingests() {
-		// A paused store still STAGES -- the receiver recorded the
-		// delivery -- so a pause loses telemetry rather than events, and
-		// resuming does not need a backfill.
+		if pausedByAPerson(store) {
+			// A PAUSE HOLDS, IT DOES NOT LOSE. The receiver staged the
+			// delivery, and answering "nothing to write" for it would have the
+			// runtime stamp it processed: the sweep after a resume reads what
+			// changed, but a domain swept by its last-changed time cannot see
+			// a deletion, so a record deleted during a pause would stay in the
+			// mirror for good. The runtime holds the delivery instead
+			// (memqlsync.ErrRecordingPaused) and resumeStore puts it back in
+			// line.
+			return nil, memqlsync.RecordingPaused(ConnectorName, store.ID)
+		}
+		// Not connected -- Shopify reported the app uninstalled, the store's
+		// data was purged, or its status records nothing: nobody is waiting
+		// for a resume, so nothing is asked and nothing is written, and the
+		// runtime stamps the delivery processed.
 		return nil, nil
 	}
 
@@ -298,6 +310,15 @@ func readUnderOrders(spec *generated.TypeSpec) bool {
 // was never recorded is not known to hold it.
 func emptyAnswerRetires(store Store, spec *generated.TypeSpec) bool {
 	return !readUnderOrders(spec) || grantIncludes(store.ScopesGranted)[allOrdersScope]
+}
+
+// pausedByAPerson reports whether the store's recording is paused and nothing
+// else: a person chose it, and a resume returns the store to recording. A
+// purge leaves the status paused as well (markStoreRedacted), and an
+// uninstalled store keeps whatever status it had; neither is such a pause,
+// and the verdict reads both as not connected.
+func pausedByAPerson(store Store) bool {
+	return store.Status == StatusPaused && store.UninstalledAt == "" && store.RedactedAt == ""
 }
 
 func (c *Connector) deduped(req memqlsync.InboundRequest, gid string) bool {

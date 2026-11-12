@@ -313,12 +313,32 @@ func (s *Store) InboundRequestsGivenUp(ctx context.Context, source string) ([]St
 	return stagedFromRows(rows), nil
 }
 
-// RequeueInboundRequest puts one delivery back in line: no tries counted, due
-// at at.
-func (s *Store) RequeueInboundRequest(ctx context.Context, requestID string, at time.Time) error {
-	_, err := s.exec(ctx, call("mutation", "requeueInboundRequest",
-		arg{"requestId", requestID}, arg{"nextAttemptAt", at.UTC().Format(time.RFC3339)}))
-	return err
+// InboundRequestsHeld reads one page of one source's HELD deliveries, least
+// recently written first and without their bodies: failed, with no next try,
+// and their lastError exactly memqlsync.ErrRecordingPaused's text, which the
+// dispatcher's hold writes and nothing else does. Read fresh, because
+// ReturnHeld reads it again after putting the last page back in line.
+func (s *Store) InboundRequestsHeld(ctx context.Context, source string) ([]StagedRequest, error) {
+	rows, err := s.rows(memql.ContextWithFreshRead(ctx), call("query", "inboundRequestsHeld",
+		arg{"source", source}, arg{"reason", memqlsync.ErrRecordingPaused.Error()}))
+	if err != nil {
+		return nil, err
+	}
+	return stagedFromRows(rows), nil
+}
+
+// RequeueInboundRequest puts one delivery back in line -- no tries counted,
+// due at at -- fenced on the version the read that found it returned, and
+// reports whether this caller's write took. A write another writer overtook
+// answers false and writes nothing: whoever won has decided what the row is.
+func (s *Store) RequeueInboundRequest(ctx context.Context, staged StagedRequest, at time.Time) (bool, error) {
+	fenced := memql.ContextWithRowVersionFence(ctx, inboundRequestConcept, staged.RequestId, staged.Version)
+	_, err := s.exec(fenced, call("mutation", "requeueInboundRequest",
+		arg{"requestId", staged.RequestId}, arg{"nextAttemptAt", at.UTC().Format(time.RFC3339)}))
+	if errors.Is(err, memql.ErrRowVersionChanged) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // SyncStateFor reads one domain's health -- one partition's, for a

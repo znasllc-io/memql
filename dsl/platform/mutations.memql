@@ -518,13 +518,14 @@ mutation inboundRequest updateInboundRequestStatus {
   }
 }
 
-/// Put one given-up delivery back in line (store mirror, U4): its tries start again from none and
-/// the retry pass may take it at nextAttemptAt. Called by datasyncRequeueInbound for the rows
-/// inboundRequestsGivenUp answers; the status stays failed, which is what the retry pass reads.
+/// Put one delivery back in line (store mirror, U4): its tries start again from none and the retry
+/// pass may take it at nextAttemptAt. Called by datasyncRequeueInbound for the given-up rows
+/// inboundRequestsGivenUp answers, and by datasyncReturnHeldInbound for the held rows
+/// inboundRequestsHeld answers; the status stays failed, which is what the retry pass reads.
 ///
 /// @serverOnly rather than actor.userId scoping, for updateInboundRequestStatus's reason: a staged
 /// delivery has no owner to scope to, and the one writer is the datasync runtime under its operator
-/// identity, behind datasyncRequeueInbound's cluster-owner gate. A client never works a delivery.
+/// identity, behind the two builtins' cluster-owner gate. A client never works a delivery.
 @serverOnly
 mutation inboundRequest requeueInboundRequest {
   args {

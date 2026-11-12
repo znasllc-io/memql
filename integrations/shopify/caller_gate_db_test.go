@@ -69,6 +69,10 @@ func TestAStoresOwnerWhoIsNotAClusterOwnerPausesAndResumesIt(t *testing.T) {
 	if err := eng.RegisterIntegration(NewIntegration(c)); err != nil {
 		t.Fatal(err)
 	}
+	// The sync runtime, as on a node: a resume returns the store's held
+	// deliveries and queues its unstarted backfills through its builtins.
+	syncRuntimeOn(t, eng, c)
+	cleanStoreRows(t, db, storeID)
 	ctx := context.Background()
 	status := func() string {
 		t.Helper()

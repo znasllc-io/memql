@@ -206,26 +206,6 @@ func TestAFetchThatResolvesTheWrongTypeIsRefused(t *testing.T) {
 	}
 }
 
-func TestApplyIsANoOpForAPausedStore(t *testing.T) {
-	h := newHarness(t)
-	h.engine.setRows("stores", []map[string]any{{
-		"id": testStoreID, "domain": "acme-widgets.myshopify.com",
-		"adminTokenRef": "ACME_ADMIN", "status": StatusPaused,
-	}})
-	h.conn.stores.Invalidate()
-
-	writes, err := h.conn.Apply(context.Background(), delivery("products/update", "gid://shopify/Product/1"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(writes) != 0 {
-		t.Errorf("a paused store produced %d writes", len(writes))
-	}
-	if len(h.admin.seen()) != 0 {
-		t.Error("a paused store still called the Admin API")
-	}
-}
-
 func TestApplyIsANoOpForAnUnknownStoreAndAnUnmirroredTopic(t *testing.T) {
 	h := newHarness(t)
 

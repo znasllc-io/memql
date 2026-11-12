@@ -182,6 +182,11 @@ type DispatchResult struct {
 	Handled bool
 	Applied int
 	Stale   int
+	// Held says the connector would not apply the delivery while its tenant's
+	// recording is paused (memqlsync.ErrRecordingPaused): nothing was written,
+	// the delivery is kept as it was, and it is neither a success nor a
+	// failure.
+	Held bool
 }
 
 // Dispatch works one staged inbound request.
@@ -196,6 +201,11 @@ type DispatchResult struct {
 // staged metadata cannot be read (DispatchStaged): it is stamped `failed`
 // once the connector has claimed it, and never before, so the no-op above
 // holds for every row of an unserved source whatever its metadata says.
+//
+// A delivery of a tenant whose recording is paused is HELD rather than
+// failed: stamped `failed` with the pause as its reason, no next try and the
+// try not counted, and put back in line when the tenant resumes (hold,
+// ReturnHeld).
 func (d *Dispatcher) Dispatch(ctx context.Context, req memqlsync.InboundRequest) (DispatchResult, error) {
 	connector, ok := d.connectorFor(ctx, req.Source)
 	if !ok {
@@ -358,6 +368,13 @@ func (d *Dispatcher) dispatchTo(ctx context.Context, connector memqlsync.Connect
 	opCtx := OperatorContext(ctx)
 
 	writes, err := connector.Apply(connCtx, req)
+	if memqlsync.IsRecordingPaused(err) {
+		if err := d.hold(connCtx, opCtx, connector, req); err != nil {
+			return out, fmt.Errorf("datasync: %q could not hold inbound request %q while recording is paused: %w", source, req.RequestId, err)
+		}
+		out.Held = true
+		return out, nil
+	}
 	if err != nil {
 		d.failed(connCtx, opCtx, connector, req, prior, err)
 		return out, fmt.Errorf("datasync: %q applying inbound request %q: %w", source, req.RequestId, err)
@@ -396,6 +413,30 @@ func (d *Dispatcher) failed(connCtx, opCtx context.Context, connector memqlsync.
 	d.stampFailed(opCtx, req.RequestId, prior, err.Error(), retry)
 }
 
+// hold keeps a delivery its connector would not apply while recording is
+// paused. A PAUSE HOLDS, IT DOES NOT LOSE: stamped `processed`, a delete notice
+// that arrived during a pause was gone for good, because the sweep after a
+// resume reads what changed and cannot see what was deleted.
+//
+// The row is written `failed` with no next try, its lastError EXACTLY the
+// sentinel's text and its try count left as it was. That is the shape of a
+// refusal no retry changes, and it is chosen for what does not read it: the
+// retry pass answers only rows with a next try, and the given-up read only
+// rows at four tries, so a held delivery is neither tried on a schedule nor
+// counted as a change that could not be recorded. The text is how it is found
+// again (Store.InboundRequestsHeld), which is why the try is not counted and
+// nothing is added to the sentence.
+//
+// The connector is told to forget the delivery, as for any try that will be
+// made again. The write's failure is returned: unlike the stamp of an outcome,
+// it IS the outcome.
+func (d *Dispatcher) hold(connCtx, opCtx context.Context, connector memqlsync.Connector, req memqlsync.InboundRequest) error {
+	if forgetter, ok := connector.(memqlsync.InboundForgetter); ok {
+		forgetter.ForgetInbound(connCtx, req)
+	}
+	return d.stamp(opCtx, req.RequestId, "failed", memqlsync.ErrRecordingPaused.Error(), arg{"nextAttemptAt", ""})
+}
+
 // worthAnotherTry reports whether a failure may go differently on a later try.
 // Everything is, except what the contract says will recur: a permanent
 // refusal, a grant that does not cover the domain, a domain the connector was
@@ -412,7 +453,7 @@ func worthAnotherTry(err error) bool {
 // stampProcessed records a try that worked: the try is counted and no next
 // try is left on the row.
 func (d *Dispatcher) stampProcessed(ctx context.Context, requestID string, prior int) {
-	d.stamp(ctx, requestID, "processed", "",
+	_ = d.stamp(ctx, requestID, "processed", "",
 		arg{"attempts", prior + 1}, arg{"nextAttemptAt", ""})
 }
 
@@ -429,19 +470,20 @@ func (d *Dispatcher) stampFailed(ctx context.Context, requestID string, prior in
 	if retry && attempts < maxInboundAttempts {
 		next = d.now().UTC().Add(inboundRetryAfter[attempts-1]).Format(time.RFC3339)
 	}
-	d.stamp(ctx, requestID, "failed", reason, arg{"attempts", attempts}, arg{"nextAttemptAt", next})
+	_ = d.stamp(ctx, requestID, "failed", reason, arg{"attempts", attempts}, arg{"nextAttemptAt", next})
 }
 
-// stamp records the request's handling outcome. Best effort: a failure
-// to stamp must not turn a successful apply into a reported failure, and
-// the delivery is durable either way.
+// stamp records the request's handling outcome. For an outcome the write is
+// best effort, and its callers drop the error: a failure to stamp must not turn
+// a successful apply into a reported failure, and the delivery is durable
+// either way.
 //
 // It names only the fields it means to write: updateInboundRequestStatus keeps
 // every one it is not handed, so a stamp cannot reset what another writer of
 // the row recorded.
-func (d *Dispatcher) stamp(ctx context.Context, requestID, status, lastError string, fields ...arg) {
+func (d *Dispatcher) stamp(ctx context.Context, requestID, status, lastError string, fields ...arg) error {
 	if strings.TrimSpace(requestID) == "" {
-		return
+		return nil
 	}
 	args := append([]arg{
 		{"requestId", requestID},
@@ -449,7 +491,8 @@ func (d *Dispatcher) stamp(ctx context.Context, requestID, status, lastError str
 		{"lastError", truncateError(lastError)},
 		{"processedAt", d.now().UTC().Format(time.RFC3339)},
 	}, fields...)
-	_, _ = d.store.exec(ctx, call("mutation", "updateInboundRequestStatus", args...))
+	_, err := d.store.exec(ctx, call("mutation", "updateInboundRequestStatus", args...))
+	return err
 }
 
 // recordInboundHealth updates lastInboundAt and lagSeconds for every

@@ -36,6 +36,8 @@ import (
 //	                 deliveries whose next try has come.
 //	requeueInbound   OPERATOR-DRIVEN. A cluster owner putting one source's
 //	                 given-up deliveries back in line.
+//	returnHeldInbound ENGINE-DRIVEN. A connector putting back in line the
+//	                 deliveries held while one of its tenants was paused.
 //
 // The scheduled and event-driven ones are no-ops on a node whose build has no
 // connector bound,
@@ -128,6 +130,12 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema:  map[string]string{"source": "string (required) - the inbound source whose given-up deliveries go back in line"},
 		},
 		{
+			Name:        "returnHeldInbound",
+			Description: "Put one source's held inbound deliveries -- the ones a connector would not apply while its tenant's recording was paused -- back in line: no tries counted, due now. A connector calls it when the tenant resumes; a delivery whose tenant is still paused is held again. Answers an error when it stopped at its bound with deliveries still held. For a cluster owner or the engine's own call (internal origin); anybody else is refused before anything is read.",
+			Handler:     i.handleReturnHeldInbound,
+			ArgsSchema:  map[string]string{"source": "string (required) - the inbound source whose held deliveries go back in line"},
+		},
+		{
 			Name:        "retryOutboxEntry",
 			Description: "Return one dead-lettered entry to the queue. Attempts reset to zero, because the operator has presumably fixed what was wrong and carrying the old count forward would dead-letter it again on the first hiccup. For a cluster owner or the engine's own call (internal origin); anybody else is refused before anything is read.",
 			Handler:     i.handleRetryOutboxEntry,
@@ -176,9 +184,10 @@ func requireInternalOrigin(ctx context.Context, name string) error {
 
 // requireOperator is the gate of the operator's sync acts -- the five
 // builtins behind Cluster > Data's buttons (startBackfill, setSyncPaused,
-// retryOutboxEntry, discardOutboxEntry, requeueInbound) -- checked FIRST,
-// before any argument is read into a read or a write. Each is @sdk with no
-// @requiresCapability, and a builtin with neither has no rank floor: every
+// retryOutboxEntry, discardOutboxEntry, requeueInbound) -- and of
+// returnHeldInbound, which a connector calls as the operator -- checked FIRST,
+// before any argument is read into a read or a write. None carries a
+// @requiresCapability, and a builtin without one has no rank floor: every
 // signed-in caller of any role reaches its handler, and the page's part only
 // hides the buttons. So the handler asks: a call with internal origin (a
 // connector acting as the operator, an automation), or a cluster owner -- the
@@ -246,6 +255,9 @@ func (i *Integration) handleDispatchInbound(ctx context.Context, args map[string
 	if !res.Handled {
 		return resultNode("skipped", "no connector serves source "+source)
 	}
+	if res.Held {
+		return resultNode("held", "recording is paused for the delivery's store; it goes back in line when recording resumes")
+	}
 	return resultNode("processed", fmt.Sprintf("applied=%d stale=%d", res.Applied, res.Stale))
 }
 
@@ -258,7 +270,7 @@ func (i *Integration) handleRetryInbound(ctx context.Context, _ map[string]any, 
 	if err != nil {
 		return nil, err
 	}
-	return resultNode("retried", fmt.Sprintf("tried=%d recovered=%d", res.Tried, res.Recovered))
+	return resultNode("retried", fmt.Sprintf("tried=%d recovered=%d held=%d", res.Tried, res.Recovered, res.Held))
 }
 
 // handleRequeueInbound is an operator putting given-up deliveries back in
@@ -276,6 +288,25 @@ func (i *Integration) handleRequeueInbound(ctx context.Context, args map[string]
 	}
 	i.logger.Info("datasync: given-up inbound deliveries were put back in line", "source", source, "requeued", n)
 	return resultNode("requeued", fmt.Sprintf("source=%s requeued=%d", source, n))
+}
+
+// handleReturnHeldInbound is a connector returning the deliveries held while
+// one of its tenants was paused: the Shopify connector, as the operator and
+// with internal origin, when a store resumes. A cluster owner may run it too;
+// nobody else reaches the read.
+func (i *Integration) handleReturnHeldInbound(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireOperator(ctx, "returnHeldInbound"); err != nil {
+		return nil, err
+	}
+	source := strings.TrimSpace(argString(args, "source"))
+	n, err := i.dispatcher.ReturnHeld(ctx, source)
+	if n > 0 {
+		i.logger.Info("datasync: held inbound deliveries were put back in line", "source", source, "returned", n)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return resultNode("returned", fmt.Sprintf("source=%s returned=%d", source, n))
 }
 
 // handleReconcileDomains is the scheduled sweep. A connector that

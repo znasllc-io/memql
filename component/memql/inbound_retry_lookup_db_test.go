@@ -19,10 +19,11 @@ import (
 // THE RETRY PASS MUST NOT COST THE INBOX (store mirror, U4). Every webhook
 // delivery is a v1:platform:inboundRequest row carrying its whole body, and an
 // installation keeps them: an unfiltered read of the concept times out. The
-// datasync retry pass asks inboundRequestsDueForRetry every minute, and the
-// operator's given-up list asks inboundRequestsGivenUp. Without a lookup both
-// collapse every delivery to its latest version and read its payload -- body
-// and all -- to keep a handful of failed ones. With the status lookup
+// datasync retry pass asks inboundRequestsDueForRetry every minute, the
+// operator's given-up list asks inboundRequestsGivenUp, and a resumed store's
+// connector asks inboundRequestsHeld. Without a lookup each collapses every
+// delivery to its latest version and reads its payload -- body and all -- to
+// keep a handful of failed ones. With the status lookup
 // (memory_nodes_inbound_failed_lookup_idx, partial on status = failed) they
 // enumerate only the deliveries that ever failed.
 //
@@ -46,6 +47,13 @@ func TestTheInboundRetryReadsLookUpOnlyFailedDeliveries(t *testing.T) {
 			name:  "what was given up",
 			query: `query inboundRequestsGivenUp(source: "inbox")`,
 			want:  []string{"v1:platform:inboundRequest:inbox-given-up"},
+		},
+		{
+			// Failed with no next try, like inbox-refused beside it; the
+			// reason, compared exactly, is what makes it held.
+			name:  "what is held",
+			query: `query inboundRequestsHeld(source: "inbox", reason: "recording is paused")`,
+			want:  []string{"v1:platform:inboundRequest:inbox-held"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -121,6 +129,10 @@ func inboxFixture(t *testing.T) (*bun.DB, *MemQLEngine, *latestPlanCapture) {
 	// Found by the lookup through its failed version, refused on its latest.
 	add("inbox-recovered", 5*time.Minute, failed(1, "2026-11-11T11:06:00Z"))
 	add("inbox-recovered", 6*time.Minute, map[string]any{"status": "processed", "attempts": 2})
+	// Held, as the dispatcher writes it: the reason and an empty next try.
+	add("inbox-held", 7*time.Minute, map[string]any{"status": "failed", "attempts": 1, "nextAttemptAt": "", "lastError": "recording is paused"})
+	// Refused for a reason that only begins as the hold's does.
+	add("inbox-refused-like-held", 8*time.Minute, map[string]any{"status": "failed", "attempts": 1, "nextAttemptAt": "", "lastError": "recording is paused, they said"})
 	_, err = db.NewInsert().Model(&nodes).Exec(ctx)
 	require.NoError(t, err)
 	_, err = db.ExecContext(ctx, `VACUUM ANALYZE "MemoryNodes"`)
