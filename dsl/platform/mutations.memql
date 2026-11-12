@@ -441,16 +441,21 @@ mutation outboundRequest updateOutboundRequestStatus {
 // delivery mint unbounded rows (memql#2957 landing review). It is
 // still recorded on the row; it just does not decide the id.
 //
-// @createOnly stops the STATUS being reset. It does not stop the
-// second node.created firing -- this is at-least-once delivery with a
-// stable idempotency key, not exactly-once processing, and a product
-// automation has to branch on status before doing work.
+// @createOnly stops the STATUS being reset. It does not stop a second
+// node.created: a redelivery that changes the row publishes one, and so
+// does every later write of the row, a handler's own status stamp
+// included. This is at-least-once delivery with a stable idempotency key,
+// not exactly-once processing, so an automation on this concept filters
+// its trigger on `received`, the staged row nobody has worked, and one that
+// works a row stamps it. Every automation the engine ships on this concept
+// carries that filter; dsl/platform/automations.memql records what an
+// unfiltered one did.
 //
 // verifiedBy (memql#5795) is @createOnly for the same reason status is,
-// seen from the dispatcher: dispatchInboundToConnector fires once, on
-// node.created, and reads the tier off that payload, so a re-stage of the
-// same signed payload must not rewrite which secret verified the row that
-// was dispatched.
+// seen from the dispatcher: it applies a row only when the connector's own
+// secret verified it, and reads that tier from the row, so a re-stage of
+// the same signed payload must not rewrite which secret verified the row
+// that was dispatched.
 //
 // @serverOnly (memql#5707 review): the row's `source` and `headersJson`
 // drive dispatchInboundToConnector all the way to a connector's privacy

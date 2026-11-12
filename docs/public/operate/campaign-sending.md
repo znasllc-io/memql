@@ -2294,8 +2294,17 @@ is that its bounces never reach the suppression list.
    ```
 
 That is the whole wiring. A shipped automation
-(`ingestCampaignFeedback`) fires on every staged inbound row and offers it
-to `campaignIngestFeedback`, which parses and applies it.
+(`ingestCampaignFeedback`) fires for every staged inbound delivery, whatever
+its source, and offers it to `campaignIngestFeedback`, which parses and applies
+it.
+
+**A report's own stamp does not ingest it again.** The automation fires for a
+row that is still `received`, and the ingester stamps the row `processed` or
+`failed` when it is done, so the stamp starts no second run; the ingester also
+leaves alone a row that has already been stamped. A report it could not read,
+or could not record, stays `failed` with the reason in `lastError`: nothing
+tries a report again, and `inboundRequestsByStatus(status: "failed")` lists
+what was not ingested.
 
 **Listing the source here is the authorization**, and there is deliberately
 no role check on top of it. The call asserts nothing: every address and every

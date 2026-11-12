@@ -14,13 +14,50 @@ use common.builtins.{ datasyncDispatchInbound, datasyncReconcileDomains, datasyn
 // reason integrations/shopify's own inbound automation records: an
 // executor that is missing fails every inbound row from every source.
 
-/// Offer every staged inbound delivery to the connector its source names. The connector decides
-/// whether the delivery is its own; a source nothing serves is skipped, not failed. It hands the
-/// dispatcher the row's id and nothing else: the dispatcher reads the source, the body, the delivery
-/// metadata, the verifying tier and the signature verdict from the row itself, absent fields
-/// included -- a mailbox-reader row carries no headersJson, and a row staged before verifiedBy
-/// existed carries no tier.
+// ---- Why every automation on a staged delivery filters on `received` ----
+//
+// EVERY WRITE OF A ROW PUBLISHES node.created, not only its first (the store
+// is append-only: component/memql/executor_mutation.go). A staged delivery is
+// written again by whatever works it: the dispatcher stamps it processed or
+// failed, the retry pass claims it and stamps it again, a requeue puts it
+// back in line, the feedback ingester stamps its own. On an unfiltered
+// trigger each of those writes fired every automation here, and the two
+// whose builtin stamps the row fired THEMSELVES: on 2026-11-12 one delivery
+// its connector could not apply was stamped failed once a second for eighteen
+// seconds, each stamp firing the dispatch that made the next, until the
+// automation loop bound refused the chain. A stamp in the same second as the
+// last is an unchanged write and publishes nothing, which is what ended most
+// chains after two runs and kept this out of sight.
+//
+// The load-time loop check does not catch it: it follows the mutations a body
+// calls and cannot see a write made inside a builtin
+// (component/automations/loop_graph.go).
+//
+// So each automation on this concept fires for a row that is `received` and
+// for no other: the staged delivery nobody has worked. A stamp, a claim and a
+// requeue all leave the row in another status and fire nothing. The retry pass
+// reaches a failed delivery itself, through the dispatcher and not through
+// this event. The two builtins that stamp a row also refuse a worked one on
+// their own (handleDispatchInbound, handleIngestFeedback), for whatever
+// reaches them another way. A write that leaves a row `received` still fires:
+// a redelivery that changes a row nobody has worked yet, or a row set back to
+// `received` on purpose, which nothing the engine ships does.
+//
+// Tests: TestAFailedDeliveryIsHandedToItsConnectorOnceByTheEventPath
+// (component/datasync), TestABounceReportIsIngestedOnceByTheEventPath
+// (component/campaigns), and TestNoShippedAutomationFiresOnAWorkedInboundDelivery
+// (component/automations), which holds every shipped automation on this concept
+// to the rule.
+
+/// Offer every staged inbound delivery to the connector its source names, while its row is still
+/// `received`: a write that stamps the row fires nothing. The connector decides whether the
+/// delivery is its own; a source nothing serves is skipped, not failed. It hands the dispatcher the
+/// row's id and nothing else: the dispatcher reads the source, the body, the delivery metadata, the
+/// verifying tier and the signature verdict from the row itself, absent fields included -- a
+/// mailbox-reader row carries no headersJson, and a row staged before verifiedBy existed carries
+/// no tier.
 @trigger(event="node.created", concept="v1:platform:inboundRequest")
+@filter(row => row.status == "received")
 @journalOnWrite
 automation dispatchInboundToConnector {
   args {
@@ -111,8 +148,12 @@ automation reconcileAccountFrontDoors {
 /// the time a row exists -- so this adds no HTTP surface at all. A delivery matching no package is
 /// a no-op: most of a cluster's webhooks are about something else. It hands the feed the row's id
 /// and nothing else: the feed reads the source, the body and the signature verdict from the row
-/// itself, so what moves a package's update cue is the delivery the receiver verified.
+/// itself, so what moves a package's update cue is the delivery the receiver verified. It fires
+/// for a `received` row only, like every automation on a staged delivery (see the note above
+/// dispatchInboundToConnector): the feed stamps nothing and noting a version twice changes
+/// nothing, but unfiltered it ran on every stamp, claim and requeue of every other source's rows.
 @trigger(event="node.created", concept="v1:platform:inboundRequest")
+@filter(row => row.status == "received")
 @journalOnWrite
 automation notePackageUpstreamFromWebhook {
   args {

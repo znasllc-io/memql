@@ -237,14 +237,22 @@ func (i *Integration) handleDispatchInbound(ctx context.Context, args map[string
 	if source == "" {
 		return resultNode("skipped", "no source on the staged row")
 	}
-	// ONLY A DELIVERY NOBODY HAS WORKED. The automation fires on every write
-	// of the row, not only its first -- every write publishes node.created --
-	// so it also fires for the dispatcher's own stamps, the retry pass's
-	// claims and a requeue. The stamps' echoes share the first fire's
-	// correlation and are deduplicated; a retry pass's writes carry the pass's
-	// own and are not. A worked row is therefore left alone here: a failed one
-	// is the retry pass's, and dispatching it from here as well would try it
-	// from two places at once.
+	// ONLY A DELIVERY NOBODY HAS WORKED. Every write of the row publishes
+	// node.created, not only its first: the dispatcher's own stamps, the retry
+	// pass's claims and a requeue each do. The automation's trigger fires for
+	// a `received` row alone (dsl/platform/automations.memql says why), so
+	// none of those writes starts a run. This is the half that holds when a
+	// run reaches a row somebody has stamped since: one a redelivery started
+	// while the first try was at work, reading the row after that try's
+	// stamp; an automation a bundle wrote that calls this builtin; a trigger
+	// that lost its filter. It does not stop two runs that both read the row
+	// before either stamps it: both reach the connector. Nothing else stands
+	// in for it. The executor's duplicate check does not, because a stamp
+	// changes the row and so the key that check compares, and the engine that
+	// shipped without this guard handed one delivery to its connector sixteen
+	// times, each stamp firing the next, until the loop bound refused the
+	// chain. A worked row is left alone: a failed one is the retry pass's, and
+	// dispatching it from here as well would try it from two places at once.
 	if status := strings.TrimSpace(staged.Status); status != "" && status != "received" {
 		return resultNode("skipped", fmt.Sprintf("the delivery is already %s; a failed one is tried again by the retry pass", status))
 	}

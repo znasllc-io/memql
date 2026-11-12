@@ -3,10 +3,12 @@ package campaigns
 import (
 	"context"
 	"errors"
+	"maps"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // feedback_parse_test.go -- memql#3461's acceptance criteria, one test each:
@@ -419,6 +421,92 @@ func TestUnconfiguredSourceIsNotAFailure(t *testing.T) {
 	if n := len(engine.fakeEngine.mutations("updateInboundRequestStatus")); n != 0 {
 		t.Errorf("an unrelated webhook's row was stamped %d times; it belongs to another handler", n)
 	}
+}
+
+// A REPORT THAT HAS BEEN WORKED IS NOT INGESTED AGAIN. The ingester stamps the
+// row it worked, and every write of a row publishes node.created, so its own
+// stamp can bring it the same row a second time; so can a redelivery that
+// changes the row. Each pass would count the report into the reputation window
+// again, so a worked row is answered and left as it is: nothing recorded,
+// nothing stamped, nothing counted.
+func TestIngestFeedbackLeavesAWorkedReportAlone(t *testing.T) {
+	sources := map[string]string{"postmaster": FormatRFC3464}
+	for _, status := range []string{"processed", "failed", "processing"} {
+		t.Run(status, func(t *testing.T) {
+			row := inboundRow("inb8", "postmaster", hardBounceDSN, true)
+			row["status"] = status
+			w, engine := ingestWorker(t, row, sources)
+			if _, err := w.handleIngestFeedback(feedbackAutomationCtx(), map[string]any{"inboundRequestId": "inb8"}, 0); err != nil {
+				t.Fatalf("a worked report raised %v; it is answered, not failed", err)
+			}
+			if n := len(engine.fakeEngine.mutations("recordSuppression")); n != 0 {
+				t.Errorf("a %s report recorded %d suppressions again", status, n)
+			}
+			if n := len(engine.fakeEngine.mutations("updateInboundRequestStatus")); n != 0 {
+				t.Errorf("a %s report was stamped %d more times; each stamp publishes the row again", status, n)
+			}
+			if n := countedHardBounces(w); n != 0 {
+				t.Errorf("a %s report was counted into the reputation window %d more times", status, n)
+			}
+		})
+	}
+
+	// THE CONTROL: the same report still received is ingested, so the silence
+	// above is the status's.
+	row := inboundRow("inb8", "postmaster", hardBounceDSN, true)
+	row["status"] = "received"
+	w, engine := ingestWorker(t, row, sources)
+	if _, err := w.handleIngestFeedback(feedbackAutomationCtx(), map[string]any{"inboundRequestId": "inb8"}, 0); err != nil {
+		t.Fatalf("a received report: %v", err)
+	}
+	if n := len(engine.fakeEngine.mutations("recordSuppression")); n != 1 {
+		t.Fatalf("a received report recorded %d suppressions, want 1", n)
+	}
+	if n := countedHardBounces(w); n != 1 {
+		t.Fatalf("a received report counted %d hard bounces, want 1", n)
+	}
+}
+
+// THE STATUS IS READ FRESH. The guard above is only as good as the read behind
+// it: inboundRequestById is cached, and a cache that still holds the `received`
+// version of a row another replica has stamped would ingest it again.
+func TestIngestFeedbackReadsTheRowsStatusFresh(t *testing.T) {
+	engine := &cachedStatusInboundEngine{inboundEngine: &inboundEngine{
+		fakeEngine: &fakeEngine{}, row: inboundRow("inb9", "postmaster", hardBounceDSN, true)}}
+	w := newTestWorker(t, engine, &recordingSender{})
+	w.cfg.FeedbackSources = map[string]string{"postmaster": FormatRFC3464}
+
+	if _, err := w.handleIngestFeedback(feedbackAutomationCtx(), map[string]any{"inboundRequestId": "inb9"}, 0); err != nil {
+		t.Fatalf("ingestFeedback: %v", err)
+	}
+	if len(engine.fresh) != 1 || !engine.fresh[0] {
+		t.Fatalf("the staged row was read with fresh=%v, want one fresh read", engine.fresh)
+	}
+	if n := countedHardBounces(w); n != 0 {
+		t.Fatalf("a row stored processed but cached received was ingested: %d hard bounces counted", n)
+	}
+}
+
+// cachedStatusInboundEngine answers inboundRequestById as a result cache would:
+// the `received` version to a cached read, the stored `processed` one to a
+// fresh read.
+type cachedStatusInboundEngine struct {
+	*inboundEngine
+	fresh []bool
+}
+
+func (e *cachedStatusInboundEngine) Execute(ctx context.Context, q string) (any, error) {
+	if !strings.HasPrefix(q, "query inboundRequestById") {
+		return e.inboundEngine.Execute(ctx, q)
+	}
+	fresh := memql.FreshReadFromContext(ctx)
+	e.fresh = append(e.fresh, fresh)
+	row := maps.Clone(e.row)
+	row["status"] = "received"
+	if fresh {
+		row["status"] = "processed"
+	}
+	return rowsEnvelope([]map[string]any{row}), nil
 }
 
 // TestFeedbackSourceConfigDropsATypo: a misspelled format must not resolve to

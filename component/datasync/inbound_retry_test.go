@@ -376,11 +376,14 @@ func TestRequeueRefusesACallerWhoIsNotAClusterOwner(t *testing.T) {
 	})
 }
 
-// The event automation fires on EVERY write of an inbound row, not only its
-// first: a status stamp, a retry pass's claim and a requeue each publish
-// node.created. A row that has been worked is not the event path's to dispatch
-// again -- a failed one is the retry pass's, and dispatching it here as well
-// would try it from two places at once.
+// EVERY write of an inbound row publishes node.created, not only its first: a
+// status stamp, a retry pass's claim and a requeue each do. The event
+// automation's trigger fires for a `received` row alone, and this is the
+// builtin's own answer for a run that starts anyway: a row that has been worked
+// is not the event path's to dispatch again -- a failed one is the retry
+// pass's, and dispatching it here as well would try it from two places at once.
+// The two halves together, through the real trigger, are in
+// inbound_event_path_db_test.go.
 func TestTheEventPathDispatchesOnlyADeliveryNobodyHasWorked(t *testing.T) {
 	for _, status := range []string{"failed", "processed", "processing"} {
 		t.Run(status, func(t *testing.T) {

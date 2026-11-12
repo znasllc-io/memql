@@ -183,12 +183,19 @@ memql#4378 the engine ships a **dispatcher** that does the routing, so the
 usual answer is *implement a connector*, not *write an automation*:
 
 ```
-dispatchInboundToConnector      an engine automation on inboundRequest.created
+dispatchInboundToConnector      an engine automation on inboundRequest.created, for a `received` row only
   -> the connector that claims the row's `source` (its Name(), or a tenant's source it answers for)
   -> Connector.Apply(ctx, InboundRequest) -> []MirrorWrite
   -> the runtime writes each one behind the VERSION GUARD
   -> the request row is stamped `processed` or `failed`, or held
 ```
+
+The automation hands a delivery to its connector when the row is staged, and
+**not again when the row is stamped**. The stamp is a write of the same row and
+publishes `node.created` again, as every write does, but the row is no longer
+`received` and the automation does not fire for it. A delivery whose try failed
+is tried again only by the [retry pass](#when-a-connectors-try-fails), a minute
+later at the earliest.
 
 `Apply` receives the row's fields as an `InboundRequest` — `Source`,
 `Body`, `Headers`, `ReceivedAt` and the staged row's id; `Topic` is empty,
@@ -323,7 +330,7 @@ no system of record on the other side:
 ```memql fragment
 /// Work a staged order delivery from the store's webhook.
 @trigger(event="node.created", concept="v1:platform:inboundRequest")
-@filter(row => row.source == "shopify-orders")
+@filter(row => row.source == "shopify-orders" && row.status == "received")
 automation handleShopifyOrder {
   args {
     id any
@@ -336,11 +343,22 @@ automation handleShopifyOrder {
 }
 ```
 
-Filter on `source` in the trigger's `@filter`, declare the payload fields the
-body reads in its `args` block (`body`, `contentType`, ...), and stamp
-`updateInboundRequestStatus` with `processing` / `processed` / `failed` as you
-work the row. The engine only ever writes the initial `received`; everything
-after that is yours.
+Filter on `source` **and on `status == "received"`** in the trigger's
+`@filter`, declare the payload fields the body reads in its `args` block
+(`body`, `contentType`, ...), and stamp `updateInboundRequestStatus` with
+`processing` / `processed` / `failed` as you work the row. The engine only ever
+writes the initial `received`; everything after that is yours.
+
+**The status half of the filter is not optional.** Every write of a row
+publishes `node.created`, not only the one that creates it, and the stamps
+above are writes of the row this automation fires on. Filtered on `source`
+alone, the first stamp fires the automation again and it works the same
+delivery a second time. When the stamps are mutations in the automation's own
+body, as here, the load refuses that as a cycle and says to give the trigger a
+filter its own write cannot satisfy. When the stamp is made inside a Go builtin
+the load cannot see it, and the automation loops at run time until the chain is
+refused at its depth bound. The engine's own automations on this concept all
+carry the filter for that reason.
 
 Both staging mutations are `@serverOnly`: `stageInboundRequest`, the
 receiver's one write, and `updateInboundRequestStatus`. An automation loaded
@@ -383,13 +401,27 @@ verified) is a new version of the row, and a new version publishes
 What this gives you is at-least-once delivery with a stable idempotency key --
 not exactly-once processing.
 
+**What a redelivery does to a delivery the engine works.** The engine's own
+automations fire for a `received` row and no other, so a redelivery reaches
+them only while nobody has worked the row yet. Once a connector's delivery is
+`processed` it is done, and a redelivery of it starts nothing. Once it is
+`failed` it belongs to the [retry pass](#when-a-connectors-try-fails), and a
+redelivery neither tries it sooner nor counts as a try. The same holds for a
+bounce report the campaign feedback ingester has stamped, with one difference:
+nothing retries a report, so a `failed` one stays as the record of what could
+not be ingested. Nothing the engine ships sets a row back to `received`; an
+automation of your own that did would hand the delivery to every automation on
+this concept again.
+
 The body is among the kept fields for a reason beyond saving a write. A privacy
 erasure blanks the body of a delivery that has been processed, and a redelivery
 of the same payload must not write it back.
 
 That distinction is the contract, so write your automation to be idempotent
-against it. The row id is the key to be idempotent *with*: branch on `status`
-before doing work, and stamp it as you go, so a second firing is a no-op.
+against it. The row id is the key to be idempotent *with*: filter the trigger on
+`status == "received"`, as the example under
+[Writing an automation instead](#writing-an-automation-instead) does, and stamp
+the row as you go, so a second firing never starts.
 
 Why identity is the signed digest rather than the sender's dedupe header: the
 vendor signs the body, not our header. A row id derived from that header could

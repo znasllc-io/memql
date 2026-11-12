@@ -11,17 +11,29 @@
 // allowlist and the per-source HMAC a suppression feed needs. It stages a
 // verified v1:platform:inboundRequest row; this fires on that row.
 //
-// It fires on EVERY inbound row rather than filtering by source, because the
+// It fires for EVERY SOURCE rather than filtering by source, because the
 // set of sources that are feedback feeds is deployment configuration
 // (MEMQL_CAMPAIGNS_FEEDBACK_SOURCES) and is not knowable here. The builtin
 // answers "not a feedback source" for everything else without erroring --
 // which is why that is a benign result rather than a failure, since
 // otherwise every Shopify webhook this cluster received would log one.
+//
+// It fires for a `received` row ONLY, and that filter is what keeps a
+// report's own stamp from ingesting it again. Every write of a row publishes
+// node.created, and the ingester stamps the row it worked: unfiltered, its
+// own stamp fired this automation again and the same report was ingested
+// again -- twice for every report, and sixteen times when each pass took a
+// second, counted into the sending ramp's reputation window each time. The
+// rule and its reasons are with the other automations on a staged delivery,
+// above dispatchInboundToConnector in dsl/platform/automations.memql; the
+// builtin refuses a worked row on its own as well (handleIngestFeedback).
 
-/// On a staged inbound webhook delivery, offer it to the campaign feedback parser. Does nothing
-/// unless the row's source is configured as a feedback feed and the delivery was signature-verified;
-/// the builtin decides both, because both are deployment configuration rather than graph state.
+/// On a staged inbound webhook delivery whose row is still `received`, offer it to the campaign
+/// feedback parser; a write that stamps the row fires nothing. Does nothing unless the row's source
+/// is configured as a feedback feed and the delivery was signature-verified; the builtin decides
+/// both, because both are deployment configuration rather than graph state.
 @trigger(event="node.created", concept="v1:platform:inboundRequest")
+@filter(row => row.status == "received")
 @journalOnWrite
 automation ingestCampaignFeedback {
   args {

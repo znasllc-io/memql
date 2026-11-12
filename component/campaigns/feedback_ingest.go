@@ -110,6 +110,28 @@ func (w *Worker) handleIngestFeedback(ctx context.Context, args map[string]any, 
 			"reason":   "the source is not listed in MEMQL_CAMPAIGNS_FEEDBACK_SOURCES, so it is not a campaign feedback feed on this deployment",
 		})
 	}
+	// ONLY A REPORT NOBODY HAS WORKED. This handler stamps the row it worked,
+	// and every write of a row publishes node.created, not only its first: on
+	// an unfiltered trigger its own stamp handed it the same report again, and
+	// again whenever the next stamp fell in a later second, until the
+	// automation loop bound stopped the chain sixteen passes in. The trigger
+	// now fires for a `received` row alone; this is the half that holds when a
+	// run reaches a row somebody has stamped since: one a redelivery started
+	// while the first pass was at work, reading the row after that pass's
+	// stamp; a run tried again; an automation a bundle wrote that calls this
+	// builtin. It does not stop two passes that both read the row before
+	// either stamps it: both ingest. A worked report is answered and left as
+	// it is, and that includes a `failed` one: nothing tries a report again,
+	// so its row stays the record of what could not be ingested
+	// (inboundRequestsByStatus). A row with no status was staged by nothing
+	// this engine ships and is read as unworked.
+	if status := strings.TrimSpace(req.Status); status != "" && status != inboundStatusReceived {
+		return feedbackResult(map[string]any{
+			"ingested": false,
+			"source":   req.Source,
+			"reason":   fmt.Sprintf("the delivery is already %s; a report is ingested once", status),
+		})
+	}
 	if !req.SignatureVerified {
 		return nil, w.failFeedback(ctx, req, fmt.Sprintf(
 			"source %q is configured as a %s feedback feed but this delivery was not signature-verified; "+
@@ -290,17 +312,27 @@ func feedbackResult(payload map[string]any) ([]memorynodes.MemoryNode, error) {
 	return resultNode("campaignFeedbackIngest", payload)
 }
 
+// inboundStatusReceived is the status the receiver stages a delivery with: the
+// one in which nobody has worked it yet.
+const inboundStatusReceived = "received"
+
 // InboundRequest is the slice of v1:platform:inboundRequest this path reads.
 type InboundRequest struct {
 	ID                string
 	Source            string
 	Body              string
 	SignatureVerified bool
+	// Status is the row's handling status as stored: `received` until
+	// something works it.
+	Status string
 }
 
-// InboundRequestByID reads one staged webhook delivery.
+// InboundRequestByID reads one staged webhook delivery, past the result cache:
+// the ingester decides on the row's status whether to work it at all, and a
+// cached `received` for a row that has since been stamped would have the
+// report ingested a second time.
 func (s *Store) InboundRequestByID(ctx context.Context, requestID string) (InboundRequest, bool, error) {
-	rows, err := s.rows(ctx, call("query", "inboundRequestById", arg{"requestId", requestID}))
+	rows, err := s.rows(memql.ContextWithFreshRead(ctx), call("query", "inboundRequestById", arg{"requestId", requestID}))
 	if err != nil || len(rows) == 0 {
 		return InboundRequest{}, false, err
 	}
@@ -310,6 +342,7 @@ func (s *Store) InboundRequestByID(ctx context.Context, requestID string) (Inbou
 		Source:            str(r, "source"),
 		Body:              str(r, "body"),
 		SignatureVerified: boolean(r, "signatureVerified"),
+		Status:            str(r, "status"),
 	}, true, nil
 }
 
