@@ -212,6 +212,18 @@ func (u *AzureBlobUploader) StorageUsage(ctx context.Context) (storagequota.Usag
 
 func (u *AzureBlobUploader) commitCapacity(ctx context.Context, container, object string, ids []string) (*storagequota.Guard, error) {
 	g, err := u.beginCapacity(ctx, container, object)
+	return u.commitCapacityGuard(ctx, g, err, container, object, ids)
+}
+
+// commitCapacityForOwner is commitCapacity for a writer that names its owner
+// rather than deriving it from the key and the caller: the account export
+// (account_exports.go) is the cluster's whoever runs it.
+func (u *AzureBlobUploader) commitCapacityForOwner(ctx context.Context, container, object, owner string, ids []string) (*storagequota.Guard, error) {
+	g, err := u.beginCapacityForOwner(ctx, container, object, owner)
+	return u.commitCapacityGuard(ctx, g, err, container, object, ids)
+}
+
+func (u *AzureBlobUploader) commitCapacityGuard(ctx context.Context, g *storagequota.Guard, err error, container, object string, ids []string) (*storagequota.Guard, error) {
 	if err != nil || g == nil {
 		return g, err
 	}

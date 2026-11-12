@@ -325,7 +325,7 @@ const maxListedBlobs = 50000
 
 // BlobInfo is one listed blob with its size in bytes.
 type BlobInfo struct {
-	Name string
+	Key  string
 	Size int64
 }
 
@@ -356,7 +356,7 @@ func (u *AzureBlobUploader) ListPrefixWithSizes(ctx context.Context, container, 
 			if item == nil || item.Name == nil {
 				continue
 			}
-			info := BlobInfo{Name: *item.Name}
+			info := BlobInfo{Key: *item.Name}
 			if item.Properties != nil && item.Properties.ContentLength != nil {
 				info.Size = *item.Properties.ContentLength
 			}

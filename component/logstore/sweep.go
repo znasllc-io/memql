@@ -542,7 +542,7 @@ func (s *Sweeper) ListArchive(ctx context.Context) ([]ArchiveObject, error) {
 			return nil, fmt.Errorf("logstore: list archive: %w", err)
 		}
 		for _, info := range infos {
-			if obj, ok := parseArchiveObject(info.Name); ok {
+			if obj, ok := parseArchiveObject(info.Key); ok {
 				obj.Size, obj.SizeKnown = info.Size, true
 				out = append(out, obj)
 			}
