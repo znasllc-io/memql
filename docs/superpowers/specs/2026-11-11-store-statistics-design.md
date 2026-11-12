@@ -60,8 +60,13 @@ No decision of the owner's changed.
 checked against the store mirror's finished branch with engine main merged in (engine 0.31.35,
 which records the account every row belongs to). Where the code said otherwise than this
 record, the record was corrected: F5, F16, F22, 6.2, section 9 (U4). The plan lists each as
-A26 to A28. D16 is unchanged and its reach on the finished verdict is an open question for the
-owner (the plan's A33). No decision of the owner's changed.
+A26 to A28. No decision of the owner's changed.
+
+**Amended with the owner's three rulings on that check (2026-11-12).** D16 is changed by
+ruling R1 (the figures freeze only for what stands in the way of the data the walk reads),
+6.2 by rulings R1 and R2, 6.5 and section 8 by R1 and R3, and section 9 by R1 (a unit of work
+in the mirror). The plan lists each as A34 to A36. No decision of the owner's (S1 to S14)
+changed.
 
 ## 1. What the owner asked for
 
@@ -174,7 +179,7 @@ No model or agent is involved anywhere, and nothing is sent to anyone (S10).
 | D13 | *Made here.* **The period is the same remembered choice as website Statistics** (`statisticsPeriod`). The destination is not remembered; the page opens on Production when it has a store, else Testing. | Same list (S3); a person comparing traffic and sales asks about the same period. A destination choice that survived would open a Testing store's sales when someone came for Production's. |
 | D14 | *Made here.* **The facts keep Shopify's order-level totals beside the line sums**, and the check counts orders where they disagree. Nothing on the page draws them. | A permanent test of the formulas against Shopify's own arithmetic on live data, and the place a wrong reading of a field shows first. |
 | D15 | *Made here.* **The button is shown when either destination has a store**; Reviews shows only for Production's. | S7: a storefront exercised only against a development store still has sales to read. |
-| D16 | *Made here.* **When the store's verdict is not `recording`**, the figures are drawn as of the time the verdict stopped being `recording` (its `since`), with the verdict's sentence in a `Notice`; buckets after that instant are gaps. During `starting` and during a rebuild every figure is absent. | S9 and S11: what was recorded before the break is true as of then; what came after is not known. While history is still arriving no total is known. |
+| D16 | *Made here; changed by the owner's ruling R1, 2026-11-12.* **The figures are drawn as of an earlier moment only when something stands in the way of the data the walk reads**: the store is paused or not connected, or a reason of its verdict stands in the way of one of the mirror concepts the figures read (`order`, `orderLineItem`, `refund`, `shop`). The mirror says what each reason concerns (`VerdictReason.Concerns` and `Concepts`, `StandsInTheWayOf`); a reason about anything else (a privacy request, an approval or a check of products) is listed in the `Notice` and freezes nothing. The moment is the walk's own, its last run at which nothing stood in the way (`last_clear_at`), not the verdict's `since`, which is the first of several reasons. Buckets after it are gaps. A store blocked before any clear run answers no figure. During `starting` and during a rebuild every figure is absent. | S9 and S11: what was recorded before the break is true as of then; what came after is not known. A page that says a store's sales stopped on a day they did not is a defect an owner sees: at the upgrade that carries the mirror every store on the shared app needs attention for a permission the figures do not use. While history is still arriving no total is known. |
 | D17 | *Made here.* **Facts hold no name, email, address or phone.** What a fact holds of a buyer is their Shopify customer id (`buyer_key`); a line fact also holds the line's title. After a customer's erasure the mirror keeps the order's customer reference (an erasure keeps references and scrubs the person) and the customer's own row is an empty shell, so the id names nobody; a custom line item, one with no product, has its title scrubbed, since a person typed it. The erasure rewrites rows in place, where the walk does not look, so the next check pass recomputes the facts of the rows it scrubbed (U8): a scrubbed title leaves the facts, and an order whose email was scrubbed is retail. When the store's data is removed (`redactedAt` set), the store's facts are deleted. | The walk reads every store's orders; the figures need a buyer only as an opaque id, and a product only by its name. |
 | D18 | *Made here.* **Facts are kept as long as their order is mirrored.** No 400-day retention. | New against returning needs the whole history, and one row per order is small. |
 | D19 | *Made here.* **A fact definition version** (`storeStatsDefinition`, an integer constant) is stored per store. A release that changes a formula raises it, and the walk rebuilds each store whose stored version is lower. | A changed definition must never mix with facts computed the old way. It is also why no Rebuild act is needed on the Store page. |
@@ -514,7 +519,9 @@ NULL`; `tax NUMERIC NOT NULL`. Gift card and product come from the line fact it 
 | `wholesale_window_seconds` | `INTEGER NOT NULL DEFAULT 86400` | the window width the pass learned, kept from one run to the next |
 | `verdict_state` | `TEXT NOT NULL DEFAULT ''` | copied from `shopifyStoreVerdict`; empty means not known |
 | `verdict_reasons` | `JSONB NOT NULL DEFAULT '[]'` | `[{code, sentence}]`, the mirror's own words |
-| `verdict_since` | `TIMESTAMPTZ` | when the store left `recording`: the verdict's `since` at that moment, kept while the state stays other than `recording`, so a move from `paused` to `needs attention` does not move D16's "as of" |
+| `verdict_since` | `TIMESTAMPTZ` | the verdict's own `since`, as last read |
+| `recording_blocked` | `BOOLEAN NOT NULL DEFAULT false` | D16: at the last verdict read the store was paused or not connected, or a reason stood in the way of the walked concepts |
+| `last_clear_at` | `TIMESTAMPTZ` | D16: the last run at which nothing stood in the way and the store was neither paused nor not connected; what the figures are as of while `recording_blocked` |
 | `last_change_at` | `TIMESTAMPTZ` | newest `recorded_at` folded into facts |
 | `walked_through` | `TIMESTAMPTZ` | how far every walk has read, never past the run's clock |
 | `rebuilding_since` | `TIMESTAMPTZ` | set by a rebuild, cleared when the walk catches up |
@@ -548,7 +555,9 @@ that declare an account form, does not count them and gains no area. A fact's ac
 store's: every row is keyed by `store_id`, the mirror rows it is computed from follow the same
 store (`@belongsTo(account, via="storeId", parent="v1:shopify:store")`), and a fact can be
 rebuilt from them. An export of one account classifies data held outside the row table in its
-own piece (that record, section N). This work adds no concept.
+own piece (that record, section N). This work adds no concept. By the owner's ruling R2 no
+statistics table carries an account column: nothing in this release reads a copy, a copy can
+lag its source, and the account is read through the store row.
 
 ### 6.3 Constructs
 
@@ -618,7 +627,7 @@ everything absent is `null`.
   storeId, siteId, storeName, storeDomain, destination: "production" | "testing" | "both",
   currency, timezone, development, taxesIncluded, olderOrderChangesNotRecorded,
   period, bucket, start, end, prevStart, historySince, lastChangeAt, asOf,
-  recording: { state, reasons: [{ code, sentence }], since },
+  recording: { state, reasons: [{ code, sentence }], since, blocked },
   rebuilding,
   figures: { totalSales, netSales, orders, averageOrderValue,
              grossSales, discounts, refunds, unitsSold },
@@ -641,6 +650,8 @@ missing refund line would lower Units sold, not raise it), so Units sold is abse
 period. `storeName` and `storeDomain` are there because a holder of the part cannot read
 the store row. `olderOrderChangesNotRecorded` is true when the store's recorded grant does
 not hold `read_all_orders` (section 10, "An order placed more than sixty days ago").
+`recording.blocked` is `recording_blocked`; `asOf` is `last_clear_at` while blocked and null
+otherwise (D16), and `recording.reasons` holds every reason, those that freeze nothing included.
 `averageOrderValue` is answered already rounded at the currency's minor units (5.3).
 
 A bucket is cut from the bounds U2 computes for the store's zone, compared as instants in
@@ -672,7 +683,10 @@ and Users list the part from the engine's grants, so no list there changes.
 the `Receipt` icon. Present only when `can.sales`, the site is a `shopify_storefront`, not
 system-owned, and `boundStoreId(site)` or `previewStoreId(site)` is not empty (D15). Absent
 otherwise, never disabled (`clients/os/DESIGN.md:170-175`, rule 12). `WorkspaceDetail` gains
-`"storeStatistics"`; `detailTitle` gains "Store statistics".
+`"storeStatistics"`; `detailTitle` gains "Store statistics". By the owner's ruling R3 it is drawn on a
+draft storefront too, where Statistics is absent: the figures are the store's sales, which do not
+depend on whether this site is published. There it stands where Statistics would, right after
+the Logs button.
 
 **The Head.** Trail: back label, deployable name, "Store statistics", through
 `breadcrumbs` and `back` (`DESIGN.md:722-745`). At its right, quiet (`DESIGN.md:561-572`):
@@ -694,8 +708,10 @@ otherwise, never disabled (`clients/os/DESIGN.md:170-175`, rule 12). `WorkspaceD
    `olderOrderChangesNotRecorded` is true, a line of its own: "Refunds, edits and
    cancellations of orders placed more than 60 days ago are not recorded."
 2. **Recording notice**, a `Notice`, only when the verdict is not `recording`, a rebuild runs,
-   the verdict is not known, or refunds are still being read (D22): the mirror's sentence,
-   then "These figures are as of <moment>." (D16). For `starting` and a rebuild: "The
+   the verdict is not known, or refunds are still being read (D22): the mirror's sentence for
+   every reason, then, only when the answer carries an `asOf`, "These figures are as of
+   <moment>." (D16); a store blocked before any clear run reads "No figure can be given until
+   this is fixed." instead. For `starting` and a rebuild: "The
    store's orders are still being brought in." and every figure absent. For a verdict
    that is not known: "Whether this store is recording is not known." The notice names
    the Store page, where the act that fixes it lives ("The Store page of this deployable
@@ -768,7 +784,8 @@ Ordered so the mirror comes first and the server side is proved before the page 
 U1 builds on the mirror record's branch, which will have landed.
 
 The plan (`docs/superpowers/plans/2026-11-11-store-statistics.md`) splits and reorders these
-units, and says why where it does: U1 is three tasks; U6's builtins, automations and
+units, and says why where it does: U1 is three tasks, and one more task in the mirror says what
+each reason of a store's verdict stands in the way of (D16); U6's builtins, automations and
 principals are declared with the tasks that give them bodies; U7 is six tasks (the rules
 that make a fact, the provider, the walk in windows, the fold, the store's state, the
 wholesale judgement); U9 is two, the first with U11; U13 is two.

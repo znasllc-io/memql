@@ -22,6 +22,7 @@ Nothing here changes the plan. Each is a consequence of a decision already made,
 - The sentences this plan invents, for wording:
   - "The store's time zone has not been recorded yet."
   - "The Store page of this deployable says what fixes it."
+  - "No figure can be given until this is fixed." (a store blocked before any clear run, ruling R1)
   - "1 refund is still being read from Shopify." (the singular of the record's "N refunds are still being read from Shopify.")
   - "A refund in this period has more lines than were recorded."
   - "1 refund has more lines than were recorded, so units are not exact." and "N refunds have more lines than were recorded, so units are not exact."
@@ -32,7 +33,7 @@ Nothing here changes the plan. Each is a consequence of a decision already made,
 
 ## Amendments to the record
 
-A1 to A13 were made with the first commit of this plan. A14 to A25 were made after the plan's review, in the commit that corrected it; where a later amendment changes an earlier one, the earlier row says what holds now. A26 to A33 were made when the plan was checked against the tree it will be built on: the finished store mirror with engine main merged in (`feat/store-mirror` at `f5df0fb3f`, main at `24e8dab2b`, engine 0.31.35). No decision of the owner's (S1 to S14) changed.
+A1 to A13 were made with the first commit of this plan. A14 to A25 were made after the plan's review, in the commit that corrected it; where a later amendment changes an earlier one, the earlier row says what holds now. A26 to A33 were made when the plan was checked against the tree it will be built on: the finished store mirror with engine main merged in (`feat/store-mirror` at `f5df0fb3f`, main at `24e8dab2b`, engine 0.31.35). A34 to A37 write in the three rulings given on that check and the branch's two later commits (head `f9a50d3c3`). No decision of the owner's (S1 to S14) changed; R1 changes a decision made here, D16.
 
 | # | Where in the record | What it says now |
 | --- | --- | --- |
@@ -62,19 +63,24 @@ A1 to A13 were made with the first commit of this plan. A14 to A25 were made aft
 | A24 | 6.2, 6.5 | `store_sales_check` holds the pass under way (its start, a cursor and a learned window width for each source, running counts) and the last pass that ended (its start, its end, its counts) and no column nothing writes. The wholesale pass keeps its learned width too. `history_since` is the store-local midnight of the first recorded day. Each index names its reader: the index by product is gone and one by order serves the lines of an order. The scale test runs in the lane at a tenth of its size and on demand in full. |
 | A25 | Section 9 | The note on how the plan splits the units is brought in line: the walk is five tasks, the read two and the page two. |
 | A26 | 6.2, section 9 (U4) | The migration is `20261112110100_store_sales_facts`. Main now holds `20261112100000_account_ownership` (`component/database/memory-nodes/migrations/`) and the Go migration `20261112110000_account_index` (`component/database/`, registered in `timescaledb.go`), both after the minute the record named, and the plan's own rule (Task 1) takes the first free minute after the newest. Record corrected. |
-| A27 | 6.2 (last paragraph), 6.3 | Every row now records the account it belongs to (accounts design record 2026-11-12). Every concept declares `@belongsTo`, a build gate holds `dsl/` and `packs/` to it, and the engine fills `accountId` on an engine-managed concept's rows. This work adds NO concept: the seven `store_sales_*` tables are side tables outside the row table, as the email statistics' are, and the answer rides a synthetic `integration:storeStats:statistics` node. So nothing here declares `@belongsTo`, the stamp never reaches a fact, and the Accounts app's inventory, which counts node-table rows of concepts that declare an account form and words them by namespace, gains no row and no area. A fact's account is its store's: every fact is keyed by `store_id`, and the mirror rows it is computed from declare `@belongsTo(account, via="storeId", parent="v1:shopify:store")` (the accounts record's section I, "all 65 mirror concepts"). An export of one account classifies data held outside the row table in its own piece (the accounts record's section N). Whether the store's account is also copied onto `store_sales_store` is open (pre-flight, "Needs a ruling"). The refund's three new fields join a concept that already declares its form. Record corrected. |
+| A27 | 6.2 (last paragraph), 6.3 | Every row now records the account it belongs to (accounts design record 2026-11-12). Every concept declares `@belongsTo`, a build gate holds `dsl/` and `packs/` to it, and the engine fills `accountId` on an engine-managed concept's rows. This work adds NO concept: the seven `store_sales_*` tables are side tables outside the row table, as the email statistics' are, and the answer rides a synthetic `integration:storeStats:statistics` node. So nothing here declares `@belongsTo`, the stamp never reaches a fact, and the Accounts app's inventory, which counts node-table rows of concepts that declare an account form and words them by namespace, gains no row and no area. A fact's account is its store's: every fact is keyed by `store_id`, and the mirror rows it is computed from declare `@belongsTo(account, via="storeId", parent="v1:shopify:store")` (the accounts record's section I, "all 65 mirror concepts"). An export of one account classifies data held outside the row table in its own piece (the accounts record's section N). No statistics table carries an account column (ruling R2): nothing in this release reads a copy, a copy can lag its source, and the accounts record leaves data held outside the row table to its export piece; if that is wrong, the cost is one column and its writer later. The refund's three new fields join a concept that already declares its form. Record corrected. |
 | A28 | F5, F16, F22 | The email facts' migration is under `component/database/memory-nodes/migrations/`. The Deployables page's Reviews pane and button moved to `DeployablePage.tsx:456` and `:546`, and Statistics is drawn there only for a site that is not a draft. The verdict builtin is gated by `@requiresCapability("execute", "app:deployables/store")` as well as its handler's check; the walk's internal origin passes the first and its maintenance principal, a cluster owner, the second. Record corrected. |
 | A29 | D17, section 10 ("A customer's data is redacted") | Read on the finished erasure. Its exported read is `ErasureDecision(concept, field string) string`, answering `kept by kind`, `kept by the list`, `kept, scrubbed on a custom item`, `kept as structure`, `scrubbed` or `no such field`; the structural fields are `storeId`, `gid`, `updatedAt`, `versionSource`, `syncedAt`, `versionReadAt`, `deleted`, `parentGid` and now `accountId`. Task 10's gate asks that read instead of keeping a list of its own, and admits a line's `title` as `kept, scrubbed on a custom item`, which the check handles. The connector's erasure is `RedactCustomer(ctx, storeID, customerGID string, orderGIDs []string) (ErasureResult, error)` and runs only on the engine's maintenance session (`WithMaintenanceSession`), so Task 18's test gives it one; the erasure's marker is the exported `RedactionMarker`. The plan's earlier statement that the erasure was still being written at `caaecb486` is withdrawn. |
 | A30 | none (the plan's own) | The plan said `component/storestats` runs in the database lane's default class without saying why. CI gives every database-gated tree a per-package alarm (`scripts/ci/db-test-budgets.yaml`): the default class is 180 seconds, on a runner about 1.9 times slower than a laptop. Task 19 now measures the whole package with the lane's flags and gives it a class of its own when the default would not hold it with the headroom the file's other classes keep, and Task 24 measures the touched trees that already have classes. |
 | A31 | none (the plan's own) | Names read on the branch: a paused store's sweep answers `memqlsync.Busy(...)`, which wraps `memqlsync.ErrBusy` and is recognised by `memqlsync.IsBusy` (Task 3). Task 1's records are now known and written in (Task 1, Step 4), each still checked. |
 | A32 | none (the plan's own) | Disagreements inside the plan, fixed: Task 16 adds to the test harness and now lists it among its files, and no gate reads a test file's hand-written statement (`staged_read_site_classification_test.go` does not sweep `_test.go` files); Task 9's shape test no longer says "no name" of shapes that project the shop's and the store's names; Task 22's week fixture carries the units of the week it says it is. |
-| A33 | D16, section 10 ("The verdict cannot be read") | Not changed, and open: on the finished mirror a store reads `needs attention` for any reason, a privacy request failing for more than a day among them (`privacy_request_failing`, which the mirror says "is not about recording"), and for reasons about domains that do not feed the figures. D16 draws the figures as of when the store left `recording` in every such case. Whether it should is a ruling (pre-flight, "Needs a ruling"); until it is given, Tasks 14, 17 and 22 do what D16 says. |
+| A33 | D16, section 10 ("The verdict cannot be read") | Ruled, see A34. What was found: on the finished mirror a store reads `needs attention` for any reason, a privacy request failing for more than a day among them (`privacy_request_failing`, which the mirror says "is not about recording"), and for reasons about domains that do not feed the figures. D16 draws the figures as of when the store left `recording` in every such case. That was put to the owner; A34 is the ruling. |
+| A34 | D16, 6.2, 6.5, section 8 (block 2), section 9 (U7, U9, U13), 11.1 | Ruling R1. The figures are "as of" an earlier moment only when something stands in the way of the data the walk reads; a reason about anything else is listed in the notice and freezes nothing. Why: at the upgrade that carries the mirror every store on the shared app needs attention until its owner approves a permission the figures do not use, and a privacy request or a failing check of products says nothing about orders; a page that says an owner's sales stopped on a day they did not is a defect. The mirror says what a reason concerns (new Task 4a: `VerdictReason.Concerns` and `Concepts`, the table `reasonConcerns` with a gate over every `Reason*` code, and `StandsInTheWayOf(concepts []string) bool`); statistics never reads a code or the display word `Domain`. The figures' dependencies are one list, `walkedConcepts` (Task 10), held equal to the shapes. The verdict's `since` is no longer the "as of": the walk keeps `last_clear_at`, its last run at which nothing stood in the way and the store was neither paused nor not connected, and `recording_blocked` (Task 14). The read answers `asOf` = `last_clear_at` and `recording.blocked` true only while blocked; a blocked store with no clear run answers no figure, a paused and a not-connected store are frozen as D16 had them, and every reason stays in `recording.reasons` (Task 17). The page draws "These figures are as of" only with an `asOf` (Task 22). `verdict_since` now holds the verdict's own `since`. If wrong, the cost is a rule to simplify back to D16. Record corrected. |
+| A35 | 6.2 | Ruling R2: no account column on any statistics table; A27 says why. Record corrected. |
+| A36 | Section 8 ("The button"), D15 | Ruling R3: Store statistics is drawn on a draft storefront that has a store, where Statistics is absent: the figures are the store's sales, which do not depend on whether this site is published, and the gate is D15's part, unchanged. On a draft it stands where Statistics would, right after the Logs button (Task 21, with a test). Record corrected. |
+| A37 | none (the plan's own) | The store-mirror branch moved to `f9a50d3c3`: `cb51cc509` gives `integrations/shopify` (600s) and `component/datasync` (300s) classes of their own, pinned in `pipeline_db_tests_test.py`; Task 24 compares against those, and Tasks 11 and 19 cite that comment's own figures (310s for 125s, 135s for 61s) for the runner's factor. `f9a50d3c3` is a docs commit that nothing here reads. |
 
 ## How the tasks follow the record's units
 
 | Record | Tasks | Why it departs, where it does |
 | --- | --- | --- |
 | U1 | 2, 3, 4 | Three reviewable changes to the mirror: the refund's detail, the detail of refunds mirrored before it, and the shop row the figures cannot be cut without. |
+| none (ruling R1, A34) | 4a | The mirror says what each reason of a store's verdict stands in the way of, so the walk freezes the figures only for what concerns them. A change to the mirror's package, so it stands with the mirror's tasks and before the walk's state (Task 14). |
 | U2, U3, U4, U5 | 5, 6, 7, 8 | As the record. U4's test stands beside the other migration round trips, so it shares no package with the component. |
 | U6 | 9, and the builtins in 11, 16, 17 | Each builtin, automation and principal is declared in the task that gives it a body, so no task leaves a builtin whose handler does nothing. |
 | U7 | 10, 11, 12, 13, 14, 15 | Too large for one review as one task or as three: the pure rules that turn a row into a fact; the provider with its builtin, automation, principal and gates; the windowed walk; the fold and the derivation; what the walk keeps about each store; the wholesale judgement. A reviewer can reject one and accept its neighbour. |
@@ -89,7 +95,7 @@ A1 to A13 were made with the first commit of this plan. A14 to A25 were made aft
 
 - Work only in this worktree, on branch `feat/store-statistics`. Every path in this plan is relative to the repository root. Never touch the main checkout or another worktree. Task 1 rebases once; after it, never rebase, stash, reset, switch branch or push.
 - Every task's tests fail first (record the command and the failing output), then pass.
-- The mirror's code is cited as it stands on its finished branch with engine main merged in (`feat/store-mirror` at `f5df0fb3f`, main at `24e8dab2b`), the customer's erasure included (`integrations/shopify/erasure_fields.go`, its golden file `integrations/shopify/testdata/erasure-fields.golden`, and the generator's `AdminType` and `GidsInside` on every field). Where a function this plan names differs on main when this work begins, main is right: do what the task intends against the code as it stands, and report the difference. Task 1 checks each name this plan consumes.
+- The mirror's code is cited as it stands on its finished branch with engine main merged in (`feat/store-mirror` at `f9a50d3c3`, which merged main at `24e8dab2b` in `f5df0fb3f`), the customer's erasure included (`integrations/shopify/erasure_fields.go`, its golden file `integrations/shopify/testdata/erasure-fields.golden`, and the generator's `AdminType` and `GidsInside` on every field). Where a function this plan names differs on main when this work begins, main is right: do what the task intends against the code as it stands, and report the difference. Task 1 checks each name this plan consumes.
 - Every `go test` carries `MEMQL_DATABASE_DSN="postgres://memql:memql_dev@127.0.0.1:55432/memql_stats_a?sslmode=disable"`, written `$STATS_DSN` below (Task 1 exports it). Database-lane tests add `MEMQL_REQUIRE_DB=1` and `-p 1`. Never port 5432. Tests under `./app/` need `-tags bff`. Name packages; a bare `go test ./...` at the root misses the engine and is not a verification. The whole tree is `make test`.
 - No file under `integrations/` imports `component/datasync`: the integrations module cannot see the root module. A test of the connector that needs the sync runtime lives in `component/datasync`. `scripts/ci/module-boundaries.sh integrations` holds it.
 - Generated files are regenerated, never hand-edited: `sdk/go/client/generated_*`, `sdk/ts/src/client/generated_*`, `integrations/shopify/generated/*`, `dsl/shopify/generated/*`, the concept snapshot, the platform graph, the automation corpus, the erasure's golden file. After any `.memql` change: `make sdk-gen`; `make concept-snapshot` when a concept gained a field; `make platform-graph` when a concept or an automation changed. Then `make sdk-gen-check`, `MEMQL_DATABASE_DSN="$STATS_DSN" go test -count=1 -run 'TestConceptFieldSnapshotIsNotStale|TestPlatformGraph' .`, `MEMQL_DATABASE_DSN="$STATS_DSN" go test -count=1 ./test/dslconformance/...` and `make dsl-lint`. If a gate names another stale file, run the make target or the `-update` its message names.
@@ -355,6 +361,123 @@ func TestAConnectedStoreHasItsCurrencyAndTimeZoneWithoutAShopUpdate(t *testing.T
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** Run the same command, then the package whole in the database lane and `scripts/ci/module-boundaries.sh integrations`. Expected: PASS.
 - [ ] **Step 5: Commit** `shopify: every connected store has its shop row, read at connect, at boot, daily and on resume`.
+
+### Task 4a: What each reason of a store's verdict stands in the way of
+
+**Independent of:** Tasks 5, 6, 7, 8, 20.
+
+Ruling R1 (A34). The figures are drawn "as of" an earlier moment only when something stands in the way of the data the walk reads; a reason about anything else is listed and freezes nothing. The mirror says what each reason concerns. Statistics never guesses from a reason's code, and never from its `Domain`, which is a phrase for a person (`plainDomain`, `joinWords`).
+
+**Files:**
+- Modify: `integrations/shopify/verdict.go` (`VerdictReason`, `reasonsOf`, `checkFailing`, `privacyReason`'s caller), `integrations/shopify/privacy_verdict.go` (`privacyReason`), `integrations/shopify/verdict_capabilities.go` (`verdictPayload`), `dsl/shopify/overlay/builtins.memql` (`shopifyStoreVerdict`'s `@description`: each reason's `concerns` and `concepts`)
+- Create: `integrations/shopify/verdict_concerns_test.go`
+- Regenerate: `make sdk-gen` (the builtin's description is carried into the generated clients)
+
+**Interfaces:**
+- Consumes: `reasonsOf`, `checkFailing(concept string, row map[string]any, interval time.Duration, from, now time.Time) (VerdictReason, bool)`, `scopesNotApproved(store Store) []string` (`connections.go`), `insideDomains`, `sweptParentOf(concept string) string`, `generated.Types`, `generated.ConceptFromID`, and the test helpers of `verdict_test.go` (`managedStore`, `cleanRows`, `setRow`, `verdictInputOf`, `reasonCodes`).
+- Produces:
+
+```go
+// What a reason stands in the way of. Every reason carries exactly one; an
+// empty Concerns is never written, so "not said" cannot pass for "nothing".
+const (
+	ConcernsWholeStore  = "wholeStore"  // nothing of the store is being recorded as it should be
+	ConcernsConcepts    = "concepts"    // the concepts named in Concepts, and the children read with them
+	ConcernsNoRecording = "noRecording" // not about recording at all
+)
+
+// on VerdictReason:
+//	Concerns string   // one of the Concerns* constants
+//	Concepts []string // generated concept names ("order"), sorted; set only with ConcernsConcepts, never empty then
+
+// reasonConcerns is THE classification: every Reason* code with its kind.
+var reasonConcerns = map[string]string{
+	ReasonDataNotDeclared:       ConcernsConcepts,
+	ReasonApprovalOutdated:      ConcernsConcepts,
+	ReasonGrantLost:             ConcernsWholeStore,
+	ReasonEventsNotRegistered:   ConcernsWholeStore,
+	ReasonCheckFailing:          ConcernsConcepts,
+	ReasonChangesNotRecorded:    ConcernsWholeStore,
+	ReasonPrivacyRequestFailing: ConcernsNoRecording,
+}
+
+// StandsInTheWayOf reports whether the reason keeps any of these generated
+// concepts (names, or ids) from being recorded. A concept and a reason's named
+// concept are each compared through the domain whose sweep records it
+// (sweptParentOf), so a reason about orders stands in the way of their lines
+// and refunds. A reason whose Concerns is not one of the three answers true:
+// what is not classified is treated as standing in the way, never as clear.
+func (r VerdictReason) StandsInTheWayOf(concepts []string) bool
+
+// VerdictReasonFromPayload reads one element of the verdict builtin's
+// `reasons` back into the fields StandsInTheWayOf reads (code, concerns,
+// concepts). For a reader of the builtin's answer in another package.
+func VerdictReasonFromPayload(m map[string]any) VerdictReason
+```
+
+  `verdictPayload` writes each reason's `concerns` and `concepts` beside its other keys; `concepts` is a list, empty unless `concerns` is `concepts`.
+
+Decisions:
+- Where each reason's concepts come from, all in code that already knows them:
+  - `data_not_declared`: the undeclared concepts of `inside`, by `generated.ConceptFromID` of each, collected beside the `plainDomain` words already built.
+  - `approval_outdated`: every generated concept whose `Scopes` holds a scope `scopesNotApproved(store)` answers, as ruled. The mirror's own reading rule is softer (`scopesMissingFor`, `reconcile.go`: a domain is refused only when the grant holds NONE of its scopes), so an order domain missing only `read_all_orders` is still recorded for sixty days and is classified here as stood in the way of all the same. A managed connection never asks for `read_all_orders` (`apply.go`, the comment on `ordersScope`), so on the shared app the two rules agree for orders; the test below pins the ruling's reading and names the difference.
+  - `check_failing`: the concept `checkFailing` was asked about.
+  - `grant_lost`, `events_not_registered`, `changes_not_recorded`: the whole store. (`changes_not_recorded` is counted from deliveries routed to the asked domains; it is classified whole-store as ruled, not per domain.)
+  - `privacy_request_failing`: not about recording.
+- The reason is built with its classification from `reasonConcerns` at each construction site, so a reason cannot be built without one; the gate test below checks every reason `computeVerdict` answers against the table.
+- Nothing about the verdict's state, its `since`, its sentences or its acts changes, and neither do the screens that read it: the Store page keeps every reason in every state.
+
+- [ ] **Step 1: Write the failing tests**
+
+```go
+// integrations/shopify/verdict_concerns_test.go
+func TestEveryReasonCodeIsClassified(t *testing.T) {
+	// Parses this package's non-test files for constants whose name begins
+	// "Reason" and whose value is a string: every one is a key of
+	// reasonConcerns with one of the three kinds, and reasonConcerns names no
+	// other code. A reason added later without a kind fails here, naming it.
+}
+
+func TestEachReasonComputeVerdictAnswersCarriesItsKind(t *testing.T) // for a fixture of each code (the cases verdict_test.go builds): Concerns == reasonConcerns[Code]; Concepts sorted, not empty with ConcernsConcepts, empty otherwise
+
+func TestAReasonSaysWhatItStandsInTheWayOf(t *testing.T) {
+	walked := []string{"order", "orderLineItem", "refund", "shop"}
+	for _, c := range []struct {
+		name   string
+		reason VerdictReason
+		want   bool
+	}{
+		{"orders' check failing", VerdictReason{Code: ReasonCheckFailing, Concerns: ConcernsConcepts, Concepts: []string{"order"}}, true},
+		{"products' check failing", VerdictReason{Code: ReasonCheckFailing, Concerns: ConcernsConcepts, Concepts: []string{"product"}}, false},
+		{"a refund's parent named", VerdictReason{Code: ReasonDataNotDeclared, Concerns: ConcernsConcepts, Concepts: []string{"order"}}, true},
+		{"customers undeclared", VerdictReason{Code: ReasonDataNotDeclared, Concerns: ConcernsConcepts, Concepts: []string{"customer"}}, false},
+		{"an approval for products only", VerdictReason{Code: ReasonApprovalOutdated, Concerns: ConcernsConcepts, Concepts: []string{"product", "productVariant"}}, false},
+		{"the grant lost", VerdictReason{Code: ReasonGrantLost, Concerns: ConcernsWholeStore}, true},
+		{"events not registered", VerdictReason{Code: ReasonEventsNotRegistered, Concerns: ConcernsWholeStore}, true},
+		{"changes not recorded", VerdictReason{Code: ReasonChangesNotRecorded, Concerns: ConcernsWholeStore}, true},
+		{"a privacy request failing", VerdictReason{Code: ReasonPrivacyRequestFailing, Concerns: ConcernsNoRecording}, false},
+		{"not classified", VerdictReason{Code: "something_new"}, true},
+		{"concepts said and none named", VerdictReason{Code: ReasonCheckFailing, Concerns: ConcernsConcepts}, true},
+	} {
+		if got := c.reason.StandsInTheWayOf(walked); got != c.want {
+			t.Errorf("%s: StandsInTheWayOf = %v, want %v", c.name, got, c.want)
+		}
+	}
+	if (VerdictReason{Code: ReasonCheckFailing, Concerns: ConcernsConcepts, Concepts: []string{"order"}}).StandsInTheWayOf([]string{"v1:shopify:refund"}) != true {
+		t.Error("a concept given by id is compared through the domain that records it")
+	}
+}
+
+func TestAnOutdatedApprovalNamesEveryConceptReadUnderAScopeNotApproved(t *testing.T) // a managed store missing read_products: the reason's Concepts hold product and its children and no order concept; one missing read_orders holds order, orderLineItem and refund. And the stated difference: a store on its own app that asks read_all_orders and lacks only it gets order in Concepts although scopesMissingFor answers nothing for the order domain
+func TestAFailingCheckNamesItsConcept(t *testing.T)                  // setRow(..., "order", a stale lastReconcileAt): Concepts ["order"]
+func TestThePrivacyReasonConcernsNoRecording(t *testing.T)           // on a recording store and on a paused one
+func TestTheVerdictReplyCarriesEachReasonsKindAndConcepts(t *testing.T) // verdictPayload: concerns and concepts on every reason; VerdictReasonFromPayload of it gives back the same three fields
+```
+
+- [ ] **Step 2:** Run `MEMQL_DATABASE_DSN="$STATS_DSN" go test -count=1 ./integrations/shopify/ -run 'Classified|CarriesItsKind|StandsInTheWay|OutdatedApprovalNames|FailingCheckNames|PrivacyReasonConcerns|ReplyCarriesEachReason'`. Expected: FAIL to compile, then FAIL.
+- [ ] **Step 3:** Implement, then `make sdk-gen`.
+- [ ] **Step 4:** Run the same command, the package whole in the database lane (`TestA*` of `verdict_test.go` unchanged and passing), `scripts/ci/module-boundaries.sh integrations`, and the generated-file gates. Expected: PASS.
+- [ ] **Step 5: Commit** `shopify: each reason of a store's verdict says what it stands in the way of`.
 
 ### Task 5: Periods in a zone (U2)
 
@@ -691,7 +814,9 @@ CREATE TABLE IF NOT EXISTS store_sales_store (
     wholesale_window_seconds INTEGER NOT NULL DEFAULT 86400,
     verdict_state            TEXT NOT NULL DEFAULT '',
     verdict_reasons          JSONB NOT NULL DEFAULT '[]',
-    verdict_since            TIMESTAMPTZ,
+    verdict_since            TIMESTAMPTZ,                     -- the verdict's own since, as last read
+    recording_blocked        BOOLEAN NOT NULL DEFAULT false,  -- at the last verdict read, something stood in the way of the walked concepts, or the store was paused or not connected
+    last_clear_at            TIMESTAMPTZ,                     -- the last run at which nothing stood in the way: what the figures are as of while recording_blocked
     last_change_at           TIMESTAMPTZ,
     walked_through           TIMESTAMPTZ,
     rebuilding_since         TIMESTAMPTZ,
@@ -737,7 +862,7 @@ Decisions:
 - Every column has a writer, named in the task that writes it: Task 11 a store's row; Task 12 `history_floor`; Task 13 the fact tables, the watermarks and the store's `last_change_at` and `walked_through`; Task 14 the rest of `store_sales_store`, `generation` and `purging` included, but the wholesale columns; Task 15 those; Task 16 `checked_at` and `store_sales_check`.
 - The round trip stands beside the other migration round trips (`role_test_session_account_migration_test.go`), not in the component: it reads the two files, rewrites `CREATE TABLE` to `CREATE TEMP TABLE`, and runs up, down, up inside one transaction it rolls back.
 - "On Postgres and TimescaleDB" is held two ways: the lane's database is TimescaleDB, and the migration uses nothing of it, which a test reads off the text.
-- Whose rows these are (A27). None of the seven is a concept and none is in the row table, so the accounts piece's rules do not reach them: no `@belongsTo` is declared (the rule is for a concept, and `TestEveryShippedConceptDeclaresBelongsTo` walks concepts), the engine's account stamp runs in the write path of the row table and never sees a `store_sales_*` statement, and the Accounts app's inventory (`integrations/accounts/inventory.go`), which counts node-table rows of the concepts that declare an account form, neither counts them nor needs a new area. A fact's account is its store's, reached through `store_id`: the mirror rows a fact is computed from follow the same store (`@belongsTo(account, via="storeId", parent="v1:shopify:store")`), and a fact is derived and can be rebuilt from them. No column holds an account; whether `store_sales_store` should copy the store's is open (pre-flight, "Needs a ruling"). The opening comment of the up file says this in a sentence: side tables, keyed by store, whose account is the store's.
+- Whose rows these are (A27). None of the seven is a concept and none is in the row table, so the accounts piece's rules do not reach them: no `@belongsTo` is declared (the rule is for a concept, and `TestEveryShippedConceptDeclaresBelongsTo` walks concepts), the engine's account stamp runs in the write path of the row table and never sees a `store_sales_*` statement, and the Accounts app's inventory (`integrations/accounts/inventory.go`), which counts node-table rows of the concepts that declare an account form, neither counts them nor needs a new area. A fact's account is its store's, reached through `store_id`: the mirror rows a fact is computed from follow the same store (`@belongsTo(account, via="storeId", parent="v1:shopify:store")`), and a fact is derived and can be rebuilt from them. No column holds an account (ruling R2, A35): nothing in this release reads a copy, and a copy can lag its source. The opening comment of the up file says this in a sentence: side tables, keyed by store, whose account is the store's.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -841,6 +966,7 @@ Decisions:
 - The pack's reads take a list because the pack's rows hold a store id in either form and the engine does not join the two: the caller passes `<id>` and `v1:shopify:store:<id>`. The settings read is a query of its own because a query is bound to one concept.
 - The pack's files are appended to and nothing in them is reordered, so a rebase over the wholesale branch is a textual merge.
 - Each overlay query is added to the map in `TestServerOnlyParsedSetMatchesTheTree` with a comment giving its reason: a mirror row has no owner to scope an actor against, and the one reader is the statistics walk under its maintenance principal.
+- The mirror concepts these shapes read (`order`, `orderLineItem`, `refund`, `shop`) are the figures' dependencies. They are written down once, as Go, in Task 10 (`walkedConcepts`), with a test that reads this file's shapes and holds the two equal (ruling R1, A34).
 - O4, from `dsl/pack_enablement.go`: a disabled pack keeps its concepts and loads none of its queries, so asking one on a node where the pack is off is an unknown call. The pack's test holds that; Task 15 asks the pack's state before it asks a query.
 - No concept is added (A27). Each shape and query is on a concept that already declares its account: the mirror's `order`, `orderLineItem`, `refund` and `shop` follow their store (`via="storeId", parent="v1:shopify:store"`), `store` is `@belongsTo(account)`, the pack's `entitlement` follows its application and `wholesaleSettings` its store. No shape projects `accountId`: the walk reads every store's rows under the cluster-owner predicate and keys them by store, and the account plays no part in a figure.
 
@@ -923,6 +1049,12 @@ func orderFactOf(row map[string]any) (OrderFact, rowKind, error)
 func lineFactOf(row map[string]any) (LineFact, rowKind, error)
 func refundFactOf(row map[string]any, linesPage int) (RefundFact, rowKind, error)
 func refundLinesPage() int // the Page of refund.refundLineItems in the generated model; 0 when the model has none
+
+// walkedConcepts is THE ONE LIST of the mirror's concepts the figures depend on (ruling R1, A34): every
+// generated concept a shape of Task 9 reads. The walk's three sources are its first three entries, and the
+// verdict's reasons are asked about the whole list (Task 14, shopify.VerdictReason.StandsInTheWayOf).
+// v1:shopify:store is not on it: it is the engine's own row, not a mirror concept, and no reason names it.
+var walkedConcepts = []string{"order", "orderLineItem", "refund", "shop"}
 func soldOf(quantity, currentQuantity, refundedQuantity int, unitPrice, allocated money.Amount, currency string) (sold int, gross, discounts money.Amount)
 func instantOf(v any) (time.Time, bool) // a time.Time, or an RFC3339 string
 
@@ -1016,7 +1148,10 @@ func TestTwoFactsAreTheSameByContentNotByText(t *testing.T)        // "36.0" and
 func TestEveryFieldTheFactsReadSurvivesAnErasure(t *testing.T)     // the fields of the four shapes, read from dsl/shopify/overlay/shapes.memql (the test fails when it finds a shape with no field): each but email and row.* is kept as structure, by kind or by the list in ErasureDecision's answer, and orderLineItem.title is "kept, scrubbed on a custom item"; a failure names the shape, the field and the erasure's answer
 func TestTheGateFailsOnAFieldAnErasureScrubs(t *testing.T)         // the same check over a copy of the order shape's list with "note" added fails and names note ("scrubbed"), and one with "noSuchField" added fails and names it ("no such field")
 func TestTheFactFunctionsReadNoKeyOutsideTheirShapes(t *testing.T) // a recording map: every key orderFactOf, lineFactOf and refundFactOf read is a field of its shape
+func TestTheWalkedConceptsAreEveryMirroredConceptTheShapesRead(t *testing.T) // the concepts of the six storeStatistics* shapes in dsl/shopify/overlay/shapes.memql, less store: each is in walkedConcepts, and each entry of walkedConcepts is a concept of generated.Types that some shape reads; the first three are order, orderLineItem and refund, the walk's sources
 ```
+
+The list lives here and not in Task 9: Task 9 writes DSL and its tests, and this is the package's first Go file beside the gate that already parses Task 9's shapes.
 
 - [ ] **Step 2:** Run `MEMQL_DATABASE_DSN="$STATS_DSN" go test -count=1 ./component/storestats/`. Expected: FAIL (the package does not exist).
 - [ ] **Step 3:** Implement. `doc.go` is the package comment, in the manner of `component/emailstats/doc.go`: why a side table, why through the engine, what a version is, why a retired row's fact is kept, what of a buyer a fact holds and what an erasure does to it.
@@ -1095,7 +1230,7 @@ Decisions:
 - The run, in this task: every page of `storeStatisticsStores()` under `walkContext`, each store once, in bare-id order. For each: its `store_sales_store` row is made if there is none (`writeTx` with `anyGeneration`, an insert that does nothing on conflict, the writer `ensureStore`); `storeState` is called when set, the store is added to `Rebuilt` or `Removed` as it answers, and a removed store is left; then the store's generation is read, after `storeState` has answered, since `storeState` may itself start a rebuild, and before any page of the store is asked; then `walkStore` is called when set, with that generation. One store's failure is logged with its id and the next store still runs; the run's error joins them. `errRebuilt` is not a failure: the store is left for the next run.
 - One lock rule, and one place that opens a writing transaction. `lockWrites` is the lock `component/sitetraffic/rollup.go` takes on its own table: it serialises two nodes' writers and blocks no reader. `writeTx` takes it first, whatever is written after, the wholesale pass's and the check's transactions included. No engine call is made inside `writeTx`: what a transaction needs from the engine is read before it begins. The generation closes a race the lock cannot: a page read before a rebuild and written after it would write old facts over a store whose watermarks the rebuild had set back, and nothing would read the rows between again.
 - The allowlist entry in `call_origin_conformance_test.go`: server-initiated, under the two maintenance principals, each checked before its walk; one stamp, in `walkContext`, for the `@serverOnly` reads and the verdict; the package writes only its own tables.
-- The CI budget (A30). Every database-gated tree runs under a per-package alarm from `scripts/ci/db-test-budgets.yaml`; a tree no class names falls in the default class, 180 seconds, on a runner the file measures at about 1.9 times a laptop's time. `component/storestats` starts there, because nothing can be measured before its suite exists; its suite boots a real engine for most cases, as the mirror's do, whose suites the file measures at 2.2 to 2.5 times a laptop. Task 19, the last task that adds to the package, measures it and decides whether it keeps the default class; this task changes neither the budgets file nor its pinned test (`scripts/ci/pipeline_db_tests_test.py`).
+- The CI budget (A30). Every database-gated tree runs under a per-package alarm from `scripts/ci/db-test-budgets.yaml`; a tree no class names falls in the default class, 180 seconds, on a runner the file measures at about 1.9 times a laptop's time. `component/storestats` starts there, because nothing can be measured before its suite exists; its suite boots a real engine for most cases, as the mirror's do, whose class comment (`cb51cc509`) expects about 310s and 135s on the runner for 125s and 61s on a laptop, about 2.5 and 2.2 times. Task 19, the last task that adds to the package, measures it and decides whether it keeps the default class; this task changes neither the budgets file nor its pinned test (`scripts/ci/pipeline_db_tests_test.py`).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1254,7 +1389,7 @@ func (i *Integration) walkOneStore(ctx context.Context, store map[string]any, ge
 ```
 
 Decisions:
-- `walkOneStore`: the store's floor (`ensureFloor`); then order, line and refund with `walkSource`, each from its `store_sales_watermark` row, 40 pages each; then the store's `walked_through` is set to the least of its three sources' `walked_through`, null while any is null. A store whose `purging` is set is not walked (Task 14 deletes first).
+- `walkOneStore`: the store's floor (`ensureFloor`); then order, line and refund (the first three entries of `walkedConcepts`, Task 10, each paired with its source name and its query in one table of this file) with `walkSource`, each from its `store_sales_watermark` row, 40 pages each; then the store's `walked_through` is set to the least of its three sources' `walked_through`, null while any is null. A store whose `purging` is set is not walked (Task 14 deletes first).
 - Each page, and each empty window, is one `writeTx` handed the generation the run read before the store's first page was asked: `foldPage`, the watermark (`through` by `GREATEST`, `window_seconds`, `walked_through`), and the store's `last_change_at` by `GREATEST` with the page's `LastRecorded`. A rebuild that lands after the page was read raises the generation, so the page writes nothing, the watermark does not move and the store is left for the next run, which starts where the rebuild left it.
 - `foldPage`, for a live row: an upsert with `ON CONFLICT ... DO UPDATE ... WHERE excluded.<row>_version >= <table>.<row>_version`, setting every column the fact holds and `deleted` false. It never touches a derived column or `checked_at`. A refund's lines are replaced whole with the refund, when the refund's own write took effect.
 - `foldPage`, for a tombstone: the fact is not removed. It is written `deleted`, with the tombstone's version and `recorded_at`, under the same guard; a fact that exists keeps its other columns, and one that does not is inserted with zeros, empty strings and its version as its dates, none of which is ever read. The row then stands in the table as the newest version, and the guard refuses every older one: the live version a later window of a first fill or of the check reads again, or one another node folds after this. A deleted refund's lines are removed with it, since they have no version of their own and are only ever written with their refund. A line's tombstone finds its fact by `(store_id, line_gid)` and a refund's by `(store_id, refund_gid)`, the tables' keys; the order the fact named is among the orders the page touched.
@@ -1308,7 +1443,7 @@ func TestTheWalkReadsNoFieldOutsideItsShapes(t *testing.T)                  // e
 - Modify: `component/storestats/integration.go` (`NewIntegration` sets `storeState`, and the `verdictOf` seam), `component/storestats/rollup.go` (the run gives a removed store no new row, leaves for this run a store that answers `outcomePurging`, and clears `rebuilding_since`), `component/storestats/harness_db_test.go`, `component/storestats/tx_test.go` (the writers `keepStoreRow`, `rebuildStore`, `purgeBatch`, `forgetStore`, `clearRebuilding`)
 
 **Interfaces:**
-- Consumes: Task 11's `Integration` and its seam `storeState func(ctx context.Context, store map[string]any, now time.Time) (outcome string, err error)`, `walkContext(ctx context.Context) context.Context`, `writeTx(ctx context.Context, db *bun.DB, storeID string, generation int64, fn func(ctx context.Context, tx bun.Tx) error) error` with `anyGeneration`, and the `Rebuilt` and `Removed` lists of `RollupReport`; a store row as Task 9's `storeStatisticsStores()` answers it (`id`, `domain`, `name`, `isDevelopment`, `scopesGranted`, `uninstalledAt`, `redactedAt`, `health`); Task 9's `storeStatisticsShop(storeId)`, whose one row holds `id`, `createdAt`, `storeId`, `deleted`, `name`, `currencyCode`, `ianaTimezone`, `taxesIncluded` and `plan`; Task 5's `statsperiod.StartOfDay(y int, m time.Month, d int, loc *time.Location) time.Time`; Task 10's `instantOf(v any) (time.Time, bool)`; the mirror's `builtin shopifyStoreVerdict(storeId)`, whose one row holds `state`, `since` (RFC3339) and `reasons` (each with `code` and `sentence`).
+- Consumes: Task 11's `Integration` and its seam `storeState func(ctx context.Context, store map[string]any, now time.Time) (outcome string, err error)`, `walkContext(ctx context.Context) context.Context`, `writeTx(ctx context.Context, db *bun.DB, storeID string, generation int64, fn func(ctx context.Context, tx bun.Tx) error) error` with `anyGeneration`, and the `Rebuilt` and `Removed` lists of `RollupReport`; a store row as Task 9's `storeStatisticsStores()` answers it (`id`, `domain`, `name`, `isDevelopment`, `scopesGranted`, `uninstalledAt`, `redactedAt`, `health`); Task 9's `storeStatisticsShop(storeId)`, whose one row holds `id`, `createdAt`, `storeId`, `deleted`, `name`, `currencyCode`, `ianaTimezone`, `taxesIncluded` and `plan`; Task 5's `statsperiod.StartOfDay(y int, m time.Month, d int, loc *time.Location) time.Time`; Task 10's `instantOf(v any) (time.Time, bool)` and `walkedConcepts`; the mirror's `builtin shopifyStoreVerdict(storeId)`, whose one row holds `state`, `since` (RFC3339) and `reasons` (each with `code`, `sentence`, and from Task 4a `concerns` and `concepts`); Task 4a's `shopify.VerdictReasonFromPayload(m map[string]any) shopify.VerdictReason` and `(shopify.VerdictReason).StandsInTheWayOf(concepts []string) bool`.
 - Produces:
 
 ```go
@@ -1316,13 +1451,19 @@ const storeStatsDefinition = 1
 
 var deleteBatch = 5000 // rows a batched delete takes in one transaction; a variable so a test can lower it
 
-type verdictReason struct{ Code, Sentence string }
+type verdictReason struct {
+	Code, Sentence string
+	InTheWay       bool // shopify.VerdictReasonFromPayload(<its element>).StandsInTheWayOf(walkedConcepts)
+}
 type storeVerdict struct {
 	State   string
 	Since   time.Time
 	Reasons []verdictReason
 }
 // a seam on Integration: verdictOf func(ctx context.Context, storeID string) (storeVerdict, error); its default asks the builtin
+
+// blocked is ruling R1's one rule: the store is paused or not connected, or a reason stands in the way of the walked concepts.
+func (v storeVerdict) blocked() bool
 
 const (
 	outcomeRebuilt = "rebuilt"
@@ -1347,7 +1488,12 @@ Decisions:
 - A store whose `purging` is set has its facts deleted before anything else is done for it: `purgeStore` with a budget of 20 transactions a run, each one `writeTx` with `anyGeneration` that reads `purging` again under the lock and stops when another node has cleared it, then deletes up to `deleteBatch` rows from each of the four fact tables. A delete of a whole store in one transaction would hold the write lock, and every other store's walk, for as long as it took. Nothing is folded for the store while `purging` is set, so no batch can delete a fact written after the rebuild.
 - Otherwise `store_sales_store` is written from the store row and the shop row (`storeStatisticsShop`): `store_domain`; `store_name` (the store row's `name`, else the shop row's); `currency`, `timezone` and `taxes_included` from a live shop row, left as they are when there is none; `development` is the shop row's `plan.partnerDevelopment` when there is a shop row, else the store row's `isDevelopment`, else null (D4); `all_orders_readable` is whether `scopesGranted` holds `read_all_orders`, the test the mirror makes in `stampOrdersFrom`.
 - `history_since` is the store-local midnight of the first recorded day. `health.ordersFrom` is a day (`2025-09-12`): `history_since` is `statsperiod.StartOfDay` of that day in the store's zone. With no `ordersFrom` it is `StartOfDay`, in the store's zone, of the day of the store's oldest `ordered_at` among facts that are not deleted. With no zone, or one that does not load, the zone is UTC. It is written again on every run, so a zone that changes moves it.
-- The verdict, from `verdictOf`: `verdict_state` and `verdict_reasons` (code and sentence only) are copied. `verdict_since` is when the store left `recording`: set to the reply's `since` when the stored state was `recording` or empty and the new one is not, kept while the state stays other than `recording`, and set to the reply's `since` when it returns to `recording`. A verdict that cannot be read writes an empty state and logs once a run.
+- The verdict, from `verdictOf` (ruling R1, A34): `verdict_state`, `verdict_since` (the reply's own `since`) and `verdict_reasons` (every reason, code and sentence only, whether or not it stands in the way: the page lists them all) are copied. Then, by `blocked()`:
+  - Not blocked, and the state is `recording` or `needs attention` (every reason it holds being one that stands in the way of none of `walkedConcepts`): a clear run. `recording_blocked` is false and `last_clear_at` is the run's clock.
+  - Blocked (`paused`, `not connected`, or any reason that stands in the way): `recording_blocked` is true and `last_clear_at` is left where the last clear run put it.
+  - `starting`: neither; `recording_blocked` is false and `last_clear_at` is not moved. Its figures are absent by the starting rule (Task 18), as D16 has it.
+  - A verdict that cannot be read: an empty state, `recording_blocked` false, `last_clear_at` not moved, logged once a run. The page says the state is not known (D16, unchanged).
+  The verdict's `since` cannot serve as the "as of": a store can need attention for an unrelated reason from one day and lose its order check on a later one, and `since` is the first. A reason's own classification is the mirror's (Task 4a): nothing here reads a code or a `domain` to decide.
 - A rebuild by definition: `keepStore` calls `rebuildStore` in its transaction when the stored `definition` is below `storeStatsDefinition`, and answers `outcomeRebuilt`. A new row has `definition` 0, so a store's first fill is a rebuild with nothing to delete.
 - The run clears `rebuilding_since` once the store's `walked_through` is within 5 minutes of the clock.
 
@@ -1360,15 +1506,20 @@ func TestADevelopmentStoreIsToldFromALiveOne(t *testing.T)                  // t
 func TestTheStoresNameAndDomainAreCopied(t *testing.T)                      // the store row's name, else the shop's
 func TestAGrantWithoutAllOrdersIsRecorded(t *testing.T)                     // scopesGranted without read_all_orders: all_orders_readable false; with it, true
 func TestOrdersSinceIsTheStoreLocalMidnightOfTheFirstRecordedDay(t *testing.T) // health.ordersFrom "2025-09-12": in Europe/Madrid 2025-09-11T22:00:00Z, in America/Los_Angeles 2025-09-12T07:00:00Z, with no zone 2025-09-12T00:00:00Z; with no ordersFrom, the local midnight of the oldest order's day, a deleted order left out
-func TestTheVerdictIsCopiedAndWhenTheStoreLeftRecordingIsKept(t *testing.T) // recording, paused at t1, needs attention at t2: verdict_since stays t1; recording again at t3: t3
-func TestAVerdictThatCannotBeReadIsNotKnown(t *testing.T)
+func TestTheVerdictIsCopied(t *testing.T)                                  // state, since and every reason's code and sentence, a reason that stands in the way of nothing included
+func TestAReasonAboutNothingTheWalkReadsKeepsTheRunClear(t *testing.T)    // needs attention with only privacy_request_failing, and with only approval_outdated naming product: recording_blocked false, last_clear_at the run's clock
+func TestAFailingOrderCheckBlocksAndLastClearAtStays(t *testing.T)        // recording at t1, then check_failing naming order at t2: recording_blocked true, last_clear_at t1
+func TestTheLastClearRunIsTheWalksNotTheVerdictsSince(t *testing.T)       // Monday 09:00 needs attention (privacy only, since Monday) through runs until Wednesday 10:00, when check_failing naming order joins it (since still Monday): last_clear_at is Wednesday's last run before 10:00, not Monday
+func TestAPausedOrNotConnectedStoreIsBlocked(t *testing.T)                // recording at t1, paused at t2: recording_blocked true, last_clear_at t1; the same for not connected
+func TestAStartingStoreMovesNothing(t *testing.T)                         // starting: recording_blocked false, last_clear_at null
+func TestAVerdictThatCannotBeReadIsNotKnown(t *testing.T)                 // state "", recording_blocked false, last_clear_at not moved
 func TestALowerDefinitionRebuilds(t *testing.T)                             // definition 0: rebuilding_since set, generation raised, cleared once the walk reaches the clock, and the facts are the same as before
 func TestAStoresFactsAreDeletedInBatchesBeforeItIsWalkedAgain(t *testing.T) // deleteBatch 2, five order facts and their lines: purgeStore takes three transactions, no fact is written while purging is set, and the run after the last batch walks
 func TestAPurgeAnotherNodeFinishedDeletesNothingMore(t *testing.T)          // purging cleared and a fact refilled between two batches: the next batch deletes nothing
 func TestAStoreWhoseDataWasRemovedLosesItsRowsAndGetsNoNewOne(t *testing.T) // redactedAt: nothing of it in any of the seven tables, it is not walked, and the next run makes no row for it
 ```
 
-- [ ] **Step 2:** Run `MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN="$STATS_DSN" go test -p 1 -count=1 ./component/storestats/ -run 'Shop|Development|NameAndDomain|AllOrders|OrdersSince|Verdict|Definition|Batches|Purge|DataWasRemoved'`. Expected: FAIL.
+- [ ] **Step 2:** Run `MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN="$STATS_DSN" go test -p 1 -count=1 ./component/storestats/ -run 'Shop|Development|NameAndDomain|AllOrders|OrdersSince|Verdict|Clear|Blocked|Starting|Definition|Batches|Purge|DataWasRemoved'`. Expected: FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** Run the same command, then the package whole in the database lane. Expected: PASS.
 - [ ] **Step 5: Commit** `storestats: the walk keeps each store's currency, time zone, verdict and definition, and deletes a store's facts in batches`.
@@ -1569,7 +1720,7 @@ func (s Statistics) Payload() map[string]any
   storeId, siteId, storeName, storeDomain, destination: "production" | "testing" | "both",
   currency, timezone, development, taxesIncluded, olderOrderChangesNotRecorded,
   period, bucket, start, end, prevStart, historySince, lastChangeAt, asOf,
-  recording: { state, reasons: [{ code, sentence }], since },
+  recording: { state, reasons: [{ code, sentence }], since, blocked },
   rebuilding,
   figures:  { totalSales, netSales, orders, averageOrderValue, grossSales, discounts, refunds, unitsSold },
   previous: { ...the same eight } | null,
@@ -1587,7 +1738,7 @@ Decisions:
 - The gate, in this order. The engine has already judged `execute app:deployables/sales` in the organization of the named site. Then the handler: (1) `statsperiod.Parse(period)`, whose own sentence refuses a bad period, before anything is read; (2) the site read under the caller's own actor; (3) it is a `shopify_storefront` and not `systemOwned`; (4) `memql.BareShortId` of its `binding.storeId` or of its `previewBinding.storeId` equals `memql.BareShortId(storeId)`. Any of (2) to (4) failing answers the one sentence of the Global Constraints. `destination` says which binding matched. Only then is `store_sales_*` read, in one `readTx`, by the bare store id. No order row is read, so the caller need not be a cluster owner.
 - The read never runs under the walk's context. `handleStatistics` uses the context it was handed for the site read and for the database, and nothing in `statistics.go` or `statistics_payload.go` calls `walkContext`: a read with internal origin would pass `@requiresCapability` and the site's own row authorization for whoever asked.
 - The store's zone is loaded in Go (`time.LoadLocation`; the engine already embeds the zone database). The period is `statsperiod.ForIn(period, now, loc)`, in UTC when the store has no zone or one that does not load. `series[].at`, `start`, `end` and `prevStart` are RFC3339 with the store's offset. `prevStart` is null for twelve months.
-- `asOf` is `verdict_since` when the state is `paused`, `needs attention` or `not connected`, else `walked_through`. This is D16 as written. On the finished mirror `needs attention` is also the state of a store whose orders record normally while a privacy request has failed for more than a day, or while a domain the figures do not read is behind (A33); whether those stores' figures are drawn as of `verdict_since` awaits the owner's ruling (pre-flight, "Needs a ruling"), and until it is given the rule stands as written. `rebuilding` is true while `rebuilding_since` is set. `recording` is the verdict as Task 14 kept it. `olderOrderChangesNotRecorded` is `not all_orders_readable`. `storeName` and `storeDomain` are there because a holder of the part cannot read the store row.
+- `asOf` (ruling R1, A34) is answered only when something stands in the way now: `recording_blocked` is true, and `asOf` is `last_clear_at`. Otherwise it is null and the figures are current, whatever the state's word: a store that needs attention only for reasons that stand in the way of nothing the walk reads (a privacy request, an approval or a check of products) is answered with current figures. `recording.blocked` is `recording_blocked`, so the page tells "as of" from "not yet" without guessing from nulls. A blocked store that has never had a clear run (`last_clear_at` null) is answered as a starting store is: `asOf` null and every figure null (Task 18). A paused and a not-connected store are blocked, so their figures are as of their last clear run, as D16 has it. `recording.reasons` holds every reason the verdict gave, those that freeze nothing included, so the page lists them all. `rebuilding` is true while `rebuilding_since` is set. `recording` is the verdict as Task 14 kept it. `olderOrderChangesNotRecorded` is `not all_orders_readable`. `storeName` and `storeDomain` are there because a holder of the part cannot read the store row.
 - A store the walk holds no row for yet is answered, not refused: the site serves it, so the frame says its ids and its destination, a `recording.state` of `starting` and every other key null.
 
 - [ ] **Step 1: Write the failing tests** (database lane)
@@ -1605,14 +1756,16 @@ func TestASiteBoundUnderTheCanonicalFormOfTheStoreIdStillServesIt(t *testing.T) 
 func TestTheReadCarriesNoInternalOrigin(t *testing.T)                       // a recording engine in front of the site read: auth.OriginFromContext of the context the handler asks it with is not internal, and the actor is the caller's own
 func TestTheFrameSaysTheStoreItsCurrencyItsZoneAndItsKind(t *testing.T)     // storeName, storeDomain, currency, timezone, development, taxesIncluded as the row holds them; null where it holds none
 func TestThePeriodIsCutInTheStoresZone(t *testing.T)                        // Europe/Madrid, 7d at 2025-11-08T10:17Z: start 2025-11-02T00:00:00+01:00, end 2025-11-09T00:00:00+01:00, seven entries in series, each at a local midnight; 12m: prevStart null
-func TestAStoreNotRecordingIsAnsweredAsOfWhenItStopped(t *testing.T)        // paused, needs attention and not connected: asOf is verdict_since; recording: walked_through; rebuilding_since set: rebuilding true
+func TestABlockedStoreIsAnsweredAsOfItsLastClearRun(t *testing.T)           // recording_blocked with last_clear_at set (a failing order check, paused, not connected): asOf is last_clear_at; not blocked, recording or needs attention: asOf null; rebuilding_since set: rebuilding true
+func TestAReasonThatFreezesNothingIsStillInTheAnswer(t *testing.T)         // needs attention, privacy_request_failing only, recording_blocked false: asOf null, recording.reasons holds the reason with its sentence
+func TestABlockedStoreWithNoClearRunAnswersNoFigure(t *testing.T)          // recording_blocked, last_clear_at null: asOf null, the eight figures null, recording.reasons as stored
 func TestAStoreWithNoZoneIsCutInUTC(t *testing.T)                           // timezone null in the answer, start a UTC midnight
 func TestAGrantWithoutAllOrdersSaysOlderChangesAreNotRecorded(t *testing.T)
 func TestAStoreTheWalkHasNotSeenYetIsAnsweredAsStarting(t *testing.T)
 func TestAStartingStoresFiguresAreNullAndEveryKeyIsThere(t *testing.T)       // a store whose state is starting: the eight are null, never 0, and the payload holds every key of the answer
 ```
 
-- [ ] **Step 2:** Run `MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN="$STATS_DSN" go test -p 1 -count=1 ./component/storestats/ -run 'Refus|NothingIsRead|IsRead|ClusterOwnerGets|Bound|InternalOrigin|Frame|CutIn|NotRecording|AllOrders|NotSeenYet|EveryKeyIsThere'` and `MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN="$STATS_DSN" go test -p 1 -count=1 ./component/memql/ -run 'TestTheDeployablesPartsAreDeclaredOnTheirConstructs'`. Expected: FAIL.
+- [ ] **Step 2:** Run `MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN="$STATS_DSN" go test -p 1 -count=1 ./component/storestats/ -run 'Refus|NothingIsRead|IsRead|ClusterOwnerGets|Bound|InternalOrigin|Frame|CutIn|BlockedStore|FreezesNothing|AllOrders|NotSeenYet|EveryKeyIsThere'` and `MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN="$STATS_DSN" go test -p 1 -count=1 ./component/memql/ -run 'TestTheDeployablesPartsAreDeclaredOnTheirConstructs'`. Expected: FAIL.
 - [ ] **Step 3:** Implement, then `make sdk-gen`; in `sdk/ts` run `npm run build`.
 - [ ] **Step 4:** Run the same two commands, the package whole in the database lane, `make sdk-gen-check` (both clients now carry `storeStatistics`), and the generated-file gates. Expected: PASS.
 - [ ] **Step 5: Commit** `storestats: a holder of the sales part asks for a store a site serves, and gets its frame`.
@@ -1634,10 +1787,10 @@ Decisions:
 - Money is summed only over orders, and refunds of orders, whose `currency` is the store's; the others are counted in Orders and Units and listed in `otherCurrencies`.
 - The average order value divides what it sums by what it summed over: the gross sales less the discounts of the period's orders in the store's currency, by the number of those orders, not by Orders, which counts every currency. It is null when there is no such order. It is answered already rounded for display, half to even at the currency's minor units (`MulRatio(1, n, money.MinorUnits(currency))`), so the page's formatter rounds nothing a second time and by another rule.
 - SQL cuts buckets with `width_bucket(<instant>, <the bucket starts as a timestamptz array>)`, never with `AT TIME ZONE`: every boundary then comes from one zone database, the one that cut the period.
-- A period's sums cover `[start, min(end, asOf))`. A bucket that starts after `asOf`, or ends at or before `historySince`, is null in every figure.
+- A period's sums cover `[start, min(end, asOf))`, and `[start, end)` when `asOf` is null (Task 17: nothing stands in the way). A bucket that starts after an answered `asOf`, or ends at or before `historySince`, is null in every figure.
 - Null, never zero:
   - no zone, or one that does not load: every figure, every bucket, every list;
-  - `rebuilding_since` set, state `starting`, or `walked_through` null: every figure and bucket;
+  - `rebuilding_since` set, state `starting`, `walked_through` null, or `recording_blocked` with `last_clear_at` null (blocked before any clear run, ruling R1): every figure and bucket;
   - no currency: every money figure; `orders` and `unitsSold` stay;
   - a counted refund in the period with `detail_fetched` false: `refunds`, `netSales`, `totalSales`, `unitsSold`, for the period and for the bucket it falls in; `refundsNotRead` counts them (D22);
   - a counted refund in the period with `lines_complete` false: `unitsSold`; `incompleteRefunds` counts them;
@@ -1684,7 +1837,7 @@ func TestACancelledOrderAndItsRefundLeaveEveryFigure(t *testing.T)          // i
 func TestAShippingRefundLowersTotalSalesAndNotNetSales(t *testing.T)
 func TestAnEditThatRemovesAUnitChangesTheOrdersOwnDayAndNoRefund(t *testing.T)
 func TestATestOrderCountsOnlyOnADevelopmentStore(t *testing.T)
-func TestFiguresStopAtAsOfAndStartAtHistory(t *testing.T)                   // paused: buckets after verdict_since null; buckets ending before historySince null; starting and rebuilding: every figure null; a state not known: figures, state ""
+func TestFiguresStopAtAsOfAndStartAtHistory(t *testing.T)                   // blocked (paused, or an order check failing): buckets after last_clear_at null; not blocked with a reason about products: no bucket null for it; buckets ending before historySince null; starting, rebuilding, and blocked with no clear run: every figure null; a state not known: figures, state ""
 func TestAStoreWithNoZoneAnswersNoFigureAndOneWithNoCurrencyNoMoney(t *testing.T) // Review Focus
 func TestTheLinesOfARetiredOrderCountNowhere(t *testing.T)
 func TestTopProductsCarryTwentyFiveRowsAndSayHowManyThereAre(t *testing.T)
@@ -1740,7 +1893,7 @@ func TestTheShortWrittenDiscountIsSharedInCentsByBoth(t *testing.T)     // disco
 - [ ] **Step 2:** Run `MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN="$STATS_DSN" go test -p 1 -count=1 ./component/storestats/ -run 'IndependentCalculation|ReferenceShares|Fixture|ShortWritten'`. Expected: FAIL.
 - [ ] **Step 3:** Write the fixture and the calculator. A difference is a defect in the component or in the reading of section 5: settle which before changing either, and never make the two agree by copying one into the other.
 - [ ] **Step 4:** Run the same command, then the package whole in the database lane, and the docs gates (the README is a tracked Markdown file). Expected: PASS.
-- [ ] **Step 5: The package's CI budget (A30).** The suite is now whole. Time it three times with the lane's own flags on a fresh database: `MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN="$STATS_DSN" go test -count=1 -p=1 -parallel=4 -timeout=600s ./component/storestats/`, and take the slowest `ok` line. The file puts the runner at about 1.9 times a laptop for most trees and 2.2 to 2.5 times for the mirror's suites, which boot a real engine as this one does: take 2.5. The file's classes keep about twice the expected runner time (`integrations/shopify`'s 600s for an expected 310s, `component/datasync`'s 300s for 135s). So when 2.5 times the slowest pass is under 90 seconds the package stays in the default class, and the report says so with the number. Otherwise it gets a class of its own, `db      storestats component/storestats <seconds>s serial    1`, at about twice the expected runner time rounded up to a multiple of 60, placed before the `default` row, under a comment in the file's manner: what the suite boots, the laptop time with the lane's flags, the expected runner time, and "keep every test and its operation deadlines". The class's name and timeout join both lists of `test_real_table_preserves_every_selected_package_and_budget`. Then `python3 -m unittest discover -s scripts/ci -p pipeline_db_tests_test.py` and `MEMQL_DATABASE_DSN="$STATS_DSN" go test -count=1 ./scripts/cidb/ ./scripts/ci/`. Expected: PASS.
+- [ ] **Step 5: The package's CI budget (A30).** The suite is now whole. Time it three times with the lane's own flags on a fresh database: `MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN="$STATS_DSN" go test -count=1 -p=1 -parallel=4 -timeout=600s ./component/storestats/`, and take the slowest `ok` line. The file puts the runner at about 1.9 times a laptop for most trees; the mirror's class comment expects about 2.5 and 2.2 times for its two engine-booting suites (310s for 125s, 135s for 61s): take 2.5. The file's classes keep about twice the expected runner time (`integrations/shopify`'s 600s for an expected 310s, `component/datasync`'s 300s for 135s). So when 2.5 times the slowest pass is under 90 seconds the package stays in the default class, and the report says so with the number. Otherwise it gets a class of its own, `db      storestats component/storestats <seconds>s serial    1`, at about twice the expected runner time rounded up to a multiple of 60, placed before the `default` row, under a comment in the file's manner: what the suite boots, the laptop time with the lane's flags, the expected runner time, and "keep every test and its operation deadlines". The class's name and timeout join both lists of `test_real_table_preserves_every_selected_package_and_budget`. Then `python3 -m unittest discover -s scripts/ci -p pipeline_db_tests_test.py` and `MEMQL_DATABASE_DSN="$STATS_DSN" go test -count=1 ./scripts/cidb/ ./scripts/ci/`. Expected: PASS.
 - [ ] **Step 6: Commit** `storestats: the figures equal an independent calculation over a fixture store, to the cent`, and, when Step 5 gave the package a class, a separate commit `ci: the store statistics suite gets its own database budget`.
 
 ### Task 20: The kit (U12)
@@ -1844,10 +1997,10 @@ it("labels its buckets, its readout and its summary in the time zone it is given
 - Produces, in `parts.ts`: `"sales"` in `DEPLOYABLE_PARTS`, `NO_PARTS` and `ALL_PARTS`, and in the header comment's list.
 - Produces, in `read.ts`: `interface StoreStatistics` mirroring the answer, a money figure parsed with `Number()` and a null kept null; `parseStoreStatistics(row: Row, requested: Period): StoreStatistics`; `fetchStoreStatistics(query: QueryClient, args: { siteId: string; storeId: string; period: Period }, signal?: AbortSignal): Promise<StoreStatistics | null>`; `destinationsOf(site: SiteRow): { production: string; testing: string }` (each id as the site holds it, "" when unbound; the server compares both forms of an id, so the client parses none).
 - Produces: `useStoreStatistics({ siteId, storeId, period, enabled }): StoreStatisticsReading`, with the states and the retry rule of `useSiteStatistics`; `StoreStatisticsSection({ site, name, trail, back })`, taking the pane as `ReviewsSection` does, a `region` named "Store statistics for " and the site's hostname; `DestinationControl({ value, onChange })`, a `Select` labelled "Destination" over `"production" | "testing"`; `WorkspaceDetail` gains `"storeStatistics"`.
-- Produces, in `harness.tsx`: `storeStatistics?: Record<string, Row>` (keyed by the store id the call names) and `storeStatisticsError?: string` on `FakeSeed`, answered for `builtin storeStatistics(`; `storeStatisticsRow(over: Partial<Row> & { storeId: string }): Row`, a recording store in EUR and `Europe/Madrid` for the week of Nov 2 to Nov 8 2026 with the names of the harness's `STORE`, every figure null and every list empty unless named.
+- Produces, in `harness.tsx`: `storeStatistics?: Record<string, Row>` (keyed by the store id the call names) and `storeStatisticsError?: string` on `FakeSeed`, answered for `builtin storeStatistics(`; `storeStatisticsRow(over: Partial<Row> & { storeId: string }): Row`, a recording store (`recording.blocked` false, `asOf` null) in EUR and `Europe/Madrid` for the week of Nov 2 to Nov 8 2026 with the names of the harness's `STORE`, every figure null and every list empty unless named.
 
 Decisions:
-- The button: `IconButton label="Store statistics"` with the `Receipt` icon, after Statistics. Present only when the organization's parts hold `sales` (`partsForOrganization`, as every part of this app is judged), the site is a `shopify_storefront`, not system-owned, and either destination has a store (D15). Absent otherwise. `detailTitle` gains "Store statistics". Statistics itself is drawn only for a site that is not a draft (`DeployablePage.tsx:546`), and the tests' `SHOP` is live; on a draft storefront with a store this rule draws Store statistics with no Statistics beside it. That is S1 and D15 as written, and whether it should is open (pre-flight, "Needs a ruling").
+- The button: `IconButton label="Store statistics"` with the `Receipt` icon, after Statistics. Present only when the organization's parts hold `sales` (`partsForOrganization`, as every part of this app is judged), the site is a `shopify_storefront`, not system-owned, and either destination has a store (D15). Absent otherwise. `detailTitle` gains "Store statistics". Statistics itself is drawn only for a site that is not a draft (`DeployablePage.tsx:546`). Ruling R3 (A36): Store statistics is drawn on a draft storefront that has a store all the same, because the figures are the store's sales, which do not depend on whether this site is published, and its gate is D15's part, unchanged. In the Head's row (Visit, Logs, Statistics, Access codes, Reviews) it stands right after Statistics; on a draft, where Statistics is absent, it stands in that place, right after the Logs button and before Access codes and Reviews.
 - The page opens on Production when it has a store, else Testing; the choice is not remembered (D13). The destination control is drawn only when both destinations name stores and the answer's `destination` is not `both`; when the answer says `both` there is none, and the context line says "Production and Testing". The period is the remembered `statisticsPeriod`, through `PeriodControl` over `SITE_PERIODS`, at the Head's right after the destination control.
 - This task draws the Head and block 1, the context, a `Caption`: the store's name, else its domain; "Prices in EUR"; "Days in Europe/Madrid"; "Orders since Sep 12"; "Last order change recorded " and `formatFreshness`. Then, each a `Caption` of its own and only when it applies: "This is a development store: every order on it is a test order, and they are counted."; "Prices on this store include tax."; and the line about older orders, exactly as the Global Constraints give it. Task 22 draws the rest.
 - Loading draws an `InlineSkeleton` for the context line; a refresh keeps what it has; a refused or failed read is a `Notice` whose `sentence` is the engine's own, kept while it is tried again, with no shape over it. `AutoRefresh` at `statisticsRefreshMs(period)`.
@@ -1907,6 +2060,13 @@ it("draws no button for a static site, for a system-owned one, and with no store
     expect(within(page).queryByRole("button", { name: "Store statistics" })).toBeNull();
     cleanup();
   }
+});
+it("draws Store statistics and no Statistics on a draft storefront with a store, right after Logs", async () => {
+  const { page } = await openDeployable({ sites: [{ ...SHOP, status: "draft" }] });
+  expect(within(page).queryByRole("button", { name: "Statistics" })).toBeNull();
+  const buttons = within(page).getAllByRole("button");
+  const logs = buttons.findIndex((b) => (b.getAttribute("aria-label") ?? "").startsWith("Logs for"));
+  expect(buttons.indexOf(within(page).getByRole("button", { name: "Store statistics" }))).toBe(logs + 1);
 });
 it("draws the button when only Testing has a store, and opens on it", async () => {
   const site = { ...SHOP, binding: {}, previewBinding: { storeId: "store-example-dev" } };
@@ -1985,7 +2145,7 @@ it("judges the sales part per organization", () => {
 
 Decisions:
 - Blocks, top to bottom after the context, spacing only between them:
-  2. A `Notice`, only when one applies: for `starting` or a rebuild, "The store's orders are still being brought in."; for `paused`, `needs attention` and `not connected`, the mirror's sentences, then "These figures are as of " and `formatMoment(asOf)` and a full stop; for a state not known, "Whether this store is recording is not known."; for refunds not read, "1 refund is still being read from Shopify." or "N refunds are still being read from Shopify." Its `next` is "The Store page of this deployable says what fixes it." for the three states the mirror gives a reason for, and nothing otherwise. It holds no act.
+  2. A `Notice`, only when one applies: for `starting` or a rebuild, "The store's orders are still being brought in."; for `paused`, `needs attention` and `not connected`, the mirror's sentence for every reason the answer lists, those that freeze nothing included (ruling R1, A34), then, only when the answer carries an `asOf`, "These figures are as of " and `formatMoment(asOf)` and a full stop, and when `recording.blocked` is true with no `asOf` (blocked before any clear run), "No figure can be given until this is fixed." instead; for a state not known, "Whether this store is recording is not known."; for refunds not read, "1 refund is still being read from Shopify." or "N refunds are still being read from Shopify." Its `next` is "The Store page of this deployable says what fixes it." for the three states the mirror gives a reason for, and nothing otherwise. It holds no act.
   3. `StatFigures`, labelled "Sales figures", eight, in this order and with these labels: Total sales, Net sales, Orders, Average order value, Gross sales, Discounts, Refunds, Units sold. Money through `formatMoney(currency)`, counts through `formatCount`. All but the average are chartable. A previous figure is given only when `previousComparable(prevStart, historySince)`. A figure in `floors` is a floor. An absent figure carries its reason as the figure's detail: "The store's currency has not been recorded yet.", "The store's time zone has not been recorded yet.", "The store's orders are still being brought in.", the refunds sentence above, "A refund in this period has more lines than were recorded.", or "No orders in this period." for the average. When more than one applies the reason is the first of these that does: no time zone; still being brought in; no currency, for a money figure; refunds still being read, for the four figures they blank; a refund with more lines than were recorded, for Units sold; no orders, for the average. When the store's state and unread refunds both call for the `Notice`, the state is said first and the refunds sentence after it.
   4. `TimeChart` of the chosen figure, labelled with the figure's label, with `timeZone`.
   5. `RankedList` "Products", with a `LocalTabs` control labelled "Products by", "Net sales" and "Units"; eight rows; when `productCount` is larger its footer says "The 8 best-selling of 31 products." and "All products" opens `ProductsListPage` under the trail. Further footer lines when they apply, every amount through `formatMoney(currency)`: "Refunds of €12.00 name no product, so they are in Net sales and not here."; "3 orders have more lines than were recorded, so these are floors."; "1 refund has more lines than were recorded, so units are not exact."
@@ -2025,13 +2185,13 @@ it("draws eight figures in order, money in the store's currency", async () => {
   expect(within(group).queryByRole("radio", { name: /^Average order value/ })).toBeNull();   // the average is not chartable
 });
 it("says the store is still being brought in, and draws every figure absent with that reason", async () => {
-  const { page } = await openStoreStatistics(seed({ recording: { state: "starting", reasons: [], since: null } }));
+  const { page } = await openStoreStatistics(seed({ recording: { state: "starting", reasons: [], since: null, blocked: false } }));
   const group = await figures(page);
   expect(page.querySelector(".os-notice-line")?.textContent).toBe("The store's orders are still being brought in.");
   for (const label of ["Total sales", "Orders", "Units sold"]) expect(figure(group, label)).toMatchObject({ value: "--", reason: "The store's orders are still being brought in." });
 });
 it("gives the mirror's sentence and the moment the figures are as of, and names the Store page", async () => {
-  const { page } = await openStoreStatistics(seed({ ...WEEK, asOf: "2026-11-07T09:00:00Z", recording: { state: "paused", reasons: [{ code: "paused", sentence: "Recording is paused for this store." }], since: "2026-11-07T09:00:00Z" } }));
+  const { page } = await openStoreStatistics(seed({ ...WEEK, asOf: "2026-11-07T09:00:00Z", recording: { state: "paused", reasons: [{ code: "paused", sentence: "Recording is paused for this store." }], since: "2026-11-07T09:00:00Z", blocked: true } }));
   await figures(page);
   const notice = page.querySelector(".os-notice")?.textContent ?? "";
   expect(notice).toContain("Recording is paused for this store.");
@@ -2039,8 +2199,40 @@ it("gives the mirror's sentence and the moment the figures are as of, and names 
   expect(notice).toContain("The Store page of this deployable says what fixes it.");
   expect(within(page.querySelector(".os-notice") as HTMLElement).queryByRole("button")).toBeNull();
 });
+it("lists a reason that freezes nothing and draws current figures with no as-of", async () => {
+  for (const reason of [
+    { code: "privacy_request_failing", sentence: "A privacy request for this store could not be completed." },
+    { code: "approval_outdated", sentence: "This store approved an older list of permissions." },   // its concepts are products', which the figures do not read
+  ]) {
+    const { page } = await openStoreStatistics(seed({ ...WEEK, asOf: null, recording: { state: "needs attention", reasons: [reason], since: "2026-11-02T08:00:00Z", blocked: false } }));
+    const group = await figures(page);
+    const notice = page.querySelector(".os-notice")?.textContent ?? "";
+    expect(notice).toContain(reason.sentence);
+    expect(notice).not.toContain("These figures are as of");
+    expect(figure(group, "Net sales").value).toBe("€65.99");
+    cleanup();
+  }
+});
+it("draws a failing order check as of the walk's last clear run, not the verdict's since", async () => {
+  // Needs attention since Monday for a privacy request; the order check failed on Wednesday.
+  const { page } = await openStoreStatistics(seed({ ...WEEK, asOf: "2026-11-04T09:59:15Z", recording: { state: "needs attention", reasons: [
+    { code: "privacy_request_failing", sentence: "A privacy request for this store could not be completed." },
+    { code: "check_failing", sentence: "The last check of orders failed" },
+  ], since: "2026-11-02T08:00:00Z", blocked: true } }));
+  await figures(page);
+  const notice = page.querySelector(".os-notice")?.textContent ?? "";
+  expect(notice).toContain(`These figures are as of ${formatMoment("2026-11-04T09:59:15Z")}.`);
+  expect(notice).not.toContain(formatMoment("2026-11-02T08:00:00Z"));
+  expect(notice).toContain("A privacy request for this store could not be completed.");
+});
+it("says no figure can be given for a store blocked before any clear run", async () => {
+  const blank = { totalSales: null, netSales: null, orders: null, averageOrderValue: null, grossSales: null, discounts: null, refunds: null, unitsSold: null };
+  const { page } = await openStoreStatistics(seed({ figures: blank, asOf: null, recording: { state: "needs attention", reasons: [{ code: "check_failing", sentence: "The last check of orders failed" }], since: "2026-11-07T09:00:00Z", blocked: true } }));
+  await figures(page);
+  expect(page.querySelector(".os-notice")?.textContent ?? "").toContain("No figure can be given until this is fixed.");
+});
 it("says whether the store is recording is not known, and still draws the figures", async () => {
-  const { page } = await openStoreStatistics(seed({ ...WEEK, recording: { state: "", reasons: [], since: null } }));
+  const { page } = await openStoreStatistics(seed({ ...WEEK, recording: { state: "", reasons: [], since: null, blocked: false } }));
   const group = await figures(page);
   expect(page.querySelector(".os-notice-line")?.textContent).toBe("Whether this store is recording is not known.");
   expect(figure(group, "Net sales").value).toBe("€65.99");
@@ -2177,7 +2369,7 @@ Content, each under the page's existing headings where one fits:
 - [ ] **Step 1:** `docker exec memql-testdb createdb -U memql memql_stats_final`.
 - [ ] **Step 2:** `MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN='postgres://memql:memql_dev@127.0.0.1:55432/memql_stats_final?sslmode=disable' make test`. Expected: PASS. The two known flakes on a busy machine are `integrations/email` `TestAzureFeedbackDiscoversPreviouslySavedOrganization` and `component/packages` `TestSynchronousConfirmationSurvivesItsCallerAndTheSweep`; run either again alone before calling it a failure.
 - [ ] **Step 3:** On the same fresh database, with `MEMQL_REQUIRE_DB=1` and `-p 1`, each database-gated tree this plan touched: `./component/storestats/`, `./integrations/shopify/`, `./component/datasync/`, `./component/memql/`, `./component/auth/`, `./component/automations/...`, `./component/database/...`, `./packs/wholesalepack/`, and `./app/` with `-tags bff`. Then `./core/statsperiod/ ./core/money/ ./cmd/shopifyschema/ ./test/dslconformance/... ./scripts/cidb/ ./scripts/ci/`, and `python3 -m unittest discover -s scripts/ci -p pipeline_db_tests_test.py`. Expected: PASS.
-- [ ] **Step 3a: The budgets of the trees that already have a class (A30).** This plan adds engine-booting database tests to `integrations/shopify` (Tasks 2, 3, 4 and 9; class `shopify`, 600s, expected about 310s on the runner before them) and `component/datasync` (Tasks 2 and 3; class `datasync`, 300s, expected about 135s). Time each with the lane's flags (`go test -count=1 -p=1 -parallel=4 -timeout=900s <tree>`) on this branch and on main, side by side, as the file's comment for these two classes was measured. When this branch's time, at the factor that comment gives for these two trees (the runner took 2.2 to 2.5 times the laptop), passes about half its class's timeout, raise that class to about twice the expected runner time, with a comment in the file's manner naming the tasks that added the suites, and the same timeout in `pipeline_db_tests_test.py`; commit it as `ci: the mirror's suites keep their headroom with the store statistics tests`. `component/storestats` was measured in Task 19; `packs`, `component/database` and `component/memql` are in classes whose timeouts these few tests do not approach, and the report gives their times.
+- [ ] **Step 3a: The budgets of the trees that already have a class (A30).** This plan adds engine-booting database tests to `integrations/shopify` (Tasks 2, 3, 4 and 9; class `shopify`, 600s, expected about 310s on the runner before them) and `component/datasync` (Tasks 2 and 3; class `datasync`, 300s, expected about 135s). Both classes are the mirror's own (`cb51cc509`, pinned in `pipeline_db_tests_test.py`), and the comparison is against them, never against the default 180s. Time each with the lane's flags (`go test -count=1 -p=1 -parallel=4 -timeout=900s <tree>`) on this branch and on main, side by side, as the file's comment for these two classes was measured. When this branch's time, at the factor that comment's figures give for the tree (about 2.5 for `integrations/shopify`, 2.2 for `component/datasync`), passes about half its class's timeout, raise that class to about twice the expected runner time, with a comment in the file's manner naming the tasks that added the suites, and the same timeout in `pipeline_db_tests_test.py`; commit it as `ci: the mirror's suites keep their headroom with the store statistics tests`. `component/storestats` was measured in Task 19; `packs`, `component/database` and `component/memql` are in classes whose timeouts these few tests do not approach, and the report gives their times.
 - [ ] **Step 4:** `make sdk-gen-check`, `make concept-snapshot-check`, `make platform-graph-check`, `make dsl-lint`, `scripts/ci/module-boundaries.sh`, and the docs gates. Expected: PASS.
 - [ ] **Step 5:** In `clients/os`: `npm run typecheck`, `npm test`, `npm run build`. Expected: PASS.
 - [ ] **Step 6:** Commit anything a gate made you regenerate, as `build: regenerate after the store statistics change`.
