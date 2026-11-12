@@ -52,8 +52,9 @@ import (
 // purge and a reconnect, and an order backfill writes rows with no detail, so
 // a stamp older than the store's last order export says nothing of the rows
 // that export wrote. The read is owed when the stamp is absent and when the
-// order domain's backfill started its last export after the stamp, as the
-// backfill's own cursor records it (finished, backfill.go); every way a
+// order domain's backfill started its last export at or after the stamp (its
+// own second counts), as the backfill's own cursor records it (finished,
+// backfill.go; an erasure's dropFailedExport keeps it); every way a
 // backfill begins (connect, a restart after an erasure, an operator's
 // backfill, a later grant) passes through that one state. While the order
 // backfill is queued or running no piece runs: it would read what the export
@@ -104,15 +105,26 @@ func (c *Connector) reconcileOrders(ctx context.Context, store Store, spec *gene
 
 // refundDetailOwed reads the store row and the order domain's sync state fresh
 // and says whether a piece of the read runs now, and where a read under way
-// stands: its cursor and when it began, or "" and the zero time to begin one.
+// stands: its cursor and when it began, or "" and the moment a read that
+// begins now began (taken before the backfill's state is read).
 //
 // Owed: the health holds no refundDetailFrom, or the order backfill started its
-// last export after it. Not owed this sweep: the order backfill is queued or
-// running, or either row cannot be read (logged), or the store row is not
-// there; the read waits for a sweep that can judge it. A read under way that
-// began before the last export begins again: the export may have written rows
-// into pages it already read.
+// last export at or after it -- whatever its status now, a failed one
+// included, since an export that failed wrote some rows and nothing queues a
+// failed backfill again by itself. Not owed this sweep: the order backfill is
+// queued or running, or either row cannot be read (logged), or the store row
+// is not there; the read waits for a sweep that can judge it. A read under way
+// whose start is not before the last export begins again: the export may have
+// written rows into pages it already read.
+//
+// A READ BEGINS BEFORE ITS BACKFILL IS JUDGED, and the comparison counts the
+// stamp's own second as after it. The stamps are kept to the second, and an
+// export can start between this read of the backfill's state and the piece's
+// end -- an operator's "Backfill now" -- even within the same second: begun
+// first and compared that way, such an export is never behind the stamp it
+// could have outrun. At worst the read is owed once more than it needed to be.
 func (c *Connector) refundDetailOwed(ctx context.Context, store Store) (owed bool, cursor string, began time.Time) {
+	now := c.now().UTC()
 	opCtx := memql.ContextWithFreshRead(operatorContext(ctx))
 	fresh, found, err := c.storeByID(opCtx, store.ID)
 	if err != nil {
@@ -137,26 +149,24 @@ func (c *Connector) refundDetailOwed(ctx context.Context, store Store) (owed boo
 			return false, "", time.Time{}
 		}
 		if at, ok := memqlsync.VersionTime(decodeBackfillCursor(mapString(rows[0], "backfillCursor")).At); ok {
-			// The stamps are kept to the second; an export started within
-			// the second a read began started before that read, which runs
-			// only once no backfill is in flight.
-			exported = at.UTC().Truncate(time.Second)
+			exported = at.UTC()
 		}
 	}
-	if from, ok := memqlsync.VersionTime(mapString(fresh.Health, refundDetailFromKey)); ok && !exported.After(from) {
+	// An export of the zero time -- none recorded -- is before every stamp.
+	if from, ok := memqlsync.VersionTime(mapString(fresh.Health, refundDetailFromKey)); ok && exported.Before(from) {
 		return false, "", time.Time{}
 	}
 	if after, ok := fresh.Health[refundDetailAfterKey].(map[string]any); ok {
 		at, ok := memqlsync.VersionTime(mapString(after, "began"))
-		if cursor := mapString(after, "cursor"); cursor != "" && ok && !exported.After(at) {
+		if cursor := mapString(after, "cursor"); cursor != "" && ok && exported.Before(at) {
 			return true, cursor, at.UTC()
 		}
 	}
-	return true, "", time.Time{}
+	return true, "", now
 }
 
 // reconcileRefundDetail is one piece of the read of every order: the listing,
-// with no filter, from cursor ("" begins the read now), for at most
+// with no filter, from cursor ("" begins the read, at began), for at most
 // refundDetailRowBudget rows. Its report is what it read; its failure is
 // recorded on the store's health and is never the sweep's.
 //
@@ -178,9 +188,6 @@ func (c *Connector) refundDetailOwed(ctx context.Context, store Store) (owed boo
 // again: reading twice is harmless, since a mirror write is guarded and skips
 // a row it already holds.
 func (c *Connector) reconcileRefundDetail(ctx context.Context, store Store, spec *generated.TypeSpec, cursor string, began time.Time) memqlsync.ReconcileReport {
-	if cursor == "" {
-		began = c.now().UTC()
-	}
 	swept, err := c.sweepListing(ctx, store, spec, "", cursor, refundDetailRowBudget, true)
 	switch {
 	case err != nil:

@@ -1401,9 +1401,11 @@ const conceptSyncState = "v1:platform:syncState"
 // dropFailedExport takes the export out of a failed backfill's cursor, and
 // reports whether there was one to take. What is the backfill's own stays in
 // the cursor: the rule it began under and its count of restarts. The export
-// goes whole -- the operation, the part of a multi-part domain it was, the
-// line it had reached and when it was started -- so the next start begins a
-// new export at the first part.
+// goes -- the operation, the part of a multi-part domain it was and the line
+// it had reached -- so the next start begins a new export at the first part,
+// with a start time of its own. When the dropped export was started stays:
+// that export wrote rows, and the read of every order is owed after it
+// (refundDetailOwed); a cursor with no operation names no export to resume.
 //
 // The write names the cursor and nothing else, and is fenced on the version of
 // the row that was read (memql.ContextWithRowVersionFence): an operator's
@@ -1416,7 +1418,7 @@ func (c *Connector) dropFailedExport(ctx context.Context, stateID string, row ma
 	if cur.OperationID == "" {
 		return false, nil
 	}
-	kept := backfillCursor{Restarts: cur.Restarts, Rule: cur.Rule}
+	kept := backfillCursor{Restarts: cur.Restarts, Rule: cur.Rule, At: cur.At}
 	cursor := ""
 	if kept != (backfillCursor{}) {
 		cursor = kept.encode()

@@ -325,7 +325,11 @@ func (c *Connector) reconcileByUpdatedAt(ctx context.Context, store Store, spec 
 	if err != nil {
 		return swept.report, err
 	}
-	if swept.cut || swept.stalled {
+	switch {
+	case swept.stalled:
+		c.logger.Warn("shopify: updated_at sweep stalled: the origin answered an empty page and said more followed",
+			"store", store.ID, "concept", spec.Concept, "rows", swept.report.Checked)
+	case swept.cut:
 		c.logger.Warn("shopify: updated_at sweep hit the row budget",
 			"store", store.ID, "concept", spec.Concept, "rows", relistRowCap)
 	}

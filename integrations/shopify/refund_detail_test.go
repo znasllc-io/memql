@@ -108,7 +108,7 @@ func (r *refundRig) orderBackfill(status, cursor string) {
 	r.engine.mu.Unlock()
 }
 
-// completedAt is the cursor of an order backfill whose export started at t.
+// backfillExportedAt is the cursor of an order backfill whose export started at t.
 func backfillExportedAt(t time.Time) string {
 	return backfillCursor{Rule: originVersionRule, At: memqlsync.ReadTime(t)}.encode()
 }
@@ -826,5 +826,83 @@ func TestAnOrdinaryCheckThatFailedIsTheSweepsAnswerAndTheReadWaits(t *testing.T)
 	}
 	if writes := r.engine.callsTo("recordStoreHealth"); len(writes) != 0 {
 		t.Errorf("the store's health was written: %v", writes)
+	}
+}
+
+// AN EXPORT IN THE SECOND THE READ BEGAN IS NOT BEHIND IT. The stamps are kept
+// to the second, so an export whose time falls in the stamp's own second may
+// have started after the read began: the read is owed again, at worst once
+// more than it needed to be.
+func TestAnExportInTheStampsOwnSecondOwesTheRead(t *testing.T) {
+	r := newRefundRig(t, StatusLive, map[string]any{refundDetailFromKey: "2026-08-23T09:00:00Z"})
+	r.now = at("12:00:00")
+	r.orderBackfill("complete", backfillExportedAt(at("09:00:00").Add(500*time.Millisecond)))
+	r.pagedOrders(2)
+	if _, err := r.sweep("order", at("11:00:00")); err != nil {
+		t.Fatalf("the sweep: %v", err)
+	}
+	if p := r.pieces(); len(p) != 1 {
+		t.Fatalf("an export in the stamp's own second listed %d pieces, want the read again", len(p))
+	}
+}
+
+// AN EXPORT STARTED WHILE A PIECE RAN -- "Backfill now" between the read of the
+// order backfill's state and the piece's end -- may write rows the piece did
+// not see, so the next sweep owes the read again.
+func TestAnExportStartedDuringAPieceOwesTheReadOnTheNextSweep(t *testing.T) {
+	r := newRefundRig(t, StatusLive, nil)
+	r.now = at("12:00:00")
+	r.orderBackfill("complete", backfillExportedAt(at("08:00:00")))
+	r.admin.replyWith("ShopifyListOrder", func(vars map[string]any) any {
+		if q, _ := vars["query"].(string); q != "" {
+			return listPageReply("orders", false, "")
+		}
+		// An operator's backfill starts its export while the piece reads.
+		r.orderBackfill("complete", backfillExportedAt(r.conn.now()))
+		return ordersPage(2, vars)
+	})
+	if _, err := r.sweep("order", at("11:00:00")); err != nil {
+		t.Fatalf("the sweep: %v", err)
+	}
+	if got := r.health()[refundDetailFromKey]; got != stamp(r.now) {
+		t.Fatalf("health %s = %v, want the piece's read stamped %s", refundDetailFromKey, got, stamp(r.now))
+	}
+
+	r.pagedOrders(2)
+	r.now = at("12:30:00")
+	if _, err := r.sweep("order", at("12:00:00")); err != nil {
+		t.Fatalf("the next sweep: %v", err)
+	}
+	if p := r.pieces(); len(p) != 2 {
+		t.Fatalf("after an export that started during the piece the next sweep listed %d pieces in all, want the read again", len(p))
+	}
+	if got := r.health()[refundDetailFromKey]; got != stamp(r.now) {
+		t.Errorf("health %s = %v, want the new read's start %s", refundDetailFromKey, got, stamp(r.now))
+	}
+}
+
+// A FAILED ORDER BACKFILL wrote some rows new to the mirror, and nothing
+// queues a failed backfill again by itself (component/datasync/runners.go:
+// "nothing retries a failed backfill"), so its export, as its cursor records
+// it, owes the read as a completed one's does -- also once an erasure has
+// dropped the export from its cursor (dropFailedExport keeps its time).
+func TestAFailedOrderBackfillsExportOwesTheRead(t *testing.T) {
+	failed := map[string]string{
+		"its export in its cursor": inFlight(backfillCursor{OperationID: "gid://shopify/BulkOperation/9", Line: 700, Rule: originVersionRule, At: memqlsync.ReadTime(at("10:00:00"))}),
+		"its export dropped":       backfillCursor{Restarts: 1, Rule: originVersionRule, At: memqlsync.ReadTime(at("10:00:00"))}.encode(),
+	}
+	for name, cursor := range failed {
+		t.Run(name, func(t *testing.T) {
+			r := newRefundRig(t, StatusLive, map[string]any{refundDetailFromKey: "2026-08-23T09:00:00Z"})
+			r.now = at("12:00:00")
+			r.orderBackfill("failed", cursor)
+			r.pagedOrders(2)
+			if _, err := r.sweep("order", at("11:00:00")); err != nil {
+				t.Fatalf("the sweep: %v", err)
+			}
+			if p := r.pieces(); len(p) != 1 {
+				t.Fatalf("a failed backfill whose export started after the stamp listed %d pieces, want the read again", len(p))
+			}
+		})
 	}
 }
