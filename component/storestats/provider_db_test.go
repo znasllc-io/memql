@@ -943,3 +943,37 @@ func stoodDownAtInfo(t *testing.T, lines []string, began time.Time) bool {
 	}
 	return false
 }
+
+// pagesWithoutEnd answers every stores read with one store and a cursor to a
+// next page, for ever.
+type pagesWithoutEnd struct{ asked int }
+
+func (e *pagesWithoutEnd) Execute(context.Context, string) (*memql.ExecuteResult, error) {
+	e.asked++
+	res := memql.NewResultWithOutput([]any{map[string]any{"id": fmt.Sprintf("v1:shopify:store:many-%d", e.asked)}})
+	res.Meta = &memql.ResultMeta{HasMore: true, Cursor: fmt.Sprintf("page-%d", e.asked)}
+	return res, nil
+}
+
+// A CLUSTER WITH MORE STORES THAN THE STATISTICS LIST is told so, and what it
+// means: the listing stops at its bound and says, in a person's words, that
+// no store's figures advance until the cluster holds fewer stores or the
+// bound is raised, with nothing of a row in it. Not a database test.
+func TestTooManyStoresSaysWhatItMeans(t *testing.T) {
+	engine := &pagesWithoutEnd{}
+	stores, err := listStores(context.Background(), engine)
+	if err == nil || stores != nil {
+		t.Fatalf("a listing past its bound answered %d stores and %v, want its error", len(stores), err)
+	}
+	if engine.asked != maxStorePages {
+		t.Errorf("the listing asked %d pages, want its bound, %d", engine.asked, maxStorePages)
+	}
+	want := fmt.Sprintf("this cluster holds more stores than the store statistics can list (%d); "+
+		"no store's figures advance until the cluster holds fewer, or the bound is raised", maxStorePages*storesPageSize)
+	if err.Error() != want {
+		t.Errorf("the listing's error is %q, want %q", err, want)
+	}
+	if strings.Contains(err.Error(), "many-") {
+		t.Errorf("the listing's error carries a value of a row: %q", err)
+	}
+}

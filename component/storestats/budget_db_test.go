@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -190,8 +191,133 @@ func TestTheRunDeadlineIsMinutesAboveWhatARunCanTake(t *testing.T) {
 		t.Errorf("the run deadline is %s and what a run can take %s; want the deadline at or above it and at most fifteen minutes", runDeadline, b)
 	}
 	// The comment's sum, line by line (integration.go): the wholesale reads
-	// count as their time budget and the one read under way when it ran out.
-	if b != 700*time.Second {
-		t.Errorf("what a run can take is %s; the sum runDeadlineBound's comment writes out is 700 s", b)
+	// count as their time budget and the one read under way when it ran out,
+	// and the turn's tail is the floor's.
+	if got := turnTail(); got != 210*time.Second {
+		t.Errorf("a turn's tail is %s; the longest turnTail's comment writes out is the floor's, 210 s", got)
+	}
+	if b != 510*time.Second {
+		t.Errorf("what a run can take is %s; the sum runDeadlineBound's comment writes out is 510 s", b)
+	}
+}
+
+// A TURN SPENT BEFORE ITS SECOND SOURCE ASKS NOTHING OF IT. The first page of
+// the order walk moves the budgets' clock past the turn's budget: the turn
+// asks no page of the line and refund sources and does not read where they
+// stand, ends normally with all three behind, and the next run walks them.
+func TestATurnSpentBeforeASourceAsksNothingOfIt(t *testing.T) {
+	i, id := runStore(t)
+	floorAt(t, time.Now().Add(-10*24*time.Hour))
+	mirror(t, orderConcept, id, fmt.Sprintf("gid://shopify/Order/%d", time.Now().UnixNano()), orderPayload())
+	clock := &budgetClock{at: time.Now()}
+	useClock(t, clock)
+	var mu sync.Mutex
+	var reads []string
+	spend := true
+	i.engine = &hookEngine{inner: i.engine, after: func(query string) {
+		if strings.Contains(query, "Changed(") {
+			mu.Lock()
+			reads = append(reads, query)
+			if spend {
+				clock.advance(turnBudget + time.Second)
+			}
+			mu.Unlock()
+		}
+	}}
+	queries := storeSalesQueries(t)
+
+	rep, err := run(t, i)
+	if err != nil {
+		t.Fatalf("a turn spent before a source failed the run: %v", err)
+	}
+	mu.Lock()
+	first := append([]string{}, reads...)
+	reads, spend = nil, false
+	mu.Unlock()
+	for _, q := range first {
+		if !strings.Contains(q, "storeStatisticsOrdersChanged(") {
+			t.Errorf("a turn spent on its order walk asked a page of another source: %s", q)
+		}
+	}
+	for _, q := range queries() {
+		if strings.Contains(q, "store_sales_watermark") && (strings.Contains(q, "source = 'line'") || strings.Contains(q, "source = 'refund'")) {
+			t.Errorf("a turn spent before its line and refund sources read where they stand: %s", q)
+		}
+	}
+	for _, s := range []string{sourceOrder, sourceLine, sourceRefund} {
+		if !slices.Contains(rep.Behind, id+"/"+s) {
+			t.Errorf("the report does not say the %s source is behind: %v", s, rep.Behind)
+		}
+	}
+
+	if _, err := run(t, i); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	second := append([]string{}, reads...)
+	mu.Unlock()
+	if !slices.ContainsFunc(second, func(q string) bool { return strings.Contains(q, "storeStatisticsLinesChanged(") }) {
+		t.Errorf("the next run asked no page of the line source: %v", second)
+	}
+}
+
+// A TURN SPENT BEFORE THE FLOOR'S PROBES MAKES NONE. A store with no floor
+// kept: its shop read moves the budgets' clock past the turn's budget, so the
+// turn asks no probe and no page, keeps no floor, ends normally with all
+// three sources behind, and the next run finds and keeps the floor.
+func TestATurnSpentBeforeTheFloorMakesNoProbe(t *testing.T) {
+	i, id := runStore(t)
+	// The store's first keeping, whose rebuild's purge would take the turn.
+	if outcome := keep(t, i, storeOf(id, nil), time.Now()); outcome != outcomeRebuilt {
+		t.Fatalf("the store's first keeping answered %q, want its rebuild done", outcome)
+	}
+	clock := &budgetClock{at: time.Now()}
+	useClock(t, clock)
+	var mu sync.Mutex
+	probes, pages := 0, 0
+	spend := true
+	i.engine = &hookEngine{inner: i.engine, after: func(query string) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case strings.Contains(query, "storeStatisticsShop("):
+			if spend {
+				clock.advance(turnBudget + time.Second)
+			}
+		case strings.Contains(query, "storeStatisticsStoreAt("):
+			probes++
+		case strings.Contains(query, "Changed("):
+			pages++
+		}
+	}}
+
+	rep, err := run(t, i)
+	if err != nil {
+		t.Fatalf("a turn spent before its floor failed the run: %v", err)
+	}
+	mu.Lock()
+	gotProbes, gotPages := probes, pages
+	probes, pages, spend = 0, 0, false
+	mu.Unlock()
+	if gotProbes != 0 || gotPages != 0 {
+		t.Errorf("a turn spent before its floor made %d probes and asked %d pages, want none", gotProbes, gotPages)
+	}
+	if floor := storeRow(t, id)["history_floor"]; floor != nil {
+		t.Errorf("a turn spent before its floor kept the floor %v", floor)
+	}
+	for _, s := range []string{sourceOrder, sourceLine, sourceRefund} {
+		if !slices.Contains(rep.Behind, id+"/"+s) {
+			t.Errorf("the report does not say the %s source is behind: %v", s, rep.Behind)
+		}
+	}
+
+	if _, err := run(t, i); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	gotProbes = probes
+	mu.Unlock()
+	if gotProbes == 0 || storeRow(t, id)["history_floor"] == nil {
+		t.Errorf("the next run made %d probes and kept the floor %v; want it found and kept", gotProbes, storeRow(t, id)["history_floor"])
 	}
 }
