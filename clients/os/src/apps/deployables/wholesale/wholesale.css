@@ -33,3 +33,16 @@
 /* A setting's checkbox stands on the control line, so its words meet the
    setting's muted name beside it as a field's value does. */
 .os-reviews .os-setting-value > .os-check { padding-top: 7px; }
+
+/* A rule in a document (Markdown `---`) is space, never a line: the
+   no-dividers rule holds inside a document too. */
+.os-wholesale-document hr { border: 0; height: 0; margin: 1.25em 0; }
+
+/* The Wholesale Head is one height whether or not it carries its Add control,
+   so the tabs beneath it stand still from one tab to the next: the line is
+   the AddButton's own height (measured, 36px) on every tab. */
+.os-wholesale-head > .os-head { min-height: 36px; }
+
+/* A section's own acts -- an application's resends -- beneath its facts, on
+   the panel's right edge as every panel act stands. */
+.os-wholesale-resends { margin-top: 12px; }

@@ -205,6 +205,8 @@ describe("the applications", () => {
 
   it("tells an operator once that the store's people decide, and draws no decide act", async () => {
     const seed = wholesaleSeed({ get: { [KESTREL_ID]: detail(KESTREL, { operator: true, acts: [] }), [BLUE_ID]: detail(BLUE, { operator: true, acts: [] }) } });
+    // The engine's answer says so (wholesaleList's operator), not the session.
+    (seed.wholesale!.list!.readyToReview as Record<string, unknown>).operator = true;
     await openWholesale(seed, OPERATOR);
     await applications();
     expect(screen.getAllByText("You can read this store's applications. Its own people decide them.")).toHaveLength(1);
@@ -356,8 +358,9 @@ describe("one application", () => {
       [{ state: "failed", errorCode: "no_settings", error: "" }, "This store has no wholesale settings."],
       [{ state: "pending", errorCode: "scope_missing", error: "" }, "The store has not allowed MemQL to change customers. Its owner approves the new permissions from the store's admin."],
       [{ state: "failed", errorCode: "plan_ceiling", error: "" }, "The store's plan allows no more catalogs."],
-      [{ state: "failed", errorCode: "customer_refused", error: "Email has already been taken" }, "Shopify refused: Email has already been taken"],
-      [{ state: "pending", errorCode: "shopify_error", error: "Throttled" }, "Shopify refused: Throttled"],
+      // Shopify's own words, as the engine recorded them: no cause of the page's own.
+      [{ state: "failed", errorCode: "customer_refused", error: "Email has already been taken" }, "Email has already been taken"],
+      [{ state: "pending", errorCode: "shopify_error", error: "Throttled" }, "Throttled"],
       [{ state: "granted", errorCode: "", error: "" }, "Trade prices on"],
     ];
     for (const [entitlement, sentence] of cases) {

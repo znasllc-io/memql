@@ -16,6 +16,7 @@ import {
   wholesaleSettingsFrom,
   type DocumentKind,
   type DocumentKindView,
+  type EmailKind,
   type DocumentVersion,
   type WholesaleApplication,
   type WholesaleBuyer,
@@ -84,7 +85,7 @@ export function useWholesaleList(scope: WholesaleScope, stage: WholesaleFilter, 
       const readRevision = current.current;
       const page = wholesalePageFrom(await answerOf(connection.query, "wholesaleList", "the applications", { ...scope, stage, search: query || undefined, limit: 10, after: cursor || undefined }, signal));
       return {
-        rows: [{ id: METADATA, metadata: { counts: page.counts, truncated: page.truncated }, revision: readRevision }, ...page.rows.map(item => ({ id: item.id, item }))],
+        rows: [{ id: METADATA, metadata: { counts: page.counts, truncated: page.truncated, operator: page.operator }, revision: readRevision }, ...page.rows.map(item => ({ id: item.id, item }))],
         nextCursor: page.next,
       };
     },
@@ -102,7 +103,7 @@ export function useWholesaleList(scope: WholesaleScope, stage: WholesaleFilter, 
   };
 }
 
-type BuyerEntry = { id: string; item?: WholesaleBuyer; metadata?: { truncated: boolean }; revision?: number };
+type BuyerEntry = { id: string; item?: WholesaleBuyer; metadata?: { truncated: boolean; operator: boolean }; revision?: number };
 
 /**
  * The store's buyers -- every approved application -- newest first, ten at a
@@ -120,7 +121,7 @@ export function useWholesaleBuyers(scope: WholesaleScope, search: string, revisi
       const readRevision = current.current;
       const page: WholesaleBuyersPage = wholesaleBuyersFrom(await answerOf(connection.query, "wholesaleBuyers", "the buyers", { ...scope, search: query || undefined, limit: 10, after: cursor || undefined }, signal));
       return {
-        rows: [{ id: METADATA, metadata: { truncated: page.truncated }, revision: readRevision }, ...page.rows.map(item => ({ id: item.id, item }))],
+        rows: [{ id: METADATA, metadata: { truncated: page.truncated, operator: page.operator }, revision: readRevision }, ...page.rows.map(item => ({ id: item.id, item }))],
         nextCursor: page.next,
       };
     },
@@ -179,6 +180,50 @@ export function useWholesaleSettings(scope: WholesaleScope, revision: number): R
   return useReading(`wholesale-settings:${scope.siteId}:${scope.storeId}`, read, revision);
 }
 
+/** What a read found after a write whose answer was lost: there, not there, or it could not be read. */
+export type Found = "there" | "absent" | "unread";
+
+/**
+ * THE READS THAT SETTLE A LOST ANSWER. A dropped connection after Add buyer or
+ * Publish leaves the write's outcome unknown, and pressing again blind could
+ * write it twice (versions are append-only). So the page asks the store what
+ * it holds, with the same reads every tab makes, and says which it found.
+ */
+export function useWholesaleChecks(scope: WholesaleScope) {
+  const connection = useOsConnection();
+  /** Whether the store holds an open application for this address (the engine's one-per-address rule). */
+  const findBuyer = useCallback(async (applicantEmail: string): Promise<{ found: Found; applicationId?: string }> => {
+    if (connection === null) return { found: "unread" };
+    const wanted = applicantEmail.trim().toLowerCase();
+    try {
+      const page = wholesalePageFrom(await answerOf(connection.query, "wholesaleList", "the applications", { ...scope, stage: "all", search: applicantEmail.trim(), limit: 50 }));
+      const open = page.rows.find((r) => r.applicantEmail.trim().toLowerCase() === wanted && (r.stage === "waitingForTerms" || r.stage === "readyToReview" || r.stage === "approved"));
+      return open ? { found: "there", applicationId: open.id } : { found: "absent" };
+    } catch {
+      return { found: "unread" };
+    }
+  }, [connection, scope.siteId, scope.storeId]);
+  /** Whether the kind's current version is this label and this text. */
+  const findVersion = useCallback(async (kind: DocumentKind, label: string, body: string): Promise<Found> => {
+    if (connection === null) return "unread";
+    try {
+      const kinds = wholesaleDocumentsFrom(await answerOf(connection.query, "wholesaleDocuments", "the documents", { siteId: scope.siteId, storeId: scope.storeId }));
+      const current = kinds.find((k) => k.kind === kind)?.current ?? null;
+      return current !== null && current.label === label.trim() && current.body === body ? "there" : "absent";
+    } catch {
+      return "unread";
+    }
+  }, [connection, scope.siteId, scope.storeId]);
+  return { findBuyer, findVersion };
+}
+
+/** A write's outcome, and the sentence of its refusal for a page that draws it in place. */
+export interface WriteResult {
+  outcome: WriteOutcome;
+  /** The engine's sentence, or the page's own for no connection; "" when it went. */
+  sentence: string;
+}
+
 export interface WholesaleWrites {
   /** The write in flight, one at a time. */
   busy: "decide" | "retry" | "settings" | "setUp" | "add" | "remove" | "resend" | "publish" | "export" | null;
@@ -190,12 +235,18 @@ export interface WholesaleWrites {
   retryAccess(applicationId: string): Promise<WriteOutcome>;
   updateSettings(changes: Partial<WholesaleSettingsChanges>): Promise<WriteOutcome>;
   setUpStore(): Promise<WriteOutcome>;
-  addBuyer(input: { companyName: string; applicantName: string; applicantEmail: string }): Promise<{ outcome: WriteOutcome; applicationId?: string }>;
+  /** Its refusal is the wizard's to draw, on the step it answers: `refusal` is left alone. */
+  addBuyer(input: { companyName: string; applicantName: string; applicantEmail: string }): Promise<WriteResult & { applicationId?: string }>;
   removeBuyer(applicationId: string, note: string): Promise<WriteOutcome>;
-  resendEmail(applicationId: string, kind: "terms" | "approved"): Promise<WriteOutcome>;
-  publishDocument(kind: DocumentKind, label: string, body: string): Promise<WriteOutcome>;
-  /** The store's every record as one file, or null when it could not be read (the refusal says why). */
-  exportStore(): Promise<{ fileName: string; json: string } | null>;
+  resendEmail(applicationId: string, kind: EmailKind): Promise<WriteOutcome>;
+  /** Its refusal is the wizard's to draw, on the step it answers: `refusal` is left alone. */
+  publishDocument(kind: DocumentKind, label: string, body: string): Promise<WriteResult>;
+  /**
+   * The store's every record as one file, or the sentence why not -- drawn by
+   * Settings beside Download every record, where the act was taken: `refusal`
+   * is left alone.
+   */
+  exportStore(): Promise<{ fileName: string; json: string } | { refusal: string }>;
 }
 
 export function useWholesaleWrites(scope: WholesaleScope): WholesaleWrites {
@@ -209,27 +260,36 @@ export function useWholesaleWrites(scope: WholesaleScope): WholesaleWrites {
 
   // Every write, and the reply's one row for the writes that answer
   // something the page goes on with (the new application's id, the file).
+  //
+  // IN PLACE (`inPlace`): the page that took the act draws its sentence where
+  // it was taken, and the shared `refusal` -- drawn above a bar -- is left
+  // alone. A lost answer is then the page's to settle too: it says nothing
+  // here of what is "shown again", because a wizard re-reads nothing until it
+  // asks.
   const call = useCallback(
-    async (kind: NonNullable<WholesaleWrites["busy"]>, name: string, args: Record<string, unknown>, given: readonly string[] = []): Promise<{ outcome: WriteOutcome; row: Row | null }> => {
-      if (inFlight.current) return { outcome: "refused", row: null };
-      setRefusal("");
+    async (kind: NonNullable<WholesaleWrites["busy"]>, name: string, args: Record<string, unknown>, given: readonly string[] = [], inPlace = false): Promise<{ outcome: WriteOutcome; row: Row | null; sentence: string }> => {
+      if (inFlight.current) return { outcome: "refused", row: null, sentence: "" };
+      const say = (sentence: string) => { if (!inPlace) setRefusal(sentence); };
+      say("");
       if (connection === null) {
-        setRefusal("Not connected to the cluster, so nothing was written.");
-        return { outcome: "refused", row: null };
+        const sentence = "Not connected to the cluster, so nothing was written.";
+        say(sentence);
+        return { outcome: "refused", row: null, sentence };
       }
       inFlight.current = true;
       setBusy(kind);
       try {
         const result = await connection.query.executeNamed(name, builtinCall(name, args, given));
-        return { outcome: "done", row: result.rows()[0] ?? null };
+        return { outcome: "done", row: result.rows()[0] ?? null, sentence: "" };
       } catch (err: unknown) {
         if (isTransportInterruption(err)) {
-          setRefusal("The connection dropped before the cluster answered, so this may have been saved. What the cluster holds is shown again.");
-          return { outcome: "unknown", row: null };
+          say("The connection dropped before the cluster answered, so this may have been saved. What the cluster holds is shown again.");
+          return { outcome: "unknown", row: null, sentence: "" };
         }
         // THE ENGINE'S SENTENCE, as it arrived.
-        setRefusal(refusalWords(err, name) || "That did not complete. Try again.");
-        return { outcome: "refused", row: null };
+        const sentence = refusalWords(err, name) || "That did not complete. Try again.";
+        say(sentence);
+        return { outcome: "refused", row: null, sentence };
       } finally {
         inFlight.current = false;
         setBusy(null);
@@ -273,12 +333,12 @@ export function useWholesaleWrites(scope: WholesaleScope): WholesaleWrites {
   // page opens it by the id the reply gives, whole.
   const addBuyer = useCallback(
     async (input: { companyName: string; applicantName: string; applicantEmail: string }) => {
-      const { outcome, row } = await call("add", "wholesaleAddBuyer", {
+      const { outcome, row, sentence } = await call("add", "wholesaleAddBuyer", {
         siteId: scope.siteId, storeId: scope.storeId,
         companyName: input.companyName.trim(), applicantName: input.applicantName.trim(), applicantEmail: input.applicantEmail.trim(),
-      });
+      }, [], true);
       const applicationId = typeof row?.["applicationId"] === "string" && row["applicationId"] !== "" ? row["applicationId"] : undefined;
-      return applicationId === undefined ? { outcome } : { outcome, applicationId };
+      return applicationId === undefined ? { outcome, sentence } : { outcome, sentence, applicationId };
     },
     [call, scope.siteId, scope.storeId],
   );
@@ -291,26 +351,27 @@ export function useWholesaleWrites(scope: WholesaleScope): WholesaleWrites {
   );
 
   const resendEmail = useCallback(
-    (applicationId: string, kind: "terms" | "approved") => run("resend", "wholesaleResendEmail", { applicationId, kind }),
+    (applicationId: string, kind: EmailKind) => run("resend", "wholesaleResendEmail", { applicationId, kind }),
     [run],
   );
 
   // THE TEXT AS GIVEN: the engine stores it exactly and fingerprints its bytes.
   const publishDocument = useCallback(
-    (kind: DocumentKind, label: string, body: string) =>
-      run("publish", "wholesalePublishDocument", { siteId: scope.siteId, storeId: scope.storeId, kind, label: label.trim(), body }),
-    [run, scope.siteId, scope.storeId],
+    async (kind: DocumentKind, label: string, body: string): Promise<WriteResult> => {
+      const { outcome, sentence } = await call("publish", "wholesalePublishDocument", { siteId: scope.siteId, storeId: scope.storeId, kind, label: label.trim(), body }, [], true);
+      return { outcome, sentence };
+    },
+    [call, scope.siteId, scope.storeId],
   );
 
   // THE FILE IS MADE IN THE BROWSER from the reply, and kept nowhere else.
   const exportStore = useCallback(async () => {
-    const { outcome, row } = await call("export", "wholesaleExportStore", { siteId: scope.siteId, storeId: scope.storeId });
-    if (outcome !== "done") return null;
+    const { outcome, row, sentence } = await call("export", "wholesaleExportStore", { siteId: scope.siteId, storeId: scope.storeId }, [], true);
+    // A read writes nothing, so a lost answer is simply not the file.
+    if (outcome === "unknown") return { refusal: "The connection dropped before the cluster answered, so the file did not arrive. Try again." };
+    if (outcome !== "done") return { refusal: sentence };
     const json = typeof row?.["json"] === "string" ? row["json"] : "";
-    if (json === "") {
-      setRefusal("The cluster answered without the file. Try again.");
-      return null;
-    }
+    if (json === "") return { refusal: "The cluster answered without the file. Try again." };
     return { fileName: typeof row?.["fileName"] === "string" && row["fileName"] !== "" ? row["fileName"] : "wholesale.json", json };
   }, [call, scope.siteId, scope.storeId]);
 

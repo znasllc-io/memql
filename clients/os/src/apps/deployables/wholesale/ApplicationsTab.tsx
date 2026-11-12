@@ -18,7 +18,7 @@ import { useWholesaleList, type WholesaleScope, type WholesaleWrites } from "./u
 // 2), never a tab: every stage is the same kind of thing. A row says its stage
 // only under All, the one view that mixes them.
 
-export function ApplicationsTab({ scope, heading, writes, operator, termsRequired, stage, onStage, search, onSearch, onOpen }: {
+export function ApplicationsTab({ scope, heading, writes, termsRequired, stage, onStage, search, onSearch, onOpen }: {
   scope: WholesaleScope;
   /** What the list is asked, kept by the section so a visit to one application keeps it. */
   stage: WholesaleFilter;
@@ -28,8 +28,6 @@ export function ApplicationsTab({ scope, heading, writes, operator, termsRequire
   /** The Wholesale heading and its tabs, with Refine beside them. */
   heading: (actions: ReactNode) => ReactNode;
   writes: WholesaleWrites;
-  /** One of the cluster's operators, who read the applications and decide none. */
-  operator: boolean;
   /** Whether the store requires its terms, as its settings answer: only then does an application wait for them. */
   termsRequired: boolean;
   onOpen: (applicationId: string, name: string) => void;
@@ -67,7 +65,8 @@ export function ApplicationsTab({ scope, heading, writes, operator, termsRequire
 
   return (
     <ReviewsPane heading={heading(refine)} bar={bar} context={{ page: "Wholesale", view: "Applications", stage, siteId: scope.siteId, storeId: scope.storeId }}>
-      {operator ? <Caption>You can read this store's applications. Its own people decide them.</Caption> : null}
+      {/* THE ENGINE SAYS WHO IS AN OPERATOR, on the list's own reply. */}
+      {page?.operator ? <Caption>You can read this store's applications. Its own people decide them.</Caption> : null}
       {/* A FAILED READ IS SAID, whether or not an earlier one left rows: those
           rows stand under it, as what could not be refreshed. */}
       {list.state === "failed" ? <Notice tone="error" sentence={list.error}><Button onClick={list.reread}>Try again</Button></Notice> : null}

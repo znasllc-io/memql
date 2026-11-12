@@ -324,6 +324,8 @@ export interface FakeSeed {
     removeError?: string;
     /** What `wholesaleExportStore` answers: `{fileName, json}`. */
     exportFile?: Row;
+    /** Fails every export with this server message, until removed. */
+    exportError?: string;
   };
   /** v1:platform:package rows `packagesAll` answers with. */
   packages?: Row[];
@@ -744,6 +746,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         return builtinReply("wholesalePublishDocument", [{ documentVersionId: "doc-new", sha256: "0".repeat(64) } as unknown as Row]);
       }
       if (call.startsWith("builtin wholesaleExportStore(")) {
+        if (seed.wholesale?.exportError !== undefined) throw new Error(seed.wholesale.exportError);
         return builtinReply("wholesaleExportStore", [seed.wholesale?.exportFile ?? ({ fileName: "wholesale-store-live-20261111.json", json: "{\"applications\":[]}" } as unknown as Row)]);
       }
 

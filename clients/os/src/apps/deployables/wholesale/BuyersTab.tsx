@@ -17,17 +17,16 @@ import { useWholesaleBuyers, type WholesaleScope, type WholesaleWrites } from ".
 //
 // A BUYER ADDED BY HAND is the Head's one creation control, drawn for the
 // store's own people on a store that is set up: the engine adds nobody for
-// the cluster's operators, and nobody on a store that is not set up.
+// the cluster's operators, and nobody on a store that is not set up. Who is an
+// operator is the buyers' own reply (`operator`), so the control waits for it.
 
-export function BuyersTab({ scope, heading, writes, settings, operator, onOpen, onAdd }: {
+export function BuyersTab({ scope, heading, writes, settings, onOpen, onAdd }: {
   scope: WholesaleScope;
   /** The Wholesale heading and its tabs; the second slot is the Head's creation control. */
   heading: (actions?: ReactNode, add?: ReactNode) => ReactNode;
   writes: WholesaleWrites;
   /** The store's settings as last read: whether it is set up. */
   settings: WholesaleSettings | null;
-  /** One of the cluster's operators, who read the buyers and add none. */
-  operator: boolean;
   onOpen: (applicationId: string, name: string) => void;
   onAdd: () => void;
 }) {
@@ -44,7 +43,7 @@ export function BuyersTab({ scope, heading, writes, settings, operator, onOpen, 
 
   const page = list.value;
   const rows = page?.rows ?? [];
-  const add = settings?.exists === true && !operator ? <AddButton label="Add buyer" onClick={onAdd} /> : undefined;
+  const add = settings?.exists === true && page !== null && !page.operator ? <AddButton label="Add buyer" onClick={onAdd} /> : undefined;
   // THE ENGINE COUNTS NO BUYERS: a count is said only once every one is on
   // the page, never of a page that has more after it.
   const bar = <ActionBar state={page === null || list.hasMore ? "" : rows.length === 0 ? "No buyers" : `${rows.length} ${rows.length === 1 ? "buyer" : "buyers"}`}

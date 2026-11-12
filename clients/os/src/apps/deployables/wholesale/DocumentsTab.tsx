@@ -1,12 +1,13 @@
 import type { ReactNode } from "react";
 import { FileText } from "lucide-react";
 
-import { Button, ContentSkeleton, Details, DetailsSection, Fact, Facts, Notice } from "../../../kit";
+import { Button, ContentSkeleton, Details, DetailsSection, Fact, Facts, Notice, Subhead } from "../../../kit";
 import { ActionBar } from "../../../kit/ActionBar";
 import { AddButton } from "../../../kit/AddButton";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { ReviewsPane } from "../reviews/ReviewsPane";
-import { dayWords, DOCUMENT_KINDS, fingerprint, isNotSetUp, NOT_SET_UP, type DocumentKind, type DocumentKindView, type DocumentVersion, type WholesaleSettings } from "./model";
+import { dayWords, DOCUMENT_KINDS, fingerprint, isNotSetUp, NOT_SET_UP, publishWords, type DocumentKind, type DocumentKindView, type DocumentVersion, type WholesaleSettings } from "./model";
+import { orNotRecorded } from "./notRecorded";
 import { useWholesaleDocuments, type WholesaleScope, type WholesaleWrites } from "./useWholesale";
 
 // THE STORE'S THREE DOCUMENTS -- its terms, its MAP policy and its price sheet
@@ -16,9 +17,9 @@ import { useWholesaleDocuments, type WholesaleScope, type WholesaleWrites } from
 // read-only. APPEND-ONLY: a document is changed by publishing a new version,
 // the section heading's one Add control, and nothing here edits a version.
 //
-// WHO MAY PUBLISH IS THE ENGINE'S: the settings' `may.update`, the engine's
-// answer for who changes this store's program. The documents' own read
-// answers no `may`.
+// WHO MAY PUBLISH IS THE ENGINE'S: the settings' `may.publish`, the
+// publishing builtin's own checks, called. The documents' own read answers no
+// `may`.
 
 export function DocumentsTab({ scope, heading, writes, settings, onPublish, onOpenVersion }: {
   scope: WholesaleScope;
@@ -54,7 +55,7 @@ export function DocumentsTab({ scope, heading, writes, settings, onPublish, onOp
     );
   }
 
-  const mayPublish = settings?.may.update === true;
+  const mayPublish = settings?.may.publish === true;
   const published = kinds.filter((k) => k.current !== null).length;
   const bar = <ActionBar state={published === kinds.length ? "Every document published" : `${published} of ${kinds.length} published`} tone={published === kinds.length ? "live" : "paused"} />;
 
@@ -80,12 +81,18 @@ function DocumentSection({ view, title, onPublish, onOpenVersion }: {
   const { current } = view;
   const earlier = current === null ? view.history : view.history.filter((v) => v.id !== current.id);
   return (
-    <DetailsSection title={title} actions={onPublish ? <AddButton label="Publish a new version" onClick={onPublish} /> : undefined}>
+    <DetailsSection title={title} actions={onPublish ? <AddButton label={publishWords(view.kind).title} onClick={onPublish} /> : undefined}>
       {current === null ? (
-        <p className="os-wholesale-line">Not published. Applications cannot open while terms are required.</p>
+        <p className="os-wholesale-line">
+          {/* A PRICE SHEET IS ALSO WHAT AN APPROVED BUYER'S LINK OPENS. */}
+          {view.kind === "priceSheet"
+            ? "Not published. Applications cannot open while terms are required. An approved buyer's price sheet link will not open until it is."
+            : "Not published. Applications cannot open while terms are required."}
+        </p>
       ) : (
         <VersionFacts version={current} />
       )}
+      {earlier.length > 0 ? <Subhead>Earlier versions</Subhead> : null}
       {earlier.length > 0 ? (
         <RecordList as="ul" density="compact" label="Earlier versions">
           {earlier.map((v) => (
@@ -106,9 +113,9 @@ export function VersionFacts({ version }: { version: DocumentVersion }) {
   return (
     <Facts>
       <Fact label="Label" value={version.label} copyValue={version.label} />
-      <Fact label="Published on" value={dayWords(version.publishedAt)} copyValue={version.publishedAt || undefined} />
-      <Fact label="Published by" value={version.publishedByName} />
-      <Fact label="Fingerprint" value={<span className="os-mono">{fingerprint(version.sha256)}</span>} copyValue={version.sha256 || undefined} />
+      <Fact label="Published on" value={orNotRecorded(dayWords(version.publishedAt))} copyValue={version.publishedAt || undefined} />
+      <Fact label="Published by" value={orNotRecorded(version.publishedByName)} />
+      <Fact label="Fingerprint" value={orNotRecorded(version.sha256, <span className="os-mono">{fingerprint(version.sha256)}</span>)} copyValue={version.sha256 || undefined} />
     </Facts>
   );
 }

@@ -4,7 +4,7 @@ import { Button, Caption, Check, ChoiceRow, ContentSkeleton, Details, DetailsSec
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import type { Reading } from "../../../cluster/reading";
 import { ReviewsPane } from "../reviews/ReviewsPane";
-import { EMAIL_TEMPLATES, NOT_SET_UP, routeWords, type WholesaleSettings, type WholesaleSettingsChanges } from "./model";
+import { EMAIL_TEMPLATES, NOT_SET_UP, routeWords, senderWords, type WholesaleSettings, type WholesaleSettingsChanges } from "./model";
 import type { WholesaleWrites } from "./useWholesale";
 
 // A STORE'S WHOLESALE SETTINGS, the last of its Wholesale tabs, laid out as
@@ -26,7 +26,12 @@ import type { WholesaleWrites } from "./useWholesale";
 //
 // THE TEMPLATES ARE THE ENGINE'S LIST for this person (`templates`: the
 // published transactional templates they may choose), Off first. The sender
-// is chosen by the cluster's operators and is not offered here.
+// is chosen by the cluster's operators and is not offered here: it is said,
+// as the engine reads it (`sender`), or the engine's sentence why there is none.
+//
+// DOWNLOAD EVERY RECORD is drawn for whoever the engine answers `may.export`
+// for, and what happened to it is said in Records, beside it: a refused export
+// is tried again from there, and nothing else on the page moves.
 
 /** The routes in the order Settings offers them; "" is none. */
 const ROUTES: readonly string[] = ["customerTag", "shopifyB2B"];
@@ -75,6 +80,8 @@ export function WholesaleSettingsPage({ heading, settings, writes, onWritten }: 
 }) {
   const value = settings.value;
   const [draft, setDraft] = useState<Draft | null>(null);
+  // WHAT HAPPENED TO THE LAST EXPORT, said beside its act.
+  const [exportRefusal, setExportRefusal] = useState("");
   // A fresh answer from the engine is the form's new starting point.
   useEffect(() => {
     if (value !== null) setDraft(draftOf(value));
@@ -133,8 +140,10 @@ export function WholesaleSettingsPage({ heading, settings, writes, onWritten }: 
   }
 
   async function download() {
+    setExportRefusal("");
     const file = await writes.exportStore();
-    if (file !== null) saveFile(file.fileName, file.json);
+    if ("refusal" in file) setExportRefusal(file.refusal);
+    else saveFile(file.fileName, file.json);
   }
 
   const acts: Act[] = canEdit && dirty
@@ -199,6 +208,7 @@ export function WholesaleSettingsPage({ heading, settings, writes, onWritten }: 
             </SettingRow>
           </DetailsSection>
           <DetailsSection title="Emails">
+            <p className="os-wholesale-line">{senderWords(value.sender)}</p>
             {EMAIL_TEMPLATES.map(([key, name]) => (
               <SettingRow key={key} label={name}>
                 {canEdit ? (
@@ -223,9 +233,14 @@ export function WholesaleSettingsPage({ heading, settings, writes, onWritten }: 
               )}
             </SettingRow>
           </DetailsSection>
-          <DetailsSection title="Records">
-            <div><Button tone="quiet" busy={exporting} onClick={() => void download()}>Download every record</Button></div>
-          </DetailsSection>
+          {value.may.export ? (
+            <DetailsSection title="Records">
+              <div><Button tone="quiet" busy={exporting} onClick={() => void download()}>Download every record</Button></div>
+              {exportRefusal ? (
+                <Notice tone="error" sentence={exportRefusal}><Button busy={exporting} onClick={() => void download()}>Try again</Button></Notice>
+              ) : null}
+            </DetailsSection>
+          ) : null}
         </Details>
       </div>
     </ReviewsPane>
