@@ -27,14 +27,15 @@ package memql
 //     while it was back in X).
 //   - FOLLOW. The row follows a parent P through `via`, its newest version
 //     names X, P's newest names another account Y, and a change record of P
-//     says it left X at time T: the row goes to P's CURRENT account Y, never to
-//     the account a record names as its target, so a parent moved twice
-//     carries its followers to where it is. Only a row whose first version is
-//     older than T (a row attached later was filed by the rules then, and is
-//     not this record's to move), and whose own latest ledger line, a person's
-//     explicit change, did not put it in X after T (their choice is kept; the
-//     job's own carry records protect nothing; loadParentChanges). The row gets a change record of its own, so its
-//     followers follow it. A row attached to P from a third account is
+//     the job has SEEN says it left X: the row goes to P's CURRENT account Y,
+//     never to the account a record names as its target, so a parent moved
+//     twice carries its followers to where it is. Only a row whose first
+//     version is older than the moment the job first saw the record (a row
+//     attached later was filed by the rules then, and is not this record's to
+//     move), and whose own latest ledger line, a person's explicit change, did
+//     not put it in X after the record was written (their choice is kept; the
+//     job's own carry records protect nothing; loadParentChanges). The row gets
+//     a change record of its own, so its followers follow it. A row attached to P from a third account is
 //     untouched unless P left that account after the row existed.
 //
 // Both are judged on every row a pass reads, full or incremental, so a stale
@@ -234,10 +235,10 @@ type assignmentLookups struct {
 	// for it after that line, by stored id: a later change of its own, which
 	// the re-apply rule must not undo.
 	changedAway map[string][]changeRecord
-	// parentLeft maps parent concept -> bare parent id -> an account its change
-	// records say it LEFT -> the newest such record's time, for the follow
-	// rule. Read only for parents whose account differs from a child's.
-	parentLeft map[string]map[string]map[string]time.Time
+	// parentLeft maps parent concept -> bare parent id -> an account its seen
+	// change records say it LEFT -> the newest such records' times, for the
+	// follow rule. Read only for parents whose account differs from a child's.
+	parentLeft map[string]map[string]map[string]parentLeftAt
 	// followable is the batch's rows the follow rule carries, by stored id
 	// (loadParentChanges).
 	followable map[string]bool
@@ -247,6 +248,13 @@ type assignmentLookups struct {
 type ledgerLine struct {
 	from, to string
 	at       time.Time
+}
+
+// parentLeftAt is when a parent left an account, by its newest seen records
+// that say so (loadParentChanges): written is the newest created_at, seen the
+// newest seen_at.
+type parentLeftAt struct {
+	written, seen time.Time
 }
 
 // changeRecord is one row of account_follow_tasks.
@@ -596,40 +604,54 @@ func (lk *assignmentLookups) changedAwayFrom(id string, line ledgerLine) bool {
 
 // loadParentChanges decides which rows of the batch the follow rule carries
 // (file header, Follow). A row R in account X whose parent P is in another
-// account Y is carried when a change record of P says P left X at time T, and
+// account Y is carried when a change record of P that the job has SEEN says P
+// left X (a record not seen yet is not used: account_follow.go, Seen), and
 //
-//   - R's FIRST version was created before T: a row attached after the record
-//     was filed by the rules in force when it was written (a template takes the
-//     parent's account; the raw surface files a row under the writer's own
-//     account when they may not write to the parent's), and is not this
-//     record's to move. No slack: a row created after the record is not one P
-//     had when it left;
+//   - R's FIRST version was created before the record's seen_at, the moment
+//     the job's fold first read it, which is after the change committed. A row
+//     written while the change was uncommitted read P in X and was filed there:
+//     it was P's when P left, and is carried. A row attached after the record
+//     was seen was filed by the rules in force when it was written (a template
+//     takes the parent's account; the raw surface files a row under the
+//     writer's own account when they may not write to the parent's), and is
+//     not this record's to move. No slack;
 //   - R's own latest LEDGER LINE (account_row_moves: a person's move,
-//     placement or re-tag) did not put it in X after T. Only a person's
-//     explicit change protects a child. A change record the job wrote by
-//     carrying or re-applying protects nothing: it follows the parent and is
-//     never the child's choice, and counting it would strand a child carried
-//     in the same instant as a second move of its parent (the carry's record
-//     newer than the parent's). A row whose last change was a carry, a stale
-//     append after it was carried included, is carried again.
+//     placement or re-tag) did not put it in X after the record was WRITTEN
+//     (created_at, not seen_at). Both times are taken the same way, by the
+//     database at the insert inside the change's own transaction, so the
+//     comparison orders the two decisions as they were made. A person's change
+//     made while the parent's change was in flight, or before the fold saw it,
+//     is newer than the parent's leaving and is kept; judged against seen_at it
+//     would be undone. Only a person's explicit change protects a child. A
+//     change record the job wrote by carrying or re-applying protects nothing:
+//     it follows the parent and is never the child's choice, and counting it
+//     would strand a child carried in the same instant as a second move of its
+//     parent (the carry's record newer than the parent's). A row whose last
+//     change was a carry, a stale append after it was carried included, is
+//     carried again.
 //
-// Per batch, each by id array: P's records, only for parents whose account
+// When P left X more than once, the newest seen record that says so decides:
+// its seen_at bounds which rows P had, its created_at which of a child's own
+// changes came after.
+//
+// Per batch, each by id array: P's seen records, only for parents whose account
 // differs from a child's (in the steady state nothing is read); and, for the
 // rows that otherwise match, their first createdAt (narrow columns). The
 // ledger lines were read by loadMoves.
 //
-// THE CLOCK. A row's createdAt is the clock of the node that wrote it, and a
-// record's created_at is the database's, so within their skew the judgment of
-// "created before the record" can be wrong either way. A node clock AHEAD of
-// the database's makes a row that did exist before the record look newer, and
-// it is left where it was. A node clock BEHIND makes a row created just after
-// the record look older, and the record carries it to the parent's account.
-// Nothing later repairs either: the first waits for an owner to place it, and
-// the second for an owner to move it back.
+// THE CLOCK. A row's createdAt is set by the node that wrote it, and a
+// record's seen_at is the database's clock at the moment the job first saw
+// the record, so within their skew the judgment of "created before the record
+// was seen" can be wrong either way. A node clock AHEAD of the database's
+// makes a row that did exist before look newer, and it is left where it was. A
+// node clock BEHIND makes a row created just after the record was seen look
+// older, and the record carries it to the parent's account. Nothing later
+// repairs either: the first waits for an owner to place it, and the second for
+// an owner to move it back.
 //
 // staged-data: MUST-NOT-GATE -- reads the change records and a row's first version time; a staged row follows its parent like any other.
 func (lk *assignmentLookups) loadParentChanges(meta *memorynodes.Concept, rows []assignmentRow) error {
-	lk.parentLeft = map[string]map[string]map[string]time.Time{}
+	lk.parentLeft = map[string]map[string]map[string]parentLeftAt{}
 	lk.followable = map[string]bool{}
 	wanted := map[string][]string{}
 	for _, row := range rows {
@@ -646,26 +668,32 @@ func (lk *assignmentLookups) loadParentChanges(meta *memorynodes.Concept, rows [
 		}
 	}
 	for concept, ids := range wanted {
-		result, err := lk.q.QueryContext(lk.ctx, `SELECT parent_id, from_account, created_at FROM account_follow_tasks
-			WHERE parent_concept = $1 AND parent_id = ANY($2::text[])`, concept, pq.Array(distinctIds(ids)))
+		result, err := lk.q.QueryContext(lk.ctx, `SELECT parent_id, from_account, created_at, seen_at FROM account_follow_tasks
+			WHERE parent_concept = $1 AND parent_id = ANY($2::text[]) AND seen_at IS NOT NULL`, concept, pq.Array(distinctIds(ids)))
 		if err != nil {
 			return fmt.Errorf("account assignment: reading the change records in %s: %w", concept, err)
 		}
-		byID := map[string]map[string]time.Time{}
+		byID := map[string]map[string]parentLeftAt{}
 		for result.Next() {
 			var id, from string
-			var at time.Time
-			if err := result.Scan(&id, &from, &at); err != nil {
+			var written, seen time.Time
+			if err := result.Scan(&id, &from, &written, &seen); err != nil {
 				result.Close()
 				return err
 			}
 			bare := BareShortId(id)
 			if byID[bare] == nil {
-				byID[bare] = map[string]time.Time{}
+				byID[bare] = map[string]parentLeftAt{}
 			}
-			if from = bareAccount(from); at.After(byID[bare][from]) {
-				byID[bare][from] = at
+			from = bareAccount(from)
+			left := byID[bare][from]
+			if written.After(left.written) {
+				left.written = written
 			}
+			if seen.After(left.seen) {
+				left.seen = seen
+			}
+			byID[bare][from] = left
 		}
 		err = result.Err()
 		result.Close()
@@ -675,8 +703,8 @@ func (lk *assignmentLookups) loadParentChanges(meta *memorynodes.Concept, rows [
 		lk.parentLeft[concept] = byID
 	}
 
-	// The rows that otherwise match, with the time T of their parent's record.
-	leftAt := map[string]time.Time{}
+	// The rows that otherwise match, with when their parent left their account.
+	leftAt := map[string]parentLeftAt{}
 	current := map[string]string{}
 	for _, row := range rows {
 		account := bareAccount(row.Payload[accountField])
@@ -717,12 +745,12 @@ func (lk *assignmentLookups) loadParentChanges(meta *memorynodes.Concept, rows [
 		return err
 	}
 	for _, id := range ids {
-		t := leftAt[id]
+		left := leftAt[id]
 		created, ok := first[id]
-		if !ok || !created.Before(t) {
+		if !ok || !created.Before(left.seen) {
 			continue
 		}
-		if line, ok := lk.moves[id]; ok && line.to == current[id] && line.at.After(t) {
+		if line, ok := lk.moves[id]; ok && line.to == current[id] && line.at.After(left.written) {
 			continue // a person's own change put it here after the parent left
 		}
 		lk.followable[id] = true

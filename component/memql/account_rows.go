@@ -49,7 +49,9 @@ package memql
 //     only; for requests (the inventory, the status totals).
 //   - AccountRowIDs and AccountRowVersions: a page of a list, a probe per row
 //     (newestAccountSQL) and an id lookup in every chunk; not for a whole kind.
-//   - UnplacedRowIDs: a page of the rows in no account, walking the kind.
+//   - UnplacedRowIDs: a page of the rows in no account, decided as the census
+//     decides it, from narrow columns; reads every named version's id and time
+//     past the page's start through the account index.
 //
 // A compressed chunk has neither the account index nor an id index; every
 // statement here decompresses the kind's segment of it. No installation built
@@ -71,6 +73,7 @@ package memql
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -203,37 +206,87 @@ func AccountRowIDs(ctx context.Context, q AccountQuerier, account, concept, afte
 	return scanIDs(ctx, q, accountRowIDsSQL, bare, accountCanonicalPrefix+bare, concept, afterID, limit)
 }
 
-// unplacedRowIDsSQL walks the concept's newest versions in id order and keeps
-// those naming no account. No index serves "no account" (the partial index
-// leaves those versions out by design), so it streams the concept through
-// (concept, id, "createdAt" DESC), reading every version of every row it
-// passes (a compressed chunk has no such index and is sorted instead), and the
-// limit is what bounds one call. A row's observation is joined by id, its key
-// in memory_liveness, and decides only when it is at least as new as the
-// newest versioned row; an observation never exists without a versioned row
+// unplacedRowIDsSQL is a page of the concept's rows in no account, after $2,
+// decided from narrow columns with the census's own test (accountCensusSQL's
+// "nobody"), never by reading a versioned row's payload:
+//
+//   - latest: per row past $2, its newest createdAt, from the (concept, id,
+//     "createdAt" DESC) index;
+//   - anyNamed: per row past $2, the newest createdAt among its versions that
+//     name ANY account, through idx_memorynodes_account (the "greater than the
+//     empty string" range on its leading column, as in the census), so the
+//     account is matched by the index and never evaluated on a heap tuple;
+//   - observed: the row's observation (memory_liveness holds one small row per
+//     record, so its payload is read there).
+//
+// A row is in no account when an observation at least as new as its newest
+// versioned row names none, or otherwise when its newest version is not one
+// that names an account. An observation never exists without a versioned row
 // (the liveness trigger stores one only after a prior version, and pruning
-// removes it with the history), so the walk misses no row.
+// removes it with the history), so latest misses no row.
+//
+// The cost: anyNamed reads the (id, createdAt) of every version of the kind
+// past $2 that names an account, whatever the limit, through the index; no
+// payload is fetched. The limit bounds what latest walks and what is returned.
 //
 // staged-data: MUST-NOT-GATE -- which rows are in no account; a staged concept's rows count the same, and the caller's capability is the wall.
-const unplacedRowIDsSQL = `SELECT n.id FROM (
-  SELECT DISTINCT ON (id) id, "createdAt", payload->>'accountId' AS account
-    FROM "MemoryNodes" WHERE concept = $1 AND id > $2
-   ORDER BY id, "createdAt" DESC
-) n
-LEFT JOIN memory_liveness l ON l.id = n.id AND l."createdAt" >= n."createdAt"
- WHERE COALESCE(CASE WHEN l.id IS NULL THEN n.account ELSE l.payload->>'accountId' END, '') = ''
- ORDER BY n.id
+const unplacedRowIDsSQL = `WITH anyNamed AS MATERIALIZED (
+    SELECT id, max("createdAt") AS at FROM "MemoryNodes"
+     WHERE ` + accountNamedSQL + ` AND (payload->>'accountId') > '' AND concept = $1 AND id > $2
+     GROUP BY id
+), observed AS MATERIALIZED (
+    SELECT id, "createdAt" AS at, COALESCE(payload->>'accountId', '') AS account
+      FROM memory_liveness WHERE concept = $1 AND id > $2
+), latest AS (
+    SELECT id, max("createdAt") AS at FROM "MemoryNodes"
+     WHERE concept = $1 AND id > $2
+     GROUP BY id
+)
+SELECT l.id FROM latest l
+  LEFT JOIN anyNamed a ON a.id = l.id
+  LEFT JOIN observed o ON o.id = l.id
+ WHERE CASE WHEN o.at >= l.at THEN o.account = '' ELSE a.at IS DISTINCT FROM l.at END
+ ORDER BY l.id
  LIMIT $3`
 
 // UnplacedRowIDs is the ids of `concept` whose newest version names no
-// account, ascending, after afterID: a page of a list. It walks the concept
-// (see unplacedRowIDsSQL); call it with a modest limit, and count with
-// AccountCensus's InNoAccount instead.
+// account, ascending, after afterID: a page of a list (see unplacedRowIDsSQL
+// for its cost); count with AccountCensus's InNoAccount instead.
+//
+// On a pool it opens a short read-only transaction of its own, so
+// withIndexPlans' transaction-local settings hold for its statement (on a pool
+// each statement would otherwise be its own transaction, and the settings
+// would do nothing). Handed a transaction or a connection, it reads in it.
 func UnplacedRowIDs(ctx context.Context, q AccountQuerier, concept, afterID string, limit int) ([]string, error) {
 	if limit <= 0 {
 		return nil, fmt.Errorf("account rows: limit %d must be positive", limit)
 	}
-	return scanIDs(ctx, q, unplacedRowIDsSQL, concept, afterID, limit)
+	read := func(q AccountQuerier) ([]string, error) {
+		var ids []string
+		err := withIndexPlans(ctx, q, func() error {
+			var err error
+			ids, err = scanIDs(ctx, q, unplacedRowIDsSQL, concept, afterID, limit)
+			return err
+		})
+		return ids, err
+	}
+	pool, ok := q.(*sql.DB)
+	if !ok {
+		return read(q)
+	}
+	tx, err := pool.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("account rows: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	ids, err := read(tx)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("account rows: %w", err)
+	}
+	return ids, nil
 }
 
 func scanIDs(ctx context.Context, q AccountQuerier, query string, args ...any) ([]string, error) {

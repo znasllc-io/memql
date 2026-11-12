@@ -126,7 +126,8 @@ package memql
 //     (runAccountAssignmentBatch).
 //   - A finished full pass keeps its SAFE POINT in full_pass_at: the earlier of
 //     its start and its horizon, the value verified_through takes. A request
-//     or change record newer than it is not covered by the pass. Its START is
+//     newer than it, or a change record the job first saw after it (its
+//     seen_at, account_follow.go), is not covered by the pass. Its START is
 //     kept in full_pass_started_at, in the same statement. A request that a
 //     full pass started after it has answered, but could not cover because a
 //     transaction held the horizon at or before it, is held back
@@ -152,8 +153,13 @@ package memql
 // it. Also, the export's session is trusted to write nothing while it carries
 // AccountExportApplicationName.
 //
-// Running it twice changes nothing: a row that has an account is kept, and the
-// write itself is guarded on the row still having none.
+// Running it twice changes nothing. A row given an account by rule 2 to 6 is
+// then kept by rule 1, and that write is guarded on the row still having none.
+// A row the follow or re-apply rule moved is in its parent's account, or its
+// ledger line's, afterwards, so neither rule matches it again; a later pass
+// moves it only when something has changed since (a new version naming the
+// account it left, or a new change record), and each such write is guarded on
+// the row still holding the account it was judged in.
 //
 // Tests: account_assignment_db_test.go.
 

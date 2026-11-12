@@ -336,11 +336,11 @@ func TestAccountRowsFollowingTheirParentAgreesWithTheMove(t *testing.T) {
 	g := f.goal(t, db, "goal", f.a)
 	unplaced := f.goal(t, db, "unplaced", "")
 	rows := map[string]string{
-		f.run(t, db, "same", g, f.a):      "follows its goal in a",
-		f.run(t, db, "other", g, f.c):     "attached from c",
-		f.row(t, db, "v1:work:run", "none", map[string]any{"ownerUserId": f.owner, "goalId": unplaced}): "both in no account",
+		f.run(t, db, "same", g, f.a):  "follows its goal in a",
+		f.run(t, db, "other", g, f.c): "attached from c",
+		f.row(t, db, "v1:work:run", "none", map[string]any{"ownerUserId": f.owner, "goalId": unplaced}):                                       "both in no account",
 		f.row(t, db, "v1:work:run", "orphan", map[string]any{"ownerUserId": f.owner, "goalId": "v1:work:goal:gone-" + f.s, "accountId": f.a}): "a parent that does not exist",
-		f.row(t, db, "v1:work:run", "root", map[string]any{"ownerUserId": f.owner, "accountId": f.a}): "no parent",
+		f.row(t, db, "v1:work:run", "root", map[string]any{"ownerUserId": f.owner, "accountId": f.a}):                                         "no parent",
 	}
 	var page []RowPayload
 	for id := range rows {

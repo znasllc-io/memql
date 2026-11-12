@@ -243,6 +243,43 @@ func TestAccountCensusReadsTheAccountThroughTheIndexOnly(t *testing.T) {
 	}
 }
 
+// The list of rows in no account decides from narrow columns: the versions
+// naming any account through the account index, every chunk, and no payload of
+// a versioned row evaluated on a heap tuple; no sequential scan of a chunk.
+func TestUnplacedRowIDsReadTheAccountThroughTheIndexOnly(t *testing.T) {
+	db, concept, accountIndex := accountPlanFixture(t, "unplaced rows plan")
+	ids, err := UnplacedRowIDs(context.Background(), db.DB, concept, "", 50)
+	require.NoError(t, err)
+	require.Empty(t, ids, "fixture: every row's newest version names an account")
+	for _, after := range []string{"''", "'" + concept + ":r1500'"} {
+		raw := explainAsTheReaderRuns(t, db, unplacedRowIDsSQL, "'"+concept+"'", after, "50")
+		require.Equal(t, 4, requireAccountThroughTheIndex(t, raw, accountIndex, "unplaced after "+after),
+			"unplaced after %s: every chunk's named versions are found through the account index: %s", after, raw)
+		requireNoChunkSeqScan(t, raw, "unplaced after "+after)
+	}
+}
+
+// requireNoChunkSeqScan fails when the plan reads a chunk of the row table by a
+// sequential scan.
+func requireNoChunkSeqScan(t *testing.T, raw []byte, label string) {
+	t.Helper()
+	var plans []map[string]any
+	require.NoError(t, json.Unmarshal(raw, &plans))
+	var inspect func(plan map[string]any)
+	inspect = func(plan map[string]any) {
+		relation, _ := plan["Relation Name"].(string)
+		if plan["Node Type"] == "Seq Scan" {
+			require.NotContains(t, relation, "_chunk", "%s scans a chunk sequentially: %s", label, raw)
+			require.NotEqual(t, "MemoryNodes", relation, "%s scans the row table sequentially: %s", label, raw)
+		}
+		children, _ := plan["Plans"].([]any)
+		for _, child := range children {
+			inspect(child.(map[string]any))
+		}
+	}
+	inspect(plans[0]["Plan"].(map[string]any))
+}
+
 // The probe that chooses the decision's shape counts the account's versions
 // through the account index.
 func TestAccountDecisionProbeReadsTheAccountThroughTheIndexOnly(t *testing.T) {

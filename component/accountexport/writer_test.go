@@ -593,3 +593,16 @@ func TestRowsDir(t *testing.T) {
 		}
 	}
 }
+
+// account.jsonl holds the account's own row and nothing else. The checker
+// refuses a file where it holds another kind, so the writer refuses such a row
+// before it writes one.
+func TestWriterRefusesAnotherKindInTheAccountMember(t *testing.T) {
+	_, w := newFixtureWriter(t)
+	mustContain(t, w.AccountRow(rowOfLine(t, "v1:todos:todo", "t", 400)), MemberAccount, "v1:todos:todo", "v1:accounts:account")
+
+	_, ok := newFixtureWriter(t)
+	if err := ok.AccountRow(rowOfLine(t, "v1:accounts:account", "a", 400)); err != nil {
+		t.Fatalf("the account's own row: %v", err)
+	}
+}

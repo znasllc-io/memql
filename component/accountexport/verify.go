@@ -45,12 +45,43 @@ func Verify(r io.Reader) (VerifyResult, error) {
 	if err := v.run(); err != nil {
 		return VerifyResult{}, fmt.Errorf("accountexport: verify: %w", err)
 	}
-	// Count the end-of-archive blocks too, so Bytes is the whole stream.
-	if _, err := io.Copy(io.Discard, cr); err != nil {
+	// Count what follows the end of the archive too, so Bytes is the whole
+	// stream, and refuse it unless it is zero blocks.
+	if err := zeroBlocksOnly(cr); err != nil {
 		return VerifyResult{}, fmt.Errorf("accountexport: verify: %w", err)
 	}
 	return VerifyResult{Manifest: v.manifest, Report: v.report, Members: len(v.digests) + 1, Bytes: cr.n}, nil
 }
+
+// zeroBlocksOnly reads the rest of the stream after the archive's end and
+// refuses anything but whole zero blocks. A tar writer may pad an archive to
+// its record size with zero blocks, and nothing else belongs there: bytes after
+// the end are not part of the format, and a file carrying them is not one the
+// writer wrote. It is read in blocks, so nothing of it is held.
+func zeroBlocksOnly(r io.Reader) error {
+	var block [blockSize]byte
+	for {
+		n, err := io.ReadFull(r, block[:])
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			return fmt.Errorf("%d bytes after the archive's end are not a whole block", n)
+		}
+		if err != nil {
+			return err
+		}
+		if block != ([blockSize]byte{}) {
+			return errors.New("a block after the archive's end is not zero")
+		}
+	}
+}
+
+// blockSize is a tar block.
+const blockSize = 512
+
+// accountKind is the one kind account.jsonl holds.
+const accountKind = "v1:accounts:account"
 
 type object struct {
 	size   int64
@@ -76,7 +107,11 @@ type verifier struct {
 	objects  map[string]object
 	lastObj  int
 	digests  []sumLine
-	sawSums  bool
+	// sumsLen is the length SHA256SUMS will have to be to list every member
+	// read so far, held to the writer's bound as each member is read
+	// (done). It also bounds digests and objects, each a line of it.
+	sumsLen int
+	sawSums bool
 }
 
 func (v *verifier) next() (*tar.Header, error) {
@@ -255,6 +290,15 @@ func (v *verifier) done(rel string, x *hashed) (string, error) {
 	if _, err := io.Copy(io.Discard, x); err != nil {
 		return "", v.cut(err)
 	}
+	// The writer refuses a member that would take SHA256SUMS past its bound
+	// (Writer.reserveSum). Refusing here, as each member is read, keeps the
+	// list of digests, and the objects, to what that bound allows; learning
+	// the list's size only at SHA256SUMS, the last member, would hold them all.
+	n := v.sumsLen + sumLineBytes(rel)
+	if n > bounds.sumsBytes {
+		return "", fmt.Errorf("%s: adding %s: %w", MemberSums, rel, over(int64(n), "bytes in the checksum list", bounds.sumsBytes))
+	}
+	v.sumsLen = n
 	d := hex.EncodeToString(x.h.Sum(nil))
 	v.digests = append(v.digests, sumLine{path: rel, digest: d})
 	return d, nil
@@ -326,6 +370,11 @@ func (v *verifier) read(rel string, h *tar.Header) error {
 			row, err := v.row(line)
 			if err != nil {
 				return err
+			}
+			// The writer puts only the account's own row here; a row of any
+			// other kind belongs in its folder under rows/.
+			if row.Concept != accountKind {
+				return fmt.Errorf("a row of %s, where only %s belongs", row.Concept, accountKind)
 			}
 			v.counts.row(&v.acctLast, row)
 			return nil

@@ -309,3 +309,89 @@ func TestTooNewIsDecidedBeforeTheRestOfTheManifest(t *testing.T) {
 		t.Fatalf("want ErrFormatTooNew, got %v", err)
 	}
 }
+
+// Verify keeps a running total of the checksum list it is building as members
+// are read, and refuses once it passes the writer's bound, before it reaches
+// SHA256SUMS: a file of empty bytes/ objects is refused at the bound, not after
+// every one of them is held. The writer refuses such a file before writing it,
+// so the input is built by hand.
+func TestVerifyBoundsTheChecksumListAsItReads(t *testing.T) {
+	file := writeFixture(t, defaultFixture())
+	manifest := readEntries(t, file)[0]
+	es := []entry{manifest}
+	for n := 1; n <= 2000; n++ {
+		es = append(es, entry{fixtureStem + "/" + objectFile(n), nil})
+	}
+	withLimits(t, func(l *limits) { l.sumsBytes = 10_000 })
+	_, err := Verify(bytes.NewReader(writeEntries(t, es)))
+	mustContain(t, err, MemberSums, "10000", "bytes in the checksum list")
+
+	// The fixture's own list, at the bound, verifies; one byte under, it is
+	// refused while the members are read, naming the bound.
+	sums := 0
+	for _, e := range readEntries(t, file) {
+		if !strings.HasSuffix(e.name, "/"+MemberSums) {
+			sums += sumLineBytes(strings.TrimPrefix(e.name, fixtureStem+"/"))
+		}
+	}
+	withLimits(t, func(l *limits) { l.sumsBytes = sums })
+	if _, err := Verify(bytes.NewReader(file)); err != nil {
+		t.Fatalf("at the bound (%d): %v", sums, err)
+	}
+	// Without its SHA256SUMS, so the refusal can only come from the running
+	// total: the file is otherwise cut short.
+	bounds.sumsBytes = sums - 1
+	noSums := []entry{}
+	for _, e := range readEntries(t, file) {
+		if !strings.HasSuffix(e.name, "/"+MemberSums) {
+			noSums = append(noSums, e)
+		}
+	}
+	_, err = Verify(bytes.NewReader(writeEntries(t, noSums)))
+	mustContain(t, err, MemberSums, fmt.Sprint(sums-1), "bytes in the checksum list")
+}
+
+// After the archive's end a file may carry only zero blocks: a tar writer may
+// pad the archive to its record size with them. Anything else is refused.
+func TestVerifyRefusesAnythingButZeroBlocksAfterTheEnd(t *testing.T) {
+	file := writeFixture(t, defaultFixture())
+	padded := append(append([]byte{}, file...), make([]byte, 20*512)...)
+	if _, err := Verify(bytes.NewReader(padded)); err != nil {
+		t.Fatalf("zero blocks after the end: %v", err)
+	}
+	for name, tail := range map[string][]byte{
+		"a block that is not zero": append(make([]byte, 511), 'x'),
+		"text":                     []byte("appended\n"),
+		"zeros that are no block":  make([]byte, 100),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Verify(bytes.NewReader(append(append([]byte{}, file...), tail...)))
+			mustContain(t, err, "after the archive's end")
+		})
+	}
+}
+
+// account.jsonl holds the account's own row and nothing else: a row of another
+// declared kind there is refused. The writer is not handed such a row, so the
+// member is rewritten by hand and the checksum list made to agree.
+func TestVerifyRefusesARowOfAnotherKindInTheAccountMember(t *testing.T) {
+	es := readEntries(t, writeFixture(t, defaultFixture()))
+	misfiled := fixtureRow("v1:todos:todo", "t9", 3, `{"title":"Misfiled"}`)
+	misfiled.Kind = KindRow
+	line, err := encodeLine(misfiled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for i, e := range es {
+		if e.name == fixtureStem+"/"+MemberAccount {
+			es[i].data = append(append([]byte{}, e.data...), line...)
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no %s", MemberAccount)
+	}
+	_, err = Verify(bytes.NewReader(writeEntries(t, resum(es))))
+	mustContain(t, err, MemberAccount, "v1:todos:todo")
+}

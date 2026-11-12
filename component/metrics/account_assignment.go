@@ -40,7 +40,8 @@ var accountFollowTasks = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: namespace,
 	Name:      "account_follow_tasks",
 	Help: "Change records not settled (component/memql/account_follow.go): rows whose account changed from one account to another, whose followers -- the rows whose via field names them, " +
-		"in the account they left -- the assignment job has not yet been through with a full pass of every follower kind started after the change. Set by each node's assignment job once per call; " +
+		"in the account they left -- the assignment job has not yet been through with a full pass of every follower kind whose safe point (the earlier of its start and its late-commit horizon) " +
+		"is after the moment the job first saw the record. Set by each node's assignment job once per call; " +
 		"an account export waits while a record names its account, so a value that stays above zero is an export that cannot start.",
 })
 

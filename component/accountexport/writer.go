@@ -223,8 +223,14 @@ func (w *Writer) rowLine(member string, r Row) ([]byte, error) {
 	return w.line(member, r)
 }
 
-// AccountRow adds one version of the account's own row to account.jsonl.
+// AccountRow adds one version of the account's own row to account.jsonl. The
+// member holds that row and nothing else, and the checker refuses a file where
+// it holds another kind (verify.go), so a row of another kind is refused here
+// before a byte of it is written.
 func (w *Writer) AccountRow(r Row) error {
+	if r.Concept != accountKind {
+		return w.fail(fmt.Errorf("%s: a row of %s, where only %s belongs", MemberAccount, r.Concept, accountKind))
+	}
 	if err := w.advance(phaseAccount, MemberAccount); err != nil {
 		return err
 	}

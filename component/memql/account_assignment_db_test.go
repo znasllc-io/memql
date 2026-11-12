@@ -1022,12 +1022,49 @@ func onlyDue(t *testing.T, db *bun.DB, kinds ...string) {
 	})
 }
 
-func seedRows(t *testing.T, db *bun.DB, concept, prefix string, n int) {
+// seedRowsInBulk writes n rows of the concept, an hour old and already in an
+// account, in one statement, and deletes them when the test ends. Enough of
+// them keep a slowed requested pass open for a whole call: its batch size grows
+// after each batch (by a quarter, from 1), so twenty batches read about 650
+// rows.
+func seedRowsInBulk(t *testing.T, db *bun.DB, concept, prefix string, n int) {
 	t.Helper()
-	for i := 0; i < n; i++ {
-		seedRawRow(t, context.Background(), db, concept, fmt.Sprintf("%s:%s-%d", concept, prefix, i), time.Now().Add(-time.Hour),
-			"assignment-test", map[string]any{"title": "t", "accountId": "self"})
+	ctx := context.Background()
+	like := concept + ":" + prefix + "-"
+	_, err := db.ExecContext(ctx, `INSERT INTO "MemoryNodes" (id, concept, "createdAt", "createdBy", type, schema, payload, provenance)
+		SELECT ? || i, ?, clock_timestamp() - interval '1 hour', 'assignment-test', 'object', '{}'::jsonb,
+		       '{"title":"t","accountId":"self"}'::jsonb, '{"kind":"direct","name":"assignment-test"}'::jsonb
+		  FROM generate_series(1, ?) AS i`, like, concept, n)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept = ? AND id LIKE ? || '%'`, concept, like)
+	})
+}
+
+// closePassesAround finishes any pass of the kinds left open, now and again
+// when the test ends (after its other cleanups, being registered first), so a
+// test measuring a requested pass starts it fresh and leaves none open behind.
+func closePassesAround(t *testing.T, engine *MemQLEngine, db *bun.DB, kinds ...string) {
+	t.Helper()
+	closeAll := func() {
+		for _, k := range kinds {
+			makeDue(t, db, k)
+			runOnePassOf(t, engine, db, k)
+		}
 	}
+	t.Cleanup(closeAll)
+	closeAll()
+}
+
+// requirePassOpen fails unless the concept's current pass is still open: a
+// pass that finished inside the call it measures says nothing about how the
+// call shares its time.
+func requirePassOpen(t *testing.T, db *bun.DB, concept string) {
+	t.Helper()
+	var open bool
+	require.NoError(t, db.QueryRowContext(context.Background(), `SELECT pass_finished_at IS NULL OR pass_finished_at < pass_started_at
+		FROM account_assignment_progress WHERE concept = ?`, concept).Scan(&open))
+	require.True(t, open, "fixture: the requested pass of %s finished inside the call", concept)
 }
 
 // Several kinds in requested passes share at most half of a call between them
@@ -1041,8 +1078,9 @@ func TestAccountAssignmentRequestedPassesTakeTurnsAndLeaveHalfTheCall(t *testing
 	_, order, err := assignmentConcepts()
 	require.NoError(t, err)
 	require.NoError(t, ensureAssignmentProgressRows(ctx, db, order))
-	seedRows(t, db, todo, "turns-"+s, 40)
-	seedRows(t, db, goal, "turns-"+s, 40)
+	closePassesAround(t, engine, db, todo, goal)
+	seedRowsInBulk(t, db, todo, "turns-"+s, 2000)
+	seedRowsInBulk(t, db, goal, "turns-"+s, 2000)
 	third := ""
 	for i, name := range order {
 		if (name == todo || name == goal) && i+1 < len(order) && order[i+1] != todo && order[i+1] != goal {
@@ -1068,6 +1106,8 @@ func TestAccountAssignmentRequestedPassesTakeTurnsAndLeaveHalfTheCall(t *testing
 	require.Positive(t, counts[goal])
 	diff := counts[todo] - counts[goal]
 	require.True(t, diff <= 1 && diff >= -1, "the requested kinds did not take turns: %v", counts)
+	requirePassOpen(t, db, todo)
+	requirePassOpen(t, db, goal)
 }
 
 // One requested kind and nothing else due: it takes the whole call.
@@ -1079,7 +1119,8 @@ func TestAccountAssignmentALoneRequestedPassUsesTheWholeCall(t *testing.T) {
 	_, order, err := assignmentConcepts()
 	require.NoError(t, err)
 	require.NoError(t, ensureAssignmentProgressRows(ctx, db, order))
-	seedRows(t, db, todo, "alone-"+s, 40)
+	closePassesAround(t, engine, db, todo)
+	seedRowsInBulk(t, db, todo, "alone-"+s, 2000)
 	onlyDue(t, db, todo)
 	counts := slowRequestedPasses(t, db, todo)
 	callCtx, cancel := context.WithTimeout(ctx, accountOwnershipDeadline)
@@ -1087,6 +1128,7 @@ func TestAccountAssignmentALoneRequestedPassUsesTheWholeCall(t *testing.T) {
 	require.NoError(t, engine.runAccountAssignmentBatch(callCtx))
 	// 100 ms a batch in a 2 s call: well over half the call's batches.
 	require.GreaterOrEqual(t, counts[todo], 14, "a requested pass with nothing else due stopped short of the call: %v", counts)
+	requirePassOpen(t, db, todo)
 }
 
 // A full pass asked for is the next pass of that concept, whatever its last

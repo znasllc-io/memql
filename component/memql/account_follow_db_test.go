@@ -308,15 +308,16 @@ func TestAccountFollowLeavesAChildsOwnReTag(t *testing.T) {
 	require.Equal(t, f.a, newestPayload(t, db, f.run1)["accountId"], "the follow rule undid the run's own change")
 }
 
-// A parent's record carries only rows that existed before it: a row attached
-// to the moved parent afterwards, filed under the account the parent left, is
-// not this record's to move. The same holds for an account the parent once left
-// and a row attached from it later.
+// A parent's record carries only rows that existed before the job first saw
+// it: a row attached to the moved parent afterwards, filed under the account
+// the parent left, is not this record's to move.
 func TestAccountFollowCarriesOnlyRowsThatExistedBeforeTheChange(t *testing.T) {
 	engine, db := recordingEngine(t)
 	ctx := context.Background()
 	f := newFollowFixture(t, db, t.Name())
 	moveOne(t, engine, db, "v1:work:goal", f.goal, f.b)
+	foldRequests(t, db)
+	require.True(t, recordSeen(t, db, f.goal), "fixture: the fold saw the goal's record")
 	time.Sleep(10 * time.Millisecond)
 	late := "v1:work:run:late-" + uniqueSuffix(t.Name())
 	seedRawRow(t, ctx, db, "v1:work:run", late, time.Now(), "follow-test",
@@ -324,7 +325,114 @@ func TestAccountFollowCarriesOnlyRowsThatExistedBeforeTheChange(t *testing.T) {
 
 	runJobUntil(t, engine, db, "the followers' passes finished", func() bool { return pendingFor(t, db, f.b) == 0 })
 	require.Equal(t, f.b, newestPayload(t, db, f.run1)["accountId"], "a run that existed before the move was not carried")
-	require.Equal(t, f.a, newestPayload(t, db, late)["accountId"], "a run attached after the move was carried")
+	require.Equal(t, f.a, newestPayload(t, db, late)["accountId"], "a run attached after the record was seen was carried")
+}
+
+// recordSeen reports whether every change record of the row has been seen by
+// the job's fold.
+func recordSeen(t *testing.T, db *bun.DB, id string) bool {
+	t.Helper()
+	var seen bool
+	require.NoError(t, db.QueryRowContext(context.Background(), `SELECT bool_and(seen_at IS NOT NULL) FROM account_follow_tasks
+		WHERE parent_id = ?`, id).Scan(&seen))
+	return seen
+}
+
+// changeGoalInOpenTx changes the goal's account from a to b in place, with its
+// change record, in a transaction left open for the caller to commit: a change
+// whose record is inserted well before it becomes visible.
+func changeGoalInOpenTx(t *testing.T, db *bun.DB, f followFixture) bun.Tx {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	_, err = tx.ExecContext(ctx, `UPDATE "MemoryNodes" SET payload = jsonb_set(payload, '{accountId}', to_jsonb(?::text))
+		WHERE id = ? AND "createdAt" = (SELECT max("createdAt") FROM "MemoryNodes" WHERE id = ?)`, f.b, f.goal, f.goal)
+	require.NoError(t, err)
+	require.NoError(t, EnqueueAccountFollow(ctx, tx, AccountRowRef{Concept: "v1:work:goal", ID: f.goal}, f.a, f.b))
+	return tx
+}
+
+// A child written while its parent's change was still uncommitted read the
+// parent in the account it was leaving, and was filed there. It existed before
+// the job could see the record, so the record carries it.
+func TestAccountFollowCarriesAChildWrittenWhileTheChangeWasUncommitted(t *testing.T) {
+	engine, db := recordingEngine(t)
+	ctx := context.Background()
+	f := newFollowFixture(t, db, t.Name())
+	tx := changeGoalInOpenTx(t, db, f)
+	time.Sleep(10 * time.Millisecond)
+	// Another connection: the goal still reads as in a, so the run is filed there.
+	inWindow := "v1:work:run:window-" + uniqueSuffix(t.Name())
+	seedRawRow(t, ctx, db, "v1:work:run", inWindow, time.Now(), "follow-test",
+		map[string]any{"ownerUserId": f.owner, "goalId": f.goal, "accountId": f.a})
+	time.Sleep(10 * time.Millisecond)
+	require.NoError(t, tx.Commit())
+
+	runJobUntil(t, engine, db, "the followers' passes finished", func() bool { return pendingFor(t, db, f.b) == 0 })
+	require.Equal(t, f.b, newestPayload(t, db, f.run1)["accountId"])
+	require.Equal(t, f.b, newestPayload(t, db, inWindow)["accountId"], "a run written while the change was uncommitted was stranded in a")
+}
+
+// A person's own re-tag of a child into the account its parent is leaving,
+// made while the parent's change was still uncommitted, is newer than the
+// parent's leaving and is kept: a child's own change is compared with when the
+// parent's record was written, not with when the job saw it.
+func TestAccountFollowKeepsAChildsReTagMadeWhileTheChangeWasUncommitted(t *testing.T) {
+	engine, db := recordingEngine(t)
+	ctx := context.Background()
+	f := newFollowFixture(t, db, t.Name())
+	tx := changeGoalInOpenTx(t, db, f)
+	time.Sleep(10 * time.Millisecond)
+	// The run is in c; a person re-tags it into a, while the goal's change is open.
+	seedRawRow(t, ctx, db, "v1:work:run", f.foreignRun, time.Now(), "follow-test",
+		map[string]any{"ownerUserId": f.owner, "goalId": f.goal, "accountId": f.a, "status": "re-tagged"})
+	_, err := db.ExecContext(ctx, `INSERT INTO account_row_moves (concept, row_id, from_account, to_account, moved_by, followers, note)
+		VALUES ('v1:work:run', ?, ?, ?, ?, 0, 're-tag')`, f.foreignRun, f.c, f.a, f.owner)
+	require.NoError(t, err)
+	require.NoError(t, EnqueueAccountFollow(ctx, db, AccountRowRef{Concept: "v1:work:run", ID: f.foreignRun}, f.c, f.a))
+	time.Sleep(10 * time.Millisecond)
+	require.NoError(t, tx.Commit())
+
+	runJobUntil(t, engine, db, "the followers' passes finished", func() bool { return pendingFor(t, db, f.b) == 0 && pendingFor(t, db, f.a) == 0 })
+	require.Equal(t, f.b, newestPayload(t, db, f.run1)["accountId"])
+	require.Equal(t, f.a, newestPayload(t, db, f.foreignRun)["accountId"], "the follow rule undid a person's re-tag made while the change was open")
+}
+
+// A record the job has not seen yet carries nothing and settles nothing, even
+// once full passes of every follower kind have finished after it committed;
+// the export still waits on it. The next call's fold sees it, asks for the
+// passes again, and those carry and settle.
+func TestAccountChangeRecordNotYetSeenCarriesNothingAndIsNotSettled(t *testing.T) {
+	engine, db := recordingEngine(t)
+	ctx := context.Background()
+	f := newFollowFixture(t, db, t.Name())
+	const run = "v1:work:run"
+	runJobUntil(t, engine, db, "no pass pending", func() bool { return !fullPassPending(t, engine, db, run) })
+
+	tx := changeGoalInOpenTx(t, db, f)
+	// The job runs while the change is uncommitted: its fold cannot see the record.
+	foldRequests(t, db)
+	require.NoError(t, tx.Commit())
+	require.False(t, recordSeen(t, db, f.goal), "fixture: the fold saw an uncommitted record")
+
+	// Full passes of every follower kind, with no fold between: none may use
+	// or settle the record.
+	for _, kind := range followerKindNames("v1:work:goal") {
+		require.NoError(t, RequestAccountFullPass(ctx, db, []string{kind}))
+		runOnePassOf(t, engine, db, kind)
+	}
+	require.Equal(t, f.a, newestPayload(t, db, f.run1)["accountId"], "a record not yet seen carried a run")
+	require.EqualValues(t, 1, pendingFor(t, db, f.b), "a record not yet seen was settled")
+	require.False(t, fullPassPending(t, engine, db, run), "fixture: the requested pass finished")
+
+	foldRequests(t, db)
+	require.True(t, recordSeen(t, db, f.goal))
+	require.True(t, fullPassPending(t, engine, db, run), "the fold did not ask for the runs' pass once it saw the record")
+	runJobUntil(t, engine, db, "the record settled", func() bool { return pendingFor(t, db, f.b) == 0 })
+	require.Equal(t, f.b, newestPayload(t, db, f.run1)["accountId"])
+	require.Equal(t, f.b, newestPayload(t, db, f.step1)["accountId"])
 }
 
 // An in-place change of account holds the list with it, so members of the

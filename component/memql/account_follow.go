@@ -20,9 +20,8 @@ package memql
 //
 // account_follow_tasks holds one row per row whose recorded account CHANGED:
 // parent_concept, parent_id, from_account ("" for a row that had none),
-// to_account, created_at. Its cursor columns (cursor_concept, cursor_id,
-// followed, next_at) are unused: they belonged to a follow runner that walked
-// follower kinds itself, and that is gone. A record is written
+// to_account, created_at (inside the change's transaction), seen_at (below)
+// and done_at (Settled). A record is written
 //
 //   - by the governed move, for each root it moves or places, and for each row
 //     tied to a placed root (account_move.go);
@@ -49,6 +48,22 @@ package memql
 // the placement write theirs, and a re-tag writes one too (in the write's
 // transaction, moved_by the person, note "re-tag").
 //
+// # Seen
+//
+// A record's created_at is when it was INSERTED, inside the transaction that
+// changed the row, and that transaction may run for seconds after (a move of
+// hundreds of roots, a carrying batch). Until it commits, an ordinary write
+// that creates a child reads the parent in the account it is leaving and files
+// the child there. So "the rows the parent had when it left" is judged against
+// seen_at instead: the moment the job's fold first read the record, which it
+// can only do once the change has committed (foldAccountChangeRequests). A
+// record not seen yet carries nothing and settles nothing. The cost, accepted:
+// a child written before the fold that the raw surface filed under its
+// writer's own account (they may not write to the parent's), where that account
+// is the one the parent left, is carried with the parent, as a child written
+// before the change would have been. The fold runs at the start of every call
+// of the job, so the window is about one call long.
+//
 // # What a change asks of the job
 //
 // A record IS the request. Followers are reached by a FULL pass of their kind;
@@ -69,12 +84,14 @@ package memql
 //
 // # Settled
 //
-// A record is SETTLED (done_at) once every follower kind of its row's kind has
-// finished a full pass whose SAFE POINT is after the record: the earlier of the
-// pass's start and its late-commit horizon (account_assignment.go, Passes),
-// which progress keeps in full_pass_at. A pass started while the record's
-// transaction was still open has a safe point at or before that transaction's
-// start, so it does not settle the record. The job settles records whenever one
+// A record is SETTLED (done_at) once it has been seen and every follower kind
+// of its row's kind has finished a full pass whose SAFE POINT is after its
+// seen_at: the earlier of the pass's start and its late-commit horizon
+// (account_assignment.go, Passes), which progress keeps in full_pass_at. A pass
+// whose safe point is before seen_at may have read the followers before the
+// record could carry them, so it does not settle the record. A requested pass
+// is pending on the same comparison: the fold's request is the newest seen_at
+// of the records it folds. The job settles records whenever one
 // of its full passes finishes (settleAccountChangeRecords). An export waits
 // while a record naming its account is not settled (AccountFollowPending).
 //
@@ -254,72 +271,92 @@ func (c *accountChange) apply(ctx context.Context, store memorynodes.Store, id s
 
 // foldAccountChangeRequests turns the change records not settled into requests
 // for full passes of their follower kinds (file header, What a change asks of
-// the job): each follower kind's full_pass_requested_at is raised to the newest
-// record it follows, so a request is never older than a record it has to read
-// past, and a record already covered by a finished pass (its safe point is
-// after the record) asks for nothing more. One short transaction of the job's
-// own, one statement over the kinds in sorted order; a progress row another
-// replica holds is skipped and folded at the next call. Reads the records
-// through their partial index on records not settled.
+// the job). One short transaction of the job's own:
+//
+//   - First it marks SEEN (seen_at = clock_timestamp()) every record not seen
+//     yet. It can only read a committed record, so seen_at is never earlier
+//     than the commit of the change: a row written while the change was still
+//     uncommitted read the parent in the account it was leaving, and its first
+//     version is older than seen_at, so the record carries it (file header,
+//     Seen). Records are taken in id order with SKIP LOCKED, so two replicas
+//     folding at once never wait on each other; one another replica is marking
+//     is marked by that one.
+//   - Then each follower kind's full_pass_requested_at is raised to the newest
+//     seen_at among the records it follows, so a request is never older than a
+//     record it has to read past, and a record already covered by a finished
+//     pass (its safe point is after the record's seen_at) asks for nothing
+//     more. One statement over the kinds in sorted order; a progress row
+//     another replica holds is skipped and folded at the next call.
+//
+// Reads the records through their partial index on records not settled.
 func foldAccountChangeRequests(ctx context.Context, db *bun.DB, managed map[string]*memorynodes.Concept) error {
-	rows, err := db.QueryContext(ctx, `SELECT parent_concept, max(created_at) FROM account_follow_tasks
-		WHERE done_at IS NULL GROUP BY parent_concept`)
-	if err != nil {
-		return fmt.Errorf("account follow: reading the records to fold: %w", err)
-	}
-	newest := map[string]time.Time{}
-	for rows.Next() {
-		var parent string
-		var at time.Time
-		if err := rows.Scan(&parent, &at); err != nil {
-			rows.Close()
-			return err
+	return db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if _, err := tx.ExecContext(ctx, `UPDATE account_follow_tasks SET seen_at = clock_timestamp()
+			 WHERE id IN (SELECT id FROM account_follow_tasks
+			               WHERE done_at IS NULL AND seen_at IS NULL ORDER BY id FOR UPDATE SKIP LOCKED)`); err != nil {
+			return fmt.Errorf("account follow: marking the records seen: %w", err)
 		}
-		for _, kind := range followerKindNames(parent) {
-			if managed[kind] != nil && at.After(newest[kind]) {
-				newest[kind] = at
+		rows, err := tx.QueryContext(ctx, `SELECT parent_concept, max(seen_at) FROM account_follow_tasks
+			WHERE done_at IS NULL AND seen_at IS NOT NULL GROUP BY parent_concept`)
+		if err != nil {
+			return fmt.Errorf("account follow: reading the records to fold: %w", err)
+		}
+		newest := map[string]time.Time{}
+		for rows.Next() {
+			var parent string
+			var at time.Time
+			if err := rows.Scan(&parent, &at); err != nil {
+				rows.Close()
+				return err
+			}
+			for _, kind := range followerKindNames(parent) {
+				if managed[kind] != nil && at.After(newest[kind]) {
+					newest[kind] = at
+				}
 			}
 		}
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil || len(newest) == 0 {
-		return err
-	}
-	kinds := make([]string, 0, len(newest))
-	for kind := range newest {
-		kinds = append(kinds, kind)
-	}
-	sort.Strings(kinds)
-	ats := make([]time.Time, len(kinds))
-	for i, kind := range kinds {
-		ats[i] = newest[kind]
-	}
-	_, err = db.ExecContext(ctx, `UPDATE account_assignment_progress AS p
-		   SET full_pass_requested_at = k.at, next_at = LEAST(p.next_at, clock_timestamp())
-		  FROM unnest(?::text[], ?::timestamptz[]) AS k(concept, at)
-		 WHERE p.concept = k.concept
-		   AND (p.full_pass_requested_at IS NULL OR p.full_pass_requested_at < k.at)
-		   AND (p.full_pass_at IS NULL OR p.full_pass_at <= k.at)
-		   AND p.concept IN (SELECT concept FROM account_assignment_progress
-		                      WHERE concept = ANY(?::text[]) ORDER BY concept FOR UPDATE SKIP LOCKED)`,
-		pq.Array(kinds), pq.Array(ats), pq.Array(kinds))
-	if err != nil {
-		return fmt.Errorf("account follow: folding the records into requests: %w", err)
-	}
-	return nil
+		err = rows.Err()
+		rows.Close()
+		if err != nil || len(newest) == 0 {
+			return err
+		}
+		kinds := make([]string, 0, len(newest))
+		for kind := range newest {
+			kinds = append(kinds, kind)
+		}
+		sort.Strings(kinds)
+		ats := make([]time.Time, len(kinds))
+		for i, kind := range kinds {
+			ats[i] = newest[kind]
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE account_assignment_progress AS p
+			   SET full_pass_requested_at = k.at, next_at = LEAST(p.next_at, clock_timestamp())
+			  FROM unnest(?::text[], ?::timestamptz[]) AS k(concept, at)
+			 WHERE p.concept = k.concept
+			   AND (p.full_pass_requested_at IS NULL OR p.full_pass_requested_at < k.at)
+			   AND (p.full_pass_at IS NULL OR p.full_pass_at <= k.at)
+			   AND p.concept IN (SELECT concept FROM account_assignment_progress
+			                      WHERE concept = ANY(?::text[]) ORDER BY concept FOR UPDATE SKIP LOCKED)`,
+			pq.Array(kinds), pq.Array(ats), pq.Array(kinds))
+		if err != nil {
+			return fmt.Errorf("account follow: folding the records into requests: %w", err)
+		}
+		return nil
+	})
 }
 
-// settleAccountChangeRecords marks settled every record whose row's follower
-// kinds have each finished a full pass whose safe point is after the record
-// (file header, Settled). The job calls it when a full pass finishes, in that
+// settleAccountChangeRecords marks settled every SEEN record whose row's
+// follower kinds have each finished a full pass whose safe point is after the
+// record's seen_at (file header, Settled). A record not seen yet is never
+// settled: no pass has carried anything by it. The job calls it when a full pass finishes, in that
 // batch's transaction.
 //
 // It reads the kinds with records outstanding through the table's partial index
 // on records not settled, and each kind's progress rows by name: no read of the
 // row table.
 func settleAccountChangeRecords(ctx context.Context, tx bun.Tx) error {
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT parent_concept FROM account_follow_tasks WHERE done_at IS NULL`)
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT parent_concept FROM account_follow_tasks
+		WHERE done_at IS NULL ORDER BY parent_concept`)
 	if err != nil {
 		return fmt.Errorf("account follow: reading the records to settle: %w", err)
 	}
@@ -340,7 +377,7 @@ func settleAccountChangeRecords(ctx context.Context, tx bun.Tx) error {
 	for _, parent := range parents {
 		kinds := followerKindNames(parent)
 		// The earliest safe point of the last finished full pass among the
-		// follower kinds: a record written before it has been read past by every one.
+		// follower kinds: a record seen before it has been read past by every one.
 		// A kind with no finished full pass (or no progress row) settles nothing.
 		var through *time.Time
 		if len(kinds) > 0 {
@@ -361,10 +398,10 @@ func settleAccountChangeRecords(ctx context.Context, tx bun.Tx) error {
 		var err error
 		if through == nil {
 			_, err = tx.ExecContext(ctx, `UPDATE account_follow_tasks SET done_at = clock_timestamp()
-				WHERE done_at IS NULL AND parent_concept = ?`, parent)
+				WHERE done_at IS NULL AND seen_at IS NOT NULL AND parent_concept = ?`, parent)
 		} else {
 			_, err = tx.ExecContext(ctx, `UPDATE account_follow_tasks SET done_at = clock_timestamp()
-				WHERE done_at IS NULL AND parent_concept = ? AND created_at < ?`, parent, *through)
+				WHERE done_at IS NULL AND parent_concept = ? AND seen_at < ?`, parent, *through)
 		}
 		if err != nil {
 			return fmt.Errorf("account follow: settling the records of %s: %w", parent, err)

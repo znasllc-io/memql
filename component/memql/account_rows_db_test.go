@@ -207,6 +207,34 @@ func TestUnplacedRowIDsAreTheRowsWhoseNewestVersionNamesNoAccount(t *testing.T) 
 	require.Equal(t, []string{rowsRunR4}, ids)
 }
 
+// On a kind with an observation store, a row whose versioned rows name an
+// account and whose newer observation names none is in no account; a row whose
+// observation names one is not, whatever its versioned rows say; and an
+// observation older than the newest versioned row decides nothing. Paging past
+// one of them walks on.
+func TestUnplacedRowIDsReadTheObservation(t *testing.T) {
+	db := openAccountRowsDB(t)
+	ctx := context.Background()
+	nodes, live := `"MemoryNodes"`, "memory_liveness"
+	a := map[string]any{"accountId": rowsAcme}
+	cleared, named, stale, plain := rowsRun+":o1", rowsRun+":o2", rowsRun+":o3", rowsRun+":o4"
+	rowsVersion(t, db, nodes, rowsRun, cleared, 1, a)
+	rowsVersion(t, db, nodes, rowsRun, cleared, 2, a)
+	rowsVersion(t, db, live, rowsRun, cleared, 3, map[string]any{"state": "done"})
+	rowsVersion(t, db, nodes, rowsRun, named, 1, map[string]any{"state": "running"})
+	rowsVersion(t, db, live, rowsRun, named, 2, a)
+	rowsVersion(t, db, nodes, rowsRun, stale, 5, map[string]any{"accountId": rowsBeta})
+	rowsVersion(t, db, live, rowsRun, stale, 4, map[string]any{"state": "old"})
+	rowsVersion(t, db, nodes, rowsRun, plain, 1, map[string]any{"state": "none"})
+
+	ids, err := UnplacedRowIDs(ctx, db, rowsRun, "", 100)
+	require.NoError(t, err)
+	require.Equal(t, []string{cleared, plain}, ids)
+	ids, err = UnplacedRowIDs(ctx, db, rowsRun, cleared, 1)
+	require.NoError(t, err)
+	require.Equal(t, []string{plain}, ids)
+}
+
 // rowsVersionKey is one version as the reader handed it over.
 type rowsVersionKey struct {
 	id       string
