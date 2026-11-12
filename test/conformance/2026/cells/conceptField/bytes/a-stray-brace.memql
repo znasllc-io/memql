@@ -1,0 +1,8 @@
+/// A file attached to a ticket, whose place writes a brace inside a literal
+/// segment.
+@rowAuthz(owner="ownerUserId")
+concept ticketAttachment {
+  ownerUserId  string
+  title        string
+  blobUrl      string  @bytes(under="attachments/x{ownerUserId}")
+}

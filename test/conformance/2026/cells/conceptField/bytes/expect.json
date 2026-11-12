@@ -122,6 +122,13 @@
       "verdict": "refuse_load",
       "code": "bytes_under",
       "message": "the concept declares no @rowAuthz(owner=...), so a carried field's place may use only `{id}`"
+    },
+    {
+      "file": "a-stray-brace.memql",
+      "verdict": "refuse_load",
+      "code": "bytes_under",
+      "message": "has the segment \"x{ownerUserId}\" in under=\"attachments/x{ownerUserId}\": a placeholder is a whole segment, `{id}` or `{<field>}`",
+      "note": "A brace inside a literal segment is neither a literal nor a placeholder, so it is refused rather than read as one or the other."
     }
   ]
 }

@@ -143,6 +143,7 @@ cells/conceptField/bytes/a-dot-segment.memql
 cells/conceptField/bytes/a-field-placeholder-with-no-owner.memql
 cells/conceptField/bytes/a-field-that-is-not-a-string.memql
 cells/conceptField/bytes/a-leading-slash.memql
+cells/conceptField/bytes/a-stray-brace.memql
 cells/conceptField/bytes/a-trailing-slash.memql
 cells/conceptField/bytes/a-tree-at-the-top-level.memql
 cells/conceptField/bytes/an-empty-place.memql

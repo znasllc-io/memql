@@ -62,12 +62,12 @@ func TestNoKindThatTravelsDeclaresASecretField(t *testing.T) {
 
 func TestBytesAndSecretNameFields(t *testing.T) {
 	wantBytes := []string{
-		"v1:library:file.blobUrl=plain under library/{ownerUserId}",
-		"v1:library:fileVersion.blobUrl=plain under library/{ownerUserId}",
-		"v1:common:attachment.blobUrl=counted under spaces",
-		"v1:platform:site.bundleRef=tree under sites/{id}",
-		"v1:platform:site.candidateRef=tree under sites/{id}",
-		"v1:platform:packageDeployment.snapshotArtifactId=counted under packages/snapshots/{packageId}",
+		"v1:library:file.blobUrl tree=false counted=false under library/{ownerUserId}",
+		"v1:library:fileVersion.blobUrl tree=false counted=false under library/{ownerUserId}",
+		"v1:common:attachment.blobUrl tree=false counted=true under spaces",
+		"v1:platform:site.bundleRef tree=true counted=false under sites/{id}",
+		"v1:platform:site.candidateRef tree=true counted=false under sites/{id}",
+		"v1:platform:packageDeployment.snapshotArtifactId tree=false counted=true under packages/snapshots/{packageId}",
 	}
 	wantSecretNames := []string{
 		"v1:shopify:store.adminTokenRef",
@@ -82,14 +82,9 @@ func TestBytesAndSecretNameFields(t *testing.T) {
 			continue
 		}
 		for _, f := range c.BytesFields() {
-			kind := "plain"
-			switch {
-			case f.Tree:
-				kind = "tree"
-			case f.Counted:
-				kind = "counted"
-			}
-			gotBytes = append(gotBytes, fmt.Sprintf("%s.%s=%s under %s", c.Name, f.Name, kind, f.Under))
+			// Both flags, so a field that is a tree AND counted never reads
+			// like one that is only a tree.
+			gotBytes = append(gotBytes, fmt.Sprintf("%s.%s tree=%t counted=%t under %s", c.Name, f.Name, f.Tree, f.Counted, f.Under))
 		}
 		for _, f := range c.SecretNameFields() {
 			gotNames = append(gotNames, c.Name+"."+f)

@@ -3,6 +3,7 @@ package memoryNodes
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -380,38 +381,56 @@ func sameId(value, segment, expected string) bool {
 
 // placeholderValue is the stored value one placeholder stands for and the
 // concept its id must be of: the row's own concept for `{id}`, a user for the
-// owner field, and for any other field (counted fields only) the concept the
-// stored value itself names, when it names one.
+// owner field, and for any other field the concept the stored value itself
+// names, when it names one.
+//
+// Any other field is a COUNTED field's only. On a carried field the load
+// refuses such a placeholder, and this answers "" (no place) as well, so a
+// BytesField built by hand -- one the load never judged -- cannot widen a
+// carried place to a field the row's writer chooses.
+//
+// The value is returned as stored, never trimmed: a value with surrounding
+// whitespace is not written the same as one without, and usableSegment turns
+// it into no place at all.
 func (f BytesField) placeholderValue(name, rowID string, payload map[string]any) (value, expected string) {
 	switch {
 	case name == "id":
-		value, expected = rowID, f.Concept
-	default:
-		if v, ok := payload[name].(string); ok {
-			value = v
-		}
-		if name == f.OwnerField {
-			expected = userConcept
-		} else if c, _, ok := idSpelling(strings.TrimSpace(value)); ok {
-			expected = c
-		}
+		return rowID, f.Concept
+	case name == f.OwnerField && f.OwnerField != "":
+		value, _ = payload[name].(string)
+		return value, userConcept
+	case !f.Counted:
+		return "", ""
 	}
-	return strings.TrimSpace(value), expected
+	value, _ = payload[name].(string)
+	if c, _, ok := idSpelling(value); ok {
+		expected = c
+	}
+	return value, expected
 }
 
 // spellings is every way a key segment may write the same id as value: the
 // value as stored, and -- when the value is itself one of the two spellings
 // of an id of the expected concept, or bare -- its short id and the short id
 // under the expected concept. It is exactly the set sameId admits.
+//
+// Each derived spelling is added only when it reads back as itself: a short id
+// that looks like a version or a concept (`v2`, `v2:a:b`) is not a bare id to
+// idSpelling, so sameId would refuse it, and Places must not offer it.
 func spellings(value, expected string) []string {
 	out := []string{value}
 	c, short, ok := idSpelling(value)
 	if !ok || (c != "" && c != expected) {
 		return out
 	}
-	out = append(out, short)
+	if bc, bs, bok := idSpelling(short); bok && bc == "" && bs == short {
+		out = append(out, short)
+	}
 	if expected != "" {
-		out = append(out, expected+":"+short)
+		full := expected + ":" + short
+		if fc, fs, fok := idSpelling(full); fok && fc == expected && fs == short {
+			out = append(out, full)
+		}
 	}
 	return out
 }
@@ -420,7 +439,29 @@ func spellings(value, expected string) []string {
 // A value holding a separator or naming a relative step would build a place
 // of another depth, or one that climbs out, so it builds none.
 func usableSegment(v string) bool {
-	return v != "" && v != "." && v != ".." && !strings.ContainsAny(v, "/\\")
+	return v != "" && v == strings.TrimSpace(v) && !relativeOrSeparated(v)
+}
+
+// relativeOrSeparated reports whether a segment is, or percent-decodes to, a
+// relative step or something holding a separator. Today's storage client
+// escapes a name, so an encoded `..` stays literal there; this refuses it
+// anyway, so no reader that decodes once can be walked out of a place.
+func relativeOrSeparated(seg string) bool {
+	for _, v := range []string{seg, percentDecoded(seg)} {
+		if v == "." || v == ".." || strings.ContainsAny(v, "/\\") {
+			return true
+		}
+	}
+	return false
+}
+
+// percentDecoded is seg with its percent escapes decoded once, or seg itself
+// when it holds none that decode.
+func percentDecoded(seg string) string {
+	if d, err := url.PathUnescape(seg); err == nil {
+		return d
+	}
+	return seg
 }
 
 // Places answers the key prefixes the row's own bytes may live under: Under
@@ -429,8 +470,13 @@ func usableSegment(v string) bool {
 // combination, deduplicated and sorted. The blob reader compares these
 // prefixes exactly, so the list is every spelling a real key can have and no
 // other -- the same set Admits accepts. A placeholder with no usable value
-// (missing, empty, not a string, or holding a separator) gives an empty
-// slice: a row that does not say whose bytes these are owns none.
+// (missing, empty, not a string, with surrounding whitespace, or holding a
+// separator) gives an empty slice: a row that does not say whose bytes these
+// are owns none.
+//
+// A `counted` field's places are for SIZING only: a reader checks Counted
+// before it opens anything, because a counted place may be literal and so
+// hold every row's bytes.
 func (f BytesField) Places(rowID string, payload map[string]any) []string {
 	out := []string{}
 	if strings.TrimSpace(f.Under) == "" {
@@ -473,7 +519,12 @@ func (f BytesField) Places(rowID string, payload map[string]any) []string {
 // "/", every literal segment equal, every placeholder segment the same id as
 // the row's value (sameId, with the concept that placeholder expects), and at
 // least one more non-empty segment after the place. A key with a relative
-// segment anywhere is refused, since storage could resolve it outside.
+// segment anywhere -- after either slash, and once percent-decoded -- is
+// refused, since storage could resolve it outside.
+//
+// For a `counted` field an admission is for SIZING only: a reader checks
+// Counted before it opens anything, because a counted place may be literal
+// and so admit every row's bytes.
 func (f BytesField) Admits(rowID string, payload map[string]any, key string) bool {
 	if key == "" || len(f.Places(rowID, payload)) == 0 {
 		return false
@@ -482,7 +533,7 @@ func (f BytesField) Admits(rowID string, payload map[string]any, key string) boo
 	// does: storage may read one as a slash, and only a relative segment can
 	// climb out of the place.
 	for _, s := range strings.Split(strings.ReplaceAll(key, "\\", "/"), "/") {
-		if s == "." || s == ".." {
+		if relativeOrSeparated(s) {
 			return false
 		}
 	}

@@ -630,6 +630,8 @@ func TestBytesUnderIsRequiredAndChecked(t *testing.T) {
 		{"a field that is not a string", owned, `@bytes(counted, under="library/{size}")`, "`{size}` names neither the row's id nor a string field"},
 		{"a nested field", owned, `@bytes(counted, under="library/{details}")`, "`{details}` names neither the row's id nor a string field"},
 		{"the export prefix", owned, `@bytes(under="exports/{id}")`, "`exports`"},
+		{"a brace inside a literal segment", owned, `@bytes(under="library/x{id}")`, "a placeholder is a whole segment"},
+		{"an empty placeholder", owned, `@bytes(under="library/{}")`, "a placeholder is a whole segment"},
 		{"a tree at the top level", owned, `@bytes(tree, under="{id}")`, "a tree"},
 		{"a carried field with no placeholder", owned, `@bytes(under="spaces")`, "has no placeholder"},
 		{"a carried tree with no placeholder", owned, `@bytes(tree, under="sites/all")`, "has no placeholder"},
@@ -704,6 +706,12 @@ func TestBytesFieldPlaces(t *testing.T) {
 		{"an owner that is not a string", libraryFile, "f1", map[string]any{"ownerUserId": 7}, []string{}},
 		{"an owner holding a slash", libraryFile, "f1", map[string]any{"ownerUserId": "u1/../u2"}, []string{}},
 		{"no row id", siteBundle, "", nil, []string{}},
+		{"a short id that reads as a version", siteBundle, "v1:platform:site:v2", nil, []string{"sites/v1:platform:site:v2"}},
+		{"a short id that reads as a concept", siteBundle, "v1:platform:site:v2:a:b", nil, []string{"sites/v1:platform:site:v2:a:b"}},
+		{"a row id with surrounding space", siteBundle, " s1", nil, []string{}},
+		{"an owner with surrounding space", libraryFile, "f1", map[string]any{"ownerUserId": "u1 "}, []string{}},
+		{"a hand-built carried field naming another field", BytesField{Under: "x/{folderId}", Concept: "v1:a:b"}, "r1",
+			map[string]any{"folderId": "v1:platform:package:p1"}, []string{}},
 		{"two placeholders", BytesField{Under: "x/{id}/{ownerUserId}", Concept: "v1:a:b", OwnerField: "ownerUserId"}, "v1:a:b:r1",
 			map[string]any{"ownerUserId": "u1"},
 			[]string{"x/r1/u1", "x/r1/v1:identity:user:u1", "x/v1:a:b:r1/u1", "x/v1:a:b:r1/v1:identity:user:u1"}},
@@ -747,6 +755,12 @@ func TestBytesFieldAdmits(t *testing.T) {
 		{"a key that climbs out", libraryFile, "f1", owned, "library/u1/../u2/x", false},
 		{"a key that climbs out with a backslash", libraryFile, "f1", owned, "library/u1/f1\\..\\..\\u2\\x", false},
 		{"a prefix that only shares characters", libraryFile, "f1", owned, "library/u10/x", false},
+		{"a percent-encoded dot-dot segment", libraryFile, "f1", owned, "library/u1/%2e%2e/u2/x", false},
+		{"a percent-encoded dot segment", libraryFile, "f1", owned, "library/u1/%2E/x", false},
+		{"a percent-encoded slash", libraryFile, "f1", owned, "library/u1/a%2F..%2Fb", false},
+		{"a percent-encoded backslash", libraryFile, "f1", owned, "library/u1/a%5Cb", false},
+		{"an ordinary percent sign", libraryFile, "f1", owned, "library/u1/f1/100%25.pdf", true},
+		{"an owner key spelled with surrounding space", libraryFile, "f1", map[string]any{"ownerUserId": " u1"}, "library/u1/f1/a", false},
 		{"a row with no owner", libraryFile, "f1", map[string]any{}, "library/u1/f1/a", false},
 		{"a tree key", siteBundle, "v1:platform:site:s1", nil, "sites/s1/v3/", true},
 		{"a tree key under the canonical id", siteBundle, "s1", nil, "sites/v1:platform:site:s1/v3/index.html", true},
@@ -785,9 +799,12 @@ func TestBytesFieldPlacesAndAdmitsAgree(t *testing.T) {
 		{siteBundle, "v1:platform:package:s1", nil},
 		{snapshot, "d1", map[string]any{"packageId": "v1:platform:package:p1"}},
 		{snapshot, "d1", map[string]any{"packageId": "p1"}},
+		{siteBundle, "v1:platform:site:v2", nil},
+		{siteBundle, "v1:platform:site:v2:a:b", nil},
+		{snapshot, "d1", map[string]any{"packageId": "v1:platform:package:v2"}},
 	}
 	candidates := []string{}
-	for _, short := range []string{"u1", "s1", "p1", "u2"} {
+	for _, short := range []string{"u1", "s1", "p1", "u2", "v2", "v2:a:b"} {
 		candidates = append(candidates, short)
 		for _, concept := range []string{"v1:identity:user", "v1:agents:agent", "v1:platform:site", "v1:platform:package", "v1:library:file"} {
 			candidates = append(candidates, concept+":"+short, "x:"+concept+":"+short)
