@@ -585,6 +585,10 @@ func (p *Provider) storeSettings(ctx context.Context, args map[string]any, _ int
 	if err != nil {
 		return nil, err
 	}
+	_, _, _, publishErr := p.publishAdmission(ctx, trimmed(args["siteId"]), storeID)
+	publishAllowed := publishErr == nil
+	_, exportErr := p.exportAdmission(ctx, args)
+	exportAllowed := exportErr == nil
 	choices := make([]map[string]any, 0, len(templates))
 	for _, t := range templates {
 		choices = append(choices, map[string]any{"id": t.id, "name": t.name})
@@ -600,6 +604,7 @@ func (p *Provider) storeSettings(ctx context.Context, args map[string]any, _ int
 		"linkLifetimeDays":   s.LinkLifetimeDays,
 		"acceptanceText":     s.AcceptanceText,
 		"senderIdentityId":   s.SenderIdentityID,
+		"sender":             p.senderView(ctx, s),
 		"termsTemplateId":    s.TermsTemplateID,
 		"approvedTemplateId": s.ApprovedTemplateID,
 		"rejectedTemplateId": s.RejectedTemplateID,
@@ -615,9 +620,16 @@ func (p *Provider) storeSettings(ctx context.Context, args map[string]any, _ int
 			"setUp": !s.Exists && isClusterOperator(ctx),
 			// And its sender is chosen by them alone.
 			"setSender": isClusterOperator(ctx),
+			// THE BUILTINS' OWN CHECKS, called: whatever they would refuse, this
+			// answers false.
+			"publish": publishAllowed,
+			"export":  exportAllowed,
 		},
 	})
 }
+
+// NotSetUpSenderSentence is the sender of a store that is not set up.
+const NotSetUpSenderSentence = "The store is not set up, so it has no sender."
 
 // notSetUpSettings is wholesaleStoreSettings' reply for a store that is not set
 // up: exists false, every setting its default, each document null, the routes
@@ -640,6 +652,7 @@ func notSetUpSettings(ctx context.Context) ([]memorynodes.MemoryNode, error) {
 		"linkLifetimeDays":   s.LinkLifetimeDays,
 		"acceptanceText":     s.AcceptanceText,
 		"senderIdentityId":   "",
+		"sender":             map[string]any{"ready": false, "fromName": "", "address": "", "reason": NotSetUpSenderSentence},
 		"termsTemplateId":    "",
 		"approvedTemplateId": "",
 		"rejectedTemplateId": "",
@@ -647,7 +660,10 @@ func notSetUpSettings(ctx context.Context) ([]memorynodes.MemoryNode, error) {
 		"templates":          []map[string]any{},
 		"documents":          documents,
 		"adapters":           AdapterNames(),
-		"may":                map[string]any{"update": false, "setUp": isClusterOperator(ctx), "setSender": false},
+		// publish and export: both builtins refuse a store that is not set up
+		// (siteForStore), so neither is open here.
+		"may": map[string]any{"update": false, "setUp": isClusterOperator(ctx), "setSender": false,
+			"publish": false, "export": false},
 	})
 }
 

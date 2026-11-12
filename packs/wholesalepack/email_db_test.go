@@ -516,3 +516,53 @@ func TestNothingIsMailedOnUpgradeForAnAccessGrantedBeforeEmails(t *testing.T) {
 		t.Fatalf("a log line carries the applicant's address:\n%s", lines)
 	}
 }
+
+// THE SETTINGS ANSWER THE SENDER AS THE EMAILS GO OUT AS, through the real row
+// lane, and MAY PUBLISH AND MAY EXPORT AGREE WITH THE BUILTINS for a person of
+// the store holding the part, one of its people who does not, and a cluster
+// operator.
+func TestTheSettingsAnswerTheSenderAndWhatTheCallerMayPublishAndExport(t *testing.T) {
+	eng, s := newEmailStore(t, "mail-may", false)
+	store := `siteId: ` + quote(s.site) + `, storeId: ` + quote(s.store)
+	settings := `builtin wholesaleStoreSettings(` + store + `)`
+	got := answerOf(t, eng, signedIn(s.staff), settings)
+	sender, _ := got["sender"].(map[string]any)
+	if sender["ready"] != true || sender["fromName"] != "Kestrel Trade" || sender["address"] != "trade@example.com" || sender["reason"] != "" {
+		t.Fatalf("the chosen sender reads %v", sender)
+	}
+
+	without := "user-nopart-" + s.site
+	group := "group-nopart-" + s.site
+	seedGroup(t, eng, group, "custom", s.account)
+	seedPersonIn(t, eng, without, without, "writer", true, group, s.account, "added")
+	publish := `builtin wholesalePublishDocument(` + store + `, kind: "terms", label: "Terms 2027", body: "Net 45.")`
+	export := `builtin wholesaleExportStore(` + store + `)`
+	for who, ctx := range map[string]context.Context{
+		"a person holding the part": signedIn(s.staff), "a person without it": signedIn(without),
+		"a cluster operator": asOperator("operator-" + s.site),
+	} {
+		_, publishErr := eng.Execute(ctx, publish)
+		_, exportErr := eng.Execute(ctx, export)
+		result, err := eng.Execute(ctx, settings)
+		if err != nil {
+			// The settings are refused: so must both acts be.
+			if publishErr == nil || exportErr == nil {
+				t.Fatalf("%s reads no settings (%v) yet publish answered %v and export %v", who, err, publishErr, exportErr)
+			}
+			continue
+		}
+		rows := memql.MaterializeRows(result)
+		may, _ := rows[0]["may"].(map[string]any)
+		if may["publish"] != (publishErr == nil) || may["export"] != (exportErr == nil) {
+			t.Fatalf("%s: may %v, but publish answered %v and export %v", who, may, publishErr, exportErr)
+		}
+	}
+
+	// NO SENDER CHOSEN: what a send with none chosen goes out as, in the lane's words.
+	wsExec(t, eng, auth.ContextWithInternalOrigin(asOperator("operator-"+s.site)),
+		`builtin wholesaleUpdateSettings(`+store+`, senderIdentityId: "")`)
+	sender, _ = answerOf(t, eng, signedIn(s.staff), settings)["sender"].(map[string]any)
+	if sender["ready"] != false || sender["address"] != "" || strings.TrimSpace(asString(sender["reason"])) == "" {
+		t.Fatalf("no sender chosen reads %v", sender)
+	}
+}

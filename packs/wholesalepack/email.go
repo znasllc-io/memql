@@ -145,6 +145,7 @@ const (
 	maxLaneRequestIDLength  = 160
 	laneSendConstruct       = "campaignSendRowMessage"
 	laneStatusConstruct     = "campaignRowMessageStatus"
+	laneSenderConstruct     = "campaignRowSender"
 	maxLaneStatusRequestIDs = 100
 )
 
@@ -180,6 +181,9 @@ func LaneRequestID(kind, applicationID string, attempt int) string {
 type rowLane interface {
 	SendRowMessage(ctx context.Context, args map[string]any) (map[string]any, error)
 	RowMessageStatus(ctx context.Context, accountID string, requestIDs []string) ([]map[string]any, error)
+	// RowSender is the sender the lane's messages for the organization go out
+	// as, resolved as a send resolves it: {ready, fromName, address, reason}.
+	RowSender(ctx context.Context, accountID, senderIdentityID string) (map[string]any, error)
 }
 
 // engineLane is the production lane: the two campaigns builtins, each through
@@ -192,6 +196,43 @@ func (l *engineLane) SendRowMessage(ctx context.Context, args map[string]any) (m
 
 func (l *engineLane) RowMessageStatus(ctx context.Context, accountID string, requestIDs []string) ([]map[string]any, error) {
 	return l.caller.CallRows(ctx, laneStatusConstruct, map[string]any{"accountId": accountID, "requestIds": requestIDs})
+}
+
+func (l *engineLane) RowSender(ctx context.Context, accountID, senderIdentityID string) (map[string]any, error) {
+	rows, err := l.caller.CallRows(ctx, laneSenderConstruct, map[string]any{"accountId": accountID, "senderIdentityId": senderIdentityID})
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) != 1 {
+		return nil, fmt.Errorf("wholesale: %s answered %d rows", laneSenderConstruct, len(rows))
+	}
+	return rows[0], nil
+}
+
+// senderView is the store's sender as a person reads it: the name and address
+// its emails go out as, resolved by the lane as a send resolves it (the chosen
+// identity, or what a send with none chosen goes out as), or why there is none,
+// in a sentence. The address is the store's own sender's, never an applicant's.
+func (p *Provider) senderView(ctx context.Context, s Settings) map[string]any {
+	unread := map[string]any{"ready": false, "fromName": "", "address": "", "reason": SenderUnreadableSentence}
+	account := bareID(s.AccountID)
+	if account == "" || p.lane == nil {
+		return unread
+	}
+	got, err := p.lane.RowSender(ctx, account, s.SenderIdentityID)
+	if err != nil {
+		return unread
+	}
+	ready, _ := got["ready"].(bool)
+	view := map[string]any{"ready": ready, "fromName": asString(got["fromName"]), "address": trimmed(got["address"]),
+		"reason": asString(got["reason"])}
+	if !ready {
+		view["fromName"], view["address"] = "", ""
+		if strings.TrimSpace(asString(got["reason"])) == "" {
+			view["reason"] = SenderUnreadableSentence
+		}
+	}
+	return view
 }
 
 // sendTermsEmail answers wholesaleSendTermsEmail.
@@ -1007,6 +1048,10 @@ func (p *Provider) emailTemplates(ctx context.Context, account string) ([]emailT
 	}
 	return out, nil
 }
+
+// SenderUnreadableSentence is the store's sender when the email service could
+// not be asked which one its emails go out as.
+const SenderUnreadableSentence = "The email service could not say just now which sender this store's emails go out as."
 
 // OnlyOperatorsChooseTheSenderSentence refuses a sender named by anybody but a
 // cluster operator.

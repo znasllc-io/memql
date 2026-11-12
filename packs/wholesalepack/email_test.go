@@ -44,6 +44,11 @@ type fakeLane struct {
 	during   func()
 	statuses []map[string]any // the status read's answer
 	asked    []string         // the account each status read named
+	// senders answers the sender read by the sender id asked for; senderErr,
+	// when set, fails it. sendersAsked is each read's account and sender.
+	senders      map[string]map[string]any
+	senderErr    error
+	sendersAsked []string
 }
 
 func (l *fakeLane) SendRowMessage(ctx context.Context, args map[string]any) (map[string]any, error) {
@@ -98,6 +103,17 @@ func (l *fakeLane) RowMessageStatus(_ context.Context, accountID string, request
 		}
 	}
 	return out, nil
+}
+
+func (l *fakeLane) RowSender(_ context.Context, accountID, senderID string) (map[string]any, error) {
+	l.sendersAsked = append(l.sendersAsked, accountID+"/"+senderID)
+	if l.senderErr != nil {
+		return nil, l.senderErr
+	}
+	if answer, ok := l.senders[senderID]; ok {
+		return answer, nil
+	}
+	return map[string]any{"ready": false, "fromName": "", "address": "", "reason": "choose a sending identity belonging to this organization"}, nil
 }
 
 // testHold and testUncertain stand in for the row lane's own hold and uncertain
@@ -1116,6 +1132,55 @@ func TestTheSenderIsASenderOfTheStoresOrganization(t *testing.T) {
 	}
 	if _, err := p.updateSettings(operatorCtx("op-1"), map[string]any{"siteId": linkSite, "storeId": linkStore, "senderIdentityId": "sender-1"}, 0); err != nil {
 		t.Fatalf("an operator naming the organization's sender: %v", err)
+	}
+}
+
+// THE SENDER AS A PERSON READS IT: the settings answer, beside the id, the name
+// and address the emails go out as, resolved by the lane as a send resolves it;
+// with none chosen, what the lane resolves for the organization; and when the
+// lane cannot say, a sentence instead of a blank.
+func TestTheSettingsAnswerTheSenderAsTheEmailsGoOutAs(t *testing.T) {
+	w := newEmailWorld()
+	p := w.provider()
+	sender := func() map[string]any {
+		t.Helper()
+		nodes, err := p.storeSettings(staffCtx(emailStaff), map[string]any{"siteId": linkSite, "storeId": linkStore}, 0)
+		got, _ := reply(t, nodes, err)["sender"].(map[string]any)
+		return got
+	}
+	w.settings["senderIdentityId"] = "sender-1"
+	w.lane.senders = map[string]map[string]any{"sender-1": {"ready": true, "fromName": "Kestrel Trade", "address": "trade@example.com", "reason": ""}}
+	if got := sender(); got["ready"] != true || got["fromName"] != "Kestrel Trade" || got["address"] != "trade@example.com" || got["reason"] != "" {
+		t.Fatalf("the chosen sender reads %v", got)
+	}
+	if w.lane.sendersAsked[0] != "acct-links/sender-1" {
+		t.Fatalf("the lane was asked %v, want the store's organization and its sender", w.lane.sendersAsked)
+	}
+	w.settings["senderIdentityId"] = ""
+	if got := sender(); got["ready"] != false || got["address"] != "" || got["reason"] != "choose a sending identity belonging to this organization" {
+		t.Fatalf("no sender chosen reads %v", got)
+	}
+	w.lane.senderErr = errors.New("campaigns.rowSender: the read timed out")
+	if got := sender(); got["ready"] != false || got["reason"] != SenderUnreadableSentence || strings.Contains(fmt.Sprint(got), "timed out") {
+		t.Fatalf("a sender the lane cannot resolve reads %v", got)
+	}
+}
+
+// MAY PUBLISH AND MAY EXPORT ARE THE BUILTINS' OWN CHECKS: each agrees with
+// whether the builtin that does it then refuses.
+func TestMayPublishAndMayExportAgreeWithTheBuiltins(t *testing.T) {
+	w := newEmailWorld()
+	p := w.provider()
+	store := map[string]any{"siteId": linkSite, "storeId": linkStore}
+	for who, ctx := range map[string]context.Context{"a member": staffCtx(emailStaff), "an operator": operatorCtx("op-1")} {
+		nodes, err := p.storeSettings(ctx, store, 0)
+		may, _ := reply(t, nodes, err)["may"].(map[string]any)
+		_, publishErr := p.publishDocument(ctx, map[string]any{"siteId": linkSite, "storeId": linkStore, "kind": DocumentTerms,
+			"label": "Terms 2027", "body": "Net 45."}, 0)
+		_, exportErr := p.exportStore(ctx, store, 0)
+		if may["publish"] != (publishErr == nil) || may["export"] != (exportErr == nil) {
+			t.Fatalf("%s: may %v, publish %v, export %v", who, may, publishErr, exportErr)
+		}
 	}
 }
 

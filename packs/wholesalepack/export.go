@@ -33,8 +33,16 @@ const exportFormat = "memql.wholesale.export/v1"
 // tokenHashField is the field a credential's digest is kept in.
 const tokenHashField = "tokenHash"
 
-func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+// exportAdmission is wholesaleExportStore's own check before it reads
+// anything: the site must serve the store (admitStore). wholesaleStoreSettings'
+// may.export is this check, called.
+func (p *Provider) exportAdmission(ctx context.Context, args map[string]any) (string, error) {
 	storeID, _, err := p.admitStore(ctx, args)
+	return storeID, err
+}
+
+func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	storeID, err := p.exportAdmission(ctx, args)
 	if err != nil {
 		return nil, err
 	}
