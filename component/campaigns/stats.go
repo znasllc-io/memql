@@ -82,6 +82,54 @@ func IsSuppressedSkipReason(reason string) bool {
 // list and an operator acts on them differently.
 const unsubscribedSkipReason = "unsubscribed"
 
+// skipSentences is each skip reason above as a person reads it: why nothing was
+// sent, in a sentence, for a screen that must never show the code. The two
+// families that mean the same thing share one sentence (hard_bounce and
+// bounced, complaint and complained).
+var skipSentences = map[string]string{
+	"hard_bounce":          skipSentenceBounced,
+	"bounced":              skipSentenceBounced,
+	"complaint":            skipSentenceComplained,
+	"complained":           skipSentenceComplained,
+	unsubscribedSkipReason: "The recipient unsubscribed from this sender's email.",
+	"manual":               "This address is on the installation's do-not-send list.",
+}
+
+const (
+	skipSentenceBounced    = "An earlier email to this address bounced, so the email service no longer sends to it."
+	skipSentenceComplained = "The recipient marked an earlier email as spam, so the email service no longer sends to them."
+	// skipSentenceOther is a skip the lane has no words of its own for: a reason
+	// it does not know, a recipient not yet confirmed (pending), or none at all.
+	skipSentenceOther = "The email service skipped this send."
+)
+
+// SkipSentence is a skipped delivery's skipReason as a person reads it: the
+// lane's own sentence for each reason it writes (skipSentences), and for any
+// other, or none, a sentence that says only that the send was skipped. It never
+// answers the code.
+//
+// Exported so a pack that records what the row lane answered shows its people
+// the lane's words, written here where the codes are, and never words of its
+// own for them.
+func SkipSentence(reason string) string {
+	if sentence, known := skipSentences[reason]; known {
+		return sentence
+	}
+	return skipSentenceOther
+}
+
+// rowSkipSentence is SkipSentence for a ROW LANE send. The row lane writes two
+// kinds of skip reason (send_row.go): a suppression's code, and a withdrawal's
+// reason, which is the row's own sentence about itself (RowWithdrawn.Reason)
+// and is answered as it was given. So a reason that is not one of the lane's
+// codes is the withdrawal's sentence; none at all is the plain sentence.
+func rowSkipSentence(reason string) string {
+	if _, known := skipSentences[reason]; known || strings.TrimSpace(reason) == "" {
+		return SkipSentence(reason)
+	}
+	return reason
+}
+
 // handleStats computes the breakdown.
 //
 // AUTHORIZATION IS THE FIRST READ, as everywhere else in this package:

@@ -39,6 +39,13 @@ import (
 // operator's block of the address stops it; an unsubscribe does not
 // (BlockingSuppression).
 //
+// # A skip says why in a sentence
+//
+// A row send that is skipped answers its reason as the ledger keeps it -- the
+// suppression's code, or the row's own withdrawal sentence -- and, beside it,
+// skipSentence: the words a person reads (rowSkipSentence, stats.go). The
+// status read answers both too. A screen shows the sentence, never the code.
+//
 // # The ledger and the replay
 //
 // The ledger row is the order route's shape plus rowConcept, rowId and rowKind,
@@ -62,9 +69,10 @@ type RowMessage struct {
 // a withdrawal.
 //
 // Reason is shown: in the send's reply, on the ledger row and in the status
-// read. It is a sentence about the row's state ("the application was
-// withdrawn") and must never carry an address or anything of the message's
-// fields.
+// read, where it is also the skip's sentence for a person, word for word
+// (rowSkipSentence). So it is a whole sentence about the row's state ("The
+// application was withdrawn.") and must never carry an address or anything of
+// the message's fields.
 type RowWithdrawn struct{ Reason string }
 
 func (w RowWithdrawn) Error() string {
@@ -258,7 +266,8 @@ func (w *Worker) sendRow(ctx context.Context, args map[string]any, receipt *sing
 		if err := recordOutcome(Delivery{Status: "skipped", SkipReason: withdrawn.Reason}); err != nil {
 			w.logger.Warn("campaigns.sendRowMessage: a withdrawn message could not be ledgered", "recipient", recipient.ID, "error", err)
 		}
-		return resultNode("campaignRecipientSend", map[string]any{"sent": false, "skipped": true, "reason": withdrawn.Reason, "recipientId": recipient.ID, "emailRuleId": ""})
+		return resultNode("campaignRecipientSend", map[string]any{"sent": false, "skipped": true, "reason": withdrawn.Reason,
+			"skipSentence": rowSkipSentence(withdrawn.Reason), "recipientId": recipient.ID, "emailRuleId": ""})
 	}
 	if err != nil {
 		// The resolver's error is a pack's words, and they may name the row and its
@@ -291,7 +300,8 @@ func (w *Worker) sendRow(ctx context.Context, args map[string]any, receipt *sing
 		if err := recordOutcome(Delivery{Status: "skipped", SkipReason: sup.Reason}); err != nil {
 			w.logger.Warn("campaigns.sendRowMessage: a suppressed message could not be ledgered", "recipient", recipient.ID, "error", err)
 		}
-		return resultNode("campaignRecipientSend", map[string]any{"sent": false, "skipped": true, "reason": sup.Reason, "recipientId": recipient.ID, "emailRuleId": ""})
+		return resultNode("campaignRecipientSend", map[string]any{"sent": false, "skipped": true, "reason": sup.Reason,
+			"skipSentence": rowSkipSentence(sup.Reason), "recipientId": recipient.ID, "emailRuleId": ""})
 	}
 
 	accountName, err := w.emailOrganizationName(ctx, account)
@@ -341,15 +351,21 @@ func resolverFailure(err error) string {
 // handleRowSender answers campaignRowSender: the sender a row send for the
 // organization would go out as, resolved exactly as sendRow resolves it
 // (resolveSendIdentityFor, with no installation fallback) -- {ready, fromName,
-// address, reason}. Ready answers the identity's name and address; otherwise
-// fromName and address are empty and reason is a sentence for a person: the
-// hold's own sentence, or one of rowSenderRefusals' words, never the campaign
-// worker's refusal text. It sends nothing and checks no transport.
+// address, reason, readFailed, noneChosen}. Ready answers the identity's name
+// and address; otherwise fromName and address are empty and reason is a
+// sentence for a person: the hold's own sentence, or one of rowSenderRefusals'
+// words, never the campaign worker's refusal text. It sends nothing and checks
+// no transport.
+//
+// WHAT A CALLER DECIDES ON IS A FIELD, NEVER THE SENTENCE: readFailed says the
+// sender could not be read just now (nothing is known of it, and the same read
+// made again may answer), and noneChosen that the organization has no sender
+// because none is chosen. The sentences may be reworded; the fields may not.
 //
 // THE SEND'S OWN AUTHORITY: the caller must hold what a row send requires of
 // it (requireSendAuthority, update data in the organization). A caller without
-// it is answered exactly as for an organization that does not exist, so the
-// answer says nothing of the organization's senders.
+// it is answered exactly as for an organization that does not exist -- both
+// fields false -- so the answer says nothing of the organization's senders.
 func (w *Worker) handleRowSender(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if !auth.OriginFromContext(ctx).IsInternal() {
 		return nil, errors.New("campaigns.rowSender: read by a trusted job, never by a client")
@@ -358,26 +374,35 @@ func (w *Worker) handleRowSender(ctx context.Context, args map[string]any, _ int
 	if account == "" {
 		return nil, errors.New("campaigns.rowSender: accountId is required: a sender is one organization's")
 	}
-	refused := func(reason string) ([]memorynodes.MemoryNode, error) {
-		return resultNode("campaignRowSender", map[string]any{"accountId": account, "ready": false, "fromName": "", "address": "", "reason": reason})
+	// why is the one thing a refusal may also say in a field: nothing, that the
+	// read failed, or that none is chosen.
+	const (
+		whyNothing = iota
+		whyReadFailed
+		whyNoneChosen
+	)
+	refused := func(reason string, why int) ([]memorynodes.MemoryNode, error) {
+		return resultNode("campaignRowSender", map[string]any{"accountId": account, "ready": false, "fromName": "", "address": "",
+			"reason": reason, "readFailed": why == whyReadFailed, "noneChosen": why == whyNoneChosen})
 	}
 	if err := w.requireSendAuthority(ctx, account); err != nil {
-		return refused(rowSenderUnreadable)
+		return refused(rowSenderUnreadable, whyNothing)
 	}
 	campaign := Campaign{AccountID: account, SenderIdentityID: memql.BareShortId(strings.TrimSpace(argString(args, "senderIdentityId")))}
 	identity, refusal := w.resolveSendIdentityFor(memql.ContextWithFreshRead(w.systemActorContext(ctx)), campaign, false)
 	switch {
 	case !refusal.refused():
 		return resultNode("campaignRowSender", map[string]any{"accountId": account, "ready": true,
-			"fromName": identity.SendAs.FromName, "address": identity.SendAs.Address, "reason": ""})
+			"fromName": identity.SendAs.FromName, "address": identity.SendAs.Address, "reason": "",
+			"readFailed": false, "noneChosen": false})
 	case refusal.Held != "":
-		return refused(refusal.Held)
+		return refused(refusal.Held, whyNothing)
 	case !refusal.Terminal:
-		return refused(rowSenderReadFailed)
+		return refused(rowSenderReadFailed, whyReadFailed)
 	case campaign.SenderIdentityID == "":
-		return refused(rowSenderNoneChosen)
+		return refused(rowSenderNoneChosen, whyNoneChosen)
 	}
-	return refused(rowSenderOtherOrganization)
+	return refused(rowSenderOtherOrganization, whyNothing)
 }
 
 // The row sender's sentences for a person, in place of the campaign worker's
@@ -390,10 +415,12 @@ const (
 )
 
 // handleRowMessageStatus answers campaignRowMessageStatus: one row per request
-// id, {requestId, status, skipReason, providerStatus, sentAt}, read under the
-// system actor for the one organization the call names, and nothing else of the
-// delivery. Another organization's request id answers nothing, as an unknown one. A request id with no message
-// recorded under it answers an empty status.
+// id, {requestId, status, skipReason, skipSentence, providerStatus, sentAt},
+// read under the system actor for the one organization the call names, and
+// nothing else of the delivery. skipSentence is a skipped message's reason as a
+// person reads it (rowSkipSentence), empty for a message that was not skipped.
+// Another organization's request id answers nothing, as an unknown one. A
+// request id with no message recorded under it answers an empty status.
 func (w *Worker) handleRowMessageStatus(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if !auth.OriginFromContext(ctx).IsInternal() {
 		return nil, errors.New("campaigns.rowMessageStatus: read by a trusted job, never by a client")
@@ -435,9 +462,17 @@ func (w *Worker) handleRowMessageStatus(ctx context.Context, args map[string]any
 	answers := make([]map[string]any, 0, len(ids))
 	for _, id := range ids {
 		row := latest[id]
+		// WHY IT WAS SKIPPED, IN A SENTENCE, and nothing for a message that was not
+		// skipped. The query answers row lane deliveries only (rowConcept set), so a
+		// reason that is not one of the lane's codes is the row's own withdrawal
+		// sentence.
+		sentence := ""
+		if str(row, "status") == "skipped" {
+			sentence = rowSkipSentence(str(row, "skipReason"))
+		}
 		answers = append(answers, map[string]any{
 			"id": id, "requestId": id, "status": str(row, "status"), "skipReason": str(row, "skipReason"),
-			"providerStatus": str(row, "providerStatus"), "sentAt": str(row, "sentAt"),
+			"skipSentence": sentence, "providerStatus": str(row, "providerStatus"), "sentAt": str(row, "sentAt"),
 		})
 	}
 	return resultRows("campaignRowMessageStatus", answers)

@@ -113,9 +113,22 @@ func TestAHardBounceSkipsARowMessage(t *testing.T) {
 			}
 			if got := l.send(t, "blocked"); got["skipped"] != true || got["reason"] != tc.reason || l.sender.count() != 0 {
 				t.Fatalf("result %v, %d sent", got, l.sender.count())
+			} else if got["skipSentence"] != SkipSentence(tc.reason) || got["skipSentence"] == tc.reason {
+				t.Fatalf("the skip answered the sentence %q, want the lane's words for %s", got["skipSentence"], tc.reason)
 			}
 			if row := l.ledger(t, "blocked"); str(row, "status") != "skipped" || str(row, "skipReason") != tc.reason {
 				t.Fatalf("the ledger row: %v", row)
+			}
+			// THE STATUS READ SAYS THE SAME, from the ledger: the code, and beside it
+			// the sentence a person reads.
+			nodes, err := l.worker.handleRowMessageStatus(auth.ContextWithInternalOrigin(l.owner),
+				map[string]any{"requestIds": []any{l.suffix + "-blocked"}, "accountId": l.org}, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status := decodeResult(t, nodes); status["status"] != "skipped" || status["skipReason"] != tc.reason ||
+				status["skipSentence"] != SkipSentence(tc.reason) {
+				t.Fatalf("the status read answered %v", status)
 			}
 		})
 	}
@@ -196,10 +209,14 @@ func TestRowMessageStatusAnswersEachRequestId(t *testing.T) {
 	if len(nodes) != 3 {
 		t.Fatalf("%d answers for 3 request ids", len(nodes))
 	}
-	want := []struct{ status, reason string }{{"sent", ""}, {"skipped", "the application was withdrawn"}, {"", ""}}
+	// A WITHDRAWAL'S SENTENCE IS THE ROW'S OWN, answered as it was given; a
+	// message that was not skipped has none.
+	want := []struct{ status, reason, sentence string }{{"sent", "", ""},
+		{"skipped", "the application was withdrawn", "the application was withdrawn"}, {"", "", ""}}
 	for i, node := range nodes {
 		got := decodeResult(t, nodes[i:i+1])
-		if got["requestId"] != ids[i] || got["status"] != want[i].status || got["skipReason"] != want[i].reason {
+		if got["requestId"] != ids[i] || got["status"] != want[i].status || got["skipReason"] != want[i].reason ||
+			got["skipSentence"] != want[i].sentence {
 			t.Fatalf("answer %d: %v", i, got)
 		}
 		if i == 0 && str(got, "sentAt") == "" {
@@ -207,7 +224,7 @@ func TestRowMessageStatusAnswersEachRequestId(t *testing.T) {
 		}
 		for key := range got {
 			switch key {
-			case "id", "requestId", "status", "skipReason", "providerStatus", "sentAt":
+			case "id", "requestId", "status", "skipReason", "skipSentence", "providerStatus", "sentAt":
 			default:
 				t.Fatalf("the status reply carries %q: %v", key, got)
 			}

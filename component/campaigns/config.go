@@ -281,6 +281,13 @@ func (c Config) CanRotateUnsubscribeSecret() bool {
 // the reader builds each one from a prefix plus a suffix, so the full
 // name exists nowhere in the source otherwise -- and an operator
 // grepping for the variable they were told to set would find nothing.
+// DefaultSendTimeout is Config.SendTimeout's default: how long one message's
+// hand-over to the provider may take before the lane gives up on its answer.
+// Exported for a caller that keeps a clock of its own beside the lane's -- a
+// pack that treats an attempt as still being handed over for a while -- so its
+// window is stated against the bound it sits above.
+const DefaultSendTimeout = defaultSendTimeoutSeconds * time.Second
+
 func LoadConfig() Config {
 	reader := env.NewEnvReader("MEMQL_CAMPAIGNS")
 	cfg := Config{

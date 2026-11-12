@@ -515,3 +515,201 @@ func TestTheRowSenderIsResolvedAsARowSendResolvesIt(t *testing.T) {
 		t.Fatalf("without authority the sender reads %v; for an organization that does not exist %v", without, missing)
 	}
 }
+
+// EVERY SKIP REASON THE LANE WRITES HAS A SENTENCE A PERSON READS, written
+// here where the codes are: the suppression list's reasons (hard_bounce,
+// complaint, manual, unsubscribed) and the recipient row's statuses (bounced,
+// complained, unsubscribed, pending). A code with no words of its own, and
+// anything the lane does not know, reads as a plain sentence -- never as the
+// code.
+func TestEverySkipReasonTheLaneWritesHasASentence(t *testing.T) {
+	for reason, want := range map[string]string{
+		"hard_bounce":  "An earlier email to this address bounced, so the email service no longer sends to it.",
+		"bounced":      "An earlier email to this address bounced, so the email service no longer sends to it.",
+		"complaint":    "The recipient marked an earlier email as spam, so the email service no longer sends to them.",
+		"complained":   "The recipient marked an earlier email as spam, so the email service no longer sends to them.",
+		"unsubscribed": "The recipient unsubscribed from this sender's email.",
+		"manual":       "This address is on the installation's do-not-send list.",
+		"pending":      "The email service skipped this send.",
+		"soft_bounce":  "The email service skipped this send.",
+		"":             "The email service skipped this send.",
+	} {
+		if got := SkipSentence(reason); got != want {
+			t.Errorf("SkipSentence(%q) = %q, want %q", reason, got, want)
+		}
+	}
+	// THE LANE'S OWN LISTS OF ITS CODES: each has words of its own, and every
+	// reason that blocks a row send is among them.
+	codes := append(append([]string{}, suppressedSkipReasons...), unsubscribedSkipReason)
+	for _, reason := range []string{"hard_bounce", "complaint", "manual", "unsubscribed"} {
+		if blocksATransactionalMessage(reason) {
+			codes = append(codes, reason)
+		}
+		if status := recipientStatusFor(reason); status != "" {
+			codes = append(codes, status)
+		}
+	}
+	for _, code := range codes {
+		got := SkipSentence(code)
+		if got == SkipSentence("") || got == code {
+			t.Errorf("the skip reason %q has no sentence of its own: %q", code, got)
+		}
+		if !strings.HasSuffix(got, ".") || got[:1] != strings.ToUpper(got[:1]) || strings.Contains(got, "_") {
+			t.Errorf("the sentence for %q is %q, want a whole sentence a person reads", code, got)
+		}
+	}
+}
+
+// A ROW SEND THAT IS SKIPPED SAYS WHY IN A SENTENCE, beside its reason: the
+// row's own withdrawal sentence, or the lane's words for the suppression
+// code. The reason is as it was.
+func TestASkippedRowMessageAnswersASentenceBesideItsReason(t *testing.T) {
+	engine := rowSendEngine()
+	w := rowWorker(t, engine, &recordingSender{})
+	withdrawn := &countingResolver{answer: func(int) (RowMessage, error) {
+		return RowMessage{}, RowWithdrawn{Reason: "The application was withdrawn."}
+	}}
+	registerTestRowAddress(t, testRowConcept, withdrawn.resolve)
+	nodes, err := w.handleSendRowMessage(fromTrustedJob(), rowArgs(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := decodeResult(t, nodes); got["skipped"] != true || got["reason"] != "The application was withdrawn." ||
+		got["skipSentence"] != "The application was withdrawn." {
+		t.Fatalf("a withdrawn row send answered %+v", got)
+	}
+
+	for _, reason := range []string{"hard_bounce", "complaint", "manual"} {
+		engine := rowSendEngine()
+		engine.suppression = map[string]map[string]any{EmailDigest("applicant@example.com"): {"reason": reason}}
+		sender := &recordingSender{}
+		w := rowWorker(t, engine, sender)
+		registerTestRowAddress(t, testRowConcept, answering("applicant@example.com", "acct-1", nil).resolve)
+		nodes, err := w.handleSendRowMessage(fromTrustedJob(), rowArgs(), 0)
+		if err != nil {
+			t.Fatalf("%s: %v", reason, err)
+		}
+		got := decodeResult(t, nodes)
+		if got["skipped"] != true || got["reason"] != reason || got["skipSentence"] != SkipSentence(reason) || sender.count() != 0 {
+			t.Fatalf("a row send to a %s address answered %+v after %d sent", reason, got, sender.count())
+		}
+		if got["skipSentence"] == reason || got["skipSentence"] == SkipSentence("") {
+			t.Fatalf("the %s skip's sentence is %q", reason, got["skipSentence"])
+		}
+	}
+}
+
+// ledgerEngine answers the row lane's status read from rows a test scripts.
+type ledgerEngine struct {
+	*fakeEngine
+	deliveries []map[string]any
+}
+
+func (e *ledgerEngine) Execute(ctx context.Context, q string) (any, error) {
+	if strings.HasPrefix(q, "query deliveriesByRequestIds") {
+		return rowsEnvelope(e.deliveries), nil
+	}
+	return e.fakeEngine.Execute(ctx, q)
+}
+
+// THE STATUS READ ANSWERS A SKIP'S SENTENCE BESIDE ITS REASON: the lane's words
+// for a code, the row's own withdrawal sentence for a row send, a plain
+// sentence when the row says nothing, and nothing for a message that was not
+// skipped. The reason stays the lane's own record.
+func TestRowMessageStatusAnswersASkipsSentenceBesideItsReason(t *testing.T) {
+	row := func(request, status, reason string) map[string]any {
+		return map[string]any{"requestId": request, "status": status, "skipReason": reason, "rowConcept": testRowConcept,
+			"rowId": "application-1", "rowKind": "received", "accountId": "v1:accounts:account:acct-1"}
+	}
+	engine := &ledgerEngine{fakeEngine: rowSendEngine(), deliveries: []map[string]any{
+		row("lane-status-bounce-1", "skipped", "hard_bounce"),
+		row("lane-status-spam-1", "skipped", "complaint"),
+		row("lane-status-block-1", "skipped", "manual"),
+		row("lane-status-withdrawn-1", "skipped", "The application is no longer waiting for terms."),
+		row("lane-status-silent-1", "skipped", ""),
+		row("lane-status-sent-1", "sent", ""),
+	}}
+	w := newTestWorker(t, engine, &recordingSender{})
+	ids := []any{"lane-status-bounce-1", "lane-status-spam-1", "lane-status-block-1", "lane-status-withdrawn-1",
+		"lane-status-silent-1", "lane-status-sent-1", "lane-status-never-1"}
+	nodes, err := w.handleRowMessageStatus(fromTrustedJob(), map[string]any{"requestIds": ids, "accountId": "acct-1"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []struct{ reason, sentence string }{
+		{"hard_bounce", "An earlier email to this address bounced, so the email service no longer sends to it."},
+		{"complaint", "The recipient marked an earlier email as spam, so the email service no longer sends to them."},
+		{"manual", "This address is on the installation's do-not-send list."},
+		{"The application is no longer waiting for terms.", "The application is no longer waiting for terms."},
+		{"", "The email service skipped this send."},
+		{"", ""},
+		{"", ""},
+	}
+	if len(nodes) != len(want) {
+		t.Fatalf("%d answers for %d request ids", len(nodes), len(want))
+	}
+	for i := range nodes {
+		got := decodeResult(t, nodes[i:i+1])
+		if got["requestId"] != ids[i] || got["skipReason"] != want[i].reason || got["skipSentence"] != want[i].sentence {
+			t.Errorf("answer %d: %v, want reason %q and sentence %q", i, got, want[i].reason, want[i].sentence)
+		}
+	}
+}
+
+// THE ROW SENDER SAYS IN FIELDS OF ITS OWN WHAT ITS SENTENCE SAYS, so a caller
+// decides on a field and never on the words: readFailed for a sender that
+// could not be read just now, noneChosen for an organization with none chosen.
+// Every other answer carries neither, and a caller without the send's
+// authority still reads exactly what an organization that does not exist
+// answers.
+func TestTheRowSenderSaysInFieldsWhatItsSentenceSays(t *testing.T) {
+	engine := rowSendEngine()
+	off := senderIdentityRow("si-off", "old@store.example.test", "Old", "disabled")
+	off["accountId"] = "v1:accounts:account:acct-1"
+	other := senderIdentityRow("si-other", "news@other.example.test", "Other", "active")
+	other["accountId"] = "v1:accounts:account:acct-x"
+	engine.senderIdentities["si-off"], engine.senderIdentities["si-other"] = off, other
+	w := rowWorker(t, engine, &recordingSender{})
+	ask := func(ctx context.Context, account, sender string) map[string]any {
+		t.Helper()
+		nodes, err := w.handleRowSender(ctx, map[string]any{"accountId": account, "senderIdentityId": sender}, 0)
+		if err != nil {
+			t.Fatalf("rowSender(%q): %v", sender, err)
+		}
+		return decodeResult(t, nodes)
+	}
+	for sender, want := range map[string][2]bool{
+		"si-store": {false, false}, // ready
+		"":         {false, true},  // none chosen
+		"si-off":   {false, false}, // held: turned off
+		"si-none":  {false, false}, // held: gone
+		"si-other": {false, false}, // another organization's
+	} {
+		got := ask(fromTrustedJob(), "acct-1", sender)
+		if got["readFailed"] != want[0] || got["noneChosen"] != want[1] {
+			t.Errorf("sender %q answered %v, want readFailed %v and noneChosen %v", sender, got, want[0], want[1])
+		}
+	}
+	engine.identityReadErr = errors.New("the database is slow")
+	if got := ask(fromTrustedJob(), "acct-1", "si-store"); got["ready"] != false || got["readFailed"] != true || got["noneChosen"] != false ||
+		got["reason"] != "The sender could not be read just now." {
+		t.Fatalf("a sender that could not be read answered %v", got)
+	}
+	engine.identityReadErr = nil
+	unauthorized := auth.ContextWithInternalOrigin(context.Background())
+	without, missing := ask(unauthorized, "acct-1", ""), ask(unauthorized, "acct-none", "")
+	delete(without, "accountId")
+	delete(missing, "accountId")
+	if fmt.Sprint(without) != fmt.Sprint(missing) || without["readFailed"] != false || without["noneChosen"] != false {
+		t.Fatalf("without authority the sender reads %v; for an organization that does not exist %v", without, missing)
+	}
+}
+
+// THE DEFAULT SEND TIMEOUT A PACK MAY NAME is the one the lane's configuration
+// starts from.
+func TestTheDefaultSendTimeoutIsTheConfigurationsDefault(t *testing.T) {
+	t.Setenv("MEMQL_CAMPAIGNS_SEND_TIMEOUT_SECONDS", "")
+	if got := LoadConfig().SendTimeout; got != DefaultSendTimeout || DefaultSendTimeout <= 0 {
+		t.Fatalf("the configuration starts from %s, DefaultSendTimeout is %s", got, DefaultSendTimeout)
+	}
+}

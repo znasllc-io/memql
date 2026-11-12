@@ -220,7 +220,7 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "rowSender",
-			Description: "The sender a row lane message for one organization would go out as: {ready, fromName, address, reason}, resolved as the send resolves it. Trusted jobs only (internal origin).",
+			Description: "The sender a row lane message for one organization would go out as: {ready, fromName, address, reason, readFailed, noneChosen}, resolved as the send resolves it; readFailed and noneChosen say in fields what the sentence says, for a caller to decide on. Trusted jobs only (internal origin).",
 			Handler:     w.handleRowSender,
 			ArgsSchema: map[string]string{
 				"accountId":        "string (required) - the organization the messages are sent for",
@@ -229,7 +229,7 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:          "rowMessageStatus",
-			Description:   "The outcome of row lane messages, one row per request id: {requestId, status, skipReason, providerStatus, sentAt}. Trusted jobs only (internal origin).",
+			Description:   "The outcome of row lane messages, one row per request id: {requestId, status, skipReason, skipSentence, providerStatus, sentAt}; skipSentence is a skip's reason as a person reads it. Trusted jobs only (internal origin).",
 			Handler:       w.handleRowMessageStatus,
 			PreserveOrder: true,
 			ArgsSchema: map[string]string{
