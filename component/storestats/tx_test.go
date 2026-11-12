@@ -20,6 +20,37 @@ import (
 	"testing"
 )
 
+// tx_test.go -- the write gate: this package writes one way, through writeTx
+// (tx.go), and this file reads the package's source with its types to hold it
+// to that (writeDiscipline has every rule).
+//
+// # What the gate guards
+//
+// The ordinary ways a write or an engine call slips past writeTx:
+//
+//   - a statement run on a handle a function was not handed as its
+//     transaction: a *bun.DB, a connection, or an interface that could be one;
+//   - a write made outside writeTx, or by a function that is not on
+//     writersThroughWriteTx;
+//   - inside a function handed to writeTx, a call to the engine, to a function
+//     value, or to a method of an interface this package declares;
+//   - a handle kept in a type this package declares, but for the one carrier
+//     allowedCarriers names.
+//
+// # What it does not follow
+//
+//   - a handle carried by a type this package does not declare: an unnamed
+//     struct with a named field, another package's type, an instantiated
+//     generic;
+//   - a function value that returns a handle, handed to another package;
+//   - an assignment to another package's variable;
+//   - reflection.
+//
+// That is accepted. Each of these needs a deliberate act, not a slip, and the
+// periodic check (check.go) is the proof at run time that the facts are right:
+// a fact that a write past writeTx left wrong is found and repaired by the
+// check's next pass.
+
 // writersThroughWriteTx is every function of this package that writes, keyed
 // as funcKey spells it: a function by its name, a method as (*T).name or
 // T.name. Each takes a bun.Tx and writes through it, so each runs inside
