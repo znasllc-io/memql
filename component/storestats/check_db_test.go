@@ -767,6 +767,7 @@ func TestAMaintenancePrincipalCannotRebuild(t *testing.T) {
 	for name, ac := range map[string]*auth.AccessContext{
 		"the rollup's principal": auth.MaintenanceActor("storeStatisticsRollupSweep"),
 		"the check's principal":  checksPrincipal(),
+		"an engine system actor": auth.SystemActor("shopify"),
 	} {
 		if !ac.IsClusterOwner() {
 			t.Fatalf("%s is not a cluster owner, so this proves nothing", name)
@@ -887,6 +888,7 @@ func TestOnlyAPersonWhoIsAClusterOwnerReadsTheCheckState(t *testing.T) {
 		"a developer":            asActor(aDeveloper),
 		"the check's principal":  auth.ContextWithInternalOrigin(asActor(checksPrincipal())),
 		"the rollup's principal": auth.ContextWithInternalOrigin(asActor(auth.MaintenanceActor("storeStatisticsRollupSweep"))),
+		"an engine system actor": auth.ContextWithInternalOrigin(asActor(auth.SystemActor("shopify"))),
 	} {
 		nodes, err := i.handleCheckState(ctx, map[string]any{"storeId": id}, 0)
 		if err == nil || nodes != nil || err.Error() != "store statistics check state is for a cluster owner" {
@@ -1059,5 +1061,39 @@ func TestAFactWhoseRowsNewestVersionIsUnreadableIsKeptByAPass(t *testing.T) {
 				t.Errorf("the pass removed the record of a row it met that is still unreadable")
 			}
 		})
+	}
+}
+
+// AN ENGINE SYSTEM ACTOR IS NO PERSON, though it is a cluster owner: the
+// rebuild and the check's state refuse it with their sentences before the
+// database is reached, and nothing is marked.
+func TestAnEngineSystemActorIsRefusedTheRebuildAndTheCheckState(t *testing.T) {
+	touched := false
+	refusing := NewIntegration(&contextEngine{}, func() *bun.DB { touched = true; return nil }, quietLogger())
+	i := testIntegration(t)
+	id := foldStore(t)
+	before := keptRow(t, id)
+	for _, name := range []string{"shopify", "edge", "datasync"} {
+		ac := auth.SystemActor(name)
+		if ac == nil || !ac.IsClusterOwner() {
+			t.Fatalf("system actor %s is not a cluster owner, so this proves nothing", name)
+		}
+		for _, h := range []*Integration{refusing, i} {
+			if nodes, err := h.handleRebuild(asActor(ac), map[string]any{"storeId": id}, 0); err == nil || nodes != nil ||
+				err.Error() != "store statistics rebuild is for a cluster owner" {
+				t.Errorf("system actor %s: the rebuild answered %d nodes and %v, want its refusal", name, len(nodes), err)
+			}
+			if nodes, err := h.handleCheckState(asActor(ac), map[string]any{"storeId": id}, 0); err == nil || nodes != nil ||
+				err.Error() != "store statistics check state is for a cluster owner" {
+				t.Errorf("system actor %s: the check state answered %d nodes and %v, want its refusal", name, len(nodes), err)
+			}
+		}
+	}
+	if touched {
+		t.Error("a refused system actor reached for the database")
+	}
+	if k := keptRow(t, id); k.generation != before.generation || k.rebuildingSince.Valid || k.purging {
+		t.Errorf("a system actor's rebuild marked the store: generation %d (was %d), rebuilding %v, purging %v",
+			k.generation, before.generation, k.rebuildingSince.Valid, k.purging)
 	}
 }
