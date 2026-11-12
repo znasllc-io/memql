@@ -160,9 +160,9 @@ product codes against is: branch on `status` before doing work.
 | `404` | source unlisted, misconfigured, receiver disabled, or the path is nested | stop |
 | `405` | not a POST | stop |
 | `401` | signature absent, malformed, mismatched, or outside the replay window | stop |
-| `413` | body over `MEMQL_INBOUND_MAX_BODY_BYTES` | stop |
+| `413` | body over the source's cap (`MEMQL_INBOUND_SOURCE_<NAME>_MAX_BODY_BYTES`, else `MEMQL_INBOUND_MAX_BODY_BYTES`); logged as a warning | stop |
 | `400` | body is not valid UTF-8, or the dedupe header is malformed | stop |
-| `503` | verified, but the row could not be staged | **retry** |
+| `503` | verified, but the row could not be staged; or a body over the default cap found every large-body turn taken | **retry** |
 
 `503` rather than `500` on a staging failure is the load-bearing one: the
 delivery was valid and we simply could not record it, so the sender must retry
@@ -223,6 +223,7 @@ Per source (`<NAME>` uppercased, `-` mapped to `_`):
 | `..._SIGNATURE_PREFIX` | no | stripped before decoding, e.g. `sha256=` |
 | `..._TIMESTAMP_HEADER` | no | enables the replay window |
 | `..._DEDUPE_HEADER` | no | sender's idempotency key |
+| `..._MAX_BODY_BYTES` | no | the source's own body cap: a GitHub push of a long branch outgrows 256 KiB, so the `github` source defaults to GitHub's 25 MiB, and a body over the default is held in one of two turns per node |
 
 ### 5.1 Why schemes rather than vendors
 

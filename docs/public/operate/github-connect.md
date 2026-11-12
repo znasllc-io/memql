@@ -281,6 +281,15 @@ receiver verifies with it. A source that is allowlisted but does not resolve to 
 usable policy is dropped and answers 404 -- never admitted unverified. Full
 reference: [inbound delivery](inbound-delivery.md).
 
+The `github` source reads a delivery of up to 25 MiB, GitHub's own cap on a
+webhook payload, rather than the receiver's 256 KiB default. A push payload
+lists every pushed commit with its changed files, so one push of a long branch
+is far over the default, and at the default it was refused with `413` and opened
+no run. Set `MEMQL_INBOUND_SOURCE_GITHUB_MAX_BODY_BYTES` only to choose a
+different cap. A body over 256 KiB is held in one of two turns per node; one
+that finds both taken is answered `503` and logged, and GitHub does not retry a
+failed delivery on its own, so redeliver it from the app's Recent Deliveries.
+
 `FORWARD_HEADERS` is what puts the event on the staged row: GitHub names the
 event (`push`, `ping`, `installation`) only in `X-GitHub-Event`, never in the
 body, and without the line the row's `headersJson` is `{}`. It is the same

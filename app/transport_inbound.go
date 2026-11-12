@@ -29,7 +29,7 @@ import (
 // the env" and "is the endpoint there" two different questions, and the
 // difference only shows up as a 404 in production either way.
 func (a *App) mountInboundEndpoints() {
-	cfg := inbound.LoadConfig(a.Logger)
+	cfg := withGitHubPayloadCap(inbound.LoadConfig(a.Logger))
 	handler := inbound.NewHandler(cfg, &InboundEngineAdapter{Engine: a.engine}, a.Logger)
 	handler.SetRegisteredSource(a.registeredGitHubWebhook())
 	for _, path := range server.InboundWebhookPaths() {
@@ -117,6 +117,42 @@ func (a *App) registeredGitHubWebhook() inbound.RegisteredSource {
 // two together.
 var githubDeliveryHeaders = []string{"X-GitHub-Event", "X-GitHub-Delivery", "X-GitHub-Hook-ID"}
 
+// githubMaxPayloadBytes is the cap GitHub's source reads deliveries under: the
+// most GitHub sends. GitHub caps a webhook payload at 25 MB and delivers no
+// larger one, so this is the one cap for its source that cannot refuse a real
+// delivery. The receiver's 256 KiB default did: a push payload lists every
+// pushed commit with its changed files, and a push of a long branch went over
+// it, was answered 413, staged nothing, and opened no run. 25 MiB rather than
+// 25,000,000 so either reading of "MB" fits; the front door's proxy-body-size
+// (48m, cmd/frontdoorhosts) is above both.
+const githubMaxPayloadBytes = 25 << 20
+
+// withGitHubPayloadCap gives the ENV-configured GitHub source GitHub's payload
+// cap when its operator set none (MEMQL_INBOUND_SOURCE_GITHUB_MAX_BODY_BYTES).
+//
+// NOT AN OPT-IN. registeredGitHubWebhook will not admit the env-configured
+// source for an operator, because admitting a sender is the operator's
+// statement to make. This admits nothing: it says how large a delivery from a
+// sender the operator already admitted may be, and the operator's own value,
+// when there is one, wins. Leaving GitHub's source at the generic default is
+// not neutral -- it is a cap that refuses some of GitHub's real deliveries.
+//
+// A new Config, so the one LoadConfig returned is not changed under its caller.
+func withGitHubPayloadCap(cfg inbound.Config) inbound.Config {
+	src, ok := cfg.Sources[githubWebhookSource]
+	if !ok || src.MaxBodyBytes > 0 {
+		return cfg
+	}
+	sources := make(map[string]inbound.SourceConfig, len(cfg.Sources))
+	for name, s := range cfg.Sources {
+		sources[name] = s
+	}
+	src.MaxBodyBytes = githubMaxPayloadBytes
+	sources[githubWebhookSource] = src
+	cfg.Sources = sources
+	return cfg
+}
+
 // githubWebhookPolicy is the fixed policy for a registered GitHub App's
 // webhook, given the secret GitHub generated for it.
 func githubWebhookPolicy(secret string) inbound.SourceConfig {
@@ -127,5 +163,6 @@ func githubWebhookPolicy(secret string) inbound.SourceConfig {
 		SignaturePrefix: "sha256=",
 		DedupeHeader:    "X-GitHub-Delivery",
 		ForwardHeaders:  append([]string(nil), githubDeliveryHeaders...),
+		MaxBodyBytes:    githubMaxPayloadBytes,
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -112,6 +113,19 @@ type SourceConfig struct {
 	DedupeHeader string
 	// ForwardHeaders is an explicit allowlist; credentials are never staged.
 	ForwardHeaders []string
+	// MaxBodyBytes, when positive, is this source's own cap on the request
+	// body, in place of the receiver's Config.MaxBodyBytes. Zero leaves the
+	// receiver's in force.
+	//
+	// IT EXISTS FOR A SENDER WHOSE REAL DELIVERIES OUTGROW THE DEFAULT. A
+	// GitHub push payload lists every pushed commit with its changed files, so
+	// one push of a long branch is far over 256 KiB: at the default cap the
+	// receiver answered it 413, staged nothing, and the run it should have
+	// opened never existed. A cap above the default does not give back what the
+	// default protects -- what an unauthenticated caller can make the node hold
+	// before the signature check runs -- because Handler holds such a body only
+	// in one of a bounded number of turns (largeBodyReads).
+	MaxBodyBytes int
 
 	// verifiedBy is the tier that resolved this policy, stamped on the staged
 	// row (memql#5795). Unexported on purpose: resolveSource sets it from
@@ -153,6 +167,8 @@ type Config struct {
 //	MEMQL_INBOUND_SOURCE_<NAME>_ELEMENT_SEPARATOR   e.g. "," for a k=v list header
 //	MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_ELEMENT   e.g. "v1"
 //	MEMQL_INBOUND_SOURCE_<NAME>_TIMESTAMP_ELEMENT   e.g. "t"
+//	MEMQL_INBOUND_SOURCE_<NAME>_MAX_BODY_BYTES      this source's own body cap;
+//	                                               default MEMQL_INBOUND_MAX_BODY_BYTES
 //
 // FORWARD_HEADERS is the only way an ENV source stages delivery metadata: with
 // it unset the row carries `headersJson: "{}"`, whatever the sender sent. A
@@ -241,6 +257,18 @@ func loadSource(name string) (SourceConfig, error) {
 		ElementSeparator: strings.TrimSpace(os.Getenv(prefix + "ELEMENT_SEPARATOR")),
 		SignatureElement: strings.TrimSpace(os.Getenv(prefix + "SIGNATURE_ELEMENT")),
 		TimestampElement: strings.TrimSpace(os.Getenv(prefix + "TIMESTAMP_ELEMENT")),
+	}
+	// Before the scheme switch, which returns early for "none": an unverified
+	// source is the one that most needs a cap of its own to be the one it gets.
+	// A value that is not a positive whole number of bytes costs the source its
+	// slot like every other setting here, rather than reading as "no cap of its
+	// own" -- an operator who wrote one meant something by it.
+	if raw := strings.TrimSpace(os.Getenv(prefix + "MAX_BODY_BYTES")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			return SourceConfig{}, fmt.Errorf("%sMAX_BODY_BYTES=%q is not a positive whole number of bytes", prefix, raw)
+		}
+		src.MaxBodyBytes = n
 	}
 
 	switch src.Scheme {

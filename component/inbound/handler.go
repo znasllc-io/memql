@@ -46,6 +46,11 @@ type Handler struct {
 	// runtime -- see SetRegisteredSource. Nil on a node that wired none, which
 	// leaves resolution exactly as it was.
 	registered RegisteredSource
+	// largeBodies holds one token for each request holding a body over the
+	// receiver's default cap, and largeBodyWait is how long such a request
+	// waits for a free one before it is answered 503. See readBody.
+	largeBodies   chan struct{}
+	largeBodyWait time.Duration
 }
 
 // RegisteredSource resolves one source name to its policy, or (_, false) when
@@ -77,7 +82,8 @@ func NewHandler(cfg Config, engine Engine, logger *slog.Logger) *Handler {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	return &Handler{cfg: cfg, engine: engine, logger: logger, now: time.Now}
+	return &Handler{cfg: cfg, engine: engine, logger: logger, now: time.Now,
+		largeBodies: make(chan struct{}, largeBodyReads), largeBodyWait: defaultLargeBodyWait}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -106,15 +112,37 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := h.readBody(r)
-	if err != nil {
-		if err == errBodyTooLarge {
-			http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
-			return
+	body, release, err := h.readBody(r, src)
+	switch {
+	case err == errBodyTooLarge:
+		// LOGGED, because nothing else says it. The 413 goes back to the
+		// sender and stages no row, so before this line the only trace of a
+		// refused delivery was the sender's own delivery history: a GitHub push
+		// over the cap opened no run, and no log in the cluster said why. The
+		// length is the caller's DECLARED one (-1 when it sent none); the body
+		// itself is never logged.
+		args := []any{"source", name, "limit", h.bodyLimit(src), "declaredLength", r.ContentLength}
+		if src.verifiedBy == memqlsync.VerifiedByEnv {
+			args = append(args, "setting", "MEMQL_INBOUND_SOURCE_"+envSuffix(name)+"_MAX_BODY_BYTES")
+		} else {
+			args = append(args, "tier", src.verifiedBy)
 		}
+		h.logger.Warn("inbound receiver: request refused, body over the cap", args...)
+		http.Error(w, "payload too large", http.StatusRequestEntityTooLarge)
+		return
+	case err == errLargeBodiesBusy:
+		// 503, because the same delivery succeeds once a turn is free -- but
+		// logged, because not every sender retries a 5xx on its own (GitHub
+		// does not), and a refused delivery is then only redelivered by hand.
+		h.logger.Warn("inbound receiver: request refused, too many large bodies being read",
+			"source", name, "declaredLength", r.ContentLength, "turns", cap(h.largeBodies))
+		http.Error(w, "receiver busy, try again", http.StatusServiceUnavailable)
+		return
+	case err != nil:
 		http.Error(w, "could not read request body", http.StatusBadRequest)
 		return
 	}
+	defer release()
 	// The body is stored in a string field and rendered into a MemQL string
 	// literal, so it has to be text. Refusing here is honest; json.Marshal
 	// would silently rewrite every invalid byte to U+FFFD and stage a row whose
@@ -330,21 +358,85 @@ func (h *Handler) resolveSource(ctx context.Context, name string) (SourceConfig,
 	}, true
 }
 
-var errBodyTooLarge = fmt.Errorf("body exceeds the configured cap")
+var (
+	errBodyTooLarge    = fmt.Errorf("body exceeds the configured cap")
+	errLargeBodiesBusy = fmt.Errorf("every turn for a body over the default cap is taken")
+)
 
-// readBody reads at most MaxBodyBytes, and one byte more so an over-cap body is
-// DETECTED rather than silently truncated -- a truncated body would fail its
-// own signature check and look like an attack.
-func (h *Handler) readBody(r *http.Request) ([]byte, error) {
-	limit := int64(h.cfg.MaxBodyBytes)
+const (
+	// largeBodyReads is how many requests on one node may hold a body over the
+	// receiver's default cap at once. Two, because the senders with a raised
+	// cap send their large deliveries rarely and one at a time -- a push of a
+	// long branch -- while each turn may hold a body as large as its source's
+	// cap (25 MiB for GitHub's) before any signature has been checked.
+	largeBodyReads = 2
+	// defaultLargeBodyWait is how long a large request waits for a turn. Short,
+	// because a sender times its delivery out on its own (GitHub after ten
+	// seconds) and an answer it can see beats a connection it gives up on.
+	defaultLargeBodyWait = 3 * time.Second
+)
+
+// bodyLimit is the cap a request to src is read under: the source's own when
+// it has one, the receiver's otherwise.
+func (h *Handler) bodyLimit(src SourceConfig) int64 {
+	if src.MaxBodyBytes > 0 {
+		return int64(src.MaxBodyBytes)
+	}
+	return int64(h.cfg.MaxBodyBytes)
+}
+
+// readBody reads at most the source's cap, and one byte more so an over-cap
+// body is DETECTED rather than silently truncated -- a truncated body would
+// fail its own signature check and look like an attack. A body whose declared
+// length is already over the cap is refused before a byte of it is read.
+//
+// A BODY OVER THE RECEIVER'S DEFAULT TAKES A TURN. The default cap bounds what
+// an unauthenticated caller can make the node hold before the signature check
+// runs, and a source's raised cap must not quietly give that back: anyone can
+// post 25 MiB to GitHub's source, signed or not. So a request that may carry
+// more than the default -- one that declares more, or declares nothing --
+// holds one of largeBodyReads turns from before the read until the request is
+// answered (the returned release, which the caller defers), and one that
+// cannot get a turn within largeBodyWait is refused with errLargeBodiesBusy. A
+// request declaring no more than the default never waits, so a crowd of large
+// requests cannot hold up ordinary deliveries.
+func (h *Handler) readBody(r *http.Request, src SourceConfig) ([]byte, func(), error) {
+	release := func() {}
+	limit := h.bodyLimit(src)
+	if r.ContentLength > limit {
+		return nil, release, errBodyTooLarge
+	}
+	if def := int64(h.cfg.MaxBodyBytes); limit > def && (r.ContentLength < 0 || r.ContentLength > def) {
+		if !h.takeLargeBodyTurn(r.Context()) {
+			return nil, release, errLargeBodiesBusy
+		}
+		release = func() { <-h.largeBodies }
+	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
+	if err == nil && int64(len(body)) > limit {
+		err = errBodyTooLarge
+	}
 	if err != nil {
-		return nil, err
+		release()
+		return nil, func() {}, err
 	}
-	if int64(len(body)) > limit {
-		return nil, errBodyTooLarge
+	return body, release, nil
+}
+
+// takeLargeBodyTurn waits up to largeBodyWait for a turn, or until the request
+// is gone. A nil largeBodies (a Handler not built by NewHandler) never yields
+// one, which fails closed: such a request is refused rather than unbounded.
+func (h *Handler) takeLargeBodyTurn(ctx context.Context) bool {
+	timer := time.NewTimer(h.largeBodyWait)
+	defer timer.Stop()
+	select {
+	case h.largeBodies <- struct{}{}:
+		return true
+	case <-timer.C:
+		return false
+	case <-ctx.Done():
+		return false
 	}
-	return body, nil
 }
 
 // splitSource extracts the source name from the request path and rejects

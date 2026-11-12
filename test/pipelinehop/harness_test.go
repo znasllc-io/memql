@@ -205,6 +205,9 @@ func newCluster(t *testing.T, dsn string) *cluster {
 			SignaturePrefix: "sha256=",
 			DedupeHeader:    "X-GitHub-Delivery",
 			ForwardHeaders:  []string{"X-GitHub-Event", "X-GitHub-Delivery", "X-GitHub-Hook-ID"},
+			// GitHub's own payload cap, as githubWebhookPolicy sets it: a push
+			// of a long branch is far over the receiver's default.
+			MaxBodyBytes: 25 << 20,
 		}, true
 	})
 	auto, err := automations.NewLoader(automations.LoaderOptions{Logger: c.logger("automations")}).LoadByName(triggerAutomation)
