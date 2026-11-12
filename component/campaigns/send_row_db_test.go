@@ -371,3 +371,40 @@ func TestAProvidersRefusalOfARowMessageStaysOnTheLedgerAndIsAnsweredAsASentence(
 		t.Fatalf("the status read answered %v, want failed and nothing of the provider's words", status)
 	}
 }
+
+func TestDeferredRowMessageStatusPreservesAnUnknownProviderOutcomeAcrossReplicas(t *testing.T) {
+	for _, definitelyRefused := range []bool{false, true} {
+		t.Run(fmt.Sprintf("definitely-refused-%v", definitelyRefused), func(t *testing.T) {
+			l := newRowLane(t, fmt.Sprintf("lane-deferred-outcome-%v", definitelyRefused))
+			l.worker.limiter = newRateLimiter(1, l.worker.now)
+			l.worker.allowSend()
+			if got := l.send(t, "outcome"); got["deferred"] != true {
+				t.Fatalf("initial send did not defer: %v", got)
+			}
+			l.sender.fail = func(int) error {
+				return &email.SendError{NotAccepted: definitelyRefused, Permanent: true, Detail: "provider connection lost"}
+			}
+			later := time.Now().Add(2 * time.Minute)
+			l.worker.now = func() time.Time { return later }
+			l.worker.limiter = newRateLimiter(1000, l.worker.now)
+			l.worker.retryDeferredSends(context.Background(), l.system)
+			if row := l.ledger(t, "outcome"); str(row, "status") != "failed" {
+				t.Fatalf("replay did not settle its delivery: %v", row)
+			}
+			e2, db2 := digestDBEngine(t)
+			other := newGatedWorker(t, e2, db2, l.sender)
+			nodes, err := other.handleRowMessageStatus(auth.ContextWithInternalOrigin(l.owner),
+				map[string]any{"requestIds": []any{l.suffix + "-outcome"}, "accountId": l.org}, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "uncertain"
+			if definitelyRefused {
+				want = "failed"
+			}
+			if got := decodeResult(t, nodes); got["status"] != want {
+				t.Fatalf("another replica reads %v, want %s", got, want)
+			}
+		})
+	}
+}

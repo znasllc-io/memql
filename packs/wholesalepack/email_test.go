@@ -3552,6 +3552,36 @@ func TestAResendOverAnUnsettledAttemptTheLaneFailedSaysItMayBeASecondCopy(t *tes
 	}
 }
 
+func TestADeferredAttemptWithAnUncertainReplayWarnsBeforeAnotherCopy(t *testing.T) {
+	useTestLaneReaders(t)
+	for _, kind := range []string{EmailTerms, EmailRejected} {
+		t.Run(kind, func(t *testing.T) {
+			w, p := worldIn(kind)
+			w.lane.outcome = "defer"
+			if got := w.automatic(t, p, kind); got["state"] != SendDeferred {
+				t.Fatalf("initial attempt did not defer: %v", got)
+			}
+			w.lane.outcome = ""
+			w.lane.statuses = []map[string]any{{"requestId": LaneRequestID(kind, linkApp, 1), "status": "uncertain"}}
+			for where, row := range map[string]map[string]any{
+				"application": emailShown(t, w.application(t, p), kind, 1),
+				"export":      w.exportedEmails(t, p)[0],
+			} {
+				if row["state"] != SendUncertain || row["reason"] != ReasonUncertain {
+					t.Fatalf("%s reads %v, want uncertain", where, row)
+				}
+			}
+			if !w.offers(t, p, resendActOf[kind]) {
+				t.Fatalf("%s is not offered", resendActOf[kind])
+			}
+			resent, err := w.resend(t, p, kind)
+			if err != nil || resent["state"] != SendSent || resent["attempt"] != float64(2) || resent["note"] != NoteMaybeSecondCopy {
+				t.Fatalf("resend answered %v, %v; want attempt 2 with the possible second-copy note", resent, err)
+			}
+		})
+	}
+}
+
 // AN ATTEMPT THE PROVIDER REPORTS ON WAS HANDED OVER. An uncertain attempt --
 // recorded uncertain, or never settled with the lane's record saying failed --
 // that the provider later reports on reads SENT, with the report beside it, as

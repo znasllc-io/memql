@@ -708,6 +708,10 @@ func (w *Worker) handleRowMessageStatus(ctx context.Context, args map[string]any
 	answers := make([]map[string]any, 0, len(ids))
 	for _, id := range ids {
 		row := latest[id]
+		status, sentAt, err := w.rowMessageOutcome(ctx, row)
+		if err != nil {
+			return nil, undecided(fmt.Errorf("campaigns.rowMessageStatus: %w", err))
+		}
 		// WHY IT WAS SKIPPED, IN A SENTENCE, and nothing for a message that was not
 		// skipped. The query answers row lane deliveries only (rowConcept set), so a
 		// reason that is not one of the lane's codes is the row's own withdrawal
@@ -717,9 +721,47 @@ func (w *Worker) handleRowMessageStatus(ctx context.Context, args map[string]any
 			sentence = rowSkipSentence(str(row, "skipReason"))
 		}
 		answers = append(answers, map[string]any{
-			"id": id, "requestId": id, "status": str(row, "status"), "skipReason": str(row, "skipReason"),
-			"skipSentence": sentence, "providerStatus": str(row, "providerStatus"), "sentAt": str(row, "sentAt"),
+			"id": id, "requestId": id, "status": status, "skipReason": str(row, "skipReason"),
+			"skipSentence": sentence, "providerStatus": str(row, "providerStatus"), "sentAt": sentAt,
 		})
 	}
 	return resultRows("campaignRowMessageStatus", answers)
+}
+
+// A failed delivery stops the deferred queue, but does not prove the provider
+// refused the message. The durable receipt distinguishes a definite refusal
+// from an attempt whose hand-over is still unknown, including on another node.
+// Read only the receipt belonging to the already admitted delivery's owner and
+// organization; no address, owner or receipt is returned by the status API.
+func (w *Worker) rowMessageOutcome(ctx context.Context, row map[string]any) (string, string, error) {
+	status, sentAt := str(row, "status"), str(row, "sentAt")
+	if status != "failed" {
+		return status, sentAt, nil
+	}
+	owner := bare(str(row, "ownerUserId"))
+	if owner == "" {
+		return "", "", errors.New("the message's sending identity could not be read")
+	}
+	actor := auth.ContextWithInternalOrigin(memql.ContextWithFreshRead(w.ownerActorContext(ctx, owner)))
+	rows, err := w.store.rows(actor, call("query", "campaignSingleSendById",
+		arg{"receiptId", singleSendReceiptID(owner, str(row, "requestId"))}))
+	if err != nil {
+		return "", "", err
+	}
+	if len(rows) == 0 {
+		return status, sentAt, nil // The send stopped before a provider attempt.
+	}
+	receipt := rows[0]
+	if !sameOrganization(str(receipt, "accountId"), str(row, "accountId")) {
+		return "", "", errors.New("the message's saved receipt belongs to another organization")
+	}
+	switch str(receipt, "status") {
+	case receiptFailed:
+		return status, sentAt, nil
+	case receiptComplete:
+		if objectField(receipt, "result")["sent"] == true {
+			return "sent", str(receipt, "createdAt"), nil
+		}
+	}
+	return "uncertain", "", nil
 }

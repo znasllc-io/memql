@@ -451,10 +451,12 @@ shape delivery deferredSendRef {
  row.createdAt
 }
 
-/// What the row lane's status read answers about one message: its outcome and nothing else of the
-/// delivery -- no address, no recipient, no row.
+/// Internal projection for the row lane's status read. Owner and organization
+/// identify its durable receipt; the status API returns neither field.
 @row
 shape delivery rowMessageStatusRef {
+ ownerUserId
+ accountId
  requestId
  status
  skipReason

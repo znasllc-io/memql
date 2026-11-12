@@ -1339,6 +1339,11 @@ func (p *Provider) effectiveSend(row, delivery map[string]any, laneRead bool) ma
 	sentAt := timeText(row["sentAt"])
 	status, provider := trimmed(delivery["status"]), trimmed(delivery["providerStatus"])
 	known := status == "sent" || status == "failed" || status == "skipped" || status == "pending"
+	if status == "uncertain" {
+		// A deferred replay may have reached the provider even though the queue
+		// stopped retrying it. The lane reads that fact from its durable receipt.
+		state, reason = SendUncertain, ReasonUncertain
+	}
 	if trimmed(row["state"]) == sendSending {
 		switch {
 		case status == "failed":
