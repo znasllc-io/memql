@@ -180,10 +180,11 @@ type InboundRequest struct {
 	// the origin answers nothing for -- reads it here.
 	Attempts int
 	// AnsweredNothingBefore says the previous try of this delivery ended in
-	// ErrAnsweredNothing: the origin answered cleanly that it has no record
-	// the mirror holds. A try that finds the same is the second answer in a
-	// row, and a deletion. False on a first try, and on the first try after
-	// an operator put the delivery back in line.
+	// ErrAnsweredNothing: the origin answered cleanly that it has no such
+	// record. A try that finds the same is the second answer in a row, and is
+	// believed: a record the mirror holds is retired, and one it does not hold
+	// is not there to record. False on a first try, and on the first try
+	// after a delivery was put back in line.
 	AnsweredNothingBefore bool
 }
 

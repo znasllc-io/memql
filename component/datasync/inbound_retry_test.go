@@ -663,3 +663,21 @@ func TestTheNextTryIsToldWhenTheLastOneAnsweredNothing(t *testing.T) {
 		}
 	}
 }
+
+// A FIRST TRY IS NEVER TOLD "ANSWERED NOTHING BEFORE". Dispatch works a
+// request with no prior try, so whatever its caller set on the request, the
+// connector must not read the try as following an empty answer: one empty
+// answer would then count as two, and retire a record on a first try.
+func TestDispatchNeverTellsAFirstTryItFollowsAnEmptyAnswer(t *testing.T) {
+	engine := newFakeEngine()
+	c := &fakeConnector{name: "shopify"}
+	d := retryDispatcher(engine, newFakeWriter(), c)
+	if _, err := d.Dispatch(context.Background(), memqlsync.InboundRequest{
+		RequestId: "req-1", Source: "shopify", ReceivedAt: testNow, Attempts: 3, AnsweredNothingBefore: true,
+	}); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if len(c.applied) != 1 || c.applied[0].AnsweredNothingBefore || c.applied[0].Attempts != 0 {
+		t.Fatalf("the connector was handed %+v, want a first try: Attempts 0 and no answer of nothing before it", c.applied)
+	}
+}

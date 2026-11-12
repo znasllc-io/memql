@@ -201,6 +201,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req memqlsync.InboundRequest)
 	if !ok {
 		return DispatchResult{}, nil
 	}
+	// No try came before this one, so none of them answered nothing, whatever
+	// the request it was handed says.
+	req.AnsweredNothingBefore = false
 	return d.dispatchTo(ctx, connector, req, 0)
 }
 

@@ -39,6 +39,8 @@ type mirrorEngine struct {
 	*fakeEngine
 	mu   stdsync.Mutex
 	rows map[string]map[string]any // concept|row id -> payload
+	// inserts counts the rows written, whoever wrote them.
+	inserts int
 }
 
 var (
@@ -57,6 +59,7 @@ func (m *mirrorEngine) Execute(ctx context.Context, q string) (*memql.ExecuteRes
 		}
 		m.mu.Lock()
 		defer m.mu.Unlock()
+		m.inserts++
 		row := m.rows[concept+"|"+id]
 		if row == nil {
 			row = map[string]any{}
@@ -218,6 +221,12 @@ func (r *mirrorRig) held(concept, gid, updatedAt string, read time.Time) {
 	r.put(concept, gid, map[string]any{"name": "held", "updatedAt": updatedAt, "versionSource": "origin",
 		"syncedAt": memqlsync.ReadTime(read), "versionReadAt": memqlsync.ReadTime(read), "deleted": false})
 }
+
+// readsAllOrders grants the rig's store read_all_orders: the origin then hides
+// no order from it, so an answer of nothing for one can be a deletion
+// (emptyAnswerRetires). The tests that play that rule through an order use
+// it; without it an order is never retired by an answer of nothing.
+func (r *mirrorRig) readsAllOrders() { r.granted(ordersScope, allOrdersScope) }
 
 // put writes a row straight into the mirror, as an earlier writer left it.
 func (r *mirrorRig) put(concept, gid string, payload map[string]any) {
@@ -534,6 +543,7 @@ func TestARetriedDeleteStillRetiresTheRecord(t *testing.T) {
 	})
 	t.Run("an update retried after the record was deleted", func(t *testing.T) {
 		r := newMirrorRig(t)
+		r.readsAllOrders()
 		// A (10:00) fails and waits for its retry; B (10:01) lands.
 		r.now = at("10:01:05")
 		r.orderFetches(orderNode("2026-08-23T10:01:00Z", 1))
@@ -657,6 +667,7 @@ func TestEveryAnswerOfAFetchIsADeletionOnlyWhenClean(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newMirrorRig(t)
+			r.readsAllOrders()
 			r.now = at("10:00:00")
 			r.held("order", "gid://shopify/Order/1", "2026-08-23T09:00:00Z", at("09:30:00"))
 			r.admin.reply("ShopifyFetchOrder", tc.reply)
@@ -684,13 +695,18 @@ func TestEveryAnswerOfAFetchIsADeletionOnlyWhenClean(t *testing.T) {
 }
 
 // A create delivery can arrive before its record is readable. An empty fetch
-// for a record the mirror does not hold has nothing to retire, so it writes
-// nothing; the record arrives with the next sweep that lists it.
+// for a record the mirror does not hold is asked once more, and has nothing to
+// retire, so it writes nothing on either try; the record arrives with the
+// next sweep that lists it.
 func TestAnEmptyFetchForARecordNotHeldWritesNothing(t *testing.T) {
 	r := newMirrorRig(t)
 	r.now = at("10:00:00")
 	r.orderFetches(nil)
-	writes, err := r.conn.Apply(context.Background(), request("orders/create", "gid://shopify/Order/1", "wh-create", at("10:00:00")))
+	create := request("orders/create", "gid://shopify/Order/1", "wh-create", at("10:00:00"))
+	if writes, err := r.conn.Apply(context.Background(), create); !memqlsync.IsAnsweredNothing(err) || len(writes) != 0 {
+		t.Fatalf("the first empty answer: writes %v, err %v; want it asked once more", writes, err)
+	}
+	writes, err := r.conn.Apply(context.Background(), retried(create))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -716,6 +732,7 @@ func TestARecordWronglySeenAsGoneComesBackOnTheNextRead(t *testing.T) {
 	for _, path := range []string{"sweep", "delivery"} {
 		t.Run(path, func(t *testing.T) {
 			r := newMirrorRig(t)
+			r.readsAllOrders()
 			r.now = at("09:30:00")
 			r.held("order", "gid://shopify/Order/1", "2026-08-23T09:00:00Z", at("09:30:00"))
 			r.now = at("10:00:00")
@@ -750,6 +767,7 @@ func TestABulkLineExportedBeforeATombstoneDoesNotBringTheRecordBack(t *testing.T
 	for _, kind := range []string{"delete topic", "empty fetch"} {
 		t.Run(kind, func(t *testing.T) {
 			r := newMirrorRig(t)
+			r.readsAllOrders()
 			r.now = at("09:30:00")
 			r.held("order", "gid://shopify/Order/1", "2026-08-23T09:00:00Z", at("09:30:00"))
 			r.now = at("10:00:30")
@@ -776,11 +794,15 @@ func TestABulkLineExportedBeforeATombstoneDoesNotBringTheRecordBack(t *testing.T
 // record in it is there: it comes back, though its updatedAt is older.
 func TestABulkLineExportedAfterATombstoneBringsTheRecordBack(t *testing.T) {
 	r := newMirrorRig(t)
+	r.readsAllOrders()
 	r.now = at("09:30:00")
 	r.held("order", "gid://shopify/Order/1", "2026-08-23T09:00:00Z", at("09:30:00"))
 	r.now = at("10:00:00")
 	r.orderFetches(nil)
 	r.deliver(t, retried(request("orders/updated", "gid://shopify/Order/1", "wh-f", at("09:59:00"))))
+	if r.row("order", "gid://shopify/Order/1")["deleted"] != true {
+		t.Fatal("the clean empty fetch did not retire the held order, so this test proves nothing")
+	}
 	r.now = at("10:30:00")
 	cursor := r.exportStarted(t, "order")
 	r.now = at("10:40:00")
@@ -867,6 +889,7 @@ func TestAnUnannouncedDeletionIsConfirmedBeforeItIsBelieved(t *testing.T) {
 	const gid = "gid://shopify/Order/1"
 	setup := func(t *testing.T) *mirrorRig {
 		r := newMirrorRig(t)
+		r.readsAllOrders()
 		r.now = at("10:00:00")
 		r.held("order", gid, "2026-08-23T09:00:00Z", at("09:30:00"))
 		return r
@@ -878,7 +901,7 @@ func TestAnUnannouncedDeletionIsConfirmedBeforeItIsBelieved(t *testing.T) {
 		if err == nil || memqlsync.IsPermanent(err) || memqlsync.IsNotGranted(err) {
 			t.Fatalf("err = %v (writes %v), want a failure worth another try", err, writes)
 		}
-		if !strings.Contains(err.Error(), "asked again before the record is retired") {
+		if !strings.Contains(err.Error(), "asked once more before that answer is believed") {
 			t.Errorf("err = %v, want the plain reason", err)
 		}
 		if r.row("order", gid)["deleted"] == true {
@@ -1013,6 +1036,7 @@ func TestTwoCleanEmptyAnswersInARowAreADeletion(t *testing.T) {
 	run := func(t *testing.T, steps ...string) (retiredOn int, row map[string]any) {
 		t.Helper()
 		r := newMirrorRig(t)
+		r.readsAllOrders()
 		r.now = at("10:00:00")
 		r.held("order", gid, "2026-08-23T09:00:00Z", at("09:30:00"))
 		attempts, nothingBefore := 0, false

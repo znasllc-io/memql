@@ -200,51 +200,104 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 		return nil, err
 	}
 	if gone {
-		// The origin answered cleanly that it has no such record. A
-		// create/update topic for something Shopify no longer has is the
-		// RACE this arm exists for: the delete delivery may arrive later,
-		// out of order, or never. Tombstoning on an empty fetch is what makes
-		// the mirror converge without it.
-		//
-		// Its time is the FETCH's: that read is what found the record gone.
-		// A record the mirror does not hold has nothing to retire -- a
-		// create delivery can arrive before its record is readable -- so
-		// nothing is written, and the record arrives with the next read that
-		// finds it.
-		held, err := c.mirrorHoldsRow(ctx, spec, store.ID, gid)
-		if err != nil {
-			c.forgetDelivery(req, gid)
-			return nil, err
-		}
-		if !held {
-			return nil, nil
-		}
-		if !req.AnsweredNothingBefore {
-			// A deletion the origin did not announce is confirmed before it
-			// is believed: two clean empty answers IN A ROW. On a domain
-			// swept by updated_at, a record wrongly retired by one empty
-			// answer has no scheduled read that brings it back (the sweep's
-			// filter skips it until it changes). So an empty answer that does
-			// not follow one fails as worth another try
-			// (memqlsync.ErrAnsweredNothing), the retry lane fetches again,
-			// and the dispatcher tells that try the last one answered nothing
-			// (InboundRequest.AnsweredNothingBefore). Only a try that follows
-			// an empty answer and still finds nothing retires the record, at
-			// that fetch's time; a try number alone proves nothing, since a
-			// first try that failed for any ordinary reason is not an answer.
-			c.forgetDelivery(req, gid)
-			return nil, memqlsync.AnsweredNothing(ConnectorName, gid)
-		}
-		return []memqlsync.MirrorWrite{tombstone(spec.Concept, store.ID, gid, readAt)}, nil
+		return c.answeredNothing(ctx, store, spec, req, gid, readAt)
 	}
 	return writes, nil
 }
 
-// mirrorHoldsRow reports whether the mirror holds a row for a gid, live or
-// retired.
-func (c *Connector) mirrorHoldsRow(ctx context.Context, spec *generated.TypeSpec, storeID, gid string) (bool, error) {
-	stored, err := c.storedMirrorRow(ctx, memqlsync.MirrorWrite{Concept: generated.ConceptID(spec.Concept), RowId: MirrorRowID(storeID, gid)})
-	return stored != nil, err
+// answeredNothing decides what a clean answer of nothing does: the origin
+// said, with no error at all, that it has no such record.
+//
+// A create or update notice for something Shopify no longer has is the RACE
+// this exists for: the delete notice may arrive later, out of order, or never,
+// and retiring on an empty fetch is what makes the mirror converge without it.
+// But an answer of nothing is not always a deletion. In order:
+//
+//  1. THE MIRROR HOLDS THE RECORD AS RETIRED. Nothing is written and nothing
+//     is asked again: the record is already gone here. A second tombstone, at
+//     this fetch's later time and unannounced, would win over the one that is
+//     there (memqlsync.Refuses: the later time wins) and take the standing of
+//     a deletion the origin announced with it.
+//
+//  2. ORDER DATA, HELD LIVE, UNDER A GRANT THAT CANNOT READ PAST SIXTY DAYS
+//     (emptyAnswerRetires). The origin hides an order older than that from an
+//     app without read_all_orders and answers a clean null for it, so a late
+//     refund's update notice is answered nothing however often it is asked,
+//     and nothing would bring a retired order back: the sweep and the export
+//     list the same sixty days. Nothing is written and nothing is asked again.
+//     Only the origin's own announcement, the delete notice, retires it.
+//
+//  3. THE FIRST EMPTY ANSWER, one that does not follow one, is not believed:
+//     it fails as worth another try (memqlsync.ErrAnsweredNothing), the retry
+//     lane fetches again, and the dispatcher tells that try the last one
+//     answered nothing (InboundRequest.AnsweredNothingBefore). For a record
+//     the mirror holds, a deletion the origin did not announce is confirmed
+//     before it is believed: on a domain swept by updated_at, a record wrongly
+//     retired has no scheduled read that brings it back. For a record it does
+//     not hold, a create notice can arrive before its record is readable, and
+//     processing it at once would leave the record to the next sweep. A try
+//     number alone proves nothing: a first try that failed for an ordinary
+//     reason is not an answer.
+//
+//  4. THE SECOND IN A ROW is believed. A record the mirror does not hold has
+//     nothing to retire, so nothing is written; a held one is retired, at this
+//     fetch's time, which is the read that found it gone.
+func (c *Connector) answeredNothing(ctx context.Context, store Store, spec *generated.TypeSpec, req memqlsync.InboundRequest, gid string, readAt time.Time) ([]memqlsync.MirrorWrite, error) {
+	conceptID := generated.ConceptID(spec.Concept)
+	stored, err := c.storedMirrorRow(ctx, memqlsync.MirrorWrite{Concept: conceptID, RowId: MirrorRowID(store.ID, gid)})
+	if err != nil {
+		c.forgetDelivery(req, gid)
+		return nil, err
+	}
+	held := stored != nil
+	switch {
+	case held && memqlsync.StoredStamp(mirrorDomain(conceptID), stored).Retired:
+		return nil, nil
+	case held && !emptyAnswerRetires(store, spec):
+		c.logger.Info("shopify: an answer of nothing for order data was not taken as a deletion; this store's grant does not read orders older than sixty days",
+			"store", store.ID, "concept", spec.Concept)
+		return nil, nil
+	case !req.AnsweredNothingBefore:
+		c.forgetDelivery(req, gid)
+		return nil, memqlsync.AnsweredNothing(ConnectorName, gid)
+	case !held:
+		return nil, nil
+	}
+	return []memqlsync.MirrorWrite{tombstone(spec.Concept, store.ID, gid, readAt)}, nil
+}
+
+// The permission order data is read under, and the one that widens it past
+// the last sixty days. A managed connection asks for the first and never the
+// second; a store connected through its own app may hold both.
+const (
+	ordersScope    = "read_orders"
+	allOrdersScope = "read_all_orders"
+)
+
+// readUnderOrders reports whether a kind is order data: read under the orders
+// permission, so hidden by the origin, past sixty days, from a grant without
+// read_all_orders. It is read off the generated specs, never a list of names:
+// a kind whose own required access names read_orders, and every kind that
+// hangs from one (Parent) -- an order's fulfilments and returns are read with
+// it, whatever scope of their own the allowlist names.
+func readUnderOrders(spec *generated.TypeSpec) bool {
+	for hops := 0; spec != nil && hops <= len(generated.ApplyOrder); hops++ {
+		for _, scope := range spec.Scopes {
+			if scope == ordersScope {
+				return true
+			}
+		}
+		spec = generated.Types[spec.Parent]
+	}
+	return false
+}
+
+// emptyAnswerRetires reports whether an answer of nothing the origin did not
+// announce may retire a record of this kind for this store: every kind, except
+// order data under a grant that does not hold read_all_orders. A grant that
+// was never recorded is not known to hold it.
+func emptyAnswerRetires(store Store, spec *generated.TypeSpec) bool {
+	return !readUnderOrders(spec) || grantIncludes(store.ScopesGranted)[allOrdersScope]
 }
 
 func (c *Connector) deduped(req memqlsync.InboundRequest, gid string) bool {
