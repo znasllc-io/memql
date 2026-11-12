@@ -89,6 +89,10 @@ func (f *storeFake) Rows(ctx context.Context, query string, args map[string]stri
 		return f.byApplication(ctx, f.decisions, args["applicationId"]), nil
 	case "entitlementForApplication":
 		return f.byApplication(ctx, f.ents, args["applicationId"]), nil
+	case "wholesaleDocumentVersionById":
+		if isSystem(ctx) {
+			return docByID(f.docs, args["documentVersionId"]), nil
+		}
 	case "userByIdSystem":
 		if !auth.OriginFromContext(ctx).IsInternal() {
 			return nil, fmt.Errorf("userByIdSystem without internal origin")
@@ -198,6 +202,10 @@ func (f *storeFake) RowsPageWithList(ctx context.Context, query string, args map
 		size = 200
 		if isSystem(ctx) {
 			all = docsMatching(f.docs, args["storeId"], args["kind"])
+		}
+	case "documentVersionBriefsForStore":
+		if isSystem(ctx) {
+			all = briefsOf(docsMatching(f.docs, args["storeId"], args["kind"]))
 		}
 	}
 	from, _ := strconv.Atoi(cursor)

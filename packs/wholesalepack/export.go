@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -96,7 +97,7 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 	}
 	var settingsOut any
 	if settings != nil {
-		settingsOut = withoutTokenHash(settings)
+		settingsOut = effectiveSettingsRow(settings)
 	}
 	// EVERY VERSION OF EVERY DOCUMENT, bodies included, read to the end in
 	// every form of the store id: what an applicant accepted is part of the
@@ -105,10 +106,7 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 	if err != nil {
 		return nil, err
 	}
-	documentVersions := make([]map[string]any, 0, len(versions))
-	for _, v := range versions {
-		documentVersions = append(documentVersions, withoutTokenHash(v))
-	}
+	documentVersions, omitted := boundedDocumentVersions(versions)
 	now := time.Now().UTC()
 	if p.now != nil {
 		now = p.now().UTC()
@@ -122,7 +120,8 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 		"entitlements": entitlements,
 		"settings":     settingsOut,
 		// Kind by kind (terms, map, priceSheet), each newest first.
-		"documentVersions": documentVersions,
+		"documentVersions":      documentVersions,
+		"documentBodiesOmitted": omitted,
 	}, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("wholesale: marshal export: %w", err)
@@ -131,6 +130,57 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 		"fileName": "wholesale-" + slugOf(storeID) + "-" + now.Format("20060102") + ".json",
 		"json":     string(doc),
 	})
+}
+
+// maxExportBodyBytes is the most document body text one export carries.
+const maxExportBodyBytes = 4 << 20
+
+// boundedDocumentVersions is the export's versions, in their order, with the
+// bodies carried NEWEST FIRST across every kind until maxExportBodyBytes: the
+// first body that does not fit, and every older one, is left out, and its
+// version is exported with every other field and bodyOmitted true. It answers
+// how many were left out. A body left out is read with wholesaleDocuments and
+// its versionId.
+func boundedDocumentVersions(versions []map[string]any) ([]map[string]any, int) {
+	byAge := append([]map[string]any(nil), versions...)
+	sort.SliceStable(byAge, func(i, j int) bool { return newerVersion(byAge[i], byAge[j]) })
+	omit := map[string]bool{}
+	budget, full := maxExportBodyBytes, false
+	for _, v := range byAge {
+		size := len(asString(v["body"]))
+		if full || size > budget {
+			full = true
+			omit[bareID(trimmed(v["id"]))] = true
+			continue
+		}
+		budget -= size
+	}
+	out := make([]map[string]any, 0, len(versions))
+	for _, v := range versions {
+		row := withoutTokenHash(v)
+		if omit[bareID(trimmed(v["id"]))] {
+			delete(row, "body")
+			row["bodyOmitted"] = true
+		}
+		out = append(out, row)
+	}
+	return out, len(omit)
+}
+
+// effectiveSettingsRow is a settings row as the store runs on it: the stored
+// row without its token hash, with every setting EffectiveSettings defaults at
+// its effective value, as wholesaleStoreSettings answers it (ruling 47).
+func effectiveSettingsRow(row map[string]any) map[string]any {
+	out := withoutTokenHash(row)
+	s := EffectiveSettings(row)
+	out["applicationsOpen"] = s.ApplicationsOpen
+	out["entitlementAdapter"] = s.EntitlementAdapter
+	out["introText"] = s.IntroText
+	out["staffEmail"] = s.StaffEmail
+	out["termsRequired"] = s.TermsRequired
+	out["linkLifetimeDays"] = s.LinkLifetimeDays
+	out["acceptanceText"] = s.AcceptanceText
+	return out
 }
 
 // withoutTokenHash is a copy of row with every token hash removed, at any depth.

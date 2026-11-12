@@ -54,6 +54,10 @@ func (f *fixtureReader) Rows(ctx context.Context, query string, args map[string]
 		return f.walk, nil
 	case "documentVersionsForStore":
 		return docsMatching(f.docs, args["storeId"], args["kind"]), nil
+	case "documentVersionBriefsForStore":
+		return briefsOf(docsMatching(f.docs, args["storeId"], args["kind"])), nil
+	case "wholesaleDocumentVersionById":
+		return docByID(f.docs, args["documentVersionId"]), nil
 	case "siteById":
 		for _, site := range f.sites {
 			if bareID(trimmed(site["id"])) == bareID(args["siteId"]) {

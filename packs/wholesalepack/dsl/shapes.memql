@@ -132,3 +132,18 @@ shape documentVersion documentVersionFull {
   publishedAt
   row.createdAt
 }
+
+@description("A document version WITHOUT its body: what tells whether a kind has a version, which is the newest, and what a history lists. The reads that run on every settings read and every shopper submission to a store that requires its terms read through this, and never carry a body of up to 200 KB they do not show.")
+@row
+shape documentVersion wholesaleDocumentVersionBrief {
+  row.id
+  ownerUserId
+  storeId
+  accountId
+  kind
+  label
+  sha256
+  publishedBy
+  publishedAt
+  row.createdAt
+}

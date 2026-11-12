@@ -165,6 +165,9 @@ func (p *Provider) publishDocument(ctx context.Context, args map[string]any, _ i
 
 // documents answers wholesaleDocuments: every kind with its current version and
 // its history, or, with versionId, that one version of this store.
+//
+// THE HISTORY CARRIES NO BODY, so it is read through the briefs; the one body a
+// kind's current version shows is read by its id.
 func (p *Provider) documents(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	storeID, _, err := p.admitStore(ctx, args)
 	if err != nil {
@@ -183,7 +186,7 @@ func (p *Provider) documents(ctx context.Context, args map[string]any, _ int) ([
 	}
 	kinds := make([]map[string]any, 0, len(DocumentKinds))
 	for _, kind := range DocumentKinds {
-		versions, err := p.documentVersionsOf(ctx, storeID, kind)
+		versions, err := p.documentVersionsOf(ctx, storeID, kind, documentBriefsQuery)
 		if err != nil {
 			return nil, err
 		}
@@ -193,8 +196,12 @@ func (p *Provider) documents(ctx context.Context, args map[string]any, _ int) ([
 		}
 		var current any
 		if len(versions) > 0 {
-			view := versionView(versions[0], people)
-			view["body"] = asString(versions[0]["body"])
+			whole, err := p.documentVersionByID(ctx, versions[0])
+			if err != nil {
+				return nil, err
+			}
+			view := versionView(whole, people)
+			view["body"] = asString(whole["body"])
 			current = view
 		}
 		kinds = append(kinds, map[string]any{"kind": kind, "current": current, "history": history})
@@ -215,32 +222,55 @@ func versionView(v map[string]any, people *peopleNames) map[string]any {
 	}
 }
 
+// The two reads of a store's versions: whole, and without the body.
+const (
+	documentVersionsQuery = "documentVersionsForStore"
+	documentBriefsQuery   = "documentVersionBriefsForStore"
+)
+
 // storeDocumentVersion is one of the store's versions by its id, in either
-// form. A version of another store is answered exactly as an unknown one.
+// form, body included. It is looked for among THIS store's versions only, so a
+// version of another store is answered exactly as an unknown one.
 func (p *Provider) storeDocumentVersion(ctx context.Context, storeID, versionID string) (map[string]any, error) {
 	for _, kind := range DocumentKinds {
-		versions, err := p.documentVersionsOf(ctx, storeID, kind)
+		versions, err := p.documentVersionsOf(ctx, storeID, kind, documentBriefsQuery)
 		if err != nil {
 			return nil, err
 		}
 		for _, v := range versions {
 			if bareID(trimmed(v["id"])) == bareID(versionID) {
-				return v, nil
+				return p.documentVersionByID(ctx, v)
 			}
 		}
 	}
 	return nil, fmt.Errorf("wholesale: there is no document version %q of this store", versionID)
 }
 
-// documentVersionsOf is every version of one of the store's documents, newest
-// first, read as the system under every form of the store id and paged to the
-// end, each version once. Its caller has admitted the caller.
-func (p *Provider) documentVersionsOf(ctx context.Context, storeID, kind string) ([]map[string]any, error) {
+// documentVersionByID reads the whole of the version brief names, as the
+// system. Its caller found the brief among the store's own versions.
+func (p *Provider) documentVersionByID(ctx context.Context, brief map[string]any) (map[string]any, error) {
+	id := trimmed(brief["id"])
+	rows, err := p.rowsFor(auth.ContextWithSystemActor(ctx, documentsActor), "wholesaleDocumentVersionById",
+		map[string]string{"documentVersionId": id})
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("wholesale: document version %q could not be read", id)
+	}
+	return rows[0], nil
+}
+
+// documentVersionsOf is every version of one of the store's documents through
+// query (whole, or briefs), newest first (newerVersion), read as the system
+// under every form of the store id and paged to the end, each version once.
+// Its caller has admitted the caller.
+func (p *Provider) documentVersionsOf(ctx context.Context, storeID, kind, query string) ([]map[string]any, error) {
 	sys := auth.ContextWithSystemActor(ctx, documentsActor)
 	seen := map[string]bool{}
 	var out []map[string]any
 	for _, form := range storeIDForms(storeID) {
-		err := p.eachPage(sys, "documentVersionsForStore", map[string]string{"storeId": form, "kind": kind}, "", nil,
+		err := p.eachPage(sys, query, map[string]string{"storeId": form, "kind": kind}, "", nil,
 			func(row map[string]any) {
 				if id := bareID(trimmed(row["id"])); id != "" {
 					if seen[id] {
@@ -254,43 +284,91 @@ func (p *Provider) documentVersionsOf(ctx context.Context, storeID, kind string)
 			return nil, err
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool { return versionTime(out[i]).After(versionTime(out[j])) })
+	sort.SliceStable(out, func(i, j int) bool { return newerVersion(out[i], out[j]) })
 	return out, nil
 }
 
-// versionTime is when a version was written: its row's createdAt, or, on a row
-// read without one, its publishedAt.
-func versionTime(v map[string]any) time.Time {
-	if at := rowTime(v["createdAt"]); !at.IsZero() {
-		return at
+// newerVersion reports whether version a is newer than b: by its row's
+// creation time, then its publishedAt, then its bare id. ONE ORDER, used
+// wherever a newest version is chosen, so two versions written at one instant
+// are told apart the same way on every read -- an acceptance names which one
+// a person was shown.
+func newerVersion(a, b map[string]any) bool {
+	if at, bt := rowTime(a["createdAt"]), rowTime(b["createdAt"]); !at.Equal(bt) {
+		return at.After(bt)
 	}
-	return rowTime(v["publishedAt"])
+	if at, bt := rowTime(a["publishedAt"]), rowTime(b["publishedAt"]); !at.Equal(bt) {
+		return at.After(bt)
+	}
+	return bareID(trimmed(a["id"])) > bareID(trimmed(b["id"]))
 }
 
-// currentDocuments is the store's current version of each kind that has one,
-// by kind; a kind with no version is absent. Its caller has admitted the caller.
-func (p *Provider) currentDocuments(ctx context.Context, storeID string) (map[string]map[string]any, error) {
-	out := map[string]map[string]any{}
-	for _, kind := range DocumentKinds {
-		versions, err := p.documentVersionsOf(ctx, storeID, kind)
+// currentBrief is the newest version of one kind, without its body, or nil.
+//
+// THE HEAD OF EACH SPELLING, NOT THE HISTORY: each spelling's first page is
+// already newest first, so the newest of the store is the newest of those
+// pages' rows, and a store with a long history costs one small page per
+// spelling.
+func (p *Provider) currentBrief(ctx context.Context, storeID, kind string) (map[string]any, error) {
+	sys := auth.ContextWithSystemActor(ctx, documentsActor)
+	var newest map[string]any
+	for _, form := range storeIDForms(storeID) {
+		rows, _, err := p.rowsPageWithList(sys, documentBriefsQuery, map[string]string{"storeId": form, "kind": kind}, "", nil, "")
 		if err != nil {
 			return nil, err
 		}
-		if len(versions) > 0 {
-			out[kind] = versions[0]
+		for _, row := range rows {
+			if newest == nil || newerVersion(row, newest) {
+				newest = row
+			}
 		}
+	}
+	return newest, nil
+}
+
+// currentBriefs is currentBrief for every kind that has a version.
+func (p *Provider) currentBriefs(ctx context.Context, storeID string) (map[string]map[string]any, error) {
+	out := map[string]map[string]any{}
+	for _, kind := range DocumentKinds {
+		brief, err := p.currentBrief(ctx, storeID, kind)
+		if err != nil {
+			return nil, err
+		}
+		if brief != nil {
+			out[kind] = brief
+		}
+	}
+	return out, nil
+}
+
+// currentDocuments is the store's current version of each kind that has one,
+// by kind, body included; a kind with no version is absent. One body is read
+// per kind: the current version's. Its caller has admitted the caller.
+func (p *Provider) currentDocuments(ctx context.Context, storeID string) (map[string]map[string]any, error) {
+	briefs, err := p.currentBriefs(ctx, storeID)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]map[string]any{}
+	for kind, brief := range briefs {
+		whole, err := p.documentVersionByID(ctx, brief)
+		if err != nil {
+			return nil, err
+		}
+		out[kind] = whole
 	}
 	return out, nil
 }
 
 // termsRuleRefusal refuses a store that would take applications (open) while
 // requiring its terms (termsRequired) with a kind that has no version. Either
-// one false needs no document and reads nothing.
+// one false needs no document and reads nothing; otherwise it reads the head
+// of each kind and no body.
 func (p *Provider) termsRuleRefusal(ctx context.Context, storeID string, open, termsRequired bool) error {
 	if !open || !termsRequired {
 		return nil
 	}
-	current, err := p.currentDocuments(ctx, storeID)
+	current, err := p.currentBriefs(ctx, storeID)
 	if err != nil {
 		return err
 	}
@@ -303,9 +381,9 @@ func (p *Provider) termsRuleRefusal(ctx context.Context, storeID string, open, t
 }
 
 // documentsSummary is the current version of each kind as the settings answer
-// it: {label, sha256}, or nil for a kind with none.
+// it: {label, sha256}, or nil for a kind with none. It reads no body.
 func (p *Provider) documentsSummary(ctx context.Context, storeID string) (map[string]any, error) {
-	current, err := p.currentDocuments(ctx, storeID)
+	current, err := p.currentBriefs(ctx, storeID)
 	if err != nil {
 		return nil, err
 	}
@@ -320,12 +398,12 @@ func (p *Provider) documentsSummary(ctx context.Context, storeID string) (map[st
 	return out, nil
 }
 
-// storeDocumentVersions is every version of every kind of the store, kind by
-// kind, each newest first: the export's.
+// storeDocumentVersions is every version of every kind of the store, whole,
+// kind by kind, each newest first: the export's.
 func (p *Provider) storeDocumentVersions(ctx context.Context, storeID string) ([]map[string]any, error) {
 	out := []map[string]any{}
 	for _, kind := range DocumentKinds {
-		versions, err := p.documentVersionsOf(ctx, storeID, kind)
+		versions, err := p.documentVersionsOf(ctx, storeID, kind, documentVersionsQuery)
 		if err != nil {
 			return nil, err
 		}

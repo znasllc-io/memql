@@ -124,13 +124,21 @@ func TestAHolderInAnotherOrganizationIsRefusedTheDocuments(t *testing.T) {
 func TestAVersionUnderTheOtherSpellingOfTheStoreIdIsFound(t *testing.T) {
 	eng := liveWholesaleEngine(t)
 	s := newAccessStore(t, eng, "docs-spelling")
-	wsExec(t, eng, seedCtx(), `appendWholesaleDocumentVersion(ownerUserId: `+quote(s.owner)+`, storeId: `+
-		quote("v1:shopify:store:"+s.store)+`, accountId: `+quote(s.account)+`, kind: "priceSheet", label: "Canonical list", `+
-		`body: "prices", sha256: "x", publishedBy: `+quote(userRef(s.staff))+`, publishedAt: `+
-		quote(time.Now().UTC().Format(time.RFC3339Nano))+`)`)
-	wsExec(t, eng, seedCtx(), `appendWholesaleDocumentVersion(ownerUserId: `+quote(s.owner)+`, storeId: `+quote(s.store)+
-		`, accountId: `+quote(s.account)+`, kind: "terms", label: "Bare terms", body: "terms", sha256: "y", publishedBy: `+
-		quote(userRef(s.staff))+`, publishedAt: `+quote(time.Now().UTC().Format(time.RFC3339Nano))+`)`)
+	// Each version written after the one before, so its row is the newer:
+	// the price sheet's newest is under the canonical spelling, the terms'
+	// under the bare one, and each kind has an older version under the other.
+	appendVersion := func(store, kind, label string) {
+		t.Helper()
+		wsExec(t, eng, seedCtx(), `appendWholesaleDocumentVersion(ownerUserId: `+quote(s.owner)+`, storeId: `+quote(store)+
+			`, accountId: `+quote(s.account)+`, kind: `+quote(kind)+`, label: `+quote(label)+`, body: `+quote(label+" body")+
+			`, sha256: "x", publishedBy: `+quote(userRef(s.staff))+`, publishedAt: `+
+			quote(time.Now().UTC().Format(time.RFC3339Nano))+`)`)
+	}
+	canonical := "v1:shopify:store:" + s.store
+	appendVersion(s.store, "priceSheet", "Bare old list")
+	appendVersion(canonical, "priceSheet", "Canonical list")
+	appendVersion(canonical, "terms", "Canonical old terms")
+	appendVersion(s.store, "terms", "Bare terms")
 	for _, asked := range []string{s.store, "v1:shopify:store:" + s.store} {
 		current, err := wholesalepack.CurrentDocumentsForTest(seedCtx(), eng, asked)
 		if err != nil {
@@ -140,8 +148,15 @@ func TestAVersionUnderTheOtherSpellingOfTheStoreIdIsFound(t *testing.T) {
 			t.Fatalf("currentDocuments(%q) = %+v, want both versions whichever spelling they hold", asked, current)
 		}
 		reply := answerOf(t, eng, signedIn(s.staff), documentCalls(s.site, asked)["wholesaleDocuments"])
-		if cur, _ := kindOf(t, reply, wholesalepack.DocumentPriceSheet)["current"].(map[string]any); cur["label"] != "Canonical list" {
+		if cur, _ := kindOf(t, reply, wholesalepack.DocumentPriceSheet)["current"].(map[string]any); cur["label"] != "Canonical list" ||
+			cur["body"] != "Canonical list body" {
 			t.Fatalf("asked as %q, the price sheet reads %+v", asked, cur)
+		}
+		if cur, _ := kindOf(t, reply, wholesalepack.DocumentTerms)["current"].(map[string]any); cur["label"] != "Bare terms" {
+			t.Fatalf("asked as %q, the terms read %+v", asked, cur)
+		}
+		if n := len(listRows(kindOf(t, reply, wholesalepack.DocumentPriceSheet)["history"])); n != 2 {
+			t.Fatalf("asked as %q, the price sheet's history holds %d versions, want both spellings' 2", asked, n)
 		}
 	}
 }

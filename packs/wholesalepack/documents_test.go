@@ -548,3 +548,239 @@ func docsMatching(rows []map[string]any, storeID, kind string) []map[string]any 
 	sort.SliceStable(out, func(i, j int) bool { return rowTime(out[i]["createdAt"]).After(rowTime(out[j]["createdAt"])) })
 	return out
 }
+
+// ---------------------------------------------------------------------------
+// Fix round 1
+// ---------------------------------------------------------------------------
+
+// THE EXPORT SHOWS WHAT THE STORE RUNS ON (ruling 47): every setting
+// EffectiveSettings defaults is exported at its effective value, as
+// wholesaleStoreSettings answers it, and the token hash stays out.
+func TestTheExportCarriesTheEffectiveSettings(t *testing.T) {
+	exported := func(f *storeFake) map[string]any {
+		p := f.provider()
+		p.now = func() time.Time { return readsClock }
+		got := decodedBy(t)(p.exportStore(staffReads(), map[string]any{"siteId": readsSite, "storeId": readsStore}, 0))
+		var parsed struct {
+			Settings map[string]any `json:"settings"`
+		}
+		if err := json.Unmarshal([]byte(asString(got["json"])), &parsed); err != nil {
+			t.Fatalf("the export is not JSON: %v", err)
+		}
+		return parsed.Settings
+	}
+	f := newStoreFake()
+	f.settings = map[string]any{"id": SettingsRowID(readsStore), "storeId": readsStore, "entitlementAdapter": AdapterNone,
+		"linkLifetimeDays": float64(0), "acceptanceText": "", "tokenHash": "settings-digest"}
+	got := exported(f)
+	want := map[string]any{"termsRequired": false, "linkLifetimeDays": float64(30), "acceptanceText": DefaultAcceptanceText,
+		"applicationsOpen": false, "entitlementAdapter": ""}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("a store that named none exports %s = %v, want %v", k, got[k], v)
+		}
+	}
+	if _, carries := got["tokenHash"]; carries {
+		t.Fatalf("the exported settings carry a token hash: %+v", got)
+	}
+	f.settings = map[string]any{"id": SettingsRowID(readsStore), "storeId": readsStore, "applicationsOpen": true,
+		"termsRequired": true, "linkLifetimeDays": float64(14), "acceptanceText": "We accept the terms above."}
+	got = exported(f)
+	for k, v := range map[string]any{"termsRequired": true, "linkLifetimeDays": float64(14),
+		"acceptanceText": "We accept the terms above.", "applicationsOpen": true} {
+		if got[k] != v {
+			t.Errorf("a store that named them exports %s = %v, want %v", k, got[k], v)
+		}
+	}
+}
+
+// THE NEWEST VERSION IS CHOSEN THE SAME WAY WHATEVER ORDER THE ROWS ARRIVE IN:
+// by creation time, then publishedAt, then the bare id.
+func TestTheNewestVersionIsChosenTheSameWayWhateverTheOrder(t *testing.T) {
+	at := docsClock
+	a := map[string]any{"id": documentVersionConcept + ":dv-a", "storeId": "store-live", "kind": DocumentTerms, "label": "A",
+		"body": "a", "publishedAt": at.Format(time.RFC3339Nano), "createdAt": at}
+	b := map[string]any{"id": documentVersionConcept + ":dv-b", "storeId": "store-live", "kind": DocumentTerms, "label": "B",
+		"body": "b", "publishedAt": at.Format(time.RFC3339Nano), "createdAt": at}
+	later := map[string]any{"id": documentVersionConcept + ":dv-0", "storeId": "v1:shopify:store:store-live", "kind": DocumentMap,
+		"label": "later", "body": "m", "publishedAt": at.Add(time.Second).Format(time.RFC3339Nano), "createdAt": at}
+	earlier := map[string]any{"id": documentVersionConcept + ":dv-9", "storeId": "store-live", "kind": DocumentMap,
+		"label": "earlier", "body": "m", "publishedAt": at.Format(time.RFC3339Nano), "createdAt": at}
+	for _, order := range [][]map[string]any{{a, b, later, earlier}, {b, a, earlier, later}} {
+		h := newDocsHarness(nil)
+		h.reader.docs = order
+		current, err := h.p.currentDocuments(context.Background(), "store-live")
+		if err != nil {
+			t.Fatalf("currentDocuments: %v", err)
+		}
+		if current[DocumentTerms]["label"] != "B" || current[DocumentMap]["label"] != "later" {
+			t.Fatalf("arriving as %v, %v: current terms %v and map %v, want B (the larger id) and later (the later publishedAt)",
+				order[0]["label"], order[1]["label"], current[DocumentTerms]["label"], current[DocumentMap]["label"])
+		}
+		got := decodedBy(t)(h.p.documents(staffCtx("staff-1"), map[string]any{"siteId": "site-1", "storeId": "store-live"}, 0))
+		terms, _ := listOfMaps(got["kinds"])[0]["current"].(map[string]any)
+		history := listOfMaps(listOfMaps(got["kinds"])[0]["history"])
+		if terms["label"] != "B" || len(history) != 2 || history[0]["label"] != "B" || history[1]["label"] != "A" {
+			t.Fatalf("wholesaleDocuments answered current %v and history %v", terms, history)
+		}
+	}
+}
+
+// listOfMaps narrows a decoded list.
+func listOfMaps(v any) []map[string]any {
+	items, _ := v.([]any)
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		m, _ := item.(map[string]any)
+		out = append(out, m)
+	}
+	return out
+}
+
+// THE TERMS RULE AND THE SETTINGS SUMMARY READ NO BODY: they read the version
+// briefs, never the whole version.
+func TestTheTermsRuleAndTheSummaryReadNoBody(t *testing.T) {
+	h := newDocsHarness(openSettings(true, true))
+	h.reader.docs = docsFor(DocumentTerms, DocumentMap, DocumentPriceSheet)
+	if err := h.p.termsRuleRefusal(context.Background(), "store-live", true, true); err != nil {
+		t.Fatalf("termsRuleRefusal with all three: %v", err)
+	}
+	got := decodedBy(t)(h.p.storeSettings(staffCtx("staff-1"), map[string]any{"siteId": "site-1", "storeId": "store-live"}, 0))
+	if docs, _ := got["documents"].(map[string]any); docs[DocumentMap] == nil {
+		t.Fatalf("the summary names no MAP policy: %+v", got["documents"])
+	}
+	briefs := 0
+	for _, q := range h.reader.asked {
+		switch q {
+		case "documentVersionsForStore", "wholesaleDocumentVersionById":
+			t.Fatalf("the terms rule or the summary read whole versions through %s (reads: %v)", q, h.reader.asked)
+		case "documentVersionBriefsForStore":
+			briefs++
+		}
+	}
+	if briefs == 0 {
+		t.Fatalf("the terms rule and the summary read no briefs at all (reads: %v)", h.reader.asked)
+	}
+}
+
+// A STORE WITH SIXTY VERSIONS OF ONE KIND answers its newest from the first page
+// of each spelling, even when the newest is held under the other spelling; the
+// history still lists every version.
+func TestSixtyVersionsAnswerTheNewestFromTheHeadOfEachSpelling(t *testing.T) {
+	f := newStoreFake()
+	for i := 0; i < 60; i++ {
+		f.docs = append(f.docs, map[string]any{"id": documentVersionConcept + ":v" + strconv.Itoa(i), "storeId": readsStore,
+			"kind": DocumentTerms, "label": "v" + strconv.Itoa(i), "body": "body " + strconv.Itoa(i),
+			"createdAt": readsClock.Add(time.Duration(i) * time.Minute)})
+	}
+	f.docs = append(f.docs, map[string]any{"id": documentVersionConcept + ":newest", "storeId": "v1:shopify:store:" + readsStore,
+		"kind": DocumentTerms, "label": "newest", "body": "the newest body", "createdAt": readsClock.Add(2 * time.Hour)})
+	p := f.provider()
+	current, err := p.currentDocuments(context.Background(), readsStore)
+	if err != nil {
+		t.Fatalf("currentDocuments: %v", err)
+	}
+	if current[DocumentTerms]["label"] != "newest" || current[DocumentTerms]["body"] != "the newest body" {
+		t.Fatalf("current terms = %+v, want the newest, with its body", current[DocumentTerms])
+	}
+	// One page per kind per spelling: three kinds, two spellings.
+	if got := f.pages["documentVersionBriefsForStore"]; got != 6 {
+		t.Fatalf("currentDocuments read %d pages of briefs, want 6 (the head of each spelling of each kind)", got)
+	}
+	if f.pages["documentVersionsForStore"] != 0 {
+		t.Fatalf("currentDocuments paged whole versions %d times", f.pages["documentVersionsForStore"])
+	}
+	got := decodedBy(t)(p.documents(staffReads(), map[string]any{"siteId": readsSite, "storeId": readsStore}, 0))
+	terms := listOfMaps(got["kinds"])[0]
+	if cur, _ := terms["current"].(map[string]any); cur["label"] != "newest" || cur["body"] != "the newest body" {
+		t.Fatalf("wholesaleDocuments current = %+v", terms["current"])
+	}
+	if history := listOfMaps(terms["history"]); len(history) != 61 || history[0]["label"] != "newest" || history[60]["label"] != "v0" {
+		t.Fatalf("history holds %d versions, want all 61 newest first", len(history))
+	}
+}
+
+// THE EXPORT'S BODIES ARE BOUNDED (ruling 48): newest first across all kinds,
+// until maxExportBodyBytes; past it a version is exported without its body,
+// marked bodyOmitted, with its fingerprint, and the count is at the top.
+func TestTheExportsDocumentBodiesAreBoundedNewestFirst(t *testing.T) {
+	export := func(f *storeFake) map[string]any {
+		p := f.provider()
+		p.now = func() time.Time { return readsClock }
+		got := decodedBy(t)(p.exportStore(staffReads(), map[string]any{"siteId": readsSite, "storeId": readsStore}, 0))
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(asString(got["json"])), &parsed); err != nil {
+			t.Fatalf("the export is not JSON: %v", err)
+		}
+		return parsed
+	}
+	f := newStoreFake()
+	f.docs = docsForStore(readsStore, 3, 10)
+	under := export(f)
+	if under["documentBodiesOmitted"] != float64(0) {
+		t.Fatalf("under the budget documentBodiesOmitted = %v, want 0", under["documentBodiesOmitted"])
+	}
+	for _, v := range listOfMaps(under["documentVersions"]) {
+		if _, has := v["body"]; !has || v["bodyOmitted"] != nil {
+			t.Fatalf("under the budget a version lost its body: %+v", v)
+		}
+	}
+	// Twenty-two bodies of 204800 bytes: twenty fit in 4 MiB, the oldest two do not.
+	f.docs = docsForStore(readsStore, 22, maxDocumentBytes)
+	over := export(f)
+	if over["documentBodiesOmitted"] != float64(2) {
+		t.Fatalf("over the budget documentBodiesOmitted = %v, want 2", over["documentBodiesOmitted"])
+	}
+	omitted := map[string]bool{}
+	for _, v := range listOfMaps(over["documentVersions"]) {
+		if v["bodyOmitted"] == true {
+			if _, has := v["body"]; has || len(asString(v["sha256"])) != 64 || v["label"] == nil {
+				t.Fatalf("an omitted version must keep every other field and no body: %+v", v)
+			}
+			omitted[asString(v["label"])] = true
+		} else if len(asString(v["body"])) != maxDocumentBytes {
+			t.Fatalf("a version under the budget lost its body: %v", v["label"])
+		}
+	}
+	if len(omitted) != 2 || !omitted["doc-0"] || !omitted["doc-1"] {
+		t.Fatalf("omitted %v, want the two oldest (doc-0, doc-1)", omitted)
+	}
+}
+
+// docsForStore is n versions on store, of the three kinds in turn, each body
+// size bytes, doc-0 the oldest.
+func docsForStore(store string, n, size int) []map[string]any {
+	var out []map[string]any
+	for i := 0; i < n; i++ {
+		body := strings.Repeat(strconv.Itoa(i%10), size)
+		out = append(out, map[string]any{"id": documentVersionConcept + ":doc-" + strconv.Itoa(i), "storeId": store,
+			"kind": DocumentKinds[i%3], "label": "doc-" + strconv.Itoa(i), "body": body, "sha256": sha256Hex(body),
+			"createdAt": readsClock.Add(time.Duration(i) * time.Minute)})
+	}
+	return out
+}
+
+// briefsOf is rows without their bodies, as the brief shape projects them.
+func briefsOf(rows []map[string]any) []map[string]any {
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		brief := map[string]any{}
+		for k, v := range row {
+			if k != "body" {
+				brief[k] = v
+			}
+		}
+		out = append(out, brief)
+	}
+	return out
+}
+
+// docByID is the one row at id, matched by bare id.
+func docByID(rows []map[string]any, id string) []map[string]any {
+	for _, row := range rows {
+		if bareID(trimmed(row["id"])) == bareID(id) {
+			return []map[string]any{row}
+		}
+	}
+	return nil
+}

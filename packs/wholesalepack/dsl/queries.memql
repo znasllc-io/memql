@@ -15,7 +15,7 @@
 // nobody else reads any.
 
 use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings, documentVersion }
-use wholesale.shapes.{ applicationFull, applicationDecisionFull, entitlementFull, wholesaleSettingsFull, documentVersionFull }
+use wholesale.shapes.{ applicationFull, applicationDecisionFull, entitlementFull, wholesaleSettingsFull, documentVersionFull, wholesaleDocumentVersionBrief }
 use wholesale.shapes.{ wholesaleStorePlan }
 use shopify.overlay.concepts.{ store }
 
@@ -158,6 +158,30 @@ query documentVersion documentVersionsForStore {
   filter  row => row.storeId == args.storeId && row.kind == args.kind
   sort    "row.createdAt", "desc"
   paginate 200
+  shape   documentVersionFull
+}
+
+@description("The versions of one of a store's documents WITHOUT their bodies, newest first. Its first page is the head a reader takes the current version from; a history pages it to its end. Matched as written, so a reader asks every form of the store id.")
+@actor
+query documentVersion documentVersionBriefsForStore {
+  args {
+    storeId  string!
+    kind     string!
+  }
+  filter  row => row.storeId == args.storeId && row.kind == args.kind
+  sort    "row.createdAt", "desc"
+  paginate 50
+  shape   wholesaleDocumentVersionBrief
+}
+
+@description("One document version by id, body included: the one body a reader of the current version or of one named version needs.")
+@unbounded("document version by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+query documentVersion wholesaleDocumentVersionById {
+  args {
+    documentVersionId  string!
+  }
+  filter  row => row.id == args.documentVersionId
   shape   documentVersionFull
 }
 
