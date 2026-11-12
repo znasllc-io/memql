@@ -244,9 +244,13 @@ func (p *Provider) notifyStaff(ctx context.Context, args map[string]any, _ int) 
 		if errors.Is(err, memql.ErrRowVersionChanged) {
 			return alreadyStaged()
 		}
-		// An engine error may quote the call it refused: the address does not
-		// reach the caller or a log line.
-		return nil, errors.New(strings.ReplaceAll(err.Error(), target, "the store's address"))
+		// NOTHING OF THE NOTICE IN THE ERROR. The engine's error may quote the call
+		// it refused, and the call carries the store's address and a subject and
+		// body filled with the applicant's address, name and company; scrubbing
+		// each value would miss one written another way. So the error is a fixed
+		// sentence naming the event and the application, and the engine's text is
+		// neither returned nor logged.
+		return nil, fmt.Errorf("wholesale: staging the %s notice for application %q in the outbox failed", event, id)
 	}
 	return confirm("wholesale:staffNotice", map[string]any{"applicationId": id, "event": event,
 		"status": "staged", "requestId": requestID, "alreadyStaged": false})

@@ -925,6 +925,37 @@ func TestTwoNodesStagingOneNoticeStageItOnce(t *testing.T) {
 	}
 }
 
+// A STAGE THAT FAILS SAYS SO WITHOUT THE NOTICE: the engine's error may quote
+// the call it refused, and the call carries the store's address and a subject
+// and body filled with the applicant's address, name and company. The error
+// names the event and the application in a fixed sentence, and neither it nor
+// a log line carries any of those values.
+func TestAFailedStageCarriesNothingOfTheNotice(t *testing.T) {
+	w := newEmailWorld()
+	w.settings["termsRequired"] = false
+	p := w.provider()
+	subject := "Ready: {{companyName}} / {{applicantEmail}}"
+	body := "{{applicantName}} <{{applicantEmail}}> of {{companyName}}"
+	filled := fillPlaceholders(body, map[string]string{"companyName": "Kestrel Cycles", "applicantName": "Ada Example", "applicantEmail": linkEmail})
+	w.stageErr = fmt.Errorf("memql: stageServerOutboundRequest(requestId: \"x\", target: \"desk@example.com\", subject: \"Ready: Kestrel Cycles / %s\", body: %q) was refused", linkEmail, filled)
+	_, err := p.notifyStaff(automation(), map[string]any{"applicationId": linkApp, "event": StaffEventReadyToReview,
+		"subject": subject, "body": body}, 0)
+	if err == nil {
+		t.Fatal("a refused stage answered no error")
+	}
+	for _, leaked := range []string{linkEmail, "Ada Example", "Kestrel Cycles", "desk@example.com", "Ready:", "stageServerOutboundRequest"} {
+		if strings.Contains(err.Error(), leaked) {
+			t.Errorf("the error carries %q: %v", leaked, err)
+		}
+		if strings.Contains(w.log.String(), leaked) {
+			t.Errorf("a log line carries %q: %s", leaked, w.log.String())
+		}
+	}
+	if !strings.Contains(err.Error(), StaffEventReadyToReview) || !strings.Contains(err.Error(), linkApp) {
+		t.Fatalf("the error does not name the event and the application: %v", err)
+	}
+}
+
 func TestAReDeliveredStaffEventStagesNothingNew(t *testing.T) {
 	w := newEmailWorld()
 	w.settings["termsRequired"] = false
