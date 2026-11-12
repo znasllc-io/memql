@@ -869,3 +869,17 @@ seed capability cap-developer-execute-app-pipelines-channels { roleSlug: "develo
 seed capability cap-owner-execute-app-pipelines-requests { roleSlug: "owner" verb: "execute" resourceType: "app:pipelines/requests" predefined: true }
 @description("developer: execute the app:pipelines/requests surface; this grants no repository authority.")
 seed capability cap-developer-execute-app-pipelines-requests { roleSlug: "developer" verb: "execute" resourceType: "app:pipelines/requests" predefined: true }
+
+// ---- app:pipelines/settings -- save the installation-wide switches of Pipelines > Settings ----
+//
+// OWNER AND DEVELOPER, the two roles the app is for. The switches (the two AI
+// switches, the weekly security scans) are configuration variables, and a
+// variable's row is written by a cluster owner or by server code that has
+// authorized its caller: pipelinesAISettingsSave and
+// pipelinesSecuritySettingsSave are that server code, and this part is what
+// they ask for. A part of its own, so turning a model on for every pipeline can
+// be granted or withheld apart from connecting one or re-running a run.
+@description("owner: the settings part of the Pipelines app -- save the installation-wide AI and weekly security scan switches; this grants no repository authority.")
+seed capability cap-owner-execute-app-pipelines-settings { roleSlug: "owner" verb: "execute" resourceType: "app:pipelines/settings" predefined: true }
+@description("developer: the settings part of the Pipelines app -- save the installation-wide AI and weekly security scan switches; this grants no repository authority.")
+seed capability cap-developer-execute-app-pipelines-settings { roleSlug: "developer" verb: "execute" resourceType: "app:pipelines/settings" predefined: true }

@@ -756,6 +756,16 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		return nil, meta, fmt.Errorf("%s: @serverWritten requires internal origin; use the concept's authorized capability", conceptMeta.Name)
 	}
 
+	// A CONFIGURATION VARIABLE'S ROW is the deployment's to write: a cluster
+	// owner, or server code stamped for the write (a settings save). Here,
+	// beside the check above and for its reasons: the answer is a property of
+	// the concept and the caller, so it covers the named mutation and the raw
+	// literal alike and a refused write reads nothing. Reads are not this
+	// rule's; see platform_variable_write_guard.go for why it is not a tier.
+	if err := guardPlatformVariableWrite(ctx, conceptMeta.Name); err != nil {
+		return nil, meta, err
+	}
+
 	// RETIRED CONCEPT: registered, readable, CLOSED TO NEW WRITES (memql#3756).
 	// A promoted concept demoted while rows already existed under it keeps its
 	// registry entry precisely so those rows stay readable -- which means the
@@ -1290,6 +1300,17 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	}
 	if conceptMeta.Name == WorkerRegistrationConcept {
 		if err := validateWorkerConsentServerOnly(ctx, organizationPrior, payload); err != nil {
+			return nil, meta, err
+		}
+	}
+	// A SOURCE CREDENTIAL'S ROW is the engine's account of a value it sealed:
+	// server code creates it and writes every field but the revocation. Here,
+	// beside the consent guard and for its reason: it judges the OWNER too,
+	// which is final only after the stamps above, and compares it before
+	// canonicalization. The writers' @serverOnly never sees a raw insert() or
+	// an inline update{}. See platform_source_credential_write_guard.go.
+	if conceptMeta.Name == conceptPlatformSourceCredential {
+		if err := validateSourceCredentialServerOnly(ctx, organizationPrior, payload); err != nil {
 			return nil, meta, err
 		}
 	}

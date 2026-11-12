@@ -57,8 +57,20 @@ mutation globalSecret setGlobalSecret {
 // Upserts an instance-wide (global) plaintext variable in
 // v1:platform:globalVariable. Used by seed files and
 // `make variable-set SCOPE=global` to populate instance defaults.
+//
+// WHO MAY CALL IT is the engine's to say, for this mutation and for the raw
+// insert literal alike (component/memql platform_variable_write_guard.go): a
+// cluster owner -- the operator credential's stream is one -- or server code
+// that has authorized its caller and stamps internal origin for the write.
+// A settings surface for anyone else goes through a capability that derives
+// the row's name itself (integrationConfigure, providerFederationSet,
+// pipelinesAISettingsSave, pipelinesSecuritySettingsSave). It carries no
+// @serverOnly because the operator CLI calls it by name over the wire, and no
+// @requiresRank or @requiresCapability because a gate declared here would be
+// judged for this one call and never for the raw literal.
 
 /// Persist an instance-wide (global) plaintext variable row in v1:platform:globalVariable.
+/// Cluster owner, or server code stamped for the write: the engine judges the write itself.
 mutation globalVariable setGlobalVariable {
   args {
     id           string!
@@ -123,8 +135,13 @@ mutation partitionSecret setPartitionSecret {
 // v1:platform:partitionVariable. Companion to setPartitionSecret
 // for non-sensitive values. Used by `make variable-set SCOPE=partition`
 // and by automations that write per-tenant config.
+//
+// Who may call it is the engine's to say, exactly as for setGlobalVariable
+// above: a cluster owner (an automation of the registered tree writes as the
+// deployment), or server code stamped for the write.
 
 /// Persist a partition-scoped plaintext variable row in v1:platform:partitionVariable.
+/// Cluster owner, or server code stamped for the write: the engine judges the write itself.
 mutation partitionVariable setPartitionVariable {
   args {
     id           string!
@@ -2886,6 +2903,12 @@ mutation site setSiteStatus {
 // the fetcher's own account of a fetch. revokeSourceCredential is the PERSON's:
 // an owned, client-reachable status flip the write guard admits for the row's
 // owner and refuses for everyone else.
+//
+// @serverOnly decides who may CALL the engine's writers. What a write may put
+// on the row, whichever construct or literal it arrives through, is held at the
+// write itself (component/memql platform_source_credential_write_guard.go):
+// without internal origin a row is not created and nothing but its revocation
+// changes.
 
 /// Land a sealed credential. @serverOnly, and caller-scoping is not the fix: the row IS the caller's
 /// (ownerUserId is stamped from actor.userId below), so a scoped form would admit exactly the call

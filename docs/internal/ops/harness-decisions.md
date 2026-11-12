@@ -4103,7 +4103,15 @@ Settings > AI. Connected workflow:
 - **Where the switches live.** The global variable `MEMQL_PIPELINES_AI`
   (`pipelines.AISettingsVariable`, `component/pipelines/ai.go`), JSON
   `{"review": bool, "diagnosis": bool}`. The OS
-  writes it through `setGlobalVariable` (row `var-global-memql-pipelines-ai`).
+  saves it through `pipelinesAISettingsSave`
+  (`component/pipelinerun/settings.go`, 2026-11-12): the engine writes the
+  variable's row (`var-global-memql-pipelines-ai`, or the active row already
+  carrying the name) for a holder of `execute app:pipelines/settings`, because
+  a variable's row is written by a cluster owner or by stamped server code
+  (`component/memql/platform_variable_write_guard.go`). The weekly security
+  scans switch is saved the same way, through `pipelinesSecuritySettingsSave`.
+  Regression tests: `component/pipelinerun/settings_test.go` and
+  `settings_db_test.go` (two engines over one database).
 - **Read at use, not at run open** (`Deps.aiSettings`,
   `component/pipelinerun/ai_settings.go`). A captured-policy switch would make
   every flip refuse the reviews in flight ("installed independent review policy

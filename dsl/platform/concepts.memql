@@ -42,6 +42,15 @@ concept globalSecret {
 /// @scope("global")) and is visible to every tenant. Used for instance-level defaults like provider
 /// names, feature flags, log levels, and tuning knobs. For per-tenant overrides use
 /// v1:platform:partitionVariable. For sensitive values use v1:platform:globalSecret.
+///
+/// READ BY EVERYONE SIGNED IN, WRITTEN BY THE DEPLOYMENT. No @rowAuthz tier, deliberately: MemQL
+/// OS, DSL logic and engine readers holding no caller identity all read these rows, and a tier
+/// decides reads as well as writes. The write side is the engine's own rule
+/// (component/memql platform_variable_write_guard.go), because the resolver reads a row by name
+/// ahead of the environment: a row is written by a cluster owner (which is what the operator
+/// credential admits), or by server code that has authorized its caller and stamps internal origin
+/// for the one write -- a settings save such as integrationConfigure, providerFederationSet or the
+/// Pipelines settings saves. The raw insert literal is judged by the same rule as setGlobalVariable.
 @displayCard(primary="name", secondary="value", tertiary="description", status="active")
 concept globalVariable {
   name         string!  @description("Variable name (uppercase with underscores by convention).")
@@ -112,6 +121,9 @@ concept partitionSecret {
 /// wire shape as v1:platform:globalVariable, different scope. When the partition-scoped resolver
 /// (resolveVariable) cannot find a row, it falls back to v1:platform:globalVariable so a tenant's
 /// override wins over the instance default but the instance default is always available.
+///
+/// Read by everyone signed in and written by the deployment, for the reasons written on
+/// v1:platform:globalVariable: a cluster owner, or server code stamped for the write.
 @displayCard(primary="name", secondary="value", tertiary="description", status="active")
 concept partitionVariable {
   name         string!  @description("Variable name (uppercase with underscores by convention).")
@@ -932,6 +944,16 @@ concept syncState {
 /// deployment whose source arrived through this token is a fact about this row -- and a deleted
 /// row answers no question anybody asks after an incident. Revocation flips `status` and stamps
 /// `revokedAt`; rotation is adding a new credential and switching a source to it.
+///
+/// THE ROW IS SERVER-WRITTEN. The tier says whose row it is; it does not say what a person's own
+/// write may put on it, and every field but the revocation is the engine's account of something
+/// only the engine did (sealed a value, refreshed it, asked GitHub what a grant reaches). So a row
+/// is created, and every field but `status` and `revokedAt` written, only under internal origin by
+/// the capability that produced the value; a person's own write may revoke the credential and
+/// nothing else. The writers' @serverOnly decides who may call them and never sees a raw insert,
+/// so the engine holds the rule at the write itself
+/// (component/memql platform_source_credential_write_guard.go), and a field added here is
+/// server-written until that file says otherwise.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="label", secondary="host", tertiary="fingerprint", status="status")
 concept sourceCredential {

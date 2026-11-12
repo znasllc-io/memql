@@ -176,7 +176,20 @@ func (e *MemQLEngine) evaluateProviderFederationSetExpression(ctx context.Contex
 			"value":       value,
 			"description": "Seeded from the OS Settings AI providers section.",
 		})
-		if _, err := e.Execute(ctx, call); err != nil {
+		// INTERNAL ORIGIN, FOR THIS ONE WRITE. A v1:platform:globalVariable row
+		// is written by a cluster owner or by server code that has authorized
+		// its caller and stamps internal origin for the write
+		// (platform_variable_write_guard.go). This builtin admits a DEVELOPER as
+		// well as an owner (providersConfigAuthorized, already passed), so a
+		// developer's ids are written as the second kind; without the stamp the
+		// engine refuses them and the Settings section offers a developer a
+		// save that cannot land. Inline, on the one Execute that needs it: the
+		// caller's own context is untouched, their actor stays on the write so
+		// `createdBy` names who saved it, and what the stamp can reach is
+		// bounded above -- the row's name and id come from federationFieldNames,
+		// never from the caller.
+		// Regression: TestProviderFederationSetWritesItsRowsForEveryRoleItAdmits.
+		if _, err := e.Execute(auth.ContextWithInternalOrigin(ctx), call); err != nil {
 			return nil, fmt.Errorf("providerFederationSet: write %s: %w", envName, err)
 		}
 		written = append(written, envName)

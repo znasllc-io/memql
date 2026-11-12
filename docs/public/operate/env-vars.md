@@ -215,6 +215,33 @@ stream as one, so `scripts/secrets` seeds through the same rule.
 [The row-authorization reference](auth/per-row-authz-audit.md#the-two-secret-concepts)
 has the rule and the tests that hold it.
 
+### Who reads and writes a variable row
+
+A variable row is plaintext configuration, and it is read by everyone signed
+in: MemQL OS draws settings from these rows, and DSL logic reads its windows
+and graces through `globalVariable(name: ...)`. The two variable concepts
+declare no row tier for that reason.
+
+Writing one is narrower, because the resolver reads a row by name ahead of the
+environment, so a row decides what a name means on every node:
+
+- **A cluster owner writes a row directly.** `setGlobalVariable`,
+  `setPartitionVariable` and the raw `insert(...)` literal are admitted for a
+  cluster owner. The operator credential admits a stream as one, so
+  `scripts/secrets` seeds through the same rule, and an automation of the
+  loaded DSL tree writes as the deployment.
+- **Everyone else saves through the surface that owns the value.** A settings
+  save authorizes its caller, derives the row's name and id itself, and writes
+  with internal origin: `integrationConfigure` for the email settings and
+  `providerFederationSet` for a vendor's federation ids (owner or developer),
+  and `pipelinesAISettingsSave` / `pipelinesSecuritySettingsSave` for the
+  Pipelines switches (the `settings` part of the Pipelines app).
+- **A client calling `setGlobalVariable` itself is refused** unless it is a
+  cluster owner's, on a fresh id and over a stored row.
+
+[The row-authorization reference](auth/per-row-authz-audit.md#the-two-variable-concepts)
+has the rule and the tests that hold it.
+
 ### Encryption
 
 Secrets are sealed with **NaCl secretbox** (XSalsa20-Poly1305) under
@@ -800,7 +827,7 @@ Stored in `v1:platform:globalVariable`.
 
 These aren't in the manifest yet -- operators add them by writing the
 `v1:platform:globalVariable` row directly (the `setGlobalVariable`
-mutation) -- but they're documented here because they live in that
+mutation, as a cluster owner) -- but they're documented here because they live in that
 concept and are read by the product frontend's runtime config layer
 (its publicConfig whitelist):
 
@@ -826,7 +853,8 @@ concept and are read by the product frontend's runtime config layer
 The exact name on the MemQL side has to match the entry in the
 frontend's publicConfig whitelist exactly. To add a new one: add it to
 the whitelist, then either append it to the manifest and re-seed, or
-call `setGlobalVariable(name: "...", value: "...")` directly.
+call `setGlobalVariable(name: "...", value: "...")` directly as a cluster
+owner ([who writes a variable row](#who-reads-and-writes-a-variable-row)).
 
 ### Per-tenant overrides
 
@@ -1047,14 +1075,15 @@ deploy-config change every time it rotates.
 
 1. Append a row to `scripts/secrets/manifest.yaml` under `variables:`
    and seed it the same way, *or* write the row directly with the
-   `setGlobalVariable(name: "YOUR_NAME", value: "...")` mutation.
+   `setGlobalVariable(name: "YOUR_NAME", value: "...")` mutation, as a
+   cluster owner.
 2. The DSL resolver returns it from `resolveVariable("YOUR_NAME")` or
    the same `env()` chain in provider auth.
 
 ### Adding a per-tenant (partition-scoped) entry
 
-Call `setPartitionSecret` / `setPartitionVariable` directly. The
-seeder writes global rows only -- the manifest carries no
+Call `setPartitionSecret` / `setPartitionVariable` directly, as a cluster
+owner. The seeder writes global rows only -- the manifest carries no
 partition-scoped entries -- and the partition dimension itself is
 being retired (#56), so treat these two concepts as legacy surface
 rather than the place to put new config.
@@ -1148,8 +1177,9 @@ Check the resolver chain in order:
 
 ### Local override without touching the env file
 
-`setGlobalSecret` / `setGlobalVariable` write directly to the running
-MemQL without modifying the env file. Useful for one-off experiments.
+`setGlobalSecret` / `setGlobalVariable`, called as a cluster owner, write
+directly to the running MemQL without modifying the env file. Useful for
+one-off experiments.
 Note that the next `make down && make up` recreates the database, and a
 re-seed replaces the value with whatever is in the env file -- so put it
 there too if you want it to last.

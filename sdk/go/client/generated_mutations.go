@@ -11382,7 +11382,7 @@ func SetGlobalSecretBuild(args SetGlobalSecretArgs) string {
 	return b.String()
 }
 
-// SetGlobalVariable -- Persist an instance-wide (global) plaintext variable row in v1:platform:globalVariable.
+// SetGlobalVariable -- Persist an instance-wide (global) plaintext variable row in v1:platform:globalVariable. Cluster owner, or server code stamped for the write: the engine judges the write itself.
 //
 // Bound concept: v1:platform:globalVariable (machine-readable: BoundConcepts["setGlobalVariable"] in generated_concepts.go).
 type SetGlobalVariableArgs struct {
@@ -11751,7 +11751,7 @@ func SetPartitionSecretBuild(args SetPartitionSecretArgs) string {
 	return b.String()
 }
 
-// SetPartitionVariable -- Persist a partition-scoped plaintext variable row in v1:platform:partitionVariable.
+// SetPartitionVariable -- Persist a partition-scoped plaintext variable row in v1:platform:partitionVariable. Cluster owner, or server code stamped for the write: the engine judges the write itself.
 //
 // Bound concept: v1:platform:partitionVariable (machine-readable: BoundConcepts["setPartitionVariable"] in generated_concepts.go).
 type SetPartitionVariableArgs struct {

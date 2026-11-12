@@ -139,9 +139,6 @@ func (i *Integration) handleConfigure(ctx context.Context, args map[string]any, 
 	}
 
 	var call string
-	// writeCtx is the context the one row write runs under. It is the caller's
-	// own for a plain setting and gains internal origin for a credential, below.
-	writeCtx := ctx
 	if slot.Secret {
 		ciphertext, fingerprint, err := secret.Encrypt(value)
 		if err != nil {
@@ -157,29 +154,6 @@ func (i *Integration) handleConfigure(ctx context.Context, args map[string]any, 
 			"description":    "Set from the OS Settings Integrations section.",
 			"addedBy":        actorOrSystem(ctx),
 		})
-		// INTERNAL ORIGIN, FOR THIS ONE WRITE. v1:platform:globalSecret declares
-		// @rowAuthz(clusterOwner): its rows are the cluster owner's to write, or
-		// server code's that has authorized its caller and stamps internal
-		// origin for the write (component/memql create_rank_floor.go and
-		// rowauthz_write_guard.go name the two). This section admits a DEVELOPER
-		// as well as an owner, deliberately (configureAuthorized, above, and
-		// already passed by the time this line runs), so a developer's
-		// credential is written as the second kind. Without the stamp the tier
-		// refuses it, and the section would offer a developer a save the engine
-		// turns down.
-		//
-		// The stamp is on a context this function builds and hands to one
-		// Execute; the caller's own context is untouched, so the developer
-		// holds nothing afterwards -- their own setGlobalSecret is still
-		// refused. The caller's actor stays on the write, so `createdBy` and
-		// `addedBy` name the person who saved it. An owner needs no stamp and
-		// gets one anyway: one path for the credential, whoever saved it.
-		//
-		// Regressions: TestConfigureStampsInternalOriginOnTheCredentialWriteOnly
-		// (the stamp is on the credential write and nothing else) and
-		// TestConfigureSealsACredentialForEveryRoleTheSectionAdmits (the real
-		// engine admits both roles' saves and refuses the developer's own call).
-		writeCtx = auth.ContextWithInternalOrigin(ctx)
 	} else {
 		call = renderConfigCall("setGlobalVariable", map[string]string{
 			"id":          rowIdFor("var-global-", slot.EnvVar),
@@ -189,7 +163,38 @@ func (i *Integration) handleConfigure(ctx context.Context, args map[string]any, 
 		})
 	}
 
-	if _, err := writer.Execute(writeCtx, call); err != nil {
+	// INTERNAL ORIGIN, FOR THIS ONE WRITE. Both rows are the deployment's to
+	// write, and neither is a developer's:
+	//
+	//   - v1:platform:globalSecret declares @rowAuthz(clusterOwner), so a row
+	//     is the cluster owner's, or server code's that has authorized its
+	//     caller and stamps internal origin for the write (component/memql
+	//     create_rank_floor.go and rowauthz_write_guard.go name the two);
+	//   - a v1:platform:globalVariable row is written by the same two
+	//     (component/memql platform_variable_write_guard.go), because the
+	//     resolver reads it by name ahead of the environment.
+	//
+	// This section admits a DEVELOPER as well as an owner, deliberately
+	// (configureAuthorized, above, and already passed by the time this line
+	// runs), so a developer's value is written as the second kind. Without the
+	// stamp the engine refuses it, and the section would offer a developer a
+	// save the engine turns down.
+	//
+	// The stamp is inline, on a context this call builds and hands to one
+	// Execute; the caller's own context is untouched, so the developer holds
+	// nothing afterwards -- their own setGlobalSecret and setGlobalVariable are
+	// still refused. The caller's actor stays on the write, so `createdBy` and
+	// `addedBy` name the person who saved it. An owner needs no stamp and gets
+	// one anyway: one path for the row, whoever saved it. What the stamp can
+	// reach is bounded above this line: the row's NAME and ID come from the
+	// manifest, never from the caller.
+	//
+	// Regressions: TestConfigureStampsInternalOriginOnItsRowWriteOnly (the
+	// stamp is on the row write and nothing else) and
+	// TestConfigureSavesAValueForEveryRoleTheSectionAdmits (the real engine
+	// admits both roles' saves of both kinds and refuses the developer's own
+	// calls).
+	if _, err := writer.Execute(auth.ContextWithInternalOrigin(ctx), call); err != nil {
 		return nil, fmt.Errorf("email.configure: write %s: %w", slot.Name, err)
 	}
 

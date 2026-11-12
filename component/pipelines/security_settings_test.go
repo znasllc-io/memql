@@ -14,3 +14,18 @@ func TestSecurityConsentIsExplicitAndFailClosed(t *testing.T) {
 		}
 	}
 }
+
+// What a save writes is what the engine reads back, for every position of the
+// switch -- and it is the same text the Settings page wrote before the save
+// moved server-side, so a row either of them wrote reads the same.
+func TestTheSavedSecuritySettingReadsBack(t *testing.T) {
+	for enabled, want := range map[bool]string{true: `{"enabled":true}`, false: `{"enabled":false}`} {
+		got := SecuritySettings{Enabled: enabled}.Encode()
+		if got != want {
+			t.Errorf("Encode(enabled=%v) = %s, want %s", enabled, got, want)
+		}
+		if ParseSecuritySettings(got).Enabled != enabled {
+			t.Errorf("%s does not read back as enabled=%v", got, enabled)
+		}
+	}
+}

@@ -305,6 +305,14 @@ var appPartGrants = map[string][]Role{
 	// the Storefront token references a binding can expose are ones an owner
 	// or Connect chose.
 	"app:deployables/store": {RoleOwner, RoleDeveloper},
+	// Saving the installation-wide switches of Pipelines > Settings: the two
+	// AI switches and the weekly security scans. A part of its own, on the two
+	// roles the app is for, because the switches are configuration variables
+	// and a variable's row is written by a cluster owner or by server code
+	// that has authorized its caller (component/memql
+	// platform_variable_write_guard.go): component/pipelinerun's settings
+	// saves are that server code, and this part is what they ask for.
+	"app:pipelines/settings": {RoleOwner, RoleDeveloper},
 	// The pipelines parts (epic memql#5479, task memql#5498): connecting a
 	// source's pipeline, re-running a run, cancelling one, and naming where a
 	// notify stage delivers -- four consequences, four parts, on the two roles

@@ -6028,6 +6028,34 @@ func PackageSourceRegisterBuild(args PackageSourceRegisterArgs) string {
 	return b.String()
 }
 
+// PipelinesAISettingsSave -- Save both installation-wide pipeline AI switches, the ones Pipelines > Settings > AI shows. The switches are one configuration variable (MEMQL_PIPELINES_AI), and a variable's row is written by a cluster owner or by server code that has authorized its caller, so the page saves through this and never through setGlobalVariable. The caller sends the two switches and nothing else: the variable's name, its row and the stored JSON are the engine's.
+type PipelinesAISettingsSaveArgs struct {
+	// AI review of pull requests: after every check of a pull request passes, a model reviews the change and a rejection fails the run's check.
+	Review bool
+	// AI diagnosis of failed runs: the installed maintenance policy may open an AI analysis goal for a run's first failure.
+	Diagnosis bool
+}
+
+// PipelinesAISettingsSave calls the engine builtin pipelinesAISettingsSave.
+func (qc *QueryClient) PipelinesAISettingsSave(ctx context.Context, args PipelinesAISettingsSaveArgs) (*Result, error) {
+	call := PipelinesAISettingsSaveBuild(args)
+	return qc.executeNamed(ctx, "pipelinesAISettingsSave", call)
+}
+
+func PipelinesAISettingsSaveBuild(args PipelinesAISettingsSaveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesAISettingsSave(")
+	b.WriteString("review: ")
+	b.WriteString(fmt.Sprintf("%v", args.Review))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("diagnosis: ")
+	b.WriteString(fmt.Sprintf("%v", args.Diagnosis))
+	b.WriteString(")")
+	return b.String()
+}
+
 // PipelinesCancel -- Ask one of the caller's pipeline runs to stop. It flags the row and ends nothing itself: the agent driving the run reads the flag at its next heartbeat, cancels what is executing and concludes the run cancelled. A queued run no agent has claimed is concluded cancelled on the spot.
 type PipelinesCancelArgs struct {
 	// The v1:pipelines:run to stop. Must be the caller's own.
@@ -6515,6 +6543,27 @@ func PipelinesRunReleaseBuild(args PipelinesRunReleaseArgs) string {
 	}
 	b.WriteString("tag: ")
 	b.WriteString(quoteMemQL(args.Tag))
+	b.WriteString(")")
+	return b.String()
+}
+
+// PipelinesSecuritySettingsSave -- Save the installation-wide weekly security scans switch, the one Pipelines > Settings > Security shows (MEMQL_PIPELINES_SECURITY). Server-side for the reason pipelinesAISettingsSave gives. A setting carried by more than one active row is refused: the engine reads that as no consent, and a save that changed one row would leave the other deciding.
+type PipelinesSecuritySettingsSaveArgs struct {
+	// True allows weekly security scans; false stops new ones.
+	Enabled bool
+}
+
+// PipelinesSecuritySettingsSave calls the engine builtin pipelinesSecuritySettingsSave.
+func (qc *QueryClient) PipelinesSecuritySettingsSave(ctx context.Context, args PipelinesSecuritySettingsSaveArgs) (*Result, error) {
+	call := PipelinesSecuritySettingsSaveBuild(args)
+	return qc.executeNamed(ctx, "pipelinesSecuritySettingsSave", call)
+}
+
+func PipelinesSecuritySettingsSaveBuild(args PipelinesSecuritySettingsSaveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesSecuritySettingsSave(")
+	b.WriteString("enabled: ")
+	b.WriteString(fmt.Sprintf("%v", args.Enabled))
 	b.WriteString(")")
 	return b.String()
 }

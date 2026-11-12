@@ -190,6 +190,66 @@ resolvers against a real engine and database, and
 `component/grpc/secret_tier_wire_db_test.go` holds it through the request
 handler a client's query lands in.
 
+### The two variable concepts
+
+`v1:platform:globalVariable` and `v1:platform:partitionVariable` -- the
+deployment's plaintext configuration -- declare **no tier, on purpose**, and
+their writes are held by a rule of their own.
+
+- **Reads stay open.** MemQL OS, DSL logic and engine readers that hold no
+  caller identity all read these rows. A tier decides reads as well as writes,
+  and the cluster-owner tier's `rankFloor` opens a read only down to a rung of
+  the role ladder: a caller with no identity and an account-scoped role stand
+  below every rung and would read **zero rows**, which is the answer for a
+  setting nobody made.
+- **A write is the deployment's.** The resolver reads a row by name ahead of
+  the environment, so `executeWrite` admits a write to either concept for a
+  cluster owner, or for server code that has authorized its caller and stamps
+  internal origin for the one write, and refuses everyone else
+  (`component/memql/platform_variable_write_guard.go`). The named mutations
+  and the raw `insert(...)` literal meet the same rule, on a fresh id and over
+  a stored row.
+- **A settings surface is that server code.** `integrationConfigure`,
+  `providerFederationSet`, `pipelinesAISettingsSave` and
+  `pipelinesSecuritySettingsSave` each authorize the caller, derive the row's
+  name and id themselves, and stamp the one write. The person who triggered a
+  save holds nothing afterwards: their own `setGlobalVariable` is refused.
+
+`TestEveryConceptAResolverReadsHasItsWritersDecided`
+(`component/memql/platform_config_write_guards_test.go`) reads the resolver's
+source and fails the build on a concept it reads by name whose writers nothing
+decides. `component/memql/platform_variable_write_db_test.go` holds the rule,
+and the unchanged reads, against a real engine and database;
+`component/grpc/variable_write_wire_db_test.go` holds it through the request
+handler.
+
+### Source credentials are server-written
+
+`v1:platform:sourceCredential` declares the composite owner tier, which
+answers whose row it is. What a write may put on the row is a second rule
+(`component/memql/platform_source_credential_write_guard.go`), because every
+field but the revocation is the engine's account of something only the engine
+did: sealed a value, refreshed it, asked GitHub which installations a grant
+reaches.
+
+- **A row is created only under internal origin**, by the capability that
+  seals its value: `sourceCredentialCreate` for a pasted token, the GitHub
+  connect callback for a grant.
+- **A person's own write may revoke the credential and nothing else.** Without
+  internal origin a write may change `status` to `revoked` and stamp
+  `revokedAt`. That is `revokeSourceCredential`, the row owner's, and a
+  cluster owner's through the tier's escape. A revoked credential is replaced
+  and not reactivated; a reconnect is server code.
+- **The writers' `@serverOnly` is not this rule.** It decides who may call a
+  named construct and never sees a raw `insert(...)` or an inline `update{}`,
+  so the engine judges the row about to be written against the stored one.
+
+`TestEverySourceCredentialFieldHasAWriter` fails the build on a field the
+concept declares and the rule does not name, so a field added later is
+server-written until someone decides otherwise.
+`component/memql/platform_source_credential_write_db_test.go` holds the rule
+against a real engine and database.
+
 The two reported states that are not buckets: **`srvOnly`**, checked
 first as above, and **`other`** — everything the classifier did not
 place. `other` is by far the largest column and is not a finding.

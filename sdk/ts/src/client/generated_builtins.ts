@@ -4497,6 +4497,31 @@ QueryClient.prototype.packageSourceRegister = function (this: QueryClient, args:
   return this.executeNamed("packageSourceRegister", buildPackageSourceRegister(args), opts);
 };
 
+/** Save both installation-wide pipeline AI switches, the ones Pipelines > Settings > AI shows. The switches are one configuration variable (MEMQL_PIPELINES_AI), and a variable's row is written by a cluster owner or by server code that has authorized its caller, so the page saves through this and never through setGlobalVariable. The caller sends the two switches and nothing else: the variable's name, its row and the stored JSON are the engine's. */
+export interface PipelinesAISettingsSaveArgs {
+  /** AI review of pull requests: after every check of a pull request passes, a model reviews the change and a rejection fails the run's check. */
+  review: boolean;
+  /** AI diagnosis of failed runs: the installed maintenance policy may open an AI analysis goal for a run's first failure. */
+  diagnosis: boolean;
+}
+
+export function buildPipelinesAISettingsSave(args: PipelinesAISettingsSaveArgs): string {
+  const parts: string[] = [];
+  parts.push("review: " + renderMemQLValue(args.review));
+  parts.push("diagnosis: " + renderMemQLValue(args.diagnosis));
+  return "builtin pipelinesAISettingsSave(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesAISettingsSave(args: PipelinesAISettingsSaveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesAISettingsSave = function (this: QueryClient, args: PipelinesAISettingsSaveArgs = {} as PipelinesAISettingsSaveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesAISettingsSave", buildPipelinesAISettingsSave(args), opts);
+};
+
 /** Ask one of the caller's pipeline runs to stop. It flags the row and ends nothing itself: the agent driving the run reads the flag at its next heartbeat, cancels what is executing and concludes the run cancelled. A queued run no agent has claimed is concluded cancelled on the spot. */
 export interface PipelinesCancelArgs {
   /** The v1:pipelines:run to stop. Must be the caller's own. */
@@ -4896,6 +4921,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.pipelinesRunRelease = function (this: QueryClient, args: PipelinesRunReleaseArgs = {} as PipelinesRunReleaseArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("pipelinesRunRelease", buildPipelinesRunRelease(args), opts);
+};
+
+/** Save the installation-wide weekly security scans switch, the one Pipelines > Settings > Security shows (MEMQL_PIPELINES_SECURITY). Server-side for the reason pipelinesAISettingsSave gives. A setting carried by more than one active row is refused: the engine reads that as no consent, and a save that changed one row would leave the other deciding. */
+export interface PipelinesSecuritySettingsSaveArgs {
+  /** True allows weekly security scans; false stops new ones. */
+  enabled: boolean;
+}
+
+export function buildPipelinesSecuritySettingsSave(args: PipelinesSecuritySettingsSaveArgs): string {
+  const parts: string[] = [];
+  parts.push("enabled: " + renderMemQLValue(args.enabled));
+  return "builtin pipelinesSecuritySettingsSave(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesSecuritySettingsSave(args: PipelinesSecuritySettingsSaveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesSecuritySettingsSave = function (this: QueryClient, args: PipelinesSecuritySettingsSaveArgs = {} as PipelinesSecuritySettingsSaveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesSecuritySettingsSave", buildPipelinesSecuritySettingsSave(args), opts);
 };
 
 /** Read pipeline configuration and each workbench's last runner isolation verdict. This read never starts a build or an isolation probe. Restricted to cluster operators. */

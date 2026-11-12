@@ -1891,6 +1891,16 @@ does not say.
   `component/memql/engine_variables.go`). A writer that is not a cluster owner
   authorizes its caller, then stamps internal origin for the one write
   ([the two secret concepts](docs/public/operate/auth/per-row-authz-audit.md#the-two-secret-concepts)).
+  **`globalVariable` and `partitionVariable` take the same WRITE rule and
+  declare no tier**: every signed-in caller, and engine code holding no
+  identity, reads them, so only writes are held
+  (`component/memql/platform_variable_write_guard.go`). A settings surface for
+  anyone below the cluster owner is a capability that derives the row's name
+  itself ([the two variable concepts](docs/public/operate/auth/per-row-authz-audit.md#the-two-variable-concepts)).
+  **`sourceCredential` is server-written**: without internal origin a row is
+  not created and nothing but its revocation changes, whatever construct or
+  raw literal the write arrives through
+  (`component/memql/platform_source_credential_write_guard.go`).
 - **Library** (`dsl/library/concepts.memql`) -- `artifact` is a thin INDEX row
   owning no content (memql#693); `file` is the only backing row with bytes
   (memql#4340); `fileChunk` holds its embeddings. All three declare
