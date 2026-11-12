@@ -7,7 +7,7 @@ import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOr
 // grants design, section 2's table and section 4 "A missing part").
 //
 // An app is `read app:<id>`; a PART of one is `execute app:<id>/<part>`, and
-// Deployables is the first app to carry the vocabulary. Twelve parts, each
+// Deployables is the first app to carry the vocabulary. Fourteen parts, each
 // the name of a thing a person does here, each grantable to a person or a
 // group by name:
 //
@@ -22,6 +22,11 @@ import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOr
 //             store, open and end a preview
 //   access    mint, regenerate, re-time and remove the access codes that open
 //             part of a deployable to a named visitor
+//   reviews   read and decide a storefront's product reviews
+//   sales     read a storefront's store statistics: its store's sales figures
+//             (the 2026-11-11 store statistics design). Judged per
+//             organization like every part here; the engine judges it again
+//             on the read and answers a refusal in its own sentence
 //   connect   preview, connect, reconnect or disconnect a source's pipeline
 //   rerun     re-run a pipeline run, whole or only its failed steps
 //   cancel    stop a queued or running pipeline run
@@ -33,7 +38,7 @@ import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOr
 // the organization capability table does not name them -- so reading them
 // through `partsForOrganization` would hide an act its owner holds.
 //
-// ALL TWELVE ARE SEEDED ON OWNER AND DEVELOPER. `store` was owner alone
+// ALL FOURTEEN ARE SEEDED ON OWNER AND DEVELOPER. `store` was owner alone
 // (memql#5541) while v1:shopify:store was plain @rowAuthz(clusterOwner): a
 // developer holding the part would have been drawn the control and served no
 // rows, a refusal rendered as an empty panel (memql#5216). The store concept
@@ -69,7 +74,7 @@ import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOr
 // version and exercise it end to end against a development store, and still
 // not be able to put it in front of a shopper.
 
-export const DEPLOYABLE_PARTS = ["sources", "deploy", "publish", "retire", "domains", "store", "preview", "access", "reviews", "connect", "rerun", "cancel", "channels"] as const;
+export const DEPLOYABLE_PARTS = ["sources", "deploy", "publish", "retire", "domains", "store", "preview", "access", "reviews", "sales", "connect", "rerun", "cancel", "channels"] as const;
 
 export type DeployablePart = (typeof DEPLOYABLE_PARTS)[number];
 
@@ -95,6 +100,7 @@ export const NO_PARTS: PartsHeld = Object.freeze({
   preview: false,
   access: false,
   reviews: false,
+  sales: false,
   connect: false,
   rerun: false,
   cancel: false,
@@ -112,6 +118,7 @@ export const ALL_PARTS: PartsHeld = Object.freeze({
   preview: true,
   access: true,
   reviews: true,
+  sales: true,
   connect: true,
   rerun: true,
   cancel: true,
