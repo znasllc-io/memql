@@ -314,13 +314,16 @@ apply to both.
 
 ```go
 memql.RegisterShopperForm(memql.ShopperForm{
-    Pack: Domain, Name: "review", Construct: "submitReview",
+    Pack: Domain, Name: "review", Construct: "reviewsSubmitFromLink",
+    Kind: memql.ShopperReadKindBuiltin,
     Fields: []memql.ShopperField{
+        {Name: "requestToken", Required: true, MaxLength: 200},
         {Name: "productHandle", Required: true, MaxLength: 200},
         {Name: "body", Required: true, MaxLength: 4000},
         {Name: "rating", Numeric: true, MaxLength: 2},
     },
     RedirectOK: "/reviews/thank-you", RedirectError: "/reviews/problem",
+    Refusals: LinkRefusals,
 })
 ```
 
@@ -350,7 +353,19 @@ what is written through their storefront; the shopper is data on the row --
 their name and email are fields, never an identity. This is the campaigns
 pattern (`auth.ContextWithUserActor`), and it means a pack's shopper mutation
 is an ordinary `@actor` mutation. A `@serverOnly` construct is deliberately out
-of reach.
+of reach, and so is a write to a `@serverWritten` concept: the construct runs
+**without internal origin**.
+
+**A pack whose rows only it may write names a builtin.** When a write must be
+judged against other rows first -- the reviews form finds the buyer's link by
+its token and refuses a closed one by name -- the construct is the pack's own
+Go (`Kind: memql.ShopperReadKindBuiltin`). It makes its checks under the
+borrowed authority and then writes through its own `@serverOnly` mutation with
+internal origin stamped for that one call. The reviews pack declares every
+concept `@serverWritten`, so that writer is the only way any of its rows is
+written: the public `insert()` never consults a mutation's `@serverOnly`, and
+without the annotation a signed-in person the row tier admits could write the
+rows around the checks.
 
 **The owner header is self-checking.** The bff re-reads the site row *under*
 the named user, and `v1:platform:site` is composite-owner tier, so a user who
@@ -721,7 +736,9 @@ packs worth reading as real worked examples:
   mutation writes": a review is shown only once a person on the store's side
   publishes it, its state is DERIVED from an append-only `reviewDecision` log
   against the revision the review holds, and the judging builtins write
-  through `@serverOnly` mutations no client can call around them.
+  through `@serverOnly` mutations no client can call around them. Every one
+  of its concepts is `@serverWritten`, so a raw insert cannot write around
+  them either.
 - `examples/shopifypack` (memql#4138) -- the Shopify product feature (console
   views for shop, secrets, sync), layered on the `integrations/shopify`
   integration. The pair is the canonical worked example of the
