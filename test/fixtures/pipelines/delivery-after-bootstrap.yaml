@@ -99,6 +99,7 @@ pipeline:
       - component/datasync
       - component/emailrules
       - component/emailstats
+      - component/storestats
       - component/grpc
       - component/identity
       - component/logstore

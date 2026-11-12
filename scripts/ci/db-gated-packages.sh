@@ -152,6 +152,16 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # own rows. What the complement now means, having looked: the package is new,
 # and its pure fact rules run beside a database they ignore.
 #
+# The 2026-11-11 store statistics design added `component/storestats`. Its
+# rollup lists the stores and walks their mirror rows through the engine's own
+# @serverOnly reads, and writes side tables under one table lock and a store's
+# generation. What is worth proving is the engine's and the database's: that
+# the engine's paging lists every store once, that a writer waits for the lock
+# while a reader does not, and that a write under an older generation writes
+# nothing. A fake asserts its own locks. What the complement now means, having
+# looked: the package moves from go-checks to db-tests whole, and its pure fact
+# rules and source gates run beside a database they ignore.
+#
 # `test/conformance` is deliberately ABSENT, and memql#5386 re-confirmed it
 # rather than changing it. The tree's db-gated cases -- the differential lane
 # above all -- run in the SEPARATE mcp-conformance job, which brings up the same
@@ -303,6 +313,7 @@ readonly DB_GATED_TREES=(
 	"component/datasync"
 	"component/emailrules"
 	"component/emailstats"
+	"component/storestats"
 	"component/grpc"
 	"component/identity"
 	"component/logstore"
