@@ -54,16 +54,100 @@ const RedactionMarker = "[redacted]"
 
 // ComplianceJob is one queued privacy request.
 type ComplianceJob struct {
-	ID          string         `json:"id"`
-	Topic       string         `json:"topic"`
-	StoreID     string         `json:"storeId"`
-	ShopDomain  string         `json:"shopDomain"`
-	CustomerGID string         `json:"customerGid,omitempty"`
-	RequestID   string         `json:"requestId,omitempty"`
-	OrderGIDs   []string       `json:"orderGids,omitempty"`
-	ReceivedAt  time.Time      `json:"receivedAt"`
-	DueAt       time.Time      `json:"dueAt"`
-	Raw         map[string]any `json:"-"`
+	ID          string    `json:"id"`
+	Topic       string    `json:"topic"`
+	StoreID     string    `json:"storeId"`
+	ShopDomain  string    `json:"shopDomain"`
+	CustomerGID string    `json:"customerGid,omitempty"`
+	RequestID   string    `json:"requestId,omitempty"`
+	OrderGIDs   []string  `json:"orderGids,omitempty"`
+	ReceivedAt  time.Time `json:"receivedAt"`
+	DueAt       time.Time `json:"dueAt"`
+	// Status is the job's as its row holds it; ScrubbedAt is when the first
+	// pass of its erasure ran, zero until it has.
+	Status     string         `json:"status,omitempty"`
+	ScrubbedAt time.Time      `json:"scrubbedAt,omitempty"`
+	Raw        map[string]any `json:"-"`
+}
+
+// ErasureSecondPassAfter is how long after the first pass of an erasure its
+// second pass is due. EVERY ERASURE IS MADE TWICE.
+//
+// A write that is in flight when the scrub runs lands after it: the rest of a
+// page of an export being applied, a delivery fetched a moment before. Starting
+// the store's backfills again closes the long case, an old export read later
+// (afterErasure). This closes the short one: the erasure is made again once
+// whatever was in flight has landed, and only then is the job done. An hour is
+// long beside a page or a delivery and short beside the thirty days an erasure
+// has. The runner is hourly, so the second pass runs at its first run after
+// the hour is up.
+const ErasureSecondPassAfter = time.Hour
+
+// A job's statuses, as the concept's enum spells them.
+const (
+	jobPending = "pending"
+	jobDone    = "done"
+	jobFailed  = "failed"
+)
+
+// jobStep is what one run of a job leaves on its row when it did not fail.
+type jobStep struct {
+	// Status is jobPending when the second pass of an erasure is still to
+	// come, else jobDone.
+	Status  string
+	Outcome string
+	// ScrubbedAt and DueAt are set by the first pass of an erasure: when it
+	// ran, and when the second is due.
+	ScrubbedAt, DueAt time.Time
+}
+
+// jobFailure is a run that failed: one sentence for the job's row, and the
+// cause for the server's log.
+//
+// THE ROW TAKES THE SENTENCE AND NEVER THE CAUSE. The cause is the engine's
+// or the database's own text, and such text can quote the statement it
+// refused -- a customer's gid, an address, a name. A name cannot be told from
+// any other word, so nothing of a cause is copied: lastError says what
+// failed, from the closed set below, and not for whom.
+type jobFailure struct {
+	sentence string
+	cause    error
+}
+
+func (f *jobFailure) Error() string {
+	if f.cause == nil {
+		return f.sentence
+	}
+	return f.sentence + ": " + f.cause.Error()
+}
+
+func (f *jobFailure) Unwrap() error { return f.cause }
+
+func failedJob(sentence string, cause error) error {
+	return &jobFailure{sentence: sentence, cause: cause}
+}
+
+// The sentences a failed job's row can hold.
+const (
+	failNoCustomer  = "the request names no customer"
+	failNotATopic   = "the job's topic is not a privacy topic"
+	failScrub       = "the customer's rows could not be scrubbed"
+	failPurge       = "the store's mirror could not be deleted"
+	failRestart     = "the erasure ran, but a backfill in flight could not be started again"
+	failDropExport  = "the erasure ran, but a failed backfill's old export could not be dropped"
+	failExportRead  = "the customer's rows could not be read for the export"
+	failExportOwner = "the store names no owner to file the export under"
+	failExportWrite = "the export could not be filed in the store owner's library"
+	failUnknown     = "the job could not be run"
+)
+
+// lastErrorOf is the sentence a failed run leaves on its job's row.
+func lastErrorOf(err error) string {
+	var f *jobFailure
+	if errors.As(err, &f) {
+		return f.sentence
+	}
+	return failUnknown
 }
 
 // enqueueComplianceJob parses a compliance delivery and records it.
@@ -92,7 +176,7 @@ func (c *Connector) enqueueComplianceJob(ctx context.Context, store Store, topic
 		return fmt.Errorf("shopify: queue %s: %w", topic, err)
 	}
 	c.logger.Info("shopify: compliance request queued", "topic", topic, "store", store.ID, "dueAt", job.DueAt.Format(time.RFC3339))
-	return c.auditCompliance(ctx, store, complianceAuditAction(topic)+"_received", job)
+	return c.auditCompliance(ctx, store.ID, complianceAuditAction(topic)+"_received", job, job.ReceivedAt, "")
 }
 
 // ComplianceJobID derives the row id from (store, topic, subject).
@@ -105,135 +189,313 @@ func ComplianceJobID(storeID, topic, subject string) string {
 	return "shpcj" + string(idEngine.FromString(storeID + "\x00" + topic + "\x00" + subject))[:24]
 }
 
-// RunDueComplianceJobs runs every queued privacy job whose hold has
-// elapsed.
+// complianceJobPages bounds one run's walk of the due read, in pages of a
+// hundred jobs.
+const complianceJobPages = 1000
+
+// RunDueComplianceJobs runs every privacy job that is due: one waiting whose
+// time has come, one that failed, and an erasure an earlier version recorded
+// done (the due read, complianceJobsDue, says which and why). It answers how
+// many it ran without failing.
+//
+// A FAILED JOB IS RUN AGAIN AT EVERY RUN UNTIL IT IS DONE. Nothing a job does
+// is unsafe to do twice: an erasure rewrites rows to what they should be, a
+// purge deletes what is there, and an export is written under the id of its
+// request.
+//
+// EVERY DUE JOB, not the first page of them: failed jobs stay due, and a
+// hundred standing failures would otherwise fill the one page a run read,
+// oldest first, for good. All of them are read before any is run, because a
+// run rewrites its job's row and a walk over rows that change under it can
+// skip one.
 func (c *Connector) RunDueComplianceJobs(ctx context.Context) (int, error) {
-	res, err := c.engine.Execute(operatorContext(ctx), renderCall("complianceJobsDue", map[string]any{
-		"asOf": c.now().UTC().Format(time.RFC3339),
-	}))
-	if err != nil {
-		return 0, fmt.Errorf("shopify: read due compliance jobs: %w", err)
+	// The stores, read once and fresh. A store row that is gone changes what
+	// a job does (runComplianceJob), so a list that could not be read must
+	// not be taken for one with no stores in it: the run stops and the jobs
+	// stay due.
+	if c.stores == nil {
+		return 0, fmt.Errorf("shopify: the privacy jobs have no store registry to read the stores from")
 	}
-	ran := 0
-	for _, row := range memql.MaterializeRows(res) {
-		job := complianceJobOf(row)
-		store, ok := c.stores.ByID(ctx, job.StoreID)
-		if !ok {
-			c.recordJob(ctx, job.ID, "failed", "", "store "+job.StoreID+" is no longer configured")
-			continue
+	stores, err := c.stores.Stores(memql.ContextWithFreshRead(ctx))
+	if err != nil {
+		return 0, fmt.Errorf("shopify: the privacy jobs could not read the stores: %w", err)
+	}
+	byID := make(map[string]Store, len(stores))
+	for _, s := range stores {
+		byID[s.ID] = s
+	}
+
+	var jobs []ComplianceJob
+	due := renderCall("complianceJobsDue", map[string]any{"asOf": c.now().UTC().Format(time.RFC3339)})
+	walkErr := memql.WalkQueryPages(operatorContext(ctx), c.engine.Execute, due, complianceJobPages, func(res *memql.ExecuteResult) error {
+		for _, row := range memql.MaterializeRows(res) {
+			jobs = append(jobs, complianceJobOf(row))
 		}
-		outcome, err := c.runComplianceJob(ctx, store, job)
+		return nil
+	})
+	if walkErr != nil && len(jobs) == 0 {
+		return 0, fmt.Errorf("shopify: read due compliance jobs: %w", walkErr)
+	}
+
+	ran := 0
+	for _, job := range jobs {
+		if err := ctx.Err(); err != nil {
+			return ran, err
+		}
+		store, found := byID[job.StoreID]
+		step, err := c.runComplianceJob(ctx, store, found, job)
 		if err != nil {
-			c.logger.Error("shopify: compliance job failed", "topic", job.Topic, "store", store.ID, "error", err)
-			c.recordJob(ctx, job.ID, "failed", "", err.Error())
+			// The cause is logged here and nowhere else (jobFailure).
+			c.logger.Error("shopify: compliance job failed", "topic", job.Topic, "store", job.StoreID, "job", job.ID, "error", err)
+			c.recordJobFailed(ctx, job, lastErrorOf(err))
 			continue
 		}
 		ran++
-		c.recordJob(ctx, job.ID, "done", outcome, "")
+		c.recordJobStep(ctx, job, step)
+	}
+	if walkErr != nil {
+		// What was read was run. The rest is still due and is read next time.
+		return ran, fmt.Errorf("shopify: read due compliance jobs: %w", walkErr)
 	}
 	return ran, nil
 }
 
-func (c *Connector) recordJob(ctx context.Context, jobID, status, outcome, lastError string) {
-	call := renderCall("recordComplianceJob", map[string]any{
-		"jobId": jobID, "status": status, "outcome": outcome, "lastError": lastError,
-	})
-	if _, err := c.engine.Execute(operatorContext(ctx), call); err != nil {
+// recordJobStep writes what a run that did not fail leaves on its job's row.
+// A second pass still to come leaves the job pending, with when the first ran
+// and when the second is due; a job that is done is stamped as completed. An
+// earlier failure's sentence is cleared either way.
+func (c *Connector) recordJobStep(ctx context.Context, job ComplianceJob, step jobStep) {
+	args := map[string]any{"jobId": job.ID, "status": step.Status, "outcome": step.Outcome, "lastError": ""}
+	if !step.ScrubbedAt.IsZero() {
+		args["scrubbedAt"] = step.ScrubbedAt.UTC().Format(time.RFC3339)
+	}
+	if !step.DueAt.IsZero() {
+		args["dueAt"] = step.DueAt.UTC().Format(time.RFC3339)
+	}
+	if step.Status == jobDone {
+		args["completedAt"] = c.now().UTC().Format(time.RFC3339)
+	}
+	c.recordJob(ctx, job.ID, args)
+}
+
+// recordJobFailed writes a failed run: the status and the sentence. What an
+// earlier pass left -- its outcome and when it ran -- is not named, so it
+// stays, and the next run takes the job up where it stands: a failed first
+// pass is a first pass again, a failed second pass a second pass.
+func (c *Connector) recordJobFailed(ctx context.Context, job ComplianceJob, sentence string) {
+	c.recordJob(ctx, job.ID, map[string]any{"jobId": job.ID, "status": jobFailed, "lastError": sentence})
+}
+
+func (c *Connector) recordJob(ctx context.Context, jobID string, args map[string]any) {
+	if _, err := c.engine.Execute(operatorContext(ctx), renderCall("recordComplianceJob", args)); err != nil {
 		c.logger.Warn("shopify: could not record a compliance job's outcome", "job", jobID, "error", err)
 	}
 }
 
-// runComplianceJob performs one privacy request and reports what it did.
-func (c *Connector) runComplianceJob(ctx context.Context, store Store, job ComplianceJob) (string, error) {
+// runComplianceJob performs one run of one privacy request and reports what
+// it leaves on the job's row. found says whether the job's store still has a
+// row; store is that row, or nothing.
+//
+// A JOB WHOSE STORE ROW IS GONE IS NOT A FAILURE. The mirror's rows can
+// outlive the row that configured them, so an erasure runs by the job's own
+// store id; only the store's backfills are left alone, as nothing reads a
+// store that is not configured. A data request for such a store has nothing
+// configured to export and nobody to file an export under, and is done.
+func (c *Connector) runComplianceJob(ctx context.Context, store Store, found bool, job ComplianceJob) (jobStep, error) {
+	if job.StoreID == "" {
+		job.StoreID = store.ID
+	}
 	switch job.Topic {
 	case TopicDataRequest:
-		export, err := c.ExportCustomerData(ctx, store, job.CustomerGID, job.OrderGIDs)
-		if err != nil {
-			return "", err
-		}
-		artifact, err := json.MarshalIndent(export, "", "  ")
-		if err != nil {
-			return "", err
-		}
-		if err := c.writeExportArtifact(ctx, store, job, artifact); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("exported %d bytes", len(artifact)), c.auditCompliance(ctx, store, "shopify_data_request_exported", job)
-
+		return c.runDataRequest(ctx, store, found, job)
 	case TopicRedact:
-		erased, err := c.RedactCustomer(ctx, store.ID, job.CustomerGID, job.OrderGIDs)
-		if err != nil {
-			return "", err
-		}
-		// The scrub ran, and is audited as run whatever the restart answers.
-		outcome, err := c.afterErasure(ctx, store, fmt.Sprintf("scrubbed %d row version(s)", erased.Versions))
-		if auditErr := c.auditCompliance(ctx, store, "shopify_customer_redacted", job); err == nil {
-			err = auditErr
-		}
-		return outcome, err
-
+		return c.runCustomerErasure(ctx, store, found, job)
 	case TopicShopRedact:
-		// Re-check the store before purging: an uninstall an operator
-		// reverses within the hold must not cost the mirror.
-		fresh, ok := c.stores.ByID(ctx, store.ID)
-		if ok && fresh.Ingests() && fresh.RedactedAt == "" && c.storeReachable(ctx, fresh) {
-			c.logger.Info("shopify: skipping shop/redact purge, the store is reachable again", "store", store.ID)
-			return "skipped: the store is reachable again", c.auditCompliance(ctx, store, "shopify_shop_redact_skipped", job)
-		}
-		rows, err := c.PurgeStore(ctx, store)
-		if err != nil {
-			return "", err
-		}
-		outcome, err := c.afterErasure(ctx, store, fmt.Sprintf("purged %d row version(s)", rows))
-		if auditErr := c.auditCompliance(ctx, store, "shopify_shop_redacted", job); err == nil {
-			err = auditErr
-		}
-		return outcome, err
+		return c.runShopErasure(ctx, store, found, job)
 	}
-	return "", fmt.Errorf("shopify: %q is not a compliance topic", job.Topic)
+	return jobStep{}, failedJob(failNotATopic, fmt.Errorf("shopify: %q is not a compliance topic", job.Topic))
 }
 
-// afterErasure is what a redaction or a purge that has just run still owes:
-// the store's backfills in flight started again (restartBackfillsInFlight).
-// It answers the job's outcome with what it restarted added. A restart that
-// could not be queued fails the job, saying that the erasure itself ran: an
-// erasure an export may still undo is not a job that is done.
-func (c *Connector) afterErasure(ctx context.Context, store Store, outcome string) (string, error) {
-	restarted, err := c.restartBackfillsInFlight(ctx, store)
+func (c *Connector) runDataRequest(ctx context.Context, store Store, found bool, job ComplianceJob) (jobStep, error) {
+	now := c.now()
+	if !found {
+		const nothing = "the store is no longer configured; nothing to export"
+		_ = c.auditCompliance(ctx, job.StoreID, "shopify_data_request_not_exported", job, now, nothing)
+		return jobStep{Status: jobDone, Outcome: nothing}, nil
+	}
+	if job.CustomerGID == "" {
+		return jobStep{}, failedJob(failNoCustomer, nil)
+	}
+	export, err := c.ExportCustomerData(ctx, store, job.CustomerGID, job.OrderGIDs)
+	if err != nil {
+		return jobStep{}, failedJob(failExportRead, err)
+	}
+	artifact, err := json.MarshalIndent(export, "", "  ")
+	if err != nil {
+		return jobStep{}, failedJob(failExportRead, err)
+	}
+	if store.OwnerUserID == "" {
+		return jobStep{}, failedJob(failExportOwner, fmt.Errorf("shopify: store %q has no ownerUserId", store.ID))
+	}
+	if err := c.writeExportArtifact(ctx, store, job, artifact); err != nil {
+		return jobStep{}, failedJob(failExportWrite, err)
+	}
+	what := fmt.Sprintf("exported %d bytes", len(artifact))
+	_ = c.auditCompliance(ctx, job.StoreID, "shopify_data_request_exported", job, now, what)
+	return jobStep{Status: jobDone, Outcome: what}, nil
+}
+
+func (c *Connector) runCustomerErasure(ctx context.Context, store Store, found bool, job ComplianceJob) (jobStep, error) {
+	if job.CustomerGID == "" {
+		return jobStep{}, failedJob(failNoCustomer, nil)
+	}
+	second := !job.ScrubbedAt.IsZero()
+	erased, err := c.RedactCustomer(ctx, job.StoreID, job.CustomerGID, job.OrderGIDs)
+	if err != nil {
+		return jobStep{}, failedJob(failScrub, err)
+	}
+	what := fmt.Sprintf("scrubbed %d row version(s) of %d row(s)", erased.Versions, erased.Rows)
+	if erased.Unlisted > 0 {
+		what += fmt.Sprintf(", and took the customer out of the references of %d more", erased.Unlisted)
+	}
+	// The scrub ran, and is audited as run whatever its backfills answer.
+	_ = c.auditCompliance(ctx, job.StoreID, passAction("shopify_customer_redacted", second), job, c.now(), what)
+	after, err := c.afterErasure(ctx, store, found, !second)
+	if err != nil {
+		return jobStep{}, err
+	}
+	return c.erasurePass(second, what+after), nil
+}
+
+func (c *Connector) runShopErasure(ctx context.Context, store Store, found bool, job ComplianceJob) (jobStep, error) {
+	second := !job.ScrubbedAt.IsZero()
+	// Check the store before purging, and before the SECOND purge exactly as
+	// before the first. An uninstall an operator reverses within the hold
+	// must not cost the mirror; and a store that came back between the two
+	// purges has had everything read again by its reconnect, which a second
+	// purge would delete.
+	if found && store.Ingests() && store.RedactedAt == "" && c.storeReachable(ctx, store) {
+		c.logger.Info("shopify: skipping shop/redact purge, the store is reachable again", "store", store.ID, "secondPass", second)
+		if second {
+			const kept = "second pass: the store is reachable again and was not purged a second time; its reconnect reads everything again"
+			_ = c.auditCompliance(ctx, job.StoreID, "shopify_shop_redact_second_pass_skipped", job, c.now(), kept)
+			return jobStep{Status: jobDone, Outcome: kept}, nil
+		}
+		const skipped = "skipped: the store is reachable again"
+		_ = c.auditCompliance(ctx, job.StoreID, "shopify_shop_redact_skipped", job, c.now(), skipped)
+		return jobStep{Status: jobDone, Outcome: skipped}, nil
+	}
+	var rows int64
+	var err error
+	if found && store.RedactedAt == "" {
+		rows, err = c.PurgeStore(ctx, store)
+	} else {
+		// No row to stamp, or one the first purge has stamped already.
+		rows, err = c.purgeMirror(ctx, job.StoreID)
+	}
+	if err != nil {
+		return jobStep{}, failedJob(failPurge, err)
+	}
+	what := fmt.Sprintf("purged %d row version(s)", rows)
+	_ = c.auditCompliance(ctx, job.StoreID, passAction("shopify_shop_redacted", second), job, c.now(), what)
+	after, err := c.afterErasure(ctx, store, found, !second)
+	if err != nil {
+		return jobStep{}, err
+	}
+	return c.erasurePass(second, what+after), nil
+}
+
+// passAction is the audit action of one pass of an erasure: the second names
+// itself.
+func passAction(action string, second bool) string {
+	if second {
+		return action + "_second_pass"
+	}
+	return action
+}
+
+// erasurePass is what one pass of an erasure leaves on its job: the first
+// leaves it pending, with when it ran and when the second is due; the second
+// ends it.
+func (c *Connector) erasurePass(second bool, what string) jobStep {
+	if second {
+		return jobStep{Status: jobDone, Outcome: "second pass: " + what}
+	}
+	now := c.now().UTC()
+	due := now.Add(ErasureSecondPassAfter)
+	return jobStep{
+		Status:     jobPending,
+		Outcome:    "first pass: " + what + "; the second pass is due at " + due.Format(time.RFC3339),
+		ScrubbedAt: now,
+		DueAt:      due,
+	}
+}
+
+// afterErasure is what an erasure that has just run still owes the store's
+// backfills (settleBackfills), and answers what it did as the rest of the
+// job's outcome. first is set for the first pass.
+//
+// A backfill that could not be started again, or an old export that could not
+// be dropped, FAILS the job, saying that the erasure itself ran: an erasure an
+// export may still undo is not a job that is done. The job is then run again.
+//
+// A store whose row is gone has no backfill anybody will run, and its row is
+// what a restart is asked through; it is left alone and the outcome says so.
+func (c *Connector) afterErasure(ctx context.Context, store Store, found, first bool) (string, error) {
+	if !found {
+		return "; the store is no longer configured, so no backfill was started again", nil
+	}
+	restarted, dropped, restartErr, dropErr := c.settleBackfills(ctx, store, first)
+	note := ""
 	if len(restarted) > 0 {
-		outcome += fmt.Sprintf("; started %d backfill(s) again from nothing", len(restarted))
+		note += fmt.Sprintf("; started %d backfill(s) again from nothing", len(restarted))
 		c.logger.Info("shopify: the store's backfills in flight were started again after an erasure",
 			"store", store.ID, "domains", strings.Join(restarted, ", "))
 	}
-	if err != nil {
-		return "", fmt.Errorf("shopify: %s, but a backfill in flight could not be started again, so an export begun before the erasure may still be applied: %w", outcome, err)
+	if len(dropped) > 0 {
+		note += fmt.Sprintf("; dropped the old export of %d failed backfill(s)", len(dropped))
+		c.logger.Info("shopify: failed backfills had the export they named dropped after an erasure",
+			"store", store.ID, "domains", strings.Join(dropped, ", "))
 	}
-	return outcome, nil
+	if restartErr != nil {
+		return "", failedJob(failRestart, restartErr)
+	}
+	if dropErr != nil {
+		return "", failedJob(failDropExport, dropErr)
+	}
+	return note, nil
 }
 
-// restartBackfillsInFlight starts again, from nothing, every backfill of the
-// store that is running or queued, and answers the domains it restarted.
+// settleBackfills makes sure no export the origin took BEFORE an erasure is
+// read after it, and answers the domains it restarted and those whose old
+// export it dropped.
 //
 // WHY. customers/redact is one point-in-time update, and shop/redact one
-// point-in-time delete. A backfill whose export the origin started BEFORE the
-// erasure, streamed after it, would write the erased fields back line by
-// line. Restarted, its row is queued with an empty cursor: the invocation in
-// flight abandons at its next write (the sync runtime's claim on the row), no
-// later step reads another line of the old export, and the export the
-// continuing pass starts next is one the origin takes after the erasure.
+// point-in-time delete. A backfill whose export the origin started before the
+// erasure, streamed after it, would write the erased fields back line by line.
 //
+// A backfill that is RUNNING or QUEUED is started again from nothing, on the
+// first pass only (restart): its row is queued with an empty cursor, the
+// invocation in flight abandons at its next write (the sync runtime's claim on
+// the row), no later step reads another line of the old export, and the export
+// the continuing pass starts next is one the origin takes after the erasure.
 // It is the restart a reconnect uses (queueBackfill with its restart flag),
-// asked of the sync runtime under the operator's identity. A domain with no
-// backfill running or queued is left alone: a complete one holds nothing
-// exported before the erasure that the scrub did not reach, and restarting it
-// would read the whole domain again for every privacy request. After a purge
-// there is normally nothing to restart, because the purge deletes the store's
-// sync state with its mirror.
+// asked of the sync runtime under the operator's identity.
+//
+// A backfill that is FAILED and whose cursor names an export has that export
+// dropped from its cursor, on every pass: an operator's "Backfill now" on a
+// failed domain continues from its cursor, and would continue the old export.
+// Its status and its error are left as they are; nothing is started.
+//
+// A domain with nothing of the kind is left alone: a complete one holds
+// nothing exported before the erasure that the scrub did not reach, and
+// starting it again would read the whole domain for every privacy request.
+// After a purge there is normally nothing here, because the purge deletes the
+// store's sync state with its mirror.
 //
 // Each domain's row is read BY ID, fresh, as the boot pass reads it.
-func (c *Connector) restartBackfillsInFlight(ctx context.Context, store Store) ([]string, error) {
-	var restarted []string
-	var errs []error
+func (c *Connector) settleBackfills(ctx context.Context, store Store, restart bool) (restarted, dropped []string, restartErr, dropErr error) {
+	var restartErrs, dropErrs []error
 	for _, concept := range generated.ApplyOrder {
 		if !bulkDomain(generated.Types[concept]) {
 			continue
@@ -241,23 +503,69 @@ func (c *Connector) restartBackfillsInFlight(ctx context.Context, store Store) (
 		stateID := memqlsync.StateID(generated.ConceptID(concept), ConnectorName, string(memqlsync.DirectionInbound), store.ID)
 		res, err := c.engine.Execute(memql.ContextWithFreshRead(operatorContext(ctx)), renderCall("syncStateById", map[string]any{"stateId": stateID}))
 		if err != nil {
-			errs = append(errs, fmt.Errorf("the sync state of %s could not be read: %w", concept, err))
+			restartErrs = append(restartErrs, fmt.Errorf("the sync state of %s could not be read: %w", concept, err))
 			continue
 		}
 		rows := memql.MaterializeRows(res)
 		if len(rows) == 0 {
 			continue
 		}
-		if status := mapString(rows[0], "backfillStatus"); status != "running" && status != "queued" {
-			continue
+		switch status := mapString(rows[0], "backfillStatus"); {
+		case status == "running" || status == "queued":
+			if !restart {
+				continue
+			}
+			if err := c.queueBackfill(ctx, store.ID, concept, true); err != nil {
+				restartErrs = append(restartErrs, fmt.Errorf("the backfill of %s could not be queued again: %w", concept, err))
+				continue
+			}
+			restarted = append(restarted, concept)
+		case status == "failed":
+			did, err := c.dropFailedExport(ctx, stateID, rows[0])
+			if err != nil {
+				dropErrs = append(dropErrs, fmt.Errorf("the failed backfill of %s could not have its export dropped: %w", concept, err))
+				continue
+			}
+			if did {
+				dropped = append(dropped, concept)
+			}
 		}
-		if err := c.queueBackfill(ctx, store.ID, concept, true); err != nil {
-			errs = append(errs, fmt.Errorf("the backfill of %s could not be queued again: %w", concept, err))
-			continue
-		}
-		restarted = append(restarted, concept)
 	}
-	return restarted, errors.Join(errs...)
+	return restarted, dropped, errors.Join(restartErrs...), errors.Join(dropErrs...)
+}
+
+// conceptSyncState is the sync runtime's health row, which a write of this
+// connector's is fenced on.
+const conceptSyncState = "v1:platform:syncState"
+
+// dropFailedExport takes the export out of a failed backfill's cursor, and
+// reports whether there was one to take. What is the backfill's own stays in
+// the cursor: the rule it began under and its count of restarts. The export
+// goes whole -- the operation, the part of a multi-part domain it was, the
+// line it had reached and when it was started -- so the next start begins a
+// new export at the first part.
+//
+// The write names the cursor and nothing else, and is fenced on the version of
+// the row that was read (memql.ContextWithRowVersionFence): an operator's
+// "Backfill now" that started the row in between has written its own cursor,
+// and this write is then refused and not made. That row is running now, with
+// the old export, and the first pass of the next erasure restarts it; here it
+// is reported, so the job is run again.
+func (c *Connector) dropFailedExport(ctx context.Context, stateID string, row map[string]any) (bool, error) {
+	cur := decodeBackfillCursor(mapString(row, "backfillCursor"))
+	if cur.OperationID == "" {
+		return false, nil
+	}
+	kept := backfillCursor{Restarts: cur.Restarts, Rule: cur.Rule}
+	cursor := ""
+	if kept != (backfillCursor{}) {
+		cursor = kept.encode()
+	}
+	fenced := memql.ContextWithRowVersionFence(operatorContext(ctx), conceptSyncState, stateID, rowTime(row, "createdAt"))
+	if _, err := c.engine.Execute(fenced, renderCall("patchSyncState", map[string]any{"stateId": stateID, "backfillCursor": cursor})); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // storeReachable asks the store a trivial question. Used only to decide
@@ -984,15 +1292,34 @@ func unlistGID(ctx context.Context, db *sql.DB, concept string, lists []string, 
 // same argument component/identity/authactivity's prune makes, with a legal
 // deadline attached rather than a retention window.
 func (c *Connector) PurgeStore(ctx context.Context, store Store) (int64, error) {
-	if c.db == nil || c.db() == nil {
-		return 0, fmt.Errorf("shopify: shop/redact needs a database handle")
+	total, err := c.purgeMirror(ctx, store.ID)
+	if err != nil {
+		return total, err
 	}
-	db := c.db()
+	stamp := renderCall("markStoreRedacted", map[string]any{
+		"storeId":    store.ID,
+		"redactedAt": c.now().UTC().Format(time.RFC3339),
+	})
+	if _, err := c.engine.Execute(operatorContext(ctx), stamp); err != nil {
+		return total, fmt.Errorf("shopify: stamp store redaction: %w", err)
+	}
+	c.stores.Invalidate()
+	return total, nil
+}
+
+// purgeMirror deletes every mirror row of a store and its sync state, by the
+// store's id, and stamps nothing: a store whose row is gone has none to stamp,
+// and the second purge of a shop's erasure finds the first one's stamp there.
+func (c *Connector) purgeMirror(ctx context.Context, storeID string) (int64, error) {
+	db, err := c.complianceDB("shop/redact")
+	if err != nil {
+		return 0, err
+	}
 	var total int64
 	for _, concept := range generated.ApplyOrder {
 		res, err := db.ExecContext(ctx,
 			`DELETE FROM "MemoryNodes" WHERE concept = $1 AND payload->>'storeId' = $2`,
-			generated.ConceptID(concept), store.ID)
+			generated.ConceptID(concept), storeID)
 		if err != nil {
 			return total, fmt.Errorf("shopify: purge %s: %w", concept, err)
 		}
@@ -1006,17 +1333,9 @@ func (c *Connector) PurgeStore(ctx context.Context, store Store) (int64, error) 
 	// storeId; both are matched, so a row of either shape goes.
 	if _, err := db.ExecContext(ctx,
 		`DELETE FROM "MemoryNodes" WHERE concept = 'v1:platform:syncState' AND payload->>'connector' = $1 AND (payload->>'storeId' = $2 OR payload->>'partitionKey' = $2)`,
-		ConnectorName, store.ID); err != nil {
+		ConnectorName, storeID); err != nil {
 		return total, fmt.Errorf("shopify: purge sync state: %w", err)
 	}
-	stamp := renderCall("markStoreRedacted", map[string]any{
-		"storeId":    store.ID,
-		"redactedAt": c.now().UTC().Format(time.RFC3339),
-	})
-	if _, err := c.engine.Execute(operatorContext(ctx), stamp); err != nil {
-		return total, fmt.Errorf("shopify: stamp store redaction: %w", err)
-	}
-	c.stores.Invalidate()
 	return total, nil
 }
 
@@ -1025,10 +1344,15 @@ func (c *Connector) PurgeStore(ctx context.Context, store Store) (int64, error) 
 // Every compliance action is audited, including the ones that only queue
 // work: the obligation is to be able to SHOW what was done and when, and a
 // job that ran leaving no trace is indistinguishable from one that did not.
-func (c *Connector) auditCompliance(ctx context.Context, store Store, action string, job ComplianceJob) error {
+//
+// at is when the action happened: the delivery's receipt for a request that
+// was queued, the pass's own time for a run. It is part of the event's id, so
+// each pass of an erasure, and each time a job is run again, is an event of
+// its own. what is what the run did, for the trail.
+func (c *Connector) auditCompliance(ctx context.Context, storeID, action string, job ComplianceJob, at time.Time, what string) error {
 	details := map[string]any{
 		"topic":      job.Topic,
-		"storeId":    store.ID,
+		"storeId":    storeID,
 		"shopDomain": job.ShopDomain,
 		"dueAt":      job.DueAt.Format(time.RFC3339),
 	}
@@ -1038,21 +1362,24 @@ func (c *Connector) auditCompliance(ctx context.Context, store Store, action str
 	if job.RequestID != "" {
 		details["requestId"] = job.RequestID
 	}
+	if what != "" {
+		details["outcome"] = what
+	}
 	call := renderCall("createAuditEvent", map[string]any{
-		"eventId":     "aud" + MirrorRowID(store.ID, action+"\x00"+job.CustomerGID+"\x00"+job.RequestID+"\x00"+job.ReceivedAt.Format(time.RFC3339)),
+		"eventId":     "aud" + MirrorRowID(storeID, action+"\x00"+job.CustomerGID+"\x00"+job.RequestID+"\x00"+at.Format(time.RFC3339)),
 		"occurredAt":  c.now().UTC().Format(time.RFC3339),
 		"category":    "data",
 		"action":      action,
 		"actorUserId": "system:connector:" + ConnectorName,
 		"targetType":  "shopifyStore",
-		"targetId":    store.ID,
+		"targetId":    storeID,
 		"detail":      details,
 		"outcome":     "success",
 	})
 	if _, err := c.engine.Execute(operatorContext(ctx), call); err != nil {
 		// An audit write that fails must not swallow the compliance
 		// action, but it must be loud: the trail is the deliverable.
-		c.logger.Error("shopify: could not write compliance audit event", "action", action, "store", store.ID, "error", err)
+		c.logger.Error("shopify: could not write compliance audit event", "action", action, "store", storeID, "error", err)
 		return nil
 	}
 	return nil
@@ -1069,6 +1396,8 @@ func complianceJobOf(row map[string]any) ComplianceJob {
 		ShopDomain:  mapString(row, "shopDomain"),
 		OrderGIDs:   mapStringSlice(row, "orderGids"),
 		DueAt:       rowTime(row, "dueAt"),
+		Status:      mapString(row, "status"),
+		ScrubbedAt:  rowTime(row, "scrubbedAt"),
 	}
 	if job.ID == "" {
 		// The default projection is payload-only, so the row id is not in

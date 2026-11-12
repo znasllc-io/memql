@@ -150,15 +150,25 @@ concept complianceJob {
   /// The shop domain as delivered, kept because a store row can be
   /// removed while a job for it is still queued.
   shopDomain   string
-  /// Not before this time. The hold, made explicit.
+  /// Not before this time. The hold, made explicit; and, once the first pass
+  /// of an erasure has run, when its second pass is due.
   dueAt        datetime!
-  /// pending -- waiting for its hold
+  /// pending -- waiting for its hold, or for the second pass of an erasure
   /// done    -- the job ran and was audited
-  /// failed  -- the job errored; lastError says how, and it is retried
+  /// failed  -- the job errored; lastError says how, and it is run again at
+  ///            every run of the privacy jobs until it is done
   status       enum("pending", "done", "failed")
   /// What the run produced, for the audit trail: the artifact id, the
   /// number of rows scrubbed, or the reason a purge was skipped.
   outcome      string
+  /// What failed, as one of a fixed set of sentences. Never for whom: no
+  /// customer's id, address or name is written here.
   lastError    string
+  /// When the first pass of an erasure ran. Every erasure is made twice, an
+  /// hour apart: a write that was in flight when the first pass ran lands
+  /// after it, and the second pass takes it. Empty until the first pass has
+  /// run -- and on a customers/redact job an earlier version recorded done,
+  /// which is how such a job is found and made again.
+  scrubbedAt   datetime
   completedAt  datetime
 }

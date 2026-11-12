@@ -34,7 +34,9 @@ const (
 	VerdictNotConnected   = "not connected"
 )
 
-// The reasons a store needs attention, in the order they are listed.
+// The reasons a store needs attention, in the order they are listed. One more
+// is listed after them, on a store in any state: ReasonPrivacyRequestFailing
+// (privacy_verdict.go).
 const (
 	ReasonDataNotDeclared     = "data_not_declared"
 	ReasonApprovalOutdated    = "approval_outdated"
@@ -103,7 +105,10 @@ type verdictInput struct {
 	// ConnectedAt is when the store was connected, or zero when the row
 	// does not say. One of the three times a late check is measured from.
 	ConnectedAt time.Time
-	Now         time.Time
+	// Privacy is the store's privacy requests that have been failing for
+	// longer than a day (privacy_verdict.go).
+	Privacy privacyFailing
+	Now     time.Time
 }
 
 // recordedKinds are the kinds "What is recorded" lists, each with the domain
@@ -119,8 +124,18 @@ var recordedKinds = []struct{ kind, concept, needs string }{
 
 // computeVerdict decides one store's state, first match: disconnected, then
 // paused, then any reason, then a backfill not yet done or a domain never
-// swept, else recording. A paused or disconnected store carries no reasons:
-// nothing it would say is something to act on while it is not recorded.
+// swept, else recording. A paused or disconnected store carries none of the
+// reasons about its recording: nothing they would say is something to act on
+// while it is not recorded.
+//
+// ONE REASON IS LISTED WHATEVER THE STATE: a privacy request that has been
+// failing for more than a day (privacyReason). It is not about recording. On a
+// store that would read recording or starting it is a reason like any other,
+// and the store needs attention. A store that is paused or not connected
+// keeps its word -- that is still the truest thing to say of it -- and lists
+// the reason beside it: a shop's erasure is a job of a store that is
+// uninstalled, so the request most likely to be failing would otherwise be
+// seen nowhere.
 func computeVerdict(in verdictInput) Verdict {
 	store := in.Store
 	rows := rowsByConcept(in.States)
@@ -140,9 +155,16 @@ func computeVerdict(in verdictInput) Verdict {
 		v.State = VerdictPaused
 	}
 	v.ResumedAt = resumedAtOf(in.Previous, v.State == "", in.Now)
+	privacy, privacyFailing := privacyReason(in.Privacy)
+	if v.State != "" && privacyFailing {
+		v.Reasons = []VerdictReason{privacy}
+	}
 	if v.State == "" {
 		from := lateFrom(in.ConnectedAt, v.ResumedAt)
 		v.Reasons = reasonsOf(in, rows, from, neverCleanFrom(in, from))
+		if privacyFailing {
+			v.Reasons = append(v.Reasons, privacy)
+		}
 		switch {
 		case len(v.Reasons) > 0:
 			v.State = VerdictNeedsAttention

@@ -242,7 +242,14 @@ mutation complianceJob queueComplianceJob {
   }
 }
 
-/// Record what a privacy job did.
+/// Record what one run of a privacy job did.
+///
+/// The runner names only what the run changed, and a field it leaves out
+/// keeps its value. After the FIRST pass of an erasure: status pending,
+/// scrubbedAt, and a dueAt one hour on, for the second pass. When the job is
+/// done: status done and completedAt. When a run failed: status failed and
+/// lastError, with the outcome of an earlier pass and its scrubbedAt left as
+/// they are, so the next run takes the job up where it stands.
 ///
 /// Server-only, and actor.userId scoping is not the fix: the caller is the
 /// connector's hourly runner, which has no user at all -- a job row belongs
@@ -251,16 +258,18 @@ mutation complianceJob queueComplianceJob {
 @serverOnly
 mutation complianceJob recordComplianceJob {
   args {
-    jobId      string!
-    status     string!
-    outcome    string
-    lastError  string
+    jobId        string!
+    status       string!
+    outcome      string
+    lastError    string
+    scrubbedAt   datetime
+    dueAt        datetime
+    completedAt  datetime
   }
   update {
-    accept { status, outcome, lastError }
+    accept { status, outcome, lastError, scrubbedAt, dueAt, completedAt }
     stamp {
-      id:           args.jobId
-      completedAt:  now
+      id:  args.jobId
     }
   }
 }

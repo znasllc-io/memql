@@ -3,6 +3,7 @@ package shopify
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -137,7 +138,7 @@ func TestShopRedactSkipsThePurgeWhenTheStoreIsBackx(t *testing.T) {
 	h.admin.reply("ShopifyReachable", map[string]any{"shop": map[string]any{"id": "gid://shopify/Shop/1"}})
 	job := ComplianceJob{Topic: TopicShopRedact, StoreID: testStoreID, DueAt: h.now.Add(-time.Hour), ReceivedAt: h.now.Add(-49 * time.Hour)}
 
-	if _, err := h.conn.runComplianceJob(context.Background(), h.store(t), job); err != nil {
+	if _, err := h.conn.runComplianceJob(context.Background(), h.store(t), true, job); err != nil {
 		t.Fatal(err)
 	}
 	audits := h.engine.callsTo("createAuditEvent")
@@ -277,5 +278,37 @@ func TestTheRunnerReadsTheOrdersAJobNames(t *testing.T) {
 	}
 	if job.ID != "shpcj1" || job.Topic != TopicRedact || job.CustomerGID != "gid://shopify/Customer/991" || job.DueAt.IsZero() {
 		t.Errorf("the job read from its row is %+v", job)
+	}
+}
+
+// What a failed run leaves on its job's row is a sentence of the runner's own,
+// whatever the failure was: a failure the runner did not name leaves the one
+// sentence that says nothing, and never the failure's text.
+func TestAFailedRunLeavesASentenceAndNeverItsCause(t *testing.T) {
+	cause := errString(`refused: insert(payload={"customerGid":"gid://shopify/Customer/991","email":"ada@example.com","name":"Ada Example"})`)
+	for name, tc := range map[string]struct {
+		err  error
+		want string
+	}{
+		"a failure the runner named":     {failedJob(failScrub, cause), "the customer's rows could not be scrubbed"},
+		"the same, wrapped on its way":   {fmt.Errorf("shopify: the pass: %w", failedJob(failPurge, cause)), "the store's mirror could not be deleted"},
+		"a failure nobody named":         {cause, "the job could not be run"},
+		"a failure with no cause at all": {failedJob(failNoCustomer, nil), "the request names no customer"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := lastErrorOf(tc.err)
+			if got != tc.want {
+				t.Errorf("lastError would be %q, want %q", got, tc.want)
+			}
+			for _, whom := range []string{"991", "ada@example.com", "Ada", "gid://"} {
+				if strings.Contains(got, whom) {
+					t.Errorf("lastError would say for whom (%q): %q", whom, got)
+				}
+			}
+		})
+	}
+	// The cause is not lost: it is the error the runner logs.
+	if err := failedJob(failScrub, cause); !strings.Contains(err.Error(), "refused: insert") {
+		t.Errorf("the failure's own text lost its cause: %v", err)
 	}
 }

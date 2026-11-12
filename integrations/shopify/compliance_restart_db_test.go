@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/znasllc-io/memql/component/memql"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 	"github.com/znasllc-io/memql/integrations/shopify/generated"
 )
@@ -70,7 +72,8 @@ func TestARedactionStartsTheStoresBackfillsInFlightAgain(t *testing.T) {
 	})
 	job := ComplianceJob{Topic: TopicRedact, StoreID: testStoreID, CustomerGID: "gid://shopify/Customer/777000111", ReceivedAt: h.now, DueAt: h.now}
 
-	outcome, err := h.conn.runComplianceJob(context.Background(), h.store(t), job)
+	step, err := h.conn.runComplianceJob(context.Background(), h.store(t), true, job)
+	outcome := step.Outcome
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,6 +86,79 @@ func TestARedactionStartsTheStoresBackfillsInFlightAgain(t *testing.T) {
 	}
 	if audits := h.engine.callsTo("createAuditEvent"); len(audits) != 1 || !strings.Contains(audits[0], "shopify_customer_redacted") {
 		t.Errorf("audits = %v, want the redaction recorded", audits)
+	}
+	// The FAILED backfill is not started; the export its cursor names is
+	// dropped from it, so "Backfill now" does not continue one taken before
+	// the erasure (ruling 80). The write names the cursor and nothing else:
+	// the row keeps its status and its error.
+	patches := h.engine.callsTo("patchSyncState")
+	collection := memqlsync.StateID(generated.ConceptID("collection"), ConnectorName, string(memqlsync.DirectionInbound), testStoreID)
+	if len(patches) != 1 || !strings.Contains(patches[0], collection) {
+		t.Fatalf("patched %v, want the one failed backfill's row", patches)
+	}
+	if strings.Contains(patches[0], "BulkOperation") || strings.Contains(patches[0], "backfillStatus") || strings.Contains(patches[0], "lastError") {
+		t.Errorf("the failed backfill's row was written as %s, want its cursor without the export and no other field", patches[0])
+	}
+	if !strings.Contains(outcome, "dropped the old export of 1 failed backfill(s)") {
+		t.Errorf("outcome = %q, want it to say the failed backfill's old export was dropped", outcome)
+	}
+	if step.Status != "pending" || step.ScrubbedAt.IsZero() || !step.DueAt.Equal(step.ScrubbedAt.Add(ErasureSecondPassAfter)) {
+		t.Errorf("the first pass leaves %+v, want the job pending for a second pass an hour on", step)
+	}
+}
+
+// The SECOND pass of an erasure starts no backfill again: the first did, and
+// one that is running now began after it. It still drops a failed backfill's
+// old export, which is safe to do at every pass.
+func TestTheSecondPassOfAnErasureStartsNoBackfillAgain(t *testing.T) {
+	db := openTestDB(t, "the second pass of customers/redact")
+	if db == nil {
+		return
+	}
+	midFile := inFlight(backfillCursor{OperationID: "gid://shopify/BulkOperation/1", Line: 1500})
+	h := redactionHarness(t, db, testStoreID, map[string]map[string]any{
+		"order":      {"backfillStatus": "running", "backfillCursor": midFile},
+		"customer":   {"backfillStatus": "queued"},
+		"collection": {"backfillStatus": "failed", "backfillCursor": midFile, "lastError": "backfill failed: shopify admin: HTTP 502"},
+	})
+	job := ComplianceJob{Topic: TopicRedact, StoreID: testStoreID, CustomerGID: "gid://shopify/Customer/777000114", ReceivedAt: h.now, DueAt: h.now, ScrubbedAt: h.now.Add(-time.Hour)}
+
+	step, err := h.conn.runComplianceJob(context.Background(), h.store(t), true, job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := h.engine.callsTo("datasyncQueueBackfill"); len(got) != 0 {
+		t.Errorf("the second pass queued %v; a backfill is started again on the first pass only", got)
+	}
+	if got := h.engine.callsTo("patchSyncState"); len(got) != 1 {
+		t.Errorf("the second pass patched %v, want the failed backfill's old export dropped", got)
+	}
+	if step.Status != "done" || !strings.HasPrefix(step.Outcome, "second pass: ") || !step.ScrubbedAt.IsZero() || !step.DueAt.IsZero() {
+		t.Errorf("the second pass leaves %+v, want the job done", step)
+	}
+	if audits := h.engine.callsTo("createAuditEvent"); len(audits) != 1 || !strings.Contains(audits[0], "shopify_customer_redacted_second_pass") {
+		t.Errorf("audits = %v, want the second pass recorded by its own name", audits)
+	}
+}
+
+// A failed backfill's old export that cannot be dropped fails the job: the row
+// changed under the write (an operator's "Backfill now" started it), and the
+// job is run again.
+func TestAnErasureWhoseOldExportCannotBeDroppedIsNotRecordedDone(t *testing.T) {
+	db := openTestDB(t, "customers/redact whose cursor write is refused")
+	if db == nil {
+		return
+	}
+	midFile := inFlight(backfillCursor{OperationID: "gid://shopify/BulkOperation/1", Line: 1500})
+	h := redactionHarness(t, db, testStoreID, map[string]map[string]any{
+		"collection": {"backfillStatus": "failed", "backfillCursor": midFile, "lastError": "backfill failed: shopify admin: HTTP 502"},
+	})
+	h.engine.fail["patchSyncState"] = memql.ErrRowVersionChanged
+	job := ComplianceJob{Topic: TopicRedact, StoreID: testStoreID, CustomerGID: "gid://shopify/Customer/777000115", ReceivedAt: h.now, DueAt: h.now}
+
+	_, err := h.conn.runComplianceJob(context.Background(), h.store(t), true, job)
+	if err == nil || lastErrorOf(err) != "the erasure ran, but a failed backfill's old export could not be dropped" || !strings.Contains(err.Error(), "collection") {
+		t.Fatalf("err = %v, want the job failed, saying the erasure ran and which backfill kept its old export", err)
 	}
 }
 
@@ -98,7 +174,8 @@ func TestARedactionWithNothingRunningQueuesNothing(t *testing.T) {
 	})
 	job := ComplianceJob{Topic: TopicRedact, StoreID: testStoreID, CustomerGID: "gid://shopify/Customer/777000112", ReceivedAt: h.now, DueAt: h.now}
 
-	outcome, err := h.conn.runComplianceJob(context.Background(), h.store(t), job)
+	step, err := h.conn.runComplianceJob(context.Background(), h.store(t), true, job)
+	outcome := step.Outcome
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,9 +198,13 @@ func TestARedactionWhoseRestartFailsIsNotRecordedDone(t *testing.T) {
 	h.engine.fail["datasyncQueueBackfill"] = errString("no connector bound")
 	job := ComplianceJob{Topic: TopicRedact, StoreID: testStoreID, CustomerGID: "gid://shopify/Customer/777000113", ReceivedAt: h.now, DueAt: h.now}
 
-	_, err := h.conn.runComplianceJob(context.Background(), h.store(t), job)
-	if err == nil || !strings.Contains(err.Error(), "scrubbed") || !strings.Contains(err.Error(), "order") || !strings.Contains(err.Error(), "no connector bound") {
-		t.Fatalf("err = %v, want the job failed, saying the scrub ran and which backfill could not be started again", err)
+	_, err := h.conn.runComplianceJob(context.Background(), h.store(t), true, job)
+	if err == nil || !strings.Contains(err.Error(), "the erasure ran") || !strings.Contains(err.Error(), "order") || !strings.Contains(err.Error(), "no connector bound") {
+		t.Fatalf("err = %v, want the job failed, saying the erasure ran and which backfill could not be started again", err)
+	}
+	// The job's row takes the sentence, and the cause stays in the log.
+	if got := lastErrorOf(err); got != "the erasure ran, but a backfill in flight could not be started again" {
+		t.Errorf("the job's lastError would be %q", got)
 	}
 	if audits := h.engine.callsTo("createAuditEvent"); len(audits) != 1 || !strings.Contains(audits[0], "shopify_customer_redacted") {
 		t.Errorf("audits = %v, want the redaction that did run recorded", audits)
@@ -145,7 +226,8 @@ func TestAPurgeStartsAgainABackfillStillInFlightOnceItIsDone(t *testing.T) {
 	h := redactionHarness(t, db, purged, map[string]map[string]any{"order": {"backfillStatus": "running", "backfillCursor": "c-1"}})
 	job := ComplianceJob{Topic: TopicShopRedact, StoreID: purged, ReceivedAt: h.now, DueAt: h.now}
 
-	outcome, err := h.conn.runComplianceJob(context.Background(), Store{ID: purged, Domain: "acme-widgets.myshopify.com"}, job)
+	step, err := h.conn.runComplianceJob(context.Background(), Store{ID: purged, Domain: "acme-widgets.myshopify.com"}, true, job)
+	outcome := step.Outcome
 	if err != nil {
 		t.Fatal(err)
 	}

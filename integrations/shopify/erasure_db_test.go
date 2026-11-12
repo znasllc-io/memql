@@ -741,12 +741,15 @@ func TestTheDataRequestExportsExactlyTheRowsTheErasureScrubs(t *testing.T) {
 	}
 }
 
-// allTexts is every row of the fixture's store, as "concept gid", with all its
-// versions' text.
+// allTexts is every mirror row of the fixture's store, as "concept gid", with
+// all its versions' text. (A privacy job of the store is a row of the store
+// too, and is not a mirror row: it carries no gid.)
 func (f *erasureFixture) allTexts() map[string]string {
 	f.t.Helper()
 	rows, err := f.db.QueryContext(context.Background(),
-		`SELECT concept, payload->>'gid', payload::text FROM "MemoryNodes" WHERE concept LIKE 'v1:shopify:%' AND payload->>'storeId' = $1 ORDER BY concept, id, "createdAt"`, f.store)
+		`SELECT concept, payload->>'gid', payload::text FROM "MemoryNodes"
+		  WHERE concept LIKE 'v1:shopify:%' AND payload->>'storeId' = $1 AND payload->>'gid' IS NOT NULL
+		  ORDER BY concept, id, "createdAt"`, f.store)
 	if err != nil {
 		f.t.Fatal(err)
 	}

@@ -295,6 +295,12 @@ func (c *Connector) storeVerdict(ctx context.Context, store Store) (Verdict, err
 			return Verdict{}, err
 		}
 	}
+	// The store's privacy requests that keep failing, read whatever the
+	// store's state (privacy_verdict.go).
+	privacy, err := c.privacyRequestsFailing(ctx, store.ID)
+	if err != nil {
+		return Verdict{}, err
+	}
 	previous, _ := store.Health["verdict"].(map[string]any)
 	return computeVerdict(verdictInput{
 		Store:        store,
@@ -305,6 +311,7 @@ func (c *Connector) storeVerdict(ctx context.Context, store Store) (Verdict, err
 		Denied:       c.FieldsDenied(store.ID),
 		Previous:     previous,
 		ConnectedAt:  connectedAtOf(store),
+		Privacy:      privacy,
 		Now:          c.now().UTC(),
 	}), nil
 }

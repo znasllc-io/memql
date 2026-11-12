@@ -329,13 +329,44 @@ query abandonedCheckout abandonedCheckouts {
   shape     abandonedCheckoutMirror
 }
 
-/// Privacy jobs whose hold has elapsed. The read the hourly runner makes.
+/// Privacy jobs that are due. The read the hourly runner makes, page by page.
+///
+/// Three kinds of job, all of them only once their dueAt has come: one that is
+/// waiting (for its hold, or for the second pass of its erasure); one that
+/// failed, which is run again at every run until it is done; and a
+/// customers/redact job that is done and carries no scrubbedAt. That last was
+/// recorded done by a version whose erasure left a customer's email address
+/// and phone number behind and never reached an order's children, so it is
+/// made again, once: its first pass under this version sets scrubbedAt.
 @actor
 query complianceJob complianceJobsDue {
   args {
     asOf  datetime!
   }
-  filter    row => statusIsPending(row) && row.dueAt <= args.asOf && actor.isClusterOwner == true
+  filter    row => (statusIsPending(row)
+                    || row.status == "failed"
+                    || (row.status == "done" && row.topic == "customers/redact" && (row.scrubbedAt == nil || row.scrubbedAt == "")))
+                && row.dueAt <= args.asOf
+                && actor.isClusterOwner == true
+  sort      "dueAt", "asc"
+  paginate  100
+  shape     complianceJobFull
+}
+
+/// A store's privacy jobs that are failed and were due before a given time,
+/// oldest due first. The store's verdict reads its first page to say that a
+/// privacy request for the store could not be completed, how many, and since
+/// when; it asks for those due more than a day ago.
+@actor
+query complianceJob complianceJobsFailingForStore {
+  args {
+    storeId    string!
+    dueBefore  datetime!
+  }
+  filter    row => row.storeId == args.storeId
+                && row.status == "failed"
+                && row.dueAt <= args.dueBefore
+                && actor.isClusterOwner == true
   sort      "dueAt", "asc"
   paginate  100
   shape     complianceJobFull
