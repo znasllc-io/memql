@@ -54,7 +54,9 @@ const anonymousWriteRefusal = "this call carries no identity"
 // shopper handler.
 type reviewsExecutor struct{ eng *memql.MemQLEngine }
 
-func (e reviewsExecutor) Execute(ctx context.Context, q string) (any, error) { return e.eng.Execute(ctx, q) }
+func (e reviewsExecutor) Execute(ctx context.Context, q string) (any, error) {
+	return e.eng.Execute(ctx, q)
+}
 
 // reviewsSites resolves a site row under its owner's own actor, as the bff's
 // site reader does. The seeded sites carry no shopperForms switch, and the
@@ -569,7 +571,6 @@ func TestASettingsSaveThroughTheBuiltinStillWrites(t *testing.T) {
 		t.Fatalf("the saved settings are %v", got)
 	}
 }
-
 
 // bareAccount is an organization id without its canonical prefix.
 func bareAccount(id string) string { return strings.TrimPrefix(id, "v1:accounts:account:") }
