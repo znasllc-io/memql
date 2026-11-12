@@ -50,7 +50,7 @@ func newStoreFake() *storeFake {
 		users:      map[string]map[string]any{},
 		extensions: map[string]memql.ExtensionRow{},
 		sysOnlyExt: map[string]bool{},
-		settings:   map[string]any{"id": SettingsRowID(readsStore), "storeId": readsStore, "applicationsOpen": true, "tokenHash": "settings-digest"},
+		settings:   map[string]any{"id": SettingsRowID(readsStore), "storeId": readsStore, "applicationsOpen": true, "accountId": "acct-reads", "tokenHash": "settings-digest"},
 		pages:      map[string]int{},
 		single:     map[string]int{},
 	}

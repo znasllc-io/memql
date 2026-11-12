@@ -36,9 +36,18 @@ import (
 // row changed between the read the change was merged into and the write.
 const ChangedWhileEditingSentence = "These settings changed while you were editing. Reload and try again."
 
-// NotSetUpSentence is the refusal of a change to a store with no settings row.
-// The OS shows it as written.
+// NotSetUpSentence is the refusal of every act of the Wholesale section on a
+// store that is not set up: one with no settings row, or one whose settings row
+// is tied to no organization (ruling 55). The OS shows it as written.
 const NotSetUpSentence = "This store's wholesale program is not set up yet. The cluster's operators set it up."
+
+// errNotSetUp is the store gate's refusal of a store that is not set up.
+var errNotSetUp = errors.New(NotSetUpSentence)
+
+// NameTheSiteSentence refuses a set-up that cannot tell which site the store's
+// program belongs to: no siteId named, and not exactly one site bound to the
+// store.
+const NameTheSiteSentence = "Name the site this store's wholesale program belongs to."
 
 // maxStaffEmail is the longest address the store's people may name.
 const maxStaffEmail = 320
@@ -327,28 +336,21 @@ type settingsPlace struct {
 // the write goes to that row's own id: two store ids that slug alike share the
 // id, and a write at an id it did not read could replace a row it never saw.
 //
-// AND WHAT IT IS TIED TO: with a siteId, the named site's organization and id
-// (the site checked to serve the store); otherwise an existing row keeps its
-// own (empty on a row from before this version, until the backfill ties it),
-// and a new row takes them from the store's site when exactly one is bound to it.
+// AND WHAT IT IS TIED TO, which is always an organization (settingsPlaceFrom):
+// the named site's, or the one bound site's, or an existing tied row's own.
 //
 // THE EXISTING OWNER IS KEPT. Otherwise the operator who changed a setting
 // would become the row's owner, and the merchant's own reads -- the shopper
 // path's applicationsOpen among them -- would stop seeing it.
 //
-// A NEW ROW IS THE STORE'S MERCHANT'S: the named site's owner, or else the one
-// owner of the deployables whose serving or preview binding names the store
-// (sitesBoundToStore). Two owners are refused rather than chosen between. With
-// no bound site, trusted server code acting as a real person names that person;
-// an operator's call is refused, because the operator is not the merchant and a
-// row they owned would be readable by nobody on the store's side.
+// A NEW ROW IS THE STORE'S MERCHANT'S: the owner of the site it is tied to.
 func (p *Provider) settingsOwner(ctx context.Context, storeID, siteID string) (settingsPlace, error) {
 	sys := auth.ContextWithSystemActor(ctx, storeLookupActor)
 	existing, err := p.settingsRowAt(sys, storeID)
 	if err != nil {
 		return settingsPlace{}, err
 	}
-	place, err := p.settingsPlaceFrom(ctx, sys, existing, storeID, siteID)
+	place, err := p.settingsPlaceFrom(sys, existing, storeID, siteID)
 	if err != nil {
 		return settingsPlace{}, err
 	}
@@ -379,71 +381,77 @@ func (p *Provider) settingsOwner(ctx context.Context, storeID, siteID string) (s
 
 // settingsPlaceFrom is whose the row is and what it is tied to after the write
 // (settingsOwner's rule), given the existing row read.
-func (p *Provider) settingsPlaceFrom(ctx, sys context.Context, existing map[string]any, storeID, siteID string) (settingsPlace, error) {
-	var err error
-	var named map[string]any
-	if siteID != "" {
-		// Read as the system: the caller is an operator or trusted code, already
-		// admitted, and the site is judged by what it serves, not who can read it.
-		if named, err = p.siteForStore(sys, siteID, storeID); err != nil {
-			return settingsPlace{}, err
-		}
-	}
-	if existing != nil {
-		if owner := trimmed(existing["ownerUserId"]); owner != "" {
-			place := settingsPlace{owner: userRef(owner), accountID: trimmed(existing["accountId"]),
-				siteID: trimmed(existing["siteId"]), staffEmail: trimmed(existing["staffEmail"]),
-				version: rowTime(existing["createdAt"])}
-			if place.version.IsZero() {
-				return settingsPlace{}, fmt.Errorf("wholesale: store %q's settings carry no version to save against; "+
-					"reload and try again", storeID)
-			}
-			if named != nil {
-				place.accountID, place.siteID = trimmed(named["accountId"]), bareID(trimmed(named["id"]))
-			}
-			return place, nil
-		}
-	}
-	if named != nil {
-		owner := userRef(trimmed(named["ownerUserId"]))
-		if owner == "" {
-			return settingsPlace{}, fmt.Errorf("wholesale: site %q names no owner, so there is no merchant to own "+
-				"store %q's wholesale settings", siteID, storeID)
-		}
-		return settingsPlace{owner: owner, accountID: trimmed(named["accountId"]), siteID: bareID(trimmed(named["id"]))}, nil
-	}
-	sites, err := p.sitesForStore(sys, storeID)
+//
+// THE SET-UP ALWAYS ENDS WITH A ROW TIED TO AN ORGANIZATION (ruling 55): the
+// site the store's program belongs to is the named one, or else the one site
+// bound to the store; with neither -- no siteId, and no site or more than one
+// bound -- it is refused with NameTheSiteSentence, and so is a site that
+// belongs to no organization. An existing row keeps its owner, and its
+// organization and site unless a site is named; a row that is not tied yet is
+// tied to the site found.
+func (p *Provider) settingsPlaceFrom(sys context.Context, existing map[string]any, storeID, siteID string) (settingsPlace, error) {
+	tie, err := p.siteOfTheProgram(sys, storeID, siteID)
 	if err != nil {
 		return settingsPlace{}, err
 	}
-	owners := map[string]bool{}
-	for _, site := range sites {
-		if owner := userRef(trimmed(site["ownerUserId"])); owner != "" {
-			owners[owner] = true
+	var place settingsPlace
+	if owner := trimmed(existing["ownerUserId"]); existing != nil && owner != "" {
+		place = settingsPlace{owner: userRef(owner), accountID: trimmed(existing["accountId"]),
+			siteID: trimmed(existing["siteId"]), staffEmail: trimmed(existing["staffEmail"]),
+			version: rowTime(existing["createdAt"])}
+		if place.version.IsZero() {
+			return settingsPlace{}, fmt.Errorf("wholesale: store %q's settings carry no version to save against; "+
+				"reload and try again", storeID)
 		}
+		if tie != nil && (siteID != "" || bareID(place.accountID) == "") {
+			place.accountID, place.siteID = trimmed(tie["accountId"]), bareID(trimmed(tie["id"]))
+		}
+	} else if tie != nil {
+		owner := userRef(trimmed(tie["ownerUserId"]))
+		if owner == "" {
+			return settingsPlace{}, fmt.Errorf("wholesale: site %q names no owner, so there is no merchant to own "+
+				"store %q's wholesale settings", trimmed(tie["id"]), storeID)
+		}
+		place = settingsPlace{owner: owner, accountID: trimmed(tie["accountId"]), siteID: bareID(trimmed(tie["id"]))}
 	}
-	switch len(owners) {
-	case 1:
-		place := settingsPlace{}
-		for owner := range owners {
-			place.owner = owner
+	if bareID(place.accountID) == "" {
+		if tie == nil {
+			return settingsPlace{}, errors.New(NameTheSiteSentence)
 		}
-		if len(sites) == 1 {
-			place.accountID = trimmed(sites[0]["accountId"])
-			place.siteID = bareID(trimmed(sites[0]["id"]))
-		}
-		return place, nil
-	case 0:
-		if auth.OriginFromContext(ctx).IsInternal() {
-			if ac, ok := auth.AccessFromContext(ctx); ok && !ac.Synthetic && strings.TrimSpace(ac.UserId) != "" {
-				return settingsPlace{owner: userRef(ac.UserId)}, nil
-			}
-		}
-		return settingsPlace{}, fmt.Errorf("wholesale: no deployable owned by a person is bound to store %q, so "+
-			"there is no merchant to own its wholesale settings; bind the store to its storefront first", storeID)
+		return settingsPlace{}, fmt.Errorf("wholesale: site %q belongs to no organization, and a store's wholesale "+
+			"program belongs to one; tie the site to its organization first", trimmed(tie["id"]))
 	}
-	return settingsPlace{}, fmt.Errorf("wholesale: the deployables bound to store %q belong to more than one "+
-		"owner, so whose wholesale settings these are cannot be told from the store alone", storeID)
+	return place, nil
+}
+
+// siteOfTheProgram is the site a set-up ties the store's program to, read as
+// sys: the named site, checked to serve the store and to be of the
+// organization any of the store's settings rows names; or, with none named,
+// the one site whose serving or preview binding names the store. nil when no
+// site is named and not exactly one is bound.
+func (p *Provider) siteOfTheProgram(sys context.Context, storeID, siteID string) (map[string]any, error) {
+	if siteID != "" {
+		site, err := p.siteServingStore(sys, siteID, storeID)
+		if err != nil {
+			return nil, err
+		}
+		rows, err := p.storeSettingsRows(sys, storeID)
+		if err != nil {
+			return nil, err
+		}
+		if err := siteIsTheStoresOrganizations(site, siteID, storeID, rows); err != nil {
+			return nil, err
+		}
+		return site, nil
+	}
+	sites, err := p.sitesForStore(sys, storeID)
+	if err != nil {
+		return nil, err
+	}
+	if len(sites) != 1 {
+		return nil, nil
+	}
+	return sites[0], nil
 }
 
 // storeSettings answers one store's settings and what the caller may do.
@@ -459,6 +467,12 @@ func (p *Provider) storeSettings(ctx context.Context, args map[string]any, _ int
 		return nil, fmt.Errorf("wholesale: storeId is required; settings are per store")
 	}
 	if _, err := p.siteForStore(ctx, trimmed(args["siteId"]), storeID); err != nil {
+		// A STORE THAT IS NOT SET UP is answered as not set up, in the reply's
+		// own shape, and with NOTHING of the store: every setting at its
+		// default, no document, and whether this caller may set it up.
+		if errors.Is(err, errNotSetUp) {
+			return notSetUpSettings(ctx)
+		}
 		return nil, err
 	}
 	row, err := p.settingsRowAt(auth.ContextWithSystemActor(ctx, storeLookupActor), storeID)
@@ -488,6 +502,31 @@ func (p *Provider) storeSettings(ctx context.Context, args map[string]any, _ int
 			// A store is set up by the cluster's operators alone.
 			"setUp": !s.Exists && isClusterOperator(ctx),
 		},
+	})
+}
+
+// notSetUpSettings is wholesaleStoreSettings' reply for a store that is not set
+// up: exists false, every setting its default, each document null, the routes
+// this engine has, may.update false, and may.setUp for a cluster operator. It
+// reads nothing.
+func notSetUpSettings(ctx context.Context) ([]memorynodes.MemoryNode, error) {
+	s := EffectiveSettings(nil)
+	documents := map[string]any{}
+	for _, kind := range DocumentKinds {
+		documents[kind] = nil
+	}
+	return confirm("wholesale:settings:store", map[string]any{
+		"exists":             false,
+		"applicationsOpen":   false,
+		"entitlementAdapter": "",
+		"introText":          "",
+		"staffEmail":         "",
+		"termsRequired":      false,
+		"linkLifetimeDays":   s.LinkLifetimeDays,
+		"acceptanceText":     s.AcceptanceText,
+		"documents":          documents,
+		"adapters":           AdapterNames(),
+		"may":                map[string]any{"update": false, "setUp": isClusterOperator(ctx)},
 	})
 }
 
@@ -638,24 +677,59 @@ func validStaffEmail(email string) error {
 		return nil
 	}
 	if !memql.IsEmailAddress(email) {
-		return fmt.Errorf("wholesale: the staff address must be one address -- at most %d characters, "+
+		return fmt.Errorf("wholesale: the staff address must be one address -- at most %d bytes, "+
 			"exactly one @ with something on each side and no whitespace -- or empty for none; %q is not",
 			maxStaffEmail, email)
 	}
 	return nil
 }
 
-// siteForStore answers the site an act names, once it has checked the site is
-// the STORE'S OWN. The organization gate judged the act against that site's
-// organization, so the site must serve the store, and -- once the store's
-// settings carry an organization -- belong to that organization: a site of
-// another organization bound to the same store would let a person granted the
-// part there act on this store.
+// siteForStore is THE STORE GATE every act of the Wholesale section on a store
+// as a whole goes through, directly or through admitStore (ruling 55). It
+// answers the site the act names once it has checked three things, in order:
 //
-// A deliberate copy of packs/reviewspack/settings.go's siteForStore (a pack
-// may not import another pack), with one difference: the settings row is read
-// as the system, so an untied row cannot hide its organization from the check.
+//   - the site serves the store (siteServingStore);
+//   - the store is SET UP: its settings row exists and is tied to an
+//     organization. A store with no row, or whose row names no organization,
+//     refuses every act with NotSetUpSentence -- before anything of the store
+//     beyond its settings rows is read, and before any write. Without this, a
+//     site of another organization bound to the store would have nothing to be
+//     checked against, and a person granted the part there could write into
+//     the store: a buyer, a document version, a settings change;
+//   - the site belongs to that organization: a site of another organization
+//     bound to the same store is refused.
+//
+// The only act that works on a store that is not set up is the set-up itself
+// (wholesaleSetSettings), which does not come through here (settingsPlaceFrom).
+//
+// The settings rows are read as the system, so an untied row cannot hide its
+// organization from the check: reading them IS the check.
 func (p *Provider) siteForStore(ctx context.Context, siteID, storeID string) (map[string]any, error) {
+	site, err := p.siteServingStore(ctx, siteID, storeID)
+	if err != nil {
+		return nil, err
+	}
+	settingsRows, err := p.storeSettingsRows(auth.ContextWithSystemActor(ctx, storeLookupActor), storeID)
+	if err != nil {
+		return nil, err
+	}
+	// THE STORE'S ONE ROW (storeSettingsRows' first, the row every read uses)
+	// must be tied.
+	if len(settingsRows) == 0 || bareID(trimmed(settingsRows[0]["accountId"])) == "" {
+		return nil, errNotSetUp
+	}
+	if err := siteIsTheStoresOrganizations(site, siteID, storeID, settingsRows); err != nil {
+		return nil, err
+	}
+	return site, nil
+}
+
+// siteServingStore reads the named site under ctx and checks it serves the
+// store (serving or preview binding).
+//
+// A deliberate copy of packs/reviewspack/settings.go's siteForStore's first
+// half (a pack may not import another pack).
+func (p *Provider) siteServingStore(ctx context.Context, siteID, storeID string) (map[string]any, error) {
 	siteID = strings.TrimSpace(siteID)
 	if siteID == "" {
 		return nil, fmt.Errorf("wholesale: siteId is required: the act is judged against the organization of the store's site")
@@ -671,18 +745,20 @@ func (p *Provider) siteForStore(ctx context.Context, siteID, storeID string) (ma
 	if !servesStore(site, bareID(storeID)) {
 		return nil, fmt.Errorf("wholesale: site %q is not bound to store %q", siteID, storeID)
 	}
-	// EVERY SETTINGS ROW OF THE STORE, under every form of its id: the check
-	// must not depend on how the caller spelled the store.
-	settingsRows, err := p.storeSettingsRows(auth.ContextWithSystemActor(ctx, storeLookupActor), storeID)
-	if err != nil {
-		return nil, err
-	}
+	return site, nil
+}
+
+// siteIsTheStoresOrganizations refuses a site of another organization than any
+// of the store's settings rows that names one -- EVERY settings row of the
+// store, under every form of its id, so the check does not depend on how the
+// caller spelled the store.
+func siteIsTheStoresOrganizations(site map[string]any, siteID, storeID string, settingsRows []map[string]any) error {
 	for _, settings := range settingsRows {
 		if want := bareID(trimmed(settings["accountId"])); want != "" && bareID(trimmed(site["accountId"])) != want {
-			return nil, fmt.Errorf("wholesale: site %q belongs to another organization than store %q's wholesale settings", siteID, storeID)
+			return fmt.Errorf("wholesale: site %q belongs to another organization than store %q's wholesale settings", siteID, storeID)
 		}
 	}
-	return site, nil
+	return nil
 }
 
 // sitesForStore reads every site whose serving or preview binding names the

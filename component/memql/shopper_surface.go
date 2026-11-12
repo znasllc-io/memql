@@ -527,7 +527,7 @@ func validateShopperRoute(pack, name, construct string, fields []ShopperField) e
 			return fmt.Errorf("%s/%s declares a negative MaxLength on %q", pack, name, fname)
 		}
 		if f.Format != "" && f.Format != ShopperFormatSHA256 && f.Format != ShopperFormatEmail {
-			return fmt.Errorf("%s/%s declares %q with the format %q; the formats there are are %q and %q",
+			return fmt.Errorf("%s/%s declares %q with the format %q; the formats there are %q and %q",
 				pack, name, fname, f.Format, ShopperFormatSHA256, ShopperFormatEmail)
 		}
 		if f.Format != "" && (f.Numeric || len(f.Enum) > 0) {

@@ -194,26 +194,33 @@ func TestASubmissionOnASiteOfOrganizationAWritesTheApplicationAndTheExtensionRow
 	}
 }
 
-// A SITE WITH NO ORGANIZATION IS A LEGITIMATE STATE: the application is written
-// with none and stays its owner's, as before.
-func TestASubmissionOnASiteWithNoOrganizationIsWrittenWithNone(t *testing.T) {
+// A STORE WHOSE ONLY SITE HAS NO ORGANIZATION CANNOT BE SET UP (ruling 55): its
+// program would belong to nobody on the store's side. So it takes no
+// application either: the shopper's post is refused as by any store with no
+// settings. Before ruling 55 the set-up was accepted and the application was
+// written with no organization.
+func TestAStoreWhoseSiteHasNoOrganizationIsNotSetUpAndTakesNoApplication(t *testing.T) {
 	eng := liveWholesaleEngine(t)
 	merchant, store, _ := wholesaleScope()
 	site := "site-none-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	seedUser(t, eng, merchant)
 	seedSiteIn(t, eng, site, merchant, store, "")
 	owner := siteOwnerOf(t, eng, site)
-	openApplications(t, eng, asSiteOwner(owner), store, wholesalepack.AdapterCustomerTag)
-
+	for _, named := range []string{"", `, siteId: ` + quote(site)} {
+		_, err := eng.Execute(auth.ContextWithInternalOrigin(asSiteOwner(owner)), `builtin wholesaleSetSettings(applicationsOpen: true, `+
+			`entitlementAdapter: "customerTag", storeId: `+quote(store)+named+`)`)
+		if err == nil || !strings.Contains(err.Error(), "belongs to no organization") {
+			t.Fatalf("a set-up through a site of no organization (%q): %v", named, err)
+		}
+	}
 	rec := postApplication(t, eng, site, store, owner, url.Values{
 		"companyName": {"Untied Trading"}, "applicantName": {"Sam Rivers"}, "applicantEmail": {"sam@none.example.com"},
 	})
-	if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, "/wholesale/thank-you") {
-		t.Fatalf("the post was refused: %d %q", rec.Code, loc)
+	if loc := rec.Header().Get("Location"); strings.HasPrefix(loc, "/wholesale/thank-you") {
+		t.Fatalf("a store that is not set up took an application: %d %q", rec.Code, loc)
 	}
-	apps := wsRows(t, eng, asSiteOwner(owner), `query applicationsForStore(storeId: `+quote(store)+`)`)
-	if len(apps) != 1 || asString(apps[0]["accountId"]) != "" {
-		t.Fatalf("the merchant reads %+v, want one application with no accountId", apps)
+	if apps := wsRows(t, eng, asSiteOwner(owner), `query applicationsForStore(storeId: `+quote(store)+`)`); len(apps) != 0 {
+		t.Fatalf("the merchant reads %+v, want none", apps)
 	}
 }
 

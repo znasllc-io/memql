@@ -31,9 +31,12 @@ type docsHarness struct {
 
 func newDocsHarness(settings map[string]any) *docsHarness {
 	h := &docsHarness{reader: &fixtureReader{sites: []map[string]any{settingsSite()}}, at: docsClock}
-	if settings != nil {
-		h.reader.settings = map[string][]map[string]any{"store-live": {settings}}
+	// nil is a store set up for its organization, closed and requiring no
+	// terms: a store that is not set up admits no act (ruling 55).
+	if settings == nil {
+		settings = openSettings(false, nil)
 	}
+	h.reader.settings = map[string][]map[string]any{"store-live": {settings}}
 	h.writer = &fakeWriter{inserted: func(mutation string, args map[string]any) string {
 		id := documentVersionConcept + ":dv-" + strconv.Itoa(len(h.reader.docs)+1)
 		row := map[string]any{"id": id, "createdAt": rowTime(args["publishedAt"])}
@@ -570,7 +573,7 @@ func TestTheExportCarriesTheEffectiveSettings(t *testing.T) {
 		return parsed.Settings
 	}
 	f := newStoreFake()
-	f.settings = map[string]any{"id": SettingsRowID(readsStore), "storeId": readsStore, "entitlementAdapter": AdapterNone,
+	f.settings = map[string]any{"id": SettingsRowID(readsStore), "storeId": readsStore, "accountId": "acct-reads", "entitlementAdapter": AdapterNone,
 		"linkLifetimeDays": float64(0), "acceptanceText": "", "tokenHash": "settings-digest"}
 	got := exported(f)
 	want := map[string]any{"termsRequired": false, "linkLifetimeDays": float64(30), "acceptanceText": DefaultAcceptanceText,
@@ -583,7 +586,7 @@ func TestTheExportCarriesTheEffectiveSettings(t *testing.T) {
 	if _, carries := got["tokenHash"]; carries {
 		t.Fatalf("the exported settings carry a token hash: %+v", got)
 	}
-	f.settings = map[string]any{"id": SettingsRowID(readsStore), "storeId": readsStore, "applicationsOpen": true,
+	f.settings = map[string]any{"id": SettingsRowID(readsStore), "storeId": readsStore, "accountId": "acct-reads", "applicationsOpen": true,
 		"termsRequired": true, "linkLifetimeDays": float64(14), "acceptanceText": "We accept the terms above."}
 	got = exported(f)
 	for k, v := range map[string]any{"termsRequired": true, "linkLifetimeDays": float64(14),

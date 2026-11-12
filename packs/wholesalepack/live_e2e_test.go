@@ -224,12 +224,36 @@ func wsExec(t *testing.T, eng *memql.MemQLEngine, ctx context.Context, call stri
 }
 
 // openApplications sets a store's settings as trusted server code acting as
-// ctx's actor: wholesaleSetSettings admits internal origin or an operator, and
-// a new settings row is owned by that actor, the store's merchant.
+// ctx's actor: wholesaleSetSettings admits internal origin or an operator.
+//
+// A SET-UP ALWAYS TIES THE STORE TO AN ORGANIZATION (ruling 55), through the
+// one site bound to the store or a site named. A store a test bound to its own
+// site is set up through it; a store with no site bound is given one here --
+// owned by ctx's actor, the store's merchant, and of an organization of its own
+// -- and set up naming it, so the row is the merchant's, as it was before.
 func openApplications(t *testing.T, eng *memql.MemQLEngine, ctx context.Context, storeID, adapter string) {
 	t.Helper()
-	wsExec(t, eng, auth.ContextWithInternalOrigin(ctx), `builtin wholesaleSetSettings(applicationsOpen: true, `+
-		`entitlementAdapter: `+wsQuote(adapter)+`, storeId: `+wsQuote(storeID)+`)`)
+	call := func(site string) error {
+		named := ""
+		if site != "" {
+			named = `, siteId: ` + wsQuote(site)
+		}
+		_, err := eng.Execute(auth.ContextWithInternalOrigin(ctx), `builtin wholesaleSetSettings(applicationsOpen: true, `+
+			`entitlementAdapter: `+wsQuote(adapter)+`, storeId: `+wsQuote(storeID)+named+`)`)
+		return err
+	}
+	err := call("")
+	if err != nil && strings.Contains(err.Error(), wholesalepack.NameTheSiteSentence) {
+		ac, _ := auth.AccessFromContext(ctx)
+		owner := strings.TrimPrefix(ac.UserId, "v1:identity:user:")
+		site, account := "site-of-"+storeID, "acct-of-"+storeID
+		seedOrganization(t, eng, account)
+		seedSiteIn(t, eng, site, owner, storeID, account)
+		err = call(site)
+	}
+	if err != nil {
+		t.Fatalf("set up %s: %v", storeID, err)
+	}
 }
 
 // submit stands in for component/server/shopper_handler.go: the pack's

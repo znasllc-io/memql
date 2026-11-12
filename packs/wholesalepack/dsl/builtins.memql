@@ -57,7 +57,7 @@ builtin wholesaleRetryAccess {
 
 @executor("integration.wholesale.storeSettings")
 @args(profile="object")
-@description("One store's wholesale settings as the Deployables app shows them: whether the store is set up, whether applications are open, the route (entitlementAdapter, empty for none), the intro text and the staff address, whether applicants must accept the terms (termsRequired), how many days a link stays usable (linkLifetimeDays), the sentence an applicant accepts with (acceptanceText) -- each its effective value -- the current version of each document (documents: terms, map and priceSheet, each {label, sha256} or null), the routes this engine has, and what the caller may do -- may.setUp is true only for a cluster operator on a store with no settings row, may.update for a person holding the wholesale part or a cluster operator on a store that has one. The caller holds the part in the site's organization (the organization gate judges it), and the site must serve the store.")
+@description("One store's wholesale settings as the Deployables app shows them: whether the store is set up, whether applications are open, the route (entitlementAdapter, empty for none), the intro text and the staff address, whether applicants must accept the terms (termsRequired), how many days a link stays usable (linkLifetimeDays), the sentence an applicant accepts with (acceptanceText) -- each its effective value -- the current version of each document (documents: terms, map and priceSheet, each {label, sha256} or null), the routes this engine has, and what the caller may do -- may.setUp is true only for a cluster operator on a store that is not set up, may.update for a person holding the wholesale part or a cluster operator on a store that is. A STORE THAT IS NOT SET UP -- no settings row, or a row tied to no organization -- is answered exists false with every setting at its default, every document null and may.update false, and nothing of the store. The caller holds the part in the site's organization (the organization gate judges it), and the site must serve the store.")
 @requiresCapability("execute", "app:deployables/wholesale")
 builtin wholesaleStoreSettings {
   siteId   string!  @description("The store's site: the organization gate judges the read against its organization, and the store must be bound to it.")
@@ -82,7 +82,7 @@ builtin wholesaleUpdateSettings {
 
 @executor("integration.wholesale.setWholesaleSettings")
 @args(profile="object")
-@description("Write one store's wholesale settings -- SETTING A STORE UP. THE CLUSTER'S OPERATORS (or trusted server code) ONLY, never the wholesale part: every other caller, the store's own merchant and its people included, is refused before anything is read; once a store is set up its people change it through wholesaleUpdateSettings. An existing row keeps its owner. With a siteId the row is THAT site's -- the site must serve the store, and a new row takes its owner, and every write its organization and id; without one a new row is owned by the one owner of the deployables bound to the store, and is refused when that owner cannot be told. DATA, NOT SOURCE -- a client opens or closes applications, changes what the storefront says and switches entitlement adapter without a deploy or a .memql edit. One row per store at a derived id, so a merchant can take applications on their live store while they are closed on the development store a candidate is being exercised against. An UNKNOWN adapter name is refused HERE rather than at approval time, so a merchant who typed it wrong learns now. Opening applications on a store whose settings require its terms is refused until the terms, the MAP policy and the price sheet each have a published version.")
+@description("Write one store's wholesale settings -- SETTING A STORE UP. THE CLUSTER'S OPERATORS (or trusted server code) ONLY, never the wholesale part: every other caller, the store's own merchant and its people included, is refused before anything is read; once a store is set up its people change it through wholesaleUpdateSettings. An existing row keeps its owner. THE SET-UP ALWAYS TIES THE STORE TO AN ORGANIZATION: the row is the named site's (siteId) -- the site must serve the store, and a new row takes its owner, and every write its organization and id -- or, with none named, the one site bound to the store's; when it cannot tell which site the program belongs to (no siteId and not exactly one site bound) it is refused (\"Name the site this store's wholesale program belongs to.\"), and so is a site of no organization. An existing row keeps its owner; one tied to no organization is tied by this write. DATA, NOT SOURCE -- a client opens or closes applications, changes what the storefront says and switches entitlement adapter without a deploy or a .memql edit. One row per store at a derived id, so a merchant can take applications on their live store while they are closed on the development store a candidate is being exercised against. An UNKNOWN adapter name is refused HERE rather than at approval time, so a merchant who typed it wrong learns now. Opening applications on a store whose settings require its terms is refused until the terms, the MAP policy and the price sheet each have a published version.")
 builtin wholesaleSetSettings {
   storeId             string!  @description("The store these settings govern.")
   siteId              string  @description("The store's site the settings are made for. It must serve the store; the row takes its organization and id, and a new row its owner.")
@@ -208,6 +208,16 @@ builtin wholesaleRemoveBuyer {
   applicationId  string!  @description("The approved buyer's application, bare or canonical.")
   note           string  @description("The reason, kept on the decision.")
 }
+
+// # The store gate (ruling 55)
+//
+// Every builtin above that names a siteId and a storeId acts on the store only
+// once the store is SET UP -- its settings row exists and is tied to an
+// organization -- and only through a site of that organization. A store that is
+// not set up refuses every one of them with "This store's wholesale program is
+// not set up yet. The cluster's operators set it up." (wholesaleStoreSettings
+// answers not set up instead); the set-up, wholesaleSetSettings, is the one act
+// that works on it.
 
 // # The private links (U8)
 //

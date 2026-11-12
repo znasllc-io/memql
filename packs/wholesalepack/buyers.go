@@ -34,10 +34,12 @@ import (
 //
 // # Who may
 //
-// Both are gated by the wholesale part (the organization gate): adding is
-// judged against the SITE's organization, which must serve the store
-// (siteForStore); removing against the APPLICATION's, which the caller must
-// then read under their own actor. The cluster's operators add and remove
+// Both are gated by the wholesale part (the organization gate). Adding is
+// judged against the SITE's organization, and the store gate (siteForStore)
+// then admits a site that serves the store only once the store is set up, and
+// only for the organization its settings are tied to. Removing is judged
+// against the APPLICATION's organization, and the caller must then read the
+// application under their own actor. The cluster's operators add and remove
 // nobody, refused as a decision is (deciderOf): the store holds who its buyers
 // are.
 
@@ -61,8 +63,10 @@ const duplicateCheckActor = "wholesale-duplicate-check"
 // THE ORGANIZATION GATE ADMITTED THE CALLER for the site. Then, before anything
 // is read, the caller must be a person who is not one of the cluster's
 // operators (deciderOf), and the three fields must meet the application form's
-// rules. Then the site must serve the store, the store must be set up (a
-// settings row exists: NotSetUpSentence), the store's documents must exist
+// rules. Then the store gate (siteForStore) admits the act: the site serves
+// the store, the store is set up -- its settings row is tied to an
+// organization, else NotSetUpSentence -- and the site is of that organization.
+// Then the store's documents must exist
 // when it requires its terms -- whether or not applications are open, which is
 // the public form's door and not this one's -- and the address must have no
 // submitted or approved application on the store.
@@ -93,15 +97,6 @@ func (p *Provider) addBuyer(ctx context.Context, args map[string]any, _ int) ([]
 	settings, err := p.settingsRowAt(sys, storeID)
 	if err != nil {
 		return nil, err
-	}
-	// A STORE NOBODY HAS SET UP TAKES NO BUYER, as it takes no shopper's
-	// application and no settings change. It is also what keeps the add on the
-	// store's own organization: siteForStore checks the site's organization
-	// against the store's settings rows, and with none there is nothing to check
-	// it against -- a holder of the part elsewhere, through a site of theirs
-	// bound to this store, would otherwise write a buyer into it.
-	if settings == nil {
-		return nil, errors.New(NotSetUpSentence)
 	}
 	if err := p.termsRuleRefusal(sys, storeID, true, EffectiveSettings(settings).TermsRequired); err != nil {
 		return nil, err

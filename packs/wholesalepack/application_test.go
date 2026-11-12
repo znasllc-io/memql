@@ -591,7 +591,7 @@ func TestAStaffAddressWithoutAnAtIsRefused(t *testing.T) {
 	writer := &fakeWriter{}
 	p := &Provider{writer: writer, reader: &fixtureReader{sites: []map[string]any{settingsSite()},
 		settings: map[string][]map[string]any{"store-live": {{"storeId": "store-live", "ownerUserId": "merchant-1",
-			"applicationsOpen": true, "createdAt": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}}}}}
+			"applicationsOpen": true, "accountId": "acct-north", "createdAt": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}}}}}
 	for _, bad := range []string{"desk.example.com", "desk@@example.com", "a@b@example.com", strings.Repeat("a", 310) + "@example.com"} {
 		if _, err := p.updateSettings(staffCtx("staff-1"), map[string]any{"siteId": "site-1", "storeId": "store-live",
 			"staffEmail": bad}, 0); err == nil {
@@ -615,7 +615,7 @@ func TestAStaffAddressIsHeldToTheApplicantsRule(t *testing.T) {
 		writer := &fakeWriter{}
 		return &Provider{writer: writer, reader: &fixtureReader{sites: []map[string]any{settingsSite()},
 			settings: map[string][]map[string]any{"store-live": {{"storeId": "store-live", "ownerUserId": "merchant-1",
-				"applicationsOpen": true, "createdAt": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}}}}}, writer
+				"applicationsOpen": true, "accountId": "acct-north", "createdAt": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}}}}}, writer
 	}
 	for _, bad := range []string{"desk@", "@example.com", "desk @example.com", "desk@exam ple.com", "desk@example.com\tdesk"} {
 		p, writer := newProvider()
@@ -652,7 +652,7 @@ func TestTheSettingsOwnerIsReadAtTheIdTheWriteGoesTo(t *testing.T) {
 	p := &Provider{writer: writer, reader: &fixtureReader{
 		settings: map[string][]map[string]any{"store.live": {{"id": SettingsRowID("store-live"), "storeId": "store.live",
 			"ownerUserId": "merchant-1", "applicationsOpen": true, "accountId": "acct-north", "siteId": "site-1", "createdAt": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}}},
-		sites: []map[string]any{{"id": "site-9", "ownerUserId": "merchant-9", "binding": map[string]any{"storeId": "store-live"}}},
+		sites: []map[string]any{{"id": "site-9", "ownerUserId": "merchant-9", "accountId": "acct-nine", "binding": map[string]any{"storeId": "store-live"}}},
 	}}
 	_, err := p.setWholesaleSettings(operatorCtx("operator-1"), map[string]any{"storeId": "store-live",
 		"applicationsOpen": false}, 0)
@@ -945,13 +945,14 @@ func TestTheMinimumAnApplicationNeedsToBeOne(t *testing.T) {
 // between.
 func TestSettingsAreOneRowPerStore(t *testing.T) {
 	writer := &fakeWriter{}
-	p := &Provider{reader: &fixtureReader{}, writer: writer}
+	p := &Provider{reader: &fixtureReader{sites: []map[string]any{settingsSite(),
+		{"id": "site-dev", "ownerUserId": "merchant-1", "accountId": "acct-north", "binding": map[string]any{"storeId": "store-dev"}}}}, writer: writer}
 	for _, tc := range []struct {
-		store string
-		open  bool
-	}{{"store-live", true}, {"store-live", false}, {"store-dev", true}} {
+		store, site string
+		open        bool
+	}{{"store-live", "site-1", true}, {"store-live", "site-1", false}, {"store-dev", "site-dev", true}} {
 		if _, err := p.setWholesaleSettings(internalAsMerchant(),
-			map[string]any{"storeId": tc.store, "applicationsOpen": tc.open}, 0); err != nil {
+			map[string]any{"storeId": tc.store, "siteId": tc.site, "applicationsOpen": tc.open}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -980,7 +981,7 @@ func TestSettingsAreOneRowPerStore(t *testing.T) {
 // fails to provision -- the moment they are least able to act on it.
 func TestUnknownAdapterIsRefusedWhenSettingsAreWritten(t *testing.T) {
 	registerShippedAdapters()
-	p := &Provider{reader: &fixtureReader{}, writer: &fakeWriter{}}
+	p := &Provider{reader: &fixtureReader{sites: []map[string]any{settingsSite()}}, writer: &fakeWriter{}}
 	_, err := p.setWholesaleSettings(internalAsMerchant(), map[string]any{
 		"storeId": "store-live", "applicationsOpen": true,
 		"entitlementAdapter": "shopifyB2b", // wrong case; a plausible typo
@@ -1080,7 +1081,7 @@ func TestSettingsAreSetByAnOperatorOrInternalOriginOnly(t *testing.T) {
 	}
 
 	existing := &fixtureReader{settings: map[string][]map[string]any{
-		"store-live": {{"storeId": "store-live", "ownerUserId": "merchant-1", "applicationsOpen": true, "createdAt": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}},
+		"store-live": {{"storeId": "store-live", "ownerUserId": "merchant-1", "applicationsOpen": true, "accountId": "acct-north", "createdAt": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}},
 	}}
 	for name, ctx := range map[string]context.Context{
 		"an operator":   operatorCtx("operator-1"),
@@ -1100,31 +1101,45 @@ func TestSettingsAreSetByAnOperatorOrInternalOriginOnly(t *testing.T) {
 }
 
 // A NEW STORE'S SETTINGS ARE OWNED BY THE STORE'S MERCHANT -- the owner of
-// the deployables bound to it -- so the merchant's own reads (the shopper
-// path's applicationsOpen among them) see them. A store whose bound sites
-// name no owner, or more than one, is refused rather than guessed at.
+// the site the program belongs to -- and TIED TO THAT SITE'S ORGANIZATION
+// (ruling 55): the named site, or the one site bound to the store. With no site
+// named and not exactly one bound, it is refused with NameTheSiteSentence --
+// one owner's two sites and trusted code with no bound site included, which
+// were accepted before and left the row tied to nobody -- and so is a site of
+// no organization.
 func TestANewStoresSettingsAreOwnedByItsSitesOwner(t *testing.T) {
-	site := func(owner string) map[string]any {
-		return map[string]any{"ownerUserId": owner, "binding": map[string]any{"storeId": "store-live"}}
+	site := func(id, owner, account string) map[string]any {
+		return map[string]any{"id": id, "ownerUserId": owner, "accountId": account, "binding": map[string]any{"storeId": "store-live"}}
 	}
 	for _, tc := range []struct {
-		name   string
-		sites  []map[string]any
-		ctx    context.Context
-		owner  string
-		refuse bool
+		name    string
+		sites   []map[string]any
+		ctx     context.Context
+		siteID  string
+		owner   string
+		account string
+		refusal string
 	}{
-		{"one owner", []map[string]any{site("merchant-1"), site("v1:identity:user:merchant-1")}, operatorCtx("operator-1"), "v1:identity:user:merchant-1", false},
-		{"two owners", []map[string]any{site("merchant-1"), site("merchant-2")}, operatorCtx("operator-1"), "", true},
-		{"no site", nil, operatorCtx("operator-1"), "", true},
-		{"internal code, no site", nil, internalAsMerchant(), "v1:identity:user:merchant-1", false},
+		{"one site", []map[string]any{site("site-1", "merchant-1", "acct-north")}, operatorCtx("operator-1"), "", "v1:identity:user:merchant-1", "acct-north", ""},
+		{"one owner's two sites", []map[string]any{site("site-1", "merchant-1", "acct-north"), site("site-2", "v1:identity:user:merchant-1", "acct-north")},
+			operatorCtx("operator-1"), "", "", "", NameTheSiteSentence},
+		{"one owner's two sites, one named", []map[string]any{site("site-1", "merchant-1", "acct-north"), site("site-2", "merchant-1", "acct-south")},
+			operatorCtx("operator-1"), "site-2", "v1:identity:user:merchant-1", "acct-south", ""},
+		{"two owners", []map[string]any{site("site-1", "merchant-1", "acct-north"), site("site-2", "merchant-2", "acct-south")}, operatorCtx("operator-1"), "", "", "", NameTheSiteSentence},
+		{"no site", nil, operatorCtx("operator-1"), "", "", "", NameTheSiteSentence},
+		{"internal code, no site", nil, internalAsMerchant(), "", "", "", NameTheSiteSentence},
+		{"a site of no organization", []map[string]any{site("site-1", "merchant-1", "")}, operatorCtx("operator-1"), "", "", "", "belongs to no organization"},
 	} {
 		w := &fakeWriter{}
 		p := &Provider{reader: &fixtureReader{sites: tc.sites}, writer: w}
-		_, err := p.setWholesaleSettings(tc.ctx, map[string]any{"storeId": "store-live", "applicationsOpen": true}, 0)
-		if tc.refuse {
-			if err == nil {
-				t.Fatalf("%s: a new settings row was written with no single merchant to own it: %+v", tc.name, w.writes)
+		args := map[string]any{"storeId": "store-live", "applicationsOpen": true}
+		if tc.siteID != "" {
+			args["siteId"] = tc.siteID
+		}
+		_, err := p.setWholesaleSettings(tc.ctx, args, 0)
+		if tc.refusal != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.refusal) {
+				t.Fatalf("%s: %v, want %q", tc.name, err, tc.refusal)
 			}
 			if len(w.writes) != 0 {
 				t.Fatalf("%s: a refused call wrote", tc.name)
@@ -1134,8 +1149,9 @@ func TestANewStoresSettingsAreOwnedByItsSitesOwner(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}
-		if got := w.only(t, "setWholesaleSettingsRow")["ownerUserId"]; got != tc.owner {
-			t.Fatalf("%s: ownerUserId = %v, want %s", tc.name, got, tc.owner)
+		row := w.only(t, "setWholesaleSettingsRow")
+		if row["ownerUserId"] != tc.owner || row["accountId"] != tc.account {
+			t.Fatalf("%s: the row is %v's of %v, want %s's of %s", tc.name, row["ownerUserId"], row["accountId"], tc.owner, tc.account)
 		}
 	}
 }
@@ -1328,7 +1344,7 @@ func TestACopiedOwnerIsStoredInTheFormTheReadPredicateMatches(t *testing.T) {
 
 	settingsWriter := &fakeWriter{}
 	sp := &Provider{writer: settingsWriter, reader: &fixtureReader{
-		sites: []map[string]any{{"id": "site-1", "ownerUserId": "merchant-2", "binding": map[string]any{"storeId": "store-new"}}},
+		sites: []map[string]any{{"id": "site-1", "ownerUserId": "merchant-2", "accountId": "acct-new", "binding": map[string]any{"storeId": "store-new"}}},
 	}}
 	if _, err := sp.setWholesaleSettings(operatorCtx("operator-1"), map[string]any{
 		"storeId": "store-new", "applicationsOpen": true,
@@ -1530,7 +1546,7 @@ func TestAnUpdateIsFencedAndClearsTheStaffAddress(t *testing.T) {
 	writer := &fakeWriter{}
 	p := &Provider{writer: writer, reader: &fixtureReader{sites: []map[string]any{settingsSite()},
 		settings: map[string][]map[string]any{"store-live": {{"storeId": "store-live", "ownerUserId": "merchant-1",
-			"applicationsOpen": true, "staffEmail": "desk@example.com", "createdAt": at}}}}}
+			"applicationsOpen": true, "accountId": "acct-north", "staffEmail": "desk@example.com", "createdAt": at}}}}}
 	if _, err := p.updateSettings(staffCtx("staff-1"), map[string]any{"siteId": "site-1", "storeId": "store-live",
 		"staffEmail": ""}, 0); err != nil {
 		t.Fatalf("updateSettings: %v", err)
@@ -1554,7 +1570,7 @@ func TestAnUpdateIsFencedAndClearsTheStaffAddress(t *testing.T) {
 func TestASetUpKeepsTheStaffAddress(t *testing.T) {
 	writer := &fakeWriter{}
 	p := &Provider{writer: writer, reader: &fixtureReader{settings: map[string][]map[string]any{"store-live": {{
-		"storeId": "store-live", "ownerUserId": "merchant-1", "applicationsOpen": true, "staffEmail": "desk@example.com", "createdAt": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}}}}}
+		"storeId": "store-live", "ownerUserId": "merchant-1", "applicationsOpen": true, "accountId": "acct-north", "staffEmail": "desk@example.com", "createdAt": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}}}}}
 	if _, err := p.setWholesaleSettings(operatorCtx("operator-1"), map[string]any{"storeId": "store-live", "applicationsOpen": false}, 0); err != nil {
 		t.Fatalf("setWholesaleSettings: %v", err)
 	}
@@ -1734,8 +1750,8 @@ func TestASetUpIsFencedOnWhatItRead(t *testing.T) {
 	writer := &fakeWriter{}
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	reader := &fixtureReader{settings: map[string][]map[string]any{"store-live": {{"storeId": "store-live",
-		"ownerUserId": "merchant-1", "applicationsOpen": true, "createdAt": at}}},
-		sites: []map[string]any{{"id": "site-n", "ownerUserId": "merchant-2", "binding": map[string]any{"storeId": "store-new"}}}}
+		"ownerUserId": "merchant-1", "applicationsOpen": true, "accountId": "acct-north", "createdAt": at}}},
+		sites: []map[string]any{{"id": "site-n", "ownerUserId": "merchant-2", "accountId": "acct-new", "binding": map[string]any{"storeId": "store-new"}}}}
 	p := &Provider{reader: reader, writer: writer}
 	for _, store := range []string{"store-live", "store-new"} {
 		writer.writes = nil
