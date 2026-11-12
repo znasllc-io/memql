@@ -1021,11 +1021,14 @@ func (r *Runner) queueOne(ctx context.Context, connectorName, conceptID, partiti
 // queuePatch is what a queue writes on a row: `queued`, an empty cursor, and a
 // stale refusal -- and only a refusal -- cleared (clearsRefusal), in either
 // spelling, so a refused backfill queued again never reads refused while it
-// waits.
+// waits. The refusal's attempt time goes with it: it was the refusal's (the
+// sweep writes the two together), and left behind it held the domain's sweep
+// back an interval and read as a check that ran.
 func queuePatch(cur SyncState) SyncPatch {
 	p := SyncPatch{"backfillStatus": "queued", "backfillCursor": ""}
 	if clearsRefusal(cur.LastError) {
 		p["lastError"] = ""
+		p["lastAttemptAt"] = ""
 	}
 	return p
 }

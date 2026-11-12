@@ -244,23 +244,26 @@ func TestQueueBackfillClearsARefusalInEitherSpelling(t *testing.T) {
 	if g == nil {
 		return
 	}
+	// The refusal's attempt time goes with it: it was the refusal's, and
+	// left behind it held the domain's sweep back an interval.
 	for _, lastError := range []string{notGrantedText, backfillRefusedPrefix + notGrantedText} {
-		g.write(retryBulkConcept, SyncState{BackfillStatus: "failed", LastError: lastError})
+		g.write(retryBulkConcept, SyncState{BackfillStatus: "failed", LastError: lastError, LastAttemptAt: g.now.Add(-5 * time.Minute)})
 		if err := g.runner.QueueBackfill(context.Background(), g.connector.Name(), retryBulkConcept, ""); err != nil {
 			t.Fatal(err)
 		}
-		if after := g.read(retryBulkConcept); after.BackfillStatus != "queued" || after.LastError != "" {
-			t.Errorf("%q queued: %+v; want queued, no refusal", lastError, after)
+		if after := g.read(retryBulkConcept); after.BackfillStatus != "queued" || after.LastError != "" || !after.LastAttemptAt.IsZero() {
+			t.Errorf("%q queued: %+v; want queued, no refusal, no attempt", lastError, after)
 		}
 	}
 	// A backfill's own failure that is not a refusal is not the queue's to
-	// clear.
-	g.write(retryBulkConcept, SyncState{BackfillStatus: "failed", LastError: backfillFailedPrefix + "boom"})
+	// clear, and neither is its attempt time.
+	attempt := g.now.Add(-5 * time.Minute)
+	g.write(retryBulkConcept, SyncState{BackfillStatus: "failed", LastError: backfillFailedPrefix + "boom", LastAttemptAt: attempt})
 	if err := g.runner.QueueBackfill(context.Background(), g.connector.Name(), retryBulkConcept, ""); err != nil {
 		t.Fatal(err)
 	}
-	if after := g.read(retryBulkConcept); after.LastError != backfillFailedPrefix+"boom" {
-		t.Errorf("a failure was cleared by a queue: %+v", after)
+	if after := g.read(retryBulkConcept); after.LastError != backfillFailedPrefix+"boom" || !after.LastAttemptAt.Equal(attempt) {
+		t.Errorf("a failure, or its attempt, was cleared by a queue: %+v", after)
 	}
 }
 
@@ -348,5 +351,40 @@ func TestRetryRefusedNamesOneDomainOfOnePartition(t *testing.T) {
 		if _, err := g.integ.handleRetryRefused(internal, args, 0); err == nil {
 			t.Errorf("%s: answered without an error", name)
 		}
+	}
+}
+
+func TestARefusalARealSweepWroteIsDueAtTheNextPassOnceRetried(t *testing.T) {
+	g := newRetryRig(t)
+	if g == nil {
+		return
+	}
+	clock := g.now
+	g.runner.now = func() time.Time { return clock }
+	// A clean sweep, then -- the domain due again an interval later -- a
+	// sweep the origin refuses.
+	if _, err := g.runner.Reconcile(context.Background(), g.connector.Name(), testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+	clock = clock.Add(6*time.Hour + time.Minute)
+	if !g.due(testMirrorConcept) {
+		t.Fatal("the domain is not due an interval after its clean sweep")
+	}
+	g.connector.reconcileErr = memqlsync.NotGranted("shopify", "read_products")
+	_, _ = g.runner.Reconcile(context.Background(), g.connector.Name(), testMirrorConcept, "")
+	refused := g.read(testMirrorConcept)
+	if !refusedNotGranted(refused.LastError) || !refused.LastAttemptAt.Equal(clock) {
+		t.Fatalf("the sweep did not record its refusal: %+v", refused)
+	}
+	if g.due(testMirrorConcept) {
+		t.Fatal("the refused domain is due before the retry; the test proves nothing")
+	}
+	// A few minutes later, a connect retries it: due at the next pass.
+	clock = clock.Add(5 * time.Minute)
+	if outcome, detail := g.retry(testMirrorConcept); outcome != "retried" || detail != "due" {
+		t.Fatalf("answer %q %q", outcome, detail)
+	}
+	if !g.due(testMirrorConcept) {
+		t.Errorf("a refusal a real sweep wrote is not due at the next pass once retried: %+v", g.read(testMirrorConcept))
 	}
 }
