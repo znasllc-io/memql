@@ -579,7 +579,8 @@ func TestARefundNotYetReadBlanksTheFourFiguresThatSubtractIt(t *testing.T) {
 }
 
 func TestARefundWithAFullPageOfLinesBlanksUnitsSold(t *testing.T) {
-	storeID, site := salesStore(t, nil)
+	// Enabled for wholesale, so the split is answered beside the rest.
+	storeID, site := salesStore(t, map[string]any{"wholesale_enabled": true})
 	sell(t, storeID, sale{gid: orderGID(1), at: nov(3), lines: []item{{gid: lineGID(1), qty: 2, price: "40.00"}}})
 	refundOf(t, storeID, refund{gid: refundGID(1), order: orderGID(1), at: nov(5), amount: "40.00",
 		lines: []returned{{line: lineGID(1), qty: 1, subtotal: "40.00", tax: "0.00"}}, fullPage: true})
@@ -594,6 +595,10 @@ func TestARefundWithAFullPageOfLinesBlanksUnitsSold(t *testing.T) {
 	wantValues(t, "the product money", got, map[string]any{"productsBySales": nil, "refundsWithoutItem": nil})
 	wantValues(t, "the money figures", figuresIn(t, got, "figures"), map[string]any{"discounts": "0", "totalSales": "40.00",
 		"averageOrderValue": "80.00"})
+	// The wholesale split is summed from the orders' and refunds' own
+	// amounts too, and stays measured: the order is retail.
+	wantValues(t, "the wholesale split", got, map[string]any{"wholesale": map[string]any{
+		"wholesale": map[string]any{"orders": 0, "netSales": "0"}, "retail": map[string]any{"orders": 1, "netSales": "40.00"}}})
 
 	// 80.00 went back and only 40.00 of it is on the lines recorded.
 	other, otherSite := salesStore(t, nil)
@@ -623,11 +628,13 @@ func productTitles(t *testing.T, answer map[string]any) map[string]string {
 }
 
 // A PRODUCT IS TITLED BY ITS NEWEST LINE SOLD IN THE PERIOD; one only refunded
-// in it, by the newest line it refunded.
+// in it, by the line of its latest refund, which need not be its newest
+// refunded line.
 func TestAProductIsTitledByItsNewestLineSoldInThePeriod(t *testing.T) {
 	storeID, site := salesStore(t, nil)
 	oct := func(d int) time.Time { return local(madrid, 2025, 10, d, 12, 0) }
 	const renamed, refundedOnly, twice = "gid://shopify/Product/801", "gid://shopify/Product/802", "gid://shopify/Product/803"
+	const refundedOutOfTurn = "gid://shopify/Product/804"
 	// Renamed: sold Oct 20 as "Old name", sold Nov 3 as "New name", and the
 	// Oct 20 line refunded Nov 5.
 	sell(t, storeID, sale{gid: orderGID(1), at: oct(20), lines: []item{{gid: lineGID(1), product: renamed, qty: 1, price: "5.00", title: "Old name"}}})
@@ -642,12 +649,22 @@ func TestAProductIsTitledByItsNewestLineSoldInThePeriod(t *testing.T) {
 		lines: []returned{{line: lineGID(3), qty: 1, subtotal: "3.00", tax: "0.00"}}})
 	refundOf(t, storeID, refund{gid: refundGID(3), order: orderGID(4), at: nov(5), amount: "3.00",
 		lines: []returned{{line: lineGID(4), qty: 1, subtotal: "3.00", tax: "0.00"}}})
+	// Only refunded in the period, out of turn: the newer line, of Oct 21, is
+	// refunded first, Nov 4, and the older, of Oct 20, last, Nov 5. Titled by
+	// the line of the latest refund, the older one, not by the newest line.
+	sell(t, storeID, sale{gid: orderGID(7), at: oct(20), lines: []item{{gid: lineGID(7), product: refundedOutOfTurn, qty: 1, price: "4.00", title: "A cup, older"}}})
+	sell(t, storeID, sale{gid: orderGID(8), at: oct(21), lines: []item{{gid: lineGID(8), product: refundedOutOfTurn, qty: 1, price: "4.00", title: "A cup, newer"}}})
+	refundOf(t, storeID, refund{gid: refundGID(4), order: orderGID(8), at: nov(4), amount: "4.00",
+		lines: []returned{{line: lineGID(8), qty: 1, subtotal: "4.00", tax: "0.00"}}})
+	refundOf(t, storeID, refund{gid: refundGID(5), order: orderGID(7), at: nov(5), amount: "4.00",
+		lines: []returned{{line: lineGID(7), qty: 1, subtotal: "4.00", tax: "0.00"}}})
 	// Sold twice in the period under two titles.
 	sell(t, storeID, sale{gid: orderGID(5), at: nov(3), lines: []item{{gid: lineGID(5), product: twice, qty: 1, price: "2.00", title: "A bell"}}})
 	sell(t, storeID, sale{gid: orderGID(6), at: nov(4), lines: []item{{gid: lineGID(6), product: twice, qty: 1, price: "2.00", title: "A brass bell"}}})
 
 	titles := productTitles(t, ask(t, storeID, site))
-	for key, want := range map[string]string{renamed: "New name", refundedOnly: "A tube, second", twice: "A brass bell"} {
+	for key, want := range map[string]string{renamed: "New name", refundedOnly: "A tube, second", twice: "A brass bell",
+		refundedOutOfTurn: "A cup, older"} {
 		if titles[key] != want {
 			t.Errorf("product %s is titled %q, want %q", key, titles[key], want)
 		}
@@ -701,6 +718,35 @@ func TestThePreviousPeriodEndsAtItsOwnEnd(t *testing.T) {
 	}
 	if stats.Previous == nil || stats.Previous.Orders == nil || *stats.Previous.Orders != 1 || stats.Previous.GrossSales.String() != "25.00" {
 		t.Errorf("previous = %+v, want the Oct 28 order alone: the period ends at PrevEnd", stats.Previous)
+	}
+	if stats.Figures.Orders == nil || *stats.Figures.Orders != 1 {
+		t.Errorf("figures = %+v, want this week's one order", stats.Figures)
+	}
+}
+
+// A PREVIOUS PERIOD THAT RUNS PAST THE PERIOD'S START is read on its own, to
+// its own end. The bounds core/statsperiod makes never do this; bounds made
+// by hand can.
+func TestAPreviousPeriodPastThePeriodsStartIsReadToItsOwnEnd(t *testing.T) {
+	storeID, _ := salesStore(t, nil)
+	sell(t, storeID, one(1, local(madrid, 2025, 10, 28, 12, 0), "25.00"))
+	sell(t, storeID, one(2, local(madrid, 2025, 10, 31, 12, 0), "7.00"))
+	sell(t, storeID, one(3, nov(3), "10.00"))
+	_, db := statsEngine(t)
+	var stats Statistics
+	if err := readTx(context.Background(), db, func(ctx context.Context, tx bun.Tx) error {
+		var err error
+		if stats, err = readFrame(ctx, tx, statisticsRequest{StoreID: storeID, Period: "7d"}, madridNow); err != nil {
+			return err
+		}
+		// A previous period that ends two days after this one starts.
+		stats.Bounds.PrevEnd = local(madrid, 2025, 11, 4, 0, 0)
+		return readFigures(ctx, tx, &stats)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if stats.Previous == nil || stats.Previous.Orders == nil || *stats.Previous.Orders != 3 || stats.Previous.GrossSales.String() != "42.00" {
+		t.Errorf("previous = %+v, want the three orders to Nov 4: the period ends at PrevEnd", stats.Previous)
 	}
 	if stats.Figures.Orders == nil || *stats.Figures.Orders != 1 {
 		t.Errorf("figures = %+v, want this week's one order", stats.Figures)

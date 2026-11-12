@@ -62,10 +62,12 @@ func (s wholesaleState) isWholesale(email string) bool {
 // is the schedule's period, a minute, less ten seconds for the store under
 // way to finish and the run to log.
 //
-// turnBudget paces a store's turn: once it is spent, the turn asks no new
-// page of any source and starts no new purge batch, and ends normally
-// (rollup.go, "A turn has a budget"). A turn's work is then at most its
-// budget plus the one unit under way when the budget ran out.
+// turnBudget paces a store's turn: once it is spent, the turn walks no new
+// source, makes no floor probe, asks no new page of any source and starts no
+// new purge batch, and ends normally (rollup.go, "A turn has a budget"). What
+// a turn still runs then is the unit under way when the budget ran out and
+// the few statements that follow it before the turn's next check
+// (runDeadlineBound, turnTail).
 //
 // txTimeout bounds every transaction of the package (tx.go): a page's write
 // makes statements in proportion to its rows, so a count of statements cannot
@@ -76,9 +78,8 @@ func (s wholesaleState) isWholesale(email string) bool {
 // context, and a run that has not answered runUnwind later is left behind,
 // its hold released, so the next minute runs. It sits at or above
 // runDeadlineBound, which a test holds at or below fifteen minutes: work
-// added to a store's turn -- the wholesale pass and the periodic check come
-// next -- asks turnSpent between its units, so that what is under way when
-// the budget runs out stays one unit, rather than adding a term to a sum.
+// added to a store's turn asks turnSpent between its units, so that what can
+// follow a spent budget stays a short tail rather than a term added to a sum.
 // Variables so a test can make a run outlast them.
 var (
 	runBudget   = 50 * time.Second
@@ -104,48 +105,74 @@ const (
 	// (wholesale.go, wholesaleOf), asked before every page on the budgets'
 	// clock: spent, the run reads no further page and walks no store's facts.
 	wholesaleReadBudget = 10 * time.Second
-	// unbudgetedTransactions are the transactions a store's turn makes that
-	// no budget is asked between, counted from the code: its row
-	// (ensureStore, 1); keepStore's purging read, its keeping and a purge
-	// batch under way (3); its generation (1); the walk's purging read (1);
-	// the floor's read and write (2); each source's watermark read (3); and
-	// the walked mark (1).
-	unbudgetedTransactions = 12
-	// unbudgetedReads are the engine reads a turn makes that no budget is
-	// asked between: the shop, the verdict and the floor's probes.
-	unbudgetedReads = 2 + floorProbes
 )
 
 // runDeadlineBound is the most a run can take, its budgets spent, line by
-// line:
+// line; the terms follow one another, so they add:
 //
 //	the stores read:      maxStorePages (20) reads x readBound (10 s)       200 s
 //	the wholesale reads:  wholesaleReadBudget (10 s) + the read under way
 //	                      when it ran out, readBound (10 s)                   20 s
 //	the run's budget:     runBudget, after which no store is taken up         50 s
 //	the turn's budget:    turnBudget, of the last store taken up              30 s
-//	the unit under way:   the largest of
-//	  one page            one read (10 s) + its transaction (txTimeout 20 s)   30 s
-//	  one purge batch     its transaction (txTimeout 20 s), BEGIN to COMMIT    20 s
-//	  the store's keeping unbudgetedTransactions (12) x txTimeout (20 s)
-//	                      + unbudgetedReads (16) x readBound (10 s)          400 s
-//	  a check's start     checkStartUnit: three transactions (20 s)           60 s
-//	                                                               total     700 s
+//	the turn's tail:      what still runs once that budget is spent
+//	                      (turnTail)                                         210 s
+//	                                                               total     510 s
 //
-// The keeping is the largest unit: a turn asks no budget before its first
-// page or batch, so when the budget is spent at the turn's start the whole of
-// it runs, and a page or a batch is one transaction of it. The purge is
-// counted as it runs: a turn can purge twice, a batch at a time, the budget
-// asked before each, so one batch is under way at most; each transaction is
-// timed BEGIN to COMMIT by txTimeout. The check a rebuild's end begins in the
-// same turn (rollup.go, rollStore) asks turnSpent before its start and before
-// each of its pages and batches, so it adds a unit to the list, its start,
-// and no term to the sum. Eleven minutes and forty seconds, and runDeadline
-// adds a minute over it.
+// Eight minutes and thirty seconds, and runDeadline adds a minute over it.
 func runDeadlineBound() time.Duration {
-	keeping := unbudgetedTransactions*txTimeout + unbudgetedReads*readBound
-	unit := max(readBound+txTimeout, txTimeout, keeping, checkStartUnit())
-	return maxStorePages*readBound + wholesaleReadBudget + readBound + runBudget + turnBudget + unit
+	return maxStorePages*readBound + wholesaleReadBudget + readBound + runBudget + turnBudget + turnTail()
+}
+
+// turnTail is the most a store's turn runs once its budget is spent. The
+// budget runs out at one point of the turn; what runs from there to the
+// turn's next check of it is ADDED, and the tail is the longest of those
+// sums, one a point. A transaction is txTimeout (20 s), BEGIN to COMMIT; an
+// engine read is readBound (10 s).
+//
+//	spent as the turn begins: the shop read and the verdict read
+//	  (2 x 10 s), the keeping transaction, the store's generation and the
+//	  walk's purging read (3 x 20 s); the purge's batches and the floor ask
+//	  the budget first                                                    80 s
+//	  (a store whose data was removed: its row's read and its mark, or the
+//	  batch under way and the forgetting, 2 x 20 s)                      40 s
+//	spent in a purge batch that ends the purge: the batch, the generation
+//	  and the walk's purging read (3 x 20 s)                              60 s
+//	spent just after the walk asked it before the floor: the floor's read,
+//	  its probes (the clock and floorProbes more, 15 x 10 s), its write
+//	  and the walked mark (3 x 20 s)                                     210 s
+//	spent just after the walk asked it before a source: the source's
+//	  watermark read and the walked mark (2 x 20 s)                       40 s
+//	spent in a page of the walk: its read (10 s) and its transaction, or a
+//	  read that outlasted its bound and the width write after it; then
+//	  the walked mark (20 s)                                              50 s
+//	spent just after the wholesale pass asked it: the pass's kept state,
+//	  the floor's read (the walk kept the floor) and the pass's start or
+//	  keepWholesaleOff (3 x 20 s)                                         60 s
+//	spent in a page of the pass, or of the check: as a page of the walk,
+//	  with no walked mark after it                                        30 s
+//	spent just after the check a rebuild's end begins asked it: the check's
+//	  start (checkStartUnit)                                              60 s
+//	spent in the check's last batch: the batch and the end of the pass
+//	  (2 x 20 s)                                                          40 s
+//
+// The longest is the floor's, 210 s: the probes are the one run of reads no
+// budget is asked within. Everything else a spent turn runs is a few
+// statements of its own bookkeeping.
+func turnTail() time.Duration {
+	page := readBound + txTimeout
+	return max(
+		2*readBound+3*txTimeout, // as the turn begins
+		2*txTimeout,             // a removal
+		3*txTimeout,             // a batch that ends the purge
+		txTimeout+(1+floorProbes)*readBound+2*txTimeout, // the floor
+		2*txTimeout,      // a source
+		page+txTimeout,   // a page of the walk, then the walked mark
+		3*txTimeout,      // the wholesale pass's start
+		page,             // a page of the pass or of the check
+		checkStartUnit(), // the check's start
+		2*txTimeout,      // the check's last batch and its end
+	)
 }
 
 // aRun is one run of the rollup on this node, held while it runs.

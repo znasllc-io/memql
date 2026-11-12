@@ -1098,6 +1098,88 @@ func TestAnEngineSystemActorIsRefusedTheRebuildAndTheCheckState(t *testing.T) {
 	}
 }
 
+// THE PACK SWITCHED OFF, OR ON, UNDER A CHECK (ruling 45). Between the check's
+// read of the granted sets and a store's page, the wholesale pack is switched
+// off (the store's row stops being enabled; it keeps its digest and its
+// flags) or on (the check read the store as not enabled). Either way the
+// check does not judge the store's orders: the granted buyer's order, set on
+// a side by hand, stays on it, and nothing is counted.
+func TestACheckLeavesTheWholesaleSideWhenThePackIsSwitchedUnderIt(t *testing.T) {
+	granted := map[string]bool{"buyer-1@example.test": true}
+	enabled := wholesaleState{Enabled: true, Granted: granted, Digest: grantedDigest(granted)}
+	for _, c := range []struct {
+		name   string
+		before bool           // the store's row is enabled when the check reads the set
+		held   wholesaleState // the set the check read
+		after  bool           // the store's row once the pack is switched
+		side   string         // the order's side, set by hand: the other side from the one a judging check would write
+	}{
+		{"switched off", true, enabled, false, "false"},
+		{"switched on", false, wholesaleState{}, true, "true"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			i, id := runStore(t)
+			i.wholesaleFor = func(context.Context, []string) (map[string]wholesaleState, error) {
+				return map[string]wholesaleState{id: enabled}, nil
+			}
+			mirrorThreeLines(t, id)
+			rewriteInPlace(t, orderConcept, id, theOrder, map[string]any{"email": "buyer-1@example.test"})
+			settle(t, i, id)
+			exec(t, `UPDATE store_sales_store SET wholesale_enabled = ? WHERE store_id = ?`, c.before, id)
+			exec(t, `UPDATE store_sales_order_fact SET wholesale = ? WHERE store_id = ? AND order_gid = ?`, c.side == "true", id, theOrder)
+
+			inner := i.engine
+			switched := false
+			i.engine = &hookEngine{inner: inner, after: func(q string) {
+				if !switched && strings.Contains(q, "storeStatisticsOrdersChanged") {
+					switched = true
+					exec(t, `UPDATE store_sales_store SET wholesale_enabled = ? WHERE store_id = ?`, c.after, id)
+				}
+			}}
+			row := checkThrough(t, i, id, c.held)
+			if !switched {
+				t.Fatal("the pack was never switched under the check")
+			}
+			want(t, "the order with the pack "+c.name+" under the check", orderFactsOf(t, id)[theOrder], "wholesale", c.side)
+			wantCounts(t, "the pack "+c.name+" under the check", row, 0, 0)
+		})
+	}
+}
+
+// THE OPERATOR CREDENTIAL IS NO PERSON, though its stream is stamped a
+// cluster owner and is not synthetic: the rebuild and the check's state
+// refuse it with their sentences before the database is reached, and a
+// person who is a cluster owner is still admitted to both.
+func TestTheOperatorCredentialIsRefusedTheRebuildAndTheCheckState(t *testing.T) {
+	// The actor the operator stream's claims resolve to (component/grpc,
+	// operator_stream_interceptor.go; its subject is OperatorSubject).
+	operator := auth.FallbackFromClaims(map[string]any{"sub": "cluster:operator", "role": "owner", "roles": []string{"owner"}, "name": "Cluster Operator"})
+	if !operator.IsClusterOwner() || operator.Synthetic {
+		t.Fatalf("the operator's actor is cluster owner %v, synthetic %v: this proves nothing", operator.IsClusterOwner(), operator.Synthetic)
+	}
+	touched := false
+	refusing := NewIntegration(&contextEngine{}, func() *bun.DB { touched = true; return nil }, quietLogger())
+	if nodes, err := refusing.handleRebuild(asActor(operator), map[string]any{"storeId": "any"}, 0); err == nil || nodes != nil ||
+		err.Error() != "store statistics rebuild is for a cluster owner" {
+		t.Errorf("the operator: the rebuild answered %d nodes and %v, want its refusal", len(nodes), err)
+	}
+	if nodes, err := refusing.handleCheckState(asActor(operator), map[string]any{"storeId": "any"}, 0); err == nil || nodes != nil ||
+		err.Error() != "store statistics check state is for a cluster owner" {
+		t.Errorf("the operator: the check state answered %d nodes and %v, want its refusal", len(nodes), err)
+	}
+	if touched {
+		t.Error("the refused operator reached for the database")
+	}
+	i := testIntegration(t)
+	id := foldStore(t)
+	if _, err := i.handleCheckState(ownerCtx(), map[string]any{"storeId": id}, 0); err != nil {
+		t.Errorf("a person who is a cluster owner was refused the check state: %v", err)
+	}
+	if _, err := i.handleRebuild(ownerCtx(), map[string]any{"storeId": id}, 0); err != nil {
+		t.Errorf("a person who is a cluster owner was refused the rebuild: %v", err)
+	}
+}
+
 // THE CHECK NEVER UNDOES THE WHOLESALE PASS (ruling 45). A buyer granted after
 // the check read the granted sets and before the store's turn: the walk and
 // the pass have written their order wholesale with the fresh set, and the

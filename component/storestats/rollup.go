@@ -37,9 +37,10 @@ import (
 // # A turn has a budget
 //
 // A store's turn has a time budget, turnBudget, carried in the context the
-// run hands it (withTurn). Once it is spent the turn asks no new page of any
-// source (walk.go) and starts no new purge batch (store.go), and ends
-// normally: where each source stands is kept as for any partial read, the
+// run hands it (withTurn). Once it is spent the turn makes no floor probe and
+// walks no new source (fold.go), asks no new page of any source (walk.go),
+// starts no new purge batch (store.go) and begins no wholesale pass or check
+// (wholesale.go, check.go), and ends normally: where each source stands is kept as for any partial read, the
 // store is not a failure, and its next turn carries on. turnSpent is the one
 // place that answers whether it is spent. Work a later task adds to a turn
 // asks it between its units.
@@ -92,14 +93,19 @@ import (
 // lists name. Nothing in it is drawn from a row but those ids (see "The reads
 // are called from here, never as steps").
 type RollupReport struct {
-	Stores     int            `json:"stores"`
-	Rows       map[string]int `json:"rows"`
-	Facts      int            `json:"facts"`
-	Unreadable int            `json:"unreadable"`
-	Behind     []string       `json:"behind,omitempty"`     // "<store>/<source>"
-	Rebuilt    []string       `json:"rebuilt,omitempty"`    // stores storeState rebuilt this run
-	Removed    []string       `json:"removed,omitempty"`    // stores storeState removed this run
-	NotReached int            `json:"notReached,omitempty"` // stores the run did not take up: its budget was spent
+	Stores int            `json:"stores"`
+	Rows   map[string]int `json:"rows"`
+	Facts  int            `json:"facts"`
+	// Unreadable is the rows the run's pages met that could not be read,
+	// counted after each page's unreadable rows are reduced to one a row id,
+	// at its newest version (fold.go, readPageFrom): a row a page holds twice
+	// counts once, a row an overlap reads again on a later page counts again,
+	// and a row with no id of its own or no write time counts each time.
+	Unreadable int      `json:"unreadable"`
+	Behind     []string `json:"behind,omitempty"`     // "<store>/<source>"
+	Rebuilt    []string `json:"rebuilt,omitempty"`    // stores storeState rebuilt this run
+	Removed    []string `json:"removed,omitempty"`    // stores storeState removed this run
+	NotReached int      `json:"notReached,omitempty"` // stores the run did not take up: its budget was spent
 }
 
 // storesPageSize is how many stores one page of the stores read holds: the
@@ -150,8 +156,9 @@ const (
 // maxStorePages bounds the stores read: a cursor that never ends is an error,
 // never a loop. Twenty pages of storesPageSize is two thousand stores, and
 // the reads are counted in the run's hard deadline (integration.go,
-// runDeadlineBound): a cluster past that fails the listing with this bound
-// named, and the bound is raised with the deadline's sum.
+// runDeadlineBound): a cluster past that fails the listing, every run, with
+// an error that says so and that no store's figures advance until the cluster
+// holds fewer stores or the bound is raised, with the deadline's sum.
 const maxStorePages = 20
 
 // What storeState answers of a store; any other answer keeps it.
@@ -384,7 +391,10 @@ func listStores(ctx context.Context, engine Engine) ([]map[string]any, error) {
 	cursor := ""
 	for page := 0; ; page++ {
 		if page >= maxStorePages {
-			return nil, fmt.Errorf("the stores read did not end within %d pages", maxStorePages)
+			// A cursor that never ends reads the same: past the bound, there
+			// are more stores than the statistics list, so none is rolled.
+			return nil, fmt.Errorf("this cluster holds more stores than the store statistics can list (%d); "+
+				"no store's figures advance until the cluster holds fewer, or the bound is raised", maxStorePages*storesPageSize)
 		}
 		res, err := engine.Execute(memql.ContextWithCursor(ctx, cursor), query)
 		if err != nil {

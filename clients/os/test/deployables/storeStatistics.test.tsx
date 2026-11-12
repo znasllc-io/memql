@@ -512,13 +512,12 @@ describe("the Store statistics figures, chart and lists", () => {
     expect(list(page, "Products").querySelector(".os-ranked-value")?.textContent).toBe("5");
   });
 
-  it("writes the refunds that name no product as money, and says how many orders and refunds are short of lines", async () => {
-    const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: [{ key: "a", title: "City bike", value: "80.00" }], productCount: 1, refundsWithoutItem: "12.00", incompleteOrders: 3, incompleteRefunds: 1, floors: { grossSales: true } }));
+  it("writes the refunds that name no product as money, and says how many orders are short of lines", async () => {
+    const { page } = await openStoreStatistics(seed({ ...WEEK, productsBySales: [{ key: "a", title: "City bike", value: "80.00" }], productCount: 1, refundsWithoutItem: "12.00", incompleteOrders: 3, floors: { grossSales: true } }));
     await figures(page);
     const footer = list(page, "Products").querySelector(".os-ranked-footer")?.textContent ?? "";
     expect(footer).toContain("Refunds of €12.00 name no product, so they are in Net sales and not here.");
     expect(footer).toContain("3 orders have more lines than were recorded, so these are floors.");
-    expect(footer).toContain("1 refund has more lines than were recorded, so units are not exact.");
     expect(footer).not.toContain("12.00 EUR");
   });
 
@@ -599,6 +598,15 @@ async function answerNext(s: FakeSeed, over: Partial<Row>): Promise<void> {
   await act(async () => { await vi.advanceTimersByTimeAsync(statisticsRefreshMs("7d") + 1_000); });
 }
 
+const INCOMPLETE_REFUND = "A refund in this period has more lines than were recorded.";
+
+/**
+ * A refund in the period with more lines than were recorded, as the engine
+ * answers it: units sold, both lists of products, their count and the refunds
+ * that name no product are null; the money figures stay measured.
+ */
+const SHORT_OF_LINES = { incompleteRefunds: 1, figures: { ...WEEK.figures, unitsSold: null }, productsBySales: null, productsByUnits: null, productCount: null, refundsWithoutItem: null };
+
 /** Opens All products on a store with 25 products, answering `over` first. */
 async function openAllProducts(over: Partial<Row> = {}, s: FakeSeed = seed({ ...WEEK, productsBySales: MANY, productsByUnits: MANY, productCount: 31, ...over })) {
   const { page } = await openStoreStatistics(s);
@@ -671,6 +679,26 @@ describe("what a Store statistics list says when it has no rows", () => {
     await figures(page);
     expect(list(page, "Products").parentElement?.textContent ?? "").toContain("Refunds of €12.00 name no product, so they are in Net sales and not here.");
   });
+
+  it("writes nothing of refunds that name no product when the store's currency is not known, never a bare number", async () => {
+    const { page } = await openStoreStatistics(seed({ ...WEEK, currency: null, figures: { ...WEEK.figures, totalSales: null, netSales: null, averageOrderValue: null, grossSales: null, discounts: null, refunds: null }, productsBySales: null, productsByUnits: [{ key: "a", title: "Bell", value: 3 }], productCount: 1, refundsWithoutItem: "12.00" }));
+    await figures(page);
+    expect(emptyOf(list(page, "Products"))).toMatchObject({ dash: true, text: `${DASH} The store's currency has not been recorded yet.` });
+    expect(page.textContent ?? "").not.toContain("name no product");
+    await click(within(within(page).getByRole("navigation", { name: "Products by" })).getByRole("button", { name: "Units" }));
+    expect(emptyOf(list(page, "Products")).rows).toBe(1);
+    expect(page.textContent ?? "").not.toContain("name no product");
+  });
+
+  it("draws both lists of products absent with the reason Units sold carries when a refund has more lines than were recorded", async () => {
+    const { page } = await openStoreStatistics(seed({ ...WEEK, ...SHORT_OF_LINES }));
+    const group = await figures(page);
+    expect(figure(group, "Units sold")).toMatchObject({ value: DASH, reason: INCOMPLETE_REFUND });
+    expect(figure(group, "Net sales").value).not.toBe(DASH);
+    expect(emptyOf(list(page, "Products"))).toMatchObject({ rows: 0, dash: true, text: `${DASH} ${INCOMPLETE_REFUND}` });
+    await click(within(within(page).getByRole("navigation", { name: "Products by" })).getByRole("button", { name: "Units" }));
+    expect(emptyOf(list(page, "Products"))).toMatchObject({ rows: 0, dash: true, text: `${DASH} ${INCOMPLETE_REFUND}` });
+  });
 });
 
 describe("the All products page in every state", () => {
@@ -698,6 +726,15 @@ describe("the All products page in every state", () => {
       expect(all.querySelector(".os-ranked-list")?.textContent ?? "").toContain(BROUGHT_IN);
       cleanup();
     }
+  });
+
+  it("draws both lists absent with the reason Units sold carries when the next answer has a refund with more lines than were recorded", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { all, s } = await openAllProducts();
+    await answerNext(s, { ...WEEK, ...SHORT_OF_LINES });
+    await waitFor(() => expect(emptyOf(all)).toMatchObject({ rows: 0, dash: true, text: `${DASH} ${INCOMPLETE_REFUND}` }));
+    await click(within(within(all).getByRole("navigation", { name: "Products by" })).getByRole("button", { name: "Units" }));
+    expect(emptyOf(all)).toMatchObject({ rows: 0, dash: true, text: `${DASH} ${INCOMPLETE_REFUND}` });
   });
 
   it("draws the whole list absent when the next answer sends it as null", async () => {

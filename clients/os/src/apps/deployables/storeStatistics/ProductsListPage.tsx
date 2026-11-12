@@ -7,7 +7,7 @@ import { LocalTabs } from "../../../kit/LocalTabs";
 import { RankedList, periodLabel, type RankedRow } from "../../../kit/statistics";
 import { useDeployablesSettings } from "../settingsContext";
 import type { StoreStatistics } from "./read";
-import { StoreNotice, listAnswer, refundsWithoutItemSentence, rowFormat, rowValue } from "./storeState";
+import { StoreNotice, listAnswer, productsAbsentReason, refundsWithoutItemSentence, rowFormat, rowValue } from "./storeState";
 
 // A STORE'S PRODUCTS, WHOLE: what "All products" opens, as a page in the Store
 // statistics' place under the trail Deployables > <name> > Store statistics >
@@ -53,7 +53,10 @@ function productFormat(stats: StoreStatistics, by: ProductsBy): (value: number) 
 /**
  * The quiet lines under a list of products, each only when it applies: how
  * many products there are beside the `shown` listed, the refunds that name no
- * product, and the orders and refunds that have more lines than were recorded.
+ * product, and the orders that have more lines than were recorded. A refund
+ * with more lines than were recorded has no line here: the engine then sends
+ * neither list, so there are no rows for a footer to stand under, and the
+ * absent list says it (productsAbsentReason).
  */
 function productsFooter(stats: StoreStatistics, shown: number): ReactNode {
   const lines: string[] = [];
@@ -62,8 +65,6 @@ function productsFooter(stats: StoreStatistics, shown: number): ReactNode {
   if (refunds !== null) lines.push(refunds);
   const orders = stats.incompleteOrders ?? 0;
   if (orders > 0) lines.push(orders === 1 ? "1 order has more lines than were recorded, so these are floors." : `${formatCount(orders)} orders have more lines than were recorded, so these are floors.`);
-  const short = stats.incompleteRefunds ?? 0;
-  if (short > 0) lines.push(short === 1 ? "1 refund has more lines than were recorded, so units are not exact." : `${formatCount(short)} refunds have more lines than were recorded, so units are not exact.`);
   if (lines.length === 0) return undefined;
   return lines.map((line) => <p key={line} className="store-statistics-footer-line">{line}</p>);
 }
@@ -82,7 +83,8 @@ export function ProductsBlock({ stats, by, onBy, title, limit, onShowAll }: {
   limit: number;
   onShowAll?: () => void;
 }) {
-  const answer = stats === null ? null : listAnswer(stats, productRows(stats, by), by === "sales" ? "netSales" : "unitsSold");
+  const kind = by === "sales" ? "netSales" : "unitsSold";
+  const answer = stats === null ? null : listAnswer(stats, productRows(stats, by), kind, productsAbsentReason(stats, kind));
   const rows = answer?.kind === "rows" ? answer.rows : [];
   const refunds = stats !== null && answer?.kind === "empty" ? refundsWithoutItemSentence(stats) : null;
   return (

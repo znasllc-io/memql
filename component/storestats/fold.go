@@ -28,9 +28,12 @@ import (
 // (ensureFloor), and each of its three sources -- order, line and refund, the
 // first three of walkedConcepts, each with its read in walkedSources -- is
 // walked with walkSource from its store_sales_watermark row, at most
-// maxPagesPerRun pages. A source that fails is the store's error, and the
-// other sources are still walked; a store rebuilt under its walk is left at
-// once, for the next run. Last, the store's walked_through is set to the
+// maxPagesPerRun pages. The turn's budget is asked before the floor and
+// before each source, as walkSource asks it before each page: a source the
+// turn has no time left for is not read at all, and is reported behind. A
+// source that fails is the store's error, and the other sources are still
+// walked; a store rebuilt under its walk is left at once, for the next run.
+// Last, the store's walked_through is set to the
 // least of its three sources' walked_through, and null while any is null.
 //
 // # One transaction a page
@@ -150,6 +153,15 @@ func (i *Integration) walkOneStore(ctx context.Context, store map[string]any, ge
 	if purging {
 		return nil
 	}
+	// The turn's budget, before the floor's probes and before each source: a
+	// turn spent here ends normally, every source it did not walk is behind,
+	// and its next turn carries on (rollup.go, "A turn has a budget").
+	if turnSpent(ctx) {
+		for _, s := range walkedSources {
+			report.Behind = append(report.Behind, id+"/"+s.source)
+		}
+		return nil
+	}
 	floor, err := ensureFloor(ctx, i, id, now)
 	if err != nil {
 		return err
@@ -160,6 +172,10 @@ func (i *Integration) walkOneStore(ctx context.Context, store map[string]any, ge
 	}
 	var failures []error
 	for _, s := range walkedSources {
+		if turnSpent(ctx) {
+			report.Behind = append(report.Behind, id+"/"+s.source)
+			continue
+		}
 		err := i.walkOneSource(ctx, db, id, s, floor, generation, clock, wholesale, report)
 		if errors.Is(err, errRebuilt) {
 			return err

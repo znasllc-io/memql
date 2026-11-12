@@ -110,11 +110,6 @@ import (
 // (auth.MaintenanceActor("storeStatisticsCheckSweep")).
 const checkPrincipal = "system:maintenance:storeStatisticsCheckSweep"
 
-// maintenancePrefix is what every maintenance principal's user id begins
-// with (component/auth, maintenanceUserIdPrefix): a caller whose id begins so
-// is the engine acting, not a person.
-const maintenancePrefix = "system:maintenance:"
-
 // The concepts of the nodes the three builtins answer with. Not DSL concepts:
 // nothing stores them, as with the rollup's report.
 const (
@@ -169,7 +164,8 @@ var (
 
 // checkStartUnit is the most a pass's start takes, the one unit of a check
 // asked no budget within: the store's state read, its floor read and the
-// pass's start, each a transaction.
+// pass's start, each a transaction. The floor is only read: a store is
+// checked once its walk has caught up, and its walk kept the floor first.
 func checkStartUnit() time.Duration { return 3 * txTimeout }
 
 // checkRunDeadlineBound is the most a check run can take, its budgets spent:
@@ -179,14 +175,20 @@ func checkStartUnit() time.Duration { return 3 * txTimeout }
 //	                      when it ran out, readBound (10 s)                20 s
 //	the run's budget:     checkRunBudget                                 1800 s
 //	the turn's budget:    turnBudget, of the last store taken up           30 s
-//	the unit under way:   the largest of a page (one read and its
-//	                      transaction, 30 s), a batch or the end of a
-//	                      pass (20 s) and a pass's start (60 s)            60 s
+//	the turn's tail:      what still runs once that budget is spent,
+//	                      the longest of: a page (one read and its
+//	                      transaction, or a read that outlasted its
+//	                      bound and the width write after it, 30 s);
+//	                      the last batch and the end of the pass that
+//	                      follows it (2 x 20 s, 40 s); and a pass's
+//	                      start (60 s)                                     60 s
 //	                                                             total   2110 s
 //
-// Thirty-five minutes and ten seconds, and the deadline adds a minute over it.
+// The five terms follow one another and add; the tail's three are
+// alternatives, since a turn's budget runs out at one point. Thirty-five minutes and
+// ten seconds, and the deadline adds a minute over it.
 func checkRunDeadlineBound() time.Duration {
-	unit := max(readBound+txTimeout, txTimeout, checkStartUnit())
+	unit := max(readBound+txTimeout, 2*txTimeout, checkStartUnit())
 	return maxStorePages*readBound + wholesaleReadBudget + readBound + checkRunBudget + turnBudget + unit
 }
 
