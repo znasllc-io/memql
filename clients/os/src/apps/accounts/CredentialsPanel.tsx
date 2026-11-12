@@ -33,7 +33,7 @@ import { useAccountTokens } from "./useAccountTokens";
 // app lists; `dsl/accounts/concepts.memql` puts it in one line -- "they share
 // a word and nothing else -- no field, no reference, no lifecycle."
 //
-// This panel was first hung inside the CLIENT detail (AccountDetail), which is
+// This panel was first hung inside the CLIENT page (now AccountPage), which is
 // the obvious-looking home and is refused on every mint. `mintAccountToken`
 // gates on `query accountById`, which binds `v1:identity:account`
 // (component/grpc/account_token_handlers.go), so a client-registry id resolves

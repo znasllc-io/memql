@@ -4,10 +4,9 @@ import {
   Check,
   Chip,
   CopyValue,
+  DetailsSection,
   Notice,
-  Panel,
   Rail,
-  Subhead,
   formatMoment,
   nextOpen,
   type Stop,
@@ -61,13 +60,12 @@ export function AccountDomainRail({
 
   if (account.domain.trim() === "" && !self) {
     return (
-      <Panel label="This client's domain">
-        <Subhead>Domain</Subhead>
+      <DetailsSection title="Domain" label="This client's domain">
         <p className="os-caption">
-          No domain recorded. Edit the profile above to add one; proving it is what lets this
+          No domain recorded. Add one to the profile above; proving it is what lets this
           client's people reach their work by arriving on it.
         </p>
-      </Panel>
+      </DetailsSection>
     );
   }
 
@@ -239,8 +237,10 @@ export function AccountDomainRail({
   ];
 
   return (
-    <Panel label={`The domain of ${accountName(account)}`}>
-      <Subhead>Domain</Subhead>
+    // A SECTION OF THE SETTINGS TAB, in its grid: the rail is where the
+    // domain's proof is published, joining is decided and the MemQL address
+    // is served, which are all settings. Its facts, read-only, are on Details.
+    <DetailsSection title="Domain" label={`The domain of ${accountName(account)}`}>
       {/* COLLAPSED, ONE OPEN, and the one it opens by default is the first
           stop still to do -- which on an unproven domain is Ownership, the
           only stop with something for a person to act on. This is the RECORD
@@ -253,7 +253,7 @@ export function AccountDomainRail({
         openStop={openStop === "" ? nextOpen(stops) : openStop}
         onOpenStop={setOpenStop}
       />
-    </Panel>
+    </DetailsSection>
   );
 }
 

@@ -4945,41 +4945,25 @@ a.os-button {
  * Library folder); its rows keep the popover's compact voice. */
 /* ---- accounts: the app's own surfaces (epic memql#4800) ----
  *
- * Three things live here and nothing else: the LEDGER, the first-run card and
- * the account label toggles. Everything else the app renders is the shared kit
+ * Three things live here and nothing else: the People bands, the first-run
+ * card and the account label toggles. Everything else the app renders is the shared kit
  * -- the list rows, the panels, the notices, the chips -- which is the measure
  * Deployables set and every app since has kept.
  *
- * THE LEDGER IS THE ONE OWNED MOMENT. Every other OS app lists what the
- * cluster owns; this one lists who it works FOR, and the four bands answer the
- * half only it can: what of all that is theirs. They are drawn as one object
- * rather than four panels because the thing they add up to is a single fact --
- * a client's footprint on this instance.
+ * THE BANDS ARE THE ONE OWNED MOMENT. Every other OS app lists what the
+ * cluster owns; this one lists who it works FOR, and the People tab's bands
+ * answer who that is. They are drawn as one ruled block rather than separate
+ * panels because they add up to one fact: the people this client's work is
+ * for.
  */
-.os-account-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 10px;
-}
-
+/* The account page's tabs take the Fleet machine page's grid (kit Details);
+ * these rows are the app's own line of a note and its one act, side by side. */
 .os-account-profile-head,
 .os-account-ledger-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
-}
-
-.os-account-form {
-  display: grid;
-  /* Two columns where there is room, one where there is not. `auto-fit` with
-   * a min track rather than a media query: this form renders inside a WINDOW,
-   * and a window's width is not the viewport's -- a breakpoint keyed off the
-   * screen would put two columns in a half-width window on a large display. */
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 8px 12px;
-  margin: 8px 0;
 }
 
 .os-account-form-actions {
@@ -4989,14 +4973,7 @@ a.os-button {
   flex-wrap: wrap;
 }
 
-/* ---- the ledger ---- */
-
-.os-account-ledger {
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-sm);
-  padding: 12px 14px;
-  background: var(--os-raised);
-}
+/* ---- the People tab's bands ---- */
 
 .os-account-bands {
   display: grid;

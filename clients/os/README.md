@@ -1444,7 +1444,7 @@ Backups use a plus action, a full-page form, a schedule, and a hidden-file switc
 
 ## Account domain defaults
 
-Accounts → select an account → Domains assigns multiple domain names and a
+Accounts → select an account → Settings → Domains assigns multiple domain names and a
 default domain and sender. `configureAccountDomains` validates these settings
 on the engine; the account's existing organization authorization applies.
 `apps/accounts/defaults.ts` is the shared source of creation suggestions for
@@ -1539,7 +1539,22 @@ rules rather than repetitions of the five before it.
 - **THE LEDGER IS AN ON-DEMAND READ, DELIBERATELY.** The inventory is a count
   over every concept, so no event could keep it current, and a ledger where
   two bands move and the rest do not is worse than one where none do. So the
-  whole ledger prints when it was read and re-reads on demand.
+  People tab and the inventory each print when they were read and re-read on
+  demand.
+
+- **ONE ACCOUNT IS A PAGE OF TABS** (design record 2026-11-12-account-export,
+  section K), the Fleet machine page's shape: `LocalTabs` under the heading,
+  the trail `Accounts > <name> > <tab>`, each tab its own scroll position.
+  **Details** is the facts, read-only (profile, domain and its proof, front
+  door, status), with quiet copy on what is worth pasting; **People** is the
+  People and Guests bands; **Data** is the inventory and, on the primary
+  account, Existing data, and is absent with the inventory part; **Settings**
+  is every edit (the profile form, domains, the domain rail with joining and
+  the MemQL address, Archive). `AccountPage.tsx` is the one place that knows
+  the tabs and their order, and each tab is its own file. The section holds
+  the chosen tab beside the open account, so the domain wizard returns to the
+  tab it was opened from and another account opens on Details; visited tabs
+  stay mounted, hidden, so a draft survives a look elsewhere.
 
 - **A REFUSAL IS NOT A ZERO.** `invitationsForAccount` carries
   `@requiresRank("developer")`, so below that floor the engine refuses the read.

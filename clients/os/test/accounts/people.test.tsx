@@ -29,7 +29,7 @@ vi.mock("../../src/chrome/state", async () => {
 
 const { AccountsApp } = await import("../../src/apps/accounts/AccountsApp");
 const { LocalAccountsSettingsStore } = await import("../../src/apps/accounts/settings");
-const { accountRow, fakeConnection, withSession } = await import("./harness");
+const { accountRow, fakeConnection, openAccountTab, withSession } = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -53,7 +53,7 @@ async function openDetail(connection: Conn): Promise<HTMLElement> {
   await act(async () => {
     fireEvent.click(row.closest("button") as HTMLElement);
   });
-  return await screen.findByRole("region", { name: /What belongs to/ });
+  return openAccountTab("People");
 }
 
 function peopleBand(ledger: HTMLElement): HTMLElement {

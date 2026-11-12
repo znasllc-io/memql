@@ -1,6 +1,7 @@
 import { configure, getConfig } from "@testing-library/react";
 
 import { setRoleLadder } from "../src/system/roles";
+import { installFakeIntersectionObserver } from "./intersectionObserver";
 import { installSeededAccess } from "./seededAccess";
 import { SEEDED_LADDER } from "./seededLadder";
 
@@ -152,6 +153,11 @@ if (!(globalThis as { ResizeObserver?: unknown }).ResizeObserver) {
   }
   (globalThis as { ResizeObserver?: unknown }).ResizeObserver = ResizeObserverShim;
 }
+
+// IntersectionObserver: a list that loads its next page on scroll watches a
+// sentinel below its rows. The fake is driven by the test that cares
+// (test/intersectionObserver.ts); every other suite renders without throwing.
+installFakeIntersectionObserver();
 
 // Element.scrollTo: the Ask log pins to its bottom; jsdom throws on it.
 if (!Element.prototype.scrollTo) {

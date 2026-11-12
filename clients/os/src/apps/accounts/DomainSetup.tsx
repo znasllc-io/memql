@@ -1,7 +1,7 @@
 import { roleAdmits } from "../../system/roles";
 import { useRef, useState } from "react";
 import { Globe } from "lucide-react";
-import { Button, Caption, Chip, ContentSkeleton, Fact, Facts, Field, Input, Notice, Panel, Select, Subhead } from "../../kit";
+import { Button, Caption, ContentSkeleton, DetailsSection, Fact, Facts, Field, Input, Notice, Select } from "../../kit";
 import { AddButton } from "../../kit/AddButton";
 import type { Act } from "../../kit/ActionBar";
 import type { Stop } from "../../kit/Rail";
@@ -13,15 +13,21 @@ import { useConfigureAccountDomains } from "./actions";
 import { accountDefaultDomain, accountDomains, normalizeAccountDomain } from "./defaults";
 import { accountName, type AccountRow } from "./rows";
 
+// A section of the account page's Settings tab: the assigned domains and the
+// default, and the one control that opens the wizard to change them. The
+// control is absent, not disabled, for anybody below admin or on an archived
+// account, where the engine would refuse the write.
 export function AccountDomainsPanel({ account, onConfigure }: { account: AccountRow; onConfigure: () => void }) {
   const { access } = useSession();
   const domains = accountDomains(account);
   const editable = account.status !== "archived" && roleAdmits(access?.role ?? "", { min: "admin" });
-  return <Panel label="Domains">
-    <Subhead actions={editable ? domains.length ? <Button tone="quiet" onClick={onConfigure}>Edit</Button> : <AddButton label="Assign domains" onClick={onConfigure} /> : undefined}>Domains</Subhead>
-    {domains.length ? <Facts>{domains.map(domain => <Fact key={domain} label={domain} value={domain === accountDefaultDomain(account) ? <Chip tone="accent">default</Chip> : "Assigned"} />)}</Facts> : <Caption>No domains assigned.</Caption>}
-    <Caption>New apps and email setup use these defaults. Existing addresses stay as they are.</Caption>
-  </Panel>;
+  return <DetailsSection title="Domains">
+    {domains.length ? <Facts>{domains.map(domain => <Fact key={domain} label={domain} value={domain === accountDefaultDomain(account) ? "Default" : "Assigned"} />)}</Facts> : <Caption>No domains assigned.</Caption>}
+    <div className="os-account-ledger-head">
+      <Caption>New apps and email setup use these defaults. Existing addresses stay as they are.</Caption>
+      {editable ? domains.length ? <Button onClick={onConfigure}>Edit</Button> : <AddButton label="Assign domains" onClick={onConfigure} /> : null}
+    </div>
+  </DetailsSection>;
 }
 
 export function DomainSetup({ account, onBack, onSaved }: { account: AccountRow; onBack: () => void; onSaved: () => void }) {

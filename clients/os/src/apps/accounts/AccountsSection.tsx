@@ -7,7 +7,7 @@ import { Building2, } from "lucide-react";
 
 import { Button, Chip, ContentSkeleton, Head, LiveList, Notice, RecordRow, Refine, listCount } from "../../kit";
 import { useLiveView } from "../../live/liveView";
-import { AccountDetail } from "./AccountDetail";
+import { AccountPage, type AccountTab } from "./AccountPage";
 import {
   accountFingerprint,
   accountFromRow,
@@ -48,13 +48,21 @@ export function AccountsSection({
   useEffect(() => { if (initialOpenId) { setOpenId(initialOpenId); onOpened?.(); } }, [initialOpenId, onOpened]);
   const [adding, setAdding] = useState(false);
   const [domains, setDomains] = useState(false);
+  // THE TAB IS HELD HERE, beside the open account, rather than inside the
+  // page: the domain wizard replaces the page while it runs, and coming back
+  // from it lands on the tab it was opened from. It is the tab OF ONE
+  // ACCOUNT, so opening another starts on that account's first tab.
+  const [view, setView] = useState<{ accountId: string; tab: AccountTab } | null>(null);
 
   const source = useLiveView<Row, AccountRow>(collection, `accounts:${showArchived}:${search}`, rows => rows.map(accountFromRow).filter(account => account.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id)));
   const open = record.snapshot.rows[0] ? accountFromRow(record.snapshot.rows[0]) : source?.snapshot.rows.find(account => account.id === openId);
 
   if (adding) return <AddAccountWizard create={create} onBack={() => setAdding(false)} onDone={id => { setAdding(false); setOpenId(id); reseed(); }} />;
   if (open && domains) return <DomainSetup account={open} onBack={() => setDomains(false)} onSaved={() => { setDomains(false); reseed(); }} />;
-  if (open) return <div className="os-app-stack"><Head navigationKey={`account:${open.id}`} title={accountName(open)} back={{ label: "Accounts", onSelect: () => setOpenId("") }} /><AccountDetail account={open} accounts={source?.snapshot.rows ?? []} update={update} archive={archive} onArchived={() => setOpenId("")} onOpenGroup={onOpenGroup} onConfigureDomains={() => setDomains(true)} /></div>;
+  if (open) return <AccountPage key={open.id} account={open} accounts={source?.snapshot.rows ?? []}
+    tab={view?.accountId === open.id ? view.tab : undefined} onTab={tab => setView({ accountId: open.id, tab })}
+    onBack={() => setOpenId("")} update={update} archive={archive} onArchived={() => setOpenId("")}
+    onOpenGroup={onOpenGroup} onConfigureDomains={() => setDomains(true)} />;
 
   if (openId && record.snapshot.state === "seeding") return <ContentSkeleton label="Opening account" />;
 

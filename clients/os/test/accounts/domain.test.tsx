@@ -13,7 +13,7 @@ vi.mock("../../src/live/connection", () => ({
 const { AccountsApp } = await import("../../src/apps/accounts/AccountsApp");
 const { LocalAccountsSettingsStore } = await import("../../src/apps/accounts/settings");
 const { accountFingerprint, accountFromRow } = await import("../../src/apps/accounts/rows");
-const { accountRow, fakeConnection, withSession } = await import("./harness");
+const { accountRow, fakeConnection, openAccountTab, withSession } = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -36,7 +36,8 @@ async function openDetail(connection: Conn): Promise<HTMLElement> {
   await act(async () => {
     fireEvent.click(row.closest("button") as HTMLElement);
   });
-  return await screen.findByRole("region", { name: /The domain of/ });
+  const settings = await openAccountTab("Settings");
+  return await within(settings).findByRole("region", { name: /The domain of/ });
 }
 
 /** One stop of the rail, by the name a person reads. */

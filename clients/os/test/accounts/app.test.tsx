@@ -15,7 +15,7 @@ vi.mock("../../src/live/connection", () => ({
 const { AccountsApp } = await import("../../src/apps/accounts/AccountsApp");
 const { LocalAccountsSettingsStore } = await import("../../src/apps/accounts/settings");
 const { SELF_ACCOUNT_ID } = await import("../../src/apps/accounts/rows");
-const { accountRow, fakeConnection, rowsResult, withSession } = await import("./harness");
+const { accountRow, accountTabNames, fakeConnection, openAccountTab, rowsResult, withSession } = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -248,11 +248,11 @@ describe("the first-run card (D7)", () => {
   });
 });
 
-describe("the ledger", () => {
+describe("the People tab", () => {
   async function openDetail(conn: Conn) {
     mount(conn);
     fireEvent.click(await screen.findByText("Acme Consulting"));
-    return screen.findByLabelText("What belongs to Acme Consulting");
+    return openAccountTab("People");
   }
 
   it("names the guests, which the inventory cannot", async () => {
@@ -276,6 +276,16 @@ describe("the ledger", () => {
     expect(within(ledger).getAllByText("Not yours to read").length).toBeGreaterThan(0);
   });
 
+  it("re-reads on demand and says when it read", async () => {
+    const conn = fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })] });
+    const people = await openDetail(conn);
+    await waitFor(() => expect(within(people).getByText(/^Read at /)).toBeTruthy());
+    expect(conn.query.groupsForAccount).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(people).getByRole("button", { name: "Re-read" }));
+    await waitFor(() => expect(conn.query.groupsForAccount).toHaveBeenCalledTimes(2));
+    expect(conn.query.invitationsForAccount).toHaveBeenCalledTimes(2);
+  });
+
   it("no longer reads the four retired bands", async () => {
     const conn = fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })] });
     await openDetail(conn);
@@ -285,6 +295,137 @@ describe("the ledger", () => {
     }
   });
 });
+
+// THE ACCOUNT PAGE (design record 2026-11-12-account-export, section K): the
+// Fleet machine page's shape, LocalTabs under the heading and one subject per
+// tab. Each case below asks a tab for its own content and checks that the
+// content of the tab beside it is not on screen with it.
+describe("the account page", () => {
+  async function openAcme(conn: Conn = fakeConnection({
+    clientAccountsAll: [
+      accountRow({ id: "a1", domainStatus: "verified", domainVerifiedAt: "2026-09-01T10:00:00Z" }),
+      accountRow({ id: "b2", name: "Borden Ltd", domain: "borden.test", createdAt: "2026-07-01T00:00:00Z" }),
+    ],
+    invitationsForAccount: [{ id: "i1", inviteeEmail: "guest@acme.com" }],
+  })) {
+    mount(conn);
+    fireEvent.click(await screen.findByText("Acme Consulting"));
+    await screen.findByRole("navigation", { name: "Account views" });
+    return conn;
+  }
+
+  it("offers Details, People, Data and Settings, in that order, and opens on Details", async () => {
+    await openAcme();
+    expect(accountTabNames()).toEqual(["Details", "People", "Data", "Settings"]);
+    const tabs = screen.getByRole("navigation", { name: "Account views" });
+    expect(within(tabs).getByRole("button", { name: "Details" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("region", { name: "Details" })).toBeTruthy();
+  });
+
+  it("reads the trail as Accounts, the account, then the tab", async () => {
+    await openAcme();
+    const crumbs = () => within(screen.getByRole("navigation", { name: "Breadcrumbs" })).getAllByRole("listitem").map((li) => li.textContent);
+    expect(crumbs()).toEqual(["Accounts", "Acme Consulting", "Details"]);
+    await openAccountTab("People");
+    expect(crumbs()).toEqual(["Accounts", "Acme Consulting", "People"]);
+  });
+
+  it("Details holds the facts, read-only, and nothing another tab holds", async () => {
+    await openAcme();
+    const details = screen.getByRole("region", { name: "Details" });
+    for (const section of ["Profile", "Domain", "Front door", "Status"]) {
+      expect(within(details).getByRole("region", { name: section })).toBeTruthy();
+    }
+    expect(within(details).getByText("dana@acme.com")).toBeTruthy();
+    expect(within(details).getByText("Proven")).toBeTruthy();
+    // Quiet copy on what is worth pasting, never on a status.
+    expect(within(details).getByRole("button", { name: "Copy Email" })).toBeTruthy();
+    expect(within(details).getByRole("button", { name: "Copy Account id" })).toBeTruthy();
+    expect(within(details).queryByRole("button", { name: "Copy Status" })).toBeNull();
+    // No edit, and no other tab's subject.
+    expect(within(details).queryByRole("textbox")).toBeNull();
+    expect(within(details).queryByText("Archive this client")).toBeNull();
+    expect(screen.queryByText("guest@acme.com")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Inventory" })).toBeNull();
+  });
+
+  it("People holds the People and Guests bands, and nothing another tab holds", async () => {
+    await openAcme();
+    const people = await openAccountTab("People");
+    expect(await within(people).findByText("guest@acme.com")).toBeTruthy();
+    expect(within(people).getAllByText("Guests").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("region", { name: "Details" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Inventory" })).toBeNull();
+    expect(screen.queryByText("Archive this client")).toBeNull();
+  });
+
+  it("Data holds the inventory, and nothing another tab holds", async () => {
+    await openAcme();
+    const data = await openAccountTab("Data");
+    expect(within(data).getByRole("region", { name: "Inventory" })).toBeTruthy();
+    expect(screen.queryByText("guest@acme.com")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Profile" })).toBeNull();
+    expect(screen.queryByText("Archive this client")).toBeNull();
+  });
+
+  it("Settings holds every edit, and nothing another tab holds", async () => {
+    await openAcme();
+    const settings = await openAccountTab("Settings");
+    expect(within(settings).getByRole("textbox", { name: "Name" })).toBeTruthy();
+    expect(within(settings).getByRole("region", { name: /The domain of/ })).toBeTruthy();
+    expect(within(settings).getByRole("button", { name: "Archive this client" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Details" })).toBeNull();
+    expect(screen.queryByText("guest@acme.com")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Inventory" })).toBeNull();
+  });
+
+  it("saves a profile edit from Settings through updateClientAccount", async () => {
+    const conn = await openAcme();
+    const settings = await openAccountTab("Settings");
+    const save = within(settings).getByRole("button", { name: "Save" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.change(within(settings).getByRole("textbox", { name: "Name" }), { target: { value: "Acme Group" } });
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect(conn.query.updateClientAccount).toHaveBeenCalledWith(expect.objectContaining({ accountId: "a1", name: "Acme Group" })),
+    );
+  });
+
+  it("keeps a refused profile edit as typed, with the refusal beside it", async () => {
+    const conn = fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })] });
+    conn.query.updateClientAccount.mockRejectedValue(new Error("a client named Acme Group already exists"));
+    await openAcme(conn);
+    const settings = await openAccountTab("Settings");
+    fireEvent.change(within(settings).getByRole("textbox", { name: "Name" }), { target: { value: "Acme Group" } });
+    fireEvent.click(within(settings).getByRole("button", { name: "Save" }));
+    const profile = within(settings).getByRole("region", { name: "Profile" });
+    expect(await within(profile).findByText("a client named Acme Group already exists")).toBeTruthy();
+    expect((within(profile).getByRole("textbox", { name: "Name" }) as HTMLInputElement).value).toBe("Acme Group");
+    fireEvent.click(within(profile).getByRole("button", { name: "Discard changes" }));
+    expect((within(profile).getByRole("textbox", { name: "Name" }) as HTMLInputElement).value).toBe("Acme Consulting");
+    expect(within(profile).queryByText("a client named Acme Group already exists")).toBeNull();
+  });
+
+  it("keeps the selected tab when the same account re-renders, and opens another account on Details", async () => {
+    await openAcme();
+    await openAccountTab("Settings");
+    await act(async () => conn0().subscriptions.emit(ACCOUNT_CONCEPT, accountRow({ id: "a1", notes: "Renewal in March" })));
+    const tabs = screen.getByRole("navigation", { name: "Account views" });
+    expect(within(tabs).getByRole("button", { name: "Settings" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("region", { name: "Settings" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to Accounts" }));
+    fireEvent.click(await screen.findByText("Borden Ltd"));
+    const next = await screen.findByRole("navigation", { name: "Account views" });
+    expect(within(next).getByRole("button", { name: "Details" }).getAttribute("aria-current")).toBe("page");
+    const profile = within(screen.getByRole("region", { name: "Details" })).getByRole("region", { name: "Profile" });
+    expect(within(profile).getByText("Borden Ltd")).toBeTruthy();
+  });
+});
+
+/** The connection the last mount was handed. */
+const conn0 = () => h.connection as Conn;
 
 /** The calls the page made to one builtin, by name. */
 function builtinCalls(conn: Conn, name: string): string[] {
@@ -320,7 +461,8 @@ describe("the inventory", () => {
   async function openInventory(conn: Conn) {
     mount(conn);
     fireEvent.click(await screen.findByText("Acme Consulting"));
-    return screen.findByRole("region", { name: "Inventory" });
+    const data = await openAccountTab("Data");
+    return within(data).findByRole("region", { name: "Inventory" });
   }
 
   it("reads the account by its id, through the one builtin", async () => {
@@ -385,22 +527,22 @@ describe("the inventory", () => {
 
   it("re-reads on demand and says when it read", async () => {
     const conn = fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })], accountInventory: POPULATED });
-    await openInventory(conn);
-    const ledger = screen.getByLabelText("What belongs to Acme Consulting");
-    await waitFor(() => expect(within(ledger).getByText(/^Read at /)).toBeTruthy());
+    const inventory = await openInventory(conn);
+    await waitFor(() => expect(within(inventory).getByText(/^Read at /)).toBeTruthy());
     expect(builtinCalls(conn, "accountInventory")).toHaveLength(1);
-    fireEvent.click(within(ledger).getByRole("button", { name: "Re-read" }));
+    fireEvent.click(within(inventory).getByRole("button", { name: "Re-read" }));
     await waitFor(() => expect(builtinCalls(conn, "accountInventory")).toHaveLength(2));
   });
 
-  it("is absent, and never asked for, without the inventory part", async () => {
+  it("is absent, with its tab, and never asked for, without the inventory part", async () => {
     installSeededAccess("admin");
     const conn = fakeConnection({ clientAccountsAll: [accountRow({ id: "a1" })], accountInventory: POPULATED });
     mount(conn);
     fireEvent.click(await screen.findByText("Acme Consulting"));
-    const ledger = await screen.findByLabelText("What belongs to Acme Consulting");
-    // The People band still stands.
-    expect(within(ledger).getByText("People")).toBeTruthy();
+    // The People tab still stands; Data, which would hold nothing, is not drawn.
+    const people = await openAccountTab("People");
+    expect(within(people).getAllByText("People").length).toBeGreaterThan(0);
+    expect(accountTabNames()).toEqual(["Details", "People", "Settings"]);
     expect(screen.queryByRole("region", { name: "Inventory" })).toBeNull();
     expect(builtinCalls(conn, "accountInventory")).toHaveLength(0);
   });
@@ -418,7 +560,8 @@ describe("existing data", () => {
     const conn = fakeConnection({ clientAccountsAll: ACCOUNTS, accountAssignmentStatus: status });
     mount(conn);
     fireEvent.click(await screen.findByText("Our Studio"));
-    return { conn, panel: await screen.findByRole("region", { name: "Existing data" }) };
+    const data = await openAccountTab("Data");
+    return { conn, panel: await within(data).findByRole("region", { name: "Existing data" }) };
   }
 
   const progress = (concept: string, assigned: number, finished: boolean) => ({
@@ -493,7 +636,9 @@ describe("existing data", () => {
     const conn = fakeConnection({ clientAccountsAll: ACCOUNTS, accountAssignmentStatus: [{ kind: "switch", enabled: true, held: false }] });
     mount(conn);
     fireEvent.click(await screen.findByText("Acme Consulting"));
-    await screen.findByLabelText("What belongs to Acme Consulting");
+    const data = await openAccountTab("Data");
+    // The control: the tab is open and holds the inventory.
+    expect(await within(data).findByRole("region", { name: "Inventory" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Existing data" })).toBeNull();
     expect(builtinCalls(conn, "accountAssignmentStatus")).toHaveLength(0);
   });
@@ -503,7 +648,8 @@ describe("existing data", () => {
     const conn = fakeConnection({ clientAccountsAll: ACCOUNTS, accountAssignmentStatus: [{ kind: "switch", enabled: true, held: false }] });
     mount(conn);
     fireEvent.click(await screen.findByText("Our Studio"));
-    await screen.findByLabelText("What belongs to Our Studio");
+    await openAccountTab("People");
+    expect(accountTabNames()).not.toContain("Data");
     expect(screen.queryByRole("region", { name: "Existing data" })).toBeNull();
     expect(builtinCalls(conn, "accountAssignmentStatus")).toHaveLength(0);
   });
@@ -517,6 +663,7 @@ describe("archiving (D8)", () => {
     const confirmSpy = vi.spyOn(globalThis, "confirm" as never);
     mount(conn);
     fireEvent.click(await screen.findByText("Acme Consulting"));
+    await openAccountTab("Settings");
     fireEvent.click(await screen.findByText("Archive this client"));
 
     expect(await screen.findByText("Archive Acme Consulting?")).toBeTruthy();
@@ -544,7 +691,9 @@ describe("archiving (D8)", () => {
     });
     mount(conn, "accounts", { showArchived: true });
     fireEvent.click(await screen.findByText("Acme Consulting"));
-    await screen.findByLabelText("What belongs to Acme Consulting");
+    const settings = await openAccountTab("Settings");
+    // The control: the Settings tab is open and holds the profile.
+    expect(within(settings).getByRole("region", { name: "Profile" })).toBeTruthy();
     expect(screen.queryByText("Archive this client")).toBeNull();
   });
 });
@@ -561,6 +710,7 @@ describe("archiving, one double-click later", () => {
     });
     mount(conn);
     fireEvent.click(await screen.findByText("Acme Consulting"));
+    await openAccountTab("Settings");
     fireEvent.click(await screen.findByText("Archive this client"));
     await screen.findByText("Archive Acme Consulting?");
     return conn;

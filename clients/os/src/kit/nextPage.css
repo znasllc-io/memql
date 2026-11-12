@@ -1,0 +1,7 @@
+/* The next page of a record list, loaded on scroll (kit/NextPage). Nothing
+ * here moves: the loading rows are the record skeleton, whose pulse the shared
+ * stylesheet already stops under reduced motion. */
+.os-next-page { min-width: 0; }
+/* One pixel tall so it can be seen at all; it stands where the next row will. */
+.os-next-page-sentinel { height: 1px; }
+.os-next-page-end { margin: 0; padding-block: 12px; text-align: center; }

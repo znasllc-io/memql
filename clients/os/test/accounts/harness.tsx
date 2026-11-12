@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { vi } from "vitest";
 import { Result, type Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -324,4 +325,25 @@ export function accountTokenRow(over: Partial<Row> & { id: string }): Row {
     createdAt: "2026-09-01T09:00:00Z",
     ...over,
   };
+}
+
+/**
+ * Open one of the account page's tabs and hand back what it shows.
+ *
+ * Each tab is a region named for itself, and a tab not on screen is hidden,
+ * so a query scoped to the region a test asked for cannot pass on content a
+ * different tab holds.
+ */
+export async function openAccountTab(name: "Details" | "People" | "Data" | "Settings"): Promise<HTMLElement> {
+  const tabs = await screen.findByRole("navigation", { name: "Account views" });
+  await act(async () => {
+    fireEvent.click(within(tabs).getByRole("button", { name }));
+  });
+  return screen.findByRole("region", { name });
+}
+
+/** The tab names the account page offers, in order. */
+export function accountTabNames(): string[] {
+  const tabs = screen.getByRole("navigation", { name: "Account views" });
+  return within(tabs).getAllByRole("button").map((button) => button.textContent ?? "");
 }

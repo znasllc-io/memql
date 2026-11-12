@@ -110,7 +110,25 @@ export function InventorySection({ reading }: { reading: Reading<Inventory> }) {
     );
   }
 
-  return <DetailsSection title="Inventory">{body}</DetailsSection>;
+  // ONE READ TIME AND ONE RE-READ, beside what was read. The inventory is a
+  // count over every concept, so no event keeps it current, and the honest
+  // thing is to print when it was taken. Absent while there is no answer:
+  // the refusal carries its own retry, and a skeleton has nothing to re-read.
+  return (
+    <DetailsSection title="Inventory">
+      {body}
+      {reading.value === null || reading.state === "failed" ? null : (
+        <div className="os-account-ledger-head">
+          {reading.at === null ? <span /> : (
+            <Caption>
+              Read at {reading.at.toLocaleTimeString()}. Not live -- re-read to see changes made since.
+            </Caption>
+          )}
+          <Button onClick={reading.reread}>Re-read</Button>
+        </div>
+      )}
+    </DetailsSection>
+  );
 }
 
 /**

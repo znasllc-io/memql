@@ -462,6 +462,17 @@ and an accessible loading status. Reserve the initial list area to avoid panel
 jumps, respect reduced motion, and keep already loaded rows visible during
 refreshes. Loading and failed reads must never look like an empty collection.
 
+A new list loads its next page on scroll (`NextPage`), never behind a "Load
+more" button. The request is the end of the list coming into view, and while
+the page is out the list's own skeleton rows stand where it will land, so
+nothing beneath the list moves and the rows already read stay put. A failure
+stays in that same place, in the engine's words with **Try again** beside them,
+and does not ask again on its own: scrolling past a refusal is not a request to
+be refused again. The end is said once, "End of list", and only after the list
+grew; a list that fitted on its first page has no end to announce. `NextPage`
+takes the feed `LoadMore` takes, so a list moves from one to the other by
+changing one line.
+
 ### Loading is the shape of the content, never a message
 
 This applies to **every app**, including tabs, entity details, dialogs, widgets,
