@@ -38,6 +38,10 @@ var writersThroughWriteTx = []string{
 	"purgeBatch",
 	"forgetStore",
 	"clearRebuilding",
+	"foldPage",
+	"deriveOrders",
+	"keepWatermark",
+	"keepWalked",
 }
 
 // THE ONE WAY THIS PACKAGE WRITES, read off its source with its types. See

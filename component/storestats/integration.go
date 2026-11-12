@@ -74,7 +74,7 @@ type Integration struct {
 	// nil walkStore walks nothing, and a nil wholesaleFor means no store has
 	// the wholesale pack enabled. A test sets its own.
 	storeState   func(ctx context.Context, store map[string]any, now time.Time) (outcome string, err error)
-	walkStore    func(ctx context.Context, store map[string]any, generation int64, now time.Time, wholesale func(email string) bool, report *RollupReport) error
+	walkStore    func(ctx context.Context, store map[string]any, generation int64, now time.Time, wholesale wholesaleState, report *RollupReport) error
 	wholesaleFor func(ctx context.Context, storeIDs []string) (map[string]wholesaleState, error)
 	// verdictOf reads a store's verdict; NewIntegration sets it to askVerdict,
 	// which asks the mirror's builtin (store.go). keepStore reads a nil one as
@@ -105,6 +105,8 @@ func NewIntegration(engine Engine, bunDB func() *bun.DB, logger *slog.Logger) *I
 	// One seam a line, each named for the task that sets it.
 	i.storeState = i.keepStore // Task 14: what is kept about each store (store.go)
 	i.verdictOf = i.askVerdict // Task 14: a store's verdict, asked of the mirror's builtin (store.go)
+
+	i.walkStore = i.walkOneStore // Task 13: the fold and the derivation (fold.go)
 	return i
 }
 

@@ -438,3 +438,80 @@ func (b *lineBuffer) lines() []string {
 	}
 	return out
 }
+
+// ---- Task 13: a run, and the store's rows read back ----
+
+// run is one run of the rollup by i under its principal, at internal origin,
+// as the scheduled automation makes it: the report it answers, and its error.
+// A run that stood down answers no report, which fails the test.
+func run(t *testing.T, i *Integration) (RollupReport, error) {
+	t.Helper()
+	nodes, err := i.handleRollup(auth.ContextWithInternalOrigin(principalCtx(t, "storeStatisticsRollupSweep")), nil, 0)
+	if err != nil {
+		return RollupReport{}, err
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("the run answered %d nodes, want its report", len(nodes))
+	}
+	var rep RollupReport
+	if err := json.Unmarshal(nodes[0].Payload, &rep); err != nil {
+		t.Fatalf("decode the report: %v", err)
+	}
+	return rep, nil
+}
+
+// salesRows reads every row of the store in a store_sales_ table, each as
+// Postgres renders it in JSON: a NUMERIC as its own digits (a json.Number,
+// so its scale is kept), a time as an RFC 3339 string, null as nil. The rows
+// are keyed by the column named, or by key columns joined with "/".
+func salesRows(t *testing.T, table, storeID string, keys ...string) map[string]map[string]any {
+	t.Helper()
+	_, db := statsEngine(t)
+	rows, err := db.QueryContext(context.Background(), "SELECT to_jsonb(x)::text FROM "+table+" x WHERE store_id = ?", storeID)
+	if err != nil {
+		t.Fatalf("read the store's %s: %v", table, err)
+	}
+	defer rows.Close()
+	out := map[string]map[string]any{}
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		dec := json.NewDecoder(strings.NewReader(raw))
+		dec.UseNumber()
+		row := map[string]any{}
+		if err := dec.Decode(&row); err != nil {
+			t.Fatal(err)
+		}
+		var key []string
+		for _, k := range keys {
+			key = append(key, fmt.Sprint(row[k]))
+		}
+		out[strings.Join(key, "/")] = row
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func orderFactsOf(t *testing.T, storeID string) map[string]map[string]any {
+	return salesRows(t, "store_sales_order_fact", storeID, "order_gid")
+}
+
+func lineFactsOf(t *testing.T, storeID string) map[string]map[string]any {
+	return salesRows(t, "store_sales_line_fact", storeID, "line_gid")
+}
+
+func refundFactsOf(t *testing.T, storeID string) map[string]map[string]any {
+	return salesRows(t, "store_sales_refund_fact", storeID, "refund_gid")
+}
+
+func refundLineFactsOf(t *testing.T, storeID string) map[string]map[string]any {
+	return salesRows(t, "store_sales_refund_line_fact", storeID, "refund_gid", "position")
+}
+
+func watermarksOf(t *testing.T, storeID string) map[string]map[string]any {
+	return salesRows(t, "store_sales_watermark", storeID, "source")
+}

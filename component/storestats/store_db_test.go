@@ -559,7 +559,7 @@ func TestALowerDefinitionRebuilds(t *testing.T) {
 	// handed, and walks through the instant it is set to.
 	var through time.Time
 	walked := 0
-	i.walkStore = func(ctx context.Context, store map[string]any, generation int64, _ time.Time, _ func(string) bool, _ *RollupReport) error {
+	i.walkStore = func(ctx context.Context, store map[string]any, generation int64, _ time.Time, _ wholesaleState, _ *RollupReport) error {
 		if store["id"] != id {
 			return nil
 		}
