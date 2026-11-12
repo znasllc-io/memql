@@ -108,6 +108,25 @@ func contextWithSystemActor(ctx context.Context, automation *Automation) context
 	return ctx
 }
 
+// installRunActor installs the run's actor on ctx (contextWithSystemActor) and
+// answers who that is, for the execution to record (AutomationExecution.Actor).
+// The record is read off the context the run's steps receive, so it is who
+// they act as and not a second derivation of it.
+func installRunActor(ctx context.Context, automation *Automation) (context.Context, RunActor) {
+	_, inherited := auth.AccessFromContext(ctx)
+	ctx = contextWithSystemActor(ctx, automation)
+	ac, ok := auth.AccessFromContext(ctx)
+	if !ok || ac == nil {
+		return ctx, RunActor{}
+	}
+	return ctx, RunActor{
+		UserId:               ac.UserId,
+		Role:                 string(ac.Role),
+		Inherited:            inherited,
+		MaintenancePrincipal: auth.IsMaintenancePrincipalOf(ac, automation.Name),
+	}
+}
+
 // maintenanceOrigin is the origin the maintenance list is asked with: the
 // engine's own only for an automation the loader read from the engine's own
 // tree (Automation.Source). Every other automation -- a pack's, a runtime
@@ -664,7 +683,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 
 	// Inject system actor for automation execution
 	// This allows automations to execute mutations without user authentication
-	ctx = contextWithSystemActor(ctx, automation)
+	ctx, exec.Actor = installRunActor(ctx, automation)
 
 	// WHO the run acts as is set above; WHERE it acts is the account of the row
 	// that triggered it, when one did (contextWithTriggerAccount). Stated here,

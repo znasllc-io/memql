@@ -44,19 +44,38 @@ import (
 	"github.com/znasllc-io/memql/core/num"
 )
 
-// DryRunRequest drives one behavioral dry-run of a single authored automation.
+// DryRunRequest drives one behavioral dry-run of a single automation: the
+// tree's own, asked for BY NAME, or an authored one, supplied as a TEXT.
+//
+// The two differ in what runs and so in who it runs as, by the rule every run
+// follows -- an automation's principal follows where it was loaded from, never
+// its name:
+//
+//   - BY NAME (AutomationSource empty): the runner takes the tree loader's own
+//     copy of the automation named, the copy a live run executes. It holds the
+//     actor a live run of it holds: the automation's own when ctx carries no
+//     caller's identity, the caller's otherwise. A name the tree does not hold
+//     is refused.
+//   - A TEXT (AutomationSource set): the runner compiles the text and runs
+//     that. A compiled text has no recorded origin, so it runs as its caller,
+//     or as the ordinary automation actor when ctx carries no identity. It
+//     never runs with the engine's authority, whatever name its automation
+//     carries.
 type DryRunRequest struct {
 	// BundleId is the bundle the automation belongs to (recorded on the report
 	// so the Gate-3 approval artifact ties back to the bundle).
 	BundleId string `json:"bundleId"`
 
-	// AutomationName is the construct name of the automation to execute. It must
-	// be one of the bundle's automation constructs (the caller resolves the
-	// source and passes it as AutomationSource).
+	// AutomationName is the name of the automation to execute. By name, it is
+	// resolved as every run by name is (the automation's name, or the name of a
+	// logic an automation wraps). With a text, it must be one of the bundle's
+	// automation constructs (the caller resolves the source and passes it as
+	// AutomationSource).
 	AutomationName string `json:"automationName"`
 
 	// AutomationSource is the .memql source for the automation, compiled fresh
 	// against the bundle's overlay registry the same way Gate 1 compiled it.
+	// Empty asks for the dry run by name.
 	AutomationSource string `json:"automationSource"`
 
 	// TriggerEvent is the synthetic or replayed event that drives the run. Its
@@ -170,6 +189,20 @@ type BundleDryRunReport struct {
 	// FailureReason carries the headline when OK is false (a hard step failure
 	// or a setup error). Empty on success.
 	FailureReason string `json:"failureReason,omitempty"`
+
+	// RanAs is the user id of the actor the run acted as: the caller's when the
+	// request carried a caller's identity, otherwise the actor the executor
+	// gives the automation that ran. Empty when no run started.
+	RanAs string `json:"ranAs,omitempty"`
+
+	// Authority is set when the engine's own automation of this name acts
+	// under the cluster's maintenance principal and this run did not hold it.
+	// It says in plain words what ran, as whom, and that the engine's own run
+	// acts with the engine's authority and this one did not, so a run that
+	// found nothing to do because of who it ran as is never reported as a
+	// clean run with nothing to do. It states a fact about the run and grants
+	// nothing.
+	Authority string `json:"authority,omitempty"`
 }
 
 // SandboxDryRunner executes one authored automation behaviorally under the
@@ -204,7 +237,9 @@ func sandboxDryRunner() SandboxDryRunner {
 
 // RunBundleDryRun is the Gate-2 entry point: it executes the requested
 // automation behaviorally through the registered dry-run runner and returns the
-// approval-artifact report. The engine is used for real reads (ai() + web reads
+// approval-artifact report. The request is by name or carries a text, and the
+// two run as different actors (DryRunRequest); the report says who ran
+// (BundleDryRunReport.RanAs). The engine is used for real reads (ai() + web reads
 // run against its live providers) but graph writes are isolated to the run's
 // ephemeral sandbox partition by the interception layer -- so it is safe to call
 // against a running engine. When no runner is linked, it returns an error rather

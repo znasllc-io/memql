@@ -11,11 +11,13 @@ package steps
 // hook from init(). It is the dry-run counterpart to the Gate-1
 // automation-compile bridge (component/automations/sandbox_bridge.go).
 //
-// What it does: takes a single authored automation source, compiles it against
-// the supplied registry exactly as Gate 1 did, then EXECUTES it through the
-// REAL automation Executor + step registry -- the same compiled-step executors
-// core uses -- but with the side-effect interception layer wired in via a
-// SANDBOX STEP REGISTRY (sandbox_registry.go) that wraps the real registry:
+// What it does: takes a single authored automation source and compiles it
+// against the supplied registry exactly as Gate 1 did -- or, asked by NAME with
+// no source, takes the tree loader's own copy of that automation -- then
+// EXECUTES it through the REAL automation Executor + step registry -- the same
+// compiled-step executors core uses -- but with the side-effect interception
+// layer wired in via a SANDBOX STEP REGISTRY (sandbox_registry.go) that wraps
+// the real registry:
 //
 //   - queries and classified read/pure builtins delegate to the real
 //     executors and are metered. Integration web builtins remain unclassified.
@@ -50,7 +52,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
+	"strings"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
@@ -75,12 +80,23 @@ func newSandboxPartition() string {
 	return "sandbox:dryrun:" + hex.EncodeToString(b[:])
 }
 
-// runBundleDryRun is the registered memql.SandboxDryRunner. It compiles the
-// requested automation against the engine's live registry (read-only), then
-// drives one behavioral run through the real Executor wired to a sandbox step
-// registry, and assembles the report (trace + side-effect manifest). The engine
-// is consulted for real reads only; the sandbox registry guarantees no write or
+// runBundleDryRun is the registered memql.SandboxDryRunner. It takes the
+// automation to run -- the tree loader's own copy when the request names it
+// and carries no source, the request's source compiled against the engine's
+// live registry (read-only) otherwise -- then drives one behavioral run through
+// the real Executor wired to a sandbox step registry, and assembles the report
+// (trace + side-effect manifest + who the run acted as). The engine is
+// consulted for real reads only; the sandbox registry guarantees no write or
 // side effect escapes.
+//
+// WHO THE RUN ACTS AS FOLLOWS WHAT RUNS, as it does for every other run. The
+// loader's copy carries the origin the loader recorded, so a run of it holds
+// the principal a live run of it holds: the automation's own when ctx carries
+// no caller's identity, the caller's otherwise. A compiled source has no
+// recorded origin, so it runs as its caller, or as the ordinary automation
+// actor when ctx carries no identity -- never with the engine's authority,
+// whatever name it gives its automation. The report says who ran
+// (BundleDryRunReport.RanAs, Authority).
 func runBundleDryRun(ctx context.Context, engine *memql.MemQLEngine, req memql.DryRunRequest) (memql.BundleDryRunReport, error) {
 	if engine == nil {
 		return memql.BundleDryRunReport{}, fmt.Errorf("dry-run requires an engine")
@@ -98,20 +114,38 @@ func runBundleDryRun(ctx context.Context, engine *memql.MemQLEngine, req memql.D
 		},
 	}
 
-	// Compile the candidate automation against the live registry, read-only --
-	// the same single-source compile path Gate 1 uses. A bundle reaching Gate 2
-	// is already Gate-1-clean, so a compile failure here is a setup error.
 	loader := automations.NewLoader(automations.LoaderOptions{
 		Logger:   discardLogger(),
 		Registry: engine.Concepts(),
 	})
-	origin := fmt.Sprintf("dryrun:automation:%s", req.AutomationName)
-	automation, err := loader.CompileSource(req.AutomationSource, origin)
-	if err != nil {
-		report.OK = false
-		report.FailureReason = fmt.Sprintf("%s: compile failed: %v", origin, err)
-		return report, nil
+	byName := strings.TrimSpace(req.AutomationSource) == ""
+	var automation *automations.Automation
+	if byName {
+		// BY NAME: the loader's own copy, resolved as every run by name
+		// resolves it (Loader.LoadByName). Nothing is compiled from the
+		// request, so there is no source whose name could stand in for the
+		// automation the tree holds. A name the tree does not hold is a
+		// refusal of the request, not a report of a run.
+		loaded, err := loadForDryRunByName(loader, req.AutomationName)
+		if err != nil {
+			return memql.BundleDryRunReport{}, err
+		}
+		automation = loaded
+		report.AutomationName = automation.Name
+	} else {
+		// Compile the candidate automation against the live registry,
+		// read-only -- the same single-source compile path Gate 1 uses. A
+		// bundle reaching Gate 2 is already Gate-1-clean, so a compile failure
+		// here is a setup error.
+		compiled, err := loader.CompileSource(req.AutomationSource, fmt.Sprintf("dryrun:automation:%s", req.AutomationName))
+		if err != nil {
+			report.OK = false
+			report.FailureReason = fmt.Sprintf("dryrun:automation:%s: compile failed: %v", req.AutomationName, err)
+			return report, nil
+		}
+		automation = compiled
 	}
+	origin := fmt.Sprintf("dryrun:automation:%s", report.AutomationName)
 
 	// The sandbox registry wraps the real one: it intercepts write-bearing
 	// steps and delegates reads. It collects the manifest as it runs.
@@ -168,10 +202,13 @@ func runBundleDryRun(ctx context.Context, engine *memql.MemQLEngine, req memql.D
 	// (NewExecutor: `if !opts.SandboxRun && opts.Engine != nil`) -- nothing
 	// resumes a preview, and the write would escape the sandbox.
 	//
-	// SourceTrusted itself is unchanged by this (CompileSource already leaves
-	// Trusted false, so it was false either way). The change is strictly more
-	// restrictive: it marks the checkpoint caller-supplied so resume cannot
-	// promote it.
+	// For a compiled source SourceTrusted is false either way (CompileSource
+	// leaves Trusted false), and this call marks the run caller-supplied. For
+	// the loader's copy, taken by name, Trusted is true, and this call is what
+	// holds its steps at client origin: internal origin requires a trusted
+	// source AND a trigger payload the caller did not supply, so the preview
+	// is no more permissive than the live run by name it predicts
+	// (TestADryRunByNameRunsAtClientOrigin).
 	exec, runErr := executor.ExecuteWithClientEvent(ctx, automation, "dryrun", triggerEvent)
 
 	// Assemble the trace from the execution's step results + the sandbox
@@ -179,6 +216,11 @@ func runBundleDryRun(ctx context.Context, engine *memql.MemQLEngine, req memql.D
 	report.Trace = sandbox.buildTrace(automation, exec)
 	report.SideEffectManifest = sandbox.manifest()
 	report.CostEstimate = sandbox.costEstimate()
+	if exec != nil {
+		// Who the run acted as, as the executor recorded it.
+		report.RanAs = exec.Actor.UserId
+		report.Authority = authorityStatement(byName, automation.Name, exec.Actor)
+	}
 
 	if runErr != nil {
 		report.OK = false
@@ -193,6 +235,69 @@ func runBundleDryRun(ctx context.Context, engine *memql.MemQLEngine, req memql.D
 
 	report.OK = true
 	return report, nil
+}
+
+// loadForDryRunByName resolves the automation a dry run by name runs: the tree
+// loader's own copy, by the resolution every run by name uses.
+func loadForDryRunByName(loader *automations.Loader, name string) (*automations.Automation, error) {
+	const rule = "A dry run by name runs the tree's own copy of an automation; to dry-run an automation the tree does not hold, " +
+		"supply its text, and it runs as its caller"
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("dry run refused: the request names no automation and carries no text. %s", rule)
+	}
+	automation, err := loader.LoadByName(name)
+	if err == nil && automation == nil {
+		err = fmt.Errorf("automation %q not found", name)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("dry run by name of %q refused: %w. %s", name, err, rule)
+	}
+	// No run executes a @disabled automation -- it is not scheduled, not
+	// subscribed, and refused on every run by name -- so there is no live run
+	// for a dry run of it to predict.
+	if !automation.IsEnabled() {
+		return nil, fmt.Errorf("dry run by name of %q refused: the automation is @disabled, and no run executes a disabled automation; "+
+			"remove the @disabled annotation to re-enable it", automation.Name)
+	}
+	return automation, nil
+}
+
+// authorityStatement is BundleDryRunReport.Authority: empty unless the engine
+// runs the automation of this name under the cluster's maintenance principal
+// and this run did not hold it. Then it says what ran, as whom, and that the
+// engine's own run acts with the engine's authority and this one did not.
+//
+// The list is read by name here because the answer is a sentence and not a
+// grant (auth.MaintenanceAutomationNames): whether a run holds the principal is
+// decided by the executor, from the origin the loader recorded, and arrives
+// here as actor.MaintenancePrincipal.
+func authorityStatement(byName bool, name string, actor automations.RunActor) string {
+	if actor.UserId == "" || actor.MaintenancePrincipal || !slices.Contains(auth.MaintenanceAutomationNames(), name) {
+		return ""
+	}
+	what := fmt.Sprintf("a supplied text of an automation named %s", name)
+	who := fmt.Sprintf("%s, the ordinary automation actor (role %s)", actor.UserId, actor.Role)
+	why := "a supplied text has no recorded origin, so it never runs with the engine's authority"
+	switch {
+	case actor.Inherited && byName:
+		what = fmt.Sprintf("the engine's own automation %s", name)
+		who = fmt.Sprintf("its caller %s (role %s)", actor.UserId, actor.Role)
+		why = "a run started under a caller's identity acts as that caller"
+	case actor.Inherited:
+		who = fmt.Sprintf("its caller %s (role %s)", actor.UserId, actor.Role)
+		why = "a supplied text runs as its caller, never with the engine's authority"
+	case byName:
+		// Every listed name loads from the engine's own tree (the maintenance
+		// gate holds that), so the loader's copy of one, run with no caller's
+		// identity, holds the principal. Said plainly should that ever fail.
+		what = fmt.Sprintf("the tree's automation %s", name)
+		why = "the automation the tree holds under that name was not loaded from the engine's own tree"
+	}
+	return fmt.Sprintf("This dry run executed %s as %s. The engine's own run of %s acts under the cluster's maintenance principal, "+
+		"and this run did not hold it: %s. What this run read is what that actor may read, so a result with nothing to do here "+
+		"does not say the engine's own run has nothing to do. The principal is held only by the engine's own automation, in a run that carries no caller's identity.",
+		what, who, name, why)
 }
 
 // toTriggerEvent converts the request's synthetic / replayed trigger into the

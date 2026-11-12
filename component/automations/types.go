@@ -701,6 +701,11 @@ type AutomationExecution struct {
 	// which is exactly how memql#2888's first fix was bypassable.
 	CallerSuppliedPayload bool `json:"-"`
 
+	// Actor is who this run acted as, recorded by the executor where it
+	// installs the run's actor. The zero value means no actor was installed:
+	// the run was refused or skipped before it started.
+	Actor RunActor `json:"-"`
+
 	// ID is a unique identifier for this execution.
 	ID string `json:"id"`
 
@@ -803,6 +808,24 @@ type AutomationExecution struct {
 
 	journalFingerprint string
 	cancelRecorded     bool
+}
+
+// RunActor says who a run acted as. The executor records it from the context
+// it has just installed the run's actor on (installRunActor), so anything that
+// reports on a run states its actor from the run itself and does not derive it
+// a second time.
+type RunActor struct {
+	// UserId is the acting actor's user id.
+	UserId string
+	// Role is its role.
+	Role string
+	// Inherited is true when the identity came with the context the run was
+	// started under -- a caller's, an author's -- and false when the executor
+	// gave the automation its own actor.
+	Inherited bool
+	// MaintenancePrincipal is true when the run held its own automation's
+	// maintenance principal (auth.IsMaintenancePrincipalOf).
+	MaintenancePrincipal bool
 }
 
 // NewExecution creates a new automation execution.

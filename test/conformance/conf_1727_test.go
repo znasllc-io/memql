@@ -18,10 +18,10 @@ package conformance
 // This dimension drives EACH of the five logics through the genuine
 // run_automation paths -- the LIVE path (Loader.LoadByName + Executor
 // .ExecuteWithClientEvent, byte-for-byte what the MCP runner does) AND the DRY-RUN
-// path (DSLConstructSource + RunBundleDryRun, the sandbox preview) -- with a
-// representative event, and asserts the binding resolves: no step fails because
-// an event.* reference came back null. It FAILS against the pre-#1727 sandbox
-// and PASSES with the converged arg resolver.
+// path (RunBundleDryRun by the resolved name, the sandbox preview of the
+// loader's own copy) -- with a representative event, and asserts the binding
+// resolves: no step fails because an event.* reference came back null. It FAILS
+// against the pre-#1727 sandbox and PASSES with the converged arg resolver.
 
 import (
 	"strings"
@@ -140,16 +140,11 @@ func runEventDryRunBinding(t *testing.T, e *Env) {
 		}
 		assertNoBindingFailure(t, c.logic, "LIVE", liveMsg)
 
-		// DRY-RUN path -- the #1727-broken sandbox preview. Source resolved by the
-		// SAME canonical name the runner uses.
-		src, ok := memql.DSLConstructSource(e.Eng.Logger, "automation", auto.Name)
-		if !ok {
-			t.Fatalf("#1727: DSLConstructSource(automation, %q) not found -- dry-run needs the source", auto.Name)
-		}
+		// DRY-RUN path -- the #1727-broken sandbox preview, asked for by the
+		// SAME canonical name and with no text, as the runner asks.
 		report, drErr := memql.RunBundleDryRun(e.Ctx, e.Eng, memql.DryRunRequest{
-			AutomationName:   auto.Name,
-			AutomationSource: src,
-			TriggerEvent:     &memql.DryRunTriggerEvent{Topic: "mcp.run." + auto.Name, Kind: "manual", Payload: c.event},
+			AutomationName: auto.Name,
+			TriggerEvent:   &memql.DryRunTriggerEvent{Topic: "mcp.run." + auto.Name, Kind: "manual", Payload: c.event},
 		})
 		if drErr != nil {
 			t.Fatalf("#1727: RunBundleDryRun(%q) returned a hard error: %v", c.logic, drErr)
