@@ -52,10 +52,9 @@ const resultConcept = "integration:library:result"
 // Integration is the Library edit capability surface. Holds the engine
 // handle so it can re-enter Execute for the read-then-write dance.
 type Integration struct {
-	// removalDB is the raw handle libraryRemoveArtifact deletes on
-	// (remove_artifact.go): every version of a row is exactly what the
-	// engine's append-only writes will not touch.
-	removalDB       func() *sql.DB
+	// maintain opens the engine's maintenance session, which
+	// libraryRemoveArtifact runs its statements on (remove_artifact.go).
+	maintain        func(context.Context) (*sql.Conn, func(), error)
 	engine          memql.IntegrationEngineAccess
 	authority       documentAuthority
 	reviewGoals     ReviewGoalOpener

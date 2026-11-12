@@ -1366,7 +1366,7 @@ func (r *runnerFixture) removeLibraryRowsOf(owner string) {
 func (r *runnerFixture) withTheLibrary() {
 	r.t.Helper()
 	lib := library.NewIntegration(r.eng)
-	lib.SetDatabase(func() *sql.DB { return r.db })
+	lib.SetMaintenanceSession(privacySessionOf(r.db))
 	if err := r.eng.RegisterIntegration(lib); err != nil {
 		r.t.Fatalf("register the Library: %v", err)
 	}
