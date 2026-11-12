@@ -1,0 +1,7 @@
+/// A file attached to a ticket. Its place ends with a slash.
+concept ticketAttachment {
+  ownerUserId  string
+  fileSize     int
+  title        string
+  blobUrl      string  @bytes(under="attachments/")
+}

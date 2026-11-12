@@ -8,7 +8,7 @@
 concept attachment {
   fileName  string!  @description("Original filename of the uploaded file.")
   fileSize  int  @description("File size in bytes.")
-  blobUrl  string!  @bytes @description("Azure Blob Storage URL where the file is stored (https://account.blob.core.windows.net/container/object).")
+  blobUrl  string!  @bytes(under="spaces") @description("Azure Blob Storage URL where the file is stored (https://account.blob.core.windows.net/container/object).")
   mimeType  string!  @description("MIME type of the uploaded file.")
   status  enum("processing", "ready", "error")!  @description("Processing status of the attachment.")
   summary  string  @description("AI-generated 2-3 sentence summary of the file content.")

@@ -273,6 +273,7 @@ var (
 	bytesKeys = []ArgSpec{
 		{Name: "tree", Type: "flag", Doc: "The field names a prefix, and the bytes are every object under it (a site's bundle), not one object."},
 		{Name: "counted", Type: "flag", Doc: "An account export counts the bytes in the file's report and never carries them."},
+		{Name: "under", Type: "string", Doc: "Required: the place the row's own bytes live in, as path segments -- {id} for the row's id, {<field>} for one of the concept's top-level string fields, anything else literal. A key outside it is not the row's and is never read."},
 	}
 	variantKeys = []ArgSpec{
 		{Name: "discriminator", Type: "string", Doc: "The field whose value picks the branch."},
@@ -450,7 +451,7 @@ var placementTable = concat(
 
 	// ---- ConceptField ---------------------------------------------------
 	[]Placement{
-		{Receiver: ConceptField, Name: "bytes", Forms: FormFlag | FormKeywords, Keys: bytesKeys, Example: "@bytes"},
+		{Receiver: ConceptField, Name: "bytes", Forms: FormFlag | FormKeywords, Keys: bytesKeys, Example: `@bytes(under="library/{ownerUserId}")`},
 		{Receiver: ConceptField, Name: "description", Forms: FormString, Example: `@description("The ticket's one-line title.")`, Doc: "The field's description, emitted into the concept schema."},
 		{Receiver: ConceptField, Name: "internal", Forms: FormFlag, Example: "@internal"},
 		{Receiver: ConceptField, Name: "maxLength", Forms: FormNumber, Example: "@maxLength(120)"},
@@ -624,7 +625,7 @@ var Docs = map[string]string{
 	"minimum":      "The INCLUSIVE lower bound on a numeric value.",
 	"maximum":      "The INCLUSIVE upper bound on a numeric value.",
 	"secret":       "The field holds a secret: emitted as x-secret, and every validation surface that quotes a rejected value redacts it (memql#3036). Not a secrecy guarantee -- see Concept.SecretFields for the limits.",
-	"bytes":        "The field points at bytes in blob storage: one object, or with tree every object under the prefix it names. Emitted as x-bytes. An account export copies the bytes the newest version of each carried row points at into the file; with counted it only counts them in the file's report. On a string or a list of strings.",
+	"bytes":        "The field points at bytes in blob storage: one object, or with tree every object under the prefix it names. under=\"<place>\" is required: the place the row's own bytes live in, {id} for the row's id and {<field>} for one of its top-level string fields, and a key outside it is never read. Emitted as x-bytes. An account export copies the bytes the newest version of each carried row points at into the file; with counted it only counts them in the file's report. On a string or a list of strings.",
 	"secretName":   "The field holds the NAME of a secret, never its value: emitted as x-secret-name. An account export lists each name it finds as a connection to set up again on the target; the value never travels. On a string or a list of strings.",
 	"pii":          "The field is personally identifying: emitted as x-pii, and the hard-delete scrub (@scrubPii, memql#1711) zeroes every such field generically.",
 	"serverSet":    "The field is stamped server-side (createdAt, createdBy, status, ...): never accepted from a mutation's caller args, but projected like any other field. Emitted as x-serverSet (memql#2035).",

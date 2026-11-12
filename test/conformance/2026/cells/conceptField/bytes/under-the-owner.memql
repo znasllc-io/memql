@@ -1,0 +1,7 @@
+/// A file attached to a ticket. Its bytes are one object in blob storage, in
+/// the place its owner's own files live in.
+concept ticketAttachment {
+  ownerUserId  string
+  title        string
+  blobUrl      string  @bytes(under="attachments/{ownerUserId}")
+}

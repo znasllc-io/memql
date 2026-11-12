@@ -1,5 +1,5 @@
 /// A file attached to a ticket, whose bytes are said to be a number.
 concept ticketAttachment {
   title    string
-  blobSize int  @bytes
+  blobSize int  @bytes(under="attachments")
 }

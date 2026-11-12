@@ -144,6 +144,12 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 		return nil, err
 	}
 
+	// `@bytes(under=...)` names the row's own fields, so it is checked once
+	// the whole property set is known, like the declarations above.
+	if err := validateBytesUnder(parsed.properties); err != nil {
+		return nil, err
+	}
+
 	if err := validateRetentionStore(conceptName, parsed.retention); err != nil {
 		return nil, err
 	}
@@ -1620,7 +1626,7 @@ func applyPropertyAttribute(prop *parsedProperty, attr *parser.Attribute) error 
 	case "bytes":
 		// Bare, or with the flags tree and counted; the registry has
 		// already refused any other key and a valued flag.
-		prop.bytes = &bytesDecl{Tree: attrFlag(attr, "tree"), Counted: attrFlag(attr, "counted")}
+		prop.bytes = &bytesDecl{Tree: attrFlag(attr, "tree"), Counted: attrFlag(attr, "counted"), Under: attrKeyString(attr, "under")}
 	case "secretName":
 		prop.secretName = true
 	case "internal":
@@ -1907,7 +1913,7 @@ func propertyToJSONSchema(prop parsedProperty) (map[string]any, error) {
 		schema["x-pii"] = true
 	}
 	if prop.bytes != nil {
-		schema["x-bytes"] = map[string]any{"tree": prop.bytes.Tree, "counted": prop.bytes.Counted}
+		schema["x-bytes"] = map[string]any{"tree": prop.bytes.Tree, "counted": prop.bytes.Counted, "under": prop.bytes.Under}
 	}
 	if prop.secretName {
 		schema["x-secret-name"] = true

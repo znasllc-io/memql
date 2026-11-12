@@ -477,15 +477,17 @@ func TestStaysAndTravelsAnswerForEveryDeclaration(t *testing.T) {
 }
 
 // @bytes and @secretName reach the concept's schema and come back through
-// their accessors, sorted by name, with @bytes's two flags read as written.
+// their accessors, sorted by name, with @bytes's two flags and its place read
+// as written.
 func TestBytesAndSecretNameFieldsAreReadBackFromTheSchema(t *testing.T) {
 	c, err := buildConcept(t, `@belongsTo(account)
 concept probe {
-  accountId  string
-  blobUrl    string    @bytes
-  bundleRef  string    @bytes(tree)
-  snapshot   string    @bytes(counted)
-  archives   []string  @bytes(tree, counted)
+  accountId    string
+  ownerUserId  string
+  blobUrl      string    @bytes(under="library/{ownerUserId}")
+  bundleRef    string    @bytes(tree, under="sites/{id}")
+  snapshot     string    @bytes(counted, under="packages")
+  archives     []string  @bytes(tree, counted, under="archives/{id}")
   names      []string  @secretName
   ref        string    @secretName
   title      string
@@ -495,10 +497,10 @@ concept probe {
 		t.Fatalf("BuildConceptFromDecl: %v", err)
 	}
 	wantBytes := []BytesField{
-		{Name: "archives", Tree: true, Counted: true},
-		{Name: "blobUrl"},
-		{Name: "bundleRef", Tree: true},
-		{Name: "snapshot", Counted: true},
+		{Name: "archives", Tree: true, Counted: true, Under: "archives/{id}"},
+		{Name: "blobUrl", Under: "library/{ownerUserId}"},
+		{Name: "bundleRef", Tree: true, Under: "sites/{id}"},
+		{Name: "snapshot", Counted: true, Under: "packages"},
 	}
 	gotBytes := c.BytesFields()
 	if len(gotBytes) != len(wantBytes) {
@@ -529,7 +531,7 @@ concept probe {
 // The schema keywords are the contract the accessors read, and a reader of a
 // stored schema (an import, a client) reads them too.
 func TestBytesAndSecretNameEmitTheirSchemaKeywords(t *testing.T) {
-	c, err := buildConcept(t, "concept probe {\n  bundleRef  string  @bytes(tree)\n  ref  string  @secretName\n}\n")
+	c, err := buildConcept(t, "concept probe {\n  bundleRef  string  @bytes(tree, under=\"sites/{id}\")\n  ref  string  @secretName\n}\n")
 	if err != nil {
 		t.Fatalf("BuildConceptFromDecl: %v", err)
 	}
@@ -540,8 +542,8 @@ func TestBytesAndSecretNameEmitTheirSchemaKeywords(t *testing.T) {
 		t.Fatalf("definition schema: %v", err)
 	}
 	bytesKw, ok := schema.Properties["bundleRef"]["x-bytes"].(map[string]any)
-	if !ok || bytesKw["tree"] != true || bytesKw["counted"] != false {
-		t.Errorf("bundleRef x-bytes = %#v, want {tree: true, counted: false}", schema.Properties["bundleRef"]["x-bytes"])
+	if !ok || bytesKw["tree"] != true || bytesKw["counted"] != false || bytesKw["under"] != "sites/{id}" {
+		t.Errorf("bundleRef x-bytes = %#v, want {tree: true, counted: false, under: sites/{id}}", schema.Properties["bundleRef"]["x-bytes"])
 	}
 	if schema.Properties["ref"]["x-secret-name"] != true {
 		t.Errorf("ref x-secret-name = %#v, want true", schema.Properties["ref"]["x-secret-name"])
@@ -559,7 +561,7 @@ func TestBytesAndSecretNameEmitTheirSchemaKeywords(t *testing.T) {
 // would be a declaration nothing can read. Refused at load, with the field,
 // its type and what to write.
 func TestBytesAndSecretNameAreRefusedOnAFieldThatIsNotAString(t *testing.T) {
-	for _, annotation := range []string{"@bytes", "@bytes(tree)", "@secretName"} {
+	for _, annotation := range []string{`@bytes(under="spaces")`, `@bytes(tree, under="sites/{id}")`, "@secretName"} {
 		for _, fieldType := range []string{"int", "bool", "object", "[]int", "map[string]string"} {
 			t.Run(annotation+" on "+fieldType, func(t *testing.T) {
 				_, err := buildConcept(t, "concept probe {\n  target  "+fieldType+"  "+annotation+"\n}\n")
@@ -584,7 +586,7 @@ func TestBytesAndSecretNameAreRefusedOnAFieldThatIsNotAString(t *testing.T) {
 // The accessors read top-level fields only, so a @bytes or @secretName inside
 // a nested block would load and be read by nobody. Refused with the same code.
 func TestBytesAndSecretNameAreRefusedOnANestedField(t *testing.T) {
-	for _, annotation := range []string{"@bytes", "@secretName"} {
+	for _, annotation := range []string{`@bytes(under="spaces")`, "@secretName"} {
 		t.Run(annotation, func(t *testing.T) {
 			_, err := buildConcept(t, "concept probe {\n  bundle {\n    ref  string  "+annotation+"\n  }\n}\n")
 			var coded interface{ RuleCode() string }
@@ -593,6 +595,133 @@ func TestBytesAndSecretNameAreRefusedOnANestedField(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "top-level") {
 				t.Errorf("error = %q, want it to say the field must be top-level", err)
+			}
+		})
+	}
+}
+
+// `under` is the place a row's bytes live in, and it is required: a kind that
+// does not say where its bytes are has none an export may read. Every way of
+// writing a place that names nothing, or names something other than the row's
+// own values, is refused with bytes_under.
+func TestBytesUnderIsRequiredAndChecked(t *testing.T) {
+	cases := []struct {
+		name       string
+		annotation string
+		wantText   string
+	}{
+		{"written bare", `@bytes`, "names no place"},
+		{"flags and no place", `@bytes(tree)`, "names no place"},
+		{"an empty place", `@bytes(under="")`, "names no place"},
+		{"an empty segment", `@bytes(under="library//x")`, "an empty segment"},
+		{"a leading slash", `@bytes(under="/library")`, "an empty segment"},
+		{"a trailing slash", `@bytes(under="library/")`, "an empty segment"},
+		{"a dot segment", `@bytes(under="library/./x")`, "a relative segment"},
+		{"a dot-dot segment", `@bytes(under="library/../x")`, "a relative segment"},
+		{"a field the concept does not declare", `@bytes(under="library/{nobody}")`, "`{nobody}` names neither the row's id nor a string field"},
+		{"a field that is not a string", `@bytes(under="library/{size}")`, "`{size}` names neither the row's id nor a string field"},
+		{"a nested field", `@bytes(under="library/{details}")`, "`{details}` names neither the row's id nor a string field"},
+		{"the export prefix", `@bytes(under="exports/{id}")`, "`exports`"},
+		{"a tree at the top level", `@bytes(tree, under="sites")`, "a tree"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "concept probe {\n  ownerUserId  string\n  size  int\n  details {\n    owner  string\n  }\n  blobUrl  string  " + tc.annotation + "\n}\n"
+			_, err := buildConcept(t, src)
+			var coded interface{ RuleCode() string }
+			if err == nil || !errors.As(err, &coded) || coded.RuleCode() != CodeBytesUnder {
+				t.Fatalf("error = %v, want code %s", err, CodeBytesUnder)
+			}
+			for _, want := range []string{tc.wantText, "`blobUrl`", "[" + CodeBytesUnder + "]"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %q, want it to contain %q", err, want)
+				}
+			}
+		})
+	}
+	for _, ok := range []string{
+		`@bytes(under="spaces")`,
+		`@bytes(under="library/{ownerUserId}")`,
+		`@bytes(tree, under="sites/{id}")`,
+		`@bytes(counted, under="packages")`,
+		`@bytes(tree, counted, under="sites/{id}/{ownerUserId}")`,
+	} {
+		if _, err := buildConcept(t, "concept probe {\n  ownerUserId  string\n  blobUrl  string  "+ok+"\n}\n"); err != nil {
+			t.Errorf("%s: %v", ok, err)
+		}
+	}
+}
+
+// Places answers the prefixes a row's own bytes may live under, with every
+// placeholder in both spellings an id is stored in. A row that does not say
+// whose bytes these are owns none.
+func TestBytesFieldPlaces(t *testing.T) {
+	library := BytesField{Name: "blobUrl", Under: "library/{ownerUserId}"}
+	site := BytesField{Name: "bundleRef", Tree: true, Under: "sites/{id}"}
+	spaces := BytesField{Name: "blobUrl", Under: "spaces"}
+	cases := []struct {
+		name    string
+		field   BytesField
+		rowID   string
+		payload map[string]any
+		want    []string
+	}{
+		{"a bare owner", library, "file1", map[string]any{"ownerUserId": "u1"}, []string{"library/u1"}},
+		{"a canonical owner", library, "file1", map[string]any{"ownerUserId": "v1:identity:user:u1"},
+			[]string{"library/u1", "library/v1:identity:user:u1"}},
+		{"the row's id, canonical", site, "v1:platform:site:s1", nil, []string{"sites/s1", "sites/v1:platform:site:s1"}},
+		{"the row's id, bare", site, "s1", nil, []string{"sites/s1"}},
+		{"a literal place", spaces, "a1", nil, []string{"spaces"}},
+		{"no owner", library, "file1", map[string]any{}, []string{}},
+		{"an empty owner", library, "file1", map[string]any{"ownerUserId": "  "}, []string{}},
+		{"an owner that is not a string", library, "file1", map[string]any{"ownerUserId": 7}, []string{}},
+		{"no row id", site, "", nil, []string{}},
+		{"two placeholders", BytesField{Under: "x/{id}/{ownerUserId}"}, "v1:a:b:r1", map[string]any{"ownerUserId": "v1:identity:user:u1"},
+			[]string{"x/r1/u1", "x/r1/v1:identity:user:u1", "x/v1:a:b:r1/u1", "x/v1:a:b:r1/v1:identity:user:u1"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.field.Places(tc.rowID, tc.payload)
+			if got == nil || strings.Join(got, "|") != strings.Join(tc.want, "|") {
+				t.Fatalf("Places = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+// Admits holds a key to the row's own place: strictly inside it, segment by
+// segment, with a placeholder compared in its bare form on both sides.
+func TestBytesFieldAdmits(t *testing.T) {
+	library := BytesField{Name: "blobUrl", Under: "library/{ownerUserId}"}
+	site := BytesField{Name: "bundleRef", Tree: true, Under: "sites/{id}"}
+	owned := map[string]any{"ownerUserId": "v1:identity:user:u1"}
+	cases := []struct {
+		name    string
+		field   BytesField
+		rowID   string
+		payload map[string]any
+		key     string
+		want    bool
+	}{
+		{"under the owner's bare id", library, "f1", owned, "library/u1/f1/report.pdf", true},
+		{"under the owner's canonical id", library, "f1", owned, "library/v1:identity:user:u1/f1/report.pdf", true},
+		{"a bare owner, a canonical key", library, "f1", map[string]any{"ownerUserId": "u1"}, "library/v1:identity:user:u1/f1/a", true},
+		{"under another owner", library, "f1", owned, "library/u2/f1/report.pdf", false},
+		{"the place itself", library, "f1", owned, "library/u1", false},
+		{"the place with a trailing slash", library, "f1", owned, "library/u1/", false},
+		{"a key that climbs out", library, "f1", owned, "library/u1/../u2/x", false},
+		{"a key that climbs out with a backslash", library, "f1", owned, "library/u1/f1\\..\\..\\u2\\x", false},
+		{"a prefix that only shares characters", library, "f1", owned, "library/u10/x", false},
+		{"a row with no owner", library, "f1", map[string]any{}, "library/u1/f1/a", false},
+		{"a tree key", site, "v1:platform:site:s1", nil, "sites/s1/v3/", true},
+		{"a tree key under the canonical id", site, "s1", nil, "sites/v1:platform:site:s1/v3/index.html", true},
+		{"another site's tree", site, "s1", nil, "sites/s2/v3/", false},
+		{"an empty key", library, "f1", owned, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.field.Admits(tc.rowID, tc.payload, tc.key); got != tc.want {
+				t.Fatalf("Admits(%q) = %v, want %v (places %v)", tc.key, got, tc.want, tc.field.Places(tc.rowID, tc.payload))
 			}
 		})
 	}

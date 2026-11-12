@@ -501,9 +501,9 @@ field's value names something kept elsewhere, so an account export can find it:
 
 | Marker | The field holds | An account export |
 |---|---|---|
-| `@bytes` | the key of one object in blob storage | copies the object into the file |
-| `@bytes(tree)` | a prefix: every object under it | copies every object under the prefix |
-| `@bytes(counted)`, or `@bytes(tree, counted)` | the same | counts the bytes in the file's report and carries none |
+| `@bytes(under="<place>")` | the key of one object in blob storage | copies the object into the file |
+| `@bytes(tree, under="<place>")` | a prefix: every object under it | copies every object under the prefix |
+| `@bytes(counted, under="<place>")`, or with `tree` too | the same | counts the bytes in the file's report and carries none |
 | `@secretName` | the name of a secret, never its value | lists the name as a connection to set up again; the value never travels |
 
 <!-- corpus: 2026/cells/conceptField/bytes/with-its-flags.memql -->
@@ -511,10 +511,23 @@ field's value names something kept elsewhere, so an account export can find it:
 /// A ticket's published help page and the snapshots it was built from.
 concept ticketHelpPage {
   title      string
-  bundleRef  string    @bytes(tree)
-  snapshots  []string  @bytes(counted)
+  bundleRef  string    @bytes(tree, under="help/{id}")
+  snapshots  []string  @bytes(counted, under="snapshots")
 }
 ```
+
+**`under` is required: it is the place the row's own bytes live in.** A row
+names its own bytes, and its writer could name anything, so an export reads a
+key only when it lies strictly inside the place built from the row's own
+values. The place is path segments separated by `/`: `{id}` is the row's id,
+`{<field>}` the value of one of the concept's top-level string fields, and any
+other segment is literal. An id is compared in its bare form, so a key under
+`library/u1/` and one under `library/v1:identity:user:u1/` are the same
+owner's. A row whose placeholder field is empty owns no bytes at all. The load
+refuses (`bytes_under`) a `@bytes` with no `under` or an empty one, an empty,
+`.` or `..` segment (so no leading or trailing `/`), a `{...}` naming neither
+`id` nor a top-level string field, a place under `exports`, where account
+exports are written, and a `tree` whose place has a single segment.
 
 Both are written on a top-level field that is a `string` or a list of strings,
 and become the schema keywords `x-bytes` and `x-secret-name`. On any other

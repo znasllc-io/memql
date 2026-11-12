@@ -627,11 +627,21 @@ concept fieldTypes {
 //                       constrain its caller. ADDING @pii TO A FIELD CAN FAIL
 //                       THE BUILD. That is the intent, and it is the working
 //                       template for what "enforced" looks like here.
-//   @bytes              The field names bytes in blob storage: one object, or
-//                       with @bytes(tree) every object under the prefix it
-//                       names. An account export copies them into the file;
-//                       @bytes(counted) only counts them in its report. Emits
-//                       `x-bytes`, read back by Concept.BytesFields().
+//   @bytes(under="<place>")
+//                       The field names bytes in blob storage: one object, or
+//                       with `tree` every object under the prefix it names.
+//                       An account export copies them into the file; with
+//                       `counted` it only counts them in its report. `under`
+//                       is REQUIRED: the place the row's own bytes live in,
+//                       as path segments -- {id} the row's id, {<field>} one
+//                       of the concept's top-level string fields, anything
+//                       else literal (`library/{ownerUserId}`, `sites/{id}`).
+//                       A key outside it is not the row's and is never read.
+//                       Refused at load (bytes_under): no place, an empty,
+//                       "." or ".." segment, a {...} naming neither id nor a
+//                       top-level string field, a place under `exports`, a
+//                       tree under a one-segment place. Emits `x-bytes`, read
+//                       back by Concept.BytesFields() (Places, Admits).
 //   @secretName         The field holds the NAME of a secret, never its value.
 //                       An account export lists each name as a connection to
 //                       set up again; the value never travels. Emits

@@ -62,12 +62,12 @@ func TestNoKindThatTravelsDeclaresASecretField(t *testing.T) {
 
 func TestBytesAndSecretNameFields(t *testing.T) {
 	wantBytes := []string{
-		"v1:library:file.blobUrl=plain",
-		"v1:library:fileVersion.blobUrl=plain",
-		"v1:common:attachment.blobUrl=plain",
-		"v1:platform:site.bundleRef=tree",
-		"v1:platform:site.candidateRef=tree",
-		"v1:platform:packageDeployment.snapshotArtifactId=counted",
+		"v1:library:file.blobUrl=plain under library/{ownerUserId}",
+		"v1:library:fileVersion.blobUrl=plain under library/{ownerUserId}",
+		"v1:common:attachment.blobUrl=plain under spaces",
+		"v1:platform:site.bundleRef=tree under sites/{id}",
+		"v1:platform:site.candidateRef=tree under sites/{id}",
+		"v1:platform:packageDeployment.snapshotArtifactId=counted under packages/snapshots/{packageId}",
 	}
 	wantSecretNames := []string{
 		"v1:shopify:store.adminTokenRef",
@@ -89,7 +89,7 @@ func TestBytesAndSecretNameFields(t *testing.T) {
 			case f.Counted:
 				kind = "counted"
 			}
-			gotBytes = append(gotBytes, fmt.Sprintf("%s.%s=%s", c.Name, f.Name, kind))
+			gotBytes = append(gotBytes, fmt.Sprintf("%s.%s=%s under %s", c.Name, f.Name, kind, f.Under))
 		}
 		for _, f := range c.SecretNameFields() {
 			gotNames = append(gotNames, c.Name+"."+f)

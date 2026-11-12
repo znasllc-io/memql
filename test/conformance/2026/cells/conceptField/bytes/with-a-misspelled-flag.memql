@@ -1,5 +1,5 @@
 /// A ticket's published help page.
 concept ticketHelpPage {
   title      string
-  bundleRef  string  @bytes(tre)
+  bundleRef  string  @bytes(tre, under="help/{id}")
 }

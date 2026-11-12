@@ -1,4 +1,4 @@
-/// A file attached to a ticket. Its bytes are one object in blob storage.
+/// A file attached to a ticket, with no word on where its bytes live.
 concept ticketAttachment {
   title    string
   blobUrl  string  @bytes

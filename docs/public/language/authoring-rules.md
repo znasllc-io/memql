@@ -3841,6 +3841,27 @@ concept ticket {
 }
 ```
 
+### `@bytes` says where its bytes live
+
+`@bytes` takes a required `under`: the place the row's own bytes live in,
+built from the row's id (`{id}`), its own top-level string fields
+(`{ownerUserId}`) and literal segments. Without one, or with a place that
+names something other than the row's own values, the load refuses it with
+`[bytes_under]`:
+
+<!-- corpus: 2026/cells/conceptField/bytes/written-bare.memql -->
+```memql retired
+/// A file attached to a ticket, with no word on where its bytes live.
+concept ticketAttachment {
+  title    string
+  blobUrl  string  @bytes
+}
+```
+
+Write `@bytes(under="library/{ownerUserId}")` for one object in its owner's
+place and `@bytes(tree, under="sites/{id}")` for a tree in the row's own. A
+tree's place has at least two segments, and no place starts with `exports`.
+
 ### `@bytes` and `@secretName` go on a string
 
 Both name something kept outside the row -- an object in blob storage, a
@@ -3853,7 +3874,7 @@ with `[field_annotation_type]`:
 /// A file attached to a ticket, whose bytes are said to be a number.
 concept ticketAttachment {
   title    string
-  blobSize int  @bytes
+  blobSize int  @bytes(under="attachments")
 }
 ```
 

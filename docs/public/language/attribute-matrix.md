@@ -369,7 +369,7 @@ Written after a field's type in the body of a `concept`.
 
 | Annotation | Written as | Example |
 |---|---|---|
-| [`@bytes`](#bytes) | no arguments or keyword arguments | `@bytes` |
+| [`@bytes`](#bytes) | no arguments or keyword arguments | `@bytes(under="library/{ownerUserId}")` |
 | [`@description`](#description) | one string | `@description("The ticket's one-line title.")` |
 | [`@internal`](#internal) | no arguments | `@internal` |
 | [`@maximum`](#maximum) | one number | `@maximum(100)` |
@@ -570,7 +570,7 @@ Declares WHICH ACCOUNT this concept's rows belong to, or that they belong to non
 
 | On | Written as | Example |
 |---|---|---|
-| [concept field](#concept-field) | no arguments or keyword arguments | `@bytes` |
+| [concept field](#concept-field) | no arguments or keyword arguments | `@bytes(under="library/{ownerUserId}")` |
 
 `@bytes` takes these keys. A key of type `flag` is written bare, and every other as `key=value`.
 
@@ -578,8 +578,9 @@ Declares WHICH ACCOUNT this concept's rows belong to, or that they belong to non
 |---|---|---|
 | `tree` | flag | The field names a prefix, and the bytes are every object under it (a site's bundle), not one object. |
 | `counted` | flag | An account export counts the bytes in the file's report and never carries them. |
+| `under` | string | Required: the place the row's own bytes live in, as path segments -- {id} for the row's id, {&lt;field>} for one of the concept's top-level string fields, anything else literal. A key outside it is not the row's and is never read. |
 
-The field points at bytes in blob storage: one object, or with tree every object under the prefix it names. Emitted as x-bytes. An account export copies the bytes the newest version of each carried row points at into the file; with counted it only counts them in the file's report. On a string or a list of strings.
+The field points at bytes in blob storage: one object, or with tree every object under the prefix it names. under="&lt;place>" is required: the place the row's own bytes live in, {id} for the row's id and {&lt;field>} for one of its top-level string fields, and a key outside it is never read. Emitted as x-bytes. An account export copies the bytes the newest version of each carried row points at into the file; with counted it only counts them in the file's report. On a string or a list of strings.
 
 ### @cache
 

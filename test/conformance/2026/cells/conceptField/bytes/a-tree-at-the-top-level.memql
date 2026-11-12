@@ -1,0 +1,7 @@
+/// A file attached to a ticket. Its tree is a whole top-level prefix.
+concept ticketAttachment {
+  ownerUserId  string
+  fileSize     int
+  title        string
+  blobUrl      string  @bytes(tree, under="attachments")
+}

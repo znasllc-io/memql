@@ -1,0 +1,7 @@
+/// A file attached to a ticket. Its place names a number.
+concept ticketAttachment {
+  ownerUserId  string
+  fileSize     int
+  title        string
+  blobUrl      string  @bytes(under="attachments/{fileSize}")
+}

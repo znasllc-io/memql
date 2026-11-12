@@ -1,0 +1,7 @@
+/// A file attached to a ticket. Its place is where account exports are written.
+concept ticketAttachment {
+  ownerUserId  string
+  fileSize     int
+  title        string
+  blobUrl      string  @bytes(under="exports/{ownerUserId}")
+}

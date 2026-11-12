@@ -1,14 +1,84 @@
 {
   "cases": [
     {
-      "file": "written-bare.memql",
+      "file": "under-the-owner.memql",
       "verdict": "load_ok",
-      "note": "The field names one object in blob storage. An account export copies the object the newest version of each carried row names into the file."
+      "note": "The field names one object in blob storage, and `under` names the place the row's own bytes live in: {ownerUserId} is the row's own owner. An account export copies the object only when its key lies strictly inside that place."
     },
     {
       "file": "with-its-flags.memql",
       "verdict": "load_ok",
-      "note": "`tree`: the field names a prefix, and the bytes are every object under it. `counted`: the bytes are counted in the file's report and never carried. Either takes a list of strings as well as a string."
+      "note": "`tree`: the field names a prefix, and the bytes are every object under it; {id} is the row's own id. `counted`: the bytes are counted in the file's report and never carried. Either takes a list of strings as well as a string, and both still name their place."
+    },
+    {
+      "file": "written-bare.memql",
+      "verdict": "refuse_load",
+      "code": "bytes_under",
+      "message": "@bytes on `blobUrl` names no place (`under` is missing or empty)",
+      "note": "`under` is required: a row names its own bytes, and an export must not read whatever a row names. A field with no place has no bytes the export may read."
+    },
+    {
+      "file": "an-empty-place.memql",
+      "verdict": "refuse_load",
+      "code": "bytes_under",
+      "message": "names no place (`under` is missing or empty)"
+    },
+    {
+      "file": "an-empty-segment.memql",
+      "verdict": "refuse_load",
+      "code": "bytes_under",
+      "message": "has an empty segment in under=\"attachments//{ownerUserId}\""
+    },
+    {
+      "file": "a-leading-slash.memql",
+      "verdict": "refuse_load",
+      "code": "bytes_under",
+      "message": "has an empty segment in under=\"/attachments\""
+    },
+    {
+      "file": "a-trailing-slash.memql",
+      "verdict": "refuse_load",
+      "code": "bytes_under",
+      "message": "has an empty segment in under=\"attachments/\""
+    },
+    {
+      "file": "a-dot-segment.memql",
+      "verdict": "refuse_load",
+      "code": "bytes_under",
+      "message": "has a relative segment \".\""
+    },
+    {
+      "file": "a-dot-dot-segment.memql",
+      "verdict": "refuse_load",
+      "code": "bytes_under",
+      "message": "has a relative segment \"..\"",
+      "note": "A relative segment is how a place would climb out of its own prefix into another kind's."
+    },
+    {
+      "file": "an-undeclared-field.memql",
+      "verdict": "refuse_load",
+      "code": "bytes_under",
+      "message": "`{uploaderId}` names neither the row's id nor a string field the concept declares at its top level"
+    },
+    {
+      "file": "a-field-that-is-not-a-string.memql",
+      "verdict": "refuse_load",
+      "code": "bytes_under",
+      "message": "`{fileSize}` names neither the row's id nor a string field the concept declares at its top level"
+    },
+    {
+      "file": "the-export-prefix.memql",
+      "verdict": "refuse_load",
+      "code": "bytes_under",
+      "message": "names a place under `exports`",
+      "note": "An account export writes its own files under `exports/`; no row's bytes may claim that place."
+    },
+    {
+      "file": "a-tree-at-the-top-level.memql",
+      "verdict": "refuse_load",
+      "code": "bytes_under",
+      "message": "a tree's place has at least two segments",
+      "note": "A tree is every object under a prefix, so a one-segment place would let a row name a whole top-level namespace as its own."
     },
     {
       "file": "on-a-number.memql",
