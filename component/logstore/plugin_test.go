@@ -67,7 +67,7 @@ func TestRoleFloors(t *testing.T) {
 	}
 	// The maintenance principal the nightly automation runs under clears
 	// the owner floor -- that is what listing logsRetentionSweep buys.
-	ma := auth.MaintenanceActor("logsRetentionSweep")
+	ma := auth.MaintenanceActor(auth.AutomationOriginEngine, "logsRetentionSweep")
 	if ma == nil {
 		t.Fatal("logsRetentionSweep is not on the maintenance list; the nightly sweep would run as a reader and be refused by its own floor")
 	}

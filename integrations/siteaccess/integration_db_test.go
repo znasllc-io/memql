@@ -2025,7 +2025,7 @@ func TestAnActBelongsToAPerson(t *testing.T) {
 		"an anonymous caller":      auth.ContextWithAnonymousActor(context.Background()),
 		"the cluster acting":       auth.ContextWithSystemActor(context.Background(), "some-part-of-the-cluster"),
 		"the cluster, trusted":     auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(context.Background(), "some-part-of-the-cluster")),
-		"a maintenance automation": auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.MaintenanceAutomationNames()[0])),
+		"a maintenance automation": auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, auth.MaintenanceAutomationNames()[0])),
 		"the operator credential":  operatorCredential(),
 	}
 	acts := map[string]func(context.Context) ([]memorynodes.MemoryNode, error){

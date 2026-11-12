@@ -45,7 +45,7 @@ func TestRepositoryPollMaintenanceActorDiscoversOwnedPackages(t *testing.T) {
 		t.Fatalf("ordinary system reader saw owned sources: %v, %v", rows, err)
 	}
 
-	actor := auth.MaintenanceActor("pollPackageUpstreams")
+	actor := auth.MaintenanceActor(auth.AutomationOriginEngine, "pollPackageUpstreams")
 	if actor == nil {
 		t.Fatal("repository polling has no maintenance identity")
 	}

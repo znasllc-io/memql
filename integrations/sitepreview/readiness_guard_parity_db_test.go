@@ -97,7 +97,7 @@ func seedSelfAccount(t *testing.T, eng *memql.MemQLEngine, db *bun.DB) {
 	// run (component/automations/executor.go, contextWithSystemActor): the
 	// claims and the token `createdBy` resolves through, and the access
 	// context row authz reads.
-	ma := auth.MaintenanceActor("seedSelfAccount")
+	ma := auth.MaintenanceActor(auth.AutomationOriginEngine, "seedSelfAccount")
 	claims := map[string]any{"sub": ma.UserId, "email": ma.UserId, "role": string(ma.Role)}
 	seed := auth.ContextWithAccess(
 		auth.ContextWithToken(auth.ContextWithClaims(context.Background(), claims), auth.BuildTokenInfo(claims)), ma)

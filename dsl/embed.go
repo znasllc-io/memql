@@ -221,8 +221,10 @@ func UnregisterTree(domain string) {
 func Tree() fs.FS {
 	pluginTreesMu.RLock()
 	overlays := make(map[string]fs.FS, len(pluginTrees))
+	runtime := make(map[string]bool, len(pluginTrees))
 	for k, v := range pluginTrees {
 		overlays[k] = v
+		runtime[k] = runtimeTrees[k]
 	}
 	pluginTreesMu.RUnlock()
 	if len(overlays) == 0 {
@@ -230,7 +232,7 @@ func Tree() fs.FS {
 		// so behaviour is bit-exact identical to the pre-#356 shape.
 		return embedFS
 	}
-	return &layeredFS{base: embedFS, overlays: overlays}
+	return &layeredFS{base: embedFS, overlays: overlays, runtime: runtime}
 }
 
 // layeredFS overlays a set of named plugin trees onto a base FS.
@@ -248,6 +250,10 @@ func Tree() fs.FS {
 type layeredFS struct {
 	base     fs.FS
 	overlays map[string]fs.FS
+	// runtime marks the overlays that are runtime domains (MEMQL_DSL_PATH, or
+	// a package analysis' candidate) rather than compiled packs. It is what
+	// SourceOf answers from; see source.go.
+	runtime map[string]bool
 	// embeddedDomains caches the set of top-level directory names
 	// in the base FS so the per-call shadowing check is O(1). Built
 	// lazily on first use; immutable for the lifetime of the

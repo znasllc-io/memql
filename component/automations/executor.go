@@ -18,6 +18,7 @@ import (
 	"github.com/znasllc-io/memql/component/provenance"
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // systemActorPrefix is the prefix for system-generated actor identifiers.
@@ -67,9 +68,16 @@ const systemActorPrefix = "system:automation:"
 // inherited, so the AuthoredScheduler invariant above is untouched: an authored
 // run keeps the author's envelope, and a maintenance name it happened to share
 // could not lift it.
-func contextWithSystemActor(ctx context.Context, automationName string) context.Context {
+//
+// And it follows the automation's ORIGIN, never its name: the list is asked
+// with where the loader found the definition (maintenanceOrigin), so only the
+// engine's own tree is granted. A pack's or a runtime domain's automation --
+// a staged package's -- that carries a listed name runs as the ordinary
+// system actor below.
+func contextWithSystemActor(ctx context.Context, automation *Automation) context.Context {
 	_, inherited := auth.AccessFromContext(ctx)
 
+	automationName := automation.Name
 	actorId := systemActorPrefix + automationName
 	role := "system"
 	accessRole := auth.RoleReader
@@ -78,7 +86,7 @@ func contextWithSystemActor(ctx context.Context, automationName string) context.
 	// describing different principals -- and the surface that decides row
 	// authz is the one we would not have touched.
 	if !inherited {
-		if ma := auth.MaintenanceActor(automationName); ma != nil {
+		if ma := auth.MaintenanceActor(maintenanceOrigin(automation), automationName); ma != nil {
 			actorId = ma.UserId
 			role = string(ma.Role)
 			accessRole = ma.Role
@@ -106,6 +114,17 @@ func contextWithSystemActor(ctx context.Context, automationName string) context.
 		})
 	}
 	return ctx
+}
+
+// maintenanceOrigin is the origin the maintenance list is asked with: the
+// engine's own only for an automation the loader read from the engine's own
+// tree (Automation.Source). Every other automation -- a pack's, a runtime
+// domain's, an authored or a caller-supplied one, one built in Go -- is not.
+func maintenanceOrigin(a *Automation) auth.AutomationOrigin {
+	if a != nil && a.Source == memqldsl.SourceEngine {
+		return auth.AutomationOriginEngine
+	}
+	return auth.AutomationOriginOther
 }
 
 // triggerAccountField is the payload key a triggering row carries its account
@@ -653,7 +672,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 
 	// Inject system actor for automation execution
 	// This allows automations to execute mutations without user authentication
-	ctx = contextWithSystemActor(ctx, automation.Name)
+	ctx = contextWithSystemActor(ctx, automation)
 
 	// WHO the run acts as is set above; WHERE it acts is the account of the row
 	// that triggered it, when one did (contextWithTriggerAccount). Stated here,

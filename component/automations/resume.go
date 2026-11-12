@@ -597,7 +597,7 @@ func (e *Executor) ResumeFrom(
 	}
 
 	// Inject system actor for automation execution
-	ctx = contextWithSystemActor(ctx, automation.Name)
+	ctx = contextWithSystemActor(ctx, automation)
 
 	// As executeWithEvent does: a resumed run acts in the account its first
 	// attempt acted in, the triggering row's. A resume does not pass through the

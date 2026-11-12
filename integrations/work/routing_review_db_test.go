@@ -56,7 +56,7 @@ func evidenceProposal(direction, model, level string) routerlib.Proposal {
 // stamps, at internal origin. Returns the approval id.
 func raiseRoutingReview(t *testing.T, eng *memqlengine.MemQLEngine, p routerlib.Proposal) string {
 	t.Helper()
-	return writeRoutingReview(t, eng, p, auth.MaintenanceActor("routingEvidenceFold"))
+	return writeRoutingReview(t, eng, p, auth.MaintenanceActor(auth.AutomationOriginEngine, "routingEvidenceFold"))
 }
 
 // raiseLegacyRoutingReview writes the review as the fold did before memql#4817:

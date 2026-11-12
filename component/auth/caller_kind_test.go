@@ -22,7 +22,7 @@ func TestCallerKindFromContext(t *testing.T) {
 		{"borrowed authority is still a person", ContextWithUserActor(context.Background(),
 			"v1:identity:user:bob"), CallerKindUser},
 		{"a maintenance sweep is the cluster", ContextWithAccess(context.Background(),
-			MaintenanceActor("auditEventRetentionSweep")), CallerKindSystem},
+			MaintenanceActor(AutomationOriginEngine, "auditEventRetentionSweep")), CallerKindSystem},
 		{"a connector", ContextWithConnectorActor(context.Background(), "shopify"), CallerKindConnector},
 		{"the anonymous reader", ContextWithAccess(context.Background(), AnonymousActor()), CallerKindAnonymous},
 	} {
@@ -77,7 +77,7 @@ func TestCallerKindsAreClosedAndDistinct(t *testing.T) {
 // origin gate are all untouched by this value, and this pins the one property
 // a future reader might be tempted to lean on -- that `system` implies power.
 func TestCallerKindGrantsNothing(t *testing.T) {
-	sweep := MaintenanceActor("auditEventRetentionSweep")
+	sweep := MaintenanceActor(AutomationOriginEngine, "auditEventRetentionSweep")
 	ctx := ContextWithAccess(context.Background(), sweep)
 	if CallerKindFromContext(ctx) != CallerKindSystem {
 		t.Fatal("precondition: the sweep is a system caller")

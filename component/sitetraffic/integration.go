@@ -64,7 +64,7 @@ const rollupConcept = "integration:siteTraffic:rollup"
 
 // rollupPrincipal is the only caller the rollup admits: the maintenance
 // principal its scheduled automation runs under
-// (auth.MaintenanceActor("siteStatisticsRollupSweep")).
+// (auth.MaintenanceActor(auth.AutomationOriginEngine, "siteStatisticsRollupSweep")).
 const rollupPrincipal = "system:maintenance:siteStatisticsRollupSweep"
 
 // countryRefreshConcept is the concept of the one node the country refresh

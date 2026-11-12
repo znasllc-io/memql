@@ -273,6 +273,11 @@ func (l *Loader) LoadFromTree(tree fs.FS) ([]*Automation, error) {
 			// come from the embedded/registered DSL tree, so they are
 			// authored, reviewed and not caller-supplied.
 			automation.Trusted = true
+			// Which layer of the tree served the file: the engine's own, a
+			// compiled pack or a runtime domain. Read from the tree, never
+			// from the file, and it is what the maintenance principal is
+			// granted on (maintenanceOrigin, executor.go).
+			automation.Source = memqldsl.SourceOf(tree, path)
 			out = append(out, automation)
 		}
 		return nil

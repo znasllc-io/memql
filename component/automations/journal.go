@@ -878,9 +878,11 @@ func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution, c
 		// schedule retries current state on its next tick; parking each old
 		// attempt manufactures an ever-growing queue with no human owner.
 		// User-owned goals and ordinary automations retain their approval and
-		// retry lifecycle, even when they share a maintenance automation name.
-		if actor, ok := auth.AccessFromContext(ctx); ok && actor != nil && actor.Synthetic &&
-			exec.TriggeredBy == "schedule" && auth.MaintenanceActor(exec.AutomationName) != nil {
+		// retry lifecycle, even when they share a maintenance automation name:
+		// the attempt is the maintenance principal's when the run HOLDS that
+		// principal, which the executor grants by origin, not by name.
+		if actor, ok := auth.AccessFromContext(ctx); ok &&
+			exec.TriggeredBy == "schedule" && auth.IsMaintenancePrincipal(actor) {
 			if run, adopted := common.RunFromContext(ctx); !adopted || (run.OwnerUserId == "" && run.GoalId == "") {
 				j.closeRunRecord(ctx, exec, chainHead)
 				return

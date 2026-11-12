@@ -119,7 +119,7 @@ func TestRoleTestWorkDB_RecoveryAndForgedOrExpiredGrants(t *testing.T) {
 			}
 		})
 	}
-	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns"))
+	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns"))
 	restored, err := planners[0].runOwnerActor(auth.ContextWithInternalOrigin(maintenance), runID, owner)
 	if err != nil {
 		t.Fatal(err)

@@ -1460,7 +1460,7 @@ func TestRetentionSeesPipelinesRunsOnlyUnderTheMaintenancePrincipal(t *testing.T
 
 	// THE POSITIVE: the principal the nightly automation runs under.
 	ctx := retentionOwner()
-	if auth.MaintenanceActor("workJournalRetentionSweep") == nil {
+	if auth.MaintenanceActor(auth.AutomationOriginEngine, "workJournalRetentionSweep") == nil {
 		t.Fatal("workJournalRetentionSweep is not on the maintenance list")
 	}
 	for _, row := range rows {

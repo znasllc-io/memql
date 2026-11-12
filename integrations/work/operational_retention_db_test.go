@@ -48,7 +48,7 @@ func (a *verifyingArchive) DownloadWithLimit(ctx context.Context, c, o string, l
 	return data, err
 }
 func retentionOwner() context.Context {
-	return auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("workJournalRetentionSweep"))
+	return auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "workJournalRetentionSweep"))
 }
 
 func TestOperationalRetentionDBProtectsActiveOwnedRecentAndArchivesSystemHistory(t *testing.T) {

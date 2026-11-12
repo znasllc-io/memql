@@ -8,6 +8,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // THE GATE on the cluster's maintenance principal (memql#4366 / memql#4406).
@@ -24,12 +25,14 @@ import (
 //     of which is a test whose whole subject is why the grant exists.
 //  2. Every entry carries a non-empty reason.
 //  3. Every entry names an automation that ACTUALLY LOADS from this repo's dsl/
-//     tree. That is what "engine-owned" means operationally: a product bundle
-//     mounted at MEMQL_DSL_PATH contributes automations at runtime, and a name
-//     that resolves to nothing here would be a grant waiting for whoever
-//     happens to define it.
+//     tree, and loads from the ENGINE'S layer of it (Automation.Source). That
+//     is what "engine-owned" means operationally: a product bundle mounted at
+//     MEMQL_DSL_PATH contributes automations at runtime, and a name that
+//     resolves to nothing here would be a grant waiting for whoever happens to
+//     define it.
 //  4. The JOIN holds -- contextWithSystemActor really does yield a cluster
-//     owner for a listed name and really does not for anything else. The list
+//     owner for the engine's automation of a listed name, and really does not
+//     for the same name from any other origin, nor for anything else. The list
 //     and the constructor are in a different package from the executor that
 //     consumes them, so nothing else asserts that the wire is connected.
 func TestMaintenanceAutomationsAreArgued(t *testing.T) {
@@ -231,38 +234,64 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAll: %v", err)
 	}
-	names := map[string]bool{}
+	// Each name, with the automation the engine's own tree loads under it. A
+	// name is the engine's only when the automation that carries it was read
+	// from the engine's own layer of the tree (Automation.Source).
+	byName := map[string][]*Automation{}
 	for _, a := range loaded {
 		if a != nil {
-			names[a.Name] = true
+			byName[a.Name] = append(byName[a.Name], a)
 		}
 	}
 	// REACHABLE POSITIVE: without this, an empty load makes every assertion
 	// below vacuous and the gate reports success over nothing.
-	if len(names) == 0 {
+	if len(byName) == 0 {
 		t.Fatal("the embedded tree yielded no automations, so the membership checks below would pass over nothing")
 	}
 	for _, name := range got {
-		if !names[name] {
+		copies := byName[name]
+		if len(copies) == 0 {
 			t.Errorf("%q is on the maintenance list but no automation of that name loads from this repo's "+
 				"dsl/ tree (%d loaded). A grant that names nothing is a grant waiting for whoever defines "+
-				"the name -- including a product bundle mounted at MEMQL_DSL_PATH.", name, len(names))
+				"the name.", name, len(byName))
+			continue
+		}
+		for _, a := range copies {
+			if a.Source != memqldsl.SourceEngine {
+				t.Errorf("%q loads from %s (source %s), which is not the engine's own tree: a listed name "+
+					"belongs to the engine's automation alone", name, a.Origin, a.Source)
+			}
 		}
 	}
 
-	// (4) The join, in both directions.
+	// (4) The join, in both directions -- and only from the engine's tree. A
+	// listed name is granted to the automation the engine's tree loads under it,
+	// and to that name from no other origin: asked with any other origin, the
+	// list answers nil, so it cannot be satisfied by a pack, a runtime domain
+	// or anything else carrying the name.
 	for _, name := range got {
-		ac, ok := auth.AccessFromContext(contextWithSystemActor(context.Background(), name))
-		if !ok || !ac.IsClusterOwner() {
-			t.Errorf("contextWithSystemActor(%q) is not a cluster owner, so the grant is declared and not "+
-				"wired -- and every read it exists to enable returns zero rows, silently", name)
+		for _, a := range byName[name] {
+			ac, ok := auth.AccessFromContext(contextWithSystemActor(context.Background(), a))
+			if !ok || !ac.IsClusterOwner() {
+				t.Errorf("contextWithSystemActor(%s) is not a cluster owner, so the grant is declared and not "+
+					"wired -- and every read it exists to enable returns zero rows, silently", a.Origin)
+			}
+		}
+		if auth.MaintenanceActor(auth.AutomationOriginOther, name) != nil || auth.IsMaintenanceAutomation(auth.AutomationOriginOther, name) {
+			t.Errorf("%q is granted to an origin that is not the engine's own tree", name)
+		}
+		for _, source := range []memqldsl.Source{memqldsl.SourceUnknown, memqldsl.SourcePack, memqldsl.SourceRuntime} {
+			ac, ok := auth.AccessFromContext(contextWithSystemActor(context.Background(), &Automation{Name: name, Source: source}))
+			if !ok || ac.IsClusterOwner() || ac.UserId != systemActorPrefix+name || ac.Role != auth.RoleReader {
+				t.Errorf("an automation named %q from source %s runs as %+v, want the ordinary system actor", name, source, ac)
+			}
 		}
 	}
 	unlisted := "anAutomationNobodyGranted"
-	if auth.IsMaintenanceAutomation(unlisted) {
+	if auth.IsMaintenanceAutomation(auth.AutomationOriginEngine, unlisted) {
 		t.Fatalf("%q reads as listed; pick a name that is not", unlisted)
 	}
-	ac, ok := auth.AccessFromContext(contextWithSystemActor(context.Background(), unlisted))
+	ac, ok := auth.AccessFromContext(contextWithSystemActor(context.Background(), &Automation{Name: unlisted, Source: memqldsl.SourceEngine}))
 	if !ok {
 		t.Fatal("contextWithSystemActor stamped no AccessContext at all")
 	}
@@ -283,7 +312,7 @@ func TestRepositoryFeedNamesDoNotElevateInheritedCallers(t *testing.T) {
 			t.Run(name+"/"+string(role), func(t *testing.T) {
 				caller := &auth.AccessContext{UserId: "feed-caller", Role: role}
 				ctx := auth.ContextWithAccess(context.Background(), caller)
-				got, ok := auth.AccessFromContext(contextWithSystemActor(ctx, name))
+				got, ok := auth.AccessFromContext(contextWithSystemActor(ctx, &Automation{Name: name, Source: memqldsl.SourceEngine}))
 				if !ok || got != caller || got.IsClusterOwner() {
 					t.Fatalf("an inherited caller was replaced or elevated: %+v", got)
 				}
@@ -305,7 +334,7 @@ func TestMaintenanceActorIsNotMintableFromARequest(t *testing.T) {
 		"system:maintenance:anything",        // the stamp's own prefix, asked for by name
 		"WORKERINVOCATIONRETENTIONSWEEP",     // case
 	} {
-		ac := auth.MaintenanceActor(name)
+		ac := auth.MaintenanceActor(auth.AutomationOriginEngine, name)
 		granted := ac != nil
 		wantGranted := strings.TrimSpace(name) == "workerInvocationRetentionSweep"
 		if granted != wantGranted {

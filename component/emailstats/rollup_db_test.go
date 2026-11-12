@@ -123,7 +123,7 @@ func statsEngine(t *testing.T) (*memql.MemQLEngine, *bun.DB) {
 // with the claims and token component/automations stamps beside it.
 func principalCtx(t *testing.T) context.Context {
 	t.Helper()
-	actor := auth.MaintenanceActor("emailStatisticsRollupSweep")
+	actor := auth.MaintenanceActor(auth.AutomationOriginEngine, "emailStatisticsRollupSweep")
 	if actor == nil {
 		t.Fatal("emailStatisticsRollupSweep is not on the maintenance list, so its automation runs as a reader and every run is refused")
 	}
@@ -1495,7 +1495,7 @@ func TestTheWalkReadsNoAddressAndNothingTheFactsDoNotUse(t *testing.T) {
 // hand and an ordinary user are all refused before the database is touched.
 // The principal is admitted, through the engine, as the automation calls it.
 func TestTheBuiltinRefusesAnyoneButItsMaintenancePrincipal(t *testing.T) {
-	principal := auth.MaintenanceActor("emailStatisticsRollupSweep")
+	principal := auth.MaintenanceActor(auth.AutomationOriginEngine, "emailStatisticsRollupSweep")
 	if principal == nil {
 		t.Fatal("emailStatisticsRollupSweep is not on the maintenance list, so its automation runs as a reader and every run is refused")
 	}
@@ -1504,7 +1504,7 @@ func TestTheBuiltinRefusesAnyoneButItsMaintenancePrincipal(t *testing.T) {
 	for name, ac := range map[string]*auth.AccessContext{
 		"an ordinary user":              {UserId: "user-ordinary", Role: auth.RoleWriter},
 		"a cluster owner by hand":       {UserId: "user-owner", Role: auth.RoleOwner},
-		"another automation's":          auth.MaintenanceActor("siteStatisticsRollupSweep"),
+		"another automation's":          auth.MaintenanceActor(auth.AutomationOriginEngine, "siteStatisticsRollupSweep"),
 		"the principal's id as reader":  {UserId: principal.UserId, Role: auth.RoleReader},
 		"the ordinary automation actor": {UserId: "system:automation:emailStatisticsRollupSweep", Role: auth.RoleReader},
 	} {

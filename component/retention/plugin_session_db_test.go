@@ -124,7 +124,7 @@ func TestAPersonRunningTheDocumentedSweepRetiresAnExpiredAccessSession(t *testin
 // owner floor; this proves the pass over a session row works from it.)
 func TestTheScheduledSweepStillRetiresAnExpiredAccessSession(t *testing.T) {
 	f, integration, _, _ := sessionSweepFixture(t)
-	scheduled := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("retireDeclaredConceptVersions"))
+	scheduled := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "retireDeclaredConceptVersions"))
 
 	nodes, err := integration.sweep(scheduled, map[string]any{}, 0)
 	require.NoError(t, err)

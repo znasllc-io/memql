@@ -68,10 +68,10 @@ func TestScheduledMaintenanceFailureDoesNotCreateHumanWait(t *testing.T) {
 		trigger string
 		want    string
 	}{
-		{"maintenance tick", auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns")), "schedule", "failed"},
+		{"maintenance tick", auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns")), "schedule", "failed"},
 		{"manual caller", auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "user-a", Role: auth.RoleOwner}), "schedule", "waiting"},
-		{"adopted user goal", common.ContextWithRun(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns")), common.RunContext{RunId: "user-run", OwnerUserId: "user-a", GoalId: "goal-a"}), "schedule", "waiting"},
-		{"nonperiodic maintenance", auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns")), "manual", "waiting"},
+		{"adopted user goal", common.ContextWithRun(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns")), common.RunContext{RunId: "user-run", OwnerUserId: "user-a", GoalId: "goal-a"}), "schedule", "waiting"},
+		{"nonperiodic maintenance", auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns")), "manual", "waiting"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &recordingJournalExecutor{}

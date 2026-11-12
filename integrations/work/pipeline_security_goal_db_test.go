@@ -23,7 +23,7 @@ func TestPipelineSecurityGoalLostEventRecoversThroughExistingCompiler(t *testing
 		t.Fatal(err)
 	}
 	// No event bus is attached. Only the normal cross-replica sweep can find it.
-	result, err := planners[0].SweepWaiting(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns")), time.Minute)
+	result, err := planners[0].SweepWaiting(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns")), time.Minute)
 	if err != nil || result.Redispatched != 1 || result.Abandoned != 0 {
 		t.Fatal("security compile was stranded", result, err)
 	}

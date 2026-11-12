@@ -282,7 +282,7 @@ func (e *MemQLEngine) evaluateFleetModelSetup(ctx context.Context, args map[stri
 	// These installation-wide records are owner-writable. This projection
 	// exposes only the public model evidence and enabled flag after own-machine
 	// admission; the research owner's identity never leaves this read scope.
-	researchCtx := auth.ContextWithAccess(ContextWithFreshRead(ctx), auth.MaintenanceActor("weeklyModelCatalogResearch"))
+	researchCtx := auth.ContextWithAccess(ContextWithFreshRead(ctx), auth.MaintenanceActor(auth.AutomationOriginEngine, "weeklyModelCatalogResearch"))
 	researchSummary, researchAt := "", ""
 	reviews, err := e.Execute(researchCtx, "latestModelCatalogReview()")
 	if err != nil {

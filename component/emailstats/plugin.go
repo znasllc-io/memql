@@ -44,7 +44,7 @@ const rollupConcept = "integration:emailStats:rollup"
 
 // rollupPrincipal is the only caller the rollup admits: the maintenance
 // principal its scheduled automation runs under
-// (auth.MaintenanceActor("emailStatisticsRollupSweep")).
+// (auth.MaintenanceActor(auth.AutomationOriginEngine, "emailStatisticsRollupSweep")).
 const rollupPrincipal = "system:maintenance:emailStatisticsRollupSweep"
 
 // Integration exposes the rollup and the statistics read.

@@ -47,7 +47,7 @@ func TestTheOpenWindowIsTheRequestLogsRetention(t *testing.T) {
 func TestTheRollupRefusesANodeWithoutAMaintenanceSession(t *testing.T) {
 	touched := false
 	i := NewIntegration(nil, func() *bun.DB { touched = true; return nil }, nil, quietLogger())
-	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("siteStatisticsRollupSweep"))
+	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "siteStatisticsRollupSweep"))
 	nodes, err := i.handleRollup(ctx, nil, 0)
 	if err == nil || nodes != nil || !strings.Contains(err.Error(), "maintenance session") {
 		t.Errorf("got %d nodes and error %v, want a refusal naming the maintenance session", len(nodes), err)

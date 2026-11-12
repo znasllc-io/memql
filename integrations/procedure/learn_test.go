@@ -193,7 +193,7 @@ func TestMarkConsumed_ADigestOnlyResultIsStillRecognised(t *testing.T) {
 // --- gap G10: the automations can act ---------------------------------------
 
 func maintenanceCtx(automation string) context.Context {
-	return auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(automation))
+	return auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, automation))
 }
 
 func personCtx(userId string) context.Context {

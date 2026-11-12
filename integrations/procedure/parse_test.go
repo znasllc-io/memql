@@ -124,7 +124,7 @@ func everyRenderedStatement(t *testing.T) []recordedCall {
 		t.Fatalf("learnFromRun: %v", err)
 	}
 	collect(eng)
-	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("mineProcedureCorpusAcrossAutomations"))
+	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "mineProcedureCorpusAcrossAutomations"))
 
 	// A re-lift of a changed procedure, a candidate re-entering, and the
 	// person's own read path.

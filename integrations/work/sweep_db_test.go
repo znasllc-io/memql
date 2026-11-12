@@ -137,7 +137,7 @@ func TestSweepDB_ClosesOnlyMissingSystemApprovalWaits(t *testing.T) {
 	i.engine, i.admitRow = eng, memqlengine.AdmitSourceRow
 	now := time.Now().UTC().Truncate(time.Second)
 	i.SetNow(func() time.Time { return now })
-	actor := auth.MaintenanceActor("sweepWaitingWorkRuns")
+	actor := auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns")
 	ctx := auth.ContextWithToken(auth.ContextWithAccess(context.Background(), actor), &auth.TokenInfo{Subject: actor.UserId})
 	for _, tc := range []struct {
 		id          string
@@ -299,7 +299,7 @@ func TestSweepDB_BuiltinLifecycleWithCanonicalRunID(t *testing.T) {
 	now := time.Now().UTC()
 	i.SetNow(func() time.Time { return now })
 	owner := actorCtx("sweep-db-owner")
-	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns"))
+	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "sweepWaitingWorkRuns"))
 	st := i.store()
 	runID := "v1:work:run:sweep-db-run"
 	if err := st.createRunRow(owner, runSeed{RunId: runID, AutomationName: "sweepDBProbe", TemplateFingerprint: "probe", Status: "waiting", Mode: "live", ReplayPolicy: "strict", StartedAt: now.Add(-time.Hour)}); err != nil {

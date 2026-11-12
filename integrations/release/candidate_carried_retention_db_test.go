@@ -181,7 +181,7 @@ VALUES ($1,$2,jsonb_build_object('WorkRunID',$3::text),$4,$5,11,1,'ready')`, car
 func (r *carriedRetention) night(now time.Time, days int) {
 	r.t.Helper()
 	r.retention.SetNow(func() time.Time { return now.AddDate(0, 0, days) })
-	if _, err := r.retention.RetentionSweep(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("workJournalRetentionSweep")), false); err != nil {
+	if _, err := r.retention.RetentionSweep(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor(auth.AutomationOriginEngine, "workJournalRetentionSweep")), false); err != nil {
 		r.t.Fatal(err)
 	}
 }

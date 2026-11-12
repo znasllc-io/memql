@@ -56,6 +56,17 @@ import (
 // comes from the list, never from the caller, so a name that is not on it gets
 // nil however loudly it asks.
 //
+// # The principal is the ENGINE'S automation's, not a name's
+//
+// A name is something any author chooses, and the tree the engine loads holds
+// more than the engine's own domains: compiled packs, and every runtime domain
+// mounted at MEMQL_DSL_PATH -- which is where each package staged through
+// Deployables arrives. So the list is never consulted with a name alone. It is
+// asked with the automation's ORIGIN as the loader recorded it (AutomationOrigin,
+// from the layer of the tree that served the file -- dsl.SourceOf), and only
+// the engine's own tree answers. An automation of any other origin that carries
+// a listed name runs as what its origin runs as: the ordinary system actor.
+//
 // # What keeps it small
 //
 // Every entry carries its reason, and TestMaintenanceAutomationsAreArgued pins
@@ -63,7 +74,8 @@ import (
 // map. Two properties an entry must have:
 //
 //   - The automation is ENGINE-OWNED (it lives in this repo's dsl/ tree). An
-//     authored or product automation must never appear.
+//     authored or product automation must never appear, and an automation of
+//     any other origin that carries the same name is not granted (below).
 //   - Its reads span owners BY NATURE -- a sweep, a cross-owner roll-up --
 //     rather than merely finding an owner-scoped read inconvenient. The fix for
 //     the latter is ContextWithUserActor at the call site, which borrows
@@ -263,24 +275,45 @@ var maintenanceAutomations = map[string]string{
 		"one human act the ladder asks for, silently discarded",
 }
 
+// AutomationOrigin is where an automation's definition came from, as the
+// engine recorded it when it loaded the definition. It is never read from the
+// automation's source.
+//
+// The zero value is AutomationOriginOther, so an automation built by any path
+// that has not stated its origin is not the engine's.
+type AutomationOrigin uint8
+
+const (
+	// AutomationOriginOther: anything that is not the engine's own tree -- a
+	// compiled pack, a runtime domain (a staged package), an authored or a
+	// caller-supplied automation, or an origin nobody recorded.
+	AutomationOriginOther AutomationOrigin = iota
+	// AutomationOriginEngine: the engine's own compiled-in dsl/ tree, or the
+	// engine's own Go acting as one of that tree's automations.
+	AutomationOriginEngine
+)
+
 // IsMaintenanceAutomation reports whether this automation runs under the
-// cluster's maintenance principal.
-func IsMaintenanceAutomation(name string) bool {
+// cluster's maintenance principal: it is the engine's own and it is listed.
+func IsMaintenanceAutomation(origin AutomationOrigin, name string) bool {
+	if origin != AutomationOriginEngine {
+		return false
+	}
 	_, ok := maintenanceAutomations[strings.TrimSpace(name)]
 	return ok
 }
 
-// MaintenanceActor builds the AccessContext a listed automation runs under, or
-// nil for any name that is not listed.
+// MaintenanceActor builds the AccessContext a listed engine automation runs
+// under, or nil for any other origin and for any name that is not listed.
 //
 // RoleOwner is the whole point: the composite tier's escape is
 // IsClusterOwner(), which is RoleOwner alone, and there is no other way past it
-// (rowauthz_enforce.go). Returning nil rather than a reader for an unlisted name
-// keeps the decision here -- a caller cannot half-succeed into a principal that
-// looks elevated and is not.
-func MaintenanceActor(automationName string) *AccessContext {
+// (rowauthz_enforce.go). Returning nil rather than a reader keeps the decision
+// here -- a caller cannot half-succeed into a principal that looks elevated and
+// is not.
+func MaintenanceActor(origin AutomationOrigin, automationName string) *AccessContext {
 	name := strings.TrimSpace(automationName)
-	if !IsMaintenanceAutomation(name) {
+	if !IsMaintenanceAutomation(origin, name) {
 		return nil
 	}
 	return &AccessContext{
@@ -296,6 +329,19 @@ func MaintenanceActor(automationName string) *AccessContext {
 		// row's owner. See AccessContext.Synthetic.
 		Synthetic: true,
 	}
+}
+
+// IsMaintenancePrincipal reports whether ac IS the maintenance principal of a
+// listed automation -- the actor MaintenanceActor builds -- as opposed to any
+// actor that merely runs under a listed name. It answers from the principal a
+// run actually holds, which the executor grants by origin, so a decision made
+// from it is made from the origin too.
+func IsMaintenancePrincipal(ac *AccessContext) bool {
+	if ac == nil || !ac.Synthetic || !ac.IsClusterOwner() || !strings.HasPrefix(ac.UserId, maintenanceUserIdPrefix) {
+		return false
+	}
+	_, ok := maintenanceAutomations[strings.TrimPrefix(ac.UserId, maintenanceUserIdPrefix)]
+	return ok
 }
 
 // MaintenanceAutomationNames returns the listed automations, sorted. For gates

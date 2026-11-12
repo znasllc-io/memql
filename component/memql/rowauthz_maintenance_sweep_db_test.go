@@ -125,7 +125,7 @@ func TestWorkerInvocationRetentionSweepStillRetiresARowUnderTheTier(t *testing.T
 
 	// ---- The maintenance principal, taken from the REAL list rather than
 	// constructed here, so this test fails if the entry is ever dropped.
-	maint := auth.MaintenanceActor("workerInvocationRetentionSweep")
+	maint := auth.MaintenanceActor(auth.AutomationOriginEngine, "workerInvocationRetentionSweep")
 	if maint == nil {
 		t.Fatal("workerInvocationRetentionSweep is not on the maintenance list, so the retention sweep " +
 			"runs as RoleReader over an owned-tier concept and retires nothing (component/auth/maintenance_actor.go)")
@@ -148,7 +148,7 @@ func TestWorkerInvocationRetentionSweepStillRetiresARowUnderTheTier(t *testing.T
 
 	// ---- THE NEGATIVE CONTROL, without which the assertion above is also
 	// satisfied by a tier that is not enforced at all.
-	if auth.MaintenanceActor("someAutomationNobodyListed") != nil {
+	if auth.MaintenanceActor(auth.AutomationOriginEngine, "someAutomationNobodyListed") != nil {
 		t.Fatal("MaintenanceActor answered for an unlisted automation; the elevation must come from the list")
 	}
 	readerCtx := auth.ContextWithToken(
@@ -268,7 +268,7 @@ func TestAuditEventSweepReadsUnderTheMaintenancePrincipalAndCreatesStillWork(t *
 	}
 
 	// ---- The sweep's read, under the REAL maintenance principal.
-	maint := auth.MaintenanceActor("auditEventRetentionSweep")
+	maint := auth.MaintenanceActor(auth.AutomationOriginEngine, "auditEventRetentionSweep")
 	if maint == nil {
 		t.Fatal("auditEventRetentionSweep is not on the maintenance list, so the audit retention sweep " +
 			"counts ZERO candidates for ever, and reports that as a healthy tick")

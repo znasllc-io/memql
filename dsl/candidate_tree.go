@@ -21,9 +21,11 @@ func CandidateTree(root fs.FS) (tree fs.FS, domains, reserved []string, err erro
 	pluginTreesMu.RLock()
 	overlays := make(map[string]fs.FS, len(pluginTrees))
 	compiled := map[string]bool{}
+	runtime := make(map[string]bool, len(pluginTrees))
 	for domain, registered := range pluginTrees {
 		overlays[domain] = registered
 		compiled[domain] = !runtimeTrees[domain]
+		runtime[domain] = runtimeTrees[domain]
 	}
 	pluginTreesMu.RUnlock()
 	for _, entry := range entries {
@@ -53,7 +55,8 @@ func CandidateTree(root fs.FS) (tree fs.FS, domains, reserved []string, err erro
 			return nil, nil, nil, err
 		}
 		overlays[domain] = sub
+		runtime[domain] = true
 		domains = append(domains, domain)
 	}
-	return &layeredFS{base: embedFS, overlays: overlays}, domains, reserved, nil
+	return &layeredFS{base: embedFS, overlays: overlays, runtime: runtime}, domains, reserved, nil
 }
