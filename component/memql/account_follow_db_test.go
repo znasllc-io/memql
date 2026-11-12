@@ -294,10 +294,13 @@ func TestAccountFollowLeavesAChildsOwnReTag(t *testing.T) {
 	runJobUntil(t, engine, db, "the followers' passes finished", func() bool { return pendingFor(t, db, f.b) == 0 })
 	require.Equal(t, f.b, newestPayload(t, db, f.run1)["accountId"])
 
-	// The run's owner puts it back in a: a new version, and the change record
-	// every explicit change writes.
+	// A person puts the run back in a: a new version, and what a person's
+	// re-tag writes, a ledger line and a change record.
 	seedRawRow(t, ctx, db, "v1:work:run", f.run1, time.Now(), "follow-test",
 		map[string]any{"ownerUserId": f.owner, "goalId": f.goal, "accountId": f.a, "status": "re-tagged"})
+	_, err := db.ExecContext(ctx, `INSERT INTO account_row_moves (concept, row_id, from_account, to_account, moved_by, followers, note)
+		VALUES ('v1:work:run', ?, ?, ?, ?, 0, 're-tag')`, f.run1, f.b, f.a, f.owner)
+	require.NoError(t, err)
 	require.NoError(t, EnqueueAccountFollow(ctx, db, AccountRowRef{Concept: "v1:work:run", ID: f.run1}, f.b, f.a))
 
 	makeDue(t, db, "v1:work:run")
@@ -412,4 +415,85 @@ func TestAccountFollowerOfADeletedParentStays(t *testing.T) {
 
 	runJobUntil(t, engine, db, "the record settled", func() bool { return pendingFor(t, db, f.b) == 0 })
 	require.Equal(t, f.a, newestPayload(t, db, f.run1)["accountId"])
+}
+
+// A follower the job carried in the same instant as a second move of its
+// parent is carried again: the job's own carry record is not the child's
+// choice, and only a person's explicit change (a ledger line) protects a child.
+// The sequence: the goal moves a to b; a person moves it b to c; the job's carry
+// of the run (a to b) commits after that second move, so the run's own record
+// is newer than the goal's record that it left b.
+func TestAccountFollowCarriesAChildPastAParentMovedWhileItWasCarried(t *testing.T) {
+	engine, db := recordingEngine(t)
+	ctx := context.Background()
+	f := newFollowFixture(t, db, t.Name())
+	moveOne(t, engine, db, "v1:work:goal", f.goal, f.b)
+	moveOne(t, engine, db, "v1:work:goal", f.goal, f.c)
+	time.Sleep(10 * time.Millisecond)
+	// The carry as it lands: the run in b, and its carry record, after the
+	// goal's second move.
+	_, err := db.ExecContext(ctx, `UPDATE "MemoryNodes" SET payload = jsonb_set(payload, '{accountId}', to_jsonb(?::text))
+		WHERE id = ? AND "createdAt" = (SELECT max("createdAt") FROM "MemoryNodes" WHERE id = ?)`, f.b, f.run1, f.run1)
+	require.NoError(t, err)
+	require.NoError(t, EnqueueAccountFollow(ctx, db, AccountRowRef{Concept: "v1:work:run", ID: f.run1}, f.a, f.b))
+
+	runJobUntil(t, engine, db, "the followers' passes finished", func() bool {
+		return pendingFor(t, db, f.b) == 0 && pendingFor(t, db, f.c) == 0
+	})
+	require.Equal(t, f.c, newestPayload(t, db, f.run1)["accountId"], "a run the job carried was stranded in the account its goal left")
+	require.Equal(t, f.c, newestPayload(t, db, f.step1)["accountId"])
+}
+
+// While a transaction held open keeps the late-commit horizon behind a change
+// record, a full pass of its follower kind cannot settle it. One such pass is
+// asked for, not one a tick: the next pass is incremental for as long as the
+// transaction stays open. Once it ends, one more full pass runs, and the record
+// settles.
+func TestAccountHeldHorizonAsksForOneFullPassNotOneATick(t *testing.T) {
+	engine, db := recordingEngine(t)
+	ctx := context.Background()
+	f := newFollowFixture(t, db, t.Name())
+	const run = "v1:work:run"
+	runJobUntil(t, engine, db, "no pass pending", func() bool {
+		makeDue(t, db, run)
+		return !fullPassPending(t, engine, db, run)
+	})
+
+	held, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = held.Rollback() })
+	var one int
+	require.NoError(t, held.QueryRowContext(ctx, `SELECT 1`).Scan(&one))
+	time.Sleep(20 * time.Millisecond)
+	moveOne(t, engine, db, "v1:work:goal", f.goal, f.b)
+
+	tick := func() bool {
+		t.Helper()
+		foldRequests(t, db)
+		makeDue(t, db, run)
+		runOnePassOf(t, engine, db, run)
+		return assignmentProgressOf(t, db, run).passFull
+	}
+	require.True(t, tick(), "the first pass after the record is the full pass it asked for")
+	require.False(t, tick(), "a second full pass ran while the transaction still held the horizon")
+	require.False(t, tick())
+	goalSettled := func() bool {
+		t.Helper()
+		var settled bool
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT bool_and(done_at IS NOT NULL) FROM account_follow_tasks WHERE parent_id = ?`, f.goal).Scan(&settled))
+		return settled
+	}
+	require.False(t, goalSettled(), "the goal's record settled while the horizon was held")
+	require.Equal(t, f.b, newestPayload(t, db, f.run1)["accountId"], "the one full pass carried the runs")
+
+	require.NoError(t, held.Rollback())
+	require.True(t, tick(), "no full pass ran once the transaction had ended")
+	require.False(t, fullPassPending(t, engine, db, run), "the pass after the transaction did not cover the request")
+	var startedAt time.Time
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT full_pass_started_at FROM account_assignment_progress WHERE concept = ?`, run).Scan(&startedAt))
+	runJobUntil(t, engine, db, "the record settled", goalSettled)
+	var startedAfter time.Time
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT full_pass_started_at FROM account_assignment_progress WHERE concept = ?`, run).Scan(&startedAfter))
+	require.Equal(t, startedAt, startedAfter, "the runs were walked in full again after the one that settled the record")
+	require.Equal(t, f.b, newestPayload(t, db, f.run1)["accountId"])
 }

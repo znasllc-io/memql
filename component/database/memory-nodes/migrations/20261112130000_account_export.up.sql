@@ -157,3 +157,13 @@ ALTER TABLE account_assignment_progress ADD COLUMN full_pass_requested_at timest
 -- batch saw one. Reset when a pass starts; at the pass's end verified_through
 -- is the earlier of the pass's start and this.
 ALTER TABLE account_assignment_progress ADD COLUMN pass_horizon_at timestamptz;
+
+-- WHEN THE LAST FINISHED FULL PASS BEGAN. full_pass_at keeps that pass's safe
+-- point (the earlier of its start and its horizon), which is what "everything
+-- before this was read" needs. This is its start, which a different question
+-- needs: has a full pass that began AFTER a change record was written already
+-- finished? If so and the record is still unsettled, the pass's safe point was
+-- held back by a transaction that was open, and asking for another full pass
+-- changes nothing until that transaction has ended. NULL until a full pass
+-- finishes.
+ALTER TABLE account_assignment_progress ADD COLUMN full_pass_started_at timestamptz;

@@ -31,9 +31,9 @@ package memql
 //     the account a record names as its target, so a parent moved twice
 //     carries its followers to where it is. Only a row whose first version is
 //     older than T (a row attached later was filed by the rules then, and is
-//     not this record's to move), and whose own latest explicit change (ledger
-//     line or record) did not put it in X after T (its owner's choice is kept;
-//     loadParentChanges). The row gets a change record of its own, so its
+//     not this record's to move), and whose own latest ledger line, a person's
+//     explicit change, did not put it in X after T (their choice is kept; the
+//     job's own carry records protect nothing; loadParentChanges). The row gets a change record of its own, so its
 //     followers follow it. A row attached to P from a third account is
 //     untouched unless P left that account after the row existed.
 //
@@ -604,16 +604,25 @@ func (lk *assignmentLookups) changedAwayFrom(id string, line ledgerLine) bool {
 //     account when they may not write to the parent's), and is not this
 //     record's to move. No slack: a row created after the record is not one P
 //     had when it left;
-//   - R's own latest explicit change, its latest ledger line or its latest
-//     change record, did not put it in X after T. A row its owner re-tagged
-//     away from P's account keeps its own choice; a row whose own latest
-//     record put it somewhere else, a stale append after it was carried, is
-//     carried again.
+//   - R's own latest LEDGER LINE (account_row_moves: a person's move,
+//     placement or re-tag) did not put it in X after T. Only a person's
+//     explicit change protects a child. A change record the job wrote by
+//     carrying or re-applying protects nothing: it follows the parent and is
+//     never the child's choice, and counting it would strand a child carried
+//     in the same instant as a second move of its parent (the carry's record
+//     newer than the parent's). A row whose last change was a carry, a stale
+//     append after it was carried included, is carried again.
 //
 // Per batch, each by id array: P's records, only for parents whose account
 // differs from a child's (in the steady state nothing is read); and, for the
-// rows that otherwise match, their first createdAt (narrow columns) and their
-// own latest record. The ledger lines were read by loadMoves.
+// rows that otherwise match, their first createdAt (narrow columns). The
+// ledger lines were read by loadMoves.
+//
+// THE CLOCK. A row's createdAt is the clock of the node that wrote it, and a
+// record's created_at is the database's, so a row created within their skew of
+// a parent's record may be judged created after it and not be carried. That
+// errs by leaving the row where it was, never by moving one, and nothing later
+// carries it: an owner places it.
 //
 // staged-data: MUST-NOT-GATE -- reads the change records and a row's first version time; a staged row follows its parent like any other.
 func (lk *assignmentLookups) loadParentChanges(meta *memorynodes.Concept, rows []assignmentRow) error {
@@ -704,41 +713,14 @@ func (lk *assignmentLookups) loadParentChanges(meta *memorynodes.Concept, rows [
 	if err != nil {
 		return err
 	}
-	own := map[string]changeRecord{}
-	result, err = lk.q.QueryContext(lk.ctx, `SELECT DISTINCT ON (parent_id) parent_id, to_account, created_at FROM account_follow_tasks
-		WHERE parent_concept = $1 AND parent_id = ANY($2::text[]) ORDER BY parent_id, created_at DESC, id DESC`, meta.Name, pq.Array(ids))
-	if err != nil {
-		return fmt.Errorf("account assignment: reading the change records of %s: %w", meta.Name, err)
-	}
-	for result.Next() {
-		var id string
-		var r changeRecord
-		if err := result.Scan(&id, &r.to, &r.at); err != nil {
-			result.Close()
-			return err
-		}
-		own[id] = r
-	}
-	err = result.Err()
-	result.Close()
-	if err != nil {
-		return err
-	}
 	for _, id := range ids {
 		t := leftAt[id]
 		created, ok := first[id]
 		if !ok || !created.Before(t) {
 			continue
 		}
-		latestTo, latestAt := "", time.Time{}
-		if line, ok := lk.moves[id]; ok {
-			latestTo, latestAt = line.to, line.at
-		}
-		if r, ok := own[id]; ok && r.at.After(latestAt) {
-			latestTo, latestAt = bareAccount(r.to), r.at
-		}
-		if latestTo == current[id] && latestAt.After(t) {
-			continue // its own explicit change put it here after the parent left
+		if line, ok := lk.moves[id]; ok && line.to == current[id] && line.at.After(t) {
+			continue // a person's own change put it here after the parent left
 		}
 		lk.followable[id] = true
 	}

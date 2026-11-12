@@ -12,6 +12,7 @@
 -- still to follow a moved parent stay in the account the parent left. The
 -- engine of the previous release does not move rows between accounts, so
 -- nothing there depends on them having followed.
+ALTER TABLE account_assignment_progress DROP COLUMN full_pass_started_at;
 ALTER TABLE account_assignment_progress DROP COLUMN pass_horizon_at;
 ALTER TABLE account_assignment_progress DROP COLUMN full_pass_requested_at;
 ALTER TABLE account_assignment_conflict DROP COLUMN left_out_by;

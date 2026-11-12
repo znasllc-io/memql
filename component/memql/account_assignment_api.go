@@ -74,8 +74,9 @@ type AccountAssignmentState struct {
 	VerifiedThrough   time.Time // zero until the first pass finishes
 	Waiting           int64
 	// FullPassPending: a full pass was requested for the kind and no full pass
-	// that STARTED after the request has finished yet. Followers of a row that
-	// changed account are carried by such a pass (account_follow.go).
+	// whose SAFE POINT (full_pass_at: the earlier of its start and its
+	// late-commit horizon) is after the request has finished yet. Followers of
+	// a row that changed account are carried by such a pass (account_follow.go).
 	FullPassPending bool
 }
 

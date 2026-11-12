@@ -927,6 +927,61 @@ func TestAccountAssignmentRequestedPassRunsBackToBack(t *testing.T) {
 	require.False(t, open, "a requested pass of 2,000 rows did not finish in one call")
 }
 
+// A kind in a long requested pass may use at most half of a call while
+// another kind is due: a kind after it in the order, due for an incremental
+// pass, still gets its batch in the same call.
+func TestAccountAssignmentRequestedPassLeavesHalfTheCallToOthers(t *testing.T) {
+	engine, db, _ := readMergeTestEngine(t)
+	ctx := context.Background()
+	const todo = "v1:todos:todo"
+	_, order, err := assignmentConcepts()
+	require.NoError(t, err)
+	require.NoError(t, ensureAssignmentProgressRows(ctx, db, order))
+	second := ""
+	for i, name := range order {
+		if name == todo && i+1 < len(order) {
+			second = order[i+1]
+		}
+	}
+	require.NotEmpty(t, second, "fixture: a kind after the to-dos in the order")
+	// The second kind has finished a pass and is due for an incremental one.
+	makeDue(t, db, second)
+	runOnePassOf(t, engine, db, second)
+	var finishedBefore time.Time
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT pass_finished_at FROM account_assignment_progress WHERE concept = ?`, second).Scan(&finishedBefore))
+
+	// Only these two are due; the to-dos' requested pass is slow, a batch at
+	// a time, so it could take the whole call.
+	_, err = db.ExecContext(ctx, `UPDATE account_assignment_progress SET next_at = clock_timestamp() + interval '1 hour' WHERE concept <> ALL(?::text[])`,
+		pq.Array([]string{todo, second}))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `UPDATE account_assignment_progress SET next_at = clock_timestamp()`)
+	})
+	makeDue(t, db, second)
+	require.NoError(t, RequestAccountFullPass(ctx, db, []string{todo}))
+	_, err = db.ExecContext(ctx, `UPDATE account_assignment_progress SET batch_size = 1 WHERE concept = ?`, todo)
+	require.NoError(t, err)
+	assignmentWriteFault = func(concept string) error {
+		if concept == todo {
+			time.Sleep(150 * time.Millisecond)
+		}
+		return nil
+	}
+	t.Cleanup(func() { assignmentWriteFault = nil })
+
+	callCtx, cancel := context.WithTimeout(ctx, accountOwnershipDeadline)
+	defer cancel()
+	require.NoError(t, engine.runAccountAssignmentBatch(callCtx))
+	var finishedAfter time.Time
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT pass_finished_at FROM account_assignment_progress WHERE concept = ?`, second).Scan(&finishedAfter))
+	require.True(t, finishedAfter.After(finishedBefore), "the to-dos' requested pass took the whole call; %s got no batch", second)
+	var open bool
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT pass_finished_at IS NULL OR pass_finished_at < pass_started_at
+		FROM account_assignment_progress WHERE concept = ?`, todo).Scan(&open))
+	require.True(t, open, "fixture: the to-dos' pass was meant to outlast the call")
+}
+
 // A full pass asked for is the next pass of that concept, whatever its last
 // full pass's age; a concept nobody asked about keeps its schedule; and a
 // requested pass waits for no other kind's.

@@ -124,7 +124,13 @@ package memql
 //     (runAccountAssignmentBatch).
 //   - A finished full pass keeps its SAFE POINT in full_pass_at: the earlier of
 //     its start and its horizon, the value verified_through takes. A request
-//     or change record newer than it is not covered by the pass.
+//     or change record newer than it is not covered by the pass. Its START is
+//     kept in full_pass_started_at, in the same statement. A request that a
+//     full pass started after it has answered, but could not cover because a
+//     transaction held the horizon at or before it, is held back
+//     (requestHeldBack): the concept takes incremental passes until the
+//     horizon moves past the request, then one more full pass covers it. So a
+//     transaction left open costs one full pass per request, not one a tick.
 //   - Each call first folds the change records not settled into requests for
 //     their follower kinds (foldAccountChangeRequests): nothing outside the
 //     job writes a progress row.
@@ -246,12 +252,36 @@ func (e *MemQLEngine) runAccountAssignmentBatch(ctx context.Context) error {
 
 	started := time.Now()
 	budget := assignmentBatchIds
-	for len(candidates) > 0 && budget > 0 && time.Since(started) < assignmentCallBudget && ctx.Err() == nil {
-		result, err := e.assignOneBatch(ctx, db, candidates, budget)
+	// A REQUESTED full pass does not crawl at one batch a tick: its batches run
+	// back to back, each its own short transaction, and do not spend the id
+	// budget the other kinds share. It may not starve them either: once it has
+	// used half of the call's time it is set aside (deferred), the other kinds
+	// get one batch each in their usual order, and only when none of them is
+	// due does it take the rest of the call.
+	deferred := ""
+	var spent time.Duration
+	for time.Since(started) < assignmentCallBudget && ctx.Err() == nil {
+		if len(candidates) == 0 || budget <= 0 {
+			if deferred == "" {
+				break
+			}
+			candidates, deferred = []string{deferred}, ""
+		}
+		limit := budget
+		if limit <= 0 {
+			limit = assignmentBatchIds // the deferred pass, once the others are served
+		}
+		batchStarted := time.Now()
+		result, err := e.assignOneBatch(ctx, db, candidates, limit)
 		if err != nil {
 			return err
 		}
 		if result.concept == "" {
+			if deferred != "" {
+				// None of the others is due: the deferred pass takes the rest.
+				candidates, deferred = []string{deferred}, ""
+				continue
+			}
 			return nil // every candidate is held by another replica or not due
 		}
 		result.record()
@@ -261,10 +291,12 @@ func (e *MemQLEngine) runAccountAssignmentBatch(ctx context.Context) error {
 			// concept takes hours, and its readers should not wait for the end.
 			e.InvalidateCacheForConcept(result.concept)
 		}
-		// A REQUESTED full pass does not crawl at one batch a tick: its batches
-		// run back to back within the call's time budget, each its own short
-		// transaction, and do not spend the id budget the other kinds share.
 		if result.requested && !result.finished {
+			spent += time.Since(batchStarted)
+			if spent >= assignmentCallBudget/2 && len(candidates) > 1 && deferred == "" {
+				deferred = result.concept
+				candidates = removeCandidate(candidates, result.concept)
+			}
 			continue
 		}
 		if !result.requested {
@@ -439,6 +471,9 @@ type assignmentProgress struct {
 	// passHorizon is the start of the oldest transaction any batch of the
 	// current pass saw open (file header, Passes).
 	passHorizon sql.NullTime
+	// fullPassStartedAt is the START of the last finished full pass, beside its
+	// safe point in fullPassAt (requestHeldBack).
+	fullPassStartedAt sql.NullTime
 	// batchSize is this concept's own bound on a batch (file header, One call).
 	batchSize int
 }
@@ -449,6 +484,24 @@ type assignmentProgress struct {
 // about may have been walked before they were ready.
 func (p assignmentProgress) fullPassRequested() bool {
 	return p.fullPassRequestedAt.Valid && (!p.fullPassAt.Valid || p.fullPassRequestedAt.Time.After(p.fullPassAt.Time))
+}
+
+// requestHeldBack reports that the request is ANSWERED as far as it can be
+// for now: a full pass that started after it has finished, and could not cover
+// it only because a transaction held its safe point back, and the horizon is
+// still at or before the request (that transaction, or another as old, is
+// still open). Another full pass now would have a safe point no later, and
+// settle nothing; so the concept takes its incremental passes meanwhile, and
+// the request is answered by one more full pass once the horizon moves past
+// it. An operator sees the held horizon in logHorizonHeldBack's WARN.
+func (p assignmentProgress) requestHeldBack(horizon sql.NullTime) bool {
+	if !p.fullPassRequestedAt.Valid || !p.fullPassStartedAt.Valid {
+		return false
+	}
+	requested := p.fullPassRequestedAt.Time
+	answered := !p.fullPassStartedAt.Time.Before(requested)
+	stillHeld := horizon.Valid && !horizon.Time.After(requested)
+	return answered && stillHeld
 }
 
 // inPass reports whether a pass is under way: one has started and not finished
@@ -495,13 +548,15 @@ func (e *MemQLEngine) assignOneBatch(ctx context.Context, db *bun.DB, candidates
 		result = assignmentBatchResult{}
 		var p assignmentProgress
 		err := tx.QueryRowContext(ctx, `SELECT concept, cursor_id, cursor_at, verified_through, pass_full,
-			       full_pass_at, pass_started_at, pass_finished_at, waiting, batch_size, full_pass_requested_at, pass_horizon_at
+			       full_pass_at, pass_started_at, pass_finished_at, waiting, batch_size, full_pass_requested_at, pass_horizon_at,
+			       full_pass_started_at
 			  FROM account_assignment_progress
 			 WHERE concept = ANY(?::text[]) AND next_at <= clock_timestamp()
 			 ORDER BY array_position(?::text[], concept)
 			 LIMIT 1 FOR UPDATE SKIP LOCKED`, pq.Array(candidates), pq.Array(candidates)).
 			Scan(&p.concept, &p.cursorID, &p.cursorAt, &p.verifiedThrough, &p.passFull,
-				&p.fullPassAt, &p.passStartedAt, &p.passFinishedAt, &p.waiting, &p.batchSize, &p.fullPassRequestedAt, &p.passHorizon)
+				&p.fullPassAt, &p.passStartedAt, &p.passFinishedAt, &p.waiting, &p.batchSize, &p.fullPassRequestedAt, &p.passHorizon,
+				&p.fullPassStartedAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -529,7 +584,7 @@ func (e *MemQLEngine) assignOneBatch(ctx context.Context, db *bun.DB, candidates
 			return err
 		}
 		if !p.inPass() {
-			p = startAssignmentPass(p, now)
+			p = startAssignmentPass(p, now, horizon)
 		}
 		p.passHorizon = earlierTime(p.passHorizon, horizon)
 
@@ -643,14 +698,16 @@ func recordAssignmentFailure(ctx context.Context, db *bun.DB, concept string) {
 }
 
 // startAssignmentPass begins a pass. It is a full pass when the concept has
-// never finished one, when a full pass was requested after the last one began,
-// or when its last full pass left rows waiting on a parent and began at least
+// never finished one, when a full pass was requested after the last one's safe
+// point (full_pass_at) and is not held back (requestHeldBack), or when its
+// last full pass left rows waiting on a parent and began at least
 // assignmentFullPassInterval ago; otherwise a later pass over what was written
-// since (file header, Passes).
-func startAssignmentPass(p assignmentProgress, now time.Time) assignmentProgress {
+// since (file header, Passes). horizon is the late-commit horizon this batch
+// read.
+func startAssignmentPass(p assignmentProgress, now time.Time, horizon sql.NullTime) assignmentProgress {
 	neverFull := !p.verifiedThrough.Valid || !p.fullPassAt.Valid
 	waitingDue := p.waiting > 0 && p.fullPassAt.Valid && now.Sub(p.fullPassAt.Time) >= assignmentFullPassInterval
-	p.passFull = neverFull || waitingDue || p.fullPassRequested()
+	p.passFull = neverFull || waitingDue || (p.fullPassRequested() && !p.requestHeldBack(horizon))
 	p.passStartedAt = sql.NullTime{Time: now, Valid: true}
 	p.cursorID, p.cursorAt = sql.NullString{}, sql.NullTime{}
 	p.passHorizon = sql.NullTime{}
@@ -815,6 +872,7 @@ func advanceAssignmentProgress(ctx context.Context, tx bun.Tx, p assignmentProgr
 		cursorID, cursorAt = nextID, nextAt
 	}
 	verified, fullAt, finishedAt, passHorizon := p.verifiedThrough, p.fullPassAt, p.passFinishedAt, p.passHorizon
+	fullStarted := p.fullPassStartedAt
 	nextDue := now
 	if finished {
 		verified = earlierTime(p.passStartedAt, p.passHorizon)
@@ -824,6 +882,7 @@ func advanceAssignmentProgress(ctx context.Context, tx bun.Tx, p assignmentProgr
 			// transaction that was open when the pass began, and committed
 			// after, is not covered by this pass (account_follow.go, Settled).
 			fullAt = verified
+			fullStarted = p.passStartedAt
 		}
 		finishedAt = sql.NullTime{Time: now, Valid: true}
 		cursorID, cursorAt = sql.NullString{}, sql.NullTime{}
@@ -831,7 +890,7 @@ func advanceAssignmentProgress(ctx context.Context, tx bun.Tx, p assignmentProgr
 	}
 	_, err := tx.ExecContext(ctx, `UPDATE account_assignment_progress SET
 		    cursor_id = ?, cursor_at = ?, verified_through = ?, pass_full = ?, full_pass_at = ?,
-		    pass_started_at = ?, pass_finished_at = ?, next_at = ?, pass_horizon_at = ?,
+		    pass_started_at = ?, pass_finished_at = ?, next_at = ?, pass_horizon_at = ?, full_pass_started_at = ?,
 		    assigned  = CASE WHEN ? THEN 0 ELSE assigned END + ?,
 		    kept      = CASE WHEN ? THEN 0 ELSE kept END + ?,
 		    shared    = CASE WHEN ? THEN 0 ELSE shared END + ?,
@@ -839,7 +898,7 @@ func advanceAssignmentProgress(ctx context.Context, tx bun.Tx, p assignmentProgr
 		    waiting   = CASE WHEN ? THEN 0 ELSE waiting END + ?,
 		    batch_size = LEAST(?, batch_size + GREATEST(1, batch_size / 4))
 		  WHERE concept = ?`,
-		cursorID, cursorAt, verified, p.passFull, fullAt, p.passStartedAt, finishedAt, nextDue, passHorizon,
+		cursorID, cursorAt, verified, p.passFull, fullAt, p.passStartedAt, finishedAt, nextDue, passHorizon, fullStarted,
 		fresh, c.assigned, fresh, c.kept, fresh, c.shared, fresh, c.conflicts, freshWaiting, c.waiting,
 		assignmentBatchIds, p.concept)
 	if err != nil {
