@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -195,7 +196,12 @@ func (c *Connector) runComplianceJob(ctx context.Context, store Store, job Compl
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("scrubbed %d row version(s)", rows), c.auditCompliance(ctx, store, "shopify_customer_redacted", job)
+		// The scrub ran, and is audited as run whatever the restart answers.
+		outcome, err := c.afterErasure(ctx, store, fmt.Sprintf("scrubbed %d row version(s)", rows))
+		if auditErr := c.auditCompliance(ctx, store, "shopify_customer_redacted", job); err == nil {
+			err = auditErr
+		}
+		return outcome, err
 
 	case TopicShopRedact:
 		// Re-check the store before purging: an uninstall an operator
@@ -209,9 +215,80 @@ func (c *Connector) runComplianceJob(ctx context.Context, store Store, job Compl
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("purged %d row version(s)", rows), c.auditCompliance(ctx, store, "shopify_shop_redacted", job)
+		outcome, err := c.afterErasure(ctx, store, fmt.Sprintf("purged %d row version(s)", rows))
+		if auditErr := c.auditCompliance(ctx, store, "shopify_shop_redacted", job); err == nil {
+			err = auditErr
+		}
+		return outcome, err
 	}
 	return "", fmt.Errorf("shopify: %q is not a compliance topic", job.Topic)
+}
+
+// afterErasure is what a redaction or a purge that has just run still owes:
+// the store's backfills in flight started again (restartBackfillsInFlight).
+// It answers the job's outcome with what it restarted added. A restart that
+// could not be queued fails the job, saying that the erasure itself ran: an
+// erasure an export may still undo is not a job that is done.
+func (c *Connector) afterErasure(ctx context.Context, store Store, outcome string) (string, error) {
+	restarted, err := c.restartBackfillsInFlight(ctx, store)
+	if len(restarted) > 0 {
+		outcome += fmt.Sprintf("; started %d backfill(s) again from nothing", len(restarted))
+		c.logger.Info("shopify: the store's backfills in flight were started again after an erasure",
+			"store", store.ID, "domains", strings.Join(restarted, ", "))
+	}
+	if err != nil {
+		return "", fmt.Errorf("shopify: %s, but a backfill in flight could not be started again, so an export begun before the erasure may still be applied: %w", outcome, err)
+	}
+	return outcome, nil
+}
+
+// restartBackfillsInFlight starts again, from nothing, every backfill of the
+// store that is running or queued, and answers the domains it restarted.
+//
+// WHY. customers/redact is one point-in-time update, and shop/redact one
+// point-in-time delete. A backfill whose export the origin started BEFORE the
+// erasure, streamed after it, would write the erased fields back line by
+// line. Restarted, its row is queued with an empty cursor: the invocation in
+// flight abandons at its next write (the sync runtime's claim on the row), no
+// later step reads another line of the old export, and the export the
+// continuing pass starts next is one the origin takes after the erasure.
+//
+// It is the restart a reconnect uses (queueBackfill with its restart flag),
+// asked of the sync runtime under the operator's identity. A domain with no
+// backfill running or queued is left alone: a complete one holds nothing
+// exported before the erasure that the scrub did not reach, and restarting it
+// would read the whole domain again for every privacy request. After a purge
+// there is normally nothing to restart, because the purge deletes the store's
+// sync state with its mirror.
+//
+// Each domain's row is read BY ID, fresh, as the boot pass reads it.
+func (c *Connector) restartBackfillsInFlight(ctx context.Context, store Store) ([]string, error) {
+	var restarted []string
+	var errs []error
+	for _, concept := range generated.ApplyOrder {
+		if !bulkDomain(generated.Types[concept]) {
+			continue
+		}
+		stateID := memqlsync.StateID(generated.ConceptID(concept), ConnectorName, string(memqlsync.DirectionInbound), store.ID)
+		res, err := c.engine.Execute(memql.ContextWithFreshRead(operatorContext(ctx)), renderCall("syncStateById", map[string]any{"stateId": stateID}))
+		if err != nil {
+			errs = append(errs, fmt.Errorf("the sync state of %s could not be read: %w", concept, err))
+			continue
+		}
+		rows := memql.MaterializeRows(res)
+		if len(rows) == 0 {
+			continue
+		}
+		if status := mapString(rows[0], "backfillStatus"); status != "running" && status != "queued" {
+			continue
+		}
+		if err := c.queueBackfill(ctx, store.ID, concept, true); err != nil {
+			errs = append(errs, fmt.Errorf("the backfill of %s could not be queued again: %w", concept, err))
+			continue
+		}
+		restarted = append(restarted, concept)
+	}
+	return restarted, errors.Join(errs...)
 }
 
 // storeReachable asks the store a trivial question. Used only to decide
