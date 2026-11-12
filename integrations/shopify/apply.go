@@ -257,7 +257,10 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 //     not hold, a create notice can arrive before its record is readable, and
 //     processing it at once would leave the record to the next sweep. A try
 //     number alone proves nothing: a first try that failed for an ordinary
-//     reason is not an answer.
+//     reason is not an answer. ON THE DELIVERY'S LAST TRY
+//     (InboundRequest.LastTry) there is no other: a first empty answer for a
+//     record the mirror does not hold is believed at once and nothing is
+//     written, so the delivery does not end given up with nothing to record.
 //
 //  4. THE SECOND IN A ROW is believed. A record the mirror does not hold has
 //     nothing to retire, so nothing is written; a held one is retired, at this
@@ -276,6 +279,11 @@ func (c *Connector) answeredNothing(ctx context.Context, store Store, spec *gene
 	case held && !emptyAnswerRetires(store, spec):
 		c.logger.Info("shopify: an answer of nothing for order data was not taken as a deletion; this store's grant does not read orders older than sixty days",
 			"store", store.ID, "concept", spec.Concept)
+		return nil, nil
+	case !held && req.LastTry():
+		// The delivery's last try: failed to be asked once more, it would end
+		// given up, and count as a change that could not be recorded, though
+		// there is nothing to record. Believed at once.
 		return nil, nil
 	case !req.AnsweredNothingBefore:
 		c.forgetDelivery(req, gid)

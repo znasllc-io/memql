@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 )
 
 // inbound_retry.go -- a failed delivery is tried again (store mirror, U4).
@@ -18,8 +20,10 @@ import (
 // through DispatchStaged, so a retry passes the same judgement as the first
 // try. Four tries at most; the hourly sweep stays the net under all of them.
 
-// maxInboundAttempts is how many tries a delivery gets, the first included.
-const maxInboundAttempts = 4
+// maxInboundAttempts is how many tries a delivery gets, the first included:
+// the contract's count, which a connector reads through
+// memqlsync.InboundRequest.LastTry.
+const maxInboundAttempts = memqlsync.MaxInboundAttempts
 
 // inboundRetryAfter is the wait before each retry, counted from the try
 // before it: the second try comes a minute after the first, the third five

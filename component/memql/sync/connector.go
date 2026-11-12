@@ -192,6 +192,17 @@ type InboundRequest struct {
 	AnsweredNothingBefore bool
 }
 
+// MaxInboundAttempts is how many tries the runtime gives a delivery, the
+// first included. A try that fails at this count, for any reason, leaves no
+// next try: the delivery ends given up.
+const MaxInboundAttempts = 4
+
+// LastTry reports whether this try is the last one the delivery gets: if it
+// fails, the runtime does not try it again. A connector that would fail a try
+// only to be asked once more reads it here, since on the last try there is no
+// once more.
+func (r InboundRequest) LastTry() bool { return r.Attempts+1 >= MaxInboundAttempts }
+
 // MirrorWrite is one row Apply wants written into a mirror. The runtime
 // performs the write, under the connector's actor and behind the
 // version guard; a connector never writes rows itself.

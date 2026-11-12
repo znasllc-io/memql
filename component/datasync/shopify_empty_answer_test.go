@@ -339,6 +339,46 @@ func TestAnEmptyAnswerForARecordNotHeldIsAskedOnceMore(t *testing.T) {
 	})
 }
 
+// ON THE LAST TRY THERE IS NO "ONCE MORE". An empty answer for a record the
+// mirror does not hold is asked again only while the delivery has a next try:
+// a first empty answer on its last try, failed to be asked again, would end
+// the delivery given up and count as a change that could not be recorded,
+// though there is nothing to record. There it is believed at once: nothing
+// written, processed. Earlier tries are asked once more, as before.
+func TestAnEmptyAnswerOnTheLastTryForARecordNotHeldIsProcessed(t *testing.T) {
+	const gid = "gid://shopify/Product/1"
+	ordinary := shopStamped{status: "failed", lastError: "shopify admin: HTTP 502", nextAttemptAt: "2026-08-23T09:59:00Z"}
+	for prior := 0; prior < maxInboundAttempts; prior++ {
+		r := newShopRig(t)
+		r.granted("read_products")
+		l := r.lane()
+		r.now = clockAt("10:00:00")
+		r.origin.reply("ShopifyFetchProduct", map[string]any{"node": nil})
+		req := shopNotice("products/create", gid, "wh-create", clockAt("09:00:00"))
+		before := shopStamped{}
+		if prior > 0 {
+			// The tries before this one failed for an ordinary reason.
+			before = ordinary
+			before.attempts = prior
+		}
+
+		got, err := l.try(req, before)
+		if last := prior == maxInboundAttempts-1; last {
+			if err != nil || got.status != "processed" || got.due() {
+				t.Errorf("try %d, the last: the empty answer left %+v (err %v), want processed", prior+1, got, err)
+			}
+		} else if err == nil || !got.due() || !memqlsync.AnsweredNothingBefore(got.lastError) {
+			t.Errorf("try %d of %d: the empty answer left %+v (err %v), want it asked once more", prior+1, maxInboundAttempts, got, err)
+		}
+		if got.attempts != prior+1 {
+			t.Errorf("try %d counted %d tries", prior+1, got.attempts)
+		}
+		if row := r.row("product", gid); row != nil {
+			t.Errorf("try %d: an empty answer for a record never held wrote %v", prior+1, row)
+		}
+	}
+}
+
 // THROUGH THE RUNTIME: an app-level delivery whose store could not be told is
 // stamped failed with a next try, never processed. A privacy request is
 // delivered once: answered "nothing to write" while the store list could not

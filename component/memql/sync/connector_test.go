@@ -152,3 +152,14 @@ func TestNotRequestedIsNotNotGranted(t *testing.T) {
 		t.Errorf("text = %q, want %q", got, want)
 	}
 }
+
+// THE LAST TRY is the one at the contract's count: a try before it that fails
+// is tried again, and one at it is not.
+func TestOnlyTheTryAtTheContractsCountIsTheLast(t *testing.T) {
+	for attempts := 0; attempts < MaxInboundAttempts+1; attempts++ {
+		want := attempts >= MaxInboundAttempts-1
+		if got := (InboundRequest{Attempts: attempts}).LastTry(); got != want {
+			t.Errorf("after %d tries, LastTry = %t, want %t", attempts, got, want)
+		}
+	}
+}
