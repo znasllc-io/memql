@@ -525,7 +525,8 @@ reads "5,000 or more", never as exact; a sum with a floor in it is a floor
 too. Only draw activity history when
 a real time series exists. Keep record lists and editors in their own sections.
 Four figures stand in one row, then two; five stand in one row while each label
-fits on one line, then three, then two.
+fits on one line, then three, then two; eight stand as two rows of four, then
+four rows of two.
 
 Maps and navigable diagrams use `MapCanvas` for their SVG viewport and
 `MapHeading` when a title is needed. `MapCanvas` owns top-right zoom and reset
@@ -547,7 +548,12 @@ Statistics are drawn with the kit's statistics pieces and nothing else
 (`kit/statistics`, from the website and email statistics design, 2026-11-08):
 `StatFigures` for the figure row, `TimeChart` for the one chart, `RankedList`
 for a dimension's leading values and `PeriodControl` for the period, with
-`kit/format`'s `formatCount`, `formatRate` and `formatBytes` for the numbers.
+`kit/format`'s `formatCount`, `formatRate`, `formatBytes` and `formatMoney` for
+the numbers. `formatMoney(currency)` writes an amount in its currency's own
+decimals ("€1,204.50", "¥1,200"), keeps a sign below zero and never signs a
+zero. The value axis of a money chart writes its whole steps without decimals
+(`formatMoneyAxis`, handed to `TimeChart` as `axisFormat`: "€1,000"), while the
+readout, the summary and the figures keep the currency's decimals.
 The client picker is `ScopeControl` over `useClientScope`, which live with the
 account concept (`apps/accounts`): the kit is the shell's vocabulary, and a
 client picker is one domain's surface. A deployable's Statistics, the
@@ -592,6 +598,23 @@ for, and an Overview that is its app's statistics hands `StatFigures` to
   as a faint dashed line at the same offsets. A bucket nothing measured is a
   gap where the line stops and starts again, never a zero, and a lone measured
   bucket is a dot. With no series there is no chart.
+- **A store's buckets are its own days.** Buckets are labelled in UTC, the
+  day the statistics turn over on, and never in the reader's own zone. A
+  store counts its days in its own time zone, so a page that reads a store
+  hands `TimeChart` that `timeZone` and the axis, readout and summary name each
+  bucket as the store's clock showed it. On the night the clocks go back the
+  repeated hour is two buckets that both read 01:00: that is what the clock
+  showed.
+- **A figure that can be below zero is drawn below the zero rule.** A net
+  figure a day of refunds outweighed scales from a round floor under zero to
+  the round top. Its fill runs to zero, not to the plot's bottom, so a day
+  below zero hangs beneath zero, and the rule at zero reads a step stronger
+  than the other rules: it is the one rule the reader needs to find. With
+  nothing above zero, zero is the top and the line hangs from it. Each value
+  label stands on its own rule, because the steps below and above zero need
+  not be even, and a step whose rule would sit within a label's height of
+  another's is left out: zero first, then the top and the floor, then the
+  halves. A figure that cannot be below zero keeps the axis from zero.
 - **Loading is the chart's shape.** While a read is out, `TimeChartSkeleton`
   stands in the chart's place with its head, plot and time axis, and the
   figures and lists are their shapes (`loading` on `StatFigures` and

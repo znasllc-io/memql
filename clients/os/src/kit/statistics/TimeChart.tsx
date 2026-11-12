@@ -2,7 +2,7 @@ import { useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "
 
 import { useWidth } from "../useWide";
 import { bucketLabel, bucketMoment, type Bucket } from "./period";
-import { niceMax, timeTickIndexes, valueTicks } from "./scale";
+import { niceMax, niceMin, spacedTicks, timeTickIndexes, valueTicks } from "./scale";
 import "./statistics.css";
 
 // ONE TIME-SERIES CHART FOR EVERY STATISTICS PAGE (spec 8).
@@ -39,6 +39,17 @@ import "./statistics.css";
 // wall display alike. What a stretch would distort -- text and round dots --
 // is HTML laid over the drawing, positioned in percentages of it.
 //
+// BELOW ZERO, BELOW THE ZERO RULE. A figure that can be below zero -- a net
+// figure a day of refunds outweighed -- scales from a round floor (`niceMin`)
+// to the round top; its fill runs to where zero falls rather than to the
+// plot's bottom, so a day below zero hangs beneath the zero rule, and that
+// rule is marked (`data-zero`). With nothing below zero the floor is zero and
+// the drawing is the one it always was.
+//
+// A STORE'S OWN DAYS. A page that reads a store passes its `timeZone`, and
+// every bucket -- the axis, the readout and the summary -- is named as the
+// store's clock showed it (`bucketLabel`). Without one, UTC.
+//
 // Colours are theme tokens (statistics.css), so every built-in theme in light
 // and dark draws it without a rule of its own, and nothing moves under
 // reduced motion.
@@ -52,6 +63,12 @@ export interface ChartPoint {
 /** The drawing's own coordinate width, stretched to the plot's real width. */
 const VIEW_WIDTH = 600;
 const DEFAULT_HEIGHT = 160;
+/**
+ * The CSS pixels a value-axis label stands tall: statistics.css sets the
+ * gutter (`.os-time-chart-values`) in `--os-text-xs`, 11px, at `line-height:
+ * 1`. Below zero, two steps' rules closer than this would stack their labels.
+ */
+const VALUE_LABEL_HEIGHT = 11;
 /** The CSS pixels a time-axis label is owed: how many labels fit is the plot's width over this. */
 const TIME_LABEL_ROOM = 72;
 
@@ -125,11 +142,11 @@ function areaPath(values: readonly (number | null)[], runs: readonly Run[], x: (
  * nothing was measured, and the unmeasured when everything was. An hour is
  * named with its day ("from Nov 7, 15:00 to Nov 8, 15:00").
  */
-function summaryOf(label: string, bucket: Bucket, points: readonly ChartPoint[], values: readonly (number | null)[], format: (value: number) => string): string {
+function summaryOf(label: string, bucket: Bucket, points: readonly ChartPoint[], values: readonly (number | null)[], format: (value: number) => string, timeZone: string | undefined): string {
   const count = points.length;
   if (count === 0) return `${label}: no points.`;
-  const first = bucketMoment(points[0]?.at ?? "", bucket);
-  const last = bucketMoment(points[count - 1]?.at ?? "", bucket);
+  const first = bucketMoment(points[0]?.at ?? "", bucket, timeZone);
+  const last = bucketMoment(points[count - 1]?.at ?? "", bucket, timeZone);
   const parts = [count === 1 ? `${label}: 1 point on ${first}` : `${label}: ${count} points from ${first} to ${last}`];
   let highest: number | null = null;
   let highestAt = -1;
@@ -142,7 +159,7 @@ function summaryOf(label: string, bucket: Bucket, points: readonly ChartPoint[],
       highestAt = index;
     }
   }
-  if (highest !== null) parts.push(`highest ${format(highest)} on ${bucketMoment(points[highestAt]?.at ?? "", bucket)}`);
+  if (highest !== null) parts.push(`highest ${format(highest)} on ${bucketMoment(points[highestAt]?.at ?? "", bucket, timeZone)}`);
   if (unmeasured > 0) parts.push(`${unmeasured} not measured`);
   return `${parts.join("; ")}.`;
 }
@@ -179,7 +196,7 @@ export function TimeChartSkeleton({ label, height = DEFAULT_HEIGHT }: {
   );
 }
 
-export function TimeChart({ label, bucket, points, previous, format, height = DEFAULT_HEIGHT }: {
+export function TimeChart({ label, bucket, points, previous, format, axisFormat = format, timeZone, height = DEFAULT_HEIGHT }: {
   /** What is drawn ("Visitors"). Names the plot, and starts its sentence. */
   label: string;
   bucket: Bucket;
@@ -188,6 +205,11 @@ export function TimeChart({ label, bucket, points, previous, format, height = DE
   previous?: readonly ChartPoint[];
   /** How a value is written, on the value axis and in the readout. */
   format: (value: number) => string;
+  /** How a step of the value axis is written, and nothing else ("€1,000" where
+   *  the readout says "€1,000.00"). Absent, `format`. */
+  axisFormat?: (value: number) => string;
+  /** The store's time zone ("Europe/Madrid"), its buckets are named in. Absent, UTC. */
+  timeZone?: string;
   /** The plot's height in CSS pixels, and the drawing's. */
   height?: number;
 }) {
@@ -204,16 +226,22 @@ export function TimeChart({ label, bucket, points, previous, format, height = DE
   const prior = previous === undefined ? null : Array.from({ length: count }, (_, index) => valueOf(previous[index]));
   const measured = [...current, ...(prior ?? [])].filter((value): value is number => value !== null);
   const largest = Math.max(0, ...measured);
-  const top = niceMax(largest);
+  const smallest = Math.min(0, ...measured);
+  const floor = niceMin(smallest);
+  // Below zero with nothing above it, zero is the top: the line hangs from it.
+  const top = floor < 0 && largest <= 0 ? 0 : niceMax(largest);
+  const span = top - floor;
 
   const x = (index: number) => (count <= 1 ? VIEW_WIDTH / 2 : (index / (count - 1)) * VIEW_WIDTH);
-  const y = (value: number) => height - (value / top) * height;
+  const y = (value: number) => height - ((value - floor) / span) * height;
   const leftOf = (index: number) => `${count <= 1 ? 50 : (index / (count - 1)) * 100}%`;
-  const topOf = (value: number) => `${(1 - value / top) * 100}%`;
+  const topOf = (value: number) => `${(1 - (value - floor) / span) * 100}%`;
+  // Where zero falls: the plot's bottom, unless something is below zero.
+  const zero = coordinate(y(0));
 
   const runs = runsOf(current);
   const line = linePath(current, runs, x, y);
-  const area = areaPath(current, runs, x, y, height);
+  const area = areaPath(current, runs, x, y, zero);
   const priorRuns = prior === null ? [] : runsOf(prior);
   const priorLine = prior === null ? "" : linePath(prior, priorRuns, x, y);
   // A measured bucket with a gap either side is a run of one, which a line
@@ -229,9 +257,12 @@ export function TimeChart({ label, bucket, points, previous, format, height = DE
   // ruled. A series of whole numbers drops a fractional middle step
   // (`valueTicks`). And while the current period says "Not measured" in the
   // middle of the plot, the middle step gives way, so no rule crosses it.
-  const steps = measured.length === 0 ? [] : valueTicks(largest, measured.every(Number.isInteger));
-  const ticks = runs.length === 0 ? steps.filter((tick) => tick === 0 || tick === top) : steps;
-  const rules = ticks.length === 0 ? [height] : ticks.map(y);
+  // Below zero the floor is a step too, under zero, and a step whose rule
+  // would sit within a label's height of another's is left out (`spacedTicks`).
+  const valued = measured.length === 0 ? [] : valueTicks(largest, measured.every(Number.isInteger), smallest);
+  const steps = floor < 0 ? spacedTicks(valued, y, VALUE_LABEL_HEIGHT) : valued;
+  const ticks = runs.length === 0 ? steps.filter((tick) => tick === floor || tick === 0 || tick === top) : steps;
+  const rules = ticks.length === 0 ? [{ key: "base", at: height, zero: false }] : ticks.map((tick) => ({ key: String(tick), at: coordinate(y(tick)), zero: floor < 0 && tick === 0 }));
 
   // Clamped at render: a shorter series arriving under a held index reads its
   // last bucket rather than nothing.
@@ -273,7 +304,7 @@ export function TimeChart({ label, bucket, points, previous, format, height = DE
         <p className="os-time-chart-readout" role="status">
           {at === null ? null : (
             <>
-              <span className="os-time-chart-when">{bucketMoment(points[at]?.at ?? "", bucket)}</span>
+              <span className="os-time-chart-when">{bucketMoment(points[at]?.at ?? "", bucket, timeZone)}</span>
               <span className="os-sr-only">: </span>
               <span className="os-time-chart-now">
                 <Swatch series="current" />
@@ -302,8 +333,11 @@ export function TimeChart({ label, bucket, points, previous, format, height = DE
         ) : null}
       </div>
       <div className="os-time-chart-body">
-        <div className="os-time-chart-values" aria-hidden="true" style={{ height }}>
-          {[...ticks].reverse().map((tick) => <span key={tick}>{format(tick)}</span>)}
+        {/* Steps from zero up are evenly spaced, so the gutter spaces its
+            labels evenly. A floor below zero need not be (-200 under 0, 500
+            and 1,000), so then each label is set on its own rule. */}
+        <div className="os-time-chart-values" data-below-zero={floor < 0 ? "true" : undefined} aria-hidden="true" style={{ height }}>
+          {[...ticks].reverse().map((tick) => <span key={tick} style={floor < 0 ? { top: topOf(tick) } : undefined}>{axisFormat(tick)}</span>)}
         </div>
         <div
           ref={plotRef}
@@ -330,8 +364,8 @@ export function TimeChart({ label, bucket, points, previous, format, height = DE
           onKeyDown={onKeyDown}
         >
           <svg viewBox={`0 0 ${VIEW_WIDTH} ${height}`} preserveAspectRatio="none" aria-hidden="true">
-            {rules.map((gridY) => (
-              <line key={gridY} className="os-time-chart-grid" x1={0} x2={VIEW_WIDTH} y1={gridY} y2={gridY} vectorEffect="non-scaling-stroke" shapeRendering="crispEdges" />
+            {rules.map((rule) => (
+              <line key={rule.key} className="os-time-chart-grid" data-zero={rule.zero ? "true" : undefined} x1={0} x2={VIEW_WIDTH} y1={rule.at} y2={rule.at} vectorEffect="non-scaling-stroke" shapeRendering="crispEdges" />
             ))}
             {area === "" ? null : <path className="os-time-chart-area" data-area="current" d={area} />}
             {priorLine === "" ? null : <path className="os-time-chart-previous" data-series="previous" d={priorLine} strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />}
@@ -359,12 +393,12 @@ export function TimeChart({ label, bucket, points, previous, format, height = DE
               data-edge={count > 1 && index === 0 ? "start" : count > 1 && index === count - 1 ? "end" : undefined}
               style={{ left: leftOf(index) }}
             >
-              {bucketLabel(points[index]?.at ?? "", bucket)}
+              {bucketLabel(points[index]?.at ?? "", bucket, timeZone)}
             </span>
           ))}
         </div>
       </div>
-      <figcaption id={captionId} className="os-sr-only">{summaryOf(label, bucket, points, current, format)}</figcaption>
+      <figcaption id={captionId} className="os-sr-only">{summaryOf(label, bucket, points, current, format, timeZone)}</figcaption>
     </figure>
   );
 }

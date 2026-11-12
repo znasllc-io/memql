@@ -35,6 +35,10 @@
 .os-time-chart-values { display: grid; align-content: space-between; justify-items: end; color: var(--os-muted); font-size: var(--os-text-xs); line-height: 1; font-variant-numeric: tabular-nums; }
 .os-time-chart-values > span:first-child { transform: translateY(-50%); }
 .os-time-chart-values > span:last-child { transform: translateY(50%); }
+/* Below zero the steps need not be even: every label shares the gutter's one
+ * cell, still sizing its width, and is set down to its own rule (`top`). */
+.os-time-chart-values[data-below-zero] { grid-template-rows: minmax(0, 1fr); }
+.os-time-chart-values[data-below-zero] > span { position: relative; grid-area: 1 / 1; align-self: start; transform: translateY(-50%); }
 
 .os-time-chart-plot { position: relative; min-width: 0; touch-action: pan-y; }
 .os-time-chart-plot:focus { outline: none; }
@@ -42,6 +46,8 @@
 .os-time-chart-plot > svg { display: block; width: 100%; height: 100%; overflow: visible; }
 
 .os-time-chart-grid { stroke: var(--os-line); stroke-width: 1; }
+/* Where a figure below zero turns: the one rule that reads a step stronger. */
+.os-time-chart-grid[data-zero] { stroke: var(--os-muted); }
 .os-time-chart-area { fill: var(--os-accent-soft); stroke: none; }
 .os-time-chart-line { fill: none; stroke: var(--os-accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .os-time-chart-previous { fill: none; stroke: var(--os-muted); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }

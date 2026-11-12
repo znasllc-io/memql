@@ -88,6 +88,64 @@ export function formatCount(value: number): string {
 }
 
 /**
+ * Money in `currency` (an ISO 4217 code), as a store's statistics write it:
+ * "€1,204.50", "¥1,200", "KWD 1.255". In the locale `formatCount` writes in,
+ * with the currency's own decimals, so a yen total has none and a dinar total
+ * three. Below zero it keeps its sign ("-€36.00"): a net figure a day of
+ * refunds outweighed is an amount, not an absence.
+ *
+ * Built once per currency and returned as the writer for its values, because
+ * a chart writes every axis step and readout through it. A value that is not
+ * finite renders "--", as `formatCount`. A code Intl refuses never throws: the
+ * value is written as its count and the code as given ("1,204.5 EURO"), so a
+ * defect in the code shows rather than taking the page down.
+ */
+export function formatMoney(currency: string): (value: number) => string {
+  const money = currencyFormat(currency, {});
+  return (value: number) => {
+    if (!Number.isFinite(value)) return "--";
+    if (money !== null) return unsignedZero(money, value);
+    const written = formatCount(value);
+    return currency === "" ? written : `${written} ${currency}`;
+  };
+}
+
+/**
+ * Money on a chart's value axis: a whole step without decimals ("€1,000",
+ * "-€200", "¥1,200"), so the gutter stays quiet beside a plot whose figures
+ * and readout keep their currency's decimals. A step with a fraction is
+ * written exactly as `formatMoney` writes it, and so is a code Intl refuses.
+ * Both formatters are built once per currency.
+ */
+export function formatMoneyAxis(currency: string): (value: number) => string {
+  const money = formatMoney(currency);
+  const whole = currencyFormat(currency, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  return (value: number) => {
+    if (whole === null || !Number.isInteger(value)) return money(value);
+    return unsignedZero(whole, value);
+  };
+}
+
+function currencyFormat(currency: string, digits: Intl.NumberFormatOptions): Intl.NumberFormat | null {
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency, ...digits });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A value that rounds to zero written without a sign ("€0.00", never
+ * "-€0.00"), for -0 and for a small negative alike: a zero is not a loss.
+ * By hand rather than `signDisplay: "negative"`, which the browsers this
+ * client builds for do not all have (Firefox before 116).
+ */
+function unsignedZero(money: Intl.NumberFormat, value: number): string {
+  const zero = money.format(0);
+  return money.format(Math.abs(value)) === zero ? zero : money.format(value);
+}
+
+/**
  * A rate as a person reads one: "42%", "4.3%", "0%". Whole percents from 10%
  * up and at zero, one decimal below 10%, where a whole number would round a
  * 4.3% click rate to 4% and hide the difference between two campaigns. Null

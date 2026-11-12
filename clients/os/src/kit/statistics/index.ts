@@ -8,5 +8,5 @@ export { StatFigures, type StatFigure } from "./StatFigures";
 export { RankedList, type RankedRow } from "./RankedList";
 export { PeriodControl } from "./PeriodControl";
 export { EMAIL_PERIODS, SITE_PERIODS, bucketLabel, bucketMoment, isPeriod, periodLabel, previousComparable, type Bucket, type Period } from "./period";
-export { niceMax, timeTickIndexes, valueTicks } from "./scale";
+export { niceMax, niceMin, timeTickIndexes, valueTicks } from "./scale";
 export { changeLabel, changeOf, type Change } from "../measure";

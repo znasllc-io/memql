@@ -165,6 +165,113 @@ describe("the axes", () => {
   });
 });
 
+describe("below zero", () => {
+  it("draws a bucket below zero below the zero rule, and a series with nothing below zero as before", () => {
+    const below = render(<TimeChart label="Net sales" bucket="day" points={days([20, -36, 55])} format={count} />).container;
+    // The axis runs from -50 to 100 over 160: zero falls at 106.67, 20 at 85.33, -36 at 145.07, 55 at 48.
+    expect(seriesPath(below, "current")?.getAttribute("d")).toBe("M0 85.33 L300 145.07 L600 48");
+    expect(below.querySelector('path[data-area="current"]')?.getAttribute("d")).toBe("M0 106.67 L0 85.33 L300 145.07 L600 48 L600 106.67 Z");
+    expect(below.querySelector(".os-time-chart-values")?.textContent).toBe("100500-50");
+    expect(below.querySelector('.os-time-chart-grid[data-zero="true"]')?.getAttribute("y1")).toBe("106.67");
+    cleanup();
+    const above = render(<TimeChart label="Visitors" bucket="day" points={days([3, 5, 4])} format={count} />).container;
+    expect(seriesPath(above, "current")?.getAttribute("d")).toBe("M0 64 L300 0 L600 32");
+    expect(above.querySelector('path[data-area="current"]')?.getAttribute("d")).toBe("M0 160 L0 64 L300 0 L600 32 L600 160 Z");
+    expect(above.querySelector(".os-time-chart-values")?.textContent).toBe("50");
+    expect(above.querySelector('.os-time-chart-grid[data-zero="true"]')).toBeNull();
+  });
+
+  it("places a lone bucket and the readout's dot on the same scale as the line", () => {
+    render(<TimeChart label="Net sales" bucket="day" points={days([null, -36, null, 55, 20])} format={count} />);
+    // -36 on an axis from -50 to 100 is 14/150 of the way up.
+    const lone = document.querySelector<HTMLElement>('.os-time-chart-point[data-series="current"]');
+    expect(lone?.style.top).toBe(`${(1 - 14 / 150) * 100}%`);
+    act(() => screen.getByRole("application", { name: "Net sales" }).focus());
+    const dot = document.querySelector<HTMLElement>('.os-time-chart-dot[data-series="current"]');
+    expect(dot?.style.top).toBe(`${(1 - 70 / 150) * 100}%`);
+  });
+
+  it("sets each value label on its own rule, since steps below zero need not be even", () => {
+    // -200, 0, 500 and 1,000: zero is a sixth of the way up, not a third.
+    const { container, rerender } = render(<TimeChart label="Net sales" bucket="day" points={days([420, -120, 610])} format={count} />);
+    const values = container.querySelector<HTMLElement>(".os-time-chart-values");
+    expect(values?.dataset.belowZero).toBe("true");
+    expect([...container.querySelectorAll<HTMLElement>(".os-time-chart-values > span")].map((span) => [span.textContent, span.style.top])).toEqual([
+      ["1,000", "0%"],
+      ["500", `${(1 - 700 / 1200) * 100}%`],
+      ["0", `${(1 - 200 / 1200) * 100}%`],
+      ["-200", "100%"],
+    ]);
+    // Nothing below zero: the gutter spaces its labels as it always has.
+    rerender(<TimeChart label="Visitors" bucket="day" points={days([3, 5, 4])} format={count} />);
+    expect(container.querySelector<HTMLElement>(".os-time-chart-values")?.dataset.belowZero).toBeUndefined();
+    expect([...container.querySelectorAll<HTMLElement>(".os-time-chart-values > span")].map((span) => span.style.top)).toEqual(["", ""]);
+  });
+
+  it("hangs from zero at the top when nothing is above zero", () => {
+    const { container } = render(<TimeChart label="Net sales" bucket="day" points={days([-10, -36, -20])} format={count} />);
+    // The axis runs from -50 to 0: zero is the top rule, and the fill hangs from it.
+    expect([...container.querySelectorAll(".os-time-chart-values > span")].map((span) => span.textContent)).toEqual(["0", "-25", "-50"]);
+    expect(container.querySelector('.os-time-chart-grid[data-zero="true"]')?.getAttribute("y1")).toBe("0");
+    expect(seriesPath(container, "current")?.getAttribute("d")).toBe("M0 32 L300 115.2 L600 64");
+    expect(container.querySelector('path[data-area="current"]')?.getAttribute("d")).toBe("M0 0 L0 32 L300 115.2 L600 64 L600 0 Z");
+  });
+
+  it("draws a series of zeros as it always has", () => {
+    const { container } = render(<TimeChart label="Visitors" bucket="day" points={days([0, 0, 0])} format={count} />);
+    expect(seriesPath(container, "current")?.getAttribute("d")).toBe("M0 160 L300 160 L600 160");
+    expect(container.querySelector('path[data-area="current"]')?.getAttribute("d")).toBe("M0 160 L0 160 L300 160 L600 160 L600 160 Z");
+    expect([...container.querySelectorAll(".os-time-chart-values > span")].map((span) => span.textContent)).toEqual(["1", "0"]);
+    expect(container.querySelector(".os-time-chart-values")?.hasAttribute("data-below-zero")).toBe(false);
+    expect(container.querySelector(".os-time-chart-grid[data-zero]")).toBeNull();
+  });
+
+  it("leaves out a step whose rule would sit on another's", () => {
+    const labels = (container: HTMLElement) => [...container.querySelectorAll(".os-time-chart-values > span")].map((span) => span.textContent);
+    const lopsided = render(<TimeChart label="Net sales" bucket="day" points={days([-5000, 40, 10])} format={count} />).container;
+    expect(labels(lopsided)).toEqual(["0", "-5,000"]);
+    expect(lopsided.querySelectorAll(".os-time-chart-grid")).toHaveLength(2);
+    cleanup();
+    const huge = render(<TimeChart label="Net sales" bucket="day" points={days([-1, 1_000_000, 10])} format={count} />).container;
+    expect(labels(huge)).toEqual(["1,000,000", "500,000", "0"]);
+    cleanup();
+    const even = render(<TimeChart label="Net sales" bucket="day" points={days([20, -36, 55])} format={count} />).container;
+    expect(labels(even)).toEqual(["100", "50", "0", "-50"]);
+    cleanup();
+    const short = render(<TimeChart label="Net sales" bucket="day" points={days([20, -36, 55])} format={count} height={30} />).container;
+    expect(labels(short)).toEqual(["100", "0"]);
+  });
+
+  it("writes its value axis through axisFormat, and everything else through format", () => {
+    const whole = (value: number) => `${value} whole`;
+    const { container } = render(<TimeChart label="Net sales" bucket="day" points={days([20, -36, 55])} format={count} axisFormat={whole} />);
+    expect([...container.querySelectorAll(".os-time-chart-values > span")].map((span) => span.textContent)).toEqual(["100 whole", "50 whole", "0 whole", "-50 whole"]);
+    expect(container.querySelector("figcaption")?.textContent).toBe("Net sales: 3 points from Nov 2 to Nov 4; highest 55 on Nov 4.");
+    act(() => screen.getByRole("application", { name: "Net sales" }).focus());
+    expect(screen.getByRole("status").textContent).toBe("Nov 4: 55");
+  });
+
+  it("names its lowest step through the page's format, and keeps a whole-number axis whole", () => {
+    const { container } = render(<TimeChart label="Net sales" bucket="day" points={days([5, -3, 2])} format={count} />);
+    // -5 to 5: the half of the top is 2.5, which a whole-number axis leaves out.
+    expect([...container.querySelectorAll(".os-time-chart-values > span")].map((span) => span.textContent)).toEqual(["5", "0", "-5"]);
+  });
+});
+
+describe("in a store's time zone", () => {
+  it("labels its buckets, its readout and its summary in the time zone it is given", () => {
+    const points = [{ at: "2025-11-07T23:00:00Z", value: 1 }, { at: "2025-11-08T23:00:00Z", value: 2 }];
+    const { container } = render(<TimeChart label="Net sales" bucket="day" timeZone="Europe/Madrid" points={points} format={count} />);
+    expect(container.querySelector(".os-time-chart-times")?.textContent).toBe("Nov 8Nov 9");
+    expect(container.querySelector("figcaption")?.textContent).toBe("Net sales: 2 points from Nov 8 to Nov 9; highest 2 on Nov 9.");
+    act(() => screen.getByRole("application", { name: "Net sales" }).focus());
+    expect(screen.getByRole("status").textContent).toBe("Nov 9: 2");
+    cleanup();
+    const utc = render(<TimeChart label="Net sales" bucket="day" points={points} format={count} />).container;
+    expect(utc.querySelector(".os-time-chart-times")?.textContent).toBe("Nov 7Nov 8");
+  });
+});
+
 describe("the readout", () => {
   it("arrow keys move the readout", () => {
     render(
