@@ -45,3 +45,18 @@ func TestRecordingPausedIsOneSentenceThatNamesNobody(t *testing.T) {
 		t.Errorf("recording paused is read as another of the contract's answers: %v", err)
 	}
 }
+
+// THE HELD SENTENCE IS PINNED. A hold stores this exact text on the delivery,
+// and the held read (the runtime's Store.InboundRequestsHeld) finds a held
+// delivery by asking for exactly this text. Reworded, every delivery held
+// under the earlier text is never found again: it stays held when recording
+// resumes, with no next try, and is never counted. A change to the sentence
+// must ALSO return the rows held under the earlier text -- read them by the
+// old sentence and put them back in line, or restamp them with the new one --
+// in the same change, and then move this literal.
+func TestTheHeldSentenceIsPinned(t *testing.T) {
+	const held = "connector: recording is paused, so this delivery is held; it goes back in line when recording resumes"
+	if got := ErrRecordingPaused.Error(); got != held {
+		t.Fatalf("ErrRecordingPaused reads %q, pinned as %q: the deliveries held under the pinned text must be returned before it changes", got, held)
+	}
+}
