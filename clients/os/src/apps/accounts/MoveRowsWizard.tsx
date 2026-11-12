@@ -44,8 +44,8 @@ export interface MoveRowsWizardProps {
   subject: string;
   breadcrumbs?: readonly Breadcrumb[];
   back: { label: string; onSelect: () => void };
-  /** The move returned: the pages behind this one read again. */
-  onMoved: () => void;
+  /** The move returned, with what it did: the pages behind this one read again. */
+  onMoved: (plan: MovePlan) => void;
   /** Leave the wizard: Cancel before the move, Done after it. */
   onClose: () => void;
 }
@@ -127,7 +127,7 @@ export function MoveRowsWizard({
       const plan = await calls.move(rows, to);
       setMove({ state: "done", plan, error: "" });
       setStep("done");
-      onMoved();
+      onMoved(plan);
     } catch (err: unknown) {
       setMove({ state: "failed", plan: null, error: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -225,6 +225,16 @@ export function MoveRowsWizard({
     acts.push(cancel, { label: "Move", tone: "primary", onAct: () => void runMove() });
   }
 
+  // NOT LEFT WHILE THE WRITE IS IN FLIGHT. The floor offers no way out then,
+  // and neither do the trail's crumbs or Back: leaving would hide a move that
+  // still lands, and its answer would have nowhere to be read.
+  const leave = () => {
+    if (move.state !== "running") back.onSelect();
+  };
+  const guardedCrumbs = breadcrumbs?.map((crumb) =>
+    crumb.onSelect === undefined ? crumb : { ...crumb, onSelect: () => { if (move.state !== "running") crumb.onSelect!(); } },
+  );
+
   const notices =
     move.state === "failed" ? (
       <Notice tone="error" sentence="The rows were not moved." next="Nothing was moved." detail={move.error} />
@@ -237,8 +247,8 @@ export function MoveRowsWizard({
       icon={<ArrowRightLeft size={20} aria-hidden />}
       title={title}
       label={title}
-      breadcrumbs={breadcrumbs}
-      back={back}
+      breadcrumbs={guardedCrumbs}
+      back={{ label: back.label, onSelect: leave }}
       steps={steps}
       open={step}
       onOpen={(id) => {
@@ -267,7 +277,7 @@ function PlanFacts({ plan, verb }: { plan: MovePlan; verb: "would" | "did" }) {
           <Subhead>{verb === "would" ? "Moves" : "Moved"}</Subhead>
           <Facts>
             {plan.moves.map((m) => (
-              <Fact key={m.concept} label={kindName(m.concept)} value={rowsPhrase(m.rows)} title={m.concept} />
+              <Fact key={m.concept} label={kindName(m.concept)} value={rowsPhrase(m.rows)} />
             ))}
           </Facts>
         </>
@@ -277,7 +287,7 @@ function PlanFacts({ plan, verb }: { plan: MovePlan; verb: "would" | "did" }) {
           <Subhead>Follows</Subhead>
           <Facts>
             {plan.follows.map((f) => (
-              <Fact key={f.concept} label={kindName(f.concept)} value={rowsPhrase(f.rows)} title={f.concept} />
+              <Fact key={f.concept} label={kindName(f.concept)} value={rowsPhrase(f.rows)} />
             ))}
           </Facts>
         </>
@@ -291,7 +301,6 @@ function PlanFacts({ plan, verb }: { plan: MovePlan; verb: "would" | "did" }) {
                 key={`${r.concept} ${r.reason}`}
                 label={kindName(r.concept)}
                 value={`${rowsPhrase(r.rows)}. ${refusalSentence(r.reason)}`}
-                title={r.concept}
               />
             ))}
           </Facts>

@@ -257,3 +257,26 @@ describe("NextPage, guarded on progress", () => {
     expect(screen.queryByText("End of list")).toBeNull();
   });
 });
+
+describe("NextPage, a feed that says nothing of its progress", () => {
+  it("does not state the end after a load that rejected without saying why", async () => {
+    let hasMore = true;
+    let rerender: () => void = () => {};
+    function Bare() {
+      const [, set] = useState(0);
+      rerender = () => set((n) => n + 1);
+      const feed = {
+        hasMore,
+        loadingMore: false,
+        loadMoreError: "",
+        loadMore: async () => { throw new Error("dropped"); },
+      };
+      return <NextPage feed={feed} />;
+    }
+    const view = render(<Bare />);
+    await act(async () => intersect(view.container.querySelector(".os-next-page-sentinel")!));
+    hasMore = false;
+    await act(async () => rerender());
+    expect(screen.queryByText("End of list")).toBeNull();
+  });
+});

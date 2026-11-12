@@ -99,6 +99,9 @@ async function openArtifacts(conn: Conn) {
   return screen.findByRole("heading", { name: "artifact" });
 }
 
+/** The list item that holds a row's visible name. */
+const lineOf = (name: string) => screen.getAllByRole("listitem").find((li) => within(li).queryByText(name) !== null)!;
+
 const crumbs = () => within(screen.getByRole("navigation", { name: "Breadcrumbs" })).getAllByRole("listitem").map((li) => li.textContent);
 
 /** The bar on the window's bottom edge. */
@@ -144,6 +147,7 @@ describe("a kind's rows", () => {
     });
     await openArtifacts(conn);
     await screen.findByText("Brief.pdf");
+    // The sentinel has no role or text of its own; it is found by its class.
     const sentinel = document.querySelector(".os-next-page-sentinel")!;
     await act(async () => intersect(sentinel));
     expect(await screen.findByText("Contract.docx")).toBeTruthy();
@@ -196,7 +200,8 @@ describe("choosing rows", () => {
     expect(within(bar()!).getByText("1 row selected")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Contract\.docx/ }));
     expect(within(bar()!).getByText("2 rows selected")).toBeTruthy();
-    expect(within(bar()!).getAllByRole("button").map((b) => b.textContent)).toEqual(["Move to account"]);
+    // One act, and the quiet way to let go of everything.
+    expect(within(bar()!).getAllByRole("button").map((b) => b.textContent)).toEqual(["Clear", "Move to account"]);
     // Choosing again lets go.
     fireEvent.click(first);
     fireEvent.click(screen.getByRole("button", { name: /Contract\.docx/ }));
@@ -208,11 +213,94 @@ describe("choosing rows", () => {
     await openArtifacts(conn);
     const follower = await screen.findByText("Brief.pdf, page 2");
     expect(follower.closest("button")).toBeNull();
-    const line = follower.closest(".os-record-row") as HTMLElement;
-    expect(within(line).getByText("Moves with the row it belongs to")).toBeTruthy();
+    expect(within(lineOf("Brief.pdf, page 2")).getByText("Moves with the row it belongs to")).toBeTruthy();
     fireEvent.click(follower);
     expect(bar()).toBeNull();
   });
+
+  it("names the kind a follower moves with, when the answer says", async () => {
+    const conn = connection({ accountRows: () => [
+      row("r3", "Brief.pdf, page 2", { followsParent: true, parentConcept: "v1:work:goal" }),
+      { kind: "page", nextCursor: "" },
+    ] });
+    await openArtifacts(conn);
+    await screen.findByText("Brief.pdf, page 2");
+    const line = lineOf("Brief.pdf, page 2");
+    expect(within(line).getByText("Moves with its goal")).toBeTruthy();
+    expect(within(line).queryByText("Moves with the row it belongs to")).toBeNull();
+    // The concept id itself is never on screen.
+    expect(line.textContent).not.toContain("v1:work:goal");
+  });
+
+  it("keeps the choice when the next page loads", async () => {
+    const conn = connection({
+      accountRows: (call) => call.includes('after: "c2"')
+        ? [row("r4", "Invoice.pdf"), { kind: "page", nextCursor: "" }]
+        : [row("r1", "Brief.pdf"), { kind: "page", nextCursor: "c2" }],
+    });
+    await openArtifacts(conn);
+    fireEvent.click(await screen.findByRole("button", { name: /Brief\.pdf/ }));
+    // The sentinel has no role or text of its own; it is found by its class.
+    await act(async () => intersect(document.querySelector(".os-next-page-sentinel")!));
+    fireEvent.click(await screen.findByRole("button", { name: /Invoice\.pdf/ }));
+    expect(screen.getByRole("button", { name: /Brief\.pdf/ }).getAttribute("aria-pressed")).toBe("true");
+    expect(within(bar()!).getByText("2 rows selected")).toBeTruthy();
+  });
+
+  it("keeps the choice across a search, says how many are not shown, and moves them all", async () => {
+    const conn = connection({
+      accountRows: (call) => call.includes('search: "con"')
+        ? [row("r2", "Contract.docx"), { kind: "page", nextCursor: "" }]
+        : ROWS(),
+    });
+    await openArtifacts(conn);
+    fireEvent.click(await screen.findByRole("button", { name: /Brief\.pdf/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Contract\.docx/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Search rows of artifact" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: "con" } });
+    await waitFor(() => expect(screen.queryByText("Brief.pdf")).toBeNull());
+    expect(within(bar()!).getByText("2 rows selected, 1 not shown")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Contract\.docx/ }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Move to account" }));
+    expect(await screen.findByRole("heading", { name: "Move rows" })).toBeTruthy();
+    expect(screen.getByText("2 rows of artifact")).toBeTruthy();
+  });
+
+  it("empties the choice with Clear, shown or not", async () => {
+    const conn = connection({
+      accountRows: (call) => call.includes('search: "con"')
+        ? [row("r2", "Contract.docx"), { kind: "page", nextCursor: "" }]
+        : ROWS(),
+    });
+    await openArtifacts(conn);
+    fireEvent.click(await screen.findByRole("button", { name: /Brief\.pdf/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Search rows of artifact" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: "con" } });
+    await waitFor(() => expect(screen.queryByText("Brief.pdf")).toBeNull());
+    expect(within(bar()!).getByText("1 row selected, 1 not shown")).toBeTruthy();
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Clear" }));
+    expect(bar()).toBeNull();
+  });
+
+  it("says at most 500 rows move at once, and offers no act past it", async () => {
+    const many = Array.from({ length: 501 }, (_, i) => row(`m${i}`, `Item ${i}`));
+    const conn = connection({ accountRows: () => [...many, { kind: "page", nextCursor: "" }] });
+    await openArtifacts(conn);
+    await screen.findByText("Item 0");
+    // Found once: the rows keep their elements as the choice changes, and a
+    // role query over 501 buttons per click takes minutes.
+    const items = screen.getAllByRole("button", { name: /^Item \d+$/ });
+    expect(items).toHaveLength(501);
+    for (let i = 0; i < 500; i += 1) fireEvent.click(items[i]!);
+    expect(within(bar()!).getByText("500 rows selected")).toBeTruthy();
+    expect(within(bar()!).getByRole("button", { name: "Move to account" })).toBeTruthy();
+    fireEvent.click(items[500]!);
+    expect(within(bar()!).getByText("501 rows selected")).toBeTruthy();
+    expect(within(bar()!).getByText(/^At most 500 rows/)).toBeTruthy();
+    expect(within(bar()!).queryByRole("button", { name: "Move to account" })).toBeNull();
+    // The way out stays.
+    expect(within(bar()!).getByRole("button", { name: "Clear" })).toBeTruthy();
+  }, 30_000);
 });
 
 describe("the wizard", () => {
@@ -308,10 +396,53 @@ describe("the wizard", () => {
     pressInBar("Move");
     expect(await screen.findByText("the destination account is archived")).toBeTruthy();
     expect(screen.getByText("The rows were not moved.")).toBeTruthy();
+    // The choice behind the wizard is untouched by a move that failed.
+    pressInBar("Cancel");
+    expect(await screen.findByRole("heading", { name: "artifact" })).toBeTruthy();
+    expect(within(bar()!).getByText("2 rows selected")).toBeTruthy();
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Move to account" }));
+    await screen.findByRole("heading", { name: "Move rows" });
+    chooseOption(screen.getByRole("combobox", { name: "Destination account" }), "Borden Ltd");
+    await screen.findByText("Moves");
+    pressInBar("Move");
+    expect(await screen.findByText("the destination account is archived")).toBeTruthy();
     fail = false;
     pressInBar("Try again");
     await waitFor(() => expect(within(bar()!).getByText("Moved")).toBeTruthy());
-    expect(callsTo(conn, "accountRowsMove").filter((c) => c.includes("preview: false"))).toHaveLength(2);
+    expect(callsTo(conn, "accountRowsMove").filter((c) => c.includes("preview: false"))).toHaveLength(3);
+  });
+
+  it("keeps the refused rows chosen after a move, and lets the moved ones go", async () => {
+    await startMove({
+      accountRowsMove: (call) => call.includes("preview: true")
+        ? [{ kind: "wouldMove", concept: "v1:library:artifact", rows: 1 }, { kind: "refused", concept: "v1:library:artifact", id: "r2", reason: "same_account" }]
+        : [{ kind: "moved", concept: "v1:library:artifact", rows: 1 }, { kind: "refused", concept: "v1:library:artifact", id: "r2", reason: "same_account" }],
+    });
+    chooseOption(screen.getByRole("combobox", { name: "Destination account" }), "Borden Ltd");
+    await screen.findByText("Moves");
+    pressInBar("Move");
+    await waitFor(() => expect(within(bar()!).getByText("Moved")).toBeTruthy());
+    pressInBar("Done");
+    expect(await screen.findByRole("heading", { name: "artifact" })).toBeTruthy();
+    await waitFor(() => expect(within(bar()!).getByText("1 row selected")).toBeTruthy());
+    expect(screen.getByRole("button", { name: /Contract\.docx/ }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /Brief\.pdf/ }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("is not left by its back while the move is in flight", async () => {
+    let finish: (rows: Row[]) => void = () => {};
+    await startMove({
+      accountRowsMove: (call) => call.includes("preview: true") ? PREVIEW : new Promise<Row[]>((resolve) => { finish = resolve; }),
+    });
+    chooseOption(screen.getByRole("combobox", { name: "Destination account" }), "Borden Ltd");
+    await screen.findByText("Moves");
+    pressInBar("Move");
+    await waitFor(() => expect(within(bar()!).getByText("Moving rows")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Back to artifact" }));
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Breadcrumbs" })).getByRole("button", { name: "artifact" }));
+    expect(screen.getByRole("heading", { name: "Move rows" })).toBeTruthy();
+    await act(async () => finish(MOVED as never));
+    await waitFor(() => expect(within(bar()!).getByText("Moved")).toBeTruthy());
   });
 
   it("keeps a failed preview on screen with a retry, and offers no Move", async () => {
@@ -325,11 +456,25 @@ describe("the wizard", () => {
     expect(await screen.findByText("Moves")).toBeTruthy();
   });
 
-  it("goes back to the rows with their choice on Cancel", async () => {
-    await startMove({ accountRowsMove: () => PREVIEW });
+  it("goes back to the rows with their choice on Cancel, having written nothing", async () => {
+    const conn = await startMove({ accountRowsMove: () => PREVIEW });
+    chooseOption(screen.getByRole("combobox", { name: "Destination account" }), "Borden Ltd");
+    await screen.findByText("Moves");
     pressInBar("Cancel");
     expect(await screen.findByRole("heading", { name: "artifact" })).toBeTruthy();
     expect(within(bar()!).getByText("2 rows selected")).toBeTruthy();
+    // Only the preview was asked; nothing was moved.
+    expect(callsTo(conn, "accountRowsMove")).toHaveLength(1);
+    expect(callsTo(conn, "accountRowsMove").every((c) => c.includes("preview: true"))).toBe(true);
+  });
+
+  it("names an unknown refusal plainly, never by its code", async () => {
+    await startMove({ accountRowsMove: () => [{ kind: "refused", concept: "v1:x:thing", id: "r1", reason: "brand_new_reason" }] });
+    chooseOption(screen.getByRole("combobox", { name: "Destination account" }), "Borden Ltd");
+    expect(await screen.findByText("1 row. It cannot be moved.")).toBeTruthy();
+    expect(screen.queryByText(/brand_new_reason/)).toBeNull();
+    // No raw concept id behind a fact either.
+    expect(document.querySelector('[title="v1:x:thing"]')).toBeNull();
   });
 });
 
@@ -395,6 +540,16 @@ describe("on the primary account", () => {
       'builtin accountConflictLeaveOut(concept: "v1:shopify:store", rowId: "store-7", conflict: "store_bound_twice")',
     ]));
     await waitFor(() => expect(callsTo(conn, "accountUnplaced").length).toBeGreaterThan(1));
+  });
+
+  it("names an unknown conflict plainly, never by its code", async () => {
+    const conn = connection({ accountUnplaced: () => [
+      { kind: "conflict", concept: "v1:shopify:store", rowId: "store-9", conflict: "brand_new_conflict", detail: "", candidates: [], foundAt: "" },
+    ] });
+    const data = await openData(conn, "Our Studio");
+    const awaiting = await within(data).findByRole("region", { name: "Awaiting a decision" });
+    expect(await within(awaiting).findByText("It needs a decision.")).toBeTruthy();
+    expect(within(awaiting).queryByText(/brand_new_conflict/)).toBeNull();
   });
 
   it("keeps a refused leave-out in the engine's words, with a retry", async () => {

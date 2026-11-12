@@ -30,7 +30,7 @@ import { useMoveCalls } from "./useAccounts";
 // out for good, which records the decision and leaves the row in no account.
 // Leaving out cannot be taken back here, so it asks in place, naming the row.
 
-/** A conflict's code in words. Anything else reads as the engine sent it. */
+/** A conflict's code in words. A code this client does not know gets a plain sentence, never itself. */
 function conflictSentence(conflict: OpenConflict): string {
   if (conflict.detail !== "") return conflict.detail;
   switch (conflict.conflict) {
@@ -39,7 +39,7 @@ function conflictSentence(conflict: OpenConflict): string {
     case "library_fence_refused":
       return "Its folder and its own account disagree.";
     default:
-      return conflict.conflict;
+      return "It needs a decision.";
   }
 }
 

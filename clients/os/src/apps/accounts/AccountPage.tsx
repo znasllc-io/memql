@@ -10,7 +10,7 @@ import type { ArchiveAccountState, UpdateAccountState } from "./actions";
 import { AccountDataTab, type AccountDataMoves } from "./AccountDataTab";
 import { AccountRows } from "./AccountRows";
 import { MoveRowsWizard, rowsSubject } from "./MoveRowsWizard";
-import { kindName, type RowRef } from "./moves";
+import { kindName, rowKey, type MovePlan, type RowRef } from "./moves";
 import { AccountDetailsTab } from "./AccountDetailsTab";
 import { AccountPeopleTab } from "./AccountPeopleTab";
 import { AccountSettingsTab } from "./AccountSettingsTab";
@@ -164,7 +164,18 @@ export function AccountPage({
   // Bumped when a move returns or a conflict is left out: every read behind
   // the wizard is taken again, in the background.
   const [revision, setRevision] = useState(0);
-  const changed = () => setRevision((n) => n + 1);
+  // The rows the last move REFUSED, as `concept id` keys: they stay chosen on
+  // the rows page, so what is still chosen is what still needs a decision.
+  // Empty after any other change.
+  const [refused, setRefused] = useState<ReadonlySet<string>>(() => new Set());
+  const changed = () => {
+    setRefused(new Set());
+    setRevision((n) => n + 1);
+  };
+  const movedRows = (plan: MovePlan) => {
+    setRefused(new Set(plan.refused.map((r) => rowKey(r.concept, r.id))));
+    setRevision((n) => n + 1);
+  };
 
   const toData = () => {
     setKindPage(null);
@@ -282,6 +293,7 @@ export function AccountPage({
               })
             }
             revision={revision}
+            refused={refused}
           />
         </div>
       ) : null}
@@ -299,7 +311,7 @@ export function AccountPage({
               : [...accountCrumbs, { label: "Data", onSelect: closeMove }, { label: movePage.title }]
           }
           back={{ label: movePage.from === "rows" && kindPage !== null ? kindPage.kind : "Data", onSelect: closeMove }}
-          onMoved={changed}
+          onMoved={movedRows}
           onClose={closeMove}
         />
       ) : null}

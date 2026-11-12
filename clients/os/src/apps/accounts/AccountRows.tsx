@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   Button,
@@ -15,7 +15,7 @@ import { ActionBar, type Act } from "../../kit/ActionBar";
 import type { Breadcrumb } from "../../kit/Breadcrumbs";
 import { useDebouncedValue, TEXT_DEBOUNCE_MS } from "../../logs/useDebouncedValue";
 import { rowsPhrase } from "./inventory";
-import { MOVE_LIMIT, type KindRow, type RowRef } from "./moves";
+import { kindName, MOVE_LIMIT, rowKey, type KindRow, type RowRef } from "./moves";
 import { useKindRows } from "./useAccounts";
 
 // THE ROWS OF ONE KIND IN ONE ACCOUNT, as a page under the trail (design record
@@ -49,20 +49,38 @@ export interface AccountRowsProps {
   onBack: () => void;
   /** Opens the wizard on the chosen rows. */
   onMove: (rows: readonly RowRef[]) => void;
-  /** Bumped after a move this page's account took part in: read again, and clear the choice. */
+  /** Bumped after a move or a decision: read again, and let go of the choice. */
   revision: number;
+  /**
+   * The rows the last move refused (`rowKey`). They stay chosen through the
+   * revision that follows, so what is still chosen is what still needs a
+   * decision; everything else is let go.
+   */
+  refused?: ReadonlySet<string>;
 }
 
-export function AccountRows({ accountId, concept, kind, breadcrumbs, onBack, onMove, revision }: AccountRowsProps) {
+const NOTHING_REFUSED: ReadonlySet<string> = new Set();
+
+export function AccountRows({ accountId, concept, kind, breadcrumbs, onBack, onMove, revision, refused = NOTHING_REFUSED }: AccountRowsProps) {
   const [searchText, setSearchText] = useState("");
   const search = useDebouncedValue(searchText.trim(), TEXT_DEBOUNCE_MS);
   const feed = useKindRows(accountId, concept, search, revision);
   // Chosen rows by id. KEPT ACROSS A SEARCH: narrowing the list to find one
   // more row must not drop the ones already chosen.
   const [chosen, setChosen] = useState<ReadonlyMap<string, KindRow>>(() => new Map());
-  // A move has happened: whatever was chosen has gone, or stayed refused, and
-  // the list is read again.
-  useEffect(() => setChosen(new Map()), [revision]);
+  // A move has happened: what moved is let go, what was refused stays chosen,
+  // and the list is read again. Keyed on the revision alone: the refused set
+  // arrives with it.
+  const refusedNow = useRef(refused);
+  refusedNow.current = refused;
+  const firstRevision = useRef(true);
+  useEffect(() => {
+    if (firstRevision.current) {
+      firstRevision.current = false;
+      return;
+    }
+    setChosen((held) => new Map([...held].filter(([, r]) => refusedNow.current.has(rowKey(r.concept || concept, r.id)))));
+  }, [revision]);
 
   const toggle = (row: KindRow) =>
     setChosen((held) => {
@@ -104,9 +122,15 @@ export function AccountRows({ accountId, concept, kind, breadcrumbs, onBack, onM
 
   const picked = [...chosen.values()];
   const tooMany = picked.length > MOVE_LIMIT;
-  const acts: Act[] = tooMany
-    ? []
-    : [{ label: "Move to account", tone: "primary", onAct: () => onMove(picked.map((r) => ({ concept: r.concept || concept, id: r.id }))) }];
+  // CHOSEN BUT NOT SHOWN: a search can hide rows already chosen, and they
+  // still move. The bar says how many, and Clear lets go of all of them, so
+  // nothing moves that the person cannot account for.
+  const shown = new Set(feed.rows.map((r) => r.id));
+  const hidden = picked.filter((r) => !shown.has(r.id)).length;
+  const acts: Act[] = [{ label: "Clear", text: true, onAct: () => setChosen(new Map()) }];
+  if (!tooMany) {
+    acts.push({ label: "Move to account", tone: "primary", onAct: () => onMove(picked.map((r) => ({ concept: r.concept || concept, id: r.id }))) });
+  }
 
   // NO FILTER CHROME OVER NO CONTENT (rule 2): the search is offered once
   // there is something to search, and stays while a search is being asked.
@@ -125,7 +149,7 @@ export function AccountRows({ accountId, concept, kind, breadcrumbs, onBack, onM
       {body}
       {picked.length === 0 ? null : (
         <ActionBar
-          state={`${rowsPhrase(picked.length)} selected`}
+          state={`${rowsPhrase(picked.length)} selected${hidden === 0 ? "" : `, ${hidden.toLocaleString("en-US")} not shown`}`}
           detail={tooMany ? `At most ${MOVE_LIMIT.toLocaleString("en-US")} rows move at once.` : undefined}
           acts={acts}
         />
@@ -137,11 +161,14 @@ export function AccountRows({ accountId, concept, kind, breadcrumbs, onBack, onM
 function KindRowLine({ row, chosen, onToggle }: { row: KindRow; chosen: boolean; onToggle: () => void }) {
   const name = row.primary || row.id;
   if (row.followsParent) {
-    // NOT A CHOICE, AND IT SAYS WHY ON THE ROW rather than in a tooltip only.
-    // The answer carries that the row follows, and not which row it follows.
+    // NOT A CHOICE, AND IT SAYS WHY ON THE ROW rather than in a tooltip only:
+    // the kind it moves with, named as the inventory names kinds, when the
+    // answer carries it (`parentConcept`), and a plain sentence when not.
     return (
       <RecordRow name={name} secondary={row.secondary || undefined}>
-        <span className="os-caption">Moves with the row it belongs to</span>
+        <span className="os-caption">
+          {row.parentConcept === "" ? "Moves with the row it belongs to" : `Moves with its ${kindName(row.parentConcept)}`}
+        </span>
         {row.status === "" ? null : <span className="os-caption">{row.status}</span>}
       </RecordRow>
     );

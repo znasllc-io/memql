@@ -26,6 +26,8 @@ export interface KindRow {
   updatedAt: string;
   /** The row moves when its parent moves, and cannot be chosen on its own. */
   followsParent: boolean;
+  /** The kind it follows, as a concept id; empty when the answer does not say. */
+  parentConcept: string;
 }
 
 /** One page of a kind's rows. `nextCursor` is empty on the last page. */
@@ -74,6 +76,11 @@ export interface Unplaced {
 export interface RowRef {
   concept: string;
   id: string;
+}
+
+/** One row of one kind, as a key: ids are unique within a kind only. */
+export function rowKey(concept: string, id: string): string {
+  return `${concept}\u001f${id}`;
 }
 
 /** The engine's limit on rows in one move. */
@@ -128,6 +135,7 @@ export function kindRowsFromRows(rows: readonly Row[]): KindRowsPage {
           createdAt: text(row["createdAt"]),
           updatedAt: text(row["updatedAt"]),
           followsParent: bool(row["followsParent"]),
+          parentConcept: text(row["parentConcept"]),
         });
         break;
       }
@@ -213,8 +221,8 @@ export function refusedByKind(plan: MovePlan): { concept: string; reason: string
 /**
  * Why the engine refused to move a row, in a sentence.
  *
- * A CLOSED SET on the engine's side; an unknown reason is shown as the
- * engine sent it, rather than dressed as one of these.
+ * A CLOSED SET on the engine's side. A reason this client does not know yet
+ * gets one plain sentence rather than its code: no code reaches the screen.
  */
 export function refusalSentence(reason: string): string {
   switch (reason) {
@@ -235,7 +243,7 @@ export function refusalSentence(reason: string): string {
     case "not_found":
       return "These rows were not found; they may have been removed.";
     default:
-      return reason;
+      return "It cannot be moved.";
   }
 }
 

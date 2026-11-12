@@ -59,22 +59,28 @@ export function NextPage({ feed, label = "Loading more", rows = 3 }: {
   // load has settled. Null before the first load.
   const mark = useRef<{ progress: unknown } | null>(null);
   const [settled, setSettled] = useState(false);
+  // The last load's promise rejected. A feed is meant to say why on
+  // `loadMoreError`; one that rejects without saying has still not grown.
+  const [rejected, setRejected] = useState(false);
   const feedRef = useRef(feed);
   feedRef.current = feed;
 
   const load = useRef(() => {
     mark.current = { progress: feedRef.current.progress };
     setSettled(false);
+    setRejected(false);
     setAsking(true);
     setAsked((n) => n + 1);
-    const settle = () => {
+    const settle = (ok: boolean) => {
       if (!mounted.current) return;
       setAsking(false);
+      setRejected(!ok);
       setSettled(true);
     };
     // A feed reports its own failure on `loadMoreError`; a rejection is
-    // settled the same way rather than left unhandled.
-    void feedRef.current.loadMore().then(settle, settle);
+    // settled the same way rather than left unhandled, and never counts as
+    // a page that arrived.
+    void feedRef.current.loadMore().then(() => settle(true), () => settle(false));
   }).current;
 
   const busy = asking || feed.loadingMore;
@@ -92,8 +98,8 @@ export function NextPage({ feed, label = "Loading more", rows = 3 }: {
   // did not fail and, where the feed says, something actually arrived. A feed
   // that stops offering more after a failure has not grown.
   useEffect(() => {
-    if (settled && !busy && !failed && (moved || feed.progress === undefined)) setGrew(true);
-  }, [settled, busy, failed, moved, feed.progress]);
+    if (settled && !busy && !failed && !rejected && (moved || feed.progress === undefined)) setGrew(true);
+  }, [settled, busy, failed, rejected, moved, feed.progress]);
 
   // A NEW OBSERVER EVERY TIME IT RE-ARMS. An observer reports a target's
   // state when it starts watching, so a sentinel still in view after a short
