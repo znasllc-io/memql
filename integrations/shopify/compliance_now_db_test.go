@@ -2508,7 +2508,7 @@ func TestTheRememberedIdsDeleteOnlyTheStoresOwnUninstallDeliveries(t *testing.T)
 // what the connector decides on. The mutation is server-only, so a cluster
 // owner who calls it as a client is refused and the row is as it was; the
 // connector's own write of a key goes through.
-func TestAStoresHealthIsWrittenByTheConnectorAlone(t *testing.T) {
+func TestTheHealthMutationRefusesAClient(t *testing.T) {
 	r := newRunnerFixture(t)
 	if r == nil {
 		return

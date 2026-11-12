@@ -105,7 +105,9 @@ mutation store setStoreStatus {
 /// once-only erasure work ran; the deliveries an uninstall arrived by, which
 /// are deleted when the store is connected again. A client-callable version
 /// would let a caller silence a store's alert, or mark erasure work done that
-/// never ran.
+/// never ran. This reserves the named mutation: the store's row can still be
+/// written whole by a cluster owner, the installation's own operator, through
+/// the language's raw insert.
 @serverOnly
 mutation store recordStoreHealth {
   args {
