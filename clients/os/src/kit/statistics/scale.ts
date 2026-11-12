@@ -20,6 +20,19 @@ export function niceMax(max: number): number {
 }
 
 /**
+ * The floor of a value axis: zero for a value at or above zero, and below
+ * zero the round number `niceMax` would give its size, negated (-36 gives
+ * -50). A figure that cannot be below zero keeps the axis it always had,
+ * which starts at zero; a net figure whose refunds outweigh a day's sales
+ * reaches down to a round floor. Anything that is not a finite number gives
+ * zero, as `niceMax` gives its own default.
+ */
+export function niceMin(min: number): number {
+  if (!(min < 0) || !Number.isFinite(min)) return 0;
+  return -niceMax(-min);
+}
+
+/**
  * `step` times ten to `exponent`. A negative power DIVIDES by the positive
  * one, because a negative power of ten has no exact binary form: `2 * 10 ** -4`
  * is 0.00019999999999999998 where `2 / 10 ** 4` is 0.0002, and an axis top
@@ -30,17 +43,20 @@ function scaled(step: number, exponent: number): number {
 }
 
 /**
- * The value axis's labelled steps: zero, half the top, and the top.
+ * The value axis's labelled steps: zero, half the top, and the top -- and,
+ * when `min` is below zero, its floor (`niceMin`) beneath them.
  *
  * For a series of whole numbers -- visitors, sends -- the middle step is left
  * out when it is not a whole number itself: an axis of 5 reads "0, 5", never
  * "0, 2.5, 5", because nobody was half a visitor. A rate or an average passes
  * `wholeNumbers` false and keeps its middle step.
  */
-export function valueTicks(max: number, wholeNumbers = false): number[] {
+export function valueTicks(max: number, wholeNumbers = false, min = 0): number[] {
   const top = niceMax(max);
   const half = top / 2;
-  return wholeNumbers && !Number.isInteger(half) ? [0, top] : [0, half, top];
+  const steps = wholeNumbers && !Number.isInteger(half) ? [0, top] : [0, half, top];
+  const floor = niceMin(min);
+  return floor < 0 ? [floor, ...steps] : steps;
 }
 
 /**

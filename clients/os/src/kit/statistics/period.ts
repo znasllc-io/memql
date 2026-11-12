@@ -13,6 +13,11 @@
 // DAYS ARE UTC (spec D5). The rollups turn over at 00:00 UTC, so a bucket is
 // labelled in UTC as well: a reader at UTC+2 sees the "Nov 8" the cluster
 // counted, not a day moved by their own clock.
+//
+// A STORE'S DAYS ARE ITS OWN. A store counts its days in its own time zone,
+// so a page that reads one passes that zone and the bucket is labelled as the
+// store's clock showed it: a bucket starting 23:00 UTC is "Nov 9" in a +01:00
+// zone. Still never the reader's own clock. Without a zone, UTC as above.
 
 export type Period = "24h" | "7d" | "30d" | "90d" | "12m";
 
@@ -58,22 +63,69 @@ function twoDigits(value: number): string {
   return String(value).padStart(2, "0");
 }
 
+/** The wall clock an instant reads on: its year, month (0 to 11), day, hour and minute. */
+interface Clock {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+}
+
+function utcClock(instant: Date): Clock {
+  return { year: instant.getUTCFullYear(), month: instant.getUTCMonth(), day: instant.getUTCDate(), hour: instant.getUTCHours(), minute: instant.getUTCMinutes() };
+}
+
+// One reader per zone, built on first use: a chart labels every tick, its
+// readout and its summary through here, and building an Intl formatter is the
+// expensive part. A zone Intl refuses is remembered as null and read as UTC.
+const zoneReaders = new Map<string, Intl.DateTimeFormat | null>();
+
+function zoneReader(timeZone: string): Intl.DateTimeFormat | null {
+  let reader = zoneReaders.get(timeZone);
+  if (reader !== undefined) return reader;
+  try {
+    reader = new Intl.DateTimeFormat("en-US", { timeZone, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric" });
+  } catch {
+    reader = null;
+  }
+  zoneReaders.set(timeZone, reader);
+  return reader;
+}
+
 /**
- * A bucket's label, in UTC: "14:00" for an hour, "Nov 8" for a day, "Nov 2026"
- * for a month.
+ * The clock an instant reads on in `timeZone`, or in UTC when there is no
+ * zone or one Intl refuses.
+ *
+ * The clock, not the elapsed time: on the day the clocks go back, the two
+ * buckets of the repeated hour both read 01:00, because that is what the
+ * store's clock showed for both of them.
+ */
+function clockOf(instant: Date, timeZone: string | undefined): Clock {
+  const reader = timeZone ? zoneReader(timeZone) : null;
+  if (reader === null) return utcClock(instant);
+  const parts = reader.formatToParts(instant);
+  const read = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((each) => each.type === type)?.value);
+  const clock: Clock = { year: read("year"), month: read("month") - 1, day: read("day"), hour: read("hour") % 24, minute: read("minute") };
+  return Object.values(clock).every(Number.isInteger) ? clock : utcClock(instant);
+}
+
+/**
+ * A bucket's label: "14:00" for an hour, "Nov 8" for a day, "Nov 2026" for a
+ * month. In UTC, or in `timeZone` when a page passes a store's own.
  *
  * An instant that does not parse is returned as written. It is a defect in
  * whatever produced it, and a label that shows the defect is more use than a
  * plausible date nobody stated.
  */
-export function bucketLabel(at: string, bucket: Bucket): string {
+export function bucketLabel(at: string, bucket: Bucket, timeZone?: string): string {
   const ms = Date.parse(at);
   if (Number.isNaN(ms)) return at;
-  const instant = new Date(ms);
-  if (bucket === "hour") return `${twoDigits(instant.getUTCHours())}:${twoDigits(instant.getUTCMinutes())}`;
-  const month = MONTHS[instant.getUTCMonth()] ?? "";
-  if (bucket === "day") return `${month} ${instant.getUTCDate()}`;
-  return `${month} ${instant.getUTCFullYear()}`;
+  const clock = clockOf(new Date(ms), timeZone);
+  if (bucket === "hour") return `${twoDigits(clock.hour)}:${twoDigits(clock.minute)}`;
+  const month = MONTHS[clock.month] ?? "";
+  if (bucket === "day") return `${month} ${clock.day}`;
+  return `${month} ${clock.year}`;
 }
 
 /**
@@ -84,9 +136,9 @@ export function bucketLabel(at: string, bucket: Bucket): string {
  * a one-sentence summary cannot. Twenty-four hours start and end on the same
  * hour, so a summary in hours alone reads "from 15:00 to 15:00".
  */
-export function bucketMoment(at: string, bucket: Bucket): string {
-  if (bucket !== "hour" || Number.isNaN(Date.parse(at))) return bucketLabel(at, bucket);
-  return `${bucketLabel(at, "day")}, ${bucketLabel(at, "hour")}`;
+export function bucketMoment(at: string, bucket: Bucket, timeZone?: string): string {
+  if (bucket !== "hour" || Number.isNaN(Date.parse(at))) return bucketLabel(at, bucket, timeZone);
+  return `${bucketLabel(at, "day", timeZone)}, ${bucketLabel(at, "hour", timeZone)}`;
 }
 
 /**

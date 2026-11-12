@@ -304,7 +304,9 @@ its chart, ranked lists side by side and Health), `view=overview` (an Overview
 whose figures are statistics), `view=charts` (hours, twelve months with no
 previous period, a rate with a gap, the first day counted, a small count, a
 previous period of lone days, this period unmeasured beside a measured
-previous one, nothing measured) and `view=states` (reading and empty). Hover the chart, then Tab into it and
+previous one, nothing measured), `view=store` (a net figure below zero beside
+a previous period, and hours in a store's zone across the night its clocks go
+back, where 01:00 is labelled twice) and `view=states` (reading and empty). Hover the chart, then Tab into it and
 use the arrow keys: one readout above the plot follows both. Check `mode=light`
 and `mode=dark`, and `width=narrow`, where five figures stand two to a row.
 

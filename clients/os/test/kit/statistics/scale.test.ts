@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { niceMax, timeTickIndexes, valueTicks } from "../../../src/kit/statistics/scale";
+import { niceMax, niceMin, timeTickIndexes, valueTicks } from "../../../src/kit/statistics/scale";
 
 // A chart's two axes. The value axis has three labelled steps from zero to a
 // round top; the time axis labels as many buckets as its width has room for,
@@ -96,5 +96,33 @@ describe("the labelled buckets of a time axis", () => {
   it("are the one bucket of a single point, and none of an empty series", () => {
     expect(timeTickIndexes(1, 8)).toEqual([0]);
     expect(timeTickIndexes(0, 8)).toEqual([]);
+  });
+});
+
+// The floor of a value axis that can be below zero: a net figure, say, where a
+// day of refunds outweighs its sales.
+describe("the floor of a value axis", () => {
+  it("answers zero for a floor at or above zero and a round number below it", () => {
+    expect(niceMin(0)).toBe(0);
+    expect(niceMin(12)).toBe(0);
+    expect(niceMin(-36)).toBe(-50);
+    expect(niceMin(-0.42)).toBe(-0.5);
+  });
+
+  it("answers zero for a floor that is not a number", () => {
+    expect(niceMin(Number.NaN)).toBe(0);
+    expect(niceMin(Number.NEGATIVE_INFINITY)).toBe(0);
+  });
+});
+
+describe("the value axis's steps below zero", () => {
+  it("runs from the floor through zero to the top", () => {
+    expect(valueTicks(55, true, -36)).toEqual([-50, 0, 50, 100]);
+    expect(valueTicks(55, false, -0.42)).toEqual([-0.5, 0, 50, 100]);
+    // The half of the top is left out of a whole-number axis as above zero.
+    expect(valueTicks(5, true, -3)).toEqual([-5, 0, 5]);
+    // A floor at or above zero is zero: the steps are those it has without one.
+    expect(valueTicks(55, true, 12)).toEqual([0, 50, 100]);
+    expect(valueTicks(55, true, 0)).toEqual(valueTicks(55, true));
   });
 });

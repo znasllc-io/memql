@@ -103,3 +103,55 @@ describe("a previous period a change may be drawn against", () => {
     expect(previousComparable("not a date", "2026-11-01")).toBe(false);
   });
 });
+
+// A store's buckets are labelled in its own time zone: the day a store's
+// clock showed, not the day UTC showed. Without a zone the labels are UTC,
+// as every page that does not name one reads today.
+describe("a bucket in a store's time zone", () => {
+  it("labels a bucket at 23:30 UTC as the next day in a +01:00 zone", () => {
+    expect(bucketLabel("2025-11-08T23:30:00Z", "day", "Europe/Madrid")).toBe("Nov 9");
+    expect(bucketLabel("2025-11-08T23:30:00Z", "day")).toBe("Nov 8");
+  });
+
+  it("labels a day west of UTC by the zone's own date", () => {
+    expect(bucketLabel("2025-11-08T08:00:00Z", "day", "America/Los_Angeles")).toBe("Nov 8");
+    expect(bucketLabel("2025-11-08T07:00:00Z", "day", "America/Los_Angeles")).toBe("Nov 7");
+  });
+
+  it("labels an hour in the zone, half-hour offsets included", () => {
+    expect(bucketLabel("2025-11-08T05:30:00Z", "hour", "Asia/Kolkata")).toBe("11:00");
+    expect(bucketLabel("2025-11-08T18:30:00Z", "day", "Asia/Kolkata")).toBe("Nov 9");
+  });
+
+  it("names an hour with its day in the zone", () => expect(bucketMoment("2025-11-08T23:30:00Z", "hour", "Europe/Madrid")).toBe("Nov 9, 00:30"));
+
+  it("labels a month by the zone's own month", () => {
+    expect(bucketLabel("2025-10-31T23:00:00Z", "month", "Europe/Madrid")).toBe("Nov 2025");
+    expect(bucketLabel("2025-10-31T23:00:00Z", "month")).toBe("Oct 2025");
+    expect(bucketMoment("2025-10-31T23:00:00Z", "month", "Europe/Madrid")).toBe("Nov 2025");
+  });
+
+  it("labels both of a fall-back day's repeated hours 01:00", () => {
+    expect(bucketLabel("2025-11-02T05:00:00Z", "hour", "America/New_York")).toBe("01:00");
+    expect(bucketLabel("2025-11-02T06:00:00Z", "hour", "America/New_York")).toBe("01:00");
+    expect(bucketLabel("2025-11-02T07:00:00Z", "hour", "America/New_York")).toBe("02:00");
+  });
+
+  it("labels midnight 00:00, never 24:00", () => expect(bucketLabel("2025-11-08T23:00:00Z", "hour", "Europe/Madrid")).toBe("00:00"));
+
+  it("reads a zone it does not know as UTC", () => {
+    expect(bucketLabel("2025-11-08T23:30:00Z", "day", "Not/AZone")).toBe("Nov 8");
+    expect(bucketMoment("2025-11-08T23:30:00Z", "hour", "Not/AZone")).toBe("Nov 8, 23:30");
+    expect(() => bucketLabel("2025-11-08T23:30:00Z", "day", "Not/AZone")).not.toThrow();
+  });
+
+  it("reads an empty zone as no zone", () => {
+    expect(bucketLabel("2025-11-08T23:30:00Z", "day", "")).toBe("Nov 8");
+    expect(bucketMoment("2025-11-08T23:30:00Z", "hour", "")).toBe("Nov 8, 23:30");
+  });
+
+  it("returns an instant that does not parse as written, zone or none", () => {
+    expect(bucketLabel("not a date", "day", "Europe/Madrid")).toBe("not a date");
+    expect(bucketMoment("not a date", "hour", "Europe/Madrid")).toBe("not a date");
+  });
+});

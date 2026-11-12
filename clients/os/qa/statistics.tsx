@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import { ScopeControl } from "../src/apps/accounts/ScopeControl";
 import { Head, Subhead } from "../src/kit";
 import { Overview } from "../src/kit/Overview";
+import { formatMoney } from "../src/kit/format";
 import { absent, figureOf } from "../src/kit/measure";
 import {
   PeriodControl,
@@ -29,7 +30,9 @@ import "../src/styles/index.css";
 // `view=page` (a statistics page: figures, chart, ranked lists, Health),
 // `view=overview` (an Overview whose figures are statistics), `view=charts`
 // (every chart state: gaps, hours, twelve months, a rate, one point, nothing)
-// and `view=states` (reading and empty). Fixtures only; nothing is read.
+// `view=store` (a store's money: a net figure below zero, and hours in the
+// store's own zone across the day its clocks go back) and `view=states`
+// (reading and empty). Fixtures only; nothing is read.
 
 const params = new URLSearchParams(location.search);
 const mode = params.get("mode") === "light" ? "light" : "dark";
@@ -173,6 +176,24 @@ function Charts() {
   </>;
 }
 
+function Store() {
+  const euros = formatMoney("EUR");
+  // A net figure: sales less refunds, a day of refunds outweighing its sales.
+  const net = series("2026-11-02T00:00:00Z", 14, DAY, (index) => [420, 380, -36, 510, 466, 290, 310, 455, -120, 398, 540, 610, 488, 520][index] ?? null);
+  const netBefore = series("2026-10-19T00:00:00Z", 14, DAY, (index) => [360, 340, 300, 410, 390, 210, 260, 380, 350, 30, 420, 470, 400, 430][index] ?? null);
+  // A store in New York, the night its clocks go back: eight hours from 23:00,
+  // in which 01:00 comes twice.
+  const fallBack = series("2025-11-02T03:00:00Z", 8, HOUR, (index) => [210, 140, 95, 60, 48, 72, 130, 260][index] ?? null);
+  const usd = formatMoney("USD");
+  return <>
+    <Head title="Store" />
+    <Subhead>Net sales, below zero on a day of refunds</Subhead>
+    <TimeChart label="Net sales" bucket="day" timeZone="Europe/Madrid" points={net} previous={netBefore} format={euros} />
+    <Subhead>By the hour in the store's zone, the night its clocks go back</Subhead>
+    <TimeChart label="Net sales" bucket="hour" timeZone="America/New_York" points={fallBack} format={usd} />
+  </>;
+}
+
 function States() {
   const reading = FIGURES.map((figure) => ({ ...figure, loading: true }));
   return <>
@@ -187,7 +208,7 @@ function States() {
 
 function Preview() {
   return <main className="os-window-content os-app-stack" style={{ maxWidth: narrow ? 390 : 1040, margin: "24px auto", background: "var(--os-glass-solid)", height: "calc(100dvh - 48px)", overflow: "auto" }}>
-    {view === "overview" ? <OverviewView /> : view === "charts" ? <Charts /> : view === "states" ? <States /> : <Page />}
+    {view === "overview" ? <OverviewView /> : view === "charts" ? <Charts /> : view === "store" ? <Store /> : view === "states" ? <States /> : <Page />}
   </main>;
 }
 

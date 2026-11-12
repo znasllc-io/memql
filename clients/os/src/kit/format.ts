@@ -88,6 +88,34 @@ export function formatCount(value: number): string {
 }
 
 /**
+ * Money in `currency` (an ISO 4217 code), as a store's statistics write it:
+ * "€1,204.50", "¥1,200", "KWD 1.255". In the locale `formatCount` writes in,
+ * with the currency's own decimals, so a yen total has none and a dinar total
+ * three. Below zero it keeps its sign ("-€36.00"): a net figure a day of
+ * refunds outweighed is an amount, not an absence.
+ *
+ * Built once per currency and returned as the writer for its values, because
+ * a chart writes every axis step and readout through it. A value that is not
+ * finite renders "--", as `formatCount`. A code Intl refuses never throws: the
+ * value is written as its count and the code as given ("1,204.5 EURO"), so a
+ * defect in the code shows rather than taking the page down.
+ */
+export function formatMoney(currency: string): (value: number) => string {
+  let money: Intl.NumberFormat | null;
+  try {
+    money = new Intl.NumberFormat("en-US", { style: "currency", currency });
+  } catch {
+    money = null;
+  }
+  return (value: number) => {
+    if (!Number.isFinite(value)) return "--";
+    if (money !== null) return money.format(value);
+    const written = formatCount(value);
+    return currency === "" ? written : `${written} ${currency}`;
+  };
+}
+
+/**
  * A rate as a person reads one: "42%", "4.3%", "0%". Whole percents from 10%
  * up and at zero, one decimal below 10%, where a whole number would round a
  * 4.3% click rate to 4% and hide the difference between two campaigns. Null
