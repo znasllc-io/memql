@@ -55,6 +55,12 @@ const (
 // is asked anything.
 var ErrNotAccountExport = errors.New("storage key is not an account export")
 
+// ErrBytesReferenceRefused is how AccountBytesReader refuses a reference that
+// resolves outside the place it was given or below its own floor: a refusal of
+// the reference, which the export records and goes on, never a failure of
+// storage, which fails the run. Callers test it with errors.Is.
+var ErrBytesReferenceRefused = errors.New("bytes reference refused")
+
 // AccountExportStore is the one writer and reader of exports/accounts/.
 type AccountExportStore struct{ u *AzureBlobUploader }
 
@@ -456,18 +462,46 @@ func insidePlace(segments []string, under []string) bool {
 //   - anything else   a bare key (a Library file, an attachment), judged as
 //     written, in the configured container, the only one it can reach.
 func (r *AccountBytesReader) resolve(ref string, under []string) (container, key string, tree, shipped bool, err error) {
+	container, object, tree, shipped, err := r.resolveKey(ref)
+	if err != nil || shipped {
+		return container, "", false, shipped, err
+	}
+	segments, _ := keySegments(object)
+	if !insidePlace(segments, under) {
+		return "", "", false, false, fmt.Errorf("%w: %q names nothing this reader may read in the place it was given", ErrBytesReferenceRefused, ref)
+	}
+	if tree {
+		return container, object + "/", true, false, nil
+	}
+	return container, object, false, false, nil
+}
+
+// Resolve answers the container-relative key a stored reference names, by the
+// parse Stat, List and Open use, and whether it is a tree (its prefix, with no
+// trailing slash) or a reference to files shipped in the engine image. It is
+// judged by the reader's floor and by no place: the export asks the row's
+// declaration about THIS key (memorynodes.BytesField.Admits), then reads it
+// with the declaration's places, so the key judged is the key read. A
+// reference the floor refuses answers ErrBytesReferenceRefused.
+func (r *AccountBytesReader) Resolve(ref string) (key string, tree, shipped bool, err error) {
+	_, key, tree, shipped, err = r.resolveKey(ref)
+	return key, tree, shipped, err
+}
+
+// resolveKey is resolve without the place: the reference turned into its
+// object in the configured container and held to the floor.
+func (r *AccountBytesReader) resolveKey(ref string) (container, object string, tree, shipped bool, err error) {
 	container, err = configuredContainer(r.u)
 	if err != nil {
 		return "", "", false, false, err
 	}
 	ref = strings.TrimSpace(ref)
 	refused := func() (string, string, bool, bool, error) {
-		return "", "", false, false, fmt.Errorf("bytes reference %q names nothing this reader may read in the place it was given", ref)
+		return "", "", false, false, fmt.Errorf("%w: %q names nothing this reader may read", ErrBytesReferenceRefused, ref)
 	}
-	var object string
 	switch {
 	case ref == "":
-		return "", "", false, false, errors.New("empty bytes reference")
+		return "", "", false, false, fmt.Errorf("%w: the reference is empty", ErrBytesReferenceRefused)
 	case strings.HasPrefix(ref, "file://"):
 		// Nothing is read for a shipped reference, so no place is needed.
 		return container, "", false, true, nil
@@ -489,13 +523,10 @@ func (r *AccountBytesReader) resolve(ref string, under []string) (container, key
 		object = ref
 	}
 	segments, ok := keySegments(object)
-	if !ok || (tree && len(segments) < minTreeSegments) || !insidePlace(segments, under) {
+	if !ok || (tree && len(segments) < minTreeSegments) {
 		return refused()
 	}
-	if tree {
-		return container, object + "/", true, false, nil
-	}
-	return container, object, false, false, nil
+	return container, object, tree, false, nil
 }
 
 // Stat resolves a reference (a stored URL, a bare key, or blob://<prefix>/ for a tree) to its object.
@@ -552,7 +583,7 @@ func (r *AccountBytesReader) Open(ctx context.Context, key string, under []strin
 	}
 	segments, ok := keySegments(key)
 	if !ok || !insidePlace(segments, under) {
-		return nil, fmt.Errorf("%q is not an object key this reader may open in the place it was given", key)
+		return nil, fmt.Errorf("%w: %q is not an object key this reader may open in the place it was given", ErrBytesReferenceRefused, key)
 	}
 	return openObject(ctx, r.u, container, key, nil)
 }
@@ -561,7 +592,7 @@ func (r *AccountBytesReader) Open(ctx context.Context, key string, under []strin
 // The tree must lie inside one of under and be at least two segments deep.
 func (r *AccountBytesReader) List(ctx context.Context, treeRef string, under []string) ([]BlobInfo, error) {
 	if !strings.HasPrefix(strings.TrimSpace(treeRef), "blob://") {
-		return nil, fmt.Errorf("%q is not a blob:// tree", treeRef)
+		return nil, fmt.Errorf("%w: %q is not a blob:// tree", ErrBytesReferenceRefused, treeRef)
 	}
 	container, key, _, _, err := r.resolve(treeRef, under)
 	if err != nil {

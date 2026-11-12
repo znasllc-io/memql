@@ -318,6 +318,7 @@ func init() {
 		dslBelongsToUndeclared,
 		accountAssignmentRows,
 		accountFollowTasks,
+		accountExports,
 	)
 	// Explicit zero so the series exists before the first keyset is
 	// observed; an alert on a missing series is harder to reason about

@@ -47,6 +47,10 @@ func (a *App) integrationsAgent() {
 	// GitHub port, node id and journal -- every port a driver needs.
 	a.wirePipelinesDriver()
 
+	// The agent node RUNS account exports (app/accounts_export_agent.go):
+	// after integrationsCore(), which materialized the accounts plug-in.
+	a.wireAccountExportRunner()
+
 	a.Logger.Info("agent integration providers registered")
 }
 

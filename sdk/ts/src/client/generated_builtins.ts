@@ -24,6 +24,197 @@ QueryClient.prototype.accountAssignmentStatus = function (this: QueryClient, arg
   return this.executeNamed("accountAssignmentStatus", buildAccountAssignmentStatus(args), opts);
 };
 
+/** Record that a row awaiting a decision stays in no account for good. Answers {kind: "conflict", concept, rowId, conflict, detail, candidates, foundAt, leftOutAt}. A conflict that is no longer open is refused. */
+export interface AccountConflictLeaveOutArgs {
+  /** The kind of the row. */
+  concept: string;
+  /** The row, as the conflict names it. */
+  rowId: string;
+  /** The conflict's code, as accountUnplaced answered it. */
+  conflict: string;
+}
+
+export function buildAccountConflictLeaveOut(args: AccountConflictLeaveOutArgs): string {
+  const parts: string[] = [];
+  parts.push("concept: " + renderMemQLValue(args.concept));
+  parts.push("rowId: " + renderMemQLValue(args.rowId));
+  parts.push("conflict: " + renderMemQLValue(args.conflict));
+  return "builtin accountConflictLeaveOut(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    accountConflictLeaveOut(args: AccountConflictLeaveOutArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.accountConflictLeaveOut = function (this: QueryClient, args: AccountConflictLeaveOutArgs = {} as AccountConflictLeaveOutArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("accountConflictLeaveOut", buildAccountConflictLeaveOut(args), opts);
+};
+
+/** Cancel an export. A prepared or queued one ends at once; a running one is asked to stop (cancelRequested) and ends when its run does. Answers {kind: "export", ...}. */
+export interface AccountExportCancelArgs {
+  /** The export. */
+  exportId: string;
+}
+
+export function buildAccountExportCancel(args: AccountExportCancelArgs): string {
+  const parts: string[] = [];
+  parts.push("exportId: " + renderMemQLValue(args.exportId));
+  return "builtin accountExportCancel(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    accountExportCancel(args: AccountExportCancelArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.accountExportCancel = function (this: QueryClient, args: AccountExportCancelArgs = {} as AccountExportCancelArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("accountExportCancel", buildAccountExportCancel(args), opts);
+};
+
+/** Prepare an export of an account as a draft, refused with export_not_ready naming what is not met, or export_in_progress naming the account's active export. Answers {kind: "export", ...}; when protected, that one answer also carries the passphrase, which is returned nowhere else. A draft not started within fifteen minutes is removed. */
+export interface AccountExportPrepareArgs {
+  /** The account, as its bare id or v1:accounts:account:<bare>. */
+  accountId: string;
+  /** Encrypt the file with a passphrase shown once. */
+  protect?: boolean;
+}
+
+export function buildAccountExportPrepare(args: AccountExportPrepareArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.protect !== undefined) parts.push("protect: " + renderMemQLValue(args.protect));
+  return "builtin accountExportPrepare(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    accountExportPrepare(args: AccountExportPrepareArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.accountExportPrepare = function (this: QueryClient, args: AccountExportPrepareArgs = {} as AccountExportPrepareArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("accountExportPrepare", buildAccountExportPrepare(args), opts);
+};
+
+/** Whether an account can be exported: one {kind: "condition", name, met, ...} for each of recording (enabled, held), assigned (kindsTotal, kindsFinished, waiting), declared (concepts), decided (rows) and followed (tasks); then {kind: "unplaced", rows}, the rows of account-scoped kinds in no account as of the assignment job's last pass; then {kind: "ready", ready}. */
+export interface AccountExportReadinessArgs {
+  /** The account, as its bare id or v1:accounts:account:<bare>. */
+  accountId: string;
+}
+
+export function buildAccountExportReadiness(args: AccountExportReadinessArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  return "builtin accountExportReadiness(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    accountExportReadiness(args: AccountExportReadinessArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.accountExportReadiness = function (this: QueryClient, args: AccountExportReadinessArgs = {} as AccountExportReadinessArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("accountExportReadiness", buildAccountExportReadiness(args), opts);
+};
+
+/** Delete a complete export's file and keep its record, with who removed it and when. Answers {kind: "export", ...}. */
+export interface AccountExportRemoveArgs {
+  /** The export. */
+  exportId: string;
+}
+
+export function buildAccountExportRemove(args: AccountExportRemoveArgs): string {
+  const parts: string[] = [];
+  parts.push("exportId: " + renderMemQLValue(args.exportId));
+  return "builtin accountExportRemove(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    accountExportRemove(args: AccountExportRemoveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.accountExportRemove = function (this: QueryClient, args: AccountExportRemoveArgs = {} as AccountExportRemoveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("accountExportRemove", buildAccountExportRemove(args), opts);
+};
+
+/** Queue a prepared export and mail every active owner that it was started. Answers {kind: "export", ...}. */
+export interface AccountExportStartArgs {
+  /** The export, as accountExportPrepare answered it. */
+  exportId: string;
+}
+
+export function buildAccountExportStart(args: AccountExportStartArgs): string {
+  const parts: string[] = [];
+  parts.push("exportId: " + renderMemQLValue(args.exportId));
+  return "builtin accountExportStart(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    accountExportStart(args: AccountExportStartArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.accountExportStart = function (this: QueryClient, args: AccountExportStartArgs = {} as AccountExportStartArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("accountExportStart", buildAccountExportStart(args), opts);
+};
+
+/** One export's state, phase and counts, as {kind: "export", ...} with its report. */
+export interface AccountExportStatusArgs {
+  /** The export. */
+  exportId: string;
+}
+
+export function buildAccountExportStatus(args: AccountExportStatusArgs): string {
+  const parts: string[] = [];
+  parts.push("exportId: " + renderMemQLValue(args.exportId));
+  return "builtin accountExportStatus(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    accountExportStatus(args: AccountExportStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.accountExportStatus = function (this: QueryClient, args: AccountExportStatusArgs = {} as AccountExportStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("accountExportStatus", buildAccountExportStatus(args), opts);
+};
+
+/** An account's exports, newest first: {kind: "export", ...} per export, then {kind: "page", nextCursor}, empty on the last page. */
+export interface AccountExportsArgs {
+  /** The account, as its bare id or v1:accounts:account:<bare>. */
+  accountId: string;
+  /** The nextCursor of the previous page. */
+  after?: string;
+  /** Exports per page: 20 when absent, at most 100. */
+  limit?: number;
+}
+
+export function buildAccountExports(args: AccountExportsArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.after !== undefined) parts.push("after: " + renderMemQLValue(args.after));
+  if (args.limit !== undefined) parts.push("limit: " + renderMemQLValue(args.limit));
+  return "builtin accountExports(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    accountExports(args: AccountExportsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.accountExports = function (this: QueryClient, args: AccountExportsArgs = {} as AccountExportsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("accountExports", buildAccountExports(args), opts);
+};
+
 /** What one account holds: one row per concept that declares an account form and holds at least one row for it ({kind: "concept", concept, namespace, name, rows, versions}, by namespace then name), then one {kind: "files", bytes} with the summed size of its current, unarchived Library files. Either spelling of the id is accepted; an empty or unknown account is refused. */
 export interface AccountInventoryArgs {
   /** The account, as its bare id or v1:accounts:account:<bare>. */
@@ -44,6 +235,118 @@ declare module "./query.js" {
 
 QueryClient.prototype.accountInventory = function (this: QueryClient, args: AccountInventoryArgs = {} as AccountInventoryArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("accountInventory", buildAccountInventory(args), opts);
+};
+
+/** What was moved, newest first, one line per moved or placed root (the rows that followed it are not listed): {kind: "move", id, concept, rowId, fromAccount, toAccount, movedBy, movedAt, note}, then {kind: "page", nextCursor}, empty on the last page. fromAccount is empty for a row that was placed. */
+export interface AccountMovesArgs {
+  /** The account, as source or destination; empty for every move. */
+  accountId?: string;
+  /** The nextCursor of the previous page. */
+  after?: string;
+  /** Moves per page: 50 when absent, at most 200. */
+  limit?: number;
+}
+
+export function buildAccountMoves(args: AccountMovesArgs): string {
+  const parts: string[] = [];
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.after !== undefined) parts.push("after: " + renderMemQLValue(args.after));
+  if (args.limit !== undefined) parts.push("limit: " + renderMemQLValue(args.limit));
+  return "builtin accountMoves(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    accountMoves(args: AccountMovesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.accountMoves = function (this: QueryClient, args: AccountMovesArgs = {} as AccountMovesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("accountMoves", buildAccountMoves(args), opts);
+};
+
+/** One page of a kind's rows in an account, or, when accountId is empty, in no account: {kind: "row", id, concept, primary, secondary, tertiary, status, ownerUserId, createdAt, updatedAt, followsParent, parentConcept} per row, then {kind: "page", nextCursor}, empty on the last page. primary..status are the values of the fields the kind's @displayCard names (primary is the id when it names none). followsParent is true for a row whose parent is in the same account: it moves with its parent and cannot be moved by itself; parentConcept is the kind it follows. search filters the page that was read, by its display values; it is not a search of the kind, so a page may hold fewer rows than asked while nextCursor still moves on. */
+export interface AccountRowsArgs {
+  /** The account, bare or v1:accounts:account:<bare>; empty for rows in no account. */
+  accountId?: string;
+  /** The kind, as its concept id. */
+  concept: string;
+  /** The nextCursor of the previous page. */
+  after?: string;
+  /** Rows per page: 50 when absent, at most 200. */
+  limit?: number;
+  /** Keep only the page's rows whose display values contain this, ignoring case. */
+  search?: string;
+}
+
+export function buildAccountRows(args: AccountRowsArgs): string {
+  const parts: string[] = [];
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("concept: " + renderMemQLValue(args.concept));
+  if (args.after !== undefined) parts.push("after: " + renderMemQLValue(args.after));
+  if (args.limit !== undefined) parts.push("limit: " + renderMemQLValue(args.limit));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  return "builtin accountRows(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    accountRows(args: AccountRowsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.accountRows = function (this: QueryClient, args: AccountRowsArgs = {} as AccountRowsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("accountRows", buildAccountRows(args), opts);
+};
+
+/** Move rows to an account, or place rows that have none. At most 500 rows in one call. Answers {kind: "moved", concept, rows} per kind of the rows moved or placed ({kind: "wouldMove", ...} for a preview), {kind: "follows", concept} per kind whose rows follow them, with no count (what hangs off a moved row follows it in the background, after the call), {kind: "refused", concept, id, reason} per row it would not move, and {kind: "summary", moved, refused, followerKinds}. A preview writes nothing. Refused as a whole while the cluster does not yet record accounts. */
+export interface AccountRowsMoveArgs {
+  /** The rows, each {concept, id}. */
+  rows: Record<string, unknown>[];
+  /** The destination account, bare or v1:accounts:account:<bare>. */
+  toAccountId: string;
+  /** Why, kept with the record of the move. */
+  note?: string;
+  /** Answer what would move and write nothing. */
+  preview?: boolean;
+}
+
+export function buildAccountRowsMove(args: AccountRowsMoveArgs): string {
+  const parts: string[] = [];
+  parts.push("rows: " + renderMemQLValue(args.rows));
+  parts.push("toAccountId: " + renderMemQLValue(args.toAccountId));
+  if (args.note !== undefined) parts.push("note: " + renderMemQLValue(args.note));
+  if (args.preview !== undefined) parts.push("preview: " + renderMemQLValue(args.preview));
+  return "builtin accountRowsMove(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    accountRowsMove(args: AccountRowsMoveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.accountRowsMove = function (this: QueryClient, args: AccountRowsMoveArgs = {} as AccountRowsMoveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("accountRowsMove", buildAccountRowsMove(args), opts);
+};
+
+/** The rows in no account and the rows awaiting a decision: {kind: "unplaced", concept, namespace, name, rows} per kind with rows in no account, as of the assignment job's last pass of that kind, then {kind: "conflict", concept, rowId, conflict, detail, candidates, foundAt} per open conflict, newest first, at most 200. A conflict that was left out is not listed. */
+export interface AccountUnplacedArgs {
+}
+
+export function buildAccountUnplaced(args: AccountUnplacedArgs): string {
+  void args;
+  return "builtin accountUnplaced()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    accountUnplaced(args?: AccountUnplacedArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.accountUnplaced = function (this: QueryClient, args: AccountUnplacedArgs = {} as AccountUnplacedArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("accountUnplaced", buildAccountUnplaced(args), opts);
 };
 
 /** Ask what kind of tree a zip in the caller's Library is (epic memql#4885, D11). Opens it through the same fetch a deploy uses -- the caller's own bytes, expanded by OpenZip under the packages limits, so a zip the deploy would refuse is refused here by the same code -- and answers {isPackage, isBuiltSite, fileCount, totalBytes}. isPackage: memql-package.yaml sits at the root, and the package path takes it from here. isBuiltSite: index.html sits at the root and there is no manifest, and the hand-made path takes it and asks for the kind. Neither: the zip is something else, commonly a folder wrapping the site one level down. fileCount and totalBytes are counted over the opened tree. Writes nothing; the artifact stays exactly the Library row it was. */

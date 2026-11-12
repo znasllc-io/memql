@@ -34,3 +34,160 @@ builtin accountInventory {
 @executor("integration.accounts.assignmentStatus")
 @requiresCapability("execute", "app:accounts/inventory")
 builtin accountAssignmentStatus { }
+
+// THE EXPORT CALLS (account export, design record
+// docs/superpowers/specs/2026-11-12-account-export-design.md, sections F and H),
+// backed by integrations/accounts (export_builtins.go). Each declares execute on
+// app:accounts/export, seeded on owner and developer only. The reads need
+// nothing more; every act (prepare, start, cancel, remove) also refuses any
+// caller that is not a person in their own signed-in session
+// (person_session_required), which the handler asks before it reads anything.
+
+/// Whether an account can be exported: one {kind: "condition", name, met, ...} for each of
+/// recording (enabled, held), assigned (kindsTotal, kindsFinished, waiting), declared (concepts),
+/// decided (rows) and followed (tasks); then {kind: "unplaced", rows}, the rows of account-scoped
+/// kinds in no account as of the assignment job's last pass; then {kind: "ready", ready}.
+@sdk
+@executor("integration.accounts.exportReadiness")
+@requiresCapability("execute", "app:accounts/export")
+builtin accountExportReadiness {
+  accountId  string!  @description("The account, as its bare id or v1:accounts:account:<bare>.")
+}
+
+/// Prepare an export of an account as a draft, refused with export_not_ready naming what is not
+/// met, or export_in_progress naming the account's active export. Answers {kind: "export", ...};
+/// when protected, that one answer also carries the passphrase, which is returned nowhere else.
+/// A draft not started within fifteen minutes is removed.
+@sdk
+@executor("integration.accounts.exportPrepare")
+@requiresCapability("execute", "app:accounts/export")
+builtin accountExportPrepare {
+  accountId  string!  @description("The account, as its bare id or v1:accounts:account:<bare>.")
+  protect    boolean  @description("Encrypt the file with a passphrase shown once.")
+}
+
+/// Queue a prepared export and mail every active owner that it was started. Answers
+/// {kind: "export", ...}.
+@sdk
+@executor("integration.accounts.exportStart")
+@requiresCapability("execute", "app:accounts/export")
+builtin accountExportStart {
+  exportId  string!  @description("The export, as accountExportPrepare answered it.")
+}
+
+/// An account's exports, newest first: {kind: "export", ...} per export, then {kind: "page",
+/// nextCursor}, empty on the last page.
+@sdk
+@executor("integration.accounts.exports")
+@requiresCapability("execute", "app:accounts/export")
+builtin accountExports {
+  accountId  string!  @description("The account, as its bare id or v1:accounts:account:<bare>.")
+  after      string   @description("The nextCursor of the previous page.")
+  limit      integer  @description("Exports per page: 20 when absent, at most 100.")
+}
+
+/// One export's state, phase and counts, as {kind: "export", ...} with its report.
+@sdk
+@executor("integration.accounts.exportStatus")
+@requiresCapability("execute", "app:accounts/export")
+builtin accountExportStatus {
+  exportId  string!  @description("The export.")
+}
+
+/// Cancel an export. A prepared or queued one ends at once; a running one is asked to stop
+/// (cancelRequested) and ends when its run does. Answers {kind: "export", ...}.
+@sdk
+@executor("integration.accounts.exportCancel")
+@requiresCapability("execute", "app:accounts/export")
+builtin accountExportCancel {
+  exportId  string!  @description("The export.")
+}
+
+/// Delete a complete export's file and keep its record, with who removed it and when. Answers
+/// {kind: "export", ...}.
+@sdk
+@executor("integration.accounts.exportRemove")
+@requiresCapability("execute", "app:accounts/export")
+builtin accountExportRemove {
+  exportId  string!  @description("The export.")
+}
+
+// THE MOVE CALLS (account export, design record
+// docs/superpowers/specs/2026-11-12-account-export-design.md, sections H and
+// I), backed by integrations/accounts (move_builtins.go). Each declares execute
+// on app:accounts/move, seeded on owner and developer only, and the engine
+// refuses every other caller before the executor runs. The handlers read rows
+// directly; they answer a row's id, the values of its kind's @displayCard
+// fields, its owner and dates, never its payload and never a field declared
+// @secret. Moving rows (other than a preview) and leaving a conflict out also
+// refuse any caller that is not a person in their own signed-in session
+// (person_session_required).
+
+/// One page of a kind's rows in an account, or, when accountId is empty, in no account:
+/// {kind: "row", id, concept, primary, secondary, tertiary, status, ownerUserId, createdAt,
+/// updatedAt, followsParent, parentConcept} per row, then {kind: "page", nextCursor}, empty on the
+/// last page. primary..status are the values of the fields the kind's @displayCard names (primary
+/// is the id when it names none). followsParent is true for a row whose parent is in the same
+/// account: it moves with its parent and cannot be moved by itself; parentConcept is the kind it
+/// follows. search filters the page that was read, by its display values; it is not a search of
+/// the kind, so a page may hold fewer rows than asked while nextCursor still moves on.
+@sdk
+@executor("integration.accounts.rows")
+@requiresCapability("execute", "app:accounts/move")
+builtin accountRows {
+  accountId  string   @description("The account, bare or v1:accounts:account:<bare>; empty for rows in no account.")
+  concept    string!  @description("The kind, as its concept id.")
+  after      string   @description("The nextCursor of the previous page.")
+  limit      integer  @description("Rows per page: 50 when absent, at most 200.")
+  search     string   @description("Keep only the page's rows whose display values contain this, ignoring case.")
+}
+
+/// The rows in no account and the rows awaiting a decision: {kind: "unplaced", concept, namespace,
+/// name, rows} per kind with rows in no account, as of the assignment job's last pass of that kind,
+/// then {kind: "conflict", concept, rowId, conflict, detail, candidates, foundAt} per open conflict,
+/// newest first, at most 200. A conflict that was left out is not listed.
+@sdk
+@executor("integration.accounts.unplaced")
+@requiresCapability("execute", "app:accounts/move")
+builtin accountUnplaced { }
+
+/// Move rows to an account, or place rows that have none. At most 500 rows in one call. Answers
+/// {kind: "moved", concept, rows} per kind of the rows moved or placed ({kind: "wouldMove", ...}
+/// for a preview), {kind: "follows", concept} per kind whose rows follow them, with no count (what
+/// hangs off a moved row follows it in the background, after the call), {kind: "refused", concept,
+/// id, reason} per row it would not move, and {kind: "summary", moved, refused, followerKinds}. A
+/// preview writes nothing. Refused as a whole while the cluster does not yet record accounts.
+@sdk
+@executor("integration.accounts.rowsMove")
+@requiresCapability("execute", "app:accounts/move")
+builtin accountRowsMove {
+  rows         []object!  @description("The rows, each {concept, id}.")
+  toAccountId  string!    @description("The destination account, bare or v1:accounts:account:<bare>.")
+  note         string     @description("Why, kept with the record of the move.")
+  preview      boolean    @description("Answer what would move and write nothing.")
+}
+
+/// Record that a row awaiting a decision stays in no account for good. Answers {kind: "conflict",
+/// concept, rowId, conflict, detail, candidates, foundAt, leftOutAt}. A conflict that is no longer
+/// open is refused.
+@sdk
+@executor("integration.accounts.conflictLeaveOut")
+@requiresCapability("execute", "app:accounts/move")
+builtin accountConflictLeaveOut {
+  concept   string!  @description("The kind of the row.")
+  rowId     string!  @description("The row, as the conflict names it.")
+  conflict  string!  @description("The conflict's code, as accountUnplaced answered it.")
+}
+
+/// What was moved, newest first, one line per moved or placed root (the rows that followed it are
+/// not listed): {kind: "move", id, concept, rowId, fromAccount, toAccount, movedBy, movedAt, note},
+/// then {kind: "page", nextCursor}, empty on the last page. fromAccount is empty for a row that was
+/// placed.
+@sdk
+@executor("integration.accounts.moves")
+@requiresCapability("execute", "app:accounts/move")
+builtin accountMoves {
+  accountId  string   @description("The account, as source or destination; empty for every move.")
+  after      string   @description("The nextCursor of the previous page.")
+  limit      integer  @description("Moves per page: 50 when absent, at most 200.")
+}

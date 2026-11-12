@@ -29,6 +29,216 @@ func AccountAssignmentStatusBuild(args AccountAssignmentStatusArgs) string {
 	return "builtin accountAssignmentStatus()"
 }
 
+// AccountConflictLeaveOut -- Record that a row awaiting a decision stays in no account for good. Answers {kind: "conflict", concept, rowId, conflict, detail, candidates, foundAt, leftOutAt}. A conflict that is no longer open is refused.
+type AccountConflictLeaveOutArgs struct {
+	// The kind of the row.
+	Concept string
+	// The row, as the conflict names it.
+	RowId string
+	// The conflict's code, as accountUnplaced answered it.
+	Conflict string
+}
+
+// AccountConflictLeaveOut calls the engine builtin accountConflictLeaveOut.
+func (qc *QueryClient) AccountConflictLeaveOut(ctx context.Context, args AccountConflictLeaveOutArgs) (*Result, error) {
+	call := AccountConflictLeaveOutBuild(args)
+	return qc.executeNamed(ctx, "accountConflictLeaveOut", call)
+}
+
+func AccountConflictLeaveOutBuild(args AccountConflictLeaveOutArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin accountConflictLeaveOut(")
+	b.WriteString("concept: ")
+	b.WriteString(quoteMemQL(args.Concept))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("rowId: ")
+	b.WriteString(quoteMemQL(args.RowId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("conflict: ")
+	b.WriteString(quoteMemQL(args.Conflict))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AccountExportCancel -- Cancel an export. A prepared or queued one ends at once; a running one is asked to stop (cancelRequested) and ends when its run does. Answers {kind: "export", ...}.
+type AccountExportCancelArgs struct {
+	// The export.
+	ExportId string
+}
+
+// AccountExportCancel calls the engine builtin accountExportCancel.
+func (qc *QueryClient) AccountExportCancel(ctx context.Context, args AccountExportCancelArgs) (*Result, error) {
+	call := AccountExportCancelBuild(args)
+	return qc.executeNamed(ctx, "accountExportCancel", call)
+}
+
+func AccountExportCancelBuild(args AccountExportCancelArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin accountExportCancel(")
+	b.WriteString("exportId: ")
+	b.WriteString(quoteMemQL(args.ExportId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AccountExportPrepare -- Prepare an export of an account as a draft, refused with export_not_ready naming what is not met, or export_in_progress naming the account's active export. Answers {kind: "export", ...}; when protected, that one answer also carries the passphrase, which is returned nowhere else. A draft not started within fifteen minutes is removed.
+type AccountExportPrepareArgs struct {
+	// The account, as its bare id or v1:accounts:account:<bare>.
+	AccountId string
+	// Encrypt the file with a passphrase shown once.
+	Protect    bool
+	ProtectSet bool // set true to send protect; required because zero-value bool is ambiguous
+}
+
+// AccountExportPrepare calls the engine builtin accountExportPrepare.
+func (qc *QueryClient) AccountExportPrepare(ctx context.Context, args AccountExportPrepareArgs) (*Result, error) {
+	call := AccountExportPrepareBuild(args)
+	return qc.executeNamed(ctx, "accountExportPrepare", call)
+}
+
+func AccountExportPrepareBuild(args AccountExportPrepareArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin accountExportPrepare(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.ProtectSet {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("protect: ")
+		b.WriteString(fmt.Sprintf("%v", args.Protect))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// AccountExportReadiness -- Whether an account can be exported: one {kind: "condition", name, met, ...} for each of recording (enabled, held), assigned (kindsTotal, kindsFinished, waiting), declared (concepts), decided (rows) and followed (tasks); then {kind: "unplaced", rows}, the rows of account-scoped kinds in no account as of the assignment job's last pass; then {kind: "ready", ready}.
+type AccountExportReadinessArgs struct {
+	// The account, as its bare id or v1:accounts:account:<bare>.
+	AccountId string
+}
+
+// AccountExportReadiness calls the engine builtin accountExportReadiness.
+func (qc *QueryClient) AccountExportReadiness(ctx context.Context, args AccountExportReadinessArgs) (*Result, error) {
+	call := AccountExportReadinessBuild(args)
+	return qc.executeNamed(ctx, "accountExportReadiness", call)
+}
+
+func AccountExportReadinessBuild(args AccountExportReadinessArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin accountExportReadiness(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AccountExportRemove -- Delete a complete export's file and keep its record, with who removed it and when. Answers {kind: "export", ...}.
+type AccountExportRemoveArgs struct {
+	// The export.
+	ExportId string
+}
+
+// AccountExportRemove calls the engine builtin accountExportRemove.
+func (qc *QueryClient) AccountExportRemove(ctx context.Context, args AccountExportRemoveArgs) (*Result, error) {
+	call := AccountExportRemoveBuild(args)
+	return qc.executeNamed(ctx, "accountExportRemove", call)
+}
+
+func AccountExportRemoveBuild(args AccountExportRemoveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin accountExportRemove(")
+	b.WriteString("exportId: ")
+	b.WriteString(quoteMemQL(args.ExportId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AccountExportStart -- Queue a prepared export and mail every active owner that it was started. Answers {kind: "export", ...}.
+type AccountExportStartArgs struct {
+	// The export, as accountExportPrepare answered it.
+	ExportId string
+}
+
+// AccountExportStart calls the engine builtin accountExportStart.
+func (qc *QueryClient) AccountExportStart(ctx context.Context, args AccountExportStartArgs) (*Result, error) {
+	call := AccountExportStartBuild(args)
+	return qc.executeNamed(ctx, "accountExportStart", call)
+}
+
+func AccountExportStartBuild(args AccountExportStartArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin accountExportStart(")
+	b.WriteString("exportId: ")
+	b.WriteString(quoteMemQL(args.ExportId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AccountExportStatus -- One export's state, phase and counts, as {kind: "export", ...} with its report.
+type AccountExportStatusArgs struct {
+	// The export.
+	ExportId string
+}
+
+// AccountExportStatus calls the engine builtin accountExportStatus.
+func (qc *QueryClient) AccountExportStatus(ctx context.Context, args AccountExportStatusArgs) (*Result, error) {
+	call := AccountExportStatusBuild(args)
+	return qc.executeNamed(ctx, "accountExportStatus", call)
+}
+
+func AccountExportStatusBuild(args AccountExportStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin accountExportStatus(")
+	b.WriteString("exportId: ")
+	b.WriteString(quoteMemQL(args.ExportId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AccountExports -- An account's exports, newest first: {kind: "export", ...} per export, then {kind: "page", nextCursor}, empty on the last page.
+type AccountExportsArgs struct {
+	// The account, as its bare id or v1:accounts:account:<bare>.
+	AccountId string
+	// The nextCursor of the previous page.
+	After string
+	// Exports per page: 20 when absent, at most 100.
+	Limit int
+}
+
+// AccountExports calls the engine builtin accountExports.
+func (qc *QueryClient) AccountExports(ctx context.Context, args AccountExportsArgs) (*Result, error) {
+	call := AccountExportsBuild(args)
+	return qc.executeNamed(ctx, "accountExports", call)
+}
+
+func AccountExportsBuild(args AccountExportsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin accountExports(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.After != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("after: ")
+		b.WriteString(quoteMemQL(args.After))
+	}
+	if args.Limit != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("limit: ")
+		b.WriteString(fmt.Sprintf("%v", args.Limit))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // AccountInventory -- What one account holds: one row per concept that declares an account form and holds at least one row for it ({kind: "concept", concept, namespace, name, rows, versions}, by namespace then name), then one {kind: "files", bytes} with the summed size of its current, unarchived Library files. Either spelling of the id is accepted; an empty or unknown account is refused.
 type AccountInventoryArgs struct {
 	// The account, as its bare id or v1:accounts:account:<bare>.
@@ -48,6 +258,166 @@ func AccountInventoryBuild(args AccountInventoryArgs) string {
 	b.WriteString(quoteMemQL(args.AccountId))
 	b.WriteString(")")
 	return b.String()
+}
+
+// AccountMoves -- What was moved, newest first, one line per moved or placed root (the rows that followed it are not listed): {kind: "move", id, concept, rowId, fromAccount, toAccount, movedBy, movedAt, note}, then {kind: "page", nextCursor}, empty on the last page. fromAccount is empty for a row that was placed.
+type AccountMovesArgs struct {
+	// The account, as source or destination; empty for every move.
+	AccountId string
+	// The nextCursor of the previous page.
+	After string
+	// Moves per page: 50 when absent, at most 200.
+	Limit int
+}
+
+// AccountMoves calls the engine builtin accountMoves.
+func (qc *QueryClient) AccountMoves(ctx context.Context, args AccountMovesArgs) (*Result, error) {
+	call := AccountMovesBuild(args)
+	return qc.executeNamed(ctx, "accountMoves", call)
+}
+
+func AccountMovesBuild(args AccountMovesArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin accountMoves(")
+	if args.AccountId != "" {
+		b.WriteString("accountId: ")
+		b.WriteString(quoteMemQL(args.AccountId))
+	}
+	if args.After != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("after: ")
+		b.WriteString(quoteMemQL(args.After))
+	}
+	if args.Limit != 0 {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("limit: ")
+		b.WriteString(fmt.Sprintf("%v", args.Limit))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// AccountRows -- One page of a kind's rows in an account, or, when accountId is empty, in no account: {kind: "row", id, concept, primary, secondary, tertiary, status, ownerUserId, createdAt, updatedAt, followsParent, parentConcept} per row, then {kind: "page", nextCursor}, empty on the last page. primary..status are the values of the fields the kind's @displayCard names (primary is the id when it names none). followsParent is true for a row whose parent is in the same account: it moves with its parent and cannot be moved by itself; parentConcept is the kind it follows. search filters the page that was read, by its display values; it is not a search of the kind, so a page may hold fewer rows than asked while nextCursor still moves on.
+type AccountRowsArgs struct {
+	// The account, bare or v1:accounts:account:<bare>; empty for rows in no account.
+	AccountId string
+	// The kind, as its concept id.
+	Concept string
+	// The nextCursor of the previous page.
+	After string
+	// Rows per page: 50 when absent, at most 200.
+	Limit int
+	// Keep only the page's rows whose display values contain this, ignoring case.
+	Search string
+}
+
+// AccountRows calls the engine builtin accountRows.
+func (qc *QueryClient) AccountRows(ctx context.Context, args AccountRowsArgs) (*Result, error) {
+	call := AccountRowsBuild(args)
+	return qc.executeNamed(ctx, "accountRows", call)
+}
+
+func AccountRowsBuild(args AccountRowsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin accountRows(")
+	if args.AccountId != "" {
+		b.WriteString("accountId: ")
+		b.WriteString(quoteMemQL(args.AccountId))
+	}
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("concept: ")
+	b.WriteString(quoteMemQL(args.Concept))
+	if args.After != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("after: ")
+		b.WriteString(quoteMemQL(args.After))
+	}
+	if args.Limit != 0 {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("limit: ")
+		b.WriteString(fmt.Sprintf("%v", args.Limit))
+	}
+	if args.Search != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// AccountRowsMove -- Move rows to an account, or place rows that have none. At most 500 rows in one call. Answers {kind: "moved", concept, rows} per kind of the rows moved or placed ({kind: "wouldMove", ...} for a preview), {kind: "follows", concept} per kind whose rows follow them, with no count (what hangs off a moved row follows it in the background, after the call), {kind: "refused", concept, id, reason} per row it would not move, and {kind: "summary", moved, refused, followerKinds}. A preview writes nothing. Refused as a whole while the cluster does not yet record accounts.
+type AccountRowsMoveArgs struct {
+	// The rows, each {concept, id}.
+	Rows []map[string]any
+	// The destination account, bare or v1:accounts:account:<bare>.
+	ToAccountId string
+	// Why, kept with the record of the move.
+	Note string
+	// Answer what would move and write nothing.
+	Preview    bool
+	PreviewSet bool // set true to send preview; required because zero-value bool is ambiguous
+}
+
+// AccountRowsMove calls the engine builtin accountRowsMove.
+func (qc *QueryClient) AccountRowsMove(ctx context.Context, args AccountRowsMoveArgs) (*Result, error) {
+	call := AccountRowsMoveBuild(args)
+	return qc.executeNamed(ctx, "accountRowsMove", call)
+}
+
+func AccountRowsMoveBuild(args AccountRowsMoveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin accountRowsMove(")
+	b.WriteString("rows: ")
+	b.WriteString(renderMemQLValue(args.Rows))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("toAccountId: ")
+	b.WriteString(quoteMemQL(args.ToAccountId))
+	if args.Note != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("note: ")
+		b.WriteString(quoteMemQL(args.Note))
+	}
+	if args.PreviewSet {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("preview: ")
+		b.WriteString(fmt.Sprintf("%v", args.Preview))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// AccountUnplaced -- The rows in no account and the rows awaiting a decision: {kind: "unplaced", concept, namespace, name, rows} per kind with rows in no account, as of the assignment job's last pass of that kind, then {kind: "conflict", concept, rowId, conflict, detail, candidates, foundAt} per open conflict, newest first, at most 200. A conflict that was left out is not listed.
+type AccountUnplacedArgs struct {
+}
+
+// AccountUnplaced calls the engine builtin accountUnplaced.
+func (qc *QueryClient) AccountUnplaced(ctx context.Context, args AccountUnplacedArgs) (*Result, error) {
+	call := AccountUnplacedBuild(args)
+	return qc.executeNamed(ctx, "accountUnplaced", call)
+}
+
+func AccountUnplacedBuild(args AccountUnplacedArgs) string {
+	_ = args
+	return "builtin accountUnplaced()"
 }
 
 // ArtifactProbe -- Ask what kind of tree a zip in the caller's Library is (epic memql#4885, D11). Opens it through the same fetch a deploy uses -- the caller's own bytes, expanded by OpenZip under the packages limits, so a zip the deploy would refuse is refused here by the same code -- and answers {isPackage, isBuiltSite, fileCount, totalBytes}. isPackage: memql-package.yaml sits at the root, and the package path takes it from here. isBuiltSite: index.html sits at the root and there is no manifest, and the hand-made path takes it and asks for the kind. Neither: the zip is something else, commonly a folder wrapping the site one level down. fileCount and totalBytes are counted over the opened tree. Writes nothing; the artifact stays exactly the Library row it was.

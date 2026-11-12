@@ -16,6 +16,8 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+
+	"github.com/znasllc-io/memql/integrations/accounts"
 )
 
 // stayingKinds is every kind that declares `stays`, with its reason.
@@ -48,14 +50,18 @@ func TestTheKindsThatStay(t *testing.T) {
 }
 
 // A kind that travels is written into a file anyone can open, so a field the
-// engine seals as a secret on it would leave with the rows.
+// engine seals as a secret on it would leave with the rows. The export removes
+// such values at every depth, and this gate keeps the engine's own tree from
+// relying on it. It asks the export's own walk (accounts.SecretPaths), which
+// reads a secret in an object block, an array's objects, a map's values or a
+// union branch as the engine's redaction does, not only a top-level field.
 func TestNoKindThatTravelsDeclaresASecretField(t *testing.T) {
 	for _, c := range loadedConcepts(t) {
 		if c == nil || !c.Travels() {
 			continue
 		}
-		if s := c.SecretFields(); len(s) > 0 {
-			t.Errorf("%s travels in an account export and declares @secret fields %v: mark the kind `stays` or name the secret with @secretName", c.Name, s)
+		if s := accounts.SecretPaths(c); len(s) > 0 {
+			t.Errorf("%s travels in an account export and declares @secret values at %v: mark the kind `stays` or name the secret with @secretName", c.Name, s)
 		}
 	}
 }
