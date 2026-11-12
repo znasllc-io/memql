@@ -196,16 +196,17 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 	}
 	c.queueConnectBackfills(ctx, prior, found, written)
 
-	// 12d. The store's shop (shop.go): a singleton no backfill reads, which
-	// carries the currency and the time zone. A store created here is
-	// configured (createStore); one that existed keeps its status, so a paused
-	// store's reconnect reads nothing. A failure is logged, never the
-	// connect's.
+	// 12d. The store as its status now stands, for the shop read in step 15's
+	// job (shop.go): a store created here is configured (createStore), a
+	// purged one reinstalled is configured again by markReconnected's own
+	// rule (reconnectedStatus), and any other keeps its status, so a
+	// reconnect of a store a person paused reads nothing.
 	shopOf := written
 	if !found {
 		shopOf.Status = StatusConfigured
+	} else if status := reconnectedStatus(prior); status != "" {
+		shopOf.Status = status
 	}
-	c.refreshShopLogged(opCtx, shopOf)
 
 	// 13. A Storefront token for a store with none -- or with one the store
 	// now refuses (memql#5638). An uninstall may have revoked the token Connect
@@ -234,7 +235,10 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 
 	// 15. Off the request: every subscribed topic is one paced Admin call, and
 	// the person's browser is parked on this redirect. A failure does not undo
-	// the connection; it lands on the store's subscription health.
+	// the connection; it lands on the store's subscription health. The store's
+	// shop is read first in the same job (12d, shop.go), bounded by its own
+	// shopReadTimeout: the redirect does not wait on it, and a request that
+	// ends does not take it along. A failure is logged, never the connect's.
 	kept := prior
 	kept.ID, kept.AdminTokenRef, kept.StorefrontTokenRef, kept.APIVersion = storeID, adminRef, storefrontRef, generated.APIVersion
 	kept.UninstalledAt, kept.RedactedAt = "", ""
@@ -247,6 +251,7 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 	}
 	detached := context.WithoutCancel(opCtx)
 	run(func() {
+		c.refreshShopLogged(detached, shopOf)
 		ctx, cancel := context.WithTimeout(detached, connectWebhookTimeout)
 		defer cancel()
 		c.registerConnectWebhooks(ctx, kept)
@@ -470,8 +475,8 @@ func (c *Connector) pendingIs(ctx context.Context, storeID, clientID, clientSecr
 // only uninstalled keeps the status an operator gave it.
 func (c *Connector) markReconnected(ctx, opCtx context.Context, storeID string, prior Store, person string) error {
 	args := map[string]any{"storeId": storeID}
-	if prior.RedactedAt != "" {
-		args["status"] = StatusConfigured
+	if status := reconnectedStatus(prior); status != "" {
+		args["status"] = status
 	}
 	if _, err := c.engine.Execute(opCtx, renderCall("markStoreReconnected", args)); err != nil {
 		return err
@@ -505,6 +510,19 @@ func (c *Connector) markReconnected(ctx, opCtx context.Context, storeID string, 
 	}
 	c.stores.Invalidate()
 	return nil
+}
+
+// reconnectedStatus is the status a verified reinstall gives the store, or ""
+// when it keeps the one it had: a purge left the store paused with nothing
+// mirrored, and its reinstall starts it again, configured. A store that was
+// only uninstalled keeps its status, which is what a reinstall returns to.
+// markReconnected writes it, and writeConnect's shop read judges the store by
+// it, so the two cannot disagree.
+func reconnectedStatus(prior Store) string {
+	if prior.RedactedAt != "" {
+		return StatusConfigured
+	}
+	return ""
 }
 
 // storefrontTokenUsable is step 13's question about a token a reconnect would

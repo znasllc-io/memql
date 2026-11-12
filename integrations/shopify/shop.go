@@ -3,6 +3,7 @@ package shopify
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
@@ -18,7 +19,8 @@ import (
 // store needs. So the shop is read, with the generated ShopifyFetchShop, at
 // the moments a store starts or starts again to record:
 //
-//   - a connect (writeConnect), for the store it connected;
+//   - a connect (writeConnect), for the store it connected, in the connect's
+//     background job so the redirect does not wait on it;
 //   - a boot (Bootstrap), for each store that ingests and has NO live shop row
 //     (onlyMissing): a node starts often, and a store that has its row is
 //     asked nothing, so a boot of N such stores makes no Admin call at all;
@@ -40,12 +42,13 @@ import (
 // clean answer with no shop retires nothing; and a read or a write that
 // fails -- or panics -- is logged with the store's id and the caller goes on.
 // Each read is bounded by the context it is given and by shopReadTimeout, so
-// a hung origin holds its caller no longer than that.
+// a hung origin holds its caller no longer than that. A panic is logged with
+// its stack and is that store's error (refreshShop).
 
 // shopReadTimeout bounds one store's shop read and its write. The Admin
 // client already bounds each attempt at a minute and retries a throttle; a
-// connect's browser and a resume's act wait on this read, so it is held
-// shorter than that.
+// resume's act waits on this read, and a boot or a pass reads its stores one
+// after another, so it is held shorter than that.
 const shopReadTimeout = 30 * time.Second
 
 // refreshShop reads the store's shop and heals its mirror row. A store that
@@ -58,9 +61,16 @@ func (c *Connector) refreshShop(ctx context.Context, store Store) (err error) {
 		return nil
 	}
 	defer func() {
-		// A malformed answer must not take a connect, a boot or a pass down
-		// with it: the shop is read again at the next of them.
+		// THE ONE RECOVER IN THIS PACKAGE, and why: everywhere else a panic is
+		// a request's, and the server's own recovery answers it. This read
+		// also runs in the boot's goroutine and in the connect's background
+		// job, where a panic has no recovery above it and ends the node --
+		// every node, since each boots and reads the same store. One store's
+		// malformed answer must not do that; the shop is read again at the
+		// next boot, pass or resume. The stack is logged with it, at error
+		// level, because what panicked is a programming error to be found.
 		if r := recover(); r != nil {
+			c.logger.Error("shopify: reading the store's shop panicked", "store", store.ID, "panic", fmt.Sprint(r), "stack", string(debug.Stack()))
 			err = fmt.Errorf("shopify: reading the shop of store %q panicked: %v", store.ID, r)
 		}
 	}()

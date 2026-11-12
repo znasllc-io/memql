@@ -1,10 +1,13 @@
 package shopify
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	stdsync "sync"
 	"testing"
 	"time"
 
@@ -204,9 +207,13 @@ func TestAShopThatCannotBeReadStopsNothing(t *testing.T) {
 	if got["status"] != StatusLive || h.admin.countOp(shopFetchOp) != 1 {
 		t.Fatalf("a resume whose shop could not be read answered %v after %d reads, want live after one", got, h.admin.countOp(shopFetchOp))
 	}
-	// And the watch's edge answers no error for it: the verdict is recorded.
+	// And the watch's edge asks again, and answers no error for it: the
+	// verdict is recorded.
 	if err := h.conn.resumeSeenByWatch(context.Background(), h.store(t), map[string]any{"resumedAt": ""}, Verdict{ResumedAt: watchNow}); err != nil {
 		t.Errorf("the watch's edge failed for a shop it could not read: %v", err)
+	}
+	if n := h.admin.countOp(shopFetchOp); n != 2 {
+		t.Errorf("the watch's edge did not try the shop it could not read: %d reads in all, want the act's and the edge's", n)
 	}
 
 	// The daily pass still passes, and the next store is still read.
@@ -263,7 +270,7 @@ func TestAShopThatCannotBeReadStopsNothing(t *testing.T) {
 	// A read that panics is an error of that store's, not of its caller's.
 	h = newHarness(t)
 	h.admin.reply(shopFetchOp, shopAnswer("EUR", "Europe/Madrid", "2026-08-01T00:00:00Z"))
-	h.conn.engine = panickingEngine{h.engine}
+	h.conn.engine = &panickingEngine{fakeEngine: h.engine}
 	if err := h.conn.refreshShop(context.Background(), h.store(t)); err == nil || !strings.Contains(err.Error(), "panicked") {
 		t.Errorf("a read that panicked answered %v, want an error saying so", err)
 	}
@@ -297,12 +304,150 @@ func TestAStoreWithoutTheShopsScopeIsNotAsked(t *testing.T) {
 }
 
 // panickingEngine panics on the mirror's raw read of a row, which heal makes
-// before it writes: a fault inside the read the callers must survive.
-type panickingEngine struct{ *fakeEngine }
+// before it writes: a fault inside the read the callers must survive. With
+// times set it panics that many times and then answers.
+type panickingEngine struct {
+	*fakeEngine
+	mu    stdsync.Mutex
+	times int
+	seen  int
+}
 
-func (e panickingEngine) Execute(ctx context.Context, q string) (*memql.ExecuteResult, error) {
+func (e *panickingEngine) Execute(ctx context.Context, q string) (*memql.ExecuteResult, error) {
 	if strings.HasPrefix(strings.TrimSpace(q), "concept==") {
-		panic("the engine fell over")
+		e.mu.Lock()
+		e.seen++
+		panics := e.times == 0 || e.seen <= e.times
+		e.mu.Unlock()
+		if panics {
+			panic("the engine fell over")
+		}
 	}
 	return e.fakeEngine.Execute(ctx, q)
+}
+
+// A PURGED STORE THAT IS REINSTALLED is configured again (markReconnected),
+// with nothing mirrored, the shop included: its connect reads the shop. A
+// store a person paused keeps its pause through a reconnect and is not read.
+func TestAReinstalledPurgedStoreReadsItsShopAtConnect(t *testing.T) {
+	h := reconnectHarness(t, map[string]any{
+		"uninstalledAt": "2026-10-01T12:00:00Z", "redactedAt": "2026-10-03T12:00:00Z", "adminTokenRef": "", "status": StatusPaused,
+	})
+	h.admin.reply(shopFetchOp, shopAnswer("EUR", "Europe/Madrid", "2026-08-01T00:00:00Z"))
+	if got := h.write(credentialSourceCurrent); got != connectResultConnected {
+		t.Fatalf("result = %q, want connected", got)
+	}
+	if n := h.admin.countOp(shopFetchOp); n != 1 {
+		t.Fatalf("the reinstall of a purged store read its shop %d times, want once", n)
+	}
+	if h.statementIndex("insert", `"v1:shopify:shop"`, `"currencyCode":"EUR"`) < 0 {
+		t.Error("the reinstall of a purged store wrote no shop row")
+	}
+
+	h = reconnectHarness(t, map[string]any{"status": StatusPaused})
+	h.admin.reply(shopFetchOp, shopAnswer("EUR", "Europe/Madrid", "2026-08-01T00:00:00Z"))
+	if got := h.write(credentialSourceCurrent); got != connectResultReconnected {
+		t.Fatalf("result = %q, want reconnected", got)
+	}
+	if n := h.admin.countOp(shopFetchOp); n != 0 {
+		t.Errorf("the reconnect of a store a person paused read its shop %d times, want never", n)
+	}
+}
+
+// THE CONNECT'S SHOP READ IS OFF THE REDIRECT: it runs in the connect's
+// background job, on that job's own context, so the browser does not wait on
+// it and a request that ends does not take it along.
+func TestTheConnectsShopReadDoesNotHoldTheRedirect(t *testing.T) {
+	h := newWriteHarness(t)
+	h.admin.reply(shopFetchOp, shopAnswer("EUR", "Europe/Madrid", "2026-08-01T00:00:00Z"))
+	var deferred []func()
+	h.integ.connector.background = func(f func()) { deferred = append(deferred, f) }
+	ctx, cancel := context.WithCancel(context.Background())
+	got, _ := h.integ.connector.WriteShopifyConnect(ctx, callbackState(credentialSourcePending), h.grant())
+	if got != connectResultConnected {
+		t.Fatalf("result = %q, want connected", got)
+	}
+	if n := h.admin.countOp(shopFetchOp); n != 0 {
+		t.Fatalf("the shop was read %d times before the callback answered", n)
+	}
+	if len(deferred) != 1 {
+		t.Fatalf("%d background jobs, want the connect's one", len(deferred))
+	}
+	// The person closes the tab: the request's context ends before the job runs.
+	cancel()
+	deferred[0]()
+	if n := h.admin.countOp(shopFetchOp); n != 1 {
+		t.Fatalf("the connect's job read the shop %d times, want once", n)
+	}
+	if h.statementIndex("insert", `"v1:shopify:shop"`, `"currencyCode":"EUR"`) < 0 {
+		t.Error("the connect's job wrote no shop row after the request ended")
+	}
+}
+
+// A READ THAT PANICS is logged with its stack, under the store's id, and the
+// next store is still read.
+func TestAPanickingShopReadIsLoggedWithItsStack(t *testing.T) {
+	h := newHarness(t)
+	second := withTwoStores(t, h)
+	h.admin.reply(shopFetchOp, shopAnswer("EUR", "Europe/Madrid", "2026-08-01T00:00:00Z"))
+	second.reply(shopFetchOp, shopAnswer("USD", "America/Chicago", "2026-08-02T00:00:00Z"))
+	var logs bytes.Buffer
+	h.conn.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	h.conn.engine = &panickingEngine{fakeEngine: h.engine, times: 1}
+
+	h.conn.refreshShops(context.Background(), false)
+
+	out := logs.String()
+	if !strings.Contains(out, "level=ERROR") || !strings.Contains(out, "store="+testStoreID) || !strings.Contains(out, "runtime/debug.Stack") {
+		t.Errorf("the panic was not logged at error level with the store's id and its stack:\n%s", out)
+	}
+	if n := second.countOp(shopFetchOp); n != 1 {
+		t.Fatalf("the store after the one that panicked was read %d times, want once", n)
+	}
+	if writes := shopWritesIn(h.engine.calls()); len(writes) != 1 || !strings.Contains(writes[0], `"storeId":"`+secondStoreID+`"`) {
+		t.Fatalf("wrote %v, want the second store's shop row", writes)
+	}
+}
+
+// shopRowsEngine answers the mirror's shop read per store: a store in `has`
+// has its live row.
+type shopRowsEngine struct {
+	*fakeEngine
+	has map[string]bool
+}
+
+func (e shopRowsEngine) Execute(ctx context.Context, q string) (*memql.ExecuteResult, error) {
+	if callName(q) == "shopifyShopForStore" {
+		_, _ = e.fakeEngine.Execute(ctx, q)
+		for id, has := range e.has {
+			if has && strings.Contains(q, `storeId: "`+id+`"`) {
+				return resultWithRows([]map[string]any{{"id": "shop-" + id, "storeId": id}}), nil
+			}
+		}
+		return resultWithRows(nil), nil
+	}
+	return e.fakeEngine.Execute(ctx, q)
+}
+
+// One boot of two stores, one with its row and one without, in either order:
+// the one with its row is passed over and the one without is still read.
+func TestABootOfTwoStoresReadsOnlyTheOneWithoutARow(t *testing.T) {
+	for _, withRow := range []string{testStoreID, secondStoreID} {
+		h := newHarness(t)
+		second := withTwoStores(t, h)
+		h.admin.reply(shopFetchOp, shopAnswer("EUR", "Europe/Madrid", "2026-08-01T00:00:00Z"))
+		second.reply(shopFetchOp, shopAnswer("USD", "America/Chicago", "2026-08-02T00:00:00Z"))
+		h.conn.engine = shopRowsEngine{fakeEngine: h.engine, has: map[string]bool{withRow: true}}
+
+		Bootstrap(context.Background(), NewIntegration(h.conn), nil)
+
+		first, other := h.admin.countOp(shopFetchOp), second.countOp(shopFetchOp)
+		want := [2]int{0, 1}
+		if withRow == secondStoreID {
+			want = [2]int{1, 0}
+		}
+		if first != want[0] || other != want[1] {
+			t.Errorf("%s has its row: the boot read the shops %d and %d times, want %v", withRow, first, other, want)
+		}
+	}
 }
