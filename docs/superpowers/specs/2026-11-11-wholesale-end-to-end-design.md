@@ -474,9 +474,14 @@ resolution and the delivery ledger are the existing ones. What differs:
   row (G6), and the replayed send calls the resolver again, so a rate-limited
   message goes out later with fresh fields (a link minted then) and no token is
   ever stored. The receipt check comes before the resolver: a second call with the
-  same request id sends nothing and mints nothing. U7's first test settles whether order sends share
-  the gap; if they do, the same two fields are set for them (`rowConcept:
-  "v1:shopify:order"`) and that is recorded in the plan as a fix.
+  same request id sends nothing and mints nothing. U7's first test showed that the
+  engine's organization guard refused every lane's ledger row (G6): a ledger row
+  that names the row it is about is now exempt from the recipient reference, and
+  only server code can write one (the delivery concept takes no client write).
+  Order sends are recorded with `rowConcept: "v1:shopify:order"` and are not
+  deferred: their fields and sender are the caller's and are not stored, so an
+  order send that meets the rate limit answers that it was limited and its caller
+  sends it again.
 
 **Templates and who edits them.** A template is an ordinary `v1:campaigns:template`
 of the store's organization, with `purpose: "transactional"`. It is written and
@@ -853,7 +858,7 @@ Named here so the engine side is complete; the client builds it.
 | --- | --- |
 | N1 is not the runtime failure the code suggests | U1's first database test |
 | N5: any signed-in caller can tag any email | Closed by X22 in U3; U4 step 7 proves the refusal |
-| G6: deferred order and row sends are not replayable | U7's first database test |
+| G6: a lane's ledger row was refused by the organization guard, so order sends left no record and nothing could be deferred | Settled by U7's first database test: the guard's exemption for a row that names what it is about, order sends recorded and not deferred, row sends replayed through their resolver |
 | Changing `applicationDecision`'s row tier on stored rows (X5) | A database test with a decision written by the old mutation, read before and after the backfill |
 | Making the mutations `@serverOnly` breaks a caller that wrote them directly (an import, `twoclients_test.go`) | The full pack suite in U1; any import path moves to a builtin |
 | A client's package automations do not run with internal origin | U4 step 6 (the automation path); reviews' moderator notice relies on the same (`automations/executor.go:868-873`) |
