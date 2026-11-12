@@ -424,6 +424,20 @@ func TestAWithdrawalAnsweredAsAPointerIsAWithdrawal(t *testing.T) {
 
 // A HOLD IS READ BY ITS SENTENCE outside this package, through a wrap, and
 // nothing else is a hold: what a pack records as skipped rather than failed.
+// UncertainSend reads an uncertain hand-over through a caller's wrap, and
+// nothing else: not a hold, not a refusal, not nothing.
+func TestUncertainSendReadsAnUncertainHandOverThroughAWrapAndNothingElse(t *testing.T) {
+	uncertain := uncertainSend{error: errors.New("campaigns.sendToRecipient: the connection closed")}
+	if !UncertainSend(fmt.Errorf("a caller's wrap: %w", uncertain)) {
+		t.Fatal("an uncertain hand-over was not read as one through a wrap")
+	}
+	for name, err := range map[string]error{"a hold": sendHeld{reason: "Publish it."}, "a resolver failure": errResolverDidNotAnswer, "nothing": nil} {
+		if UncertainSend(err) {
+			t.Fatalf("%s was read as an uncertain hand-over", name)
+		}
+	}
+}
+
 func TestHeldReasonReadsAHoldThroughAWrapAndNothingElse(t *testing.T) {
 	engine := rowSendEngine()
 	engine.template["status"] = "draft"

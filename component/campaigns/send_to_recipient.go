@@ -141,6 +141,17 @@ type uncertainSend struct {
 
 func (e uncertainSend) Unwrap() error { return e.error }
 
+// UncertainSend reports whether err is an uncertain hand-over (uncertainSend):
+// the provider may have accepted the message, and nothing submits it again
+// until the provider's record says it did not. A pack that records what the row
+// lane answered reads one through here -- the type is this package's own -- so
+// it can tell the store's people "not known yet" apart from a send that failed.
+// The error's text is the transport's and is not for them.
+func UncertainSend(err error) bool {
+	var u uncertainSend
+	return errors.As(err, &u)
+}
+
 // uncertain is err, a send whose receipt keeps saying an attempt began, as an
 // uncertainSend that says whether its transport keeps a record to ask.
 func (w *Worker) uncertain(ctx context.Context, receipt *singleSendReceipt, err error) error {
