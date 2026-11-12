@@ -418,6 +418,7 @@ func verdictPayload(v Verdict) map[string]any {
 		"storeId": v.StoreID, "domain": v.Domain, "state": v.State, "since": v.Since.UTC().Format(time.RFC3339),
 		"resumedAt": timeOrEmpty(v.ResumedAt), "connectedAt": timeOrEmpty(v.ConnectedAt),
 		"reasons": reasons, "recorded": recorded, "outside": toAny(v.Outside), "withheld": toAny(v.Withheld),
-		"ordersFrom": v.OrdersFrom,
+		"outsideConcepts": toAny(v.OutsideConcepts),
+		"ordersFrom":      v.OrdersFrom,
 	}
 }

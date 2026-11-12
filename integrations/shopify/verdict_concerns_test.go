@@ -62,11 +62,16 @@ func reasonCodeConstants(t *testing.T) map[string]string {
 			for _, spec := range gen.Specs {
 				vs := spec.(*ast.ValueSpec)
 				for i, name := range vs.Names {
-					if !strings.HasPrefix(name.Name, "Reason") || i >= len(vs.Values) {
+					if !strings.HasPrefix(name.Name, "Reason") {
+						continue
+					}
+					if i >= len(vs.Values) {
+						t.Errorf("%s: %s takes its value implicitly; a reason code is a string literal", path, name.Name)
 						continue
 					}
 					lit, ok := vs.Values[i].(*ast.BasicLit)
 					if !ok || lit.Kind != token.STRING {
+						t.Errorf("%s: %s is not a string literal; a reason code is one, so the gate can read it", path, name.Name)
 						continue
 					}
 					value, err := strconv.Unquote(lit.Value)
@@ -111,6 +116,63 @@ func TestEveryReasonCodeIsClassified(t *testing.T) {
 			}
 			seen[kind] = true
 		}
+	}
+}
+
+// TestEveryReasonIsBuiltWithAReasonConstant reads every VerdictReason
+// literal of the package's non-test files: each is keyed, and its Code is one
+// of the package's Reason* constants, so a reason cannot be built with a bare
+// string the classification does not see. VerdictReasonFromPayload, which
+// reads a code back from a reply, is the one exception, by name.
+func TestEveryReasonIsBuiltWithAReasonConstant(t *testing.T) {
+	constants := reasonCodeConstants(t)
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	built := 0
+	for _, path := range files {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		for _, decl := range file.Decls {
+			fn := ""
+			if f, ok := decl.(*ast.FuncDecl); ok {
+				fn = f.Name.Name
+			}
+			ast.Inspect(decl, func(n ast.Node) bool {
+				lit, ok := n.(*ast.CompositeLit)
+				if !ok {
+					return true
+				}
+				if ident, ok := lit.Type.(*ast.Ident); !ok || ident.Name != "VerdictReason" {
+					return true
+				}
+				for _, elt := range lit.Elts {
+					kv, ok := elt.(*ast.KeyValueExpr)
+					if !ok {
+						t.Errorf("%s: an unkeyed VerdictReason literal", fset.Position(lit.Pos()))
+						break
+					}
+					if key, ok := kv.Key.(*ast.Ident); !ok || key.Name != "Code" || fn == "VerdictReasonFromPayload" {
+						continue
+					}
+					built++
+					if value, ok := kv.Value.(*ast.Ident); !ok || constants[value.Name] == "" {
+						t.Errorf("%s: a VerdictReason's Code is not a Reason* constant", fset.Position(kv.Value.Pos()))
+					}
+				}
+				return true
+			})
+		}
+	}
+	if built == 0 {
+		t.Fatal("no VerdictReason literal with a Code found: the check is reading the wrong files")
 	}
 }
 
@@ -240,6 +302,19 @@ func TestAReasonSaysWhatItStandsInTheWayOf(t *testing.T) {
 	}
 	if (VerdictReason{Code: ReasonCheckFailing, Concerns: ConcernsConcepts, Concepts: []string{"order"}}).StandsInTheWayOf([]string{"v1:shopify:refund"}) != true {
 		t.Error("a concept given by id is compared through the domain that records it")
+	}
+	// One way, never beside: neither the orders nor the shop is read under
+	// the other.
+	if (VerdictReason{Code: ReasonCheckFailing, Concerns: ConcernsConcepts, Concepts: []string{"order"}}).StandsInTheWayOf([]string{"shop"}) {
+		t.Error("a reason naming orders stands in the way of a walk of the shop alone")
+	}
+	if (VerdictReason{Code: ReasonApprovalOutdated, Concerns: ConcernsConcepts, Concepts: []string{"shop"}}).StandsInTheWayOf([]string{"order"}) {
+		t.Error("a reason naming the shop stands in the way of a walk of orders alone")
+	}
+	// A reply from an older node: a known code and no concerns.
+	older := VerdictReasonFromPayload(map[string]any{"code": ReasonCheckFailing, "domain": "products", "sentence": "The last check of products failed"})
+	if older.Concerns != "" || !older.StandsInTheWayOf(walked) {
+		t.Errorf("a reason read from an older node's reply = %+v; with no concerns it stands in the way", older)
 	}
 }
 
@@ -395,12 +470,33 @@ func TestChangesNotRecordedNameTheirDomains(t *testing.T) {
 		t.Errorf("a floor: %+v; the deliveries not read may be of any domain", r)
 	}
 
-	r = reason(append(slices.Clone(products), givenUp("app/scopes_update", after)), false)
-	if r.Concerns != ConcernsWholeStore || len(r.Concepts) != 0 || !r.StandsInTheWayOf(walked) {
-		t.Errorf("beside a delivery routed to no domain: %+v; want the whole store", r)
+	// A delivery the connector routes to no domain is never counted. It makes
+	// the reason whole-store when it could have carried a record of any
+	// domain: the bulk export's finish, or a topic the connector does not
+	// know (app/scopes_update is one: Apply names it nowhere, and an
+	// unreadable header is another). A topic the connector routes to its
+	// privacy jobs or to the uninstall carries no mirrored record and leaves
+	// the reason by concept.
+	noHeader := givenUp("products/update", after)
+	noHeader["headersJson"] = "{not json"
+	for name, delivery := range map[string]map[string]any{
+		"the bulk export's finish": givenUp("bulk_operations/finish", after),
+		"an unknown topic":         givenUp("app/scopes_update", after),
+		"an unreadable header":     noHeader,
+	} {
+		r = reason(append(slices.Clone(products), delivery), false)
+		if r.Concerns != ConcernsWholeStore || len(r.Concepts) != 0 || !r.StandsInTheWayOf(walked) {
+			t.Errorf("beside %s: %+v; want the whole store", name, r)
+		}
+		if r.Count != 2 {
+			t.Errorf("beside %s: count = %d; a delivery routed to no domain is still not counted", name, r.Count)
+		}
 	}
-	if r.Count != 2 {
-		t.Errorf("count = %d; the delivery routed to no domain is still not counted", r.Count)
+	for _, topic := range []string{generated.TopicCustomersRedact, generated.TopicCustomersDataRequest, generated.TopicShopRedact, TopicAppUninstalled} {
+		r = reason(append(slices.Clone(products), givenUp(topic, after)), false)
+		if r.Concerns != ConcernsConcepts || !slices.Equal(r.Concepts, []string{"product"}) || r.Count != 2 {
+			t.Errorf("beside %s, which carries no mirrored record: %+v; want concepts [product]", topic, r)
+		}
 	}
 
 	// A delivery of a domain outside the connection is neither counted nor
@@ -525,5 +621,158 @@ func TestTheVerdictReplyCarriesEachReasonsKindAndConcepts(t *testing.T) {
 	}
 	if back := VerdictReasonFromPayload(map[string]any{"code": ReasonCheckFailing, "concerns": ConcernsConcepts, "concepts": []string{"order"}}); !slices.Equal(back.Concepts, []string{"order"}) {
 		t.Errorf("a []string of concepts read back = %+v", back)
+	}
+}
+
+func TestAnOutdatedApprovalNamesTheConceptsTheOriginRefuses(t *testing.T) {
+	// The recorded grant is written at connect and never refreshed. A store on
+	// its own app whose recorded grant lacks only read_all_orders frees
+	// everything; when the origin then refuses its orders, the order row reads
+	// not granted and that is what the reason names.
+	own := Store{
+		ID: testStoreID, Domain: "acme-widgets.myshopify.com", AdminTokenRef: "ACME_ADMIN", Status: StatusLive,
+		ScopesGranted: without(ConnectScopes(), "read_all_orders"),
+	}
+	before := reasonNamed(t, computeVerdict(verdictInputOf(own, cleanRows(own))), ReasonApprovalOutdated)
+	if before.Concerns != ConcernsNoRecording {
+		t.Fatalf("before the refusal: %+v; want nothing recorded held", before)
+	}
+	rows := setRow(cleanRows(own), "order", func(r map[string]any) {
+		r["lastError"] = memqlsync.NotGranted(ConnectorName, "read_orders").Error()
+		r["lastReconcileAt"] = ""
+	})
+	v := computeVerdict(verdictInputOf(own, rows))
+	if codes := reasonCodes(v); len(codes) != 1 {
+		t.Fatalf("reasons = %v; the refused orders are the outdated approval's, and no failing check", codes)
+	}
+	r := reasonNamed(t, v, ReasonApprovalOutdated)
+	checkReasonKind(t, r)
+	if r.Concerns != ConcernsConcepts || !slices.Equal(r.Concepts, []string{"order"}) || !r.StandsInTheWayOf(statisticsWalk) {
+		t.Errorf("after the refusal: %+v; want concepts [order], in the way of the walk", r)
+	}
+
+	// A failed backfill refused the same way counts as the row's refusal.
+	rows = setRow(cleanRows(own), "order", func(r map[string]any) {
+		r["backfillStatus"] = "failed"
+		r["lastError"] = backfillRefusedPrefix + memqlsync.NotGranted(ConnectorName, "read_orders").Error()
+	})
+	r = reasonNamed(t, computeVerdict(verdictInputOf(own, rows)), ReasonApprovalOutdated)
+	if !slices.Contains(r.Concepts, "order") {
+		t.Errorf("a refused backfill: %+v; want order named", r)
+	}
+
+	// The undeclared-data refusal is its own reason, and not this one's.
+	rows = setRow(cleanRows(own), "customer", func(r map[string]any) {
+		r["lastError"] = protectedRefusal
+		r["lastReconcileAt"] = ""
+		r["backfillStatus"] = "none"
+	})
+	v = computeVerdict(verdictInputOf(own, rows))
+	if r := reasonNamed(t, v, ReasonApprovalOutdated); r.Concerns != ConcernsNoRecording {
+		t.Errorf("an undeclared-data refusal: approval %+v; the refusal is data_not_declared's", r)
+	}
+	reasonNamed(t, v, ReasonDataNotDeclared)
+}
+
+// replyOf is the verdict's payload as a client reads it, through JSON.
+func replyOf(t *testing.T, v Verdict) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(verdictPayload(v))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reply map[string]any
+	if err := json.Unmarshal(raw, &reply); err != nil {
+		t.Fatal(err)
+	}
+	return reply
+}
+
+func TestTheVerdictNamesTheConceptsOutsideWhatTheStoreRecords(t *testing.T) {
+	// A store row from before grants were recorded: nothing is known to be
+	// missing, so no reason; the origin refuses the orders, and the order row
+	// reads not granted.
+	store := verdictStore()
+	store.ScopesGranted = nil
+	rows := setRow(cleanRows(store), "order", func(r map[string]any) {
+		r["lastError"] = memqlsync.NotGranted(ConnectorName, "read_orders").Error()
+		r["lastReconcileAt"] = ""
+	})
+	v := computeVerdict(verdictInputOf(store, rows))
+	if len(v.Reasons) != 0 {
+		t.Fatalf("reasons = %v; a store with no recorded grant has none for a refused domain", reasonCodes(v))
+	}
+	if !slices.Contains(v.OutsideConcepts, "order") || !sort.StringsAreSorted(v.OutsideConcepts) {
+		t.Errorf("outside concepts = %v; want order, sorted", v.OutsideConcepts)
+	}
+	// The display lists are what they were.
+	if !slices.Equal(v.Outside, outsideOf(store, rowsByConcept(rows))) || slices.Contains(v.Outside, "orders") {
+		t.Errorf("outside = %v; the display list is unchanged", v.Outside)
+	}
+	if !slices.Equal(v.Withheld, []string{}) {
+		t.Errorf("withheld = %v; unchanged", v.Withheld)
+	}
+	reply := replyOf(t, v)
+	if _, ok := reply["outsideConcepts"].([]any); !ok {
+		t.Fatalf("reply outsideConcepts = %#v; want a list", reply["outsideConcepts"])
+	}
+	for concept, want := range map[string]bool{"order": true, "orderLineItem": true, "refund": true, "v1:shopify:refund": true, "shop": false} {
+		outside, known := OutsideWhatTheStoreRecords(reply, []string{concept})
+		if !known || outside != want {
+			t.Errorf("%s: outside %v, known %v; want outside %v, known", concept, outside, known, want)
+		}
+	}
+	if outside, known := OutsideWhatTheStoreRecords(reply, statisticsWalk); !known || !outside {
+		t.Errorf("the walk: outside %v, known %v; want outside", outside, known)
+	}
+
+	// Customers outside do not put orders outside.
+	store = verdictStore()
+	store.ScopesGranted = nil
+	rows = setRow(cleanRows(store), "customer", func(r map[string]any) {
+		r["lastError"] = memqlsync.NotGranted(ConnectorName, "read_customers").Error()
+		r["lastReconcileAt"] = ""
+	})
+	v = computeVerdict(verdictInputOf(store, rows))
+	if !slices.Contains(v.OutsideConcepts, "customer") || slices.Contains(v.OutsideConcepts, "order") {
+		t.Errorf("outside concepts = %v; want customer and not order", v.OutsideConcepts)
+	}
+	if outside, known := OutsideWhatTheStoreRecords(replyOf(t, v), statisticsWalk); !known || outside {
+		t.Errorf("customers outside: the walk outside %v, known %v; want clear", outside, known)
+	}
+
+	// Every domain the display list names is among the concepts, and a
+	// store with nothing outside lists none.
+	store = verdictStore()
+	v = computeVerdict(verdictInputOf(store, cleanRows(store)))
+	for _, concept := range domainsOutside(store) {
+		if !slices.Contains(v.OutsideConcepts, generated.ConceptFromID(concept)) {
+			t.Errorf("outside concepts = %v; %s is outside the connection", v.OutsideConcepts, concept)
+		}
+	}
+	if outside, known := OutsideWhatTheStoreRecords(replyOf(t, v), statisticsWalk); !known || outside {
+		t.Errorf("a store recording everything it asks: outside %v, known %v; want clear", outside, known)
+	}
+	full := managedStore(ConnectScopes()...)
+	full.AdminTokenRef = "ACME_ADMIN"
+	if v := computeVerdict(verdictInputOf(full, cleanRows(full))); len(v.OutsideConcepts) != 0 {
+		t.Errorf("a store on its own app asking everything: outside concepts = %v; want none", v.OutsideConcepts)
+	}
+}
+
+func TestAnOlderNodesVerdictLeavesWhatIsOutsideUnknown(t *testing.T) {
+	store := verdictStore()
+	reply := replyOf(t, computeVerdict(verdictInputOf(store, cleanRows(store))))
+	delete(reply, "outsideConcepts")
+	outside, known := OutsideWhatTheStoreRecords(reply, statisticsWalk)
+	if known || !outside {
+		t.Errorf("a reply with no outsideConcepts: outside %v, known %v; want unknown, and outside if the caller reads only the first", outside, known)
+	}
+	reply["outsideConcepts"] = "order"
+	if _, known := OutsideWhatTheStoreRecords(reply, statisticsWalk); known {
+		t.Error("an outsideConcepts that is not a list is read as known")
+	}
+	if outside, known := OutsideWhatTheStoreRecords(nil, statisticsWalk); known || !outside {
+		t.Errorf("no reply: outside %v, known %v; want unknown", outside, known)
 	}
 }
