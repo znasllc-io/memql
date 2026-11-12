@@ -11,6 +11,9 @@ import { dataOriginRow, fakeConnection, inboundRequestRow, syncStateRow, withSes
 //                           for and one failing domain -- beside a connector
 //                           that keeps no stores apart. Add `click=Check` to
 //                           open the changes that could not be recorded.
+//   view=origins-by-store-admin
+//                           the same page for a person who may open it and
+//                           is not a cluster owner: every state, no act.
 //
 // With `mode=light|dark` and `width=narrow` as everywhere in the harness.
 
@@ -63,11 +66,14 @@ const GIVEN_UP = [
 ];
 
 export function originsByStoreScenes(Frame: Frame) {
+  const scene = (role?: string) => ({
+    connect: () => fakeConnection({ dataOrigins: [...SHOPIFY, ...BOOKS], syncStatesAll: HEALTH, inboundRequestsGivenUp: GIVEN_UP }),
+    wrap: (element: ReactElement, role: string) => withSession(element, { role }),
+    ...(role === undefined ? {} : { role }),
+    render: () => <Frame fallback="Cluster"><OriginsSection /></Frame>,
+  });
   return {
-    "origins-by-store": {
-      connect: () => fakeConnection({ dataOrigins: [...SHOPIFY, ...BOOKS], syncStatesAll: HEALTH, inboundRequestsGivenUp: GIVEN_UP }),
-      wrap: (element: ReactElement, role: string) => withSession(element, { role }),
-      render: () => <Frame fallback="Cluster"><OriginsSection /></Frame>,
-    },
+    "origins-by-store": scene(),
+    "origins-by-store-admin": scene("admin"),
   };
 }

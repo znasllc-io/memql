@@ -21,7 +21,10 @@ import { fakeConnection, previewReadinessRow, SHOP, siteRow, storeVerdictRow, ve
 //   view=store-verdict-unknown      the verdict could not be read
 //   view=store-verdict-nostate      the reply named no state (no Shopify connector)
 //   view=store-verdict-two-stores   two different stores, each notice naming its own
+//   view=store-verdict-own-app      a store on its own app that grants less: a reason with no act
 //   view=store-verdict-slot         the deployable's page, its Store slot
+//   view=store-verdict-slot-unavailable
+//                                   the slot when the bound store does not read back
 //   view=settings-shopify-alert     Settings > Shopify with the alert wait
 //
 // With `mode=light|dark` and `width=narrow` as everywhere in the harness.
@@ -78,6 +81,7 @@ export function storeVerdictScenes(Frame: Frame) {
     "store-verdict-starting": page(seed({ state: "starting", recorded: RECORDED.map((k) => ({ ...k, lastChangeAt: "" })) })),
     "store-verdict-paused": page(seed({ state: "paused", recorded: RECORDED })),
     "store-verdict-attention": page(seed({ state: "needs attention", reasons: REASONS, recorded: RECORDED, alert: { state: "failed", reason: "the mail server refused the message" } })),
+    "store-verdict-own-app": page(seed({ state: "needs attention", reasons: [verdictReasonRow({ code: "approval_outdated", sentence: "This store's own app does not allow everything MemQL records.", detail: "read_returns" })], recorded: RECORDED })),
     "store-verdict-readonly": page(seed({ state: "needs attention", reasons: REASONS, recorded: RECORDED, may: { act: false } })),
     "store-verdict-uninstalled": page(seed({ state: "not connected", alert: { state: "failed", reason: "the store has no owner with an address" } }, {}, { ...OWN, adminTokenRef: "", uninstalledAt: "2026-11-10T08:00:00Z" } as unknown as Row)),
     "store-verdict-unknown": page(seed(null, { storeVerdictError: "shopify: the store's sync state could not be read" })),
@@ -97,6 +101,11 @@ export function storeVerdictScenes(Frame: Frame) {
     },
     "store-verdict-slot": {
       connect: () => fakeConnection(seed({ state: "needs attention", reasons: REASONS.slice(2, 3) })),
+      wrap: (element: ReactElement, role: string) => withSession(element, { role, userId: "u-me" }),
+      render: () => <Frame fallback="Deployables"><DeployablePage site={siteFromRow(SITE)} pkg={null} credentials={[]} viewerUserId="u-me" nameOf={() => ""} can={ALL_PARTS} clusterDomain="memql.example.com" onBack={() => {}} onOpenSource={() => {}} onOpenHistory={() => {}} /></Frame>,
+    },
+    "store-verdict-slot-unavailable": {
+      connect: () => fakeConnection(seed(null, { stores: [] })),
       wrap: (element: ReactElement, role: string) => withSession(element, { role, userId: "u-me" }),
       render: () => <Frame fallback="Deployables"><DeployablePage site={siteFromRow(SITE)} pkg={null} credentials={[]} viewerUserId="u-me" nameOf={() => ""} can={ALL_PARTS} clusterDomain="memql.example.com" onBack={() => {}} onOpenSource={() => {}} onOpenHistory={() => {}} /></Frame>,
     },

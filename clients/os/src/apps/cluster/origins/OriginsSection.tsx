@@ -4,6 +4,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { AutoRefresh, Button, Caption, Head, Notice, Panel, Subhead, RecordList, RecordRow } from "../../../kit";
 import { Measure } from "../../../kit/MeasureView";
+import { useSession } from "../../../chrome/access";
 import { useOsConnection } from "../../../live/connection";
 import { useReading } from "../../../cluster/reading";
 import { DeadLetterBand } from "./DeadLetters";
@@ -45,6 +46,13 @@ import {
 
 export function OriginsSection() {
   const connection = useOsConnection();
+  // EVERY ACT ON THIS PAGE IS A CLUSTER OWNER'S. Backfill now, Pause, Resume,
+  // Try again and a dead letter's Retry and Discard are refused by the engine
+  // for anybody else (requireOperator), while the page's part can be granted
+  // to anybody. A person who is not one sees the state and no act: absent,
+  // never drawn to be refused (DESIGN.md rule 12).
+  const { access } = useSession();
+  const operator = access?.role === "owner";
 
   const readInventory = useCallback(
     async (signal: AbortSignal): Promise<Row[]> => {
@@ -94,7 +102,7 @@ export function OriginsSection() {
   // NO ACT WITHOUT A WHOLE HEALTH READ (ruling 45). Without it the page cannot
   // tell a store's row from a shared one, and a pause that names no store
   // reaches every store. Absent, not disabled.
-  const mayAct = health.value !== null && !health.value.incomplete;
+  const mayAct = operator && health.value !== null && !health.value.incomplete;
   const [givenUpOpen, setGivenUpOpen] = useState(false);
 
   const [openConnector, setOpenConnector] = useState("");
@@ -109,8 +117,8 @@ export function OriginsSection() {
       const store = row.partition === "" ? {} : { partitionKey: row.partition };
       try {
         if (which === "backfill") {
-          // A failed backfill's cursor may hold a download link that has
-          // expired, so it starts again from the start; any other continues
+          // A failed backfill starts again from the start, because whatever
+          // failed it is in the cursor it stopped at; any other continues
           // from where it stopped.
           await connection.query.datasyncStartBackfill({
             connector: row.connector,
@@ -266,7 +274,7 @@ export function OriginsSection() {
               </Button>
             ))}
           </div>
-          {openConnector === "" ? null : <DeadLetterBand connector={openConnector} />}
+          {openConnector === "" ? null : <DeadLetterBand connector={openConnector} mayAct={operator} />}
         </Panel>
       ) : null}
 
@@ -280,7 +288,7 @@ export function OriginsSection() {
             {givenUpOpen ? "Close" : "Check"}
           </Button>
         </div>
-        {givenUpOpen ? <GivenUpBand /> : null}
+        {givenUpOpen ? <GivenUpBand mayAct={operator} /> : null}
       </Panel>
 
       {inventory.at === null ? null : (
@@ -392,7 +400,7 @@ const GIVEN_UP_PAGES = 20;
  * dead-letter band's is. When pages remain after the last one read, each count
  * is a floor and says so.
  */
-function GivenUpBand() {
+function GivenUpBand({ mayAct }: { mayAct: boolean }) {
   const connection = useOsConnection();
   const read = useCallback(
     async (signal: AbortSignal) => {
@@ -453,7 +461,7 @@ function GivenUpBand() {
       <RecordList as="ul" label="Changes that could not be recorded">
         {sources.map((s) => (
           <RecordRow key={s.source} name={s.source} tone="warn"
-            actions={<Button tone="quiet" busy={busy === s.source} busyLabel="Working" onClick={() => void tryAgain(s.source)}>Try again</Button>}>
+            actions={mayAct ? <Button tone="quiet" busy={busy === s.source} busyLabel="Working" onClick={() => void tryAgain(s.source)}>Try again</Button> : undefined}>
             <span>{capped ? "At least " : ""}{s.count} {s.count === 1 ? "change" : "changes"}</span>
             {s.lastError ? <span className="os-cluster-dl-error os-mono">{s.lastError}</span> : null}
           </RecordRow>

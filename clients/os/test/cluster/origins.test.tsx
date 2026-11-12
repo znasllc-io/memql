@@ -730,7 +730,7 @@ describe("data origins, by store: the numbers and the acts", () => {
         syncStatesAll: [shopify("order", STORE, { paused: true }), shopify("company", STORE, { lastError: NOT_REQUESTED })],
       }),
     );
-    expect(await screen.findByText("Every concept of its store is paused. Deliveries are staged and nothing is being applied.")).toBeTruthy();
+    expect(await screen.findByText("Every concept of its store is paused: no backfill, check or outbound change runs. Changes the origin sends are still applied.")).toBeTruthy();
     expect(screen.getByText("1 of 1 reported")).toBeTruthy();
   });
 
@@ -868,5 +868,72 @@ describe("data origins, by store: the numbers and the acts", () => {
     await click(within(section).getByRole("button", { name: "Check" }));
     expect(await within(section).findByText("The list could not be read.")).toBeTruthy();
     expect(within(section).getByText("inboundRequestsGivenUp: the cluster is busy")).toBeTruthy();
+  });
+});
+
+// THE OPERATOR'S ACTS ARE A CLUSTER OWNER'S (final fix wave, A2). The page's
+// part can be granted to anybody, but every act on it -- Backfill now, Pause,
+// Resume, Try again, a dead letter's Retry and Discard -- is refused by the
+// engine for anybody but a cluster owner (requireOperator). So a person who
+// holds the page and is not one sees the state and no act: an act that will
+// be refused is absent, never drawn (DESIGN.md rule 12).
+describe("a person who may open Data and is not a cluster owner", () => {
+  const ENTRY = {
+    id: "dl-1",
+    conceptId: "v1:shopify:product",
+    rowRef: "p-1",
+    action: "upsert",
+    target: "shopify",
+    attempts: 5,
+    lastError: "429 from the vendor",
+    createdAt: "2026-10-12T09:00:00Z",
+  };
+
+  function mountAs(role: string) {
+    const connection = fakeConnection({
+      dataOrigins: [NEVER_RUN, RAN_CLEAN],
+      syncStatesAll: [syncStateRow({ conceptId: "v1:shopify:customer", connector: "shopify", paused: true })],
+      outboxDeadLettersBrowse: [ENTRY],
+      inboundRequestsGivenUp: [inboundRequestRow({ id: "in-1", source: "shopify-acme-widgets", lastError: "the Admin API answered 503" })],
+    });
+    h.connection = connection;
+    render(withSession(<OriginsSection />, { role }));
+    return connection;
+  }
+
+  it("sees each domain's state and no Backfill now, Pause or Resume", async () => {
+    mountAs("admin");
+    await screen.findByText("paused");
+    for (const concept of ["v1:shopify:product", "v1:shopify:customer"]) {
+      const row = await rowFor(concept);
+      expect(within(row).queryByRole("button")).toBeNull();
+    }
+  });
+
+  it("sees the dead letters and no Retry or Discard", async () => {
+    mountAs("developer");
+    await screen.findByText("v1:shopify:product");
+    await click(screen.getByRole("button", { name: "Check shopify" }));
+    await screen.findByText("429 from the vendor");
+    const band = screen.getByRole("list", { name: "shopify dead letters" });
+    expect(within(band).queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(within(band).queryByRole("button", { name: "Discard" })).toBeNull();
+  });
+
+  it("sees the changes that could not be recorded and no Try again", async () => {
+    mountAs("admin");
+    await screen.findByText("v1:shopify:product");
+    const section = screen.getByRole("region", { name: "Changes that could not be recorded" });
+    await click(within(section).getByRole("button", { name: "Check" }));
+    await within(section).findByText("the Admin API answered 503");
+    expect(within(section).queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+
+  it("a cluster owner is drawn every act", async () => {
+    mountAs("owner");
+    await screen.findByText("paused");
+    const row = await rowFor("v1:shopify:customer");
+    expect(within(row).getByRole("button", { name: /^Resume/ })).toBeTruthy();
+    expect(within(row).getByRole("button", { name: /^Backfill now/ })).toBeTruthy();
   });
 });

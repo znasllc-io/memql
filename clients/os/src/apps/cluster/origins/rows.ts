@@ -58,9 +58,11 @@ export interface OriginRow {
    *  reason the row exists at all. */
   hasHealth: boolean;
   backfillStatus: string;
-  /** The row's backfill status is `failed`. Its cursor may lead nowhere (a
-   *  download link that expired), so "Backfill now" starts it again from the
-   *  start rather than from the cursor. */
+  /** The row's backfill status is `failed`. Whatever failed it is still in
+   *  the cursor it stopped at (an export the origin may no longer have), so
+   *  "Backfill now" starts it again from the start rather than from the
+   *  cursor. The cursor names the export and the line reached, never an
+   *  address: nothing here reads it. */
   backfillFailed: boolean;
   backfillCursor: string;
   lagSeconds: Figure;
@@ -376,7 +378,11 @@ export function coverageSentence(c: ConnectorCoverage): string {
     return `${c.reported} of ${c.concepts} ${noun}${ofStores} have reported. The rest have no measurement, which is not the same as no lag.`;
   }
   if (c.paused === c.concepts) {
-    return `Every concept${ofStores} is paused. Deliveries are staged and nothing is being applied.`;
+    // A DOMAIN'S PAUSE STOPS ITS RUNNERS AND ITS DRAIN, NOT ITS DELIVERIES:
+    // the dispatcher never reads the sync-state row, so a change the origin
+    // sends is applied. Holding deliveries is the Store page's pause, a
+    // store's, not this switch.
+    return `Every concept${ofStores} is paused: no backfill, check or outbound change runs. Changes the origin sends are still applied.`;
   }
   if (c.paused > 0) {
     return `All ${c.concepts} ${noun}${ofStores} have reported; ${c.paused} ${c.paused === 1 ? "is" : "are"} paused.`;

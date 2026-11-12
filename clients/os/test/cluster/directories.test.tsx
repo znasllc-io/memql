@@ -11,7 +11,7 @@ import { fakeConnection, rowsResult, withSession, agentRow, auditEventRow } from
 const cases = [
   { name: "agents", method: "allAgents" as const, list: "Agents in this cluster", search: "Search agents", placeholder: "Search agents", row: (n: number): Row => agentRow({ id: `agent-${n}`, name: `Resource ${n}` }), view: () => <AgentsSection showInactive={false} /> },
   { name: "audit", method: "auditEventsBrowse" as const, list: "Audit events", search: "Refine the audit trail", placeholder: "Search audit events", row: (n: number): Row => auditEventRow({ id: `audit-${n}`, action: `Resource ${n}` }), view: () => <AuditSection /> },
-  { name: "dead letters", method: "outboxDeadLettersBrowse" as const, list: "shopify dead letters", search: "Search dead letters", placeholder: "Search dead letters", row: (n: number): Row => ({ id: `dead-${n}`, conceptId: `Resource ${n}`, target: "shopify", status: "dead" }), view: () => <DeadLetterBand connector="shopify" /> },
+  { name: "dead letters", method: "outboxDeadLettersBrowse" as const, list: "shopify dead letters", search: "Search dead letters", placeholder: "Search dead letters", row: (n: number): Row => ({ id: `dead-${n}`, conceptId: `Resource ${n}`, target: "shopify", status: "dead" }), view: () => <DeadLetterBand connector="shopify" mayAct /> },
 ];
 for (const fixture of cases) it(`${fixture.name} appends tens, retains pages and searches older records`, async () => {
   const connection = fakeConnection();

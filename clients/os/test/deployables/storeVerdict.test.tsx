@@ -218,6 +218,20 @@ describe("what needs attention", () => {
     expect(link.getAttribute("rel")).toContain("noreferrer");
   });
 
+  it("draws a reason that arrives with no act as its sentence and detail alone", async () => {
+    // A store connected with its own app: the engine keeps approval_outdated
+    // and names no act, because nothing in MemQL OS or Shopify's admin widens
+    // that app's permissions. The notice has nothing to press and no empty
+    // room where a button would be.
+    openPage(seedFor({ storeVerdict: verdict({ state: "needs attention", reasons: [verdictReasonRow({ code: "approval_outdated", sentence: "This store's own app does not allow everything MemQL records.", detail: "read_returns" })] }) }));
+    await productionRow("Needs attention");
+    const notice = noticeWith("This store's own app does not allow everything MemQL records.");
+    expect(notice.textContent).toContain("read_returns");
+    expect(within(notice).queryByRole("button")).toBeNull();
+    expect(within(notice).queryByRole("link")).toBeNull();
+    expect(Array.from(notice.querySelectorAll("div")).some((div) => div.childElementCount === 0 && (div.textContent ?? "") === "")).toBe(false);
+  });
+
   it("gives register and retry a button, and runs the builtin once", async () => {
     const connection = openPage(seedFor({ storeVerdict: verdict(ATTENTION) }));
     await productionRow("Needs attention");
