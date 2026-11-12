@@ -72,6 +72,11 @@ var storesPageSize = 100
 // sees this file call the @serverOnly query.
 const storesRead = "paginate(query storeStatisticsStores(), %d)"
 
+// shopRead is the shop read's statement: a format taking the quoted store id.
+// Here beside storesRead, in the file that stamps the reads' origin
+// (walkContext), for the same reason: test/dslconformance sees the call.
+const shopRead = "query storeStatisticsShop(storeId: %s)"
+
 // maxStorePages bounds the stores read: a cursor that never ends is an error,
 // never a loop.
 const maxStorePages = 10000
@@ -80,6 +85,7 @@ const maxStorePages = 10000
 const (
 	outcomeRebuilt = "rebuilt"
 	outcomeRemoved = "removed" // the walk leaves the store
+	outcomePurging = "purging" // its facts are still being deleted; the walk leaves the store for this run
 )
 
 // walkContext is the context every read of the run is made under, and the
@@ -139,10 +145,13 @@ func runRollup(ctx context.Context, i *Integration, now time.Time) (RollupReport
 // rollStore is one store's turn.
 func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[string]any, now time.Time, rep *RollupReport) error {
 	id := store["id"].(string)
-	if err := writeTx(ctx, db, id, anyGeneration, func(ctx context.Context, tx bun.Tx) error {
-		return ensureStore(ctx, tx, id)
-	}); err != nil {
-		return err
+	// A store whose data was removed is given no new row (store.go).
+	if !storeDataRemoved(store) {
+		if err := writeTx(ctx, db, id, anyGeneration, func(ctx context.Context, tx bun.Tx) error {
+			return ensureStore(ctx, tx, id)
+		}); err != nil {
+			return err
+		}
 	}
 	if i.storeState != nil {
 		outcome, err := i.storeState(ctx, store, now)
@@ -155,6 +164,8 @@ func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[strin
 		case outcomeRemoved:
 			rep.Removed = append(rep.Removed, id)
 			return nil
+		case outcomePurging:
+			return nil
 		}
 	}
 	// After storeState, which may itself have started a rebuild, and before
@@ -163,10 +174,15 @@ func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[strin
 	if err != nil {
 		return err
 	}
-	if i.walkStore == nil {
-		return nil
+	if i.walkStore != nil {
+		if err := i.walkStore(ctx, store, generation, now, rep); err != nil {
+			return err
+		}
 	}
-	return i.walkStore(ctx, store, generation, now, rep)
+	// A rebuild is over once the walk is within rebuildCaughtUp of the clock.
+	return writeTx(ctx, db, id, generation, func(ctx context.Context, tx bun.Tx) error {
+		return clearRebuilding(ctx, tx, id, now)
+	})
 }
 
 // listStores reads every page of the stores read and answers each store once,

@@ -19,6 +19,11 @@ import (
 var writersThroughWriteTx = []string{
 	"ensureStore",
 	"keepFloor",
+	"keepStoreRow",
+	"rebuildStore",
+	"purgeBatch",
+	"forgetStore",
+	"clearRebuilding",
 }
 
 // writeCalls are the calls that write: the bun builders, and NewRaw and

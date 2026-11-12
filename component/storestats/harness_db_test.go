@@ -302,3 +302,54 @@ func (r *statementRecorder) take() []string {
 	r.seen = nil
 	return out
 }
+
+// shopRow writes the store's shop row, live, as the mirror writes it: a raw
+// insert of a v1:shopify:shop row under the connector actor, with its prices
+// including tax. The row is deleted when the test ends.
+func shopRow(t *testing.T, storeID, currency, zone string, development bool) {
+	t.Helper()
+	writeShopRow(t, storeID, map[string]any{
+		"currencyCode": currency, "ianaTimezone": zone, "taxesIncluded": true,
+		"plan": map[string]any{"partnerDevelopment": development},
+	})
+}
+
+// writeShopRow writes a version of the store's one shop row with these fields
+// over its storeId, gid, deleted false and name.
+func writeShopRow(t *testing.T, storeID string, fields map[string]any) {
+	t.Helper()
+	eng, db := statsEngine(t)
+	if eng == nil {
+		t.FailNow()
+	}
+	gid := "gid://shopify/Shop/1"
+	rowID := shopify.MirrorRowID(storeID, gid)
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept = 'v1:shopify:shop' AND id = ?`, "v1:shopify:shop:"+rowID)
+	})
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	row := map[string]any{"storeId": storeID, "gid": gid, "deleted": false, "name": "Shop " + storeID, "updatedAt": stamp, "syncedAt": stamp}
+	for k, v := range fields {
+		row[k] = v
+	}
+	payload, err := json.Marshal(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connector := auth.ContextWithInternalOrigin(auth.ContextWithConnectorActor(context.Background(), "shopify"))
+	if _, err := eng.Execute(connector, fmt.Sprintf(`insert("v1:shopify:shop", id=%s, payload=%s)`, langparser.QuoteString(rowID), payload)); err != nil {
+		t.Fatalf("write the shop row of %s: %v", storeID, err)
+	}
+}
+
+// answerVerdict sets the integration's verdictOf to read this reply, as the
+// mirror's builtin would answer it, through the same reading the default
+// makes; a nil reply is a verdict that cannot be read.
+func answerVerdict(i *Integration, reply map[string]any) {
+	i.verdictOf = func(context.Context, string) (storeVerdict, error) {
+		if reply == nil {
+			return storeVerdict{}, errors.New("the verdict could not be read")
+		}
+		return verdictFromReply(reply)
+	}
+}
