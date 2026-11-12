@@ -2,12 +2,20 @@ package automations
 
 import (
 	"context"
+	"fmt"
+	"go/ast"
+	goparser "go/parser"
+	"go/token"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/repowalk"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
@@ -350,4 +358,197 @@ func TestMaintenanceActorIsNotMintableFromARequest(t *testing.T) {
 	if !sort.StringsAreSorted(sorted) {
 		t.Errorf("MaintenanceAutomationNames is not sorted: %v", sorted)
 	}
+}
+
+// TestTheMaintenanceListIsNeverAskedWithANameAlone is the source gate on the
+// rule above: the maintenance principal follows an automation's ORIGIN, so
+// nothing in the tree may ask the list with a name alone.
+//
+// Three things are scanned, and each closes a way the rule could come back
+// with every behavioural test still green:
+//
+//  1. Every call, anywhere in the repository, to auth.MaintenanceActor or
+//     auth.IsMaintenanceAutomation passes an origin first: an
+//     AutomationOrigin* constant, or maintenanceOrigin(automation), which
+//     reads the origin the tree loader recorded.
+//  2. In component/auth, the list itself is read only by the functions that
+//     either take an origin or do not grant: a new reader of the map is a new
+//     way to be granted, and it has to be argued here.
+//  3. The executor's contextWithSystemActor takes the automation, not its
+//     name: the origin can only come from the automation.
+func TestTheMaintenanceListIsNeverAskedWithANameAlone(t *testing.T) {
+	root := filepath.Join("..", "..")
+	asks := map[string]bool{"MaintenanceActor": true, "IsMaintenanceAutomation": true}
+	var offenders []string
+	calls := 0
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if repowalk.SkipDir(d.Name()) || d.Name() == "testdata" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		body, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if !strings.Contains(string(body), "MaintenanceActor(") && !strings.Contains(string(body), "IsMaintenanceAutomation(") {
+			return nil
+		}
+		fset := token.NewFileSet()
+		file, parseErr := goparser.ParseFile(fset, path, body, goparser.SkipObjectResolution)
+		if parseErr != nil {
+			return fmt.Errorf("parse %s: %w", path, parseErr)
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			name := ""
+			switch fn := call.Fun.(type) {
+			case *ast.SelectorExpr:
+				name = fn.Sel.Name
+			case *ast.Ident:
+				name = fn.Name
+			}
+			if !asks[name] {
+				return true
+			}
+			calls++
+			// The one pass-through: MaintenanceActor hands IsMaintenanceAutomation
+			// the origin it was itself given.
+			passThrough := false
+			if id, ok := call.Args[0].(*ast.Ident); ok && id.Name == "origin" &&
+				filepath.ToSlash(path) == "../../component/auth/maintenance_actor.go" {
+				passThrough = true
+			}
+			if len(call.Args) != 2 || (!passThrough && !isOriginExpr(call.Args[0])) {
+				offenders = append(offenders, fmt.Sprintf("%s:%d %s", path, fset.Position(call.Pos()).Line, name))
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	// REACHABLE POSITIVE: the tree asks the list from dozens of places, so a
+	// scan that finds a handful has stopped looking.
+	if calls < 20 {
+		t.Fatalf("found only %d calls to the maintenance list, expected 20+ -- the scan is broken, not the tree", calls)
+	}
+	if len(offenders) > 0 {
+		t.Errorf("the maintenance list is asked without an origin (want auth.AutomationOrigin* or maintenanceOrigin(a) first):\n  %s",
+			strings.Join(offenders, "\n  "))
+	}
+
+	// (2) The readers of the list in component/auth.
+	readers := map[string]bool{
+		"IsMaintenanceAutomation":     true, // takes the origin; MaintenanceActor goes through it
+		"IsMaintenancePrincipal":      true, // answers from a principal the executor granted by origin
+		"MaintenanceAutomationNames":  true, // names, for gates and messages; grants nothing
+		"MaintenanceAutomationReason": true, // a reason string; grants nothing
+	}
+	authDir := filepath.Join(root, "component", "auth")
+	entries, err := os.ReadDir(authDir)
+	if err != nil {
+		t.Fatalf("read %s: %v", authDir, err)
+	}
+	found := map[string]bool{}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		path := filepath.Join(authDir, e.Name())
+		fset := token.NewFileSet()
+		file, parseErr := goparser.ParseFile(fset, path, nil, goparser.SkipObjectResolution)
+		if parseErr != nil {
+			t.Fatalf("parse %s: %v", path, parseErr)
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			reads := false
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				if id, ok := n.(*ast.Ident); ok && id.Name == "maintenanceAutomations" {
+					reads = true
+				}
+				return true
+			})
+			if !reads {
+				continue
+			}
+			found[fn.Name.Name] = true
+			if !readers[fn.Name.Name] {
+				t.Errorf("%s:%d %s reads the maintenance list; a reader that is not argued in this gate is a way to be granted that nobody reviewed",
+					path, fset.Position(fn.Pos()).Line, fn.Name.Name)
+			}
+			if fn.Name.Name == "IsMaintenanceAutomation" && !firstParamIs(fn, "AutomationOrigin") {
+				t.Errorf("IsMaintenanceAutomation does not take an AutomationOrigin first")
+			}
+		}
+	}
+	if !found["IsMaintenanceAutomation"] {
+		t.Fatal("found no reader of the maintenance list in component/auth -- the scan is broken, not the tree")
+	}
+
+	// (3) contextWithSystemActor takes the automation.
+	fset := token.NewFileSet()
+	file, err := goparser.ParseFile(fset, "executor.go", nil, goparser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse executor.go: %v", err)
+	}
+	seen := false
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "contextWithSystemActor" {
+			continue
+		}
+		seen = true
+		params := fn.Type.Params.List
+		star, ok := params[len(params)-1].Type.(*ast.StarExpr)
+		if id, isIdent := star.X.(*ast.Ident); !ok || !isIdent || id.Name != "Automation" {
+			t.Errorf("contextWithSystemActor must take the *Automation, whose recorded origin decides the principal, not its name")
+		}
+	}
+	if !seen {
+		t.Fatal("contextWithSystemActor is not in executor.go -- move this check with it")
+	}
+}
+
+// isOriginExpr reports whether e states an automation's origin: an
+// AutomationOrigin* constant, a conversion to AutomationOrigin, or
+// maintenanceOrigin(...).
+func isOriginExpr(e ast.Expr) bool {
+	switch x := e.(type) {
+	case *ast.SelectorExpr:
+		return strings.HasPrefix(x.Sel.Name, "AutomationOrigin")
+	case *ast.Ident:
+		return strings.HasPrefix(x.Name, "AutomationOrigin")
+	case *ast.CallExpr:
+		switch fn := x.Fun.(type) {
+		case *ast.Ident:
+			return fn.Name == "maintenanceOrigin" || fn.Name == "AutomationOrigin"
+		case *ast.SelectorExpr:
+			return fn.Sel.Name == "AutomationOrigin"
+		}
+	}
+	return false
+}
+
+func firstParamIs(fn *ast.FuncDecl, typeName string) bool {
+	if fn.Type.Params == nil || len(fn.Type.Params.List) == 0 {
+		return false
+	}
+	id, ok := fn.Type.Params.List[0].Type.(*ast.Ident)
+	return ok && id.Name == typeName
 }
