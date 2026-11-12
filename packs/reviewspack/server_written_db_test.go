@@ -652,10 +652,13 @@ func TestEachWritingBuiltinRefusesBeforeItWritesAndWritesNothing(t *testing.T) {
 			`builtin reviewsSendDueRequests(storeId: ` + store + `)`, "not by a client"},
 		{"reviewsSubmitFromLink with a token that is no link", asMerchant(w.owner),
 			`builtin reviewsSubmitFromLink(requestToken: "no-such-token", productHandle: ` + quote(w.handle) +
-				`, body: "x", storeId: ` + store + `)`, "link_invalid"},
+				`, body: "x", storeId: ` + store + `, siteId: ` + site + `)`, "no request carries this token"},
 		{"reviewsSubmitFromLink with an expired link", asMerchant(w.owner),
 			`builtin reviewsSubmitFromLink(requestToken: ` + quote(expired) + `, productHandle: ` + quote(w.handle+"-x") +
-				`, body: "x", storeId: ` + store + `)`, "link_expired"},
+				`, body: "x", storeId: ` + store + `, siteId: ` + site + `)`, "link_expired"},
+		{"reviewsSubmitFromLink by a person not the site's owner", bystander,
+			`builtin reviewsSubmitFromLink(requestToken: ` + quote(w.token) + `, productHandle: ` + quote(w.handle) +
+				`, body: "x", storeId: ` + store + `, siteId: ` + site + `)`, reviewspack.NotThisSitesLink},
 	}
 	for _, c := range cases {
 		reviews, outbound := w.storeRows(t)
@@ -664,6 +667,140 @@ func TestEachWritingBuiltinRefusesBeforeItWritesAndWritesNothing(t *testing.T) {
 		}
 		if r, o := w.storeRows(t); r != reviews || o != outbound {
 			t.Errorf("%s wrote %d reviews row version(s) and %d outbound email(s)", c.name, r-reviews, o-outbound)
+		}
+	}
+}
+
+// ---- THE FORM'S CONSTRUCT IS FOR THE SITE IT NAMES -------------------------
+//
+// reviewsSubmitFromLink is the shopper form's construct, and the shopper
+// handler runs it as the owner of the site the post arrived through. Called by
+// name, it refuses a caller who is not the owner of the site it names, and a
+// site the pack does not admit for the store, with one answer for both -- given
+// before the token is judged, so it says nothing about the token.
+
+// directSubmit calls the form's construct by name, as ctx, naming site.
+func directSubmit(w *writtenWorld, ctx context.Context, site, token, handle string) error {
+	_, err := w.eng.Execute(ctx, `builtin reviewsSubmitFromLink(requestToken: `+quote(token)+`, productHandle: `+quote(handle)+
+		`, body: "direct", storeId: `+quote(w.store)+`, siteId: `+quote(site)+`)`)
+	return err
+}
+
+// freshLink is a new open link of the store for a product of its own.
+func (w *writtenWorld) freshLink(t *testing.T, suffix string) (requestID, token, handle string) {
+	t.Helper()
+	requestID, handle = w.requestID+"-"+suffix, w.handle+"-"+suffix
+	token = "tok-" + requestID + "-0123456789abcdefghijklmnopqrstuvwxyz"
+	putRequest(t, w.eng, w.owner, w.store, requestID, handle, token, time.Now().Add(time.Hour))
+	return requestID, token, handle
+}
+
+// refusedForTheSite asserts the construct's one answer for a site the caller
+// may not name: link_invalid, the code the storefront's review page already
+// shows for a link that cannot be used.
+func refusedForTheSite(t *testing.T, what string, err error) string {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), "link_invalid") || !strings.Contains(err.Error(), reviewspack.NotThisSitesLink) {
+		t.Errorf("%s answered %v, want link_invalid: %q", what, err, reviewspack.NotThisSitesLink)
+		return ""
+	}
+	return err.Error()
+}
+
+// 1. A person of the store's organization who is not the site's owner, holding
+// a valid token, is refused and writes nothing.
+func TestTheFormsConstructRefusesAMemberWhoIsNotTheSitesOwner(t *testing.T) {
+	w := newWrittenWorld(t, "site-member")
+	_, token, handle := w.freshLink(t, "m")
+	reviews, outbound := w.storeRows(t)
+	refusedForTheSite(t, "a member who is not the site's owner", directSubmit(w, w.as(w.bystander), w.site, token, handle))
+	if r, o := w.storeRows(t); r != reviews || o != outbound {
+		t.Errorf("the refused call wrote %d reviews row version(s) and %d email(s)", r-reviews, o-outbound)
+	}
+}
+
+// 2. The same caller naming a site of ANOTHER organization they own is refused
+// and writes nothing -- in that organization or anywhere.
+func TestTheFormsConstructRefusesASiteOfAnotherOrganization(t *testing.T) {
+	w := newWrittenWorld(t, "site-other")
+	other := "acct-reviews-site-other-second-" + w.n
+	own := "group-reviews-site-other-second-" + w.n
+	seedOrganization(t, w.eng, other)
+	seedGroup(t, w.eng, own, "custom", other)
+	bystander := strings.TrimPrefix(w.bystander, "v1:identity:user:")
+	seedPersonIn(t, w.eng, bystander, "Bea Bystander", string(auth.RoleWriter), true, own, other, "added")
+	elsewhere := "site-reviews-site-other-second-" + w.n
+	seedSiteIn(t, w.eng, elsewhere, bystander, "store-reviews-site-other-second-"+w.n, other)
+	requestID, token, handle := w.freshLink(t, "o")
+	reviews, outbound := w.storeRows(t)
+	refusedForTheSite(t, "a site of another organization", directSubmit(w, w.as(w.bystander), elsewhere, token, handle))
+	if r, o := w.storeRows(t); r != reviews || o != outbound {
+		t.Errorf("the refused call wrote %d reviews row version(s) and %d email(s)", r-reviews, o-outbound)
+	}
+	if n := versionsOf(t, "v1:reviews:review", reviewspack.ReviewIDForRequestForTest(requestID)); n != 0 {
+		got := latestOf(t, "v1:reviews:review", reviewspack.ReviewIDForRequestForTest(requestID))
+		t.Errorf("the refused call wrote a review into %v through %v, owned by %v", got["accountId"], got["siteId"], got["ownerUserId"])
+	}
+}
+
+// 3. A cluster owner who is not the site's owner is refused.
+func TestTheFormsConstructRefusesAClusterOwnerWhoIsNotTheSitesOwner(t *testing.T) {
+	w := newWrittenWorld(t, "site-operator")
+	_, token, handle := w.freshLink(t, "c")
+	operator := asPerson("v1:identity:user:user-reviews-site-operator-"+w.n, auth.RoleOwner)
+	reviews, _ := w.storeRows(t)
+	refusedForTheSite(t, "a cluster owner who is not the site's owner", directSubmit(w, operator, w.site, token, handle))
+	if r, _ := w.storeRows(t); r != reviews {
+		t.Errorf("the refused call wrote %d reviews row version(s)", r-reviews)
+	}
+}
+
+// 4. The site's owner calling by name for their own store's site is accepted,
+// and writes what the form route writes: the same owner, organization and site.
+func TestTheFormsConstructAcceptsTheSitesOwnerAsTheFormWould(t *testing.T) {
+	w := newWrittenWorld(t, "site-owner")
+	requestID, token, handle := w.freshLink(t, "s")
+	if err := directSubmit(w, asMerchant(w.owner), w.site, token, handle); err != nil {
+		t.Fatalf("the site's owner was refused: %v", err)
+	}
+	direct := latestOf(t, "v1:reviews:review", reviewspack.ReviewIDForRequestForTest(requestID))
+	viaForm := latestOf(t, "v1:reviews:review", w.reviewID)
+	for _, field := range []string{"ownerUserId", "accountId", "siteId", "storeId", "verifiedBuyer"} {
+		if direct[field] != viaForm[field] {
+			t.Errorf("%s: by name %v, through the form %v", field, direct[field], viaForm[field])
+		}
+	}
+}
+
+// 6. The answer for a site the caller may not name is the same whatever the
+// token: valid, expired, used or nonsense.
+func TestTheWrongSiteAnswerSaysNothingAboutTheToken(t *testing.T) {
+	w := newWrittenWorld(t, "site-same")
+	_, valid, validHandle := w.freshLink(t, "v")
+	expired := w.token + "-expired"
+	putRequest(t, w.eng, w.owner, w.store, w.requestID+"-expired", w.handle+"-x", expired, time.Now().Add(-time.Hour))
+	if _, err := w.eng.Execute(w.as(w.moderator),
+		`builtin reviewsDecide(reviewId: `+quote(w.reviewRowID)+`, action: "publish", revision: 1)`); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	tokens := []struct{ name, token, handle string }{
+		{"valid", valid, validHandle}, {"expired", expired, w.handle + "-x"},
+		{"used", w.token, w.handle}, {"nonsense", "nonsense-" + w.n, w.handle},
+	}
+	for _, wrong := range []struct {
+		name string
+		ctx  context.Context
+		site string
+	}{
+		{"a member naming the store's site", w.as(w.bystander), w.site},
+		{"the owner naming no such site", asMerchant(w.owner), "no-such-site-" + w.n},
+	} {
+		answers := map[string]bool{}
+		for _, tok := range tokens {
+			answers[refusedForTheSite(t, wrong.name+" with a "+tok.name+" token", directSubmit(w, wrong.ctx, wrong.site, tok.token, tok.handle))] = true
+		}
+		if len(answers) != 1 {
+			t.Errorf("%s was answered %d different ways across the tokens: %v", wrong.name, len(answers), answers)
 		}
 	}
 }

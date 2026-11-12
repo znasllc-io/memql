@@ -66,9 +66,12 @@ func storeSite(t *testing.T, store string) (site, account string) {
 	return strings.TrimPrefix(id, "v1:platform:site:"), acct
 }
 
-func submitThrough(eng *memql.MemQLEngine, merchant, store, handle, token, body string) error {
+// submitThrough is the form's construct called as the shopper handler calls
+// it: as the owner of the site the post arrived through, naming that site.
+func submitThrough(eng *memql.MemQLEngine, merchant, store, site, handle, token, body string) error {
 	_, err := eng.Execute(asMerchant(merchant), `builtin reviewsSubmitFromLink(requestToken: `+quote(token)+
-		`, productHandle: `+quote(handle)+`, body: `+quote(body)+`, rating: 4, storeId: `+quote(store)+`)`)
+		`, productHandle: `+quote(handle)+`, body: `+quote(body)+`, rating: 4, storeId: `+quote(store)+
+		`, siteId: `+quote(site)+`)`)
 	return err
 }
 
@@ -95,7 +98,7 @@ func TestLiveE2E_ABuyersLinkWritesAVerifiedReviewAndClosesOnPublish(t *testing.T
 	seedStorePerson(t, eng, account, merchant)
 	putRequest(t, eng, merchant, store, "request-"+n, handle, token, time.Now().Add(14*24*time.Hour))
 
-	if err := submitThrough(eng, merchant, store, handle, token, "first words"); err != nil {
+	if err := submitThrough(eng, merchant, store, site, handle, token, "first words"); err != nil {
 		t.Fatalf("a valid link was refused: %v", err)
 	}
 	draft := payloadOf(t, eng, asMerchant(merchant),
@@ -103,7 +106,7 @@ func TestLiveE2E_ABuyersLinkWritesAVerifiedReviewAndClosesOnPublish(t *testing.T
 	if draft["body"] != "first words" || draft["state"] != "waiting" {
 		t.Fatalf("draft = %v, want the buyer's words, waiting", draft)
 	}
-	if err := submitThrough(eng, merchant, store, handle, token, "second thoughts"); err != nil {
+	if err := submitThrough(eng, merchant, store, site, handle, token, "second thoughts"); err != nil {
 		t.Fatalf("an edit through an open link was refused: %v", err)
 	}
 	rows := rowsOf(t, eng, asMerchant(merchant), `query reviewsInStore(storeId: `+quote(store)+`)`)
@@ -130,7 +133,7 @@ func TestLiveE2E_ABuyersLinkWritesAVerifiedReviewAndClosesOnPublish(t *testing.T
 	if len(list) != 1 || list[0].(map[string]any)["verifiedBuyer"] != true {
 		t.Fatalf("published = %v, want the one review, marked verified", shown)
 	}
-	refusedAs(t, submitThrough(eng, merchant, store, handle, token, "too late"), "link_used")
+	refusedAs(t, submitThrough(eng, merchant, store, site, handle, token, "too late"), "link_used")
 
 	// ---- the store's record leaves with it ---------------------------------
 	export := payloadOf(t, eng, asPerson(merchant, auth.RoleWriter),
@@ -190,8 +193,8 @@ func TestLiveE2E_ABuyersLinkWritesAVerifiedReviewAndClosesOnPublish(t *testing.T
 	// An expired link and a forged token refuse by name too.
 	expiredToken := token + "-expired"
 	putRequest(t, eng, merchant, store, "request-exp-"+n, handle+"-x", expiredToken, time.Now().Add(-time.Hour))
-	refusedAs(t, submitThrough(eng, merchant, store, handle+"-x", expiredToken, "late"), "link_expired")
-	refusedAs(t, submitThrough(eng, merchant, store, handle, "forged-"+n, "nope"), "link_invalid")
+	refusedAs(t, submitThrough(eng, merchant, store, site, handle+"-x", expiredToken, "late"), "link_expired")
+	refusedAs(t, submitThrough(eng, merchant, store, site, handle, "forged-"+n, "nope"), "link_invalid")
 }
 
 // THE ORDER-LINE QUERY RESOLVES ACROSS DOMAINS: the reviews pack reads the
@@ -215,13 +218,17 @@ func TestLiveE2E_AWaitingReviewStagesOneEmailForTheModerator(t *testing.T) {
 	site := "site-reviews-notify-" + n
 	handle := "floss-picks-" + n
 	token := "tok-notify-" + n + "-0123456789abcdefghijklmnopqrstuvwxyz"
+	// The site's owner is a person, so the site is read under them as the
+	// form's construct reads it; from here they are their canonical id.
+	seedOwnerUser(t, eng, merchant)
 	seedSite(t, eng, site, merchant, store)
+	merchant = siteOwnerOf(t, site)
 	if _, err := eng.Execute(asPerson(merchant, auth.RoleOwner),
 		`builtin reviewsUpdateSettings(storeId: `+quote(store)+`, siteId: `+quote(site)+`, notifyEmail: "moderator@example.com")`); err != nil {
 		t.Fatalf("settings: %v", err)
 	}
 	putRequest(t, eng, merchant, store, "request-notify-"+n, handle, token, time.Now().Add(time.Hour))
-	if err := submitThrough(eng, merchant, store, handle, token, "a waiting review"); err != nil {
+	if err := submitThrough(eng, merchant, store, site, handle, token, "a waiting review"); err != nil {
 		t.Fatal(err)
 	}
 	reviewID := "review-notify-" + n

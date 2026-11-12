@@ -143,11 +143,52 @@ func (l *linkReader) Rows(_ context.Context, query string, args map[string]strin
 	case "reviewDecisionsForReview":
 		return l.decisions, nil
 	case "siteById":
-		if l.site != nil {
-			return []map[string]any{l.site}, nil
+		// THE STORE'S SITE, owned by the request's merchant: the site a form
+		// post arrives through. A test's own fields are laid over it.
+		site := map[string]any{"id": args["siteId"], "ownerUserId": "merchant-1",
+			"binding": map[string]any{"storeId": "store-live"}}
+		for k, v := range l.site {
+			site[k] = v
 		}
+		return []map[string]any{site}, nil
 	}
 	return nil, nil
+}
+
+// linkCaller is the caller the shopper handler runs the form's construct as:
+// the owner of the site the post arrived through.
+func linkCaller() context.Context {
+	return auth.ContextWithUserActor(context.Background(), "merchant-1")
+}
+
+// THE CONSTRUCT IS FOR THE SITE IT NAMES: a caller who is not the site's
+// owner, a site of another store and no site at all are one refusal, before
+// the token is judged, and nothing is written.
+func TestTheFormsConstructIsForTheOwnerOfTheSiteItNames(t *testing.T) {
+	cases := []struct {
+		name   string
+		ctx    context.Context
+		site   map[string]any
+		change func(map[string]any)
+	}{
+		{"another person", auth.ContextWithUserActor(context.Background(), "someone-else"), nil, nil},
+		{"no session", context.Background(), nil, nil},
+		{"a site of another store", linkCaller(), map[string]any{"binding": map[string]any{"storeId": "store-other"}}, nil},
+		{"no site named", linkCaller(), nil, func(a map[string]any) { delete(a, "siteId") }},
+	}
+	for _, c := range cases {
+		p, w := linkProvider(&linkReader{request: openRequest(), site: c.site})
+		args := linkArgs()
+		if c.change != nil {
+			c.change(args)
+		}
+		_, err := p.submitFromLink(c.ctx, args, 0)
+		var refusal *memql.ShopperRefusal
+		if !errors.As(err, &refusal) || refusal.Code != RefusalLinkInvalid || !strings.Contains(err.Error(), NotThisSitesLink) {
+			t.Errorf("%s: %v, want link_invalid: %s", c.name, err, NotThisSitesLink)
+		}
+		w.none(t)
+	}
 }
 
 func (l *linkReader) RowsWithList(context.Context, string, map[string]string, string, []string) ([]map[string]any, error) {
@@ -185,7 +226,7 @@ func refusalCode(t *testing.T, err error) string {
 
 func TestAValidLinkWritesAVerifiedReviewAtRevisionOne(t *testing.T) {
 	p, w := linkProvider(&linkReader{request: openRequest(), site: map[string]any{"accountId": "acct-shop"}})
-	if _, err := p.submitFromLink(context.Background(), linkArgs(), 0); err != nil {
+	if _, err := p.submitFromLink(linkCaller(), linkArgs(), 0); err != nil {
 		t.Fatal(err)
 	}
 	row := w.only(t, "putReview")
@@ -202,7 +243,7 @@ func TestAnEditThroughTheLinkIsTheNextRevision(t *testing.T) {
 		"review-abc": {"id": "review-abc", "storeId": "store-live", "revision": 1, "body": "first"},
 	}}
 	p, w := linkProvider(r)
-	if _, err := p.submitFromLink(context.Background(), linkArgs(), 0); err != nil {
+	if _, err := p.submitFromLink(linkCaller(), linkArgs(), 0); err != nil {
 		t.Fatal(err)
 	}
 	if got := w.only(t, "putReview")["revision"]; got != 2 {
@@ -218,7 +259,7 @@ func TestADeclinedReviewCanStillBeEdited(t *testing.T) {
 		decisions: []map[string]any{decisionRow("review-abc", ActionDecline, 1, 0)},
 	}
 	p, w := linkProvider(r)
-	if _, err := p.submitFromLink(context.Background(), linkArgs(), 0); err != nil {
+	if _, err := p.submitFromLink(linkCaller(), linkArgs(), 0); err != nil {
 		t.Fatalf("a declined review's open link refused an edit: %v", err)
 	}
 	w.only(t, "putReview")
@@ -250,7 +291,7 @@ func TestTheLinkRefusesByName(t *testing.T) {
 		if c.change != nil {
 			c.change(args)
 		}
-		_, err := p.submitFromLink(context.Background(), args, 0)
+		_, err := p.submitFromLink(linkCaller(), args, 0)
 		if got := refusalCode(t, err); got != c.code {
 			t.Errorf("%s: refused %q, want %q", c.name, got, c.code)
 		}
