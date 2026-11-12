@@ -137,7 +137,7 @@ func TestACallerWithoutThePartIsRefusedAndNothingIsRead(t *testing.T) {
 	answer, err = askStatistics(t, personCtx("dbtest-storestats-nobody-"+uniq(), auth.RoleWriter), site, storeID, "7d")
 	refusedReadingNothing(t, "a person with no grant", read, answer, err, memql.CodeCapabilityNotHeld)
 	answer, err = askStatistics(t, context.Background(), site, storeID, "7d")
-	refusedReadingNothing(t, "no session", read, answer, err, "")
+	refusedReadingNothing(t, "no session", read, answer, err, memql.CodeCapabilityNotHeld)
 }
 
 func TestAHolderOfThePartInAnotherOrganizationIsRefusedAndNothingIsRead(t *testing.T) {
@@ -189,7 +189,7 @@ func TestAnUnknownOrMalformedSiteIsRefusedWithNoFallback(t *testing.T) {
 				answer = rows[0]
 			}
 		}
-		refusedReadingNothing(t, label, read, answer, err, "")
+		refusedReadingNothing(t, label, read, answer, err, memql.CodeCapabilityNotHeld)
 	}
 }
 
@@ -505,12 +505,41 @@ func TestAStoreWithNoZoneIsCutInUTC(t *testing.T) {
 		storeID := newStore(t)
 		storeFrame(t, storeID, recordingFrame(map[string]any{"timezone": zone}))
 		got := mustAsk(t, ownerCtx(), siteFor(t, storeID, nil), storeID, "7d")
-		if v, present := got["timezone"]; !present || v != nil {
-			t.Errorf("%s: timezone = %v (present %v), want null", label, v, present)
+		if got["periodZone"] != "UTC" {
+			t.Errorf("%s: periodZone = %v, want UTC", label, got["periodZone"])
 		}
 		if got["start"] != "2025-11-02T00:00:00Z" || got["end"] != "2025-11-09T00:00:00Z" {
 			t.Errorf("%s: start %v end %v, want UTC midnights", label, got["start"], got["end"])
 		}
+	}
+}
+
+// TestTheAnswerNamesTheZoneItsPeriodWasCutIn: periodZone is the zone every
+// day of the answer was cut in, and timezone the zone the store recorded, so
+// a page tells "no zone recorded" (timezone null) from "a recorded zone that
+// could not be loaded" (timezone set, periodZone UTC), and never shows UTC
+// days as the store's own.
+func TestTheAnswerNamesTheZoneItsPeriodWasCutIn(t *testing.T) {
+	for _, c := range []struct {
+		zone             string
+		timezone, period any
+	}{
+		{"Europe/Madrid", "Europe/Madrid", "Europe/Madrid"},
+		{"", nil, "UTC"},
+		{"Mars/Olympus_Mons", "Mars/Olympus_Mons", "UTC"},
+	} {
+		storeID := newStore(t)
+		storeFrame(t, storeID, recordingFrame(map[string]any{"timezone": c.zone}))
+		got := mustAsk(t, ownerCtx(), siteFor(t, storeID, nil), storeID, "7d")
+		if got["timezone"] != c.timezone || got["periodZone"] != c.period {
+			t.Errorf("recorded %q: timezone %v, periodZone %v; want %v and %v", c.zone, got["timezone"], got["periodZone"], c.timezone, c.period)
+		}
+	}
+	// A store the walk holds no row for has no period cut, and says so.
+	storeID := newStore(t)
+	got := mustAsk(t, ownerCtx(), siteFor(t, storeID, nil), storeID, "7d")
+	if v, present := got["periodZone"]; !present || v != nil {
+		t.Errorf("a store with no row: periodZone = %v (present %v), want null", v, present)
 	}
 }
 
@@ -551,7 +580,7 @@ func TestAStoreTheWalkHasNotSeenYetIsAnsweredAsStarting(t *testing.T) {
 // answerKeys is every key of the answer, as the brief lists them.
 var answerKeys = []string{"storeId", "siteId", "storeName", "storeDomain", "destination", "currency", "timezone", "development",
 	"taxesIncluded", "olderOrderChangesNotRecorded", "period", "bucket", "start", "end", "prevStart", "historySince",
-	"lastChangeAt", "asOf", "recording", "rebuilding", "figures", "previous", "floors", "series", "productsBySales",
+	"lastChangeAt", "asOf", "periodZone", "recording", "rebuilding", "figures", "previous", "floors", "series", "productsBySales",
 	"productsByUnits", "productCount", "refundsWithoutItem", "incompleteOrders", "incompleteRefunds", "refundsNotRead",
 	"buyers", "wholesale", "otherCurrencies"}
 
@@ -752,11 +781,164 @@ builtin storeStatistics {
 	member := memberCtx(t, site, false)
 	for _, name := range []string{"storeStatistics", "shopify/overlay.storeStatistics", "shopify.overlay.storeStatistics", "shopify.storeStatistics"} {
 		answer, err := askOn(t, eng, reader, statisticsCall(name, site, storeID, "7d"))
-		refusedReadingNothing(t, name+" as a reader with no grant", read, answer, err, "")
+		// Today: "not found" for every name the engine resolves, and the
+		// parser's refusal for the slash. The engine's own fix may resolve a
+		// name to its construct instead, and then its gate or the handler
+		// refuses: those are the only refusals this call may meet.
+		meant := false
+		if err != nil {
+			for _, refusal := range []string{"not found", "unexpected token after expression", memql.CodeCapabilityNotHeld, notServed} {
+				meant = meant || strings.Contains(err.Error(), refusal)
+			}
+		}
+		if !meant {
+			t.Errorf("%s as a reader with no grant: answered %v, %v; want a refusal of the name, of the gate or of the handler", name, answer, err)
+			continue
+		}
+		refusedReadingNothing(t, name+" as a reader with no grant", read, answer, err, err.Error())
 		t.Logf("%s as a reader with no grant: %v", name, err)
 	}
 	for label, ctx := range map[string]context.Context{"a reader with no grant": reader, "a member without the part": member} {
 		answer, err := askOn(t, eng, ctx, statisticsCall("storestatsfixtureb.storeStatistics", site, storeID, "7d"))
 		refusedReadingNothing(t, "the other domain's storeStatistics as "+label, read, answer, err, notServed)
+	}
+}
+
+// TestAPurgingOrRebuildingStoreIsNotCurrent: a store whose facts are being
+// deleted (purging) or walked again from the start (rebuilding_since) is never
+// answered as current, whatever its verdict: it is blocked, with a state of
+// its own the page names, and with no asOf, because no figure of it can be
+// given yet. A purge comes first: a rebuild sets both, and its facts are
+// deleted before it is walked again.
+func TestAPurgingOrRebuildingStoreIsNotCurrent(t *testing.T) {
+	since := time.Date(2025, 11, 8, 9, 30, 0, 0, time.UTC)
+	for _, c := range []struct {
+		label   string
+		frame   map[string]any
+		state   string
+		blocked bool
+	}{
+		{"purging", map[string]any{"purging": true}, "purging", true},
+		{"purging for a rebuild", map[string]any{"purging": true, "rebuilding_since": since}, "purging", true},
+		{"rebuilding", map[string]any{"rebuilding_since": since}, "rebuilding", true},
+		{"both cleared", map[string]any{"purging": false, "rebuilding_since": nil}, "recording", false},
+	} {
+		storeID := newStore(t)
+		storeFrame(t, storeID, recordingFrame(c.frame))
+		got := mustAsk(t, ownerCtx(), siteFor(t, storeID, nil), storeID, "7d")
+		r := recordingOf(t, got)
+		if r["state"] != c.state || r["blocked"] != c.blocked {
+			t.Errorf("%s: recording = %v, want state %s and blocked %v", c.label, r, c.state, c.blocked)
+		}
+		if v, present := got["asOf"]; !present || v != nil {
+			t.Errorf("%s: asOf = %v (present %v), want null", c.label, v, present)
+		}
+	}
+}
+
+// TestBorrowedAuthorityIsNeverAnsweredRevenue: the shopper surface runs a
+// declared read under the site owner's borrowed authority, in the site's
+// account (component/server/shopper_handler.go, shopperContext). Under it the
+// read refuses whatever the borrowed person holds: a page's call always
+// carries the person's own session.
+func TestBorrowedAuthorityIsNeverAnsweredRevenue(t *testing.T) {
+	storeID, site := servedStore(t)
+	holder := memberOf(t, site, true)
+	if _, err := askStatistics(t, personCtx(holder, auth.RoleWriter), site, storeID, "7d"); err != nil {
+		t.Fatalf("the holder is refused in their own session: %v", err)
+	}
+	borrowed := auth.ContextWithCallAccount(auth.ContextWithUserActor(context.Background(), "v1:identity:user:"+holder), accountOf(t, site))
+	read := storeSalesQueries(t)
+	answer, err := askStatistics(t, borrowed, site, storeID, "7d")
+	refusedReadingNothing(t, "the holder's borrowed authority, through the engine", read, answer, err, notServed)
+	nodes, err := statisticsHandler(t, testIntegration(t))(borrowed, map[string]any{"siteId": site, "storeId": storeID, "period": "7d"}, 0)
+	refusedReadingNothing(t, "the holder's borrowed authority, at the handler", read, map[string]any{"nodes": len(nodes)}, err, notServed)
+}
+
+// TestTheHandlerAndTheEnginesGateAgree: for every kind of caller the review
+// probed, the handler's answer about the part is the engine's gate's, because
+// both ask the engine's one method (memql's RequirementHeldFor). The engine's
+// gate is read through the real builtin: refused with capability_not_held, or
+// passed. The handler is called directly with the same caller. Two callers
+// are left to their own tests: borrowed authority, which the handler refuses
+// on purpose (TestBorrowedAuthorityIsNeverAnsweredRevenue), and internal
+// origin, which the engine's gate passes before any requirement is judged and
+// the handler does not (TestInternalOriginIsJudgedByItsActor).
+func TestTheHandlerAndTheEnginesGateAgree(t *testing.T) {
+	storeID, site := servedStore(t)
+	otherStore, otherSite := servedStore(t)
+	_ = otherStore
+	// A personal site, owned by a person who holds the part only through a
+	// group of an organization: the engine admits them (its global path for a
+	// site no organization owns asks every group they are in).
+	personalStore := newStore(t)
+	storeFrame(t, personalStore, recordingFrame(nil))
+	orgHolder := memberOf(t, site, true)
+	personal := siteFor(t, personalStore, map[string]any{"accountId": nil, "ownerUserId": "v1:identity:user:" + orgHolder})
+	plainOwner := "dbtest-storestats-plain-" + uniq()
+	seedRow(t, "v1:identity:user", plainOwner, map[string]any{"displayName": "A site owner", "primaryEmail": plainOwner + "@example.test",
+		"role": string(auth.RoleWriter), "active": true})
+	plainSite := siteFor(t, personalStore, map[string]any{"accountId": nil, "ownerUserId": "v1:identity:user:" + plainOwner})
+
+	type call struct {
+		label       string
+		ctx         context.Context
+		site, store string
+		admitted    bool
+	}
+	calls := []call{
+		{"a holder of the part in the site's organization", memberCtx(t, site, true), site, storeID, true},
+		{"a member without the part", memberCtx(t, site, false), site, storeID, false},
+		{"a holder of the part in another organization", memberCtx(t, otherSite, true), site, storeID, false},
+		{"a writer with no grant", personCtx("dbtest-storestats-w-"+uniq(), auth.RoleWriter), site, storeID, false},
+		{"a reader with no grant", personCtx("dbtest-storestats-r-"+uniq(), auth.RoleReader), site, storeID, false},
+		{"no session", context.Background(), site, storeID, false},
+		{"a cluster owner", personCtx("dbtest-storestats-o-"+uniq(), auth.RoleOwner), site, storeID, true},
+		{"a cluster developer", personCtx("dbtest-storestats-d-"+uniq(), auth.RoleDeveloper), site, storeID, true},
+		{"a cluster admin", personCtx("dbtest-storestats-a-"+uniq(), auth.RoleAdmin), site, storeID, false},
+		{"a personal site's owner who holds no part", personCtx(plainOwner, auth.RoleWriter), plainSite, personalStore, false},
+		{"a personal site's owner who holds the part through an organization's group", personCtx(orgHolder, auth.RoleWriter), personal, personalStore, true},
+	}
+	handler := statisticsHandler(t, testIntegration(t))
+	for _, c := range calls {
+		_, gateErr := askStatistics(t, c.ctx, c.site, c.store, "7d")
+		gate := gateErr == nil || !strings.Contains(gateErr.Error(), memql.CodeCapabilityNotHeld)
+		_, handlerErr := handler(c.ctx, map[string]any{"siteId": c.site, "storeId": c.store, "period": "7d"}, 0)
+		held := handlerErr == nil
+		if handlerErr != nil && handlerErr != errNotServed {
+			t.Errorf("%s: the handler answered %v, want the one refusal or an answer", c.label, handlerErr)
+		}
+		if gate != held {
+			t.Errorf("%s: the engine's gate admits %v (%v) and the handler %v (%v)", c.label, gate, gateErr, held, handlerErr)
+		}
+		if held != c.admitted {
+			t.Errorf("%s: admitted %v, want %v", c.label, held, c.admitted)
+		}
+	}
+}
+
+// TestInternalOriginIsJudgedByItsActor: the engine's gate passes a call with
+// internal origin before it judges any requirement (refuseBelowRequiredCapability).
+// The handler does not take internal origin as a pass: it judges the actor
+// the call carries, so the cluster's own maintenance principal is answered and
+// an actorless or connector context is not. This is the one disagreement left
+// standing, reported rather than settled (the task 17 report, fix round 1).
+func TestInternalOriginIsJudgedByItsActor(t *testing.T) {
+	storeID, site := servedStore(t)
+	handler := statisticsHandler(t, testIntegration(t))
+	args := map[string]any{"siteId": site, "storeId": storeID, "period": "7d"}
+	for label, c := range map[string]struct {
+		ctx      context.Context
+		admitted bool
+	}{
+		"the maintenance principal":           {auth.ContextWithInternalOrigin(principalCtx(t, "storeStatisticsRollupSweep")), true},
+		"internal origin with no actor":       {auth.ContextWithInternalOrigin(context.Background()), false},
+		"the shopify connector":               {auth.ContextWithInternalOrigin(auth.ContextWithConnectorActor(context.Background(), "shopify")), false},
+		"a member without the part, internal": {auth.ContextWithInternalOrigin(memberCtx(t, site, false)), false},
+	} {
+		_, err := handler(c.ctx, args, 0)
+		if (err == nil) != c.admitted || (err != nil && err != errNotServed) {
+			t.Errorf("%s: the handler answered %v, want admitted %v", label, err, c.admitted)
+		}
 	}
 }

@@ -10537,7 +10537,7 @@ func SourceRepositoriesBuild(args SourceRepositoriesArgs) string {
 	return b.String()
 }
 
-// StoreStatistics -- One store's sales figures (the 2026-11-11 store statistics design, U9), the read the Store statistics page of a storefront deployable calls. Gated twice: the engine judges the sales part in the organization of the site `siteId` names, and the handler judges it again in Go against the site it reads under the caller's own context, then holds the store to the site's own bound or preview store. Every refusal is one sentence, before anything of a store is read. The figures are read from the component's own tables, never from an order row, so the caller need not be a cluster owner.
+// StoreStatistics -- One store's sales figures (the 2026-11-11 store statistics design, U9), the read the Store statistics page of a storefront deployable calls. Gated twice: the engine judges the sales part in the organization of the site `siteId` names, and the handler judges it again in Go against the site it reads under the caller's own context, then holds the store to the site's own bound or preview store. Nothing of a store is read before both have answered. The figures are read from the component's own tables, never from an order row, so the caller need not be a cluster owner.
 type StoreStatisticsArgs struct {
 	// The storefront deployable.
 	SiteId string

@@ -91,7 +91,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "statistics",
-			Description: "One store's sales figures for a period, asked through a storefront site that serves the store: the store's name, domain, currency and zone, the period cut in that zone, and how current the figures are. Admits a caller who can read the site and holds execute on app:deployables/sales in the site's organization, for the site's own bound or preview store; every other caller gets one sentence before anything is read.",
+			Description: "One store's sales figures for a period, asked through a storefront site that serves the store: the store's name, domain, currency and zone, the period cut in that zone, and how current the figures are. Admits a caller, in their own session, who can read the site and holds execute on app:deployables/sales for the site's organization, for the site's own bound or preview store. A period that is not one of the five gets the period's own sentence, and every other refusal here is one sentence, before anything of a store is read.",
 			Handler:     i.handleStatistics,
 		},
 	}

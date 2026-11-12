@@ -39,13 +39,18 @@ import (
 //     context -- the context this handler was handed, never walkContext --
 //     so the site's own row authorization decides whether this caller may
 //     see it;
-//  3. the caller holds the part in the organization that row names, asked
-//     of the engine's OrganizationCapable, the one rule the engine's own gate
-//     asks; a site no organization owns is judged as the engine judges it,
-//     on the caller's data reach and their part where no organization
-//     governs;
+//  3. the caller holds the part for the organization that row names, asked
+//     of the engine's RequirementHeldFor, the one judgement the engine's own
+//     gate makes once it knows the construct's requirement and the target's
+//     account; the handler asks it and nothing of its own;
 //  4. it is a shopify_storefront and not systemOwned;
 //  5. the store asked for is its bound or its preview store, compared bare.
+//
+// Before all of them, a call made under borrowed authority is refused: the
+// shopper surface runs a declared read as the site owner's borrowed actor
+// (auth.ContextWithUserActor, which marks the actor RoleStandIn), and revenue
+// is never answered to a storefront's visitor in its owner's name. A page's
+// call always carries the person's own session.
 //
 // Any of 2 to 5 failing answers one sentence, errNotServed: "no such site",
 // "not yours", "you do not hold the part" and "not that store" are one
@@ -77,6 +82,13 @@ const salesPart = "app:deployables/sales"
 // errNotServed is the read's one refusal.
 var errNotServed = errors.New("This deployable does not serve that store for you.")
 
+// The states the frame answers of its own, beside the verdict's words: the
+// store's facts are being deleted, or walked again from the start.
+const (
+	statePurging    = "purging"
+	stateRebuilding = "rebuilding"
+)
+
 // The destinations, as the answer spells them.
 const (
 	destinationProduction = "production"
@@ -84,13 +96,15 @@ const (
 	destinationBoth       = "both"
 )
 
-// organizationJudge is what the handler asks the engine of the caller: the
-// engine's own answers, never a rule of this package's. *memql.MemQLEngine
+// requirementJudge is what the handler asks the engine of the caller: the
+// engine's own judgement, never a rule of this package's. *memql.MemQLEngine
 // is one. An engine that is not one admits nobody.
-type organizationJudge interface {
-	OrganizationCapable(ctx context.Context, account string, verb, resource string) bool
-	GlobalDataCapable(ctx context.Context, verb string) bool
+type requirementJudge interface {
+	RequirementHeldFor(ctx context.Context, account string, required memql.CapabilityRequirement) bool
 }
+
+// salesRequirement is the construct's own declaration, as the engine holds it.
+var salesRequirement = memql.CapabilityRequirement{Verb: auth.VerbExecute, Resource: salesPart}
 
 type statisticsRequest struct {
 	SiteID, StoreID, Destination string // StoreID bare; Destination one of production, testing, both
@@ -100,6 +114,9 @@ type statisticsRequest struct {
 // handleStatistics makes the gate's checks (the file's comment), builds the
 // request and answers one node with id `statistics`.
 func (i *Integration) handleStatistics(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if borrowedAuthority(ctx) {
+		return nil, errNotServed
+	}
 	period, err := statsperiod.Parse(argText(args, "period"))
 	if err != nil {
 		return nil, err
@@ -181,23 +198,21 @@ func (i *Integration) servedRequest(ctx context.Context, siteID, storeID string)
 }
 
 // holdsTheSalesPart asks the engine whether the caller holds the sales part
-// for a site of this organization, with the questions the engine's own gate
-// asks of a target-bound construct (refuseOrganizationActionCapability): for
-// an organization, its data, its Deployables app and the part, each through
-// OrganizationCapable; for a site no organization owns, the caller's global
-// data reach and the part where no organization governs.
+// for a site of this organization: RequirementHeldFor, the judgement the
+// engine's own gate makes for a target-bound construct
+// (refuseOrganizationActionCapability), so a question added to that gate is
+// asked here too.
 func (i *Integration) holdsTheSalesPart(ctx context.Context, account string) bool {
-	judge, ok := i.engine.(organizationJudge)
-	if !ok {
-		return false
-	}
-	if strings.TrimSpace(account) == "" {
-		return judge.GlobalDataCapable(ctx, auth.VerbRead) && judge.OrganizationCapable(ctx, "", auth.VerbExecute, salesPart)
-	}
-	app := strings.SplitN(salesPart, "/", 2)[0]
-	return judge.OrganizationCapable(ctx, account, auth.VerbRead, auth.ResourceData) &&
-		judge.OrganizationCapable(ctx, account, auth.VerbRead, app) &&
-		judge.OrganizationCapable(ctx, account, auth.VerbExecute, salesPart)
+	judge, ok := i.engine.(requirementJudge)
+	return ok && judge.RequirementHeldFor(ctx, account, salesRequirement)
+}
+
+// borrowedAuthority reports whether the call carries a stand-in actor rather
+// than the person's own session: the shopper surface's borrowed authority,
+// and work restored for its owner, both marked RoleStandIn by component/auth.
+func borrowedAuthority(ctx context.Context) bool {
+	ac, ok := auth.AccessFromContext(ctx)
+	return ok && ac != nil && ac.RoleStandIn
 }
 
 // readStatistics is the read under the component's own authority, in one
@@ -225,6 +240,7 @@ type frameRow struct {
 	StoreName         string          `bun:"store_name"`
 	Currency          string          `bun:"currency"`
 	Timezone          string          `bun:"timezone"`
+	Purging           bool            `bun:"purging"`
 	TaxesIncluded     sql.NullBool    `bun:"taxes_included"`
 	Development       sql.NullBool    `bun:"development"`
 	AllOrdersReadable bool            `bun:"all_orders_readable"`
@@ -251,7 +267,7 @@ func readFrame(ctx context.Context, tx bun.Tx, req statisticsRequest, now time.T
 	var row frameRow
 	err := tx.NewSelect().Model(&row).
 		Column("store_domain", "store_name", "currency", "timezone", "taxes_included", "development",
-			"all_orders_readable", "history_since", "verdict_state", "verdict_reasons", "verdict_since",
+			"all_orders_readable", "purging", "history_since", "verdict_state", "verdict_reasons", "verdict_since",
 			"recording_blocked", "last_clear_at", "last_change_at", "rebuilding_since").
 		Where("store_id = ?", req.StoreID).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -263,9 +279,11 @@ func readFrame(ctx context.Context, tx bun.Tx, req statisticsRequest, now time.T
 	}
 
 	stats.StoreName, stats.StoreDomain, stats.Currency = nonEmpty(row.StoreName), nonEmpty(row.StoreDomain), nonEmpty(row.Currency)
+	stats.Timezone = nonEmpty(row.Timezone)
+	stats.PeriodZone = "UTC"
 	if loc := storeZone(row.Timezone); loc != nil {
 		stats.Loc = loc
-		stats.Timezone = nonEmpty(row.Timezone)
+		stats.PeriodZone = strings.TrimSpace(row.Timezone)
 	}
 	stats.TaxesIncluded, stats.Development = nullBool(row.TaxesIncluded), nullBool(row.Development)
 	older := !row.AllOrdersReadable
@@ -294,12 +312,23 @@ func readFrame(ctx context.Context, tx bun.Tx, req statisticsRequest, now time.T
 	if stats.Recording.Blocked {
 		stats.AsOf = nullTime(row.LastClearAt)
 	}
+	// A store whose facts are being deleted, or walked again from the start,
+	// has no figure to give, current or as of any moment, whatever its
+	// verdict: the state says which, the verdict's reasons stay listed. A
+	// purge comes first, because a rebuild sets both and deletes the facts
+	// before the store is walked again.
+	switch {
+	case row.Purging:
+		stats.Recording.State, stats.Recording.Blocked, stats.AsOf = statePurging, true, nil
+	case row.RebuildingSince.Valid:
+		stats.Recording.State, stats.Recording.Blocked, stats.AsOf = stateRebuilding, true, nil
+	}
 	return stats, nil
 }
 
 // storeZone loads a store's zone, or answers nil when it has none or one the
-// Go runtime cannot load: the period is then cut in UTC and the answer's
-// timezone is null. "Local" is the machine's zone, never a store's.
+// Go runtime cannot load: the period is then cut in UTC, and the answer's
+// periodZone says so. "Local" is the machine's zone, never a store's.
 func storeZone(name string) *time.Location {
 	name = strings.TrimSpace(name)
 	if name == "" || name == "Local" {

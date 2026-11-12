@@ -296,7 +296,7 @@ func seedCtx() context.Context {
 // deletes it when the test ends.
 func seedRow(t *testing.T, concept, id string, payload map[string]any) {
 	t.Helper()
-	eng, db := statsEngine(t)
+	eng, _ := statsEngine(t)
 	if eng == nil {
 		t.FailNow()
 	}
@@ -308,8 +308,18 @@ func seedRow(t *testing.T, concept, id string, payload map[string]any) {
 	if _, err := eng.Execute(seedCtx(), call); err != nil {
 		t.Fatalf("seed %s %s: %v", concept, id, err)
 	}
+	forget(t, concept, id)
+}
+
+// forget deletes one row the test wrote through the engine, every version of
+// it, when the test ends. The database is shared and kept between runs, so a
+// test leaves no user, group, membership or grant behind: each would be read
+// again by every later membership resolution.
+func forget(t *testing.T, concept, id string) {
+	t.Helper()
+	_, db := statsEngine(t)
 	t.Cleanup(func() {
-		_, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept = ? AND id = ?`, concept, concept+":"+id)
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept = ? AND id = ?`, concept, concept+":"+memql.BareShortId(id))
 	})
 }
 
@@ -379,6 +389,7 @@ func seedGroup(t *testing.T, groupID, kind, account string) {
 	t.Helper()
 	seedCall(t, `mutation writeGroup(groupId: `+q(groupID)+`, name: `+q(groupID)+`, kind: `+q(kind)+
 		`, accountId: `+q(account)+`, status: "active")`)
+	forget(t, "v1:identity:group", groupID)
 }
 
 // grantGroup gives a group one allow grant, at the id the grant writer derives.
@@ -387,6 +398,7 @@ func grantGroup(t *testing.T, groupID, verb, resource string) {
 	seedCall(t, `writeGrant(grantId: `+q(auth.GrantRowID(auth.SubjectKindGroup, groupID, verb, resource))+
 		`, subjectKind: "group", subjectId: `+q(groupID)+`, verb: `+q(verb)+`, resourceType: `+q(resource)+
 		`, effect: "allow", grantedBy: "dbtest-storestats-seeder")`)
+	forget(t, "v1:rbac:grant", auth.GrantRowID(auth.SubjectKindGroup, groupID, verb, resource))
 }
 
 // personCtx is a signed-in person as a deployed cluster spells them: the
@@ -403,6 +415,12 @@ func personCtx(userID string, role auth.Role) context.Context {
 // own that opens Deployables (read app:deployables) and, when withPart, holds
 // the sales part (execute app:deployables/sales). Answered signed in.
 func memberCtx(t *testing.T, siteID string, withPart bool) context.Context {
+	t.Helper()
+	return personCtx(memberOf(t, siteID, withPart), auth.RoleWriter)
+}
+
+// memberOf is memberCtx's person, by their bare user id.
+func memberOf(t *testing.T, siteID string, withPart bool) string {
 	t.Helper()
 	v, ok := siteAccounts.Load(siteID)
 	account, _ := v.(string)
@@ -421,7 +439,8 @@ func memberCtx(t *testing.T, siteID string, withPart bool) context.Context {
 		"role": string(auth.RoleWriter), "active": true})
 	seedCall(t, `mutation writeGroupMembership(membershipId: `+q(group+"-"+userID)+`, groupId: `+q(group)+
 		`, userId: `+q(userID)+`, origin: "added", status: "active", accountId: `+q(account)+`)`)
-	return personCtx(userID, auth.RoleWriter)
+	forget(t, "v1:identity:groupMembership", group+"-"+userID)
+	return userID
 }
 
 // storeFrame writes the store's store_sales_store row with the columns given
