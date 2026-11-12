@@ -446,7 +446,11 @@ func evidenceFixture(t *testing.T) (*ShopperHandler, *evidenceRecordingExecutor)
 	memql.ResetShopperSurfaceForTest()
 	memql.RegisterShopperForm(memql.ShopperForm{
 		Pack: "wholesale", Name: "acceptance", Construct: "wholesaleAcceptTerms", Kind: memql.ShopperReadKindBuiltin,
-		Fields:     []memql.ShopperField{{Name: "signedName", Required: true, MaxLength: 120}},
+		Fields: []memql.ShopperField{
+			{Name: "signedName", Required: true, MaxLength: 120},
+			{Name: "acceptTerms", Required: true, MaxLength: 8, Enum: []string{"on"}},
+			{Name: "termsSha256", Required: true, MaxLength: 64, Format: memql.ShopperFormatSHA256},
+		},
 		Evidence:   true,
 		RedirectOK: "/wholesale/accepted", RedirectError: "/wholesale/link-problem",
 	})
@@ -471,7 +475,7 @@ func TestAnEvidenceFormCarriesTheEdgesAddressAndTheBrowserOnItsContext(t *testin
 	stamp := goodStamp()
 	stamp[memql.ShopperClientHeader] = "198.51.100.7"
 	stamp["User-Agent"] = strings.Repeat("a", 600)
-	rec := shopperPost(h, "/forms/wholesale/acceptance", "signedName=Ada+Example&clientAddress=203.0.113.9&userAgent=forged", stamp)
+	rec := shopperPost(h, "/forms/wholesale/acceptance", "signedName=Ada+Example&acceptTerms=on&termsSha256="+strings.Repeat("a", 64)+"&clientAddress=203.0.113.9&userAgent=forged", stamp)
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/wholesale/accepted" {
 		t.Fatalf("the post answered %d %q", rec.Code, rec.Header().Get("Location"))
 	}
@@ -492,7 +496,7 @@ func TestAnEvidenceUserAgentIsCutOnACharacterBoundary(t *testing.T) {
 	h, exec := evidenceFixture(t)
 	stamp := goodStamp()
 	stamp["User-Agent"] = strings.Repeat("a", 511) + "é"
-	shopperPost(h, "/forms/wholesale/acceptance", "signedName=Ada", stamp)
+	shopperPost(h, "/forms/wholesale/acceptance", "signedName=Ada&acceptTerms=on&termsSha256="+strings.Repeat("a", 64), stamp)
 	if got := exec.evidence[0].UserAgent; got != strings.Repeat("a", 511) {
 		t.Fatalf("the User-Agent was cut to %d bytes, want the 511 before the cut character", len(got))
 	}
@@ -513,14 +517,57 @@ func TestANonEvidenceFormIsGivenNoEvidence(t *testing.T) {
 	}
 }
 
-// A CONSTRUCT MAY ANSWER invalid: a declared field that breaks a rule the
-// declaration cannot state (a box that is not on, a fingerprint that is not
-// hex) is told as the surface tells its own field rules.
-func TestAConstructsInvalidIsToldAsInvalid(t *testing.T) {
+// A CONSTRUCT'S invalid IS NOT FORWARDED (ruling 53): every undeclared code is
+// still failed, on a form and on a read, exactly as before.
+func TestAConstructsInvalidIsStillFailed(t *testing.T) {
 	h, exec := evidenceFixture(t)
 	exec.err = fmt.Errorf("wholesale: %w", memql.NewShopperRefusal("invalid", "a box is not on"))
-	rec := shopperPost(h, "/forms/wholesale/acceptance", "signedName=Ada", goodStamp())
-	if loc := rec.Header().Get("Location"); loc != "/wholesale/link-problem?reason=invalid" {
+	rec := shopperPost(h, "/forms/wholesale/acceptance", "signedName=Ada&acceptTerms=on&termsSha256="+strings.Repeat("a", 64), goodStamp())
+	if loc := rec.Header().Get("Location"); loc != "/wholesale/link-problem?reason=failed" {
 		t.Fatalf("the refusal redirected to %q", loc)
+	}
+	memql.RegisterShopperRead(memql.ShopperRead{Pack: "wholesale", Name: "terms", Construct: "wholesaleTermsForLink",
+		Kind: memql.ShopperReadKindBuiltin, Fields: []memql.ShopperField{{Name: "requestToken", Required: true}}, Private: true})
+	req := httptest.NewRequest(http.MethodGet, "/reads/wholesale/terms?requestToken=t", nil)
+	for k, v := range goodStamp() {
+		req.Header.Set(k, v)
+	}
+	read := httptest.NewRecorder()
+	h.ServeHTTP(read, req)
+	if read.Code != http.StatusBadGateway || !strings.Contains(read.Body.String(), `"failed"`) {
+		t.Fatalf("the read answered %d %s", read.Code, read.Body.String())
+	}
+}
+
+// THE HANDLER REFUSES A BOX THAT IS NOT on AND A FINGERPRINT THAT IS NOT 64 HEX
+// CHARACTERS BEFORE THE CONSTRUCT RUNS (ruling 53): the field rules are the
+// declaration's, and the refusal is the surface's own invalid.
+func TestTheHandlerRefusesABoxAndAFingerprintBeforeTheConstructRuns(t *testing.T) {
+	good := "signedName=Ada&acceptTerms=on&termsSha256=" + strings.Repeat("a", 64)
+	for name, body := range map[string]string{
+		"a box that is not on":   "signedName=Ada&acceptTerms=yes&termsSha256=" + strings.Repeat("a", 64),
+		"63 hex characters":      "signedName=Ada&acceptTerms=on&termsSha256=" + strings.Repeat("a", 63),
+		"64 characters, not hex": "signedName=Ada&acceptTerms=on&termsSha256=" + strings.Repeat("g", 64),
+	} {
+		h, exec := evidenceFixture(t)
+		rec := shopperPost(h, "/forms/wholesale/acceptance", body, goodStamp())
+		if loc := rec.Header().Get("Location"); loc != "/wholesale/link-problem?reason=invalid" || len(exec.calls) != 0 {
+			t.Fatalf("%s: redirected to %q after %d calls", name, loc, len(exec.calls))
+		}
+	}
+	h, exec := evidenceFixture(t)
+	if loc := shopperPost(h, "/forms/wholesale/acceptance", good, goodStamp()).Header().Get("Location"); loc != "/wholesale/accepted" || len(exec.calls) != 1 {
+		t.Fatalf("a good post redirected to %q after %d calls", loc, len(exec.calls))
+	}
+}
+
+// AN EDGE HEADER THAT IS NOT AN ADDRESS IS HANDED ON AS NOTHING.
+func TestAnEvidenceAddressThatIsNotAnAddressIsEmpty(t *testing.T) {
+	h, exec := evidenceFixture(t)
+	stamp := goodStamp()
+	stamp[memql.ShopperClientHeader] = "any text the caller likes"
+	shopperPost(h, "/forms/wholesale/acceptance", "signedName=Ada&acceptTerms=on&termsSha256="+strings.Repeat("a", 64), stamp)
+	if len(exec.evidence) != 1 || exec.evidence[0].ClientAddress != "" {
+		t.Fatalf("the evidence carries %+v", exec.evidence)
 	}
 }

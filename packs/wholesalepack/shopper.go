@@ -94,7 +94,8 @@ func registerShopperSurface() {
 // tokenField is a private link's token, from its t parameter.
 func tokenField() memql.ShopperField {
 	return memql.ShopperField{Name: "requestToken", Required: true, MaxLength: 200,
-		Description: "The link's token. Without one the request is refused as link_invalid."}
+		Description: "The link's token. Required: the surface refuses a request without one as invalid, " +
+			"and a token that is no link of this store is link_invalid."}
 }
 
 // acceptanceForm is the form an applicant accepts the terms with, on their
@@ -109,13 +110,18 @@ func acceptanceForm() memql.ShopperForm {
 			"HTML form post; answers 303. Written once; a version that changed under the page is terms_changed.",
 		Fields: []memql.ShopperField{
 			tokenField(),
-			{Name: "acceptTerms", Required: true, MaxLength: 8, Description: "The terms box: on."},
-			{Name: "acceptMap", Required: true, MaxLength: 8, Description: "The MAP policy box: on."},
+			// The field rules are the surface's (ruling 53): a box that is not on,
+			// or a fingerprint that is not 64 hex characters, is the surface's own
+			// invalid before the construct runs.
+			{Name: "acceptTerms", Required: true, MaxLength: 8, Enum: []string{"on"}, Description: "The terms box: on."},
+			{Name: "acceptMap", Required: true, MaxLength: 8, Enum: []string{"on"}, Description: "The MAP policy box: on."},
 			{Name: "signedName", Required: true, MaxLength: 120, Description: "The name the applicant types to accept."},
-			{Name: "termsSha256", Required: true, MaxLength: 64,
+			{Name: "termsSha256", Required: true, MaxLength: 64, Format: memql.ShopperFormatSHA256,
 				Description: "The terms version's fingerprint, as the terms read answered it."},
-			{Name: "mapSha256", Required: true, MaxLength: 64,
+			{Name: "mapSha256", Required: true, MaxLength: 64, Format: memql.ShopperFormatSHA256,
 				Description: "The MAP policy version's fingerprint, as the terms read answered it."},
+			{Name: "statementSha256", Required: true, MaxLength: 64, Format: memql.ShopperFormatSHA256,
+				Description: "The acceptance sentence's fingerprint, as the terms read answered it."},
 		},
 		// THE ADDRESS AND THE BROWSER, on the context and never posted: what an
 		// acceptance records as evidence of where the assent came from.

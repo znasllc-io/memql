@@ -173,6 +173,11 @@ func trimmed(v any) string { return strings.TrimSpace(asString(v)) }
 // the legality fold -- is refused by the engine. engineWriter stamps internal
 // origin for exactly its one call.
 //
+// THE STAMP IS THE ONLY WAY IN. Every concept the pack declares is
+// @serverWritten (ruling 50): a write of any of its rows without internal
+// origin -- the public insert() included -- is refused, so this writer is the
+// one path that writes them.
+//
 // THE STAMP ESCAPES THE ROW GATE. A write at internal origin is not
 // owner-checked (component/memql/rowauthz_write_guard.go), so a row's tier
 // does not protect it from this writer: whoever reaches a builtin that

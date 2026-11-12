@@ -217,8 +217,37 @@ type ShopperField struct {
 	// Numeric parses the value as an integer before it reaches the
 	// construct, so a rating arrives as a number rather than a string.
 	Numeric bool
+	// Format, when set, is a named rule the value must meet, checked by the
+	// handler before the construct runs and refused as the surface's own
+	// invalid. ShopperFormatSHA256 is the one there is.
+	Format string
 	// Description is what the pack guide and the module inventory show.
 	Description string
+}
+
+// ShopperFormatSHA256 accepts exactly 64 hexadecimal characters, of either
+// case: a SHA-256 fingerprint as hex.
+const ShopperFormatSHA256 = "sha256"
+
+// MatchesFormat reports whether value meets the field's Format; a field with
+// none accepts every value.
+func (f ShopperField) MatchesFormat(value string) bool {
+	switch f.Format {
+	case "":
+		return true
+	case ShopperFormatSHA256:
+		if len(value) != 64 {
+			return false
+		}
+		for i := 0; i < len(value); i++ {
+			c := value[i]
+			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // EffectiveMaxLength resolves the declared bound. Exported because the
@@ -469,6 +498,14 @@ func validateShopperRoute(pack, name, construct string, fields []ShopperField) e
 		seen[fname] = struct{}{}
 		if f.MaxLength < 0 {
 			return fmt.Errorf("%s/%s declares a negative MaxLength on %q", pack, name, fname)
+		}
+		if f.Format != "" && f.Format != ShopperFormatSHA256 {
+			return fmt.Errorf("%s/%s declares %q with the format %q; the one format there is is %q",
+				pack, name, fname, f.Format, ShopperFormatSHA256)
+		}
+		if f.Format != "" && (f.Numeric || len(f.Enum) > 0) {
+			return fmt.Errorf("%s/%s declares %q with a format and Numeric or an Enum; a format is a rule "+
+				"of its own", pack, name, fname)
 		}
 		if f.Numeric && len(f.Enum) > 0 {
 			return fmt.Errorf("%s/%s declares %q as both Numeric and an Enum; Enum members "+

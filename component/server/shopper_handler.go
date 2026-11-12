@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -327,7 +328,7 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 	// edge saw, and the browser's User-Agent cut to its bound.
 	if form.Evidence {
 		ctx = memql.ContextWithShopperEvidence(ctx, memql.ShopperEvidence{
-			ClientAddress: strings.TrimSpace(r.Header.Get(memql.ShopperClientHeader)),
+			ClientAddress: evidenceAddress(r.Header.Get(memql.ShopperClientHeader)),
 			UserAgent:     cutUTF8(r.UserAgent(), shopperUserAgentMaxBytes),
 		})
 	}
@@ -339,7 +340,7 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 		// can say what happened ("this link has expired"); every other error
 		// is still "failed" and its text stays in the log.
 		reason := shopperReasonFailed
-		if code, declared := memql.ShopperRefusalCode(err, constructReasons(form.Refusals)); declared {
+		if code, declared := memql.ShopperRefusalCode(err, form.Refusals); declared {
 			reason = code
 		}
 		h.redirect(w, r, form.RedirectError, reason)
@@ -468,12 +469,8 @@ func (h *ShopperHandler) serveRead(w http.ResponseWriter, r *http.Request) {
 			"component", "server", "pack", pack, "read", name, "site", site.ID, "err", err)
 		// 422 for a refusal the read declared: the request was understood and
 		// the answer is a reason the caller can act on, not a fault.
-		if code, declared := memql.ShopperRefusalCode(err, constructReasons(read.Refusals)); declared {
-			status := http.StatusUnprocessableEntity
-			if code == shopperReasonInvalid {
-				status = http.StatusBadRequest
-			}
-			writeShopperJSONError(w, status, code)
+		if code, declared := memql.ShopperRefusalCode(err, read.Refusals); declared {
+			writeShopperJSONError(w, http.StatusUnprocessableEntity, code)
 			return
 		}
 		writeShopperJSONError(w, http.StatusBadGateway, shopperReasonFailed)
@@ -499,16 +496,19 @@ func (h *ShopperHandler) serveRead(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"data": rows})
 }
 
-// constructReasons is what a construct may refuse with by name: the codes its
-// declaration names, and invalid -- a declared field breaking a rule the
-// declaration cannot state (a box that is not on, a fingerprint that is not
-// hex), told exactly as the surface tells a field that fails its own rule.
-func constructReasons(declared []string) []string {
-	return append(append([]string{}, declared...), shopperReasonInvalid)
-}
-
 // shopperUserAgentMaxBytes bounds the User-Agent an Evidence form is handed.
 const shopperUserAgentMaxBytes = 512
+
+// evidenceAddress is the edge's address header as an IP address in its
+// canonical spelling, or "" when it is not one: the edge sets only an address,
+// and anything else is recorded as nothing rather than as text.
+func evidenceAddress(raw string) string {
+	addr, err := netip.ParseAddr(strings.TrimSpace(raw))
+	if err != nil || addr.Zone() != "" {
+		return ""
+	}
+	return addr.Unmap().String()
+}
 
 // cutUTF8 is s cut to at most max bytes, at the start of the character the
 // bound falls in, so the cut never leaves half of one.
@@ -545,6 +545,9 @@ func shopperArgs(fields []memql.ShopperField, get func(string) string) (map[stri
 			return nil, f.Name
 		}
 		if len(f.Enum) > 0 && !containsString(f.Enum, raw) {
+			return nil, f.Name
+		}
+		if !f.MatchesFormat(raw) {
 			return nil, f.Name
 		}
 		if f.Numeric {

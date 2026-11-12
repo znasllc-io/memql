@@ -3,9 +3,7 @@ package wholesalepack
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -109,13 +107,8 @@ func mintToken() (token, hash string, err error) {
 		return "", "", fmt.Errorf("wholesale: minting a link token: %w", err)
 	}
 	token = base64.RawURLEncoding.EncodeToString(b)
-	return token, tokenHashOf(token), nil
-}
-
-// tokenHashOf is the stored form of a token: the hex SHA-256 of it.
-func tokenHashOf(token string) string {
-	sum := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(sum[:])
+	// The stored form of a token: its hex SHA-256 (sha256Hex).
+	return token, sha256Hex(token), nil
 }
 
 // validPurpose refuses a purpose outside the two.
@@ -202,7 +195,7 @@ func (p *Provider) linkFor(ctx context.Context, storeID, token, purpose string, 
 	if token == "" || storeID == "" {
 		return nil, nil, errNoSuchLink
 	}
-	rows, err := p.rowsFor(ctx, "privateLinkByTokenHash", map[string]string{"storeId": bareID(storeID), "tokenHash": tokenHashOf(token)})
+	rows, err := p.rowsFor(ctx, "privateLinkByTokenHash", map[string]string{"storeId": bareID(storeID), "tokenHash": sha256Hex(token)})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -231,6 +224,15 @@ func (p *Provider) linkFor(ctx context.Context, storeID, token, purpose string, 
 	case LinkPurposeTerms:
 		if !rowTime(link["usedAt"]).IsZero() {
 			return nil, nil, refuseLink(RefusalLinkUsed, "the terms were accepted through this link")
+		}
+		// AN ACCEPTANCE EXISTS, whatever usedAt says: the usedAt write after the
+		// acceptance may have failed, and the link is used all the same.
+		accepted, err := p.acceptanceOf(sys, applicationID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if accepted != nil {
+			return nil, nil, refuseLink(RefusalLinkUsed, "the application has accepted the terms")
 		}
 		if state != StateSubmitted {
 			return nil, nil, refuseLink(RefusalLinkUsed, "the application is "+state)
@@ -277,15 +279,20 @@ func (p *Provider) termsForLink(ctx context.Context, args map[string]any, _ int)
 		return nil, err
 	}
 	sys := auth.ContextWithSystemActor(ctx, linksActor)
-	docs, err := p.currentDocuments(sys, storeID)
-	if err != nil {
-		return nil, err
-	}
+	// THE TWO BODIES SHOWN AND NO OTHER: the heads of the terms and the MAP
+	// policy, then each one's body by id. Nothing of the price sheet.
 	shown := make([]map[string]any, 0, 2)
 	for _, kind := range []string{DocumentTerms, DocumentMap} {
-		v := docs[kind]
-		if v == nil {
+		brief, err := p.currentBrief(sys, storeID, kind)
+		if err != nil {
+			return nil, err
+		}
+		if brief == nil {
 			return nil, p.linkProblem(trimmed(app["id"]), "the store has no current "+kind+" version")
+		}
+		v, err := p.documentVersionByID(sys, brief)
+		if err != nil {
+			return nil, err
 		}
 		shown = append(shown, map[string]any{"kind": kind, "label": asString(v["label"]), "body": asString(v["body"]),
 			"sha256": trimmed(v["sha256"])})
@@ -294,11 +301,15 @@ func (p *Provider) termsForLink(ctx context.Context, args map[string]any, _ int)
 	if err != nil {
 		return nil, err
 	}
+	statement := EffectiveSettings(settings).AcceptanceText
 	return confirm("wholesale:terms", map[string]any{
 		"companyName": asString(app["companyName"]),
 		"documents":   shown,
-		"statement":   EffectiveSettings(settings).AcceptanceText,
-		"expiresAt":   timeText(link["expiresAt"]),
+		"statement":   statement,
+		// ruling 52: the page posts this back, so the acceptance names the
+		// sentence that was shown.
+		"statementSha256": sha256Hex(statement),
+		"expiresAt":       timeText(link["expiresAt"]),
 	})
 }
 

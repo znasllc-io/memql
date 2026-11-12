@@ -18,7 +18,7 @@ use wholesale.concepts.{ application, applicationDecision, entitlement, wholesal
 use wholesale.shapes.{ applicationFull, applicationDecisionFull, entitlementFull, wholesaleSettingsFull, documentVersionFull, wholesaleDocumentVersionBrief }
 use wholesale.shapes.{ wholesaleStorePlan }
 use wholesale.concepts.{ privateLink, acceptance }
-use wholesale.shapes.{ privateLinkFull, privateLinkPublic, acceptanceFull }
+use wholesale.shapes.{ privateLinkPublic, acceptanceFull }
 use shopify.overlay.concepts.{ store }
 
 @description("One application by id. The read a decision resolves its subject through, so a caller who cannot read an application cannot record a decision against it either -- which is the same narrowing reviewspack's moderation path carries, and for the same reason: a decision naming an application nobody can read would be a row scoped to no store.")
@@ -187,6 +187,17 @@ query documentVersion wholesaleDocumentVersionById {
   shape   documentVersionFull
 }
 
+@description("One document version by id WITHOUT its body: what a reader that shows a version's label or fingerprint needs, and nothing of a body of up to 200 KB.")
+@unbounded("document version by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+query documentVersion wholesaleDocumentVersionBriefById {
+  args {
+    documentVersionId  string!
+  }
+  filter  row => row.id == args.documentVersionId
+  shape   wholesaleDocumentVersionBrief
+}
+
 @description("The bound store's plan, through the pack's own narrow projection. THIS READ ANSWERING NOTHING IS ORDINARY: v1:shopify:store is readable by a cluster owner or a developer only (its read floor is developer), so a merchant reads no rows here. What an unknown plan MEANS is each adapter's to say -- shopifyB2B refuses, because it cannot establish the catalog ceiling it has to respect; customerTag proceeds, because it needs no plan at all. That difference is what plan-independence is.")
 @unbounded("store by id -- bounded to a single row (id is the row's own primary key)")
 @actor
@@ -224,7 +235,7 @@ query privateLink privateLinkByTokenHash {
   shape   privateLinkPublic
 }
 
-@description("One application's link of one purpose (terms or priceSheet). One row per application and purpose at a derived id, so this answers at most one. A link row holds the CANONICAL application id and this query matches it as written, so a reader asks both forms.")
+@description("One application's link of one purpose (terms or priceSheet), without its token hash. One row per application and purpose at a derived id, so this answers at most one. A link row holds the CANONICAL application id and this query matches it as written, so a reader asks both forms.")
 @actor
 query privateLink privateLinkForApplication {
   args {
@@ -233,7 +244,7 @@ query privateLink privateLinkForApplication {
   }
   filter  row => row.applicationId == args.applicationId && row.purpose == args.purpose
   sort    "row.createdAt", "desc"
-  shape   privateLinkFull
+  shape   privateLinkPublic
 }
 
 @description("One application's acceptance of the terms. Written once at a derived id, so this answers at most one. An acceptance holds the CANONICAL application id and this query matches it as written, so a reader asks both forms.")

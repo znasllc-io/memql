@@ -199,7 +199,7 @@ builtin wholesaleDocuments {
 
 @executor("integration.wholesale.termsForLink")
 @args(profile="object")
-@description("THE TERMS LINK'S READ: the store's current terms and MAP policy for the applicant whose link this is, {companyName, documents: [{kind, label, body, sha256}] (terms, then map), statement, expiresAt}, where statement is the sentence they accept with. Never an email, an id or a token hash. Refused by name: link_invalid (no link of this store carries the token, or the token was replaced), link_expired, link_used (the terms were accepted, or the application was decided).")
+@description("THE TERMS LINK'S READ: the store's current terms and MAP policy for the applicant whose link this is, {companyName, documents: [{kind, label, body, sha256}] (terms, then map), statement, statementSha256, expiresAt}, where statement is the sentence they accept with and statementSha256 the lowercase hex SHA-256 of its UTF-8 bytes. Never an email, an id or a token hash. Refused by name: link_invalid (no link of this store carries the token, or the token was replaced), link_expired, link_used (the terms were accepted -- an acceptance exists, whatever the link says -- or the application was decided).")
 builtin wholesaleTermsForLink {
   requestToken  string!  @description("The link's token.")
   storeId       string!  @description("Stamped by the shopper handler from the binding the request arrived through.")
@@ -208,7 +208,7 @@ builtin wholesaleTermsForLink {
 
 @executor("integration.wholesale.acceptTerms")
 @args(profile="object")
-@description("THE ACCEPTANCE FORM'S CONSTRUCT: an applicant accepts the store's terms and MAP policy through their terms link. The link is verified as the read verifies it; an application that has accepted already is link_used; both boxes must arrive as on, the trimmed name must not be empty and each fingerprint must be 64 hex characters, else invalid. The current terms and MAP versions are read again, and a fingerprint that is not the current version's is terms_changed: nothing is written, the link stays usable, and the applicant reads the current texts again. The acceptance records the versions, their fingerprints, the store's acceptance sentence, the name typed, and the address and browser the storefront's edge saw -- empty for a call that did not arrive through the storefront -- and is written once: of two posts at once, one is recorded and the other is link_used. The link is then marked used.")
+@description("THE ACCEPTANCE FORM'S CONSTRUCT: an applicant accepts the store's terms and MAP policy through their terms link. The link is verified as the read verifies it; an application that has accepted already is link_used; both boxes must arrive as on, the trimmed name must not be empty and each of the three fingerprints must be 64 hex characters, else invalid (through the storefront the form's own rules refuse these first). The current terms and MAP versions are read again, and a fingerprint that is not the current version's -- or a statementSha256 that is not the current acceptance sentence's -- is terms_changed: nothing is written, the link stays usable, and the applicant reads the current texts again. The acceptance records the versions, their fingerprints, the store's acceptance sentence, the name typed, and the address and browser the storefront's edge saw -- empty for a call that did not arrive through the storefront -- and is written once: of two posts at once, one is recorded and the other is link_used. The link is then marked used.")
 builtin wholesaleAcceptTerms {
   requestToken  string!  @description("The link's token.")
   acceptTerms   string!  @description("The terms box: on.")
@@ -216,6 +216,7 @@ builtin wholesaleAcceptTerms {
   signedName    string!  @description("The name the applicant types to accept.")
   termsSha256   string!  @description("The fingerprint of the terms version the page showed, as the terms read answered it.")
   mapSha256     string!  @description("The fingerprint of the MAP policy version the page showed, as the terms read answered it.")
+  statementSha256  string!  @description("The fingerprint of the acceptance sentence the page showed, as the terms read answered it.")
   storeId       string!  @description("Stamped by the shopper handler from the binding the post arrived through.")
   siteId        string   @description("Stamped by the shopper handler.")
 }

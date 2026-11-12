@@ -149,6 +149,8 @@ func (w *linkWorld) Rows(ctx context.Context, query string, args map[string]stri
 		return briefsOf(docsMatching(w.docs, args["storeId"], args["kind"])), nil
 	case "wholesaleDocumentVersionById":
 		return docByID(w.docs, args["documentVersionId"]), nil
+	case "wholesaleDocumentVersionBriefById":
+		return briefsOf(docByID(w.docs, args["documentVersionId"])), nil
 	}
 	return nil, nil
 }
@@ -263,6 +265,7 @@ func termsArgs(token string) map[string]any {
 func (w *linkWorld) acceptArgs(token string) map[string]any {
 	args := termsArgs(token)
 	args["acceptTerms"], args["acceptMap"], args["signedName"] = "on", "on", "  Ada Example  "
+	args["statementSha256"] = sha256Hex(EffectiveSettings(w.settings).AcceptanceText)
 	for field, kind := range map[string]string{"termsSha256": DocumentTerms, "mapSha256": DocumentMap} {
 		// A kind with no version is posted a well-formed fingerprint of nothing.
 		args[field] = strings.Repeat("0", 64)
@@ -421,17 +424,24 @@ func TestTheTermsReadShowsNoEmailNoIdAndNoHash(t *testing.T) {
 			t.Fatalf("the terms read carries %q: %s", secret, raw)
 		}
 	}
+	sheet := trimmed(docsMatching(w.docs, linkStore, DocumentPriceSheet)[0]["id"])
+	for i, q := range w.reads {
+		if q == "wholesaleDocumentVersionById" && bareID(w.readArgs[i]["documentVersionId"]) == bareID(sheet) {
+			t.Fatal("the terms page read the price sheet's body")
+		}
+	}
 	docs := listOfMaps(got["documents"])
 	if got["companyName"] != "Kestrel Cycles" || len(docs) != 2 || docs[0]["kind"] != DocumentTerms || docs[1]["kind"] != DocumentMap ||
 		docs[0]["label"] != "Terms 2026" || docs[0]["body"] != "Net 30. Kestrel Cycles trade terms." ||
 		docs[0]["sha256"] != sha256Hex("Net 30. Kestrel Cycles trade terms.") || docs[1]["sha256"] != sha256Hex("Advertise at list price.") {
 		t.Fatalf("the terms read is %s", raw)
 	}
-	if got["statement"] != DefaultAcceptanceText || got["expiresAt"] != linkClock.Add(30*24*time.Hour).Format(time.RFC3339Nano) {
+	if got["statement"] != DefaultAcceptanceText || got["statementSha256"] != sha256Hex(DefaultAcceptanceText) ||
+		got["expiresAt"] != linkClock.Add(30*24*time.Hour).Format(time.RFC3339Nano) {
 		t.Fatalf("the terms read is %s", raw)
 	}
 	for k := range got {
-		if k != "companyName" && k != "documents" && k != "statement" && k != "expiresAt" {
+		if k != "companyName" && k != "documents" && k != "statement" && k != "statementSha256" && k != "expiresAt" {
 			t.Fatalf("the terms read answers %q: %s", k, raw)
 		}
 	}
@@ -715,7 +725,7 @@ func TestAFingerprintThatIsNotSixtyFourHexIsInvalid(t *testing.T) {
 		"65 characters": strings.Repeat("a", 65),
 		"not hex":       strings.Repeat("g", 64),
 	} {
-		for _, field := range []string{"termsSha256", "mapSha256"} {
+		for _, field := range []string{"termsSha256", "mapSha256", "statementSha256"} {
 			w := newLinkWorld()
 			p := w.provider()
 			token := w.mint(t, p, LinkPurposeTerms)
@@ -874,12 +884,26 @@ func TestTheTermsAndPriceSheetReadsArePrivate(t *testing.T) {
 		strings.Join(f.Refusals, ",") != strings.Join(AcceptanceRefusals, ",") {
 		t.Fatalf("the acceptance form is %+v", f)
 	}
-	want := map[string]int{"requestToken": 200, "acceptTerms": 8, "acceptMap": 8, "signedName": 120, "termsSha256": 64, "mapSha256": 64}
+	want := map[string]int{"requestToken": 200, "acceptTerms": 8, "acceptMap": 8, "signedName": 120, "termsSha256": 64, "mapSha256": 64,
+		"statementSha256": 64}
 	for _, field := range f.Fields {
 		if want[field.Name] != field.MaxLength || !field.Required {
 			t.Fatalf("the acceptance field %+v", field)
 		}
+		switch field.Name {
+		case "acceptTerms", "acceptMap":
+			if strings.Join(field.Enum, ",") != "on" {
+				t.Fatalf("the box %s accepts %v, want on only", field.Name, field.Enum)
+			}
+		case "termsSha256", "mapSha256", "statementSha256":
+			if field.Format != memql.ShopperFormatSHA256 {
+				t.Fatalf("the fingerprint %s has the format %q", field.Name, field.Format)
+			}
+		}
 		delete(want, field.Name)
+	}
+	if desc := tokenField().Description; !strings.Contains(desc, "without one as invalid") || strings.Contains(desc, " t parameter") {
+		t.Fatalf("the token's description is not what the surface does: %q", desc)
 	}
 	if len(want) != 0 {
 		t.Fatalf("the acceptance form lacks %v", want)
@@ -912,6 +936,13 @@ func TestAnAcceptedApplicationIsReadyToReview(t *testing.T) {
 	got = decodedBy(t)(p.get(staff, map[string]any{"applicationId": linkApp}, 0))
 	if got["stage"] != StageReadyToReview || strings.Join(asStrings(got["acts"]), ",") != ActReject+","+ActApprove {
 		t.Fatalf("an accepted application: stage %v, acts %v", got["stage"], got["acts"])
+	}
+	w.reads = nil
+	got = decodedBy(t)(p.get(staff, map[string]any{"applicationId": linkApp}, 0))
+	for _, q := range w.reads {
+		if q == "wholesaleDocumentVersionById" {
+			t.Fatal("the application read a document body to show a label")
+		}
 	}
 	acc, _ := got["acceptance"].(map[string]any)
 	want := map[string]any{"signedName": "Ada Example", "acceptedAt": linkClock.Format(time.RFC3339Nano),
@@ -1171,4 +1202,71 @@ func TestAPriceSheetLinkWithNoPriceSheetIsLinkInvalidAndLogged(t *testing.T) {
 	if !strings.Contains(w.log.String(), linkApp) || strings.Contains(w.log.String(), token) {
 		t.Fatalf("the operator's line is %q", w.log.String())
 	}
+}
+
+// ruling 52: THE STATEMENT IS TIED TO WHAT WAS SHOWN. A staff edit of the
+// sentence between the read and the post refuses the post as terms_changed,
+// with nothing written and the link usable; a second read answers the new
+// sentence and its fingerprint.
+func TestAnEditOfTheSentenceBetweenTheReadAndThePostIsTermsChanged(t *testing.T) {
+	w := newLinkWorld()
+	p := w.provider()
+	token := w.mint(t, p, LinkPurposeTerms)
+	shown := decodedBy(t)(p.termsForLink(shopper(), termsArgs(token), 0))
+	args := w.acceptArgs(token)
+	args["statementSha256"] = asString(shown["statementSha256"])
+	w.settings["acceptanceText"] = "I accept the revised Kestrel Cycles terms."
+	if _, err := p.acceptTerms(shopper(), args, 0); refusalCode(err) != RefusalTermsChanged {
+		t.Fatalf("a post of the old sentence: %v, want %s", err, RefusalTermsChanged)
+	}
+	if len(w.acceptances) != 0 || w.termsLink()["usedAt"] != "" {
+		t.Fatal("a post of the old sentence wrote something")
+	}
+	again := decodedBy(t)(p.termsForLink(shopper(), termsArgs(token), 0))
+	if again["statement"] != "I accept the revised Kestrel Cycles terms." ||
+		again["statementSha256"] != sha256Hex("I accept the revised Kestrel Cycles terms.") {
+		t.Fatalf("the read again answers %v / %v", again["statement"], again["statementSha256"])
+	}
+	args["statementSha256"] = again["statementSha256"]
+	if _, err := p.acceptTerms(shopper(), args, 0); err != nil {
+		t.Fatalf("a post of the new sentence: %v", err)
+	}
+	if a := w.onlyAcceptance(t); a["statement"] != "I accept the revised Kestrel Cycles terms." {
+		t.Fatalf("the acceptance records %v", a["statement"])
+	}
+}
+
+// A TERMS LINK IS link_used WHENEVER AN ACCEPTANCE EXISTS for its application,
+// whatever usedAt says: here the usedAt write failed after the acceptance.
+func TestATermsLinkIsUsedOnceAnAcceptanceExistsWhateverUsedAtSays(t *testing.T) {
+	w := newLinkWorld()
+	p := w.provider()
+	token := w.mint(t, p, LinkPurposeTerms)
+	p.writer = usedAtFails{inner: w}
+	if _, err := p.acceptTerms(shopper(), w.acceptArgs(token), 0); err == nil {
+		t.Fatal("the accept answered no error although its usedAt write failed")
+	}
+	if len(w.acceptances) != 1 || w.termsLink()["usedAt"] != "" {
+		t.Fatalf("the acceptance or usedAt is not as the failure left it: %d, %v", len(w.acceptances), w.termsLink()["usedAt"])
+	}
+	if _, err := p.termsForLink(shopper(), termsArgs(token), 0); refusalCode(err) != RefusalLinkUsed {
+		t.Fatalf("the terms read after the acceptance: %v, want %s", err, RefusalLinkUsed)
+	}
+	if _, err := p.acceptTerms(shopper(), w.acceptArgs(token), 0); refusalCode(err) != RefusalLinkUsed {
+		t.Fatalf("a retry: %v, want %s", err, RefusalLinkUsed)
+	}
+}
+
+// usedAtFails refuses the link's usedAt write and passes every other.
+type usedAtFails struct{ inner *linkWorld }
+
+func (u usedAtFails) Write(ctx context.Context, mutation string, args map[string]any) error {
+	if mutation == "putPrivateLinkRow" && asString(args["usedAt"]) != "" {
+		return errors.New("wholesale: putPrivateLinkRow: the database is unavailable")
+	}
+	return u.inner.Write(ctx, mutation, args)
+}
+
+func (u usedAtFails) Insert(ctx context.Context, mutation string, args map[string]any) (string, error) {
+	return u.inner.Insert(ctx, mutation, args)
 }

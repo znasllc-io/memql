@@ -96,7 +96,9 @@ func TestATermsLinkIsAcceptedOnceThroughTheShopperPath(t *testing.T) {
 		t.Fatalf("an approve before the acceptance: %v", err)
 	}
 	link := latestPayload(t, "v1:wholesale:privateLink", wholesalepack.PrivateLinkRowID(wholesalepack.LinkPurposeTerms, s.appID))
-	if asString(link["usedAt"]) != "" || asString(link["expiresAt"]) == "" || strings.Contains(asString(link), token) {
+	stored, _ := json.Marshal(link)
+	if asString(link["usedAt"]) != "" || asString(link["expiresAt"]) == "" || strings.Contains(string(stored), token) ||
+		!strings.Contains(string(stored), sha256Text(token)) {
 		t.Fatalf("the minted link is %+v", link)
 	}
 
@@ -110,7 +112,8 @@ func TestATermsLinkIsAcceptedOnceThroughTheShopperPath(t *testing.T) {
 	}
 	form := url.Values{"requestToken": {token}, "acceptTerms": {"on"}, "acceptMap": {"on"}, "signedName": {"Ada Example"},
 		"termsSha256": {asString(docs[0]["sha256"])}, "mapSha256": {asString(docs[1]["sha256"])},
-		"clientAddress": {"203.0.113.9"}, "userAgent": {"Forged/1.0"}}
+		"statementSha256": {asString(terms["statementSha256"])},
+		"clientAddress":   {"203.0.113.9"}, "userAgent": {"Forged/1.0"}}
 	rec := postAcceptance(t, eng, s, form)
 	if loc := rec.Header().Get("Location"); rec.Code != http.StatusSeeOther || loc != "/wholesale/accepted" {
 		t.Fatalf("the acceptance answered %d %q", rec.Code, loc)
@@ -180,7 +183,8 @@ func TestANewTermsVersionBetweenTheReadAndThePostIsRefusedThroughTheShopperPath(
 	answerOf(t, eng, signedIn(s.staff), `builtin wholesalePublishDocument(siteId: `+quote(s.site)+`, storeId: `+quote(s.store)+
 		`, kind: "terms", label: "terms 2027", body: "Net 45.")`)
 	form := url.Values{"requestToken": {token}, "acceptTerms": {"on"}, "acceptMap": {"on"}, "signedName": {"Ada Example"},
-		"termsSha256": {asString(docs[0]["sha256"])}, "mapSha256": {asString(docs[1]["sha256"])}}
+		"termsSha256": {asString(docs[0]["sha256"])}, "mapSha256": {asString(docs[1]["sha256"])},
+		"statementSha256": {asString(terms["statementSha256"])}}
 	if loc := postAcceptance(t, eng, s, form).Header().Get("Location"); loc != "/wholesale/link-problem?reason=terms_changed" {
 		t.Fatalf("a post of the old terms redirected to %q", loc)
 	}
@@ -206,7 +210,8 @@ func TestTwoAcceptancesPostedAtOnceWriteOneAndTheOtherIsLinkUsed(t *testing.T) {
 	_, terms := readTerms(t, eng, s, token)
 	docs := listRows(terms["documents"])
 	args := map[string]any{"requestToken": token, "acceptTerms": "on", "acceptMap": "on", "signedName": "Ada Example",
-		"termsSha256": asString(docs[0]["sha256"]), "mapSha256": asString(docs[1]["sha256"]), "storeId": s.store, "siteId": s.site}
+		"termsSha256": asString(docs[0]["sha256"]), "mapSha256": asString(docs[1]["sha256"]),
+		"statementSha256": asString(terms["statementSha256"]), "storeId": s.store, "siteId": s.site}
 	var arrived sync.WaitGroup
 	arrived.Add(2)
 	barrier := func() {
@@ -245,5 +250,173 @@ func TestTwoAcceptancesPostedAtOnceWriteOneAndTheOtherIsLinkUsed(t *testing.T) {
 	}
 	if n := versionCount(t, "v1:wholesale:acceptance", wholesalepack.AcceptanceRowID(s.appID)); n != 1 {
 		t.Fatalf("%d versions of the acceptance", n)
+	}
+}
+
+// shopperGet is one private read through the handler: its status and body.
+func shopperGet(t *testing.T, eng *memql.MemQLEngine, s accessStore, read, token string) (int, string) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, memql.ShopperReadPathPrefix+"wholesale/"+read+"?requestToken="+url.QueryEscape(token), nil)
+	rec := shopperRequest(t, eng, s, req)
+	return rec.Code, rec.Body.String()
+}
+
+// acceptForm is a good acceptance post for what the terms read answered.
+func acceptForm(token string, terms map[string]any) url.Values {
+	docs := listRows(terms["documents"])
+	return url.Values{"requestToken": {token}, "acceptTerms": {"on"}, "acceptMap": {"on"}, "signedName": {"Ada Example"},
+		"termsSha256": {asString(docs[0]["sha256"])}, "mapSha256": {asString(docs[1]["sha256"])},
+		"statementSha256": {asString(terms["statementSha256"])}}
+}
+
+// ruling 52, through the handler: A STAFF EDIT OF THE SENTENCE between the read
+// and the post is terms_changed, nothing is written, and the read again answers
+// the new sentence and its fingerprint.
+func TestAnEditOfTheSentenceBetweenTheReadAndThePostIsRefusedThroughTheShopperPath(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	s, token := termsStore(t, eng, "accept-sentence")
+	_, terms := readTerms(t, eng, s, token)
+	if terms["statementSha256"] != sha256Text(wholesalepack.DefaultAcceptanceText) {
+		t.Fatalf("the read answers the fingerprint %v", terms["statementSha256"])
+	}
+	revised := "I accept the revised Kestrel Cycles trade terms."
+	wsExec(t, eng, signedIn(s.staff), `builtin wholesaleUpdateSettings(siteId: `+quote(s.site)+`, storeId: `+quote(s.store)+
+		`, acceptanceText: `+quote(revised)+`)`)
+	if loc := postAcceptance(t, eng, s, acceptForm(token, terms)).Header().Get("Location"); loc != "/wholesale/link-problem?reason=terms_changed" {
+		t.Fatalf("a post of the old sentence redirected to %q", loc)
+	}
+	if n := versionCount(t, "v1:wholesale:acceptance", wholesalepack.AcceptanceRowID(s.appID)); n != 0 {
+		t.Fatalf("%d acceptances after terms_changed", n)
+	}
+	link := latestPayload(t, "v1:wholesale:privateLink", wholesalepack.PrivateLinkRowID(wholesalepack.LinkPurposeTerms, s.appID))
+	if asString(link["usedAt"]) != "" {
+		t.Fatalf("the link was marked used: %+v", link)
+	}
+	code, again := readTerms(t, eng, s, token)
+	if code != http.StatusOK || again["statement"] != revised || again["statementSha256"] != sha256Text(revised) {
+		t.Fatalf("the read again answered %d %+v", code, again)
+	}
+}
+
+// ONE MERCHANT, TWO STORES: a real token of store A presented on store B answers
+// exactly what an unknown token answers, for each of the three link builtins
+// through the handler.
+func TestATokenOfTheMerchantsOtherStoreAnswersAsAnUnknownOneThroughTheShopperPath(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	a, terms := termsStore(t, eng, "two-stores")
+	sheet, err := wholesalepack.MintLinkForTest(context.Background(), eng, a.appID, wholesalepack.LinkPurposePriceSheet)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	b := a
+	b.store, b.site = a.store+"-b", a.site+"-b"
+	seedSiteIn(t, eng, b.site, a.merchant, b.store, a.account)
+	b.owner = siteOwnerOf(t, eng, b.site)
+	if b.owner != a.owner {
+		t.Fatalf("the two sites have two owners: %q and %q", a.owner, b.owner)
+	}
+	const unknown = "an-unknown-token"
+	for _, read := range []string{"terms", "priceSheet"} {
+		for _, token := range []string{terms, sheet} {
+			wantCode, wantBody := shopperGet(t, eng, b, read, unknown)
+			code, body := shopperGet(t, eng, b, read, token)
+			if code != wantCode || body != wantBody || !strings.Contains(body, wholesalepack.RefusalLinkInvalid) {
+				t.Fatalf("%s with store A's token on store B answered %d %s; an unknown token answers %d %s", read, code, body, wantCode, wantBody)
+			}
+		}
+	}
+	_, shown := readTerms(t, eng, a, terms)
+	for _, token := range []string{terms, sheet} {
+		form := acceptForm(token, shown)
+		got := postAcceptance(t, eng, b, form).Header().Get("Location")
+		form.Set("requestToken", unknown)
+		want := postAcceptance(t, eng, b, form).Header().Get("Location")
+		if got != want || want != "/wholesale/link-problem?reason=link_invalid" {
+			t.Fatalf("an acceptance with store A's token on store B redirected to %q; an unknown token to %q", got, want)
+		}
+	}
+	if n := versionCount(t, "v1:wholesale:acceptance", wholesalepack.AcceptanceRowID(a.appID)); n != 0 {
+		t.Fatalf("%d acceptances", n)
+	}
+}
+
+// A LINK SENT AGAIN CLEARS ITS usedAt in the database, with a new token hash.
+func TestARemintedLinkClearsItsUsedAt(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	s, token := termsStore(t, eng, "remint")
+	_, terms := readTerms(t, eng, s, token)
+	if loc := postAcceptance(t, eng, s, acceptForm(token, terms)).Header().Get("Location"); loc != "/wholesale/accepted" {
+		t.Fatalf("the acceptance redirected to %q", loc)
+	}
+	id := wholesalepack.PrivateLinkRowID(wholesalepack.LinkPurposeTerms, s.appID)
+	if used := latestPayload(t, "v1:wholesale:privateLink", id); asString(used["usedAt"]) == "" {
+		t.Fatalf("the link was not marked used: %+v", used)
+	}
+	again, err := wholesalepack.MintLinkForTest(context.Background(), eng, s.appID, wholesalepack.LinkPurposeTerms)
+	if err != nil {
+		t.Fatalf("mint again: %v", err)
+	}
+	fresh := latestPayload(t, "v1:wholesale:privateLink", id)
+	if asString(fresh["usedAt"]) != "" || fresh["tokenHash"] != sha256Text(again) {
+		t.Fatalf("the link sent again is %+v", fresh)
+	}
+	// And the acceptance still makes it used.
+	if code, got := readTerms(t, eng, s, again); code != http.StatusUnprocessableEntity || got["error"] != wholesalepack.RefusalLinkUsed {
+		t.Fatalf("the new token after the acceptance answered %d %+v", code, got)
+	}
+}
+
+// THE PRICE-SHEET ROUTE through the real handler: the link stores no expiry,
+// opens while the buyer is approved and granted, and is link_used after a revoke.
+func TestAPriceSheetLinkOpensThroughTheShopperPathWhileApprovedAndGranted(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	s, token := termsStore(t, eng, "pricesheet")
+	_, terms := readTerms(t, eng, s, token)
+	if loc := postAcceptance(t, eng, s, acceptForm(token, terms)).Header().Get("Location"); loc != "/wholesale/accepted" {
+		t.Fatalf("the acceptance redirected to %q", loc)
+	}
+	if err := s.approve(eng, signedIn(s.staff)); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	sheet, err := wholesalepack.MintLinkForTest(context.Background(), eng, s.appID, wholesalepack.LinkPurposePriceSheet)
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	link := latestPayload(t, "v1:wholesale:privateLink", wholesalepack.PrivateLinkRowID(wholesalepack.LinkPurposePriceSheet, s.appID))
+	if asString(link["expiresAt"]) != "" || asString(link["usedAt"]) != "" {
+		t.Fatalf("the price-sheet link is %+v, want no expiry", link)
+	}
+	if code, body := shopperGet(t, eng, s, "priceSheet", sheet); code != http.StatusUnprocessableEntity || !strings.Contains(body, wholesalepack.RefusalLinkUsed) {
+		t.Fatalf("before access is granted the price sheet answered %d %s", code, body)
+	}
+	// A GRANTED ENTITLEMENT, seeded at internal origin in test code only: the
+	// test engine has no Shopify connector to grant one.
+	app := "v1:wholesale:application:" + s.appID
+	wsExec(t, eng, seedCtx(), rawInsert("v1:wholesale:entitlement", wholesalepack.EntitlementRowID(s.appID), map[string]any{
+		"ownerUserId": s.owner, "applicationId": app, "storeId": s.store, "buyerEmail": "sam@pricesheet.example.com",
+		"adapter": wholesalepack.AdapterCustomerTag, "state": wholesalepack.EntitlementGranted, "accountId": s.account}))
+	code, body := shopperGet(t, eng, s, "priceSheet", sheet)
+	if code != http.StatusOK || !strings.Contains(body, "Frame 410.00") || !strings.Contains(body, "priceSheet 2026") ||
+		strings.Contains(body, "sam@") || strings.Contains(body, s.appID) {
+		t.Fatalf("the price sheet answered %d %s", code, body)
+	}
+	if _, err := eng.Execute(signedIn(s.staff), `builtin wholesaleRecordDecision(applicationId: `+quote(s.appID)+
+		`, transition: "revoke", note: "account closed")`); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if code, body := shopperGet(t, eng, s, "priceSheet", sheet); code != http.StatusUnprocessableEntity || !strings.Contains(body, wholesalepack.RefusalLinkUsed) {
+		t.Fatalf("after the revoke the price sheet answered %d %s", code, body)
+	}
+}
+
+// THE LINK READ OF AN APPLICATION carries no token hash to the store's people.
+func TestTheLinkReadOfAnApplicationCarriesNoTokenHash(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	s, token := termsStore(t, eng, "nohash")
+	rows := wsRows(t, eng, signedIn(s.merchant), `query privateLinkForApplication(applicationId: `+
+		quote("v1:wholesale:application:"+s.appID)+`, purpose: "terms")`)
+	raw, _ := json.Marshal(rows)
+	if len(rows) != 1 || strings.Contains(string(raw), "tokenHash") || strings.Contains(string(raw), sha256Text(token)) {
+		t.Fatalf("the merchant reads %s", raw)
 	}
 }

@@ -70,15 +70,9 @@ func (p *Provider) acceptTerms(ctx context.Context, args map[string]any, _ int) 
 	if err != nil {
 		return nil, err
 	}
+	// linkFor answered link_used for an application that has accepted already.
 	applicationID := trimmed(app["id"])
 	sys := auth.ContextWithSystemActor(ctx, linksActor)
-	prior, err := p.acceptanceOf(sys, applicationID)
-	if err != nil {
-		return nil, err
-	}
-	if prior != nil {
-		return nil, refuseLink(RefusalLinkUsed, "the application has accepted the terms")
-	}
 	if trimmed(args["acceptTerms"]) != boxOn || trimmed(args["acceptMap"]) != boxOn {
 		return nil, memql.NewShopperRefusal(refusalInvalid, "both boxes must be on")
 	}
@@ -87,7 +81,8 @@ func (p *Provider) acceptTerms(ctx context.Context, args map[string]any, _ int) 
 		return nil, memql.NewShopperRefusal(refusalInvalid, "the name typed is empty")
 	}
 	postedTerms, postedMap := trimmed(args["termsSha256"]), trimmed(args["mapSha256"])
-	if !isFingerprint(postedTerms) || !isFingerprint(postedMap) {
+	postedStatement := trimmed(args["statementSha256"])
+	if !isFingerprint(postedTerms) || !isFingerprint(postedMap) || !isFingerprint(postedStatement) {
 		return nil, memql.NewShopperRefusal(refusalInvalid, "a fingerprint is not 64 hex characters")
 	}
 	// THE CURRENT VERSIONS, read again: what the acceptance names.
@@ -105,6 +100,11 @@ func (p *Provider) acceptTerms(ctx context.Context, args map[string]any, _ int) 
 	settings, err := p.settingsRowAt(sys, storeID)
 	if err != nil {
 		return nil, err
+	}
+	// THE SENTENCE, tied to what was shown as the documents are (ruling 52).
+	statement := EffectiveSettings(settings).AcceptanceText
+	if !strings.EqualFold(postedStatement, sha256Hex(statement)) {
+		return nil, refuseLink(RefusalTermsChanged, "the sentence the page showed is no longer the store's")
 	}
 	merchant, err := p.asMerchant(ctx, app)
 	if err != nil {
@@ -125,7 +125,7 @@ func (p *Provider) acceptTerms(ctx context.Context, args map[string]any, _ int) 
 		"termsSha256":    trimmed(terms["sha256"]),
 		"mapVersionId":   trimmed(mapv["id"]),
 		"mapSha256":      trimmed(mapv["sha256"]),
-		"statement":      EffectiveSettings(settings).AcceptanceText,
+		"statement":      statement,
 		"clientAddress":  cutUTF8(ev.ClientAddress, maxClientAddressBytes),
 		"userAgent":      cutUTF8(ev.UserAgent, maxUserAgentBytes),
 		"linkIssuedAt":   timeText(link["issuedAt"]),
@@ -141,7 +141,7 @@ func (p *Provider) acceptTerms(ctx context.Context, args map[string]any, _ int) 
 		used[k] = v
 	}
 	// The lookup projects no hash; the token in hand is the link's.
-	used["tokenHash"] = tokenHashOf(strings.TrimSpace(asString(args["requestToken"])))
+	used["tokenHash"] = sha256Hex(strings.TrimSpace(asString(args["requestToken"])))
 	used["issuedAt"], used["expiresAt"] = timeText(link["issuedAt"]), timeText(link["expiresAt"])
 	used["usedAt"] = now.Format(time.RFC3339Nano)
 	if err := p.putLink(merchant, bareID(trimmed(link["id"])), used); err != nil {
@@ -195,7 +195,8 @@ func (p *Provider) acceptanceView(sys context.Context, acceptance map[string]any
 		if versionID == "" {
 			return "", nil
 		}
-		rows, err := p.rowsFor(sys, "wholesaleDocumentVersionById", map[string]string{"documentVersionId": versionID})
+		// The brief, not the version: a label needs no body.
+		rows, err := p.rowsFor(sys, "wholesaleDocumentVersionBriefById", map[string]string{"documentVersionId": versionID})
 		if err != nil || len(rows) == 0 {
 			return "", err
 		}

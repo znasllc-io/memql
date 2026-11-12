@@ -149,7 +149,7 @@ shape documentVersion wholesaleDocumentVersionBrief {
   row.createdAt
 }
 
-@description("A private link, whole, its token hash included. Read by the pack only, to write the link's next version; never answered to a shopper or exported.")
+@description("A private link, whole, its token hash included. NO READ PROJECTS IT: the token lookup and the application's link read both project privateLinkPublic, so a token hash leaves no read. The whole row, as a reader of the concept would name it.")
 @row
 shape privateLink privateLinkFull {
   row.id

@@ -308,3 +308,33 @@ func TestShopperEvidenceRidesTheContext(t *testing.T) {
 		t.Fatalf("ShopperClientHeader = %q", ShopperClientHeader)
 	}
 }
+
+// A FIELD'S FORMAT IS A NAMED RULE (ruling 53): sha256 accepts exactly 64
+// hexadecimal characters of either case and nothing else, an unknown format is
+// refused at registration, and a format does not combine with Numeric or Enum.
+func TestAFieldFormatIsANamedRule(t *testing.T) {
+	f := ShopperField{Name: "termsSha256", Format: ShopperFormatSHA256}
+	for value, want := range map[string]bool{
+		strings.Repeat("a", 64): true, strings.Repeat("A", 64): true, strings.Repeat("0", 64): true,
+		strings.Repeat("a", 63): false, strings.Repeat("a", 65): false, strings.Repeat("g", 64): false, "": false,
+	} {
+		if got := f.MatchesFormat(value); got != want {
+			t.Errorf("MatchesFormat(%q) = %v, want %v", value, got, want)
+		}
+	}
+	if !(ShopperField{Name: "free"}).MatchesFormat("anything") {
+		t.Error("a field with no format refuses a value")
+	}
+	for name, field := range map[string]ShopperField{
+		"unknown": {Name: "x", Format: "uuid"},
+		"numeric": {Name: "x", Format: ShopperFormatSHA256, Numeric: true},
+		"enum":    {Name: "x", Format: ShopperFormatSHA256, Enum: []string{"a"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Cleanup(ResetShopperSurfaceForTest)
+			form := validForm()
+			form.Fields = []ShopperField{field}
+			expectPanic(t, "format", func() { RegisterShopperForm(form) })
+		})
+	}
+}

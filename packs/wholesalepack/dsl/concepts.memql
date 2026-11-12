@@ -58,6 +58,16 @@
 // through and is refused as a form field, which is the half of D9 that
 // cannot be expressed in a schema.
 //
+// # EVERY ROW HERE IS WRITTEN BY THE PACK, AND ONLY BY THE PACK (ruling 50)
+//
+// Every concept below is @serverWritten: the engine refuses any write of it
+// without internal origin, the public insert() included, which never consults a
+// mutation's @serverOnly. The pack's own writer (reader.go's engineWriter) is
+// the one place that stamps internal origin, inline on its one call, after the
+// builtin in front of it has judged the caller. Without this a client could
+// write an acceptance, a link carrying a token it chose, a decision or a terms
+// version around every check the builtins make.
+//
 // # STOREFRONT PACK CONVENTION
 //
 // Concepts, mutations, queries, shapes, tools and builtins -- NO
@@ -70,6 +80,7 @@
 @version("1.1.0")
 @description("A wholesale application: somebody asking one store for trade terms. Its STATES are submitted, approved, rejected and revoked, and they are DERIVED from the append-only decision log rather than stored here -- v1:wholesale:applicationDecision carries each transition and the wholesaleApplicationState builtin folds them. There is deliberately no mutable state field: an application whose state was overwritten would lose why it was refused the moment somebody approved it, which is the one thing a trade desk needs to look back at.")
 @displayCard(primary="companyName", secondary="applicantEmail", tertiary="storeId")
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept application {
   ownerUserId    string!   @description("v1:identity:user.id of the MERCHANT this application belongs to -- the owner of the deployable it was submitted through, NOT the applicant. A shopper is nobody to MemQL: they have no user row, no session and no actor (epic memql#5532, issue memql#5550), so the applicant is applicantName and applicantEmail below and nothing else. On the shopper path this stamps from actor.userId under the site owner's BORROWED authority; on the authenticated path it is the calling user, which is what an operator or an importing job writes as.")
@@ -86,6 +97,7 @@ concept application {
 @version("1.1.0")
 @description("An append-only decision on a wholesale application, in the manner of v1:reviews:moderationAction. A new row is a new decision; there is no in-place update and no undo-by-overwrite, so WHY an application was refused survives the next decision. decidedBy is the person on the store's side who called -- the cluster's own operators are refused on the write path exactly as the reviews pack refuses their moderation. The row belongs to the application's merchant and its organization, so the merchant and the store's people read every decision whoever made it. WHO may approve, in what order and against what threshold is deliberately NOT here: dsl/commerce already ships approvalChain for a client that wants one, and a client that does not must not have to edit this pack to say so.")
 @displayCard(primary="transition", secondary="applicationId", tertiary="decidedBy")
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept applicationDecision {
   applicationId string!  @description("v1:wholesale:application.id this decision applies to.")
@@ -101,6 +113,7 @@ concept applicationDecision {
 @version("1.1.0")
 @description("What this pack granted, to whom, against which store, and through which adapter. STATE THE PACK OWNS, never inferred from Shopify: a company that exists over there says nothing about whether THIS pack granted it, and reading entitlement back out of somebody else's system would make an operator's own record of what they granted depend on an API call that can fail. ONE ROW PER APPLICATION at the derived id wholesale-entitlement-<the application's bare id, as a slug> (EntitlementRowID), the same whichever form of the application id the caller named -- and a row written at another id before that rule keeps being written at its own -- so a re-provision is a new VERSION of one logical row rather than a second row a read would have to choose between -- and 'revoked when' is that version's own createdAt.")
 @displayCard(primary="state", secondary="buyerEmail", tertiary="adapter")
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept entitlement {
   ownerUserId   string!  @description("v1:identity:user.id of the merchant who granted this. Same owner as the application it came from.")
@@ -120,6 +133,7 @@ concept entitlement {
 @version("1.1.0")
 @description("Runtime wholesale settings for one store. Held as DATA in the manner of v1:reviews:reviewSettings, so a client opens or closes applications, changes what the storefront says and switches entitlement adapter without a deploy or a .memql edit.")
 @displayCard(primary="applicationsOpen", secondary="entitlementAdapter", tertiary="storeId")
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept wholesaleSettings {
   ownerUserId        string!  @description("v1:identity:user.id of the Client that owns this storefront's wholesale settings.")
@@ -138,6 +152,7 @@ concept wholesaleSettings {
 @version("1.0.0")
 @description("One published version of a document a store shows its wholesale applicants: its terms (terms), its MAP policy (map) or its price sheet (priceSheet). APPEND-ONLY: a new version is a new row and a version is never updated, so what an applicant accepted is still readable after the store publishes the next one. The current version of a kind is its newest. The body is Markdown text held as given, and sha256 is the lowercase hex digest of its UTF-8 bytes, so an acceptance can name exactly what was shown. Written by wholesalePublishDocument as the store's merchant, never by a client.")
 @displayCard(primary="label", secondary="kind", tertiary="storeId")
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept documentVersion {
   ownerUserId  string!  @description("v1:identity:user.id of the store's merchant: the owner of the site the version was published through. The tier's owner arm.")
@@ -154,6 +169,7 @@ concept documentVersion {
 @version("1.0.0")
 @description("A private link the store sends one applicant: terms, on which they read the store's current terms and MAP policy and accept them, or priceSheet, on which an approved buyer reads the current price sheet. THE TOKEN IS NEVER STORED, only tokenHash, the hex SHA-256 of it, so no read of this row yields a working link. ONE ROW PER APPLICATION AND PURPOSE at the derived id wholesale-link-<purpose>-<the application's bare id, as a slug> (PrivateLinkRowID): a link sent again is a new VERSION of that row with a new token, which is what makes the token before it refused. Written by the pack as the application's merchant, never by a client. A new version publishes graph.node.created again with firstVersion false.")
 @displayCard(primary="purpose", secondary="applicationId", tertiary="expiresAt")
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept privateLink {
   ownerUserId    string!    @description("v1:identity:user.id of the application's merchant, copied off the application in canonical form. The shopper path reads the link under the site owner's borrowed authority, which is this person.")
@@ -171,6 +187,7 @@ concept privateLink {
 @version("1.0.0")
 @description("One applicant's acceptance of a store's terms and MAP policy, and its evidence: who typed their name, when, against exactly which versions (each named by its id and the SHA-256 of its body), with which sentence, and from which address and browser as the storefront's edge saw them. WRITTEN ONCE, at the derived id wholesale-acceptance-<the application's bare id, as a slug> (AcceptanceRowID), and fenced on that row being absent, so of two posts at once one is recorded and the other is told the link is used. Written by the pack as the application's merchant, never by a client.")
 @displayCard(primary="signedName", secondary="applicationId", tertiary="acceptedAt")
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept acceptance {
   ownerUserId     string!    @description("v1:identity:user.id of the application's merchant, copied off the application in canonical form.")
