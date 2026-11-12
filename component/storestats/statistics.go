@@ -172,8 +172,10 @@ func (i *Integration) servedRequest(ctx context.Context, siteID, storeID string)
 		return statisticsRequest{}, false
 	}
 	site := rowFields(rows[0])
-	// 3. The part, in the site's own organization.
-	if !i.holdsTheSalesPart(ctx, rowText(site, "accountId")) {
+	// 3. The part, in the site's own organization, named as the row names it:
+	// the engine's gate reads the account untrimmed, and so does this.
+	account, _ := site["accountId"].(string)
+	if !i.holdsTheSalesPart(ctx, account) {
 		return statisticsRequest{}, false
 	}
 	// 4. A storefront, and not the platform's own site.

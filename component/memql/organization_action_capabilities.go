@@ -111,7 +111,10 @@ func (e *MemQLEngine) RequirementHeldFor(ctx context.Context, account string, re
 	if e == nil || !required.complete() {
 		return false
 	}
-	if strings.TrimSpace(account) == "" {
+	// The gate's own test, untrimmed: an account of white space is an
+	// organization, whose questions OrganizationCapable answers, never a
+	// target no organization owns.
+	if account == "" {
 		if !e.GlobalDataCapable(ctx, auth.VerbRead) {
 			return false
 		}

@@ -893,6 +893,11 @@ func TestTheHandlerAndTheEnginesGateAgree(t *testing.T) {
 	seedRow(t, "v1:identity:user", plainOwner, map[string]any{"displayName": "A site owner", "primaryEmail": plainOwner + "@example.test",
 		"role": string(auth.RoleWriter), "active": true})
 	plainSite := siteFor(t, personalStore, map[string]any{"accountId": nil, "ownerUserId": "v1:identity:user:" + plainOwner})
+	// A site whose accountId is only white space: the engine's gate takes it
+	// for an organization (it asks account == "", untrimmed), so a grant of
+	// another organization's group is not lent to it, by the gate or by the
+	// handler.
+	blankAccount := siteFor(t, personalStore, map[string]any{"accountId": "   ", "ownerUserId": "v1:identity:user:" + orgHolder})
 
 	type call struct {
 		label       string
@@ -912,6 +917,7 @@ func TestTheHandlerAndTheEnginesGateAgree(t *testing.T) {
 		{"a cluster admin", personCtx("dbtest-storestats-a-"+uniq(), auth.RoleAdmin), site, storeID, false},
 		{"a personal site's owner who holds no part", personCtx(plainOwner, auth.RoleWriter), plainSite, personalStore, false},
 		{"a personal site's owner who holds the part through an organization's group", personCtx(orgHolder, auth.RoleWriter), personal, personalStore, true},
+		{"a site whose organization is only white space", personCtx(orgHolder, auth.RoleWriter), blankAccount, personalStore, false},
 	}
 	handler := statisticsHandler(t, testIntegration(t))
 	for _, c := range calls {
