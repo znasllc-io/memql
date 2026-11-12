@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // send_row_db_test.go -- the transactional row lane against a real engine and a
@@ -334,5 +335,39 @@ func TestABlockOnAnAddressIsNeverWeakenedByALaterUnsubscribe(t *testing.T) {
 	}
 	if sup, _, _ := l.store.SuppressionByDigest(l.system, EmailDigest(other)); sup.Reason != "hard_bounce" {
 		t.Fatalf("an unsubscribe then a hard bounce reads %q", sup.Reason)
+	}
+}
+
+// A MESSAGE THE PROVIDER DID NOT TAKE, against the real ledger: the send answers
+// its code and the lane's sentence, and nothing of the provider's own words --
+// which here quote the address the message went to. Those words are kept on the
+// delivery's ledger row (lastError), the lane's own record, and the status read
+// answers that the message failed and none of them.
+func TestAProvidersRefusalOfARowMessageStaysOnTheLedgerAndIsAnsweredAsASentence(t *testing.T) {
+	l := newRowLane(t, "lane-refused")
+	l.sender.fail = func(int) error {
+		return &email.SendError{StatusCode: 550, Permanent: true, NotAccepted: true,
+			Detail: "550 5.1.1 <" + l.address + ">: Recipient address rejected"}
+	}
+	_, err := l.worker.handleSendRowMessage(auth.ContextWithInternalOrigin(l.owner), l.args("refused"), 0)
+	code, sentence, failed := RowSendFailure(err)
+	if !failed || code != RowSendProviderRefused || sentence != RowSendSentence(RowSendProviderRefused) || err.Error() != sentence {
+		t.Fatalf("a message the provider refused answered %v (failed %v, code %q)", err, failed, code)
+	}
+	if strings.Contains(err.Error(), l.address) || strings.Contains(err.Error(), "Recipient address rejected") {
+		t.Fatalf("the answer carries the provider's words: %v", err)
+	}
+	row := l.ledger(t, "refused")
+	if str(row, "status") != "failed" || !strings.Contains(str(row, "lastError"), "Recipient address rejected") {
+		t.Fatalf("the ledger row does not keep the provider's answer: %v", row)
+	}
+	nodes, err := l.worker.handleRowMessageStatus(auth.ContextWithInternalOrigin(l.owner),
+		map[string]any{"requestIds": []any{l.suffix + "-refused"}, "accountId": l.org}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := decodeResult(t, nodes)
+	if status["status"] != "failed" || strings.Contains(fmt.Sprint(status), l.address) || strings.Contains(fmt.Sprint(status), "Recipient address rejected") {
+		t.Fatalf("the status read answered %v, want failed and nothing of the provider's words", status)
 	}
 }

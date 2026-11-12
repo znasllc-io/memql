@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // send_row.go -- THE TRANSACTIONAL ROW LANE (U7, E1): one message about one
@@ -45,6 +47,21 @@ import (
 // suppression's code, or the row's own withdrawal sentence -- and, beside it,
 // skipSentence: the words a person reads (rowSkipSentence, stats.go). The
 // status read answers both too. A screen shows the sentence, never the code.
+//
+// # A refusal and a failure say why in a sentence, beside a code
+//
+// A row send that is refused, or that fails, answers its caller TWO THINGS AND
+// NOTHING ELSE (rowSendFailure, read with RowSendFailure): a short code that
+// does not change, for a caller to decide on, and a sentence a person reads,
+// written here beside it (rowSendSentences). The answer's whole text is that
+// sentence. The lane's own error -- which names the function that refused, may
+// quote the engine's message, and from a provider may quote the address the
+// message went to -- is NOT answered: it stays with the lane, in its log, and
+// for a message the provider did not take in the ledger row of the delivery
+// (lastError). A provider's own words are never logged. A hold is answered as
+// it always was: its text is its sentence already, written for the
+// organization's people (HeldReason). So is an uncertain hand-over
+// (UncertainSend), with the lane's sentence in place of the transport's text.
 //
 // # The ledger and the replay
 //
@@ -157,7 +174,231 @@ func (w *Worker) handleSendRowMessage(ctx context.Context, args map[string]any, 
 	if id := strings.TrimSpace(argString(args, "senderIdentityId")); id != "" {
 		send["senderIdentityId"] = id
 	}
-	return w.sendToRecipientOnce(ctx, send, singleSend{deferWhenLimited: true, rowSend: &rowSend{Concept: concept, RowID: rowID, Kind: kind, AccountID: account}})
+	nodes, err := w.sendToRecipientOnce(ctx, send, singleSend{deferWhenLimited: true, rowSend: &rowSend{Concept: concept, RowID: rowID, Kind: kind, AccountID: account}})
+	if err != nil {
+		return nil, w.rowSendAnswer(err, rowRecipientID(concept, rowID), requestID)
+	}
+	return nodes, nil
+}
+
+// The codes a row send's refusal or failure carries (RowSendFailure), each with
+// its sentence in rowSendSentences. A CODE DOES NOT CHANGE; its sentence may be
+// reworded. RowSendNoAuthority and the sender's own three are also what
+// campaignRowSender answers as its code, beside RowSenderHeld.
+const (
+	// RowSendNoAuthority: the person the send is made as holds no write
+	// permission in the organization (requireSendAuthority).
+	RowSendNoAuthority = "no_authority"
+	// RowSendTemplateUnreadable: the template no longer exists, or that person
+	// cannot read it.
+	RowSendTemplateUnreadable = "template_unreadable"
+	// RowSendTemplateOtherOrg: the template is another organization's.
+	RowSendTemplateOtherOrg = "template_other_organization"
+	// RowSendTemplateInvalid: the template cannot be rendered as it is written.
+	RowSendTemplateInvalid = "template_invalid"
+	// RowSendSenderNoneChosen: no sender is named, for an organization that is
+	// not the installation's.
+	RowSendSenderNoneChosen = "sender_none_chosen"
+	// RowSendSenderOtherOrg: the sender named is another organization's.
+	RowSendSenderOtherOrg = "sender_other_organization"
+	// RowSendSenderUnread: the sender could not be read just now.
+	RowSendSenderUnread = "sender_unread"
+	// RowSendRowUnanswered: the row's resolver did not answer.
+	RowSendRowUnanswered = "row_unanswered"
+	// RowSendRowOtherOrg: the resolver answered another organization than the
+	// call named.
+	RowSendRowOtherOrg = "row_other_organization"
+	// RowSendNoAddress: the row names no address a message can go to.
+	RowSendNoAddress = "no_address"
+	// RowSendSuppressionUnread: the suppression list could not be read, so the
+	// send was refused rather than made.
+	RowSendSuppressionUnread = "suppression_unread"
+	// RowSendNoProvider: no email sender is registered on the node.
+	RowSendNoProvider = "no_provider"
+	// RowSendProviderRefused: the provider did not accept the message.
+	RowSendProviderRefused = "provider_refused"
+	// RowSendProviderBusy: the provider is limiting what it accepts.
+	RowSendProviderBusy = "provider_busy"
+	// RowSendNotNow: something the send needed -- a read, a lock, the record that
+	// an attempt began -- failed before anything was attempted.
+	RowSendNotNow = "not_now"
+	// RowSendFailed: anything with no kind of its own.
+	RowSendFailed = "failed"
+
+	// RowSenderHeld is campaignRowSender's code for a chosen sender the send
+	// would be HELD for (turned off, or no longer there): its reason is the
+	// hold's own sentence. A send answers that as a hold, never as a failure.
+	RowSenderHeld = "sender_held"
+)
+
+// rowSendSentences is each code as a person reads it: what happened, and what
+// can be done next or who can do it. WRITTEN FOR A PERSON: no function's name,
+// none of the lane's or a provider's own error text, no address, and no promise
+// of something nobody will do -- the lane tries a refused send again for no
+// caller, so no sentence says it will. The lane does not know who its reader
+// is, so where something must be chosen or corrected it says what, and not by
+// whom: a pack that knows says so in a sentence of its own.
+var rowSendSentences = map[string]string{
+	RowSendNoAuthority: "The person on whose behalf this email is sent does not have write permission in this organization, " +
+		"so it was not sent. An administrator of the organization can give them that permission.",
+	RowSendTemplateUnreadable: "The template chosen for this email no longer exists, or the person on whose behalf it is sent " +
+		"cannot read it, so it was not sent. Once another template is chosen, or that person can read this one, it can be sent again.",
+	RowSendTemplateOtherOrg: "The template chosen for this email belongs to another organization, so it was not sent. " +
+		"Once one of this organization's templates is chosen, it can be sent again.",
+	RowSendTemplateInvalid: "The template chosen for this email cannot be sent as it is written, so the email was not sent. " +
+		"Once the template is corrected, it can be sent again.",
+	RowSendSenderNoneChosen: "No sender is chosen for this organization, so this email was not sent. " +
+		"Once a sender is chosen, it can be sent again.",
+	RowSendSenderOtherOrg: "The sender chosen for this email belongs to another organization, so it was not sent. " +
+		"Once one of this organization's senders is chosen, it can be sent again.",
+	RowSendSenderUnread: "The sender of this email could not be read just now, so it was not sent. It can be sent again.",
+	RowSendRowUnanswered: "What this email needs from the record it is about could not be read, so it was not sent. " +
+		"It can be sent again; if it is still not sent, the cluster's operators can say why.",
+	RowSendRowOtherOrg: "The record this email is about belongs to another organization, so it was not sent. " +
+		"The cluster's operators can say why.",
+	RowSendNoAddress: "The record this email is about names no email address a message can go to, so it was not sent.",
+	RowSendSuppressionUnread: "The email service could not check its do-not-send list just now, so this email was not sent. " +
+		"It can be sent again.",
+	RowSendNoProvider: "No email provider is connected to this installation, so this email was not sent. " +
+		"The cluster's operators connect one.",
+	RowSendProviderRefused: "The email provider did not accept this email, so it was not sent. " +
+		"The cluster's operators can read the provider's answer in the email service's record of it.",
+	RowSendProviderBusy: "The email provider is limiting how much email it accepts just now, so this email was not sent. " +
+		"It can be sent again later.",
+	RowSendNotNow: "The email service could not finish this just now, and nothing was sent. It can be sent again.",
+	RowSendFailed: "The email service could not send this email. " +
+		"It can be sent again; if it is still not sent, the cluster's operators can say why.",
+}
+
+// rowSendUncertainSentence is the text of an uncertain hand-over as a row send
+// answers it, in place of the transport's own.
+const rowSendUncertainSentence = "The email provider did not say whether it accepted this email, so it may have been sent."
+
+// RowSendSentence is a row send's refusal or failure code as a person reads it:
+// the lane's sentence for each code it answers, and for any other the general
+// one. It never answers the code.
+func RowSendSentence(code string) string {
+	if sentence, known := rowSendSentences[code]; known {
+		return sentence
+	}
+	return rowSendSentences[RowSendFailed]
+}
+
+// RowSendCodes is every code a row send's refusal or failure carries, in order.
+func RowSendCodes() []string {
+	codes := make([]string, 0, len(rowSendSentences))
+	for code := range rowSendSentences {
+		codes = append(codes, code)
+	}
+	sort.Strings(codes)
+	return codes
+}
+
+// rowSendFailure is a row send that was refused or that failed, AS ITS CALLER IS
+// ANSWERED: a code and a sentence. Its text is the sentence and it wraps
+// nothing, so nothing of the lane's own error travels with it.
+type rowSendFailure struct{ code, sentence string }
+
+func (f rowSendFailure) Error() string { return f.sentence }
+
+// RowSendFailure reports whether err is a row send the lane refused or failed
+// (rowSendFailure), and answers its code and the sentence a person reads. A
+// pack that records what the row lane answered reads a failure through here --
+// the type is this package's own -- decides on the code, never the sentence,
+// and shows its people the sentence. A hold (HeldReason), an uncertain
+// hand-over (UncertainSend) and a busy receipt lock are not failures.
+func RowSendFailure(err error) (code, sentence string, failed bool) {
+	var f rowSendFailure
+	if errors.As(err, &f) {
+		return f.code, f.sentence, true
+	}
+	return "", "", false
+}
+
+// rowRefusal marks one of the lane's own errors with the code its caller is
+// answered. THE ERROR IS UNCHANGED BENEATH IT -- its text is what the lane's log
+// keeps and what the replay of a deferred row send writes on the ledger -- and
+// it never leaves the lane: rowSendAnswer answers the code's sentence in its
+// place.
+type rowRefusal struct {
+	error
+	code string
+}
+
+func (r rowRefusal) Unwrap() error { return r.error }
+
+// rowRefused is err, one of the lane's own, marked with its code.
+func rowRefused(code string, err error) error { return rowRefusal{error: err, code: code} }
+
+// rowSendCode is the code of a row send's error. One the row lane marked
+// carries its own (rowRefused); the rest are read by what they are, never by
+// their text: the send's authority, the resolver, the template's read, the
+// node's provider, the provider's own refusal, and a failure that decided
+// nothing about the message. Anything else is RowSendFailed.
+func rowSendCode(err error) string {
+	var (
+		marked     rowRefusal
+		unreadable templateUnreadable
+		provider   *email.SendError
+	)
+	switch {
+	case errors.As(err, &marked):
+		return marked.code
+	case errors.Is(err, errNoSendAuthority):
+		return RowSendNoAuthority
+	case errors.Is(err, errResolverDidNotAnswer):
+		return RowSendRowUnanswered
+	case errors.As(err, &unreadable):
+		return RowSendTemplateUnreadable
+	case errors.Is(err, errNoEmailSender):
+		return RowSendNoProvider
+	case errors.As(err, &provider):
+		if provider.Throttled {
+			return RowSendProviderBusy
+		}
+		return RowSendProviderRefused
+	case errors.Is(err, errPriorSendNotAccepted):
+		return RowSendProviderRefused
+	case isUndecided(err):
+		return RowSendNotNow
+	}
+	return RowSendFailed
+}
+
+// rowSendAnswer is a row send's error AS ITS CALLER IS ANSWERED.
+//
+// A hold is answered as it is: its text is its sentence, written for the
+// organization's people. So is a busy receipt lock, which says nothing of the
+// message and which a caller reads by what it is (memql.IsWriteGateBusy).
+//
+// An uncertain hand-over stays one (UncertainSend), with the lane's sentence
+// in place of the transport's text: that text may quote the address, and it is
+// on the ledger row the hand-over wrote before it was known to be uncertain.
+//
+// Everything else is answered as its code and the code's sentence
+// (rowSendFailure), and the lane's own error goes to the lane's log -- except a
+// provider's own words, which may quote the address: of those the log says only
+// what kind of answer it was, and the ledger row of the delivery keeps the
+// words.
+func (w *Worker) rowSendAnswer(err error, recipientID, requestID string) error {
+	if _, held := HeldReason(err); held || memql.IsWriteGateBusy(err) {
+		return err
+	}
+	var uncertain uncertainSend
+	if errors.As(err, &uncertain) {
+		w.logger.Warn("campaigns.sendRowMessage: a row message's hand-over had no answer", "recipient", recipientID, "request", requestID)
+		return uncertainSend{error: errors.New(rowSendUncertainSentence), recorded: uncertain.recorded}
+	}
+	code := rowSendCode(err)
+	attrs := []any{"code", code, "recipient", recipientID, "request", requestID}
+	var provider *email.SendError
+	if errors.As(err, &provider) {
+		attrs = append(attrs, "status", provider.StatusCode, "permanent", provider.Permanent, "throttled", provider.Throttled)
+	} else {
+		attrs = append(attrs, "error", err.Error())
+	}
+	w.logger.Warn("campaigns.sendRowMessage: a row message was not sent", attrs...)
+	return rowSendFailure{code: code, sentence: RowSendSentence(code)}
 }
 
 // rowTemplateHeld is the hold of a row send whose template is not a published
@@ -209,7 +450,7 @@ func (w *Worker) sendRow(ctx context.Context, args map[string]any, receipt *sing
 		return nil, sendHeld{reason: held}
 	}
 	if account == "" || !sameOrganization(tmpl.AccountID, account) {
-		return nil, errors.New("campaigns.sendRowMessage: the template must belong to the row's organization")
+		return nil, rowRefused(RowSendTemplateOtherOrg, errors.New("campaigns.sendRowMessage: the template must belong to the row's organization"))
 	}
 	if err := w.requireSendAuthority(ctx, account); err != nil {
 		return nil, err
@@ -230,11 +471,16 @@ func (w *Worker) sendRow(ctx context.Context, args map[string]any, receipt *sing
 		if refusal.Held != "" {
 			return nil, sendHeld{reason: refusal.Held}
 		}
+		// WHICH REFUSAL IT IS, as campaignRowSender tells them apart: one that could
+		// not be read (and decides nothing), none named, or another organization's.
 		err := fmt.Errorf("campaigns.sendRowMessage: %s", refusal.Reason)
-		if !refusal.Terminal {
-			err = undecided(err)
+		switch {
+		case !refusal.Terminal:
+			return nil, undecided(rowRefused(RowSendSenderUnread, err))
+		case campaign.SenderIdentityID == "":
+			return nil, rowRefused(RowSendSenderNoneChosen, err)
 		}
-		return nil, err
+		return nil, rowRefused(RowSendSenderOtherOrg, err)
 	}
 	// recipient is read when an outcome is recorded: before the resolver has
 	// answered it carries no address, after it the one the resolver answered.
@@ -277,11 +523,11 @@ func (w *Worker) sendRow(ctx context.Context, args map[string]any, receipt *sing
 		return nil, errResolverDidNotAnswer
 	}
 	if bare(resolved.AccountID) == "" || !sameOrganization(resolved.AccountID, account) {
-		return nil, errors.New("campaigns.sendRowMessage: the row belongs to another organization, so nothing was sent")
+		return nil, rowRefused(RowSendRowOtherOrg, errors.New("campaigns.sendRowMessage: the row belongs to another organization, so nothing was sent"))
 	}
 	digest := EmailDigest(resolved.Email)
 	if digest == "" {
-		return nil, errors.New("campaigns.sendRowMessage: the row names no usable address")
+		return nil, rowRefused(RowSendNoAddress, errors.New("campaigns.sendRowMessage: the row names no usable address"))
 	}
 	recipient.Email = strings.TrimSpace(resolved.Email)
 	recipient.Fields = map[string]any{}
@@ -294,8 +540,8 @@ func (w *Worker) sendRow(ctx context.Context, args map[string]any, receipt *sing
 	// A bounce, a complaint and an operator's block stop the message; an
 	// unsubscribe from a list does not (X9).
 	if sup, blocked, err := w.store.BlockingSuppression(w.systemActorContext(ctx), account, digest); err != nil {
-		return nil, undecided(fmt.Errorf("campaigns.sendRowMessage: the suppression list could not be consulted, "+
-			"so this send is refused rather than made: %w", err))
+		return nil, undecided(rowRefused(RowSendSuppressionUnread, fmt.Errorf("campaigns.sendRowMessage: the suppression list could not be consulted, "+
+			"so this send is refused rather than made: %w", err)))
 	} else if blocked {
 		if err := recordOutcome(Delivery{Status: "skipped", SkipReason: sup.Reason}); err != nil {
 			w.logger.Warn("campaigns.sendRowMessage: a suppressed message could not be ledgered", "recipient", recipient.ID, "error", err)
@@ -315,7 +561,7 @@ func (w *Worker) sendRow(ctx context.Context, args map[string]any, receipt *sing
 		Transactional: true,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("campaigns.sendRowMessage: %w", err)
+		return nil, rowRefused(RowSendTemplateInvalid, fmt.Errorf("campaigns.sendRowMessage: %w", err))
 	}
 	return w.handOver(ctx, args, receipt, opts, campaign, recipient, "", identity, msg, recordOutcome)
 }
@@ -351,21 +597,27 @@ func resolverFailure(err error) string {
 // handleRowSender answers campaignRowSender: the sender a row send for the
 // organization would go out as, resolved exactly as sendRow resolves it
 // (resolveSendIdentityFor, with no installation fallback) -- {ready, fromName,
-// address, reason, readFailed, noneChosen}. Ready answers the identity's name
-// and address; otherwise fromName and address are empty and reason is a
+// address, reason, code, readFailed, noneChosen}. Ready answers the identity's
+// name and address; otherwise fromName and address are empty and reason is a
 // sentence for a person: the hold's own sentence, or one of rowSenderRefusals'
 // words, never the campaign worker's refusal text. It sends nothing and checks
 // no transport.
 //
-// WHAT A CALLER DECIDES ON IS A FIELD, NEVER THE SENTENCE: readFailed says the
-// sender could not be read just now (nothing is known of it, and the same read
-// made again may answer), and noneChosen that the organization has no sender
-// because none is chosen. The sentences may be reworded; the fields may not.
+// WHAT A CALLER DECIDES ON IS A FIELD, NEVER THE SENTENCE: code says which
+// answer it is, in the codes a send refused for the same thing carries
+// (RowSendNoAuthority, RowSendSenderNoneChosen, RowSendSenderOtherOrg,
+// RowSendSenderUnread) and RowSenderHeld for a sender the send would be held
+// for; it is empty when the sender is ready. readFailed and noneChosen say two
+// of them as fields of their own: the sender could not be read just now
+// (nothing is known of it, and the same read made again may answer), and the
+// organization has no sender because none is chosen. The sentences may be
+// reworded; the code and the fields may not.
 //
 // THE SEND'S OWN AUTHORITY: the caller must hold what a row send requires of
 // it (requireSendAuthority, update data in the organization). A caller without
-// it is answered exactly as for an organization that does not exist -- both
-// fields false -- so the answer says nothing of the organization's senders.
+// it is answered RowSendNoAuthority, exactly as for an organization that does
+// not exist -- where nobody holds it either -- so the answer says nothing of the
+// organization's senders.
 func (w *Worker) handleRowSender(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if !auth.OriginFromContext(ctx).IsInternal() {
 		return nil, errors.New("campaigns.rowSender: read by a trusted job, never by a client")
@@ -374,35 +626,29 @@ func (w *Worker) handleRowSender(ctx context.Context, args map[string]any, _ int
 	if account == "" {
 		return nil, errors.New("campaigns.rowSender: accountId is required: a sender is one organization's")
 	}
-	// why is the one thing a refusal may also say in a field: nothing, that the
-	// read failed, or that none is chosen.
-	const (
-		whyNothing = iota
-		whyReadFailed
-		whyNoneChosen
-	)
-	refused := func(reason string, why int) ([]memorynodes.MemoryNode, error) {
+	// THE CODE SAYS WHICH REFUSAL IT IS; two of them are also fields of their own.
+	refused := func(reason, code string) ([]memorynodes.MemoryNode, error) {
 		return resultNode("campaignRowSender", map[string]any{"accountId": account, "ready": false, "fromName": "", "address": "",
-			"reason": reason, "readFailed": why == whyReadFailed, "noneChosen": why == whyNoneChosen})
+			"reason": reason, "code": code, "readFailed": code == RowSendSenderUnread, "noneChosen": code == RowSendSenderNoneChosen})
 	}
 	if err := w.requireSendAuthority(ctx, account); err != nil {
-		return refused(rowSenderUnreadable, whyNothing)
+		return refused(rowSenderUnreadable, RowSendNoAuthority)
 	}
 	campaign := Campaign{AccountID: account, SenderIdentityID: memql.BareShortId(strings.TrimSpace(argString(args, "senderIdentityId")))}
 	identity, refusal := w.resolveSendIdentityFor(memql.ContextWithFreshRead(w.systemActorContext(ctx)), campaign, false)
 	switch {
 	case !refusal.refused():
 		return resultNode("campaignRowSender", map[string]any{"accountId": account, "ready": true,
-			"fromName": identity.SendAs.FromName, "address": identity.SendAs.Address, "reason": "",
+			"fromName": identity.SendAs.FromName, "address": identity.SendAs.Address, "reason": "", "code": "",
 			"readFailed": false, "noneChosen": false})
 	case refusal.Held != "":
-		return refused(refusal.Held, whyNothing)
+		return refused(refusal.Held, RowSenderHeld)
 	case !refusal.Terminal:
-		return refused(rowSenderReadFailed, whyReadFailed)
+		return refused(rowSenderReadFailed, RowSendSenderUnread)
 	case campaign.SenderIdentityID == "":
-		return refused(rowSenderNoneChosen, whyNoneChosen)
+		return refused(rowSenderNoneChosen, RowSendSenderNoneChosen)
 	}
-	return refused(rowSenderOtherOrganization, whyNothing)
+	return refused(rowSenderOtherOrganization, RowSendSenderOtherOrg)
 }
 
 // The row sender's sentences for a person, in place of the campaign worker's

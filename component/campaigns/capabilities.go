@@ -206,7 +206,8 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 			Name: "sendRowMessage",
 			Description: "Send ONE message about one person's own request to the person a pack's row names (the row lane): the address, the organization " +
 				"and the fields come from the resolver the row's concept registered in Go, never from an argument; a published transactional template; " +
-				"no unsubscribe; a bounce, a complaint or a block skips it, an unsubscribe does not. Trusted jobs only (internal origin).",
+				"no unsubscribe; a bounce, a complaint or a block skips it, an unsubscribe does not. A send that is refused or that fails answers a code " +
+				"and a sentence a person reads, and nothing of the lane's own error. Trusted jobs only (internal origin).",
 			Handler: w.handleSendRowMessage,
 			ArgsSchema: map[string]string{
 				"rowConcept":       "string (required) - a concept registered for the row lane",
@@ -220,7 +221,7 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "rowSender",
-			Description: "The sender a row lane message for one organization would go out as: {ready, fromName, address, reason, readFailed, noneChosen}, resolved as the send resolves it; readFailed and noneChosen say in fields what the sentence says, for a caller to decide on. Trusted jobs only (internal origin).",
+			Description: "The sender a row lane message for one organization would go out as: {ready, fromName, address, reason, code, readFailed, noneChosen}, resolved as the send resolves it; code, readFailed and noneChosen say in fields what the sentence says, for a caller to decide on. Trusted jobs only (internal origin).",
 			Handler:     w.handleRowSender,
 			ArgsSchema: map[string]string{
 				"accountId":        "string (required) - the organization the messages are sent for",
