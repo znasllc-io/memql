@@ -14,6 +14,7 @@ import {
   accountIsArchived,
   accountIsSelf,
   accountName,
+  SELF_ACCOUNT_ID,
   type AccountRow,
 } from "./rows";
 import { useAccounts, useAccountRecord } from "./useAccounts";
@@ -62,7 +63,8 @@ export function AccountsSection({
   if (open) return <AccountPage key={open.id} account={open} accounts={source?.snapshot.rows ?? []}
     tab={view?.accountId === open.id ? view.tab : undefined} onTab={tab => setView({ accountId: open.id, tab })}
     onBack={() => setOpenId("")} update={update} archive={archive} onArchived={() => setOpenId("")}
-    onOpenGroup={onOpenGroup} onConfigureDomains={() => setDomains(true)} />;
+    onOpenGroup={onOpenGroup} onConfigureDomains={() => setDomains(true)}
+    onOpenPrimaryData={() => { setOpenId(SELF_ACCOUNT_ID); setView({ accountId: SELF_ACCOUNT_ID, tab: "data" }); }} />;
 
   if (openId && record.snapshot.state === "seeding") return <ContentSkeleton label="Opening account" />;
 

@@ -96,6 +96,8 @@ export async function downloadWorkerRegistration(): Promise<ServiceWorkerRegistr
  */
 export async function runWorkerDownload(input: {
   artifactId: string;
+  /** A whole content path that is not an artifact's; it wins over `artifactId`. */
+  contentPath?: string;
   fileName: string;
   sizeBytes: number;
   /** An earlier version of this file; omitted means the current one. */
@@ -111,7 +113,7 @@ export async function runWorkerDownload(input: {
   if (!worker) throw new Error("The download worker is not running yet. Try again.");
 
   const token = await input.bearer();
-  const response = await fetchImpl(artifactContentPath(base, input.artifactId, input.version), {
+  const response = await fetchImpl(input.contentPath ?? artifactContentPath(base, input.artifactId, input.version), {
     method: "GET",
     credentials: "same-origin",
     ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),

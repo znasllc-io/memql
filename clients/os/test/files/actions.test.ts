@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   BUFFER_LIMIT_BYTES,
   OVER_LIMIT_SENTENCE,
+  downloadFromPath,
   planDownload,
   runBufferedDownload,
 } from "../../src/apps/files/actions/download";
@@ -111,6 +112,45 @@ describe("runBufferedDownload", () => {
     ).rejects.toThrow("no such artifact");
     expect(p.saved).toEqual([]);
     expect(p.revoked).toEqual([]);
+  });
+});
+
+describe("downloadFromPath", () => {
+  // A SECOND CONTENT PATH (an account's export) through the same plan and the
+  // same runners: the worker when the browser has one, the buffered path
+  // below the limit otherwise, the over-limit sentence past it.
+  it("fetches the path it is given with the bearer, and saves under the file's name", async () => {
+    const saved: Array<{ url: string; name: string }> = [];
+    const fetchImpl = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer tok-2");
+      return new Response(new Blob(["bytes"]), { status: 200 });
+    });
+    await downloadFromPath({
+      contentPath: "/_memql/accounts/exports/x-1/content",
+      fileName: "acme.memql-account",
+      sizeBytes: 10,
+      bearer: async () => "tok-2",
+      fetchImpl: fetchImpl as typeof fetch,
+      workerRegistration: async () => null,
+      createObjectUrl: () => "blob:two",
+      revokeObjectUrl: () => {},
+      save: (url, name) => void saved.push({ url, name }),
+    });
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toBe("/_memql/accounts/exports/x-1/content");
+    expect(saved).toEqual([{ url: "blob:two", name: "acme.memql-account" }]);
+  });
+
+  it("refuses past the buffered limit when there is no worker, before fetching", async () => {
+    const fetchImpl = vi.fn();
+    await expect(downloadFromPath({
+      contentPath: "/_memql/accounts/exports/x-1/content",
+      fileName: "acme.memql-account",
+      sizeBytes: BUFFER_LIMIT_BYTES + 1,
+      bearer: async () => "tok-2",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      workerRegistration: async () => null,
+    })).rejects.toThrow(OVER_LIMIT_SENTENCE);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
 

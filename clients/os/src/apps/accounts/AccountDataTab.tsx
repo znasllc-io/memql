@@ -4,7 +4,9 @@ import type { InventoryArea, InventoryConcept } from "./inventory";
 import type { OpenConflict, UnplacedKind } from "./moves";
 import { accountIsSelf, type AccountRow } from "./rows";
 import { UnplacedSection } from "./UnplacedSection";
-import { useAccountAssignmentStatus, useAccountInventory, useAccountUnplaced } from "./useAccounts";
+import { useAccountAssignmentStatus, useAccountUnplaced } from "./useAccounts";
+import type { Reading } from "../../cluster/reading";
+import type { Inventory } from "./inventory";
 
 // THE DATA TAB: what the account holds (design record
 // 2026-11-12-account-export, section K), from the inventory builtin.
@@ -12,7 +14,8 @@ import { useAccountAssignmentStatus, useAccountInventory, useAccountUnplaced } f
 // DRAWN ONLY FOR A HOLDER of `execute app:accounts/inventory`, and the page
 // decides that: for anyone else there is no Data tab at all (DESIGN.md rule
 // 12, absent rather than disabled), so this component assumes the part is
-// held and asks for both reads unconditionally.
+// held. The inventory reading itself is the page's (AccountPage.tsx), shared
+// with the export wizard's Contents step.
 //
 // MOVING IS A SECOND PART, `execute app:accounts/move`, and the page decides
 // that too: `move` is given only to a holder. Without it the inventory is
@@ -35,15 +38,16 @@ export interface AccountDataTabProps {
   account: AccountRow;
   /** The accounts the app already holds, to name an account by. */
   accounts: readonly AccountRow[];
+  /** The page's one inventory reading, which the export wizard counts from too. */
+  inventory: Reading<Inventory>;
   /** Present only for a holder of `execute app:accounts/move`. */
   moves?: AccountDataMoves;
   /** Bumped after a move or a decision: every read here is taken again. */
   revision?: number;
 }
 
-export function AccountDataTab({ account, accounts, moves, revision = 0 }: AccountDataTabProps) {
+export function AccountDataTab({ account, accounts, inventory, moves, revision = 0 }: AccountDataTabProps) {
   const self = accountIsSelf(account);
-  const inventory = useAccountInventory(account.id, true, revision);
   const assignment = useAccountAssignmentStatus(self, revision);
   const unplaced = useAccountUnplaced(self && moves !== undefined, revision);
   return (

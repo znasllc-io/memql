@@ -126,8 +126,61 @@ export async function downloadArtifact(input: {
   });
 }
 
+/**
+ * One file at a content path other than an artifact's, through the same plan
+ * and the same two runners (an account's export, design record
+ * 2026-11-12-account-export section G).
+ *
+ * A SHARED FUNCTION RATHER THAN A COPY: the worker-or-buffered decision, the
+ * over-limit refusal and the refusal wording are the parts that would drift.
+ * The size is the caller's, read off its own row; zero plans as unmeasured,
+ * as it does for an artifact. Throws the over-limit sentence, as
+ * `downloadArtifact` does, so a caller renders every failure one way.
+ */
+export async function downloadFromPath(input: {
+  /** The whole same-origin path, base included. */
+  contentPath: string;
+  fileName: string;
+  sizeBytes: number;
+  bearer: () => Promise<string | null>;
+  /** Injectable for tests; the default registers the download worker. */
+  workerRegistration?: () => Promise<ServiceWorkerRegistration | null>;
+  fetchImpl?: typeof fetch;
+  createObjectUrl?: (blob: Blob) => string;
+  revokeObjectUrl?: (url: string) => void;
+  save?: (url: string, name: string) => void;
+}): Promise<void> {
+  const registration = await (input.workerRegistration ?? downloadWorkerRegistration)();
+  const plan = planDownload({ workerAvailable: registration !== null, sizeBytes: input.sizeBytes });
+  if (plan.path === "refused") throw new Error(OVER_LIMIT_SENTENCE);
+  if (plan.path === "worker" && registration !== null) {
+    await runWorkerDownload({
+      artifactId: "",
+      contentPath: input.contentPath,
+      fileName: input.fileName,
+      sizeBytes: input.sizeBytes,
+      bearer: input.bearer,
+      registration,
+      ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+    });
+    return;
+  }
+  await runBufferedDownload({
+    artifactId: "",
+    contentPath: input.contentPath,
+    fileName: input.fileName,
+    bearer: input.bearer,
+    ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+    ...(input.createObjectUrl ? { createObjectUrl: input.createObjectUrl } : {}),
+    ...(input.revokeObjectUrl ? { revokeObjectUrl: input.revokeObjectUrl } : {}),
+    ...(input.save ? { save: input.save } : {}),
+  });
+}
+
 export interface BufferedDownloadPorts {
   artifactId: string;
+  /** A whole content path that is not an artifact's; it wins over `artifactId`. */
+  contentPath?: string;
   fileName: string;
   /** An earlier version of this file; omitted means the current one. */
   version?: number;
@@ -163,7 +216,7 @@ export async function runBufferedDownload(ports: BufferedDownloadPorts): Promise
   const base = ports.baseUrl ?? import.meta.env.BASE_URL;
 
   const token = await ports.bearer();
-  const response = await fetchImpl(artifactContentPath(base, ports.artifactId, ports.version), {
+  const response = await fetchImpl(ports.contentPath ?? artifactContentPath(base, ports.artifactId, ports.version), {
     method: "GET",
     credentials: "same-origin",
     ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),

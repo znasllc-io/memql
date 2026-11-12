@@ -1571,6 +1571,18 @@ rules rather than repetitions of the five before it.
   of those rows. Without the part, the inventory stays counts, nothing opens
   and none of these reads is asked.
 
+- **THE EXPORT TAB IS THE PART `execute app:accounts/export`** (sections F, G
+  and K), between Data and Settings, absent without it. Not ready, it names
+  the five conditions (`accountExportReadiness`) and offers no Add; ready, it
+  lists the exports (`accountExports`, on scroll, re-read every 3 s while one
+  is active and 15 s otherwise) with the Add control that opens "Export this
+  account". The wizard's Contents counts from the page's ONE inventory reading,
+  shared with the Data tab. The passphrase is held in the wizard's own state
+  for its one step and dropped when the step is left: never in storage, a log
+  or a URL. Download goes through `downloadFromPath`
+  (`files/actions/download.ts`), the Files app's plan and runners over another
+  content path, `/_memql/accounts/exports/{id}/content`, with the bearer.
+
 - **A REFUSAL IS NOT A ZERO.** `invitationsForAccount` carries
   `@requiresRank("developer")`, so below that floor the engine refuses the read.
   The band renders "Not yours to read" plus the server's own sentence, and

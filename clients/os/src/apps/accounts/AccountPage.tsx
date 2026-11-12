@@ -15,7 +15,11 @@ import { AccountDetailsTab } from "./AccountDetailsTab";
 import { AccountPeopleTab } from "./AccountPeopleTab";
 import { AccountSettingsTab } from "./AccountSettingsTab";
 import { frontDoorFromRow, type FrontDoorRow } from "./frontDoor";
-import { accountName, type AccountRow } from "./rows";
+import { accountIsSelf, accountName, type AccountRow } from "./rows";
+import { AccountExportTab } from "./AccountExportTab";
+import { ExportWizard } from "./ExportWizard";
+import type { ExportRow } from "./exports";
+import { useAccountExports, useAccountInventory, useExportReadiness } from "./useAccounts";
 import { useAccountFrontDoors } from "./useAccountFrontDoors";
 
 // ONE ACCOUNT, AS A PAGE OF TABS (design record 2026-11-12-account-export,
@@ -36,18 +40,18 @@ import { useAccountFrontDoors } from "./useAccountFrontDoors";
 // counts rows by the account recorded on them, which is why its tab exists
 // only for a holder of `execute app:accounts/inventory`.
 
-export type AccountTab = "details" | "people" | "data" | "settings";
+export type AccountTab = "details" | "people" | "data" | "export" | "settings";
 
 const TAB_NAMES: Record<AccountTab, string> = {
   details: "Details",
   people: "People",
   data: "Data",
+  export: "Export",
   settings: "Settings",
 };
 
-// Export joins between Data and Settings when its tab is built; Settings stays
-// last, as it is on a machine.
-const TAB_ORDER: readonly AccountTab[] = ["details", "people", "data", "settings"];
+// Settings stays last, as it is on a machine.
+const TAB_ORDER: readonly AccountTab[] = ["details", "people", "data", "export", "settings"];
 
 // A stable empty array: useSyncExternalStore compares snapshots by identity,
 // and a fresh `[]` on every read is an infinite render loop.
@@ -90,6 +94,8 @@ export interface AccountPageProps {
   onOpenGroup?: (groupId: string) => void;
   /** Opens the domain setup wizard. */
   onConfigureDomains?: () => void;
+  /** Opens the primary account on its Data tab, where rows in no account are placed. */
+  onOpenPrimaryData?: () => void;
 }
 
 export function AccountPage({
@@ -103,6 +109,7 @@ export function AccountPage({
   onArchived,
   onOpenGroup,
   onConfigureDomains,
+  onOpenPrimaryData,
 }: AccountPageProps) {
   // WHO MAY SEE THE INVENTORY. The builtins carry the part; this is the
   // courtesy half, so a non-holder is offered no tab that would only be
@@ -112,7 +119,8 @@ export function AccountPage({
   const { access, accessEpoch } = useSession();
   const canInventory = useMemo(() => holds("execute", "app:accounts/inventory"), [accessEpoch]);
   const canMove = useMemo(() => holds("execute", "app:accounts/move"), [accessEpoch]);
-  const offered = TAB_ORDER.filter((t) => t !== "data" || canInventory);
+  const canExport = useMemo(() => holds("execute", "app:accounts/export"), [accessEpoch]);
+  const offered = TAB_ORDER.filter((t) => (t !== "data" || canInventory) && (t !== "export" || canExport));
   const current: AccountTab = tab !== undefined && offered.includes(tab) ? tab : offered[0]!;
 
   // VISITED TABS STAY MOUNTED, hidden, as a machine's views do: a profile
@@ -221,6 +229,24 @@ export function AccountPage({
     { label: kindPage.area, onSelect: toData },
   ];
 
+  // ONE INVENTORY READING FOR THE PAGE. The Data tab draws it and the export
+  // wizard's Contents step counts from it: the same numbers, asked once.
+  // Asked from the first visit to either, never before, and only for a holder
+  // of the inventory part, whom the builtin would otherwise refuse.
+  const [exportWizard, setExportWizard] = useState<{ existing?: ExportRow } | null>(null);
+  const inventoryWanted = canInventory && (visited.includes("data") || current === "data" || exportWizard !== null);
+  const inventory = useAccountInventory(account.id, inventoryWanted, revision);
+
+  // THE EXPORT TAB'S READS, from its first visit, held here so the wizard's
+  // answers land in the list behind it.
+  const exportVisited = canExport && (visited.includes("export") || current === "export");
+  const readiness = useExportReadiness(account.id, exportVisited, revision);
+  const exportsFeed = useAccountExports(account.id, exportVisited && readiness.value?.ready === true);
+  const openPrimaryData = () => {
+    if (accountIsSelf(account)) onTab("data");
+    else onOpenPrimaryData?.();
+  };
+
   function render(t: AccountTab): ReactNode {
     switch (t) {
       case "details":
@@ -228,7 +254,17 @@ export function AccountPage({
       case "people":
         return <AccountPeopleTab account={account} onOpenGroup={onOpenGroup} />;
       case "data":
-        return <AccountDataTab account={account} accounts={accounts} moves={moves} revision={revision} />;
+        return <AccountDataTab account={account} accounts={accounts} inventory={inventory} moves={moves} revision={revision} />;
+      case "export":
+        return (
+          <AccountExportTab
+            readiness={readiness}
+            feed={exportsFeed}
+            onAdd={() => setExportWizard({})}
+            onOpenExport={(x) => setExportWizard({ existing: x })}
+            onOpenUnplaced={openPrimaryData}
+          />
+        );
       case "settings":
         return (
           <AccountSettingsTab
@@ -244,7 +280,7 @@ export function AccountPage({
     }
   }
 
-  const covered = (kindPage !== null || movePage !== null) && canMove;
+  const covered = ((kindPage !== null || movePage !== null) && canMove) || (exportWizard !== null && canExport);
   const closeMove = () => setMovePage(null);
   return (
     <>
@@ -313,6 +349,22 @@ export function AccountPage({
           back={{ label: movePage.from === "rows" && kindPage !== null ? kindPage.kind : "Data", onSelect: closeMove }}
           onMoved={movedRows}
           onClose={closeMove}
+        />
+      ) : null}
+      {exportWizard !== null && canExport ? (
+        <ExportWizard
+          accountId={account.id}
+          accountName={name}
+          inventory={inventory}
+          existing={exportWizard.existing}
+          breadcrumbs={[...accountCrumbs, { label: "Export", onSelect: () => setExportWizard(null) }, { label: "Export this account" }]}
+          back={{ label: "Export", onSelect: () => setExportWizard(null) }}
+          onChanged={exportsFeed.upsert}
+          onClose={() => {
+            setExportWizard(null);
+            readiness.reread();
+            void exportsFeed.refresh();
+          }}
         />
       ) : null}
     </>

@@ -315,9 +315,9 @@ describe("the account page", () => {
     return conn;
   }
 
-  it("offers Details, People, Data and Settings, in that order, and opens on Details", async () => {
+  it("offers Details, People, Data, Export and Settings, in that order, and opens on Details", async () => {
     await openAcme();
-    expect(accountTabNames()).toEqual(["Details", "People", "Data", "Settings"]);
+    expect(accountTabNames()).toEqual(["Details", "People", "Data", "Export", "Settings"]);
     const tabs = screen.getByRole("navigation", { name: "Account views" });
     expect(within(tabs).getByRole("button", { name: "Details" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("region", { name: "Details" })).toBeTruthy();

@@ -18,6 +18,18 @@ import {
   type Unplaced,
 } from "./moves";
 import type { PagedFeed } from "../../kit/NextPage";
+import {
+  exportActCall,
+  exportsCall,
+  exportsPageFromRows,
+  oneExport,
+  prepareCall,
+  preparedFromRows,
+  readinessCall,
+  readinessFromRows,
+  type ExportReadiness,
+  type ExportRow,
+} from "./exports";
 import { useLiveCollection, usePagedCollection } from "../../live/useLiveCollection";
 import { ACCOUNT_CONCEPT, accountFromRow, type AccountRow } from "./rows";
 
@@ -476,4 +488,161 @@ export function useAccountPeople(accountId: string): AccountPeople & { reload: (
   }, [connection, accountId, nonce]);
 
   return { ...state, reload };
+}
+
+// ---------------------------------------------------------------------------
+// An account's exports (design record 2026-11-12-account-export, sections F
+// and K). Every call carries `execute app:accounts/export`; the page asks none
+// of them for anybody who does not hold it.
+// ---------------------------------------------------------------------------
+
+/** Whether the account may be exported, read on demand. */
+export function useExportReadiness(accountId: string, enabled: boolean, revision: number = 0): Reading<ExportReadiness> {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  const read = useMemo(() => {
+    if (!enabled || query === null || accountId === "") return null;
+    return async (signal: AbortSignal) => {
+      const result = await query.executeNamed("accountExportReadiness", readinessCall(accountId), { signal });
+      return readinessFromRows(result.rows());
+    };
+  }, [enabled, query, accountId]);
+  return useReading<ExportReadiness>(`accounts:exportReadiness:${accountId}:${enabled}`, read, revision);
+}
+
+/** The account's exports, newest first, page by page: the feed `NextPage` takes. */
+export interface ExportsFeed extends PagedFeed {
+  state: "unread" | "reading" | "read" | "failed";
+  exports: ExportRow[];
+  error: string;
+  reread: () => void;
+  /** Read the first page again and fold it over what is held, keeping later pages. */
+  refresh: () => Promise<void>;
+  /** Put one export's newest answer in place. */
+  upsert: (row: ExportRow) => void;
+}
+
+export function useAccountExports(accountId: string, enabled: boolean): ExportsFeed {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  const [state, setState] = useState<{
+    state: ExportsFeed["state"];
+    exports: ExportRow[];
+    cursor: string;
+    error: string;
+    loadingMore: boolean;
+    loadMoreError: string;
+  }>({ state: "unread", exports: [], cursor: "", error: "", loadingMore: false, loadMoreError: "" });
+  const [attempt, setAttempt] = useState(0);
+  const current = useRef(state);
+  current.current = state;
+  const refreshing = useRef(false);
+
+  useEffect(() => {
+    if (!enabled || query === null || accountId === "") return;
+    const controller = new AbortController();
+    setState((held) => ({ ...held, state: held.exports.length > 0 ? held.state : "reading", error: "" }));
+    query
+      .executeNamed("accountExports", exportsCall(accountId, ""), { signal: controller.signal })
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        const page = exportsPageFromRows(result.rows());
+        setState({ state: "read", exports: page.exports, cursor: page.nextCursor, error: "", loadingMore: false, loadMoreError: "" });
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) return;
+        setState((held) => ({ ...held, state: "failed", error: err instanceof Error ? err.message : String(err) }));
+      });
+    return () => controller.abort();
+  }, [enabled, query, accountId, attempt]);
+
+  const loadMore = useCallback(async () => {
+    const held = current.current;
+    if (query === null || held.cursor === "" || held.loadingMore || held.state !== "read") return;
+    setState((s) => ({ ...s, loadingMore: true, loadMoreError: "" }));
+    try {
+      const result = await query.executeNamed("accountExports", exportsCall(accountId, held.cursor));
+      const page = exportsPageFromRows(result.rows());
+      setState((s) => {
+        const seen = new Set(s.exports.map((x) => x.id));
+        return { ...s, exports: [...s.exports, ...page.exports.filter((x) => !seen.has(x.id))], cursor: page.nextCursor, loadingMore: false };
+      });
+    } catch (err: unknown) {
+      setState((s) => ({ ...s, loadingMore: false, loadMoreError: err instanceof Error ? err.message : String(err) }));
+    }
+  }, [query, accountId]);
+
+  // A REFRESH KEEPS THE PAGES ALREADY READ. The first page is read again and
+  // its rows replace their older selves; a new export lands at the top; the
+  // rest stay where they are. A failed refresh leaves the list as it was: the
+  // next tick asks again.
+  const refresh = useCallback(async () => {
+    if (query === null || accountId === "" || refreshing.current || current.current.state !== "read") return;
+    refreshing.current = true;
+    try {
+      const result = await query.executeNamed("accountExports", exportsCall(accountId, ""));
+      const page = exportsPageFromRows(result.rows());
+      setState((s) => {
+        const fresh = new Set(page.exports.map((x) => x.id));
+        return { ...s, exports: [...page.exports, ...s.exports.filter((x) => !fresh.has(x.id))] };
+      });
+    } catch {
+      // Kept as it was.
+    } finally {
+      refreshing.current = false;
+    }
+  }, [query, accountId]);
+
+  const upsert = useCallback((row: ExportRow) => {
+    setState((s) => {
+      const at = s.exports.findIndex((x) => x.id === row.id);
+      if (at < 0) return { ...s, exports: [row, ...s.exports] };
+      const next = [...s.exports];
+      next[at] = row;
+      return { ...s, exports: next };
+    });
+  }, []);
+
+  const reread = useCallback(() => setAttempt((n) => n + 1), []);
+  return {
+    state: !enabled || query === null ? "unread" : state.state,
+    exports: state.exports,
+    error: state.error,
+    reread,
+    refresh,
+    upsert,
+    hasMore: state.state === "read" && state.cursor !== "",
+    loadingMore: state.loadingMore,
+    loadMoreError: state.loadMoreError,
+    loadMore,
+    progress: `${state.exports.length}\u001f${state.cursor}`,
+  };
+}
+
+/** The acts on an export. Null with no connection. */
+export interface ExportCalls {
+  /** The draft, and its passphrase when protected: returned once, kept by nobody here. */
+  prepare: (accountId: string, protect: boolean) => Promise<{ export: ExportRow; passphrase: string }>;
+  start: (exportId: string) => Promise<ExportRow>;
+  cancel: (exportId: string) => Promise<ExportRow>;
+  remove: (exportId: string) => Promise<ExportRow>;
+  status: (exportId: string) => Promise<ExportRow>;
+}
+
+export function useExportCalls(): ExportCalls | null {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  return useMemo(() => {
+    if (query === null) return null;
+    const act = (name: "accountExportStart" | "accountExportCancel" | "accountExportRemove" | "accountExportStatus") =>
+      async (exportId: string) => oneExport((await query.executeNamed(name, exportActCall(name, exportId))).rows());
+    return {
+      prepare: async (accountId, protect) =>
+        preparedFromRows((await query.executeNamed("accountExportPrepare", prepareCall(accountId, protect))).rows()),
+      start: act("accountExportStart"),
+      cancel: act("accountExportCancel"),
+      remove: act("accountExportRemove"),
+      status: act("accountExportStatus"),
+    };
+  }, [query]);
 }
