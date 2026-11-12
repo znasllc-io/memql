@@ -104,26 +104,25 @@ func TestNewestAccountProbeDoesNotDependOnOrderedAppend(t *testing.T) {
 	require.Zero(t, plan.discarded, "no version of another row may be read and thrown away: %s", plan.raw)
 }
 
-// The decision (accountDecisionSQL, behind AccountKindRowIDs, AccountRowCounts
-// and the census) must find the account's versions through the account index's
-// own condition and never evaluate payload->>'accountId' on a row-table heap
-// tuple: on an installation the payload is stored out of line, and evaluating
-// the expression fetches and unpacks it whole. So every chunk scan that names
-// accountId names it as an Index Cond of the account index, and none carries a
-// Filter or a Recheck Cond that names it (a bitmap scan rechecks lossy pages).
-func TestAccountDecisionReadsTheAccountThroughTheIndexOnly(t *testing.T) {
+// accountPlanFixture is a schema of its own holding a hypertable of four daily
+// chunks of one kind: 2,000 rows of three versions each, the newest naming an
+// account (acme for one row in ten, beta otherwise), the older ones naming
+// none, and payloads long enough to be stored out of line. It returns the
+// connection, the kind, and the name the copy gave the account index.
+func accountPlanFixture(t *testing.T, purpose string) (*bun.DB, string, string) {
+	t.Helper()
 	ctx := context.Background()
 	admin := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()))), pgdialect.New())
 	t.Cleanup(func() { _ = admin.Close() })
 	if err := admin.PingContext(ctx); err != nil {
-		dbtest.Unreachable(t, "account decision plan", dbtest.DSN(), err)
+		dbtest.Unreachable(t, purpose, dbtest.DSN(), err)
 	}
 	var timescale bool
 	require.NoError(t, admin.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname='timescaledb')`).Scan(&timescale))
 	if !timescale {
 		t.Skip("requires TimescaleDB chunk planner")
 	}
-	schema := fmt.Sprintf("accountdecision_%d", time.Now().UnixNano())
+	schema := fmt.Sprintf("accountplan_%d", time.Now().UnixNano())
 	_, err := admin.ExecContext(ctx, `CREATE SCHEMA `+schema)
 	require.NoError(t, err)
 	t.Cleanup(func() { _, _ = admin.ExecContext(ctx, `DROP SCHEMA `+schema+` CASCADE`) })
@@ -131,9 +130,6 @@ func TestAccountDecisionReadsTheAccountThroughTheIndexOnly(t *testing.T) {
 		pgdriver.WithConnParams(map[string]any{"search_path": schema}))), pgdialect.New())
 	t.Cleanup(func() { _ = db.Close() })
 
-	// Four daily chunks of one kind: 2,000 rows of three versions each, the
-	// newest naming an account (acme for one row in ten, beta otherwise), the
-	// older ones naming none, and payloads long enough to be stored out of line.
 	const concept = "v1:todos:todo"
 	stamp := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
 	for _, stmt := range []string{
@@ -151,54 +147,124 @@ func TestAccountDecisionReadsTheAccountThroughTheIndexOnly(t *testing.T) {
 		_, err := db.ExecContext(ctx, stmt)
 		require.NoError(t, err)
 	}
-
-	// The copy's account index has a generated name; find it by its shape.
 	var accountIndex string
 	require.NoError(t, admin.QueryRowContext(ctx, `SELECT indexname FROM pg_indexes WHERE schemaname = ? AND tablename = 'MemoryNodes'
 	  AND indexdef LIKE '%(((payload ->> ''accountId''::text)), concept) WHERE%'`, schema).Scan(&accountIndex))
+	return db, concept, accountIndex
+}
 
-	ids, err := AccountKindRowIDs(ctx, db.DB, "acme", concept)
+// explainAsTheReaderRuns is the plan of query, with the reader's parameters
+// written in, inside a transaction through withIndexPlans, as the reader runs
+// its statements.
+func explainAsTheReaderRuns(t *testing.T, db *bun.DB, query string, args ...string) []byte {
+	t.Helper()
+	ctx := context.Background()
+	pairs := make([]string, 0, 2*len(args))
+	for n := len(args); n >= 1; n-- { // $10 before $1
+		pairs = append(pairs, fmt.Sprintf("$%d", n), args[n-1])
+	}
+	query = strings.NewReplacer(pairs...).Replace(query)
+	var raw []byte
+	tx, err := db.DB.BeginTx(ctx, nil)
 	require.NoError(t, err)
-	require.Len(t, ids, 200)
+	require.NoError(t, withIndexPlans(ctx, tx, func() error {
+		return tx.QueryRowContext(ctx, `EXPLAIN (ANALYZE,FORMAT JSON) `+query).Scan(&raw)
+	}))
+	require.NoError(t, tx.Rollback())
+	return raw
+}
 
-	for _, shape := range []struct {
-		name, sql string
-	}{{"few", accountKindRowIDsFewSQL}, {"many", accountKindRowIDsManySQL}} {
-		for _, account := range []string{"acme", "beta"} {
-			account := shape.name + " " + account
-			query := strings.NewReplacer("$1", "'"+strings.Fields(account)[1]+"'", "$2", "'v1:accounts:account:"+strings.Fields(account)[1]+"'", "$3::text[]", "ARRAY['"+concept+"']").Replace(shape.sql)
-			// As the reader runs it: inside a transaction, through withIndexPlans.
-			var raw []byte
-			tx, err := db.DB.BeginTx(ctx, nil)
-			require.NoError(t, err)
-			require.NoError(t, withIndexPlans(ctx, tx, func() error {
-				return tx.QueryRowContext(ctx, `EXPLAIN (ANALYZE,FORMAT JSON) `+query).Scan(&raw)
-			}))
-			require.NoError(t, tx.Rollback())
-			var plans []map[string]any
-			require.NoError(t, json.Unmarshal(raw, &plans))
-			viaIndex := 0
-			var inspect func(plan map[string]any)
-			inspect = func(plan map[string]any) {
-				relation, _ := plan["Relation Name"].(string)
-				index, _ := plan["Index Name"].(string)
-				if strings.Contains(relation, "_chunk") || strings.Contains(index, "_chunk") {
-					for _, key := range []string{"Filter", "Recheck Cond"} {
-						cond, _ := plan[key].(string)
-						require.NotContains(t, cond, "accountId", "%s evaluates the account on heap tuples (%s %s): %s", account, plan["Node Type"], key, raw)
-					}
-					if cond, _ := plan["Index Cond"].(string); strings.Contains(cond, "accountId") {
-						require.Contains(t, index, accountIndex, "%s: the account is matched by an index that is not the account index: %s", account, raw)
-						viaIndex++
-					}
-				}
-				children, _ := plan["Plans"].([]any)
-				for _, child := range children {
-					inspect(child.(map[string]any))
-				}
+// requireAccountThroughTheIndex holds a plan to the reader's promise: no chunk
+// scan carries a Filter or Recheck Cond naming accountId (an expression on a
+// heap tuple, which unpacks an out-of-line payload; a bitmap rechecks lossy
+// pages), and every chunk scan that names accountId names it as an Index Cond
+// of the account index. It returns how many chunk scans did.
+func requireAccountThroughTheIndex(t *testing.T, raw []byte, accountIndex, label string) int {
+	t.Helper()
+	var plans []map[string]any
+	require.NoError(t, json.Unmarshal(raw, &plans))
+	viaIndex := 0
+	var inspect func(plan map[string]any)
+	inspect = func(plan map[string]any) {
+		relation, _ := plan["Relation Name"].(string)
+		index, _ := plan["Index Name"].(string)
+		if strings.Contains(relation, "_chunk") || strings.Contains(index, "_chunk") {
+			for _, key := range []string{"Filter", "Recheck Cond"} {
+				cond, _ := plan[key].(string)
+				require.NotContains(t, cond, "accountId", "%s evaluates the account on heap tuples (%s %s): %s", label, plan["Node Type"], key, raw)
 			}
-			inspect(plans[0]["Plan"].(map[string]any))
-			require.Equal(t, 4, viaIndex, "%s: every chunk's account versions are found through the account index: %s", account, raw)
+			if cond, _ := plan["Index Cond"].(string); strings.Contains(cond, "accountId") {
+				require.Contains(t, index, accountIndex, "%s: the account is matched by an index that is not the account index: %s", label, raw)
+				viaIndex++
+			}
+		}
+		children, _ := plan["Plans"].([]any)
+		for _, child := range children {
+			inspect(child.(map[string]any))
 		}
 	}
+	inspect(plans[0]["Plan"].(map[string]any))
+	return viaIndex
+}
+
+// The decision (accountDecisionSQL, behind AccountKindRowIDs and
+// AccountRowCounts) must find the account's versions through the account
+// index's own condition and never evaluate payload->>'accountId' on a
+// row-table heap tuple: on an installation the payload is stored out of line,
+// and evaluating the expression fetches and unpacks it whole.
+func TestAccountDecisionReadsTheAccountThroughTheIndexOnly(t *testing.T) {
+	db, concept, accountIndex := accountPlanFixture(t, "account decision plan")
+	ids, err := AccountKindRowIDs(context.Background(), db.DB, "acme", concept)
+	require.NoError(t, err)
+	require.Len(t, ids, 200)
+	for _, shape := range []struct {
+		name, sql string
+	}{
+		{"row ids, few", accountKindRowIDsFewSQL}, {"row ids, many", accountKindRowIDsManySQL},
+		{"counts, few", accountRowCountsFewSQL}, {"counts, many", accountRowCountsManySQL},
+	} {
+		for _, account := range []string{"acme", "beta"} {
+			label := shape.name + " " + account
+			raw := explainAsTheReaderRuns(t, db, shape.sql, "'"+account+"'", "'v1:accounts:account:"+account+"'", "ARRAY['"+concept+"']")
+			require.Equal(t, 4, requireAccountThroughTheIndex(t, raw, accountIndex, label), "%s: every chunk's account versions are found through the account index: %s", label, raw)
+		}
+	}
+}
+
+// The census reads the account's versions (named) and every version naming
+// any account (anyNamed, through the index's leading column read as a range),
+// both through the account index.
+func TestAccountCensusReadsTheAccountThroughTheIndexOnly(t *testing.T) {
+	db, concept, accountIndex := accountPlanFixture(t, "account census plan")
+	for _, account := range []string{"acme", "beta"} {
+		raw := explainAsTheReaderRuns(t, db, accountCensusSQL, "'"+account+"'", "'v1:accounts:account:"+account+"'", "ARRAY['"+concept+"']")
+		require.Equal(t, 8, requireAccountThroughTheIndex(t, raw, accountIndex, "census "+account),
+			"census %s: named and anyNamed each read every chunk through the account index: %s", account, raw)
+	}
+}
+
+// The probe that chooses the decision's shape counts the account's versions
+// through the account index.
+func TestAccountDecisionProbeReadsTheAccountThroughTheIndexOnly(t *testing.T) {
+	db, concept, accountIndex := accountPlanFixture(t, "account probe plan")
+	for _, account := range []string{"acme", "beta"} {
+		raw := explainAsTheReaderRuns(t, db, accountDecisionProbeSQL, "'"+account+"'", "'v1:accounts:account:"+account+"'", "ARRAY['"+concept+"']", "2000")
+		require.GreaterOrEqual(t, requireAccountThroughTheIndex(t, raw, accountIndex, "probe "+account), 1,
+			"probe %s: the count reads the account index: %s", account, raw)
+	}
+}
+
+// AccountRowHeads names no account; its plan must read each chunk through an
+// index the id leads and read no version of another row (the hash join over
+// the whole kind its comment records read every one).
+func TestAccountRowHeadsReadOnlyTheirIds(t *testing.T) {
+	db, concept, _ := accountPlanFixture(t, "account row heads plan")
+	ids := make([]string, 0, 50)
+	for r := 1; r <= 50; r++ {
+		ids = append(ids, fmt.Sprintf("'%s:r%d'", concept, r*37))
+	}
+	// As AccountRowHeads runs it: on the pool, with the planner's own settings.
+	plan := explainNewestByID(t, db, strings.NewReplacer("$2", "ARRAY["+strings.Join(ids, ",")+"]", "$1", "'"+concept+"'").Replace(accountRowHeadsSQL))
+	require.Empty(t, plan.unprobed, "every chunk must be read through an index that finds the ids: %s", plan.raw)
+	require.Zero(t, plan.discarded, "no version of another row may be read and thrown away: %s", plan.raw)
 }

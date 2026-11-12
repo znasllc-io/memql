@@ -13,6 +13,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -516,4 +519,239 @@ func TestAccountRowHeadsAreTheNewestVersionAndTheFirstTime(t *testing.T) {
 
 	tooMany := make([]string, 501)
 	require.Error(t, AccountRowHeads(ctx, db, rowsNote, tooMany, func(memorynodes.MemoryNode, bool, time.Time) error { return nil }))
+}
+
+// ruleCase is one fixture row that pins a case of the rule, and what the rule
+// says of it.
+type ruleCase struct {
+	name     string
+	concept  string
+	id       string
+	owner    string // the account whose row it is, "" for in no account
+	exists   bool   // false: no reader may answer for it at all
+	versions int64  // every version, the observation included
+	newest   int    // minutes of its newest version
+	observed bool   // its newest version is the observation
+}
+
+const (
+	rowsCaseKind     = "v1:aerows:case"
+	rowsCaseOther    = "v1:aerows:other"
+	rowsCaseObserved = "v1:platform:customDomain" // listed in memorynodes.HasLiveness
+)
+
+// seedRuleCases writes one row per case into kinds of their own, so a kind's
+// counts are the cases' counts.
+func seedRuleCases(t *testing.T, db *sql.DB) []ruleCase {
+	t.Helper()
+	nodes, live := `"MemoryNodes"`, "memory_liveness"
+	a := map[string]any{"accountId": rowsAcme}
+	canon := map[string]any{"accountId": rowsAcmeCanon}
+	b := map[string]any{"accountId": rowsBeta}
+	null := map[string]any{"accountId": nil}
+	none := map[string]any{"title": "none"}
+	dual := rowsCaseKind + ":dual"
+
+	rowsVersion(t, db, nodes, rowsCaseObserved, rowsCaseObserved+":tie", 1, b)
+	rowsVersion(t, db, nodes, rowsCaseObserved, rowsCaseObserved+":tie", 2, b)
+	rowsVersion(t, db, live, rowsCaseObserved, rowsCaseObserved+":tie", 2, a)
+	rowsVersion(t, db, nodes, rowsCaseObserved, rowsCaseObserved+":cleared", 1, a)
+	rowsVersion(t, db, live, rowsCaseObserved, rowsCaseObserved+":cleared", 2, none)
+	rowsVersion(t, db, nodes, rowsCaseObserved, rowsCaseObserved+":nulled", 1, a)
+	rowsVersion(t, db, live, rowsCaseObserved, rowsCaseObserved+":nulled", 2, null)
+	rowsVersion(t, db, live, rowsCaseObserved, rowsCaseObserved+":orphan", 1, a)
+	rowsVersion(t, db, nodes, rowsCaseKind, rowsCaseKind+":null", 1, a)
+	rowsVersion(t, db, nodes, rowsCaseKind, rowsCaseKind+":null", 2, null)
+	rowsVersion(t, db, nodes, rowsCaseKind, rowsCaseKind+":bareThenCanon", 1, a)
+	rowsVersion(t, db, nodes, rowsCaseKind, rowsCaseKind+":bareThenCanon", 2, canon)
+	rowsVersion(t, db, nodes, rowsCaseKind, rowsCaseKind+":canonThenBare", 1, canon)
+	rowsVersion(t, db, nodes, rowsCaseKind, rowsCaseKind+":canonThenBare", 2, a)
+	rowsVersion(t, db, nodes, rowsCaseKind, dual, 1, a)
+	// The key is (id, createdAt), so the second concept's version is later.
+	rowsVersion(t, db, nodes, rowsCaseOther, dual, 3, b)
+
+	return []ruleCase{
+		{"an observation with the newest versioned row's createdAt decides", rowsCaseObserved, rowsCaseObserved + ":tie", rowsAcme, true, 3, 2, true},
+		{"a newer observation naming no account over a versioned row naming one", rowsCaseObserved, rowsCaseObserved + ":cleared", "", true, 2, 2, true},
+		{"an observation whose accountId is JSON null", rowsCaseObserved, rowsCaseObserved + ":nulled", "", true, 2, 2, true},
+		{"an observation with no versioned row is no row", rowsCaseObserved, rowsCaseObserved + ":orphan", "", false, 0, 0, false},
+		{"a versioned row whose accountId is JSON null", rowsCaseKind, rowsCaseKind + ":null", "", true, 2, 2, false},
+		{"both spellings, bare then canonical, are one row of one account", rowsCaseKind, rowsCaseKind + ":bareThenCanon", rowsAcme, true, 2, 2, false},
+		{"both spellings, canonical then bare, are one row of one account", rowsCaseKind, rowsCaseKind + ":canonThenBare", rowsAcme, true, 2, 2, false},
+		{"an id under two concepts is decided in its first kind", rowsCaseKind, dual, rowsAcme, true, 1, 1, false},
+		{"an id under two concepts is decided in its second kind", rowsCaseOther, dual, rowsBeta, true, 1, 3, false},
+	}
+}
+
+// withDecisionShape runs fn with every account sent down one shape of the
+// decision: few true forces the FEW statements, false the MANY ones.
+func withDecisionShape(t *testing.T, few bool, fn func()) {
+	t.Helper()
+	saved := accountDecisionFewLimit
+	defer func() { accountDecisionFewLimit = saved }()
+	if few {
+		accountDecisionFewLimit = 1 << 30
+	} else {
+		accountDecisionFewLimit = 0
+	}
+	fn()
+}
+
+// TestTheRuleHoldsCaseByCase asks every function that decides whose a row is
+// about every case, in both shapes of the decision.
+func TestTheRuleHoldsCaseByCase(t *testing.T) {
+	db := openAccountRowsDB(t)
+	seedAccountRows(t, db)
+	cases := seedRuleCases(t, db)
+	ctx := context.Background()
+	kinds := []string{rowsCaseKind, rowsCaseOther, rowsCaseObserved}
+	bare := func(account string) string {
+		if account == "" {
+			return ""
+		}
+		b, err := BareAccountID(account)
+		require.NoError(t, err)
+		return b
+	}
+
+	for _, few := range []bool{true, false} {
+		withDecisionShape(t, few, func() {
+			for _, account := range []string{rowsAcme, rowsBeta} {
+				census, err := AccountCensus(ctx, db, account, kinds)
+				require.NoError(t, err)
+				counts, err := AccountRowCounts(ctx, db, account, kinds)
+				require.NoError(t, err)
+				wantCensus := map[string]AccountCensusLine{}
+				wantCounts := map[string]AccountKindCount{}
+				for _, c := range cases {
+					label := fmt.Sprintf("few=%t %s, asked for %s", few, c.name, account)
+					mine := c.exists && c.owner == account
+
+					byPage, err := AccountRowIDs(ctx, db, account, c.concept, "", 1000)
+					require.NoError(t, err)
+					require.Equal(t, mine, slices.Contains(byPage, c.id), "AccountRowIDs: %s", label)
+					byKind, err := AccountKindRowIDs(ctx, db, account, c.concept)
+					require.NoError(t, err)
+					require.Equal(t, mine, slices.Contains(byKind, c.id), "AccountKindRowIDs: %s", label)
+					var versions int64
+					require.NoError(t, AccountKindVersions(ctx, db, account, c.concept, func(n memorynodes.MemoryNode, _ bool) error {
+						if n.ID == c.id {
+							versions++
+						}
+						return nil
+					}))
+					if mine {
+						require.Equal(t, c.versions, versions, "AccountKindVersions: %s", label)
+					} else {
+						require.Zero(t, versions, "AccountKindVersions: %s", label)
+					}
+					unplaced, err := UnplacedRowIDs(ctx, db, c.concept, "", 1000)
+					require.NoError(t, err)
+					require.Equal(t, c.exists && c.owner == "", slices.Contains(unplaced, c.id), "UnplacedRowIDs: %s", label)
+
+					var heads int
+					require.NoError(t, AccountRowHeads(ctx, db, c.concept, []string{c.id}, func(n memorynodes.MemoryNode, observed bool, _ time.Time) error {
+						heads++
+						var p struct {
+							AccountID *string `json:"accountId"`
+						}
+						require.NoError(t, json.Unmarshal(n.Payload, &p))
+						got := ""
+						if p.AccountID != nil {
+							got = *p.AccountID
+						}
+						require.Equal(t, c.owner, bare(got), "AccountRowHeads' newest version: %s", label)
+						require.Equal(t, c.observed, observed, "AccountRowHeads: %s", label)
+						require.Equal(t, c.newest, int(n.CreatedAt.Sub(rowsClock)/time.Minute), "AccountRowHeads: %s", label)
+						return nil
+					}))
+					if c.exists {
+						require.Equal(t, 1, heads, "AccountRowHeads: %s", label)
+					} else {
+						require.Zero(t, heads, "AccountRowHeads: %s", label)
+					}
+
+					w := wantCensus[c.concept]
+					w.Concept = c.concept
+					k := wantCounts[c.concept]
+					k.Concept = c.concept
+					if mine {
+						w.Rows++
+						w.Versions += c.versions
+						k.Rows++
+						k.Versions += c.versions
+						wantCounts[c.concept] = k
+					}
+					if c.exists && c.owner == "" {
+						w.InNoAccount++
+					}
+					wantCensus[c.concept] = w
+				}
+				want := []AccountCensusLine{}
+				wantK := []AccountKindCount{}
+				for _, concept := range []string{rowsCaseKind, rowsCaseOther, rowsCaseObserved} {
+					if l := wantCensus[concept]; l.Rows > 0 || l.InNoAccount > 0 {
+						want = append(want, l)
+					}
+					if k, ok := wantCounts[concept]; ok {
+						wantK = append(wantK, k)
+					}
+				}
+				slices.SortFunc(want, func(x, y AccountCensusLine) int { return strings.Compare(x.Concept, y.Concept) })
+				slices.SortFunc(wantK, func(x, y AccountKindCount) int { return strings.Compare(x.Concept, y.Concept) })
+				require.Equal(t, want, census, "AccountCensus few=%t for %s", few, account)
+				require.Equal(t, wantK, counts, "AccountRowCounts few=%t for %s", few, account)
+			}
+		})
+	}
+}
+
+// TestBothShapesOfTheDecisionGiveOneAnswer runs every deciding function over
+// the whole fixture with every account sent down the FEW statements and then
+// down the MANY ones: a wrong choice of shape may cost time, never an answer.
+func TestBothShapesOfTheDecisionGiveOneAnswer(t *testing.T) {
+	db := openAccountRowsDB(t)
+	seedAccountRows(t, db)
+	seedRuleCases(t, db)
+	ctx := context.Background()
+	kinds := []string{rowsNote, rowsRun, rowsLoose, rowsEmptyKind, rowsCaseKind, rowsCaseOther, rowsCaseObserved}
+	type answer struct {
+		ids      map[string][]string
+		versions map[string][]rowsVersionKey
+		counts   []AccountKindCount
+		census   []AccountCensusLine
+	}
+	read := func(account string) answer {
+		t.Helper()
+		out := answer{ids: map[string][]string{}, versions: map[string][]rowsVersionKey{}}
+		for _, concept := range kinds {
+			ids, err := AccountKindRowIDs(ctx, db, account, concept)
+			require.NoError(t, err)
+			out.ids[concept] = ids
+			var v []rowsVersionKey
+			require.NoError(t, AccountKindVersions(ctx, db, account, concept, func(n memorynodes.MemoryNode, observed bool) error {
+				v = append(v, rowsVersionKey{n.ID, int(n.CreatedAt.Sub(rowsClock) / time.Minute), "", observed})
+				return nil
+			}))
+			out.versions[concept] = v
+		}
+		var err error
+		out.counts, err = AccountRowCounts(ctx, db, account, kinds)
+		require.NoError(t, err)
+		out.census, err = AccountCensus(ctx, db, account, kinds)
+		require.NoError(t, err)
+		return out
+	}
+	for _, account := range []string{rowsAcme, rowsAcmeCanon, rowsBeta} {
+		var few, many answer
+		withDecisionShape(t, true, func() { few = read(account) })
+		withDecisionShape(t, false, func() { many = read(account) })
+		require.Equal(t, few, many, account)
+		require.NotEmpty(t, few.counts, "the fixture holds rows of %s", account)
+		for _, concept := range kinds {
+			walked, err := AccountRowIDs(ctx, db, account, concept, "", 1000)
+			require.NoError(t, err)
+			require.Equal(t, walked, many.ids[concept], "%s %s", account, concept)
+		}
+	}
 }

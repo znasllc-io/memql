@@ -253,10 +253,11 @@ func (i *Integration) handleInventory(ctx context.Context, args map[string]any, 
 		}
 		return fmt.Errorf("accountInventory: %s: %w", what, err)
 	}
-	// A read-only transaction, so the reader's plan settings hold for its
-	// statements (memql.AccountRowCounts) and the counts and the file sum see
-	// one snapshot.
-	tx, err := db.DB.BeginTx(countCtx, &sql.TxOptions{ReadOnly: true})
+	// One REPEATABLE READ, READ ONLY transaction: the reader's plan settings
+	// are transaction-local and hold for its statements
+	// (memql.AccountRowCounts), and the probe, the count and the file sum all
+	// read the one snapshot taken at its first statement.
+	tx, err := db.DB.BeginTx(countCtx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return nil, tooLarge(err, "begin")
 	}
@@ -436,13 +437,23 @@ func readConflicts(ctx context.Context, db *bun.DB) ([]memorynodes.MemoryNode, e
 // account, the account is matched by the account index instead. The loop stops
 // at the deadline, and the status then answers without totals, as it does for
 // any failure here.
+//
+// The totals list the accounts that have an account row, plus the primary
+// account. A row naming an id that is no account's (no v1:accounts:account row
+// carries it) is in no total; the rows of each listed account are counted
+// exactly as its inventory counts them.
+//
+// Each account costs five round trips (the plan settings read and set, the
+// probe that chooses the statement's shape, the count, the settings put back).
+// Measured in the task report's fix round: on the bench's 22 accounts the loop
+// does not fit the deadline, and the status shows no totals there.
 func (i *Integration) accountTotals(ctx context.Context, db *bun.DB) ([]memorynodes.MemoryNode, error) {
 	ctx, cancel := context.WithTimeout(ctx, i.totalsDeadline)
 	defer cancel()
 	kinds := memql.AccountKinds(i.conceptList(), false)
-	// One read-only transaction, for the reader's plan settings and one
-	// snapshot across the accounts.
-	tx, err := db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	// One REPEATABLE READ, READ ONLY transaction: the reader's plan settings
+	// hold for its statements, and every account is counted in one snapshot.
+	tx, err := db.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return nil, fmt.Errorf("begin: %w", err)
 	}
