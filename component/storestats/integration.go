@@ -100,9 +100,10 @@ const (
 	// read deadline, ten seconds, which ends a statement before or when the
 	// request pool's eight-second statement timeout does.
 	readBound = 10 * time.Second
-	// wholesaleReadsBound is the most reads wholesaleFor may make in a run
-	// (Task 15's wholesaleOf pages two reads); more must be read across runs.
-	wholesaleReadsBound = 10
+	// wholesaleReadBudget is the time the run's wholesale reads share
+	// (wholesale.go, wholesaleOf), asked before every page on the budgets'
+	// clock: spent, the run reads no further page and walks no store's facts.
+	wholesaleReadBudget = 10 * time.Second
 	// unbudgetedTransactions are the transactions a store's turn makes that
 	// no budget is asked between, counted from the code: its row
 	// (ensureStore, 1); keepStore's purging read, its keeping and a purge
@@ -119,7 +120,8 @@ const (
 // line:
 //
 //	the stores read:      maxStorePages (20) reads x readBound (10 s)       200 s
-//	the wholesale read:   wholesaleReadsBound (10) x readBound (10 s)        100 s
+//	the wholesale reads:  wholesaleReadBudget (10 s) + the read under way
+//	                      when it ran out, readBound (10 s)                   20 s
 //	the run's budget:     runBudget, after which no store is taken up         50 s
 //	the turn's budget:    turnBudget, of the last store taken up              30 s
 //	the unit under way:   the largest of
@@ -127,19 +129,19 @@ const (
 //	  one purge batch     its transaction (txTimeout 20 s), BEGIN to COMMIT    20 s
 //	  the store's keeping unbudgetedTransactions (12) x txTimeout (20 s)
 //	                      + unbudgetedReads (16) x readBound (10 s)          400 s
-//	                                                               total     780 s
+//	                                                               total     700 s
 //
 // The keeping is the largest unit: a turn asks no budget before its first
 // page or batch, so when the budget is spent at the turn's start the whole of
 // it runs, and a page or a batch is one transaction of it. The purge is
 // counted as it runs: a turn can purge twice, a batch at a time, the budget
 // asked before each, so one batch is under way at most; each transaction is
-// timed BEGIN to COMMIT by txTimeout. Thirteen minutes, and runDeadline adds
-// a minute over it.
+// timed BEGIN to COMMIT by txTimeout. Eleven minutes and forty seconds, and
+// runDeadline adds a minute over it.
 func runDeadlineBound() time.Duration {
 	keeping := unbudgetedTransactions*txTimeout + unbudgetedReads*readBound
 	unit := max(readBound+txTimeout, txTimeout, keeping)
-	return maxStorePages*readBound + wholesaleReadsBound*readBound + runBudget + turnBudget + unit
+	return maxStorePages*readBound + wholesaleReadBudget + readBound + runBudget + turnBudget + unit
 }
 
 // aRun is one run of the rollup on this node, held while it runs.
@@ -200,6 +202,8 @@ func NewIntegration(engine Engine, bunDB func() *bun.DB, logger *slog.Logger) *I
 	i.verdictOf = i.askVerdict // Task 14: a store's verdict, asked of the mirror's builtin (store.go)
 
 	i.walkStore = i.walkOneStore // Task 13: the fold and the derivation (fold.go)
+
+	i.wholesaleFor = i.wholesaleOf // Task 15: who is wholesale, asked of the wholesale pack (wholesale.go)
 	return i
 }
 

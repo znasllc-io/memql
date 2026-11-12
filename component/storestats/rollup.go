@@ -50,7 +50,9 @@ import (
 // rolls the first, for every store it is about to roll, and hands each store's
 // walk that store's own state, a value (wholesaleState.isWholesale), the zero
 // one when wholesaleFor is nil or names none for the store: the walk folds every
-// order it reads with it. When wholesaleFor cannot answer, the run answers
+// order it reads with it, and the store's wholesale pass, after the walk,
+// judges again the orders written before its granted set changed
+// (wholesale.go). When wholesaleFor cannot answer, the run answers
 // that error once and walks no store's facts: a store walked with "nobody is
 // wholesale" would write its granted buyers' new orders retail, and nothing
 // would read them again until the next change of the granted set. Every
@@ -136,6 +138,14 @@ var changedReads = map[string]string{
 	"storeStatisticsRefundsChanged": "paginate(query storeStatisticsRefundsChanged(storeId: %s, since: %s), %d)",
 	"storeStatisticsOrderBuyers":    "paginate(query storeStatisticsOrderBuyers(storeId: %s, since: %s), %d)",
 }
+
+// The wholesale pack's two reads (wholesale.go, wholesaleOf): each a format
+// taking the quoted list of store ids and the page size. Here for the same
+// reason.
+const (
+	wholesaleSettingsRead = "paginate(query wholesaleStatisticsSettings(storeIds: %s), %d)"
+	wholesaleGrantedRead  = "paginate(query wholesaleStatisticsGranted(storeIds: %s), %d)"
+)
 
 // maxStorePages bounds the stores read: a cursor that never ends is an error,
 // never a loop. Twenty pages of storesPageSize is two thousand stores, and
@@ -265,7 +275,17 @@ func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[strin
 	if !walk || i.walkStore == nil {
 		return nil
 	}
-	return i.walkStore(ctx, store, generation, now, wholesale, rep)
+	err = i.walkStore(ctx, store, generation, now, wholesale, rep)
+	if errors.Is(err, errRebuilt) {
+		return err
+	}
+	// After the walk, which judged the orders it wrote: the pass judges again
+	// those written before the granted set changed (wholesale.go).
+	perr := wholesalePass(ctx, i, id, generation, wholesale, i.walkClock(), maxPagesPerRun)
+	if errors.Is(perr, errRebuilt) {
+		return perr
+	}
+	return errors.Join(err, perr)
 }
 
 // budgetNow is the clock the run's and the turn's budgets read: the time, or
