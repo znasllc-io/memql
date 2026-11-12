@@ -189,6 +189,8 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 		// (memqlsync.AnnouncedRetireAllowance).
 		w := tombstone(spec.Concept, store.ID, gid, announcedAt(req, c.now()))
 		w.Announced = true
+		// Stored, so a live write over it is held to the same allowance.
+		w.Payload["versionSource"] = memqlsync.VersionFromAnnouncement
 		return []memqlsync.MirrorWrite{w}, nil
 	}
 
@@ -217,16 +219,21 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 		if !held {
 			return nil, nil
 		}
-		if req.Attempts == 0 {
+		if !req.AnsweredNothingBefore {
 			// A deletion the origin did not announce is confirmed before it
-			// is believed. On a domain swept by updated_at, a record wrongly
-			// retired by one empty answer has no scheduled read that brings
-			// it back (the sweep's filter skips it until it changes). So the
-			// first empty answer fails as worth another try, the retry lane
-			// fetches again after its first wait, and only a later try that
-			// still finds nothing retires the record, at that fetch's time.
+			// is believed: two clean empty answers IN A ROW. On a domain
+			// swept by updated_at, a record wrongly retired by one empty
+			// answer has no scheduled read that brings it back (the sweep's
+			// filter skips it until it changes). So an empty answer that does
+			// not follow one fails as worth another try
+			// (memqlsync.ErrAnsweredNothing), the retry lane fetches again,
+			// and the dispatcher tells that try the last one answered nothing
+			// (InboundRequest.AnsweredNothingBefore). Only a try that follows
+			// an empty answer and still finds nothing retires the record, at
+			// that fetch's time; a try number alone proves nothing, since a
+			// first try that failed for any ordinary reason is not an answer.
 			c.forgetDelivery(req, gid)
-			return nil, fmt.Errorf("shopify: the origin answered nothing for a record the mirror holds (%s); it is asked again before the record is retired", gid)
+			return nil, memqlsync.AnsweredNothing(ConnectorName, gid)
 		}
 		return []memqlsync.MirrorWrite{tombstone(spec.Concept, store.ID, gid, readAt)}, nil
 	}

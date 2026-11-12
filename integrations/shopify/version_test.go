@@ -540,10 +540,18 @@ func TestARetriedDeleteStillRetiresTheRecord(t *testing.T) {
 		r.deliver(t, request("orders/updated", "gid://shopify/Order/1", "wh-b", at("10:01:00")))
 
 		// The order is deleted at 10:02 and the delete delivery is lost. A's
-		// retry fetches nothing.
+		// retry fetches nothing, which is asked again; the next retry still
+		// finds nothing, and that is a deletion.
 		r.now = at("10:03:00")
 		r.orderFetches(nil)
-		r.deliver(t, retried(request("orders/updated", "gid://shopify/Order/1", "wh-a", at("10:00:00"))))
+		a := request("orders/updated", "gid://shopify/Order/1", "wh-a", at("10:00:00"))
+		a.Attempts = 1
+		if _, err := r.conn.Apply(context.Background(), a); !memqlsync.IsAnsweredNothing(err) {
+			t.Fatalf("A's first empty answer: err = %v, want it asked again", err)
+		}
+		r.now = at("10:08:00")
+		a.Attempts, a.AnsweredNothingBefore = 2, true
+		r.deliver(t, a)
 		if row := r.row("order", "gid://shopify/Order/1"); row["deleted"] != true {
 			t.Errorf("an update whose fetch found nothing left the deleted order live: updatedAt %v", row["updatedAt"])
 		}
@@ -835,9 +843,12 @@ func TestVersionsOfDifferentKindsAreNeverCompared(t *testing.T) {
 
 // ---- fix round 2 ----
 
-// retried is a delivery on the retry lane's first retry.
+// retried is a delivery on its retry after a try that ended in a clean empty
+// answer for a record the mirror holds, as the dispatcher hands it
+// (InboundRequest.AnsweredNothingBefore).
 func retried(req memqlsync.InboundRequest) memqlsync.InboundRequest {
 	req.Attempts = 1
+	req.AnsweredNothingBefore = true
 	return req
 }
 
@@ -918,6 +929,9 @@ func TestTheDeleteTopicsTombstoneAllowsForClocksApart(t *testing.T) {
 		{"a whole-second receipt from the earlier build, read later in that second", sub("10:00:00+300ms"), at("10:00:00"), true},
 		{"a receipt two seconds before the read", at("10:00:02"), at("10:00:00"), true},
 		{"a row read ninety seconds after the receipt", at("10:01:30"), at("10:00:00"), false},
+		// Inside the allowance only because a whole-second receipt counts as
+		// the end of its second: 60.5 s after its start, 59.5 s after its end.
+		{"a whole-second receipt, read sixty and a half seconds after its start", sub("10:01:00+500ms"), at("10:00:00"), true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -984,4 +998,133 @@ func TestARowFromBeforeTheRuleKeepsItsReadTimeForATombstone(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ---- fix round 3 ----
+
+// "SAYS SO TWICE" IS TWO CLEAN EMPTY ANSWERS IN A ROW, not a second try. A
+// first try that failed for an ordinary reason (a throttle) makes the next
+// try the record's first empty answer, which is asked again. The dispatcher
+// says whether the previous try ended in an answer of nothing
+// (AnsweredNothingBefore); this plays its part, as
+// TestTheNextTryIsToldWhenTheLastOneAnsweredNothing pins it.
+func TestTwoCleanEmptyAnswersInARowAreADeletion(t *testing.T) {
+	const gid = "gid://shopify/Order/1"
+	run := func(t *testing.T, steps ...string) (retiredOn int, row map[string]any) {
+		t.Helper()
+		r := newMirrorRig(t)
+		r.now = at("10:00:00")
+		r.held("order", gid, "2026-08-23T09:00:00Z", at("09:30:00"))
+		attempts, nothingBefore := 0, false
+		for i, step := range steps {
+			r.now = at("10:00:00").Add(time.Duration(i+1) * time.Minute)
+			if step == "requeue" {
+				// An operator puts the given-up delivery back in line: no
+				// tries counted, and the count of answers starts again.
+				attempts, nothingBefore = 0, false
+				continue
+			}
+			r.admin.httpStatus("ShopifyFetchOrder", 0)
+			switch step {
+			case "empty":
+				r.orderFetches(nil)
+			case "throttle":
+				r.admin.httpStatus("ShopifyFetchOrder", http.StatusServiceUnavailable)
+			case "found":
+				r.orderFetches(orderNode("2026-08-23T09:00:00Z", 2))
+			}
+			req := request("orders/updated", gid, "wh-1", at("09:59:00"))
+			req.Attempts, req.AnsweredNothingBefore = attempts, nothingBefore
+			writes, err := r.conn.Apply(context.Background(), req)
+			if err == nil {
+				r.apply(t, writes)
+			} else if memqlsync.IsPermanent(err) {
+				t.Fatalf("try %d (%s): a permanent failure %v, want one worth another try", i+1, step, err)
+			}
+			if retiredOn == 0 && r.row("order", gid)["deleted"] == true {
+				retiredOn = len(steps[:i+1])
+			}
+			attempts, nothingBefore = attempts+1, memqlsync.IsAnsweredNothing(err)
+		}
+		return retiredOn, r.row("order", gid)
+	}
+	for _, tc := range []struct {
+		steps []string
+		want  int // the step that retired the record, 0 for none
+	}{
+		{[]string{"empty", "empty"}, 2},
+		{[]string{"throttle", "empty"}, 0},
+		{[]string{"throttle", "empty", "empty"}, 3},
+		{[]string{"empty", "throttle", "empty"}, 0},
+		{[]string{"empty", "found"}, 0},
+		{[]string{"empty", "requeue", "empty"}, 0},
+	} {
+		t.Run(strings.Join(tc.steps, ","), func(t *testing.T) {
+			got, row := run(t, tc.steps...)
+			if got != tc.want {
+				t.Errorf("retired on step %d, want %d (row %v)", got, tc.want, row)
+			}
+			if tc.steps[len(tc.steps)-1] == "found" && (row["deleted"] == true || row["name"] != "#1001") {
+				t.Errorf("the record found was not written: %v", row)
+			}
+		})
+	}
+}
+
+// AN ANNOUNCED DELETION IS AS HARD TO UNDO AS IT IS TO REFUSE. A read made
+// just before a delete, on a node whose clock runs ahead, carries a time after
+// the delete's receipt: against an announced tombstone a live write applies
+// only when it was read more than the allowance after it. A tombstone this
+// engine concluded from its own reads keeps the strict rule, so a record
+// wrongly seen as gone comes back on the next read.
+func TestAnAnnouncedDeletionIsAsHardToUndoAsToRefuse(t *testing.T) {
+	const gid = "gid://shopify/Order/1"
+	receipt := at("10:00:00").Add(400 * time.Millisecond)
+	for _, tc := range []struct {
+		name      string
+		announced bool
+		after     time.Duration
+		back      bool
+	}{
+		{"announced, a read two seconds after", true, 2 * time.Second, false},
+		{"announced, a read ninety seconds after", true, 90 * time.Second, true},
+		{"not announced, a read two seconds after", false, 2 * time.Second, true},
+		{"not announced, a read ninety seconds after", false, 90 * time.Second, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newMirrorRig(t)
+			r.now = at("10:05:00")
+			r.held("order", gid, "2026-08-23T09:00:00Z", at("09:30:00"))
+			if tc.announced {
+				del := request("orders/delete", gid, "wh-del", at("09:59:59"))
+				del.ReceivedAt = receipt
+				r.deliver(t, del)
+			} else {
+				r.apply(t, []memqlsync.MirrorWrite{tombstone("order", testStoreID, gid, receipt)})
+			}
+			if r.row("order", gid)["deleted"] != true {
+				t.Fatal("the tombstone did not land, so this test proves nothing")
+			}
+			live := mapObject(generated.Types["order"], testStoreID, map[string]any{"id": gid, "name": "#1001", "updatedAt": "2026-08-23T09:00:00Z"}, "", receipt.Add(tc.after))
+			r.apply(t, live[:1])
+			if back := r.row("order", gid)["deleted"] != true; back != tc.back {
+				t.Errorf("came back = %t, want %t", back, tc.back)
+			}
+		})
+	}
+	t.Run("a bulk line whose export started before an announced tombstone", func(t *testing.T) {
+		r := newMirrorRig(t)
+		r.now = at("09:59:00")
+		r.held("order", gid, "2026-08-23T09:00:00Z", at("09:30:00"))
+		cursor := r.exportStarted(t, "order")
+		r.now = at("10:05:00")
+		del := request("orders/delete", gid, "wh-del", at("09:59:59"))
+		del.ReceivedAt = receipt
+		r.deliver(t, del)
+		r.now = at("10:10:00")
+		r.exportStreamed(t, "order", cursor, orderLines("2026-08-23T09:00:00Z", 1)...)
+		if r.row("order", gid)["deleted"] != true {
+			t.Error("a line from an export started before the announced deletion brought the order back")
+		}
+	})
 }

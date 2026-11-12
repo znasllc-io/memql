@@ -34,8 +34,9 @@ concept refund {
   gid        string!
   /// The ORIGIN's version. A write whose updatedAt is older than the stored one is refused as stale.
   updatedAt  datetime!
-  /// Where updatedAt came from: "origin", Shopify's own version; or "read", a time MemQL read Shopify -- for a row
-  /// Shopify publishes no version for, and for a tombstone, whose standing is when it was read (syncedAt), not a version.
+  /// Where updatedAt came from: "origin", Shopify's own version; "read", a time MemQL read Shopify -- for a row
+  /// Shopify publishes no version for, and for a tombstone MemQL concluded from its reads, whose standing is when it was
+  /// read (syncedAt), not a version; or "announced", a tombstone of a delete Shopify sent, whose standing is its receipt.
   /// Counted only beside versionReadAt equal to syncedAt; otherwise the row was written before every write said, and the
   /// guard reads it as holding no version.
   versionSource string

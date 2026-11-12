@@ -179,6 +179,12 @@ type InboundRequest struct {
 	// connector that needs a second answer before it acts on one -- a record
 	// the origin answers nothing for -- reads it here.
 	Attempts int
+	// AnsweredNothingBefore says the previous try of this delivery ended in
+	// ErrAnsweredNothing: the origin answered cleanly that it has no record
+	// the mirror holds. A try that finds the same is the second answer in a
+	// row, and a deletion. False on a first try, and on the first try after
+	// an operator put the delivery back in line.
+	AnsweredNothingBefore bool
 }
 
 // MirrorWrite is one row Apply wants written into a mirror. The runtime

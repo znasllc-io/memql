@@ -46,6 +46,8 @@ func TestTheGuardJudgesExistenceByReadTimeAndOrderByVersion(t *testing.T) {
 		{"the same version, read later", live(VersionFromOrigin, "2026-08-23T09:00:00Z", read("10:00:00")), live(VersionFromOrigin, "2026-08-23T09:00:00Z", read("10:01:00")), false},
 		{"a row from before the rule, an older tombstone", Stamp{Held: true, ReadAt: read("10:00:00")}, gone(read("09:59:00")), true},
 		{"a row from before the rule, a newer tombstone", Stamp{Held: true, ReadAt: read("10:00:00")}, gone(read("10:01:00")), false},
+		{"live over an announced tombstone, read inside the allowance", announced(read("10:00:00")), live(VersionFromOrigin, "2026-08-23T09:00:00Z", read("10:00:02")), true},
+		{"live over an announced tombstone, read past the allowance", announced(read("10:00:00")), live(VersionFromOrigin, "2026-08-23T09:00:00Z", read("10:01:30")), false},
 		{"a row from before the rule, any live write", Stamp{Held: true, ReadAt: read("10:00:00")}, live(VersionFromOrigin, "2026-08-20T00:00:00Z", read("09:00:00")), false},
 	}
 	for _, tc := range cases {
@@ -70,5 +72,17 @@ func TestAMarkerCountsOnlyBesideItsOwnReadTime(t *testing.T) {
 	retired := map[string]any{"deleted": true, "syncedAt": "2026-08-23T12:00:00Z"}
 	if st := StoredStamp(spec, retired); !st.Held || !st.Retired || st.ReadAt != "2026-08-23T12:00:00Z" {
 		t.Errorf("an unmarked tombstone reads %+v, want its read time kept", st)
+	}
+}
+
+// A stored tombstone is announced when its paired marker says so.
+func TestAStoredTombstoneSaysWhetherItWasAnnounced(t *testing.T) {
+	spec := DomainSpec{VersionField: "updatedAt", VersionSourceField: "versionSource", ReadAtField: "syncedAt", VersionReadAtField: "versionReadAt"}
+	at := ReadTime(time.Date(2026, 8, 23, 10, 0, 0, 0, time.UTC))
+	for source, want := range map[string]bool{VersionFromAnnouncement: true, VersionFromRead: false} {
+		row := map[string]any{"deleted": true, "updatedAt": "2026-08-23T10:00:00Z", "versionSource": source, "syncedAt": at, "versionReadAt": at}
+		if st := StoredStamp(spec, row); st.Announced != want || !st.Retired {
+			t.Errorf("a tombstone marked %q reads %+v, want announced %t", source, st, want)
+		}
 	}
 }

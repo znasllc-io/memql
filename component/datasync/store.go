@@ -234,6 +234,7 @@ func stagedFromRow(row map[string]any, requestID string) StagedRequest {
 		SignatureVerified: boolField(row, "signatureVerified"),
 		Attempts:          intField(row, "attempts"),
 		Status:            argString(row, "status"),
+		LastError:         argString(row, "lastError"),
 		Version:           timeField(row, "createdAt"),
 	}
 }

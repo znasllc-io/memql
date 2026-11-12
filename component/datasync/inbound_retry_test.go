@@ -624,3 +624,42 @@ func TestTheConnectorIsToldWhichTryThisIs(t *testing.T) {
 		}
 	}
 }
+
+// THE NEXT TRY IS TOLD WHEN THE LAST ONE ANSWERED NOTHING. A connector that
+// fails a delivery with memqlsync.ErrAnsweredNothing -- the origin answered
+// cleanly that it has no record the mirror holds -- has it stamped like any
+// failure worth another try, and the try after it is handed
+// AnsweredNothingBefore, read from the stored failure. Any other last failure,
+// or a delivery an operator put back in line (no tries counted), is not.
+func TestTheNextTryIsToldWhenTheLastOneAnsweredNothing(t *testing.T) {
+	engine := newFakeEngine()
+	c := &fakeConnector{name: "shopify", applyErr: memqlsync.AnsweredNothing("shopify", "gid://shopify/Order/1")}
+	d := retryDispatcher(engine, newFakeWriter(), c)
+	_, _ = d.DispatchStaged(context.Background(), stagedFailure("req-1", 0))
+	stamp := onlyStamp(t, engine)
+	lastError, _ := stamp["lastError"].(string)
+	if stamp["attempts"] != 1 || clearsNextAttempt(stamp) || !memqlsync.AnsweredNothingBefore(lastError) {
+		t.Fatalf("stamped %v, want a failure worth another try whose text names it", stamp)
+	}
+	for _, tc := range []struct {
+		name      string
+		attempts  int
+		lastError string
+		want      bool
+	}{
+		{"after an answer of nothing", 1, lastError, true},
+		{"after a throttle", 2, "shopify admin: HTTP 503", false},
+		{"put back in line by an operator", 0, lastError, false},
+		{"a first try", 0, "", false},
+	} {
+		engine := newFakeEngine()
+		c := &fakeConnector{name: "shopify"}
+		d := retryDispatcher(engine, newFakeWriter(), c)
+		staged := stagedFailure("req-1", tc.attempts)
+		staged.LastError = tc.lastError
+		_, _ = d.DispatchStaged(context.Background(), staged)
+		if len(c.applied) != 1 || c.applied[0].AnsweredNothingBefore != tc.want {
+			t.Errorf("%s: AnsweredNothingBefore = %v, want %t", tc.name, c.applied, tc.want)
+		}
+	}
+}

@@ -26,6 +26,9 @@ const (
 	// row the origin publishes no version for, and for a tombstone, whose
 	// standing is its read time (Refuses), not a version.
 	VersionFromRead = "read"
+	// VersionFromAnnouncement: a tombstone the origin announced (a delete
+	// event), whose standing is its receipt (Refuses).
+	VersionFromAnnouncement = "announced"
 )
 
 // Stamp is what the guard knows of one side of a write: the row MemQL holds,
@@ -43,8 +46,9 @@ type Stamp struct {
 	Version string
 	// ReadAt is when the origin was read for it (ReadTime), "" when unknown.
 	ReadAt string
-	// Announced is a write's retirement the origin announced
-	// (MirrorWrite.Announced).
+	// Announced is a retirement the origin announced: on a write,
+	// MirrorWrite.Announced; on a stored tombstone, its paired marker
+	// VersionFromAnnouncement.
 	Announced bool
 }
 
@@ -94,6 +98,7 @@ func StoredStamp(spec DomainSpec, payload map[string]any) Stamp {
 		return out
 	}
 	out.Source, out.Version = source, field(payload, spec.VersionField)
+	out.Announced = out.Retired && source == VersionFromAnnouncement
 	return out
 }
 
@@ -122,6 +127,11 @@ func WriteStamp(spec DomainSpec, w MirrorWrite) Stamp {
 //     time the origin was last read for that row -- or, for a deletion the
 //     origin announced, unless the row was read more than
 //     AnnouncedRetireAllowance after the announcement's receipt;
+//   - a live write over an ANNOUNCED tombstone applies only when it was read
+//     more than AnnouncedRetireAllowance after the tombstone's time: a read
+//     just before the delete on a node whose clock runs ahead carries a time
+//     after its receipt, and an announced deletion is as hard to undo as it
+//     is to refuse;
 //   - a tombstone over a tombstone: the later time wins, and an earlier or
 //     equal one writes nothing, since it changes nothing.
 //
@@ -139,6 +149,9 @@ func Refuses(stored, incoming Stamp) bool {
 	if (stored.Retired || incoming.Retired) && stored.ReadAt != "" {
 		if incoming.Announced && !stored.Retired {
 			return readAfterBy(stored.ReadAt, incoming.ReadAt, AnnouncedRetireAllowance)
+		}
+		if stored.Announced && !incoming.Retired {
+			return !readAfterBy(incoming.ReadAt, stored.ReadAt, AnnouncedRetireAllowance)
 		}
 		return !readAfter(incoming.ReadAt, stored.ReadAt)
 	}

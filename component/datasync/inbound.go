@@ -226,6 +226,8 @@ type StagedRequest struct {
 	// Status is the row's handling status as read: `received` until the row
 	// is worked.
 	Status string
+	// LastError is the failure the last try recorded, "" for none.
+	LastError string
 	// Version is the stored version's time (row.createdAt), the witness the
 	// retry pass's claim is fenced on.
 	Version time.Time
@@ -288,6 +290,11 @@ func (d *Dispatcher) DispatchStaged(ctx context.Context, staged StagedRequest) (
 		d.stampFailed(OperatorContext(ctx), req.RequestId, staged.Attempts, reason, false)
 		return DispatchResult{Handled: true}, fmt.Errorf("datasync: %s", reason)
 	}
+	// The previous try ended in a clean answer of nothing for a record the
+	// mirror holds: recognised by its stored text, which only
+	// memqlsync.ErrAnsweredNothing writes. A delivery an operator put back in
+	// line has no tries counted, and its count of answers starts again.
+	req.AnsweredNothingBefore = staged.Attempts > 0 && memqlsync.AnsweredNothingBefore(staged.LastError)
 	return d.dispatchTo(ctx, connector, req, staged.Attempts)
 }
 
