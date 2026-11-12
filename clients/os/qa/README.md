@@ -317,11 +317,16 @@ A storefront's Store statistics (`qa/storeStatisticsScenes.tsx`, in the main
 harness): `view=storefront-with-store-statistics` (the button after
 Statistics), `storefront-without-sales` (no button without the sales part),
 `storefront-draft-store-statistics` (a draft: the button after Logs), then the
-page's head and context: `store-statistics` (two stores, the Destination
-control, the tax and older-orders lines), `store-statistics-both` (one store
-on both destinations), `store-statistics-testing` (only Testing has a store),
-`store-statistics-no-zone` ("Days in UTC"), `store-statistics-starting` (no
-row yet), `store-statistics-pending` and `store-statistics-refused`.
+page, one view per state: `store-statistics` (a full week: figures, chart and
+every list), `store-statistics-products` (All products pressed),
+`-two-stores` (the Destination control), `-both` (one store on both
+destinations), `-development` (only Testing has a store), `-paused`,
+`-frozen` (as of the last clear run), `-blocked` (no figure can be given),
+`-current-reason`, `-unknown`, `-starting`, `-purging`, `-rebuilding`,
+`-refunds-unread`, `-no-currency`, `-no-zone`, `-zone-not-loaded` ("Days in
+UTC"), `-empty`, `-below-zero`, `-pending` and `-refused`, each prefixed
+`store-statistics`. Check the eight figures as two rows of four, and as four
+rows of two at `width=narrow`.
 
 ## GitHub repository creation
 
