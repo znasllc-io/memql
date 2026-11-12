@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
+	"testing"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -32,6 +34,16 @@ import (
 // the run's error joins every failure, so the automation's run says it
 // failed. errRebuilt is no failure: the store was rebuilt under its walk, and
 // the next run walks it under the new generation.
+//
+// # Who is wholesale
+//
+// A run asks wholesaleFor once, after it has listed the stores and before it
+// rolls the first, for every store it is about to roll, and hands each store's
+// walk that store's own judgement (wholesaleState.judge): the walk folds every
+// order it reads with it. When wholesaleFor cannot answer, the run answers
+// that error and walks no store: a store walked with "nobody is wholesale"
+// would write its granted buyers' new orders retail, and nothing would read
+// them again until the next change of the granted set.
 //
 // # The reads are called from here, never as steps
 //
@@ -76,6 +88,14 @@ const storesRead = "paginate(query storeStatisticsStores(), %d)"
 // Here beside storesRead, in the file that stamps the reads' origin
 // (walkContext), for the same reason: test/dslconformance sees the call.
 const shopRead = "query storeStatisticsShop(storeId: %s)"
+
+// onlyStoresForTests narrows the stores a run lists, in a test binary and
+// nowhere else: this package's harness sets it to the stores its tests seeded,
+// so a store another package's test left in the shared database is not walked
+// by every run here (harness_db_test.go, seededStores). listStores reads it
+// only when testing.Testing() is true, which it is in no binary but the one
+// `go test` builds, so production code setting it would narrow nothing.
+var onlyStoresForTests func(id string) bool
 
 // maxStorePages bounds the stores read: a cursor that never ends is an error,
 // never a loop.
@@ -130,10 +150,17 @@ func runRollup(ctx context.Context, i *Integration, now time.Time) (RollupReport
 	}
 	rep.Stores = len(stores)
 
+	// The wholesale state, once a run, for the stores the run rolls. See
+	// "Who is wholesale".
+	wholesale, err := i.wholesaleStates(ctx, stores)
+	if err != nil {
+		return rep, err
+	}
+
 	var failures []error
 	for _, store := range stores {
 		id := store["id"].(string)
-		if err := i.rollStore(ctx, db, store, now, &rep); err != nil && !errors.Is(err, errRebuilt) {
+		if err := i.rollStore(ctx, db, store, now, wholesale[id].judge(), &rep); err != nil && !errors.Is(err, errRebuilt) {
 			i.logger.Warn("Store statistics for a store were not kept this run; the next run carries on",
 				"component", "storestats", "storeId", id, "error", err)
 			failures = append(failures, &storeFailure{StoreID: id, Err: err})
@@ -143,7 +170,7 @@ func runRollup(ctx context.Context, i *Integration, now time.Time) (RollupReport
 }
 
 // rollStore is one store's turn.
-func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[string]any, now time.Time, rep *RollupReport) error {
+func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[string]any, now time.Time, wholesale func(email string) bool, rep *RollupReport) error {
 	id := store["id"].(string)
 	// A store whose data was removed is given no new row (store.go).
 	if !storeDataRemoved(store) {
@@ -175,7 +202,7 @@ func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[strin
 		return err
 	}
 	if i.walkStore != nil {
-		if err := i.walkStore(ctx, store, generation, now, rep); err != nil {
+		if err := i.walkStore(ctx, store, generation, now, wholesale, rep); err != nil {
 			return err
 		}
 	}
@@ -183,6 +210,39 @@ func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[strin
 	return writeTx(ctx, db, id, generation, func(ctx context.Context, tx bun.Tx) error {
 		return clearRebuilding(ctx, tx, id, now)
 	})
+}
+
+// wholesaleStates asks wholesaleFor once for every store the run rolls. A nil
+// wholesaleFor, and a run with no store, ask nothing: no store is wholesale.
+// An error is the run's: see "Who is wholesale".
+func (i *Integration) wholesaleStates(ctx context.Context, stores []map[string]any) (map[string]wholesaleState, error) {
+	if i.wholesaleFor == nil || len(stores) == 0 {
+		return nil, nil
+	}
+	ids := make([]string, len(stores))
+	for n, store := range stores {
+		ids[n] = store["id"].(string)
+	}
+	states, err := i.wholesaleFor(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("read the stores' wholesale state, so no store is walked this run: %w", err)
+	}
+	return states, nil
+}
+
+// foldEmail is an address as a granted set holds it: trimmed and in lower
+// case.
+func foldEmail(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+
+// judge is the store's wholesale judgement for this run: an address is
+// wholesale when the store is enabled and the folded address is granted. A
+// blank address is never wholesale, nor is any address of a store that is
+// not enabled or that wholesaleFor said nothing of (the zero state).
+func (s wholesaleState) judge() func(email string) bool {
+	return func(email string) bool {
+		folded := foldEmail(email)
+		return s.Enabled && folded != "" && s.Granted[folded]
+	}
 }
 
 // listStores reads every page of the stores read and answers each store once,
@@ -210,6 +270,9 @@ func listStores(ctx context.Context, engine Engine) ([]map[string]any, error) {
 			raw, _ := row["id"].(string)
 			id := memql.BareShortId(raw)
 			if id == "" {
+				continue
+			}
+			if testing.Testing() && onlyStoresForTests != nil && !onlyStoresForTests(id) {
 				continue
 			}
 			row["id"] = id

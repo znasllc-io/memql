@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -42,6 +42,23 @@ type wholesaleState struct {
 	Digest  string
 }
 
+// A RUN HAS A DEADLINE OF ITS OWN. The brief gives no budget for a whole run,
+// so it is the schedule's period, a minute, less a margin: a run that is still
+// going when the next minute fires makes that one stand down, and a run stuck
+// for good -- a read that never answers, a seam deaf to its context -- would
+// make every later minute stand down with it. At runDeadline the run's context
+// is cancelled; a run that has not answered runUnwind later is left behind,
+// its flag released, and the next minute runs. Variables so a test can make a
+// run outlast them. Ten seconds is the margin: the unwind and its log line, and
+// a minute's clock skew between ticks.
+var (
+	runDeadline = 50 * time.Second
+	runUnwind   = 5 * time.Second
+)
+
+// aRun is one run of the rollup on this node, held while it runs.
+type aRun struct{ started time.Time }
+
 // Integration exposes the rollup.
 type Integration struct {
 	engine Engine
@@ -57,19 +74,20 @@ type Integration struct {
 	// nil walkStore walks nothing, and a nil wholesaleFor means no store has
 	// the wholesale pack enabled. A test sets its own.
 	storeState   func(ctx context.Context, store map[string]any, now time.Time) (outcome string, err error)
-	walkStore    func(ctx context.Context, store map[string]any, generation int64, now time.Time, report *RollupReport) error
+	walkStore    func(ctx context.Context, store map[string]any, generation int64, now time.Time, wholesale func(email string) bool, report *RollupReport) error
 	wholesaleFor func(ctx context.Context, storeIDs []string) (map[string]wholesaleState, error)
 	// verdictOf reads a store's verdict; NewIntegration sets it to askVerdict,
 	// which asks the mirror's builtin (store.go). keepStore reads a nil one as
 	// a verdict that cannot be read.
 	verdictOf func(ctx context.Context, storeID string) (storeVerdict, error)
 
-	// rollupRunning keeps one rollup per process, the email statistics
-	// rollup's guard: a run slower than the schedule must not have the next
-	// one start beside it and walk the same stores again. Two nodes need no
-	// such guard, because every write takes the one lock and checks the
-	// store's generation (tx.go).
-	rollupRunning atomic.Bool
+	// running is the run under way on this node, or nil: one rollup per
+	// process, the email statistics rollup's guard. A run slower than the
+	// schedule must not have the next one start beside it and walk the same
+	// stores again. Two nodes need no such guard, because every write takes
+	// the one lock and checks the store's generation (tx.go).
+	runningMu sync.Mutex
+	running   *aRun
 }
 
 // NewIntegration wires the handles. The db getter is resolved at call time,
@@ -79,9 +97,14 @@ func NewIntegration(engine Engine, bunDB func() *bun.DB, logger *slog.Logger) *I
 	if logger == nil {
 		logger = slog.Default()
 	}
-	i := &Integration{engine: engine, bunDB: bunDB, logger: logger}
-	i.storeState = i.keepStore
-	i.verdictOf = i.askVerdict
+	i := &Integration{
+		engine: engine,
+		bunDB:  bunDB,
+		logger: logger,
+	}
+	// One seam a line, each named for the task that sets it.
+	i.storeState = i.keepStore // Task 14: what is kept about each store (store.go)
+	i.verdictOf = i.askVerdict // Task 14: a store's verdict, asked of the mirror's builtin (store.go)
 	return i
 }
 
@@ -115,7 +138,9 @@ var errNotThePrincipal = errors.New("store statistics rollup requires the engine
 // refused, with one sentence, before anything is read or written.
 //
 // A SECOND RUN IN THIS PROCESS STANDS DOWN: it answers no node and no error,
-// and says so at Debug.
+// and says so at Info with the time the running one started, so a run that
+// holds the node for minute after minute is seen. A run has a deadline of its
+// own (runDeadline).
 //
 // THE REPORT IS COUNTS. The engine's work journal keeps what an automation
 // step answers, and the store statistics reads carry a buyer's email on two
@@ -126,18 +151,18 @@ func (i *Integration) handleRollup(ctx context.Context, _ map[string]any, _ int)
 	if !ok || actor == nil || actor.UserId != rollupPrincipal || !actor.IsClusterOwner() || !auth.OriginFromContext(ctx).IsInternal() {
 		return nil, errNotThePrincipal
 	}
-	if !i.rollupRunning.CompareAndSwap(false, true) {
-		i.logger.Debug("Store statistics rollup stood down: another run is under way on this node",
-			"component", "storestats")
+	run, standing := i.startRun()
+	if run == nil {
+		i.logger.Info("Store statistics rollup stood down: a run is still under way on this node",
+			"component", "storestats", "startedAt", standing.started.UTC().Format(time.RFC3339Nano))
 		return nil, nil
 	}
-	defer i.rollupRunning.Store(false)
 
 	now := time.Now()
 	if i.now != nil {
 		now = i.now()
 	}
-	rep, err := runRollup(ctx, i, now)
+	rep, err := i.runWithin(ctx, run, now)
 	// A routine run is the same line every minute, so it is Debug; a store
 	// behind, rebuilt or removed is worth a line at Info. Each store's failure
 	// has its own Warn (rollup.go).
@@ -163,4 +188,60 @@ func (i *Integration) handleRollup(ctx context.Context, _ map[string]any, _ int)
 		CreatedAt: now.UTC(),
 		Payload:   payload,
 	}}, nil
+}
+
+// startRun takes the node's one run, or answers the run that holds it.
+func (i *Integration) startRun() (run, standing *aRun) {
+	i.runningMu.Lock()
+	defer i.runningMu.Unlock()
+	if i.running != nil {
+		return nil, i.running
+	}
+	i.running = &aRun{started: time.Now()}
+	return i.running, nil
+}
+
+// endRun gives the node's run back, when it is still this one's.
+func (i *Integration) endRun(run *aRun) {
+	i.runningMu.Lock()
+	defer i.runningMu.Unlock()
+	if i.running == run {
+		i.running = nil
+	}
+}
+
+// runWithin runs the rollup under its deadline. See runDeadline.
+func (i *Integration) runWithin(ctx context.Context, run *aRun, now time.Time) (RollupReport, error) {
+	ctx, cancel := context.WithTimeout(ctx, runDeadline)
+	type result struct {
+		rep RollupReport
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		// The run's context is cancelled once it has answered, or once it is
+		// left behind: never before its deadline.
+		defer cancel()
+		rep, err := runRollup(ctx, i, now)
+		done <- result{rep, err}
+	}()
+	select {
+	case r := <-done:
+		i.endRun(run)
+		return r.rep, r.err
+	case <-ctx.Done():
+	}
+	select {
+	case r := <-done:
+		i.endRun(run)
+		return r.rep, r.err
+	case <-time.After(runUnwind):
+	}
+	// Left behind: the next minute runs. What the stuck run still writes
+	// goes through writeTx like any write, under the lock and the store's
+	// generation.
+	i.endRun(run)
+	i.logger.Warn("Store statistics rollup did not end within its deadline; it was cancelled and the next run will not wait for it",
+		"component", "storestats", "deadline", runDeadline.String(), "startedAt", run.started.UTC().Format(time.RFC3339Nano))
+	return RollupReport{Rows: map[string]int{}}, fmt.Errorf("store statistics rollup: the run did not end within %s, and was cancelled", runDeadline)
 }

@@ -113,6 +113,9 @@ func statsEngine(t *testing.T) (*memql.MemQLEngine, *bun.DB) {
 			return
 		}
 		s.eng, s.db = eng, db
+		// A run lists only the stores this package's tests seeded: see
+		// seededStores.
+		onlyStoresForTests = seededStores.has
 	})
 	if s.pingErr != nil {
 		dbtest.Unreachable(t, "the store statistics", dbtest.DSN(), s.pingErr)
@@ -169,7 +172,9 @@ func newStore(t *testing.T) string {
 		t.FailNow()
 	}
 	storeID := fmt.Sprintf("dbtest-storestats-%d", time.Now().UnixNano())
+	seededStores.add(storeID)
 	t.Cleanup(func() {
+		seededStores.remove(storeID)
 		ctx := context.Background()
 		_, _ = db.ExecContext(ctx, `DELETE FROM store_sales_store WHERE store_id = ?`, storeID)
 		_, _ = db.ExecContext(ctx, `DELETE FROM "MemoryNodes" WHERE concept = 'v1:shopify:store' AND id = ?`, "v1:shopify:store:"+storeID)
@@ -352,4 +357,84 @@ func answerVerdict(i *Integration, reply map[string]any) {
 		}
 		return verdictFromReply(reply)
 	}
+}
+
+// seededStores is every store a test of this package made with newStore and
+// has not yet cleaned up. THE HARNESS RUNS AGAINST ITS OWN STORES: the
+// database is shared, and a store another package's test left behind --
+// one whose verdict cannot be read, whose walk fails -- would otherwise be
+// walked by every run here and fail this package's tests. statsEngine sets
+// onlyStoresForTests to its has; the production code reads that variable only
+// when testing.Testing() is true, so no binary but a test binary is narrowed
+// by it (rollup.go). The tests of this package run one at a time, so the set
+// is the running test's stores.
+var seededStores = &storeSet{ids: map[string]bool{}}
+
+type storeSet struct {
+	mu  sync.Mutex
+	ids map[string]bool
+}
+
+func (s *storeSet) add(id string)    { s.mu.Lock(); s.ids[id] = true; s.mu.Unlock() }
+func (s *storeSet) remove(id string) { s.mu.Lock(); delete(s.ids, id); s.mu.Unlock() }
+func (s *storeSet) has(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ids[id]
+}
+
+// foreignStore writes a store as another package's test would leave one: a
+// store row this package's tests did not seed. It is deleted when the test
+// ends.
+func foreignStore(t *testing.T) string {
+	t.Helper()
+	eng, db := statsEngine(t)
+	if eng == nil {
+		t.FailNow()
+	}
+	storeID := fmt.Sprintf("dbtest-foreign-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = db.ExecContext(ctx, `DELETE FROM store_sales_store WHERE store_id = ?`, storeID)
+		_, _ = db.ExecContext(ctx, `DELETE FROM "MemoryNodes" WHERE concept = 'v1:shopify:store' AND id = ?`, "v1:shopify:store:"+storeID)
+	})
+	call := fmt.Sprintf(`mutation createStore(storeId: %s, domain: %s, adminTokenRef: "test-admin", apiVersion: "2026-07")`,
+		langparser.QuoteString(storeID), langparser.QuoteString(storeID+".myshopify.com"))
+	if _, err := eng.Execute(ownerCtx(), call); err != nil {
+		t.Fatalf("write the foreign store %s: %v", storeID, err)
+	}
+	return storeID
+}
+
+// captureLogs gives i a logger that keeps every line at Debug and above, and
+// answers a function that hands back the lines written so far, each as the
+// JSON the handler wrote.
+func captureLogs(i *Integration) func() []string {
+	w := &lineBuffer{}
+	i.logger = slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	return w.lines
+}
+
+type lineBuffer struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
+func (b *lineBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf = append(b.buf, p...)
+	return len(p), nil
+}
+
+func (b *lineBuffer) lines() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []string
+	for _, l := range strings.Split(string(b.buf), "\n") {
+		if strings.TrimSpace(l) != "" {
+			out = append(out, l)
+		}
+	}
+	return out
 }

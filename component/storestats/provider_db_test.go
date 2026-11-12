@@ -23,10 +23,9 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/database/dbtest"
-	langparser "github.com/znasllc-io/memql/component/language/parser"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/repowalk"
-	"github.com/znasllc-io/memql/integrations/shopify"
 )
 
 // provider_db_test.go -- the provider, its rollup builtin and the one way the
@@ -202,7 +201,7 @@ type walkRecorder struct {
 	fail        func(storeID string) error
 }
 
-func (w *walkRecorder) walk(_ context.Context, store map[string]any, generation int64, _ time.Time, _ *RollupReport) error {
+func (w *walkRecorder) walk(_ context.Context, store map[string]any, generation int64, _ time.Time, _ func(string) bool, _ *RollupReport) error {
 	id, _ := store["id"].(string)
 	w.mu.Lock()
 	w.stores = append(w.stores, id)
@@ -397,7 +396,7 @@ func TestOnlyTheRollupsPrincipalRunsIt(t *testing.T) {
 	var touched atomic.Bool
 	refusing := NewIntegration(engine, func() *bun.DB { touched.Store(true); return nil }, quietLogger())
 	walked := false
-	refusing.walkStore = func(context.Context, map[string]any, int64, time.Time, *RollupReport) error {
+	refusing.walkStore = func(context.Context, map[string]any, int64, time.Time, func(string) bool, *RollupReport) error {
 		walked = true
 		return nil
 	}
@@ -453,7 +452,7 @@ func TestTwoRunsAtOnceInOneProcessAreOne(t *testing.T) {
 	inside := make(chan struct{})
 	release := make(chan struct{})
 	var walks, held atomic.Int32
-	i.walkStore = func(_ context.Context, store map[string]any, _ int64, _ time.Time, _ *RollupReport) error {
+	i.walkStore = func(_ context.Context, store map[string]any, _ int64, _ time.Time, _ func(string) bool, _ *RollupReport) error {
 		walks.Add(1)
 		// Only the first walk of the test's store is held, so a second run
 		// that did not stand down is seen walking rather than hanging.
@@ -464,6 +463,8 @@ func TestTwoRunsAtOnceInOneProcessAreOne(t *testing.T) {
 		return nil
 	}
 	ctx := auth.ContextWithInternalOrigin(principalCtx(t, "storeStatisticsRollupSweep"))
+	logs := captureLogs(i)
+	firstBegan := time.Now()
 
 	type answer struct {
 		n   int
@@ -497,6 +498,9 @@ func TestTwoRunsAtOnceInOneProcessAreOne(t *testing.T) {
 	if err != nil || nodes != 0 {
 		t.Errorf("the second run answered %d nodes and error %v while the first ran, want it to stand down with neither", nodes, err)
 	}
+	if !stoodDownAtInfo(t, logs(), firstBegan) {
+		t.Errorf("the second run did not say at Info that it stood down, with when the running one started: %v", logs())
+	}
 	if walks.Load() != before {
 		t.Errorf("the second run walked %d stores while the first ran, want none", walks.Load()-before)
 	}
@@ -512,55 +516,255 @@ func TestTwoRunsAtOnceInOneProcessAreOne(t *testing.T) {
 	}
 }
 
-// THE REPORT HOLDS NOTHING OF A ROW. The engine's work journal keeps what the
-// automation's step answers, so the builtin answers counts: with a store whose
-// domain and name are recognisable, and an order of it whose email is, the
-// rendered report holds none of the three.
+// THE REPORT HOLDS NOTHING OF A ROW, AND NEITHER DOES THE LOG. The engine's
+// work journal keeps what the automation's step answers, and a node's log is
+// read by more people than a store's figures are. So with a store, its shop
+// row, and an order of it whose email, address and buyer are recognisable, a
+// real run -- the provider's own store state, and a walk that reads the
+// buyers read through walkSource and judges every row's email as the fold
+// does -- answers a report and writes log lines that hold none of them. The
+// walk is the test's because the fold is a later task's; the reads, the store
+// state, the report and the logger are the provider's own.
 func TestTheReportHoldsNothingDrawnFromARow(t *testing.T) {
-	eng, db := statsEngine(t)
+	i := testIntegration(t)
+	logs := captureLogs(i)
 	storeID := newStore(t)
-	email := fmt.Sprintf("statistics-buyer-%d@example.com", time.Now().UnixNano())
-	gid := fmt.Sprintf("gid://shopify/Order/%d", time.Now().UnixNano())
-	rowID := shopify.MirrorRowID(storeID, gid)
-	t.Cleanup(func() {
-		_, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept = 'v1:shopify:order' AND id = ?`, "v1:shopify:order:"+rowID)
+	shopRow(t, storeID, "EUR", "Europe/Madrid", false)
+	n := time.Now().UnixNano()
+	email := fmt.Sprintf("statistics-buyer-%d@example.com", n)
+	address := fmt.Sprintf("%d Recognisable Lane", n)
+	buyerName := fmt.Sprintf("Recognisable Buyer %d", n)
+	buyer := fmt.Sprintf("gid://shopify/Customer/%d", n)
+	gid := fmt.Sprintf("gid://shopify/Order/%d", n)
+	mirror(t, "v1:shopify:order", storeID, gid, map[string]any{
+		"email": email, "name": "#1001", "currencyCode": "EUR", "customerGid": buyer,
+		"processedAt":     time.Now().UTC().Format(time.RFC3339),
+		"shippingAddress": map[string]any{"address1": address, "name": buyerName, "city": "Example City"},
 	})
-	payload, _ := json.Marshal(map[string]any{
-		"storeId": storeID, "gid": gid, "deleted": false, "email": email, "name": "#1001",
-		"currencyCode": "EUR", "processedAt": time.Now().UTC().Format(time.RFC3339),
-		"updatedAt": time.Now().UTC().Format(time.RFC3339), "syncedAt": time.Now().UTC().Format(time.RFC3339),
-	})
-	connector := auth.ContextWithInternalOrigin(auth.ContextWithConnectorActor(context.Background(), "shopify"))
-	if _, err := eng.Execute(connector, fmt.Sprintf(`insert("v1:shopify:order", id=%s, payload=%s)`, langparser.QuoteString(rowID), payload)); err != nil {
-		t.Fatalf("write the order: %v", err)
+	i.wholesaleFor = func(context.Context, []string) (map[string]wholesaleState, error) {
+		return map[string]wholesaleState{storeID: {Enabled: true, Granted: map[string]bool{email: true}}}, nil
 	}
-	// The order is there to be read, so a report that carried rows would
-	// carry it.
-	res, err := eng.Execute(auth.ContextWithInternalOrigin(principalCtx(t, "storeStatisticsRollupSweep")),
-		fmt.Sprintf(`query storeStatisticsOrderBuyers(storeId: %s, since: %s)`, langparser.QuoteString(storeID),
-			langparser.QuoteString(time.Now().UTC().Add(-time.Hour).Format(time.RFC3339))))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rows := memql.MaterializeRows(res); len(rows) != 1 || rows[0]["email"] != email {
-		t.Fatalf("the order's buyer read answered %v, want the order with its email", rows)
+	var read, wholesale int
+	i.walkStore = func(ctx context.Context, store map[string]any, _ int64, now time.Time, isWholesale func(string) bool, rep *RollupReport) error {
+		id, _ := store["id"].(string)
+		_, _, err := walkSource(ctx, i.engine, "storeStatisticsOrderBuyers", id, now.Add(-24*time.Hour), walkWindow{}, time.Now, maxPagesPerRun,
+			func(page walkPage) error {
+				for _, row := range page.Rows {
+					read++
+					rep.Rows[sourceOrder]++
+					if e, _ := row["email"].(string); isWholesale(e) {
+						wholesale++
+					}
+				}
+				return nil
+			})
+		return err
 	}
 
-	res, err = eng.Execute(auth.ContextWithInternalOrigin(principalCtx(t, "storeStatisticsRollupSweep")), "builtin storeStatisticsRollup()")
+	nodes, err := i.handleRollup(auth.ContextWithInternalOrigin(principalCtx(t, "storeStatisticsRollupSweep")), nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := json.Marshal(memql.MaterializeRows(res))
+	if len(nodes) != 1 {
+		t.Fatalf("the run answered %d nodes, want its report", len(nodes))
+	}
+	if read != 1 || wholesale != 1 {
+		t.Fatalf("the walk read %d rows and judged %d wholesale; want the order read and its buyer judged, or nothing below measures a leak", read, wholesale)
+	}
+	raw, err := json.Marshal(nodes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), `"stores"`) {
-		t.Fatalf("the builtin answered %s, not a report", raw)
+	if !strings.Contains(string(nodes[0].Payload), `"stores"`) {
+		t.Fatalf("the run answered %s, not a report", nodes[0].Payload)
 	}
-	for _, drawn := range []string{email, storeID + ".myshopify.com", "Store " + storeID, gid} {
-		if strings.Contains(string(raw), drawn) {
-			t.Errorf("the report %s holds %q, drawn from a row", raw, drawn)
+	drawn := []string{email, address, buyerName, buyer, gid, storeID + ".myshopify.com", "Store " + storeID, "Shop " + storeID}
+	for _, d := range drawn {
+		if strings.Contains(string(raw), d) || strings.Contains(string(nodes[0].Payload), d) {
+			t.Errorf("the report holds %q, drawn from a row: %s", d, nodes[0].Payload)
 		}
+	}
+	lines := logs()
+	if len(lines) == 0 {
+		t.Fatal("the run wrote no log line, so nothing below measures one")
+	}
+	for _, line := range lines {
+		for _, d := range drawn {
+			if strings.Contains(line, d) {
+				t.Errorf("a log line holds %q, drawn from a row: %s", d, line)
+			}
+		}
+	}
+}
+
+// THE HARNESS RUNS AGAINST ITS OWN STORES. A store another package's test
+// left in the shared database, whose walk would fail, changes nothing: the
+// run lists this test's store alone, walks it, and gives the other no row.
+func TestAStoreAnotherTestLeftChangesNothing(t *testing.T) {
+	i := testIntegration(t)
+	own := newStore(t)
+	foreign := foreignStore(t)
+	rec := &walkRecorder{fail: func(id string) error {
+		if id != own {
+			return errors.New("a store this test did not seed was walked")
+		}
+		return nil
+	}}
+	i.walkStore = rec.walk
+	rep, err := runRollup(principalCtx(t, "storeStatisticsRollupSweep"), i, time.Now())
+	if err != nil {
+		t.Fatalf("a store this test did not seed failed the run: %v", err)
+	}
+	if rec.count(own) != 1 || rec.count(foreign) != 0 || rep.Stores != 1 {
+		t.Errorf("the run listed %d stores, walked its own %d times and the other %d; want 1, once and never", rep.Stores, rec.count(own), rec.count(foreign))
+	}
+	if storeRow(t, foreign) != nil {
+		t.Error("the run gave a store this test did not seed its row")
+	}
+}
+
+// THE WHOLESALE STATE IS ASKED ONCE A RUN. wholesaleFor is called once, with
+// every store the run is about to roll, and each store is handed its own
+// judgement: an enabled store's granted buyer is wholesale, whatever the case
+// and spaces of the address; anybody else, a store that is not enabled and a
+// store wholesaleFor says nothing of answer false for every address. A nil
+// wholesaleFor is nobody wholesale.
+func TestTheWholesaleStateIsAskedOncePerRun(t *testing.T) {
+	i := testIntegration(t)
+	stores := []string{newStore(t), newStore(t), newStore(t)}
+	sort.Strings(stores)
+	calls := 0
+	var asked []string
+	i.wholesaleFor = func(_ context.Context, ids []string) (map[string]wholesaleState, error) {
+		calls++
+		asked = slices.Clone(ids)
+		granted := map[string]bool{"buyer@example.com": true}
+		return map[string]wholesaleState{
+			stores[0]: {Enabled: true, Granted: granted},
+			stores[1]: {Enabled: false, Granted: granted},
+		}, nil
+	}
+	judged := map[string][3]bool{}
+	i.walkStore = func(_ context.Context, store map[string]any, _ int64, _ time.Time, wholesale func(string) bool, _ *RollupReport) error {
+		id, _ := store["id"].(string)
+		judged[id] = [3]bool{wholesale(" Buyer@Example.COM "), wholesale("other@example.com"), wholesale("")}
+		return nil
+	}
+	if _, err := runRollup(principalCtx(t, "storeStatisticsRollupSweep"), i, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Errorf("wholesaleFor was asked %d times in one run, want once", calls)
+	}
+	if !slices.Equal(asked, stores) {
+		t.Errorf("wholesaleFor was asked for %v, want the stores the run rolls, %v", asked, stores)
+	}
+	for id, want := range map[string][3]bool{stores[0]: {true, false, false}, stores[1]: {}, stores[2]: {}} {
+		if judged[id] != want {
+			t.Errorf("store %s judged the granted buyer, another address and no address %v, want %v", id, judged[id], want)
+		}
+	}
+
+	i.wholesaleFor = nil
+	clear(judged)
+	if _, err := runRollup(principalCtx(t, "storeStatisticsRollupSweep"), i, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range stores {
+		if judged[id] != ([3]bool{}) {
+			t.Errorf("with no wholesaleFor, store %s judged %v, want nobody wholesale", id, judged[id])
+		}
+	}
+}
+
+// A WHOLESALE STATE THAT CANNOT BE READ ROLLS NO STORE. The brief is silent
+// on it, so no store's facts are folded under a judgement that would be
+// wrong: the run answers the error and walks no store.
+func TestAWholesaleStateThatCannotBeReadRollsNoStore(t *testing.T) {
+	i := testIntegration(t)
+	newStore(t)
+	i.wholesaleFor = func(context.Context, []string) (map[string]wholesaleState, error) {
+		return nil, errors.New("the wholesale settings could not be read")
+	}
+	walked := 0
+	i.walkStore = func(context.Context, map[string]any, int64, time.Time, func(string) bool, *RollupReport) error {
+		walked++
+		return nil
+	}
+	_, err := runRollup(principalCtx(t, "storeStatisticsRollupSweep"), i, time.Now())
+	if err == nil || !strings.Contains(err.Error(), "the wholesale settings could not be read") {
+		t.Errorf("the run answered %v, want the wholesale read's error", err)
+	}
+	if walked != 0 {
+		t.Errorf("the run walked %d stores with no wholesale judgement, want none", walked)
+	}
+}
+
+// lowerRunDeadline gives a run d before it is cancelled, and unwind after
+// that, for the rest of the test.
+func lowerRunDeadline(t *testing.T, d, unwind time.Duration) {
+	t.Helper()
+	wasD, wasU := runDeadline, runUnwind
+	runDeadline, runUnwind = d, unwind
+	t.Cleanup(func() { runDeadline, runUnwind = wasD, wasU })
+}
+
+// A RUN HAS A DEADLINE. A walk stuck past it, deaf to its context, does not
+// silence every later minute: the run answers an error that names the
+// deadline, its context is cancelled, and the next run is a run, not a stand
+// down.
+func TestARunThatOutlastsItsDeadlineIsCancelledAndTheNextRuns(t *testing.T) {
+	i := testIntegration(t)
+	newStore(t)
+	lowerRunDeadline(t, 300*time.Millisecond, 200*time.Millisecond)
+	release := make(chan struct{})
+	stuck := make(chan error, 1)
+	var calls atomic.Int32
+	i.walkStore = func(ctx context.Context, _ map[string]any, _ int64, _ time.Time, _ func(string) bool, _ *RollupReport) error {
+		if calls.Add(1) == 1 {
+			<-release
+			stuck <- ctx.Err()
+		}
+		return nil
+	}
+	ctx := auth.ContextWithInternalOrigin(principalCtx(t, "storeStatisticsRollupSweep"))
+	began := time.Now()
+	type answer struct {
+		nodes []memorynodes.MemoryNode
+		err   error
+	}
+	first := make(chan answer, 1)
+	go func() {
+		nodes, err := i.handleRollup(ctx, nil, 0)
+		first <- answer{nodes, err}
+	}()
+	var got answer
+	select {
+	case got = <-first:
+	case <-time.After(10 * time.Second):
+		close(release)
+		t.Fatal("a run stuck in its walk did not answer within ten seconds: it has no deadline")
+	}
+	nodes, err := got.nodes, got.err
+	if err == nil || nodes != nil || !strings.Contains(err.Error(), "did not end within") {
+		close(release)
+		t.Fatalf("a run stuck past its deadline answered %d nodes and error %v, want the deadline's error", len(nodes), err)
+	}
+	if took := time.Since(began); took > 10*time.Second {
+		t.Errorf("the stuck run answered after %s, want about its deadline", took)
+	}
+	nodes, err = i.handleRollup(ctx, nil, 0)
+	if err != nil || len(nodes) != 1 {
+		t.Errorf("the run after a stuck one answered %d nodes and error %v, want its report", len(nodes), err)
+	}
+	close(release)
+	select {
+	case cerr := <-stuck:
+		if !errors.Is(cerr, context.DeadlineExceeded) {
+			t.Errorf("the stuck walk's context ended with %v, want its deadline", cerr)
+		}
+	case <-time.After(10 * time.Second):
+		t.Error("the stuck walk never ended")
 	}
 }
 
@@ -623,4 +827,25 @@ func TestTheProviderOffersWhatItsBuiltinsName(t *testing.T) {
 	if _, ok := any(provider).(*Integration); !ok {
 		t.Errorf("the registered provider is %T, want this package's Integration", provider)
 	}
+}
+
+// stoodDownAtInfo reports whether a line says, at Info, that a run stood down,
+// with a startedAt no earlier than the running one began.
+func stoodDownAtInfo(t *testing.T, lines []string, began time.Time) bool {
+	t.Helper()
+	for _, line := range lines {
+		var rec map[string]any
+		if json.Unmarshal([]byte(line), &rec) != nil {
+			continue
+		}
+		msg, _ := rec["msg"].(string)
+		if rec["level"] != "INFO" || !strings.Contains(msg, "stood down") {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339Nano, fmt.Sprint(rec["startedAt"]))
+		if err == nil && !at.Before(began.Add(-time.Second)) && !at.After(time.Now()) {
+			return true
+		}
+	}
+	return false
 }
