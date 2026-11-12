@@ -32,6 +32,14 @@ import (
 // internal origin for exactly that one call, and the CALLER'S OWN ACTOR still
 // runs it, so the row gate still decides whether this caller may write this
 // row.
+//
+// # The stamp is the only way in
+//
+// Every concept the pack declares is @serverWritten (dsl/concepts.memql): a
+// write of any of its rows without internal origin -- the public insert()
+// included, which never consults a mutation's @serverOnly -- is refused by the
+// engine. So this writer is the one path that writes them, and only after the
+// builtin in front of it has judged the caller (server_written_db_test.go).
 
 type rowWriter interface {
 	Write(ctx context.Context, mutation string, args map[string]any) error

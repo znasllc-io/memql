@@ -8,14 +8,11 @@ package reviewspack_test
 // cannot reach, and all three are assumptions the rest of the epic rests on:
 //
 //	PROOF 1 -- THE SHOPPER NAMES NO ID AND THE ROW IS WRITTEN AT THE ONE THE
-//	  BFF STAMPED. `id` is among the names the shopper surface refuses as a
-//	  form field, so a shopper cannot choose where their row lands. What
-//	  supplies one is the submission id the bff mints per POST and stamps
-//	  beside storeId and siteId (design record 2026-09-21, D4) -- and the
-//	  row must be written AT it, because that is the id a client's
-//	  @shopperFormExtension relates its own row to. It used to be engine-
-//	  derived and therefore known to nobody, which is why an extension had
-//	  nothing to point at.
+//	  LINK DERIVES. `id` is among the names the shopper surface refuses as a
+//	  form field, so a shopper cannot choose where their row lands. The form's
+//	  construct is the pack's own Go (reviewsSubmitFromLink): it finds the
+//	  link by its token and writes the one review that link's id derives, so
+//	  an edit is the next version of the same row.
 //
 //	PROOF 2 -- A ROW WRITTEN UNDER ONE storeId IS INVISIBLE UNDER ANOTHER,
 //	  through the real query and the real row-authz gate rather than through
@@ -129,31 +126,26 @@ func asMerchant(userID string) context.Context {
 }
 
 func TestLiveE2E_TheShopperPathWritesAndScopesByStore(t *testing.T) {
-	eng := liveEngine(t)
+	eng := livePackEngine(t)
+	declareShopperSurface(t)
 	merchantA, merchantB, storeLive, storeDev, handle := runScope()
 
-	// ---- PROOF 1: a shopper write with NO id ------------------------------
+	// ---- PROOF 1: a buyer's post through the real form route --------------
 	//
-	// The arguments are exactly what component/server/shopper_handler.go
-	// builds: the pack's declared fields, plus the three it stamps --
-	// storeId, siteId and the submission id it mints for this POST -- under
-	// the site owner's actor.
-	write := func(ctx context.Context, storeID, handle, body, submissionID string) {
-		t.Helper()
-		call := `submitReview(authorEmail: "sam@example.com", authorName: "Sam", body: ` + quote(body) +
-			`, productHandle: ` + quote(handle) +
-			`, rating: 5, siteId: "site-reviews-e2e", storeId: ` + quote(storeID) +
-			`, submissionId: ` + quote(submissionID) + `)`
-		if _, err := eng.Execute(ctx, call); err != nil {
-			t.Fatalf("submitReview: %v\n  call: %s", err, call)
-		}
-	}
-	liveSubmission := "sub-live-" + handle
-	write(asMerchant(merchantA), storeLive, handle, "Live store review", liveSubmission)
-	write(asMerchant(merchantA), storeDev, handle, "Written while previewing", "sub-dev-"+handle)
+	// One merchant, two storefronts: the live store's and the development
+	// store's a candidate is previewed against. Each post goes through the
+	// handler exactly as the edge forwards it -- the site, the store it is
+	// bound to and the site's owner -- and names no id.
+	seedOwnerUser(t, eng, merchantA)
+	siteLive, siteDev := "site-"+storeLive, "site-"+storeDev
+	seedSite(t, eng, siteLive, merchantA, storeLive)
+	seedSite(t, eng, siteDev, merchantA, storeDev)
+	owner := siteOwnerOf(t, siteLive)
+	liveReview := reviewThroughLink(t, eng, siteLive, storeLive, owner, "request-live-"+handle, handle, "Live store review")
+	reviewThroughLink(t, eng, siteDev, storeDev, owner, "request-dev-"+handle, handle, "Written while previewing")
 
 	// ---- PROOF 2: storeId scopes the read ---------------------------------
-	live := rowsOf(t, eng, asMerchant(merchantA),
+	live := rowsOf(t, eng, asMerchant(owner),
 		`query reviewsForProduct(productHandle: `+quote(handle)+`, storeId: `+quote(storeLive)+`)`)
 	if len(live) != 1 {
 		t.Fatalf("the live store returned %d reviews, want exactly the one written against it "+
@@ -163,28 +155,16 @@ func TestLiveE2E_TheShopperPathWritesAndScopesByStore(t *testing.T) {
 		t.Fatalf("the live store returned %q", got)
 	}
 
-	dev := rowsOf(t, eng, asMerchant(merchantA),
+	dev := rowsOf(t, eng, asMerchant(owner),
 		`query reviewsForProduct(productHandle: `+quote(handle)+`, storeId: `+quote(storeDev)+`)`)
 	if len(dev) != 1 {
 		t.Fatalf("the development store returned %d reviews, want 1 -- the row must still be "+
 			"readable where it was written", len(dev))
 	}
 
-	// ---- PROOF 1 (continued): the row IS the submission -------------------
-	//
-	// Not merely "it has an id": it has THE id the bff stamped. That is the
-	// whole of what lets a client's related row point at this one, and an
-	// engine-derived id would satisfy the weaker check while breaking the
-	// thing the check exists for.
-	id, _ := live[0]["id"].(string)
-	if id == "" {
-		t.Fatal("submitReview wrote a row with no id. The shopper names none on purpose -- " +
-			"`id` is refused as a form field -- so the bff's submission id is what supplies one")
-	}
-	if !strings.HasSuffix(id, liveSubmission) {
-		t.Fatalf("the review landed at id %q, which does not carry the submission id %q it was "+
-			"written under. A client extension relates its own row to that id, so a row written "+
-			"anywhere else is a row nothing can find", id, liveSubmission)
+	// ---- PROOF 1 (continued): the row IS the link's -----------------------
+	if id, _ := live[0]["id"].(string); id != liveReview {
+		t.Fatalf("the review landed at id %q, want the one its link derives, %q", id, liveReview)
 	}
 
 	// ---- PROOF 4: THE PUBLIC PROJECTION OMITS THE SHOPPER'S EMAIL --------
@@ -193,7 +173,7 @@ func TestLiveE2E_TheShopperPathWritesAndScopesByStore(t *testing.T) {
 	// omission: publishedReviewsForProduct projects reviewPublic, so the
 	// address never reaches the read whose output is served to an
 	// unauthenticated browser.
-	pub := rowsOf(t, eng, asMerchant(merchantA),
+	pub := rowsOf(t, eng, asMerchant(owner),
 		`query publishedReviewsForProduct(productHandle: `+quote(handle)+`, storeId: `+quote(storeLive)+`)`)
 	if len(pub) != 1 {
 		t.Fatalf("the public projection returned %d rows, want 1", len(pub))
@@ -201,7 +181,7 @@ func TestLiveE2E_TheShopperPathWritesAndScopesByStore(t *testing.T) {
 	if _, present := pub[0]["authorEmail"]; present {
 		t.Fatalf("the public projection carries authorEmail: %v", pub[0])
 	}
-	if got, _ := pub[0]["authorName"].(string); got != "Sam" {
+	if got, _ := pub[0]["authorName"].(string); got != "Dana" {
 		t.Fatalf("the public projection lost the author's display name: %v", pub[0])
 	}
 	// ...while the MERCHANT's projection keeps it, which is what makes the
@@ -212,13 +192,12 @@ func TestLiveE2E_TheShopperPathWritesAndScopesByStore(t *testing.T) {
 	}
 
 	// ---- PROOF 3: the MERCHANT owns it, not the shopper -------------------
-	owner, _ := live[0]["ownerUserId"].(string)
-	if owner != merchantA {
+	if got, _ := live[0]["ownerUserId"].(string); got != owner {
 		t.Fatalf("ownerUserId = %q, want the site owner %q. A shopper has no identity, so a "+
 			"row owned by anyone else -- or by nobody -- is unreadable by the merchant whose "+
-			"storefront it was submitted through", owner, merchantA)
+			"storefront it was submitted through", got, owner)
 	}
-	if name, _ := live[0]["authorName"].(string); name != "Sam" {
+	if name, _ := live[0]["authorName"].(string); name != "Dana" {
 		t.Fatalf("authorName = %q; the shopper is DATA on the row", name)
 	}
 
@@ -261,23 +240,44 @@ func quote(s string) string {
 // absent rather than present and refusing.
 func TestLiveE2E_ADisabledPackIsInert(t *testing.T) {
 	eng := liveEngineWithDisabled(t, reviewspack.Domain)
-	_, _, storeLive, _, handle := runScope()
-	ctx := asMerchant("user-reviews-inert")
+	declareShopperSurface(t)
+	merchant, _, storeLive, _, handle := runScope()
+	site := "site-" + storeLive
+	seedOwnerUser(t, eng, merchant)
+	seedSite(t, eng, site, merchant, storeLive)
+	owner := siteOwnerOf(t, site)
+	// A live link, written as the pack would write one: the concept stays,
+	// so a seed at internal origin can still write it.
+	token := "tok-inert-" + handle + "-0123456789abcdefghijklmnopqrstuvwxyz"
+	now := time.Now().UTC()
+	if _, err := eng.Execute(seedCtx(), rawReviewsInsert("v1:reviews:reviewRequest", "request-inert-"+handle, map[string]any{
+		"ownerUserId": owner, "storeId": storeLive, "orderGid": "gid://shopify/Order/1", "productHandle": handle,
+		"email": "buyer@example.com", "tokenHash": reviewspack.TokenHashForTest(token),
+		"issuedAt": now.Format(time.RFC3339Nano), "expiresAt": now.Add(time.Hour).Format(time.RFC3339Nano)})); err != nil {
+		t.Fatalf("seed the link: %v", err)
+	}
 
-	// The BEHAVIOURAL half is gone: the shopper mutation the pack declares a
-	// form over is not loaded, so the write cannot happen at all.
-	// A COMPLETE call, so the refusal is "the construct is not loaded" and
-	// not "an argument is missing" -- an inert pack has to be what stops
-	// this, and a call the loader would reject anyway proves nothing.
-	_, err := eng.Execute(ctx, `submitReview(body: "x", productHandle: `+quote(handle)+
-		`, storeId: `+quote(storeLive)+`, submissionId: "sub-inert")`)
-	if err == nil {
-		t.Fatal("submitReview ran on a DISABLED pack: a mounted-inert pack must load no " +
+	// The BEHAVIOURAL half is gone: the form's construct is not loaded, so
+	// the write cannot happen at all. A COMPLETE call, so the refusal is "the
+	// construct is not loaded" and not "an argument is missing" -- an inert
+	// pack has to be what stops this, and a call the loader would reject
+	// anyway proves nothing.
+	if _, err := eng.Execute(asMerchant(owner), `builtin reviewsSubmitFromLink(requestToken: `+quote(token)+
+		`, productHandle: `+quote(handle)+`, body: "x", storeId: `+quote(storeLive)+`)`); err == nil {
+		t.Fatal("reviewsSubmitFromLink ran on a DISABLED pack: a mounted-inert pack must load no " +
 			"behavioural construct, so the shopper write path has nothing to reach")
+	}
+	// ...and the form route, posted through the real handler, writes nothing.
+	rec := postReviewForm(t, eng, site, storeLive, owner, reviewForm(token, handle, "x"))
+	if loc := rec.Header().Get("Location"); strings.HasPrefix(loc, "/reviews/thank-you") {
+		t.Fatalf("a DISABLED pack's form answered %q", loc)
+	}
+	if n := versionsOf(t, "v1:reviews:review", reviewspack.ReviewIDForRequestForTest("request-inert-"+handle)); n != 0 {
+		t.Fatalf("a DISABLED pack's form wrote %d review versions", n)
 	}
 
 	// ...and so is the read behind the declared shopper read.
-	if _, err := eng.Execute(ctx,
+	if _, err := eng.Execute(asMerchant(owner),
 		`query reviewsForStore(storeId: `+quote(storeLive)+`)`); err == nil {
 		t.Fatal("a query on a DISABLED pack still resolved")
 	}

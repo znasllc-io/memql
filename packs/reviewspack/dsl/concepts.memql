@@ -18,6 +18,16 @@
 // and is refused as a form field, which is the half of D9 that cannot be
 // expressed in a schema.
 //
+// EVERY ROW HERE IS WRITTEN BY THE PACK, AND ONLY BY THE PACK. Every concept
+// below is @serverWritten: the engine refuses any write of it without internal
+// origin, the public insert() included, which never consults a mutation's
+// @serverOnly. The pack's own writer (writer.go's engineWriter) is the one
+// place that stamps internal origin, inline on its one call, after the builtin
+// in front of it has judged the caller. Without this the store's own people
+// could write a decision that publishes, a link carrying a token they chose,
+// a review in a buyer's name or settings naming another address around every
+// check the builtins make (server_written_db_test.go).
+//
 // STOREFRONT PACK CONVENTION: concepts, mutations, tools, builtins and
 // queries -- NO automations and NO logic. A client's process attaches from
 // its own repository with `use reviews.concepts.{ review }` and
@@ -28,6 +38,7 @@
 @version("1.2.0")
 @description("A storefront product review. Merchandising stays on the store; this row is the review body plus optional image attachment ids. Images export as files (bytes), not URLs. Whether it is shown is NOT a field: it is derived from the append-only reviewDecision log against the revision the row holds now.")
 @displayCard(primary="title", secondary="body", tertiary="productHandle")
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @belongsTo(account, stated)
 concept review {
@@ -53,6 +64,7 @@ concept review {
 @version("1.1.0")
 @description("Append-only moderation decision for a review. A new row is a new decision; there is no in-place update and no undo-by-overwrite. decidedBy is a Client principal -- a Provider operator cannot author one. Criterion is a closed enum: no other, no sentiment.")
 @displayCard(primary="criterion", secondary="reviewId", tertiary="decidedBy")
+@serverWritten
 @rowAuthz(owner="decidedBy", clusterOwner)
 @belongsTo(account, via="reviewId", parent="v1:reviews:review")
 concept moderationAction {
@@ -68,6 +80,7 @@ concept moderationAction {
 @version("1.0.0")
 @description("One moderation decision on one review, append-only: a new row is a new decision, there is no update and no undo-by-overwrite. A review's state (waiting, published, declined, removed, erased) is DERIVED from these rows against the revision the review holds now. decidedBy is a person on the store's side; the cluster's operators are refused on the write path.")
 @displayCard(primary="action", secondary="reviewId", tertiary="decidedBy")
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @belongsTo(account, stated)
 concept reviewDecision {
@@ -86,6 +99,7 @@ concept reviewDecision {
 @version("1.0.0")
 @description("One buyer's review link: a product line of a paid order, at an id derived from (store, order, product) so a line is one link. The link is /reviews/write?product=<handle>&t=<token> on the store's own site; the token is never stored, only its SHA-256. A review written through it is verified. The link closes when its review is published, removed or erased -- read off the review's state, so publishing writes nothing here -- and at expiresAt.")
 @displayCard(primary="productHandle", secondary="orderName", tertiary="expiresAt")
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @belongsTo(account, stated)
 concept reviewRequest {
@@ -109,6 +123,7 @@ concept reviewRequest {
 @version("1.2.0")
 @description("Runtime reviews settings for one store. The public display toggle lives here as data so a client can hide or show reviews without a deploy or .memql edit.")
 @displayCard(primary="publicDisplay", secondary="storeId")
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @belongsTo(account, stated)
 concept reviewSettings {
