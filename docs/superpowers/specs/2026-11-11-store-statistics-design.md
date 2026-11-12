@@ -43,6 +43,13 @@ from Shopify's refund records on their own day, and the single release are the o
 rulings on the first draft (2026-11-11). Every other decision is marked *Made here* and
 waits for the owner's review of this record.
 
+**Amended with the plan (2026-11-11).** The plan
+(`docs/superpowers/plans/2026-11-11-store-statistics.md`) was written against the store
+mirror's branch as it then stood and against the code. Where either said otherwise than
+this record, the record was corrected: F8, F12, F13, F22, D20, D22, sections 3, 6.1 to
+6.5, 8, 9, 10 and 14. The plan lists each amendment under "Amendments to the record".
+No decision of the owner's (S1 to S14) changed.
+
 ## 1. What the owner asked for
 
 | # | Requirement, in the owner's terms |
@@ -65,12 +72,12 @@ Read at `3d4fe13e9` (v0.31.33).
 | F5 | The email statistics are the pattern: a fact table filled by a scheduled walk through the engine under a maintenance principal, with `@serverOnly` queries, a watermark less five minutes, a fresh, roots-only read, and a read that groups the facts with SQL. | `component/emailstats/doc.go:9-58`; `component/emailstats/rollup.go:454`; `migrations/20261108090300_email_stat_facts.up.sql:27-50`; `dsl/campaigns/automations.memql:191-194` |
 | F6 | The maintenance principal is a named synthetic cluster owner, granted only to automations on a compiled list. | `component/auth/maintenance_actor.go:8-60`, `:108-121`, `:268-313` |
 | F7 | Money arrives as a decimal string inside a `MoneyBag`: `{shopMoney: {amount, currencyCode}, presentmentMoney: {...}}`. No decimal type exists in the engine. | `cmd/shopifyschema/mapping.go:721-735`; `dsl/shopify/generated/order.memql:63-65`; `go.mod` (no decimal module) |
-| F8 | A line carries `quantity`, `currentQuantity`, `isGiftCard`, `originalUnitPriceSet`, `originalTotalSet`, `discountAllocations` (each with `allocatedAmountSet`), `productGid`, `title`. Lines are fetched `first: 100` per order. | `dsl/shopify/generated/orderLineItem.memql:43-122`; `integrations/shopify/generated/model.go:4260-4300` |
+| F8 | A line carries `quantity`, `currentQuantity`, `isGiftCard`, `originalUnitPriceSet`, `originalTotalSet`, `discountAllocations` (each with `allocatedAmountSet`), `productGid`, `title`. Lines are fetched `first: 100` per order, and on the mirror's branch the pages after the first are read too, up to fifty pages (`integrations/shopify/children.go`, `completeChildren`). | `dsl/shopify/generated/orderLineItem.memql:43-122`; `integrations/shopify/generated/model.go:4260-4300` |
 | F9 | An order carries `test`, `cancelledAt`, `processedAt`, `sourceCreatedAt`, `currencyCode`, `customerGid`, `email`, `taxesIncluded`, `subtotalLineItemsQuantity`, `currentSubtotalPriceSet`, `totalDiscountsSet`, `totalShippingPriceSet`, `totalTaxSet`, `originalTotalDutiesSet`, `totalRefundedSet`, `updatedAt` (Shopify's version) and `syncedAt` (the mirror's write time). | `dsl/shopify/generated/order.memql:31-34`, `:60`, `:82`, `:93`, `:118`, `:186`, `:204`, `:237`, `:247`, `:260`, `:262`, `:270`, `:282`, `:288`, `:291` |
 | F10 | Refunds are already mirrored as a child of the order (`refunds`, a plain list, so it is part of the order's own fetch and of its bulk line). The row holds `processedAt`, `sourceCreatedAt`, `totalRefundedSet`, `duties` and `orderGid`, and nothing about which lines were refunded. No refund topic is subscribed: a refund moves the order's `updatedAt`, so `ORDERS_UPDATED` carries it. | `cmd/shopifyschema/allowlist.yaml:13-19`, `:355-401`; `dsl/shopify/generated/refund.memql:30-62`; `integrations/shopify/generated/model.go:4335-4346` |
 | F11 | In the pinned Admin schema, `Refund` has three connections the mirror drops: `refundLineItems` (`lineItem`, `quantity`, `subtotalSet`, `totalTaxSet`, `restockType`, `restocked`), `refundShippingLines` (`subtotalAmountSet`, `taxAmountSet`) and `orderAdjustments` (`amountSet`, `taxAmountSet`, `reason`, one of `RESTOCK`, `DAMAGE`, `CUSTOMER`, `REFUND_DISCREPANCY`, `FULL_RETURN_BALANCING_ADJUSTMENT`, `PENDING_REFUND_DISCREPANCY`). `Refund.updatedAt` exists. | `cmd/shopifyschema/testdata/schema-2026-07.json`, types `Refund`, `RefundLineItem`, `RefundShippingLine`, `OrderAdjustment`, `OrderAdjustmentDiscrepancyReason` |
-| F12 | The generator keeps a connection that is not a declared child as GIDs only when its node type has an id, and inline as objects only when it has none. All three refund connections have ids, so listing them as references would keep ids and no amounts. A child's own children are not selected in its parent's document (`selectionLines(child, ..., false, ...)`), so making them child concepts of `Refund` would fetch them only through a refund's own fetch, which nothing triggers. Reference connections are left out of bulk documents and refilled by the reconcile after a backfill. | `cmd/shopifyschema/allowlist.go:83-95`; `cmd/shopifyschema/mapping.go:94-102`, `:430-475`; `cmd/shopifyschema/emit_graphql.go:81-140`, `:207-230` |
-| F13 | The mirrored shop row holds `currencyCode`, `ianaTimezone` and `plan`; the mirror selects `plan { partnerDevelopment ... }`. The store row's `isDevelopment` is set at connect from the same answer. | `dsl/shopify/generated/shop.memql:51`, `:72`, `:94`; `integrations/shopify/generated/model.go:6641`; `integrations/shopify/connect_write.go:46`, `:131-139`, `:253-275`; `integrations/shopify/store.go:43-49` |
+| F12 | The generator keeps a connection that is not a declared child as GIDs only when its node type has an id, and inline as objects only when it has none. All three refund connections have ids, so listing them as references would keep ids and no amounts. A child's own children are not selected in its parent's document (`selectionLines(child, ..., false, ...)`), so making them child concepts of `Refund` would fetch them only through a refund's own fetch, which nothing triggers. Reference connections are left out of bulk documents. The mapper writes a list it finds nothing for as an empty list, not as an absent field, so a bulk line leaves a reference list empty (`integrations/shopify/mapper.go`, `mapObjectUnder`). Only a store's first sweep, which has no watermark, lists every row again; a later sweep reads what changed since its watermark (`component/datasync/runners.go`, `reconcileOne`; `integrations/shopify/reconcile.go`, `reconcileByUpdatedAt`). | `cmd/shopifyschema/allowlist.go:83-95`; `cmd/shopifyschema/mapping.go:94-102`, `:430-475`; `cmd/shopifyschema/emit_graphql.go`, `selectionLines` and `EmitBulkDocuments` |
+| F13 | The mirrored shop row holds `currencyCode`, `ianaTimezone` and `plan`; the mirror selects `plan { partnerDevelopment ... }`. The store row's `isDevelopment` is set at connect from the same answer. The shop row is a singleton with no listing and no backfill: it is written only when a `SHOP_UPDATE` delivery arrives, so a store whose settings never changed has none (the one fetch of the singleton is a delivery's, `integrations/shopify/apply.go`, `fetchAndMap`). U1 makes the mirror read it at connect, at boot and daily. | `dsl/shopify/generated/shop.memql:51`, `:72`, `:94`; `integrations/shopify/generated/model.go:6641`; `integrations/shopify/connect_write.go:46`, `:131-139`, `:253-275`; `integrations/shopify/store.go:43-49` |
 | F14 | Statistics periods are a fixed list; every bound is a UTC instant. No time zone variant exists. | `core/statsperiod/statsperiod.go:11-15`, `:117-140` |
 | F15 | The OS kit has the figure row, one chart, ranked lists, a period control and floors ("5,000 or more"), but no money formatter, and bucket labels are UTC only. The figure grid is four columns unless there are exactly five figures. | `clients/os/src/kit/statistics/StatFigures.tsx`; `kit/statistics/period.ts:62-77`; `kit/measure.ts:74-113`; `kit/format.ts`; `clients/os/src/styles/index.css:14618-14621` |
 | F16 | Reviews is the exact gate wanted: only a `shopify_storefront`, not system-owned, with a bound store, for a holder of the part; it takes the pane. | `clients/os/src/apps/deployables/page/DeployablePage.tsx:449-460`, `:552` |
@@ -79,13 +86,15 @@ Read at `3d4fe13e9` (v0.31.33).
 | F19 | The wholesale pack keeps an entitlement per approved application, keyed by store and buyer email, in state `pending`, `granted`, `failed` or `revoked`. It ships disabled; a `v1:platform:packState` row enables it. | `packs/wholesalepack/dsl/concepts.memql:100-108`, `:115-120`; `packs/wholesalepack/pack.go` (`DefaultEnabled = false`) |
 | F20 | The query path has a per-node result cache; a fresh read neither consults nor fills it. | `component/memql/engine.go:1189-1242`; `component/memql/fresh_read.go:36-45` |
 | F21 | The deployables settings document remembers one period for every deployable, against the website periods. | `clients/os/src/apps/deployables/settings.ts:30-40`, `:69-77` |
-| F22 | The mirror record's verdict builtin (`shopifyStoreVerdict`) and its lines fix (its F9) are not on `main` yet. | mirror record sections 6 and 8 (U6, U8) |
+| F22 | On the mirror's branch the verdict builtin exists (`shopifyStoreVerdict`, for the store's owner, a cluster owner or a caller who may read stores) and an order's lines past the first hundred are read through a generated page operation (`ChildSpec.PageOp`). Both land with the mirror, before this work. Every mirror row there carries `versionSource`, and the rule that orders two writes is `component/memql/sync/version.go`. | `integrations/shopify/verdict_capabilities.go`; `integrations/shopify/children.go`; `component/memql/sync/version.go` |
 
 ## 3. Shape of the solution
 
 **The mirror records refunds in full.** Each mirrored refund gains, inline, its refund
 lines, its refunded shipping and its order adjustments, so the engine holds Shopify's own
-account of every refund (U1).
+account of every refund (U1). The mirror also reads each store's shop row without waiting
+for Shopify to announce a change to it, because the store's currency and time zone are
+there and nowhere else (F13).
 
 **One component, `component/storestats`**, in the manner of `component/emailstats`. It is a
 component because it reads this cluster's own rows and writes its own tables, and calls
@@ -154,9 +163,9 @@ No model or agent is involved anywhere, and nothing is sent to anyone (S10).
 | D17 | *Made here.* **Facts hold no personal data**: no email, name, address or phone. A buyer is an opaque Shopify id. When the store's data is removed (`redactedAt` set), the store's facts are deleted. | The walk reads every store's orders; the figures need none of it. |
 | D18 | *Made here.* **Facts are kept as long as their order is mirrored.** No 400-day retention. | New against returning needs the whole history, and one row per order is small. |
 | D19 | *Made here.* **A fact definition version** (`storeStatsDefinition`, an integer constant) is stored per store. A release that changes a formula raises it, and the walk rebuilds each store whose stored version is lower. | A changed definition must never mix with facts computed the old way. It is also why no Rebuild act is needed on the Store page. |
-| D20 | *Made here.* **The part is `app:deployables/sales`**, labelled "Sales figures", on owner and developer by default, like `reviews`. | S6. A short resource name in the existing family. |
+| D20 | *Made here.* **The part is `app:deployables/sales`**, on owner and developer by default, like `reviews`. The OS words a part by the last segment of its resource ("sales"), as it does for every part; "sales figures" is what the seeds' descriptions call it. | S6. A short resource name in the existing family. No table of part labels exists to hold another wording. |
 | D21 | *Made here.* **The refund's detail is mirrored inline on the refund row**, as three object-list fields, through a new generator option, not as three child concepts. U1 states the choice and its cost. | F12: child concepts of a child are never fetched with the order, and a reference keeps ids without amounts. Inline fields ride in the order's own fetch, add no rows, no topics and no new read path. |
-| D22 | *Made here.* **A refund whose detail has not been fetched yet** (its inline fields are absent, as after a bulk backfill until the next reconcile, F12) makes Refunds, Net sales, Total sales and Units sold absent for the periods it falls in, with the reason "N refunds are still being read from Shopify." | S11. Its money total is known, but not how much of it was shipping or tax, so no figure that subtracts it can be stated. |
+| D22 | *Made here.* **A refund whose detail has not been fetched yet** (its three inline fields are absent: the row was written by a bulk line, or before the detail was mirrored, 6.1) makes Refunds, Net sales, Total sales and Units sold absent for the periods it falls in, with the reason "N refunds are still being read from Shopify." | S11. Its money total is known, but not how much of it was shipping or tax, so no figure that subtracts it can be stated. |
 
 ## 5. The figures
 
@@ -291,32 +300,68 @@ carried on the row as `[]object` with their node's full selection, `first: page`
 connection whose node type is not itself mirrored may be inlined, which the allowlist
 validation enforces; that is what keeps it from being "two versions of the same fact"
 (`mapping.go:437-441`). Like references, an inline connection is left out of bulk
-documents (`OmitFromBulk`).
+documents (`OmitFromBulk`). It is a field kind of its own (`inlineList`), because the
+mapper must treat it differently from every other list: a list the mapper finds nothing for
+is written empty (F12), and an inlined connection the document did not select is instead
+left out of the write. On a new row the field is then absent, and on an existing row the
+engine's read-merge keeps what a fetch wrote, so a bulk line never blanks a refund's detail
+and "not read" can be told from "read, and empty".
 
 Regenerated, `v1:shopify:refund` gains three fields, added and never renamed:
 
 | Field | Type | Holds, per element |
 | --- | --- | --- |
 | `refundLineItems` | `[]object` | `id`, `lineItem { id }`, `quantity`, `restockType`, `restocked`, `priceSet`, `subtotalSet`, `totalTaxSet`, `location { id }` |
-| `refundShippingLines` | `[]object` | `id`, `shippingLine { id }`, `subtotalAmountSet`, `taxAmountSet` |
+| `refundShippingLines` | `[]object` | `id`, `shippingLine` (inline, by the generator's object rule: `ShippingLine` is not a mirrored type), `subtotalAmountSet`, `taxAmountSet` |
 | `orderAdjustments` | `[]object` | `id`, `reason`, `amountSet`, `taxAmountSet` |
+
+The three fields make the release that carries them roll-forward only: a refund row that
+holds them is refused by an older schema on its next write.
 
 **What it costs.** No new concept, row, topic, webhook or read path: the three lists ride in
 the order's existing fetch, inside its `refunds { ... }` selection, and in
 `ShopifyFetchRefund`. Each refund row grows by one object per refunded line. The order
 fetch's requested query cost grows with the number of refunds times 70 nodes at most;
 Shopify refuses a single query whose requested cost passes its limit, so the measured cost
-of `ShopifyFetchOrder` on an order with refunds is a gate of U1 (L11). After a bulk
-backfill the lists are absent until the first reconcile re-reads the order, as reference
-connections already are; D22 covers that window. A refund with more lines than 50, which
-the mirror cannot tell from exactly 50, marks its facts incomplete (6.2).
+of `ShopifyFetchOrder` on an order with refunds is a gate of U1 (L11). A refund with more
+lines than 50, which the mirror cannot tell from exactly 50, marks its facts incomplete
+(6.2). The mirror's paging of an order's lines (`completeChildren`, F22) does not reach
+these lists and is not extended to them: it pages only the fetched object's own child
+connections that carry a page operation, by that object's id; `refunds` is a plain list,
+which Shopify answers whole, and a refund's inlined connection is a field of the child.
+
+**When the detail arrives.** With an order's own fetch (every delivery that names it), and
+with a sweep's list page. A bulk line never carries it and never removes it. Only a
+store's first sweep lists every order (F12), so two things would otherwise leave refunds
+without detail for good, and U1 closes both. A refund mirrored before this version, or
+written only by a bulk line: the store's first order sweep under this version ignores its
+watermark and reads every order Shopify still shows, once, marked on the store's health
+(`refundDetailFrom`). What stays without detail is a refund of an order Shopify no longer
+shows (section 10, "An order placed more than sixty days ago") or past the 20,000 orders
+one sweep reads; D22 holds for it.
+
+**The shop row.** The mirror reads each store's shop singleton at connect, at boot when the
+store has no shop row, and in the daily subscription pass, through the same generated fetch
+and the same guarded write a `SHOP_UPDATE` delivery uses (F13).
 
 ### 6.2 Tables
 
 One migration, `component/database/memory-nodes/migrations/20261112090000_store_sales_facts.up.sql`
 with its `.down.sql`. Every id is bare. Every money column is `NUMERIC` with no scale, so a
-sum is exact in the database. Columns marked *derived* are recomputed in SQL from the other
-fact tables at the end of each run, for the rows that run touched.
+sum is exact in the database. Columns marked *derived* are recomputed from the other fact
+tables for every order a page of the walk touched, in the transaction that wrote the page,
+so a run that stops between two pages leaves no derived column stale. A line's sold
+quantity, gross and discounts are computed in Go with U3, where the one rounding rule
+lives; everything that is a sum is SQL.
+
+**A fact's version** (`order_version`, `line_version`, `refund_version`) is its mirror row's
+own write time, the row's `createdAt`: the instant the mirror wrote that version of the
+row. It is how the engine itself orders a row's versions, and it moves forward on every
+write. The row's `updatedAt` cannot serve: on the mirror's branch it is Shopify's version
+only when `versionSource` is `origin`; a tombstone carries the time MemQL read Shopify
+there, and so does a row written before the mirror kept the origin's version, so a later
+state can hold an earlier `updatedAt`. `checked_at`, on the three walked fact tables, is
+the start of the last check pass that found the fact's row (U8).
 
 `store_sales_order_fact`, one row per mirrored order, primary key `(store_id, order_gid)`,
 indexes `(store_id, ordered_at)` and `(store_id, buyer_key, ordered_at)`:
@@ -324,7 +369,7 @@ indexes `(store_id, ordered_at)` and `(store_id, buyer_key, ordered_at)`:
 | Column | Type | Meaning |
 | --- | --- | --- |
 | `store_id`, `order_gid` | `TEXT NOT NULL` | |
-| `order_version` | `TIMESTAMPTZ NOT NULL` | the order's `updatedAt` |
+| `order_version` | `TIMESTAMPTZ NOT NULL` | the order row's `createdAt` (above) |
 | `recorded_at` | `TIMESTAMPTZ NOT NULL` | the order's `syncedAt` |
 | `ordered_at` | `TIMESTAMPTZ NOT NULL` | D2 |
 | `currency` | `TEXT NOT NULL` | `currencyCode` |
@@ -339,6 +384,7 @@ indexes `(store_id, ordered_at)` and `(store_id, buyer_key, ordered_at)`:
 | `line_count` | `INTEGER NOT NULL` | *derived* |
 | `lines_version` | `TIMESTAMPTZ` | *derived*: newest line version |
 | `lines_complete` | `BOOLEAN NOT NULL` | *derived*: the sum of `quantity` over its lines is at least `expected_quantity` (L8) |
+| `checked_at` | `TIMESTAMPTZ` | U8 |
 
 `store_sales_line_fact`, primary key `(store_id, order_gid, line_gid)`, index
 `(store_id, product_key)`:
@@ -346,13 +392,14 @@ indexes `(store_id, ordered_at)` and `(store_id, buyer_key, ordered_at)`:
 | Column | Type | Meaning |
 | --- | --- | --- |
 | `store_id`, `order_gid`, `line_gid` | `TEXT NOT NULL` | |
-| `line_version` | `TIMESTAMPTZ NOT NULL` | the line's `updatedAt` |
+| `line_version` | `TIMESTAMPTZ NOT NULL` | the line row's `createdAt` |
 | `gift_card` | `BOOLEAN NOT NULL` | |
 | `product_key`, `title` | `TEXT NOT NULL` | `productGid` or `title:` and the title; the line's title |
 | `quantity`, `current_quantity` | `INTEGER NOT NULL` | q0, q1 |
 | `unit_price`, `allocated_discounts` | `NUMERIC NOT NULL` | P, A |
 | `refunded_quantity`, `sold_quantity` | `INTEGER NOT NULL` | *derived*: qr, qs |
 | `gross`, `discounts` | `NUMERIC NOT NULL` | *derived*: G(L), D(L) |
+| `checked_at` | `TIMESTAMPTZ` | U8 |
 
 `store_sales_refund_fact`, one row per mirrored refund, primary key `(store_id, refund_gid)`,
 indexes `(store_id, refunded_at)` and `(store_id, order_gid)`:
@@ -360,15 +407,16 @@ indexes `(store_id, refunded_at)` and `(store_id, order_gid)`:
 | Column | Type | Meaning |
 | --- | --- | --- |
 | `store_id`, `refund_gid`, `order_gid` | `TEXT NOT NULL` | |
-| `refund_version` | `TIMESTAMPTZ NOT NULL` | the refund's `updatedAt` |
+| `refund_version` | `TIMESTAMPTZ NOT NULL` | the refund row's `createdAt` |
 | `recorded_at` | `TIMESTAMPTZ NOT NULL` | the refund's `syncedAt` |
 | `refunded_at` | `TIMESTAMPTZ NOT NULL` | D2 |
 | `money_refunded` | `NUMERIC NOT NULL` | M(F) |
-| `shipping_refunded`, `tax_refunded`, `duties_refunded` | `NUMERIC` | RS, RT, RU; null when the detail is not fetched (D22) |
-| `detail_fetched` | `BOOLEAN NOT NULL` | the three inline lists were present on the row |
+| `shipping_refunded`, `tax_refunded`, `duties_refunded` | `NUMERIC` | RS, RT, RU; null when the detail is not fetched (D22). `tax_refunded` is the sum as Shopify wrote it; a figure reads it as 0 for an order whose prices include tax, which the refund row does not know |
+| `detail_fetched` | `BOOLEAN NOT NULL` | the three inline lists were present on the row, empty or not (6.1) |
 | `lines_complete` | `BOOLEAN NOT NULL` | `refundLineItems` held fewer than its page of 50 |
 | `gift_card_refunded`, `item_refunds` | `NUMERIC` | *derived*: RG, R(F); null when not fetched |
 | `units_returned` | `INTEGER` | *derived*: RQ |
+| `checked_at` | `TIMESTAMPTZ` | U8 |
 
 `store_sales_refund_line_fact`, primary key `(store_id, refund_gid, position)`, index
 `(store_id, order_gid, line_gid)`: `store_id`, `refund_gid`, `order_gid`, `line_gid`
@@ -381,27 +429,33 @@ NULL`; `tax NUMERIC NOT NULL`. Gift card and product come from the line fact it 
 | Column | Type | Meaning |
 | --- | --- | --- |
 | `store_id` | `TEXT PRIMARY KEY` | |
+| `store_domain`, `store_name` | `TEXT NOT NULL DEFAULT ''` | from the store row, for the page's context line: a holder of the part cannot read the store row itself |
 | `currency`, `timezone` | `TEXT NOT NULL DEFAULT ''` | from the shop row; empty means not known |
+| `taxes_included` | `BOOLEAN` | the shop row's `taxesIncluded`; null means not known |
 | `development` | `BOOLEAN` | D4; null means not known |
+| `all_orders_readable` | `BOOLEAN NOT NULL DEFAULT false` | the store's recorded grant holds `read_all_orders` (section 10) |
 | `history_since` | `TIMESTAMPTZ` | "Orders since" from the store's health (mirror record, section 13), else the oldest fact |
 | `wholesale_enabled` | `BOOLEAN NOT NULL DEFAULT false` | D10 |
 | `wholesale_digest` | `TEXT NOT NULL DEFAULT ''` | SHA-256 of the sorted, case-folded granted emails; never the emails |
-| `wholesale_cursor` | `TEXT NOT NULL DEFAULT ''` | where a wholesale pass resumes; empty when none runs |
+| `wholesale_cursor` | `TEXT NOT NULL DEFAULT ''` | where a wholesale pass resumes, an instant; empty when none runs |
 | `verdict_state` | `TEXT NOT NULL DEFAULT ''` | copied from `shopifyStoreVerdict`; empty means not known |
 | `verdict_reasons` | `JSONB NOT NULL DEFAULT '[]'` | `[{code, sentence}]`, the mirror's own words |
-| `verdict_since` | `TIMESTAMPTZ` | |
+| `verdict_since` | `TIMESTAMPTZ` | when the store left `recording`: the verdict's `since` at that moment, kept while the state stays other than `recording`, so a move from `paused` to `needs attention` does not move D16's "as of" |
 | `last_change_at` | `TIMESTAMPTZ` | newest `recorded_at` folded into facts |
 | `walked_through` | `TIMESTAMPTZ` | how far every walk has read, never past the run's clock |
 | `rebuilding_since` | `TIMESTAMPTZ` | set by a rebuild, cleared when the walk catches up |
 | `definition` | `INTEGER NOT NULL DEFAULT 0` | D19 |
 
-`store_sales_watermark`: `store_id TEXT`, `source TEXT` (`order`, `line`, `refund`,
-`entitlement`), `through TIMESTAMPTZ NOT NULL`; primary key `(store_id, source)`.
+`store_sales_watermark`: `store_id TEXT`, `source TEXT` (`order`, `line`, `refund`),
+`through TIMESTAMPTZ NOT NULL`, `window_seconds INTEGER NOT NULL DEFAULT 86400` (how far
+past `through` one read of the past may reach, section 10), `walked_through TIMESTAMPTZ`
+(how far this source is walked; the store's is the least of its three); primary key
+`(store_id, source)`.
 
 `store_sales_check`: `store_id TEXT PRIMARY KEY`, `started_at TIMESTAMPTZ`, `order_cursor`,
-`line_cursor`, `refund_cursor` `TEXT`, `finished_at TIMESTAMPTZ`, `mirror_rows INTEGER`,
-`fact_rows INTEGER`, `mismatched INTEGER`, `repaired INTEGER`, `disagreeing INTEGER` (D14),
-`clean_at TIMESTAMPTZ`.
+`line_cursor`, `refund_cursor` `TEXT` (each empty, an instant to resume at, or `done`),
+`finished_at TIMESTAMPTZ`, `mirror_rows INTEGER`, `fact_rows INTEGER`, `mismatched INTEGER`,
+`repaired INTEGER`, `disagreeing INTEGER` (D14), `clean_at TIMESTAMPTZ`.
 
 None of these tables is a concept; no row admission sees them, and only
 `component/storestats` reads or writes them.
@@ -414,17 +468,16 @@ All in `dsl/shopify/overlay/` unless named otherwise. Every query is `@serverOnl
 
 | Kind | Name | What |
 | --- | --- | --- |
-| shape | `storeStatisticsOrder` | `storeId, gid, updatedAt, syncedAt, deleted, processedAt, sourceCreatedAt, cancelledAt, test, taxesIncluded, currencyCode, customerGid, email, subtotalLineItemsQuantity, totalShippingPriceSet, totalTaxSet, originalTotalDutiesSet, currentSubtotalPriceSet, totalDiscountsSet, totalRefundedSet`. `email` is used only by the wholesale judgement (D9). |
-| shape | `storeStatisticsLine` | `storeId, gid, parentGid, updatedAt, deleted, isGiftCard, productGid, title, quantity, currentQuantity, originalUnitPriceSet, discountAllocations` |
-| shape | `storeStatisticsRefund` | `storeId, gid, parentGid, updatedAt, syncedAt, deleted, processedAt, sourceCreatedAt, totalRefundedSet, duties, refundLineItems, refundShippingLines, orderAdjustments` |
-| shape | `storeStatisticsVersion` | `gid, parentGid, updatedAt, deleted` |
-| query | `storeStatisticsOrdersChanged(storeId, since)`, `storeStatisticsLinesChanged(storeId, since)`, `storeStatisticsRefundsChanged(storeId, since)` | rows with `row.createdAt >= since`, deleted ones included, `sort "row.createdAt", "asc"`, `paginate 250` |
-| query | `storeStatisticsOrderVersions(storeId)`, `storeStatisticsLineVersions(storeId)`, `storeStatisticsRefundVersions(storeId)` | every row, keyset-paged by id, for the check |
-| query | `storeStatisticsOrderBuyers(storeId)` | `gid, email, deleted`, keyset-paged, for the wholesale pass |
-| query | `storeStatisticsShop(storeId)` | `currencyCode, ianaTimezone, plan` |
-| query | `storeStatisticsStores()` | store rows: `storeId, isDevelopment, uninstalledAt, redactedAt`, and "Orders since" from `health` |
-| query (wholesale pack, `packs/wholesalepack/dsl/queries.memql`) | `wholesaleStatisticsGranted(storeId)` | `buyerEmail` of entitlements in state `granted`, and whether a `wholesaleSettings` row exists |
-| query (wholesale pack) | `wholesaleStatisticsChanged(since)` | entitlements with `row.createdAt >= since`, `storeId` and `updatedAt` only |
+| shape | `storeStatisticsOrder` | `row.id, row.createdAt, storeId, gid, syncedAt, deleted, processedAt, sourceCreatedAt, cancelledAt, test, taxesIncluded, currencyCode, customerGid, email, subtotalLineItemsQuantity, totalShippingPriceSet, totalTaxSet, originalTotalDutiesSet, currentSubtotalPriceSet, totalDiscountsSet, totalRefundedSet`. `email` is used only by the wholesale judgement (D9). `row.createdAt` is the fact's version (6.2); `updatedAt` is not read. |
+| shape | `storeStatisticsLine` | `row.id, row.createdAt, storeId, gid, parentGid, deleted, isGiftCard, productGid, title, quantity, currentQuantity, originalUnitPriceSet, discountAllocations` |
+| shape | `storeStatisticsRefund` | `row.id, row.createdAt, storeId, gid, parentGid, syncedAt, deleted, processedAt, sourceCreatedAt, totalRefundedSet, duties, refundLineItems, refundShippingLines, orderAdjustments` |
+| shape | `storeStatisticsBuyer`, `storeStatisticsShop`, `storeStatisticsStore` | `row.id, row.createdAt, storeId, gid, deleted, email`; `row.id, row.createdAt, storeId, deleted, name, currencyCode, ianaTimezone, taxesIncluded, plan`; `row.id, domain, name, isDevelopment, scopesGranted, uninstalledAt, redactedAt, health` |
+| query | `storeStatisticsOrdersChanged(storeId, since)`, `storeStatisticsLinesChanged(storeId, since)`, `storeStatisticsRefundsChanged(storeId, since)` | rows with `row.createdAt >= since`, deleted ones included, `sort "row.createdAt", "asc"`, `paginate 250`. The walk asks them from each watermark; the check asks the same three from the start. The engine continues a page by keyset over creation order or a schema-bound text field, not over the row id, and a version is a write time these already order by and project, so the check needs no shape or query of its own and recomputes from the row in hand. |
+| query | `storeStatisticsOrderBuyers(storeId, since)` | the same walk over `storeStatisticsBuyer`, for the wholesale pass |
+| query | `storeStatisticsShop(storeId)` | the store's shop row, newest first, one row |
+| query | `storeStatisticsStores()` | every store row; "Orders since" is `health.ordersFrom`, and `scopesGranted` says whether the grant holds `read_all_orders` |
+| query (wholesale pack, `packs/wholesalepack/dsl/queries.memql`) | `wholesaleStatisticsGranted(storeIds)` | `storeId` and `buyerEmail` of entitlements in state `granted`, for every form of a store id named: the pack's rows hold a store id bare or as `v1:shopify:store:<id>`, and the engine does not join the two |
+| query (wholesale pack) | `wholesaleStatisticsSettings(storeIds)` | the `storeId` of each `wholesaleSettings` row among the forms named. A query of its own, because a query is bound to one concept |
 | builtin | `storeStatisticsRollup {}` | executor `integration.storeStats.rollup`; no `@sdk`; admits the principal `system:maintenance:storeStatisticsRollupSweep` and no other caller, a cluster owner included |
 | builtin | `storeStatisticsCheck {}` | executor `integration.storeStats.check`; no `@sdk`; admits `system:maintenance:storeStatisticsCheckSweep` only |
 | builtin | `storeStatisticsRebuild { storeId string! }` | executor `integration.storeStats.rebuild`; no `@sdk`; admits a cluster owner only, checked in Go |
@@ -435,7 +488,10 @@ All in `dsl/shopify/overlay/` unless named otherwise. Every query is `@serverOnl
 | part | `app:deployables/sales` | section 7 |
 
 The wholesale queries sit in the pack because the rows are the pack's. When the pack is
-disabled the component does not ask them and treats the store as D10's "not enabled".
+disabled the component does not ask them and treats the store as D10's "not enabled". The
+walk reads a store's granted set once a run, because it must hold the set to judge each
+order it writes; it compares the set's digest there, so no read of changed entitlements
+and no watermark for them is kept.
 
 `component/storestats` registers as the `storeStats` integration provider on every node
 type, the way `component/sitetraffic/integration.go` registers `siteTraffic`, and is linked
@@ -449,8 +505,9 @@ in by the same blank-import list in `app/` that links `component/emailstats`.
    `v1:platform:site` / `siteId` in `organizationCapabilityTarget`.
 2. The site reads for the caller under their own actor (`siteById`), is of kind
    `shopify_storefront` and is not system-owned.
-3. Its `binding.storeId` or `previewBinding.storeId` equals `storeId`. A binding is an
-   authorized link (F18), so this is what ties the store to the organization.
+3. Its `binding.storeId` or `previewBinding.storeId` equals `storeId`, each compared as a
+   bare id: a binding may hold `v1:shopify:store:<id>`. A binding is an authorized link
+   (F18), so this is what ties the store to the organization.
 4. `period` is one of `statsperiod.All()`.
 
 Each refusal is one sentence and names nothing the caller could not already read: a site
@@ -466,9 +523,9 @@ everything absent is `null`.
 
 ```
 {
-  storeId, siteId, destination: "production" | "testing" | "both",
-  currency, timezone, development, taxesIncluded, period, bucket, start, end, prevStart,
-  historySince, lastChangeAt, asOf,
+  storeId, siteId, storeName, storeDomain, destination: "production" | "testing" | "both",
+  currency, timezone, development, taxesIncluded, olderOrderChangesNotRecorded,
+  period, bucket, start, end, prevStart, historySince, lastChangeAt, asOf,
   recording: { state, reasons: [{ code, sentence }], since },
   rebuilding,
   figures: { totalSales, netSales, orders, averageOrderValue,
@@ -477,7 +534,7 @@ everything absent is `null`.
   floors: { ...the figures that are floors },
   series: [{ at, totalSales, netSales, orders, grossSales, discounts, refunds, unitsSold }],
   productsBySales: [{ key, title, value }], productsByUnits: [{ key, title, value }],
-  productCount, refundsWithoutItem, incompleteOrders, refundsNotRead,
+  productCount, refundsWithoutItem, incompleteOrders, incompleteRefunds, refundsNotRead,
   buyers: { new, returning, unknown },
   wholesale: null | { wholesale: { orders, netSales }, retail: { orders, netSales } },
   otherCurrencies: [{ currency, orders }]
@@ -485,8 +542,18 @@ everything absent is `null`.
 ```
 
 `series[].at` is the bucket's start as an instant with the store's offset. Top lists carry
-25 rows. `floors` names the line-derived figures that are floors because an order's or a
-refund's lines are incomplete; `refundsNotRead` counts D22's refunds.
+25 rows. `floors` names the line-derived figures that are floors because an order's lines
+are incomplete; `refundsNotRead` counts D22's refunds. `incompleteRefunds` counts the
+period's refunds that hold a full page of refund lines: a figure is not a floor then (a
+missing refund line would lower Units sold, not raise it), so Units sold is absent for the
+period. `storeName` and `storeDomain` are there because a holder of the part cannot read
+the store row. `olderOrderChangesNotRecorded` is true when the store's recorded grant does
+not hold `read_all_orders` (section 10, "An order placed more than sixty days ago").
+
+A bucket is cut from the bounds U2 computes for the store's zone, compared as instants in
+SQL (`width_bucket` over the bucket starts), not with `AT TIME ZONE`: the period's own
+start and end come from Go, and two time zone databases, Go's and the database server's,
+can disagree on a rule or a name.
 
 ## 7. Access
 
@@ -527,15 +594,19 @@ otherwise, never disabled (`clients/os/DESIGN.md:170-175`, rule 12). `WorkspaceD
 **Blocks, top to bottom.** No dividers between rows; spacing only (`DESIGN.md:118-126`).
 
 1. **Context line**, a `Caption`: the store's name or domain, "Prices in EUR", "Days in
-   Europe/Madrid", "Orders since Sep 12", "Last order change recorded 4 minutes ago"
+   Europe/Madrid", "Orders since Sep 12", "Last order change recorded 4m ago"
    (`formatFreshness`). On a development store a second line: "This is a development
    store: every order on it is a test order, and they are counted." On a tax-inclusive
-   store: "Prices on this store include tax."
+   store: "Prices on this store include tax." When the answer's
+   `olderOrderChangesNotRecorded` is true, a line of its own: "Refunds and edits of orders
+   placed more than 60 days ago are not recorded."
 2. **Recording notice**, a `Notice`, only when the verdict is not `recording`, a rebuild runs,
    the verdict is not known, or refunds are still being read (D22): the mirror's sentence,
    then "These figures are as of <moment>." (D16). For `starting` and a rebuild: "The
-   store's orders are still being brought in." and every figure absent. The notice names
-   the Store page, where the act that fixes it lives, and holds no act of its own.
+   store's orders are still being brought in." and every figure absent. For a verdict
+   that is not known: "Whether this store is recording is not known." The notice names
+   the Store page, where the act that fixes it lives ("The Store page of this deployable
+   says what fixes it."), and holds no act of its own.
 3. **Figure row**, `StatFigures`, eight figures in D12's order, money with `formatMoney`,
    counts with `formatCount`, each with its previous period only when
    `previousComparable(prevStart, historySince)` (`DESIGN.md:577-589`). A floor reads "or
@@ -547,8 +618,8 @@ otherwise, never disabled (`clients/os/DESIGN.md:170-175`, rule 12). `WorkspaceD
    `productCount` is larger, its footer says "The 8 best-selling of 31 products." and
    opens "All products" as a page under the trail (`DESIGN.md:605-612`). Further footer
    lines, only when they apply: "Refunds of 12.00 EUR name no product, so they are in Net
-   sales and not here." and "3 orders have more lines than were recorded, so these are
-   floors."
+   sales and not here.", "3 orders have more lines than were recorded, so these are
+   floors." and "1 refund has more lines than were recorded, so units are not exact."
 6. **Buyers**, `RankedList` with rows New, Returning, No customer recorded; values are counts.
 7. **Wholesale and retail**, `RankedList`, only when `wholesale` is not null: two rows,
    Wholesale and Retail, with a `LocalTabs` control "Net sales" or "Orders".
@@ -569,7 +640,8 @@ page's shared help control, not on the page.
 | Empty | After a successful read with no counted orders or refunds: figures are a measured 0 where history covers the period, the average is a dash ("No orders in this period."), each list says "No orders in this period." |
 | Not recording | Block 2, and D16. |
 | Refunds not yet read | Block 2; the four figures D22 names are dashes with its reason. |
-| Currency or time zone not known | Money figures are dashes, "The store's currency has not been recorded yet."; with no time zone every figure is a dash, because no day can be cut. |
+| Currency or time zone not known | Money figures are dashes, "The store's currency has not been recorded yet."; with no time zone every figure is a dash, because no day can be cut: "The store's time zone has not been recorded yet." U1's read of the shop row is what keeps a connected store out of this state (F13). |
+| A day below zero | A day with more refunded than sold has Net sales, Total sales and Units sold below zero. The figure shows the amount with its sign and the chart draws the day under the zero rule. |
 | History shorter than the period | Buckets before `historySince` are gaps; no change is drawn. |
 
 **Cadence.** `AutoRefresh` at the website Statistics' cadence (`statisticsRefreshMs`: five
@@ -579,7 +651,8 @@ pushes.
 **Kit additions** (`clients/os/src/kit`):
 
 - `formatMoney(currency: string): (value: number) => string` in `kit/format.ts`, over
-  `Intl.NumberFormat(undefined, {style: "currency", currency})`, the currency's own
+  `Intl.NumberFormat("en-US", {style: "currency", currency})`, the one locale
+  `formatCount` writes in, so a figure and the axis beside it agree; the currency's own
   decimals; a non-finite value renders "--". The value is the server's exact decimal
   string converted with `Number()`. Every sum the page can show has at most 15 significant
   digits (under ten trillion with cents), which a double holds and prints back exactly, so
@@ -587,28 +660,38 @@ pushes.
 - `bucketLabel` and `bucketMoment` take an optional IANA `timeZone`, through
   `Intl.DateTimeFormat`; `TimeChart` passes a new optional `timeZone` prop to them. Without
   it, both stay UTC, so the existing pages do not change.
+- `TimeChart` scales from zero up today, and a value below zero would be drawn off the
+  plot. It gains a floor below zero when a series has a value there: the value axis gains a
+  step below zero and the fill runs to the zero rule. A series with nothing below zero is
+  drawn exactly as before.
 - `clients/os/DESIGN.md`, "App overviews": "eight stand as two rows of four"; "Statistics":
-  `formatMoney` joins the formatters, and a store's buckets are labelled in its time zone.
+  `formatMoney` joins the formatters, a store's buckets are labelled in its time zone, and
+  a figure that can be below zero is drawn below the zero rule.
 
 ## 9. Units of work
 
 Ordered so the mirror comes first and the server side is proved before the page exists.
 U1 builds on the mirror record's branch, which will have landed.
 
+The plan (`docs/superpowers/plans/2026-11-11-store-statistics.md`) splits and reorders these
+units, and says why where it does: U1 is three tasks; U6's builtins, automations and
+principals are declared with the tasks that give them bodies; U7 is three tasks; U11 lands
+with U9.
+
 | Unit | What | Files | Interfaces | Depends on | Proved by |
 | --- | --- | --- | --- | --- | --- |
-| U1 Refund detail in the mirror | The `inline` allowlist key and its validation; the planner renders an inlined connection as `KindObjectList` with its node's selection and `first: page`, left out of bulk; the `Refund` entry inlines its three connections; regenerate. | `cmd/shopifyschema/{allowlist.go,allowlist.yaml,mapping.go,emit_graphql.go}` and tests; regenerated `dsl/shopify/generated/refund.memql`, `integrations/shopify/generated/model.go`, `dsl/shopify/generated/selections/` | 6.1 | the mirror record | the drift test; a planner test refusing an inline connection whose node is mirrored; a database test that applies a fixture order with a line refund, a shipping refund and an amount-only refund and finds the three lists on the refund rows; L11 (requested cost of `ShopifyFetchOrder`) on a development store |
-| U2 Periods in a zone | `ForIn(p Period, now time.Time, loc *time.Location) Bounds`; `For` becomes `ForIn(p, now, time.UTC)`. Day and month starts are local midnights; hours are local hours, so a zone offset by 30 minutes cuts at its own hour. | `core/statsperiod/statsperiod.go`, `statsperiod_test.go` | `ForIn` | none | a spring-forward day has 23 hours and a fall-back day 25; a +05:30 zone's 24 hours start on its own hour; `For` answers what it answered before |
+| U1 Refund detail in the mirror | The `inline` allowlist key and its validation; the planner renders an inlined connection as its own kind, `inlineList`, a `[]object` with its node's selection and `first: page`, left out of bulk; the mapper leaves it out of a write when the document did not select it; the `Refund` entry inlines its three connections; regenerate. A store's first order sweep under this version reads from the start. The mirror reads each store's shop row at connect, at boot and daily. | `cmd/shopifyschema/{allowlist.go,allowlist.yaml,mapping.go,emit_go.go}` and tests; `integrations/shopify/{mapper.go,admin.go,partitions.go,shop.go,plugin.go,connect_write.go,capabilities.go}`; regenerated `dsl/shopify/generated/refund.memql`, `integrations/shopify/generated/model.go`, `dsl/shopify/generated/selections/` | 6.1 | the mirror record | the drift test; a planner test refusing an inline connection whose node is mirrored; a database test that applies a fixture order with a line refund, a shipping refund and an amount-only refund and finds the three lists on the refund rows; O3's test, in both orders; a refund mirrored before its detail gets it at the next sweep; a connected store has its currency and time zone without a `SHOP_UPDATE`; L11 (requested cost of `ShopifyFetchOrder`) on a development store |
+| U2 Periods in a zone | `ForIn(p Period, now time.Time, loc *time.Location) Bounds`; `For` becomes `ForIn(p, now, time.UTC)`. Day and month starts are local midnights, or the change itself on a day whose midnight the clocks skip; hours are local hours, so a zone offset by 30 minutes cuts at its own hour. | `core/statsperiod/statsperiod.go`, `statsperiod_test.go` | `ForIn` | none | a spring-forward day has 23 hours and a fall-back day 25; a +05:30 zone's 24 hours start on its own hour; a day whose midnight is skipped starts at the change; `For` answers what it answered before |
 | U3 Exact money | `core/money`: `Parse(string) (Amount, error)` accepting only `-?digits[.digits]`; `Add`, `Sub`, `Mul(int64)`, `MulRatio(num, den int64)` rounding half to even to the operand's scale; `Scale`; `String`. Built on `math/big`. | `core/money/money.go`, `money_test.go` | `Amount` | none | refuses exponents, spaces, empty strings and floats; a million random sums equal `big.Rat` sums; `0.1 + 0.2` is `0.3` |
-| U4 Tables | The migration of 6.2. | `component/database/memory-nodes/migrations/20261112090000_store_sales_facts.{up,down}.sql`; `component/storestats/main_dbschema_test.go` | 6.2 | none | up, down, up again on Postgres and TimescaleDB |
-| U5 Part | Section 7, steps 1, 2, 4 and 5 (the construct lands in U6). | as listed in section 7 | | none | the parity test; an organization-gate test: a holder in one organization is refused a site of another |
-| U6 Constructs | Shapes, queries, builtins and automations of 6.3; the two maintenance principals. | `dsl/shopify/overlay/{shapes,queries,builtins,automations}.memql`; `packs/wholesalepack/dsl/queries.memql`; `component/auth/maintenance_actor.go` | 6.3 | U1, U5 | DSL validation and the edition gate; each query answers nothing to a reader actor and rows to the principal |
-| U7 Fill | The walk: per store, read changed orders, lines and refunds from each watermark less five minutes under the principal, internal origin and a fresh, roots-only read (as `component/emailstats/rollup.go:454` does); write order, line, refund and refund-line facts with U3; then re-derive, in SQL, the derived columns of 6.2 for every touched order, line and refund; delete facts of tombstoned rows; copy the shop row, D4 and the verdict into `store_sales_store`; run a wholesale pass when the granted digest changed; rebuild on a lower `definition`. Writes are guarded so an older version never replaces a newer one: `ON CONFLICT ... DO UPDATE ... WHERE excluded.<row>_version >= fact.<row>_version`. | `component/storestats/{doc,integration,facts,rollup,derive,wholesale}.go` and tests | `handleRollup` | U2, U3, U4, U6 | 11.1 |
-| U8 Check and rebuild | The check: per store, page through the three `...Versions` queries (40 pages a run, resuming), compare with the facts by gid and version, recompute or delete what differs, re-derive, count D14 disagreements, record `store_sales_check`. The rebuild: in one transaction delete the store's facts, watermarks and check row and set `rebuilding_since`; the walk refills; when `walked_through` reaches the clock less five minutes, `rebuilding_since` clears and a check starts at once. A rebuild is proven when that check finishes with `mismatched = 0`. | `component/storestats/{check,rebuild}.go` and tests | `handleCheck`, `handleRebuild` | U7 | 11.1 |
-| U9 Read | The gate of 6.4; the SQL of 5.3 with store days cut by `AT TIME ZONE`; previous period, floors, D6, D11, D16, D22; the answer of 6.5. | `component/storestats/{statistics,statistics_payload}.go` and tests | `handleStatistics` | U7 | 11.1, and `statistics_scale_test.go` |
+| U4 Tables | The migration of 6.2. | `component/database/memory-nodes/migrations/20261112090000_store_sales_facts.{up,down}.sql`; the round trip beside the other migration round trips, `component/database/memory-nodes/store_sales_facts_migration_test.go` | 6.2 | none | up, down, up again on the lane's TimescaleDB; the migration uses nothing of it, so the same statements run on plain Postgres |
+| U5 Part | Section 7, steps 1, 2, 4 and 5 (the construct lands with U9, and its row in the construct table and the database proof with it). | as listed in section 7 | | none | the parity test; an organization-gate test: a holder in one organization is refused a site of another |
+| U6 Constructs | Shapes, queries, builtins and automations of 6.3; the two maintenance principals. | `dsl/shopify/overlay/{shapes,queries,builtins,automations}.memql`; `packs/wholesalepack/dsl/{shapes,queries}.memql`; `component/auth/maintenance_actor.go` | 6.3 | U1, U5 | DSL validation and the edition gate; each query answers nothing to a reader actor and rows to the principal; with the pack disabled its queries are not loaded (O4) |
+| U7 Fill | The walk: per store, read changed orders, lines and refunds from each watermark less five minutes under the principal, internal origin and a fresh, roots-only read (as `component/emailstats/rollup.go:454` does), the past in bounded windows read as of their end (section 10); write order, line, refund and refund-line facts with U3; re-derive the derived columns of 6.2 for every order a page touched, in the page's transaction; delete the fact of a tombstoned row, recognised by `deleted` alone; copy the store row, the shop row, D4 and the verdict into `store_sales_store`; run a wholesale pass when the granted digest changed; rebuild on a lower `definition`. Writes are guarded so an older version never replaces a newer one: `ON CONFLICT ... DO UPDATE ... WHERE excluded.<row>_version >= fact.<row>_version`, where a version is the mirror row's own write time (6.2). | `component/storestats/{doc,integration,facts,rollup,derive,store,wholesale}.go` and tests | `handleRollup` | U2, U3, U4, U6 | 11.1 |
+| U8 Check and rebuild | The check: per store, walk the three `...Changed` queries again from the start (40 pages a run, resuming), compare each row written before the pass began with its fact by gid and version, recompute from the row in hand or delete what differs, re-derive, mark each fact it found a row for and at the end of the pass delete the facts no row answered for, count D14 disagreements, record `store_sales_check`. A row written after the pass began is the walk's to fold and is not a mismatch. The rebuild: in one transaction delete the store's facts, watermarks and check row and set `rebuilding_since`; the walk refills; when `walked_through` reaches the clock less five minutes, `rebuilding_since` clears and a check starts at once. A rebuild is proven when that check finishes with `mismatched = 0`. | `component/storestats/check.go` and tests | `handleCheck`, `handleRebuild` | U7 | 11.1 |
+| U9 Read | The gate of 6.4; the SQL of 5.3 with store days cut from U2's bounds (6.5); previous period, floors, D6, D11, D16, D22; the answer of 6.5. | `component/storestats/{statistics,statistics_payload}.go` and tests | `handleStatistics` | U7 | 11.1, and `statistics_scale_test.go` |
 | U10 Independent totals | A fixture store of Shopify-shaped orders and refunds (discount codes, an order-level discount, a gift card, a line refund with and without restock, a shipping refund, an amount-only refund, a restocking fee, a refund in a later period than its order, an edit that removes a unit, an edit that adds a line, a cancellation with a refund, a test order, two currencies, a buyer with three orders, a wholesale buyer, an order and a refund across a local midnight, one order with 120 lines) applied through the mirror's own write path; then the walk; then `storeStatistics`. A reference calculator in the test, written from section 5 over the fixture JSON and sharing no code with U7 or U9, must give the same figures to the cent for every period. | `component/storestats/reference_db_test.go`, `component/storestats/testdata/fixture-store/` | | U9 | the test |
 | U11 SDK | Regenerate the client builders so `query.storeStatistics` exists. | `sdk/go/client/generated_builtins.go`, the TS SDK | | U6 | the generators' drift tests |
-| U12 Kit | Section 8, kit additions. | `clients/os/src/kit/format.ts`, `kit/statistics/{period.ts,TimeChart.tsx}`, `clients/os/DESIGN.md` | `formatMoney`, `timeZone` | none | unit tests: three currencies with 0, 2 and 3 decimals; a bucket at 23:30 UTC labelled as the next day in a +01:00 zone |
+| U12 Kit | Section 8, kit additions. | `clients/os/src/kit/format.ts`, `kit/statistics/{period.ts,TimeChart.tsx,scale.ts}`, `clients/os/DESIGN.md` | `formatMoney`, `timeZone` | none | unit tests: three currencies with 0, 2 and 3 decimals; a bucket at 23:30 UTC labelled as the next day in a +01:00 zone; a bucket below zero drawn below the zero rule |
 | U13 Page | Part, button, page, controls and states of section 8. | `clients/os/src/apps/deployables/{parts.ts,page/DeployablePage.tsx,page/DeployableWorkspace.tsx}`, `apps/deployables/storeStatistics/{read.ts,useStoreStatistics.ts,StoreStatisticsSection.tsx,DestinationControl.tsx,ProductsListPage.tsx}` | 6.5 | U11, U12 | 11.2 |
 | U14 Docs | Section 12. | | | U9, U13 | the docs gates |
 
@@ -617,18 +700,23 @@ U1 builds on the mirror record's branch, which will have landed.
 | Situation | What happens |
 | --- | --- |
 | A store with many thousands of orders | The read is grouped SQL over indexed tables; the scale test holds 200,000 orders, 600,000 lines and 20,000 refunds under 500 ms for 90 days. The first fill reads at most 40 pages of 250 of each source per minute per store, about 10,000 orders a minute, with `walked_through` and D16 keeping figures absent until it catches up. |
-| An order with more lines than the mirror fetches | Lines are fetched `first: 100` until the mirror record's U8 lands. For any order whose recorded quantities fall short of `subtotalLineItemsQuantity`, `lines_complete` is false, every line-derived figure for its period is a floor ("or more"), and the products list says how many orders are short. |
-| A refund with more than 50 lines | `lines_complete` is false on its fact; Refunds stays exact, because it starts from `totalRefundedSet`, but Units sold and the products' figures for its period are marked as not exact, and the products footer says so. |
-| A refund whose detail is not fetched | D22, until the next reconcile re-reads its order. |
+| A long history | A read of rows written since an instant costs every version of the concept written since then, on the whole cluster (`component/memql/latest_scan_keys.go`), and a first fill, a rebuild and the check all start at the beginning; a first page over a large mirror would outlast the statement timeout on every run, as the email walk's once did. So the past is read in bounded windows, each as of its end: a day wide at first, halved when a page outlasts a read, doubled after a window that read cleanly. Only a read that reaches the clock is unbounded. The check's "within a day" holds for a store whose three sources each fit 24 runs of 40 pages; a larger one takes proportionally longer. |
+| An order with more lines than the mirror fetches | On the mirror's branch an order's lines past the first hundred are read, up to fifty pages (F22). The `lines_complete` guard stays for what that cannot reach: for any order whose recorded quantities fall short of `subtotalLineItemsQuantity`, `lines_complete` is false, every line-derived figure for its period is a floor ("or more"), and the products list says how many orders are short. |
+| A refund with more than 50 lines | `lines_complete` is false on its fact; Refunds stays exact, because it starts from `totalRefundedSet`. A missing refund line would lower Units sold, so the figure is not a floor: Units sold is absent for the period, `incompleteRefunds` counts such refunds, and the products footer says so. |
+| A refund whose detail is not fetched | D22, until its order is read again by a fetch or a sweep's list page (6.1). A refund of an order Shopify no longer shows, or past the 20,000 orders one sweep reads, is never read again: D22 holds for its periods for good. |
+| An order placed more than sixty days ago | The app does not hold Shopify's `read_all_orders`, so Shopify hides an order once it is more than sixty days old. The mirror keeps such an order as it was last recorded: an update notice whose fetch answers nothing neither retires the order nor changes it, unless the store's grant holds `read_all_orders`. A refund or an edit made to it after that is therefore not recorded, and Refunds can be lower than the store's own admin shows. The answer says so with `olderOrderChangesNotRecorded`, true when the store's recorded grant lacks `read_all_orders` (the test the mirror makes on `scopesGranted`), and the page says it in one line (section 8). |
+| A paused store | The mirror keeps the deliveries that arrive while a store is paused and applies them on resume, so nothing is lost and the "as of" of D16 stays true for the pause. |
+| A store whose shop never changed | Without U1's read of the shop row such a store would have no currency and no time zone, and every figure would be absent (F13). |
+| A tombstoned order | The mirror retires only the order row (a delete notice, or two clean empty fetches); its lines and refunds have no notice and no sweep of their own, so their rows stay live and their facts stay. They count nowhere: every figure reaches a line or a refund through its order's fact. |
 | A refund recorded late | It is folded within two minutes of being written, onto its own past day; that period's Refunds, Net sales and Total sales change. |
 | An order cancelled after its period | D3 and 5.4: the earlier period's figures drop. "Last order change recorded" says when. |
 | Several currencies over time | D6. A store that changed currency shows its old orders' count and the line naming them. |
 | A store whose time zone changes | D5: the next read cuts every day in the new zone. Comparisons across the change are in the new zone too. |
 | An order recorded late | The walk reads by the mirror's write time, so a late order is folded within two minutes of being written, onto its own past day. |
 | A write the walk missed | The five-minute overlap catches a row committed behind the watermark; the hourly check catches anything else within a day, by version, and repairs it. |
-| Several engine nodes | The rollup and the check run on the cron leader, one run at a time per process, under a table lock across replicas, as `component/sitetraffic/rollup.go` does. Every write is guarded by version and the derivation is recomputed from facts, so two runs give one answer. Reads are pure reads of shared tables and any node answers. The walk's reads are fresh reads, so a node's result cache never hands it an old page (F20). |
+| Several engine nodes | The rollup and the check run on the cron leader, one run at a time per process, and every write transaction takes a table lock across replicas, as `component/sitetraffic/rollup.go` does; a scheduled automation can still overlap across nodes, so every pass is safe to run twice and at once. Every write is guarded by version and the derivation is recomputed from facts, so two runs give one answer. The version is the mirror row's own write time (6.2), not its `updatedAt`: on the mirror's branch every mirror row carries `versionSource`, the rule that orders two mirror writes is `component/memql/sync/version.go`, and a row's `updatedAt` is Shopify's version only when `versionSource` is `origin`. A retired row is a tombstone the mirror keeps: the same row with `deleted` true, every other field as it last was, `updatedAt` the time MemQL read Shopify and `versionSource` `read` or `announced`. A read recognises it by `deleted` alone. Reads are pure reads of shared tables and any node answers. The walk's reads are fresh reads, so a node's result cache never hands it an old page (F20). |
 | The order fetch costs more | U1 adds up to 70 nodes per refund to the order fetch; L11 measures it before release. If it passes Shopify's limit on a real order, the page sizes of 6.1 are lowered, and a refund past them is incomplete as above. |
-| The verdict is not yet available | Until the mirror record's `shopifyStoreVerdict` is on the cluster, `verdict_state` is empty and the page says "Whether this store is recording is not known." above the figures. |
+| The verdict cannot be read | `shopifyStoreVerdict` lands with the mirror. When the walk's call of it fails, `verdict_state` is empty and the page says "Whether this store is recording is not known." above the figures. |
 | The wholesale pack is turned off | `wholesale` is null and the block is absent; the stored flags are left and recomputed when it is turned on again. |
 | A customer's data is redacted | The order's email is overwritten, so at the next wholesale pass the order is retail. The facts held no personal data to redact. |
 | The store's data is removed | D17: the store's facts and its `store_sales_store` row are deleted. |
@@ -739,10 +827,10 @@ order.
 | --- | --- | --- |
 | O1 | Shopify's meaning of the fields in 5.5 | L1 to L15 in the walk |
 | O2 | Whether the order fetch stays under Shopify's query cost limit with the refund detail inlined | L11, a gate of U1 |
-| O3 | That the first reconcile after a bulk backfill re-reads every order, so inlined refund detail arrives (F12 states it for references) | a U1 database test: backfill, then reconcile, then the lists are present |
-| O4 | Whether a disabled pack's queries are still loaded; the component asks the pack state first either way | a test in U6 with the pack disabled |
+| O3 | That the first reconcile after a bulk backfill re-reads every order, so inlined refund detail arrives (F12 states it for references) | Read in the code: only a store's first sweep, which has no watermark, lists every order; a later one reads what changed. So the detail arrives with the first sweep, with an order's own fetch, or with the one sweep from the start of 6.1, and a bulk line never removes it. Held by a U1 database test in both orders: backfill then first sweep, and first sweep then backfill, the lists are present |
+| O4 | Whether a disabled pack's queries are still loaded; the component asks the pack state first either way | Read in the code: they are not. A disabled pack is mounted inert: its concepts load and every query, mutation, builtin and shape is skipped (`dsl/pack_enablement.go`, `SkipsBehavioralLoad`), so asking one is an unknown call. Held by a test in U6 with the pack disabled |
 | O5 | Whether a top-level builtin's answer is ever served from the result cache (`useSiteStatistics.ts:15-17` claims it is not; this record did not find the code) | a U9 test that reads twice around a fact write on one node and sees the change |
-| O6 | The exact name of the pack-state read the component calls | settled in the plan, from `component/memql/module_registry.go` |
+| O6 | The exact name of the pack-state read the component calls | Settled: `PackDomainDisabled(domain string) bool` in package `dsl` (`dsl/pack_enablement.go`), asked with `wholesale`. It is the loaders' own answer for the node, set at boot from the `v1:platform:packState` rows over the pack's declared default, and what `component/memql/module_registry.go` reports as loaded or mounted inert. `ReadPackStates` (`component/memql/pack_state.go`) reads the rows, the cluster's wish, which can differ from a node until it restarts; the question is whether the pack's queries exist on the node that runs the pass |
 | O7 | That `row.createdAt >= since` with `sort "row.createdAt"` pages correctly over mirrored rows as it does over campaign rows | the U7 overlap test |
 
 ## 15. Proposed additions
