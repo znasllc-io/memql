@@ -215,14 +215,21 @@ func wantVersion(t *testing.T, what string, row map[string]any, col string, v ti
 	}
 }
 
-// snapshot is every fact of the store, as text, without checked_at.
+// snapshot is every fact of the store, as text, without checked_at: the
+// check marks every fact it compares (check.go), and the check a rebuild's
+// end begins runs in an ordinary run.
 func snapshot(t *testing.T, storeID string) string {
 	t.Helper()
-	all := map[string]any{
+	all := map[string]map[string]map[string]any{
 		"order":       orderFactsOf(t, storeID),
 		"line":        lineFactsOf(t, storeID),
 		"refund":      refundFactsOf(t, storeID),
 		"refund_line": refundLineFactsOf(t, storeID),
+	}
+	for _, table := range all {
+		for _, row := range table {
+			delete(row, "checked_at")
+		}
 	}
 	raw, err := json.Marshal(all)
 	if err != nil {
@@ -1885,38 +1892,66 @@ func TestARefundLineNamingADeletedOrGiftCardLineIsNoItemReturn(t *testing.T) {
 //     watermark (three); and keepWalked's one. Five.
 //   - Engine reads: the shop row and the verdict (keepStore), and one read
 //     to the clock per source. Five. The floor is kept, so it asks nothing.
+//
+// The wholesale pass (wholesale.go) adds nothing to either, in both cases
+// here: a store the pack is off for and kept not enabled, and an enabled
+// store whose granted set is the one it was last judged against, with no pass
+// under way. Each reads its row's wholesale columns once (wholesalePass's
+// wholesaleKept), a read that takes no lock and asks no engine, and then has
+// nothing to do: one unlocked read a turn, asserted below. The pack's own two reads are the run's,
+// made once for every store before the first turn (rollup.go, "Who is
+// wholesale"), and are not a turn's.
 func TestAQuietStoresWalkCosts(t *testing.T) {
-	i, id := runStore(t)
-	answerVerdict(i, verdictReply("recording", time.Now()))
-	_, db := statsEngine(t)
-	mirrorThreeLines(t, id)
-	for range 2 {
-		if _, err := run(t, i); err != nil {
-			t.Fatal(err)
-		}
-	}
-	engine := &contextEngine{inner: i.engine}
-	i.engine = engine
-	verdicts := 0
-	answer := i.verdictOf
-	i.verdictOf = func(ctx context.Context, storeID string) (storeVerdict, error) {
-		verdicts++
-		return answer(ctx, storeID)
-	}
-	queries := storeSalesQueries(t)
-	rep := RollupReport{Rows: map[string]int{}}
-	if err := i.rollStore(sweepCtx(t), db, storeOf(id, nil), time.Now(), wholesaleState{}, true, &rep); err != nil {
-		t.Fatal(err)
-	}
-	locks := 0
-	for _, q := range queries() {
-		if strings.HasPrefix(q, "LOCK TABLE") {
-			locks++
-		}
-	}
-	if locks != 5 || engine.asked()+verdicts != 5 {
-		t.Errorf("a quiet store's turn with its walk took %d locked transactions and %d engine and %d verdict reads; want 5 and 5 in all",
-			locks, engine.asked(), verdicts)
+	for _, c := range []struct {
+		name  string
+		state wholesaleState
+	}{
+		{"the pack off", wholesaleState{}},
+		{"enabled, its pass done", wholesaleState{Enabled: true, Granted: map[string]bool{buyerEmail: true}, Digest: grantedDigest(map[string]bool{buyerEmail: true})}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			i, id := runStore(t)
+			answerVerdict(i, verdictReply("recording", time.Now()))
+			_, db := statsEngine(t)
+			mirrorThreeLines(t, id)
+			for range 2 {
+				if _, err := run(t, i); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.state.Enabled {
+				exec(t, `UPDATE store_sales_store SET wholesale_enabled = true, wholesale_digest = ?, wholesale_cursor = '' WHERE store_id = ?`, c.state.Digest, id)
+			}
+			engine := &contextEngine{inner: i.engine}
+			i.engine = engine
+			verdicts := 0
+			answer := i.verdictOf
+			i.verdictOf = func(ctx context.Context, storeID string) (storeVerdict, error) {
+				verdicts++
+				return answer(ctx, storeID)
+			}
+			queries := storeSalesQueries(t)
+			rep := RollupReport{Rows: map[string]int{}}
+			if err := i.rollStore(sweepCtx(t), db, storeOf(id, nil), time.Now(), c.state, true, &rep); err != nil {
+				t.Fatal(err)
+			}
+			locks, wholesaleReads := 0, 0
+			for _, q := range queries() {
+				if strings.HasPrefix(q, "LOCK TABLE") {
+					locks++
+				}
+				if strings.HasPrefix(q, "SELECT") && strings.Contains(q, "wholesale_cursor") {
+					wholesaleReads++
+				}
+			}
+			if locks != 5 || engine.asked()+verdicts != 5 {
+				t.Errorf("a quiet store's turn with its walk took %d locked transactions and %d engine and %d verdict reads; want 5 and 5 in all",
+					locks, engine.asked(), verdicts)
+			}
+			if wholesaleReads != 1 {
+				t.Errorf("the turn read the store's wholesale columns %d times, want once, unlocked", wholesaleReads)
+			}
+		})
 	}
 }
 

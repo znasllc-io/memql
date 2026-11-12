@@ -25,6 +25,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/integrations/shopify"
+	"github.com/znasllc-io/memql/packs/anchor"
 )
 
 // harness_db_test.go -- the store statistics against a real engine and a real
@@ -93,6 +94,12 @@ func statsEngine(t *testing.T) (*memql.MemQLEngine, *bun.DB) {
 		// take a hook off a handle, so it is added once and a test registers
 		// a recorder with it for as long as it runs.
 		db.AddQueryHook(statementRecorders)
+		// The wholesale pack, linked as every node links it, before the
+		// boot loads the tree: its two statistics reads are what wholesaleOf
+		// asks (wholesale_db_test.go). Linking is not enabling; the process's
+		// disabled set is empty, so the pack loads, and a test turns it off
+		// with dsl.SetDisabledPackDomains.
+		anchor.Storefront()
 		if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
 			s.bootErr = fmt.Errorf("LoadUnifiedConcepts: %w", err)
 			_ = db.Close()
@@ -779,6 +786,29 @@ func mustAsk(t *testing.T, ctx context.Context, siteID, storeID, period string) 
 		t.Fatalf("storeStatistics(%s, %s, %s): %v", siteID, storeID, period, err)
 	}
 	return answer
+}
+
+// ---- Task 16: the check ----
+
+// rewriteInPlace changes the keys named in every stored version of a mirror
+// row with one statement, and leaves each version's write time as it was. It
+// is a test's stand-in for a customer's erasure, which rewrites a row's
+// versions in place where no walk looks; Task 18 runs the mirror's own.
+func rewriteInPlace(t *testing.T, concept, storeID, gid string, change map[string]any) {
+	t.Helper()
+	_, db := statsEngine(t)
+	raw, err := json.Marshal(change)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := db.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload = payload || ?::jsonb WHERE concept = ? AND id = ?`,
+		string(raw), concept, concept+":"+shopify.MirrorRowID(storeID, gid))
+	if err != nil {
+		t.Fatalf("rewrite %s in place: %v", gid, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		t.Fatalf("rewrite %s in place changed no version", gid)
+	}
 }
 
 // ---- Task 18: a store's facts, and its figures asked through the read ----

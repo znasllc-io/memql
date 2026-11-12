@@ -659,7 +659,13 @@ func TestALowerDefinitionRebuilds(t *testing.T) {
 		t.Errorf("the run after the first fill's walk reached the clock left rebuilding_since %v and generation %d, want cleared and %d",
 			k.rebuildingSince, k.generation, made)
 	}
-	before := facts()
+	// The check that run began when the rebuild ended (check.go) deleted the
+	// two facts this walk writes, which no mirrored row answers for; the walk
+	// writes them again, so they are what a rebuild must end with.
+	if got := facts(); len(got) != 0 {
+		t.Errorf("the rebuild's check left the facts no row answers for: %v", got)
+	}
+	before := []string{"o-1", "o-2"}
 
 	// An older definition: rebuilt, and while the walk is behind the clock
 	// the rebuild is not over.

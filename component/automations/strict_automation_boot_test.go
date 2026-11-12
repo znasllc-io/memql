@@ -295,7 +295,10 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 206 -> 207: storeStatisticsRollupSweep, the one-minute walk of every store's
 // mirrored orders, lines and refunds into the store statistics facts
 // (2026-11-12). One added, none removed; measured by the strict loader.
-const shippedAutomationCount = 207
+// 207 -> 208: storeStatisticsCheckSweep, the hourly check of every store's
+// statistics facts against its mirrored rows (2026-11-12). One added, none
+// removed; measured by the strict loader.
+const shippedAutomationCount = 208
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

@@ -913,8 +913,10 @@ func TestTheProviderOffersWhatItsBuiltinsName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(named, "rollup") {
-		t.Errorf("no builtin in the tree names integration.storeStats.rollup; found %v", named)
+	for _, c := range []string{"rollup", "check", "rebuild", "checkState"} {
+		if !slices.Contains(named, c) {
+			t.Errorf("no builtin in the tree names integration.storeStats.%s; found %v", c, named)
+		}
 	}
 	if _, ok := any(provider).(*Integration); !ok {
 		t.Errorf("the registered provider is %T, want this package's Integration", provider)

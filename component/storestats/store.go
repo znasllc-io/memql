@@ -343,7 +343,7 @@ func (i *Integration) keepStore(ctx context.Context, store map[string]any, now t
 	if err != nil {
 		return "", err
 	}
-	var rebuilt, purging, rebuilding bool
+	var rebuilt, purging, rebuilding, ended bool
 	if err := writeTx(ctx, db, id, anyGeneration, func(ctx context.Context, tx bun.Tx) error {
 		if err := ensureStore(ctx, tx, id); err != nil {
 			return err
@@ -371,13 +371,19 @@ func (i *Integration) keepStore(ctx context.Context, store map[string]any, now t
 			return rebuildStore(ctx, tx, id, now)
 		}
 		if !purging && rebuilding {
-			return clearRebuilding(ctx, tx, id, now)
+			var err error
+			ended, err = clearRebuilding(ctx, tx, id, now)
+			return err
 		}
 		return nil
 	}); err != nil {
 		return "", err
 	}
 	if !purging {
+		if ended {
+			// Its check begins once the store is walked (rollup.go, rollStore).
+			return outcomeRebuildEnded, nil
+		}
 		return "", nil
 	}
 	// A rebuild sets purging: the store's facts go before it is walked again.
@@ -818,13 +824,18 @@ func forgetStore(ctx context.Context, tx bun.Tx, storeID string) (gone bool, err
 }
 
 // clearRebuilding ends a store's rebuild once its walk is within
-// rebuildCaughtUp of the clock.
-func clearRebuilding(ctx context.Context, tx bun.Tx, storeID string, now time.Time) error {
-	if _, err := tx.NewUpdate().TableExpr("store_sales_store").
+// rebuildCaughtUp of the clock. ended says it ended now.
+func clearRebuilding(ctx context.Context, tx bun.Tx, storeID string, now time.Time) (ended bool, err error) {
+	res, err := tx.NewUpdate().TableExpr("store_sales_store").
 		Set("rebuilding_since = NULL").
 		Where("store_id = ? AND rebuilding_since IS NOT NULL AND NOT purging AND walked_through >= ?", storeID, now.UTC().Add(-rebuildCaughtUp)).
-		Exec(ctx); err != nil {
-		return fmt.Errorf("end the store's rebuild: %w", err)
+		Exec(ctx)
+	if err != nil {
+		return false, fmt.Errorf("end the store's rebuild: %w", err)
 	}
-	return nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }

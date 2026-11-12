@@ -405,3 +405,29 @@ builtin storeStatistics {
   storeId  string!  @description("The store of one of its destinations, as a bare id.")
   period   string!  @description("24h, 7d, 30d, 90d or 12m.")
 }
+
+/// The store statistics check (the 2026-11-11 store statistics design). NO @sdk: it is the
+/// storeStatisticsCheckSweep automation's work, and its handler admits that automation's maintenance
+/// principal at internal origin and no other caller, a cluster owner included. It walks each
+/// caught-up store's mirror rows again from Go and answers counts, for the rollup's reasons.
+@executor("integration.storeStats.check")
+@description("Carry every store's check pass on: walk each caught-up store's mirrored orders, lines and refunds again from its floor, compare each fact with what its row gives now by version and by content, write again what differs, and at the end of a pass delete, in batches, the facts no row answers for. Answers {stores, compared, mismatched, repaired, disagreeing, finished}: counts, and the ids of the stores whose pass ended, never a row.")
+builtin storeStatisticsCheck { }
+
+/// Rebuild one store's statistics. NO @sdk, and no rank floor of the engine's: its handler admits a
+/// person who is a cluster owner and nobody else, a maintenance principal included, before it reads
+/// the store id. The walk then deletes the store's facts in batches and refills them, and a check
+/// begins once it has caught up; storeStatisticsCheckState says when that check ended clean.
+@executor("integration.storeStats.rebuild")
+@description("Cluster owners only. Rebuild one store's statistics: raise its generation, mark it rebuilding and delete its watermarks and check row, so the walk deletes its facts in batches and refills them, and a check begins when the walk has caught up. A store the statistics hold no row for is refused. Answers {storeId, rebuildingSince}.")
+builtin storeStatisticsRebuild {
+  storeId  string!  @description("The store, as its bare id or v1:shopify:store:<id>.")
+}
+
+/// One store's check, as the statistics hold it. NO @sdk: its handler admits a person who is a
+/// cluster owner and nobody else, before it reads the store id.
+@executor("integration.storeStats.checkState")
+@description("Cluster owners only. One store's check: when the pass under way began, when the last pass began and ended, when one last ended with nothing mismatched, and that last pass's compared, mismatched, repaired and disagreeing counts; a time that never was is null. A store the statistics hold no row for is refused. Answers one node, checkState: {storeId, passUnderWaySince, lastStartedAt, lastFinishedAt, cleanAt, compared, mismatched, repaired, disagreeing}.")
+builtin storeStatisticsCheckState {
+  storeId  string!  @description("The store, as its bare id or v1:shopify:store:<id>.")
+}

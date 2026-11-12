@@ -100,9 +100,10 @@ const (
 	// read deadline, ten seconds, which ends a statement before or when the
 	// request pool's eight-second statement timeout does.
 	readBound = 10 * time.Second
-	// wholesaleReadsBound is the most reads wholesaleFor may make in a run
-	// (Task 15's wholesaleOf pages two reads); more must be read across runs.
-	wholesaleReadsBound = 10
+	// wholesaleReadBudget is the time the run's wholesale reads share
+	// (wholesale.go, wholesaleOf), asked before every page on the budgets'
+	// clock: spent, the run reads no further page and walks no store's facts.
+	wholesaleReadBudget = 10 * time.Second
 	// unbudgetedTransactions are the transactions a store's turn makes that
 	// no budget is asked between, counted from the code: its row
 	// (ensureStore, 1); keepStore's purging read, its keeping and a purge
@@ -119,7 +120,8 @@ const (
 // line:
 //
 //	the stores read:      maxStorePages (20) reads x readBound (10 s)       200 s
-//	the wholesale read:   wholesaleReadsBound (10) x readBound (10 s)        100 s
+//	the wholesale reads:  wholesaleReadBudget (10 s) + the read under way
+//	                      when it ran out, readBound (10 s)                   20 s
 //	the run's budget:     runBudget, after which no store is taken up         50 s
 //	the turn's budget:    turnBudget, of the last store taken up              30 s
 //	the unit under way:   the largest of
@@ -127,19 +129,23 @@ const (
 //	  one purge batch     its transaction (txTimeout 20 s), BEGIN to COMMIT    20 s
 //	  the store's keeping unbudgetedTransactions (12) x txTimeout (20 s)
 //	                      + unbudgetedReads (16) x readBound (10 s)          400 s
-//	                                                               total     780 s
+//	  a check's start     checkStartUnit: three transactions (20 s)           60 s
+//	                                                               total     700 s
 //
 // The keeping is the largest unit: a turn asks no budget before its first
 // page or batch, so when the budget is spent at the turn's start the whole of
 // it runs, and a page or a batch is one transaction of it. The purge is
 // counted as it runs: a turn can purge twice, a batch at a time, the budget
 // asked before each, so one batch is under way at most; each transaction is
-// timed BEGIN to COMMIT by txTimeout. Thirteen minutes, and runDeadline adds
-// a minute over it.
+// timed BEGIN to COMMIT by txTimeout. The check a rebuild's end begins in the
+// same turn (rollup.go, rollStore) asks turnSpent before its start and before
+// each of its pages and batches, so it adds a unit to the list, its start,
+// and no term to the sum. Eleven minutes and forty seconds, and runDeadline
+// adds a minute over it.
 func runDeadlineBound() time.Duration {
 	keeping := unbudgetedTransactions*txTimeout + unbudgetedReads*readBound
-	unit := max(readBound+txTimeout, txTimeout, keeping)
-	return maxStorePages*readBound + wholesaleReadsBound*readBound + runBudget + turnBudget + unit
+	unit := max(readBound+txTimeout, txTimeout, keeping, checkStartUnit())
+	return maxStorePages*readBound + wholesaleReadBudget + readBound + runBudget + turnBudget + unit
 }
 
 // aRun is one run of the rollup on this node, held while it runs.
@@ -181,6 +187,8 @@ type Integration struct {
 	// next run begins with the store after it (rollup.go, "One long store
 	// does not starve the others"). In memory, under runningMu.
 	lastTaken string
+	// checkLastTaken is lastTaken for the check's runs (check.go, runCheck).
+	checkLastTaken string
 }
 
 // NewIntegration wires the handles. The db getter is resolved at call time,
@@ -200,6 +208,8 @@ func NewIntegration(engine Engine, bunDB func() *bun.DB, logger *slog.Logger) *I
 	i.verdictOf = i.askVerdict // Task 14: a store's verdict, asked of the mirror's builtin (store.go)
 
 	i.walkStore = i.walkOneStore // Task 13: the fold and the derivation (fold.go)
+
+	i.wholesaleFor = i.wholesaleOf // Task 15: who is wholesale, asked of the wholesale pack (wholesale.go)
 	return i
 }
 
@@ -218,6 +228,24 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Name:        "statistics",
 			Description: "One store's sales figures for a period, asked through a storefront site that serves the store: the store's name, domain, currency and zone, the period cut in that zone, and how current the figures are. Admits a caller, in their own session, who can read the site and holds execute on app:deployables/sales for the site's organization, for the site's own bound or preview store. A period that is not one of the five gets the period's own sentence, and every other refusal here is one sentence, before anything of a store is read.",
 			Handler:     i.handleStatistics,
+		},
+		// Task 16: the check, the rebuild and the check's state (check.go).
+		{
+			Name:        "check",
+			Description: "Carry every store's check pass on: walk each caught-up store's mirrored orders, lines and refunds again from its floor, compare each fact with what its row gives now by version and by content, write again what differs, and at the end of a pass delete the facts no row answers for. Answers counts and store ids only. Admits only the storeStatisticsCheckSweep maintenance principal, at internal origin.",
+			Handler:     i.handleCheck,
+		},
+		{
+			Name:        "rebuild",
+			Description: "Rebuild one store's statistics: raise its generation, mark it rebuilding and delete its watermarks and check row, so the walk deletes its facts in batches and refills them, and a check begins when it has caught up. Answers {storeId, rebuildingSince}. For a person who is a cluster owner.",
+			Handler:     i.handleRebuild,
+			ArgsSchema:  map[string]string{"storeId": "string - the store, bare or v1:shopify:store:<id>"},
+		},
+		{
+			Name:        "checkState",
+			Description: "One store's check: when the pass under way began, when the last pass began and ended, when one last ended clean, and the last ended pass's compared, mismatched, repaired and disagreeing counts. For a person who is a cluster owner.",
+			Handler:     i.handleCheckState,
+			ArgsSchema:  map[string]string{"storeId": "string - the store, bare or v1:shopify:store:<id>"},
 		},
 	}
 }
