@@ -347,50 +347,69 @@ func TestAccountCensusAgreesWithTheIdWalk(t *testing.T) {
 	require.Empty(t, none)
 }
 
-func TestAccountRowCountsCountARowUnderItsNewestAccountNamingVersion(t *testing.T) {
+func TestAccountRowCountsAreTheCensusRows(t *testing.T) {
 	db := openAccountRowsDB(t)
 	seedAccountRows(t, db)
 	ctx := context.Background()
 	kinds := []string{rowsNote, rowsRun, rowsLoose, rowsEmptyKind}
 
-	// A row moved either way counts under the account its newest version
-	// names: n2 (beta then acme) is acme's, n3 (acme then beta) beta's; n5 is
-	// spelled canonically; r1's newest is an observation naming acme, r2's an
-	// observation naming beta.
-	//
-	// THE ONE DIFFERENCE FROM THE EXACT RULE, pinned: a row whose newest
-	// version names no account after an older version named one is in no
-	// account for the export and its census, and is still counted here under
-	// the account it last named. n6 (acme, then none) and r4 (an observation
-	// naming acme, older than its versioned row naming none) are counted for
-	// acme here and are not in acme's census or walk.
-	for _, spelling := range []string{rowsAcme, rowsAcmeCanon} {
-		acme, err := AccountRowCounts(ctx, db, spelling, kinds)
+	// Exactly the census's Rows and Versions per kind, for both accounts and
+	// both spellings: n2 (beta then acme) is acme's, n3 (acme then beta)
+	// beta's, n5 is spelled canonically, r1's and r2's newest versions are
+	// observations.
+	for _, account := range []string{rowsAcme, rowsAcmeCanon, rowsBeta} {
+		census, err := AccountCensus(ctx, db, account, kinds)
 		require.NoError(t, err)
-		require.Equal(t, []AccountKindCount{
-			{Concept: rowsNote, Rows: 4, Versions: 6}, // n1 (2), n2 (2: beta and acme), n5 (1), n6 (1: its acme version)
-			{Concept: rowsRun, Rows: 3, Versions: 3},  // r1 (1: the observation), r3 (1), r4 (1: the observation)
-		}, acme, spelling)
+		want := []AccountKindCount{}
+		for _, l := range census {
+			if l.Rows > 0 {
+				want = append(want, AccountKindCount{Concept: l.Concept, Rows: l.Rows, Versions: l.Versions})
+			}
+		}
+		got, err := AccountRowCounts(ctx, db, account, kinds)
+		require.NoError(t, err)
+		require.Equal(t, want, got, account)
 	}
-	beta, err := AccountRowCounts(ctx, db, rowsBeta, kinds)
+	acme, err := AccountRowCounts(ctx, db, rowsAcme, kinds)
 	require.NoError(t, err)
 	require.Equal(t, []AccountKindCount{
-		{Concept: rowsLoose, Rows: 1, Versions: 1},
-		{Concept: rowsNote, Rows: 1, Versions: 2},
-		{Concept: rowsRun, Rows: 1, Versions: 2},
-	}, beta)
+		{Concept: rowsNote, Rows: 3, Versions: 5},
+		{Concept: rowsRun, Rows: 2, Versions: 3},
+	}, acme)
 
-	census, err := AccountCensus(ctx, db, rowsAcme, []string{rowsNote, rowsRun})
-	require.NoError(t, err)
-	require.Equal(t, int64(3), census[0].Rows, "n6 is not in acme's census")
-	require.Equal(t, int64(2), census[1].Rows, "r4 is not in acme's census")
-	for _, v := range rowsWalk(t, db, rowsAcme, rowsNote) {
-		require.NotEqual(t, rowsNoteN6, v.id, "n6 is not in acme's walk")
+	// A row whose account a later version removed is counted nowhere: n6
+	// (acme, then none) and r4 (an acme observation older than its versioned
+	// row naming none) are in no account's count, walk or kind read.
+	for _, account := range []string{rowsAcme, rowsBeta} {
+		for _, concept := range []string{rowsNote, rowsRun} {
+			ids, err := AccountKindRowIDs(ctx, db, account, concept)
+			require.NoError(t, err)
+			require.NotContains(t, ids, rowsNoteN6)
+			require.NotContains(t, ids, rowsRunR4)
+		}
 	}
 
 	none, err := AccountRowCounts(ctx, db, rowsAcme, nil)
 	require.NoError(t, err)
 	require.Empty(t, none)
+}
+
+func TestAccountKindVersionsAcrossBatchBoundaries(t *testing.T) {
+	db := openAccountRowsDB(t)
+	seedAccountRows(t, db)
+	ctx := context.Background()
+	saved := AccountKindVersionBatch
+	t.Cleanup(func() { AccountKindVersionBatch = saved })
+	for _, batch := range []int{1, 2, 3, 5000} {
+		AccountKindVersionBatch = batch
+		for _, account := range []string{rowsAcme, rowsBeta} {
+			for _, concept := range []string{rowsNote, rowsRun, rowsLoose, rowsEmptyKind} {
+				var got []rowsVersionKey
+				require.NoError(t, AccountKindVersions(ctx, db, account, concept, rowsCollect(t, concept, &got)))
+				require.Equal(t, rowsWalk(t, db, account, concept), got, "batch %d %s %s", batch, account, concept)
+			}
+		}
+	}
 }
 
 func TestAccountKindsAreTheAccountScopedConceptsSorted(t *testing.T) {
@@ -432,4 +451,69 @@ func TestBareAccountIDAcceptsBothSpellingsAndNothingElse(t *testing.T) {
 		_, err := BareAccountID(raw)
 		require.ErrorContains(t, err, want, "%q", raw)
 	}
+}
+
+func TestAccountKindRowIDsAreTheIdsOfTheWalk(t *testing.T) {
+	db := openAccountRowsDB(t)
+	seedAccountRows(t, db)
+	ctx := context.Background()
+	for _, account := range []string{rowsAcme, rowsAcmeCanon, rowsBeta} {
+		for _, concept := range []string{rowsNote, rowsRun, rowsLoose, rowsEmptyKind} {
+			walked, err := AccountRowIDs(ctx, db, account, concept, "", 1000)
+			require.NoError(t, err)
+			got, err := AccountKindRowIDs(ctx, db, account, concept)
+			require.NoError(t, err)
+			require.Equal(t, walked, got, "%s %s", account, concept)
+		}
+	}
+	ids, err := AccountKindRowIDs(ctx, db, rowsAcme, rowsRun)
+	require.NoError(t, err)
+	require.Equal(t, []string{rowsRunR1, rowsRunR3}, ids, "r1 by its observation; r4's older observation does not decide")
+	_, err = AccountKindRowIDs(ctx, db, "", rowsNote)
+	require.Error(t, err)
+}
+
+func TestAccountRowHeadsAreTheNewestVersionAndTheFirstTime(t *testing.T) {
+	db := openAccountRowsDB(t)
+	seedAccountRows(t, db)
+	ctx := context.Background()
+	// n9 has three versions, the newest naming beta.
+	n9 := rowsNote + ":n9"
+	rowsVersion(t, db, `"MemoryNodes"`, rowsNote, n9, 1, map[string]any{"title": "one"})
+	rowsVersion(t, db, `"MemoryNodes"`, rowsNote, n9, 2, map[string]any{"accountId": rowsAcme})
+	rowsVersion(t, db, `"MemoryNodes"`, rowsNote, n9, 3, map[string]any{"accountId": rowsBeta})
+
+	type head struct {
+		key   rowsVersionKey
+		first int
+	}
+	read := func(concept string, ids []string) []head {
+		t.Helper()
+		var out []head
+		var keys []rowsVersionKey
+		collect := rowsCollect(t, concept, &keys)
+		require.NoError(t, AccountRowHeads(ctx, db, concept, ids, func(n memorynodes.MemoryNode, observed bool, first time.Time) error {
+			require.NoError(t, collect(n, observed))
+			out = append(out, head{keys[len(keys)-1], int(first.Sub(rowsClock) / time.Minute)})
+			return nil
+		}))
+		return out
+	}
+
+	// In the ids' order whatever order they were given; an id that does not
+	// exist has no call.
+	require.Equal(t, []head{
+		{rowsVersionKey{rowsNoteN1, 2, rowsAcme, false}, 1},
+		{rowsVersionKey{n9, 3, rowsBeta, false}, 1},
+	}, read(rowsNote, []string{n9, rowsNote + ":missing", rowsNoteN1}))
+	// r1's newest version is its observation; r4's observation is older than
+	// its versioned row and is not.
+	require.Equal(t, []head{
+		{rowsVersionKey{rowsRunR1, 3, rowsAcme, true}, 1},
+		{rowsVersionKey{rowsRunR4, 5, "", false}, 5},
+	}, read(rowsRun, []string{rowsRunR4, rowsRunR1}))
+	require.Empty(t, read(rowsNote, nil))
+
+	tooMany := make([]string, 501)
+	require.Error(t, AccountRowHeads(ctx, db, rowsNote, tooMany, func(memorynodes.MemoryNode, bool, time.Time) error { return nil }))
 }

@@ -15,18 +15,14 @@ package accounts
 //
 // The answer is one grouped count over every concept that declares an account
 // form. The engine's read path answers one concept per query and pages its
-// rows. The counts come from memql.AccountRowCounts and the totals from
-// memql.AccountNamingNewestSQL (component/memql/account_rows.go): the
-// COUNTING rule, a row counted once under the account its newest
-// ACCOUNT-NAMING version names, across the row table and the observation
-// store, read only from versions that name an account so a request can afford
-// it. `versions` is the versions of those rows that name an account. The
-// exact rule, which an export carries, differs in one case: a row whose newest
-// version names no account after an older one named an account is in no
-// account there and still counted here under the account it last named (the
-// file header of account_rows.go). The file sum below is raw SQL of its own
-// over the partial index idx_memorynodes_account, whose predicate it repeats
-// so the planner can use it.
+// rows. The counts, and the status panel's per-account totals, come from
+// memql.AccountRowCounts (component/memql/account_rows.go), the rule an export
+// carries: a row is counted once, under the account its newest version names,
+// across the row table and the observation store, and `versions` is every
+// version of those rows. It is decided from narrow columns, the account
+// matched by the account index, so no payload is unpacked. The file sum below
+// is raw SQL of its own over the partial index idx_memorynodes_account, whose
+// predicate it repeats so the planner can use it.
 //
 // # What counts
 //
@@ -58,7 +54,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lib/pq"
 	"github.com/uptrace/bun"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -83,9 +78,9 @@ const (
 
 	// inventoryDeadline bounds the inventory's two statements together. The
 	// request pool cancels a statement at 8 seconds and the node table holds
-	// tens of millions of rows; the count reads every version that names an
-	// account in the account-scoped kinds, so on a large cluster it can take
-	// longer than one read may. A deadline of its own, shorter than the
+	// tens of millions of rows; the count reads the account's versions through
+	// the account index and its rows' version counts, so an account holding
+	// most of a large cluster can take longer than one read may. A deadline of its own, shorter than the
 	// pool's, lets the handler answer in words the panel can show instead of a
 	// raw timeout.
 	inventoryDeadline = 6 * time.Second
@@ -140,24 +135,8 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	}
 }
 
-// accountScopedConcepts is the set of concept ids whose rows belong to an
-// account, read from the registry on every call so a concept mounted or
-// reloaded since boot is counted.
-func (i *Integration) accountScopedConcepts() map[string]bool {
-	out := map[string]bool{}
-	if i.concepts == nil {
-		return out
-	}
-	for _, c := range i.concepts() {
-		if c != nil && c.BelongsTo != nil && c.BelongsTo.AccountScoped() {
-			out[c.Name] = true
-		}
-	}
-	return out
-}
-
-// conceptList is the registry's concepts, read on every call for the reason
-// accountScopedConcepts gives.
+// conceptList is the registry's concepts, read on every call so a concept
+// mounted or reloaded since boot is counted.
 func (i *Integration) conceptList() []*memorynodes.Concept {
 	if i.concepts == nil {
 		return nil
@@ -215,19 +194,10 @@ const inventoryFilesSQL = `SELECT COALESCE(sum((f.payload->>'size')::numeric), 0
 // staged-data: MUST-NOT-GATE -- deciding whether the id names an account at all; a staged account is still one, and refusing it as unknown would hide rows that are already its.
 const accountExistsSQL = `SELECT EXISTS (SELECT 1 FROM "MemoryNodes" WHERE concept = $1 AND id IN ($2, $3))`
 
-// accountTotalsSQL counts the rows per (bare account, concept) by the
-// counting rule AccountRowCounts uses, for every account in one pass:
-// memql.AccountNamingNewestSQL decides each row, and this groups it. Grouped
-// by the BARE id, so a row whose newest account-naming version spells the
-// account canonically counts under the same account as one spelled bare. It
-// runs under totalsDeadline and the status answers without it when slow.
+// accountListSQL is every account row's id, in either spelling.
 //
-// staged-data: MUST-NOT-GATE -- an inventory of what every account holds; a staged concept's rows are the account's all the same.
-var accountTotalsSQL = `SELECT CASE WHEN r.account LIKE 'v1:accounts:account:%'
-            THEN substr(r.account, 21) ELSE r.account END AS account,
-       r.concept, count(*)
-  FROM (` + memql.AccountNamingNewestSQL + `) r
- GROUP BY 1, 2`
+// staged-data: MUST-NOT-GATE -- listing the accounts the totals count; a staged account's rows are its own all the same, and leaving it out would drop its total.
+const accountListSQL = `SELECT DISTINCT id FROM "MemoryNodes" WHERE concept = $1`
 
 const switchSQL = `SELECT enabled FROM account_stamping_storage LIMIT 1`
 
@@ -283,7 +253,15 @@ func (i *Integration) handleInventory(ctx context.Context, args map[string]any, 
 		}
 		return fmt.Errorf("accountInventory: %s: %w", what, err)
 	}
-	counts, err := memql.AccountRowCounts(countCtx, db.DB, bare, memql.AccountKinds(i.conceptList(), false))
+	// A read-only transaction, so the reader's plan settings hold for its
+	// statements (memql.AccountRowCounts) and the counts and the file sum see
+	// one snapshot.
+	tx, err := db.DB.BeginTx(countCtx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, tooLarge(err, "begin")
+	}
+	defer func() { _ = tx.Rollback() }()
+	counts, err := memql.AccountRowCounts(countCtx, tx, bare, memql.AccountKinds(i.conceptList(), false))
 	if err != nil {
 		return nil, tooLarge(err, "count rows")
 	}
@@ -308,7 +286,7 @@ func (i *Integration) handleInventory(ctx context.Context, args map[string]any, 
 	})
 
 	var bytes int64
-	if err := db.DB.QueryRowContext(countCtx, inventoryFilesSQL, bare, canonical, fileConcept).Scan(&bytes); err != nil {
+	if err := tx.QueryRowContext(countCtx, inventoryFilesSQL, bare, canonical, fileConcept).Scan(&bytes); err != nil {
 		return nil, tooLarge(err, "sum file sizes")
 	}
 
@@ -446,46 +424,83 @@ func readConflicts(ctx context.Context, db *bun.DB) ([]memorynodes.MemoryNode, e
 // accountTotals is one {kind: "account"} row per account holding rows of a
 // concept that declares an account form, sorted by account id, read under
 // totalsDeadline.
+//
+// Each account is counted with memql.AccountRowCounts, the rule decided
+// from narrow columns, once per account that exists (the rows of
+// v1:accounts:account, plus the primary account, which is an account before
+// its row is written). One statement for every account at once would have to
+// read each version's account, and only the payload holds it: on a bench with
+// payloads of installation size (about 3 KB, stored out of line) that
+// statement took 6.2 s, past this deadline, because evaluating the account on
+// a version fetches and unpacks its whole payload (task report, round 3). Per
+// account, the account is matched by the account index instead. The loop stops
+// at the deadline, and the status then answers without totals, as it does for
+// any failure here.
 func (i *Integration) accountTotals(ctx context.Context, db *bun.DB) ([]memorynodes.MemoryNode, error) {
 	ctx, cancel := context.WithTimeout(ctx, i.totalsDeadline)
 	defer cancel()
-	scoped := i.accountScopedConcepts()
-	totals, err := db.DB.QueryContext(ctx, accountTotalsSQL, pq.Array(memql.AccountKinds(i.conceptList(), false)))
+	kinds := memql.AccountKinds(i.conceptList(), false)
+	// One read-only transaction, for the reader's plan settings and one
+	// snapshot across the accounts.
+	tx, err := db.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return nil, fmt.Errorf("count rows per account: %w", err)
+		return nil, fmt.Errorf("begin: %w", err)
 	}
-	defer totals.Close()
-	perAccount := map[string]int64{}
-	for totals.Next() {
-		var account, concept string
-		var count int64
-		if err := totals.Scan(&account, &concept, &count); err != nil {
-			return nil, fmt.Errorf("count rows per account: %w", err)
-		}
-		if !scoped[concept] || strings.TrimSpace(account) == "" {
-			continue
-		}
-		// Ids are unique per concept (the concept is part of the id), so
-		// summing each concept's distinct count is the account's distinct
-		// row count.
-		perAccount[account] += count
+	defer func() { _ = tx.Rollback() }()
+	accounts, err := listAccounts(ctx, tx)
+	if err != nil {
+		return nil, fmt.Errorf("list accounts: %w", err)
 	}
-	if err := totals.Err(); err != nil {
-		return nil, fmt.Errorf("count rows per account: %w", err)
-	}
-	accounts := make([]string, 0, len(perAccount))
-	for a := range perAccount {
-		accounts = append(accounts, a)
-	}
-	sort.Strings(accounts)
 	out := make([]memorynodes.MemoryNode, 0, len(accounts))
 	for _, a := range accounts {
-		n, err := node("account:"+a, map[string]any{"kind": "account", "accountId": a, "rows": perAccount[a]})
+		counts, err := memql.AccountRowCounts(ctx, tx, a, kinds)
+		if err != nil {
+			return nil, fmt.Errorf("count rows of account %q: %w", a, err)
+		}
+		// Ids are unique per concept (the concept is part of the id), so
+		// summing each concept's count is the account's row count.
+		var rows int64
+		for _, c := range counts {
+			rows += c.Rows
+		}
+		if rows == 0 {
+			continue
+		}
+		n, err := node("account:"+a, map[string]any{"kind": "account", "accountId": a, "rows": rows})
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, n)
 	}
+	return out, nil
+}
+
+// listAccounts is the bare id of every account row and of the primary
+// account, sorted.
+func listAccounts(ctx context.Context, q memql.AccountQuerier) ([]string, error) {
+	rows, err := q.QueryContext(ctx, accountListSQL, accountConcept)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	seen := map[string]bool{primaryAccount: true}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		if bare, err := memql.BareAccountID(id); err == nil {
+			seen[bare] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(seen))
+	for a := range seen {
+		out = append(out, a)
+	}
+	sort.Strings(out)
 	return out, nil
 }
 

@@ -4,48 +4,56 @@ package memql
 // account's" (design record
 // docs/superpowers/specs/2026-11-12-account-export-design.md, section B, "The
 // rule"). The export, the account inventory, the status panel's totals and the
-// move act all read through it or through the rule written down here.
+// move act all read through it.
 //
-// # Two rules, and why there are two
+// # The rule
 //
-// A row is one id with many versions, one physical row per version, and
-// `accountId` is written onto its NEWEST version only (the assignment job) or
-// copied forward by the write path. Both spellings of an account id match,
-// bare `acme` and canonical `v1:accounts:account:acme`; an absent field and ""
-// are no account. A row's versions live in "MemoryNodes" and, for the concepts
-// memorynodes.HasLiveness lists, its newest version can be its current
-// observation in memory_liveness (two of them are account-scoped,
-// v1:platform:customDomain and v1:pipelines:run); every statement reads both,
-// and an observation wins a createdAt tie (the liveness trigger never makes
-// one). Nothing writes an account-scoped concept to "SecretMemoryNodes"; a
-// change that does extends this reader in the same push.
+// A row is one id with many versions, one physical row per version. It is an
+// account's when its NEWEST version names the account in `accountId`, in
+// either spelling (bare `acme` or canonical `v1:accounts:account:acme`); an
+// absent field and "" are no account. A row whose newest version names none is
+// in no account, whatever an older version named, and is counted nowhere.
+// Every version of an account's row travels with it, whatever account each
+// names. The newest version is read across "MemoryNodes" and memory_liveness:
+// for the concepts memorynodes.HasLiveness lists (two are account-scoped,
+// v1:platform:customDomain and v1:pipelines:run) the newest version can be the
+// row's current observation, which decides when it is at least as new as the
+// newest versioned row. Nothing writes an account-scoped concept to
+// "SecretMemoryNodes"; a change that does extends this reader in the same push.
 //
-//   - THE EXACT RULE: a row is an account's when its newest version names the
-//     account. A row whose newest version names none is in no account, whatever
-//     an older version named. This is what an export carries and what its
-//     census proves. Deciding it needs every version of the kind, because the
-//     newest version may name nothing and so is not in the account index, and
-//     on an installation the cold tail of the row table is compressed, where
-//     neither the account index nor an id index exists. So the exact rule is
-//     read in ONE pass over the kind's versions, sorted or hashed by id, on the
-//     export's snapshot session, never per candidate and never on a request:
-//     AccountKindVersions (the export's rows), AccountCensus (its proof), and,
-//     for a page of a list, AccountRowIDs with AccountRowVersions.
+// # Deciding it without reading payloads
 //
-//   - THE COUNTING RULE: a row counts under the account its newest
-//     ACCOUNT-NAMING version names. It is read from the versions that name an
-//     account (the partial index idx_memorynodes_account, whose predicate every
-//     such statement repeats, plus the observations naming one), with no read
-//     of a version that names none, which is what lets a request afford it:
-//     AccountRowCounts, behind the inventory, and the status panel's totals in
-//     integrations/accounts. It differs from the exact rule in ONE case: a row
-//     whose newest version names no account after an older one named an
-//     account is not in the export, and is still counted here under the
-//     account it last named. A move rewrites the newest version to name the new
-//     account, so moved rows count the same under both rules.
+// On an installation a version's payload is about 3 KB and stored out of line,
+// so evaluating payload->>'accountId' on a heap tuple fetches and unpacks the
+// whole payload. The decision (accountDecisionSQL) therefore reads narrow
+// columns only: per row its newest createdAt and version count from the
+// (concept, id, "createdAt" DESC) index, and the newest createdAt among its
+// versions that name the account, found through idx_memorynodes_account's own
+// condition so the account is matched by the index, not by evaluating the
+// expression. The row is the account's when the two are equal (or the
+// observation decides). Payloads are then read once, and only for the
+// account's rows. account_rows_plan_db_test.go holds that plan.
 //
-// UnplacedRowIDs lists rows in no account by the exact rule; counting them is
-// AccountCensus's InNoAccount.
+// # What each function costs
+//
+//   - AccountKindRowIDs: the decision for one kind; the account's versions
+//     through the account index and its candidate rows' version counts. Holds
+//     the kind's ids in memory.
+//   - AccountKindVersions: those ids, then every version of them in batches of
+//     AccountKindVersionBatch ids; no statement sorts more than a batch. The
+//     export's read of a kind, on its snapshot session.
+//   - AccountCensus: the exact count the export proves its file against, plus
+//     the rows in no account; reads every row of the given kinds through narrow
+//     columns. For the export, not a request.
+//   - AccountRowCounts: the census's Rows and Versions from the account's rows
+//     only; for requests (the inventory, the status totals).
+//   - AccountRowIDs and AccountRowVersions: a page of a list, a probe per row
+//     (newestAccountSQL) and an id lookup in every chunk; not for a whole kind.
+//   - UnplacedRowIDs: a page of the rows in no account, walking the kind.
+//
+// A compressed chunk has neither the account index nor an id index; every
+// statement here decompresses the kind's segment of it. No installation built
+// from this tree is compressed today (memory_nodes_compression.go).
 //
 // # Who may call
 //
@@ -56,9 +64,8 @@ package memql
 // runs on the request pool, on the export's snapshot session, or in a test's
 // transaction alike.
 //
-// Measurements behind these shapes: the account export task report, round 2
-// (a 26-chunk hypertable with its older half compressed). Tests:
-// account_rows_db_test.go, account_rows_plan_db_test.go, and
+// Measurements behind these shapes: the account export task report, rounds 2
+// and 3. Tests: account_rows_db_test.go, account_rows_plan_db_test.go, and
 // integrations/accounts/accounts_db_test.go.
 
 import (
@@ -68,6 +75,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/lib/pq"
 
@@ -86,8 +94,8 @@ type AccountCensusLine struct {
 	InNoAccount    int64
 }
 
-// AccountKindCount is one kind's rows counted by the counting rule, and the
-// versions of those rows that name an account.
+// AccountKindCount is one kind's rows whose newest version names the account,
+// and every version of those rows.
 type AccountKindCount struct {
 	Concept  string
 	Rows     int64
@@ -129,17 +137,6 @@ func BareAccountID(raw string) (string, error) {
 // accountNamedSQL is idx_memorynodes_account's predicate, repeated in every
 // statement that reads through the index so the planner can match it.
 const accountNamedSQL = `(payload->>'accountId') IS NOT NULL AND (payload->>'accountId') <> ''`
-
-// newestKeySQL orders a row's versions inside one aggregate: the version's
-// time to the microsecond in a fixed-width text, then the store (1 for an
-// observation, so it wins a tie). max(newestKeySQL || account) is then the
-// newest version's account after the first 21 characters, which lets a hash
-// aggregate decide each row in one pass with no sort of the kind's versions.
-// It reads `"createdAt"` and `observed` from the subquery it is applied to.
-const newestKeySQL = `to_char("createdAt" AT TIME ZONE 'UTC', 'YYYYMMDDHH24MISSUS') || observed`
-
-// newestKeyWidth is newestKeySQL's width: 20 characters of time, 1 of store.
-const newestKeyWidth = 21
 
 // newestAccountSQL is the account the newest version of the row c.id of
 // concept c.concept names, across the row table and the observation store: a
@@ -185,7 +182,7 @@ const accountRowIDsSQL = `SELECT c.id FROM (
  LIMIT $5`
 
 // AccountRowIDs is the ids of `concept` whose NEWEST version names `account`,
-// ascending, after afterID: the exact rule, for one page of a list.
+// ascending, after afterID: the rule, for one page of a list.
 //
 // It finds candidates through the account index and decides each by a probe of
 // its newest version (newestAccountSQL), so a page costs a probe per row it
@@ -268,7 +265,7 @@ const accountRowVersionsSQL = `SELECT ` + versionColumnsSQL + `, false AS observ
 UNION ALL
 SELECT ` + versionColumnsSQL + `, true
   FROM memory_liveness WHERE concept = $1 AND id = ANY($2::text[])
- ORDER BY 1, 2`
+ ORDER BY 1, 2, 10`
 
 // AccountRowVersions calls each for every version of the given ids, ordered by
 // id, then createdAt, with observed true for a version held in the observation
@@ -284,42 +281,59 @@ func AccountRowVersions(ctx context.Context, q AccountQuerier, concept string, i
 	return scanVersions(ctx, q, "account row versions", each, accountRowVersionsSQL, concept, pq.Array(ids))
 }
 
-// accountKindVersionsSQL is every version of every row of one kind whose
-// newest version names the account, in (id, createdAt) order: one pass over
-// the kind's versions in both stores, a window that gives each version its
-// row's newest account, and the filter. Measured against a materialized
-// DISTINCT ON of the kind's ids joined back to its versions, which reads the
-// kind twice: the window was faster for a large account and its first row
-// arrives sooner (round 2 of the task report). Its sort is of the kind's
-// whole versions and spills to temporary files for a large kind; it runs on
-// the export's session, not on a request.
+// accountKindBatchSQL is AccountRowVersions' statement bounded by the batch's
+// first and last id ($3, $4). Without the bound the planner read each batch by
+// scanning the kind's concept index and filtering on the ids, the whole kind
+// once per batch (64 s for a 212,500-row kind on the bench); with it each
+// batch is a range of the (concept, id, "createdAt" DESC) index, and a kind is
+// read about once (21 s, nearly all of it the payloads themselves). The
+// bounds are the batch's own ends in the order the database returned the ids,
+// so they compare in the database's collation.
 //
-// staged-data: MUST-NOT-GATE -- the rows an export carries; leaving a staged concept's rows out would lose them on import.
-const accountKindVersionsSQL = `SELECT ` + versionColumnsSQL + `, observed FROM (
-  SELECT v.*, last_value(v.payload->>'accountId') OVER (
-           PARTITION BY v.id ORDER BY v."createdAt", v.observed
-           ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS newest
-    FROM (
-      SELECT ` + versionColumnsSQL + `, false AS observed FROM "MemoryNodes" WHERE concept = $3
-      UNION ALL
-      SELECT ` + versionColumnsSQL + `, true FROM memory_liveness WHERE concept = $3
-    ) v
-) w
- WHERE newest IN ($1, $2)
- ORDER BY id, "createdAt", observed`
+// staged-data: MUST-NOT-GATE -- the versions of rows already chosen as an account's; leaving a staged concept's out would lose them on import.
+const accountKindBatchSQL = `SELECT ` + versionColumnsSQL + `, false AS observed
+  FROM "MemoryNodes" WHERE concept = $1 AND id >= $3 AND id <= $4 AND id = ANY($2::text[])
+UNION ALL
+SELECT ` + versionColumnsSQL + `, true
+  FROM memory_liveness WHERE concept = $1 AND id >= $3 AND id <= $4 AND id = ANY($2::text[])
+ ORDER BY 1, 2, 10`
+
+// AccountKindVersionBatch is how many ids AccountKindVersions reads the
+// versions of in one statement. A variable so a test can cross a batch
+// boundary with a small fixture. Chosen on the bench (round 3 of the task
+// report): one batch's statement sorts only that batch's versions.
+var AccountKindVersionBatch = 5000
 
 // AccountKindVersions calls each for every version of every row of `concept`
 // whose NEWEST version (across both stores) names `account`, ordered by id
-// then createdAt, with observed true for a version held in the observation
-// store. One statement, no probe per id: the export reads a kind with it on
-// its snapshot session. The rows stream, so each must not issue a statement on
-// q itself; an error from each stops the read and is returned as it is.
+// then createdAt then observed, with observed true for a version held in the
+// observation store. The export reads a kind with it on its snapshot session.
+//
+// The rows are AccountKindRowIDs' (decided from narrow columns, the kind's ids
+// held in memory); their versions are then read AccountKindVersionBatch ids at
+// a time, so payloads are read once and
+// only for the account's rows, and no statement sorts more than a batch (see
+// accountKindBatchSQL).
+// Because each batch's statement is closed before the next is opened, the
+// read is consistent across batches only inside one transaction, which is how
+// the export runs it. each must not issue a statement on q itself; an error
+// from each stops the read and is returned as it is.
 func AccountKindVersions(ctx context.Context, q AccountQuerier, account, concept string, each func(n memorynodes.MemoryNode, observed bool) error) error {
-	bare, err := BareAccountID(account)
+	ids, err := AccountKindRowIDs(ctx, q, account, concept)
 	if err != nil {
-		return err
+		return fmt.Errorf("account kind versions: %w", err)
 	}
-	return scanVersions(ctx, q, "account kind versions", each, accountKindVersionsSQL, bare, accountCanonicalPrefix+bare, concept)
+	batch := AccountKindVersionBatch
+	if batch <= 0 {
+		batch = 1
+	}
+	for start := 0; start < len(ids); start += batch {
+		end := min(start+batch, len(ids))
+		if err := scanVersions(ctx, q, "account kind versions", each, accountKindBatchSQL, concept, pq.Array(ids[start:end]), ids[start], ids[end-1]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func scanVersions(ctx context.Context, q AccountQuerier, what string, each func(memorynodes.MemoryNode, bool) error, query string, args ...any) error {
@@ -347,39 +361,60 @@ func scanVersions(ctx context.Context, q AccountQuerier, what string, each func(
 	return nil
 }
 
-// accountCensusSQL is the exact rule counted: per kind, the rows whose newest
-// version names the account, every version of them, and the rows whose newest
-// version names none. One grouped statement over every version of the given
-// kinds in both stores, each row decided by max(newestKeySQL || account) in a
-// hash aggregate, so no row is probed and nothing is sorted by time.
+// accountCensusSQL counts accountDecisionSQL's rule per kind, from the same
+// narrow sources, plus the rows in no account. Beside accountDecisionSQL's
+// three it reads, for every row of the kinds, its newest createdAt and version
+// count from the (concept, id, "createdAt" DESC) index (latest, not restricted
+// to candidates), and its newest createdAt among the versions that name ANY
+// account, through idx_memorynodes_account's predicate with no account
+// condition (anyNamed). Its "greater than the empty string" condition is that
+// index's leading column read as a range (every non-empty text is greater than
+// the empty one), so the planner reads the account index; without it the
+// planner filtered another index's heap tuples on the expression. A row is in
+// no account when that is not its newest
+// version, or when an observation that decides names none.
 //
 // staged-data: MUST-NOT-GATE -- the count an export proves its file against; leaving a staged concept's rows out would make a file that dropped them look complete.
-var accountCensusSQL = fmt.Sprintf(`SELECT concept,
-       count(*) FILTER (WHERE newest IN ($1, $2)),
-       COALESCE(sum(versions) FILTER (WHERE newest IN ($1, $2)), 0)::bigint,
-       count(*) FILTER (WHERE newest = '')
-  FROM (
-    SELECT concept, id, count(*) AS versions,
-           substr(max(%s || COALESCE(account, '')), %d) AS newest
-      FROM (
-        SELECT concept, id, "createdAt", payload->>'accountId' AS account, 0 AS observed
-          FROM "MemoryNodes" WHERE concept = ANY($3::text[])
-        UNION ALL
-        SELECT concept, id, "createdAt", payload->>'accountId', 1
-          FROM memory_liveness WHERE concept = ANY($3::text[])
-      ) v
+const accountCensusSQL = `WITH named AS MATERIALIZED (
+    SELECT concept, id, max("createdAt") AS at FROM "MemoryNodes"
+     WHERE ` + accountNamedSQL + ` AND (payload->>'accountId') IN ($1, $2) AND concept = ANY($3::text[])
      GROUP BY concept, id
-  ) r
- GROUP BY concept`, newestKeySQL, newestKeyWidth+1)
+), anyNamed AS MATERIALIZED (
+    SELECT concept, id, max("createdAt") AS at FROM "MemoryNodes"
+     WHERE ` + accountNamedSQL + ` AND (payload->>'accountId') > '' AND concept = ANY($3::text[])
+     GROUP BY concept, id
+), observed AS MATERIALIZED (
+    SELECT concept, id, "createdAt" AS at, COALESCE(payload->>'accountId', '') AS account
+      FROM memory_liveness WHERE concept = ANY($3::text[])
+), latest AS (
+    SELECT concept, id, max("createdAt") AS at, count(*) AS versions FROM "MemoryNodes"
+     WHERE concept = ANY($3::text[])
+     GROUP BY concept, id
+)
+SELECT concept,
+       count(*) FILTER (WHERE mine),
+       COALESCE(sum(versions) FILTER (WHERE mine), 0)::bigint,
+       count(*) FILTER (WHERE nobody)
+  FROM (
+    SELECT l.concept, l.versions + CASE WHEN o.id IS NULL THEN 0 ELSE 1 END AS versions,
+           CASE WHEN o.at >= l.at THEN o.account IN ($1, $2) ELSE n.at IS NOT DISTINCT FROM l.at END AS mine,
+           CASE WHEN o.at >= l.at THEN o.account = '' ELSE a.at IS DISTINCT FROM l.at END AS nobody
+      FROM latest l
+      LEFT JOIN named n ON n.concept = l.concept AND n.id = l.id
+      LEFT JOIN anyNamed a ON a.concept = l.concept AND a.id = l.id
+      LEFT JOIN observed o ON o.concept = l.concept AND o.id = l.id
+  ) x
+ GROUP BY concept`
 
 // AccountCensus is the exact count of what an export of the account carries,
-// per kind: Rows and Versions by the exact rule, and InNoAccount, the kind's
+// per kind: Rows and Versions by the rule, and InNoAccount, the kind's
 // rows whose newest version names no account. Sorted by concept. A kind with
 // neither rows of the account nor rows in no account has no line.
 //
-// It reads every version of the given kinds, the cold compressed tail
-// included, and is for the export's snapshot, not for a request: a request
-// counts with AccountRowCounts.
+// It reads every row of the given kinds through narrow columns (no payload of
+// a versioned row), the cold compressed tail decompressed, and is for the
+// export's snapshot, not for a request: a request counts with
+// AccountRowCounts, which reads the account's rows only.
 func AccountCensus(ctx context.Context, q AccountQuerier, account string, concepts []string) ([]AccountCensusLine, error) {
 	bare, err := BareAccountID(account)
 	if err != nil {
@@ -389,21 +424,24 @@ func AccountCensus(ctx context.Context, q AccountQuerier, account string, concep
 	if len(concepts) == 0 {
 		return out, nil
 	}
-	rows, err := q.QueryContext(ctx, accountCensusSQL, bare, accountCanonicalPrefix+bare, pq.Array(concepts))
+	err = withIndexPlans(ctx, q, func() error {
+		rows, err := q.QueryContext(ctx, accountCensusSQL, bare, accountCanonicalPrefix+bare, pq.Array(concepts))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var l AccountCensusLine
+			if err := rows.Scan(&l.Concept, &l.Rows, &l.Versions, &l.InNoAccount); err != nil {
+				return err
+			}
+			if l.Rows > 0 || l.InNoAccount > 0 {
+				out = append(out, l)
+			}
+		}
+		return rows.Err()
+	})
 	if err != nil {
-		return nil, fmt.Errorf("account census: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var l AccountCensusLine
-		if err := rows.Scan(&l.Concept, &l.Rows, &l.Versions, &l.InNoAccount); err != nil {
-			return nil, fmt.Errorf("account census: %w", err)
-		}
-		if l.Rows > 0 || l.InNoAccount > 0 {
-			out = append(out, l)
-		}
-	}
-	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("account census: %w", err)
 	}
 	// Sorted here, byte-wise, rather than by the database's collation.
@@ -411,41 +449,11 @@ func AccountCensus(ctx context.Context, q AccountQuerier, account string, concep
 	return out, nil
 }
 
-// AccountNamingNewestSQL decides every row of the given kinds ($1) that has a
-// version naming an account by the counting rule: the account its newest
-// ACCOUNT-NAMING version names, raw (either spelling), with the count of its
-// versions that name an account. Read only from versions that name an account,
-// through idx_memorynodes_account's predicate, and the observations naming one,
-// in one hash aggregate. The per-account count and the status panel's totals
-// in integrations/accounts both group it, so the two cannot disagree.
-//
-// staged-data: MUST-NOT-GATE -- whose rows are whose for an inventory; a staged concept's rows are the account's all the same.
-var AccountNamingNewestSQL = fmt.Sprintf(`SELECT concept, id, count(*) AS versions,
-       substr(max(%s || account), %d) AS account
-  FROM (
-    SELECT concept, id, "createdAt", payload->>'accountId' AS account, 0 AS observed
-      FROM "MemoryNodes" WHERE `+accountNamedSQL+` AND concept = ANY($1::text[])
-    UNION ALL
-    SELECT concept, id, "createdAt", payload->>'accountId', 1
-      FROM memory_liveness WHERE `+accountNamedSQL+` AND concept = ANY($1::text[])
-  ) v
- GROUP BY concept, id`, newestKeySQL, newestKeyWidth+1)
-
-// accountRowCountsSQL is AccountNamingNewestSQL for one account.
-//
-// staged-data: MUST-NOT-GATE -- the AccountNamingNewestSQL reason, for one account.
-var accountRowCountsSQL = `SELECT concept, count(*), sum(versions)::bigint
-  FROM (` + AccountNamingNewestSQL + `) r
- WHERE account IN ($2, $3)
- GROUP BY concept`
-
-// AccountRowCounts is, per kind, the rows counted under the account by the
-// counting rule (the account a row's newest account-naming version names) and
-// the versions of those rows that name an account. Sorted by concept; a kind
-// with no rows has no line. For requests: it reads only versions that name an
-// account. It is not what an export carries: a row whose newest version names
-// no account after an older one named this account is counted here and is in
-// no account by the exact rule (see the file header).
+// AccountRowCounts is, per kind, the rows whose newest version names the
+// account and every version of them: the census's Rows and Versions, without
+// its rows in no account, read from the account's rows only (accountDecisionSQL)
+// so a request can afford it. Sorted by concept; a kind with no rows has no
+// line.
 func AccountRowCounts(ctx context.Context, q AccountQuerier, account string, concepts []string) ([]AccountKindCount, error) {
 	bare, err := BareAccountID(account)
 	if err != nil {
@@ -455,21 +463,272 @@ func AccountRowCounts(ctx context.Context, q AccountQuerier, account string, con
 	if len(concepts) == 0 {
 		return out, nil
 	}
-	rows, err := q.QueryContext(ctx, accountRowCountsSQL, pq.Array(concepts), bare, accountCanonicalPrefix+bare)
-	if err != nil {
-		return nil, fmt.Errorf("account row counts: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var c AccountKindCount
-		if err := rows.Scan(&c.Concept, &c.Rows, &c.Versions); err != nil {
-			return nil, fmt.Errorf("account row counts: %w", err)
+	err = withIndexPlans(ctx, q, func() error {
+		few, err := accountDecisionShape(ctx, q, bare, concepts)
+		if err != nil {
+			return err
 		}
-		out = append(out, c)
-	}
-	if err := rows.Err(); err != nil {
+		query := accountRowCountsManySQL
+		if few {
+			query = accountRowCountsFewSQL
+		}
+		rows, err := q.QueryContext(ctx, query, bare, accountCanonicalPrefix+bare, pq.Array(concepts))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var c AccountKindCount
+			if err := rows.Scan(&c.Concept, &c.Rows, &c.Versions); err != nil {
+				return err
+			}
+			out = append(out, c)
+		}
+		return rows.Err()
+	})
+	if err != nil {
 		return nil, fmt.Errorf("account row counts: %w", err)
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].Concept < out[b].Concept })
 	return out, nil
+}
+
+// accountDecisionSQL is the rule decided from narrow columns, for the kinds in
+// $3 and the account spelled $1 (bare) or $2 (canonical): one row per row of
+// those kinds whose newest version names the account, with every version of
+// it counted (the observation included). No payload of a versioned row is
+// read:
+//
+//   - named: per row, the newest createdAt among its versions that name the
+//     account, read through idx_memorynodes_account's own condition (its
+//     predicate repeated), so the account is matched by the index and the
+//     expression is never evaluated on a heap tuple; only id and createdAt
+//     come from the heap.
+//   - latest: per row, its newest createdAt and version count, from the
+//     (concept, id, "createdAt" DESC) index.
+//   - observed: the observation store's row, at least as new as the newest
+//     versioned row, decides by its own account (memory_liveness holds one
+//     small row per record, so its payload is read there).
+//
+// A row is the account's when its newest version is one of those that name the
+// account: named.at = latest.at, unless the observation decides.
+//
+// It comes in two shapes, because no one plan serves a small account and the
+// big one (round 3 of the task report). FEW restricts latest to the account's
+// candidate rows, which the planner answers with a probe of the id index per
+// candidate per chunk: a few milliseconds for a small account, 40 s for one
+// holding 85% of a 2-million-version bench. MANY reads latest for the whole kind in one pass of
+// the index and joins: the right plan for a large account and wasteful for a
+// small one. accountDecisionShape chooses with a bounded count of the
+// account's index entries; the planner's own estimate of the account's share
+// was measured off by a factor of thirty, so it is not trusted to choose.
+//
+// staged-data: MUST-NOT-GATE -- deciding whose a row is; gating a staged concept's versions would place its rows in no account and leave them out of the account's export.
+func accountDecisionSQL(few bool) string {
+	restrict := ""
+	if few {
+		restrict = `
+       AND (concept, id) IN (SELECT concept, id FROM named UNION ALL SELECT concept, id FROM observed WHERE names)`
+	}
+	return `WITH named AS MATERIALIZED (
+    SELECT concept, id, max("createdAt") AS at FROM "MemoryNodes"
+     WHERE ` + accountNamedSQL + ` AND (payload->>'accountId') IN ($1, $2) AND concept = ANY($3::text[])
+     GROUP BY concept, id
+), observed AS MATERIALIZED (
+    SELECT concept, id, "createdAt" AS at, COALESCE(payload->>'accountId', '') IN ($1, $2) AS names
+      FROM memory_liveness WHERE concept = ANY($3::text[])
+), latest AS (
+    SELECT concept, id, max("createdAt") AS at, count(*) AS versions FROM "MemoryNodes"
+     WHERE concept = ANY($3::text[])` + restrict + `
+     GROUP BY concept, id
+)
+SELECT l.concept, l.id, l.versions + CASE WHEN o.id IS NULL THEN 0 ELSE 1 END AS versions
+  FROM latest l
+  LEFT JOIN named n ON n.concept = l.concept AND n.id = l.id
+  LEFT JOIN observed o ON o.concept = l.concept AND o.id = l.id
+ WHERE CASE WHEN o.at >= l.at THEN o.names ELSE n.at IS NOT DISTINCT FROM l.at END`
+}
+
+// accountDecisionFewLimit is the count of the account's versions in the
+// given kinds at and above which the MANY shape is read. On the bench, with
+// payloads of installation size and 26 chunks, a candidate cost about 0.7 ms
+// in the FEW shape (a probe of each chunk) and the MANY shape about one second
+// for a kind of 250,000 rows, so they cross near 1,500 candidates, about 3,000
+// versions; the limit stays below that, and the count stops at it.
+const accountDecisionFewLimit = 2000
+
+// accountDecisionProbeSQL counts the account's versions in the kinds, up to
+// $4, through the account index's condition.
+//
+// staged-data: MUST-NOT-GATE -- choosing how to read an account's rows; a staged concept's rows are the account's all the same.
+const accountDecisionProbeSQL = `SELECT count(*) FROM (
+    SELECT 1 FROM "MemoryNodes"
+     WHERE ` + accountNamedSQL + ` AND (payload->>'accountId') IN ($1, $2) AND concept = ANY($3::text[])
+     LIMIT $4) k`
+
+// accountDecisionShape is true when the account has few enough versions in the
+// kinds for the FEW shape.
+func accountDecisionShape(ctx context.Context, q AccountQuerier, bare string, kinds []string) (bool, error) {
+	rows, err := q.QueryContext(ctx, accountDecisionProbeSQL, bare, accountCanonicalPrefix+bare, pq.Array(kinds), accountDecisionFewLimit)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	var n int
+	if rows.Next() {
+		if err := rows.Scan(&n); err != nil {
+			return false, err
+		}
+	}
+	return n < accountDecisionFewLimit, rows.Err()
+}
+
+// staged-data: MUST-NOT-GATE -- deciding whose a row is; gating a staged concept's versions would place its rows in no account and leave them out of the account's export.
+var (
+	accountKindRowIDsFewSQL  = `SELECT d.id FROM (` + accountDecisionSQL(true) + `) d ORDER BY d.id`
+	accountKindRowIDsManySQL = `SELECT d.id FROM (` + accountDecisionSQL(false) + `) d ORDER BY d.id`
+	accountRowCountsFewSQL   = `SELECT d.concept, count(*), sum(d.versions)::bigint FROM (` + accountDecisionSQL(true) + `) d GROUP BY d.concept`
+	accountRowCountsManySQL  = `SELECT d.concept, count(*), sum(d.versions)::bigint FROM (` + accountDecisionSQL(false) + `) d GROUP BY d.concept`
+)
+
+// withIndexPlans runs read with sequential and bitmap scans turned off for its
+// statements, then puts both settings back. A sequential scan of a kind that
+// matches the account's versions by evaluating payload->>'accountId' unpacks
+// every payload it passes; a bitmap scan rechecks the expression on a lossy
+// page. The planner prefers both for an account that holds most of a kind,
+// because it does not price the unpacking. The settings are transaction-local
+// (set_config(..., true)): inside a transaction, which is how the export and
+// the inventory read, they hold for read's statements alone. On a pool or a
+// connection outside a transaction each statement is its own transaction and
+// the settings do nothing, and the statements run as the planner chooses.
+func withIndexPlans(ctx context.Context, q AccountQuerier, read func() error) error {
+	var seq, bitmap string
+	if err := queryOne(ctx, q, `SELECT current_setting('enable_seqscan'), current_setting('enable_bitmapscan')`, nil, &seq, &bitmap); err != nil {
+		return err
+	}
+	var ignore1, ignore2 string
+	if err := queryOne(ctx, q, `SELECT set_config('enable_seqscan', 'off', true), set_config('enable_bitmapscan', 'off', true)`, nil, &ignore1, &ignore2); err != nil {
+		return err
+	}
+	readErr := read()
+	if err := queryOne(ctx, q, `SELECT set_config('enable_seqscan', $1, true), set_config('enable_bitmapscan', $2, true)`, []any{seq, bitmap}, &ignore1, &ignore2); err != nil && readErr == nil {
+		readErr = err
+	}
+	return readErr
+}
+
+// queryOne scans the one row a statement answers into dest.
+func queryOne(ctx context.Context, q AccountQuerier, query string, args []any, dest ...any) error {
+	rows, err := q.QueryContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return errors.New("account rows: no row")
+	}
+	if err := rows.Scan(dest...); err != nil {
+		return err
+	}
+	return rows.Err()
+}
+
+// AccountKindRowIDs is the ids of every row of `concept` whose newest version
+// (across both stores) names `account`, ascending in the database's order.
+// Exact, decided from narrow columns (accountDecisionSQL), and the whole kind's
+// ids are held in memory: the export reads a kind's ids with it and then its
+// versions in batches.
+func AccountKindRowIDs(ctx context.Context, q AccountQuerier, account, concept string) ([]string, error) {
+	bare, err := BareAccountID(account)
+	if err != nil {
+		return nil, err
+	}
+	kinds := []string{concept}
+	var ids []string
+	err = withIndexPlans(ctx, q, func() error {
+		few, err := accountDecisionShape(ctx, q, bare, kinds)
+		if err != nil {
+			return err
+		}
+		query := accountKindRowIDsManySQL
+		if few {
+			query = accountKindRowIDsFewSQL
+		}
+		ids, err = scanIDs(ctx, q, query, bare, accountCanonicalPrefix+bare, pq.Array(kinds))
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("account kind row ids: %w", err)
+	}
+	return ids, nil
+}
+
+// accountRowHeadsLimit is the most ids AccountRowHeads takes: a page of a list.
+const accountRowHeadsLimit = 500
+
+// accountRowHeadsSQL is, per id of $2, its newest version and its oldest
+// createdAt. The span (oldest and newest createdAt) comes from narrow columns
+// grouped by id, the id matched with = ANY, so no older version's payload is
+// read and no LIMIT over "createdAt" invites an ordered walk of the chunks
+// (versionsOfOneID in executor.go has that history). The newest version is
+// then read by its key, with the ids matched again by = ANY: the planner
+// misjudged the span's size and, joining on the key alone, hashed the whole
+// kind (4 s and 2 GB of temporary files for 50 ids on the bench). An
+// observation at least as new as the newest versioned row is the newest
+// version instead.
+//
+// staged-data: MUST-NOT-GATE -- a page of an account's rows for the operator who lists them; a staged concept's rows are the account's all the same.
+const accountRowHeadsSQL = `WITH span AS MATERIALIZED (
+    SELECT id, min("createdAt") AS first, max("createdAt") AS last FROM "MemoryNodes"
+     WHERE concept = $1 AND id = ANY($2::text[])
+     GROUP BY id
+)
+SELECT n.id, n."createdAt", n."createdBy", n.concept, n.type, n.schema, n.payload, n.metadata, n.provenance, false, s.first
+  FROM span s
+  JOIN "MemoryNodes" n ON n.concept = $1 AND n.id = ANY($2::text[]) AND n.id = s.id AND n."createdAt" = s.last
+ WHERE NOT EXISTS (SELECT 1 FROM memory_liveness l WHERE l.concept = $1 AND l.id = s.id AND l."createdAt" >= s.last)
+UNION ALL
+SELECT l.id, l."createdAt", l."createdBy", l.concept, l.type, l.schema, l.payload, l.metadata, l.provenance, true, s.first
+  FROM span s
+  JOIN memory_liveness l ON l.concept = $1 AND l.id = s.id AND l."createdAt" >= s.last
+ ORDER BY 1`
+
+// AccountRowHeads calls each once per id of `concept` that exists, in the
+// ids' database order, with the row's newest version across both stores, true
+// when that version is the observation, and the row's oldest createdAt. It is
+// for a page of a list and refuses more than 500 ids; it reads one payload per
+// row (the newest), never the older versions'.
+func AccountRowHeads(ctx context.Context, q AccountQuerier, concept string, ids []string, each func(newest memorynodes.MemoryNode, observed bool, firstCreatedAt time.Time) error) error {
+	if len(ids) > accountRowHeadsLimit {
+		return fmt.Errorf("account row heads: %d ids is more than a page (%d)", len(ids), accountRowHeadsLimit)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := q.QueryContext(ctx, accountRowHeadsSQL, concept, pq.Array(ids))
+	if err != nil {
+		return fmt.Errorf("account row heads: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var n memorynodes.MemoryNode
+		var observed bool
+		var first time.Time
+		var schema, payload, metadata, provenance []byte
+		if err := rows.Scan(&n.ID, &n.CreatedAt, &n.CreatedBy, &n.Concept, &n.Type, &schema, &payload, &metadata, &provenance, &observed, &first); err != nil {
+			return fmt.Errorf("account row heads: %w", err)
+		}
+		n.Schema, n.Payload = json.RawMessage(schema), json.RawMessage(payload)
+		n.Metadata, n.Provenance = json.RawMessage(metadata), json.RawMessage(provenance)
+		if err := each(n, observed, first); err != nil {
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("account row heads: %w", err)
+	}
+	return nil
 }

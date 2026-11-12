@@ -199,10 +199,8 @@ func TestAccountInventoryCountsARowUnderTheAccountItsNewestVersionNames(t *testi
 	// observation naming globex.
 	version(t, db, runConcept, runConcept+":r1", 1, map[string]any{"state": "running"})
 	versionIn(t, db, "memory_liveness", runConcept, runConcept+":r1", 2, map[string]any{"state": "running", "accountId": "globex"})
-	// n10's newest version names no account after one that named acme. The
-	// export leaves it out (it is in no account); the inventory counts by the
-	// counting rule (memql.AccountRowCounts) and still counts it under acme,
-	// with its one version that names an account.
+	// n10's newest version names no account after one that named acme: it is
+	// in no account, so it is counted nowhere.
 	version(t, db, "v1:testa:note", "v1:testa:note:n10", 1, map[string]any{"accountId": "acme"})
 	version(t, db, "v1:testa:note", "v1:testa:note:n10", 2, map[string]any{"title": "cleared"})
 
@@ -210,7 +208,7 @@ func TestAccountInventoryCountsARowUnderTheAccountItsNewestVersionNames(t *testi
 	require.NoError(t, err)
 	got := payloads(t, nodes)
 	require.Contains(t, got, conceptLine("v1:testb:task", "testb", "task", 1, 1), "only t1 is acme's")
-	require.Contains(t, got, conceptLine("v1:testa:note", "testa", "note", 4, 6), "n1-n3 and n10")
+	require.Contains(t, got, conceptLine("v1:testa:note", "testa", "note", 3, 5), "n1-n3, not n10")
 	for _, p := range got {
 		require.NotEqual(t, runConcept, p["concept"], "the run is globex's: %v", p)
 	}
@@ -219,9 +217,8 @@ func TestAccountInventoryCountsARowUnderTheAccountItsNewestVersionNames(t *testi
 	require.NoError(t, err)
 	require.Equal(t, []map[string]any{
 		conceptLine(fileConcept, "library", "file", 2, 3),
-		// versions counts the versions that name an account: r1's
-		// observation, not its versioned row that names none.
-		conceptLine(runConcept, "pipelines", "run", 1, 1),
+		// Both of r1's versions: the versioned row and the observation.
+		conceptLine(runConcept, "pipelines", "run", 1, 2),
 		conceptLine("v1:testa:note", "testa", "note", 1, 1),
 		conceptLine("v1:testb:task", "testb", "task", 1, 2),
 		{"kind": "files", "bytes": float64(27)},
