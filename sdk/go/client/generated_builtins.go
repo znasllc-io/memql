@@ -10537,6 +10537,41 @@ func SourceRepositoriesBuild(args SourceRepositoriesArgs) string {
 	return b.String()
 }
 
+// StoreStatistics -- One store's sales figures (the 2026-11-11 store statistics design, U9), the read the Store statistics page of a storefront deployable calls. Gated twice: the engine judges the sales part in the organization of the site `siteId` names, and the handler judges it again in Go against the site it reads under the caller's own context, then holds the store to the site's own bound or preview store. Every refusal is one sentence, before anything of a store is read. The figures are read from the component's own tables, never from an order row, so the caller need not be a cluster owner.
+type StoreStatisticsArgs struct {
+	// The storefront deployable.
+	SiteId string
+	// The store of one of its destinations, as a bare id.
+	StoreId string
+	// 24h, 7d, 30d, 90d or 12m.
+	Period string
+}
+
+// StoreStatistics calls the engine builtin storeStatistics.
+func (qc *QueryClient) StoreStatistics(ctx context.Context, args StoreStatisticsArgs) (*Result, error) {
+	call := StoreStatisticsBuild(args)
+	return qc.executeNamed(ctx, "storeStatistics", call)
+}
+
+func StoreStatisticsBuild(args StoreStatisticsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin storeStatistics(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("period: ")
+	b.WriteString(quoteMemQL(args.Period))
+	b.WriteString(")")
+	return b.String()
+}
+
 // StorefrontProbe -- Ask one store's Storefront API the three questions a storefront preview can answer (epic memql#5531, issue memql#5547): does the catalog read, does a cart accept a line, does a checkoutUrl come back.
 // IT CREATES A CART, and saying so is part of the contract rather than a footnote. That is the thing being observed, which is why it is pointed at a DEVELOPMENT store by a guard one level up (component/sitepreview) rather than being safe to run anywhere. Nothing is paid for and no order is placed; the payment walk happens in a browser on Shopify's hosted checkout and is not something this cluster can observe at all.
 // IT WRITES NOTHING. The observation rows these results become are written by `sitePreviewProbe`, which calls this and owns v1:platform:sitePreviewObservation. The split is the module taxonomy: the call to Shopify lives in the package this repository classifies as the one that talks to Shopify, and the rows live with the concept that declares them.

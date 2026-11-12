@@ -62,4 +62,12 @@
 // so its fact's title and product key become the marker. The erasure keeps the
 // order's customer reference while it empties the customer's own row, so the
 // buyer key names nobody. The order's money stays in every figure.
+//
+// # Who reads the figures
+//
+// builtin storeStatistics (statistics.go) is the one read a person calls. It
+// answers a store's figures to a holder of the sales part
+// (app:deployables/sales) in the organization of a storefront site that
+// serves the store, and it holds that gate in Go itself, whatever construct
+// reached it, before anything of a store is read.
 package storestats

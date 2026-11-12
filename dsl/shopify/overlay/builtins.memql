@@ -388,3 +388,21 @@ builtin shopifyAccountConnectBegin {
 @executor("integration.storeStats.rollup")
 @description("Keep every store's statistics. Lists every configured store through the engine, gives each its row in the store statistics tables, and walks each in turn, one store's failure leaving the next walked; one run at a time on a node. Answers {stores, rows, facts, unreadable, behind, rebuilt, removed}: counts, and the ids of the stores the lists name, never a row.")
 builtin storeStatisticsRollup { }
+
+/// One store's sales figures (the 2026-11-11 store statistics design, U9), the read the Store
+/// statistics page of a storefront deployable calls. Gated twice: the engine judges the sales part
+/// in the organization of the site `siteId` names, and the handler judges it again in Go against the
+/// site it reads under the caller's own context, then holds the store to the site's own bound or
+/// preview store. Every refusal is one sentence, before anything of a store is read. The figures are
+/// read from the component's own tables, never from an order row, so the caller need not be a
+/// cluster owner.
+@sdk
+@executor("integration.storeStats.statistics")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/sales")
+@description("One store's sales figures for a period, for the store statistics page of a storefront deployable. Answers one row: the store (storeName, storeDomain, currency, timezone, development, taxesIncluded), which destination of the site serves it (production, testing or both), the period cut in the store's own zone (start, end, prevStart, bucket, series), and how current the figures are (recording: its state, every reason with its sentence, since, and blocked; asOf, set only while something stands in the way; rebuilding), then the figures. Money is a decimal string; a figure that is not known is null and never zero. For a caller who holds execute on app:deployables/sales in the site's organization and asks for the site's own bound or preview store; anybody else gets one sentence, 'This deployable does not serve that store for you.', and nothing is read.")
+builtin storeStatistics {
+  siteId   string!  @description("The storefront deployable.")
+  storeId  string!  @description("The store of one of its destinations, as a bare id.")
+  period   string!  @description("24h, 7d, 30d, 90d or 12m.")
+}

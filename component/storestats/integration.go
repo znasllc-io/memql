@@ -89,6 +89,11 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Keep every store's statistics: list every configured store through the engine, give each its row in the store statistics tables, and walk each in turn, one store's failure leaving the next walked. Answers counts and store ids only. Admits only the storeStatisticsRollupSweep maintenance principal, at internal origin.",
 			Handler:     i.handleRollup,
 		},
+		{
+			Name:        "statistics",
+			Description: "One store's sales figures for a period, asked through a storefront site that serves the store: the store's name, domain, currency and zone, the period cut in that zone, and how current the figures are. Admits a caller who can read the site and holds execute on app:deployables/sales in the site's organization, for the site's own bound or preview store; every other caller gets one sentence before anything is read.",
+			Handler:     i.handleStatistics,
+		},
 	}
 }
 

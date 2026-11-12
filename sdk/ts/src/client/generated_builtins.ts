@@ -8223,6 +8223,34 @@ QueryClient.prototype.sourceRepositories = function (this: QueryClient, args: So
   return this.executeNamed("sourceRepositories", buildSourceRepositories(args), opts);
 };
 
+/** One store's sales figures (the 2026-11-11 store statistics design, U9), the read the Store statistics page of a storefront deployable calls. Gated twice: the engine judges the sales part in the organization of the site `siteId` names, and the handler judges it again in Go against the site it reads under the caller's own context, then holds the store to the site's own bound or preview store. Every refusal is one sentence, before anything of a store is read. The figures are read from the component's own tables, never from an order row, so the caller need not be a cluster owner. */
+export interface StoreStatisticsArgs {
+  /** The storefront deployable. */
+  siteId: string;
+  /** The store of one of its destinations, as a bare id. */
+  storeId: string;
+  /** 24h, 7d, 30d, 90d or 12m. */
+  period: string;
+}
+
+export function buildStoreStatistics(args: StoreStatisticsArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("period: " + renderMemQLValue(args.period));
+  return "builtin storeStatistics(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    storeStatistics(args: StoreStatisticsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.storeStatistics = function (this: QueryClient, args: StoreStatisticsArgs = {} as StoreStatisticsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("storeStatistics", buildStoreStatistics(args), opts);
+};
+
 /** Ask one store's Storefront API the three questions a storefront preview can answer (epic memql#5531, issue memql#5547): does the catalog read, does a cart accept a line, does a checkoutUrl come back.
 IT CREATES A CART, and saying so is part of the contract rather than a footnote. That is the thing being observed, which is why it is pointed at a DEVELOPMENT store by a guard one level up (component/sitepreview) rather than being safe to run anywhere. Nothing is paid for and no order is placed; the payment walk happens in a browser on Shopify's hosted checkout and is not something this cluster can observe at all.
 IT WRITES NOTHING. The observation rows these results become are written by `sitePreviewProbe`, which calls this and owns v1:platform:sitePreviewObservation. The split is the module taxonomy: the call to Shopify lives in the package this repository classifies as the one that talks to Shopify, and the rows live with the concept that declares them.
