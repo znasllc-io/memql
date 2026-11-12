@@ -84,18 +84,39 @@ func walkCtx(t *testing.T) context.Context {
 // backdate moves the newest version of a mirror row to at: a version whose
 // write time is earlier than the instant it became visible, as one that
 // commits late is.
+//
+// The version is written again at at and the old one removed, in one
+// transaction, never updated in place: the node table is chunked by write
+// time (seven days, from Thursday 00:00 UTC), and an UPDATE that moves a row
+// out of its chunk is refused, so a test that moved a version back failed
+// for the hours after a chunk began. An insert lands in any chunk.
 func backdate(t *testing.T, concept, storeID, gid string, at time.Time) {
 	t.Helper()
 	_, db := statsEngine(t)
 	id := concept + ":" + shopify.MirrorRowID(storeID, gid)
-	res, err := db.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET "createdAt" = ?
-		WHERE concept = ? AND id = ? AND "createdAt" = (SELECT max("createdAt") FROM "MemoryNodes" WHERE concept = ? AND id = ?)`,
-		at.UTC(), concept, id, concept, id)
+	err := db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
+		var newest time.Time
+		if err := tx.QueryRowContext(ctx, `SELECT max("createdAt") FROM "MemoryNodes" WHERE concept = ? AND id = ?`, concept, id).
+			Scan(&newest); err != nil {
+			return err
+		}
+		if newest.Equal(at) {
+			return nil
+		}
+		res, err := tx.ExecContext(ctx, `INSERT INTO "MemoryNodes"
+			SELECT (jsonb_populate_record(NULL::"MemoryNodes", to_jsonb(m) || jsonb_build_object('createdAt', ?::timestamptz))).*
+			FROM "MemoryNodes" m WHERE concept = ? AND id = ? AND "createdAt" = ?`, at.UTC(), concept, id, newest)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return fmt.Errorf("wrote %d versions again, want one", n)
+		}
+		_, err = tx.ExecContext(ctx, `DELETE FROM "MemoryNodes" WHERE concept = ? AND id = ? AND "createdAt" = ?`, concept, id, newest)
+		return err
+	})
 	if err != nil {
 		t.Fatalf("backdate %s: %v", gid, err)
-	}
-	if n, _ := res.RowsAffected(); n != 1 {
-		t.Fatalf("backdate %s moved %d versions, want one", gid, n)
 	}
 }
 
@@ -637,4 +658,27 @@ func driverConnectionRefused(t *testing.T) error {
 		t.Fatal("a connection to a port nothing listens on did not fail")
 	}
 	return err
+}
+
+// BACKDATE MOVES A VERSION ACROSS A CHUNK of the node table: a day further
+// back than the table's seven-day chunks reach is always another chunk, and
+// the row keeps one version, at the new time, with its payload. Without this
+// every test that moves a version back fails for the hours after a chunk
+// begins.
+func TestBackdateMovesAVersionAcrossAChunkBoundary(t *testing.T) {
+	storeID := newStore(t)
+	gid := fmt.Sprintf("gid://shopify/Order/%d", time.Now().UnixNano())
+	mirror(t, orderConcept, storeID, gid, orderPayload())
+	at := time.Now().UTC().Add(-8 * 24 * time.Hour).Truncate(time.Microsecond)
+	backdate(t, orderConcept, storeID, gid, at)
+	_, db := statsEngine(t)
+	var versions int
+	var payload string
+	if err := db.QueryRowContext(context.Background(), `SELECT count(*), max(payload::text) FROM "MemoryNodes" WHERE concept = ? AND id = ?`,
+		orderConcept, orderConcept+":"+shopify.MirrorRowID(storeID, gid)).Scan(&versions, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if got := writtenAt(t, orderConcept, storeID, gid); versions != 1 || !got.Equal(at) || !strings.Contains(payload, gid) {
+		t.Errorf("after a move of eight days: %d versions, the newest at %v; want one at %v with its payload", versions, got, at)
+	}
 }
