@@ -172,8 +172,10 @@ func (i *Integration) servedRequest(ctx context.Context, siteID, storeID string)
 		return statisticsRequest{}, false
 	}
 	site := rowFields(rows[0])
-	// 3. The part, in the site's own organization.
-	if !i.holdsTheSalesPart(ctx, rowText(site, "accountId")) {
+	// 3. The part, in the site's own organization, named as the row names it:
+	// the engine's gate reads the account untrimmed, and so does this.
+	account, _ := site["accountId"].(string)
+	if !i.holdsTheSalesPart(ctx, account) {
 		return statisticsRequest{}, false
 	}
 	// 4. A storefront, and not the platform's own site.
@@ -219,15 +221,16 @@ func borrowedAuthority(ctx context.Context) bool {
 }
 
 // readStatistics is the read under the component's own authority, in one
-// readTx: the frame, and from Task 18 the figures after it.
+// readTx: the frame, and the figures after it (figures.go).
 func readStatistics(ctx context.Context, db *bun.DB, req statisticsRequest, now time.Time) (Statistics, error) {
 	var stats Statistics
 	err := readTx(ctx, db, func(ctx context.Context, tx bun.Tx) error {
 		var err error
-		stats, err = readFrame(ctx, tx, req, now)
-		// The seam: the figures are read here, after the frame and in the
-		// same snapshot (readFigures, the next task).
-		return err
+		if stats, err = readFrame(ctx, tx, req, now); err != nil {
+			return err
+		}
+		// The figures, after the frame and in the same snapshot.
+		return readFigures(ctx, tx, &stats)
 	})
 	if err != nil {
 		return Statistics{}, err
@@ -255,12 +258,14 @@ type frameRow struct {
 	LastClearAt       sql.NullTime    `bun:"last_clear_at"`
 	LastChangeAt      sql.NullTime    `bun:"last_change_at"`
 	RebuildingSince   sql.NullTime    `bun:"rebuilding_since"`
+	WalkedThrough     sql.NullTime    `bun:"walked_through"`
+	WholesaleEnabled  bool            `bun:"wholesale_enabled"`
 }
 
 // readFrame reads the store's store_sales_store row and cuts the period in
 // its zone. A store the walk holds no row for is answered as starting: its
-// ids, its destination, and every other key null. Figures are left null for
-// Task 18.
+// ids, its destination, and every other key null; readFigures then answers
+// it no figure.
 func readFrame(ctx context.Context, tx bun.Tx, req statisticsRequest, now time.Time) (Statistics, error) {
 	stats := Statistics{
 		StoreID: req.StoreID, SiteID: req.SiteID, Destination: req.Destination, Period: req.Period, Loc: time.UTC,
@@ -271,7 +276,7 @@ func readFrame(ctx context.Context, tx bun.Tx, req statisticsRequest, now time.T
 	err := tx.NewSelect().Table("store_sales_store").
 		Column("store_domain", "store_name", "currency", "timezone", "taxes_included", "development",
 			"all_orders_readable", "purging", "history_since", "verdict_state", "verdict_reasons", "verdict_since",
-			"recording_blocked", "last_clear_at", "last_change_at", "rebuilding_since").
+			"recording_blocked", "last_clear_at", "last_change_at", "rebuilding_since", "walked_through", "wholesale_enabled").
 		Where("store_id = ?", req.StoreID).Limit(1).Scan(ctx, &row)
 	if errors.Is(err, sql.ErrNoRows) {
 		stats.Recording.State = "starting"
@@ -282,12 +287,16 @@ func readFrame(ctx context.Context, tx bun.Tx, req statisticsRequest, now time.T
 	}
 
 	stats.StoreName, stats.StoreDomain, stats.Currency = nonEmpty(row.StoreName), nonEmpty(row.StoreDomain), nonEmpty(row.Currency)
-	stats.Timezone = nonEmpty(row.Timezone)
+	// The recorded zone, trimmed as periodZone is, so one zone is spelled one
+	// way in the answer.
+	stats.Timezone = nonEmpty(strings.TrimSpace(row.Timezone))
 	stats.PeriodZone = "UTC"
 	if loc := storeZone(row.Timezone); loc != nil {
 		stats.Loc = loc
 		stats.PeriodZone = strings.TrimSpace(row.Timezone)
+		stats.zoneLoaded = true
 	}
+	stats.walked, stats.wholesaleEnabled = row.WalkedThrough.Valid, row.WholesaleEnabled
 	stats.TaxesIncluded, stats.Development = nullBool(row.TaxesIncluded), nullBool(row.Development)
 	older := !row.AllOrdersReadable
 	stats.OlderOrderChangesNotRecorded = &older

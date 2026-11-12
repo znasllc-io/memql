@@ -383,9 +383,10 @@ func TestThePeriodIsCutInTheStoresZone(t *testing.T) {
 		if entry["at"] != want {
 			t.Errorf("series[%d].at = %v, want %s", i, entry["at"], want)
 		}
+		// A recording store that sold nothing: every day measured, and zero.
 		for _, k := range []string{"totalSales", "netSales", "orders", "grossSales", "discounts", "refunds", "unitsSold"} {
-			if v, present := entry[k]; !present || v != nil {
-				t.Errorf("series[%d].%s = %v (present %v), want null", i, k, v, present)
+			if v, present := entry[k]; !present || js(v) != js(measuredZeros[k]) {
+				t.Errorf("series[%d].%s = %v (present %v), want %v", i, k, v, present, js(measuredZeros[k]))
 			}
 		}
 		if len(entry) != 8 {
@@ -554,6 +555,18 @@ func TestTheAnswerNamesTheZoneItsPeriodWasCutIn(t *testing.T) {
 	}
 }
 
+// TestOneRecordedZoneIsSpelledOneWay: timezone and periodZone are the one
+// recorded zone written the same way, so a page that compares them reads a
+// zone recorded with spaces around it as the zone that loaded.
+func TestOneRecordedZoneIsSpelledOneWay(t *testing.T) {
+	storeID := newStore(t)
+	storeFrame(t, storeID, recordingFrame(map[string]any{"timezone": " Europe/Madrid "}))
+	got := mustAsk(t, ownerCtx(), siteFor(t, storeID, nil), storeID, "7d")
+	if got["timezone"] != "Europe/Madrid" || got["periodZone"] != "Europe/Madrid" {
+		t.Errorf("recorded \" Europe/Madrid \": timezone %q, periodZone %q; want both \"Europe/Madrid\"", got["timezone"], got["periodZone"])
+	}
+}
+
 func TestAGrantWithoutAllOrdersSaysOlderChangesAreNotRecorded(t *testing.T) {
 	storeID := newStore(t)
 	approval := []any{map[string]any{"code": "approval_outdated", "sentence": "Approve the app's new permissions in Shopify."}}
@@ -613,9 +626,11 @@ func TestAStartingStoresFiguresAreNullAndEveryKeyIsThere(t *testing.T) {
 			t.Errorf("%s = %v, want null", k, got[k])
 		}
 	}
+	// Lists not measured are null, never empty: an empty list says the store
+	// sold nothing.
 	for _, k := range []string{"productsBySales", "productsByUnits", "otherCurrencies"} {
-		if list, ok := got[k].([]any); !ok || len(list) != 0 {
-			t.Errorf("%s = %v, want an empty list", k, got[k])
+		if v, present := got[k]; !present || v != nil {
+			t.Errorf("%s = %v (present %v), want null", k, v, present)
 		}
 	}
 	if floors, ok := got["floors"].(map[string]any); !ok || len(floors) != 0 {
@@ -890,6 +905,11 @@ func TestTheHandlerAndTheEnginesGateAgree(t *testing.T) {
 	seedRow(t, "v1:identity:user", plainOwner, map[string]any{"displayName": "A site owner", "primaryEmail": plainOwner + "@example.test",
 		"role": string(auth.RoleWriter), "active": true})
 	plainSite := siteFor(t, personalStore, map[string]any{"accountId": nil, "ownerUserId": "v1:identity:user:" + plainOwner})
+	// A site whose accountId is only white space: the engine's gate takes it
+	// for an organization (it asks account == "", untrimmed), so a grant of
+	// another organization's group is not lent to it, by the gate or by the
+	// handler.
+	blankAccount := siteFor(t, personalStore, map[string]any{"accountId": "   ", "ownerUserId": "v1:identity:user:" + orgHolder})
 
 	type call struct {
 		label       string
@@ -909,6 +929,7 @@ func TestTheHandlerAndTheEnginesGateAgree(t *testing.T) {
 		{"a cluster admin", personCtx("dbtest-storestats-a-"+uniq(), auth.RoleAdmin), site, storeID, false},
 		{"a personal site's owner who holds no part", personCtx(plainOwner, auth.RoleWriter), plainSite, personalStore, false},
 		{"a personal site's owner who holds the part through an organization's group", personCtx(orgHolder, auth.RoleWriter), personal, personalStore, true},
+		{"a site whose organization is only white space", personCtx(orgHolder, auth.RoleWriter), blankAccount, personalStore, false},
 	}
 	handler := statisticsHandler(t, testIntegration(t))
 	for _, c := range calls {

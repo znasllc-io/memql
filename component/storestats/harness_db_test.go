@@ -810,3 +810,24 @@ func rewriteInPlace(t *testing.T, concept, storeID, gid string, change map[strin
 		t.Fatalf("rewrite %s in place changed no version", gid)
 	}
 }
+
+// ---- Task 18: a store's facts, and its figures asked through the read ----
+
+// salesStore is a store of the test's own whose store_sales_store row is
+// recordingFrame with over laid on it, and a storefront site of an
+// organization of its own bound to it. Every row of the store in every
+// store_sales_ table is deleted when the test ends, its facts included. The
+// facts are written with the fold (foldRows), so each one is what the walk
+// would have written; the read is asked with mustAsk, through the builtin.
+func salesStore(t *testing.T, over map[string]any) (storeID, siteID string) {
+	t.Helper()
+	storeID = newStore(t)
+	_, db := statsEngine(t)
+	t.Cleanup(func() {
+		for _, table := range statsTableNames() {
+			_, _ = db.ExecContext(context.Background(), "DELETE FROM "+table+" WHERE store_id = ?", storeID)
+		}
+	})
+	storeFrame(t, storeID, recordingFrame(over))
+	return storeID, siteFor(t, storeID, nil)
+}

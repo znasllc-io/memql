@@ -17,11 +17,10 @@ import (
 //
 // NOTHING PERSONAL. The answer carries the store's name, domain, currency and
 // zone, the period's bounds and the recording state; no buyer's email, name or
-// key. Task 18's lists carry a product's title and key, and counts.
+// key. The lists carry a product's title and key, and counts.
 
 // Statistics is one answer. readFrame fills its frame, every field above
-// Figures; Task 18's readFigures fills Figures and everything after it, which
-// is null or empty until then.
+// Figures; readFigures (figures.go) fills Figures and everything after it.
 type Statistics struct {
 	StoreID, SiteID string
 	// Destination is "binding", "previewBinding" or "both": the name of the
@@ -30,8 +29,9 @@ type Statistics struct {
 	Destination string
 
 	StoreName, StoreDomain, Currency *string
-	// Timezone is the zone the store recorded, as recorded, whether or not it
-	// loads; nil when it recorded none.
+	// Timezone is the zone the store recorded, with the spaces around it
+	// trimmed (as PeriodZone is), whether or not it loads; nil when it
+	// recorded none.
 	Timezone *string
 	// PeriodZone is the zone the period was cut in: the store's zone when it
 	// loads, otherwise "UTC"; "" for a store the walk holds no row for. A
@@ -55,10 +55,12 @@ type Statistics struct {
 	// Rebuilding is nil for a store the walk holds no row for.
 	Rebuilding *bool
 
-	Figures            Figures
-	Previous           *Figures
-	Floors             map[string]bool
-	Series             []Bucket
+	Figures  Figures
+	Previous *Figures
+	Floors   map[string]bool
+	Series   []Bucket
+	// ProductsBySales, ProductsByUnits and OtherCurrencies are nil, answered
+	// null, when not measured, and empty when measured and empty.
 	ProductsBySales    []Product
 	ProductsByUnits    []Product
 	ProductCount       *int64
@@ -69,6 +71,11 @@ type Statistics struct {
 	Buyers             *Buyers
 	Wholesale          *Wholesale
 	OtherCurrencies    []CurrencyCount
+
+	// What readFigures needs of the store's row beyond the answer's keys: the
+	// recorded zone loaded, the walk reached the clock for every source
+	// (walked_through), and the wholesale pack is enabled for the store.
+	zoneLoaded, walked, wholesaleEnabled bool
 }
 
 // Recording is the store's verdict as the walk kept it in store_sales_store.
@@ -187,9 +194,13 @@ func (s Statistics) Payload() map[string]any {
 		side := func(x Side) map[string]any { return map[string]any{"orders": x.Orders, "netSales": amount(x.NetSales)} }
 		wholesale = map[string]any{"wholesale": side(s.Wholesale.Wholesale), "retail": side(s.Wholesale.Retail)}
 	}
-	others := make([]any, 0, len(s.OtherCurrencies))
-	for _, c := range s.OtherCurrencies {
-		others = append(others, map[string]any{"currency": c.Currency, "orders": c.Orders})
+	var others any
+	if s.OtherCurrencies != nil {
+		list := make([]any, 0, len(s.OtherCurrencies))
+		for _, c := range s.OtherCurrencies {
+			list = append(list, map[string]any{"currency": c.Currency, "orders": c.Orders})
+		}
+		others = list
 	}
 	var periodZone any
 	if s.PeriodZone != "" {
@@ -227,7 +238,11 @@ func (f Figures) payload() map[string]any {
 	}
 }
 
-func products(list []Product) []any {
+// products is a top list, or nil (null) for a list not measured.
+func products(list []Product) any {
+	if list == nil {
+		return nil
+	}
 	out := make([]any, 0, len(list))
 	for _, p := range list {
 		var value any
