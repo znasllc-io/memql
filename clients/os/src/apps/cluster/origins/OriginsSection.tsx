@@ -142,6 +142,9 @@ export function OriginsSection() {
         health.reread();
       } catch (err: unknown) {
         setRefusal(err instanceof Error ? err.message : String(err));
+        // A backfill can fail partway, with pages applied and progress
+        // recorded: the rows are read again so they show it.
+        health.reread();
       } finally {
         setBusyKey("");
       }
@@ -185,8 +188,10 @@ export function OriginsSection() {
       {health.value?.incomplete ? (
         <Caption>The connector health was not read to its end, so this list is incomplete.</Caption>
       ) : null}
+      {/* NOT "NOTHING CHANGED": a backfill that fails partway keeps what it
+          applied. True of a refusal and of a failure alike. */}
       {refusal === "" ? null : (
-        <Notice tone="error" sentence="The cluster refused, and nothing changed." detail={refusal} />
+        <Notice tone="error" sentence="The cluster did not finish this." next="The list is read again, so each row shows where it stands now." detail={refusal} />
       )}
 
       {inventory.state === "reading" && inventory.value === null ? (

@@ -588,6 +588,24 @@ describe("data origins, by store", () => {
     }
   });
 
+  it("says a failed Backfill now did not finish, without claiming nothing changed", async () => {
+    // A backfill can fail partway: pages it applied stay applied, so "nothing
+    // changed" would be false. The sentence holds for a refusal and a failure.
+    const connection = fakeConnection({ dataOrigins: [ORDER, INVOICE], syncStatesAll: [state("v1:shopify:order", STORE), INVOICE_HEALTH] });
+    connection.query.datasyncStartBackfill.mockRejectedValueOnce(new Error("datasync: the backfill's progress could not be recorded"));
+    mount(connection);
+    const own = await screen.findByRole("group", { name: STORE });
+    const healthReads = connection.query.syncStatesAll.mock.calls.length;
+    await click(within(own).getByRole("button", { name: /^Backfill now/ }));
+    const notice = (await screen.findByText("The cluster did not finish this.")).closest(".os-notice") as HTMLElement;
+    expect(notice.getAttribute("data-tone")).toBe("error");
+    // What it did before it stopped is on the rows, so the rows are read again.
+    expect(within(notice).getByText("The list is read again, so each row shows where it stands now.")).toBeTruthy();
+    await vi.waitFor(() => expect(connection.query.syncStatesAll.mock.calls.length).toBeGreaterThan(healthReads));
+    expect(within(notice).getByText("datasync: the backfill's progress could not be recorded")).toBeTruthy();
+    expect(screen.queryByText("The cluster refused, and nothing changed.")).toBeNull();
+  });
+
   it("does not read given-up deliveries until somebody asks", async () => {
     const connection = fakeConnection({ dataOrigins: [ORDER] });
     mount(connection);
@@ -730,7 +748,10 @@ describe("data origins, by store: the numbers and the acts", () => {
         syncStatesAll: [shopify("order", STORE, { paused: true }), shopify("company", STORE, { lastError: NOT_REQUESTED })],
       }),
     );
-    expect(await screen.findByText("Every concept of its store is paused: no backfill, check or outbound change runs. Changes the origin sends are still applied.")).toBeTruthy();
+    // A DOMAIN'S PAUSE DOES NOT HOLD PUSHES: the outbound drain never reads it,
+    // so the sentence names only what the pause stops.
+    expect(await screen.findByText("Every concept of its store is paused: no backfill or check runs. Changes the origin sends are still applied.")).toBeTruthy();
+    expect(screen.queryByText(/outbound change/)).toBeNull();
     expect(screen.getByText("1 of 1 reported")).toBeTruthy();
   });
 
