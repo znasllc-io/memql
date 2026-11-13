@@ -10,6 +10,16 @@ const h=vi.hoisted(()=>({connection:null as unknown}));
 vi.mock("../../src/live/connection",()=>({useOsConnection:()=>h.connection}));
 function View({runId=capture.run.id,active=false}:{runId?:string;active?:boolean}) { const usage=useModelUsage(runId,active);return <UsageDetails usage={usage} />; }
 
+async function scrollReceipts() {
+  const details = screen.queryByText("Model usage receipts") ?? await screen.findByText("Model usage receipts");
+  act(() => {
+    const disclosure = details.closest("details")!;
+    disclosure.open = true;
+    fireEvent(disclosure, new Event("toggle"));
+  });
+  await scrollNextPage();
+}
+
 describe("bounded usage reading",()=>{
   it("loads an additional cursor page only on request and deduplicates its overlapping call",async()=>{
     const conn=fakeConnection();h.connection=conn;
@@ -17,7 +27,7 @@ describe("bounded usage reading",()=>{
     render(<View />);
     await screen.findByText("7.5k estimated tokens shown");
     expect(conn.query.workModelUsageForOwnerRun).toHaveBeenCalledTimes(1);
-    await scrollNextPage();
+    await scrollReceipts();
     await screen.findByText("7.9k estimated tokens");
     expect(conn.query.workModelUsageForOwnerRun.mock.calls[1]?.[1]).toMatchObject({cursor:"older-page"});
     expect(screen.queryByRole("button",{name:"Load more usage"})).toBeNull();
@@ -36,7 +46,7 @@ describe("bounded usage reading",()=>{
         .mockResolvedValueOnce(rowsResult([newer,...capture.modelUsage]));
       const view=render(<View active />);
       await act(async()=>{});
-      await scrollNextPage();
+      await scrollReceipts();
       expect(screen.getByText("7.9k estimated tokens shown")).toBeTruthy();
       // Reading history pauses automatic head refresh, without claiming that
       // this growing run's loaded snapshot is complete or resetting the page.
@@ -46,7 +56,7 @@ describe("bounded usage reading",()=>{
       expect(conn.query.workModelUsageForOwnerRun).toHaveBeenCalledTimes(3);
       expect(conn.query.workModelUsageForOwnerRun.mock.calls[2]?.[1]).not.toHaveProperty("cursor");
       expect(screen.getByText("120 estimated tokens shown")).toBeTruthy();
-      await scrollNextPage();
+      await scrollReceipts();
       expect(conn.query.workModelUsageForOwnerRun.mock.calls[3]?.[1]).toMatchObject({cursor:"final-older-page"});
       expect(screen.getByText("8.0k estimated tokens")).toBeTruthy();
       expect(screen.getByText("3")).toBeTruthy();
@@ -56,15 +66,45 @@ describe("bounded usage reading",()=>{
       expect(screen.getByText("8.0k estimated tokens")).toBeTruthy();
     } finally { vi.useRealTimers(); }
   });
-  it("retains clearly incomplete usage after a refresh failure and offers retry",async()=>{
+  it("retains incomplete usage after an older-page failure and retries that same cursor",async()=>{
     const conn=fakeConnection();h.connection=conn;
     conn.query.workModelUsageForOwnerRun.mockResolvedValueOnce(rowsResult([capture.modelUsage[0]!],"older-page")).mockRejectedValueOnce(Error("Receipts temporarily unavailable")).mockResolvedValueOnce(rowsResult(capture.modelUsage));
     render(<View />);
-    await scrollNextPage();
+    await scrollReceipts();
     await screen.findByText("Receipts temporarily unavailable");
     expect(screen.getByText("7.5k estimated tokens shown")).toBeTruthy();
     fireEvent.click(screen.getByRole("button",{name:"Try again"}));
     await screen.findByText("7.9k estimated tokens");
+    expect(conn.query.workModelUsageForOwnerRun.mock.calls[2]?.[1]).toMatchObject({cursor:"older-page"});
+  });
+  it("retries a failed head refresh without using a retained older-page cursor",async()=>{
+    const conn=fakeConnection();h.connection=conn;
+    conn.query.workModelUsageForOwnerRun
+      .mockResolvedValueOnce(rowsResult([capture.modelUsage[0]!],"older-page"))
+      .mockRejectedValueOnce(Error("Head temporarily unavailable"))
+      .mockResolvedValueOnce(rowsResult(capture.modelUsage));
+    render(<View />);
+    await screen.findByText("7.5k estimated tokens shown");
+    fireEvent.click(screen.getByRole("button",{name:"Refresh usage"}));
+    await screen.findByText("Head temporarily unavailable");
+    expect(screen.getByText("7.5k estimated tokens shown")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button",{name:/Read usage again|Try again/}));
+    await screen.findByText("7.9k estimated tokens");
+    expect(conn.query.workModelUsageForOwnerRun.mock.calls[1]?.[1]).not.toHaveProperty("cursor");
+    expect(conn.query.workModelUsageForOwnerRun.mock.calls[2]?.[1]).not.toHaveProperty("cursor");
+  });
+  it("does not continue a collapsed receipt history until it is opened",async()=>{
+    const conn=fakeConnection();h.connection=conn;
+    conn.query.workModelUsageForOwnerRun
+      .mockResolvedValueOnce(rowsResult([capture.modelUsage[0]!],"older-page"))
+      .mockResolvedValueOnce(rowsResult(capture.modelUsage));
+    render(<View />);
+    await screen.findByText("7.5k estimated tokens shown");
+    await scrollNextPage();
+    expect(conn.query.workModelUsageForOwnerRun).toHaveBeenCalledTimes(1);
+    await scrollReceipts();
+    await screen.findByText("7.9k estimated tokens");
+    expect(conn.query.workModelUsageForOwnerRun).toHaveBeenCalledTimes(2);
   });
   it("does not expose the previous run's receipts while another read fails or a late response arrives",async()=>{
     const conn=fakeConnection();h.connection=conn;

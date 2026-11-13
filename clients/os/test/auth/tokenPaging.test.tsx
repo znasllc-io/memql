@@ -11,7 +11,7 @@ const auth = {
 const token = (id: string, label: string) => ({ ID: id, Label: label, Active: true });
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
 const page = (tokens: unknown[], cursor = "", fresh = "") => json({ page: "me/tokens", csrf: "fixture-csrf", data: { Tokens: tokens, NextCursor: cursor, NewToken: fresh } });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("personal token scroll pages", () => {
   it("retains token rows and the one-time secret through a slow failure, then retries the same cursor and deduplicates", async () => {
@@ -41,6 +41,26 @@ describe("personal token scroll pages", () => {
       expect(String(url)).toContain("/me/tokens?cursor=older");
       expect(options.headers.Authorization).toBe("Bearer fixture-bearer");
     }
+  });
+
+  it("pauses loaded token paging offline and resumes once online", async () => {
+    let online = true;
+    vi.spyOn(navigator, "onLine", "get").mockImplementation(() => online);
+    const fetcher = vi.fn().mockResolvedValueOnce(page([token("a", "First")], "older"))
+      .mockResolvedValueOnce(page([token("b", "Older")]));
+    vi.stubGlobal("fetch", fetcher);
+    render(<IdentityScreen initialPath="/me/tokens" embedded />);
+    await screen.findByText("First");
+    act(() => { online = false; window.dispatchEvent(new Event("offline")); });
+    await scrollNextPage();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("First")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    act(() => { online = true; window.dispatchEvent(new Event("online")); });
+    await scrollNextPage();
+    await screen.findByText("Older");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(String(fetcher.mock.calls[1]?.[0])).toContain("/me/tokens?cursor=older");
   });
 
   it("discards a late token page after navigating to another personal section", async () => {

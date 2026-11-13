@@ -59,6 +59,15 @@ function PageContinuation({ feed, label = "Loading more", rows = 3 }: NextPagePr
   const sentinel = useRef<HTMLDivElement>(null);
   const windowVisible = useContext(LiveReadVisibility);
   const [tabVisible, setTabVisible] = useState(() => document.visibilityState !== "hidden");
+  // Native identity and other request/reply feeds have no live connection
+  // snapshot. Browser offline pauses their automatic continuation too.
+  const [online, setOnline] = useState(() => navigator.onLine !== false);
+  useEffect(() => {
+    const changed = () => setOnline(navigator.onLine !== false);
+    window.addEventListener("online", changed);
+    window.addEventListener("offline", changed);
+    return () => { window.removeEventListener("online", changed); window.removeEventListener("offline", changed); };
+  }, []);
   useEffect(() => {
     const changed = () => setTabVisible(document.visibilityState !== "hidden");
     document.addEventListener("visibilitychange", changed);
@@ -92,7 +101,7 @@ function PageContinuation({ feed, label = "Loading more", rows = 3 }: NextPagePr
   feedRef.current = feed;
 
   const load = useRef((retry = false) => {
-    if (request.current || feedRef.current.loadingMore || (!retry && feedRef.current.enabled === false)) return;
+    if (request.current || feedRef.current.loadingMore || (!retry && (feedRef.current.enabled === false || navigator.onLine === false))) return;
     const own = { scope: feedRef.current.scope };
     request.current = own;
     mark.current = { progress: feedRef.current.progress };
@@ -119,7 +128,7 @@ function PageContinuation({ feed, label = "Loading more", rows = 3 }: NextPagePr
   const busy = asking || feed.loadingMore;
   const error = feed.loadMoreError || requestError;
   const failed = error !== "";
-  const armed = feed.hasMore && !busy && !failed && feed.enabled !== false && windowVisible && tabVisible;
+  const armed = feed.hasMore && !busy && !failed && feed.enabled !== false && windowVisible && tabVisible && online;
   const moved = mark.current !== null && feed.progress !== undefined && !Object.is(feed.progress, mark.current.progress);
   // STALLED: the last load settled, without a failure, and the feed shows no
   // sign that anything arrived. A browser's observer reports a target's state

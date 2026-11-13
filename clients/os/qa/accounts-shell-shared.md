@@ -37,3 +37,11 @@ Recorded local checks: 1,241 tests in 101 files passed; the final lifecycle and
 keyboard additions passed 56 targeted tests in four files. Production and test
 typechecking, fixture typechecking and the production build passed under Node
 22.23.4. Browser inspection is pending.
+
+Independent review follow-up: browser offline now pauses native identity scroll
+continuation and online re-arms it without losing rows. Nexus receipt paging
+stays inside its disclosure and is disabled while closed; a failed head refresh
+retries the head, while a failed older page retries its cursor. All three
+regressions failed before the fix and passed afterwards; the focused combined
+set passed 24 tests. This supplements, rather than replaces, the pending browser
+review.
