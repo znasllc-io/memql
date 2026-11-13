@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useDroppable, type DragEndEvent } from "@dnd-kit/core";
 import { horizontalListSortingStrategy, SortableContext, useSortable } from "@dnd-kit/sortable";
-import { LayoutGrid, RefreshCw } from "lucide-react";
+import { LayoutGrid, LogOut, RefreshCw } from "lucide-react";
 
 import { useAsk } from "../ask/AskProvider";
 import { BIN_DROPPABLE_ID, type BinDropPayload } from "../apps/bin/concepts";
@@ -9,6 +9,7 @@ import { decideBinDrop } from "../apps/bin/drop";
 import { LocalFilesSettingsStore } from "../apps/files/settings";
 import { useOsConnection } from "../live/connection";
 import { Button, Notice } from "../kit";
+import { IconButton } from "../kit/IconButton";
 import { InPlaceAsk } from "../kit/pressHold";
 import { dockOrder, isPinned } from "../system/dock";
 import { appById, listedAppsFor, canOpen, fixturesFor, isDockFixture } from "../system/registry";
@@ -214,15 +215,17 @@ function Clock() {
   );
 }
 
-function ProfileButton() {
+function ProfileButton({ onSignOut }: { onSignOut: () => void }) {
   const { actions, registry } = useOs();
-  if (!canOpen(registry, "profile")) return null;
+  // Leaving a session must remain possible even when its app grants deny Profile.
+  if (!canOpen(registry, "profile")) return <IconButton label="Sign out" className="os-avatar-button" onClick={onSignOut}><LogOut size={18} aria-hidden /></IconButton>;
   return <button type="button" className="os-avatar-button" aria-label="Open Profile"
     onClick={() => actions.openApp("profile")}><AccountAvatar /></button>;
 }
 
 export function Dock({
   onOpenLauncher,
+  onSignOut,
   hidden = false,
 }: {
   onOpenLauncher: () => void;
@@ -477,7 +480,7 @@ export function Dock({
           aria-label={connectionDotTooltip(connectionTone)}
         />
         <Clock />
-        <ProfileButton />
+        <ProfileButton onSignOut={onSignOut} />
       </div>
       {!hidden && menu ? (
         <ContextMenu

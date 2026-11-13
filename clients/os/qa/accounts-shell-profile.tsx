@@ -5,7 +5,8 @@ import { Shell } from "../src/chrome/Shell";
 import { AuthProvider } from "../src/auth/AuthProvider";
 import { LocalDesktopStore } from "../src/system/store";
 import { applyPackStyles } from "../src/themes/registry";
-import { installSeededAccess, seededAccessFor } from "../test/seededAccess";
+import { setEffectiveCapabilities } from "../src/system/roles";
+import { seededAccessFor } from "../test/seededAccess";
 import { SEEDED_LADDER } from "../test/seededLadder";
 import { StubAskTransport } from "../test/ask/stubTransport";
 import { installQaConnection } from "./connectionShim";
@@ -16,11 +17,18 @@ import "../src/styles/index.css";
 // credentials, permission writes, account switch or provider action is involved.
 const params = new URLSearchParams(location.search);
 const role = params.get("role") === "viewer" ? "viewer" : "owner";
+const capabilities = seededAccessFor(role);
+if (params.get("profile") === "denied") {
+  // Keep the older personal doors: an explicit Profile deny must still win.
+  for (const entry of capabilities) {
+    if (entry.verb === "read" && entry.resource === "app:profile") entry.effect = "deny";
+  }
+}
 document.documentElement.dataset.theme = params.get("mode") === "light" ? "light" : "dark";
 document.documentElement.dataset.osTheme = "graphite";
 applyPackStyles([]);
 if (params.get("motion") === "reduced") applyReducedMotionFixture();
-installSeededAccess(role);
+setEffectiveCapabilities(capabilities);
 const config = { identityUrl: location.origin, identityApiBaseUrl: location.origin, oauthClientId: "fixture", authEnabled: false, domain: "memql.example.test" };
 const nativePages = {
   "/me/devices": { Layout: { Title: "Passkeys and sessions" }, PasskeysEnabled: true, Passkeys: [{ ID: "fixture-passkey", Label: "This Mac", Active: true, Authenticator: "Platform authenticator", Backup: "Backed up", CreatedAt: "2026-11-01", LastUsedAt: "2026-11-13" }], SessionsAvailable: true, Sessions: [{ ID: "fixture-session", Label: "This browser", Origin: location.origin, ThisDevice: true, FirstSeen: "2026-11-13", LastSeen: "Now", Expires: "2026-11-14" }] },
@@ -38,7 +46,7 @@ const base = profileScenes(({ children }) => <>{children}</>)[params.get("empty"
 const empty = () => Promise.resolve(new Result({ data: [] } as never));
 const query = new Proxy({ ...base.query,
   activeRoles: async () => new Result({ data: SEEDED_LADDER.map(rung => ({ ...rung, active: true })) } as never),
-  effectiveCapabilitiesForActor: async () => new Result({ data: [{ ok: true, entries: seededAccessFor(role) }] } as never),
+  effectiveCapabilitiesForActor: async () => new Result({ data: [{ ok: true, entries: capabilities }] } as never),
   executeNamed: (name: string, call: string) => name === "myBudget" ? base.query.executeNamed(name, call) : empty(),
 }, { get: (target, name) => name in target ? target[name as keyof typeof target] : empty });
 installQaConnection({ ...base, query, dispatcher: null,

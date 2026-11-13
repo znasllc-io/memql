@@ -66,7 +66,8 @@ Your picture opens Profile directly, on desktop and phone. Profile contains
 your name and photo, storage, passkeys and sessions, personal access tokens,
 personal sign-in preferences, Appearance, Ask, Apps, About and Diagnostics.
 It has no Launcher tile, dock pin or app-selector entry. Sign out is inside
-Profile. Identity administers the installation's sign-in policy and brand,
+Profile; when Profile is unavailable to a session, Sign out remains in the
+shell corner. Identity administers the installation's sign-in policy and brand,
 access requests, signing keys, service tokens and audit trail. Email verification, invitations, recovery, and
 external OAuth consent also render in OS. Old identity page URLs hand off to
 `/identity/...`, carrying their parameters in the fragment rather than OS access

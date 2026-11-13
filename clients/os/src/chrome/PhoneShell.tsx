@@ -2,12 +2,13 @@ import { AccountAvatar } from "./AccountAvatar";
 import { appDestination } from "../system/appDestinations";
 import { StorageWarning } from "../cluster/storage/StorageHealth";
 import { useRef, useState } from "react";
-import { ArrowLeft, LayoutGrid } from "lucide-react";
+import { ArrowLeft, LayoutGrid, LogOut } from "lucide-react";
 
 import { useAsk } from "../ask/AskProvider";
 import { AskSheet } from "../ask/AskSheet";
 import { ConnectionNotice } from "../kit/ConnectionNotice";
 import { ProvenanceDot } from "../kit";
+import { IconButton } from "../kit/IconButton";
 import { PageNavigationProvider } from "../kit/pageNavigation";
 import { TrailRow } from "../kit/TrailRow";
 import { PageContent } from "../kit/PageContent";
@@ -37,7 +38,7 @@ import { useWindowAsk } from "./windowAsk";
 // grid is home; an app opens full screen, one at a time, with its section
 // nav as a top strip; Ask fills the content area; the picture opens Profile.
 
-export function PhoneShell(_props: { onSignOut: () => void }) {
+export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
   const { registry, actorRole } = useOs();
   const { openAsk, sheet } = useAsk();
   const [currentAppId, setCurrentAppId] = useState<string | null>(null);
@@ -100,7 +101,8 @@ export function PhoneShell(_props: { onSignOut: () => void }) {
         <span className="os-phone-title">{current ? current.name : "MemQL OS"}</span>
         <ConnectionNotice className="os-phone-connection" retryLabel="Retry" />
         {canOpen(registry, "profile") ? <button type="button" className="os-avatar-button" aria-label="Open Profile"
-          onClick={() => open("profile")}><AccountAvatar /></button> : null}
+          onClick={() => open("profile")}><AccountAvatar /></button>
+          : <IconButton label="Sign out" className="os-avatar-button" onClick={onSignOut}><LogOut size={18} aria-hidden /></IconButton>}
       </header>
       <div className="os-phone-content">
       <div className="os-phone-page" inert={sheet.open}>
