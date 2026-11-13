@@ -37,8 +37,8 @@ import (
 // pages of each source (checkPagesPerRun for a run); a pass that ended starts
 // again at the next call.
 //
-// A store is checked only when its walk has caught up (walked_through within
-// checkCaughtUp of the clock), it is neither rebuilding nor purging, and no
+// A store is checked only when its last completed turn caught up,
+// it is neither rebuilding nor purging, and no
 // wholesale pass is under way (wholesale_cursor empty); otherwise the call
 // leaves it.
 //
@@ -91,19 +91,22 @@ import (
 //
 // # The end of a pass
 //
-// When all three cursors are done, the facts no mirrored row answered for are
-// deleted in batches (orphanBatch): facts that are not deleted, not marked by
+// When all three cursors are done, every source with existing old facts must
+// have witnessed a row before any orphan may be deleted. An entirely empty
+// source preserves the facts and ends the pass without advancing clean_at.
+// Otherwise facts no mirrored row answered for are deleted in batches
+// (orphanBatch): facts that are not deleted, not marked by
 // this pass, and at or before the cut. A deleted fact is left alone: it is the
 // guard against the versions before it. A record of a row that could not be
 // read and that the pass did not meet goes the same way. When a batch deletes
 // nothing the pass ends (finishCheckPass): its counts and start become the
-// last pass's, disagreeing is counted, clean_at moves when nothing was
-// mismatched, and the pass's own columns are cleared.
+// last pass's, clean_at moves when nothing was mismatched, and the pass's own
+// columns are cleared. The disagreeing count is read before that transaction.
 //
 // # Nothing of a row is reported
 //
 // What a check answers and logs is counts and store ids. A row that could not
-// be read is logged as the walk logs it: its gid and a field name.
+// be read contributes to one warning per store and run with an aggregate count.
 
 // checkPrincipal is the only caller the check admits: the maintenance
 // principal its scheduled automation runs under
@@ -122,9 +125,6 @@ const (
 	// checkPagesPerRun is how many counted pages of each source a run
 	// carries a store's pass on by: the walk's own page budget.
 	checkPagesPerRun = maxPagesPerRun
-	// checkCaughtUp is how near the clock a store's walked_through must be
-	// for the store to be checked.
-	checkCaughtUp = 10 * time.Minute
 	// checkCut is how long before the pass began a row may have been written
 	// and be compared: the walk's overlap, the room a late commit has.
 	checkCut = watermarkOverlap
@@ -142,12 +142,13 @@ var errPassMoved = errors.New("storestats: another check moved this pass on")
 // again is compared, and counted, again. Disagreeing is the sum over the
 // passes that ended in this run.
 type CheckReport struct {
-	Stores      int      `json:"stores"`
-	Compared    int      `json:"compared"`
-	Mismatched  int      `json:"mismatched"`
-	Repaired    int      `json:"repaired"`
-	Disagreeing int      `json:"disagreeing"`
-	Finished    []string `json:"finished,omitempty"`
+	unreadableLogged int
+	Stores           int      `json:"stores"`
+	Compared         int      `json:"compared"`
+	Mismatched       int      `json:"mismatched"`
+	Repaired         int      `json:"repaired"`
+	Disagreeing      int      `json:"disagreeing"`
+	Finished         []string `json:"finished,omitempty"`
 }
 
 // A CHECK RUN HAS A BUDGET AND A DEADLINE OF ITS OWN. The check's sweep runs
@@ -304,6 +305,12 @@ func checkStore(ctx context.Context, i *Integration, storeID string, now time.Ti
 	if rep == nil {
 		rep = &CheckReport{}
 	}
+	beforeUnreadable := rep.unreadableLogged
+	defer func() {
+		if n := rep.unreadableLogged - beforeUnreadable; n > 0 {
+			i.logger.Warn("Store statistics: mirrored rows could not be read during the check; their last readable facts are kept", "component", "storestats", "storeId", storeID, "count", n)
+		}
+	}()
 	var db *bun.DB
 	if i.bunDB != nil {
 		db = i.bunDB()
@@ -359,8 +366,19 @@ func checkStore(ctx context.Context, i *Integration, storeID string, now time.Ti
 		}
 	}
 
+	// Read completeness before deleting anything. The pass and generation are
+	// checked again under each write lock, so a rebuild cannot reuse this verdict.
+	var emptySources int
+	if err := readTx(ctx, db, func(ctx context.Context, tx bun.Tx) error {
+		var err error
+		emptySources, err = emptyCheckSources(ctx, tx, storeID, pass.started)
+		return err
+	}); err != nil {
+		return false, leaves(err)
+	}
+	complete := emptySources == 0
 	// The facts no row answered for, in batches, each asked the turn's budget.
-	for {
+	for complete {
 		if turnSpent(ctx) {
 			return false, nil
 		}
@@ -379,14 +397,26 @@ func checkStore(ctx context.Context, i *Integration, storeID string, now time.Ti
 		}
 	}
 	var disagreeing int
+	// This potentially long aggregation holds no writer lock. The final write
+	// still checks the pass identity, so a concurrent rebuild discards its result.
+	if err := readTx(ctx, db, func(ctx context.Context, tx bun.Tx) error {
+		var err error
+		disagreeing, err = disagreeingOrders(ctx, tx, storeID)
+		return err
+	}); err != nil {
+		return false, leaves(err)
+	}
 	if err := writeTx(ctx, db, storeID, generation, func(ctx context.Context, tx bun.Tx) error {
 		var err error
-		finished, disagreeing, err = finishCheckPass(ctx, tx, storeID, pass.started, now)
+		finished, err = finishCheckPass(ctx, tx, storeID, pass.started, now, disagreeing, complete)
 		return err
 	}); err != nil {
 		return false, leaves(err)
 	}
 	if finished {
+		if !complete {
+			i.logger.Warn("Store statistics: a check met no rows for a source with facts; no facts were deleted and the pass is not clean", "component", "storestats", "storeId", storeID, "count", emptySources)
+		}
 		rep.Finished = append(rep.Finished, storeID)
 		rep.Disagreeing += disagreeing
 	}
@@ -406,16 +436,16 @@ func leaves(err error) error {
 // its generation and its pass. See "A pass".
 func checkable(ctx context.Context, db *bun.DB, storeID string, now time.Time) (generation int64, pass checkPass, ok bool, err error) {
 	err = readTx(ctx, db, func(ctx context.Context, tx bun.Tx) error {
-		var purging bool
-		var rebuilding, walked sql.NullTime
+		var purging, caughtUp bool
+		var rebuilding sql.NullTime
 		var wholesaleCursor string
 		if err := tx.NewSelect().Table("store_sales_store").
-			Column("generation", "purging", "rebuilding_since", "walked_through", "wholesale_cursor").
-			Where("store_id = ?", storeID).Scan(ctx, &generation, &purging, &rebuilding, &walked, &wholesaleCursor); err != nil {
+			Column("generation", "purging", "rebuilding_since", "caught_up", "wholesale_cursor").
+			Where("store_id = ?", storeID).Scan(ctx, &generation, &purging, &rebuilding, &caughtUp, &wholesaleCursor); err != nil {
 			return err
 		}
 		ok = !purging && !rebuilding.Valid && wholesaleCursor == "" &&
-			walked.Valid && !walked.Time.Before(now.Add(-checkCaughtUp))
+			caughtUp
 		if !ok {
 			return nil
 		}
@@ -548,10 +578,7 @@ func (i *Integration) checkSource(ctx context.Context, db *bun.DB, storeID strin
 		rep.Compared += res.compared
 		rep.Mismatched += res.mismatched
 		rep.Repaired += res.repaired
-		for _, u := range res.logged {
-			i.logger.Warn("Store statistics: a mirrored row could not be read; it was recorded and no fact was written",
-				"component", "storestats", "storeId", storeID, "source", s.source, "gid", u.gid, "field", u.field, "error", u.err.Error())
-		}
+		rep.unreadableLogged += len(res.logged)
 		return nil
 	})
 	if err != nil {
@@ -922,7 +949,7 @@ func orderAgrees(o foldedOrder, s orderFactRow) (bool, error) {
 	}
 	const t = "store_sales_order_fact"
 	held := OrderFact{StoreID: o.fact.StoreID, OrderGID: s.OrderGID, Version: s.OrderVersion, RecordedAt: s.RecordedAt,
-		OrderedAt: s.OrderedAt, Currency: s.Currency, BuyerKey: s.BuyerKey, Cancelled: s.Cancelled, Test: s.Test,
+		OrderedAt: s.OrderedAt, SourceCreatedAt: instantOrZero(s.SourceCreatedAt), Currency: s.Currency, BuyerKey: s.BuyerKey, Cancelled: s.Cancelled, Test: s.Test,
 		TaxIncluded: s.TaxesIncluded, ExpectedQuantity: s.ExpectedQuantity}
 	var err error
 	if held.Shipping, err = parseStored(s.Shipping, t, "shipping"); err != nil {
@@ -945,6 +972,7 @@ func orderAgrees(o foldedOrder, s orderFactRow) (bool, error) {
 	}
 	want := o.fact
 	want.Version, want.RecordedAt, want.OrderedAt = micro(want.Version), micro(recordedOr(want.RecordedAt, want.Version)), micro(want.OrderedAt)
+	want.SourceCreatedAt = micro(want.SourceCreatedAt)
 	return want.same(held), nil
 }
 
@@ -1017,4 +1045,11 @@ func startCheckPass(ctx context.Context, tx bun.Tx, storeID string, now time.Tim
 		return checkPass{}, fmt.Errorf("begin the check's pass: %w", err)
 	}
 	return readPass(ctx, tx, storeID)
+}
+
+func instantOrZero(at *time.Time) time.Time {
+	if at == nil {
+		return time.Time{}
+	}
+	return *at
 }

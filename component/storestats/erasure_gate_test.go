@@ -241,8 +241,8 @@ func TestTheWalkedConceptsAreEveryMirroredConceptTheShapesRead(t *testing.T) {
 			read[s.concept] = true
 		}
 	}
-	if n != 6 {
-		t.Errorf("%d storeStatistics shapes in %s, want six", n, shapesFile)
+	if n != 7 {
+		t.Errorf("%d storeStatistics shapes in %s, want seven including the connection markers", n, shapesFile)
 	}
 	in := map[string]bool{}
 	for _, c := range walkedConcepts {

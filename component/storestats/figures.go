@@ -60,9 +60,9 @@ const unreadableCode = "statistics_rows_unreadable"
 // unreadableSentence says how many of the store's rows the figures leave out.
 func unreadableSentence(n int64) string {
 	if n == 1 {
-		return "1 record of this store could not be read and is left out of these figures."
+		return "1 record of this store could not be read and is left out of its figures."
 	}
-	return strconv.FormatInt(n, 10) + " records of this store could not be read and are left out of these figures."
+	return strconv.FormatInt(n, 10) + " records of this store could not be read and are left out of its figures."
 }
 
 // floorFigures are the figures that are floors while an order's lines are
@@ -82,7 +82,7 @@ func readFigures(ctx context.Context, tx bun.Tx, s *Statistics) error {
 		s.unmeasured()
 		return nil
 	}
-	scope := figureScope{storeID: s.StoreID, development: s.Development != nil && *s.Development}
+	scope := figureScope{storeID: s.StoreID, development: s.Development != nil && *s.Development, refundDetailFrom: s.refundDetailFrom}
 	if s.Currency != nil {
 		scope.currency = *s.Currency
 	}
@@ -128,7 +128,8 @@ func readFigures(ctx context.Context, tx bun.Tx, s *Statistics) error {
 	}
 	all := period.total()
 	s.Figures = scope.figures(all, true)
-	s.IncompleteOrders, s.IncompleteRefunds, s.RefundsNotRead = countOf(all.incompleteOrders), countOf(all.incompleteRefunds), countOf(all.notRead)
+	s.IncompleteOrders, s.IncompleteRefunds, s.RefundsNotRead = countOf(all.incompleteOrders), countOf(all.incompleteRefunds), countOf(all.notRead-all.tooOld)
+	s.RefundsTooOldToRead = countOf(all.tooOld)
 	s.Floors = map[string]bool{}
 	if all.incompleteOrders > 0 {
 		for _, k := range floorFigures {
@@ -193,6 +194,7 @@ func (s *Statistics) unmeasured() {
 	s.Figures, s.Previous, s.Floors = Figures{}, nil, map[string]bool{}
 	s.ProductsBySales, s.ProductsByUnits, s.OtherCurrencies = nil, nil, nil
 	s.ProductCount, s.RefundsWithoutItem, s.IncompleteOrders, s.IncompleteRefunds, s.RefundsNotRead = nil, nil, nil, nil, nil
+	s.ProductSalesCount, s.ProductUnitsCount, s.RefundsTooOldToRead = nil, nil, nil
 	s.Buyers, s.Wholesale = nil, nil
 }
 
@@ -239,6 +241,7 @@ func readUnreadable(ctx context.Context, tx bun.Tx, s *Statistics) error {
 type figureScope struct {
 	storeID, currency string
 	development       bool
+	refundDetailFrom  *time.Time
 }
 
 // countedOrder is the filter of a counted order fact aliased o, and its
@@ -259,11 +262,11 @@ func countedOrderWhere(storeID string, development any) (string, []any) {
 // sums is what one bucket and one wholesale side sum to. Money is the store's
 // currency only.
 type sums struct {
-	orders, storeOrders, units                int64
-	gross, discounts, charges                 money.Amount
-	incompleteOrders                          int64
-	refunds, refundedOut                      money.Amount // R(F), and M(F) - RG(F)
-	returnedUnits, notRead, incompleteRefunds int64
+	orders, storeOrders, units                        int64
+	gross, discounts, charges                         money.Amount
+	incompleteOrders                                  int64
+	refunds, refundedOut                              money.Amount // R(F), and M(F) - RG(F)
+	returnedUnits, notRead, incompleteRefunds, tooOld int64
 }
 
 func (a sums) add(b sums) sums {
@@ -272,7 +275,7 @@ func (a sums) add(b sums) sums {
 		gross: a.gross.Add(b.gross), discounts: a.discounts.Add(b.discounts), charges: a.charges.Add(b.charges),
 		incompleteOrders: a.incompleteOrders + b.incompleteOrders,
 		refunds:          a.refunds.Add(b.refunds), refundedOut: a.refundedOut.Add(b.refundedOut),
-		returnedUnits: a.returnedUnits + b.returnedUnits, notRead: a.notRead + b.notRead,
+		returnedUnits: a.returnedUnits + b.returnedUnits, notRead: a.notRead + b.notRead, tooOld: a.tooOld + b.tooOld,
 		incompleteRefunds: a.incompleteRefunds + b.incompleteRefunds,
 	}
 }
@@ -405,6 +408,7 @@ type refundSumsRow struct {
 	Bucket     int    `bun:"bucket"`
 	Wholesale  bool   `bun:"wholesale"`
 	NotRead    int64  `bun:"not_read"`
+	TooOld     int64  `bun:"too_old"`
 	Incomplete int64  `bun:"incomplete"`
 	Refunds    string `bun:"refunds"`
 	Out        string `bun:"refunded_out"`
@@ -468,10 +472,11 @@ func readSums(ctx context.Context, tx bun.Tx, c figureScope, starts []time.Time,
 	}
 
 	var refunds []refundSumsRow
-	args = append([]any{buckets, c.currency, c.currency, c.storeID}, countedArgs...)
+	args = append([]any{buckets, c.refundDetailFrom, c.currency, c.currency, c.storeID}, countedArgs...)
 	args = append(args, from.UTC(), until.UTC())
 	if err := tx.NewSelect().TableExpr(`(SELECT width_bucket(r.refunded_at, ?::timestamptz[]) AS bucket, o.wholesale,
 			count(*) FILTER (WHERE NOT r.detail_fetched) AS not_read,
+			count(*) FILTER (WHERE NOT r.detail_fetched AND o.source_created_at < ?::timestamptz) AS too_old,
 			count(*) FILTER (WHERE r.detail_fetched AND NOT r.lines_complete) AS incomplete,
 			COALESCE(sum(r.item_refunds) FILTER (WHERE o.currency = ?), 0)::text AS refunds,
 			COALESCE(sum(r.money_refunded - r.gift_card_refunded) FILTER (WHERE o.currency = ?), 0)::text AS refunded_out,
@@ -492,7 +497,7 @@ func readSums(ctx context.Context, tx bun.Tx, c figureScope, starts []time.Time,
 			return nil, err
 		}
 		k := sideKey{r.Bucket, r.Wholesale}
-		out[k] = out[k].add(sums{refunds: item, refundedOut: refundedOut, returnedUnits: r.Units, notRead: r.NotRead,
+		out[k] = out[k].add(sums{refunds: item, refundedOut: refundedOut, returnedUnits: r.Units, notRead: r.NotRead, tooOld: r.TooOld,
 			incompleteRefunds: r.Incomplete})
 	}
 	return out, nil
@@ -597,6 +602,7 @@ func readProducts(ctx context.Context, tx bun.Tx, c figureScope, from, until tim
 	bySales := c.currency != "" && linesKnown
 	byUnits := linesKnown
 	s.ProductsBySales, s.ProductsByUnits, s.ProductCount, s.RefundsWithoutItem = nil, nil, nil, nil
+	s.ProductSalesCount, s.ProductUnitsCount = nil, nil
 	if !bySales && !byUnits {
 		return nil
 	}
@@ -609,7 +615,13 @@ func readProducts(ctx context.Context, tx bun.Tx, c figureScope, from, until tim
 	// Each branch is summed by product as it is read, by hash, so the lines
 	// are never kept or sorted; a product's newest line is the greatest of
 	// newestKey over its sold lines, or over its refunded lines when it has
-	// none, and its title what follows the key's two instants.
+	// none, and its title what follows the key's two instants. The sold branch
+	// can reach lines through (store_id, order_ordered_at); deriveOrders keeps
+	// that date aligned with its parent in the same transaction. The parent
+	// is still checked by countedOrder, while the copied date selects the
+	// period only once.
+	// Refund lines deliberately have no order-period filter: their date is
+	// the refund's date, even when the original sale is outside the period.
 	if err := tx.NewSelect().TableExpr(`(WITH sold AS (
 			SELECT l.product_key, sum(l.sold_quantity) AS units,
 				sum(CASE WHEN o.currency = ? THEN l.gross - l.discounts END) AS sales,
@@ -617,7 +629,7 @@ func readProducts(ctx context.Context, tx bun.Tx, c figureScope, from, until tim
 				max(`+newestKey("o.ordered_at")+`) AS newest, false AS refunded
 			FROM store_sales_order_fact o
 			JOIN store_sales_line_fact l ON l.store_id = o.store_id AND l.order_gid = o.order_gid
-			WHERE `+counted+` AND o.ordered_at >= ? AND o.ordered_at < ? AND NOT l.deleted AND NOT l.gift_card
+			WHERE `+counted+` AND l.order_ordered_at >= ? AND l.order_ordered_at < ? AND NOT l.deleted AND NOT l.gift_card
 			GROUP BY l.product_key
 		), back AS (
 			SELECT l.product_key, -sum(rl.quantity) AS units,
@@ -644,12 +656,14 @@ func readProducts(ctx context.Context, tx bun.Tx, c figureScope, from, until tim
 		UNION ALL
 		SELECT 'count', '', '', count(*), NULL FROM per
 		UNION ALL
+		SELECT 'sales-count', '', '', count(*) FILTER (WHERE priced > 0), NULL FROM per
+		UNION ALL
 		SELECT 'returned', '', '', 0, COALESCE(sum(returned), 0)::text FROM per
 		) AS f`, args...).ColumnExpr("f.*").Scan(ctx, &rows); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("list the products of store %s: %w", c.storeID, err)
 	}
 	sales, units := []Product{}, []Product{}
-	var count int64
+	var count, salesCount int64
 	var returned money.Amount
 	for _, r := range rows {
 		switch r.List {
@@ -664,6 +678,8 @@ func readProducts(ctx context.Context, tx bun.Tx, c figureScope, from, until tim
 			units = append(units, Product{Key: r.Key, Title: r.Title, Count: &n})
 		case "count":
 			count = r.Units
+		case "sales-count":
+			salesCount = r.Units
 		case "returned":
 			a, err := parseStored(r.Sales.String, "store_sales_refund_line_fact", "subtotal")
 			if err != nil {
@@ -673,7 +689,7 @@ func readProducts(ctx context.Context, tx bun.Tx, c figureScope, from, until tim
 		}
 	}
 	if bySales {
-		s.ProductsBySales = sales
+		s.ProductsBySales, s.ProductSalesCount = sales, &salesCount
 		// The part of Refunds that names no product: the refunds of items less
 		// their refund lines on lines that are not gift cards. A KNOWN LIMIT: a
 		// refund line naming a line the store has since deleted is not an item
@@ -686,7 +702,7 @@ func readProducts(ctx context.Context, tx bun.Tx, c figureScope, from, until tim
 		s.RefundsWithoutItem = &without
 	}
 	if byUnits {
-		s.ProductsByUnits, s.ProductCount = units, &count
+		s.ProductsByUnits, s.ProductCount, s.ProductUnitsCount = units, &count, &count
 	}
 	return nil
 }

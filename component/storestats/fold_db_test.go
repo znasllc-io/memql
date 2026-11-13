@@ -1420,15 +1420,15 @@ func TestARowThatCannotBeReadIsCountedAndTheWalkGoesOn(t *testing.T) {
 	}
 	var lines []string
 	for _, l := range logs() {
-		if strings.Contains(l, bad) {
+		if strings.Contains(l, "mirrored rows could not be read") {
 			lines = append(lines, l)
 		}
 	}
 	if len(lines) != 1 {
 		t.Fatalf("the unreadable order is in %d log lines, want one: %v", len(lines), logs())
 	}
-	if !strings.Contains(lines[0], "totalShippingPriceSet") || !strings.Contains(lines[0], id) || !strings.Contains(lines[0], `"source":"order"`) {
-		t.Errorf("the log line does not name the field, the store and the source: %s", lines[0])
+	if !strings.Contains(lines[0], id) || !strings.Contains(lines[0], `"count":1`) {
+		t.Errorf("the aggregated warning does not name the store and count: %s", lines[0])
 	}
 	if strings.Contains(lines[0], "12,50") || strings.Contains(lines[0], buyerEmail) {
 		t.Errorf("the log line holds a value of the row: %s", lines[0])
@@ -1806,7 +1806,7 @@ func TestAnUnreadableRowReadAgainIsOneRecordAndOneLogLine(t *testing.T) {
 	}
 	lines := 0
 	for _, l := range logs() {
-		if strings.Contains(l, bad) {
+		if strings.Contains(l, "mirrored rows could not be read") {
 			lines++
 		}
 	}

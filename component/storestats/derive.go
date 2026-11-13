@@ -25,7 +25,10 @@ import (
 // refunded_quantity is the sum of the refund-line quantities naming it over
 // the order's refunds; sold_quantity, gross and discounts are soldOf's, with
 // the line's currency, computed in Go and written back (the rounding is
-// core/money's, never SQL's). The order's gross, discounts and units sum its
+// core/money's, never SQL's). Its order_ordered_at copies the parent order's
+// ordered_at, so product reads can reach sold lines by period. It is null
+// until a live parent is folded and changes with any correction of that parent.
+// The order's gross, discounts and units sum its
 // lines that are not gift cards; line_count and lines_version are over all its
 // lines; lines_complete says the sum of quantity over all its lines is at
 // least expected_quantity -- false when a line was never read, which is how a
@@ -51,6 +54,7 @@ import (
 // The derived columns as they are, and the inputs they are computed from.
 type deriveOrder struct {
 	OrderGID         string       `bun:"order_gid"`
+	OrderedAt        sql.NullTime `bun:"ordered_at"`
 	Deleted          bool         `bun:"deleted"`
 	ExpectedQuantity int          `bun:"expected_quantity"`
 	TaxesIncluded    bool         `bun:"taxes_included"`
@@ -63,20 +67,21 @@ type deriveOrder struct {
 }
 
 type deriveLine struct {
-	LineGID            string    `bun:"line_gid"`
-	OrderGID           string    `bun:"order_gid"`
-	Deleted            bool      `bun:"deleted"`
-	LineVersion        time.Time `bun:"line_version"`
-	Currency           string    `bun:"currency"`
-	GiftCard           bool      `bun:"gift_card"`
-	Quantity           int       `bun:"quantity"`
-	CurrentQuantity    int       `bun:"current_quantity"`
-	UnitPrice          string    `bun:"unit_price"`
-	AllocatedDiscounts string    `bun:"allocated_discounts"`
-	RefundedQuantity   int       `bun:"refunded_quantity"`
-	SoldQuantity       int       `bun:"sold_quantity"`
-	Gross              string    `bun:"gross"`
-	Discounts          string    `bun:"discounts"`
+	LineGID            string       `bun:"line_gid"`
+	OrderGID           string       `bun:"order_gid"`
+	OrderOrderedAt     sql.NullTime `bun:"order_ordered_at"`
+	Deleted            bool         `bun:"deleted"`
+	LineVersion        time.Time    `bun:"line_version"`
+	Currency           string       `bun:"currency"`
+	GiftCard           bool         `bun:"gift_card"`
+	Quantity           int          `bun:"quantity"`
+	CurrentQuantity    int          `bun:"current_quantity"`
+	UnitPrice          string       `bun:"unit_price"`
+	AllocatedDiscounts string       `bun:"allocated_discounts"`
+	RefundedQuantity   int          `bun:"refunded_quantity"`
+	SoldQuantity       int          `bun:"sold_quantity"`
+	Gross              string       `bun:"gross"`
+	Discounts          string       `bun:"discounts"`
 }
 
 type deriveRefund struct {
@@ -130,13 +135,13 @@ func deriveOrders(ctx context.Context, tx bun.Tx, storeID string, orderGIDs []st
 	in := bun.In(orderGIDs)
 	var orders []deriveOrder
 	if err := tx.NewSelect().TableExpr("store_sales_order_fact").
-		Column("order_gid", "deleted", "expected_quantity", "taxes_included", "gross", "discounts", "units", "line_count", "lines_version", "lines_complete").
+		Column("order_gid", "ordered_at", "deleted", "expected_quantity", "taxes_included", "gross", "discounts", "units", "line_count", "lines_version", "lines_complete").
 		Where("store_id = ? AND order_gid IN (?)", storeID, in).Scan(ctx, &orders); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("read the orders to derive: %w", err)
 	}
 	var lines []deriveLine
 	if err := tx.NewSelect().TableExpr("store_sales_line_fact").
-		Column("line_gid", "order_gid", "deleted", "line_version", "currency", "gift_card", "quantity", "current_quantity", "unit_price",
+		Column("line_gid", "order_gid", "order_ordered_at", "deleted", "line_version", "currency", "gift_card", "quantity", "current_quantity", "unit_price",
 			"allocated_discounts", "refunded_quantity", "sold_quantity", "gross", "discounts").
 		Where("store_id = ? AND order_gid IN (?) AND NOT deleted", storeID, in).
 		OrderExpr("line_gid").Scan(ctx, &lines); err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -187,7 +192,7 @@ func deriveOrders(ctx context.Context, tx bun.Tx, storeID string, orderGIDs []st
 	for _, l := range d.lines {
 		if _, err := tx.NewUpdate().TableExpr("store_sales_line_fact").
 			Set("refunded_quantity = ?", l.RefundedQuantity).Set("sold_quantity = ?", l.SoldQuantity).
-			Set("gross = ?", l.Gross).Set("discounts = ?", l.Discounts).
+			Set("gross = ?", l.Gross).Set("discounts = ?", l.Discounts).Set("order_ordered_at = ?", l.OrderOrderedAt).
 			Where("store_id = ? AND line_gid = ?", storeID, l.LineGID).Exec(ctx); err != nil {
 			return fmt.Errorf("write a line's derived amounts: %w", err)
 		}
@@ -242,6 +247,13 @@ func derive(orders []deriveOrder, lines []deriveLine, refunds []deriveRefund, re
 		}
 	}
 
+	orderedAt := map[string]sql.NullTime{}
+	for _, o := range orders {
+		if !o.Deleted {
+			orderedAt[o.OrderGID] = o.OrderedAt
+		}
+	}
+
 	// Each line, and its order's sums.
 	type sums struct {
 		gross, discounts money.Amount
@@ -268,6 +280,10 @@ func derive(orders []deriveOrder, lines []deriveLine, refunds []deriveRefund, re
 		}
 		sold, gross, discounts := soldOf(l.Quantity, l.CurrentQuantity, refunded[l.LineGID], price, allocated, l.Currency)
 		next := l
+		at := orderedAt[l.OrderGID]
+		if at.Valid != l.OrderOrderedAt.Valid || (at.Valid && !at.Time.Equal(l.OrderOrderedAt.Time)) {
+			next.OrderOrderedAt = at
+		}
 		next.RefundedQuantity, next.SoldQuantity, next.Gross, next.Discounts = refunded[l.LineGID], sold, amountText(gross), amountText(discounts)
 		if next != l {
 			d.lines = append(d.lines, next)

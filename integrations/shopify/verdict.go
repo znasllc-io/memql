@@ -210,6 +210,32 @@ func OutsideWhatTheStoreRecords(verdict map[string]any, concepts []string) (outs
 	return heldBy(listed, concepts), true
 }
 
+// HistoryArrivingFor answers whether a concept's history is being backfilled.
+// A missing machine field is unknown, so rolling upgrades cannot call partial
+// history current merely because another reason owns the verdict's word.
+func HistoryArrivingFor(verdict map[string]any, concepts []string) (arriving, known bool) {
+	listed, ok := payloadStrings(verdict["arrivingConcepts"])
+	if !ok {
+		return true, false
+	}
+	return heldBy(listed, concepts), true
+}
+
+func arrivingConceptsOf(store Store, rows map[string]map[string]any) []string {
+	var out []string
+	for concept, row := range rows {
+		spec := generated.Types[generated.ConceptFromID(concept)]
+		if spec == nil || !domainInConnection(store, spec) || domainPaused(row) {
+			continue
+		}
+		status := mapString(row, "backfillStatus")
+		if status == "queued" || status == "running" {
+			out = append(out, concept)
+		}
+	}
+	return conceptNames(out)
+}
+
 // payloadStrings reads a list of strings from a reply: []any after JSON, or
 // []string from the reply's own map. ok is false when it is not a list, or
 // when any element is not a string: a malformed list is not known.
@@ -303,6 +329,9 @@ type Verdict struct {
 	// outside what the store records (outsideConceptsOf): Outside's domains,
 	// and every domain whose row the origin refuses as not granted.
 	OutsideConcepts []string
+	// ArrivingConcepts names domains whose backfill is queued or running.
+	// It is independent of State: another reason must not hide partial history.
+	ArrivingConcepts []string
 }
 
 // verdictInput is everything computeVerdict reads, gathered beforehand.
@@ -357,15 +386,16 @@ func computeVerdict(in verdictInput) Verdict {
 	store := in.Store
 	rows := rowsByConcept(in.States)
 	v := Verdict{
-		StoreID:         store.ID,
-		Domain:          store.Domain,
-		OrdersFrom:      healthString(store.Health, "ordersFrom"),
-		ConnectedAt:     in.ConnectedAt,
-		GrantRecordedAt: in.GrantRecordedAt,
-		Recorded:        recordedOf(store, rows),
-		Outside:         outsideOf(store, rows),
-		OutsideConcepts: outsideConceptsOf(store, rows),
-		Withheld:        withheldOf(in.Denied),
+		StoreID:          store.ID,
+		Domain:           store.Domain,
+		OrdersFrom:       healthString(store.Health, "ordersFrom"),
+		ConnectedAt:      in.ConnectedAt,
+		GrantRecordedAt:  in.GrantRecordedAt,
+		Recorded:         recordedOf(store, rows),
+		Outside:          outsideOf(store, rows),
+		OutsideConcepts:  outsideConceptsOf(store, rows),
+		ArrivingConcepts: arrivingConceptsOf(store, rows),
+		Withheld:         withheldOf(in.Denied),
 	}
 	switch {
 	case store.UninstalledAt != "" || store.RedactedAt != "":

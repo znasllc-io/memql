@@ -109,19 +109,16 @@ func orphanBatch(ctx context.Context, tx bun.Tx, storeID string, started time.Ti
 
 // finishCheckPass ends the pass begun at started, inside tx: see "The end of
 // a pass". finished is false when another call ended it first.
-func finishCheckPass(ctx context.Context, tx bun.Tx, storeID string, started, now time.Time) (finished bool, disagreeing int, err error) {
+func finishCheckPass(ctx context.Context, tx bun.Tx, storeID string, started, now time.Time, disagreeing int, complete bool) (finished bool, err error) {
 	if err := passStands(ctx, tx, storeID, started, "", ""); err != nil {
-		return false, 0, err
-	}
-	if disagreeing, err = disagreeingOrders(ctx, tx, storeID); err != nil {
-		return false, 0, err
+		return false, err
 	}
 	res, err := tx.NewUpdate().TableExpr("store_sales_check").
 		Set("last_started_at = pass_started_at").
 		Set("last_compared = compared").Set("last_mismatched = mismatched").Set("last_repaired = repaired").
 		Set("last_disagreeing = ?", disagreeing).
 		Set("last_finished_at = ?", now.UTC()).
-		Set("clean_at = CASE WHEN mismatched = 0 THEN ?::timestamptz ELSE clean_at END", now.UTC()).
+		Set("clean_at = CASE WHEN mismatched = 0 AND ? THEN ?::timestamptz ELSE clean_at END", complete, now.UTC()).
 		Set("pass_started_at = NULL").
 		Set("order_cursor = ''").Set("line_cursor = ''").Set("refund_cursor = ''").
 		Set("order_window_seconds = ?", seconds(defaultWindow)).
@@ -130,13 +127,13 @@ func finishCheckPass(ctx context.Context, tx bun.Tx, storeID string, started, no
 		Set("compared = 0").Set("mismatched = 0").Set("repaired = 0").
 		Where("store_id = ? AND pass_started_at = ?", storeID, started).Exec(ctx)
 	if err != nil {
-		return false, 0, fmt.Errorf("end the check's pass: %w", err)
+		return false, fmt.Errorf("end the check's pass: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return false, 0, err
+		return false, err
 	}
-	return n == 1, disagreeing, nil
+	return n == 1, nil
 }
 
 // disagreeingOrders counts the store's counted orders (countedOrderWhere,
@@ -168,4 +165,24 @@ func disagreeingOrders(ctx context.Context, tx bun.Tx, storeID string) (int, err
 		return 0, fmt.Errorf("count the orders whose totals disagree: %w", err)
 	}
 	return n, nil
+}
+
+// emptyCheckSources counts empty sources over existing old facts. A read's
+// admission or completeness changing must never turn every fact into an orphan.
+// New facts beyond the cut do not count; they were not this pass's to prove.
+func emptyCheckSources(ctx context.Context, tx bun.Tx, storeID string, started time.Time) (int, error) {
+	count := 0
+	for _, source := range walkedSources {
+		table, _, version := factColumnsOf(source.source)
+		var old, met bool
+		err := tx.NewSelect().ColumnExpr("EXISTS (SELECT 1 FROM ? WHERE store_id = ? AND NOT deleted AND ? <= ?)", bun.Ident(table), storeID, bun.Ident(version), started.Add(-checkCut)).
+			ColumnExpr("EXISTS (SELECT 1 FROM ? WHERE store_id = ? AND checked_at >= ?)", bun.Ident(table), storeID, started).Scan(ctx, &old, &met)
+		if err != nil {
+			return 0, err
+		}
+		if old && !met {
+			count++
+		}
+	}
+	return count, nil
 }

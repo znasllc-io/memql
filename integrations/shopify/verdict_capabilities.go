@@ -437,7 +437,8 @@ func verdictPayload(v Verdict) map[string]any {
 		"resumedAt": timeOrEmpty(v.ResumedAt), "connectedAt": timeOrEmpty(v.ConnectedAt),
 		"grantRecordedAt": timeOrEmpty(v.GrantRecordedAt),
 		"reasons":         reasons, "recorded": recorded, "outside": toAny(v.Outside), "withheld": toAny(v.Withheld),
-		"outsideConcepts": toAny(v.OutsideConcepts),
-		"ordersFrom":      v.OrdersFrom,
+		"outsideConcepts":  toAny(v.OutsideConcepts),
+		"arrivingConcepts": toAny(v.ArrivingConcepts),
+		"ordersFrom":       v.OrdersFrom,
 	}
 }

@@ -161,6 +161,8 @@ func statisticsReads() []statisticsRead {
 			admitted: mirror("shop"), admittedRow: mirrorRow(statsShopGid)},
 		{name: "storeStatisticsStores", reader: developer, seeded: isStoreRow,
 			admitted: storeById, admittedRow: isStoreRow},
+		{name: "storeStatisticsConnection", args: map[string]any{"storeId": authorityTestStoreId}, reader: developer,
+			seeded: func(map[string]any) bool { return true }, admitted: storeById, admittedRow: isStoreRow},
 		{name: "storeStatisticsStoreAt", args: map[string]any{"storeId": authorityTestStoreId, "at": time.Now().UTC().Add(time.Minute).Format(time.RFC3339)},
 			reader: developer, seeded: isStoreRow, admitted: storeById, admittedRow: isStoreRow},
 	}
@@ -289,6 +291,7 @@ var statisticsShapes = map[string]struct {
 		"taxesIncluded", "plan"}},
 	"storeStatisticsStore": {"store", []string{"row.id", "domain", "name", "isDevelopment", "scopesGranted", "uninstalledAt",
 		"redactedAt", "health"}},
+	"storeStatisticsConnection": {"store", []string{"redactedAt", "uninstalledAt"}},
 }
 
 // The query each shape is read through.
@@ -300,6 +303,7 @@ var statisticsQueryShapes = map[string]string{
 	"storeStatisticsShop":           "storeStatisticsShop",
 	"storeStatisticsStores":         "storeStatisticsStore",
 	"storeStatisticsStoreAt":        "storeStatisticsStore",
+	"storeStatisticsConnection":     "storeStatisticsConnection",
 }
 
 var statisticsTree struct {

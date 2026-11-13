@@ -5,7 +5,7 @@
 -- those by time over graph rows. What is kept here is derived from the store's
 -- mirror rows and is meant to be rebuilt from them, so it has no history of
 -- its own and nothing here is the only copy; the database sums it with
--- ordinary SQL. None of the seven is a concept and none is in the row table.
+-- ordinary SQL. None of the eight is a concept and none is in the row table.
 -- They are keyed by store, and a fact's account is its store's, reached
 -- through store_id; no column holds an account, because a copy can lag its
 -- source.
@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS store_sales_order_fact (
     deleted                  BOOLEAN NOT NULL DEFAULT false,  -- the mirror retired the row: the fact stays, counts nowhere and refuses every older version
     recorded_at              TIMESTAMPTZ NOT NULL,            -- the row's syncedAt
     ordered_at               TIMESTAMPTZ NOT NULL,
+    source_created_at        TIMESTAMPTZ, -- original order creation, independent of its processing date
     currency                 TEXT NOT NULL,
     cancelled                BOOLEAN NOT NULL,
     test                     BOOLEAN NOT NULL,
@@ -77,6 +78,7 @@ CREATE TABLE IF NOT EXISTS store_sales_line_fact (
     current_quantity    INTEGER NOT NULL,
     unit_price          NUMERIC NOT NULL,
     allocated_discounts NUMERIC NOT NULL,
+    order_ordered_at    TIMESTAMPTZ,                 -- derived from the live parent order, null until it is folded
     refunded_quantity   INTEGER NOT NULL DEFAULT 0,  -- derived
     sold_quantity       INTEGER NOT NULL DEFAULT 0,  -- derived
     gross               NUMERIC NOT NULL DEFAULT 0,  -- derived
@@ -86,6 +88,8 @@ CREATE TABLE IF NOT EXISTS store_sales_line_fact (
 );
 -- read by: the lines of an order, in the derivation and in every figure that reaches a line through its order
 CREATE INDEX IF NOT EXISTS store_sales_line_fact_order_idx ON store_sales_line_fact (store_id, order_gid);
+-- read by: products sold in a period, without scanning lines of other periods or stores
+CREATE INDEX IF NOT EXISTS store_sales_line_fact_ordered_idx ON store_sales_line_fact (store_id, order_ordered_at);
 
 --bun:split
 
@@ -151,6 +155,7 @@ CREATE TABLE IF NOT EXISTS store_sales_store (
     taxes_included           BOOLEAN,
     development              BOOLEAN,
     all_orders_readable      BOOLEAN NOT NULL DEFAULT false,
+    refund_detail_from       TIMESTAMPTZ, -- lower bound of the completed detail scan, null when unknown or all orders are readable
     history_floor            TIMESTAMPTZ,                     -- an instant before the store row was first written: where every walk of the store begins
     history_since            TIMESTAMPTZ,                     -- the store-local midnight of the first recorded day
     wholesale_enabled        BOOLEAN NOT NULL DEFAULT false,
@@ -165,6 +170,7 @@ CREATE TABLE IF NOT EXISTS store_sales_store (
     last_clear_at            TIMESTAMPTZ,                     -- the last run at which nothing stood in the way: what the figures are as of while recording_blocked
     last_change_at           TIMESTAMPTZ,
     walked_through           TIMESTAMPTZ,
+    caught_up                BOOLEAN NOT NULL DEFAULT false, -- all sources reached their clocks in the last completed turn
     rebuilding_since         TIMESTAMPTZ,
     definition               INTEGER NOT NULL DEFAULT 0
 );

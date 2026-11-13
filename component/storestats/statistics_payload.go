@@ -41,15 +41,15 @@ type Statistics struct {
 
 	Period statsperiod.Period
 	// Bounds is the period cut in Loc; nil for a store the walk holds no row
-	// for, whose frame says its ids, its destination and that it is starting.
+	// for, whose frame says its ids, destination and connection state.
 	Bounds *statsperiod.Bounds
 	// Loc is the zone every moment of the answer is written in.
 	Loc *time.Location
 
 	HistorySince, LastChangeAt *time.Time
 	// AsOf is set only while something stands in the way now
-	// (Recording.Blocked): the walk's last clear run, and nil when there was
-	// none. Nil otherwise: the figures are current.
+	// (Recording.Blocked): the last clear run, or the last walked instant when
+	// the walk has fallen behind. Nil when there was none or figures are current.
 	AsOf      *time.Time
 	Recording Recording
 	// Rebuilding is nil for a store the walk holds no row for.
@@ -61,21 +61,24 @@ type Statistics struct {
 	Series   []Bucket
 	// ProductsBySales, ProductsByUnits and OtherCurrencies are nil, answered
 	// null, when not measured, and empty when measured and empty.
-	ProductsBySales    []Product
-	ProductsByUnits    []Product
-	ProductCount       *int64
-	RefundsWithoutItem *money.Amount
-	IncompleteOrders   *int64
-	IncompleteRefunds  *int64
-	RefundsNotRead     *int64
-	Buyers             *Buyers
-	Wholesale          *Wholesale
-	OtherCurrencies    []CurrencyCount
+	ProductsBySales                      []Product
+	ProductsByUnits                      []Product
+	ProductCount                         *int64 // compatibility count: the units list
+	ProductSalesCount, ProductUnitsCount *int64
+	RefundsWithoutItem                   *money.Amount
+	IncompleteOrders                     *int64
+	IncompleteRefunds                    *int64
+	RefundsNotRead                       *int64
+	RefundsTooOldToRead                  *int64
+	Buyers                               *Buyers
+	Wholesale                            *Wholesale
+	OtherCurrencies                      []CurrencyCount
 
 	// What readFigures needs of the store's row beyond the answer's keys: the
 	// recorded zone loaded, the walk reached the clock for every source
 	// (walked_through), and the wholesale pack is enabled for the store.
 	zoneLoaded, walked, wholesaleEnabled bool
+	refundDetailFrom                     *time.Time
 }
 
 // Recording is the store's verdict as the walk kept it in store_sales_store.
@@ -224,9 +227,9 @@ func (s Statistics) Payload() map[string]any {
 		"rebuilding": rebuilding,
 		"figures":    s.Figures.payload(), "previous": previous, "floors": floors, "series": series,
 		"productsBySales": products(s.ProductsBySales), "productsByUnits": products(s.ProductsByUnits),
-		"productCount": count(s.ProductCount), "refundsWithoutItem": amount(s.RefundsWithoutItem),
+		"productCount": count(s.ProductCount), "productSalesCount": count(s.ProductSalesCount), "productUnitsCount": count(s.ProductUnitsCount), "refundsWithoutItem": amount(s.RefundsWithoutItem),
 		"incompleteOrders": count(s.IncompleteOrders), "incompleteRefunds": count(s.IncompleteRefunds),
-		"refundsNotRead": count(s.RefundsNotRead), "buyers": buyers, "wholesale": wholesale, "otherCurrencies": others,
+		"refundsNotRead": count(s.RefundsNotRead), "refundsTooOldToRead": count(s.RefundsTooOldToRead), "buyers": buyers, "wholesale": wholesale, "otherCurrencies": others,
 	}
 }
 
