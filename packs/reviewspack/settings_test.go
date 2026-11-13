@@ -90,15 +90,74 @@ func TestUpdateSettingsMergesTheFieldsItIsGiven(t *testing.T) {
 	}
 }
 
-// A tester's minutes are kept beside the days (TestTheDelayCanBeMinutes).
+// Only a cluster operator can configure a short test delay.
 func TestTheDelayMinutesAreSaved(t *testing.T) {
-	out, err := writeSettings(t, moderatorCtx("mod-1"), existingSettings(),
+	out, err := writeSettings(t, operatorCtxFor("op-1"), existingSettings(),
 		map[string]any{"siteId": "site-1", "storeId": "store-live", "requestDelayDays": 0, "requestDelayMinutes": 5}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if out["requestDelayDays"] != 0 || out["requestDelayMinutes"] != 5 {
 		t.Fatalf("out = %v, want 0 days and 5 minutes", out)
+	}
+}
+
+func TestBusinessUsersCannotSetMinuteDelays(t *testing.T) {
+	for _, user := range []string{"mod-1", "owner-1"} {
+		t.Run(user, func(t *testing.T) {
+			_, err := writeSettings(t, moderatorCtx(user), existingSettings(),
+				map[string]any{"siteId": "site-1", "storeId": "store-live", "requestDelayDays": 0, "requestDelayMinutes": 5}, false)
+			if err == nil || !strings.Contains(err.Error(), "only the cluster's operators") {
+				t.Fatalf("minute delay = %v, want an operator-only refusal without a write", err)
+			}
+		})
+	}
+}
+
+func TestBusinessSettingsEditsPreserveAnOperatorsMinuteDelay(t *testing.T) {
+	row := existingSettings()
+	row["requestDelayDays"], row["requestDelayMinutes"] = 0, 5
+	args := map[string]any{"siteId": "site-1", "storeId": "store-live", "notifyEmail": "changed@example.com"}
+	out, err := writeSettings(t, moderatorCtx("mod-1"), row, args, false)
+	if err != nil || out["requestDelayDays"] != 0 || out["requestDelayMinutes"] != 5 || out["notifyEmail"] != "changed@example.com" {
+		t.Fatalf("unrelated edit = %v, %v; want exact minute delay retained", out, err)
+	}
+}
+
+func TestBusinessMinuteDelayConversionRequiresAnExplicitDayValue(t *testing.T) {
+	row := existingSettings()
+	row["requestDelayDays"], row["requestDelayMinutes"] = 2, 5
+	for name, change := range map[string]map[string]any{
+		"unchanged positive minute replay":    {"requestDelayMinutes": 5},
+		"changed minutes":                     {"requestDelayMinutes": 6},
+		"days with minutes retained":          {"requestDelayDays": 21},
+		"minutes cleared without chosen days": {"requestDelayMinutes": 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			change["siteId"], change["storeId"] = "site-1", "store-live"
+			if _, err := writeSettings(t, moderatorCtx("mod-1"), row, change, false); err == nil {
+				t.Fatal("non-day delay change succeeded")
+			}
+		})
+	}
+	for _, days := range []int{0, 21, 365} {
+		out, err := writeSettings(t, moderatorCtx("mod-1"), row,
+			map[string]any{"siteId": "site-1", "storeId": "store-live", "requestDelayDays": days, "requestDelayMinutes": 0}, false)
+		if err != nil || out["requestDelayDays"] != days || out["requestDelayMinutes"] != 0 {
+			t.Fatalf("explicit day replacement = %v, %v", out, err)
+		}
+	}
+	if _, err := writeSettings(t, moderatorCtx("mod-1"), row,
+		map[string]any{"siteId": "site-1", "storeId": "store-live", "requestDelayDays": 366, "requestDelayMinutes": 0}, false); err == nil {
+		t.Fatal("invalid replacement day value succeeded")
+	}
+}
+
+func TestBusinessUsersCanChangeWholeDayDelays(t *testing.T) {
+	out, err := writeSettings(t, moderatorCtx("mod-1"), existingSettings(),
+		map[string]any{"siteId": "site-1", "storeId": "store-live", "requestDelayDays": 21}, false)
+	if err != nil || out["requestDelayDays"] != 21 || asInt(out["requestDelayMinutes"]) != 0 {
+		t.Fatalf("whole-day change = %v, %v", out, err)
 	}
 }
 

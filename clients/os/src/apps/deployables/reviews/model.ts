@@ -87,7 +87,7 @@ export interface ReviewSettingsValues {
   publicDisplay: boolean;
   linkLifetimeDays: number;
   requestDelayDays: number;
-  /** Minutes added to the days: a test's wait, set with the Days / Minutes switch. */
+  /** Minutes added to the days for an operator's short test. */
   requestDelayMinutes: number;
   requestsEnabled: boolean;
   requestTemplateId: string;
@@ -101,7 +101,7 @@ export interface ReviewSettings {
   /** False until the cluster's operators set the store up. */
   exists: boolean;
   values: ReviewSettingsValues;
-  may: { edit: boolean; nameApprover: boolean; nameSender: boolean };
+  may: { edit: boolean; nameApprover: boolean; nameSender: boolean; setMinuteDelay: boolean };
   viewer: { moderates: boolean; approvesRemovals: boolean };
 }
 
@@ -240,7 +240,12 @@ export function reviewSettingsFrom(row: Row | null): ReviewSettings {
       notifyEmail: rowString(s, "notifyEmail"),
       removalApproverUserId: rowString(s, "removalApproverUserId"),
     },
-    may: { edit: flag(may, "edit"), nameApprover: flag(may, "nameApprover"), nameSender: flag(may, "nameSender") },
+    may: {
+      edit: flag(may, "edit"), nameApprover: flag(may, "nameApprover"), nameSender: flag(may, "nameSender"),
+      // The older server omitted this capability. Absence or any malformed
+      // value must never turn a business user's day control into a test one.
+      setMinuteDelay: may?.["setMinuteDelay"] === true || may?.["setMinuteDelay"] === "true",
+    },
     viewer: { moderates: flag(viewer, "moderates"), approvesRemovals: flag(viewer, "approvesRemovals") },
   };
 }

@@ -40,9 +40,9 @@ type Settings struct {
 	PublicDisplay    bool
 	LinkLifetimeDays int
 	RequestDelayDays int
-	// RequestDelayMinutes is added to the days (TestTheDelayCanBeMinutes): a
-	// tester asks a buyer minutes after the order with the Days / Minutes switch
-	// Email > Automations' waits have, then turns it back (Jesús, 2026-11-12).
+	// RequestDelayMinutes is added to the days for an operator's short test.
+	// Business users set whole days. Existing minute values survive unrelated
+	// edits until explicitly replaced by a day value and zero minutes.
 	RequestDelayMinutes int
 	RequestsEnabled     bool
 	RequestTemplateID   string
@@ -213,13 +213,16 @@ var errApproverCannotModerate = errors.New("reviews: Choose someone in this stor
 // writeSettings merges changes into the store's current settings row and
 // answers the new version.
 //
-// Three rules decide who may write. A store with no settings row yet is set up
+// The field rules decide who may write. A store with no settings row yet is set up
 // by the cluster's operators; after that, whoever can read the row may change
 // it. The owner who approves removals is named only by the current owner or by
 // an operator -- a moderator who could name themselves would remove reviews
 // nobody approved. And the mailbox the store's requests leave from is named
 // only by an operator: it may be the installation's own, standing in for an
 // organization with none, and only the installation's people may lend it.
+// Minute delays are also an operator's test control. Other people can keep an
+// existing minute delay or explicitly replace it with whole days; an unrelated
+// edit must never convert or round the current delay.
 //
 // And one rule decides whom: the approver named is one of the people who can
 // moderate the store, in its organization as reviewsPeople reads it
@@ -241,6 +244,32 @@ func (p *Provider) writeSettings(ctx context.Context, storeID string, changes ma
 	}
 	if len(current) == 0 && !operator {
 		return nil, fmt.Errorf("reviews: this store has no reviews settings yet; the cluster's operators set them up")
+	}
+	if !operator {
+		effective := EffectiveSettings(current)
+		days, changesDays := changes["requestDelayDays"]
+		minutes, changesMinutes := changes["requestDelayMinutes"]
+		nextDays, nextMinutes := effective.RequestDelayDays, effective.RequestDelayMinutes
+		if changesDays {
+			nextDays = asInt(days)
+		}
+		if changesMinutes {
+			nextMinutes = asInt(minutes)
+			// Never accept a positive value from a business caller, even an
+			// apparent replay. The read may lag an operator's recent change;
+			// equality against that row is not authority to restore minutes.
+			if nextMinutes > 0 {
+				return nil, fmt.Errorf("reviews: only the cluster's operators set a review-request delay in minutes; choose whole days")
+			}
+		}
+		if nextMinutes > 0 && (nextMinutes != effective.RequestDelayMinutes || nextDays != effective.RequestDelayDays) {
+			return nil, fmt.Errorf("reviews: only the cluster's operators set a review-request delay in minutes; choose whole days")
+		}
+		// Zero minutes alone would silently discard an operator's current
+		// delay. Require the caller to choose the replacement day value too.
+		if effective.RequestDelayMinutes > 0 && nextMinutes == 0 && !changesDays {
+			return nil, fmt.Errorf("reviews: choose whole days when replacing the operator's minute delay")
+		}
 	}
 	// THE ORGANIZATION IS THE OPERATORS' TO SET. Whose store this is must not
 	// be decided by the first site that happens to touch it, so a change of

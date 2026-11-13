@@ -328,6 +328,22 @@ func TestTheSettingsReadAnswersWhatIsInForce(t *testing.T) {
 	}
 }
 
+func TestOnlyOperatorsReadTheMinuteDelayCapability(t *testing.T) {
+	for name, ctx := range map[string]context.Context{
+		"operator":         operatorCtxFor("op-1"),
+		"moderator":        moderatorCtx("mod-1"),
+		"removal approver": moderatorCtx("owner-1"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			row := readSettings(t, ctx, &readsReader{settings: existingSettings()})
+			may, _ := row["may"].(map[string]any)
+			if may["setMinuteDelay"] != (name == "operator") {
+				t.Fatalf("%s minute capability = %v", name, may["setMinuteDelay"])
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Who can moderate (reviewsPeople)
 // ---------------------------------------------------------------------------

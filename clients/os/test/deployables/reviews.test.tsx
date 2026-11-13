@@ -367,11 +367,15 @@ describe("the settings", () => {
     expect(connection.callsNamed("reviewsUpdateSettings")[0]).toContain('requestSenderIdentityId: "si-house"');
   });
 
-  // THE SAME SWITCH AS AN EMAIL AUTOMATION'S WAIT (Jesús, 2026-11-12): a
-  // tester asks a buyer minutes after the order, then turns it back. Switching
-  // keeps the length of time; switching back rounds to whole days.
-  it("sets the wait before asking in days or minutes, as an automation's wait is set", async () => {
-    const connection = await openReviews();
+  // Only the server's operator capability enables the short test control.
+  const minuteSettings = (days = 14, minutes = 0, permitted = true): Row => ({
+    exists: true, settings: { linkLifetimeDays: 14, requestDelayDays: days, requestDelayMinutes: minutes },
+    may: { edit: true, nameApprover: false, nameSender: permitted, setMinuteDelay: permitted },
+    viewer: { moderates: !permitted, approvesRemovals: false },
+  } as unknown as Row);
+
+  it("lets an operator set the wait before asking in days or minutes", async () => {
+    const connection = await openReviews(reviewsSeed({ settings: minuteSettings() }));
     await click(tab("Settings"));
     const wait = (await screen.findByLabelText("Wait after an order before asking")) as HTMLInputElement;
     const unit = screen.getByRole("radiogroup", { name: "Wait unit" });
@@ -390,16 +394,31 @@ describe("the settings", () => {
     expect(call).toContain("requestDelayMinutes: 5");
   });
 
-  it("opens a wait saved in minutes in Minutes, and rounds back to whole days", async () => {
-    const seed = reviewsSeed({ settings: { exists: true, settings: { linkLifetimeDays: 14, requestDelayDays: 0, requestDelayMinutes: 5 }, may: { edit: true, nameApprover: false, nameSender: false }, viewer: { moderates: true, approvesRemovals: false } } as unknown as Row });
-    const connection = await openReviews(seed);
+  it.each([[2, 5, 2885], [365, 525600, 1051200]])("preserves an operator's %i days plus %i minutes when a moderator saves another setting", async (days, minutes, total) => {
+    const connection = await openReviews(reviewsSeed({ settings: minuteSettings(days, minutes, false) }));
     await click(tab("Settings"));
-    const wait = (await screen.findByLabelText("Wait after an order before asking")) as HTMLInputElement;
-    const unit = screen.getByRole("radiogroup", { name: "Wait unit" });
-    expect(wait.value).toBe("5");
-    expect(within(unit).getByRole("radio", { name: "Minutes" }).getAttribute("aria-checked")).toBe("true");
-    await click(within(unit).getByRole("radio", { name: "Days" }));
-    expect(wait.value).toBe("0");
+    expect(await screen.findByText(`${total} minutes`)).toBeTruthy();
+    expect(screen.queryByLabelText("Wait after an order before asking")).toBeNull();
+    expect(screen.queryByRole("radiogroup", { name: "Wait unit" })).toBeNull();
+    expect(barButtons()).toEqual([]);
+    await typeInto(screen.getByLabelText("Email when a review is waiting") as HTMLInputElement, "changed@example.com");
+    await readTheBar();
+    await click(within(bar()).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(connection.callsNamed("reviewsUpdateSettings")).toHaveLength(1));
+    const call = connection.callsNamed("reviewsUpdateSettings")[0];
+    expect(call).toContain('notifyEmail: "changed@example.com"');
+    expect(call).not.toContain("requestDelay");
+  });
+
+  it("requires a deliberate whole-day replacement instead of rounding the operator's minute delay", async () => {
+    const connection = await openReviews(reviewsSeed({ settings: minuteSettings(0, 5, false) }));
+    await click(tab("Settings"));
+    await click(await screen.findByRole("button", { name: "Change to days" }));
+    const wait = screen.getByLabelText("Wait after an order before asking") as HTMLInputElement;
+    expect(wait.value).toBe("");
+    expect(document.activeElement).toBe(wait);
+    expect(barButtons()).toEqual(["Discard"]);
+    expect(connection.callsNamed("reviewsUpdateSettings")).toHaveLength(0);
     await typeInto(wait, "21");
     await readTheBar();
     await click(within(bar()).getByRole("button", { name: "Save" }));
@@ -409,8 +428,45 @@ describe("the settings", () => {
     expect(call).toContain("requestDelayMinutes: 0");
   });
 
+  it("clears the minute component on an explicit equal-duration whole-day replacement", async () => {
+    const connection = await openReviews(reviewsSeed({ settings: minuteSettings(0, 1440, false) }));
+    await click(tab("Settings"));
+    await click(await screen.findByRole("button", { name: "Change to days" }));
+    await typeInto(screen.getByLabelText("Wait after an order before asking") as HTMLInputElement, "1");
+    await readTheBar();
+    await click(within(bar()).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(connection.callsNamed("reviewsUpdateSettings")).toHaveLength(1));
+    expect(connection.callsNamed("reviewsUpdateSettings")[0]).toContain("requestDelayDays: 1");
+    expect(connection.callsNamed("reviewsUpdateSettings")[0]).toContain("requestDelayMinutes: 0");
+  });
+
+  it("discards an unfinished day conversion without changing the existing minute delay", async () => {
+    const connection = await openReviews(reviewsSeed({ settings: minuteSettings(0, 5, false) }));
+    await click(tab("Settings"));
+    await click(await screen.findByRole("button", { name: "Change to days" }));
+    await readTheBar();
+    await click(within(bar()).getByRole("button", { name: "Discard" }));
+    expect(await screen.findByText("5 minutes")).toBeTruthy();
+    expect(screen.queryByLabelText("Wait after an order before asking")).toBeNull();
+    expect(connection.callsNamed("reviewsUpdateSettings")).toHaveLength(0);
+  });
+
+  it.each(["absent", "false"])("offers a business user whole days only when minute capability is %s", async (capability) => {
+    const connection = await openReviews(capability === "absent" ? reviewsSeed() : reviewsSeed({ settings: minuteSettings(14, 0, false) }));
+    await click(tab("Settings"));
+    const wait = await screen.findByLabelText("Wait after an order before asking") as HTMLInputElement;
+    expect(screen.queryByRole("radiogroup", { name: "Wait unit" })).toBeNull();
+    expect(screen.queryByRole("radio", { name: "Minutes" })).toBeNull();
+    await typeInto(wait, "21");
+    await readTheBar();
+    await click(within(bar()).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(connection.callsNamed("reviewsUpdateSettings")).toHaveLength(1));
+    expect(connection.callsNamed("reviewsUpdateSettings")[0]).toContain("requestDelayDays: 21");
+    expect(connection.callsNamed("reviewsUpdateSettings")[0]).toContain("requestDelayMinutes: 0");
+  });
+
   it("offers no Save for minutes out of range, and says what is wrong", async () => {
-    await openReviews();
+    await openReviews(reviewsSeed({ settings: minuteSettings() }));
     await click(tab("Settings"));
     await click(within(await screen.findByRole("radiogroup", { name: "Wait unit" })).getByRole("radio", { name: "Minutes" }));
     await typeInto((await screen.findByLabelText("Wait after an order before asking")) as HTMLInputElement, "600000");

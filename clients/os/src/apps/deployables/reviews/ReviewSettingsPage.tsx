@@ -32,12 +32,10 @@ import { useReviewPeople, type ReviewsScope, type ReviewWrites } from "./useRevi
 // An approver past that cut is on no row, so who approves is said from the
 // settings, never from the list.
 
-// THE WAIT BEFORE ASKING IS SET IN DAYS OR MINUTES with the switch an email
-// automation's wait has (kit/durationUnit.ts; Jesús, 2026-11-12): a tester
-// asks a buyer minutes after the order, then turns it back to the agreed days.
-// The engine adds requestDelayMinutes to requestDelayDays; this page writes one
-// or the other, the unpicked one as 0. A wait saved in minutes opens in Minutes.
-// Switching the unit keeps the length of time, so it alone changes nothing.
+// BUSINESS USERS SET WHOLE DAYS; only a cluster operator has the Days / Minutes
+// test control. An existing minute delay stays exact and read-only for others
+// until they deliberately choose its whole-day replacement. Unrelated saves
+// preserve it. This is the invitation's age threshold, never the job schedule.
 type Draft = {
   publicDisplay: boolean;
   requestsEnabled: boolean;
@@ -71,14 +69,23 @@ function days(text: string, min: number, max: number): number | null {
 }
 
 /** Only what changed, typed as the engine takes it; or the first thing wrong with it. */
-export function settingsChanges(from: ReviewSettingsValues, draft: Draft, may: { nameApprover: boolean; nameSender: boolean }): { changes: Partial<ReviewSettingsValues>; problem: string } {
+export function settingsChanges(from: ReviewSettingsValues, draft: Draft, may: Pick<ReviewSettings["may"], "nameApprover" | "nameSender" | "setMinuteDelay">): { changes: Partial<ReviewSettingsValues>; problem: string } {
   const changes: Partial<ReviewSettingsValues> = {};
   if (draft.publicDisplay !== from.publicDisplay) changes.publicDisplay = draft.publicDisplay;
   if (draft.requestsEnabled !== from.requestsEnabled) changes.requestsEnabled = draft.requestsEnabled;
   const inMinutes = draft.requestDelayUnit === "minutes";
-  const delay = days(draft.requestDelay, 0, inMinutes ? 365 * MINUTES_PER_DAY : 365);
+  const previousMinutes = from.requestDelayDays * MINUTES_PER_DAY + from.requestDelayMinutes;
+  // A stored combination can exceed the input's single-unit cap. Keeping
+  // that exact value is not a new minute setting and must not block edits
+  // elsewhere; only a changed value is validated against the input bounds.
+  const unchangedMinutes = inMinutes && from.requestDelayMinutes > 0 && draft.requestDelay.trim() === String(previousMinutes);
+  const delay = unchangedMinutes ? previousMinutes : days(draft.requestDelay, 0, inMinutes ? 365 * MINUTES_PER_DAY : 365);
   if (delay === null) return { changes, problem: inMinutes ? "The wait before asking is a whole number of minutes from 0 to 525,600." : "The wait before asking is a whole number of days from 0 to 365." };
-  if ((inMinutes ? delay : delay * MINUTES_PER_DAY) !== from.requestDelayDays * MINUTES_PER_DAY + from.requestDelayMinutes) {
+  if (inMinutes && !may.setMinuteDelay && (from.requestDelayMinutes === 0 || delay !== previousMinutes)) {
+    return { changes, problem: "Only the cluster's operators set a delay in minutes. Choose whole days." };
+  }
+  const convertsToDays = !may.setMinuteDelay && !inMinutes && from.requestDelayMinutes > 0;
+  if (convertsToDays || (inMinutes ? delay : delay * MINUTES_PER_DAY) !== previousMinutes) {
     changes.requestDelayDays = inMinutes ? 0 : delay;
     changes.requestDelayMinutes = inMinutes ? delay : 0;
   }
@@ -109,6 +116,11 @@ export function ReviewSettingsView({ heading, scope, settings, writes, nameOf, v
   const value = settings.value;
   const people = useReviewPeople(scope, writes.revision);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const delayControl = useRef<HTMLDivElement>(null);
+  const [delayFocus, setDelayFocus] = useState(0);
+  useEffect(() => {
+    if (delayFocus > 0) delayControl.current?.querySelector("input")?.focus();
+  }, [delayFocus]);
   // A fresh answer from the engine is the form's new starting point.
   useEffect(() => {
     if (value !== null) setDraft(draftOf(value.values));
@@ -138,6 +150,7 @@ export function ReviewSettingsView({ heading, scope, settings, writes, nameOf, v
   }
 
   const canEdit = value.may.edit;
+  const keepsOperatorMinutes = !value.may.setMinuteDelay && value.values.requestDelayMinutes > 0 && draft.requestDelayUnit === "minutes";
   const { changes, problem } = settingsChanges(value.values, draft, value.may);
   const dirty = Object.keys(changes).length > 0 || problem !== "";
   const saving = writes.busy === "settings";
@@ -147,7 +160,7 @@ export function ReviewSettingsView({ heading, scope, settings, writes, nameOf, v
   // stays as typed, for its problem to be said.
   const switchDelayUnit = (next: DurationUnit) =>
     setDraft((d) => {
-      if (d === null || d.requestDelayUnit === next) return d;
+      if (!value.may.setMinuteDelay || d === null || d.requestDelayUnit === next) return d;
       const shown = days(d.requestDelay, 0, Number.MAX_SAFE_INTEGER);
       if (shown === null) return { ...d, requestDelayUnit: next };
       const total = d.requestDelayUnit === "minutes" ? shown : shown * MINUTES_PER_DAY;
@@ -227,15 +240,28 @@ export function ReviewSettingsView({ heading, scope, settings, writes, nameOf, v
               <Caption>Each paid product of a paid order gets its own link, sent once.</Caption>
             </SettingRow>
             <SettingRow label="Wait before asking">
-              <Input id="review-request-delay" label="Wait after an order before asking" value={draft.requestDelay} disabled={!canEdit} onChange={set("requestDelay")} />
+              {keepsOperatorMinutes ? (
+                <>
+                  <span>{draft.requestDelay} minutes</span>
+                  <Caption>Set by an operator. Choose whole days to replace this delay.</Caption>
+                  {canEdit ? <Button tone="quiet" onClick={() => {
+                    setDraft((d) => d === null ? d : { ...d, requestDelayUnit: "days", requestDelay: "" });
+                    setDelayFocus((n) => n + 1);
+                  }}>Change to days</Button> : null}
+                </>
+              ) : (
+                <div ref={delayControl}>
+                  <Input id="review-request-delay" label="Wait after an order before asking" value={draft.requestDelay} disabled={!canEdit} onChange={set("requestDelay")} />
+                </div>
+              )}
             </SettingRow>
-            <SettingRow label="Unit">
-              {canEdit ? (
+            {!keepsOperatorMinutes ? <SettingRow label="Unit">
+              {canEdit && value.may.setMinuteDelay ? (
                 <ChoiceRow label="Wait unit" value={draft.requestDelayUnit} onChange={(next) => switchDelayUnit(next as DurationUnit)} options={DURATION_UNITS} />
               ) : (
                 <span>{draft.requestDelayUnit === "minutes" ? "Minutes" : "Days"}</span>
               )}
-            </SettingRow>
+            </SettingRow> : null}
             <SettingRow label="Days a link stays open">
               <Input id="review-link-lifetime" label="Days a review link stays open" value={draft.linkLifetimeDays} disabled={!canEdit} onChange={set("linkLifetimeDays")} />
               <Caption>The buyer can change their review through the link until it is published or the link expires.</Caption>

@@ -281,9 +281,10 @@ func (p *Provider) readSettings(ctx context.Context, args map[string]any, _ int)
 			"criteriaText":            strings.TrimSpace(asString(row["criteriaText"])),
 		},
 		"may": map[string]any{
-			"edit":         userID != "" && (exists || operator),
-			"nameApprover": userID != "" && (operator || approver),
-			"nameSender":   userID != "" && operator,
+			"edit":           userID != "" && (exists || operator),
+			"nameApprover":   userID != "" && (operator || approver),
+			"nameSender":     userID != "" && operator,
+			"setMinuteDelay": userID != "" && operator,
 		},
 		"viewer": map[string]any{
 			"moderates":        !operator && userID != "",

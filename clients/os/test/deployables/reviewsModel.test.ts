@@ -72,6 +72,17 @@ describe("the reviews pack's answers", () => {
     // A test's wait in minutes (Jesús, 2026-11-12): the minutes add to the days.
     expect(reviewSettingsFrom({ exists: true, settings: { requestDelayDays: 0, requestDelayMinutes: 5 } }).values).toMatchObject({ requestDelayDays: 0, requestDelayMinutes: 5 });
   });
+
+  it("enables minute test controls only for an explicit server capability", () => {
+    expect(reviewSettingsFrom(null).may.setMinuteDelay).toBe(false);
+    expect(reviewSettingsFrom({ may: { edit: true, nameSender: true } }).may.setMinuteDelay).toBe(false);
+    for (const value of [false, "false", undefined, null, 1, "yes", {}, []]) {
+      expect(reviewSettingsFrom({ may: { setMinuteDelay: value } } as never).may.setMinuteDelay).toBe(false);
+    }
+    for (const value of [true, "true"]) {
+      expect(reviewSettingsFrom({ may: { setMinuteDelay: value } }).may.setMinuteDelay).toBe(true);
+    }
+  });
 });
 
 describe("who can moderate", () => {
