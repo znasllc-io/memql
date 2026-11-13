@@ -15,7 +15,7 @@ vi.mock("../../src/live/connection", () => ({
   bridgePathFor: () => "/_memql/ws",
 }));
 
-import { AccessSection } from "../../src/apps/settings/AccessSection";
+import { UsersApp } from "../../src/apps/users/UsersApp";
 import { accessResources, groupActs, knownGrantCodes, type AccessGrant, type AccessResource, type Subject } from "../../src/apps/settings/access/model";
 import { OS_REGISTRY } from "../../src/apps/registry";
 import { SessionProvider } from "../../src/chrome/access";
@@ -27,7 +27,7 @@ import { installSeededAccess, SEEDED_CAPABILITIES } from "../seededAccess";
 import { chooseOption } from "../selectControl";
 import { SEEDED_LADDER } from "../seededLadder";
 
-// SETTINGS > ACCESS (epic memql#5289, task memql#5307; access clarity,
+// USERS > ACCESS (epic memql#5289, task memql#5307; access clarity,
 // 2026-11-06). By person, the answers are the ENGINE's
 // (`effectiveAccessForSubject`), said in words with where each one comes from
 // and, where the engine answers per organization, which organization. By
@@ -207,7 +207,7 @@ function mount(state: State, role = "owner", userId = "u-me") {
       }}
     >
       <OsProvider registry={OS_REGISTRY} actorRole={role} grid={{ cols: 12, rows: 8 }} store={new LocalDesktopStore(memStorage())}>
-        <AccessSection />
+        <UsersApp sectionId="access" navigate={vi.fn()} askContext={vi.fn()} />
       </OsProvider>
     </SessionProvider>,
   );
@@ -275,7 +275,7 @@ describe("the pure half", () => {
     expect(parts).toEqual(expect.arrayContaining(["deploy", "publish", "retire", "domains", "logs"]));
     // A part is `execute`; a floored section is `read`, named as the section.
     expect(rows.find((r) => r.resource === "app:deployables/publish")?.verb).toBe("execute");
-    expect(rows.find((r) => r.resource === "app:settings/cluster")).toMatchObject({ verb: "read", label: "Cluster" });
+    expect(rows.find((r) => r.resource === "app:settings/cluster")).toMatchObject({ verb: "read", label: "Cluster facts" });
     // Every app's parts come right after its door.
     for (let i = deployables + 1; i < rows.length && rows[i]!.appId === "deployables"; i++) expect(rows[i]!.part).not.toBe("");
     // A resource only a grant names is kept, so a deny on it can be lifted.
@@ -848,7 +848,7 @@ describe("by app: who holds it", () => {
     mount(state);
     fireEvent.click(screen.getByRole("button", { name: "By app" }));
     const trigger = await screen.findByLabelText("App or part");
-    await waitFor(() => chooseOption(trigger, "Cluster: Data"));
+    await waitFor(() => chooseOption(trigger, "Settings: Data"));
     await waitFor(() => expect(screen.getByText("By role: Owner.")).toBeTruthy());
     const list = screen.getByRole("list", { name: "Granted by name" });
     expect(within(list).getByText("Ada Lovelace")).toBeTruthy();
@@ -866,7 +866,7 @@ describe("by app: who holds it", () => {
       },
     });
     mount(state);
-    const list = await pickResource("Cluster: Data");
+    const list = await pickResource("Settings: Data");
     expect(within(list).getByText("Not on this roster")).toBeTruthy();
     expect(list.textContent).not.toContain("u-ghost");
     // The act's label says the same thing, for the same reason.
@@ -882,7 +882,7 @@ describe("by app: who holds it", () => {
       },
     });
     mount(state);
-    const list = await pickResource("Cluster: Data");
+    const list = await pickResource("Settings: Data");
     expect(within(list).getByText("you")).toBeTruthy();
     expect(within(list).queryByRole("button", { name: /^Revoke/ })).toBeNull();
     expect(screen.getByText(/Nobody revokes their own grant/)).toBeTruthy();
@@ -897,7 +897,7 @@ describe("by app: who holds it", () => {
       },
     });
     mount(state);
-    const list = await pickResource("Cluster: Data");
+    const list = await pickResource("Settings: Data");
     expect(within(list).getByRole("button", { name: "Revoke allow for Acme" })).toBeTruthy();
     expect(screen.queryByText(/Nobody revokes their own grant/)).toBeNull();
   });
@@ -933,7 +933,7 @@ describe("a canonical viewer id against bare subjects", () => {
       },
     });
     mount(state, "owner", CANONICAL_ME);
-    const list = await pickResource("Cluster: Data");
+    const list = await pickResource("Settings: Data");
     expect(within(list).getByText("a person, by you")).toBeTruthy();
     // ...and not the viewer's own display name, which is what the raw
     // comparison falls through to: the roster names them, so the provenance
@@ -948,7 +948,7 @@ describe("a canonical viewer id against bare subjects", () => {
       },
     });
     mount(state, "owner", CANONICAL_ME);
-    const list = await pickResource("Cluster: Data");
+    const list = await pickResource("Settings: Data");
     expect(within(list).getByText("you")).toBeTruthy();
     expect(within(list).queryByRole("button", { name: /^Revoke/ })).toBeNull();
   });

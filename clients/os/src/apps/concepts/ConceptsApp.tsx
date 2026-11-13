@@ -3,6 +3,7 @@ import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
 import { Head, Panel } from "../../kit";
 import { RegistrySection } from "./RegistrySection";
+import { LanguageSection } from "../settings/LanguageSection";
 import {
   CONCEPTS_SECTIONS,
   DEFAULT_CONCEPTS_SETTINGS,
@@ -74,6 +75,7 @@ export function ConceptsApp({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  if (sectionId === "language") return <LanguageSection />;
   if (sectionId === "settings") {
     return <ConceptsSettingsSection settings={settings} update={update} />;
   }

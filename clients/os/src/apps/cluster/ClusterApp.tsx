@@ -2,19 +2,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 
 import { AppLogsSection } from "../../logs/AppLogsSection";
-import type { OsAppProps } from "../../system/registry";
+import { accessAdmits, type OsAppProps } from "../../system/registry";
 import { Details, DetailsSection, Head, Select, SettingRow, Switch, RecordList, RecordRow, Subhead, useAppReach } from "../../kit";
 import { AgentsSection } from "./agents/AgentsSection";
-import { AuditSection } from "./audit/AuditSection";
 import { MeshSection } from "./mesh/MeshSection";
 import { ModulesSection } from "./modules/ModulesSection";
 import { AutomationsSection } from "./automations/AutomationsSection";
-import { OriginsSection } from "./origins/OriginsSection";
 import { holds } from "../../system/roles";
 import type { ProposedRelease } from "./updates/InstallationProposals";
 import { UpdatesSection } from "./updates/UpdatesSection";
 import { ReadinessSection } from "./readiness/ReadinessSection";
 import { CapacitySection } from "./capacity/CapacitySection";
+import { ClusterSection } from "../settings/ClusterSection";
+import { BenchmarksSection } from "../settings/BenchmarksSection";
 import {
   CLUSTER_SECTIONS,
   LocalClusterSettingsStore,
@@ -26,27 +26,29 @@ import {
 //
 // Readiness answers "can this thing do work at all"; Modules answers "what is
 // it made of"; Mesh answers "does every node hear what the cluster
-// broadcasts"; Data origins answers "what does it own and what does it
-// mirror"; Agents answers "what does it run"; the Audit trail answers "what
-// has been decided here". None of them is a wizard and none of them blocks
-// anything -- the portal's first-run gate is deliberately not rebuilt here
+// broadcasts"; Agents answers "what does it run"; facts and benchmarks
+// report what is recorded and measured. None of them is a wizard and none
+// of them blocks anything -- the portal's first-run gate is deliberately not rebuilt here
 // (see readiness/ReadinessSection.tsx).
 //
 // Sections are the app's own navigation. It never opens a window.
 
-/** The concepts this app owns, for its Logs section: a line about the data
- *  origins, a connector's health, an outbox entry, an agent, a grant or an
- *  audit decision is this app's line. */
+/** The agent runtime this app owns. Data-origin logs belong to Settings;
+ * identity decisions belong to Identity. */
 const CLUSTER_LOG_CONCEPTS = [
-  Concepts.PLATFORM_DATA_ORIGIN,
-  Concepts.PLATFORM_SYNC_STATE,
-  Concepts.PLATFORM_OUTBOX_ENTRY,
   Concepts.AGENTS_AGENT,
   Concepts.AGENTS_AGENT_AUTHORIZATION,
-  Concepts.IDENTITY_AUDIT_EVENT,
 ] as const;
 
-export function ClusterApp({
+export function ClusterApp(props: OsAppProps & { store?: ClusterSettingsStore }) {
+  // Moved sections keep their original capability doors in the registry.
+  // A facts-only grant must not mount runtime/readiness reads on its way in.
+  if (props.sectionId === "facts") return <ClusterSection />;
+  if (props.sectionId === "benchmarks") return <BenchmarksSection />;
+  return <ClusterRuntimeApp {...props} />;
+}
+
+function ClusterRuntimeApp({
   sectionId,
   windowVisible = true,
   navigate,
@@ -114,19 +116,19 @@ export function ClusterApp({
     // operator back to their default the moment they navigated away.
   }, []);
 
-  if (sectionId === "overview") return <><ReadinessSection title="Overview" /><div className="os-cluster"><Subhead>Explore</Subhead><RecordList as="ul" label="Cluster details"><RecordRow name="Runtime" secondary="Nodes, capacity and installed capabilities" onOpen={() => navigate("runtime", { fromContent: true })} />{holds("read", "app:cluster/updates") ? <RecordRow name="Updates" secondary="Published versions available to this installation" onOpen={() => navigate("updates", { fromContent: true })} /> : null}</RecordList></div></>;
+  if (sectionId === "overview") return <><ReadinessSection title="Overview" />{accessAdmits("app:settings") && accessAdmits("app:settings/cluster") ? <ClusterSection inline /> : null}<div className="os-cluster"><Subhead>Explore</Subhead><RecordList as="ul" label="Cluster details"><RecordRow name="Runtime" secondary="Nodes, capacity and installed capabilities" onOpen={() => navigate("runtime", { fromContent: true })} />{holds("read", "app:cluster/updates") ? <RecordRow name="Updates" secondary="Published versions available to this installation" onOpen={() => navigate("updates", { fromContent: true })} /> : null}</RecordList></div></>;
   if (sectionId === "runtime") return <div className="os-cluster os-app-stack"><Head title="Runtime" /><RecordList as="ul" label="Runtime components">{CLUSTER_SECTIONS.filter(section => section.parent === "runtime" && (!section.requires || holds("read", section.requires))).map(section => <RecordRow key={section.id} name={section.name} onOpen={() => navigate(section.id, { fromContent: true })} />)}</RecordList></div>;
   if (sectionId === "settings") {
     return <ClusterSettingsSection settings={settings} update={update} />;
   }
   if (sectionId === "logs") {
     return (
-      <><div className="os-panel-actions">{holds("read", "app:cluster/audit") ? <button className="os-link" onClick={() => navigate("audit", { fromContent: true })}>Audit trail</button> : null}</div><AppLogsSection
+      <AppLogsSection
         app="cluster"
         subjectConcepts={CLUSTER_LOG_CONCEPTS}
         intent={intent}
         consumeIntent={consumeIntent}
-      /></>
+      />
     );
   }
   if (sectionId === "releases") return <div className="os-cluster"><Head title="Releases" /><RecordList as="ul" label="Release management"><RecordRow name="Open releases in Pipelines" onOpen={() => pipelines.open("releases")} /></RecordList></div>;
@@ -135,9 +137,7 @@ export function ClusterApp({
   if (sectionId === "modules") return <ModulesSection />;
   if (sectionId === "mesh") return <MeshSection intent={intent} consumeIntent={consumeIntent} />;
   if (sectionId === "automations") return <AutomationsSection />;
-  if (sectionId === "origins") return <OriginsSection />;
   if (sectionId === "agents") return <AgentsSection showInactive={settings.showInactiveAgents} />;
-  if (sectionId === "audit") return <AuditSection />;
   return <ReadinessSection />;
 }
 

@@ -112,7 +112,7 @@ const { SessionProvider } = await import("../../src/chrome/access");
 const { OsProvider } = await import("../../src/chrome/state");
 const { OS_REGISTRY } = await import("../../src/apps/registry");
 const { installSeededAccess } = await import("../seededAccess");
-const { SettingsApp } = await import("../../src/apps/settings/SettingsApp");
+const { ClusterApp } = await import("../../src/apps/cluster/ClusterApp");
 const { LocalDesktopStore } = await import("../../src/system/store");
 const { UNKNOWN_RUNTIME_CONFIG } = await import("../../src/cluster/config");
 const { hiddenSurfaces } = await import("../../src/apps/settings/hiddenSurfaces");
@@ -143,7 +143,7 @@ function wrap(children: ReactNode, role = "owner") {
 }
 
 async function renderBenchmarks(role = "owner") {
-  const view = render(wrap(<SettingsApp sectionId="benchmarks" navigate={vi.fn()} askContext={vi.fn()} />, role));
+  const view = render(wrap(<ClusterApp sectionId="benchmarks" navigate={vi.fn()} askContext={vi.fn()} />, role));
   await screen.findByText("durability.duplicatedSideEffects");
   return view;
 }

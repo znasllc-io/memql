@@ -71,7 +71,8 @@ vi.mock("../../src/live/connection", () => ({
 const { SessionProvider } = await import("../../src/chrome/access");
 const { OsProvider } = await import("../../src/chrome/state");
 const { OS_REGISTRY } = await import("../../src/apps/registry");
-const { SettingsApp } = await import("../../src/apps/settings/SettingsApp");
+const { ClusterApp } = await import("../../src/apps/cluster/ClusterApp");
+const { PolicyPanel } = await import("../../src/apps/settings/PolicyPanel");
 const { LocalDesktopStore } = await import("../../src/system/store");
 const { UNKNOWN_RUNTIME_CONFIG } = await import("../../src/cluster/config");
 
@@ -106,13 +107,19 @@ function wrap(children: ReactNode, role: string) {
 
 async function renderCluster(role = "owner") {
   const view = render(
-    wrap(<SettingsApp sectionId="cluster" navigate={vi.fn()} askContext={vi.fn()} />, role),
+    wrap(<ClusterApp sectionId="facts" navigate={vi.fn()} askContext={vi.fn()} />, role),
   );
   // Let the seeds and the two request/reply reads settle.
   await act(async () => {
     await Promise.resolve();
     await Promise.resolve();
   });
+  return view;
+}
+
+async function renderPolicy(role = "owner") {
+  const view = render(wrap(<PolicyPanel enabled={role === "owner" || role === "admin"} />, role));
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
   return view;
 }
 
@@ -207,6 +214,7 @@ beforeEach(() => {
   h.state.mailError = null;
   h.state.providerError = null;
   h.state.integrationCalls = 0;
+  h.connection.query.clusterSettingsCurrent.mockClear();
 });
 
 describe("infrastructure facts (memql#4766)", () => {
@@ -272,7 +280,7 @@ describe("infrastructure facts (memql#4766)", () => {
 });
 
 describe("cluster facts (memql#4742)", () => {
-  it("renders the fact groups read-only, with every write inside the policy panel", async () => {
+  it("renders facts without mounting the relocated policy form", async () => {
     await renderCluster();
     expect(screen.getByRole("region", { name: "Cluster and identity" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Versions" })).toBeTruthy();
@@ -283,24 +291,16 @@ describe("cluster facts (memql#4742)", () => {
     // place a person could read a provider's state from.
     expect(screen.queryByRole("region", { name: "AI providers" })).toBeNull();
 
-    // THE BOUNDARY IS THE ASSERTION. Everything above the policy panel
-    // re-asks a question and changes nothing; the one region that writes is
-    // Policy, and its controls are inside it.
-    const policy = screen.getByRole("region", { name: "Policy" });
-    const outside = screen
-      .getAllByRole("button")
-      .filter((b) => !policy.contains(b))
-      .map((b) => b.textContent);
-    expect(new Set(outside)).toEqual(new Set());
-    expect(within(policy).getByRole("button", { name: "Save" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Policy" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(h.connection.query.clusterSettingsCurrent).not.toHaveBeenCalled();
   });
 
   it("offers no policy form to a role that could not save one", async () => {
     // PRESENTATION, and adminops remains the authority -- but a form that
     // could only ever be refused teaches nobody who may use it. The section
     // itself admits developer through the ladder; the panel does not.
-    await renderCluster("developer");
-    expect(screen.getByRole("region", { name: "Cluster and identity" })).toBeTruthy();
+    await renderPolicy("developer");
     expect(screen.queryByRole("region", { name: "Policy" })).toBeNull();
   });
 
@@ -316,7 +316,7 @@ describe("cluster facts (memql#4742)", () => {
         invitationTTLDays: 7,
       },
     ];
-    await renderCluster();
+    await renderPolicy();
     const policy = screen.getByRole("region", { name: "Policy" });
     // 1800 seconds is 30 MINUTES on screen; 2592000 is 30 DAYS. The wire
     // carries seconds and nobody reasons about a session in them.
@@ -336,7 +336,7 @@ describe("cluster facts (memql#4742)", () => {
 
   it("refuses to save a lifetime outside the bounds, in the unit on screen", async () => {
     h.state.clusterSettings = [{ id: "cluster", registrationMode: "open", internalDefaultRole: "writer" }];
-    await renderCluster();
+    await renderPolicy();
     const policy = screen.getByRole("region", { name: "Policy" });
     fireEvent.change(within(policy).getByLabelText("Session length in minutes"), {
       target: { value: "4000" },

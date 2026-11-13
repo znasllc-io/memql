@@ -1,6 +1,6 @@
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { ContentSkeleton, InlineSkeleton } from "../../kit/ContentSkeleton";
-import { AutoRefresh, RecordList, RecordRow, Subhead } from "../../kit";
+import { AutoRefresh, Details, DetailsSection, Fact, Facts, Head, RecordList, RecordRow, Subhead } from "../../kit";
 import { Caption } from "../../kit";
 import { useSession } from "../../chrome/access";
 import { useOsConnection } from "../../live/connection";
@@ -12,24 +12,10 @@ import {
   useInfrastructureFacts,
   useMailStatus,
 } from "./useClusterFacts";
-import { PolicyPanel } from "./PolicyPanel";
 
-// Cluster facts (memql#4742), plus the policy that governs them (epic
-// memql#4984).
-//
-// THE FACTS ARE READ-ONLY AND THE POLICY IS NOT, and the panels are ordered so
-// that boundary is visible: everything down to Mail sender re-asks a question
-// and changes nothing, and the one Panel below them is the form. Cluster
-// settings editing arrived here when the portal's admin console was retired;
-// DEPLOY control did not, and stays with the cockpit.
-//
-// NO SECRET APPEARS HERE, and that is a property of the surfaces consumed
-// rather than of this file's discretion: `integrationStatus` reports slot
-// PRESENCE and never a value (its redactSecrets invariant), and
-// `clusterSettingsCurrent` carries no credential. The policy form below writes
-// registration and lifetime values and no credential of any kind -- the two
-// surfaces that DO take one are Providers and Integrations, and both are
-// write-only in both directions.
+// Read-only cluster facts now live in Cluster > Overview. The sign-in policy
+// and brand form live in Identity; mounting facts must never read that form.
+// No secret appears here: integrationStatus reports presence, never values.
 //
 // WHAT THIS PANEL CLAIMS, AND WHAT IT STILL WILL NOT.
 //
@@ -57,7 +43,7 @@ import { PolicyPanel } from "./PolicyPanel";
 // cluster recorded at its last bff start -- and a disagreement between them
 // is worth seeing.
 
-export function ClusterSection() {
+export function ClusterSection({ inline = false }: { inline?: boolean }) {
   const { access, config } = useSession();
   const connection = useOsConnection();
   const identity = useClusterIdentity();
@@ -69,174 +55,133 @@ export function ClusterSection() {
   const infra = useInfrastructureFacts(access?.role === "owner");
 
   return (
-    <div className="os-settings">
-      <h3 className="os-settings-title">Cluster</h3>
+    <div className="os-cluster">
+      {inline ? null : <Head title="Cluster facts" />}
+      <Details>
 
-      <section className="os-field-group" aria-label="Cluster and identity">
-        <h4 className="os-subhead">Cluster and identity</h4>
-        <dl className="os-facts">
-          <dt>Domain</dt>
-          <dd className="os-mono">{config.domain || "unknown"}</dd>
-          <dt>Identity issuer</dt>
-          <dd className="os-mono">{config.identityUrl || "unknown"}</dd>
-          <dt>Name</dt>
-          <dd>{identity.cluster?.name || dash(identity.loading)}</dd>
-          <dt>Region</dt>
-          <dd>{identity.cluster?.region || dash(identity.loading)}</dd>
-          {/* NO "Status" ROW. `v1:cluster:cluster.status` is gone (memql#4772):
-              its only writer stamped a constant at bootstrap and nothing ever
-              refreshed it, so this line said "healthy" with every node down --
-              and it said it HERE, on the panel, as well as in the diagnostics
-              report. A health verdict for this cluster has to be DERIVED at
-              read time (seedNodeTypes against live v1:cluster:node rows), not
-              read from a stored field. */}
-          <dt>Deploy target</dt>
-          <dd>{identity.cluster?.provider || dash(identity.loading)}</dd>
-        </dl>
-        <Caption>
-          The domain and issuer are the values this cluster served to this
-          client, not a re-derivation -- one derivation, and a second copy
-          would disagree.
-        </Caption>
-      </section>
-
-      <section className="os-field-group" aria-label="Versions">
-        <h4 className="os-subhead">Versions</h4>
-        <dl className="os-facts">
-          <dt>Engine (this node)</dt>
-          <dd className="os-mono">{connection?.engineVersion || "unknown"}</dd>
-          <dt>Engine commit</dt>
-          <dd className="os-mono">{connection?.engineCommit || "unknown"}</dd>
-          <dt>Answered by</dt>
-          <dd className="os-mono">{connection?.nodeId || "unknown"}</dd>
-        </dl>
-        {deployment.latest === null ? (deployment.loading ? <RecordListSkeleton label="Loading from the cluster" /> : <Caption>{"No deployment has been recorded for this cluster."}</Caption>) : (
-          <>
-            <dl className="os-facts">
-              <dt>Deployment</dt>
-              <dd className="os-mono">{deployment.latest.deploymentId}</dd>
-              <dt>Deployment status</dt>
-              <dd>{deployment.latest.status}</dd>
-              <dt>Deployment engine version</dt>
-              <dd className="os-mono">{deployment.latest.version || "unknown"}</dd>
-            </dl>
-            {deployment.specs.length === 0 ? (
-              <Caption>No per-node pins recorded for this deployment.</Caption>
-            ) : (
-              <><Subhead meta={!deployment.loading && !deployment.error ? deployment.specs.length : undefined}>Node type versions</Subhead>
-              <RecordList as="ul" label="Node type versions">{deployment.specs.map(spec => <RecordRow key={spec.nodeType} name={spec.nodeType} secondary={resolvedVersion(spec, deployment.latest?.version ?? "") || "unknown"} state={ridesTheSpine(spec) ? "engine version" : "pinned"}><span>{spec.replicas} replicas</span></RecordRow>)}</RecordList></>
-            )}
-          </>
-        )}
-        {deployment.error ? <Caption>{deployment.error}</Caption> : null}
-      </section>
-
-      <section className="os-field-group" aria-label="Infrastructure">
-        <h4 className="os-subhead">Infrastructure</h4>
-        {access?.role !== "owner" ? (
+        <DetailsSection title="Cluster and identity">
+          <Facts>
+            <Fact label="Domain" mono value={<>{config.domain || "unknown"}</>} />
+            <Fact label="Identity issuer" mono value={<>{config.identityUrl || "unknown"}</>} />
+            <Fact label="Name" value={<>{identity.cluster?.name || dash(identity.loading)}</>} />
+            <Fact label="Region" value={<>{identity.cluster?.region || dash(identity.loading)}</>} />
+            {/* NO "Status" ROW. `v1:cluster:cluster.status` is gone (memql#4772):
+                its only writer stamped a constant at bootstrap and nothing ever
+                refreshed it, so this line said "healthy" with every node down --
+                and it said it HERE, on the panel, as well as in the diagnostics
+                report. A health verdict for this cluster has to be DERIVED at
+                read time (seedNodeTypes against live v1:cluster:node rows), not
+                read from a stored field. */}
+            <Fact label="Deploy target" value={<>{identity.cluster?.provider || dash(identity.loading)}</>} />
+          </Facts>
           <Caption>
-            The database and identity-provider records are cluster-owner only. This section admits
-            admins, and the engine decides that read, not this window.
+            The domain and issuer are the values this cluster served to this
+            client, not a re-derivation -- one derivation, and a second copy
+            would disagree.
           </Caption>
-        ) : infra.error ? (
-          <Refusal role={access?.role ?? ""} message={infra.error} />
-        ) : infra.loading ? (
-          <ContentSkeleton kind="form" label="Loading from the cluster" />
-        ) : (
-          <>
-            {infra.database === null ? (
-              <Caption>
-                No database record. It is written when a bff node starts, so a cluster that has not
-                restarted since this was added will not have one yet.
-              </Caption>
-            ) : (
-              <dl className="os-facts">
-                <dt>Database</dt>
-                <dd className="os-mono">
-                  {infra.database.dbName} on {infra.database.host}:{infra.database.port}
-                </dd>
-                <dt>Recorded engine</dt>
-                <dd className="os-mono">
-                  {infra.database.engine} {infra.database.engineVersion || "--"}
-                </dd>
-                <dt>SSL mode</dt>
-                <dd className="os-mono">{infra.database.sslMode || "--"}</dd>
-                <dt>Extensions</dt>
-                <dd className="os-mono">
-                  {infra.database.extensions.length === 0
-                    ? "--"
-                    : infra.database.extensions
-                        .map((name) => {
-                          const version = infra.database?.extensionVersions[name];
-                          return version ? `${name} ${version}` : name;
-                        })
-                        .join(", ")}
-                </dd>
-              </dl>
-            )}
-            {infra.identityProvider === null ? null : (
-              <dl className="os-facts">
-                <dt>Identity provider</dt>
-                <dd className="os-mono">
-                  {infra.identityProvider.name} ({infra.identityProvider.providerType})
-                </dd>
-                <dt>Issuer</dt>
-                <dd className="os-mono">{infra.identityProvider.issuerUrl || "--"}</dd>
-                <dt>JWKS</dt>
-                <dd className="os-mono">{infra.identityProvider.jwksUrl || "--"}</dd>
-                <dt>Accepted audiences</dt>
-                <dd className="os-mono">
-                  {infra.identityProvider.acceptedAudiences.length === 0
-                    ? "--"
-                    : infra.identityProvider.acceptedAudiences.join(", ")}
-                </dd>
-              </dl>
-            )}
+        </DetailsSection>
+
+        <DetailsSection title="Versions">
+          <Facts>
+            <Fact label="Engine (this node)" mono value={<>{connection?.engineVersion || "unknown"}</>} />
+            <Fact label="Engine commit" mono value={<>{connection?.engineCommit || "unknown"}</>} />
+            <Fact label="Answered by" mono value={<>{connection?.nodeId || "unknown"}</>} />
+          </Facts>
+          {deployment.latest === null ? (deployment.loading ? <RecordListSkeleton label="Loading from the cluster" /> : <Caption>{"No deployment has been recorded for this cluster."}</Caption>) : (
+            <>
+              <Facts>
+                <Fact label="Deployment" mono value={<>{deployment.latest.deploymentId}</>} />
+                <Fact label="Deployment status" value={<>{deployment.latest.status}</>} />
+                <Fact label="Deployment engine version" mono value={<>{deployment.latest.version || "unknown"}</>} />
+              </Facts>
+              {deployment.specs.length === 0 ? (
+                <Caption>No per-node pins recorded for this deployment.</Caption>
+              ) : (
+                <><Subhead meta={!deployment.loading && !deployment.error ? deployment.specs.length : undefined}>Node type versions</Subhead>
+                <RecordList as="ul" label="Node type versions">{deployment.specs.map(spec => <RecordRow key={spec.nodeType} name={spec.nodeType} secondary={resolvedVersion(spec, deployment.latest?.version ?? "") || "unknown"} state={ridesTheSpine(spec) ? "engine version" : "pinned"}><span>{spec.replicas} replicas</span></RecordRow>)}</RecordList></>
+              )}
+            </>
+          )}
+          {deployment.error ? <Caption>{deployment.error}</Caption> : null}
+        </DetailsSection>
+
+        <DetailsSection title="Infrastructure">
+          {access?.role !== "owner" ? (
             <Caption>
-              Recorded when a bff node last started -- not a live probe, and deliberately carrying
-              no health verdict.
+              The database and identity-provider records are cluster-owner only. This section admits
+              admins, and the engine decides that read, not this window.
             </Caption>
-          </>
-        )}
-      </section>
+          ) : infra.error ? (
+            <Refusal role={access?.role ?? ""} message={infra.error} />
+          ) : infra.loading ? (
+            <ContentSkeleton kind="form" label="Loading from the cluster" />
+          ) : (
+            <>
+              {infra.database === null ? (
+                <Caption>
+                  No database record. It is written when a bff node starts, so a cluster that has not
+                  restarted since this was added will not have one yet.
+                </Caption>
+              ) : (
+                <Facts>
+                  <Fact label="Database" mono value={<>{infra.database.dbName} on {infra.database.host}:{infra.database.port}</>} />
+                  <Fact label="Recorded engine" mono value={<>{infra.database.engine} {infra.database.engineVersion || "--"}</>} />
+                  <Fact label="SSL mode" mono value={<>{infra.database.sslMode || "--"}</>} />
+                  <Fact label="Extensions" mono value={<>{infra.database.extensions.length === 0
+                      ? "--"
+                      : infra.database.extensions
+                          .map((name) => {
+                            const version = infra.database?.extensionVersions[name];
+                            return version ? `${name} ${version}` : name;
+                          })
+                          .join(", ")}</>} />
+                </Facts>
+              )}
+              {infra.identityProvider === null ? null : (
+                <Facts>
+                  <Fact label="Identity provider" mono value={<>{infra.identityProvider.name} ({infra.identityProvider.providerType})</>} />
+                  <Fact label="Issuer" mono value={<>{infra.identityProvider.issuerUrl || "--"}</>} />
+                  <Fact label="JWKS" mono value={<>{infra.identityProvider.jwksUrl || "--"}</>} />
+                  <Fact label="Accepted audiences" mono value={<>{infra.identityProvider.acceptedAudiences.length === 0
+                      ? "--"
+                      : infra.identityProvider.acceptedAudiences.join(", ")}</>} />
+                </Facts>
+              )}
+              <Caption>
+                Recorded when a bff node last started -- not a live probe, and deliberately carrying
+                no health verdict.
+              </Caption>
+            </>
+          )}
+        </DetailsSection>
 
-      <section className="os-field-group" aria-label="Mail sender">
-        <h4 className="os-subhead">Mail sender</h4>
-        {mail.error ? (
-          <Refusal role={access?.role ?? ""} message={mail.error} />
-        ) : mail.value === null ? (
-          mail.loading ? <ContentSkeleton kind="detail" label="Loading mail status" /> : <Caption>No mail status reported.</Caption>
-        ) : (
-          <>
-            <p className="os-stub-summary">
-              <span
-                className="os-dot"
-                data-os-dot={mailTone(mail.value)}
-                role="img"
-                aria-label={`Mail health: ${mail.value.health}`}
-              />{" "}
-              {mailHeadline(mail.value)}
-            </p>
-            <dl className="os-facts">
-              <dt>Configured</dt>
-              <dd>{mail.value.configured}</dd>
-              <dt>Health</dt>
-              <dd>{mail.value.health}</dd>
-            </dl>
-            {mail.value.detail ? <Caption>{mail.value.detail}</Caption> : null}
-          </>
-        )}
-        <Refresh facts={mail} serverStamp={mail.value?.checkedAt ?? ""} />
-      </section>
+        <DetailsSection title="Mail sender">
+          {mail.error ? (
+            <Refusal role={access?.role ?? ""} message={mail.error} />
+          ) : mail.value === null ? (
+            mail.loading ? <ContentSkeleton kind="detail" label="Loading mail status" /> : <Caption>No mail status reported.</Caption>
+          ) : (
+            <>
+              <p className="os-stub-summary">
+                <span
+                  className="os-dot"
+                  data-os-dot={mailTone(mail.value)}
+                  role="img"
+                  aria-label={`Mail health: ${mail.value.health}`}
+                />{" "}
+                {mailHeadline(mail.value)}
+              </p>
+              <Facts>
+                <Fact label="Configured" value={<>{mail.value.configured}</>} />
+                <Fact label="Health" value={<>{mail.value.health}</>} />
+              </Facts>
+              {mail.value.detail ? <Caption>{mail.value.detail}</Caption> : null}
+            </>
+          )}
+          <Refresh facts={mail} serverStamp={mail.value?.checkedAt ?? ""} />
+        </DetailsSection>
 
-      {/* The editable half, LAST and in its own Panel. The sections above are
-          facts; this one is policy, and interleaving a control into a `dl` of
-          read-only rows is how somebody comes to believe a fact is a control
-          (DESIGN.md rule 6). Owner or admin, which is what adminops enforces
-          -- the same floor this section already carries, so there is no
-          narrower gate to apply here. */}
-      <PolicyPanel enabled={access?.role === "owner" || access?.role === "admin"} />
-
+      </Details>
     </div>
   );
 }

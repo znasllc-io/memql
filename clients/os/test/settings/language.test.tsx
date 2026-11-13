@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, type Result, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-// Settings -> Language (memql#5390): the MemQL line the cluster speaks, the
+// Concepts -> Language (memql#5390): the MemQL line the cluster speaks, the
 // forms it deprecates and where its DSL still spells them, and the grammar and
 // vocabulary copied for a model.
 //
@@ -27,7 +27,7 @@ import {
   windowSentence,
   type LanguageForm,
 } from "../../src/apps/settings/language";
-import { SettingsApp } from "../../src/apps/settings/SettingsApp";
+import { ConceptsApp } from "../../src/apps/concepts/ConceptsApp";
 import { resetIdsForTest } from "../../src/system/desks";
 import { builtinReply, withSession } from "../deployables/harness";
 import { rolesOpening } from "../seededAccess";
@@ -131,7 +131,7 @@ function connect({
 }
 
 function renderLanguage(role = "owner") {
-  return render(withSession(<SettingsApp sectionId="language" navigate={vi.fn()} askContext={vi.fn()} />, { role }));
+  return render(withSession(<ConceptsApp sectionId="language" navigate={vi.fn()} askContext={vi.fn()} />, { role }));
 }
 
 async function landed() {
@@ -285,7 +285,7 @@ describe("languageDocsText", () => {
 // The section
 // ---------------------------------------------------------------------------
 
-describe("Settings -> Language", () => {
+describe("Concepts -> Language", () => {
   it("opens on the line this cluster speaks, its one primary action on the Head", async () => {
     const stub = connect();
     renderLanguage();
@@ -758,11 +758,9 @@ describe("copying for a model", () => {
 // ---------------------------------------------------------------------------
 
 describe("the Language section in the registry", () => {
-  it("sits after Cluster and opens for the roles the seeds grant", () => {
-    const settings = OS_REGISTRY.apps.find((a) => a.id === "settings")!;
-    const ids = settings.sections!.map((s) => s.id);
-    expect(ids.indexOf("language")).toBe(ids.indexOf("cluster") + 1);
-    expect(settings.sections!.find((s) => s.id === "language")).toEqual({
+  it("sits in Concepts and retains its original capability door", () => {
+    const concepts = OS_REGISTRY.apps.find((a) => a.id === "concepts")!;
+    expect(concepts.sections!.find((s) => s.id === "language")).toMatchObject({
       id: "language",
       name: "Language",
       requires: "app:settings/language",
@@ -775,14 +773,14 @@ describe("the Language section in the registry", () => {
 describe("navigation without update guides", () => {
   beforeEach(() => resetIdsForTest());
 
-  it.each(["desktop", "phone"] as const)("opens Settings on %s without markers or receipt tracking", async (layout) => {
+  it.each(["desktop", "phone"] as const)("opens Concepts on %s without markers or receipt tracking", async (layout) => {
     const stub = connect();
     renderShell({ access: OWNER, layout });
     if (layout === "desktop") fireEvent.click(screen.getByRole("button", { name: "Launcher" }));
     // Exact names also catch a marker accidentally returning inside a tile.
     const tiles = layout === "desktop" ? within(screen.getByRole("dialog", { name: "Launcher" })) : screen;
-    fireEvent.click(tiles.getByRole("button", { name: appTileName("Settings") }));
-    const sections = screen.getByRole("navigation", { name: "Settings sections" });
+    fireEvent.click(tiles.getByRole("button", { name: appTileName("Concepts") }));
+    const sections = screen.getByRole("navigation", { name: "Concepts sections" });
     fireEvent.click(within(sections).getByRole("button", { name: "Language" }));
     await landed();
     expect(screen.queryByRole("img", { name: "Unseen change" })).toBeNull();
@@ -793,11 +791,11 @@ describe("navigation without update guides", () => {
     expect(calls).not.toContain("acknowledgeAttention");
   });
 
-  it("keeps inaccessible Settings sections hidden", () => {
+  it("keeps inaccessible Concepts sections hidden", () => {
     connect();
     renderShell({ access: READER });
-    openFromLauncher("Settings");
-    const nav = screen.getByRole("navigation", { name: "Settings sections" });
+    openFromLauncher("Concepts");
+    const nav = screen.getByRole("navigation", { name: "Concepts sections" });
     expect(within(nav).queryByRole("button", { name: "Language" })).toBeNull();
   });
 });
