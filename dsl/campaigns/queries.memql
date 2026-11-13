@@ -1028,8 +1028,8 @@ query delivery deferredSingleSendById {
 @cache(0)
 query delivery deliveriesByRequestIds {
   args {
-    requestIds  list!
-    accountIds  list!
+    requestIds  []string!
+    accountIds  []string!
   }
   filter row => actor.isClusterOwner == true && row.rowConcept != nil && row.rowConcept != "" && row.requestId in args.requestIds && row.accountId in args.accountIds
   sort "row.createdAt", "asc"
