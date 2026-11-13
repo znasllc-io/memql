@@ -65,3 +65,28 @@ func TestNavigationResolvesBuiltInSiteForOwnerWithoutSharingItWithAnotherRole(t 
 		}
 	}
 }
+
+func TestNavigationRelocationPreservesCustomGrantWithoutOpeningOtherSections(t *testing.T) {
+	granted := map[string]bool{"app:settings": true, "app:settings/language": true}
+	find := func(apps []navigationApp) *navigationApp {
+		for i := range apps {
+			if apps[i].ID == "concepts" {
+				return &apps[i]
+			}
+		}
+		return nil
+	}
+	admitted := find(filterNavigation(navigationApps(), func(resource string) bool { return granted[resource] }))
+	require.NotNil(t, admitted)
+	require.Len(t, admitted.Sections, 1)
+	require.Equal(t, "language", admitted.Sections[0].ID)
+	require.Empty(t, admitted.Records)
+	delete(granted, "app:settings")
+	require.Nil(t, find(filterNavigation(navigationApps(), func(resource string) bool { return granted[resource] })))
+	granted = map[string]bool{"app:concepts": true}
+	admitted = find(filterNavigation(navigationApps(), func(resource string) bool { return granted[resource] }))
+	require.NotNil(t, admitted)
+	for _, section := range admitted.Sections {
+		require.NotEqual(t, "language", section.ID)
+	}
+}

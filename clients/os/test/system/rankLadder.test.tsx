@@ -1,3 +1,4 @@
+import { relocatedSectionSource } from "../../src/system/appDestinations";
 import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -62,7 +63,7 @@ describe("every shipped requirement names a seeded resource", () => {
       expect(app.requires, `app ${app.id} names its own door`).toBe(`app:${app.id}`);
       for (const section of app.sections ?? []) {
         check(`section ${app.id}/${section.id}`, section.requires);
-        if (section.requires !== undefined) {
+        if (section.requires !== undefined && !relocatedSectionSource(app.id, section.id, section.requires)) {
           expect(section.requires, `section ${app.id}/${section.id}`).toBe(`app:${app.id}/${section.id}`);
         }
       }
@@ -123,8 +124,8 @@ describe("each seeded role's desktop is the one the floors used to draw", () => 
     owner: { apps: ["Users", "Accounts", "Training", "Logs", "Cluster", "Concepts"], not: [] },
     developer: { apps: ["Users", "Accounts", "Training", "Logs", "Cluster", "Concepts"], not: [] },
     admin: { apps: ["Users", "Accounts", "Training", "Logs", "Cluster", "Concepts"], not: [] },
-    writer: { apps: ["Training", "Deployables", "Files", "Settings"], not: ["Users", "Accounts", "Logs"] },
-    reader: { apps: ["Deployables", "Files", "Settings"], not: ["Users", "Accounts", "Training", "Logs"] },
+    writer: { apps: ["Training", "Deployables", "Files", "Profile"], not: ["Users", "Accounts", "Logs", "Settings", "Identity"] },
+    reader: { apps: ["Deployables", "Files", "Profile"], not: ["Users", "Accounts", "Training", "Logs", "Settings", "Identity"] },
   };
   for (const [role, want] of Object.entries(expected)) {
     it(`draws ${role}'s desktop`, () => {
@@ -138,12 +139,12 @@ describe("each seeded role's desktop is the one the floors used to draw", () => 
   // The defect the ladder flip measured, now a fact about the seeds: a
   // developer opens the apps the engine considers them MORE privileged for.
   it("offers a developer the admin-floored SECTION as well", () => {
-    const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
+    const settings = OS_REGISTRY.apps.find((a) => a.id === "identity");
     expect(settings).toBeTruthy();
     installSeededAccess("developer");
-    expect(sectionsFor(settings!).map((s) => s.id)).toContain("cluster");
+    expect(sectionsFor(settings!).map((s) => s.id)).toContain("policy");
     installSeededAccess("reader");
-    expect(sectionsFor(settings!).map((s) => s.id)).not.toContain("cluster");
+    expect(sectionsFor(settings!).map((s) => s.id)).not.toContain("policy");
   });
 
   // Widgets are gated the same way apps are, and the desk context menu

@@ -1,3 +1,4 @@
+import { SECTION_RELOCATIONS } from "../../../system/appDestinations";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { flatten } from "../../../kit/rows";
@@ -110,6 +111,8 @@ export interface AccessResource {
   resource: string;
   /** The app id the resource belongs to. */
   appId: string;
+  /** Presentation only; appId still names the original durable door. */
+  displayAppId?: string;
   /** "" for the app's own door; the part or section id otherwise. */
   part: string;
   /** The verb that holds it: `read` for a door or a floored section, `execute` for a named part. */
@@ -152,14 +155,17 @@ export function accessResources(
     // name where the registry has one.
     for (const resource of [...named].filter((r) => r.startsWith(`${door}/`)).sort(catalogOrder(catalog))) {
       const part = resource.slice(door.length + 1);
-      const section = sections.find((s) => s.id === part);
+      const relocation = SECTION_RELOCATIONS.find(move => move.resource === resource);
+      const destination = relocation && registry.apps.find(item => item.id === relocation.toApp);
+      const section = destination?.sections?.find(item => item.id === relocation?.toSection) ?? sections.find((s) => s.id === part);
       const isSection = section !== undefined;
       push({
         resource,
         appId: app.id,
         part,
         verb: verbFor(catalog, resource) ?? (isSection ? OPEN_VERB : PART_VERB),
-        label: isSection ? section.name : part,
+        label: resource === "app:settings/cluster" ? "Cluster facts and sign-in policy" : isSection ? section.name : part,
+        ...(destination ? { displayAppId: destination.id } : {}),
       });
     }
   }

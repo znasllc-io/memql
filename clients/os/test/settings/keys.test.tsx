@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ReactNode } from "react";
 
-// Settings -> Keys (epic memql#4984), and the property the section exists for:
+// Identity -> Keys (epic memql#4984), and the property the section exists for:
 // whether every identity replica publishes the SAME keyset.
 //
 // Divergent keysets fail roughly half of all auth (memql#3400) -- a token
@@ -44,7 +44,7 @@ vi.mock("../../src/live/connection", () => ({
 const { SessionProvider } = await import("../../src/chrome/access");
 const { OsProvider } = await import("../../src/chrome/state");
 const { OS_REGISTRY } = await import("../../src/apps/registry");
-const { SettingsApp } = await import("../../src/apps/settings/SettingsApp");
+const { IdentityApp } = await import("../../src/apps/identity/IdentityApp");
 const { LocalDesktopStore } = await import("../../src/system/store");
 const { UNKNOWN_RUNTIME_CONFIG } = await import("../../src/cluster/config");
 const { agreementOf, PROBE_READS, probeKeyset } = await import(
@@ -93,7 +93,7 @@ function wrap(children: ReactNode, role: string, identityUrl: string) {
 
 async function renderKeys(role = "owner", identityUrl = "https://identity.example.com") {
   const view = render(
-    wrap(<SettingsApp sectionId="keys" navigate={vi.fn()} askContext={vi.fn()} />, role, identityUrl),
+    wrap(<IdentityApp sectionId="keys" navigate={vi.fn()} askContext={vi.fn()} />, role, identityUrl),
   );
   await act(async () => {
     for (let i = 0; i < 12; i += 1) await Promise.resolve();
@@ -157,7 +157,7 @@ describe("the agreement reading", () => {
   });
 });
 
-describe("Settings -> Keys", () => {
+describe("Identity -> Keys", () => {
   it("leads with agreement, then lists what is published", async () => {
     await renderKeys();
     expect(screen.getByText(new RegExp(`${PROBE_READS} reads all returned the same keyset`))).toBeTruthy();

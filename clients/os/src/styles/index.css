@@ -1871,14 +1871,14 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   width: 20px;
   height: 20px;
 }
-.os-phone-mark, .os-phone-bar > .os-icon-button, .os-phone-bar > .os-link { flex: none; }
-.os-phone-bar > .os-link { margin-inline-start: auto; }
+.os-phone-mark, .os-phone-bar > .os-icon-button, .os-phone-bar > .os-avatar-button { flex: none; }
+.os-phone-bar > .os-avatar-button { margin-inline-start: auto; }
 .os-connection-notice { display: flex; align-items: center; gap: 12px; color: var(--os-muted); font-size: var(--os-text-sm); }
 .os-connection-notice [role="status"] { display: inline-flex; align-items: center; gap: 8px; }
 /* On the header's own line, with no way to make it taller: a line of its own moved
  * every page under the finger, 24.5 px at two seconds and 40 px with Retry. A 30 px
  * control's margins leave it the 20 px of the shortest line, the home page's. Retry
- * stands at least 20 px from Sign out, which it used to share no line with. */
+ * stands at least 20 px from Profile, which it used to share no line with. */
 .os-phone-connection { flex: 0 1 auto; min-width: 0; margin-inline-end: 10px; }
 .os-phone-connection [role="status"] { min-width: 0; white-space: nowrap; }
 .os-phone-connection .os-connection-spinner { flex: none; }

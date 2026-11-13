@@ -54,8 +54,12 @@ broadcast across nodes. Notification recipients are optional; an empty list
 uses cluster owners and admins. Notice throttling is shared across replicas,
 and failed delivery leaves the request available for review.
 
-The Identity app contains your profile, passkeys, sessions, personal access
-tokens, and sign-in policy. Email verification, invitations, recovery, and
+Your picture opens Profile directly, on desktop and phone. Profile contains
+your name and photo, storage, passkeys and sessions, personal access tokens,
+personal sign-in preferences, Appearance, Ask, Apps, About and Diagnostics.
+It has no Launcher tile, dock pin or app-selector entry. Sign out is inside
+Profile. Identity administers the installation's sign-in policy and brand,
+access requests, signing keys, service tokens and audit trail. Email verification, invitations, recovery, and
 external OAuth consent also render in OS. Old identity page URLs hand off to
 `/identity/...`, carrying their parameters in the fragment rather than OS access
 logs. Identity remains the authority: its structured representation requires the
@@ -65,6 +69,29 @@ own origin, so its host-only security/session cookies work with third-party
 cookies blocked. HTML identity URLs still hand off to OS; native routes are
 exact-path and representation-gated, and unsafe requests still require their
 original Origin and CSRF pair. OAuth/PKCE and device-bound email verification keep their existing protocol.
+
+The Accounts program's app relocations keep existing capability names and
+backend checks. A fixed map in `system/appDestinations.ts` preserves the old app
+and section grant together, including custom grants; it does not grant unrelated
+sections in the destination app. Old personal Identity links open Profile. Old
+Settings links open their new home: Language in Concepts, app Access in Users,
+and Benchmarks in Cluster. Cluster facts appear in Overview, and Data lives in
+Settings beside Integrations. Accounts no longer offers its unusable billing
+credential minting page. Generated agent-navigation metadata uses the same
+admission conjunction. The Access editor shows the current destination while
+retaining the original resource ID; the former Cluster grant controls both
+Cluster facts and Identity sign-in policy. An older custom role with no
+`app:profile` decision can reach only the personal sections its original
+Identity or Settings door admitted; an explicit Profile deny wins. Saved deep
+links resolve before destination-section admission. Desktop documents do not
+persist windows.
+
+This is the Profile and shell UI piece. Account switching, account-bound
+sessions/desktops and the primary-account-only administration boundary still
+depend on the unimplemented sign-in/separation piece. The UI does not simulate
+those boundaries with a local account selection. Import and storage top-ups
+remain separate unfinished pieces; production stamping/export activation stays
+under its existing operator hold.
 
 Passkeys keep their existing RP IDs. The identity host publishes
 `/.well-known/webauthn` for WebAuthn Related Origin Requests from OS. Passkey

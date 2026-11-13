@@ -35,6 +35,7 @@ const shim = path.join(__dirname, "connectionShim.tsx");
 export default defineConfig({
   root: __dirname,
   cacheDir: path.join(__dirname, ".vite"),
+  define: { __OS_BUILD__: JSON.stringify("local-accounts-shell-qa"), __OS_LOCAL_COCKPIT__: "null" },
   plugins: [
     react(),
     {
@@ -54,7 +55,7 @@ export default defineConfig({
       enforce: "pre",
       async resolveId(id, importer, options) {
         const resolved = await this.resolve(id, importer, { ...options, skipSelf: true });
-        if (resolved && path.resolve(resolved.id.split("?")[0]) === seededAccess) {
+        if (resolved && path.resolve(resolved.id.split("?")[0] ?? resolved.id) === seededAccess) {
           return seededAccess + "?qa-inline";
         }
         return null;
@@ -83,7 +84,7 @@ export default defineConfig({
         // itself, or its re-exports resolve to nothing.
         if (importer === shim) return null;
         const resolved = await this.resolve(id, importer, { ...options, skipSelf: true });
-        if (resolved && path.resolve(resolved.id.split("?")[0]) === realConnection) return shim;
+        if (resolved && path.resolve(resolved.id.split("?")[0] ?? resolved.id) === realConnection) return shim;
         return null;
       },
     },

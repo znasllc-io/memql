@@ -19,7 +19,7 @@ import type { OsAppSection } from "../../system/registry";
  */
 export const USERS_SECTIONS: OsAppSection[] = [
   { id: "people", name: "People" },
-  { id: "requests", name: "Access requests" },
+  { id: "access", name: "Access", requires: "app:settings/access" },
   { id: "groups", name: "Groups" },
   { id: "roles", name: "Roles" },
  { id: "testing", name: "Role testing" },

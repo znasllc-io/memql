@@ -27,7 +27,7 @@ it("keeps the phone header reachable and opens paused work in the phone app with
   const sheet = screen.getByRole("dialog", {name:"Ask"});
   const content = document.querySelector(".os-phone-content")!;
   expect(content.contains(sheet)).toBe(true);
-  expect(content.contains(screen.getByRole("button", {name:"Sign out"}))).toBe(false);
+  expect(content.contains(screen.getByRole("button", {name:"Open Profile"}))).toBe(false);
   expect(document.querySelector(".os-phone-page")?.hasAttribute("inert")).toBe(true);
   expect(screen.queryByRole("button", {name:/Maximize Ask|Restore Ask/})).toBeNull();
   expect(document.querySelector(".os-ask-wait")).toBeNull();

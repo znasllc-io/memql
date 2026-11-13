@@ -14,6 +14,7 @@ import {
   Settings as SettingsIcon,
   Shapes,
   Trash2,
+  UserRound,
   Users,
   Waypoints,
 } from "lucide-react";
@@ -42,6 +43,7 @@ import { useOs } from "../chrome/state";
 // Knowing an app's name, icon and capabilities must not download its whole
 // workspace. These stable component wrappers load once when a window opens.
 const IdentityApp = loadApp("Identity", () => import("./identity/IdentityApp").then(module => module.IdentityApp));
+const ProfileApp = loadApp("Profile", () => import("./profile/ProfileApp").then(module => module.ProfileApp));
 const AccountsApp = loadApp("Accounts", () => import("./accounts/AccountsApp").then(module => module.AccountsApp));
 const BinApp = loadApp("Bin", () => import("./bin/BinApp").then(module => module.BinApp));
 const EmailApp = loadApp("Email", () => import("./email/EmailApp").then(module => module.EmailApp));
@@ -64,118 +66,26 @@ const NexusApp = loadApp("Nexus", () => import("./nexus/NexusApp").then(module =
 // is the widget framework's first resident. Static by design -- runtime app
 // delivery is deliberately not a foundation question.
 
+// Installation services. Relocated sections retain their original grant IDs;
+// appDestinations is the reviewed compatibility boundary.
 const settings: OsAppManifest = {
   id: "settings",
   name: "Settings",
   icon: SettingsIcon,
   requires: "app:settings",
   sections: [
-    { id: "about", name: "About" },
-    { id: "appearance", name: "Appearance" },
-    { id: "ask", name: "Ask" },
-    { id: "apps", name: "Apps" },
-    // Access (epic memql#5289, task memql#5307): who may open which app, and
-    // which parts of one, over and above their role. Seeded on the roles the
-    // grant READS admit (admin, developer, owner); the writes go read-only in
-    // the shell for anybody who does not hold `update` on `principal`, and
-    // the engine refuses them for the same person.
-    { id: "access", name: "Access", requires: "app:settings/access" },
-    // Widened by the ladder flip (epic memql#4832, D1): under the shell's
-    // old ordering this admitted {admin, owner}, and it now admits
-    // {admin, developer, owner}. Correct in the new direction -- cluster
-    // diagnostics is engineering surface, and developer is the engineering
-    // tier -- so this is a line the flip fixes rather than one it endangers.
-    { id: "cluster", name: "Cluster", requires: "app:settings/cluster" },
-    // Language (memql#5390): the MemQL line this cluster speaks, what its
-    // edition's status actually promises, and where its DSL still spells a
-    // deprecated form. Beside Cluster, on the same three roles, because it is
-    // the same kind of engineering fact -- and `app:settings/language` is also
-    // the capability the languageStatus builtin declares, so the engine refuses
-    // the read to anybody this entry hides the section from.
-    { id: "language", name: "Language", requires: "app:settings/language" },
-    { id: "diagnostics", name: "Diagnostics" },
-    // Benchmarks (epic memql#4993). BESIDE Diagnostics rather than inside it:
-    // Diagnostics is three panels about THIS SESSION, and folding a fact about
-    // the deployment across releases into it would change what its "copy
-    // diagnostics" button means.
-    //
-    // { min: "admin" } matches Cluster and Logs, and it is presentation over a
-    // gate the engine already holds: v1:bench:run and v1:bench:sample declare
-    // @rowAuthz(clusterOwner), so a reader below the floor would see an empty
-    // section with no explanation rather than a refusal.
-    { id: "benchmarks", name: "Benchmarks", requires: "app:settings/benchmarks" },
-    // OWNER OR DEVELOPER, AND EXPLICITLY NOT ADMIN (program decision P6).
-    // This is the first section in the shell whose gate a ladder MINIMUM
-    // cannot express: `{ min: "developer" }` would admit admin, and the
-    // decision is that configuring an integration is a developer's job and an
-    // owner's prerogative rather than a rank. `roleAdmits`' `any` form is what
-    // says exactly that, and it is presentation over a gate the status
-    // capability's own `statusAuthorized` remains the authority on.
-    { id: "connections", name: "Connections", requires: "app:settings/connections" },
     { id: "integrations", name: "Integrations", requires: "app:settings/integrations" },
-    // Pipelines (epic memql#5479, D15): the cluster's OPTIONAL readiness item
-    // -- the GitHub App, a connected repository, compute -- and the place its
-    // marker under the gear points. OWNER ONLY: it asks about the cluster's
-    // own GitHub App and its installations, which only an owner registers.
-    // Beside Integrations because it is the same kind of thing: something
-    // this cluster can be connected to, set up once.
+    { id: "data", name: "Data", requires: "app:cluster/origins" },
+    { id: "connections", name: "Connections", requires: "app:settings/connections" },
     { id: "pipelines", name: "Pipelines", parent: "integrations", requires: "app:settings/pipelines" },
-    // The three that arrived when the portal's admin console was retired
-    // (epic memql#4984). Each requirement is the one the ENGINE will
-    // actually apply, not a rounder number: the Tokens reads and the revokes
-    // are owner-or-admin, and Keys reads a PUBLIC feed that needs no role at
-    // all -- floored at admin because knowing which keys a cluster signs with
-    // is operator business.
-    //
-    // AI providers is the shell's THIRD non-monotonic gate (epic memql#5088,
-    // D7), beside Settings -> Integrations and Cluster -> Modules, and it is
-    // a SET for the same reason they are. The four provider builtins move to
-    // owner-or-developer because a developer helps an owner through setup;
-    // admin is deliberately left out, since an admin's concern is user
-    // administration. `{ min: "developer" }` cannot express that -- the
-    // ladder ranks developer 300 ABOVE admin 200, so a floor there admits
-    // exactly the role the engine refuses.
-    // Settings -> AI keeps what is a CREDENTIAL or a cluster-wide VALUE
-    // (routing redesign, 2026-09-28): Vendors, where a vendor's ids are set,
-    // and the read-only Levels table. How a call is routed -- routes, rules and
-    // the history of what served -- lives in Fleet > Routing.
-    //
-    // THE `providers` ID IS KEPT DELIBERATELY. Vendors is that section's
-    // successor (it was "Doors", and "AI providers" before that) -- same role
-    // gate, same vendor forms, same intent -- and two things reach for
-    // `settings/providers` by name: the core gate's inference stop, and
-    // MODULE_SETTINGS_SECTION's `ai` entry. The id is not user-visible; the
-    // name is.
     { id: "providers", name: "Vendors", requires: "app:settings/providers" },
-    // Levels is readable one rung wider than Vendors (D7): `{ min: "admin" }`
-    // admits admin, developer and owner.
     { id: "levels", name: "Levels", requires: "app:settings/levels" },
-    // RULES AND DECISIONS MOVED TO FLEET > ROUTING, AND THEIR GATES WITH THEM.
-    // The two sections stay declared as drill-downs under Levels -- off the
-    // rail, reached only by a link or an old deep link -- where each is a
-    // signpost to its new home. That keeps `app:settings/rules` and
-    // `app:settings/decisions` named by this registry, which is what the
-    // seeds' parity gate (component/memql, TestOsRegistryRequiresMatchTheAppSeeds)
-    // holds them to, and it is the same capability Fleet > Routing's Routes,
-    // Rules and History tabs ask for (fleet/routing/access.ts).
     { id: "rules", name: "Rules", parent: "levels", requires: "app:settings/rules" },
     { id: "decisions", name: "Decisions", parent: "levels", requires: "app:settings/decisions" },
-    // Procedures (epic memql#5408): the certification ladder's values -- how
-    // much evidence a learned procedure needs before it runs without a model.
-    // AFTER Decisions, closing the AI group in the order a person learns it:
-    // where a call goes, how much it needs, who gets what, what happened, and
-    // when a goal stops needing a model at all. Seeded on the Levels roles,
-    // because it is the same kind of read-only reflection of the cluster.
     { id: "procedures", name: "Procedures", requires: "app:settings/procedures" },
-    { id: "tokens", name: "Tokens", requires: "app:settings/tokens" },
-    { id: "keys", name: "Keys", requires: "app:settings/keys" },
-    // The shell's own lines (epic memql#4895): what the OS front end
-    // recorded under no app, plus everything the Settings surfaces logged.
-    // Last rather than before a settings section, because this app HAS no
-    // settings section -- every section here is one.
     { id: "logs", name: "Logs", requires: "app:settings/logs" },
   ],
-  settingsSection: "appearance",
+  settingsSection: "integrations",
   logsSection: "logs",
   component: SettingsApp,
 };
@@ -749,25 +659,50 @@ const askWidget: OsWidgetManifest = {
   component: AskWidgetBody,
 };
 
-const identity: OsAppManifest = {
-  id: "identity",
-  name: "Identity",
-  icon: Fingerprint,
-  requires: "app:identity",
+const profile: OsAppManifest = {
+  id: "profile",
+  name: "Profile",
+  icon: UserRound,
+  requires: "app:profile",
+  listed: false,
   settingsSection: "settings",
   logsSection: "logs",
   sections: [
     { id: "profile", name: "Profile" },
     { id: "devices", name: "Passkeys and sessions" },
     { id: "tokens", name: "Access tokens" },
-    { id: "logs", name: "Logs", requires: "app:identity/logs" },
+    { id: "appearance", name: "Appearance" },
+    { id: "ask", name: "Ask" },
+    { id: "apps", name: "Apps" },
+    { id: "about", name: "About" },
+    { id: "diagnostics", name: "Diagnostics" },
+    { id: "logs", name: "Logs", requires: "app:profile/logs" },
     { id: "settings", name: "Settings" },
+  ],
+  component: ProfileApp,
+};
+
+const identity: OsAppManifest = {
+  id: "identity",
+  name: "Identity",
+  icon: Fingerprint,
+  requires: "app:identity",
+  settingsSection: "policy",
+  logsSection: "logs",
+  sections: [
+    { id: "policy", name: "Sign-in policy", requires: "app:settings/cluster" },
+    { id: "requests", name: "Access requests", requires: "app:users" },
+    { id: "keys", name: "Keys", requires: "app:settings/keys" },
+    { id: "service-tokens", name: "Tokens", requires: "app:settings/tokens" },
+    { id: "audit", name: "Audit trail", requires: "app:cluster/audit" },
+    { id: "logs", name: "Logs", requires: "app:identity/logs" },
   ],
   component: IdentityApp,
 };
 
 export const OS_REGISTRY: OsRegistry = {
   apps: [
+    profile,
     identity,
     accounts,
     email,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useDroppable, type DragEndEvent } from "@dnd-kit/core";
 import { horizontalListSortingStrategy, SortableContext, useSortable } from "@dnd-kit/sortable";
 import { LayoutGrid, RefreshCw } from "lucide-react";
@@ -11,12 +11,10 @@ import { useOsConnection } from "../live/connection";
 import { Button, Notice } from "../kit";
 import { InPlaceAsk } from "../kit/pressHold";
 import { dockOrder, isPinned } from "../system/dock";
-import { appById, appsFor, canOpen, fixturesFor, isDockFixture } from "../system/registry";
+import { appById, listedAppsFor, canOpen, fixturesFor, isDockFixture } from "../system/registry";
 import { useActiveDrag, useShellDragClaim } from "./dragScope";
-import { readStoredTheme, setTheme, type ThemeChoice } from "../app/theme";
 import type { OsAppManifest } from "../system/registry";
 import type { AppId } from "../system/windows";
-import { useSession } from "./access";
 import { useConnectionStatus } from "./connection";
 import { connectionDotTone, connectionDotTooltip } from "../ask/useAskReadiness";
 import { ContextMenu, type MenuEntry } from "./ContextMenu";
@@ -27,7 +25,7 @@ import { useOs, type OsNotice } from "./state";
 // The one bar (spec A): Launcher at the left end; pinned then running apps
 // center (running dot beneath, right-click to pin/unpin/close, drag to
 // reorder pins); right cluster = Ask orb, connection dot, clock, avatar
-// menu. Pins persist through the DesktopStore.
+// picture. Pins persist through the DesktopStore.
 //
 // The roaming desktop's cue lives in that right cluster too (epic
 // memql#4746), beside the connection dot, and DELIBERATELY NOT AS A TOAST:
@@ -216,93 +214,15 @@ function Clock() {
   );
 }
 
-function AvatarMenu({ onSignOut }: { onSignOut: () => void }) {
-  const { access } = useSession();
+function ProfileButton() {
   const { actions, registry } = useOs();
-  // Offered only where the registry says this person can open it -- the
-  // Identity app has no role floor, but a menu item that opens nothing is
-  // worse than one that is absent.
-  const canOpenProfile = registry.apps.some((app) => app.id === "identity");
-  const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<ThemeChoice>(() => readStoredTheme());
-  const ref = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointer = (event: PointerEvent) => {
-      if (!ref.current?.contains(event.target as Node)) setOpen(false);
-    };
-    window.addEventListener("pointerdown", onPointer, true);
-    return () => window.removeEventListener("pointerdown", onPointer, true);
-  }, [open]);
-
-  function choose(choice: ThemeChoice) {
-    setMode(choice);
-    setTheme(choice);
-  }
-
-  return (
-    <div className="os-avatar-anchor" ref={ref}>
-      <button
-        type="button"
-        className="os-avatar-button"
-        aria-label="Account menu"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <AccountAvatar />
-      </button>
-      {open ? (
-        <div role="menu" aria-label="Account" className="os-menu os-avatar-menu">
-          <p className="os-menu-head">{access?.primaryEmail || "Signed in"}</p>
-          <div className="os-menu-modes" role="group" aria-label="Mode">
-            {(["light", "dark", "system"] as const).map((choice) => (
-              <button
-                key={choice}
-                type="button"
-                role="menuitemradio"
-                aria-checked={mode === choice}
-                className="os-menu-mode"
-                onClick={() => choose(choice)}
-              >
-                {choice === "light" ? "Light" : choice === "dark" ? "Dark" : "System"}
-              </button>
-            ))}
-          </div>
-          {canOpenProfile ? (
-            <button
-              type="button"
-              role="menuitem"
-              className="os-menu-item"
-              onClick={() => {
-                setOpen(false);
-                actions.openApp("identity", "profile");
-              }}
-            >
-              Profile
-            </button>
-          ) : null}
-          <button
-            type="button"
-            role="menuitem"
-            className="os-menu-item"
-            onClick={() => {
-              setOpen(false);
-              onSignOut();
-            }}
-          >
-            Sign out
-          </button>
-        </div>
-      ) : null}
-    </div>
-  );
+  if (!canOpen(registry, "profile")) return null;
+  return <button type="button" className="os-avatar-button" aria-label="Open Profile"
+    onClick={() => actions.openApp("profile")}><AccountAvatar /></button>;
 }
 
 export function Dock({
   onOpenLauncher,
-  onSignOut,
   hidden = false,
 }: {
   onOpenLauncher: () => void;
@@ -328,11 +248,11 @@ export function Dock({
 
   const runningIds = Object.values(state.shell.windows).map((w) => w.appId);
   const visible = dockOrder(state.dock, runningIds, fixtureIds).filter((id) =>
-    canOpen(registry, id),
+    canOpen(registry, id) && appById(registry, id)?.listed !== false,
   );
   const pinnedVisible = state.dock.pinned.filter(
     (id) =>
-      !fixtureIds.includes(id) && appsFor(registry).some((a) => a.id === id),
+      !fixtureIds.includes(id) && listedAppsFor(registry).some((a) => a.id === id),
   );
 
   // --- the drop onto the Bin (memql#4784) ---
@@ -557,7 +477,7 @@ export function Dock({
           aria-label={connectionDotTooltip(connectionTone)}
         />
         <Clock />
-        <AvatarMenu onSignOut={onSignOut} />
+        <ProfileButton />
       </div>
       {!hidden && menu ? (
         <ContextMenu

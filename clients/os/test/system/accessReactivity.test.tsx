@@ -231,7 +231,12 @@ describe("the two re-reads (D11)", () => {
   it("asks again after a grant written from this browser", async () => {
     const fake = fakeConnection([
       () => effectiveRow("owner"),
-      () => effectiveRow("owner", [{ verb: "read", resource: "app:users", effect: "deny", source: "user" }]),
+      () => effectiveRow("owner", [
+        { verb: "read", resource: "app:users", effect: "deny", source: "user" },
+        // Access moved from Settings and retains its independent old grant.
+        // Both doors must be withheld before the entire Users app disappears.
+        { verb: "read", resource: "app:settings/access", effect: "deny", source: "user" },
+      ]),
     ]);
     h.connection = fake.connection;
     mountShell();

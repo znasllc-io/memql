@@ -87,7 +87,7 @@ export function AutoPage({
 }) {
   // The person's Profile is a section of the Identity app (memql#6220), where
   // the monthly budget is set.
-  const identity = useAppReach("identity");
+  const identity = useAppReach("profile");
   const profileReachable = identity.sections.includes("profile") && identity.canOpenWindows;
   const saved = balance.value;
   const [draft, setDraft] = useState<Balance | null>(null);

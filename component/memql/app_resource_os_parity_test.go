@@ -75,13 +75,52 @@ func osRegistryResources(t *testing.T) map[string]bool {
 			if s.requires == "" {
 				continue
 			}
-			if !strings.HasPrefix(s.requires, "app:"+m.id+"/") {
+			if !osSectionResourceMatches(m.id, s.id, s.requires) {
 				t.Errorf("manifest %q section %q requires %q; a section's resource is `app:<id>/<section>` under its own app", m.id, s.id, s.requires)
 			}
 			out[s.requires] = true
 		}
 	}
 	return out
+}
+
+// A UI relocation keeps durable grant names. Only these reviewed destinations
+// may use another app's resource; an arbitrary exception would hide a typo or
+// silently change a custom grant. The client also retains the source app gate.
+func osSectionResourceMatches(app, section, resource string) bool {
+	if strings.HasPrefix(resource, "app:"+app+"/") {
+		return true
+	}
+	allowed := map[string]string{
+		"identity/policy":         "app:settings/cluster",
+		"identity/keys":           "app:settings/keys",
+		"identity/service-tokens": "app:settings/tokens",
+		"identity/requests":       "app:users",
+		"identity/audit":          "app:cluster/audit",
+		"cluster/facts":           "app:settings/cluster",
+		"cluster/benchmarks":      "app:settings/benchmarks",
+		"concepts/language":       "app:settings/language",
+		"users/access":            "app:settings/access",
+		"settings/data":           "app:cluster/origins",
+	}
+	return resource != "" && allowed[app+"/"+section] == resource
+}
+
+func TestOsRelocatedResourceExceptionsAreExact(t *testing.T) {
+	if !osSectionResourceMatches("identity", "service-tokens", "app:settings/tokens") {
+		t.Fatal("the moved token administration must retain its old grant")
+	}
+	for _, in := range [][3]string{
+		{"identity", "tokens", "app:settings/tokens"},
+		{"profile", "service-tokens", "app:settings/tokens"},
+		{"identity", "service-tokens", "app:settings/keys"},
+		{"identity", "requests", "app:users/unknown"},
+		{"unknown", "data", "app:cluster/origins"},
+	} {
+		if osSectionResourceMatches(in[0], in[1], in[2]) {
+			t.Errorf("unreviewed relocation accepted: %v", in)
+		}
+	}
 }
 
 func TestOsRegistryRequiresMatchTheAppSeeds(t *testing.T) {

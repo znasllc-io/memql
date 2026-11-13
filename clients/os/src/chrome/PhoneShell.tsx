@@ -1,3 +1,5 @@
+import { AccountAvatar } from "./AccountAvatar";
+import { appDestination } from "../system/appDestinations";
 import { StorageWarning } from "../cluster/storage/StorageHealth";
 import { useRef, useState } from "react";
 import { ArrowLeft, LayoutGrid } from "lucide-react";
@@ -19,6 +21,7 @@ import { MODULE_DESCRIPTIONS } from "../system/modules";
 import {
   allRequirementsFor,
   appsFor,
+  listedAppsFor,
   canOpen,
   requirementsFor,
   sectionsFor,
@@ -32,9 +35,9 @@ import { useWindowAsk } from "./windowAsk";
 
 // Phone chrome (spec D13): no desks, no windows, no pins. The Launcher
 // grid is home; an app opens full screen, one at a time, with its section
-// nav as a top strip; Ask fills the content area; sign out stays in the top bar.
+// nav as a top strip; Ask fills the content area; the picture opens Profile.
 
-export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
+export function PhoneShell(_props: { onSignOut: () => void }) {
   const { registry, actorRole } = useOs();
   const { openAsk, sheet } = useAsk();
   const [currentAppId, setCurrentAppId] = useState<string | null>(null);
@@ -68,7 +71,12 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
   const unmetIsSectionOnly = gate.unmet.some((id) => !(current?.needs ?? []).includes(id));
 
   function open(appId: string, section = "", payload?: Record<string, unknown>) {
+    const destination = appDestination(appId, section);
+    appId = destination.appId;
+    section = destination.sectionId ?? "";
     if (!canOpen(registry, appId)) return;
+    const manifest = registry.apps.find(app => app.id === appId);
+    if (section && manifest?.sections?.length && !sectionsFor(manifest).some(item => item.id === section)) return;
     setCurrentAppId(appId);
     setSectionId(section);
     setIntent(payload ? { id: crypto.randomUUID(), payload } : undefined);
@@ -91,9 +99,8 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
         )}
         <span className="os-phone-title">{current ? current.name : "MemQL OS"}</span>
         <ConnectionNotice className="os-phone-connection" retryLabel="Retry" />
-        <button type="button" className="os-link" onClick={onSignOut}>
-          Sign out
-        </button>
+        {canOpen(registry, "profile") ? <button type="button" className="os-avatar-button" aria-label="Open Profile"
+          onClick={() => open("profile")}><AccountAvatar /></button> : null}
       </header>
       <div className="os-phone-content">
       <div className="os-phone-page" inert={sheet.open}>
@@ -154,7 +161,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
         </PageContent>
       ) : (
         <main className="os-phone-home">
-          {apps.map((app) => {
+          {listedAppsFor(registry).map((app) => {
             const Icon = app.icon;
             return (
               <button key={app.id} type="button" className="os-tile" onClick={() => open(app.id)}>

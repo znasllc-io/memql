@@ -22,8 +22,8 @@ import { MODULE_DESCRIPTIONS } from "../system/modules";
 import type { Rect } from "../system/placement";
 import {
   allRequirementsFor,
-  accessAdmits,
-  appsFor,
+  canOpen,
+  listedAppsFor,
   requirementsFor,
   sectionsFor,
   type OsAppManifest,
@@ -199,7 +199,8 @@ export function WindowFrame({
                 else actions.openApp(appId);
               }}
             >
-              {appsFor(registry).map(app => <option key={app.id} value={app.id}>{app.name}</option>)}
+              {manifest.listed === false ? <option value={manifest.id} disabled>{manifest.name}</option> : null}
+              {listedAppsFor(registry).map(app => <option key={app.id} value={app.id}>{app.name}</option>)}
             </Select>
           ) : null}
         </span>
@@ -324,7 +325,7 @@ export function WindowFrame({
               screen for a frame; `partial` renders it too, because mid-rollout
               is a state that resolves itself and a screen telling somebody to
               fix a deploy in progress is worse than a page that mostly works. */}
-          {!accessAdmits(manifest.requires) ? (
+          {!canOpen(registry, manifest.id) ? (
             <SurfaceRefused
               surface={manifest.name}
               resource={manifest.requires}

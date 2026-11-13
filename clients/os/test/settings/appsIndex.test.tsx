@@ -13,8 +13,8 @@ beforeEach(() => {
 
 async function openIndex(access?: Parameters<typeof renderShell>[0] extends undefined ? never : { access: typeof ADMIN }) {
   renderShell(access);
-  openFromLauncher("Settings");
-  gotoSection("Settings", "Apps");
+  fireEvent.click(screen.getByRole("button", { name: "Open Profile" }));
+  gotoSection("Profile", "Apps");
   return screen.findByRole("list", { name: "Installed apps" });
 }
 
@@ -64,8 +64,8 @@ describe("the apps index", () => {
   it("focuses the app's EXISTING window rather than opening a second one", async () => {
     renderShell({ access: OWNER });
     openFromLauncher("Fleet");
-    openFromLauncher("Settings");
-    gotoSection("Settings", "Apps");
+    fireEvent.click(screen.getByRole("button", { name: "Open Profile" }));
+    gotoSection("Profile", "Apps");
 
     const list = await screen.findByRole("list", { name: "Installed apps" });
     fireEvent.click(within(entryFor(list, "Fleet")).getByRole("button", { name: "Settings" }));

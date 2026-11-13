@@ -11,6 +11,8 @@ import type { Readiness } from "../live/readiness";
 export interface SessionFacts {
   access: ProfileAccess | null;
   config: OsRuntimeConfig;
+  /** The existing shell sign-out flow, also reachable from personal Profile. */
+  signOut?: () => void;
   /**
    * Whether the cluster's role ladder has landed (epic memql#4832, D1).
    *

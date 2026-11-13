@@ -10,7 +10,7 @@ export function IdentityOpenDispatcher() {
     const path = identityEntry()?.split("?")[0];
     if (!path?.startsWith("/me")) return;
     const section = path === "/me/tokens" ? "tokens" : path === "/me/settings" ? "settings" : path === "/me/devices" ? "devices" : "profile";
-    actions.openApp("identity", section);
+    actions.openApp("profile", section);
     window.history.replaceState({}, "", "/");
   }, [actions]);
   return null;

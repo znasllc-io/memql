@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 
 import { betweenTheClicks, readTheBar, useFakeDate } from "../readTheBar";
 
-// Settings -> Tokens (epic memql#4984). Every credential in the cluster that
+// Identity -> Tokens (epic memql#4984). Every credential in the cluster that
 // is not a browser session, and the one act that can be taken on one.
 //
 // The planted hash is the sweep's target: `patSummary` and `nodeTokenSummary`
@@ -87,7 +87,7 @@ const { IdentityAdminError } = await import("@znasllc-io/memql-sdk-core/identity
 const { SessionProvider } = await import("../../src/chrome/access");
 const { OsProvider } = await import("../../src/chrome/state");
 const { OS_REGISTRY } = await import("../../src/apps/registry");
-const { SettingsApp } = await import("../../src/apps/settings/SettingsApp");
+const { IdentityApp } = await import("../../src/apps/identity/IdentityApp");
 const { LocalDesktopStore } = await import("../../src/system/store");
 const { UNKNOWN_RUNTIME_CONFIG } = await import("../../src/cluster/config");
 const { MAX_PEOPLE_SCANNED } = await import("../../src/apps/settings/tokenFacts");
@@ -119,7 +119,7 @@ function wrap(children: ReactNode, role: string) {
 
 async function renderTokens(role = "admin") {
   const view = render(
-    wrap(<SettingsApp sectionId="tokens" navigate={vi.fn()} askContext={vi.fn()} />, role),
+    wrap(<IdentityApp sectionId="service-tokens" navigate={vi.fn()} askContext={vi.fn()} />, role),
   );
   await act(async () => {
     for (let i = 0; i < 6; i += 1) await Promise.resolve();
@@ -170,7 +170,7 @@ beforeEach(() => {
   h.state.adminError = null;
 });
 
-describe("Settings -> Tokens", () => {
+describe("Identity -> Tokens", () => {
   it("keeps the two credential kinds apart", async () => {
     await renderTokens();
     const personal = screen.getByRole("region", { name: "Personal access tokens" });
@@ -280,7 +280,7 @@ describe("Settings -> Tokens", () => {
 // The question opens under the Revoke that asked it, outside any bar
 // (memql#6033): the second click of a double-click on Revoke used to revoke the
 // credential before the sentence about what breaks had been read.
-describe("Settings -> Tokens, one double-click later", () => {
+describe("Identity -> Tokens, one double-click later", () => {
   useFakeDate();
 
   const settle = () =>

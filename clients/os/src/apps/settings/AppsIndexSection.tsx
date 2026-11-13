@@ -1,6 +1,6 @@
 import { Caption, Head, RecordList, RecordRow } from "../../kit";
 import { useOs } from "../../chrome/state";
-import { appsFor, sectionsFor, settingsSectionProblem } from "../../system/registry";
+import { listedAppsFor, sectionsFor, settingsSectionProblem } from "../../system/registry";
 import type { OsAppManifest } from "../../system/registry";
 
 // The apps index (memql#4743): a DIRECTORY of every installed app's own
@@ -14,11 +14,11 @@ import type { OsAppManifest } from "../../system/registry";
 // app, one place its settings live, and this list only points at them.
 
 export function AppsIndexSection() {
-  const { registry, actorRole, actions } = useOs();
+  const { registry, actions } = useOs();
   // The one role predicate, through the registry's selector -- the same call
   // the launcher grid and the dock make. An app hidden from this session is
   // hidden here too, and for exactly one reason rather than two.
-  const apps = appsFor(registry);
+  const apps = listedAppsFor(registry);
 
   return (
     <div className="os-settings">
@@ -29,7 +29,7 @@ export function AppsIndexSection() {
       </p>
       <RecordList as="ul" label="Installed apps">
         {apps.map((app) => (
-          <AppEntry key={app.id} app={app} actorRole={actorRole} onOpen={openAppSettings} />
+          <AppEntry key={app.id} app={app} onOpen={openAppSettings} />
         ))}
       </RecordList>
       <Caption>
@@ -59,11 +59,9 @@ export function AppsIndexSection() {
 
 function AppEntry({
   app,
-  actorRole,
   onOpen,
 }: {
   app: OsAppManifest;
-  actorRole: string;
   onOpen: (app: OsAppManifest) => void;
 }) {
   const Icon = app.icon;
@@ -76,6 +74,6 @@ function AppEntry({
   const problem = settingsSectionProblem(app);
 
   return (
-    <RecordRow name={app.name} icon={<Icon size={18} aria-hidden />} secondary={target ? undefined : problem ?? `Requires a higher role than ${actorRole || "unknown"}`} actions={target ? <button type="button" className="os-choice" onClick={() => onOpen(app)}>{target.name}</button> : undefined} />
+    <RecordRow name={app.name} icon={<Icon size={18} aria-hidden />} secondary={target ? undefined : problem ?? "Settings is not available with your access"} actions={target ? <button type="button" className="os-choice" onClick={() => onOpen(app)}>{target.name}</button> : undefined} />
   );
 }

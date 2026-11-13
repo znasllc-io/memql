@@ -22,9 +22,10 @@ import (
 var osNavigationJSON []byte
 
 type navigationSection struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Requires string `json:"requires,omitempty"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Requires       string `json:"requires,omitempty"`
+	SourceRequires string `json:"sourceRequires,omitempty"`
 }
 type navigationRecord struct {
 	Section string   `json:"section"`
@@ -52,16 +53,27 @@ func admittedNavigation(ctx context.Context) []navigationApp {
 	if !ok {
 		return nil
 	}
+	return filterNavigation(navigationApps(), func(resource string) bool { return auth.CapableFor(ctx, subject, "read", resource) })
+}
+
+// Relocation metadata is generated from the fixed OS compatibility map, not
+// supplied by a caller. Keep the old app AND section gate; a grant to a moved
+// surface never opens the destination app's unrelated sections or records.
+func filterNavigation(catalog []navigationApp, capable func(string) bool) []navigationApp {
 	apps := []navigationApp{}
-	for _, app := range navigationApps() {
-		if !auth.CapableFor(ctx, subject, "read", app.Requires) {
-			continue
-		}
+	for _, app := range catalog {
 		sections := []navigationSection{}
 		for _, section := range app.Sections {
-			if section.Requires == "" || auth.CapableFor(ctx, subject, "read", section.Requires) {
+			door := app.Requires
+			if section.SourceRequires != "" {
+				door = section.SourceRequires
+			}
+			if capable(door) && (section.Requires == "" || capable(section.Requires)) {
 				sections = append(sections, section)
 			}
+		}
+		if len(sections) == 0 && (len(app.Sections) > 0 || !capable(app.Requires)) {
+			continue
 		}
 		app.Sections = sections
 		records := []navigationRecord{}

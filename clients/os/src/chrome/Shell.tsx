@@ -138,7 +138,7 @@ export function Shell({
           its own provider from this, and gets `bearer()` rather than the
           token. */}
       <OsConnectionProvider authSource={source} enabled={!ports.disableConnection}>
-        <SessionScope access={access} config={config}>
+        <SessionScope access={access} config={config} signOut={onSignOut}>
           <RoleTestBanner />
         {/* WHAT THIS CLUSTER STILL NEEDS SET UP, read once for the three
             surfaces that ask (epic memql#5118). Above the desk, because the
@@ -211,10 +211,12 @@ export function Shell({
 function SessionScope({
   access,
   config,
+  signOut,
   children,
 }: {
   access: ProfileAccess | null;
   config: OsRuntimeConfig;
+  signOut: () => void;
   children: ReactNode;
 }) {
   const resolved = useResolvedAccess(access);
@@ -240,8 +242,8 @@ function SessionScope({
   // Set up group reads one answer. See src/live/readiness.tsx.
   const readiness = useReadinessFeed();
   const value = useMemo(
-    () => ({ access: resolved, config, ladderLoaded, accessEpoch, readiness }),
-    [resolved, config, ladderLoaded, accessEpoch, readiness],
+    () => ({ access: resolved, config, signOut, ladderLoaded, accessEpoch, readiness }),
+    [resolved, config, signOut, ladderLoaded, accessEpoch, readiness],
   );
   return <SessionProvider value={value}>{children}</SessionProvider>;
 }

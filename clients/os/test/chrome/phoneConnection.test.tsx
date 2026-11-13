@@ -41,16 +41,16 @@ async function dropped(retry = vi.fn()) {
 }
 const notice = () => screen.getByRole("status").closest(".os-connection-notice")!;
 const title = () => document.querySelector(".os-phone-title")!;
-const signOut = () => screen.getByRole("button", { name: "Sign out" });
+const profile = () => screen.getByRole("button", { name: "Open Profile" });
 const onTheLine = () => {
   expect(notice().parentElement).toBe(document.querySelector(".os-phone-bar"));
   expect(notice().previousElementSibling).toBe(title());
-  expect(notice().nextElementSibling).toBe(signOut());
+  expect(notice().nextElementSibling).toBe(profile());
 };
 
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
-it("says it is reconnecting on the header's own line, between the title and Sign out", async () => {
+it("says it is reconnecting on the header's own line, between the title and Profile", async () => {
   await dropped();
   expect(screen.getByRole("status").textContent).toBe("Reconnecting…");
   onTheLine();
@@ -82,10 +82,9 @@ it("gives the header's line no way to grow, with the title giving way first", ()
   expect(rule(".os-phone-connection")).toContain("flex: 0 1 auto;");
   expect(rule(".os-phone-connection")).toContain("min-width: 0;");
   // Nothing that does not give way can wrap or be squeezed.
-  expect(rule(".os-phone-mark, .os-phone-bar > .os-icon-button, .os-phone-bar > .os-link")).toContain("flex: none;");
-  // Sign out keeps its edge, and the room left over stands between it and Retry: a tap
-  // meant for Retry must not sign anyone out, on top of the line's own 10 px gap.
-  expect(rule(".os-phone-bar > .os-link")).toContain("margin-inline-start: auto;");
+  expect(rule(".os-phone-mark, .os-phone-bar > .os-icon-button, .os-phone-bar > .os-avatar-button")).toContain("flex: none;");
+  // Profile keeps its edge, with the same protected gap from Retry.
+  expect(rule(".os-phone-bar > .os-avatar-button")).toContain("margin-inline-start: auto;");
   expect(rule(".os-phone-connection")).toContain("margin-inline-end: 10px;");
   // A 30 px control in a 20 px line: its margins leave it 20 px of the line's height.
   expect(CSS).toContain("--os-control-h");

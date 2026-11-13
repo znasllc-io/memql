@@ -1,3 +1,4 @@
+import { appDestination } from "../system/appDestinations";
 // The shell's one state hub: the kernel's ShellState + per-desk surfaces +
 // dock pins + theme pack, persisted through DesktopStore on every change.
 // Components call the actions; nothing outside this file mutates state.
@@ -585,6 +586,7 @@ export function OsProvider({
 
     actionsRef.current = {
       openApp: (appId, sectionId, payload) => {
+        ({ appId, sectionId } = appDestination(appId, sectionId));
         // Saved links and Ask actions keep pointing to the same object after its workspace moves.
         if (appId === "deployables" && (sectionId === "sources" || sectionId === "runs")) { appId = "pipelines"; sectionId = sectionId === "sources" ? "repositories" : "runs"; }
         if (appId === "cluster" && sectionId === "releases") { appId = "pipelines"; }
@@ -595,6 +597,8 @@ export function OsProvider({
         const intent = payload ? { id: nextId("intent"), payload } : undefined;
         set((s) => {
           if (!canOpen(registry, appId)) return s;
+          const manifest = registry.apps.find(app => app.id === appId);
+          if (sectionId && manifest?.sections?.length && !sectionsFor(manifest).some(section => section.id === sectionId)) return s;
           const target = sectionId ?? defaultSection(registry, appId);
           const { state: shell, effect } = openAppFn(s.shell, appId, target, intent);
           lastEffect = effect;
@@ -628,7 +632,7 @@ export function OsProvider({
       switchDeskBy: (delta) =>
         set((s) => ({ ...s, shell: switchDeskByFn(s.shell, delta, { deskHasSurfaceContent: hasContent(s) }) })),
       addDesk: () => set((s) => ({ ...s, shell: addDeskFn(s.shell) })),
-      pinApp: (appId) => set((s) => ({ ...s, dock: pinFn(s.dock, appId) })),
+      pinApp: (appId) => set((s) => registry.apps.some(app => app.id === appId && app.listed === false) ? s : ({ ...s, dock: pinFn(s.dock, appId) })),
       unpinApp: (appId) => set((s) => ({ ...s, dock: unpinFn(s.dock, appId) })),
       movePin: (appId, toIndex) => set((s) => ({ ...s, dock: movePinFn(s.dock, appId, toIndex) })),
       addFile: (entry, preferred) => {

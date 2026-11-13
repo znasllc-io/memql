@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Palette } from "lucide-react";
 
 import { Mark } from "./Mark";
-import { appsFor, widgetsFor } from "../system/registry";
+import { listedAppsFor, widgetsFor } from "../system/registry";
 import { useOs } from "./state";
 
 // The Launcher (spec A): a full-screen glass overlay -- search, the
@@ -37,14 +37,14 @@ export function LauncherOverlay({
     }
   }, [open]);
 
-  // `accessEpoch` is a dep even though it is not read in the body: appsFor
+  // `accessEpoch` is a dep even though it is not read in the body: listedAppsFor
   // reads the EFFECTIVE CAPABILITY SET out of band (module state), so the set
   // landing after the identity -- or changing on a focus re-read -- is a
   // change this memo must see or it keeps the empty-set answer, every gated
   // app hidden, for the session (memql#4857, which bit the ladder first).
   // The same reason it rides the widgets filter below.
   const apps = useMemo(() => {
-    const admitted = appsFor(registry);
+    const admitted = listedAppsFor(registry);
     const q = query.trim().toLowerCase();
     return q ? admitted.filter((a) => a.name.toLowerCase().includes(q)) : admitted;
   }, [registry, accessEpoch, query]);

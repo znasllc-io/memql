@@ -595,7 +595,8 @@ function namer(people: readonly PersonRow[], groups: readonly GroupRow[], viewer
 }
 
 function appLabel(resources: readonly AccessResource[], r: AccessResource): string {
-  return resources.find((x) => x.appId === r.appId && x.part === "")?.label ?? r.appId;
+  const displayAppId = r.displayAppId ?? r.appId;
+  return resources.find((x) => x.appId === displayAppId && x.part === "")?.label ?? displayAppId;
 }
 
 function verbOf(resources: readonly AccessResource[], resource: string): string {

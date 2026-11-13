@@ -257,9 +257,6 @@
 
 /* "Show more" under who got it: the panel's own gap spaces it from the rows, so
  * the paragraph adds none of its own. */
-.email-more {
-  margin: 0;
-}
 
 /* ---- An email, as it is sent (templates/Preview.tsx) ---------------------- */
 

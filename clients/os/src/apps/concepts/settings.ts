@@ -16,6 +16,7 @@ import type { OsAppSection } from "../../system/registry";
  */
 export const CONCEPTS_SECTIONS: OsAppSection[] = [
   { id: "registry", name: "Registry" },
+  { id: "language", name: "Language", requires: "app:settings/language" },
   // The app's slice of the cluster's logs (epic memql#4895). Admin-floored
   // because every read on the log store is (spec L3), and this is the one
   // section whose floor is not this app's to choose.

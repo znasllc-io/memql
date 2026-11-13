@@ -18,7 +18,7 @@ describe("the permissions self-view (memql#4744)", () => {
     const labels = hidden.map((h) => h.label);
     expect(labels).toContain("Users");
     expect(labels).toContain("Training");
-    expect(labels).toContain("Settings -- Cluster");
+    expect(labels).toContain("Identity -- Sign-in policy");
     // THE RESOURCE, NOT A ROLE. What opens Users is `read app:users`, which a
     // role, a group or a grant to this person by name may hold -- so "admin"
     // would be false for somebody granted the app on their own name.
@@ -31,7 +31,7 @@ describe("the permissions self-view (memql#4744)", () => {
     const labels = hiddenSurfaces(OS_REGISTRY).map((h) => h.label);
     expect(labels).not.toContain("Training");
     expect(labels).toContain("Users");
-    expect(labels).toContain("Settings -- Cluster");
+    expect(labels).toContain("Identity -- Sign-in policy");
   });
 
   it("an admin loses exactly what the seeds leave them out of", () => {
@@ -71,8 +71,8 @@ describe("the permissions self-view (memql#4744)", () => {
     // for and the list had never actually asserted.
     expect(gated).toContain("Settings -- Integrations");
     expect(gated).toContain("Settings -- Vendors");
-    expect(gated).toContain("Cluster -- Audit trail");
-    expect(gated).toContain("Cluster -- Data");
+    expect(gated).toContain("Identity -- Audit trail");
+    expect(gated).toContain("Settings -- Data");
   });
 
   it("names the resource when a section is what hid the surface", () => {

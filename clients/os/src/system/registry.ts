@@ -6,8 +6,9 @@
 import type { ComponentType, ReactNode } from "react";
 
 import type { ModuleId } from "./modules";
+import { legacyPersonalSource, relocatedSectionSource } from "./appDestinations";
 import { isModuleId } from "./modules";
-import { availableInAnyOrganization, decidedPerOrganization, holds } from "./roles";
+import { availableInAnyOrganization, decidedPerOrganization, effectiveCapabilities, holds } from "./roles";
 
 // WHAT A MANIFEST ASKS OF THE PERSON (epic memql#5289, design D10): a
 // capability RESOURCE, named. `requires: "app:<id>"` on an app or widget,
@@ -137,6 +138,11 @@ export interface OsAppManifest {
    * a manifest that does not name its resource.
    */
   requires: AccessResource;
+  /** False for a surface with its own shell entry (Profile's picture).
+   * It stays addressable for existing links and retained windows, but is not
+   * offered in the Launcher, app selector, directory or dock pin list. This
+   * controls discovery only; canOpen still checks the app's capability. */
+  listed?: boolean;
   sections?: OsAppSection[];
   /**
    * Modules the WHOLE app cannot work without: every section but Settings
@@ -265,7 +271,11 @@ export function widgetById(registry: OsRegistry, id: string): OsWidgetManifest |
  * or it keeps the empty-set answer (every app hidden) after the read lands.
  */
 export function appsFor(registry: OsRegistry): OsAppManifest[] {
-  return registry.apps.filter((a) => accessAdmits(a.requires));
+  return registry.apps.filter((a) => canOpen(registry, a.id));
+}
+
+export function listedAppsFor(registry: OsRegistry): OsAppManifest[] {
+  return appsFor(registry).filter((app) => app.listed !== false);
 }
 
 export function widgetsFor(registry: OsRegistry): OsWidgetManifest[] {
@@ -274,7 +284,16 @@ export function widgetsFor(registry: OsRegistry): OsWidgetManifest[] {
 
 /** Sections of an app the effective set opens; the first is the default. */
 export function sectionsFor(app: OsAppManifest): OsAppSection[] {
-  return (app.sections ?? []).filter((s) => accessAdmits(s.requires));
+  return (app.sections ?? []).filter((s) => {
+    // Compatibility for pre-existing custom personal grants is section-specific.
+    // An explicit new Profile answer (especially a deny) never falls back.
+    if (app.id === "profile" && !effectiveCapabilities().some(entry => entry.verb === OPEN_VERB && entry.resource === app.requires)) {
+      const personalSource = legacyPersonalSource(s.id);
+      return personalSource !== undefined && accessAdmits(`app:${personalSource}`) && accessAdmits(s.requires);
+    }
+    const source = relocatedSectionSource(app.id, s.id, s.requires);
+    return accessAdmits(source ? `app:${source}` : app.requires) && accessAdmits(s.requires);
+  });
 }
 
 /**
@@ -283,7 +302,8 @@ export function sectionsFor(app: OsAppManifest): OsAppSection[] {
  */
 export function canOpen(registry: OsRegistry, appId: string): boolean {
   const app = appById(registry, appId);
-  return !!app && accessAdmits(app.requires);
+  if (!app) return false;
+  return app.sections?.length ? sectionsFor(app).length > 0 : accessAdmits(app.requires);
 }
 
 /**

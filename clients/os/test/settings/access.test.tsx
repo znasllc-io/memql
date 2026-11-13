@@ -275,7 +275,7 @@ describe("the pure half", () => {
     expect(parts).toEqual(expect.arrayContaining(["deploy", "publish", "retire", "domains", "logs"]));
     // A part is `execute`; a floored section is `read`, named as the section.
     expect(rows.find((r) => r.resource === "app:deployables/publish")?.verb).toBe("execute");
-    expect(rows.find((r) => r.resource === "app:settings/cluster")).toMatchObject({ verb: "read", label: "Cluster facts" });
+    expect(rows.find((r) => r.resource === "app:settings/cluster")).toMatchObject({ verb: "read", label: "Cluster facts and sign-in policy" });
     // Every app's parts come right after its door.
     for (let i = deployables + 1; i < rows.length && rows[i]!.appId === "deployables"; i++) expect(rows[i]!.part).not.toBe("");
     // A resource only a grant names is kept, so a deny on it can be lifted.

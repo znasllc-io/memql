@@ -368,7 +368,7 @@ function BudgetFields({ limit, spent, resetsAt, save }: { limit: number | null; 
 
 function SecurityFacts({ profile }: { profile: MyProfile }) {
   const passkeys = useMyPasskeys();
-  const identity = useAppReach("identity");
+  const identity = useAppReach("profile");
   const count =
     passkeys.state === "ready" ? (passkeys.active === 0 ? "None" : passkeys.active === 1 ? "1 passkey" : `${passkeys.active} passkeys`)
       : passkeys.state === "reading" ? "Checking…" : "Not reported";

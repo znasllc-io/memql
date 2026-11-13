@@ -44,7 +44,7 @@ vi.mock("../../src/live/connection", () => ({
 const { SessionProvider } = await import("../../src/chrome/access");
 const { OsProvider } = await import("../../src/chrome/state");
 const { OS_REGISTRY } = await import("../../src/apps/registry");
-const { SettingsApp } = await import("../../src/apps/settings/SettingsApp");
+const { ProfileApp } = await import("../../src/apps/profile/ProfileApp");
 const { LocalDesktopStore } = await import("../../src/system/store");
 const { UNKNOWN_RUNTIME_CONFIG } = await import("../../src/cluster/config");
 import { installSeededAccess } from "../seededAccess";
@@ -79,7 +79,7 @@ function wrap(children: ReactNode, role = "owner") {
 function renderDiagnostics(role = "owner") {
   installSeededAccess(role);
   return render(
-    wrap(<SettingsApp sectionId="diagnostics" navigate={vi.fn()} askContext={vi.fn()} />, role),
+    wrap(<ProfileApp sectionId="diagnostics" navigate={vi.fn()} askContext={vi.fn()} />, role),
   );
 }
 
@@ -132,7 +132,7 @@ describe("the permissions self-view", () => {
     expect(rows.some((r) => /Users.*needs read on app:users.*you are reader/.test(r))).toBe(true);
     expect(rows.some((r) => /Training.*needs read on app:training/.test(r))).toBe(true);
     // The informative case: a section gated above an app the reader CAN open.
-    expect(rows.some((r) => /Settings -- Cluster.*needs read on app:settings\/cluster/.test(r))).toBe(true);
+    expect(rows.some((r) => /Identity -- Sign-in policy.*needs read on app:settings\/cluster/.test(r))).toBe(true);
   });
 
   it("tells an owner that nothing is hidden", () => {

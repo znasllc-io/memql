@@ -863,6 +863,18 @@ seed capability cap-developer-execute-app-deployables-store { roleSlug: "develop
 // `sources` and `deploy` for these (epic memql#5477) ends here.
 
 
+// Personal Profile is reachable by every signed-in role from the shell's
+// picture. Its existing writes still derive the person from actor.userId;
+// this app capability grants no account selection or administrative authority.
+seed capability cap-owner-read-app-profile { roleSlug: "owner" verb: "read" resourceType: "app:profile" predefined: true }
+seed capability cap-developer-read-app-profile { roleSlug: "developer" verb: "read" resourceType: "app:profile" predefined: true }
+seed capability cap-admin-read-app-profile { roleSlug: "admin" verb: "read" resourceType: "app:profile" predefined: true }
+seed capability cap-user-read-app-profile { roleSlug: "user" verb: "read" resourceType: "app:profile" predefined: true }
+seed capability cap-viewer-read-app-profile { roleSlug: "viewer" verb: "read" resourceType: "app:profile" predefined: true }
+seed capability cap-owner-read-app-profile-logs { roleSlug: "owner" verb: "read" resourceType: "app:profile/logs" predefined: true }
+seed capability cap-developer-read-app-profile-logs { roleSlug: "developer" verb: "read" resourceType: "app:profile/logs" predefined: true }
+seed capability cap-admin-read-app-profile-logs { roleSlug: "admin" verb: "read" resourceType: "app:profile/logs" predefined: true }
+
 // ---- app:identity (registry floor: no floor) ----
 @description("owner: open the bin app -- reproduces the OS registry floor no floor (memql#5300).")
 seed capability cap-owner-read-app-identity { roleSlug: "owner"  verb: "read"  resourceType: "app:identity"  predefined: true }

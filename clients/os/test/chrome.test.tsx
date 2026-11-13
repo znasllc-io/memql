@@ -218,25 +218,25 @@ describe("roles (spec K bullet 7)", () => {
     expect(within(launcher).getByRole("button", { name: appTileName("Files") })).toBeTruthy();
   });
 
-  it("gates app sections: reader sees no Cluster section in Settings", () => {
+  it("keeps the reader's personal settings in Profile", () => {
     renderShell({ access: READER });
-    openFromLauncher("Settings");
-    const nav = screen.getByRole("navigation", { name: "Settings sections" });
-    expect(within(nav).queryByRole("button", { name: "Cluster" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open Profile" }));
+    const nav = screen.getByRole("navigation", { name: "Profile sections" });
+    expect(within(nav).queryByRole("button", { name: "Sign-in policy" })).toBeNull();
     expect(within(nav).getByRole("button", { name: "About" })).toBeTruthy();
   });
 
-  it("owner sees the Cluster section and the gear jumps to Appearance", async () => {
+  it("owner sees installation services and the gear opens Integrations", async () => {
     renderShell();
     openFromLauncher("Settings");
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
-    expect(within(nav).getByRole("button", { name: "Cluster" })).toBeTruthy();
+    expect(within(nav).getByRole("button", { name: "Integrations" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Settings settings" }));
     expect(screen.getByRole("button", { name: "Settings settings" }).getAttribute("aria-current")).toBe("page");
     // The real Settings module loads on demand. Await that work and its React
     // update explicitly; a cold transform need not finish within findBy's 1s.
     await act(async () => { await import("../src/apps/settings/SettingsApp"); });
-    expect(screen.getByRole("heading", { name: "Appearance" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Integrations" })).toBeTruthy();
   });
 });
 
@@ -394,10 +394,12 @@ describe("phone chrome (spec D13)", () => {
     expect(document.querySelector("[data-os-dock]")).toBeNull();
     expect(document.querySelector("[data-os-phone]")).not.toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: appTileName("Settings") }));
-    expect(await screen.findByRole("heading", { name: "About this OS" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: appTileName("Profile") })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open Profile" }));
+    fireEvent.click(screen.getByRole("button", { name: "About" }));
+    expect(await screen.findByRole("heading", { name: "About" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Back to home" }));
-    expect(screen.queryByRole("heading", { name: "About this OS" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "About" })).toBeNull();
   });
 });
 

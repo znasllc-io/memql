@@ -114,44 +114,25 @@ describe("the settings-section contract", () => {
   it("Settings itself declares its sections", () => {
     const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
     expect(settings?.sections?.map((s) => s.id)).toEqual([
-      "about",
-      "appearance",
-      "ask",
-      "apps",
-      "access",
-      "cluster",
-      "language",
-      "diagnostics",
-      "benchmarks",
-      "connections",
-      "integrations",
-      "pipelines",
-      "providers",
-      "levels",
-      "rules",
-      "decisions",
-      "procedures",
-      "tokens",
-      "keys",
-      "logs",
+      "integrations", "data", "connections", "pipelines", "providers", "levels", "rules", "decisions", "procedures", "logs",
     ]);
     expect(settings?.sections?.find((s) => s.id === "pipelines")?.requires).toBe("app:settings/pipelines");
     expect(rolesOpening("app:settings/pipelines")).toEqual(["owner"]);
-    expect(settings?.sections?.find((s) => s.id === "cluster")?.requires).toBe("app:settings/cluster");
+    expect(OS_REGISTRY.apps.find(app => app.id === "identity")?.sections?.find(s => s.id === "policy")?.requires).toBe("app:settings/cluster");
     expect(rolesOpening("app:settings/cluster")).toEqual(["owner", "developer", "admin"]);
     // Language (memql#5390): the same three roles, and the same name the
     // languageStatus builtin declares -- so the engine refuses the read to
     // exactly the people the shell hides the section from.
-    expect(settings?.sections?.find((s) => s.id === "language")?.requires).toBe("app:settings/language");
+    expect(OS_REGISTRY.apps.find(app => app.id === "concepts")?.sections?.find(s => s.id === "language")?.requires).toBe("app:settings/language");
     expect(rolesOpening("app:settings/language")).toEqual(["owner", "developer", "admin"]);
     // Access (epic memql#5289): seeded on the roles the grant reads admit.
-    expect(settings?.sections?.find((s) => s.id === "access")?.requires).toBe("app:settings/access");
+    expect(OS_REGISTRY.apps.find(app => app.id === "users")?.sections?.find(s => s.id === "access")?.requires).toBe("app:settings/access");
     expect(rolesOpening("app:settings/access")).toEqual(["owner", "developer", "admin"]);
     // Benchmarks is a MINIMUM and matches Cluster: v1:bench:run and
     // v1:bench:sample declare @rowAuthz(clusterOwner), so a reader below the
     // floor would be shown an empty section with no explanation. The gate here
     // is presentation over one the engine already holds.
-    expect(settings?.sections?.find((s) => s.id === "benchmarks")?.requires).toBe("app:settings/benchmarks");
+    expect(OS_REGISTRY.apps.find(app => app.id === "cluster")?.sections?.find(s => s.id === "benchmarks")?.requires).toBe("app:settings/benchmarks");
     expect(rolesOpening("app:settings/benchmarks")).toEqual(["owner", "developer", "admin"]);
     // THE TWO GATE FORMS ARE PINNED SEPARATELY, because they are different
     // statements and the difference is the point. Cluster is a ladder MINIMUM
@@ -192,9 +173,9 @@ describe("the settings-section contract", () => {
     expect(rolesOpening("app:settings/procedures")).toEqual(rolesOpening("app:settings/levels"));
     expect(settings?.sections?.find((s) => s.id === "providers")?.requires).toBe("app:settings/providers");
     expect(rolesOpening("app:settings/providers")).toEqual(["owner", "developer"]);
-    expect(settings?.sections?.find((s) => s.id === "tokens")?.requires).toBe("app:settings/tokens");
+    expect(OS_REGISTRY.apps.find(app => app.id === "identity")?.sections?.find(s => s.id === "service-tokens")?.requires).toBe("app:settings/tokens");
     expect(rolesOpening("app:settings/tokens")).toEqual(["owner", "developer", "admin"]);
-    expect(settings?.sections?.find((s) => s.id === "keys")?.requires).toBe("app:settings/keys");
+    expect(OS_REGISTRY.apps.find(app => app.id === "identity")?.sections?.find(s => s.id === "keys")?.requires).toBe("app:settings/keys");
     expect(rolesOpening("app:settings/keys")).toEqual(["owner", "developer", "admin"]);
   });
 });

@@ -8,9 +8,8 @@ import { LocalDesktopStore } from "../src/system/store";
 import type { OsRuntimeConfig } from "../src/cluster/config";
 import { appTileName } from "./appTile";
 
-// The Profile MODULE is gone (spec A0): its MyAccess facts now surface in
-// Settings -> About and the avatar menu. The parse layer stays -- the Shell
-// reads it from the cluster stream (memql#4775).
+// Profile is a personal app reached directly from the shell picture. Its
+// identity facts still come from the same authenticated cluster stream.
 
 const ACCESS = {
   userId: "v1:identity:user:u-42",
@@ -104,7 +103,7 @@ describe("the access facts surface in chrome", () => {
     return { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) };
   }
 
-  it("Settings -> About names the signed-in identity and role", async () => {
+  it("Profile -> About names the signed-in identity and role", async () => {
     resetIdsForTest();
     render(
       <Shell
@@ -115,16 +114,15 @@ describe("the access facts surface in chrome", () => {
         ports={{ store: new LocalDesktopStore(memStorage()), disableConnection: true }}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Launcher" }));
-    fireEvent.click(
-      within(screen.getByRole("dialog", { name: "Launcher" })).getByRole("button", { name: appTileName("Settings") }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Open Profile" }));
+    const profile = await screen.findByRole("dialog", { name: "Profile" });
+    fireEvent.click(within(profile).getByRole("button", { name: "About" }));
     expect(await screen.findByText("ada@example.test")).toBeTruthy();
     expect(screen.getByText("owner")).toBeTruthy();
     expect(screen.getByText("example.test")).toBeTruthy();
   });
 
-  it("the avatar menu carries the email and the sign out", () => {
+  it("Profile retains the existing sign-out action", async () => {
     resetIdsForTest();
     const onSignOut = vi.fn();
     render(
@@ -136,14 +134,13 @@ describe("the access facts surface in chrome", () => {
         ports={{ store: new LocalDesktopStore(memStorage()), disableConnection: true }}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Account menu" }));
-    const menu = screen.getByRole("menu", { name: "Account" });
-    expect(within(menu).getByText("ada@example.test")).toBeTruthy();
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "Sign out" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Profile" }));
+    const profile = await screen.findByRole("dialog", { name: "Profile" });
+    fireEvent.click(await within(profile).findByRole("button", { name: "Sign out" }));
     expect(onSignOut).toHaveBeenCalledTimes(1);
   });
 
-  it("the avatar menu opens your Profile (memql#6220)", async () => {
+  it("the picture opens one Profile directly, outside the Launcher", async () => {
     resetIdsForTest();
     render(
       <Shell
@@ -154,9 +151,15 @@ describe("the access facts surface in chrome", () => {
         ports={{ store: new LocalDesktopStore(memStorage()), disableConnection: true }}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Account menu" }));
-    fireEvent.click(within(screen.getByRole("menu", { name: "Account" })).getByRole("menuitem", { name: "Profile" }));
+    fireEvent.click(screen.getByRole("button", { name: "Launcher" }));
+    const launcher = screen.getByRole("dialog", { name: "Launcher" });
+    expect(within(launcher).queryByRole("button", { name: appTileName("Profile") })).toBeNull();
+    fireEvent.keyDown(launcher, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Open Profile" }));
     expect(screen.queryByRole("menu", { name: "Account" })).toBeNull();
+    await screen.findByRole("dialog", { name: "Profile" });
+    fireEvent.click(screen.getByRole("button", { name: "Open Profile" }));
+    expect(screen.getAllByRole("dialog", { name: "Profile" })).toHaveLength(1);
     // No connection in this harness, so the page holds its reading state --
     // which is the Profile section, not the identity service's page.
     expect(await screen.findByText("Reading your profile")).toBeTruthy();

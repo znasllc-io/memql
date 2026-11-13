@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { BUILT_IN_PACKS, resolveThemePack, themePackById } from "../../src/themes/registry";
 import { resetIdsForTest } from "../../src/system/desks";
 import { DESKTOP_STORE_KEY } from "../../src/system/store";
-import { gotoSection, memStorage, openFromLauncher, renderShell } from "./shellHarness";
+import { gotoSection, memStorage, renderShell } from "./shellHarness";
 
 // The theme-pack selector (memql#4743) -- the ONE write this epic makes,
 // and it goes to DesktopStore, never to the cluster.
@@ -38,8 +38,8 @@ describe("the theme registry", () => {
 describe("the Appearance section", () => {
   async function openAppearance(storage = memStorage()) {
     renderShell({ storage });
-    openFromLauncher("Settings");
-    gotoSection("Settings", "Appearance");
+    fireEvent.click(screen.getByRole("button", { name: "Open Profile" }));
+    gotoSection("Profile", "Appearance");
     await screen.findByRole("radiogroup", { name: "Theme" });
     return storage;
   }
@@ -91,6 +91,6 @@ describe("the Appearance section", () => {
     // Choosing a theme pack leaves mode exactly where it was. A theme
     // defines BOTH looks; picking one is not a statement about which look.
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
-    expect(screen.getByRole("radio", { name: "Dark" }).getAttribute("aria-checked")).toBe("true");
+    expect(String((screen.getByRole("radio", { name: "Dark" }) as HTMLInputElement).checked)).toBe("true");
   });
 });

@@ -63,7 +63,8 @@ import type { OsAppSection } from "../../system/registry";
 export const CLUSTER_SECTIONS: OsAppSection[] = [
   { id: "overview", name: "Overview" },
   { id: "runtime", name: "Runtime" },
-  { id: "origins", name: "Data", requires: "app:cluster/origins" },
+  { id: "facts", name: "Cluster facts", parent: "overview", requires: "app:settings/cluster" },
+  { id: "benchmarks", name: "Benchmarks", requires: "app:settings/benchmarks" },
   { id: "updates", name: "Updates", requires: "app:cluster/updates" },
   { id: "readiness", name: "Readiness", parent: "overview" },
   { id: "capacity", name: "Capacity", parent: "runtime", requires: "app:cluster/capacity" },
@@ -71,7 +72,6 @@ export const CLUSTER_SECTIONS: OsAppSection[] = [
   { id: "mesh", name: "Nodes", parent: "runtime" },
   { id: "automations", name: "System automations", parent: "runtime", requires: "app:cluster/automations" },
   { id: "agents", name: "Agents", parent: "runtime" },
-  { id: "audit", name: "Audit trail", parent: "logs", requires: "app:cluster/audit" },
   { id: "logs", name: "Logs", requires: "app:cluster/logs" },
   { id: "settings", name: "Settings" },
 ];

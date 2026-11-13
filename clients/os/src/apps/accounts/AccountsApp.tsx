@@ -6,7 +6,6 @@ import { AppLogsSection } from "../../logs/AppLogsSection";
 import { useOsIfPresent } from "../../chrome/state";
 import type { OsAppProps } from "../../system/registry";
 import { AccountsSection } from "./AccountsSection";
-import { CredentialsSection } from "./CredentialsSection";
 import { FirstRunCard } from "./FirstRunCard";
 import { useArchiveAccount, useCreateAccount, useUpdateAccount } from "./actions";
 import { accountFromRow, needsFirstRun, SELF_ACCOUNT_ID, type AccountRow } from "./rows";
@@ -85,9 +84,6 @@ export function AccountsApp({
   // nothing else, so the section takes no props from here: not the feed, not
   // the write states, not the settings. A shared prop would be the first step
   // back towards the placement this fixed.
-  if (sectionId === "credentials") {
-    return <CredentialsSection />;
-  }
   if (sectionId === "logs") {
     return (
       <AppLogsSection

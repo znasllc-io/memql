@@ -9,7 +9,8 @@
 // table as a permission audit would be reading it wrong.
 
 import { describeResource } from "../../system/roles";
-import { accessAdmits, sectionsFor } from "../../system/registry";
+import { relocatedSectionSource } from "../../system/appDestinations";
+import { accessAdmits, canOpen, sectionsFor } from "../../system/registry";
 import type { OsRegistry } from "../../system/registry";
 
 export interface HiddenSurface {
@@ -37,17 +38,19 @@ export function hiddenSurfaces(registry: OsRegistry): HiddenSurface[] {
   const hidden: HiddenSurface[] = [];
 
   for (const app of registry.apps) {
-    if (!accessAdmits(app.requires)) {
+    if (!accessAdmits(app.requires) && !canOpen(registry, app.id)) {
       hidden.push({ kind: "app", label: app.name, requires: describeResource(app.requires) });
       continue;
     }
     const admitted = new Set(sectionsFor(app).map((s) => s.id));
     for (const section of app.sections ?? []) {
       if (admitted.has(section.id)) continue;
+      const source = relocatedSectionSource(app.id, section.id, section.requires);
+      const door = source ? `app:${source}` : app.requires;
       hidden.push({
         kind: "section",
         label: `${app.name} -- ${section.name}`,
-        requires: describeResource(section.requires),
+        requires: describeResource(accessAdmits(door) ? section.requires : door),
       });
     }
   }

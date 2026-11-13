@@ -5,25 +5,39 @@
     "requires": "app:identity",
     "sections": [
       {
-        "id": "profile",
-        "name": "Profile"
+        "id": "policy",
+        "name": "Sign-in policy",
+        "requires": "app:settings/cluster",
+        "sourceRequires": "app:settings"
       },
       {
-        "id": "devices",
-        "name": "Passkeys and sessions"
+        "id": "requests",
+        "name": "Access requests",
+        "requires": "app:users",
+        "sourceRequires": "app:users"
       },
       {
-        "id": "tokens",
-        "name": "Access tokens"
+        "id": "keys",
+        "name": "Keys",
+        "requires": "app:settings/keys",
+        "sourceRequires": "app:settings"
+      },
+      {
+        "id": "service-tokens",
+        "name": "Tokens",
+        "requires": "app:settings/tokens",
+        "sourceRequires": "app:settings"
+      },
+      {
+        "id": "audit",
+        "name": "Audit trail",
+        "requires": "app:cluster/audit",
+        "sourceRequires": "app:cluster"
       },
       {
         "id": "logs",
         "name": "Logs",
         "requires": "app:identity/logs"
-      },
-      {
-        "id": "settings",
-        "name": "Settings"
       }
     ],
     "records": []
@@ -36,10 +50,6 @@
       {
         "id": "accounts",
         "name": "Accounts"
-      },
-      {
-        "id": "credentials",
-        "name": "Credentials"
       },
       {
         "id": "logs",
@@ -145,9 +155,16 @@
         "name": "Runtime"
       },
       {
-        "id": "origins",
-        "name": "Data",
-        "requires": "app:cluster/origins"
+        "id": "facts",
+        "name": "Cluster facts",
+        "requires": "app:settings/cluster",
+        "sourceRequires": "app:settings"
+      },
+      {
+        "id": "benchmarks",
+        "name": "Benchmarks",
+        "requires": "app:settings/benchmarks",
+        "sourceRequires": "app:settings"
       },
       {
         "id": "updates",
@@ -182,11 +199,6 @@
         "name": "Agents"
       },
       {
-        "id": "audit",
-        "name": "Audit trail",
-        "requires": "app:cluster/audit"
-      },
-      {
         "id": "logs",
         "name": "Logs",
         "requires": "app:cluster/logs"
@@ -206,6 +218,12 @@
       {
         "id": "registry",
         "name": "Registry"
+      },
+      {
+        "id": "language",
+        "name": "Language",
+        "requires": "app:settings/language",
+        "sourceRequires": "app:settings"
       },
       {
         "id": "logs",
@@ -445,8 +463,10 @@
         "name": "People"
       },
       {
-        "id": "requests",
-        "name": "Access requests"
+        "id": "access",
+        "name": "Access",
+        "requires": "app:settings/access",
+        "sourceRequires": "app:settings"
       },
       {
         "id": "groups",
@@ -570,54 +590,20 @@
     "requires": "app:settings",
     "sections": [
       {
-        "id": "about",
-        "name": "About"
+        "id": "integrations",
+        "name": "Integrations",
+        "requires": "app:settings/integrations"
       },
       {
-        "id": "appearance",
-        "name": "Appearance"
-      },
-      {
-        "id": "ask",
-        "name": "Ask"
-      },
-      {
-        "id": "apps",
-        "name": "Apps"
-      },
-      {
-        "id": "access",
-        "name": "Access",
-        "requires": "app:settings/access"
-      },
-      {
-        "id": "cluster",
-        "name": "Cluster",
-        "requires": "app:settings/cluster"
-      },
-      {
-        "id": "language",
-        "name": "Language",
-        "requires": "app:settings/language"
-      },
-      {
-        "id": "diagnostics",
-        "name": "Diagnostics"
-      },
-      {
-        "id": "benchmarks",
-        "name": "Benchmarks",
-        "requires": "app:settings/benchmarks"
+        "id": "data",
+        "name": "Data",
+        "requires": "app:cluster/origins",
+        "sourceRequires": "app:cluster"
       },
       {
         "id": "connections",
         "name": "Connections",
         "requires": "app:settings/connections"
-      },
-      {
-        "id": "integrations",
-        "name": "Integrations",
-        "requires": "app:settings/integrations"
       },
       {
         "id": "pipelines",
@@ -648,16 +634,6 @@
         "id": "procedures",
         "name": "Procedures",
         "requires": "app:settings/procedures"
-      },
-      {
-        "id": "tokens",
-        "name": "Tokens",
-        "requires": "app:settings/tokens"
-      },
-      {
-        "id": "keys",
-        "name": "Keys",
-        "requires": "app:settings/keys"
       },
       {
         "id": "logs",

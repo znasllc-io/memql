@@ -1,3 +1,4 @@
+import { applyReducedMotionFixture } from "./reducedMotion";
 import { createRoot } from "react-dom/client";
 import { useEffect, useRef, useState } from "react";
 import { Button, NextPage, RecordList, RecordRow } from "../src/kit";
@@ -11,6 +12,7 @@ const params = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = params.get("mode") === "light" ? "light" : "dark";
 document.documentElement.dataset.osTheme = "graphite";
 applyPackStyles([]);
+if (params.get("motion") === "reduced") applyReducedMotionFixture();
 
 function Entry() {
   const [pending, setPending] = useState(true);
