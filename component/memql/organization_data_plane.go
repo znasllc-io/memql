@@ -49,6 +49,9 @@ func (e *MemQLEngine) OrganizationDataPlaneEnforced(ctx context.Context, query s
 		if err != nil || fn.FunctionKind != "builtin" {
 			return false
 		}
+		if organizationCollectionRead(fn, builtin.Args) {
+			return true
+		}
 		if personalSourceBuiltin(fn) {
 			verb, resource := personalSourceRequirement(fn.Name)
 			return e.personalSourceCapable(ctx, verb, resource)
@@ -89,6 +92,31 @@ func (e *MemQLEngine) OrganizationDataPlaneEnforced(ctx context.Context, query s
 		}
 	}
 	return organizationRootShape(shape)
+}
+
+// These collection readers resolve every row under the caller before
+// reducing it. They have no single target for organizationCapabilityTarget:
+// an omitted account means all readable organizations, never all data. A
+// scoped role must reach those guards without gaining targetless data read.
+// Match both construct and executor so a same-named authored builtin cannot
+// borrow this exception. The directory's sources mode also reads personal
+// credential provenance, so it deliberately retains the global gate.
+func organizationCollectionRead(fn *Function, args map[string]any) bool {
+	if fn == nil || fn.FunctionKind != "builtin" {
+		return false
+	}
+	switch {
+	case fn.Name == "deployableDirectoryPage" && fn.Executor == "integration.packages.directoryPage":
+		resource, present := args["resource"]
+		if !present {
+			return true
+		}
+		value, ok := resource.(string)
+		return ok && (value == "" || value == "deployables")
+	case fn.Name == "siteStatistics" && fn.Executor == "integration.siteTraffic.statistics":
+		return true
+	}
+	return false
 }
 
 func organizationDataWriteConcept(concept string) bool {

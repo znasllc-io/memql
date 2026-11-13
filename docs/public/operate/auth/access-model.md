@@ -1054,6 +1054,21 @@ hidden control appearing late, never one that works when it should not.
   planner loop, node bootstrap -- are likewise not covered, by design.
   It is also the COARSE half only: it answers "may this actor write at
   all", never "which rows".
+
+  Requests whose complete data access is covered by organization guards
+  defer to those guards (`OrganizationDataPlaneEnforced`). This includes
+  the released Deployables directory in its `deployables` mode and website
+  statistics: each handler reads sites/packages under the verified caller,
+  and a requested organization or site only narrows those readable rows.
+  An organization role therefore needs no global data grant to reach its
+  own directory or statistics. The directory's `sources` mode retains the
+  global gate because it also reads personal credential provenance. The
+  exception matches each builtin's name and executor, admits only plain
+  arguments, and does not cover mixed requests, logic or related-data
+  projections. The scoped role's global data denial remains in force.
+  `TestScopedDeployableReadsPassTheTransportGate` exercises the wire gate
+  with a verified forwarded identity;
+  `TestOrganizationCollectionReadRequiresTheGuardedExecutor` pins its bound.
 - **Identity-merge UI.** If the same human ends up with two users
   (different emails), there's no merge tool. Avoid by using
   `primaryEmail` as the dedup key at registration.
