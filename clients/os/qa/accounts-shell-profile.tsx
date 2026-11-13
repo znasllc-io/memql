@@ -18,6 +18,11 @@ import "../src/styles/index.css";
 const params = new URLSearchParams(location.search);
 const role = params.get("role") === "viewer" ? "viewer" : "owner";
 const capabilities = seededAccessFor(role);
+if (params.get("ask") === "denied") {
+  for (const entry of capabilities) {
+    if (entry.verb === "read" && entry.resource === "app:ask") entry.effect = "deny";
+  }
+}
 if (params.get("profile") === "denied") {
   // Keep the older personal doors: an explicit Profile deny must still win.
   for (const entry of capabilities) {
