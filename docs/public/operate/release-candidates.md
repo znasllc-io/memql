@@ -815,6 +815,19 @@ selection, cadence, retries and the installation workflow; native preparation
 owns fresh artifact and cluster evidence, effect fencing and rollback authority.
 This boundary also applies when an automation calls the discovery builtins.
 
+Workload completion compares strict immutable runtime image references with the
+verified root index or its selected platform manifest, after checking the Pod's
+actual node platform. It canonicalizes Docker Hub's equivalent `docker.io` and
+`index.docker.io` hostnames on both sides; otherwise a correct digest reported by
+containerd could be refused. This does not rewrite the Pod or loosen its exact
+authored image check. Config IDs, tags without a digest, unqualified references,
+different repositories and unverified digests still refuse completion, with no
+fallback to the container's display image. The observer regression is
+`TestWorkloadsCanonicalizeDockerHubRuntimeImageIDs`; its negative cases and
+`TestWorkloadsBindIndexAndManifestToTheAssignedNodePlatform` retain the digest
+and platform boundaries. This normalization alone is not a completion receipt;
+the installation still needs fresh native observation of every requirement.
+
 Installation preparation tolerates routine Argo Application status refreshes
 while retaining checks for real configuration changes, including an edit later
 restored to its original value. The receiver keeps the checked history with the

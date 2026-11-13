@@ -532,7 +532,11 @@ func (s *workloadAdmission) observeWorkloadPod(ctx context.Context, reads *recei
 					state = candidate
 				}
 			}
-			runtime := strings.TrimPrefix(resourceText(state, "imageID"), "docker-pullable://")
+			// Use the inventory's strict immutable-reference parser on runtime
+			// IDs too: Docker Hub may be reported as docker.io while admission
+			// canonicalizes it to index.docker.io. A bare config ID or tag still
+			// cannot name the verified repository and digest.
+			runtime, runtimeErr := immutableImage(strings.TrimPrefix(resourceText(state, "imageID"), "docker-pullable://"))
 			// The text check above stays verbatim: controllers, CNPG included,
 			// copy the image string into the Pod. Verification keyed this image
 			// as repository@digest (inventoryImages), and the kubelet reports
@@ -544,7 +548,7 @@ func (s *workloadAdmission) observeWorkloadPod(ctx context.Context, reads *recei
 			// selected manifest. Native OCI verification established exactly one
 			// matching platform, and the Pod's actual Node was checked above.
 			// A config ID, arbitrary digest or unknown root remains insufficient.
-			if err != nil || state == nil || manifest == "" || (runtime != manifest && runtime != root) {
+			if err != nil || runtimeErr != nil || state == nil || manifest == "" || (runtime != manifest && runtime != root) {
 				return errors.New("workload runtime image differs from its verified image and platform")
 			}
 			if completed || pair[0] == "initContainers" {
