@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { IdentityAccount } from "../../src/apps/identity/IdentityAccount";
@@ -6,7 +7,7 @@ const tokenData = { Tokens: [{ ID: "a", Label: "Automation", Active: true }, { I
 const acts = () => ({ submit: vi.fn(), navigate: vi.fn(), register: vi.fn() });
 
 describe("identity record lists", () => {
-  it("counts the loaded page, keeps revoke outside row buttons, and retains pagination", () => {
+  it("counts the loaded page, keeps revoke outside row buttons, and retains pagination", async () => {
     const actions = acts();
     render(<IdentityAccount page="me/tokens" data={tokenData} busy={false} {...actions} />);
     const list = screen.getByRole("list", { name: "Tokens" });
@@ -17,7 +18,7 @@ describe("identity record lists", () => {
     expect(revoke.closest(".os-record-actions")).not.toBeNull();
     fireEvent.click(revoke);
     expect(actions.submit).toHaveBeenCalledWith("/me/tokens/revoke", { id: "a" });
-    fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+    await scrollNextPage();
     expect(actions.navigate).toHaveBeenCalledWith("/me/tokens?cursor=next%20page");
   });
 

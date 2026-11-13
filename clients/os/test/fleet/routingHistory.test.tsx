@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { cleanup, fireEvent, screen, within, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -418,7 +419,7 @@ describe("History: bounded retained pages", () => {
     const rowCount = () => document.querySelectorAll(".os-decision-item").length;
     expect(rowCount()).toBe(10);
     expect(calls.routerDecisionsRecent).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await scrollNextPage();
     await waitFor(() => expect(rowCount()).toBe(20));
     expect(calls.routerDecisionsRecent).toHaveBeenCalledTimes(2);
     expect(calls.routerDecisionsRecent.mock.calls[1]?.[1]).toMatchObject({ cursor: "10" });
@@ -435,7 +436,7 @@ describe("History: bounded retained pages", () => {
     fireEvent.change(input, { target: { value: "" } });
     await waitFor(() => expect(rowCount()).toBe(20));
     expect(calls.routerDecisionsRecent).toHaveBeenCalledTimes(3);
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await scrollNextPage();
     await waitFor(() => expect(rowCount()).toBe(25));
     expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
   });

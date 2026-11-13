@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -195,7 +196,7 @@ describe("it is live", () => {
     mount(fakeConnection({ constructs: many }));
     await screen.findByText("10 shown · Recent");
     expect(document.querySelectorAll(".os-livelist-row")).toHaveLength(10);
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await scrollNextPage();
     await screen.findByText("20 shown · Recent");
     expect(document.querySelectorAll(".os-livelist-row")).toHaveLength(20);
   });

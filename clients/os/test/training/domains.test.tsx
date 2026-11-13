@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -154,7 +155,7 @@ describe("a domain's detail", () => {
     expect(screen.getByText("Seeded corpus")).toBeTruthy();
     expect(screen.getByText("10 chunks loaded.")).toBeTruthy();
 
-    await click(screen.getByText("Load more"));
+    await scrollNextPage();
     await settle();
     expect(screen.getByText(/11 chunks loaded -- that is all of them/)).toBeTruthy();
   });

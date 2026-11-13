@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -182,7 +183,7 @@ describe("the queue", () => {
     expect(screen.queryByText("Load more")).toBeNull();
   });
 
-  it("walks the keyset pages on Load more", async () => {
+  it("walks the keyset pages as their end comes into view", async () => {
     const connection = fakeConnection({
       domainRows: [domainLiteRow("domain-sales", "unvalidated")],
       chunkPages: {
@@ -194,7 +195,7 @@ describe("the queue", () => {
     expect(screen.getByText("chunk 0")).toBeTruthy();
     expect(screen.queryByText("Page two chunk.")).toBeNull();
 
-    await click(screen.getByText("Load more"));
+    await scrollNextPage();
     await settle(6);
 
     expect(screen.getByText("Page two chunk.")).toBeTruthy();
@@ -311,7 +312,8 @@ describe("when the domain read fails", () => {
     const connection = fakeConnection({ domainsError: "domains unavailable" });
     mount(connection);
     await settle(6);
-    expect(screen.getByText(/Reading the queue failed/)).toBeTruthy();
+    expect(screen.getByText("domains unavailable").closest('[role="alert"]')).toBeTruthy();
+    expect(screen.queryByText("No document passages awaiting review.")).toBeNull();
     expect(screen.getByText("domains unavailable")).toBeTruthy();
   });
 });
@@ -329,6 +331,6 @@ describe("review count availability", () => {
     const view = mount(fakeConnection({ domainRows: [domainLiteRow("sales", "unvalidated")], chunkPages: { sales: [pageOf(0, 30), pageOf(30, 10)] } }));
     await settle(6);
     expect(view.container.querySelector(".os-head-meta")?.textContent).toBe("10 loaded");
-    expect(screen.getByRole("button", { name: "Load more" })).toBeTruthy();
+    expect(document.querySelector(".os-next-page-sentinel")).toBeTruthy();
   });
 });

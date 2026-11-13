@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { useLayoutEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -111,7 +112,7 @@ describe("bounded directories and complete demanded catalogs", () => {
     expect(screen.queryByText("Campaign 10")).toBeNull();
     expect(conn.query.campaignsBrowse).toHaveBeenCalledTimes(1);
     for (const name of ["campaigns", "audiences", "templates", "senderIdentities", "emailRules", "journeys"] as const) expect(conn.query[name]).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await scrollNextPage();
     await screen.findByText("Campaign 19");
     expect(screen.queryByText("Campaign 20")).toBeNull();
     expect(conn.query.campaignsBrowse).toHaveBeenCalledTimes(2);
@@ -127,7 +128,7 @@ describe("bounded directories and complete demanded catalogs", () => {
     mount(conn);
     await screen.findByText("Campaign 19");
     expect(conn.query.campaignsBrowse).toHaveBeenCalledTimes(3);
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await scrollNextPage();
     await screen.findByText("Campaign 24");
     expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
   });

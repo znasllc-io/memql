@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { act, fireEvent, render, screen, waitFor, cleanup } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UpdateBrowser, type UpdateQueries } from "../../src/apps/cluster/updates/UpdatesSection";
@@ -35,7 +36,7 @@ describe("signed update discovery", () => {
     expect(screen.queryByRole("button", { name: /install|deploy|approve/i })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Back to MemQL" }));
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Inspect engine 0.25.0" })));
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await scrollNextPage();
     await waitFor(() => expect(f.state.calls).toContain("page:older"));
     expect(f.state.calls.filter(c => c === "page:")).toHaveLength(1);
   });

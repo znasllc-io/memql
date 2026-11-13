@@ -103,7 +103,7 @@ export function EvaluationsSection() {
     </> : <>
       <Refine label="Search evaluation runs" search={search} onSearch={setSearch} placeholder="Search scenario or setup" />
       <Subhead>Recent results by setup</Subhead>
-      <Caption>Counts describe the {results.length} loaded results. Load more to include earlier runs.</Caption>
+      <Caption>Counts describe the {results.length} loaded results. Scroll to include earlier runs.</Caption>
       <table className="os-grid os-training-setups" aria-label="MemQL evaluation setups" tabIndex={0}>
         <thead><tr><th scope="col">Setup</th>{roles.map((role) => <th scope="col" key={role}>{role[0]?.toUpperCase()}{role.slice(1)}</th>)}{!setups.length ? <th scope="col">Other roles</th> : null}<th scope="col">Software development</th></tr></thead>
         <tbody>{setups.length ? setups.map((r) => {

@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { useState } from "react";
 import {
   act,
@@ -127,7 +128,7 @@ describe("Materialized", () => {
     expect(conn.query.libraryFilesForOwner).not.toHaveBeenCalled();
     expect(screen.queryByText("Filed away")).toBeNull();
     expect(container.querySelector(".os-head-meta")?.textContent).toContain("10+");
-    await press("Load more");
+    await scrollNextPage();
     await screen.findByText("Report 19");
     expect(conn.query.compositionsBrowse).toHaveBeenCalledTimes(2);
   });

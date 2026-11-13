@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({ connection: null as any }));
@@ -17,7 +18,7 @@ it("merges ten recent archived resources and retains the twenty-row window on re
   expect(h.connection.callsNamed("libraryArchivedArtifacts")).toHaveLength(0);
   expect(h.connection.callsNamed("libraryArtifactsBrowse")).toHaveLength(1);
   expect(h.connection.callsNamed("libraryArchivedFoldersBrowse")).toHaveLength(1);
-  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  await scrollNextPage();
   await waitFor(() => expect(rows()).toHaveLength(20));
   first.unmount();
   await renderBin();

@@ -643,6 +643,7 @@ export interface DeliveryLedger {
   loadingMore: boolean;
   /** The engine's sentence when the last older page was refused. */
   moreError: string;
+  progress?: string;
   loadMore: () => void;
   reload: () => Promise<void>;
 }
@@ -707,6 +708,7 @@ export function useDeliveryLedger(campaignId: string): DeliveryLedger {
     more: cursor !== "",
     loadingMore: older?.loading ?? false,
     moreError: older?.error ?? "",
+    progress: cursor,
     loadMore,
     reload: newest.reload,
   };

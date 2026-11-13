@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import {
   act,
   fireEvent,
@@ -140,7 +141,7 @@ describe("Nexus resource directory budgets", () => {
       const first = await read.mock.results[0]!.value;
       expect(first.rows()).toHaveLength(10);
       expect(JSON.stringify(first.rows())).not.toContain("x".repeat(4000));
-      fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+      await scrollNextPage();
       await waitFor(() => expect(rowCount()).toBe(20));
       expect(read).toHaveBeenCalledTimes(2);
       view.unmount();
@@ -185,7 +186,7 @@ describe("Nexus resource directory budgets", () => {
     connection.query.workRunsBrowse.mockRejectedValueOnce(
       new Error("Next page unavailable"),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await scrollNextPage();
     await screen.findByText("Next page unavailable");
     expect(rowCount()).toBe(10);
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));

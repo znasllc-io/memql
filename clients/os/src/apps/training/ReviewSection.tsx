@@ -5,7 +5,7 @@ import { useMemo } from "react";
 // different `Check`s in one file is a rename waiting to go wrong.
 import { Check as CheckIcon, FileStack, X } from "lucide-react";
 
-import { Button, Caption, Head, Notice, ProvenanceDot, Refine, Subhead } from "../../kit";
+import { Button, Caption, Head, NextPage, ProvenanceDot, Refine, Subhead } from "../../kit";
 import { REJECTED, VALIDATED, sourceMeaning, type ChunkDecision } from "./concepts";
 import { groupChunksByDocument, type Chunk, type ChunkGroup } from "./rows";
 import type { ChunkDecisions } from "./actions";
@@ -50,17 +50,6 @@ export function ReviewSection({
       <LessonsReview />
       <Subhead>Document passages</Subhead>
 
-      {queue.error !== "" ? (
-        <Notice
-          tone="error"
-          sentence="Reading the queue failed part-way."
-          next="Anything already loaded is still shown and still decidable."
-          detail={queue.error}
-        >
-          <Button onClick={queue.loadMore}>Try again</Button>
-        </Notice>
-      ) : null}
-
       {groups.length === 0 && queue.state === "ready" ? (
         <Caption>No document passages awaiting review.</Caption>
       ) : null}
@@ -82,15 +71,16 @@ export function ReviewSection({
       <div className="os-refresh-row">
         <span className="os-caption">
           {awaiting} awaiting review in {queue.pagesRead} page{queue.pagesRead === 1 ? "" : "s"}{" "}
-          read
-          {queue.exhausted ? " -- every page has been walked" : ""}.
+          read.
         </span>
-        {queue.exhausted ? null : (
-          <Button onClick={queue.loadMore} busy={queue.state === "loading"}>
-            Load more
-          </Button>
-        )}
       </div>
+      <NextPage key={queue.search} feed={{
+        hasMore: !queue.exhausted, enabled: queue.state !== "idle",
+        loadingMore: queue.state === "loading" && groups.length > 0,
+        progress: queue.pagesRead, ...queue.pagination,
+        loadMoreError: queue.error,
+        loadMore: queue.error && queue.pagesRead === 0 ? queue.reload : queue.loadMore,
+      }} />
     </div>
   );
 }

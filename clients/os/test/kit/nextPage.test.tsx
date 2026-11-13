@@ -5,6 +5,8 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { NextPage } from "../../src/kit";
+import { LoadMore } from "../../src/kit/LoadMore";
+import { LiveReadVisibility } from "../../src/live/useGraphRevision";
 import { intersect, observed } from "../intersectionObserver";
 
 afterEach(cleanup);
@@ -279,4 +281,68 @@ describe("NextPage, a feed that says nothing of its progress", () => {
     await act(async () => rerender());
     expect(screen.queryByText("End of list")).toBeNull();
   });
+});
+
+
+describe("shared list continuation lifecycle", () => {
+  it("moves legacy lists onto scrolling without a paging button", async () => {
+    const loadMore = vi.fn(async () => {});
+    const view = render(<LoadMore feed={{ hasMore: true, loadingMore: false, loadMoreError: "", loadMore }} />);
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+    await act(async () => intersect(view.container.querySelector(".os-next-page-sentinel")!));
+    expect(loadMore).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not page a parked window and resumes when it becomes visible", async () => {
+    const loadMore = vi.fn(async () => {});
+    const feed = { hasMore: true, loadingMore: false, loadMoreError: "", loadMore };
+    const view = render(<LiveReadVisibility.Provider value={false}><NextPage feed={feed} /></LiveReadVisibility.Provider>);
+    const target = view.container.querySelector(".os-next-page-sentinel")!;
+    expect(observed(target)).toBe(false);
+    await act(async () => intersect(target));
+    expect(loadMore).not.toHaveBeenCalled();
+    view.rerender(<LiveReadVisibility.Provider value={true}><NextPage feed={feed} /></LiveReadVisibility.Provider>);
+    await act(async () => intersect(target));
+    expect(loadMore).toHaveBeenCalledTimes(1);
+  });
+
+  it("makes a rejected request retryable even when the feed cannot publish its error", async () => {
+    const loadMore = vi.fn().mockRejectedValueOnce(new Error("Page unavailable")).mockResolvedValue(undefined);
+    const view = render(<NextPage feed={{ hasMore: true, loadingMore: false, loadMoreError: "", loadMore }} />);
+    await act(async () => intersect(view.container.querySelector(".os-next-page-sentinel")!));
+    expect(screen.getByText("Page unavailable")).toBeTruthy();
+    expect(view.container.querySelector(".os-next-page-sentinel")).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Try again" })));
+    expect(loadMore).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+it("does not let a previous filtered read settle into the current list", async () => {
+  let finish!: () => void;
+  const oldLoad = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+  const currentLoad = vi.fn(async () => {});
+  const initial = { hasMore: true, loadingMore: false, loadMoreError: "", loadMore: oldLoad, scope: "old", progress: 1 };
+  const view = render(<NextPage feed={initial} />);
+  await act(async () => intersect(view.container.querySelector(".os-next-page-sentinel")!));
+  view.rerender(<NextPage feed={{ ...initial, hasMore: false, loadMore: currentLoad, scope: "new" }} />);
+  await act(async () => finish());
+  expect(screen.queryByText("End of list")).toBeNull();
+  expect(screen.queryByRole("status")).toBeNull();
+  view.rerender(<NextPage feed={{ ...initial, loadMore: currentLoad, scope: "new" }} />);
+  await act(async () => intersect(view.container.querySelector(".os-next-page-sentinel")!));
+  expect(currentLoad).toHaveBeenCalledTimes(1);
+});
+
+it("waits for feed recovery before paging and keeps loaded rows in place", async () => {
+  const loadMore = vi.fn(async () => {});
+  const feed = { hasMore: true, loadingMore: false, loadMoreError: "", loadMore, enabled: false };
+  const view = render(<><p>Existing row</p><NextPage feed={feed} /></>);
+  const row = screen.getByText("Existing row");
+  await act(async () => intersect(view.container.querySelector(".os-next-page-sentinel")!));
+  expect(loadMore).not.toHaveBeenCalled();
+  view.rerender(<><p>Existing row</p><NextPage feed={{ ...feed, enabled: true }} /></>);
+  await act(async () => intersect(view.container.querySelector(".os-next-page-sentinel")!));
+  expect(loadMore).toHaveBeenCalledTimes(1);
+  expect(screen.getByText("Existing row")).toBe(row);
 });

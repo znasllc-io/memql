@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -36,7 +37,7 @@ describe("Files bounded directory", () => {
     expect(connection.callsNamed("libraryFilesByIds")).toHaveLength(0);
     expect(connection.callsNamed("libraryFileById")).toHaveLength(0);
     for (const name of ["libraryArtifactsByLens", "libraryFilesForOwner", "compositions"]) expect(connection.callsNamed(name)).toHaveLength(0);
-    await click(screen.getByRole("button", { name: "Load more" }));
+    await scrollNextPage();
     expect(screen.getAllByRole("button", { name: /Document \d+\.pdf/ })).toHaveLength(20);
     expect(connection.callsNamed("libraryArtifactsBrowse")).toHaveLength(2);
     first.unmount();
@@ -52,7 +53,7 @@ describe("Files bounded directory", () => {
     const connection = fakeConnection({ artifacts: directory() });
     h.connection = connection;
     await renderFiles();
-    await click(screen.getByRole("button", { name: "Load more" }));
+    await scrollNextPage();
     await click(screen.getByRole("button", { name: "Refine files" }));
     const search = screen.getByRole("textbox", { name: "Search" });
     fireEvent.change(search, { target: { value: "ANCIENT" } });

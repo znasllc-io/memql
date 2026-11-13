@@ -213,7 +213,7 @@ export const NO_FILTERS: DecisionFilters = {
   outcome: "",
 };
 
-export interface DecisionsState extends Pick<PagedCollectionHandle<Row>, "loadMore" | "hasMore" | "loadingMore" | "loadMoreError"> {
+export interface DecisionsState extends Pick<PagedCollectionHandle<Row>, "loadMore" | "hasMore" | "loadingMore" | "loadMoreError" | "progress" | "scope" | "enabled"> {
   rows: DecisionRow[];
   loading: boolean;
   /** The cluster has the read at all. */
@@ -245,6 +245,7 @@ export function useDecisions(enabled: boolean, filters: DecisionFilters): Decisi
   const rows = useMemo(() => feed.snapshot.rows.map(decisionFromRow), [feed.snapshot.rows]);
   const fetchedAt = useMemo(() => feed.snapshot.version > 0 ? Date.now() : null, [feed.snapshot.version]);
   return { rows, loading: feed.snapshot.state === "seeding", supported, error: feed.snapshot.error,
+    progress: feed.progress, scope: feed.scope, enabled: feed.enabled,
     fetchedAt, reload: feed.reseed, loadMore: feed.loadMore, hasMore: feed.hasMore,
     loadingMore: feed.loadingMore, loadMoreError: feed.loadMoreError };
 }

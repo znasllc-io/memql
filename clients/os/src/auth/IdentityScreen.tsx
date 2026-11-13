@@ -6,7 +6,7 @@ import { nativeIdentity, oauthFields, value, IdentityRequestError, type Identity
 import { Wizard } from "../kit/Wizard";
 import { OWNERSHIP_STEP_SUBTITLES, OwnershipWizard } from "./OwnershipWizard";
 import { EntryLayout } from "../kit/EntryLayout";
-import { EntryPending } from "../kit/EntryPending";
+import { EntryPending, useEntryTransition } from "../kit/EntryPending";
 import { deviceAuthenticatorName, loginWithPasskey, onlySecurityKeys, passkeyWindowRemembered, registerPasskey, type PasskeyPlace } from "./passkeys";
 import { Field, Button, Head } from "../kit/controls";
 import { IdentityAccount } from "../apps/identity/IdentityAccount";
@@ -27,6 +27,7 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
   const [busy, setBusy] = useState(true);
   const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState("");
+  const [pagingError, setPagingError] = useState("");
   const [refreshNeeded, setRefreshNeeded] = useState(false);
   const [loginProblem, setLoginProblem] = useState<SignInProblem>();
   const [passkeyPending, setPasskeyPending] = useState(false);
@@ -37,7 +38,9 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
 
   const load = useCallback(async (next: string, form?: Record<string, string>) => {
     const revision = ++generation.current;
-    setBusy(true); setError(""); setRefreshNeeded(false); setLoginProblem(undefined);
+    const target = new URL(next, window.location.origin);
+    const appendTokens = form === undefined && target.pathname === "/me/tokens" && !!target.searchParams.get("cursor");
+    setBusy(true); setError(""); setPagingError(""); setRefreshNeeded(false); setLoginProblem(undefined);
     try {
       const bearer = status === "signed-in" ? await authSource.bearer() : null;
       let result = await nativeIdentity(config, next, { form, csrf: csrf.current, bearer: bearer || undefined });
@@ -54,14 +57,26 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
       }
       if (revision !== generation.current) return;
       if (result.redirect || !result.page) throw new Error("Identity could not open this page");
+      if (appendTokens && result.page !== "me/tokens") throw new Error(value(result.data || {}, "Message") || "The token page could not be read.");
       csrf.current = result.csrf || csrf.current;
       if (form && result.page === "error") throw new Error(value(result.data || {}, "Message") || "Identity could not complete this request");
-      setPath(next); setPage(result);
+      setPath(next); setPage(previous => {
+        if (!appendTokens || previous?.page !== "me/tokens") return result;
+        const older = Array.isArray(previous.data?.Tokens) ? previous.data.Tokens : [];
+        const incoming = Array.isArray(result.data?.Tokens) ? result.data.Tokens : [];
+        // Same-session cursor pages append by token identity. A normal read
+        // or write still replaces the answer. Keep a newly issued one-time
+        // token visible while paging; never persist it outside this view.
+        const tokens = [...new Map([...older, ...incoming].map(row => [value(row, "ID"), row])).values()];
+        return { ...result, data: { ...previous.data, ...result.data, Tokens: tokens,
+          NewToken: result.data?.NewToken || previous.data?.NewToken } };
+      });
       setFields({ email: value(result.data || {}, "PrefillEmail"), user_code: value(result.data || {}, "PrefillCode") });
     } catch (err) {
       if (revision === generation.current) {
         setLeaving(false);
-        setError(err instanceof Error ? err.message : "Identity is unavailable");
+        const sentence = err instanceof Error ? err.message : "Identity is unavailable";
+        if (appendTokens) setPagingError(sentence); else setError(sentence);
         setRefreshNeeded(err instanceof IdentityRequestError && err.code === "csrf_expired");
       }
     } finally { if (revision === generation.current) setBusy(false); }
@@ -147,7 +162,8 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
     return () => { stopped = true; clearTimeout(timer); };
   }, [page, config, load]);
 
-  if (leaving || (!page && busy && !embedded)) return <EntryPending label={leaving ? "Completing sign-in" : "Opening identity"} />;
+  const entryTransition = useEntryTransition(leaving || (!page && busy && !embedded));
+  if (entryTransition.show) return <EntryPending label={leaving ? "Completing sign-in" : "Opening identity"} leaving={entryTransition.leaving} />;
 
   if (page?.page === "setup_wizard") return <EntryLayout><OwnershipWizard data={data} busy={busy} error={error} submit={(next, form) => {
     if (next === "/setup" && data.Local === true) autoPasskey.current = true;
@@ -271,7 +287,7 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
     case "me/profile":
       body = <dl>{Object.entries((data.Profile || {}) as Record<string, string>).map(([label, text]) => <div key={label}><dt>{label}</dt><dd>{text || "Not set"}</dd></div>)}</dl>; break;
     case "me/devices": case "me/settings": case "me/tokens": case "me/dashboard":
-      body = <IdentityAccount page={page.page} data={data} busy={busy} error={error} submit={submit} navigate={next => void load(next)} register={() => void run(async () => {
+      body = <IdentityAccount page={page.page} data={data} busy={busy} error={error} pagingError={pagingError} submit={submit} navigate={load} register={() => void run(async () => {
         const bearer = await authSource.bearer(); if (!bearer) throw new Error("Sign in again to add a passkey");
         await registerPasskey(config, `Bearer ${bearer}`, "My passkey"); await load("/me/devices");
       })} />; break;

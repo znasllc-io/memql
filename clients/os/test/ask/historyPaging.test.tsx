@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Dispatcher } from "@znasllc-io/memql-sdk-core/client";
@@ -33,7 +34,7 @@ it("loads ten, appends ten, restores both pages, and searches older titles on th
   await screen.findByRole("button", { name: "Conversation 9" });
   expect(screen.queryByRole("button", { name: "Conversation 10" })).toBeNull();
   expect(f.page).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  await scrollNextPage();
   await screen.findByRole("button", { name: "Conversation 19" });
   expect(f.page).toHaveBeenCalledTimes(2); view.unmount();
   view = render(<AskConversations {...props} />);

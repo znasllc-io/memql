@@ -85,6 +85,8 @@ describe("what the gate does while it cannot say", () => {
     await act(async () => vi.advanceTimersByTime(2999));
     expect(screen.queryByTestId("desk")).toBeNull();
     await act(async () => vi.advanceTimersByTime(1));
+    expect(screen.getByRole("status").getAttribute("data-leaving")).toBe("true");
+    await act(async () => vi.advanceTimersByTime(160));
     expect(screen.getByTestId("desk")).toBeTruthy();
   });
 

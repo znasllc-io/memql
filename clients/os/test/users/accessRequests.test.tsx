@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { readTheBar } from "../readTheBar";
@@ -54,7 +55,7 @@ it("pages access requests and restores rows without another read", async () => {
  h.rows=Array.from({length:25},(_,n)=>({id:`request-${n}`,name:`Person ${n}`,email:`person${n}@test.invalid`,status:"pending",additionalContext:"Needs access"}));
  const props={catalog:{roles:[],grants:[],state:"ready" as const,error:"",reload:()=>{}},viewerRole:"owner",canReview:true};
  let view=render(<AccessRequestsSection {...props}/>);await screen.findByRole("button",{name:/^Person 9(?: |$)/});expect(screen.queryByRole("button",{name:/^Person 10(?: |$)/})).toBeNull();
- fireEvent.click(screen.getByRole("button",{name:"Load more"}));await screen.findByRole("button",{name:/^Person 19(?: |$)/});
+ await scrollNextPage();await screen.findByRole("button",{name:/^Person 19(?: |$)/});
  view.unmount();view=render(<AccessRequestsSection {...props}/>);expect(screen.getByRole("button",{name:/^Person 19(?: |$)/})).toBeTruthy();expect(connection.query.pendingAccessRequests).toHaveBeenCalledTimes(2);
  fireEvent.click(screen.getByRole("button",{name:"Search access requests"}));fireEvent.change(screen.getByRole("textbox",{name:"Search access requests"}),{target:{value:"person24"}});
  await screen.findByRole("button",{name:/^Person 24(?: |$)/});expect(connection.query.pendingAccessRequests).toHaveBeenLastCalledWith({search:"person24"},expect.anything());view.unmount();

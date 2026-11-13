@@ -1,4 +1,4 @@
-import { Button, Caption, Fact, Facts, Notice, RecordList, RecordRow, Subhead } from "../../kit";
+import { Button, Caption, Fact, Facts, NextPage, Notice, RecordList, RecordRow, RecordListSkeleton, Subhead } from "../../kit";
 import { formatMoney, formatTokens } from "./rows";
 import { summarizeUsage, usageLabel } from "./modelUsage";
 import type { ModelUsageState } from "./useModelUsage";
@@ -14,9 +14,11 @@ export function UsageDetails({ usage }: { usage: ModelUsageState }) {
       <details className="nexus-technical"><summary>Model usage receipts</summary><RecordList as="ul" label="Usage receipts">{usage.calls.map(call => <RecordRow key={call.id} name={call.model || "Model not reported"} state={call.estimated ? "Estimated tokens" : "Reported tokens"}>
         <span>{call.input === null ? "Input not reported" : `${formatTokens(call.input)} input`}</span><span>{call.output === null ? "Output not reported" : `${formatTokens(call.output)} output`}</span><span>{call.cacheKind ? "Saved response reused" : call.billing === "local" ? "Local inference" : call.cost === null ? "Cost not reported" : formatMoney(call.cost)}</span>
       </RecordRow>)}</RecordList></details>
-    </> : usage.loading ? <Caption>Reading the recorded usage…</Caption> : usage.error ? null : <Caption>No completed model usage receipts were returned.</Caption>}
-    {usage.hasMore ? <Button tone="quiet" disabled={usage.loading} onClick={usage.loadMore}>Load more usage</Button> : null}
+    </> : usage.loading ? <RecordListSkeleton label="Reading the recorded usage" /> : usage.error ? null : <Caption>No completed model usage receipts were returned.</Caption>}
+    {total.calls > 0 ? <NextPage feed={{ hasMore: usage.hasMore, loadingMore: usage.loading,
+      loadMoreError: usage.error, progress: usage.progress ?? usage.calls.length, scope: usage.scope,
+      loadMore: usage.hasMore ? usage.loadMore : usage.refresh }} label="Loading more usage" /> : null}
     {!usage.error ? <Button tone="quiet" disabled={usage.loading} onClick={usage.refresh}>Refresh usage</Button> : null}
-    {usage.error ? <Notice tone="warn" sentence="Usage could not be refreshed." detail={usage.error}><Button tone="quiet" onClick={usage.refresh}>Read usage again</Button></Notice> : null}
+    {usage.error && total.calls === 0 ? <Notice tone="warn" sentence="Usage could not be refreshed." detail={usage.error}><Button tone="quiet" onClick={usage.refresh}>Read usage again</Button></Notice> : null}
   </section>;
 }

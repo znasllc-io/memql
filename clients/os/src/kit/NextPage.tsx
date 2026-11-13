@@ -1,15 +1,20 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 
+import { LiveReadVisibility } from "../live/useGraphRevision";
 import { Button, Notice } from "./controls";
 import { RecordListSkeleton } from "./RecordListSkeleton";
 import "./nextPage.css";
 
-/** The paged feed both continuation controls take, so a list moves between them in one line. */
+/** The paged feed used by every scroll continuation. */
 export interface PagedFeed {
   hasMore: boolean;
   loadingMore: boolean;
   loadMoreError: string;
-  loadMore: () => Promise<void>;
+  loadMore: () => void | Promise<void>;
+  /** A disconnected or reseeding feed must recover before paging resumes. */
+  enabled?: boolean;
+  /** The read's identity, so switching filters does not inherit an old end or failure. */
+  scope?: unknown;
   /**
    * A value that changes when a page lands: the row count, or the cursor.
    * Optional, so a feed `LoadMore` takes still fits. With it, a sentinel
@@ -23,8 +28,8 @@ export interface PagedFeed {
  * A record list's next page, loaded when the end of the list comes into view
  * (DESIGN.md, Record lists).
  *
- * Takes exactly the feed `LoadMore` takes. Where `LoadMore` waits for a press,
- * this watches a sentinel standing where the next row will be: in view is the
+ * Also backs existing `LoadMore` imports. It watches a sentinel standing
+ * where the next row will be: in view is the
  * request. While the page is out the list's own skeleton rows hold that place,
  * so nothing below the list jumps. A failure stays in that place with the
  * engine's words and a retry, and does not retry by itself, because scrolling
@@ -32,14 +37,33 @@ export interface PagedFeed {
  * once, and only after this list grew: a list that fitted on its first page
  * has no end worth announcing.
  */
-export function NextPage({ feed, label = "Loading more", rows = 3 }: {
+interface NextPageProps {
   feed: PagedFeed;
   /** The loading status, read by assistive technology only. */
   label?: string;
   /** How many skeleton rows stand in for the page. */
   rows?: number;
-}) {
+}
+
+export function NextPage(props: NextPageProps) {
+  const identity = useRef({ scope: props.feed.scope, key: 0 });
+  if (!Object.is(identity.current.scope, props.feed.scope)) {
+    identity.current = { scope: props.feed.scope, key: identity.current.key + 1 };
+  }
+  // Filters and sessions get their own continuation state. A late result,
+  // old refusal or old end marker cannot cross into the new read.
+  return <PageContinuation key={identity.current.key} {...props} />;
+}
+
+function PageContinuation({ feed, label = "Loading more", rows = 3 }: NextPageProps) {
   const sentinel = useRef<HTMLDivElement>(null);
+  const windowVisible = useContext(LiveReadVisibility);
+  const [tabVisible, setTabVisible] = useState(() => document.visibilityState !== "hidden");
+  useEffect(() => {
+    const changed = () => setTabVisible(document.visibilityState !== "hidden");
+    document.addEventListener("visibilitychange", changed);
+    return () => document.removeEventListener("visibilitychange", changed);
+  }, []);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -62,30 +86,40 @@ export function NextPage({ feed, label = "Loading more", rows = 3 }: {
   // The last load's promise rejected. A feed is meant to say why on
   // `loadMoreError`; one that rejects without saying has still not grown.
   const [rejected, setRejected] = useState(false);
+  const [requestError, setRequestError] = useState("");
+  const request = useRef<{ scope: unknown } | null>(null);
   const feedRef = useRef(feed);
   feedRef.current = feed;
 
-  const load = useRef(() => {
+  const load = useRef((retry = false) => {
+    if (request.current || feedRef.current.loadingMore || (!retry && feedRef.current.enabled === false)) return;
+    const own = { scope: feedRef.current.scope };
+    request.current = own;
     mark.current = { progress: feedRef.current.progress };
     setSettled(false);
     setRejected(false);
+    setRequestError("");
     setAsking(true);
     setAsked((n) => n + 1);
-    const settle = (ok: boolean) => {
-      if (!mounted.current) return;
+    const settle = (error?: unknown) => {
+      if (!mounted.current || request.current !== own || !Object.is(own.scope, feedRef.current.scope)) return;
+      request.current = null;
       setAsking(false);
-      setRejected(!ok);
+      setRejected(error !== undefined);
+      if (error !== undefined) setRequestError((error instanceof Error ? error.message : String(error)) || "The page could not be read.");
       setSettled(true);
     };
     // A feed reports its own failure on `loadMoreError`; a rejection is
     // settled the same way rather than left unhandled, and never counts as
     // a page that arrived.
-    void feedRef.current.loadMore().then(() => settle(true), () => settle(false));
+    try { void Promise.resolve(feedRef.current.loadMore()).then(() => settle(), error => settle(error ?? "The page could not be read.")); }
+    catch (error) { settle(error ?? "The page could not be read."); }
   }).current;
 
   const busy = asking || feed.loadingMore;
-  const failed = feed.loadMoreError !== "";
-  const armed = feed.hasMore && !busy && !failed;
+  const error = feed.loadMoreError || requestError;
+  const failed = error !== "";
+  const armed = feed.hasMore && !busy && !failed && feed.enabled !== false && windowVisible && tabVisible;
   const moved = mark.current !== null && feed.progress !== undefined && !Object.is(feed.progress, mark.current.progress);
   // STALLED: the last load settled, without a failure, and the feed shows no
   // sign that anything arrived. A browser's observer reports a target's state
@@ -116,6 +150,9 @@ export function NextPage({ feed, label = "Loading more", rows = 3 }: {
         return;
       }
       if (!left) return;
+      // A retained pane can become inert between an observer notification
+      // and React's visibility update. That is not a request for more rows.
+      if (target.parentElement?.closest('[hidden], [inert], [aria-hidden="true"]')) return;
       observer.disconnect();
       load();
     }, { rootMargin: "0px 0px 240px 0px" });
@@ -128,8 +165,8 @@ export function NextPage({ feed, label = "Loading more", rows = 3 }: {
     body = <RecordListSkeleton label={label} rows={rows} />;
   } else if (failed) {
     body = (
-      <Notice tone="error" sentence="The next page was not read." next="The rows above are unchanged." detail={feed.loadMoreError}>
-        <Button onClick={load}>Try again</Button>
+      <Notice tone="error" sentence="The next page was not read." next="The rows above are unchanged." detail={error}>
+        <Button onClick={() => load(true)}>Try again</Button>
       </Notice>
     );
   } else if (feed.hasMore) {

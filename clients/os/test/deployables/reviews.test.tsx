@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -797,7 +798,7 @@ describe("review directory pages", () => {
     const {connection,mount}=fixture();let view=mount();
     await waitFor(()=>expect(reviews()).toHaveLength(10));
     expect(connection.callsNamed("reviewsList")[0]).toContain("limit: 10");
-    await click(screen.getByRole("button",{name:"Load more"}));
+    await scrollNextPage();
     await waitFor(()=>expect(reviews()).toHaveLength(20));
     expect(connection.callsNamed("reviewsList")[1]).toContain('after: "10"');
     await typeInto(screen.getByLabelText("Search reviews") as HTMLInputElement,"REVIEW 24");
@@ -807,7 +808,7 @@ describe("review directory pages", () => {
     const reads=connection.callsNamed("reviewsList").length;view.unmount();view=mount();
     await waitFor(()=>expect(reviews()).toHaveLength(20));
     expect(connection.callsNamed("reviewsList")).toHaveLength(reads);
-    await click(screen.getByRole("button",{name:"Load more"}));
+    await scrollNextPage();
     await waitFor(()=>expect(reviews()).toHaveLength(25));
     expect(screen.queryByRole("button",{name:"Load more"})).toBeNull();
     view.unmount();
@@ -817,7 +818,7 @@ describe("review directory pages", () => {
     await click(tab("Decision log"));
     const decisions=()=>within(screen.getByRole("list",{name:"Decision log"})).getAllByRole("button");
     await waitFor(()=>expect(decisions()).toHaveLength(10));
-    await click(screen.getByRole("button",{name:"Load more"}));await waitFor(()=>expect(decisions()).toHaveLength(20));
+    await scrollNextPage();await waitFor(()=>expect(decisions()).toHaveLength(20));
     await typeInto(screen.getByLabelText("Search decisions") as HTMLInputElement,"NEEDLE%_");await waitFor(()=>expect(decisions()).toHaveLength(2));
     await typeInto(screen.getByLabelText("Search decisions") as HTMLInputElement,"");await waitFor(()=>expect(decisions()).toHaveLength(20));
     const reads=connection.callsNamed("reviewsDecisionLog").length;
@@ -826,7 +827,7 @@ describe("review directory pages", () => {
   });
   it("refreshes retained depth after a detail decision without rereading an inactive directory",async()=>{
     const {connection,seed,mount,rows}=fixture();mount();await screen.findByRole("list",{name:"Waiting reviews"});
-    await click(screen.getByRole("button",{name:"Load more"}));await waitFor(()=>expect(reviews()).toHaveLength(20));
+    await scrollNextPage();await waitFor(()=>expect(reviews()).toHaveLength(20));
     const original=vi.mocked(connection.query.executeNamed).getMockImplementation()!;
     vi.mocked(connection.query.executeNamed).mockImplementation(async(name,call,options)=>{
       if(name==="reviewsDecide") seed.reviews!.list!.waiting={reviews:rows.slice(1),total:24,next:"",counts:{waiting:24,all:25}} as unknown as Row;

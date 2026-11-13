@@ -1,4 +1,4 @@
-import { EntryPending } from "../kit/EntryPending";
+import { EntryPending, useEntryTransition } from "../kit/EntryPending";
 import { useEffect, useState } from "react";
 
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
@@ -18,6 +18,7 @@ export function App() {
 function OsBoot() {
   const { status, signIn, signOut, config, authSource, entry } = useAuth();
   const [layout, setLayout] = useState<ChromeLayout>(() => layoutFromWindow(window));
+  const entryTransition = useEntryTransition(status === "loading");
 
   useEffect(() => {
     const update = () => setLayout(layoutFromWindow(window));
@@ -38,8 +39,8 @@ function OsBoot() {
   // Nothing replaces it at THIS level on purpose: the read needs the
   // Connection, and the Connection is created inside the Shell.
 
-  if (status === "loading") {
-    return <EntryPending />;
+  if (entryTransition.show) {
+    return <EntryPending leaving={entryTransition.leaving} />;
   }
   if (status !== "unavailable" && entry && !(status === "signed-in" && entry.startsWith("/me"))) return <IdentityScreen initialPath={entry} />;
   if (status === "unclaimed") return <IdentityScreen initialPath="/setup" />;

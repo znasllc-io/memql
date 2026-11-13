@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -498,7 +499,7 @@ describe("the section, further", () => {
     await waitFor(async () => expect(within(await applications()).getAllByRole("button")).toHaveLength(10));
     expect(connection.callsNamed("wholesaleList")[0]).toContain("limit: 10");
     expect(connection.callsNamed("wholesaleList")[0]).not.toContain("after:");
-    await click(screen.getByRole("button", { name: "Load more" }));
+    await scrollNextPage();
     await waitFor(async () => expect(within(await applications()).getAllByRole("button")).toHaveLength(12));
     expect(connection.callsNamed("wholesaleList")[1]).toContain('after: "10"');
     expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();

@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readTheBar } from "../readTheBar";
@@ -420,7 +421,7 @@ it("retains loaded candidate pages and searches beyond recent results", async ()
   const view = render(<ReleaseBrowser query={f.query} connected />);
   await screen.findByRole("button", { name: "Review Component9 1.0.0" });
   expect(screen.queryByRole("button", { name: "Review Component10 1.0.0" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  await scrollNextPage();
   await screen.findByRole("button", { name: "Review Component19 1.0.0" });
   view.unmount();
   const reopened = render(<ReleaseBrowser query={f.query} connected />);

@@ -1,13 +1,14 @@
 import { RecordList, RecordRow } from "../../kit/RecordRow";
 import { useState } from "react";
 import { Button, Field, Subhead } from "../../kit/controls";
+import { NextPage } from "../../kit/NextPage";
 import { value, type IdentityData } from "../../auth/nativeIdentity";
 
 const rows = (data: IdentityData, key: string): IdentityData[] => Array.isArray(data[key]) ? data[key] as IdentityData[] : [];
-export function IdentityAccount({ page, data, busy, error = "", submit, navigate, register }: {
-  page: string; data: IdentityData; busy: boolean; error?: string;
+export function IdentityAccount({ page, data, busy, error = "", pagingError = "", submit, navigate, register }: {
+  page: string; data: IdentityData; busy: boolean; error?: string; pagingError?: string;
   submit: (path: string, form: Record<string, string>) => void;
-  navigate: (path: string) => void; register: () => void;
+  navigate: (path: string) => void | Promise<void>; register: () => void;
 }) {
   const counted = !busy && !error;
   const [label, setLabel] = useState("");
@@ -51,7 +52,10 @@ export function IdentityAccount({ page, data, busy, error = "", submit, navigate
       state={row.Active ? "Active" : "Revoked"} tone={row.Active ? "accent" : "muted"} dim={!row.Active}
       secondary={`Last used ${value(row, "LastUsedAt") || "Never"}`}
       actions={row.Active === true ? button("Revoke token", "/me/tokens/revoke", { id: value(row, "ID") }) : undefined} />)}</RecordList>
-    {data.NextCursor && <Button onClick={() => navigate(`/me/tokens?cursor=${encodeURIComponent(value(data, "NextCursor"))}`)}>Show more</Button>}
+    <NextPage feed={{ hasMore: !!data.NextCursor, loadingMore: busy,
+      enabled: !error, loadMoreError: pagingError, progress: value(data, "NextCursor"),
+      loadMore: () => navigate(`/me/tokens?cursor=${encodeURIComponent(value(data, "NextCursor"))}`),
+    }} label="Loading more tokens" />
   </>;
   const security = data.SignInSecurity as IdentityData | undefined;
   // The acceptance history identity read from the person's own row. Absent or

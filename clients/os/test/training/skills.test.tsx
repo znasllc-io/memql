@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Result } from "@znasllc-io/memql-sdk-core/client";
@@ -51,7 +52,7 @@ it("reads ten summaries per click, retains pages on reopen and searches on the s
   await screen.findByRole("button", { name: /^Skill 9\b/ });
   expect(read).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole("button", { name: /^Skill 10\b/ })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  await scrollNextPage();
   await screen.findByRole("button", { name: /^Skill 19\b/ });
   expect(read.mock.calls[1]![0].cursor).toBe("older");
   view.unmount();

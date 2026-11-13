@@ -5,6 +5,7 @@ import { usePagedCollection } from "../../live/useLiveCollection";
 import { TEXT_DEBOUNCE_MS, useDebouncedValue } from "../../logs/useDebouncedValue";
 import { flatten } from "../../kit/rows";
 import { chunkFromRow, type Chunk } from "./rows";
+import type { PagedFeed } from "../../kit/NextPage";
 
 export interface ReviewQueue {
   chunks: Chunk[];
@@ -17,6 +18,7 @@ export interface ReviewQueue {
   applyDecision: (chunkId: string, status: string) => void;
   search: string;
   setSearch: (search: string) => void;
+  pagination?: PagedFeed;
 }
 
 type Decision = { status: string; version: string };
@@ -66,7 +68,7 @@ export function useReviewQueue(enabled = true): ReviewQueue {
   }, [store, feed.snapshot.rows]);
   const error = feed.snapshot.error || feed.loadMoreError;
   const state = error ? "error" : !enabled || !connection ? "idle" : feed.snapshot.state === "seeding" || feed.loadingMore ? "loading" : "ready";
-  return { chunks, state, error, search, setSearch,
+  return { chunks, state, error, search, setSearch, pagination: feed,
     pagesRead: chunks.length ? Math.ceil(chunks.length / 10) : state === "ready" ? 1 : 0,
     exhausted: !feed.hasMore, loadMore: () => void feed.loadMore(), reload: feed.reseed, applyDecision };
 }

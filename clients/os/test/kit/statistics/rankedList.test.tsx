@@ -26,10 +26,13 @@ describe("the ranked list", () => {
     expect(items).toHaveLength(8);
     expect(items[0]!.querySelector(".os-ranked-label")?.textContent).toBe("/page-0");
     expect(items[0]!.querySelector(".os-ranked-value")?.textContent).toBe("120");
-    // The way to the rest stands on the list's heading, as a quiet button.
+    // The way to the rest stands on the list's heading, as the same up-right arrow used in Fleet.
     const all = within(section).getByRole("button", { name: "All pages" });
     expect(all.closest(".os-head-actions")).not.toBeNull();
-    expect(all.getAttribute("data-tone")).toBe("quiet");
+    expect(all.classList.contains("os-icon-button")).toBe(true);
+    expect(all.querySelector("svg.lucide-arrow-up-right")).toBeTruthy();
+    expect(all.textContent).toBe("");
+    expect(all.title).toBe("All pages");
     fireEvent.click(all);
     expect(onShowAll).toHaveBeenCalledTimes(1);
   });

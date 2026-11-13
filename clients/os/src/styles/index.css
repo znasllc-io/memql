@@ -8044,18 +8044,23 @@ a.os-button {
 }
 .os-entry-preferences { flex: none; padding: 20px 20px 0; }
 .os-entry-layout > .os-wizard { flex: 1; min-height: 0; }
-.os-entry-pending { flex: 1; display: grid; place-items: center; }
+.os-entry-pending { flex: 1; display: grid; place-items: center; animation: os-entry-arrive 160ms ease-out; }
+.os-entry-pending-content { display: grid; justify-items: center; gap: 16px; }
+.os-entry-pending-label { margin: 0; color: var(--os-muted); font-size: var(--os-text-sm); }
 .os-entry-pending-mark {
   color: var(--os-muted);
-  opacity: 0;
-  animation: os-entry-wait 160ms ease-out 200ms forwards;
+  display: flex;
+  animation: os-entry-wait 2s ease-in-out infinite alternate;
 }
-@keyframes os-entry-wait { to { opacity: 1; } }
+.os-entry-pending[data-leaving] { animation: os-entry-leave 160ms ease-in forwards; }
+@keyframes os-entry-wait { from { opacity: .55; } to { opacity: 1; } }
+@keyframes os-entry-leave { to { opacity: 0; } }
 .os-entry-layout .os-signin-content,
 .os-entry-layout .os-core-gate-column { animation: os-entry-arrive 140ms ease-out; }
 @keyframes os-entry-arrive { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
   .os-entry-pending-mark { animation: none; opacity: 1; }
+  .os-entry-pending, .os-entry-pending[data-leaving] { animation: none; }
   .os-entry-layout .os-signin-content,
   .os-entry-layout .os-core-gate-column { animation: none; }
 }

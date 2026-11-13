@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Result } from "@znasllc-io/memql-sdk-core/client";
@@ -16,7 +17,7 @@ describe("bounded usage reading",()=>{
     render(<View />);
     await screen.findByText("7.5k estimated tokens shown");
     expect(conn.query.workModelUsageForOwnerRun).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button",{name:"Load more usage"}));
+    await scrollNextPage();
     await screen.findByText("7.9k estimated tokens");
     expect(conn.query.workModelUsageForOwnerRun.mock.calls[1]?.[1]).toMatchObject({cursor:"older-page"});
     expect(screen.queryByRole("button",{name:"Load more usage"})).toBeNull();
@@ -35,7 +36,7 @@ describe("bounded usage reading",()=>{
         .mockResolvedValueOnce(rowsResult([newer,...capture.modelUsage]));
       const view=render(<View active />);
       await act(async()=>{});
-      await act(async()=>{fireEvent.click(screen.getByRole("button",{name:"Load more usage"}));});
+      await scrollNextPage();
       expect(screen.getByText("7.9k estimated tokens shown")).toBeTruthy();
       // Reading history pauses automatic head refresh, without claiming that
       // this growing run's loaded snapshot is complete or resetting the page.
@@ -45,7 +46,7 @@ describe("bounded usage reading",()=>{
       expect(conn.query.workModelUsageForOwnerRun).toHaveBeenCalledTimes(3);
       expect(conn.query.workModelUsageForOwnerRun.mock.calls[2]?.[1]).not.toHaveProperty("cursor");
       expect(screen.getByText("120 estimated tokens shown")).toBeTruthy();
-      await act(async()=>{fireEvent.click(screen.getByRole("button",{name:"Load more usage"}));});
+      await scrollNextPage();
       expect(conn.query.workModelUsageForOwnerRun.mock.calls[3]?.[1]).toMatchObject({cursor:"final-older-page"});
       expect(screen.getByText("8.0k estimated tokens")).toBeTruthy();
       expect(screen.getByText("3")).toBeTruthy();
@@ -59,10 +60,10 @@ describe("bounded usage reading",()=>{
     const conn=fakeConnection();h.connection=conn;
     conn.query.workModelUsageForOwnerRun.mockResolvedValueOnce(rowsResult([capture.modelUsage[0]!],"older-page")).mockRejectedValueOnce(Error("Receipts temporarily unavailable")).mockResolvedValueOnce(rowsResult(capture.modelUsage));
     render(<View />);
-    fireEvent.click(await screen.findByRole("button",{name:"Load more usage"}));
-    await screen.findByText("Usage could not be refreshed.");
+    await scrollNextPage();
+    await screen.findByText("Receipts temporarily unavailable");
     expect(screen.getByText("7.5k estimated tokens shown")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button",{name:"Read usage again"}));
+    fireEvent.click(screen.getByRole("button",{name:"Try again"}));
     await screen.findByText("7.9k estimated tokens");
   });
   it("does not expose the previous run's receipts while another read fails or a late response arrives",async()=>{

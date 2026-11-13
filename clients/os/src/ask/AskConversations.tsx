@@ -41,7 +41,9 @@ export function AskConversations({ conversation, onOpen }: { conversation: Conve
           current={item.id === state.selectedId} state={item.id === state.openingId ? "Opening…" : item.id === state.selectedId ? "Current" : undefined}
           disabled={state.loading || ((state.busy || state.voiceActive) && item.id !== state.selectedId)} onOpen={() => { void open(item.id); }} />)}
       </RecordList>
-      <LoadMore feed={{ hasMore: state.historyHasMore, loadingMore: state.historyLoadingMore, loadMoreError: state.historyMoreError, loadMore: conversation.loadMoreHistory }} />
+      <LoadMore feed={{ hasMore: state.historyHasMore, loadingMore: state.historyLoadingMore, loadMoreError: state.historyMoreError,
+        progress: state.conversations.length, scope: state.historySearch, enabled: !state.historyLoading && !state.historyError,
+        loadMore: conversation.loadMoreHistory }} />
     </div>
     <ActionBar state={state.loading ? "Opening conversation…" : state.busy ? "Reply in progress" : state.voiceActive ? "Voice conversation in progress" : ""}
       acts={error ? [{ label: "Retry", onAct: () => { if (state.selectionError && failedId) void open(failedId); else void conversation.refresh(); } }]

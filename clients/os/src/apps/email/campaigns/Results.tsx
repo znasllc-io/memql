@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-import { AutoRefresh, Caption, Fact, Facts, Notice, Panel, RecordList, RecordRow, Refine, Select, Subhead, type RefineChip } from "../../../kit";
+import { AutoRefresh, Caption, Fact, Facts, NextPage, Notice, Panel, RecordList, RecordRow, Refine, Select, Subhead, type RefineChip } from "../../../kit";
 import { ContentSkeleton, InlineSkeleton } from "../../../kit/ContentSkeleton";
 import { formatRate } from "../../../kit/format";
 import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
@@ -236,16 +236,11 @@ export function WhoGotIt({ campaignId, total }: { campaignId: string; total: num
           ) : deliveries.length > 0 ? (
             <Caption>No match among the loaded recipients.</Caption>
           ) : null}
-          {ledger.moreError !== "" ? <Notice tone="error" sentence="This cluster did not return more of the delivery record." detail={ledger.moreError} /> : null}
-          {!ledger.more || deliveries.length === 0 ? null : ledger.loadingMore ? (
-            <RecordListSkeleton rows={2} label="Loading more of the delivery record" />
-          ) : (
-            <p className="email-more">
-              <button type="button" className="os-link" onClick={ledger.loadMore}>
-                Show more
-              </button>
-            </p>
-          )}
+          {deliveries.length > 0 ? <NextPage rows={2} label="Loading more of the delivery record" feed={{
+            scope: campaignId, progress: ledger.progress ?? deliveries.length, hasMore: ledger.more,
+            enabled: ledger.state === "ready" && !ledger.error,
+            loadingMore: ledger.loadingMore, loadMoreError: ledger.moreError, loadMore: ledger.loadMore,
+          }} /> : null}
         </Panel>
       )}
     </>

@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { Button, Rail, type Stop } from "../kit";
 import { EntryLayout } from "../kit/EntryLayout";
-import { EntryPending } from "../kit/EntryPending";
+import { EntryPending, useEntryTransition } from "../kit/EntryPending";
 import { canConfigure } from "../kit/ReadinessStates";
 import { useSetupFacts } from "../apps/setup/context";
 import { InferenceStop } from "../apps/setup/InferenceStop";
@@ -69,7 +69,8 @@ export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
     const timer = setTimeout(() => setWaitExpired(true), 3000);
     return () => clearTimeout(timer);
   }, [waiting]);
-  if (waiting) return <EntryPending />;
+  const entryTransition = useEntryTransition(waiting || (unconfigured && Object.keys(state.shell.windows).length === 0 && (ladderLoaded !== true || access === null)));
+  if (entryTransition.show) return <EntryPending leaving={entryTransition.leaving} />;
 
   // Only a reported unconfigured verdict holds the desktop after entry.
   if (readiness?.of("ai")?.state !== "unconfigured") return <>{children}</>;
@@ -97,7 +98,7 @@ export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
   // ?? ""` while it is still null hands an OWNER the reader variant -- "an
   // owner or developer has to set up inference", to the owner, with Sign out
   // as the only control. Both reads, or neither variant.
-  if (ladderLoaded !== true || access === null) return <EntryPending />;
+  // The shared entry transition above holds this unresolved variant too.
   // Bound once so `bodyFor` below reads the narrowed value: TypeScript does
   // not carry a narrowing through a closure, and the alternative is a non-null
   // assertion at the one place a wrong answer would be silent. Non-null is

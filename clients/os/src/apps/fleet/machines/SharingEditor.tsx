@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 
 import { Check, LoaderCircle, Pause, Play, Trash2, User, Users } from "lucide-react";
 import { sameEntityId } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, Caption, Notice, Switch } from "../../../kit";
+import { Button, Caption, NextPage, Notice, Switch } from "../../../kit";
 import { IconButton } from "../../../kit/IconButton";
 import { AutoRefresh } from "../../../kit/AutoRefresh";
 import { CardCollectionSearch, EditableCard, CardCollectionSkeleton } from "../../../kit/CardCollectionEditor";
@@ -49,7 +49,7 @@ export function SharingEditor({ machine, writes, resource = "models" }: { machin
   const toggleLabel = resource === "models" ? "Share models" : "Share fleet workbenches";
   const searchId = useId(), listId = useId();
   const root = useRef<HTMLElement>(null), search = useRef<HTMLInputElement>(null);
-  const searchArea = useRef<HTMLDivElement>(null), popup = useRef<HTMLDivElement>(null), loadMore = useRef<HTMLButtonElement>(null);
+  const searchArea = useRef<HTMLDivElement>(null), popup = useRef<HTMLDivElement>(null);
   const inFlight = useRef(false);
   const [pending, setPending] = useState("");
   const [saved, setSaved] = useState<{ before: string; share: StoredShare } | null>(null);
@@ -144,11 +144,12 @@ export function SharingEditor({ machine, writes, resource = "models" }: { machin
     await persist(choiceFor("people", [...storedSubjects(currentRef.current), ...added]), "add", "search", false, selection);
   }
 
-  function showMore() {
+  function showMore(fromKeyboard = false) {
     if (!hasMore || busy) return;
     setVisibleCount(count => count + 5);
-    setActive(results.length);
-    search.current?.focus();
+    // Scrolling reveals options without changing the focused/selected one.
+    // ArrowDown explicitly asks to move to the first newly exposed option.
+    if (fromKeyboard) setActive(results.length);
   }
 
   function closeSearch() { setSearching(false); setActive(-1); }
@@ -157,7 +158,7 @@ export function SharingEditor({ machine, writes, resource = "models" }: { machin
     if (event.nativeEvent.isComposing) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault(); setSearching(true);
-      if (searching && event.key === "ArrowDown" && activeIndex === results.length - 1 && hasMore) loadMore.current?.focus();
+      if (searching && event.key === "ArrowDown" && activeIndex === results.length - 1 && hasMore) showMore(true);
       else if (results.length) setActive(event.key === "ArrowDown" ? Math.min(activeIndex + 1, results.length - 1) : Math.max(activeIndex - 1, 0));
     } else if (event.key === "Enter" && searching && results[activeIndex]) {
       event.preventDefault(); toggleCandidate(results[activeIndex]);
@@ -229,12 +230,10 @@ export function SharingEditor({ machine, writes, resource = "models" }: { machin
                 })}
               </div>
               {!results.length ? <p className="os-picker-empty">{query.trim() ? "No matches" : "No users or groups to add"}</p> : null}
-              {hasMore ? <button ref={loadMore} type="button" className="os-picker-more" onMouseDown={event => event.preventDefault()} onClick={showMore}
-                onKeyDown={event => {
-                  if (event.key === "ArrowUp") { event.preventDefault(); search.current?.focus(); setActive(results.length - 1); }
-                  if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); search.current?.focus(); closeSearch(); }
-                  if (event.key === "Tab") { event.preventDefault(); search.current?.focus(); closeSearch(); searchArea.current?.querySelector<HTMLButtonElement>(".os-add-button")?.focus(); }
-                }}>Load more</button> : null}
+              <NextPage key={`${query}:${searchBy}`} rows={1} label="Showing more users and groups" feed={{
+                hasMore, loadingMore: false, loadMoreError: "", progress: results.length,
+                enabled: read.state === "ready" && !locked, loadMore: () => showMore(),
+              }} />
             </AnchoredPicker> : null}
           </div>
           <p className="os-caption fleet-share-selection-count" id={`${searchId}-selection`} role="status" aria-live="polite" aria-atomic="true">{selection.length} selected</p>

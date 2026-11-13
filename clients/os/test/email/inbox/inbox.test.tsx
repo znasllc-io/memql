@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../../scrollNextPage";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -46,7 +47,7 @@ describe("Email inbox", () => {
     await screen.findByRole("button", { name: /Captured 0/ });
     expect(screen.queryByRole("button", { name: /Captured 10/ })).toBeNull();
     expect(original.query.emailInboxMessage).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await scrollNextPage();
     await screen.findByRole("button", { name: /Captured 19/ });
     first.unmount();
     render(<EmailInbox />);
@@ -63,7 +64,7 @@ describe("Email inbox", () => {
     render(<EmailInbox />);
     await screen.findByText("No matches in these messages");
     expect(screen.queryByText("No matching email")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await scrollNextPage();
     await screen.findByRole("button", { name: /Verify your email/ });
     expect(read.mock.calls[1]?.[0]).toMatchObject({ cursor: "scan-next" });
   });

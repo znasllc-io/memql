@@ -145,6 +145,9 @@ export interface PagedCollectionHandle<T> extends LiveCollectionHandle<T> {
   hasMore: boolean;
   loadingMore: boolean;
   loadMoreError: string;
+  progress?: number;
+  enabled?: boolean;
+  scope?: unknown;
 }
 
 /** The server query supplies a ten-row page and searches before pagination. */
@@ -161,6 +164,8 @@ export function usePagedCollection<T>(
     if (source && "loadMore" in source && typeof source.loadMore === "function") await source.loadMore();
   }, [handle.source]);
   return { ...handle, loadMore, hasMore: handle.snapshot.hasMore ?? false,
+    progress: handle.snapshot.pageCount ?? 0, scope: handle.source,
+    enabled: handle.snapshot.state === "live" && !handle.snapshot.error,
     loadingMore: handle.snapshot.loadingMore ?? false, loadMoreError: handle.snapshot.loadMoreError ?? "" };
 }
 

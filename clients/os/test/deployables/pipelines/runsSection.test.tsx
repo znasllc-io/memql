@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../../scrollNextPage";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -145,7 +146,7 @@ describe("the Runs tab", () => {
     await screen.findByText("Paged change 9");
     expect(screen.queryByText("Paged change 10")).toBeNull();
     expect(connection.calls.filter(call => call.startsWith("query pipelineRunsBrowse("))).toHaveLength(1);
-    await click(screen.getByRole("button", { name: "Load more" }));
+    await scrollNextPage();
     expect(await screen.findByText("Paged change 19")).toBeTruthy();
     expect(screen.queryByText("Paged change 20")).toBeNull();
     first.unmount();

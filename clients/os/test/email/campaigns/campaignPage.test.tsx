@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../../scrollNextPage";
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -906,7 +907,7 @@ describe("what happened when it went out", () => {
     expect(within(who).getByText("Sent")).toBeTruthy();
     expect(within(who).getByText("They unsubscribed")).toBeTruthy();
 
-    fireEvent.click(within(who).getByRole("button", { name: "Show more" }));
+    await scrollNextPage(who);
     expect(await within(who).findByText("sam@acme.com")).toBeTruthy();
     expect(within(who).getByText("kim@acme.com")).toBeTruthy();
     expect(within(who).getByText("mailbox full")).toBeTruthy();

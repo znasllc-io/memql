@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -78,7 +79,7 @@ it("loads one transfer page at a time, restores it, and searches older archives"
  const connection=fakeConnection({transfers:transfers as never});h.connection=connection;
  const props={machines,refresh:0,onDownload:vi.fn()};let view=render(<ArchiveTransfers {...props} />);
  await screen.findByText("archive-9.zip");expect(screen.queryByText("archive-10.zip")).toBeNull();
- fireEvent.click(screen.getByRole("button",{name:"Load more"}));await screen.findByText("archive-19.zip");
+ await scrollNextPage();await screen.findByText("archive-19.zip");
  expect(connection.callsNamed("libraryBackupList")).toHaveLength(2);view.unmount();
  view=render(<ArchiveTransfers {...props} />);expect(screen.getByText("archive-19.zip")).toBeTruthy();expect(connection.callsNamed("libraryBackupList")).toHaveLength(2);
  fireEvent.click(screen.getByRole("button",{name:"Search transfers"}));

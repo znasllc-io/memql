@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -253,7 +254,7 @@ it("pages workspaces by ten, caches loaded rows, and searches beyond them", asyn
  await screen.findByRole("button",{name:/^workspace-run-9 /});
  expect(screen.queryByRole("button",{name:/^workspace-run-10 /})).toBeNull();
  expect(connection.query.clusterNodes).not.toHaveBeenCalled();
- await click(screen.getByRole("button",{name:"Load more"}));
+ await scrollNextPage();
  await screen.findByRole("button",{name:/^workspace-run-19 /});
  view.unmount(); view=mount(connection);
  expect(screen.getByRole("button",{name:/^workspace-run-19 /})).toBeTruthy();

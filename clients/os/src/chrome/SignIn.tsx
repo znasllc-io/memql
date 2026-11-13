@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { canCoordinateIdentityRefresh } from "../auth/identityClient";
 import { IdentityFrame } from "../auth/IdentityFrame";
-import { EntryPending } from "../kit/EntryPending";
+import { EntryPending, useEntryTransition } from "../kit/EntryPending";
 import { Button } from "../kit/controls";
 
 export function SignIn({
@@ -20,7 +20,8 @@ export function SignIn({
     void onSignIn().catch(() => setFailed(true));
   }, [status, supportedBrowser, onSignIn]);
 
-  if (supportedBrowser && status === "signed-out" && !failed) return <EntryPending label="Opening sign-in" />;
+  const entryTransition = useEntryTransition(supportedBrowser && status === "signed-out" && !failed);
+  if (entryTransition.show) return <EntryPending label="Opening sign-in" leaving={entryTransition.leaving} />;
 
   return (
     <IdentityFrame title="Sign-in is unavailable">

@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type Row } from "@znasllc-io/memql-sdk-core/client";
@@ -138,9 +139,9 @@ describe("the sharing access list", () => {
     const { conn } = mount(studio(shared()), { directory: directory({ people, groups: [] }) }); await settle();
     fireEvent.focus(searchBox());
     expect(screen.getAllByRole("option")).toHaveLength(5);
-    await click("Load more");
+    await scrollNextPage();
     expect(screen.getAllByRole("option")).toHaveLength(10);
-    await click("Load more");
+    await scrollNextPage();
     expect(screen.getAllByRole("option")).toHaveLength(12);
     expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
     fireEvent.change(searchBox(), { target: { value: "Person 11" } });
@@ -152,6 +153,21 @@ describe("the sharing access list", () => {
     expect(screen.getByRole("option", { name: "Person 11" })).toBeTruthy();
     expect(conn.query.fleetShareDirectory).toHaveBeenCalledTimes(1);
     expect(conn.query.fleetSetSharing).not.toHaveBeenCalled();
+  });
+  it("reveals the next keyboard option without a paging button or a focus transfer", async () => {
+    const people = Array.from({ length: 12 }, (_, index) => ({ id: `p${index}`, name: `Person ${String(index).padStart(2, "0")}`, detail: "" }));
+    mount(studio(shared()), { directory: directory({ people, groups: [] }) }); await settle();
+    fireEvent.focus(searchBox());
+    for (let n = 0; n < 6; n++) fireEvent.keyDown(searchBox(), { key: "ArrowDown" });
+    const next = screen.getByRole("option", { name: "Person 05" });
+    expect(searchBox().getAttribute("aria-activedescendant")).toBe(next.id);
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+    fireEvent.keyDown(searchBox(), { key: "Enter" });
+    expect(next.getAttribute("aria-selected")).toBe("true");
+    const selected = searchBox().getAttribute("aria-activedescendant");
+    await scrollNextPage();
+    expect(searchBox().getAttribute("aria-activedescendant")).toBe(selected);
+    expect(next.getAttribute("aria-selected")).toBe("true");
   });
   it("holds multiple selections across filters and searches, then adds them in one write", async () => {
     const { conn } = mount(studio(shared())); await settle();

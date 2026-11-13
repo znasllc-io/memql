@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { beforeAll, expect, it, vi } from "vitest";
 import { webcrypto } from "node:crypto";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
@@ -61,13 +62,13 @@ it("loads recent evaluation receipts in tens and searches older history on the s
   });
   state.connection = { query: { workGoalEvaluationsBrowse: read } };
   const view = render(<EvaluationsSection />);
-  await screen.findByText("Counts describe the 10 loaded results. Load more to include earlier runs.");
+  await screen.findByText("Counts describe the 10 loaded results. Scroll to include earlier runs.");
   expect(read).toHaveBeenCalledTimes(1);
-  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
-  await screen.findByText("Counts describe the 20 loaded results. Load more to include earlier runs.");
+  await scrollNextPage();
+  await screen.findByText("Counts describe the 20 loaded results. Scroll to include earlier runs.");
   view.unmount();
   const reopened = render(<EvaluationsSection />);
-  await screen.findByText("Counts describe the 20 loaded results. Load more to include earlier runs.");
+  await screen.findByText("Counts describe the 20 loaded results. Scroll to include earlier runs.");
   expect(read).toHaveBeenCalledTimes(2);
   fireEvent.click(screen.getByRole("button", { name: "Search evaluation runs" }));
   fireEvent.change(screen.getByPlaceholderText("Search scenario or setup"), { target: { value: "Older target" } });

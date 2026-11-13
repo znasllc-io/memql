@@ -158,6 +158,9 @@ export function useMergedPagedCollections<A, B, T>(
   return {
     source,
     limit,
+    progress: limit,
+    scope: held as unknown,
+    enabled: feeds.every(feed => feed.snapshot.state === "live" && !feed.snapshot.error),
     hasMore: (manual && feeds.some(feed => feed.hasMore)) || available > limit,
     loadingMore: feeds.some(feed => feed.loadingMore),
     loadMoreError: first.loadMoreError || second.loadMoreError || "",

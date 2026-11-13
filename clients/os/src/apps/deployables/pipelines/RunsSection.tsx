@@ -47,7 +47,7 @@ import "./pipelines.css";
 // here because they are grouped under day headings, which LiveList does not
 // draw.
 //
-// THE LIVE WINDOW AND THE PAST. Ten recent summaries load first; Load more
+// THE LIVE WINDOW AND THE PAST. Ten recent summaries load first; scrolling
 // appends ten through the server cursor. Selected runs and visible source names
 // have scoped reads, independent of the retained directory depth.
 

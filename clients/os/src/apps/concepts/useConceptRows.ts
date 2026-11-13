@@ -3,6 +3,7 @@ import { browseConceptPage, getRowByConceptAndId, type Row } from "@znasllc-io/m
 
 import { usePagedCollection } from "../../live/useLiveCollection";
 import { useOsConnection } from "../../live/connection";
+import type { PagedFeed } from "../../kit/NextPage";
 
 // A retained, newest-first snapshot of the selected concept, loaded on demand.
 // Generic inspection keeps a separate change band so opening a raw record
@@ -24,6 +25,7 @@ export interface ConceptRowsWalk {
   /** Refresh the loaded page depth from the first page, clearing the band. */
   reload: () => void;
   retry?: () => void;
+  pagination?: PagedFeed;
 }
 
 export function useConceptRows(conceptId: string, pageSize: number, search = ""): ConceptRowsWalk {
@@ -119,7 +121,7 @@ export function useConceptRows(conceptId: string, pageSize: number, search = "")
     // on every page and lose whatever arrived in between.
   }, [subscriptions, query, conceptId, attempt]);
 
-  return { rows: [...rows], status, error, arrivedCount, changedCount, loadMore, reload, retry };
+  return { rows: [...rows], status, error, arrivedCount, changedCount, loadMore, reload, retry, pagination: feed };
 }
 
 /**

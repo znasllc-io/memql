@@ -3,7 +3,7 @@ import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { Concept, Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, Caption, Refine, Notice, RecordList, RecordRow, Panel, Subhead } from "../../kit";
+import { Button, Caption, Refine, Notice, NextPage, RecordList, RecordRow, Panel, Subhead } from "../../kit";
 import { cardFor, fieldText } from "./displayCard";
 import { rowIdOf, type ConceptRowsWalk } from "./useConceptRows";
 
@@ -60,13 +60,13 @@ export function RowsPanel({ concept, walk, search = "", onSearch }: { concept: C
           detail={walk.rows.length ? "Showing the rows already loaded." : "Waiting for the rows to load."} />
       ) : null}
 
-      {walk.status === "failed" ? (
+      {walk.status === "failed" && walk.rows.length === 0 ? (
         <Notice
           tone="error"
           sentence="These rows could not be read."
           detail={walk.error}
           next="The concept may be gated to a role this account does not hold."
-        />
+        ><Button tone="quiet" onClick={walk.retry ?? walk.reload}>Try again</Button></Notice>
       ) : null}
 
       {walk.rows.length === 0 && walk.status === "loading" ? (
@@ -93,32 +93,13 @@ export function RowsPanel({ concept, walk, search = "", onSearch }: { concept: C
         </RecordList>
       )}
 
-      {/* EACH STATE SAYS SOMETHING DIFFERENT. "Loaded N" with no
-          more to come and "loaded N, more available" are the two a reader
-          most needs told apart: the first means the number below is the
-          whole answer. */}
       <div className="os-rows-foot">
-        {walk.status === "loading" && walk.rows.length > 0 ? (
-          <RecordListSkeleton label="Loading more rows" />
-        ) : null}
-        {walk.status === "more" ? (
-          <>
-            <Caption>{walk.rows.length} rows loaded, more available.</Caption>
-            <Button tone="quiet" onClick={walk.loadMore}>
-              Load more
-            </Button>
-          </>
-        ) : null}
-        {walk.status === "exhausted" && walk.rows.length > 0 ? (
-          <Caption>
-            All {walk.rows.length} readable {search.trim() ? "matching " : ""}rows loaded.{search.trim() ? "" : " That is the whole concept as far as this account can see it."}
-          </Caption>
-        ) : null}
-        {walk.status === "failed" ? (
-          <Button tone="quiet" onClick={walk.retry ?? walk.reload}>
-            Try again
-          </Button>
-        ) : null}
+        {walk.rows.length > 0 || walk.status === "more" ? <NextPage key={`${concept.id}:${search}`} label="Loading more rows" feed={{
+          hasMore: walk.status !== "exhausted", enabled: walk.status !== "disconnected",
+          loadingMore: walk.status === "loading", progress: walk.rows.length, ...walk.pagination,
+          loadMoreError: walk.status === "failed" ? walk.error : "",
+          loadMore: walk.status === "failed" ? walk.retry ?? walk.reload : walk.loadMore,
+        }} /> : null}
       </div>
     </Panel>
   );

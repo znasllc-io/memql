@@ -234,8 +234,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   Do not flash form skeletons, generic account pages, or the desktop on the way
   to setup. A bounded first-read wait must still let an unavailable readiness
   feed reach the desktop; subsequent refreshes do not reopen the entry loader.
-  Reveal the destination once with a short opacity transition, without moving
-  its content; respect reduced motion.
+  Keep the loading mark and one short visible line stationary, with a quiet
+  opacity pulse. Reveal the destination after a bounded 160ms fade out; reduced
+  motion stops the pulse and skips the visual delay. A reconnect never reopens
+  this initial loading frame.
 - Keep one contextual information button at the far right of the shared
   `TrailRow`, after Back and breadcrumbs, on desktop and phone. It opens the
   current page's help modal; until documentation exists, say “Documentation is
@@ -462,7 +464,7 @@ and an accessible loading status. Reserve the initial list area to avoid panel
 jumps, respect reduced motion, and keep already loaded rows visible during
 refreshes. Loading and failed reads must never look like an empty collection.
 
-A new list loads its next page on scroll (`NextPage`), never behind a "Load
+Every list loads its next page on scroll (`NextPage`), never behind a "Load
 more" button. The request is the end of the list coming into view, and while
 the page is out the list's own skeleton rows stand where it will land, so
 nothing beneath the list moves and the rows already read stay put. A failure
@@ -470,12 +472,13 @@ stays in that same place, in the engine's words with **Try again** beside them,
 and does not ask again on its own: scrolling past a refusal is not a request to
 be refused again. The end is said once, "End of list", and only after the list
 grew; a list that fitted on its first page has no end to announce. `NextPage`
-takes the feed `LoadMore` takes, so a list moves from one to the other by
-changing one line. A feed that also says how far it has got (`progress`, its
+also backs existing `LoadMore` imports; those no longer render a button. A feed that also says how far it has got (`progress`, its
 row count or cursor) is asked again at once when a page arrived and the end is
 still in view; after a page that brought nothing, or from a feed that does not
 say, the end has to leave the view and come back first, so a list never asks
-in a loop.
+in a loop. Parked windows, hidden browser tabs and recovering feeds do not
+ask for more. A filter or session change gets a fresh continuation state; a
+late old read cannot mark the new list complete.
 
 ### Loading is the shape of the content, never a message
 

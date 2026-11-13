@@ -64,7 +64,7 @@ export function InboxSection() {
       {selected && detail.snapshot.state === "live" && !detail.snapshot.error ? <Notice tone="info" sentence="That captured message is no longer available." /> : null}
       {mode === "external" ? <EmptyState icon={Mail} title="Nothing is captured on this cluster">This cluster delivers email to real inboxes.</EmptyState> : <LiveList<InboxRow> source={source} rowId={row => row.id} fingerprint={row => `${row.Subject}:${row.To}`} label="Captured messages"
         errorContent={null}
-        emptyContent={feed.hasMore ? <EmptyState title="No matches in these messages">Load more to continue searching older messages.</EmptyState> : <EmptyState icon={Mail} title={needle || organization ? "No matching email" : "No test email yet"}>{needle || organization ? "Try another subject or address." : "Email this cluster sends appears here instead of being delivered."}</EmptyState>}
+        emptyContent={feed.hasMore ? <EmptyState title="No matches in these messages">Scroll to search older messages.</EmptyState> : <EmptyState icon={Mail} title={needle || organization ? "No matching email" : "No test email yet"}>{needle || organization ? "Try another subject or address." : "Email this cluster sends appears here instead of being delivered."}</EmptyState>}
         renderRow={item => <RecordRow icon={<Mail size={16} aria-hidden />} name={item.Subject || "(No subject)"} secondary={item.To} trailing={formatMoment(item.createdAt ?? "")} onOpen={() => setSelected(item.id)} />} />}
       <LoadMore feed={feed} />
     </>}

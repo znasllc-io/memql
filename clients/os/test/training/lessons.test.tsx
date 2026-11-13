@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Result } from "@znasllc-io/memql-sdk-core/client";
@@ -164,7 +165,7 @@ it("loads ten lesson heads at a time, preserves pages on reopen and searches on 
   await screen.findByText("Lesson 9");
   expect(screen.queryByText("Lesson 10")).toBeNull();
   expect(read).toHaveBeenCalledTimes(1);
-  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  await scrollNextPage();
   await screen.findByText("Lesson 19");
   view.unmount();
   const reopened = render(<LessonsReview />);
@@ -193,7 +194,7 @@ it("reads delivery evidence only for the visible lesson selections, with cached 
   expect(read).toHaveBeenCalledTimes(1);
   expect(deliveries).toHaveBeenCalledTimes(1);
   expect(deliveries.mock.calls[0]![0].observationIds).toEqual(selections.slice(0, 10).map(row => row.id));
-  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  await scrollNextPage();
   await screen.findByText("run-12");
   expect(deliveries.mock.calls[1]![0].observationIds).toEqual(selections.slice(10).map(row => row.id));
   view.unmount();

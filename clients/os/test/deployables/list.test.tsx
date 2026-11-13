@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -914,7 +915,7 @@ describe("server directory pages", () => {
     expect(connection.callsNamed("sitesAll")).toHaveLength(0);
     expect(connection.callsNamed("packagesAll")).toHaveLength(0);
     expect(connection.callsNamed("packageDeploymentsPending")).toHaveLength(0);
-    await click(screen.getByRole("button", { name: "Load more" }));
+    await scrollNextPage();
     await waitFor(() => expect(rowNames()).toHaveLength(20));
     await click(screen.getByRole("button", { name: "Refine deployables" }));
     const { type } = await import("./harness");
@@ -927,7 +928,7 @@ describe("server directory pages", () => {
     mount(connection);
     await waitFor(() => expect(rowNames()).toHaveLength(20));
     expect(connection.callsNamed("deployableDirectoryPage")).toHaveLength(reads);
-    await click(screen.getByRole("button", { name: "Load more" }));
+    await scrollNextPage();
     await waitFor(() => expect(rowNames()).toHaveLength(25));
     expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
   });
@@ -941,7 +942,7 @@ describe("server directory pages", () => {
     expect(connection.callsNamed("packagesAll")).toHaveLength(0);
     expect(connection.callsNamed("sourceCredentialsMine")).toHaveLength(0);
     expect(connection.callsNamed("sourceConnectionsMine")).toHaveLength(0);
-    await click(screen.getByRole("button", { name: "Load more" }));
+    await scrollNextPage();
     await waitFor(() => expect(rowNames()).toHaveLength(12));
     await click(screen.getByRole("button", { name: /^Open Repository 00,/ }));
     await screen.findByRole("region", { name: "Source Repository 00" });

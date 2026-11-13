@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -26,7 +27,7 @@ for (const fixture of cases) it(`${fixture.name} appends tens, retains pages and
   await screen.findByText("Resource 9");
   expect(screen.queryByText("Resource 10")).toBeNull();
   expect(read).toHaveBeenCalledTimes(1);
-  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  await scrollNextPage();
   await screen.findByText("Resource 19");
   view.unmount();
   const reopened = render(withSession(fixture.view()));

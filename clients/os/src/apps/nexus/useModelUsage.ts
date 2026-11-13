@@ -5,6 +5,8 @@ import { modelUsageFromRows, type ModelUsage } from "./modelUsage";
 export interface ModelUsageState {
   calls: ModelUsage[]; complete: boolean; error: string; loading: boolean;
   refresh: () => void; hasMore: boolean; loadMore: () => void;
+  progress?: string;
+  scope?: string;
 }
 /** Owner-scoped pages only. Background refresh reads one page; older receipts
  * are fetched one bounded page per explicit action and deduplicated by call. */
@@ -17,7 +19,13 @@ export function useModelUsage(runId: string, active: boolean): ModelUsageState {
   const cursor = request.runId === runId && request.active === active ? request.cursor : "";
   const [state, setState] = useState({ runId, calls: [] as ModelUsage[], complete: false, next: "", error: "", loading: true });
   const refresh = useCallback(() => { setRequest({ runId, active, cursor: "" }); update(value => value + 1); }, [runId, active]);
-  const loadMore = () => { if (state.runId === runId && state.next && !state.loading) setRequest({ runId, active, cursor: state.next }); };
+  const loadMore = () => {
+    if (state.runId !== runId || !state.next || state.loading) return;
+    setRequest({ runId, active, cursor: state.next });
+    // A failed page keeps its cursor; retry must start that same read even
+    // though the request key did not change.
+    if (state.error) update(value => value + 1);
+  };
   useEffect(() => {
     if (request.runId !== runId || request.active !== active) setRequest({ runId, active, cursor: "" });
     if (!runId || !connection) { setState({ runId, calls: [], complete: false, next: "", error: "", loading: false }); return; }
@@ -38,5 +46,6 @@ export function useModelUsage(runId: string, active: boolean): ModelUsageState {
     return () => { abort.abort(); if (timer) clearTimeout(timer); };
   }, [connection, runId, active, nonce, cursor, refresh]);
   const current = state.runId === runId ? state : { calls: [], complete: false, next: "", error: "", loading: true };
-  return { ...current, complete: current.complete && !active, refresh, loadMore, hasMore: Boolean(current.next) };
+  return { ...current, complete: current.complete && !active, refresh, loadMore,
+    scope: runId, progress: current.next, hasMore: Boolean(current.next) };
 }

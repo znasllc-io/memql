@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { refusalSentence, type Row } from "@znasllc-io/memql-sdk-core/client";
-import { Button, Notice, Panel, RecordList, RecordRow, RecordListSkeleton, Refine, Select, Subhead, Switch } from "../../../kit";
+import { Button, NextPage, Notice, Panel, RecordList, RecordRow, RecordListSkeleton, Refine, Select, Subhead, Switch } from "../../../kit";
 import { InPlaceAsk } from "../../../kit/pressHold";
 import { AddButton } from "../../../kit/AddButton";
 import { recipientFromRow, recipientIsSendable, type AudienceRow } from "../rows";
@@ -39,6 +39,7 @@ export function Subscribers({ audience, pinned = null, roster, writes, onAdd, ar
     if (marking && agreed && await set(marking.id, "subscribed", true)) setMarking(null);
   }
   const needle = search.trim().toLowerCase();
+  useEffect(() => setLimit(50), [audience.id, needle, state]);
   const filtered = people.filter(p => (!state || p.subscriptionStatus === state) && `${p.email} ${p.displayName}`.toLowerCase().includes(needle));
   const blocked = people.filter(p => !recipientIsSendable(p)).length;
   return <Panel label="People"><Subhead meta={people.length >= 100 ? "Latest 100" : undefined} actions={<>
@@ -48,7 +49,9 @@ export function Subscribers({ audience, pinned = null, roster, writes, onAdd, ar
     {roster.state === "loading" && !roster.readAt ? <RecordListSkeleton label="Loading people" /> : null}
     {roster.error ? <Notice tone="warn" sentence={refusalSentence(roster.error)}><Button busy={roster.state === "loading"} onClick={() => { void roster.reload(); }}>Try again</Button></Notice> : null}
     <RecordList label="People in this audience">{filtered.slice(0, limit).map(person => <RecordRow key={person.id} name={person.email} secondary={person.displayName} state={SUBSCRIPTION_STATES.find(s => s.value === person.subscriptionStatus)?.label} actions={!archived && !LEFT.has(person.subscriptionStatus) ? <Select id={`email-person-${person.id}`} label={`Subscription state for ${person.email}`} value={person.subscriptionStatus} onChange={next => { void change(person, next); }}>{SETTABLE.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}</Select> : undefined} />)}</RecordList>
-    {filtered.length > limit ? <div className="os-panel-actions"><Button onClick={() => setLimit(n => n + 50)}>Show more</Button></div> : null}
+    <NextPage key={`${audience.id}:${needle}:${state}`} feed={{ hasMore: filtered.length > limit,
+      loadingMore: false, loadMoreError: "", enabled: roster.state === "ready", progress: limit,
+      loadMore: () => setLimit(n => n + 50) }} />
     {roster.state === "ready" && !filtered.length ? <p className="os-caption">{people.length ? "No matching people." : "Nobody on this list yet."}</p> : null}
     {blocked ? <p className="os-caption">{blocked} of these can't be mailed. They stay on the list so a later import can't add them back.</p> : null}
     {marking ? <InPlaceAsk><Notice tone="info" sentence={`${marking.email} asked to confirm, so they are subscribed once they do. To subscribe them now, say they already agreed.`}><Switch checked={agreed} onChange={setAgreed}>They already agreed to receive these emails</Switch><div className="os-panel-actions">{agreed ? <Button tone="primary" busy={writes.setSubscription.busy} onClick={() => { void markSubscribed(); }}>Mark subscribed</Button> : null}<Button onClick={() => setMarking(null)}>Cancel</Button></div></Notice></InPlaceAsk> : null}

@@ -156,19 +156,20 @@ describe("a concept's rows", () => {
     mount(connection);
     await snapshot(connection);
     await click(await screen.findByText("order"));
-    expect(await screen.findByText(/All 1 readable rows loaded/)).toBeTruthy();
+    expect(await screen.findByText("1 shown · Recent")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+    expect(document.querySelector(".os-next-page-sentinel")).toBeNull();
   });
 
-  it("offers Load more while the walk has a cursor", async () => {
+  it("observes the next page while the walk has a cursor", async () => {
     const connection = fakeConnection({
       pages: [{ rows: [nodeOf("a", { total: 1 }, ORDER.id)], cursor: "next" }],
     });
     mount(connection);
     await snapshot(connection);
     await click(await screen.findByText("order"));
-    expect(await screen.findByText(/1 rows loaded, more available/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Load more" })).toBeTruthy();
+    expect(await screen.findByText("1 shown · Recent")).toBeTruthy();
+    expect(document.querySelector(".os-next-page-sentinel")).toBeTruthy();
   });
 
   it("an empty answer says 'not readable by this account', never 'this concept is empty'", async () => {
@@ -194,7 +195,7 @@ describe("a concept's rows", () => {
     mount(connection);
     await snapshot(connection);
     await click(await screen.findByText("order"));
-    await screen.findByText(/1 rows loaded, more available/);
+    await screen.findByText("1 shown · Recent");
 
     await act(async () => {
       connection.subscriptions.emit("v1:shopify:order", { id: "brand-new" });
@@ -238,7 +239,7 @@ describe("the walk starts once", () => {
     });
     mount(connection, "v1:shopify:order");
     await snapshot(connection);
-    await screen.findByText(/All 2 readable rows loaded/);
+    await screen.findByText("2 shown · Recent");
 
     const browses = connection.query.executeNamed.mock.calls.filter(
       (call) => call[0] === "conceptBrowse",
@@ -284,7 +285,7 @@ it("counts and profiles only the selected concept's roots, not its related appli
     connection.pushDelta({ generation: 1, added: [detail], removed: [], reset: true });
   });
 
-  expect(await screen.findByText(/All 1 readable rows loaded/)).toBeTruthy();
+  expect(await screen.findByText("1 shown · Recent")).toBeTruthy();
   expect(screen.queryByText("companyName")).toBeNull();
   expect(screen.queryByText("applicantEmail")).toBeNull();
   expect(screen.queryByText(/cannot be written again/)).toBeNull();

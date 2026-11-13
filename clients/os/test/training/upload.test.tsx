@@ -1,3 +1,4 @@
+import { scrollNextPage } from "../scrollNextPage";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -602,7 +603,7 @@ it("keeps loaded file pages on reopen and searches beyond the recent page", asyn
   await settle();
   expect(screen.getByText("File page 9")).toBeTruthy();
   expect(screen.queryByText("File page 10")).toBeNull();
-  await click(screen.getByRole("button", { name: "Load more" }));
+  await scrollNextPage();
   await settle();
   expect(screen.getByText("File page 19")).toBeTruthy();
   const reads = () => connection.calls.filter(call => call.includes("trainingFilesBrowse")).length;

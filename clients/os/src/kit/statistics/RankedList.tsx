@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
-import { ChevronRight } from "lucide-react";
+import { ArrowUpRight, ChevronRight } from "lucide-react";
 
 import { Caption } from "../Caption";
-import { Button, Subhead } from "../controls";
+import { Subhead } from "../controls";
+import { IconButton } from "../IconButton";
 import { formatCount } from "../format";
 import { RecordListSkeleton } from "../RecordListSkeleton";
 import "./statistics.css";
@@ -99,7 +100,7 @@ export function RankedList({
   const largest = Math.max(0, ...shown.map((row) => (Number.isFinite(row.value) ? row.value : 0)));
   // `null` keeps the heading a row while the act is absent (kit Subhead), so it
   // does not change shape when the list grows past its limit.
-  const showAll = onShowAll === undefined ? undefined : rows.length > limit ? <Button tone="quiet" onClick={onShowAll}>{showAllLabel}</Button> : null;
+  const showAll = onShowAll === undefined ? undefined : rows.length > limit ? <IconButton label={showAllLabel} onClick={onShowAll}><ArrowUpRight size={16} aria-hidden /></IconButton> : null;
 
   return (
     <section className="os-ranked-list" aria-label={title}>
