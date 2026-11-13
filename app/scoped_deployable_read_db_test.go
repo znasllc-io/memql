@@ -1,11 +1,9 @@
-package memql
+package app
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log/slog"
 	"testing"
 	"time"
 
@@ -15,15 +13,15 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
-	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/packages"
 	"github.com/znasllc-io/memql/component/sitetraffic"
 )
 
-// Only the role catalog is fixed. Both real integrations, every nested row
-// read, organization memberships and live denials use the real database. The
-// receiver gets verified forwarded identity, never the first node's scope memo.
-type scopedDeployableWireCatalog struct{ organizationGroupsWireCatalog }
+// The role catalog and transport authentication are fixtures. Both real
+// integrations, nested reads, memberships and denials use the database. The
+// public TCP stream resolves the seeded user from verified fixture claims,
+// never an owner bypass or a first node's scope memo.
+type scopedDeployableWireCatalog struct{ scopedOrganizationWireCatalog }
 
 func (c scopedDeployableWireCatalog) Holds(slug, verb, resource string) bool {
 	return slug == "owner" || slug == c.role && verb == auth.VerbRead && (resource == auth.ResourceData || resource == "app:deployables")
@@ -36,13 +34,7 @@ func (c scopedDeployableWireCatalog) Grants(slug string) []auth.VerbResource {
 }
 
 func TestScopedDeployableReadsThroughWireKeepOrganizationRowsAndTotals(t *testing.T) {
-	db := openWireTestDB(t)
-	_, err := memqlengine.LoadUnifiedConcepts(nil)
-	require.NoError(t, err)
-	eng, err := memqlengine.New(db)
-	require.NoError(t, err)
-	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
-	require.NoError(t, eng.Init(memorynodes.DefaultRegistry()))
+	eng, db := workTemplateDBEngineAndDB(t)
 	oldCatalog, oldGrants, oldMembers := auth.InstalledCapabilityCatalog(), auth.InstalledGrantSource(), auth.InstalledMembershipSource()
 	t.Cleanup(func() {
 		auth.SetCapabilityCatalog(oldCatalog)
@@ -107,23 +99,16 @@ func TestScopedDeployableReadsThroughWireKeepOrganizationRowsAndTotals(t *testin
 		_, err = db.ExecContext(context.Background(), `INSERT INTO edge_stats_daily_top(site_id,day,dimension,value,visitors,visits,page_views) VALUES (?,(now() AT TIME ZONE 'UTC')::date - 1,'page',?,?,?,?)`, "site-"+account, "/"+account, visitors, visitors, visitors)
 		require.NoError(t, err)
 	}
-	auth.SetCapabilityCatalog(scopedDeployableWireCatalog{organizationGroupsWireCatalog{role: role, account: a}})
+	auth.SetCapabilityCatalog(scopedDeployableWireCatalog{scopedOrganizationWireCatalog{role: role, account: a}})
 	put("v1:identity:user", user, map[string]any{"role": role})
 	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: user, Role: auth.Role(role)})
 	require.False(t, eng.GlobalDataCapable(ctx, auth.VerbRead))
 	require.True(t, eng.OrganizationCapable(ctx, a, auth.VerbRead, auth.ResourceData))
 	require.False(t, eng.OrganizationCapable(ctx, b, auth.VerbRead, auth.ResourceData))
-	session, stream := gateTestSession(t, eng, auth.Role(role))
-	session.access.UserId = user
-	wire, err := auth.ForwardedAuthorityForUser(session.access, auth.ForwardedClassUser, "", time.Time{}, time.Now())
-	require.NoError(t, err)
-	session.access, err = auth.VerifyForwardedAuthority(wire, time.Now())
-	require.NoError(t, err)
-	stream.ctx = auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: user})
+	stream := newScopedReadWire(t, eng, user, auth.Role(role))
 	call := func(t *testing.T, id, query string) map[string]any {
 		t.Helper()
-		driveGateQuery(t, session, id, query)
-		result := waitForQueryResult(t, stream, id, 15*time.Second)
+		result := stream.Query(t, id, query)
 		payload := scopedDeployableResult(t, result)
 		raw, err := json.Marshal(payload)
 		require.NoError(t, err)
@@ -198,9 +183,8 @@ func TestScopedDeployableReadsThroughWireKeepOrganizationRowsAndTotals(t *testin
 		execute(fmt.Sprintf(`mutation writeGrant(grantId: %s, subjectKind: "user", subjectId: %s, verb: "read", resourceType: %s, effect: "allow", grantedBy: "scoped-deployables-fixture")`, quote(grant), quote(user), quote(resource)))
 	}
 	require.False(t, eng.GlobalDataCapable(ctx, auth.VerbRead), "collection admission promoted an organization role")
-	for _, query := range []string{`builtin deployableDirectoryPage(resource: "sources")`, `builtin deployableDirectoryPage(resource: "unknown")`, `query agentById(agentId: "private")`, `mutation createAgent(agentId: "private", name: "Private")`, `builtin siteStatistics(period: "7d") || concept==v1:identity:user`, `builtin siteStatistics(period: builtin modelCatalog())`} {
-		allowed, _ := session.allowDataPlaneAccess(ctx, query)
-		require.False(t, allowed, "unscoped or executable input admitted: %s", query)
+	for n, query := range []string{`builtin deployableDirectoryPage(resource: "sources")`, `builtin deployableDirectoryPage(resource: "unknown")`, `query agentById(agentId: "private")`, `mutation createAgent(agentId: "private", name: "Private")`, `builtin siteStatistics(period: "7d") || concept==v1:identity:user`, `builtin siteStatistics(period: builtin modelCatalog())`} {
+		stream.Refused(t, fmt.Sprintf("denied-query-%d", n), query)
 	}
 }
 

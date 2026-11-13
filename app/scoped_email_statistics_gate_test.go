@@ -1,12 +1,10 @@
-package memql
+package app
 
 import (
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log/slog"
 	"testing"
 	"time"
 
@@ -19,10 +17,9 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/emailstats"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
-	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
-type scopedEmailStatisticsCatalog struct{ organizationGroupsWireCatalog }
+type scopedEmailStatisticsCatalog struct{ scopedOrganizationWireCatalog }
 
 func (c scopedEmailStatisticsCatalog) Holds(slug, verb, resource string) bool {
 	return slug == "owner" || slug == c.role && verb == auth.VerbRead && (resource == auth.ResourceData || resource == "app:email")
@@ -34,17 +31,11 @@ func (c scopedEmailStatisticsCatalog) Grants(slug string) []auth.VerbResource {
 	return nil
 }
 
-// Real wire, verified forwarded identity, real membership/grant resolution and
+// Real public TCP wire, verified fixture identity, real membership/grant resolution and
 // the real statistics handler. Statistics facts/watermarks live in connection-
 // private temporary tables; no shared rollup position is changed by this test.
 func TestScopedEmailStatisticsThroughWireHonorsOrganizationDenials(t *testing.T) {
-	db := openWireTestDB(t)
-	_, err := memqlengine.LoadUnifiedConcepts(nil)
-	require.NoError(t, err)
-	eng, err := memqlengine.New(db)
-	require.NoError(t, err)
-	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
-	require.NoError(t, eng.Init(memorynodes.DefaultRegistry()))
+	eng, db := workTemplateDBEngineAndDB(t)
 	oldCatalog, oldGrants, oldMembers := auth.InstalledCapabilityCatalog(), auth.InstalledGrantSource(), auth.InstalledMembershipSource()
 	t.Cleanup(func() {
 		auth.SetCapabilityCatalog(oldCatalog)
@@ -116,25 +107,18 @@ func TestScopedEmailStatisticsThroughWireHonorsOrganizationDenials(t *testing.T)
 			require.NoError(t, err)
 		}
 	}
-	_, err = statsDB.ExecContext(context.Background(), `INSERT INTO email_stat_fact(kind,source_id,account_id,day) VALUES ('sent','anchor','historical-anchor',(now() AT TIME ZONE 'UTC')::date-45)`)
+	_, err := statsDB.ExecContext(context.Background(), `INSERT INTO email_stat_fact(kind,source_id,account_id,day) VALUES ('sent','anchor','historical-anchor',(now() AT TIME ZONE 'UTC')::date-45)`)
 	require.NoError(t, err)
-	auth.SetCapabilityCatalog(scopedEmailStatisticsCatalog{organizationGroupsWireCatalog{role: role, account: a}})
+	auth.SetCapabilityCatalog(scopedEmailStatisticsCatalog{scopedOrganizationWireCatalog{role: role, account: a}})
 	put("v1:identity:user", user, map[string]any{"role": role})
 	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: user, Role: auth.Role(role)})
 	require.False(t, eng.GlobalDataCapable(ctx, auth.VerbRead))
 	require.True(t, eng.OrganizationCapable(ctx, a, auth.VerbRead, auth.ResourceData))
 	require.False(t, eng.OrganizationCapable(ctx, b, auth.VerbRead, auth.ResourceData))
-	session, stream := gateTestSession(t, eng, auth.Role(role))
-	session.access.UserId = user
-	wire, err := auth.ForwardedAuthorityForUser(session.access, auth.ForwardedClassUser, "", time.Time{}, time.Now())
-	require.NoError(t, err)
-	session.access, err = auth.VerifyForwardedAuthority(wire, time.Now())
-	require.NoError(t, err)
-	stream.ctx = auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: user})
+	wire := newScopedReadWire(t, eng, user, auth.Role(role))
 	call := func(id, extra string, want any, forbidForeign bool) map[string]any {
 		t.Helper()
-		driveGateQuery(t, session, id, `builtin emailStatistics(period:"7d"`+extra+`)`)
-		p := scopedDeployableResult(t, waitForQueryResult(t, stream, id, 15*time.Second))
+		p := scopedDeployableResult(t, wire.Query(t, id, `builtin emailStatistics(period:"7d"`+extra+`)`))
 		require.Equal(t, want, p["totals"].(map[string]any)["sent"], id)
 		if want == nil {
 			require.Nil(t, p["measuredSince"])
@@ -179,7 +163,8 @@ func TestScopedEmailStatisticsThroughWireHonorsOrganizationDenials(t *testing.T)
 	// Same user's full memberships and foreign ownership cannot lift a role
 	// fence. Changing to an actual operator below is explicit test setup.
 	put("v1:identity:user", user, map[string]any{"role": "owner"})
-	session.access.Role = auth.RoleOwner
+	wire.Close()
+	wire = newScopedReadWire(t, eng, user, auth.RoleOwner)
 	call("operator-with-account-deny", "", float64(15), true)
 	call("operator-orphan", `,accountIds:[`+quote(orphan)+`]`, float64(5), true)
 	call("operator-denied-account", `,accountIds:[`+quote(b)+`]`, nil, true)
@@ -193,16 +178,17 @@ func TestScopedEmailStatisticsThroughWireHonorsOrganizationDenials(t *testing.T)
 		execute(fmt.Sprintf(`mutation deactivateGrant(grantId:%s)`, quote(id)))
 	}
 	put("v1:identity:user", user, map[string]any{"role": role})
-	session.access.Role = auth.Role(role)
+	wire.Close()
+	wire = newScopedReadWire(t, eng, user, auth.Role(role))
+	call("scoped-before-membership-revocation", "", float64(3), true)
 	execute(fmt.Sprintf(`mutation writeGroupMembership(membershipId:%s,groupId:%s,userId:%s,origin:"added",status:"removed",accountId:%s)`, quote("m-"+a), quote("g-"+a), quote(user), quote(a)))
 	call("membership-revoked", "", nil, true)
-	for _, q := range []string{
+	for n, q := range []string{
 		`builtin emailStatisticsRollup()`, `builtin emailStatistics(period:"7d") || concept==v1:identity:user`,
 		`builtin emailStatistics(period:builtin modelCatalog())`, `query agentById(agentId:"private")`,
 		`mutation createAgent(agentId:"private",name:"Private")`, `builtin notEmailStatistics()`,
 	} {
-		allowed, _ := session.allowDataPlaneAccess(ctx, q)
-		require.False(t, allowed, "unscoped or executable work admitted: %s", q)
+		wire.Refused(t, fmt.Sprintf("unsafe-source-%d", n), q)
 	}
 	require.False(t, eng.GlobalDataCapable(ctx, auth.VerbRead))
 }

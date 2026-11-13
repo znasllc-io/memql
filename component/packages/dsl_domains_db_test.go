@@ -298,6 +298,10 @@ func TestASiteOwnerReadsTheDomainsOfThePackageTheyOwn(t *testing.T) {
 // and the deploy's own write still lands.
 func TestNoClientWriteCanNameTheDomainsAPackageShips(t *testing.T) {
 	eng, db := dbEngine(t)
+	// This positive control uses real persisted grants, not just role defaults.
+	previousGrants, previousMembers := auth.InstalledGrantSource(), auth.InstalledMembershipSource()
+	eng.InstallGrantResolution()
+	t.Cleanup(func() { auth.SetGrantSource(previousGrants); auth.SetMembershipSource(previousMembers) })
 	suffix := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
 
 	var ids []string
@@ -313,6 +317,15 @@ func TestNoClientWriteCanNameTheDomainsAPackageShips(t *testing.T) {
 	group := "dd-guard-group-" + suffix
 	seedTieGroup(t, eng, group, account)
 	ids = append(ids, group)
+	// Source policy is client-editable only with its own capability. Grant that
+	// exact permission to this account's group so repoRef is a legitimate
+	// positive control even for its writer, without giving any client internal
+	// origin or permission to name a deployment-owned DSL field.
+	grant := auth.GrantRowID(auth.SubjectKindGroup, group, auth.VerbExecute, "app:pipelines/repositories")
+	ids = append(ids, "v1:rbac:grant:"+grant)
+	if _, err := eng.Execute(tieSeederCtx(), fmt.Sprintf(`mutation writeGrant(grantId: %s, subjectKind: "group", subjectId: %s, verb: "execute", resourceType: "app:pipelines/repositories", effect: "allow", grantedBy: "dd-guard-seeder")`, langparser.QuoteString(grant), langparser.QuoteString(group))); err != nil {
+		t.Fatal(err)
+	}
 
 	// person writes a user of the given role. A writer reaches a tied package
 	// only through the organization, so a writer is a member of it; staff are
@@ -341,10 +354,9 @@ func TestNoClientWriteCanNameTheDomainsAPackageShips(t *testing.T) {
 		}
 		return pkg
 	}
-	// stored is the list on the latest stored version of the row, read straight
-	// off the table: the answer to "what is the list", with no read tier between.
-	// A row that was never written has none, which is not a failure to read.
-	stored := func(t *testing.T, pkg string) []string {
+	// Read the latest stored payload directly, without a read tier. Both a
+	// refusal and the positive control must be proved against durable state.
+	storedPayload := func(t *testing.T, pkg string) map[string]any {
 		t.Helper()
 		var node concept.MemoryNode
 		err := db.NewSelect().Model(&node).Where("concept = ?", "v1:platform:package").Where("id = ?", pkg).
@@ -359,7 +371,11 @@ func TestNoClientWriteCanNameTheDomainsAPackageShips(t *testing.T) {
 		if err := json.Unmarshal(node.Payload, &payload); err != nil {
 			t.Fatal(err)
 		}
-		return rowStrings(payload, "dslDomains")
+		return payload
+	}
+	stored := func(t *testing.T, pkg string) []string {
+		t.Helper()
+		return rowStrings(storedPayload(t, pkg), "dslDomains")
 	}
 	raw := func(ctx context.Context, pkg, payload string) error {
 		_, err := eng.Execute(ctx, fmt.Sprintf(`insert("v1:platform:package", id=%s, payload=%s)`, langparser.QuoteString(pkg), payload))
@@ -394,12 +410,16 @@ func TestNoClientWriteCanNameTheDomainsAPackageShips(t *testing.T) {
 					t.Fatalf("a %s called the @serverOnly mutation", role)
 				}
 
-				// A CLIENT'S OTHER WRITES TO THE ROW ARE NOT THE GUARD'S. Naming the
-				// field is what is refused, not touching the row. (latestKnownVersion
-				// because no organization capability is held against it: a plain
-				// writer's write to the row is refused by those, which is not this.)
-				if err := raw(ctx, pkg, `{"latestKnownVersion":"sha-unrelated"}`); err != nil {
-					t.Fatalf("an unrelated write to the row was refused: %v", err)
+				// A permitted source-policy edit still works. latestKnownVersion is
+				// feed-owned, so it cannot serve as an unrelated client-write control.
+				if !eng.OrganizationCapable(ctx, account, auth.VerbExecute, "app:pipelines/repositories") {
+					t.Fatal("fixture lacks the granted source-policy capability")
+				}
+				if err := raw(ctx, pkg, `{"repoRef":"release-control"}`); err != nil {
+					t.Fatalf("an authorized source-policy write was refused: %v", err)
+				}
+				if got := storedPayload(t, pkg); rowString(got, "repoRef") != "release-control" || !reflect.DeepEqual(rowStrings(got, "dslDomains"), []string{"real"}) {
+					t.Fatalf("source-policy write did not persist repoRef while retaining dslDomains: %v", got)
 				}
 				// A CLIENT THAT RE-SENDS THE ROW WITHOUT THE FIELD cannot change it:
 				// the read-merge keeps what the delta omits.

@@ -3,7 +3,7 @@ package accounts
 import (
 	"bytes"
 	"encoding/json"
-	"io/fs"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -12,14 +12,17 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/secret"
-	"github.com/znasllc-io/memql/packs/reviewspack"
 )
 
-// Use the pack's actual embedded declaration and the registry's schema builder,
+// Use the pack's actual declaration and the registry's schema builder,
 // then the Accounts export scrubber. A store-specific export test alone cannot
 // protect historical versions carried by a whole-account export.
 func TestReviewRequestRetrySecretsDoNotTravelWithAccountHistory(t *testing.T) {
-	source, err := fs.ReadFile(reviewspack.Tree(), "concepts.memql")
+	// Go tests run from this package directory, including GOWORK=off in the
+	// full CI checkout. Read the source embedded by reviewspack directly: a
+	// Go import would invert the integrations module boundary back to root.
+	// Missing source must fail, never turn this privacy regression into a skip.
+	source, err := os.ReadFile("../../packs/reviewspack/dsl/concepts.memql")
 	if err != nil {
 		t.Fatal(err)
 	}
