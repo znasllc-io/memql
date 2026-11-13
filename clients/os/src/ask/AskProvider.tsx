@@ -2,6 +2,8 @@ import { LiveVoiceSession } from "./liveVoiceSession";
 import { ConversationSession } from "./conversationSession";
 import { onAppResume } from "../live/resume";
 import { useOsConnection } from "../live/connection";
+import { useSessionIfPresent } from "../chrome/access";
+import { holds } from "../system/roles";
 import { createContext, useEffect, useCallback, useContext, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { CHECKING_ASK, type AskAvailability } from "./useAskReadiness";
@@ -33,6 +35,7 @@ export interface AskSheetState {
 }
 
 interface AskContextValue {
+  canAsk: boolean;
   transport: AskTransport;
   conversation: ConversationSession;
   liveVoice: LiveVoiceSession;
@@ -68,13 +71,13 @@ export function useAskActivity() {
  * Ask provider in isolated app fixtures. Permission approvals stay in Nexus. */
 export function useOpenAskWork() {
   const ask = useContext(Ctx);
-  return ask ? (runId: string) => { ask.openAsk(); void ask.conversation.openWork(runId); } : null;
+  return ask?.canAsk ? (runId: string) => { if (holds("read", "app:ask")) { ask.openAsk(); void ask.conversation.openWork(runId); } } : null;
 }
 
 /** An explicit discussion never grants access or resumes the blocked work. */
 export function useDiscussApproval() {
   const ask = useContext(Ctx);
-  return ask ? (approvalId: string) => { ask.openAsk(); void ask.conversation.discussApproval(approvalId); } : null;
+  return ask?.canAsk ? (approvalId: string) => { if (holds("read", "app:ask")) { ask.openAsk(); void ask.conversation.discussApproval(approvalId); } } : null;
 }
 
 export function AskProvider({
@@ -92,28 +95,44 @@ export function AskProvider({
   settingsStore?: AskSettingsStore;
   children: ReactNode;
 }) {
+  // Subscribe to the session's access epoch as well as reading the effective
+  // set: a grant revocation must close every entry point without a reload.
+  const session = useSessionIfPresent();
+  const canAsk = (!session || session.access !== null) && holds("read", "app:ask");
   const storeRef = useRef<AskSettingsStore | null>(null);
   if (!storeRef.current) storeRef.current = settingsStore ?? new LocalAskSettingsStore();
-  const conversation = useMemo(() => new ConversationSession(transport), [transport]);
+  // A revoked session loses its transcript/draft and in-flight local work.
+  // Regranting starts a fresh viewer rather than reviving a stale open sheet.
+  const conversation = useMemo(() => {
+    const next = new ConversationSession(transport);
+    if (!canAsk) next.dispose();
+    return next;
+  }, [transport, canAsk]);
   const connection = useOsConnection();
-  useEffect(() => { conversation.activate(); return () => conversation.dispose(); }, [conversation]);
+  useEffect(() => { if (canAsk) conversation.activate(); return () => conversation.dispose(); }, [conversation, canAsk]);
   const liveVoice = useMemo(() => new LiveVoiceSession(transport, conversation), [transport, conversation]);
   useEffect(() => () => liveVoice.dispose(), [liveVoice]);
-  useEffect(() => { if (availability.state === "ready") { conversation.refreshHistory(); void conversation.reload(false); } }, [availability.state, conversation]);
+  useEffect(() => { if (canAsk && availability.state === "ready") { conversation.refreshHistory(); void conversation.reload(false); } }, [canAsk, availability.state, conversation]);
   useEffect(() => {
+    if (!canAsk) return;
     let recoveredAt = -Infinity;
     const recover = () => { recoveredAt = Date.now(); conversation.refreshHistory(); void conversation.reload(false); };
     const stopCycle = connection?.onConnectionCycle?.(recover);
     const stopResume = onAppResume(() => { if ((!connection || connection.status === "connected") && Date.now() - recoveredAt >= 1_000) recover(); });
     return () => { stopCycle?.(); stopResume(); };
-  }, [connection, conversation]);
+  }, [canAsk, connection, conversation]);
   const [sheet, setSheet] = useState<AskSheetState>({ open: false, context: null });
+  useEffect(() => { if (!canAsk) setSheet({ open: false, context: null }); }, [canAsk]);
   // Work can be rerun from Nexus after its terminal snapshot stopped polling.
   // Reopen the viewer with one fresh snapshot, retaining this session's draft.
-  useEffect(() => { if (sheet.open) void conversation.reload(false); }, [sheet.open, conversation]);
+  useEffect(() => { if (canAsk && sheet.open) void conversation.reload(false); }, [canAsk, sheet.open, conversation]);
   const [settings, setSettings] = useState<AskSettings>(() => storeRef.current!.load());
 
-  const openAsk = useCallback((context: string | null = null, contextLabel?: string) => setSheet({ open: true, context, contextLabel }), []);
+  const openAsk = useCallback((context: string | null = null, contextLabel?: string) => {
+    // Recheck the authoritative set even for a callback retained by a command
+    // or app from before the session's access update rendered.
+    if (canAsk && holds("read", "app:ask")) setSheet({ open: true, context, contextLabel });
+  }, [canAsk]);
   const closeAsk = useCallback(() => setSheet((s) => ({ ...s, open: false })), []);
   const updateSettings = useCallback((patch: Partial<AskSettings>) => {
     setSettings((prev) => {
@@ -138,8 +157,8 @@ export function AskProvider({
   }, [conversation, updateSettings]);
 
   const value = useMemo(
-    () => ({ conversation, liveVoice, transport, availability, voice, uploads, settings, updateSettings, sheet, openAsk, closeAsk }),
-    [conversation, liveVoice, transport, availability, voice, uploads, settings, updateSettings, sheet, openAsk, closeAsk],
+    () => ({ canAsk, conversation, liveVoice, transport, availability, voice, uploads, settings, updateSettings, sheet: canAsk ? sheet : { open: false, context: null }, openAsk, closeAsk }),
+    [canAsk, conversation, liveVoice, transport, availability, voice, uploads, settings, updateSettings, sheet, openAsk, closeAsk],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

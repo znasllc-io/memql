@@ -97,7 +97,7 @@ export function WindowFrame({
     if (searchDialog.current?.open) searchDialog.current.close();
     content.current?.querySelectorAll<HTMLDialogElement>("dialog[open]").forEach(dialog => dialog.close());
   }, [hidden]);
-  const { openAsk } = useAsk();
+  const { canAsk, openAsk } = useAsk();
   const askActivity = useDrivingCue(manifest.id);
   const driving = askActivity ? askActivity.phase === "completed" ? "completed" : "running" : undefined;
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -207,7 +207,7 @@ export function WindowFrame({
         <div className="os-window-drag-space" {...listeners} {...attributes} aria-label={`Drag ${manifest.name}`} />
         <div className="os-window-controls">
           <div className="os-window-control-group">
-          <button
+          {canAsk && <button
             type="button"
             className="os-icon-button"
             aria-label={`Ask about ${manifest.name}`}
@@ -215,7 +215,7 @@ export function WindowFrame({
             onClick={() => openAsk(visiblePageContext(content.current, windowAsk.contextTag()), visiblePageLabel(content.current, `${manifest.name} / ${current?.name ?? ""}`))}
           >
             <Mark size={14} aria-hidden />
-          </button>
+          </button>}
           <button type="button" className="os-icon-button" aria-label={`Search ${manifest.name}`} title={`Search ${manifest.name}`} onClick={searchApp}><Search size={14} aria-hidden /></button>
           </div><div className="os-window-control-group">
           {manifest.settingsSection ? (

@@ -40,7 +40,7 @@ import { useWindowAsk } from "./windowAsk";
 
 export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
   const { registry, actorRole } = useOs();
-  const { openAsk, sheet } = useAsk();
+  const { canAsk, openAsk, sheet } = useAsk();
   const [currentAppId, setCurrentAppId] = useState<string | null>(null);
   const [sectionId, setSectionId] = useState("");
   const [intent, setIntent] = useState<{ id: string; payload: Record<string, unknown> }>();
@@ -184,9 +184,9 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
         >
           <LayoutGrid size={20} aria-hidden />
         </button>
-        <button type="button" className="os-ask-orb" aria-label="Ask" onClick={() => openAsk(current ? appAsk.contextTag() : null)}>
+        {canAsk && <button type="button" className="os-ask-orb" aria-label="Ask" onClick={() => openAsk(current ? appAsk.contextTag() : null)}>
           <Mark className="os-ask-mark" />
-        </button>
+        </button>}
       </footer>
       </div>
       <AskSheet embedded onOpenApp={open} />

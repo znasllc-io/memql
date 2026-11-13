@@ -4,6 +4,7 @@ import { inferenceFrom } from "../apps/settings/routingFacts";
 import { useSession } from "../chrome/access";
 import { useConnectionStatus, type ShellConnectionStatus } from "../chrome/connection";
 import { useOsConnection } from "../live/connection";
+import { holds } from "../system/roles";
 
 export interface AskAvailability {
   state: "checking" | "ready" | "unavailable" | "error" | "disconnected" | "reconnecting";
@@ -70,8 +71,8 @@ type ProbeAnswer = {
   probing: boolean;
 };
 
-function scopeKeyOf(parts: { connected: boolean; userId: string; epoch: number; moduleState: string | undefined }): string {
-  return `${parts.connected}|${parts.userId}|${parts.epoch}|${parts.moduleState ?? ""}`;
+function scopeKeyOf(parts: { connected: boolean; canAsk: boolean; userId: string; epoch: number; moduleState: string | undefined }): string {
+  return `${parts.connected}|${parts.canAsk}|${parts.userId}|${parts.epoch}|${parts.moduleState ?? ""}`;
 }
 
 /** One caller in ShellTransports, shared by sheet and widget. */
@@ -79,14 +80,15 @@ export function useAskReadiness(): AskAvailability {
   const connection = useOsConnection();
   const status = useConnectionStatus();
   const { access, readiness } = useSession();
+  const canAsk = holds("read", "app:ask");
   const userId = access?.userId ?? "";
   const moduleState = readiness?.of("ai")?.state;
   const [epoch, setEpoch] = useState(0);
   const refresh = useCallback(() => setEpoch((n) => n + 1), []);
   const connected = status === "connected";
   const scope = useMemo(
-    () => ({ connection, connected, userId, epoch, moduleState }),
-    [connection, connected, userId, epoch, moduleState],
+    () => ({ connection, connected, canAsk, userId, epoch, moduleState }),
+    [connection, connected, canAsk, userId, epoch, moduleState],
   );
   const key = scopeKeyOf(scope);
   const [answer, setAnswer] = useState<ProbeAnswer | null>(null);
@@ -96,16 +98,16 @@ export function useAskReadiness(): AskAvailability {
   // Bounded probe loop with increasing backoff. Once exhausted, stay red and
   // stop. Reconnect / module / refresh bumps epoch and restarts the budget.
   useEffect(() => {
-    if (!scope.connected || !scope.connection || !scope.userId) return;
+    if (!scope.canAsk || !scope.connected || !scope.connection || !scope.userId) return;
     let stale = false;
     let timer: number | undefined;
     const abort = new AbortController();
 
     const run = (probesSoFar: number) => {
       void Promise.resolve()
-        .then(() => scope.connection!.query.inferenceStatus({}, { signal: abort.signal }))
+        .then(() => stale ? undefined : scope.connection!.query.inferenceStatus({}, { signal: abort.signal }))
         .then((result) => {
-          if (stale) return;
+          if (stale || !result) return;
           const statusRow = inferenceFrom(result.rows()[0], "");
           if (statusRow.read && statusRow.streamingChatEligible === true) {
             setAnswer({ scopeKey: key, state: "ready", probes: probesSoFar + 1, probing: false });
@@ -142,7 +144,7 @@ export function useAskReadiness(): AskAvailability {
 
   // Final disconnect blanks Ask. Brief SDK reconnecting keeps the last ready
   // reading so a BFF GoingAway / roll does not yellow-flap Send + the dock.
-  if (status === "disconnected" || !connection || !userId) {
+  if (!canAsk || status === "disconnected" || !connection || !userId) {
     return { state: "disconnected", message: "", refresh };
   }
   if (status === "reconnecting") {

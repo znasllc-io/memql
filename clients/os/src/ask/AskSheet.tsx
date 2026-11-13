@@ -12,7 +12,7 @@ import { AskSurface } from "./AskSurface";
 // Both entry points retain the composer while the shared readiness check runs.
 
 export function AskSheet({ dockReserve = 0, embedded = false, onOpenApp }: { dockReserve?: number; embedded?: boolean; onOpenApp?: (appId: string, sectionId?: string, payload?: Record<string, unknown>) => void }) {
-  const { sheet, closeAsk, transport, voice, uploads, settings, availability, conversation, liveVoice } = useAsk();
+  const { canAsk, sheet, closeAsk, transport, voice, uploads, settings, availability, conversation, liveVoice } = useAsk();
   const { actions } = useOs();
   const [maximized, setMaximized] = useState(false);
   const openApp = onOpenApp ?? actions.openApp;
@@ -26,7 +26,7 @@ export function AskSheet({ dockReserve = 0, embedded = false, onOpenApp }: { doc
     return () => window.removeEventListener("keydown", onKey);
   }, [sheet.open, closeAsk]);
 
-  if (!sheet.open) return null;
+  if (!canAsk || !sheet.open) return null;
   return (
     <div
       className="os-ask-backdrop"
