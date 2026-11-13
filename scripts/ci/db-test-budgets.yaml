@@ -52,7 +52,11 @@ classes: |
   # e1d22855f and 7d88c9f3c, db-tests#5, 301.9s), where slower packages run
   # about 1.9 times their laptop time. 900s keeps 1.5 times an expected worst
   # pass near 600s; keep every test and its operation deadlines.
-  db      installation integrations/installation 900s serial 1
+  # On 2026-11-13 this full suite exhausted 900s twice; the intervening native
+  # run passed in 867.207s. The second timeout caught a new rollback test only
+  # 1s into fixture setup, without an assertion failure. Give the aggregate
+  # suite 1200s; retain every test, operation deadline and runner resource.
+  db      installation integrations/installation 1200s serial 1
   # Campaigns now covers 498 cases, including independent two-engine hops.
   # Keep each lock/write deadline assertion; give the full suite its own budget.
   db      campaigns component/campaigns 600s     serial,uncached 1
