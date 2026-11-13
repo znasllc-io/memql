@@ -1072,6 +1072,13 @@ vendor's own `Retry-After` where one is given.
   owner for their own store. It is absent until an Admin call made by the
   node that answers has reported one. The Store page does not draw it.
 
+When Shopify refuses a field, subsequent reads omit that field and retain
+only the requested operation when preparing the query. A denied child
+connection therefore cannot invalidate an unrelated order read. If the
+refusal arrives while reading a later page of that child, the current record
+read reports the refusal; it does not record a deletion or claim that the
+partial record is complete. Later parent reads omit the denied connection.
+
 ---
 
 ## The quarterly bump

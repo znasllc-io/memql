@@ -427,9 +427,9 @@ func (c *Connector) bulkStatus(ctx context.Context, store Store, id string) (bul
 
 // operationBody extracts ONE named operation from a multi-operation document.
 //
-// bulkOperationRunQuery takes a query STRING, and Shopify refuses a document
-// carrying more than one operation. A domain split across parts therefore has
-// to hand over exactly the part being run.
+// Bulk operations must hand over exactly the part being run. Ordinary reads
+// also use this before pruning denied fields, so an unused child-page
+// operation cannot be left with an empty selection or unused variables.
 func operationBody(document, operation string) (string, error) {
 	marker := "query " + operation + "("
 	idx := strings.Index(document, marker)
@@ -438,7 +438,7 @@ func operationBody(document, operation string) (string, error) {
 		idx = strings.Index(document, marker)
 	}
 	if idx < 0 {
-		return "", fmt.Errorf("shopify: operation %q not found in the generated bulk document", operation)
+		return "", fmt.Errorf("shopify: operation %q not found in the generated document", operation)
 	}
 	rest := document[idx:]
 	// Find the matching close brace of the operation body.
@@ -454,7 +454,7 @@ func operationBody(document, operation string) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("shopify: operation %q is not balanced in the generated bulk document", operation)
+	return "", fmt.Errorf("shopify: operation %q is not balanced in the generated document", operation)
 }
 
 // streamBulk downloads the JSONL and maps up to `limit` lines starting at

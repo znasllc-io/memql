@@ -43,7 +43,11 @@ const maxDeniedPrunes = 4
 // with its errors -- and a permanent failure when it returned none.
 func (c *Connector) callWithGrant(ctx context.Context, store Store, spec *generated.TypeSpec, operation string, vars map[string]any) (*AdminResponse, error) {
 	for prunes := 0; ; prunes++ {
-		resp, err := c.adminCall(ctx, store, c.documentFor(store, spec), operation, vars)
+		document, err := c.documentFor(store, spec, operation)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := c.adminCall(ctx, store, document, operation, vars)
 		if err == nil {
 			return resp, nil
 		}
@@ -55,7 +59,14 @@ func (c *Connector) callWithGrant(ctx context.Context, store Store, spec *genera
 		if deniesRoot(fields, spec) || ae.DeniesNode() {
 			return nil, fmt.Errorf("%w: %v", memqlsync.ErrNotGranted, ae)
 		}
-		if c.noteDeniedFields(store, spec, fields) && prunes < maxDeniedPrunes {
+		learned := c.noteDeniedFields(store, spec, fields)
+		if deniedChildPage(spec, operation, fields) != "" {
+			// This page's only connection was refused. Keep that knowledge
+			// for later parent reads, but never retry an empty page operation
+			// or interpret its null parent as a deleted/completed record.
+			return nil, fmt.Errorf("%w: %v", memqlsync.ErrNotGranted, ae)
+		}
+		if learned && prunes < maxDeniedPrunes {
 			continue
 		}
 		if len(ae.Data) > 0 {
@@ -79,12 +90,40 @@ func deniesRoot(fields []string, spec *generated.TypeSpec) bool {
 	return false
 }
 
-// documentFor is the generated document for this store: the whole of it
-// until the grant has refused something, then the same document without
-// those selections.
-func (c *Connector) documentFor(store Store, spec *generated.TypeSpec) string {
+// documentFor leaves a store's generated document unchanged until a denial
+// is learned. Before pruning, select only the operation being requested:
+// removing returns from the complete Order document also emptied its unused
+// returns-page operation, invalidating every order read. Keeping a dummy field
+// there would still leave that page's $after variable unused. The selected
+// operation keeps its own root and variables; a denied child-page root is a
+// typed refusal instead of a malformed query.
+func (c *Connector) documentFor(store Store, spec *generated.TypeSpec, operation string) (string, error) {
 	denied := c.FieldsDenied(store.ID)[generated.ConceptID(spec.Concept)]
-	return pruneSelections(spec.FetchDocument, denied)
+	if field := deniedChildPage(spec, operation, denied); field != "" {
+		return "", fmt.Errorf("%w: shopify: the grant does not cover the %s page of %s", memqlsync.ErrNotGranted, field, spec.Concept)
+	}
+	document, err := operationBody(spec.FetchDocument, operation)
+	if err != nil {
+		return "", memqlsync.Permanent(err)
+	}
+	if len(denied) == 0 {
+		return spec.FetchDocument, nil
+	}
+	return pruneSelections(document, denied), nil
+}
+
+func deniedChildPage(spec *generated.TypeSpec, operation string, fields []string) string {
+	for _, child := range spec.Children {
+		if child.PageOp == "" || child.PageOp != operation {
+			continue
+		}
+		for _, field := range fields {
+			if field == child.Connection {
+				return field
+			}
+		}
+	}
+	return ""
 }
 
 // reservedSelections are the names a document needs to be a document at
