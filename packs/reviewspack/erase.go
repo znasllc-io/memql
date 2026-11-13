@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/uptrace/bun"
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
@@ -106,6 +107,16 @@ func (p *Provider) eraseReviewer(ctx context.Context, args map[string]any, _ int
 	if !approver {
 		return nil, fmt.Errorf("reviews: only the store's owner can erase a reviewer's data")
 	}
+	requestID := strings.TrimSpace(asString(review["requestId"]))
+	var hold requestLease
+	if requestID != "" {
+		held, lease, release, err := p.lockRequest(ctx, requestID)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+		ctx, hold = held, lease
+	}
 	state := StateOf(VersionOf(review), decisions)
 	if state != StateErased {
 		// THE DECISION FIRST: from here the review is hidden, whatever happens
@@ -132,15 +143,39 @@ func (p *Provider) eraseReviewer(ctx context.Context, args map[string]any, _ int
 		return nil, fmt.Errorf("reviews: erasing needs a database handle")
 	}
 	now := p.clock().Format(time.RFC3339Nano)
+	if requestID != "" {
+		// Publish a new terminal version BEFORE rewriting history. In-place
+		// redaction alone has no new version timestamp, so a stale worker's
+		// fence could otherwise pass and restore erased email/ciphertext.
+		request, at, err := p.currentRequest(auth.ContextWithSystemActor(ctx, dueActor), requestID)
+		if err != nil {
+			return nil, err
+		}
+		if request != nil && asString(request["erasedAt"]) == "" {
+			write := requestWrite(request, requestID)
+			write["email"], write["tokenCiphertext"] = "", ""
+			write["sendState"], write["sendNote"], write["erasedAt"] = "skipped", "reviewer data erased", now
+			owner := strings.TrimSpace(asString(request["ownerUserId"]))
+			if owner == "" {
+				return nil, fmt.Errorf("reviews: request has no owner")
+			}
+			if err := p.writeRequest(auth.ContextWithUserActor(ctx, owner), hold, requestID, at, write); err != nil {
+				return nil, err
+			}
+		}
+		if err := hold.Verify(ctx); err != nil {
+			return nil, err
+		}
+	}
 	versions, err := p.redactor.Redact(ctx, "v1:reviews:review", reviewID, map[string]string{
 		"authorName": "", "authorEmail": "", "title": "", "body": "", "erasedAt": now,
 	})
 	if err != nil {
 		return nil, err
 	}
-	if requestID := strings.TrimSpace(asString(review["requestId"])); requestID != "" {
+	if requestID != "" {
 		n, err := p.redactor.Redact(ctx, "v1:reviews:reviewRequest", "v1:reviews:reviewRequest:"+bareID(requestID, "v1:reviews:reviewRequest:"),
-			map[string]string{"email": ""})
+			map[string]string{"email": "", "tokenCiphertext": "", "erasedAt": now})
 		if err != nil {
 			return nil, err
 		}

@@ -131,6 +131,8 @@ mutation reviewRequest putReviewRequest {
     productTitle   string
     email          string!
     tokenHash      string!
+    tokenCiphertext string
+    erasedAt       datetime
     issuedAt       datetime!
     expiresAt      datetime!
     sentAt         datetime
@@ -138,7 +140,7 @@ mutation reviewRequest putReviewRequest {
     sendNote       string  @maxLength(1000)
   }
   insert {
-    accept { storeId, accountId, siteId, orderGid, orderName, productHandle, productTitle, email, tokenHash, issuedAt, expiresAt, sentAt, sendState, sendNote }
+    accept { storeId, accountId, siteId, orderGid, orderName, productHandle, productTitle, email, tokenHash, tokenCiphertext, erasedAt, issuedAt, expiresAt, sentAt, sendState, sendNote }
     stamp {
       id: args.requestId
       ownerUserId: actor.userId

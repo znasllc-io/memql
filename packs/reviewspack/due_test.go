@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/secret"
 )
 
 // due_test.go -- THE DAILY ASK (reviewsSendDueRequests).
@@ -76,7 +79,9 @@ func (f *fakeMailer) SendOrderMessage(_ context.Context, args map[string]any) (s
 	return f.answer, "", nil
 }
 
-func dueFixture() (*dueReader, *fakeWriter, *fakeMailer, *Provider) {
+func dueFixture(t *testing.T) (*dueReader, *fakeWriter, *fakeMailer, *Provider) {
+	t.Helper()
+	t.Setenv(secret.EnvMasterKey, strings.Repeat("17", 32))
 	r := &dueReader{
 		settings: []map[string]any{{"storeId": "store-live", "accountId": "acct-shop", "requestsEnabled": true,
 			"requestTemplateId": "tmpl-ask", "requestSenderIdentityId": "si-house", "requestDelayDays": 14, "linkLifetimeDays": 14}},
@@ -88,11 +93,27 @@ func dueFixture() (*dueReader, *fakeWriter, *fakeMailer, *Provider) {
 		products: map[string]map[string]any{"gid://shopify/Product/1": {"handle": "floss-picks", "title": "Floss Picks"}},
 	}
 	w, m := &fakeWriter{}, &fakeMailer{}
-	return r, w, m, &Provider{reader: r, writer: w, mailer: m, now: func() time.Time { return dueNow }}
+	w.onWrite = func(ctx context.Context, mutation string, row map[string]any) error {
+		if mutation != "putReviewRequest" {
+			return nil
+		}
+		if r.requests == nil {
+			r.requests = map[string]map[string]any{}
+		}
+		stored := requestWrite(row, asString(row["requestId"]))
+		stored["id"] = requestConcept + ":" + asString(row["requestId"])
+		stored["createdAt"] = dueNow.Add(time.Duration(len(w.calls)) * time.Microsecond)
+		if ac, ok := auth.AccessFromContext(ctx); ok {
+			stored["ownerUserId"] = ac.UserId
+		}
+		r.requests[asString(row["requestId"])] = stored
+		return nil
+	}
+	return r, w, m, &Provider{coordinateRequest: fakeRequestCoordinator, reader: r, writer: w, mailer: m, now: func() time.Time { return dueNow }}
 }
 
 func TestADueOrderEarnsOneMailedLinkPerPaidProduct(t *testing.T) {
-	r, w, m, p := dueFixture()
+	r, w, m, p := dueFixture(t)
 	nodes, err := p.sendDueRequests(fromAutomation(), map[string]any{}, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -143,11 +164,11 @@ func TestADueOrderEarnsOneMailedLinkPerPaidProduct(t *testing.T) {
 	}
 }
 
-func TestALineAlreadyAskedIsNotAskedAgainButAFailedOneIs(t *testing.T) {
+func TestSettledAndLegacyUnrecoverableRequestsAreNotMailed(t *testing.T) {
 	id := requestIDFor("store-live", "gid://shopify/Order/9", "floss-picks")
-	for state, wantMail := range map[string]bool{"sent": false, "skipped": false, "failed": true, "pending": true} {
-		r, _, m, p := dueFixture()
-		r.requests = map[string]map[string]any{id: {"id": "v1:reviews:reviewRequest:" + id, "sendState": state}}
+	for state, wantMail := range map[string]bool{"sent": false, "skipped": false, "failed": false, "pending": false} {
+		r, _, m, p := dueFixture(t)
+		r.requests = map[string]map[string]any{id: {"id": "v1:reviews:reviewRequest:" + id, "sendState": state, "createdAt": dueNow}}
 		if _, err := p.sendDueRequests(fromAutomation(), map[string]any{}, 0); err != nil {
 			t.Fatal(err)
 		}
@@ -165,7 +186,7 @@ func TestStoresThatAskNothing(t *testing.T) {
 		"no organization": func(s map[string]any) { delete(s, "accountId") },
 	}
 	for name, change := range cases {
-		r, w, m, p := dueFixture()
+		r, w, m, p := dueFixture(t)
 		change(r.settings[0])
 		if _, err := p.sendDueRequests(fromAutomation(), map[string]any{}, 0); err != nil {
 			t.Fatal(err)
@@ -177,7 +198,7 @@ func TestStoresThatAskNothing(t *testing.T) {
 }
 
 func TestAFailedSendIsRecordedAndTheRunGoesOn(t *testing.T) {
-	_, w, m, p := dueFixture()
+	_, w, m, p := dueFixture(t)
 	m.err = context.DeadlineExceeded
 	if _, err := p.sendDueRequests(fromAutomation(), map[string]any{}, 0); err != nil {
 		t.Fatalf("one failed send stopped the run: %v", err)
@@ -189,7 +210,7 @@ func TestAFailedSendIsRecordedAndTheRunGoesOn(t *testing.T) {
 }
 
 func TestTheDailyAskRefusesAClient(t *testing.T) {
-	_, w, m, p := dueFixture()
+	_, w, m, p := dueFixture(t)
 	if _, err := p.sendDueRequests(moderatorCtx("mod-1"), map[string]any{}, 0); err == nil {
 		t.Fatal("a client started the daily ask")
 	}
@@ -251,7 +272,7 @@ func TestTheLinkGoesToTheOneLiveSiteThatServesTheStore(t *testing.T) {
 		{"two live sites", []map[string]any{site("one", nil), site("two", nil)}, "", 1},
 	}
 	for _, c := range cases {
-		r, w, m, p := dueFixture()
+		r, w, m, p := dueFixture(t)
 		r.sites = c.sites
 		nodes, err := p.sendDueRequests(fromAutomation(), map[string]any{}, 0)
 		if err != nil {
@@ -284,7 +305,7 @@ func TestTheLinkGoesToTheOneLiveSiteThatServesTheStore(t *testing.T) {
 // address and takes the product and the token as fields; and a send under a
 // store's organization goes out only as the sender its operator named.
 func TestARequestCarriesItsLinksPartsAndTheChosenSender(t *testing.T) {
-	_, w, m, p := dueFixture()
+	_, w, m, p := dueFixture(t)
 	if _, err := p.sendDueRequests(fromAutomation(), map[string]any{}, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +349,7 @@ func TestTheDelayCanBeMinutes(t *testing.T) {
 		{14, nil, 14 * 24 * time.Hour},
 	}
 	for _, c := range cases {
-		r, _, _, p := dueFixture()
+		r, _, _, p := dueFixture(t)
 		r.settings[0]["requestDelayDays"] = c.days
 		if c.minutes != nil {
 			r.settings[0]["requestDelayMinutes"] = c.minutes

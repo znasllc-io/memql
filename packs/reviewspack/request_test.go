@@ -225,7 +225,7 @@ func linkArgs() map[string]any {
 
 func linkProvider(r *linkReader) (*Provider, *fakeWriter) {
 	w := &fakeWriter{}
-	return &Provider{reader: r, writer: w, now: func() time.Time { return linkNow }}, w
+	return &Provider{coordinateRequest: fakeRequestCoordinator, reader: r, writer: w, now: func() time.Time { return linkNow }}, w
 }
 
 func refusalCode(t *testing.T, err error) string {

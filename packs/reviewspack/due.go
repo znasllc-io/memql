@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/campaigns"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -14,7 +15,7 @@ import (
 // due.go -- THE DAILY ASK (reviewsSendDueRequests).
 //
 // The store's own automation runs this on a schedule it chooses (Fylo's runs
-// every minute since 2026-11-12, so the delay in its settings is the one dial).
+// daily at 15:00 UTC; the delay in settings chooses the due-order window).
 // For every store whose requests are on, with a reviewed request template and
 // its organization set, every paid order processed the store's delay ago (14
 // days unless it said otherwise; days and minutes added, RequestDelay) earns
@@ -25,8 +26,9 @@ import (
 //
 // Every buyer is asked: the job looks at nothing but whether an order was
 // paid. A line already asked (sent, or skipped by the suppression list) is
-// not asked again; one whose send failed or was deferred is, with a new link,
-// since only the old link's hash was kept. The window reaches back a few days
+// not asked again. Unresolved sends reuse the original encrypted bearer and
+// expiry, because Campaigns may replay an already accepted send without mailing.
+// Legacy unresolved rows with no recoverable bearer stop for operator review. The window reaches back a few days
 // past the delay, so a day the job did not run is caught up rather than lost.
 //
 // It reads under a system identity (the orders are cluster-owner tier), and
@@ -67,7 +69,7 @@ func (m *engineMailer) SendOrderMessage(ctx context.Context, args map[string]any
 		return "sent", "", nil
 	case row["skipped"] == true:
 		return "skipped", asString(row["reason"]), nil
-	case row["deferred"] == true:
+	case row["deferred"] == true || row["uncertain"] == true:
 		return "pending", asString(row["reason"]), nil
 	}
 	return "failed", "the order mail route's answer named no outcome", nil
@@ -142,94 +144,146 @@ func (p *Provider) askOrder(ctx, sys context.Context, site, settings map[string]
 		titles[h] = strings.TrimSpace(asString(rows[0]["title"]))
 		return h
 	}
-	merchant := auth.ContextWithUserActor(ctx, strings.TrimSpace(asString(site["ownerUserId"])))
 	for _, l := range EligibleLines(order, lines, handleOf) {
 		tally["considered"]++
-		requestID := requestIDFor(storeID, orderGid, l.ProductHandle)
-		existing, err := p.rowsFor(sys, "reviewRequestById", map[string]string{"requestId": requestID})
-		if err != nil {
-			// An unread request may already have been mailed. Treating a read
-			// failure as absence would replace its token hash before Campaigns
-			// replays the accepted send, invalidating the buyer's only link.
-			// Leave the row and mail untouched; a later scan can read it again.
-			tally["failed"]++
-			continue
-		}
-		if len(existing) > 0 {
-			switch asString(existing[0]["sendState"]) {
-			case "sent", "skipped":
-				continue // asked already
-			}
-		}
-		token, hash, err := mintToken()
-		if err != nil {
-			tally["failed"]++
-			continue
-		}
-		expires := now.Add(time.Duration(eff.LinkLifetimeDays) * 24 * time.Hour)
 		title := l.ProductTitle
 		if t := titles[l.ProductHandle]; t != "" {
 			title = t
 		}
-		row := map[string]any{
-			"requestId":     requestID,
-			"storeId":       storeID,
-			"accountId":     accountID,
-			"siteId":        strings.TrimSpace(asString(site["id"])),
-			"orderGid":      orderGid,
-			"productHandle": l.ProductHandle,
-			"email":         strings.TrimSpace(asString(order["email"])),
-			"tokenHash":     hash,
-			"issuedAt":      now.Format(time.RFC3339Nano),
-			"expiresAt":     expires.Format(time.RFC3339Nano),
-			"sendState":     "pending",
+		status := p.askLine(ctx, site, eff, order, storeID, accountID, orderGid, l.ProductHandle, title, now)
+		if status != "" {
+			tally[status]++
 		}
-		setIfPresent(row, "orderName", strings.TrimSpace(asString(order["name"])))
-		setIfPresent(row, "productTitle", title)
-		if err := p.writer.Write(merchant, "putReviewRequest", row); err != nil {
-			tally["failed"]++
-			continue
-		}
-		fields := map[string]any{
-			"productTitle": title,
-			"reviewUrl":    linkURL(strings.TrimSpace(asString(site["hostname"])), l.ProductHandle, token),
-			// THE LINK'S PARTS, for a template: a value may not choose where a
-			// template's link goes, so the template writes the store's own
-			// address and takes these in its query.
-			"productHandle": l.ProductHandle,
-			"reviewToken":   token,
-			"expiresOn":     expires.Format("January 2, 2006"),
-			"orderName":     strings.TrimSpace(asString(order["name"])),
-		}
-		if billing, _ := order["billingAddress"].(map[string]any); billing != nil {
-			setIfPresentAny(fields, "firstName", strings.TrimSpace(asString(billing["firstName"])))
-		}
-		status, reason, err := p.mailer.SendOrderMessage(merchant, map[string]any{
-			"storeId": storeID, "orderGid": orderGid, "accountId": accountID,
-			"templateId": strings.TrimSpace(eff.RequestTemplateID), "requestId": requestID, "fields": fields,
-			// The sender the store's operator named, which may be the
-			// installation's own: naming it is an operator's act (settings.go),
-			// so the job may say it was chosen.
-			"senderIdentityId": eff.RequestSenderIdentityID, "installationSender": true,
-		})
-		// THE OUTCOME IS A NEW VERSION OF THE SAME ROW, written from its own
-		// copy: the pending version above stays what it was.
-		done := make(map[string]any, len(row)+2)
-		for k, v := range row {
-			done[k] = v
-		}
-		switch {
-		case err != nil:
-			done["sendState"], done["sendNote"] = "failed", clip(err.Error(), 1000)
-		case status == "sent":
-			done["sendState"], done["sentAt"] = "sent", p.clock().Format(time.RFC3339Nano)
-		default:
-			done["sendState"] = status
-			setIfPresent(done, "sendNote", clip(reason, 1000))
-		}
-		tally[asString(done["sendState"])]++
-		_ = p.writer.Write(merchant, "putReviewRequest", done)
 	}
+}
+
+// askLine owns one durable request from the fresh read through Campaigns and
+// the final fenced write. Failures never mint a replacement for an existing row.
+func (p *Provider) askLine(ctx context.Context, site map[string]any, eff Settings, order map[string]any, storeID, accountID, orderGid, handle, title string, now time.Time) string {
+	id := requestIDFor(storeID, orderGid, handle)
+	held, hold, release, err := p.lockRequest(ctx, id)
+	if err != nil {
+		return "failed"
+	}
+	defer release()
+	sys := auth.ContextWithSystemActor(held, dueActor)
+	owner := strings.TrimSpace(asString(site["ownerUserId"]))
+	merchant := auth.ContextWithUserActor(held, owner)
+	existing, at, err := p.currentRequest(sys, id)
+	if err != nil {
+		// R2: unread is not absent. An existing row may already be mailed.
+		return "failed"
+	}
+	if erased, err := p.requestWasErased(sys, id); err != nil {
+		return "failed"
+	} else if erased {
+		return ""
+	}
+	var row map[string]any
+	var envelope retryEnvelope
+	if existing != nil {
+		switch asString(existing["sendState"]) {
+		case "sent", "skipped":
+			return ""
+		case "pending", "failed":
+		default:
+			return "failed"
+		}
+		if asString(existing["erasedAt"]) != "" {
+			return ""
+		}
+		row = requestWrite(existing, id)
+		// A changed order recipient or serving identity is not authority to
+		// move a previously accepted link to somebody else.
+		for key, want := range map[string]string{"storeId": storeID, "accountId": accountID,
+			"siteId": strings.TrimSpace(asString(site["id"])), "orderGid": orderGid,
+			"productHandle": handle, "email": strings.TrimSpace(asString(order["email"]))} {
+			if asString(row[key]) != want {
+				return "failed"
+			}
+		}
+		if asString(existing["ownerUserId"]) != owner {
+			return "failed"
+		}
+		envelope, err = openRetry(row, owner)
+		if err != nil || envelope.Host != strings.TrimSpace(asString(site["hostname"])) {
+			return "failed"
+		}
+	} else {
+		token, hash, err := mintToken()
+		if err != nil {
+			return "failed"
+		}
+		row = map[string]any{"requestId": id, "storeId": storeID, "accountId": accountID,
+			"siteId": strings.TrimSpace(asString(site["id"])), "orderGid": orderGid,
+			"productHandle": handle, "productTitle": title, "email": strings.TrimSpace(asString(order["email"])),
+			"tokenHash": hash, "issuedAt": now.Format(time.RFC3339Nano),
+			"expiresAt": now.Add(time.Duration(eff.LinkLifetimeDays) * 24 * time.Hour).Format(time.RFC3339Nano), "sendState": "pending"}
+		setIfPresent(row, "orderName", strings.TrimSpace(asString(order["name"])))
+		host := strings.TrimSpace(asString(site["hostname"]))
+		cipher, err := sealRetry(row, owner, host, token)
+		if err != nil {
+			return "failed"
+		}
+		row["tokenCiphertext"] = cipher
+		if err := p.writeRequest(merchant, hold, id, at, row); err != nil {
+			return "failed"
+		}
+		// Read back the actual committed version; guessing a timestamp would
+		// leave the final write unfenced. A crash here is safe to resume.
+		stored, version, err := p.currentRequest(sys, id)
+		if err != nil || stored == nil || asString(stored["tokenHash"]) != hash || asString(stored["tokenCiphertext"]) != cipher || asString(stored["sendState"]) != "pending" {
+			return "failed"
+		}
+		at = version
+		envelope = envelopeFor(row, owner, host, token)
+	}
+	expires := asTime(row["expiresAt"])
+	if expires.IsZero() || !p.clock().Before(expires) {
+		return "failed"
+	}
+	if err := hold.Verify(merchant); err != nil {
+		return "failed"
+	}
+	expectedEmailDigest := campaigns.EmailDigest(asString(row["email"]))
+	if expectedEmailDigest == "" {
+		return "failed"
+	}
+	fields := map[string]any{"productTitle": asString(row["productTitle"]),
+		"reviewUrl": linkURL(envelope.Host, handle, envelope.Token), "productHandle": handle,
+		"reviewToken": envelope.Token, "expiresOn": expires.Format("January 2, 2006"), "orderName": asString(row["orderName"])}
+	if billing, _ := order["billingAddress"].(map[string]any); billing != nil {
+		setIfPresentAny(fields, "firstName", strings.TrimSpace(asString(billing["firstName"])))
+	}
+	status, reason, sendErr := p.mailer.SendOrderMessage(merchant, map[string]any{
+		"storeId": storeID, "orderGid": orderGid, "accountId": accountID,
+		"expectedEmailDigest": expectedEmailDigest,
+		"templateId":          strings.TrimSpace(eff.RequestTemplateID), "requestId": id, "fields": fields,
+		"senderIdentityId": eff.RequestSenderIdentityID, "installationSender": true})
+	done := requestWrite(row, id)
+	switch {
+	case sendErr != nil:
+		// Provider errors can contain message fields. Persist a bounded fixed
+		// explanation, never an error that could echo the plaintext bearer.
+		status, reason = "failed", "The mail route did not confirm delivery; retry keeps the original link."
+	case status == "sent":
+		done["sentAt"] = p.clock().Format(time.RFC3339Nano)
+	case status == "skipped", status == "pending", status == "failed":
+	default:
+		status, reason = "failed", "The mail route did not confirm an outcome."
+	}
+	done["sendState"] = status
+	// Reasons from a mail provider are untrusted message data too.
+	if reason != "" {
+		done["sendNote"] = "Delivery unresolved or suppressed; consult the Campaigns receipt."
+	}
+	if status == "sent" || status == "skipped" {
+		done["tokenCiphertext"] = ""
+	}
+	if err := p.writeRequest(merchant, hold, id, at, done); err != nil {
+		return "failed"
+	}
+	return status
 }
 
 // servingSite is the ONE live site of the store's organization that serves

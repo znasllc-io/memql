@@ -26,17 +26,30 @@ func (limitedOrderRoute) Execute(context.Context, string) (*memql.ExecuteResult,
 
 // An order message that met the send-rate limit is not queued by the order
 // route; the daily ask records the request failed, and the next run asks
-// again, with a new link.
+// again with the original encrypted bearer and expiry.
 func TestALimitedOrderSendIsRecordedFailedAndAskedAgain(t *testing.T) {
 	status, _, err := (&engineMailer{engine: limitedOrderRoute{}}).SendOrderMessage(context.Background(), map[string]any{})
 	if err != nil || status != "failed" {
 		t.Fatalf("a limited answer is %q, %v; want failed, which the next run asks again", status, err)
 	}
 	id := requestIDFor("store-live", "gid://shopify/Order/9", "floss-picks")
-	r, _, m, p := dueFixture()
-	r.requests = map[string]map[string]any{id: {"id": "v1:reviews:reviewRequest:" + id, "sendState": status}}
+	r, _, m, p := dueFixture(t)
+	p.mailer = &engineMailer{engine: limitedOrderRoute{}}
+	if _, err := p.sendDueRequests(fromAutomation(), nil, 0); err != nil {
+		t.Fatal(err)
+	}
+	original := requestWrite(r.requests[id], id)
+	if original["sendState"] != status || asString(original["tokenCiphertext"]) == "" {
+		t.Fatal("limited send did not retain its retry envelope")
+	}
+	p.mailer = m
 	if _, err := p.sendDueRequests(fromAutomation(), map[string]any{}, 0); err != nil {
 		t.Fatal(err)
+	}
+	for _, key := range []string{"tokenHash", "issuedAt", "expiresAt"} {
+		if original[key] != r.requests[id][key] {
+			t.Fatalf("limited retry changed %s", key)
+		}
 	}
 	if len(m.calls) != 1 {
 		t.Fatalf("a request recorded %q was mailed %d times on the next run; want once", status, len(m.calls))

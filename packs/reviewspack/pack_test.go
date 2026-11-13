@@ -2,6 +2,7 @@ package reviewspack_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -64,7 +65,7 @@ func TestClosedCriterionEnum(t *testing.T) {
 // THE LEGACY MODERATION CAPABILITY IS GONE. It accepted any signed-in caller
 // and persisted nothing; a decision is recorded only through reviewsDecide.
 func TestTheLegacyModerationCapabilityIsGone(t *testing.T) {
-	provider, err := reviewspack.NewProvider(memql.PluginContext{Logger: slog.Default()})
+	provider, err := reviewspack.NewProvider(memql.PluginContext{Logger: slog.Default(), GateDB: func() *sql.DB { return nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +98,7 @@ func TestExportIncludesImageBytesNotURLs(t *testing.T) {
 	if len(files) != 1 || len(files[0].Bytes) == 0 || files[0].Name != "a.jpg" {
 		t.Fatalf("files=%+v", files)
 	}
-	provider, err := reviewspack.NewProvider(memql.PluginContext{Logger: slog.Default()})
+	provider, err := reviewspack.NewProvider(memql.PluginContext{Logger: slog.Default(), GateDB: func() *sql.DB { return nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +129,7 @@ func TestExportIncludesImageBytesNotURLs(t *testing.T) {
 }
 
 func TestPublicDisplayToggleIsData(t *testing.T) {
-	provider, err := reviewspack.NewProvider(memql.PluginContext{Logger: slog.Default()})
+	provider, err := reviewspack.NewProvider(memql.PluginContext{Logger: slog.Default(), GateDB: func() *sql.DB { return nil }})
 	if err != nil {
 		t.Fatal(err)
 	}

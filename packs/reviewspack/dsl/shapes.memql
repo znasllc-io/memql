@@ -104,7 +104,7 @@ shape reviewSettings reviewSettingsFull {
   row.createdAt
 }
 
-@description("A buyer's review link, as the pack reads it. Carries the token's HASH, never the token; never served to a storefront.")
+@description("A buyer's review link, as the pack reads it. Carries the token's hash and encrypted retry envelope, never its plaintext; never served to a storefront.")
 @row
 shape reviewRequest reviewRequestFull {
   row.id
@@ -118,6 +118,8 @@ shape reviewRequest reviewRequestFull {
   productTitle
   email
   tokenHash
+  tokenCiphertext
+  erasedAt
   issuedAt
   expiresAt
   sentAt

@@ -2,10 +2,12 @@ package campaigns
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // send_order_test.go -- THE THIRD SHAPE OF AUTOMATED MAIL: what an ORDER
@@ -107,6 +109,35 @@ func TestAnOrderMessageTakesNoAddress(t *testing.T) {
 	}
 	if sender.count() != 1 || sender.sent[0].To != "buyer@example.test" {
 		t.Fatalf("the message went to %v; only the order's buyer may be mailed", sender.sent)
+	}
+}
+
+func TestAnOrderMessageRefusesAChangedBoundBuyer(t *testing.T) {
+	engine := orderSendEngine()
+	sender := &recordingSender{}
+	w := withOpenGate(newTestWorker(t, engine, sender))
+	args := orderArgs()
+	args["expectedEmailDigest"] = EmailDigest("buyer@example.test")
+	engine.orders["gid://shopify/Order/9"]["email"] = "changed@example.test"
+	if _, err := w.handleSendOrderMessage(fromTrustedJob(), args, 0); err == nil || !strings.Contains(err.Error(), "buyer changed") {
+		t.Fatalf("changed buyer was not refused: %v", err)
+	}
+	if sender.count() != 0 || wroteContaining(engine, "mutation recordCampaignSingleSend", "") {
+		t.Fatal("recipient mismatch reached transport or wrote an attempt receipt")
+	}
+}
+
+func TestAnOrderMessageAcceptsTheOriginalBoundBuyer(t *testing.T) {
+	engine := orderSendEngine()
+	sender := &recordingSender{}
+	w := withOpenGate(newTestWorker(t, engine, sender))
+	args := orderArgs()
+	args["expectedEmailDigest"] = EmailDigest(" BUYER@EXAMPLE.TEST ")
+	if _, err := w.handleSendOrderMessage(fromTrustedJob(), args, 0); err != nil {
+		t.Fatal(err)
+	}
+	if sender.count() != 1 || sender.sent[0].To != "buyer@example.test" {
+		t.Fatal("the bound buyer did not receive its message")
 	}
 }
 
@@ -335,5 +366,43 @@ func TestAnOrderMessageFooterSaysTheBuyerBoughtNotSubscribed(t *testing.T) {
 		if !strings.Contains(body, "you bought from") {
 			t.Errorf("%s footer: want \"you bought from\" in %q", part, body)
 		}
+	}
+}
+
+func TestOrderProviderErrorNeverPersistsEchoedPrivateFields(t *testing.T) {
+	const token = "private-review-bearer-0123456789abcdef"
+	const url = "https://shop.example.test/reviews/write?t=" + token
+	for _, kind := range []string{"refused", "uncertain", "held earlier"} {
+		t.Run(kind, func(t *testing.T) {
+			engine := orderSendEngine()
+			sender := &recordingSender{}
+			failure := &email.SendError{Detail: "provider echoed " + token + " and " + url, NotAccepted: kind == "refused", HeldEarlier: kind == "held earlier"}
+			sender.fail = func(int) error { return failure }
+			w := withOpenGate(newTestWorker(t, engine, sender))
+			args := orderArgs()
+			args["fields"].(map[string]any)["reviewUrl"] = url
+			_, err := w.handleSendOrderMessage(fromTrustedJob(), args, 0)
+			if err == nil {
+				t.Fatal("provider failure was reported sent")
+			}
+			if !errors.Is(err, failure) || email.IsNotAccepted(err) != (kind == "refused") || email.HeldEarlier(err) != (kind == "held earlier") || UncertainSend(err) != (kind != "refused") {
+				t.Fatal("original typed provider classification was not preserved")
+			}
+			for _, call := range engine.calls {
+				if strings.HasPrefix(call.query, "mutation ") && (strings.Contains(call.query, token) || strings.Contains(call.query, url)) {
+					t.Fatal("provider echo persisted in a delivery or receipt mutation")
+				}
+			}
+			if kind == "held earlier" {
+				if wroteContaining(engine, "mutation recordCampaignDelivery", `status: "failed"`) {
+					t.Fatal("held earlier rewrote the earlier delivery")
+				}
+			} else if !wroteContaining(engine, "mutation recordCampaignDelivery", "order message") {
+				t.Fatal("safe provider explanation was not recorded")
+			}
+			if got := wroteContaining(engine, "mutation recordCampaignSingleSend", `status: "failed"`); got != (kind == "refused") {
+				t.Fatal("provider classification changed receipt retry semantics")
+			}
+		})
 	}
 }

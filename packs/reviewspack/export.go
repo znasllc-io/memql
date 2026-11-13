@@ -61,6 +61,7 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 	}
 	for _, r := range requests {
 		delete(r, "tokenHash")
+		delete(r, "tokenCiphertext")
 	}
 	settings, err := p.settingsFor(ctx, storeID)
 	if err != nil {

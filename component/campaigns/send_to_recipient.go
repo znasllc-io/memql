@@ -467,8 +467,19 @@ func (w *Worker) handOver(ctx context.Context, args map[string]any, receipt *sin
 		// nothing now (email.HeldEarlier): the row keeps describing the earlier one,
 		// whose outcome decides the delivery, and is not rewritten as this message.
 		if !email.HeldEarlier(sendErr) {
+			lastError := sendErr.Error()
+			if opts.orderRecipient != nil {
+				// Order fields may contain a private bearer (a review link). A
+				// provider can echo its message in an error, so the durable ledger
+				// keeps only the outcome class. Keep the ORIGINAL typed error
+				// below: retry/uncertainty decisions must not inspect this text.
+				lastError = "The provider did not confirm acceptance of the order message."
+				if email.IsNotAccepted(sendErr) {
+					lastError = "The provider did not accept the order message."
+				}
+			}
 			recordOutcome(Delivery{
-				Status: "failed", Attempts: 1, LastError: sendErr.Error(),
+				Status: "failed", Attempts: 1, LastError: lastError,
 			})
 		}
 		err := fmt.Errorf("campaigns.sendToRecipient: %w", sendErr)

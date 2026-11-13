@@ -31,7 +31,7 @@ func eraseFixture(decisions []map[string]any) (*Provider, *fakeWriter, *fakeReda
 	r["requestId"] = "request-abc"
 	w, red := &fakeWriter{}, &fakeRedactor{}
 	reader := &decideReader{review: r, decisions: decisions, settings: map[string]any{"removalApproverUserId": "owner-1"}}
-	return &Provider{reader: reader, writer: w, redactor: red}, w, red
+	return &Provider{coordinateRequest: fakeRequestCoordinator, reader: reader, writer: w, redactor: red}, w, red
 }
 
 func TestOnlyTheNamedOwnerErasesAndNothingIsTouchedBeforeThat(t *testing.T) {
@@ -101,7 +101,7 @@ type exportReader struct{ listReader }
 func (e *exportReader) Rows(ctx context.Context, query string, args map[string]string) ([]map[string]any, error) {
 	switch query {
 	case "reviewRequestsForStore":
-		return []map[string]any{{"id": "v1:reviews:reviewRequest:request-abc", "email": "buyer@example.com", "tokenHash": "secret-hash", "productHandle": "boot"}}, nil
+		return []map[string]any{{"id": "v1:reviews:reviewRequest:request-abc", "email": "buyer@example.com", "tokenHash": "secret-hash", "tokenCiphertext": "sealed-retry-material", "productHandle": "boot"}}, nil
 	case "reviewSettingsForStore":
 		return []map[string]any{{"storeId": "store-live", "notifyEmail": "support@example.com", "accountId": "acct-shop"}}, nil
 	}
@@ -138,8 +138,8 @@ func TestTheExportIsTheStoresWholeRecord(t *testing.T) {
 	if first["state"] == nil {
 		t.Fatal("an exported review does not carry its state")
 	}
-	if strings.Contains(answer.JSON, "secret-hash") || strings.Contains(answer.JSON, "tokenHash") {
-		t.Fatal("the export carries a link's token hash")
+	if strings.Contains(answer.JSON, "secret-hash") || strings.Contains(answer.JSON, "tokenHash") || strings.Contains(answer.JSON, "tokenCiphertext") || strings.Contains(answer.JSON, "sealed-retry-material") {
+		t.Fatal("the export carries private link material")
 	}
 }
 

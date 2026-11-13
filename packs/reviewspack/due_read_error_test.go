@@ -22,7 +22,7 @@ func (r requestReadFailure) Rows(ctx context.Context, query string, args map[str
 // A read failure is not proof the buyer has never been asked. Replacing a
 // possibly sent request's hash would invalidate the existing emailed link.
 func TestUnreadRequestStateNeitherReplacesLinkNorMailsBuyer(t *testing.T) {
-	r, w, m, p := dueFixture()
+	r, w, m, p := dueFixture(t)
 	p.reader = requestReadFailure{dueReader: r}
 	nodes, err := p.sendDueRequests(fromAutomation(), map[string]any{}, 0)
 	if err != nil {
@@ -41,7 +41,7 @@ func TestUnreadRequestStateNeitherReplacesLinkNorMailsBuyer(t *testing.T) {
 }
 
 func TestUnreadRequestDoesNotStopOtherBuyers(t *testing.T) {
-	r, w, m, p := dueFixture()
+	r, w, m, p := dueFixture(t)
 	other := map[string]any{}
 	for k, v := range r.orders[0] {
 		other[k] = v

@@ -190,6 +190,7 @@ func (p *Provider) clock() time.Time {
 // or refuses by name. Reads run under the caller's actor, which on the shopper
 // path is the site owner's borrowed authority -- the request's owner.
 func (p *Provider) openLink(ctx context.Context, storeID, token, productHandle string) (*link, error) {
+	ctx = memql.ContextWithFreshRead(ctx)
 	token = strings.TrimSpace(token)
 	if token == "" || strings.TrimSpace(storeID) == "" {
 		return nil, refuse(RefusalLinkInvalid, "no link token")
@@ -202,6 +203,9 @@ func (p *Provider) openLink(ctx context.Context, storeID, token, productHandle s
 		return nil, refuse(RefusalLinkInvalid, "no request carries this token for this store")
 	}
 	req := rows[0]
+	if asString(req["erasedAt"]) != "" {
+		return nil, refuse(RefusalLinkUsed, "the reviewer data was erased")
+	}
 	if productHandle = strings.TrimSpace(productHandle); productHandle != "" && productHandle != strings.TrimSpace(asString(req["productHandle"])) {
 		return nil, refuse(RefusalLinkInvalid, "the link is for another product")
 	}
@@ -453,30 +457,48 @@ func (p *Provider) issueRequest(ctx context.Context, args map[string]any, _ int)
 	if err != nil {
 		return nil, err
 	}
+	requestID := requestIDFor(storeID, orderGid, handle)
+	held, hold, release, err := p.lockRequest(ctx, requestID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	existing, at, err := p.currentRequest(auth.ContextWithSystemActor(held, dueActor), requestID)
+	if err != nil {
+		return nil, err
+	}
+	if erased, err := p.requestWasErased(auth.ContextWithSystemActor(held, dueActor), requestID); err != nil {
+		return nil, err
+	} else if erased {
+		return nil, fmt.Errorf("reviews: an erased request cannot be reissued")
+	}
+	if existing != nil && asString(existing["erasedAt"]) != "" {
+		return nil, fmt.Errorf("reviews: an erased request cannot be reissued")
+	}
 	token, hash, err := mintToken()
 	if err != nil {
 		return nil, err
 	}
 	now := p.clock()
 	expires := now.Add(time.Duration(EffectiveSettings(settings).LinkLifetimeDays) * 24 * time.Hour)
-	requestID := requestIDFor(storeID, orderGid, handle)
 	write := map[string]any{
-		"requestId":     requestID,
-		"storeId":       storeID,
-		"siteId":        siteID,
-		"orderGid":      orderGid,
-		"productHandle": handle,
-		"email":         strings.TrimSpace(asString(order["email"])),
-		"tokenHash":     hash,
-		"issuedAt":      now.Format(time.RFC3339Nano),
-		"expiresAt":     expires.Format(time.RFC3339Nano),
-		"sendState":     "skipped",
-		"sendNote":      "issued by hand",
+		"requestId":       requestID,
+		"storeId":         storeID,
+		"siteId":          siteID,
+		"orderGid":        orderGid,
+		"productHandle":   handle,
+		"email":           strings.TrimSpace(asString(order["email"])),
+		"tokenHash":       hash,
+		"issuedAt":        now.Format(time.RFC3339Nano),
+		"expiresAt":       expires.Format(time.RFC3339Nano),
+		"sendState":       "skipped",
+		"sendNote":        "issued by hand",
+		"tokenCiphertext": "",
 	}
 	setIfPresent(write, "accountId", strings.TrimSpace(asString(site["accountId"])))
 	setIfPresent(write, "orderName", strings.TrimSpace(asString(order["name"])))
 	setIfPresent(write, "productTitle", strings.TrimSpace(chosen.ProductTitle))
-	if err := p.writer.Write(auth.ContextWithUserActor(ctx, owner), "putReviewRequest", write); err != nil {
+	if err := p.writeRequest(auth.ContextWithUserActor(held, owner), hold, requestID, at, write); err != nil {
 		return nil, err
 	}
 	return receipt("v1:reviews:issued", requestID, map[string]any{

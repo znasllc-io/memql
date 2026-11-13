@@ -80,6 +80,8 @@ type Provider struct {
 	osBase func() string
 	// mailer sends a message an order entitles (due.go).
 	mailer orderMailer
+	// coordinateRequest serializes issuance, retries and erasure across replicas.
+	coordinateRequest requestCoordinator
 	// organizations answers what a named person holds in each of their
 	// organizations (reads.go, organizationDecisions); nil asks the engine.
 	organizations organizationDecisions
@@ -406,12 +408,16 @@ func asString(v any) string {
 
 // NewProvider builds the pack IntegrationProvider.
 func NewProvider(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
+	if pctx.GateDB == nil {
+		return nil, fmt.Errorf("reviews: NewProvider requires PluginContext.GateDB")
+	}
 	return &Provider{
-		engine:   pctx.Engine,
-		reader:   &engineRowReader{engine: pctx.Engine},
-		writer:   &engineWriter{engine: pctx.Engine},
-		redactor: sqlRedactor{db: pctx.BunDB},
-		mailer:   &engineMailer{engine: pctx.Engine},
+		coordinateRequest: databaseRequestCoordinator(pctx.GateDB),
+		engine:            pctx.Engine,
+		reader:            &engineRowReader{engine: pctx.Engine},
+		writer:            &engineWriter{engine: pctx.Engine},
+		redactor:          sqlRedactor{db: pctx.BunDB},
+		mailer:            &engineMailer{engine: pctx.Engine},
 	}, nil
 }
 

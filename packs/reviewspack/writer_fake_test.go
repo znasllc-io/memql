@@ -12,7 +12,8 @@ import (
 // internal-origin allowlist entry for this package rests on -- so every
 // refusal test asserts the writer was never called.
 type fakeWriter struct {
-	calls []writeCall
+	calls   []writeCall
+	onWrite func(context.Context, string, map[string]any) error
 }
 
 type writeCall struct {
@@ -27,6 +28,9 @@ func (f *fakeWriter) Write(ctx context.Context, mutation string, args map[string
 		actor = ac.UserId
 	}
 	f.calls = append(f.calls, writeCall{mutation: mutation, args: args, actor: actor})
+	if f.onWrite != nil {
+		return f.onWrite(ctx, mutation, args)
+	}
 	return nil
 }
 

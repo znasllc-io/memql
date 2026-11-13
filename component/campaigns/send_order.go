@@ -90,6 +90,14 @@ func (w *Worker) handleSendOrderMessage(ctx context.Context, args map[string]any
 	if EmailDigest(email) == "" {
 		return nil, fmt.Errorf("campaigns.sendOrderMessage: order %q carries no address to write to", orderGid)
 	}
+	// A durable caller may bind private message fields to the buyer it read.
+	// Check that binding at THIS authoritative resolution, not against the
+	// caller's earlier order snapshot. The resolved recipient below is the
+	// one sent, so an intervening checkout-email edit cannot move its bearer.
+	expectedEmailDigest := strings.TrimSpace(argString(args, "expectedEmailDigest"))
+	if expectedEmailDigest != "" && expectedEmailDigest != EmailDigest(email) {
+		return nil, errors.New("campaigns.sendOrderMessage: the order buyer changed since this request was prepared")
+	}
 	recipient := Recipient{
 		ID:        orderRecipientID(storeID, orderGid),
 		AccountID: account,
@@ -114,7 +122,7 @@ func (w *Worker) handleSendOrderMessage(ctx context.Context, args map[string]any
 	installation, _ := args["installationSender"].(bool)
 	// NOT deferWhenLimited: an order message that meets the rate limit is answered
 	// as limited and the caller sends it again (send_to_recipient.go).
-	return w.sendToRecipientOnce(ctx, send, singleSend{orderRecipient: &recipient, orderGid: orderGid, installationSender: installation})
+	return w.sendToRecipientOnce(ctx, send, singleSend{orderRecipient: &recipient, orderGid: orderGid, installationSender: installation, emailDigest: expectedEmailDigest})
 }
 
 // orderRecipientID is the stable id of the recipient one order entitles: per

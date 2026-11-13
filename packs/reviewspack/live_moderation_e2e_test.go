@@ -18,6 +18,7 @@ package reviewspack_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"strconv"
 	"testing"
@@ -26,6 +27,8 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/database"
+	"github.com/znasllc-io/memql/component/database/dbtest"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/packs/reviewspack"
 )
@@ -40,8 +43,13 @@ func livePackEngine(t *testing.T) *memql.MemQLEngine {
 	// never Starts must install itself (the engine's own db tests do the same).
 	eng.InstallGrantResolution()
 	t.Cleanup(func() { auth.SetGrantSource(nil); auth.SetMembershipSource(nil) })
+	gateDB, err := database.NewGatePool(dbtest.DSN(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = gateDB.Close() })
 	prov, err := reviewspack.NewProvider(memql.PluginContext{Engine: eng, Logger: eng.Logger,
-		BunDB: func() *bun.DB { return liveDB }})
+		BunDB: func() *bun.DB { return liveDB }, GateDB: func() *sql.DB { return gateDB }})
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
 	}
