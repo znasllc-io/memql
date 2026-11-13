@@ -14,13 +14,17 @@ func (s *streamSession) handleAskVoiceStart(envelope *memqlv1.MemqlClientMessage
 		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument, "voice request is missing")
 	}
 	requestID := s.normalizeRequestId(envelope, msg.GetRequestId())
+	ctx, allowed := s.askAccessContext()
+	if !allowed {
+		return s.sendQueryError(requestID, envelope.GetMessageId(), codes.PermissionDenied, "Ask is unavailable for this person")
+	}
 	if s.shouldProxyAI(nodeTargetForChat()) {
 		return s.proxyAI(envelope, requestID, nodeTargetForChat())
 	}
 	if s.service.engine == nil {
 		return s.sendQueryError(requestID, envelope.GetMessageId(), codes.Unavailable, "MemQL is unavailable")
 	}
-	ctx, release, err := s.beginAskRequest(s.stream.Context(), requestID)
+	ctx, release, err := s.beginAskRequest(ctx, requestID)
 	if err != nil {
 		return s.sendQueryError(requestID, envelope.GetMessageId(), codes.AlreadyExists, err.Error())
 	}

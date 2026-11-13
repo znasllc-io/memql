@@ -224,6 +224,15 @@ func (s *streamSession) handleAiChat(envelope *memqlv1.MemqlClientMessage, msg *
 	}
 
 	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
+	// Both durable conversations and a direct chat turn are Ask. Resolve the
+	// current session actor and its live grants before a BFF can forward work;
+	// omitting conversation_id must not bypass RunAsk's app permission gate.
+	// CapableFor retains the established trusted-system role policy and reads
+	// person/group grants afresh, including revocations on an existing stream.
+	ctx, allowed := s.askAccessContext()
+	if !allowed {
+		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.PermissionDenied, "Ask is unavailable for this person")
+	}
 
 	// BFF proxy: on BFF binaries, forward every aiChat envelope to a
 	// worker peer of the configured target type (Agent by default).
@@ -253,7 +262,7 @@ func (s *streamSession) handleAiChat(envelope *memqlv1.MemqlClientMessage, msg *
 	if len(msg.GetMessages()) == 0 {
 		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.InvalidArgument, "messages array is required and must not be empty")
 	}
-	ctx, err := chatCallContext(s.stream.Context(), msg.GetProvider(), msg.GetFleetRegistrationId())
+	ctx, err := chatCallContext(ctx, msg.GetProvider(), msg.GetFleetRegistrationId())
 	if err != nil {
 		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.InvalidArgument, err.Error())
 	}
@@ -292,6 +301,34 @@ func (s *streamSession) handleAiChat(envelope *memqlv1.MemqlClientMessage, msg *
 
 	go s.handleAiChatNonStream(ctx, requestId, correlate, messages, msg.GetProvider())
 	return nil
+}
+
+// A stream is long-lived, but an Ask authorization decision belongs to one
+// envelope. Refresh both grant and membership memos without replacing or
+// widening the verified actor, and refuse if either authorization read failed.
+func (s *streamSession) askAccessContext() (context.Context, bool) {
+	ctx := s.stream.Context()
+	var actor *auth.AccessContext
+	_, forwarded := s.stream.(*forwardedStream)
+	if forwarded {
+		// HandleForwardedRequest already verified this one-envelope actor.
+		// Rebuilding it from claims would discard its ceiling and flags.
+		actor, _ = auth.AccessFromContext(ctx)
+	} else {
+		actor = s.ensureAccess(ctx)
+	}
+	if actor == nil {
+		return ctx, false
+	}
+	ctx = auth.ContextWithAccess(ctx, actor)
+	if !forwarded {
+		// Local execution carries the same post-RotateAuth ceiling as a proxy.
+		ctx = s.bindQueryAuthority(ctx)
+	}
+	ctx, failures := s.service.engine.OrganizationReadContext(ctx)
+	subject, ok := auth.SubjectFromContext(ctx)
+	allowed := ok && subject.UserId != "" && auth.CapableFor(ctx, subject, auth.VerbRead, "app:ask")
+	return ctx, allowed && failures.Err() == nil
 }
 
 // chatCallContext binds the pin on the RECEIVING replica, after the complete
