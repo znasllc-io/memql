@@ -5569,6 +5569,7 @@
       "fields": [
         "accountId",
         "email",
+        "erasedAt",
         "expiresAt",
         "issuedAt",
         "orderGid",
@@ -5581,6 +5582,7 @@
         "sentAt",
         "siteId",
         "storeId",
+        "tokenCiphertext",
         "tokenHash"
       ],
       "required": [

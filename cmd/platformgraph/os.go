@@ -22,9 +22,10 @@ type navApp struct {
 	Name     string `json:"name"`
 	Requires string `json:"requires"`
 	Sections []struct {
-		ID       string `json:"id"`
-		Name     string `json:"name"`
-		Requires string `json:"requires"`
+		ID             string `json:"id"`
+		Name           string `json:"name"`
+		Requires       string `json:"requires"`
+		SourceRequires string `json:"sourceRequires"`
 	} `json:"sections"`
 	Records []struct {
 		Section string   `json:"section"`
@@ -57,10 +58,16 @@ func osPass(b *builder, root string) error {
 			queries[r.Section] = append(queries[r.Section], r.Query)
 		}
 		for _, s := range a.Sections {
-			b.node(model.OSSectionID(a.ID, s.ID), model.PlatformOSSection, s.Name, map[string]string{
+			attrs := map[string]string{
 				"requires": s.Requires,
 				"records":  strings.Join(queries[s.ID], ","),
-			})
+			}
+			// Moved sections retain both original grants. Keep the extra
+			// app requirement in the graph instead of flattening it away.
+			if s.SourceRequires != "" {
+				attrs["sourceRequires"] = s.SourceRequires
+			}
+			b.node(model.OSSectionID(a.ID, s.ID), model.PlatformOSSection, s.Name, attrs)
 			b.edge(model.OSAppID(a.ID), model.OSSectionID(a.ID, s.ID), model.PlatformContains, nil)
 		}
 	}
