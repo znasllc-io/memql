@@ -17,6 +17,26 @@
 # fulfilments are materialised as children of the order and every one of them
 # also moves the order's own updatedAt, so ORDERS_UPDATED carries them and
 # they are deliberately not subscribed separately.
+#
+# CONNECTIONS. A connection of a type is mirrored one of three ways, or not at
+# all: `children` makes each node a row of its own concept (the node type must
+# be an entry); `references` keeps the nodes' GIDs as a []string; `inline`
+# carries the nodes inside the row as a []object, for a node that is not
+# mirrored and whose rows a reader needs -- a refund's lines, shipping lines
+# and adjustments, which the sales figures are computed from. A connection is
+# named once across the three. An inline NAMES THE FIELDS IT KEEPS of each
+# node, and may name only a figure or a moment (Boolean, Int, BigInt, Float,
+# Decimal, Money, UnsignedInt64, Date, DateTime, ID), an enum, a money object
+# (MoneyBag, MoneyV2) or a reference to a mirrored row, kept as { id }, that is
+# not a row a customer's erasure treats as a person's (Customer, Order,
+# DraftOrder, GiftCard: an erasure keeps an inlined list whole and looks at no
+# reference inside it). A string, a URL, a JSON value, any other object and any
+# list are refused: the node's whole selection would bring along what a person
+# typed, and a refund's shipping line selected whole carries the phone number
+# at the buyer's delivery address. `page` (1 to 250, 25 when omitted) is how many nodes a
+# fetch reads; an inlined connection is read one page deep, never paged
+# further, and is left out of bulk documents. A bulk line therefore leaves an
+# inlined list out of its write, so it never blanks what a fetch recorded.
 
 apiVersion: "2026-07"
 
@@ -393,6 +413,10 @@ types:
     scopes: [read_orders]
     reconcile: none
     bulk: false
+    inline:
+      - {connection: refundLineItems, page: 50, fields: [lineItem, quantity, subtotalSet, totalTaxSet]}
+      - {connection: refundShippingLines, page: 10, fields: [subtotalAmountSet, taxAmountSet]}
+      - {connection: orderAdjustments, page: 10, fields: [amountSet, taxAmountSet, reason]}
 
   - type: Fulfillment
     concept: fulfillment

@@ -124,6 +124,14 @@ var pluginKinds = map[string]moduleKind{
 	// the cluster's own rows and tables, the campaign rows through the engine
 	// and its own fact and watermark tables with SQL.
 	"emailStats": kindComponent,
+	// The store statistics facts (the 2026-11-11 store statistics design), for
+	// emailStats' reasons: builtin storeStatisticsRollup is declared in
+	// dsl/shopify/overlay/builtins.memql, which EVERY binary loads, so a node
+	// without the executor fails boot resolution. And it calls nobody's API:
+	// it reads the cluster's own mirror rows through the engine and writes its
+	// own store_sales_* tables with SQL. Shopify is reached by the shopify
+	// integration, never by this.
+	"storeStats": kindComponent,
 	// Storefront preview (epic memql#5531): the grant an operator opens, what
 	// is legal right now, and the three active observations.
 	//

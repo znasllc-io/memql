@@ -139,6 +139,12 @@ import (
 	// is declared in dsl/campaigns/builtins.memql, which every binary loads, so
 	// a capability missing from the registry is a boot-time resolution failure.
 	_ "github.com/znasllc-io/memql/component/emailstats"
+	// The store statistics facts (the 2026-11-11 store statistics design). On
+	// every node type for emailstats' reason: builtin storeStatisticsRollup is
+	// declared in dsl/shopify/overlay/builtins.memql, which every binary loads,
+	// so a capability missing from the registry is a boot-time resolution
+	// failure.
+	_ "github.com/znasllc-io/memql/component/storestats"
 	_ "github.com/znasllc-io/memql/component/sitehealth"
 	_ "github.com/znasllc-io/memql/component/sitetraffic"
 	_ "github.com/znasllc-io/memql/integrations/shopify"

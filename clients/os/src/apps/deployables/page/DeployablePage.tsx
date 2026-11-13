@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
-import { ChartLine, Handshake, Lock, MessageSquareText } from "lucide-react";
+import { ChartLine, Handshake, Lock, MessageSquareText, Receipt } from "lucide-react";
 
 import { Button, Caption, Chip, Chips, Head, Input, Panel, useLiveView } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
@@ -26,6 +26,8 @@ import { RuntimeSettingsPanel } from "./stops/RuntimeSettings";
 import { LIST_TITLES, type Dimension } from "../statistics/read";
 import { SiteStatisticsView, StatisticsPeriodControl, statisticsMeasured } from "../statistics/SiteStatisticsView";
 import { StatisticsListPage } from "../statistics/StatisticsListPage";
+import { destinationsOf } from "../storeStatistics/read";
+import { StoreStatisticsSection } from "../storeStatistics/StoreStatisticsSection";
 import "../composition.css";
 import { railFor, refusalStopFor, type RailStage, type StandingInput } from "./rail";
 import { BuildStop } from "./stops/Build";
@@ -472,6 +474,22 @@ export function DeployablePage({
       back={{ label: name, onSelect: toOverview }} />;
   }
 
+  // STORE STATISTICS TAKE THE PANE, for Reviews' reason: the store's sales are
+  // a page of their own under this one's trail. Drawn only for a holder of the
+  // sales part (judged for the site's organization, as `can` is), on a
+  // storefront that is not the cluster's own and has a store on either
+  // destination. A DRAFT KEEPS IT (ruling R3): the figures are the store's
+  // sales, which do not wait for this site to be published.
+  const salesStores = destinationsOf(site);
+  const storeStatistics = can.sales && site.kind === "shopify_storefront" && !site.systemOwned && (salesStores.production !== "" || salesStores.testing !== "");
+  if (detail === "storeStatistics" && storeStatistics) {
+    const toOverview = () => setDetail(null);
+    return <StoreStatisticsSection key={site.id}
+      site={site} name={name}
+      trail={[{ label: backLabel, onSelect: onBack }, { label: name, onSelect: toOverview }]}
+      back={{ label: name, onSelect: toOverview }} />;
+  }
+
   // EVERY OTHER DETAIL CHANGES THE PAGE TOO (the owner's rule, 2026-11-03).
   // Traffic (now Statistics), Access codes and each stop's detail used to open
   // a dialog over the page; now each takes the page's place under its own
@@ -482,7 +500,7 @@ export function DeployablePage({
   // opens the Logs app. A version's page needs the version it is about, so
   // without one the overview stands; a whole statistics list needs its list,
   // so without one Statistics stands.
-  const inPage = detail === null || detail === "whereItLives" || detail === "store" || detail === "reviews" || detail === "wholesale" || (detail === "version" && chosenVersion === null) ? null
+  const inPage = detail === null || detail === "whereItLives" || detail === "store" || detail === "reviews" || detail === "wholesale" || detail === "storeStatistics" || (detail === "version" && chosenVersion === null) ? null
     : detail === "statisticsList" && listDimension === null ? "statistics" : detail;
   // WHAT THE OPEN VERSION IS NOW, read from the live row rather than kept
   // from the click: one that has become the one serving has served.
@@ -557,6 +575,9 @@ export function DeployablePage({
                 open nothing: a draft has never served. A system-owned site keeps
                 it, for the note that says why its traffic is not recorded. */}
             {site.status !== "draft" ? <IconButton label="Statistics" onClick={() => setDetail("statistics")}><ChartLine size={16} aria-hidden /></IconButton> : null}
+            {/* The store's sales, beside the website's Statistics, and in its
+                place on a draft. Absent, never disabled, where it is not drawn. */}
+            {storeStatistics ? <IconButton label="Store statistics" onClick={() => setDetail("storeStatistics")}><Receipt size={16} aria-hidden /></IconButton> : null}
             {/* ABSENT, NOT DISABLED (rule 12): a system-owned site is exempt from
                 the whole axis, and a code opens a gate that only a package's own
                 deployable can declare. */}
@@ -785,5 +806,5 @@ function newestFirst(rows: DeploymentRow[]): DeploymentRow[] {
 // Each detail's title, as its page's Head and the trail name it. A whole
 // statistics list is named by its list ("Pages"), Statistics without one.
 function detailTitle(detail: WorkspaceDetail, dimension: Dimension | null): string {
-  return { source: "Source", whatItIs: "App and deployment plan", whereItLives: "Addresses and client", build: "Build", runtime: "App values", statistics: "Statistics", statisticsList: dimension === null ? "Statistics" : LIST_TITLES[dimension], access: "Access codes", store: "Store", reviews: "Reviews", wholesale: "Wholesale", visit: "Visit", version: "Version" }[detail];
+  return { source: "Source", whatItIs: "App and deployment plan", whereItLives: "Addresses and client", build: "Build", runtime: "App values", statistics: "Statistics", statisticsList: dimension === null ? "Statistics" : LIST_TITLES[dimension], access: "Access codes", store: "Store", reviews: "Reviews", wholesale: "Wholesale", storeStatistics: "Store statistics", visit: "Visit", version: "Version" }[detail];
 }

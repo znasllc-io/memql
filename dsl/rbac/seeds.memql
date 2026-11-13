@@ -781,6 +781,19 @@ seed capability cap-owner-execute-app-deployables-health { roleSlug: "owner"  ve
 @description("developer: the health part of the Deployables app -- a deployable's request, error, not-found, response-time, bytes and bot figures on its Statistics page.")
 seed capability cap-developer-execute-app-deployables-health { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/health"  predefined: true }
 
+// ---- app:deployables/sales -- a storefront's sales figures, on its Store statistics page ----
+//
+// OWNER AND DEVELOPER, like the parts above, and its own part because revenue
+// is more sensitive than visits: a client's group is granted it beside
+// `read app:deployables`, and holding the app alone does not show a store's
+// sales. The shared organization gate judges every read against the
+// organization of the site it names
+// (component/memql/organization_action_capabilities.go).
+@description("owner: the sales part of the Deployables app -- a storefront's sales figures, on its Store statistics page.")
+seed capability cap-owner-execute-app-deployables-sales { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/sales"  predefined: true }
+@description("developer: the sales part of the Deployables app -- a storefront's sales figures, on its Store statistics page.")
+seed capability cap-developer-execute-app-deployables-sales { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/sales"  predefined: true }
+
 // ---- app:deployables/reviews -- a store's reviews, in the Deployables app ----
 //
 // OWNER AND DEVELOPER, like the parts above, and its own part because it is a

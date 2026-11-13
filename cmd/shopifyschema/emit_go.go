@@ -183,7 +183,19 @@ type FieldSpec struct {
 	// field that is not an object or a list of objects, and for an object
 	// that keeps none.
 	GidsInside []string
+	// Page is the page an inlined connection (KindInlineList) is read with,
+	// from cmd/shopifyschema/allowlist.yaml, its one owner: a list holding a
+	// full page may hold more than was read. Zero for every other field.
+	Page int
+	// Holds is what an inlined connection keeps of each node, one entry a
+	// field the allowlist names. Nil for every other field.
+	Holds []HeldField
 }
+
+// HeldField is one field an inlined connection keeps of each node: its name,
+// its kind (KindScalar, KindEnum, KindObject for a money object, KindGid for a
+// reference, kept as {id}) and its Admin type.
+type HeldField struct{ Name, Kind, AdminType string }
 
 // Field kinds.
 const (
@@ -195,6 +207,11 @@ const (
 	KindRefs       = "refs"
 	KindMetafields = "metafields"
 	KindGid        = "gid"
+	// KindInlineList is a connection carried in the row as a []object, each
+	// element holding only the fields its Holds name. A document that did not
+	// select it (a bulk line) leaves it out of the write: not read is not
+	// empty.
+	KindInlineList = "inlineList"
 )
 
 // ChildSpec is a data-carrying connection materialised as its own concept.
@@ -379,6 +396,16 @@ func emitTypeSpec(p *TypePlan, doc, bulkDoc string, bulkOps []string) string {
 		fmt.Fprintf(&b, "\t\t\t{Name: %q, GraphQL: %q, Kind: %q, DSLType: %q, Extract: %q, AdminType: %q", f.Name, f.GraphQL, goKindConst(f.Kind), f.DSLType, f.Extract, f.AdminType)
 		if len(f.GidsInside) > 0 {
 			fmt.Fprintf(&b, ", GidsInside: []string{%s}", quoteList(f.GidsInside))
+		}
+		if f.Page != 0 {
+			fmt.Fprintf(&b, ", Page: %d", f.Page)
+		}
+		if len(f.Holds) > 0 {
+			held := make([]string, 0, len(f.Holds))
+			for _, h := range f.Holds {
+				held = append(held, fmt.Sprintf("{Name: %q, Kind: %q, AdminType: %q}", h.Name, h.Kind, h.AdminType))
+			}
+			fmt.Fprintf(&b, ", Holds: []HeldField{%s}", strings.Join(held, ", "))
 		}
 		b.WriteString("},\n")
 	}

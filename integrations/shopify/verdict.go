@@ -3,6 +3,7 @@ package shopify
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -66,13 +67,219 @@ const protectedDataURL = "https://shopify.dev/docs/apps/launch/protected-custome
 // known. The connect's pass and the daily pass both record it.
 const subscriptionsUnreadable = "subscriptions: the store's webhook subscriptions could not be read"
 
+// What a reason stands in the way of. Every reason carries exactly one; an
+// empty Concerns is never written, so "not said" cannot pass for "nothing".
+const (
+	ConcernsWholeStore  = "wholeStore"  // nothing of the store is being recorded as it should be
+	ConcernsConcepts    = "concepts"    // the concepts named in Concepts, and the children read with them
+	ConcernsNoRecording = "noRecording" // not about recording at all
+)
+
+// reasonConcerns is THE classification: every Reason* code with the kinds a
+// reason of it may carry. Two codes take one of two kinds by what the mirror
+// found: approval_outdated concerns the concepts the mirror refuses under the
+// grant, or nothing recorded when the scopes not approved only widen what is
+// read (approvalConcerns); changes_not_recorded concerns the domains of the
+// deliveries it counted, or the whole store when its count is a floor or a
+// delivery it read routes to no domain (changesNotRecorded).
+// TestEveryReasonCodeIsClassified reads the package's Reason* constants from
+// its source and fails on one this table does not name, and on an entry no
+// constant declares.
+var reasonConcerns = map[string][]string{
+	ReasonDataNotDeclared:       {ConcernsConcepts},
+	ReasonApprovalOutdated:      {ConcernsConcepts, ConcernsNoRecording},
+	ReasonGrantLost:             {ConcernsWholeStore},
+	ReasonEventsNotRegistered:   {ConcernsWholeStore},
+	ReasonCheckFailing:          {ConcernsConcepts},
+	ReasonChangesNotRecorded:    {ConcernsConcepts, ConcernsWholeStore},
+	ReasonPrivacyRequestFailing: {ConcernsNoRecording},
+}
+
 // VerdictReason is one reason a store needs attention: a code, one sentence
-// for a person, and at most one act.
+// for a person, at most one act, and what it stands in the way of.
 type VerdictReason struct {
 	Code, Domain, Sentence, Detail string
 	Count                          int
 	AtLeast                        bool
 	Act, ActLabel, ActURL          string // Act: "", "approve", "reconnect", "register", "retry", "declare"
+	// Concerns is one of the Concerns* constants, among the kinds
+	// reasonConcerns allows its code.
+	Concerns string
+	// Concepts is the generated concept names ("order") the reason stands in
+	// the way of, sorted: set only with ConcernsConcepts, and never empty then.
+	Concepts []string
+}
+
+// StandsInTheWayOf reports whether the reason keeps any of these generated
+// concepts (names, or ids) from being recorded. A concept is compared through
+// the domains it is read with up to the one whose sweep records it
+// (recordedThrough, the chain sweptParentOf walks), so a reason about orders
+// stands in the way of their lines and refunds, and one about the returns read
+// with orders does not stand in the way of the orders. A reason whose Concerns
+// is not one of the three answers true: what is not classified is treated as
+// standing in the way, never as clear. So does a reason whose code
+// reasonConcerns does not name or does not allow that kind, and one that
+// concerns concepts and names none.
+func (r VerdictReason) StandsInTheWayOf(concepts []string) bool {
+	if !slices.Contains(reasonConcerns[r.Code], r.Concerns) {
+		return true
+	}
+	switch r.Concerns {
+	case ConcernsNoRecording:
+		return false
+	case ConcernsConcepts:
+		if len(r.Concepts) == 0 {
+			return true
+		}
+		return heldBy(r.Concepts, concepts)
+	}
+	return true
+}
+
+// heldBy reports whether any of concepts is named, or is read under a named
+// concept: one way, a named concept holds itself and what is read under it,
+// never what is above or beside it (recordedThrough).
+func heldBy(named, concepts []string) bool {
+	set := map[string]bool{}
+	for _, c := range named {
+		set[generated.ConceptFromID(strings.TrimSpace(c))] = true
+	}
+	for _, c := range concepts {
+		if generated.Types[generated.ConceptFromID(strings.TrimSpace(c))] == nil {
+			// A concept the generated model does not know -- misspelled, or
+			// renamed -- is never clear.
+			return true
+		}
+		for _, held := range recordedThrough(c) {
+			if set[held] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// recordedThrough is a concept, given by name or id, and each concept it is
+// read with on the way up to the domain whose sweep records it: the chain
+// sweptParentOf walks. A reason naming any of them holds the concept. A reason
+// naming only a child read with a parent holds neither the parent nor its
+// other children: an approval that lacks read_returns refuses the returns
+// read with orders, and the orders, their lines and their refunds are still
+// read.
+func recordedThrough(concept string) []string {
+	concept = generated.ConceptFromID(strings.TrimSpace(concept))
+	out := []string{concept}
+	for seen := 0; seen < len(generated.ApplyOrder); seen++ {
+		spec := generated.Types[concept]
+		if spec == nil || spec.Reconcile != generated.ReconcileNone || spec.Parent == "" {
+			break
+		}
+		concept = spec.Parent
+		out = append(out, concept)
+	}
+	return out
+}
+
+// VerdictReasonFromPayload reads one element of the verdict builtin's
+// `reasons` back into the fields StandsInTheWayOf reads (code, concerns,
+// concepts). For a reader of the builtin's answer in another package.
+func VerdictReasonFromPayload(m map[string]any) VerdictReason {
+	r := VerdictReason{Code: mapString(m, "code"), Concerns: mapString(m, "concerns")}
+	concepts, ok := payloadStrings(m["concepts"])
+	if _, present := m["concepts"]; present && !ok {
+		// A concepts value that is not a list of strings: the reason is
+		// read as unclassified, which stands in the way whatever it says.
+		r.Concerns = ""
+	}
+	r.Concepts = concepts
+	return r
+}
+
+// OutsideWhatTheStoreRecords answers from the verdict builtin's reply whether
+// any of these generated concepts (names, or ids) is outside what the store
+// records: listed in the reply's outsideConcepts, or read under a concept
+// listed there, one way as StandsInTheWayOf compares. known is false when the
+// reply carries no outsideConcepts list -- a reply from an older node, or no
+// reply -- and outside is then true, so a caller that reads only the first
+// answer still does not take the figures for current.
+func OutsideWhatTheStoreRecords(verdict map[string]any, concepts []string) (outside, known bool) {
+	listed, ok := payloadStrings(verdict["outsideConcepts"])
+	if !ok {
+		return true, false
+	}
+	return heldBy(listed, concepts), true
+}
+
+// payloadStrings reads a list of strings from a reply: []any after JSON, or
+// []string from the reply's own map. ok is false when it is not a list, or
+// when any element is not a string: a malformed list is not known.
+func payloadStrings(v any) (out []string, ok bool) {
+	switch list := v.(type) {
+	case []string:
+		return append([]string(nil), list...), true
+	case []any:
+		for _, c := range list {
+			s, ok := c.(string)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, s)
+		}
+		return out, true
+	}
+	return nil, false
+}
+
+// conceptNames is concept ids, or names, as sorted generated concept names.
+func conceptNames(concepts []string) []string {
+	out := make([]string, 0, len(concepts))
+	for _, c := range concepts {
+		out = append(out, generated.ConceptFromID(strings.TrimSpace(c)))
+	}
+	return uniqueSorted(out)
+}
+
+// refusedByTheOrigin is the domains of the store's connection, by generated
+// concept name in apply order, whose own row the origin refused as not
+// granted: a refusal naming a scope the connection asks for. The
+// undeclared-data refusal (data_not_declared's) is not one, and neither is a
+// domain the connection does not ask for, or a row refused as not requested:
+// both are outside.
+func refusedByTheOrigin(store Store, rows map[string]map[string]any) []string {
+	var out []string
+	for _, concept := range generated.ApplyOrder {
+		spec := generated.Types[concept]
+		row := rows[generated.ConceptID(concept)]
+		if spec != nil && row != nil && domainInConnection(store, spec) && isNotGranted(refusalOf(row)) && !undeclaredData(row) {
+			out = append(out, concept)
+		}
+	}
+	return out
+}
+
+// approvalConcerns is what an outdated approval stands in the way of: the
+// concepts of the store's connection the mirror itself refuses under the
+// grant, because the grant holds none of their scopes (scopesMissingFor, the
+// same rule the sweep, the subscriptions and the shop's refresh refuse by),
+// and every concept of the connection whose own row the origin refused as
+// not granted. The recorded grant is written at connect and never refreshed,
+// so the origin's answer is the later word; the undeclared-data refusal is
+// data_not_declared's and not counted here. None means the scopes not
+// approved only widen what is read -- as read_all_orders widens orders past
+// sixty days -- and everything the connection reads is still read: nothing
+// recorded is held.
+func approvalConcerns(store Store, rows map[string]map[string]any) (string, []string) {
+	var refused []string
+	for concept, spec := range generated.Types {
+		if domainInConnection(store, spec) && len(scopesMissingFor(store, spec)) > 0 {
+			refused = append(refused, concept)
+		}
+	}
+	refused = append(refused, refusedByTheOrigin(store, rows)...)
+	if len(refused) == 0 {
+		return ConcernsNoRecording, nil
+	}
+	return ConcernsConcepts, uniqueSorted(refused)
 }
 
 // RecordedKind is one line of "What is recorded": when the last change of the
@@ -85,10 +292,17 @@ type Verdict struct {
 	Since                  time.Time
 	ResumedAt              time.Time
 	ConnectedAt            time.Time
-	Reasons                []VerdictReason
-	Recorded               []RecordedKind
-	Outside, Withheld      []string
-	OrdersFrom             string
+	// GrantRecordedAt is when a connect last recorded the store's grant, or
+	// zero when the store's health does not say (grantRecordedKey).
+	GrantRecordedAt   time.Time
+	Reasons           []VerdictReason
+	Recorded          []RecordedKind
+	Outside, Withheld []string
+	OrdersFrom        string
+	// OutsideConcepts is the generated concept names, sorted, of the domains
+	// outside what the store records (outsideConceptsOf): Outside's domains,
+	// and every domain whose row the origin refuses as not granted.
+	OutsideConcepts []string
 }
 
 // verdictInput is everything computeVerdict reads, gathered beforehand.
@@ -105,6 +319,9 @@ type verdictInput struct {
 	// ConnectedAt is when the store was connected, or zero when the row
 	// does not say. One of the three times a late check is measured from.
 	ConnectedAt time.Time
+	// GrantRecordedAt is when a connect last recorded the store's grant
+	// (grantRecordedKey on its health), or zero.
+	GrantRecordedAt time.Time
 	// Privacy is the store's privacy requests that have been failing for
 	// longer than a day (privacy_verdict.go).
 	Privacy privacyFailing
@@ -140,13 +357,15 @@ func computeVerdict(in verdictInput) Verdict {
 	store := in.Store
 	rows := rowsByConcept(in.States)
 	v := Verdict{
-		StoreID:     store.ID,
-		Domain:      store.Domain,
-		OrdersFrom:  healthString(store.Health, "ordersFrom"),
-		ConnectedAt: in.ConnectedAt,
-		Recorded:    recordedOf(store, rows),
-		Outside:     outsideOf(store, rows),
-		Withheld:    withheldOf(in.Denied),
+		StoreID:         store.ID,
+		Domain:          store.Domain,
+		OrdersFrom:      healthString(store.Health, "ordersFrom"),
+		ConnectedAt:     in.ConnectedAt,
+		GrantRecordedAt: in.GrantRecordedAt,
+		Recorded:        recordedOf(store, rows),
+		Outside:         outsideOf(store, rows),
+		OutsideConcepts: outsideConceptsOf(store, rows),
+		Withheld:        withheldOf(in.Denied),
 	}
 	switch {
 	case store.UninstalledAt != "" || store.RedactedAt != "":
@@ -259,10 +478,11 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from, fromNeverC
 	// never a reason, whatever else holds below.
 	inside := insideDomains(store, rows)
 
-	var undeclared []string
+	var undeclared, undeclaredConcepts []string
 	for _, concept := range inside {
 		if undeclaredData(rows[concept]) {
 			undeclared = append(undeclared, plainDomain(concept))
+			undeclaredConcepts = append(undeclaredConcepts, concept)
 		}
 	}
 	if len(undeclared) > 0 {
@@ -271,10 +491,12 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from, fromNeverC
 			Domain:   joinWords(undeclared),
 			Sentence: "Shopify refuses " + joinWords(undeclared) + " for this app, because the app has not declared the customer data it uses.",
 			Act:      ActDeclare, ActLabel: "Declare the customer data", ActURL: protectedDataURL,
+			Concerns: ConcernsConcepts, Concepts: conceptNames(undeclaredConcepts),
 		})
 	}
 
-	if missing := scopesNotApproved(store); len(missing) > 0 {
+	missing, refusedRows := scopesNotApproved(store), refusedByTheOrigin(store, rows)
+	if len(missing) > 0 || len(refusedRows) > 0 {
 		// The grant lacks something the store's connection asks for. WHO CAN
 		// GIVE IT depends on how the store is connected (Store.Managed: the
 		// Admin token it holds is the shared app's offline grant, or a token
@@ -283,13 +505,33 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from, fromNeverC
 		// app has nothing to approve in MemQL OS: what its token allows is
 		// that app's own configuration, so the reason says so and offers no
 		// act.
+		//
+		// THE ORIGIN'S OWN ANSWER RAISES IT TOO. The recorded grant is written
+		// at connect and never refreshed, and a store connected before it was
+		// recorded has none (scopesNotApproved is then nil). A domain of the
+		// connection whose row the origin refused as not granted is the same
+		// fact said by the origin, so it raises the reason by itself. With no
+		// scope known to be missing, the detail names what is refused.
 		reason := VerdictReason{
 			Code:     ReasonApprovalOutdated,
 			Sentence: "This store's own app does not allow everything MemQL records.",
 			Detail:   strings.Join(missing, ", "),
 		}
+		if len(missing) == 0 {
+			words := make([]string, 0, len(refusedRows))
+			for _, concept := range refusedRows {
+				words = append(words, plainDomain(concept))
+			}
+			reason.Detail = "Shopify refuses " + joinWords(words) + " under the store's grant."
+		}
+		reason.Concerns, reason.Concepts = approvalConcerns(store, rows)
 		if store.Managed() {
-			reason.Sentence = "This store approved an older list of permissions."
+			// With no scope known to be missing, an older list is a guess:
+			// the sentence says only what is known.
+			reason.Sentence = "Shopify does not allow everything MemQL records for this store."
+			if len(missing) > 0 {
+				reason.Sentence = "This store approved an older list of permissions."
+			}
 			reason.Act, reason.ActLabel = ActApprove, "Open MemQL OS from the store's Shopify admin and approve"
 			reason.ActURL = "https://" + store.Domain + "/admin/apps"
 		}
@@ -301,6 +543,7 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from, fromNeverC
 			out = append(out, VerdictReason{
 				Code: ReasonGrantLost, Sentence: "MemQL can no longer reach this store.", Detail: lastError,
 				Act: ActReconnect, ActLabel: "Reconnect in Settings",
+				Concerns: ConcernsWholeStore,
 			})
 			break
 		}
@@ -310,6 +553,7 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from, fromNeverC
 		out = append(out, VerdictReason{
 			Code: ReasonEventsNotRegistered, Sentence: "Shopify is not sending every change.", Detail: detail,
 			Act: ActRegister, ActLabel: "Register again",
+			Concerns: ConcernsWholeStore,
 		})
 	}
 
@@ -318,12 +562,19 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from, fromNeverC
 		if rowTime(rows[concept], "lastReconcileAt").IsZero() {
 			since = fromNeverClean
 		}
+		// A domain with no attempt on record -- one the sync runtime retried
+		// after a connect recorded the grant, waiting for its check -- is
+		// measured from that connect too. Every other row is judged as before:
+		// an attempt on record says checks ran, and their lateness is theirs.
+		if rowTime(rows[concept], "lastAttemptAt").IsZero() && in.GrantRecordedAt.After(since) {
+			since = in.GrantRecordedAt
+		}
 		if r, ok := checkFailing(concept, rows[concept], intervalOf(in.Intervals, concept), since, in.Now); ok {
 			out = append(out, r)
 		}
 	}
 
-	if n := changesNotRecorded(in.GivenUp, inside, rows); n > 0 {
+	if n, concepts, unrouted := changesNotRecorded(in.GivenUp, inside, rows); n > 0 {
 		sentence := fmt.Sprintf("%d changes could not be recorded.", n)
 		if n == 1 {
 			sentence = "1 change could not be recorded."
@@ -332,10 +583,17 @@ func reasonsOf(in verdictInput, rows map[string]map[string]any, from, fromNeverC
 			// The read ran out of budget: at least this many.
 			sentence = "At least " + sentence
 		}
-		out = append(out, VerdictReason{
+		reason := VerdictReason{
 			Code: ReasonChangesNotRecorded, Sentence: sentence, Count: n, AtLeast: in.GivenUpFloor,
 			Act: ActRetry, ActLabel: "Try again",
-		})
+			Concerns: ConcernsConcepts, Concepts: conceptNames(concepts),
+		}
+		if in.GivenUpFloor || unrouted {
+			// The deliveries not read, or one whose domain is not known, may
+			// be of any domain.
+			reason.Concerns, reason.Concepts = ConcernsWholeStore, nil
+		}
+		out = append(out, reason)
 	}
 	return out
 }
@@ -349,11 +607,18 @@ const backfillRefusedPrefix = "backfill refused: "
 // refusal: the sweep's standing not-granted answer, or a failed backfill
 // refused with it.
 func undeclaredData(row map[string]any) bool {
+	lastError := refusalOf(row)
+	return isNotGranted(lastError) && protectedDataRefusal(lastError)
+}
+
+// refusalOf is a domain row's error with a failed backfill's prefix read
+// through: what the origin answered, whichever of the two met it.
+func refusalOf(row map[string]any) string {
 	lastError := mapString(row, "lastError")
 	if mapString(row, "backfillStatus") == "failed" {
 		lastError = strings.TrimPrefix(lastError, backfillRefusedPrefix)
 	}
-	return isNotGranted(lastError) && protectedDataRefusal(lastError)
+	return lastError
 }
 
 // grantLost reports whether a domain's error says the store's grant no longer
@@ -432,11 +697,16 @@ func checkFailing(concept string, row map[string]any, interval time.Duration, fr
 		return VerdictReason{}, false
 	}
 	lastError := mapString(row, "lastError")
-	if grantLost(lastError) || isNotGranted(lastError) || isNotRequested(lastError) {
+	// A refusal is the approval's notice (or data_not_declared's), the
+	// prefixed form of a refused backfill included: one refusal, one notice.
+	if grantLost(lastError) || isNotGranted(refusalOf(row)) || isNotRequested(lastError) {
 		return VerdictReason{}, false
 	}
 	word := plainDomain(concept)
-	r := VerdictReason{Code: ReasonCheckFailing, Domain: word, Sentence: "The last check of " + word + " failed"}
+	r := VerdictReason{
+		Code: ReasonCheckFailing, Domain: word, Sentence: "The last check of " + word + " failed",
+		Concerns: ConcernsConcepts, Concepts: conceptNames([]string{concept}),
+	}
 	if undeclaredData(row) {
 		// data_not_declared, with its act.
 		return VerdictReason{}, false
@@ -484,15 +754,27 @@ func checkFailing(concept string, row map[string]any, interval time.Duration, fr
 // its parent, the parent's, since the parent's sweep is what records it. One older than that sweep
 // is not counted: the sweep read what it named. One whose topic routes to no
 // domain asked about is not counted either.
-func changesNotRecorded(givenUp []map[string]any, inside []string, rows map[string]map[string]any) int {
+//
+// It also answers the domains it counted, by concept id, and whether it read
+// a delivery whose topic routes to no domain and could have carried a record
+// of any: the bulk export's finish, an unreadable header, or a topic the
+// connector does not know. Such a delivery is not counted, and what it would
+// have changed is not known. A delivery of a topic Apply routes elsewhere and
+// that carries no mirrored record (carriesNoMirroredRecord), and one routed
+// to a domain outside the connection, are neither counted nor unrouted.
+func changesNotRecorded(givenUp []map[string]any, inside []string, rows map[string]map[string]any) (n int, concepts []string, unrouted bool) {
 	asked := map[string]bool{}
 	for _, concept := range inside {
 		asked[concept] = true
 	}
-	n := 0
+	counted := map[string]bool{}
 	for _, delivery := range givenUp {
-		route, ok := generated.Topics[generated.TopicHeaderToEnum(topicHeaderOf(delivery))]
-		if !ok {
+		topic := topicHeaderOf(delivery)
+		route, ok := generated.Topics[generated.TopicHeaderToEnum(topic)]
+		if !ok || generated.Types[route.Concept] == nil {
+			if !carriesNoMirroredRecord(topic) {
+				unrouted = true
+			}
 			continue
 		}
 		concept := generated.ConceptID(sweptParentOf(route.Concept))
@@ -503,9 +785,23 @@ func changesNotRecorded(givenUp []map[string]any, inside []string, rows map[stri
 		clean := rowTime(rows[concept], "lastReconcileAt")
 		if clean.IsZero() || received.IsZero() || received.After(clean) {
 			n++
+			if !counted[concept] {
+				counted[concept] = true
+				concepts = append(concepts, concept)
+			}
 		}
 	}
-	return n
+	return n, concepts, unrouted
+}
+
+// carriesNoMirroredRecord reports whether a topic is one Apply hands to
+// something other than the mirror, by the names it routes them by: a privacy
+// topic (isComplianceTopic) or the app's uninstall (isUninstallTopic). Any
+// other topic outside the routing table is not one the connector can tell
+// apart -- app/scopes_update is named nowhere in it -- and is treated as
+// unknown.
+func carriesNoMirroredRecord(topic string) bool {
+	return isComplianceTopic(topic) || isUninstallTopic(topic)
 }
 
 // sweptParentOf is the domain whose sweep records a concept: the concept
@@ -692,6 +988,30 @@ func outsideOf(store Store, rows map[string]map[string]any) []string {
 		}
 	}
 	return out
+}
+
+// outsideConceptsOf is, by generated concept name and sorted, the domains
+// outside what the store records: every domain outsideOf lists (outside the
+// connection, or refused as not requested) and every one whose row the
+// origin refused as not granted, the undeclared-data refusal among them. A
+// store with no recorded grant has no reason for such a refusal -- nothing is
+// known to be missing (scopesNotApproved) -- and the display lists do not
+// name it, so this is where a reader of the reply learns the domain is not
+// recorded. A child read with its parent is understood through its parent
+// (OutsideWhatTheStoreRecords).
+func outsideConceptsOf(store Store, rows map[string]map[string]any) []string {
+	outside := map[string]bool{}
+	for _, concept := range domainsOutside(store) {
+		outside[concept] = true
+	}
+	var out []string
+	for _, concept := range sweptDomains(func(*generated.TypeSpec) bool { return true }) {
+		row := rows[concept]
+		if outside[concept] || isNotRequested(mapString(row, "lastError")) || isNotGranted(refusalOf(row)) {
+			out = append(out, concept)
+		}
+	}
+	return conceptNames(out)
 }
 
 // withheldOf is the fields Shopify withholds, in plain words: "product

@@ -89,5 +89,6 @@ func privacyReason(p privacyFailing) (VerdictReason, bool) {
 		Detail:   detail + ". It is tried again at every run of the privacy jobs.",
 		Count:    p.Count,
 		AtLeast:  p.AtLeast,
+		Concerns: ConcernsNoRecording,
 	}, true
 }

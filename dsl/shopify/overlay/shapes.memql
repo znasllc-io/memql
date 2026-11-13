@@ -1,4 +1,8 @@
 use shopify.overlay.concepts.{ store, complianceJob }
+use shopify.generated.order.{ order }
+use shopify.generated.orderLineItem.{ orderLineItem }
+use shopify.generated.refund.{ refund }
+use shopify.generated.shop.{ shop }
 
 /// The store row as the connector and the portal read it.
 ///
@@ -64,4 +68,125 @@ shape complianceJob complianceJobStored {
   deliveryIds
   exportId
   row.createdAt
+}
+
+// ---- the store statistics walk (the 2026-11-11 store statistics design) ----
+//
+// What the walk reads of a store, and nothing more. It reads every
+// organization's stores under the cluster-owner predicate and keys each row by
+// its store, so a shape projects what a figure is made of: no person's name,
+// no address, no phone and no account. The buyer's email is on the two order
+// shapes only, where a returning buyer is told from a new one. The one name
+// projected is the shop's own and the store's own.
+//
+// row.createdAt is the write time of a row's newest version: the walk resumes
+// from the newest it read. `deleted` is projected on every mirror shape
+// because the walk is handed tombstones too, and retires the fact a retired
+// row made.
+
+/// An order as the statistics walk reads it: the business date, the money
+/// sets a sale is figured from, and the buyer it is counted under.
+@row
+shape order storeStatisticsOrder {
+  row.id
+  row.createdAt
+  storeId
+  gid
+  syncedAt
+  deleted
+  processedAt
+  sourceCreatedAt
+  cancelledAt
+  test
+  taxesIncluded
+  currencyCode
+  customerGid
+  email
+  subtotalLineItemsQuantity
+  totalShippingPriceSet
+  totalTaxSet
+  originalTotalDutiesSet
+  currentSubtotalPriceSet
+  totalDiscountsSet
+  totalRefundedSet
+}
+
+/// An order line as the statistics walk reads it: the product, the
+/// quantities sold and kept, the unit price and the discounts on it.
+@row
+shape orderLineItem storeStatisticsLine {
+  row.id
+  row.createdAt
+  storeId
+  gid
+  parentGid
+  deleted
+  isGiftCard
+  productGid
+  title
+  quantity
+  currentQuantity
+  originalUnitPriceSet
+  discountAllocations
+}
+
+/// A refund as the statistics walk reads it: when, how much, and what it
+/// gave back -- lines, shipping, duties and adjustments.
+@row
+shape refund storeStatisticsRefund {
+  row.id
+  row.createdAt
+  storeId
+  gid
+  parentGid
+  syncedAt
+  deleted
+  processedAt
+  sourceCreatedAt
+  totalRefundedSet
+  duties
+  refundLineItems
+  refundShippingLines
+  orderAdjustments
+}
+
+/// The buyer of an order, for the count of new and returning buyers.
+@row
+shape order storeStatisticsBuyer {
+  row.id
+  row.createdAt
+  storeId
+  gid
+  deleted
+  email
+}
+
+/// The shop as the statistics walk reads it: its currency, its time zone,
+/// whether its prices include tax, and its plan.
+@row
+shape shop storeStatisticsShop {
+  row.id
+  row.createdAt
+  storeId
+  deleted
+  name
+  currencyCode
+  ianaTimezone
+  taxesIncluded
+  plan
+}
+
+/// A configured store as the statistics walk reads it: which stores there
+/// are, whether one is a development store, and whether it is still
+/// installed. No credential reference and no owner.
+@row
+shape store storeStatisticsStore {
+  row.id
+  domain
+  name
+  isDevelopment
+  scopesGranted
+  uninstalledAt
+  redactedAt
+  health
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -366,4 +367,51 @@ func fieldName(line string) string {
 		return line[:i]
 	}
 	return line
+}
+
+// AN ORDER'S FETCH READS EACH REFUND'S DETAIL, AND ITS BULK EXPORT DOES NOT.
+// The recorded documents are what the connector sends (the drift gate holds
+// them to the generator): the fetch and the list select a refund's lines,
+// shipping lines and adjustments inside refunds { }, and no bulk document
+// selects any of them -- a bulk query budgets its connections, and a bulk line
+// that leaves them out leaves what a fetch wrote alone.
+func TestAnOrdersFetchSelectsEachRefundsDetailAndItsBulkDocumentDoesNot(t *testing.T) {
+	read := func(rel string) string {
+		t.Helper()
+		raw, err := os.ReadFile(filepath.Join(repoRoot(), filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	detail := []string{"refundLineItems", "refundShippingLines", "orderAdjustments"}
+	doc := read("dsl/shopify/generated/selections/Order.graphql")
+	for _, path := range [][]string{
+		{"query ShopifyFetchOrder", "node(id: $id)", "... on Order", "refunds"},
+		{"query ShopifyListOrder", "orders", "nodes", "refunds"},
+	} {
+		fields, ok := selectionAt(doc, path...)
+		if !ok {
+			t.Errorf("no selection at %q in the recorded Order.graphql", path)
+			continue
+		}
+		for _, want := range detail {
+			if !slices.Contains(fields, want) {
+				t.Errorf("%s does not select %s inside refunds (selects %v)", path[0], want, fields)
+			}
+		}
+	}
+	// A refund is a plain list of the order, so its lines are in the order's
+	// own bulk line. (A return's suggested refund has refundLineItems of its
+	// own, a different field, which is why the refunds are read by path.)
+	bulk := read("dsl/shopify/generated/bulk/Order.graphql")
+	fields, ok := selectionAt(bulk, "query ShopifyBulkOrder", "orders", "edges", "node", "refunds")
+	if !ok || !slices.Contains(fields, "totalRefundedSet") {
+		t.Fatalf("no refunds selection in the recorded bulk document of orders (%v)", fields)
+	}
+	for _, never := range detail {
+		if slices.Contains(fields, never) {
+			t.Errorf("the bulk document of orders selects %s inside refunds", never)
+		}
+	}
 }

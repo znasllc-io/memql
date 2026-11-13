@@ -349,9 +349,12 @@ func (c *Connector) advanceOperation(cur backfillCursor, spec *generated.TypeSpe
 }
 
 // finished is a backfill's last step: done, with a cursor naming the rule it
-// read the domain under, which the boot pass reads (queueUnstartedBackfills).
+// read the domain under, which the boot pass reads (queueUnstartedBackfills),
+// and when its last export was started, which the read of every order reads
+// (refundDetailOwed): an export writes rows with no refund detail, so a read
+// of every order that began before it no longer describes them.
 func (c *Connector) finished(cur backfillCursor) memqlsync.BackfillPage {
-	return memqlsync.BackfillPage{Done: true, NextCursor: backfillCursor{Rule: cur.Rule}.encode()}
+	return memqlsync.BackfillPage{Done: true, NextCursor: backfillCursor{Rule: cur.Rule, At: cur.At}.encode()}
 }
 
 // underRule reports whether a cursor belongs to a backfill begun under

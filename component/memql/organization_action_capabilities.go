@@ -12,7 +12,7 @@ import (
 
 func organizationDeployableCapability(resource string) bool {
 	switch resource {
-	case "app:deployables/deploy", "app:deployables/publish", "app:deployables/retire", "app:pipelines/repositories", "app:deployables/preview", "app:deployables/store", "app:deployables/access", "app:deployables/reviews", "app:deployables/wholesale":
+	case "app:deployables/deploy", "app:deployables/publish", "app:deployables/retire", "app:pipelines/repositories", "app:deployables/preview", "app:deployables/store", "app:deployables/access", "app:deployables/reviews", "app:deployables/wholesale", "app:deployables/sales":
 		return true
 	}
 	return false
@@ -63,6 +63,10 @@ func organizationCapabilityTarget(fn *Function) (concept, argument string) {
 		// (TestEveryClientCallableAccessCodeActIsAGatedBuiltin).
 		case "siteAccessCodeCreate", "siteAccessGuestPassCreate", "siteAccessGates", "siteAccessCodesForSite":
 			return "v1:platform:site", "siteId"
+		// A storefront's sales figures (the sales part): asked about the SITE the
+		// store statistics are read for.
+		case "storeStatistics":
+			return "v1:platform:site", "siteId"
 		case "siteAccessCodeRegenerate", "siteAccessCodeSetExpiry", "siteAccessCodeRemove":
 			return "v1:platform:siteAccessCode", "codeId"
 		case "packageAnalyze", "packageDeploy", "packageCancelDeployment", "packageRollback", "packageArchive", "packageDeactivateDeployable", "packageRestore", "packageSetAutoDeploy":
@@ -97,6 +101,43 @@ func organizationCapabilityTarget(fn *Function) (concept, argument string) {
 		}
 	}
 	return "", ""
+}
+
+// RequirementHeldFor answers whether the caller on ctx holds required for a
+// target that belongs to account: the judgement this file's gate makes once it
+// knows a construct's requirement and its target's account, exported so a
+// handler that must hold the same gate itself (component/storestats, for a
+// construct of another source bound to its executor) asks it and nothing of
+// its own.
+//
+// For an organization: its data, the app the requirement's resource belongs
+// to, and the requirement itself, each in that organization
+// (OrganizationCapable). For a target no organization owns, the gate's own
+// path: the caller's global data reach, then the requirement as the global
+// capability gate judges it (refuseBelowRequiredCapability's last question,
+// auth.CapableFor over the caller's subject), which the gate reaches by
+// answering "not handled".
+//
+// It judges the caller only. Internal origin, which the capability gate
+// passes before any requirement is asked, is not a pass here, and an
+// incomplete requirement is held by nobody.
+func (e *MemQLEngine) RequirementHeldFor(ctx context.Context, account string, required CapabilityRequirement) bool {
+	if e == nil || !required.complete() {
+		return false
+	}
+	// The gate's own test, untrimmed: an account of white space is an
+	// organization, whose questions OrganizationCapable answers, never a
+	// target no organization owns.
+	if account == "" {
+		if !e.GlobalDataCapable(ctx, auth.VerbRead) {
+			return false
+		}
+		subject, ok := e.subjectFor(ctx)
+		return ok && auth.CapableFor(ctx, subject, required.Verb, required.Resource)
+	}
+	return e.OrganizationCapable(ctx, account, auth.VerbRead, auth.ResourceData) &&
+		e.OrganizationCapable(ctx, account, auth.VerbRead, strings.SplitN(required.Resource, "/", 2)[0]) &&
+		e.OrganizationCapable(ctx, account, required.Verb, required.Resource)
 }
 
 func (e *MemQLEngine) refuseOrganizationActionCapability(ctx context.Context, fn *Function, args map[string]any) (bool, error) {
@@ -166,7 +207,7 @@ func (e *MemQLEngine) refuseOrganizationActionCapability(ctx context.Context, fn
 		}
 		return false, nil
 	}
-	if !e.OrganizationCapable(ctx, account, auth.VerbRead, auth.ResourceData) || !e.OrganizationCapable(ctx, account, auth.VerbRead, strings.SplitN(fn.RequiresCapability.Resource, "/", 2)[0]) || !e.OrganizationCapable(ctx, account, fn.RequiresCapability.Verb, fn.RequiresCapability.Resource) {
+	if !e.RequirementHeldFor(ctx, account, fn.RequiresCapability) {
 		return denied()
 	}
 	if requested != "" && BareShortId(requested) != BareShortId(account) && !e.OrganizationCapable(ctx, requested, fn.RequiresCapability.Verb, fn.RequiresCapability.Resource) {

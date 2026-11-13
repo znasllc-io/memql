@@ -109,6 +109,13 @@ describe("its states", () => {
     expect(screen.getByText("Nothing in this period.").classList.contains("os-caption")).toBe(true);
   });
 
+  it("says what a page gives it for an empty answer, a sentence or more", () => {
+    render(<RankedList title="Products" rows={[]} empty={<><span className="marked">-</span> Not known.</>} />);
+    const caption = screen.getByRole("region", { name: "Products" }).querySelector(".os-caption");
+    expect(caption?.querySelector(".marked")).not.toBeNull();
+    expect(caption?.textContent).toBe("- Not known.");
+  });
+
   it("keeps its rows while a refresh is read", () => {
     render(<RankedList title="Pages" rows={pages(3)} loading />);
     expect(screen.queryByRole("status")).toBeNull();

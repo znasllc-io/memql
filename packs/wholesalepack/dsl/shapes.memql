@@ -234,3 +234,25 @@ shape emailSend emailSendFull {
   requestedBy
   row.createdAt
 }
+
+// ---- the store statistics walk (the 2026-11-11 store statistics design) ----
+//
+// What the walk reads of this pack: which buyers a store granted, and which
+// stores have wholesale set up. The row's store id and nothing the figures do
+// not use -- no owner, no adapter, no reference and no account.
+
+@description("An entitlement as the store statistics walk reads it: the store, the buyer it was granted to and its state, so the walk can tell a wholesale order from a retail one.")
+@row
+shape entitlement entitlementStatisticsRef {
+  row.id
+  storeId
+  buyerEmail
+  state
+}
+
+@description("One store's wholesale settings as the store statistics walk reads them: only that the store has them.")
+@row
+shape wholesaleSettings wholesaleSettingsStatisticsRef {
+  row.id
+  storeId
+}

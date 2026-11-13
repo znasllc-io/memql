@@ -600,11 +600,16 @@ func TestAnErasureDropsAFailedBackfillsExportFromItsCursor(t *testing.T) {
 
 	order := read("order")
 	cur := decodeBackfillCursor(mapString(order, "backfillCursor"))
-	if cur.OperationID != "" || cur.Line != 0 || cur.OpIndex != 0 || cur.At != "" {
+	if cur.OperationID != "" || cur.Line != 0 || cur.OpIndex != 0 {
 		t.Errorf("the failed backfill's cursor is %q after the erasure, want the export it named dropped from it", mapString(order, "backfillCursor"))
 	}
 	if cur.Rule != originVersionRule || cur.Restarts != 1 {
 		t.Errorf("the cursor lost what is the backfill's own: %q, want its rule and its count of restarts kept", mapString(order, "backfillCursor"))
+	}
+	// When the dropped export started stays: it wrote rows with no refund
+	// detail, and the read of every order is owed after it (refundDetailOwed).
+	if cur.At != "2026-10-30T08:00:00Z" {
+		t.Errorf("the cursor lost when its export started: %q, want it kept for the read of every order", mapString(order, "backfillCursor"))
 	}
 	if mapString(order, "backfillStatus") != "failed" || mapString(order, "lastError") != "backfill failed: shopify admin: HTTP 502" {
 		t.Errorf("the failed backfill is now %q with %q, want its status and its error kept", mapString(order, "backfillStatus"), mapString(order, "lastError"))

@@ -1,10 +1,11 @@
 // The connector's own schedule.
 //
-// Only three, and the shortness is the point: the data-origins runtime
+// Only three of the connector's own, and the shortness is the point: the data-origins runtime
 // (component/datasync) already owns inbound dispatch, the reconciliation
 // runner and the outbox drain, and it drives them from
 // dsl/platform/automations.memql for EVERY connector. What is left here
-// is what is Shopify's alone.
+// is what is Shopify's alone, and, last, the store statistics rollup, which
+// reads this overlay's store statistics queries.
 
 /// Reconcile every store's webhook subscriptions daily.
 ///
@@ -49,4 +50,38 @@ automation watchShopifyStores {
 @mode(single)
 automation runShopifyComplianceJobs {
   run := builtin shopifyRunComplianceJobs()
+}
+
+/// Keep every store's statistics (the 2026-11-11 store statistics design): every minute on the
+/// cron leader, at second 15, so it does not start in the same second as the other rollups.
+///
+/// THE WORK IS A BUILTIN, builtin storeStatisticsRollup in component/storestats, because its output
+/// is no concept: side tables of facts the statistics read sums with SQL. It reads the stores and
+/// their mirror rows through the engine from Go, and its one step answers counts, so no row of a
+/// store's mirror is kept in this automation's journal.
+///
+/// A MAINTENANCE automation (component/auth/maintenance_actor.go): the builtin admits this
+/// automation's maintenance principal and no other caller, so the default reader actor would be
+/// refused on every run.
+@trigger(schedule="15 * * * * *")
+automation storeStatisticsRollupSweep {
+  roll := builtin storeStatisticsRollup()
+}
+
+/// Check every store's statistics against its mirror (the 2026-11-11 store statistics design): every
+/// hour on the cron leader, at minute 40, where no other hourly sweep begins. Each run carries every
+/// caught-up store's pass on, comparing each fact with what its mirrored row gives now by version and
+/// by content -- the walk trusts versions, and a customer's erasure rewrites rows in place where no
+/// walk looks -- writing again what differs and, at the end of a pass, deleting the facts no row
+/// answers for.
+///
+/// THE WORK IS A BUILTIN, builtin storeStatisticsCheck in component/storestats, for the rollup's
+/// reasons: it reads the mirror rows from Go and its one step answers counts, so no row of a store's
+/// mirror is kept in this automation's journal.
+///
+/// A MAINTENANCE automation (component/auth/maintenance_actor.go): the builtin admits this
+/// automation's maintenance principal and no other caller.
+@trigger(schedule="0 40 * * * *")
+automation storeStatisticsCheckSweep {
+  check := builtin storeStatisticsCheck()
 }

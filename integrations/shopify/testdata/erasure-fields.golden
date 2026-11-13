@@ -998,8 +998,14 @@ concept refund (Refund)
       holds { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } originalDuty { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
   legacyResourceId                         scalar      UnsignedInt64                      kept by kind: an unsigned 64-bit number
   note                                     scalar      String                             scrubbed: becomes "[redacted]"
+  orderAdjustments                         inlineList  OrderAdjustment                    kept by the list: the refund's adjustments: their amounts and a reason that is an enum
+      holds { nodes { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } reason } }
   orderGid                                 gid         Order                              kept by kind: a reference to another row; a link: a row that names an in-scope order here is in scope
   processedAt                              scalar      DateTime                           kept by kind: a date-time
+  refundLineItems                          inlineList  RefundLineItem                     kept by the list: the refunded lines: which line, how many, and their amounts
+      holds { nodes { lineItem { id } quantity subtotalSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } totalTaxSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
+  refundShippingLines                      inlineList  RefundShippingLine                 kept by the list: the refunded shipping: its amounts and nothing else
+      holds { nodes { subtotalAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxAmountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
   sourceCreatedAt                          scalar      DateTime                           kept by kind: a date-time
   sourceReturnGid                          gid         Return                             kept by kind: a reference to another row; a link: a row that names an in-scope shopifyReturn here is in scope
   staffMemberGid                           gid         StaffMember                        kept by kind: a reference to another row; a link that reaches nothing: no erasure reaches a staffMember

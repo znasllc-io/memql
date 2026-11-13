@@ -304,9 +304,31 @@ its chart, ranked lists side by side and Health), `view=overview` (an Overview
 whose figures are statistics), `view=charts` (hours, twelve months with no
 previous period, a rate with a gap, the first day counted, a small count, a
 previous period of lone days, this period unmeasured beside a measured
-previous one, nothing measured) and `view=states` (reading and empty). Hover the chart, then Tab into it and
+previous one, nothing measured), `view=store` (a net figure below zero beside
+a previous period, and hours in a store's zone across the night its clocks go
+back, where 01:00 is labelled twice; money steps are whole on the axis),
+`view=refunds` (nothing above zero: zero is the top), `view=lopsided` (-5,000
+under 40: only zero and the floor are labelled) and `view=states` (reading and
+empty). Hover the chart, then Tab into it and
 use the arrow keys: one readout above the plot follows both. Check `mode=light`
 and `mode=dark`, and `width=narrow`, where five figures stand two to a row.
+
+A storefront's Store statistics (`qa/storeStatisticsScenes.tsx`, in the main
+harness): `view=storefront-with-store-statistics` (the button after
+Statistics), `storefront-without-sales` (no button without the sales part),
+`storefront-draft-store-statistics` (a draft: the button after Logs), then the
+page, one view per state: `store-statistics` (a full week: figures, chart and
+every list), `store-statistics-products` (All products pressed; also
+`-products-paused`, `-products-frozen`, `-products-rebuilding` and
+`-products-absent`, the last two answered anew five seconds after the press),
+`-two-stores` (the Destination control), `-both` (one store on both
+destinations), `-development` (only Testing has a store), `-paused`,
+`-frozen` (as of the last clear run), `-blocked` (no figure can be given),
+`-current-reason`, `-unknown`, `-starting`, `-purging`, `-rebuilding`,
+`-refunds-unread`, `-no-currency`, `-no-zone`, `-zone-not-loaded` ("Days in
+UTC"), `-empty`, `-below-zero`, `-pending` and `-refused`, each prefixed
+`store-statistics`. Check the eight figures as two rows of four, and as four
+rows of two at `width=narrow`.
 
 ## GitHub repository creation
 

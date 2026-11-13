@@ -59,10 +59,22 @@ concept refund {
   legacyResourceId           string
   /// Admin GraphQL note.
   note                       string
+  /// Admin GraphQL orderAdjustments. Inline OrderAdjustment rows (first 10,
+  /// never paged further), each holding amountSet, taxAmountSet, reason and
+  /// nothing else.
+  orderAdjustments           []object
   /// Admin GraphQL order. GID of the mirrored Order row.
   orderGid                   string
   /// Admin GraphQL processedAt.
   processedAt                string
+  /// Admin GraphQL refundLineItems. Inline RefundLineItem rows (first 50,
+  /// never paged further), each holding lineItem, quantity, subtotalSet,
+  /// totalTaxSet and nothing else.
+  refundLineItems            []object
+  /// Admin GraphQL refundShippingLines. Inline RefundShippingLine rows (first
+  /// 10, never paged further), each holding subtotalAmountSet, taxAmountSet
+  /// and nothing else.
+  refundShippingLines        []object
   /// Admin GraphQL createdAt.
   sourceCreatedAt            string
   /// Admin GraphQL return. GID of the mirrored Return row.

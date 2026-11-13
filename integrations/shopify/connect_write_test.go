@@ -117,6 +117,21 @@ func (h *writeHarness) assertNoCredential(t *testing.T) {
 
 func q(s string) string { return `"` + s + `"` }
 
+// subscriptionHealth is the store health writes of the subscription pass: the
+// ones carrying its outcome. The connect's stamp of when it recorded the
+// grant (grantRecordedKey) writes the same health, carrying what the row held
+// (in these tests, ordersFrom), and is neither the pass's nor an ordersFrom
+// stamp.
+func (h *writeHarness) subscriptionHealth() []connectCall {
+	var out []connectCall
+	for _, c := range h.engine.callsNamed("recordStoreHealth") {
+		if strings.Contains(c.query, `"subscriptions"`) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 var sealedValueRe = regexp.MustCompile(`encryptedValue: "([^"]*)"`)
 
 // sealedValue is the plaintext the first setGlobalSecret for name sealed, or
@@ -282,7 +297,7 @@ func TestAFirstConnectKeepsEverythingItWasGiven(t *testing.T) {
 	if h.admin.countOp("ShopifyWebhookCreate") != len(generated.SubscribedTopics) {
 		t.Errorf("created %d subscriptions, want %d", h.admin.countOp("ShopifyWebhookCreate"), len(generated.SubscribedTopics))
 	}
-	if len(h.engine.callsNamed("recordStoreHealth")) != 1 {
+	if len(h.subscriptionHealth()) != 1 {
 		t.Error("the subscription health was not recorded")
 	}
 
@@ -399,7 +414,7 @@ func TestAFailedMintKeepsOnlyTheAdminConnection(t *testing.T) {
 			if n := len(h.engine.callsNamed("updateSiteStoreBinding")); n != 0 {
 				t.Error("a failed mint went on to attach")
 			}
-			if h.admin.countOp("ShopifyWebhookSubscriptions") != 0 || len(h.engine.callsNamed("recordStoreHealth")) != 0 {
+			if h.admin.countOp("ShopifyWebhookSubscriptions") != 0 || len(h.subscriptionHealth()) != 0 {
 				t.Error("a failed mint went on to the webhooks")
 			}
 			h.assertNoCredential(t)
@@ -413,7 +428,7 @@ func TestAWebhookFailureDoesNotUndoTheConnection(t *testing.T) {
 	if got := h.write(credentialSourcePending); got != "connected" {
 		t.Fatalf("result = %q, want connected", got)
 	}
-	health := h.engine.callsNamed("recordStoreHealth")
+	health := h.subscriptionHealth()
 	if len(health) != 1 || !strings.Contains(health[0].query, `"failed": [`) {
 		t.Fatalf("the failure was not recorded on the store's health: %v", health)
 	}
@@ -443,14 +458,14 @@ func TestTheWebhooksDoNotHoldTheRedirect(t *testing.T) {
 	if got := h.write(credentialSourcePending); got != "connected" {
 		t.Fatalf("result = %q", got)
 	}
-	if h.admin.countOp("ShopifyWebhookSubscriptions") != 0 || len(h.engine.callsNamed("recordStoreHealth")) != 0 {
+	if h.admin.countOp("ShopifyWebhookSubscriptions") != 0 || len(h.subscriptionHealth()) != 0 {
 		t.Fatal("the webhooks were registered before the callback answered")
 	}
 	if len(deferred) != 1 {
 		t.Fatalf("%d background jobs, want 1", len(deferred))
 	}
 	deferred[0]()
-	if h.admin.countOp("ShopifyWebhookCreate") != len(generated.SubscribedTopics) || len(h.engine.callsNamed("recordStoreHealth")) != 1 {
+	if h.admin.countOp("ShopifyWebhookCreate") != len(generated.SubscribedTopics) || len(h.subscriptionHealth()) != 1 {
 		t.Fatal("the handed-off job did not register the webhooks and record their health")
 	}
 }
@@ -773,7 +788,7 @@ func TestOrdersFromIsStampedOnceSixtyDaysBack(t *testing.T) {
 	ordersFrom := func(h *writeHarness) []string {
 		var out []string
 		for _, c := range h.engine.callsNamed("recordStoreHealth") {
-			if strings.Contains(c.query, `"ordersFrom"`) {
+			if strings.Contains(c.query, `"ordersFrom"`) && !strings.Contains(c.query, `"`+grantRecordedKey+`"`) {
 				if c.role != auth.RoleOwner || !c.internal {
 					t.Errorf("the stamp ran as %+v, want operatorContext", c)
 				}
@@ -887,7 +902,7 @@ func TestOrdersFromMovesAfterAPurge(t *testing.T) {
 	h.managedConnect(t, managedConnectScopes())
 	var stamps []string
 	for _, c := range h.engine.callsNamed("recordStoreHealth") {
-		if strings.Contains(c.query, `"ordersFrom"`) {
+		if strings.Contains(c.query, `"ordersFrom"`) && !strings.Contains(c.query, `"`+grantRecordedKey+`"`) {
 			stamps = append(stamps, c.query)
 		}
 	}

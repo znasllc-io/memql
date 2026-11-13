@@ -209,8 +209,14 @@ Then:
    Shopify asks.
 3. **The rest is automatic.** The approval returns through the connect
    callback, which records the new grant and queues the backfill of each
-   domain the new grant unlocked. The store reads "Starting" while those run,
-   then "Recording".
+   domain the new grant unlocked. Every kind Shopify had refused that the new
+   grant covers is tried again at once. A kind read by a backfill has it
+   queued, and the store reads "Starting" while it runs. Any other kind has
+   its refusal cleared and is read at the next pass of the periodic check,
+   every ten minutes; until then its lateness is measured from the approval,
+   so it is not reported as a failed check. Then the store reads
+   "Recording". A kind Shopify refuses again reads refused again from that
+   check, or from that backfill.
 
 ---
 
@@ -335,6 +341,7 @@ they own several.
 | `shopifyEnsureSubscriptions`, `shopifyRunComplianceJobs` | their scheduled automations, or a cluster owner running them by hand |
 | `shopifyStoreAlertWaitSet` | cluster owner |
 | `shopifyProvisionWholesale`, `shopifyRevokeWholesale`, `shopifyTagWholesaleCustomer`, `shopifyUntagWholesaleCustomer`, `shopifyWholesaleCatalogHeadroom` (the wholesale pack's calls) | the store's owner, cluster owner, or a step of a registered automation; anybody else is refused with "shopify: <builtin> is for the store's owner or a cluster owner" before Shopify is asked. A wholesale application approved by somebody who is neither keeps its entitlement `pending`, with that sentence as its error. |
+| `datasyncRetryRefused` (a connect's fresh try of each kind Shopify refused) | the engine itself; any other call is refused with "datasync: retryRefused is driven by the engine's own automations and refuses a client-origin call" |
 | `datasyncStartBackfill`, `datasyncSetSyncPaused`, `datasyncRequeueInbound`, `datasyncRetryOutboxEntry`, `datasyncDiscardOutboxEntry` (the acts of [Cluster > Data](#cluster--data)), and `datasyncReturnHeldInbound` | cluster owner, or the engine itself; anybody else is refused with "datasync: <name> is for a cluster owner" |
 
 `shopifyStoreRetryDeliveries` -- the Store page's "Try again" -- puts the
@@ -548,6 +555,59 @@ node's log says so. Its returns are read the same way. Lists kept on the order a
 are read one page deep: an order's discount applications, shipping lines and
 fulfillment orders past the first 25, and its metafields past the first 50,
 are not mirrored.
+
+**A refund's detail.** Each refund row carries three lists, read with its
+order, that the [store statistics](#store-statistics-what-is-computed-from-the-mirror)
+are computed from: `refundLineItems` (which line, how many units, and the
+refunded subtotal and tax), `refundShippingLines` (the refunded shipping's
+subtotal and tax) and `orderAdjustments` (an adjustment's amount, its tax and
+its reason). Each is the allowlist's `inline` option, which names the fields
+it keeps of each node and may name only amounts, counts, moments, enums and
+references: a refund's shipping line read whole would carry the phone number
+at the buyer's delivery address into the refund row. Each is read one page
+deep -- 50 refund lines, 10 shipping lines and 10 adjustments -- and never
+paged further. A history download selects none of the three, and its write
+leaves them out: on a new refund row they are absent, which reads as "not read
+yet", never as empty, and on a row a fetch already wrote they keep what the
+fetch recorded. A customer's erasure keeps the three lists whole, since they
+hold nothing a person typed. The three fields make the release that adds them
+roll-forward only
+([Upgrading to the release that keeps store statistics](#upgrading-to-the-release-that-keeps-store-statistics)).
+
+**Every order is read once more.** A refund mirrored before its detail was, or
+written by a history download, has none, and a sweep that reads only what
+changed since its watermark would never read its order again. So each store's
+whole order listing is read once, with the detail, a piece at each of the
+store's order sweeps: after the sweep's ordinary check has succeeded, up to the
+sweep's row budget again, from where the last piece stopped. A store with more
+orders than one piece reads has them read over several sweeps. The store's
+health says where it stands: `refundDetailAfter` while the read is under way,
+`refundDetailFrom` once it has ended, and `refundDetailError` when a piece
+failed, with when and a sentence that names no order and no person. A piece
+that fails is tried again at the next sweep from its own page, and never fails
+the sweep, whose check holds or moves the watermark as it always has. While the
+read is under way a sweep asks Shopify for up to twice its row budget, and an
+order both reads meet is counted twice in that sweep's report; once it has
+ended it costs nothing more. It is owed again whenever the order backfill
+starts an export at or after the read began, since an export writes rows with
+no detail, and no piece runs while that backfill is queued or running. It
+cannot reach an order Shopify no longer shows -- without `read_all_orders`,
+every order older than sixty days -- so a refund of such an order never gets
+its detail. The statistics count those refunds separately from ones still
+being read. Their four affected figures stay absent while the selected period
+contains them, until the connection can read all orders and their detail is
+fetched, or the refunds leave the period. `refundDetailFrom` is the start of
+the completed detail scan; without `read_all_orders`, its readable order
+window starts sixty days before that instant.
+
+**The shop.** The shop row is a singleton with no sweep, so a store whose
+settings never changed would have none, and with it no currency and no time
+zone. It is read at a connect (in the connect's background job), at boot for
+each recorded store whose mirror holds no shop row yet, at the daily
+subscription pass for every recorded store, and when a store is resumed. A
+paused or not-connected store is not read, nor one whose grant reaches none of
+the shop's scopes; a read that fails is logged with the store's id and fails
+nothing else, and is made again at the next of those moments.
 
 **Live delivery.** A webhook arrives at the inbound receiver, is verified
 against the store's own secret, and is staged. The runtime's dispatcher
@@ -1101,6 +1161,11 @@ These are limits of this connector, as it is built today.
   ten thousand take over three hours. The store reads Recording meanwhile: a
   held delivery is not a change that could not be recorded. The first periodic
   check after the resume brings the changed records of a kind current sooner.
+- **A refusal approval cannot change.** When Shopify refuses a kind for a
+  reason no approval changes while naming a permission the connection asks
+  for, the store keeps reading Needs attention: the detail names the kind, and
+  the sign is that the reason clears at an approval and comes back at the
+  kind's next check.
 - **A record the mirror cannot write** holds its kind's check back: the kind
   reads "The last check of ... failed" and the store Needs attention until the
   record can be written.
@@ -1158,6 +1223,369 @@ boundary.
 
 ---
 
+## Store statistics: what is computed from the mirror
+
+The [Store statistics page](deployables.md#store-statistics) of a storefront
+deployable shows a store's sales for a period. The engine computes them from
+the orders, order lines and refunds this mirror holds and from its shop row,
+in `component/storestats`. No model is called and nothing is sent to anyone.
+This section is what is kept, how each figure is made, and where a figure is
+not to be trusted; the page itself, and who may open it, are in
+[Deployables](deployables.md#store-statistics).
+
+### What is kept
+
+A walk turns each mirrored order, order line and refund into a **fact**, in
+the statistics' own tables beside the mirror, and the page's read sums those
+facts with SQL. A fact holds no name, email, address or phone. What an order's
+fact keeps of its buyer is the Shopify customer's id, empty for a guest; a
+line's fact keeps the line's title and its product. An order's email is read
+in memory to judge whether the order is wholesale and is written nowhere.
+Money is summed with exact decimal arithmetic in the shop's currency, never in
+floating point; the amounts in the buyer's own currency (`presentmentMoney`)
+are never read.
+
+Each store also has one statistics row: its name, domain, currency and time
+zone (from the shop row, "The shop" in
+[Step 4](#step-4----what-happens-next)), whether its prices include tax,
+whether it is a development store, whether its grant reads all orders, the
+first day its history covers, and its verdict as the statistics last read it.
+
+### The walk
+
+`storeStatisticsRollupSweep` runs every minute, at second 15, on the
+cluster's schedule leader, under a maintenance principal of its own. A run
+lists every store and takes each in turn. For each it reads the orders, lines
+and refunds the mirror wrote since where it last stood, less five minutes --
+so a write that became visible late is still read -- and folds them into
+facts. A fact is written only over an older version of itself, so a row read
+twice, or by two nodes at once, changes nothing.
+
+- **A store's turn is bounded.** It reads at most 40 pages of 250 rows of each
+  of the three a run, and asks for no new page once 30 seconds have passed. A
+  run takes up no new store once 50 seconds have passed, and the next run
+  begins with the store after the last one taken, so every store gets its
+  turn.
+- **A first fill takes several runs for a busy store.** A store's history is
+  read from an instant before its store row was first written, in windows a
+  day wide at first, at 10,000 rows of each of the three a run at most. Until
+  the walk has read each of them up to the present, the page gives no figure.
+- **An order deleted in the store** keeps its fact, marked deleted, so no
+  older version of it read again by a later window, another node or the check
+  can bring it back. A deleted fact counts nowhere, and neither do the lines
+  and refunds of a deleted order.
+- **A row the statistics cannot read** -- an amount that is not one, a missing
+  date, amounts in two currencies -- makes no new fact. If an earlier version
+  of the row was read, that version's fact stays in the figures, and the walk
+  and the check both keep it, until a readable version arrives; if none was,
+  the row is in no figure. Either way it is recorded, logged as a count once
+  per store per run, and the page's notice says how many
+  records are in that state. A record goes once a readable version of its row
+  is read, or once a whole check pass no longer meets the row.
+- **The verdict.** Each turn reads the store's verdict
+  ([the Store page](#the-storefronts-store-page)) and keeps it. When a reason
+  of it concerns orders, lines, refunds or the shop, or the store is paused or
+  not connected, the figures are drawn as of the walk's last run at which
+  nothing stood in the way. A verdict that cannot be read for more than
+  fifteen minutes does the same, with "The store's recording state could not
+  be read." An otherwise current store whose statistics have not advanced
+  for fifteen minutes is also answered as of its last run, with "This store's
+  figures are not up to date." Arriving order, line, refund or shop history
+  keeps all figures absent even when the verdict lists another reason.
+
+### What counts
+
+- **A counted order** is one the mirror holds, not deleted, not cancelled, and
+  not a test order -- unless the store is a development store, where every
+  order is a test order and all of them are counted. A store is a development
+  store when its shop row says Shopify bills it as one
+  (`plan.partnerDevelopment`), or, while it has no shop row, when its store
+  row is marked as one ([The development store](#the-development-store)).
+- **A counted refund** is one whose order is counted and which is not
+  deleted. **A counted line** is one whose order is counted, which is not
+  deleted, and which is not a gift card.
+- **When.** An order is dated by when Shopify processed it (`processedAt`,
+  else when it was created), and a refund by its own. An edit has no date of
+  its own here, so it changes its order's own day. Days are cut in the store's
+  time zone as it is at the read, so a zone that changes re-cuts every day.
+- **Which money.** Amounts are summed only for orders in the store's present
+  currency and for their refunds. An order in another currency is counted in
+  Orders and Units sold and named on the page, never summed: no rate between
+  two currencies is known to the engine. A store that changed its currency
+  sums only its orders in the new one. A refund whose detail has not been read
+  is counted whatever its order's currency, so one on an order in another
+  currency blanks the store-currency Refunds, Net sales and Total sales until
+  it is read: the cautious side, on purpose.
+
+### The figures
+
+Units sold on a line is the units on it less those an edit removed: the
+smaller of the units ordered and the units still on the order plus those
+refunded, since a refunded unit was sold and then returned. Each figure, for
+the period's counted orders and the counted refunds made in the period:
+
+| Figure | What goes in | What does not |
+|---|---|---|
+| **Gross sales** | each line's unit price before discounts (`originalUnitPriceSet`) times its units sold | gift cards; shipping, tax and duties -- except that on a store whose prices include tax, the tax is inside the price; refunds |
+| **Discounts** | the discounts allocated to each line, item and order discounts alike: all of them, or, when an edit removed units, the share for the units sold. Shown as a positive amount | a discount on shipping, which no line carries; discounts on gift-card lines |
+| **Refunds** | for each refund, on the refund's own day: the money that went back (`totalRefundedSet`), less the refunded shipping, tax and duties and the refunded gift-card lines. A refund of an amount with no line on it counts in full, less its tax; a restocking or damage fee lowers it. Shown as a positive amount | shipping, tax and duties refunded; gift cards; on a store whose prices include tax, no tax is taken out, since it was inside the price |
+| **Net sales** | Gross sales less Discounts less Refunds. A refund of an order placed in an earlier period lowers the period of the refund | shipping, tax, duties |
+| **Total sales** | Net sales, plus the shipping, tax and duties charged on the period's orders (`totalShippingPriceSet`, `totalTaxSet`, `originalTotalDutiesSet`), less the shipping, tax and duties refunded in the period. Tax charged is none on a store whose prices include tax, since it is in Gross sales | tips; additional fees; gift cards |
+| **Orders** | the counted orders placed in the period, in every currency | cancelled, deleted and (outside a development store) test orders |
+| **Average order value** | Gross sales less Discounts, over the period's orders in the store's currency. Absent when there is none | Refunds |
+| **Units sold** | the units sold on the lines of the period's orders, less the units on the refund lines of the period's refunds, in every currency. Below zero in a period with more returned than sold | gift cards; a refund line naming a line the store has since deleted |
+| **Products** | per product -- a line with no product by its title -- the lines' gross less their discounts less its refund lines' subtotals (by net sales, in the store's currency), or its units sold less those returned (by units). Labelled by the title of its newest line sold in the period; a refund of an older line never renames it, and a product the period holds only through refunds takes the title of the line of its latest refund. The leading 25 | gift cards. The part of Refunds that names no product is in Net sales and in no product, and the page says how much |
+| **Buyers** | each Shopify customer of the period's orders: new when their first counted order the statistics hold is in the period, returning when they have one before it. Orders with no customer are counted apart | anything about the person. History begins where the mirror's does, so "new" means new since then |
+| **Wholesale and retail** | Orders and Net sales, split: an order is wholesale when its email, trimmed and in lower case, is the buyer email of a `granted` wholesale entitlement of the same store now. A refund is on its order's side | everything, when the wholesale pack is off on the node or has no settings row for the store: the block is absent |
+| **By day** | each figure but the average, per hour over 24 hours, per store day over 7 to 90 days, per store month over 12 months | |
+
+**Exact, and where it is rounded.** Every sum is exact. Two amounts are
+divided, and each is rounded half to even. A line's share of its discounts,
+when an edit removed some of its units, is rounded at the larger of the
+decimals Shopify wrote and the currency's minor units (ISO 4217: none for the
+yen, three for the Kuwaiti dinar, two for most), because Shopify writes a whole
+amount with one decimal: a discount written "1.0" over two of three units is
+"0.67", not "0.7". The average order value is rounded at the currency's minor
+units, and the page rounds nothing again.
+
+**Who is wholesale is judged now, not when the order was placed.** The pack
+keeps who holds access, not since when. When a store's set of granted buyers
+changes, every one of its orders is judged again, a page at a time over the
+following runs, so a buyer whose access ends moves, with every past order, to
+retail. An order whose email an erasure removed is retail.
+
+### Against Shopify's own reports
+
+The page and Shopify's own sales reports differ in these known ways:
+
+- **An edit** that removes a unit without a refund lowers its order's own day
+  here, and leaves Refunds alone. Shopify's report dates it on the edit's day.
+- **A cancelled order** leaves every figure here, its refunds with it, in
+  every period, so a cancellation lowers the figures of the period the order
+  was placed in. Shopify shows the sale on its day and a return on the day of
+  the cancellation.
+- **A return fee** lowers Refunds here. Shopify shows the whole return and the
+  fee as a line of its own. Total sales is the same either way.
+- **Prices that include tax.** Gross sales holds the tax here; Shopify's
+  Gross sales is thought to be without it.
+- **Test orders** are left out on a live store and counted on a development
+  store; **gift cards** are left out of every sale and refund; **tips and
+  additional fees** are left out of Total sales.
+
+Each figure rests on what a Shopify field means, and this repository holds
+the fields' shape, not their meaning. These readings are assumed and are
+confirmed on a store, against its own reports, before the part is granted
+([Granting the sales part](#granting-the-sales-part)):
+
+- an order's `totalShippingPriceSet`, `totalTaxSet` and
+  `originalTotalDutiesSet` are what was charged, before refunds;
+- a refund's `totalRefundedSet` is all the money it sent back, and a refund of
+  an amount with no line on it carries the difference as an order adjustment;
+- an adjustment's amounts carry their sign, a positive tax being tax that went
+  back to the buyer;
+- on a store whose prices include tax, a refunded shipping line's subtotal
+  holds its tax;
+- the lines' discount allocations add up to the order's total discounts when no
+  shipping discount applies;
+- Shopify's report dates an order and a return by their `processedAt`.
+
+A formula found wrong is changed with the facts' definition version raised,
+which rebuilds every store's facts by itself.
+
+### When a figure is absent
+
+A figure the engine cannot state is answered as not known and drawn as a dash
+with its reason, never as zero ([the page](deployables.md#store-statistics)).
+From the mirror's side:
+
+- **A refund whose detail has not been read** ("A refund's detail", in
+  [Step 4](#step-4----what-happens-next)) makes Refunds, Net sales, Total sales
+  and Units sold absent for every period it falls in, with "N refunds are still
+  being read from Shopify.", until its order is read again. Its money total is
+  known; how much of it was shipping or tax is not. Such a refund is counted
+  whatever its order's currency, so one on an order in another currency blanks
+  the store-currency Refunds, Net sales and Total sales too, until its detail
+  is read: the cautious side, on purpose. It also leaves both lists of
+  products, the count of products and the refunds that name no product
+  absent, and the Net sales of its order's side of the wholesale split.
+- **A refund holding a full page of lines (50)** may hold more, and lines past
+  the page are on no product. So Units sold, both lists of products, the count
+  of products and the refunds that name no product are absent for its
+  periods. Refunds, Net sales, Total sales and the wholesale split stay exact,
+  because Refunds starts from the money that went back.
+- **An order whose recorded lines hold fewer units than the order says it
+  has** makes Gross sales, Discounts, Net sales, Total sales, Average order
+  value and Units sold floors for its period, shown with "or more".
+
+### The check
+
+`storeStatisticsCheckSweep` runs every hour, at minute 40, on the cluster's
+schedule leader, under a maintenance principal of its own. The walk trusts
+versions, and there are two things it cannot see: a row changed in place,
+which keeps its write time (a customer's erasure does that), and a fact that
+was lost or changed by hand. So the check reads each store's orders, lines and
+refunds again from the start of its history, recomputes each fact from the row
+in hand, and compares it by version and by content. A fact that differs, or is
+missing, is written again from its row. An order's wholesale side is the one
+exception: it is judged only when the check holds the granted set the store
+keeps -- the store enabled in both, the same set its orders were last judged
+with, and no wholesale pass under way. Otherwise the side is left as the walk
+and the wholesale pass wrote it, and judged at a later run. A row that cannot
+be read keeps the fact of its last readable version through the check as well.
+When a pass has read all three to the present, the facts no mirrored row
+answered for are deleted in batches, and the pass ends.
+
+A run carries each store's pass on by at most 40 pages of each of the three. A
+run has thirty minutes in all and each store a turn of thirty seconds within
+it, so a small store's pass ends within one run unless its turn or the run's
+time runs out first, and a larger store's is carried over several hourly runs.
+A store is checked only when its last walk reached the end of every source
+in that turn, and it is not being rebuilt, not having its facts
+deleted, and not in the middle of judging its wholesale orders again. A row
+written in the five minutes before a pass began is the walk's to fold, not the
+check's. When the wholesale pack's state cannot be read, no store is checked
+that run.
+
+What the last pass ended with is kept for the store:
+
+| Key | What it says |
+|---|---|
+| `passUnderWaySince` | when the pass under way began |
+| `lastStartedAt`, `lastFinishedAt` | when the last pass that ended began and ended |
+| `cleanAt` | when a pass last ended with nothing mismatched |
+| `compared` | the comparisons of a fact with its row the last pass made; a row read twice is compared twice |
+| `mismatched` | the facts that differed from their rows, or that no row answered for |
+| `repaired` | those of them written again or deleted |
+| `disagreeing` | counted orders with all their lines recorded whose Shopify totals the facts do not add up to: the refunds' money against the order's total refunded, the lines' discounts against its total discounts, and, when no line was partly removed, the lines against its current subtotal |
+
+`mismatched` 0 with `cleanAt` set is a store whose facts are what its rows
+give. `disagreeing` is for the formulas, not the facts: nothing on the page
+draws it, and it is the standing test of this section's reading of Shopify's
+fields against Shopify's own arithmetic, on live data. Zero is the healthy
+reading; a steady count is where a field read wrong shows first. A time that
+never was is null.
+
+A cluster owner reads a store's check by name, from any client that executes
+MemQL calls:
+
+```memql fragment
+builtin storeStatisticsCheckState(storeId: "<storeId>")
+```
+
+`storeId` is the store's bare id or `v1:shopify:store:<id>`. Neither this
+builtin nor the rebuild is in the generated clients. Each admits only a person
+who is a cluster owner, and nobody acting for the engine, and
+refuses anyone else with "store statistics check state is for a cluster
+owner"; a store the statistics hold no row for is refused with "Store
+statistics has no store with that id."
+
+### A customer's erasure
+
+A customer's erasure ([Step 5](#step-5----the-compliance-topics)) rewrites the
+customer's mirror rows in place and keeps their write times, so the walk does
+not see it. The check does: the next pass that reaches the store's rows after
+the erasure finds each changed fact and writes it again. An erasure that lands
+while a page of the pass is being checked is compared by what the page read
+before it, so it waits for the following pass. No hour is promised: a pass
+needs the store's walk caught up, and may be carried over several runs
+(above). After the pass that reaches it:
+
+- the order, whose email was scrubbed, is retail -- at the first such pass that
+  holds the store's granted set ([The check](#the-check)); until then its side
+  stands as it was;
+- a custom item (a line with no product), whose title a person typed and the
+  erasure scrubbed, holds the erasure's marker as its title and product, and
+  is listed under it;
+- the order keeps its customer's id, as the erasure keeps every reference,
+  while the customer's own row is emptied, so the id names nobody;
+- the order's money stays in every figure.
+
+Every other field the facts are made from is one the erasure keeps, and a test
+of `component/storestats` fails when that stops being true. When Shopify
+removes a store's data, the store's facts are deleted in batches, and then its
+statistics rows.
+
+### Rebuilding a store
+
+A cluster owner starts a store's facts again from its mirror by name:
+
+```memql fragment
+builtin storeStatisticsRebuild(storeId: "<storeId>")
+```
+
+It answers the store's id and `rebuildingSince`. The store's watermarks and
+check are dropped, its facts are deleted in batches, and the walk reads its
+history again from the start; a page the walk read before the rebuild writes
+nothing after it. Meanwhile the Store statistics page says "The store's orders
+are still being brought in." and gives no figure. The turn that reads every
+source to its clock ends the rebuild, even when turns are far apart. The
+figures come back, and a check
+pass begins; `storeStatisticsCheckState` says when it ended, and `cleanAt`
+moves to that moment when it ended clean. The refusals are the check state's,
+with "store statistics rebuild is for a cluster owner". A release that changes
+a figure's definition rebuilds every store by itself.
+
+### Granting the sales part
+
+The sales part is seeded on the owner and developer roles and on no other
+([how to grant it](deployables.md#store-statistics)). Grant it to a client's
+group only after, for the store their storefront fronts:
+
+1. `storeStatisticsCheckState` says a pass has ended clean: `cleanAt` is set
+   and `mismatched` is 0;
+2. the eight figures for one period have been compared with the store's own
+   reports in its Shopify admin (Analytics, Reports: "Sales over time" and
+   "Sales by product") for the same days in the store's time zone, and each
+   difference is one of [Against Shopify's own reports](#against-shopifys-own-reports).
+
+### The limits
+
+- **At most 2,000 stores a cluster** are listed for statistics: 20 pages of
+  100. On a cluster with more, the walk's run and the check's run each fail
+  with that bound named, and walk or check no store. The read then marks
+  figures as out of date after fifteen minutes. Rebuild completion does not
+  require turns to be less than five minutes apart: it follows the work
+  completed in each turn.
+- **The wholesale state is read within ten seconds a run.** When it cannot
+  be read in time, or at all, no store's facts move that run and the check
+  checks no store; each store's own row, verdict, deletion and removal still
+  run.
+- **How fast a store's rows may arrive.** A run reads at most 40 pages of each
+  of the three for a store, and the next run reads again the five minutes
+  behind where it stopped; that re-read is what limits how fast a store's
+  rows may arrive. When a page is read in well under a second, the limit is
+  far above any one store's rate. With pages near the statement timeout, a
+  store whose rows arrive at half the rate its pages can be read stays at most
+  a few minutes behind, and one at nine tenths of it falls further behind at
+  every run. Behind is not lost: every run moves forward and reports the
+  store behind.
+- **Orders in another currency** are counted and named, never summed; a refund
+  of one whose detail has not been read still blanks the store-currency
+  Refunds, Net sales and Total sales until it is read.
+- **Refunds, edits and cancellations of orders placed more than 60 days ago
+  are not recorded** on a store whose grant lacks `read_all_orders`, which is
+  every store on the shared app ([What the mirror cannot do](#what-the-mirror-cannot-do)).
+  Such an order is kept as last recorded, so Refunds can be lower, and Net
+  sales higher, than the store's own admin shows, and a cancelled order of that
+  age stays counted. The page says so in that sentence.
+- **A refund of an order Shopify no longer shows** never gets its detail, so
+  Refunds, Net sales, Total sales and Units sold stay absent for good for the
+  periods it falls in. The page says those refunds are on orders too old
+  for the connection to read, rather than describing them as pending. The
+  gaps end when the refunds leave the period, or when all-order permission
+  allows their detail to be fetched.
+- **A refund line naming a line the store has since deleted** is taken for no
+  item return: its amount stays in Refunds, and in the refunds that name no
+  product, whatever kind of line it was -- a deleted gift-card line included,
+  since once the line is gone the statistics cannot tell -- and its units are
+  not taken from Units sold.
+- **An order deleted in the store** leaves every figure, with its lines and
+  refunds, for good, and the check ends clean over it.
+- **A write the walk missed** by more than its five minutes is found by the
+  check's next pass over the store, and repaired.
+
+---
+
 ## Operating it
 
 ### The storefront's Store page
@@ -1194,7 +1622,7 @@ both destinations shows each reason once. A domain is named in plain words
 | Reason | The sentence | Beneath it | The act |
 |---|---|---|---|
 | `data_not_declared` | "Shopify refuses orders for this app, because the app has not declared the customer data it uses." -- naming every refused domain, as in "orders and customers" | -- | "Declare the customer data": a link to Shopify's page on protected customer data. The steps are [The data declaration](#the-data-declaration). |
-| `approval_outdated` | "This store approved an older list of permissions." -- or, for a store connected with its own app, "This store's own app does not allow everything MemQL records." | The scopes the store's grant lacks. | "Open MemQL OS from the store's Shopify admin and approve": a link to the store's apps page in its Shopify admin ([When the list grows](#when-the-list-grows)). None for a store on its own app: MemQL cannot widen that app's permissions, and the store reads Needs attention until they cover the list. |
+| `approval_outdated` | "This store approved an older list of permissions." when the store's recorded grant lacks a scope, and "Shopify does not allow everything MemQL records for this store." when none is known to be missing -- or, for a store connected with its own app, "This store's own app does not allow everything MemQL records." in both cases. Raised when the store's recorded grant lacks a scope its connection asks for, or when Shopify refuses a domain of the connection for a scope it asks for, whatever the recorded grant says. | The scopes the store's grant lacks; when none is known to be missing, the domains Shopify refuses, as in "Shopify refuses orders under the store's grant." | "Open MemQL OS from the store's Shopify admin and approve": a link to the store's apps page in its Shopify admin ([When the list grows](#when-the-list-grows)). None for a store on its own app: MemQL cannot widen that app's permissions, and the store reads Needs attention until they cover the list. |
 | `grant_lost` | "MemQL can no longer reach this store." | The error the store's last check recorded. | "Reconnect in Settings", which opens the Shopify connections. |
 | `events_not_registered` | "Shopify is not sending every change." | The subscriptions that failed, or "The last registration left 20 of the 24 subscriptions it wanted." | "Register again": the store's subscription pass, run now. It is refused within a minute of the last pass, and for a store that is not recording. |
 | `check_failing` | "The last check of orders failed" | For a backfill that failed: its own reason, or "The backfill did not finish." Otherwise the sweep's last error, or "No check has run since" a time, then "The next check is at" a time, or "The next check is due now." | None. |
@@ -1650,6 +2078,42 @@ Removal acts on the customer id recorded by the grant, so a later email change
 does not leave the old customer tagged. Configure the customer-conditioned
 discount in the store; the tag alone does not change prices. See
 [Consuming the wholesale pack](../build/consuming-the-wholesale-pack.md).
+
+---
+
+## Upgrading to the release that keeps store statistics
+
+The release that adds a refund's detail to the mirror and the
+[store statistics](#store-statistics-what-is-computed-from-the-mirror) changes
+what an installation holds too. Before you roll it out:
+
+- **It is roll-forward only,** for the reason above. A refund row this release
+  writes holds its three detail lists, which an earlier release's refund
+  concept does not declare, and a concept's schema refuses a stored field it
+  does not know on the row's next write: under an earlier release that refund
+  would stop changing. Do not pin the installation back to an earlier release
+  after it.
+- **Every order is read once more**, a piece at each order sweep, so the
+  refunds mirrored before this release get their detail ("Every order is read
+  once more" in [Step 4](#step-4----what-happens-next)). Until a store's read
+  has reached a refund, Refunds, Net sales, Total sales and Units sold are
+  absent for the periods it falls in, with "N refunds are still being read
+  from Shopify." Once the completed scan proves an order too old for
+  the connection to read, the page counts its refunds separately and says
+  that these figures cannot be given. The gaps can last for months on the
+  90-day and twelve-month views, until those refunds leave the period or
+  the connection gains all-order access and their detail is fetched.
+- **Each store's shop is read** at the first boot when the mirror holds no
+  shop row for it, so its currency and time zone are known.
+- **Every store's statistics fill from nothing.** A store's first fill is a
+  rebuild with nothing to delete: its page says "The store's orders are still
+  being brought in." until the walk has read its history up to the present,
+  which for a busy store takes several runs.
+- **Only the owner and developer roles hold the sales part** at first. A
+  client's people see no figure until their group is granted it
+  ([Granting the sales part](#granting-the-sales-part)).
+
+---
 
 ## Unverified
 

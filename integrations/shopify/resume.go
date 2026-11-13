@@ -27,11 +27,12 @@ import (
 // PAGE before it answers, so the person is not kept waiting and what they are
 // looking at moves at once; the rest is the watch's.
 //
-// THE UNSTARTED BACKFILLS ARE QUEUED ON THE EDGE: by the act, and by the pass
-// that records that the store left its pause (resumeSeenByWatch). Both may run
-// for one resume, on different nodes at once, and nothing is done twice: a
-// returned delivery is no longer held, the return's writes are fenced, and a
-// queued backfill is no longer unstarted.
+// THE UNSTARTED BACKFILLS ARE QUEUED, AND THE SHOP READ, ON THE EDGE: by the
+// act, and by the pass that records that the store left its pause
+// (resumeSeenByWatch). Both may run for one resume, on different nodes at
+// once, and nothing is done twice: a returned delivery is no longer held, the
+// return's writes are fenced, a queued backfill is no longer unstarted, and a
+// shop row that already holds the answer is not written again (heal).
 
 // resumeReturnsAtMost is how many held deliveries the act that resumes a store
 // puts back in line before it answers: one page of the runtime's read.
@@ -58,12 +59,12 @@ func (c *Connector) returnHeld(ctx context.Context, store Store, limit int) erro
 }
 
 // resumeStore is what the act that resumes a store does for it before it
-// answers: one page of its held deliveries goes back in line, and the
-// backfills it never started are queued. It answers nothing, because the
-// resume stands whatever happens here -- the status is written and audited --
-// and the watch does what this could not: it returns what is still held on
-// its next pass, and queues the backfills on the pass that records the
-// resume.
+// answers: one page of its held deliveries goes back in line, the backfills
+// it never started are queued, and its shop is read (shop.go). It answers
+// nothing, because the resume stands whatever happens here -- the status is
+// written and audited -- and the watch does what this could not: it returns
+// what is still held on its next pass, and queues the backfills on the pass
+// that records the resume.
 func (c *Connector) resumeStore(ctx context.Context, store Store) {
 	if err := c.returnHeld(ctx, store, resumeReturnsAtMost); err != nil {
 		c.logger.Warn("shopify: a resumed store's held deliveries were not put back in line; the store watch returns them",
@@ -73,19 +74,24 @@ func (c *Connector) resumeStore(ctx context.Context, store Store) {
 		c.logger.Warn("shopify: a resumed store's backfills were not all queued; the store watch queues them",
 			"store", store.ID, "error", err.Error())
 	}
+	c.refreshShopLogged(ctx, store)
 }
 
 // resumeSeenByWatch is the edge, for the watch: when the verdict the pass is
 // about to record says the store left paused or not connected since the last
 // one recorded -- its resumedAt moved -- the backfills the store never started
-// are queued. The watch records the verdict only when this answers no error,
-// so a queue that failed is tried again by the next pass, which still sees the
-// store leaving its pause. Held deliveries are not its business: every pass
-// returns those, by state.
+// are queued and its shop is read (shop.go). The watch records the verdict
+// only when this answers no error, so a queue that failed is tried again by
+// the next pass, which still sees the store leaving its pause. A shop that
+// could not be read is logged and answers no error: it does not hold the
+// verdict back, and the daily pass reads it again. Held deliveries are not its
+// business: every pass returns those, by state.
 func (c *Connector) resumeSeenByWatch(ctx context.Context, store Store, previous map[string]any, v Verdict) error {
 	resumed := timeOrEmpty(v.ResumedAt)
 	if resumed == "" || resumed == mapString(previous, "resumedAt") {
 		return nil
 	}
-	return c.queueUnstartedBackfillsOf(ctx, store)
+	err := c.queueUnstartedBackfillsOf(ctx, store)
+	c.refreshShopLogged(ctx, store)
+	return err
 }

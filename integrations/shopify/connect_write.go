@@ -155,6 +155,8 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 			return connectReasonExchangeFailed, keptResult
 		}
 	}
+	// The grant is on the row from here: the moment stampGrantRecorded keeps.
+	grantAt := c.now().UTC()
 	// 12a. The store's recording starts here when the connect starts it
 	// afresh: the clock a late check is measured from. A connect that only
 	// widens the grant keeps it. Through its own server-only write, so no
@@ -195,6 +197,20 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 		written.Domain = state.ShopDomain
 	}
 	c.queueConnectBackfills(ctx, prior, found, written)
+	c.stampGrantRecorded(ctx, storeID, grantAt)
+	c.retryRefusedDomains(ctx, written)
+
+	// 12d. The store as its status now stands, for the shop read in step 15's
+	// job (shop.go): a store created here is configured (createStore), a
+	// purged one reinstalled is configured again by markReconnected's own
+	// rule (reconnectedStatus), and any other keeps its status, so a
+	// reconnect of a store a person paused reads nothing.
+	shopOf := written
+	if !found {
+		shopOf.Status = StatusConfigured
+	} else if status := reconnectedStatus(prior); status != "" {
+		shopOf.Status = status
+	}
 
 	// 13. A Storefront token for a store with none -- or with one the store
 	// now refuses (memql#5638). An uninstall may have revoked the token Connect
@@ -223,7 +239,10 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 
 	// 15. Off the request: every subscribed topic is one paced Admin call, and
 	// the person's browser is parked on this redirect. A failure does not undo
-	// the connection; it lands on the store's subscription health.
+	// the connection; it lands on the store's subscription health. The store's
+	// shop is read first in the same job (12d, shop.go), bounded by its own
+	// shopReadTimeout: the redirect does not wait on it, and a request that
+	// ends does not take it along. A failure is logged, never the connect's.
 	kept := prior
 	kept.ID, kept.AdminTokenRef, kept.StorefrontTokenRef, kept.APIVersion = storeID, adminRef, storefrontRef, generated.APIVersion
 	kept.UninstalledAt, kept.RedactedAt = "", ""
@@ -236,6 +255,7 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 	}
 	detached := context.WithoutCancel(opCtx)
 	run(func() {
+		c.refreshShopLogged(detached, shopOf)
 		ctx, cancel := context.WithTimeout(detached, connectWebhookTimeout)
 		defer cancel()
 		c.registerConnectWebhooks(ctx, kept)
@@ -459,8 +479,8 @@ func (c *Connector) pendingIs(ctx context.Context, storeID, clientID, clientSecr
 // only uninstalled keeps the status an operator gave it.
 func (c *Connector) markReconnected(ctx, opCtx context.Context, storeID string, prior Store, person string) error {
 	args := map[string]any{"storeId": storeID}
-	if prior.RedactedAt != "" {
-		args["status"] = StatusConfigured
+	if status := reconnectedStatus(prior); status != "" {
+		args["status"] = status
 	}
 	if _, err := c.engine.Execute(opCtx, renderCall("markStoreReconnected", args)); err != nil {
 		return err
@@ -494,6 +514,19 @@ func (c *Connector) markReconnected(ctx, opCtx context.Context, storeID string, 
 	}
 	c.stores.Invalidate()
 	return nil
+}
+
+// reconnectedStatus is the status a verified reinstall gives the store, or ""
+// when it keeps the one it had: a purge left the store paused with nothing
+// mirrored, and its reinstall starts it again, configured. A store that was
+// only uninstalled keeps its status, which is what a reinstall returns to.
+// markReconnected writes it, and writeConnect's shop read judges the store by
+// it, so the two cannot disagree.
+func reconnectedStatus(prior Store) string {
+	if prior.RedactedAt != "" {
+		return StatusConfigured
+	}
+	return ""
 }
 
 // storefrontTokenUsable is step 13's question about a token a reconnect would
@@ -588,4 +621,58 @@ func (c *Connector) attachStore(ctx, opCtx context.Context, state *componentIden
 		return false
 	}
 	return true
+}
+
+// stampGrantRecorded records on the store's health when this connect recorded
+// its grant (grantRecordedKey), before the refused domains are retried: a
+// domain the runtime retried has no attempt on record while it waits for its
+// check, and the verdict measures its lateness from this moment. A failure is
+// logged; the verdict then judges such a domain by its last clean sweep, as it
+// did before the key existed.
+func (c *Connector) stampGrantRecorded(ctx context.Context, storeID string, at time.Time) {
+	if err := c.recordStoreHealthKey(ctx, storeID, grantRecordedKey, at.UTC().Format(time.RFC3339), nil); err != nil {
+		c.logger.Warn("shopify: Connect could not record when the store's grant was recorded", "store", storeID, "error", err.Error())
+	}
+}
+
+// retryRefusedDomains is step 12c's second half (ledger ruling 17): every
+// domain of the connection whose scopes the grant now recorded holds is
+// offered a fresh try, through the sync runtime's builtin, under
+// operatorContext. The runtime decides on the domain's row whether it stands
+// refused as not granted and, only then, queues its backfill or clears the
+// refusal and makes it due for the next pass of the periodic check; any other
+// row it leaves as it is. So an owner who has just approved is not told to
+// approve again until the refused domains' next sweeps, and a domain the
+// origin refuses again reads refused again. This integration reads no domain
+// row to decide and writes none. A retry that fails is logged and the rest
+// still run; the domain then keeps its refusal until its next sweep.
+func (c *Connector) retryRefusedDomains(ctx context.Context, store Store) {
+	for _, id := range verdictDomains(store) {
+		if len(scopesMissingFor(store, generated.Types[generated.ConceptFromID(id)])) > 0 {
+			continue
+		}
+		_, err := c.engine.Execute(operatorContext(ctx), "builtin "+renderCall("datasyncRetryRefused", map[string]any{
+			"connector":    ConnectorName,
+			"conceptId":    id,
+			"partitionKey": store.ID,
+		}))
+		if err != nil {
+			c.logger.Warn("shopify: Connect could not ask for a refused domain to be tried again; it is tried at its next sweep", "store", store.ID, "concept", id, "error", err.Error())
+		}
+	}
+}
+
+// RetryableRefusal says, for the sync runtime's retry of a refused domain
+// (datasyncRetryRefused), whether a not-granted refusal recorded on a domain's
+// row is one a wider grant can answer. Shopify's protected-customer-data
+// refusal is not: it is data_not_declared's, and a grant does not change it.
+// Every other not-granted refusal names a scope, the store's or the origin's.
+func (c *Connector) RetryableRefusal(_ string, lastError string) bool {
+	return !protectedDataRefusal(lastError)
+}
+
+// BackfillsDomain says whether a domain's past is read by a bulk backfill,
+// which is then what the runtime's retry queues.
+func (c *Connector) BackfillsDomain(conceptID string) bool {
+	return bulkDomain(generated.Types[generated.ConceptFromID(conceptID)])
 }

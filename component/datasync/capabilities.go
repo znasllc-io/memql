@@ -29,6 +29,9 @@ import (
 //	                 backfill now.
 //	queueBackfill    ENGINE-DRIVEN. A connector asking for a backfill --
 //	                 at connect, at boot -- without running it.
+//	retryRefused     ENGINE-DRIVEN. A connector, at a connect that
+//	                 recorded a grant, asking for one domain of one tenant
+//	                 that stands refused as not granted to be tried again.
 //	continueBackfills SCHEDULED. A cron automation carries every queued
 //	                 or running backfill on, in rounds, for four minutes
 //	                 of each tick.
@@ -115,6 +118,16 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"conceptId":    "string - canonical id of the concept to backfill",
 				"partitionKey": "string (optional) - one partition of a partitioned connector; absent queues every partition it names",
 				"restart":      "boolean (optional) - also reset a running backfill to queued with an empty cursor; for an origin that no longer holds what the cursor counted",
+			},
+		},
+		{
+			Name:        "retryRefused",
+			Description: "Try again one domain of one tenant whose row stands refused as not granted (the bare refusal, or a backfill refused): a domain the connector backfills has its backfill queued, any other has the refusal cleared and is due at the next pass of the periodic check. Any other row is left as it is. Answers retried or unchanged, and for a retry queued or due. Refuses a call without internal origin.",
+			Handler:     i.handleRetryRefused,
+			ArgsSchema: map[string]string{
+				"connector":    "string - connector name",
+				"conceptId":    "string - canonical id of the concept",
+				"partitionKey": "string - the one partition of a partitioned connector; required for one",
 			},
 		},
 		{
@@ -503,6 +516,30 @@ func (i *Integration) handleQueueBackfill(ctx context.Context, args map[string]a
 		return nil, err
 	}
 	return resultNode("queued", fmt.Sprintf("%s/%s%s", connector, conceptID, partitionSuffix(partition)))
+}
+
+// handleRetryRefused is how a connector asks for a domain the origin refused
+// to be tried again, after a connect recorded a grant that may answer it. The
+// runtime decides on the row whether it stands refused; the connector names
+// the domain and nothing else. Internal origin only, as queueBackfill.
+func (i *Integration) handleRetryRefused(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireInternalOrigin(ctx, "retryRefused"); err != nil {
+		return nil, err
+	}
+	connector := strings.TrimSpace(argString(args, "connector"))
+	conceptID := strings.TrimSpace(argString(args, "conceptId"))
+	partition := strings.TrimSpace(argString(args, "partitionKey"))
+	if connector == "" || conceptID == "" {
+		return nil, fmt.Errorf("datasync: retryRefused needs both connector and conceptId")
+	}
+	res, err := i.runner.RetryRefused(ctx, connector, conceptID, partition)
+	if err != nil {
+		return nil, err
+	}
+	if !res.Retried {
+		return resultNode("unchanged", "")
+	}
+	return resultNode("retried", res.Action)
 }
 
 // handleContinueBackfills is the scheduled continuing pass. One partition's

@@ -25,7 +25,16 @@ const (
 	KindRefs       = "refs"       // a connection kept as a []string of GIDs
 	KindMetafields = "metafields" // the namespace.key map
 	KindGid        = "gid"        // a single mirrored object, kept as its GID
+	// KindInlineList is a connection whose nodes are carried in the row as a
+	// []object, each holding only the fields its allowlist entry names
+	// (Entry.Inline).
+	KindInlineList = "inlineList"
 )
+
+// HeldField is one field an inlined connection keeps of each node: its name,
+// its kind (KindScalar, KindEnum, KindObject for a money object, KindGid for
+// a reference) and its Admin type.
+type HeldField struct{ Name, Kind, AdminType string }
 
 // maxInlineEnumValues bounds a closed enum in a generated concept.
 //
@@ -46,6 +55,9 @@ const (
 	refsPageSize      = 25
 	childPageSize     = 100
 	metafieldPageSize = 50
+	// inlinePageSize is an inlined connection's page when its entry names
+	// none.
+	inlinePageSize = 25
 )
 
 // mirrorOwnFields are the columns every mirror row carries. A Shopify field
@@ -121,6 +133,13 @@ type FieldPlan struct {
 	// so the object is about that customer. Empty for every field that is
 	// not an object or a list of objects, and for an object that keeps none.
 	GidsInside []string
+	// Page is the page an inlined connection is read with, from its
+	// allowlist entry: the one owner of that number. Zero for every other
+	// field.
+	Page int
+	// Holds is what an inlined connection keeps of each node, one entry a
+	// named field, in the allowlist's order. Nil for every other field.
+	Holds []HeldField
 }
 
 // ChildPlan is a data-carrying connection materialised as its own concept.
@@ -266,6 +285,11 @@ func (p *Planner) planType(e *Entry) (*TypePlan, error) {
 	for _, s := range e.Skip {
 		skip[s] = true
 	}
+	inlined := map[string]*Inline{}
+	for i := range e.Inline {
+		inlined[e.Inline[i].Connection] = &e.Inline[i]
+	}
+	planned := map[string]bool{}
 
 	taken := map[string]bool{}
 	for _, f := range t.Fields {
@@ -294,13 +318,14 @@ func (p *Planner) planType(e *Entry) (*TypePlan, error) {
 		if childByConnection[f.Name].Connection != "" {
 			continue // materialised as its own concept
 		}
-		fp, ok, err := p.planField(&f, refs[f.Name])
+		fp, ok, err := p.planField(&f, refs[f.Name], inlined[f.Name])
 		if err != nil {
 			return nil, fmt.Errorf("%s.%s: %w", e.Type, f.Name, err)
 		}
 		if !ok {
 			continue
 		}
+		planned[f.Name] = true
 		if fp.Extract == "" {
 			fp.Extract = f.Name
 		}
@@ -315,6 +340,14 @@ func (p *Planner) planType(e *Entry) (*TypePlan, error) {
 		plan.Fields = append(plan.Fields, fp)
 	}
 	sort.SliceStable(plan.Fields, func(i, j int) bool { return plan.Fields[i].Name < plan.Fields[j].Name })
+	// An inline the loop never planned names a field the type does not have,
+	// or one that cannot be read (deprecated, or needing an argument): said
+	// here, or the allowlist would promise a list the mirror never holds.
+	for _, in := range e.Inline {
+		if !planned[in.Connection] {
+			return nil, fmt.Errorf("%s.%s: inline names a field %s does not have, or one that is deprecated or needs an argument", e.Type, in.Connection, e.Type)
+		}
+	}
 
 	// The version the apply guard compares. Preference order is a fact
 	// about the schema, not a choice: updatedAt is the origin's own
@@ -439,7 +472,15 @@ func mirrorFieldName(name string, taken map[string]bool) string {
 }
 
 // planField applies the mapping table to one field.
-func (p *Planner) planField(f *Field, isRef bool) (FieldPlan, bool, error) {
+//
+// inline is the field's allowlist entry when it is an inlined connection
+// (Entry.Inline), nil otherwise; an inlined connection is planned by
+// planInline and by nothing else here.
+func (p *Planner) planField(f *Field, isRef bool, inline *Inline) (FieldPlan, bool, error) {
+	if inline != nil {
+		fp, err := p.planInline(f, inline)
+		return fp, err == nil, err
+	}
 	named := f.Type.Named()
 	target := p.schema.Lookup(named)
 	fp := FieldPlan{GraphQL: f.Name, Required: f.Type.NonNull()}
@@ -592,6 +633,127 @@ func (p *Planner) planField(f *Field, isRef bool) (FieldPlan, bool, error) {
 		return fp, true, nil
 	}
 	return fp, false, nil
+}
+
+// inlineScalars are the scalar types an inlined connection may hold: a figure
+// or a moment, never a person's words. They are the scalars a customer's
+// erasure keeps by kind (integrations/shopify/erasure_fields.go,
+// erasureKeptScalars); that package's TestNoInlinedListHoldsAFieldAnErasureWouldScrub
+// fails on any held field the erasure would scrub, so the two lists cannot
+// drift apart unseen.
+var inlineScalars = map[string]bool{
+	"Boolean": true, "Int": true, "BigInt": true, "Float": true, "Decimal": true, "Money": true,
+	"UnsignedInt64": true, "Date": true, "DateTime": true, "ID": true,
+}
+
+// inlinePersonTypes are the mirrored types an inlined connection may not hold
+// a reference to: the rows a customer's erasure treats as a person's. An
+// inlined list is kept whole through an erasure, which neither follows nor
+// takes out a reference inside it, so a reference to one of these would keep
+// her gid after her erasure, in a row nobody marks as hers.
+//
+// The list is the erasure's, by name, because the generator may not import the
+// integration (integrations/shopify/erasure_fields.go): Customer is the erased
+// concept (erasedConcept); Order is the one a request names (requestedConcept);
+// Order, DraftOrder and GiftCard are the rows it reaches as "the customer
+// inside an object" (erasureCustomerInside). That package's
+// TestNoInlinedListHoldsAReferenceToAPersonsRow fails if the generated model
+// holds one of its own list's types, so a type added there and not here is
+// caught.
+var inlinePersonTypes = map[string]bool{
+	"Customer": true, "Order": true, "DraftOrder": true, "GiftCard": true,
+}
+
+// inlineRefusal is what every refused inlined field is told.
+const inlineRefusal = "an inlined connection holds amounts, counts, moments, enums and references, and nothing a person typed"
+
+// planInline plans an inlined connection: a []object whose elements hold the
+// fields the allowlist names and nothing else, read one page deep on a fetch
+// and never in a bulk document. The error is wrapped by planType with the
+// entry's type and the connection, so each refusal here names the field.
+func (p *Planner) planInline(f *Field, inline *Inline) (FieldPlan, error) {
+	named := f.Type.Named()
+	if !strings.HasSuffix(named, "Connection") {
+		return FieldPlan{}, fmt.Errorf("inline names a %s, which is not a connection", named)
+	}
+	node := p.connectionNodeType(named)
+	if node == nil {
+		return FieldPlan{}, fmt.Errorf("the node type of %s is not in the schema", named)
+	}
+	if p.list.Entry(node.Name) != nil {
+		return FieldPlan{}, fmt.Errorf("its node %s is mirrored: a mirrored node is a child or a reference, never a second copy inline", node.Name)
+	}
+	page := inline.Page
+	if page == 0 {
+		page = inlinePageSize
+	}
+	kept := map[string]bool{}
+	parts := make([]string, 0, len(inline.Fields))
+	holds := make([]HeldField, 0, len(inline.Fields))
+	for _, name := range inline.Fields {
+		held, sel, err := p.inlineHeldField(node, name, kept)
+		if err != nil {
+			return FieldPlan{}, err
+		}
+		holds = append(holds, held)
+		parts = append(parts, sel)
+	}
+	return FieldPlan{
+		GraphQL:      f.Name,
+		Kind:         KindInlineList,
+		DSLType:      "[]object",
+		Required:     false,
+		OmitFromBulk: true,
+		Doc: fmt.Sprintf("Inline %s rows (first %d, never paged further), each holding %s and nothing else.",
+			node.Name, page, strings.Join(inline.Fields, ", ")),
+		Selection:  fmt.Sprintf("%s(first: %d) { nodes { %s } }", f.Name, page, strings.Join(parts, " ")),
+		Extract:    f.Name + ".nodes[]",
+		AdminType:  node.Name,
+		GidsInside: sortedNames(kept),
+		Page:       page,
+		Holds:      holds,
+	}, nil
+}
+
+// inlineHeldField checks one field an inline names on its node and renders its
+// selection: a scalar that is a figure or a moment, an enum, a money object, or
+// a reference to a mirrored row kept as `{ id }` (recorded in kept). Anything
+// else -- a string, a URL, a JSON value, any other object, any list -- is
+// refused.
+func (p *Planner) inlineHeldField(node *Type, name string, kept map[string]bool) (HeldField, string, error) {
+	f := node.Field(name)
+	if f == nil {
+		return HeldField{}, "", fmt.Errorf("inline names %s, which %s does not have", name, node.Name)
+	}
+	if f.IsDeprecated || requiresArgument(f) {
+		return HeldField{}, "", fmt.Errorf("inline names %s, which is deprecated or needs an argument", name)
+	}
+	typeName := f.Type.Named()
+	target := p.schema.Lookup(typeName)
+	refuse := func(what string) (HeldField, string, error) {
+		return HeldField{}, "", fmt.Errorf("inline names %s, %s: %s", name, what, inlineRefusal)
+	}
+	if target == nil {
+		return refuse("a " + typeName + " the schema does not have")
+	}
+	if f.Type.IsList() {
+		return refuse("a list of " + typeName)
+	}
+	switch {
+	case target.Kind == "SCALAR" && inlineScalars[typeName]:
+		return HeldField{Name: name, Kind: KindScalar, AdminType: typeName}, name, nil
+	case target.Kind == "ENUM":
+		return HeldField{Name: name, Kind: KindEnum, AdminType: typeName}, name, nil
+	case moneyShape(typeName) != "":
+		return HeldField{Name: name, Kind: KindObject, AdminType: typeName}, name + " " + p.objectSelection(target, 0, kept), nil
+	case (target.Kind == "OBJECT" || target.Kind == "INTERFACE") && p.referencedByGid(target):
+		if inlinePersonTypes[target.Name] {
+			return HeldField{}, "", fmt.Errorf("inline names %s, a reference to a %s: an inlined list is kept whole through a customer's erasure, which neither follows nor takes out a reference inside it, so it may not hold a row the erasure treats as a person's", name, target.Name)
+		}
+		kept[target.Name] = true
+		return HeldField{Name: name, Kind: KindGid, AdminType: typeName}, name + " { id }", nil
+	}
+	return refuse("a " + typeName)
 }
 
 // objectSelection renders `{ ... }` for a nested object, interface or union.

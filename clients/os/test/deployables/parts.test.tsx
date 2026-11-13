@@ -9,7 +9,7 @@ vi.mock("../../src/live/connection", () => ({
   bridgePathFor: () => "/_memql/ws",
 }));
 
-import { ALL_PARTS, DEPLOYABLE_PARTS, NO_PARTS, canManagePersonalSources, heldParts, partResource } from "../../src/apps/deployables/parts";
+import { ALL_PARTS, DEPLOYABLE_PARTS, NO_PARTS, canManagePersonalSources, heldParts, partResource, partsForOrganization } from "../../src/apps/deployables/parts";
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { OS_REGISTRY } from "../../src/apps/registry";
@@ -156,6 +156,18 @@ describe("organization-specific deployable controls", () => {
     mount(fakeConnection({ sites: [siteRow({ ...BUILT, id: "site-new", accountId: "beta" })] }), globalDenied, organizationEntries);
     await open("new.memql.example.com");
     expect(screen.queryByRole("button", { name: "Go live" })).toBeNull();
+  });
+});
+
+describe("the sales part", () => {
+  it("judges the sales part per organization", () => {
+    const allow = (accountId: string, verb: string, resource: string): OrganizationCapability => ({ accountId, verb, resource, effect: "allow" });
+    setEffectiveCapabilities([], [
+      ...["acme", "beta"].flatMap((id) => [allow(id, "read", "data"), allow(id, "read", "app:deployables"), allow(id, "update", "data")]),
+      allow("acme", "execute", "app:deployables/sales"),
+    ]);
+    expect(partsForOrganization("acme", NO_PARTS).sales).toBe(true);
+    expect(partsForOrganization("beta", NO_PARTS).sales).toBe(false);
   });
 });
 

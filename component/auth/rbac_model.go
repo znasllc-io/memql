@@ -287,6 +287,12 @@ var appPartGrants = map[string][]Role{
 	// their storefront's visitors. component/sitetraffic blanks the figures for
 	// a caller without the part; the OS draws the section only to a holder.
 	"app:deployables/health": {RoleOwner, RoleDeveloper},
+	// A storefront's sales figures on its Store statistics page. Revenue is
+	// more sensitive than visits, so it is a part of its own rather than a
+	// reading of `read app:deployables`: granted to a client's group beside
+	// that read, held by owner and developer, and judged in the organization of
+	// the site being read (component/memql organization_action_capabilities.go).
+	"app:deployables/sales": {RoleOwner, RoleDeveloper},
 	// The inventory part of the Accounts app (account row ownership, design
 	// record 2026-11-12, section H): the rows an account holds by concept and
 	// the progress of assigning existing rows. Owner and developer; an admin

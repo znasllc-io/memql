@@ -2,6 +2,7 @@ package shopify
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -43,6 +44,35 @@ func TestTheClientPacesOnTheReportedBucket(t *testing.T) {
 	// (100 - 20) / 100 points per second = 0.8s.
 	if got := h.slept[len(h.slept)-1]; got < 700*time.Millisecond || got > time.Second {
 		t.Errorf("waited %v, want about 800ms of restore", got)
+	}
+}
+
+// A response says what the query was charged before it ran: Shopify's
+// requestedQueryCost, which is a property of the document, and the one a
+// single query must keep under the 1,000-point ceiling. The actual cost is
+// what the bucket is charged after.
+func TestTheResponseSaysWhatTheQueryCost(t *testing.T) {
+	h := newHarness(t)
+	h.admin.reply("Probe", map[string]any{"shop": map[string]any{"id": "gid://shopify/Shop/1"}})
+	resp, err := h.conn.adminCall(context.Background(), h.store(t), "query Probe { shop { id } }", "Probe", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.RequestedCost != 12 || resp.QueryCost != 10 {
+		t.Errorf("requested %v, actual %v; want the fake's 12 and 10", resp.RequestedCost, resp.QueryCost)
+	}
+}
+
+func TestADeniedFieldKeepsTheCompleteDocumentsQueryCost(t *testing.T) {
+	h := newHarness(t)
+	h.admin.denyField("Probe", "fulfillmentOrders", map[string]any{"node": nil})
+	_, err := h.conn.adminCall(context.Background(), h.store(t), "query Probe { node { fulfillmentOrders { id } } }", "Probe", nil)
+	var denied *AdminError
+	if !errors.As(err, &denied) || !denied.DeniedOnly() {
+		t.Fatalf("wanted a denied-field response, got %v", err)
+	}
+	if denied.RequestedCost != 12 || denied.QueryCost != 10 {
+		t.Fatalf("partial denial discarded the full document's cost: requested %v, actual %v", denied.RequestedCost, denied.QueryCost)
 	}
 }
 

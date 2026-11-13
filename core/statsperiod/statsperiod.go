@@ -8,16 +8,18 @@
 // (component/emailstats) both take their bounds from here, so "last 30 days"
 // covers the same days on both pages.
 //
-// # Days are UTC
+// # Days are cut in one zone
 //
-// Every bound is a UTC instant whatever zone `now` arrives in (D5). The
+// For cuts every bound in UTC whatever zone `now` arrives in (D5): the
 // statistics tables are keyed by UTC hour and UTC day, and a bound computed in
-// another zone would cut a day in two.
+// another zone would cut a day in two. ForIn cuts them in a zone it is handed,
+// a store's own, and answers every time in that zone; this package loads no
+// zone, a caller passes a *time.Location.
 //
 // # The bucket under way is included
 //
 // A period ends where the bucket holding `now` ends: the next whole hour, the
-// next UTC midnight, the first of next month. So "last 7 days" is today and
+// start of tomorrow in the period's zone (UTC for For), the first of next month. So "last 7 days" is today and
 // the six days before it, and today's partial figures are part of it. A period
 // that ended at `now` would leave the newest bucket out until it closed.
 //
@@ -33,6 +35,7 @@ package statsperiod
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -109,16 +112,51 @@ func Parse(s string, allowed ...Period) (Period, error) {
 	if p == "" {
 		return "", fmt.Errorf("period is required: one of %s", list(offered))
 	}
-	return "", fmt.Errorf("period must be one of %s; got %q", list(offered), s)
+	return "", fmt.Errorf("period must be one of %s; got %s", list(offered), quoted(s))
 }
 
-// For answers the bounds of p as of now. A period Parse would not return has
-// empty bounds: no buckets and no previous period.
+// quotedRunes is the most of a refused value an error quotes: a caller who
+// sent a megabyte as a period gets a sentence back, not the megabyte.
+const quotedRunes = 32
+
+// quoted is s as a refusal quotes it: Go-quoted, and cut at quotedRunes
+// characters with " and more" after the quote when it is longer.
+func quoted(s string) string {
+	n := 0
+	for i := range s {
+		if n == quotedRunes {
+			return strconv.Quote(s[:i]) + " and more"
+		}
+		n++
+	}
+	return strconv.Quote(s)
+}
+
+// For answers the bounds of p as of now, cut in UTC. A period Parse would not
+// return has empty bounds: no buckets and no previous period.
 func For(p Period, now time.Time) Bounds {
-	now = now.UTC()
+	return ForIn(p, now, time.UTC)
+}
+
+// ForIn answers the bounds of p as of now with every day, month and hour cut in
+// loc, a store's own zone. A nil loc is UTC. Every time in the answer is in loc.
+//
+// A day starts at the first instant whose date in loc is that day, so where the
+// clocks move a day is 23 or 25 hours long and a bucket is as long as its day.
+// The 24 hours are the one exception to "calendar": they are 24 hours of elapsed
+// time, 24 buckets of one hour each, so on a day the clocks go back two of them
+// carry the same local hour.
+func ForIn(p Period, now time.Time, loc *time.Location) Bounds {
+	if loc == nil {
+		loc = time.UTC
+	}
+	now = now.In(loc)
 	switch p {
 	case Last24Hours:
-		end := now.Truncate(time.Hour).Add(time.Hour)
+		// The hour under way starts at now less its LOCAL minutes: Truncate cuts
+		// on UTC hours, which is half an hour off in a +05:30 zone.
+		hour := now.Add(-(time.Duration(now.Minute())*time.Minute + time.Duration(now.Second())*time.Second + time.Duration(now.Nanosecond())))
+		end := hour.Add(time.Hour)
 		start := end.Add(-24 * time.Hour)
 		return Bounds{
 			Start: start, End: end,
@@ -127,32 +165,75 @@ func For(p Period, now time.Time) Bounds {
 		}
 	case Last7Days, Last30Days, Last90Days:
 		n := days(p)
-		end := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 1)
-		start := end.AddDate(0, 0, -n)
+		y, m, d := now.Date()
+		end := StartOfDay(y, m, d+1, loc)
+		start := StartOfDay(y, m, d+1-n, loc)
 		return Bounds{
 			Start: start, End: end,
-			PrevStart: start.AddDate(0, 0, -n), PrevEnd: start,
+			PrevStart: StartOfDay(y, m, d+1-2*n, loc), PrevEnd: start,
 			Bucket: BucketDay, Buckets: n, HasPrevious: true,
 		}
 	case Last12Months:
-		month := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+		y, m, _ := now.Date()
 		return Bounds{
-			Start: month.AddDate(0, -12, 0), End: month.AddDate(0, 1, 0),
+			Start: StartOfDay(y, m-12, 1, loc), End: StartOfDay(y, m+1, 1, loc),
 			Bucket: BucketMonth, Buckets: 13,
 		}
 	}
 	return Bounds{}
 }
 
-// Next is the start of the bucket after the one starting at t.
+// StartOfDay is the first instant whose date in loc is y-m-d; a nil loc is UTC.
+// An out-of-range day or month normalises as time.Date does.
+//
+// time.Date(y, m, d, 0, 0, 0, 0, loc) is that instant except where the clocks
+// skip midnight: there it answers an instant on the day before or an hour into
+// the day, and the day starts at the change itself. A date the zone never had
+// (Pacific/Apia, 2011-12-30) starts where the next date that exists starts, so
+// the missing day has no bucket.
+//
+// Two assumptions are not handled. Where a zone's clocks go back across
+// midnight, so that a date begins twice, the day is taken from the midnight the
+// standard library answers; no zone does this at present. And where a clock goes
+// back within the first minutes of a day, the period's end can fall before `now`
+// for that stretch.
+func StartOfDay(y int, m time.Month, d int, loc *time.Location) time.Time {
+	if loc == nil {
+		loc = time.UTC
+	}
+	t := time.Date(y, m, d, 0, 0, 0, 0, loc)
+	wy, wm, wd := time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Date()
+	gy, gm, gd := t.Date()
+	if gy == wy && gm == wm && gd == wd && t.Hour() == 0 && t.Minute() == 0 {
+		return t
+	}
+	// Midnight does not exist here: t sits at one side of the change.
+	from, until := t.ZoneBounds()
+	candidate := from
+	if gy*10000+int(gm)*100+gd < wy*10000+int(wm)*100+wd {
+		candidate = until
+	}
+	// The change is the day's first instant, or, for a date the zone skipped
+	// altogether, the first instant after it.
+	if cy, cm, cd := candidate.Date(); !candidate.IsZero() && cy*10000+int(cm)*100+cd >= wy*10000+int(wm)*100+wd {
+		return candidate.In(loc)
+	}
+	return t
+}
+
+// Next is the start of the bucket after the one starting at t, in t's own
+// location: a day or a month is stepped through StartOfDay, so it may be 23 or
+// 25 hours on.
 func (b Bounds) Next(t time.Time) time.Time {
 	switch b.Bucket {
 	case BucketHour:
 		return t.Add(time.Hour)
 	case BucketDay:
-		return t.AddDate(0, 0, 1)
+		y, m, d := t.Date()
+		return StartOfDay(y, m, d+1, t.Location())
 	case BucketMonth:
-		return t.AddDate(0, 1, 0)
+		y, m, _ := t.Date()
+		return StartOfDay(y, m+1, 1, t.Location())
 	}
 	// No bucket size: there is no next bucket, and End stops any walk.
 	return b.End

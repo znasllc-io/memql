@@ -20,6 +20,19 @@ export function niceMax(max: number): number {
 }
 
 /**
+ * The floor of a value axis: zero for a value at or above zero, and below
+ * zero the round number `niceMax` would give its size, negated (-36 gives
+ * -50). A figure that cannot be below zero keeps the axis it always had,
+ * which starts at zero; a net figure whose refunds outweigh a day's sales
+ * reaches down to a round floor. Anything that is not a finite number gives
+ * zero, as `niceMax` gives its own default.
+ */
+export function niceMin(min: number): number {
+  if (!(min < 0) || !Number.isFinite(min)) return 0;
+  return -niceMax(-min);
+}
+
+/**
  * `step` times ten to `exponent`. A negative power DIVIDES by the positive
  * one, because a negative power of ten has no exact binary form: `2 * 10 ** -4`
  * is 0.00019999999999999998 where `2 / 10 ** 4` is 0.0002, and an axis top
@@ -30,17 +43,48 @@ function scaled(step: number, exponent: number): number {
 }
 
 /**
- * The value axis's labelled steps: zero, half the top, and the top.
+ * The value axis's labelled steps: zero, half the top, and the top -- and,
+ * when `min` is below zero, its floor (`niceMin`) beneath them. When `min` is
+ * below zero and nothing is above it (`max` at or under zero), zero is the
+ * top and the steps mirror the usual ones: the floor, half the floor, zero.
  *
  * For a series of whole numbers -- visitors, sends -- the middle step is left
  * out when it is not a whole number itself: an axis of 5 reads "0, 5", never
  * "0, 2.5, 5", because nobody was half a visitor. A rate or an average passes
  * `wholeNumbers` false and keeps its middle step.
  */
-export function valueTicks(max: number, wholeNumbers = false): number[] {
+export function valueTicks(max: number, wholeNumbers = false, min = 0): number[] {
+  const floor = niceMin(min);
+  if (floor < 0 && !(max > 0)) {
+    const half = floor / 2;
+    return wholeNumbers && !Number.isInteger(half) ? [floor, 0] : [floor, half, 0];
+  }
   const top = niceMax(max);
   const half = top / 2;
-  return wholeNumbers && !Number.isInteger(half) ? [0, top] : [0, half, top];
+  const steps = wholeNumbers && !Number.isInteger(half) ? [0, top] : [0, half, top];
+  return floor < 0 ? [floor, ...steps] : steps;
+}
+
+/**
+ * The steps whose rules stand at least `gap` apart, `y` placing each one, in
+ * ascending order.
+ *
+ * Kept in order of what a reader needs: zero first, always; then the top and
+ * the floor; then the halves. A step is kept only if it is `gap` (one label's
+ * height) from every step already kept, so a lopsided axis -- a floor of
+ * -5,000 under a top of 50 -- draws zero and the floor, not three labels
+ * stacked into one. The scale still runs to a step left out; only its rule
+ * and label go.
+ */
+export function spacedTicks(steps: readonly number[], y: (value: number) => number, gap: number): number[] {
+  const lowest = Math.min(...steps);
+  const highest = Math.max(...steps);
+  const rank = (step: number) => (step === 0 ? 0 : step === highest ? 1 : step === lowest ? 2 : 3);
+  const kept: number[] = [];
+  for (const step of [...steps].sort((a, b) => rank(a) - rank(b))) {
+    if (kept.every((other) => Math.abs(y(step) - y(other)) >= gap)) kept.push(step);
+  }
+  return kept.sort((a, b) => a - b);
 }
 
 /**

@@ -714,11 +714,13 @@ builtin datasyncDispatchInbound {
 @description("Sweep every mirrored domain whose own DomainSpec interval says it is due, healing drift through the same version-guarded apply path inbound uses. Skips paused domains and connectors that do not implement Reconcile.")
 builtin datasyncReconcileDomains { }
 
-// The two below are driven by the engine as well, so they carry no @sdk and
+// The three below are driven by the engine as well, so they carry no @sdk and
 // refuse a call without internal origin in their handler. A connector queues a
 // backfill through the first, under its own operator identity, when a store is
 // connected, its grant widens, or a boot finds a store whose past was never
-// read; the continueQueuedBackfills automation drives the second.
+// read; it asks for a refused domain to be tried again through the second, at
+// a connect that recorded a grant; the continueQueuedBackfills automation
+// drives the third.
 
 @executor("integration.datasync.queueBackfill")
 @description("Queue one domain's backfill: write backfillStatus queued and an empty cursor on its v1:platform:syncState row, and run nothing -- the continuing pass starts it. A running backfill is left as it is unless restart is set; a complete one is queued again from the start. Only the engine reaches it: a call without internal origin is refused before anything is read.")
@@ -727,6 +729,14 @@ builtin datasyncQueueBackfill {
   conceptId     string!
   partitionKey  string  @description("One partition of a partitioned connector (one store). Absent queues every partition the connector names; a partition named on a connector without partitions is refused.")
   restart       boolean  @description("Also reset a running backfill to queued with an empty cursor, so it starts again from nothing: for an origin that no longer holds what the cursor counted, such as a store reconnected after an uninstall or a purge. An ordinary queue leaves a running backfill alone.")
+}
+
+@executor("integration.datasync.retryRefused")
+@description("Try again one domain of one partition whose v1:platform:syncState row stands refused as not granted, after a connect recorded a grant that may answer it: a domain the connector backfills has its backfill queued, any other has the refusal cleared and is due at the next pass of the periodic check; any other row is left as it is, and nothing says a check ran. Answers retried or unchanged, and for a retry queued or due. Only the engine reaches it: a call without internal origin is refused before anything is read.")
+builtin datasyncRetryRefused {
+  connector     string!
+  conceptId     string!
+  partitionKey  string  @description("The one partition of a partitioned connector (one store). Required for one: a retry names one domain of one store.")
 }
 
 @executor("integration.datasync.continueBackfills")

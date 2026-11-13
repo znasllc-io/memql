@@ -77,4 +77,12 @@ classes: |
   # the default class's 180s. Its own class at about twice that; keep every
   # test and its operation deadlines.
   db      wholesale packs/wholesalepack 600s     serial    1
+  # The store statistics suite boots a real engine, folds stores through the
+  # rollup and asks the read; since the fixture store's independent totals it
+  # also sweeps a store's orders through the Shopify connector. With this
+  # lane's flags it took 79s, 90s and 227s on a laptop running other builds
+  # (load averages 10 to 20). From the slowest, at the 2.5 times the mirror's
+  # suites take on the bounded AKS runner, expect about 570s; give it about
+  # twice that. Keep every test and its operation deadlines.
+  db      storestats component/storestats 1140s serial    1
   db      default   -                   180s     -         2

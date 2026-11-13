@@ -37,8 +37,9 @@ import (
 type fakeEngine struct {
 	memql.IntegrationEngineAccess
 
-	mu       stdsync.Mutex
-	executed []string
+	mu         stdsync.Mutex
+	executed   []string
+	freshReads map[string][]bool
 	// rows maps a function NAME to the rows a call of it returns. The
 	// simplest thing that lets a test say "there are two stores".
 	rows map[string][]map[string]any
@@ -54,10 +55,14 @@ func newFakeEngine() *fakeEngine {
 	return &fakeEngine{rows: map[string][]map[string]any{}, fail: map[string]error{}, cursors: map[string]string{}}
 }
 
-func (f *fakeEngine) Execute(_ context.Context, q string) (*memql.ExecuteResult, error) {
+func (f *fakeEngine) Execute(ctx context.Context, q string) (*memql.ExecuteResult, error) {
 	f.mu.Lock()
 	f.executed = append(f.executed, q)
 	name := callName(q)
+	if f.freshReads == nil {
+		f.freshReads = map[string][]bool{}
+	}
+	f.freshReads[name] = append(f.freshReads[name], memql.FreshReadFromContext(ctx))
 	if name == "storesForConnector" {
 		// The fixture describes stores once; the production connector uses
 		// a cursor-capable read while the UI retains its display ordering.
@@ -265,7 +270,8 @@ func (f *fakeAdmin) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 	}
 	envelope := map[string]any{
 		"extensions": map[string]any{"cost": map[string]any{
-			"actualQueryCost": 10,
+			"requestedQueryCost": 12,
+			"actualQueryCost":    10,
 			"throttleStatus": map[string]any{
 				"maximumAvailable":   throttle.MaximumAvailable,
 				"currentlyAvailable": throttle.CurrentlyAvailable,

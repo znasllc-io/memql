@@ -99,8 +99,17 @@ func mapObjectUnder(spec *generated.TypeSpec, storeID string, obj map[string]any
 		// int or enum is omitted, which on an existing row keeps its last
 		// mirrored value -- a limit of the raw insert, which has no way to
 		// unset a typed field, noted until the engine grows one.
+		//
+		// An INLINED connection (a refund's lines, shipping lines and
+		// adjustments) is the exception for a list: nil there means the
+		// document did not select it -- a bulk export selects none -- and a
+		// list that was not read is not an empty one. It is left out, so a
+		// new row lacks it and an existing row keeps what a fetch wrote; a
+		// connection that was read and holds nothing arrives as
+		// {"nodes": []} and is written [].
 		if raw == nil {
 			switch {
+			case f.Kind == generated.KindInlineList:
 			case f.DSLType == "string":
 				payload[f.Name] = ""
 			case strings.HasPrefix(f.DSLType, "[]"):

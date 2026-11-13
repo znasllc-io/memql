@@ -9957,7 +9957,7 @@ func ShopifyStoreSetRecordingBuild(args ShopifyStoreSetRecordingArgs) string {
 }
 
 // ShopifyStoreVerdict -- One store's verdict (U6): whether it is being recorded, and when it is not, why and the one act that fixes each reason. Computed in the engine from the store row, its sync state and its given-up deliveries, so a screen draws it without a copy of the rules.
-// `state` is recording, starting, paused, needs attention or not connected, `since` when it began, `resumedAt` when the store last left paused or not connected (empty when it never has), and `connectedAt` when a connect last started its recording afresh (empty for a store connected before that was recorded). Each reason has a `code` (data_not_declared, approval_outdated, grant_lost, events_not_registered, check_failing, changes_not_recorded), one `sentence` for a person, and an `act` with its `actLabel` and `actUrl` (or none); `count` is a floor when `atLeast` is true. `outside` and `withheld` are plain words. `may.act` says whether the caller may take the acts. For the store's owner, a cluster owner, or a caller who may read stores; anyone else is refused before the store's state is read.
+// `state` is recording, starting, paused, needs attention or not connected, `since` when it began, `resumedAt` when the store last left paused or not connected (empty when it never has), and `connectedAt` when a connect last started its recording afresh (empty for a store connected before that was recorded), and `grantRecordedAt` when a connect last recorded its grant (empty for a store connected before that was recorded). Each reason has a `code` (data_not_declared, approval_outdated, grant_lost, events_not_registered, check_failing, changes_not_recorded, privacy_request_failing), one `sentence` for a person, and an `act` with its `actLabel` and `actUrl` (or none); `count` is a floor when `atLeast` is true. Each reason also says in machine fields what it stands in the way of: `concerns` is wholeStore (nothing of the store is recorded as it should be), concepts (the generated concepts named in `concepts`, sorted, and the children read with them) or noRecording (not about recording); `concepts` is a list, empty unless `concerns` is concepts. `outside` and `withheld` are plain words. `outsideConcepts` is the machine form of what the store does not record: the generated concept names, sorted, of the domains outside its connection, refused as not requested, or refused by the origin as not granted (a child read with its parent is outside with it). A reply without it is from an older node and says nothing about what is outside. `may.act` says whether the caller may take the acts. For the store's owner, a cluster owner, or a caller who may read stores; anyone else is refused before the store's state is read.
 type ShopifyStoreVerdictArgs struct {
 	// The store.
 	StoreId string
@@ -10939,6 +10939,41 @@ func SourceRepositoriesBuild(args SourceRepositoriesArgs) string {
 		b.WriteString("page: ")
 		b.WriteString(fmt.Sprintf("%v", args.Page))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// StoreStatistics -- One store's sales figures (the 2026-11-11 store statistics design, U9), the read the Store statistics page of a storefront deployable calls. Gated twice: the engine judges the sales part in the organization of the site `siteId` names, and the handler judges it again in Go against the site it reads under the caller's own context, then holds the store to the site's own bound or preview store. Nothing of a store is read before both have answered. The figures are read from the component's own tables, never from an order row, so the caller need not be a cluster owner.
+type StoreStatisticsArgs struct {
+	// The storefront deployable.
+	SiteId string
+	// The store of one of its destinations, as a bare id.
+	StoreId string
+	// 24h, 7d, 30d, 90d or 12m.
+	Period string
+}
+
+// StoreStatistics calls the engine builtin storeStatistics.
+func (qc *QueryClient) StoreStatistics(ctx context.Context, args StoreStatisticsArgs) (*Result, error) {
+	call := StoreStatisticsBuild(args)
+	return qc.executeNamed(ctx, "storeStatistics", call)
+}
+
+func StoreStatisticsBuild(args StoreStatisticsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin storeStatistics(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("period: ")
+	b.WriteString(quoteMemQL(args.Period))
 	b.WriteString(")")
 	return b.String()
 }

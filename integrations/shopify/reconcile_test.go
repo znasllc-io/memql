@@ -1,7 +1,9 @@
 package shopify
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -166,5 +168,20 @@ func TestAnUnknownConceptIsNotImplemented(t *testing.T) {
 	_, err := h.conn.Reconcile(context.Background(), "v1:something:else", time.Time{})
 	if !memqlsync.IsNotImplemented(err) {
 		t.Fatalf("err = %v, want the contract's not-implemented error", err)
+	}
+}
+
+// A STALL IN THE ORDINARY CHECK IS LOGGED AS A STALL: an empty page that says
+// there is a next one is the origin not advancing, not the row budget.
+func TestAStallInTheOrdinaryCheckIsLoggedAsAStall(t *testing.T) {
+	h := newHarness(t)
+	var logs bytes.Buffer
+	h.conn.logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h.admin.reply("ShopifyListProduct", listPageReply("products", true, "c1"))
+	if _, err := h.conn.Reconcile(context.Background(), "v1:shopify:product", h.now); err != nil {
+		t.Fatal(err)
+	}
+	if got := logs.String(); !strings.Contains(got, "stalled") || strings.Contains(got, "row budget") {
+		t.Fatalf("the sweep logged %q, want a stall said as a stall", got)
 	}
 }

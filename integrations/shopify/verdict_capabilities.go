@@ -303,16 +303,17 @@ func (c *Connector) storeVerdict(ctx context.Context, store Store) (Verdict, err
 	}
 	previous, _ := store.Health["verdict"].(map[string]any)
 	return computeVerdict(verdictInput{
-		Store:        store,
-		States:       states,
-		Intervals:    sweepIntervals(c.Domains()),
-		GivenUp:      givenUp,
-		GivenUpFloor: floor,
-		Denied:       c.FieldsDenied(store.ID),
-		Previous:     previous,
-		ConnectedAt:  connectedAtOf(store),
-		Privacy:      privacy,
-		Now:          c.now().UTC(),
+		Store:           store,
+		States:          states,
+		Intervals:       sweepIntervals(c.Domains()),
+		GivenUp:         givenUp,
+		GivenUpFloor:    floor,
+		Denied:          c.FieldsDenied(store.ID),
+		Previous:        previous,
+		ConnectedAt:     connectedAtOf(store),
+		Privacy:         privacy,
+		GrantRecordedAt: grantRecordedAtOf(store),
+		Now:             c.now().UTC(),
 	}), nil
 }
 
@@ -322,6 +323,23 @@ func (c *Connector) storeVerdict(ctx context.Context, store Store) (Verdict, err
 // moves with every write).
 func connectedAtOf(store Store) time.Time {
 	at, err := time.Parse(time.RFC3339Nano, store.ConnectedAt)
+	if err != nil {
+		return time.Time{}
+	}
+	return at.UTC()
+}
+
+// grantRecordedKey is the store health key a connect writes when it records
+// the store's grant (recordStoreHealth, through recordStoreHealthKey): the
+// moment a domain the runtime retried is measured from while it waits for its
+// check.
+const grantRecordedKey = "grantRecordedAt"
+
+// grantRecordedAtOf is when a connect last recorded the store's grant, from
+// its health, or zero for a store whose health does not say (a store connected
+// before the key was written).
+func grantRecordedAtOf(store Store) time.Time {
+	at, err := time.Parse(time.RFC3339Nano, healthString(store.Health, grantRecordedKey))
 	if err != nil {
 		return time.Time{}
 	}
@@ -407,6 +425,7 @@ func verdictPayload(v Verdict) map[string]any {
 		reasons = append(reasons, map[string]any{
 			"code": r.Code, "domain": r.Domain, "sentence": r.Sentence, "detail": r.Detail, "count": r.Count,
 			"atLeast": r.AtLeast, "act": r.Act, "actLabel": r.ActLabel, "actUrl": r.ActURL,
+			"concerns": r.Concerns, "concepts": toAny(r.Concepts),
 		})
 	}
 	recorded := make([]any, 0, len(v.Recorded))
@@ -416,7 +435,9 @@ func verdictPayload(v Verdict) map[string]any {
 	return map[string]any{
 		"storeId": v.StoreID, "domain": v.Domain, "state": v.State, "since": v.Since.UTC().Format(time.RFC3339),
 		"resumedAt": timeOrEmpty(v.ResumedAt), "connectedAt": timeOrEmpty(v.ConnectedAt),
-		"reasons": reasons, "recorded": recorded, "outside": toAny(v.Outside), "withheld": toAny(v.Withheld),
-		"ordersFrom": v.OrdersFrom,
+		"grantRecordedAt": timeOrEmpty(v.GrantRecordedAt),
+		"reasons":         reasons, "recorded": recorded, "outside": toAny(v.Outside), "withheld": toAny(v.Withheld),
+		"outsideConcepts": toAny(v.OutsideConcepts),
+		"ordersFrom":      v.OrdersFrom,
 	}
 }

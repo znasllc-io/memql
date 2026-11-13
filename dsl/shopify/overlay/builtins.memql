@@ -42,15 +42,24 @@ builtin shopifyStoreHealth {
 /// `state` is recording, starting, paused, needs attention or not connected, `since` when it began,
 /// `resumedAt` when the store last left paused or not connected (empty when it never has), and
 /// `connectedAt` when a connect last started its recording afresh (empty for a store connected before
-/// that was recorded). Each reason has a `code` (data_not_declared, approval_outdated, grant_lost,
-/// events_not_registered, check_failing, changes_not_recorded), one `sentence` for a person, and an
-/// `act` with its `actLabel` and `actUrl` (or none); `count` is a floor when `atLeast` is true. `outside` and `withheld` are plain words.
+/// that was recorded), and `grantRecordedAt` when a connect last recorded its grant (empty for a store
+/// connected before that was recorded). Each reason has a `code` (data_not_declared, approval_outdated, grant_lost,
+/// events_not_registered, check_failing, changes_not_recorded, privacy_request_failing), one
+/// `sentence` for a person, and an `act` with its `actLabel` and `actUrl` (or none); `count` is a
+/// floor when `atLeast` is true. Each reason also says in machine fields what it stands in the way
+/// of: `concerns` is wholeStore (nothing of the store is recorded as it should be), concepts (the
+/// generated concepts named in `concepts`, sorted, and the children read with them) or noRecording
+/// (not about recording); `concepts` is a list, empty unless `concerns` is concepts. `outside` and
+/// `withheld` are plain words. `outsideConcepts` is the machine form of what the store does not
+/// record: the generated concept names, sorted, of the domains outside its connection, refused as not
+/// requested, or refused by the origin as not granted (a child read with its parent is outside with
+/// it). A reply without it is from an older node and says nothing about what is outside.
 /// `may.act` says whether the caller may take the acts. For the store's owner, a cluster owner, or a
 /// caller who may read stores; anyone else is refused before the store's state is read.
 @sdk
 @executor("integration.shopify.storeVerdict")
 @requiresCapability("execute", "app:deployables/store")
-@description("One store's verdict: state (recording, starting, paused, needs attention, not connected), since, resumedAt and connectedAt; reasons, each {code, domain, sentence, detail, count, atLeast, act, actLabel, actUrl} (atLeast: the count is a floor); recorded, each {kind, lastChangeAt, lastCheckedAt}; outside and withheld in plain words; ordersFrom; alert {state, reason}; may {act}. For the store's owner, a cluster owner, or a caller who may read stores.")
+@description("One store's verdict: state (recording, starting, paused, needs attention, not connected), since, resumedAt, connectedAt and grantRecordedAt (when a connect last recorded the store's grant); reasons, each {code, domain, sentence, detail, count, atLeast, act, actLabel, actUrl, concerns, concepts} (atLeast: the count is a floor; concerns: wholeStore, concepts or noRecording, what the reason stands in the way of; concepts: the generated concept names it concerns, sorted, empty unless concerns is concepts); recorded, each {kind, lastChangeAt, lastCheckedAt}; outside and withheld in plain words; outsideConcepts, the generated concept names, sorted, of the domains the store does not record (outside its connection, not requested, or not granted by the origin); ordersFrom; alert {state, reason}; may {act}. For the store's owner, a cluster owner, or a caller who may read stores.")
 builtin shopifyStoreVerdict {
   storeId  string!  @description("The store.")
 }
@@ -375,4 +384,57 @@ builtin shopifyConnectionProviderStatus { }
 builtin shopifyAccountConnectBegin {
   signedQuery string!
   returnPath string
+}
+
+/// The store statistics rollup (the 2026-11-11 store statistics design). NO @sdk: it is the
+/// storeStatisticsRollupSweep automation's work, and its handler admits that automation's
+/// maintenance principal at internal origin and no other caller, a cluster owner included. It reads
+/// the stores and their mirror rows from Go, never as statements of the automation, and answers
+/// counts: the engine's work journal keeps what an automation step answers, and two of the walk's
+/// reads carry a buyer's email.
+@executor("integration.storeStats.rollup")
+@description("Keep every store's statistics. Lists every configured store through the engine, gives each its row in the store statistics tables, and walks each in turn, one store's failure leaving the next walked; one run at a time on a node. Answers {stores, rows, facts, unreadable, behind, rebuilt, removed}: counts, and the ids of the stores the lists name, never a row.")
+builtin storeStatisticsRollup { }
+
+/// One store's sales figures (the 2026-11-11 store statistics design, U9), the read the Store
+/// statistics page of a storefront deployable calls. Gated twice: the engine judges the sales part
+/// in the organization of the site `siteId` names, and the handler judges it again in Go against the
+/// site it reads under the caller's own context, then holds the store to the site's own bound or
+/// preview store. Nothing of a store is read before both have answered. The figures are read from
+/// the component's own tables, never from an order row, so the caller need not be a cluster owner.
+@sdk
+@executor("integration.storeStats.statistics")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/sales")
+@description("One store's sales figures for a period, for the store statistics page of a storefront deployable. Answers one row: the store (storeName, storeDomain, currency, timezone as the store recorded it, development, taxesIncluded), which of the site's bindings names it (destination: binding, previewBinding, or both when the two name the one store), the period cut in periodZone, the store's own zone or UTC when it has none that loads (start, end, prevStart, bucket, series), and how current the figures are (recording: its state, which is the verdict's word or purging or rebuilding while the store's figures are being deleted or rebuilt, every reason with its sentence, since, and blocked; asOf, set only while something stands in the way; rebuilding), then the figures. Money is a decimal string; a figure that is not known is null and never zero. For a caller who holds execute on app:deployables/sales in the site's organization, in their own session, asking for the site's own bound or preview store. A caller the engine's capability gate refuses gets its capability_not_held refusal; a period that is not one of the five gets the period's own sentence; every other refusal is one sentence, 'This deployable does not serve that store for you.' No refusal reads anything of a store.")
+builtin storeStatistics {
+  siteId   string!  @description("The storefront deployable.")
+  storeId  string!  @description("The store of one of its destinations, as a bare id.")
+  period   string!  @description("24h, 7d, 30d, 90d or 12m.")
+}
+
+/// The store statistics check (the 2026-11-11 store statistics design). NO @sdk: it is the
+/// storeStatisticsCheckSweep automation's work, and its handler admits that automation's maintenance
+/// principal at internal origin and no other caller, a cluster owner included. It walks each
+/// caught-up store's mirror rows again from Go and answers counts, for the rollup's reasons.
+@executor("integration.storeStats.check")
+@description("Carry every store's check pass on: walk each caught-up store's mirrored orders, lines and refunds again from its floor, compare each fact with what its row gives now by version and by content, write again what differs, and at the end of a pass delete, in batches, the facts no row answers for. Answers {stores, compared, mismatched, repaired, disagreeing, finished}: counts (compared counts comparisons, not rows: a row an overlap reads again is compared again), and the ids of the stores whose pass ended, never a row.")
+builtin storeStatisticsCheck { }
+
+/// Rebuild one store's statistics. NO @sdk, and no rank floor of the engine's: its handler admits a
+/// person who is a cluster owner and nobody else, a maintenance principal included, before it reads
+/// the store id. The walk then deletes the store's facts in batches and refills them, and a check
+/// begins once it has caught up; storeStatisticsCheckState says when that check ended clean.
+@executor("integration.storeStats.rebuild")
+@description("Cluster owners only. Rebuild one store's statistics: raise its generation, mark it rebuilding and delete its watermarks and check row, so the walk deletes its facts in batches and refills them, and a check begins when the walk has caught up. A store the statistics hold no row for is refused. Answers {storeId, rebuildingSince}.")
+builtin storeStatisticsRebuild {
+  storeId  string!  @description("The store, as its bare id or v1:shopify:store:<id>.")
+}
+
+/// One store's check, as the statistics hold it. NO @sdk: its handler admits a person who is a
+/// cluster owner and nobody else, before it reads the store id.
+@executor("integration.storeStats.checkState")
+@description("Cluster owners only. One store's check: when the pass under way began, when the last pass began and ended, when one last ended with nothing mismatched, and that last pass's counts: compared (comparisons, not rows: a row an overlap reads again is compared again), mismatched, repaired and disagreeing; a time that never was is null. A store the statistics hold no row for is refused. Answers one node, checkState: {storeId, passUnderWaySince, lastStartedAt, lastFinishedAt, cleanAt, compared, mismatched, repaired, disagreeing}.")
+builtin storeStatisticsCheckState {
+  storeId  string!  @description("The store, as its bare id or v1:shopify:store:<id>.")
 }
