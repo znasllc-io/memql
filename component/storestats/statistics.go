@@ -24,15 +24,9 @@ import (
 //
 // # Two locks on one door
 //
-// The construct declares @requiresCapability("execute",
-// "app:deployables/sales"), and the engine judges it in the organization of
-// the site `siteId` names (organizationCapabilityTarget). The handler does not
-// rely on it: a construct of another source can be bound to this executor
-// without the declaration, and a construct of the same name in another domain
-// can leave the engine's gate unresolved, and either would reach this handler
-// with no gate at all (statistics_gate_db_test.go mounts both). So
-// handleStatistics holds the
-// whole gate again, in Go, before anything of a store is read:
+// Revenue admission is held by the handler as well as the construct: the
+// permission and the site's ownership must be the same for every invocation.
+// handleStatistics holds the whole gate before anything of a store is read:
 //
 //  1. the period parses (statsperiod.Parse's own sentence refuses it);
 //  2. the site is read through `query siteById` under the CALLER's own
@@ -67,9 +61,9 @@ import (
 // bound or preview store of a site the caller could read and holds the part
 // for; no argument widens it.
 //
-// The read never takes internal origin: a read with internal origin would
-// pass @requiresCapability and the site's row authorization for whoever
-// asked. Nothing in this file or statistics_payload.go calls walkContext.
+// Admission uses the caller's context throughout. When no statistics frame
+// exists, the admitted request may read the bound store's connection markers
+// through connectionState, which returns only a recording state.
 
 // statisticsConcept is the concept of the one node the read answers with.
 // Not a DSL concept: the answer rides a synthetic node, as the email and
@@ -141,6 +135,14 @@ func (i *Integration) handleStatistics(ctx context.Context, args map[string]any,
 	stats, err := readStatistics(ctx, db, req, now)
 	if err != nil {
 		return nil, err
+	}
+	if stats.Bounds == nil {
+		state, err := i.connectionState(ctx, req.StoreID)
+		if err != nil {
+			return nil, err
+		}
+		stats.Recording.State = state
+		stats.Recording.Blocked = state == "not connected"
 	}
 	payload, err := json.Marshal(stats.Payload())
 	if err != nil {
@@ -250,6 +252,7 @@ type frameRow struct {
 	TaxesIncluded     sql.NullBool    `bun:"taxes_included"`
 	Development       sql.NullBool    `bun:"development"`
 	AllOrdersReadable bool            `bun:"all_orders_readable"`
+	RefundDetailFrom  sql.NullTime    `bun:"refund_detail_from"`
 	HistorySince      sql.NullTime    `bun:"history_since"`
 	VerdictState      string          `bun:"verdict_state"`
 	VerdictReasons    json.RawMessage `bun:"verdict_reasons,type:jsonb"`
@@ -275,7 +278,7 @@ func readFrame(ctx context.Context, tx bun.Tx, req statisticsRequest, now time.T
 	var row frameRow
 	err := tx.NewSelect().Table("store_sales_store").
 		Column("store_domain", "store_name", "currency", "timezone", "taxes_included", "development",
-			"all_orders_readable", "purging", "history_since", "verdict_state", "verdict_reasons", "verdict_since",
+			"all_orders_readable", "refund_detail_from", "purging", "history_since", "verdict_state", "verdict_reasons", "verdict_since",
 			"recording_blocked", "last_clear_at", "last_change_at", "rebuilding_since", "walked_through", "wholesale_enabled").
 		Where("store_id = ?", req.StoreID).Limit(1).Scan(ctx, &row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -297,6 +300,7 @@ func readFrame(ctx context.Context, tx bun.Tx, req statisticsRequest, now time.T
 		stats.zoneLoaded = true
 	}
 	stats.walked, stats.wholesaleEnabled = row.WalkedThrough.Valid, row.WholesaleEnabled
+	stats.refundDetailFrom = nullTime(row.RefundDetailFrom)
 	stats.TaxesIncluded, stats.Development = nullBool(row.TaxesIncluded), nullBool(row.Development)
 	older := !row.AllOrdersReadable
 	stats.OlderOrderChangesNotRecorded = &older
@@ -334,6 +338,12 @@ func readFrame(ctx context.Context, tx bun.Tx, req statisticsRequest, now time.T
 		stats.Recording.State, stats.Recording.Blocked, stats.AsOf = statePurging, true, nil
 	case row.RebuildingSince.Valid:
 		stats.Recording.State, stats.Recording.Blocked, stats.AsOf = stateRebuilding, true, nil
+	case !stats.Recording.Blocked && stats.Recording.State != "starting" && row.WalkedThrough.Valid && now.Sub(row.WalkedThrough.Time) > verdictStaleAfter:
+		stats.Recording.Blocked, stats.AsOf = true, nullTime(row.WalkedThrough)
+		stats.Recording.Reasons = append(stats.Recording.Reasons, Reason{Code: "statistics_behind", Sentence: "This store's figures are not up to date."})
+	}
+	if stats.Timezone != nil && !stats.zoneLoaded {
+		stats.Recording.Reasons = append(stats.Recording.Reasons, Reason{Code: "statistics_timezone_unavailable", Sentence: "The store's time zone could not be read, so its figures cannot be given."})
 	}
 	return stats, nil
 }

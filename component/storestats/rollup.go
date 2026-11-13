@@ -11,6 +11,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -93,9 +94,11 @@ import (
 // lists name. Nothing in it is drawn from a row but those ids (see "The reads
 // are called from here, never as steps").
 type RollupReport struct {
-	Stores int            `json:"stores"`
-	Rows   map[string]int `json:"rows"`
-	Facts  int            `json:"facts"`
+	unreadableLogged int
+	rebuildEnded     map[string]bool // this turn completed every source and ended its rebuild
+	Stores           int             `json:"stores"`
+	Rows             map[string]int  `json:"rows"`
+	Facts            int             `json:"facts"`
 	// Unreadable is the rows the run's pages met that could not be read,
 	// counted after each page's unreadable rows are reduced to one a row id,
 	// at its newest version (fold.go, readPageFrom): a row a page holds twice
@@ -184,6 +187,29 @@ func walkContext(ctx context.Context) context.Context {
 	return auth.ContextWithInternalOrigin(memql.ContextWithRootsOnlyRead(memql.ContextWithFreshRead(ctx)))
 }
 
+// connectionState is called only after servedRequest admits the sales part,
+// site and bound store. Its server-only projection contains two installation
+// markers; neither the row nor any other store fields enter the answer.
+func (i *Integration) connectionState(ctx context.Context, storeID string) (string, error) {
+	ctx = auth.ContextWithAccess(ctx, auth.MaintenanceActor("storeStatisticsRollupSweep"))
+	res, err := i.engine.Execute(walkContext(ctx), "query storeStatisticsConnection(storeId: "+langparser.QuoteString(storeID)+")")
+	if err != nil {
+		return "", fmt.Errorf("read the store statistics connection: %w", sanitized(err))
+	}
+	rows := memql.MaterializeRows(res)
+	if len(rows) == 0 {
+		return "not connected", nil
+	}
+	if len(rows) != 1 {
+		return "", errors.New("read the store statistics connection: expected one store")
+	}
+	fields := rowFields(rows[0])
+	if storeDataRemoved(fields) || fields["uninstalledAt"] != nil && rowText(fields, "uninstalledAt") != "" {
+		return "not connected", nil
+	}
+	return "starting", nil
+}
+
 // storeFailure is one store's turn failing. The other stores still run.
 type storeFailure struct {
 	StoreID string
@@ -237,10 +263,23 @@ func runRollup(ctx context.Context, i *Integration, now time.Time) (RollupReport
 			break
 		}
 		i.tookUp(id)
-		if err := i.rollStore(ctx, db, store, now, wholesale[id], walk, &rep); err != nil && !errors.Is(err, errRebuilt) {
-			i.logger.Warn("Store statistics for a store were not kept this run; the next run carries on",
-				"component", "storestats", "storeId", id, "error", err)
+		beforeUnreadable := rep.unreadableLogged
+		err := i.rollStore(ctx, db, store, now, wholesale[id], walk, &rep)
+		if n := rep.unreadableLogged - beforeUnreadable; n > 0 {
+			i.logger.Warn("Store statistics: mirrored rows could not be read; their last readable facts are kept", "component", "storestats", "storeId", id, "count", n)
+		}
+		permanent := errors.Is(err, errOverlapTooDense)
+		if err != nil && !errors.Is(err, errRebuilt) {
+			if !permanent || i.noted.change("walk:"+id, "overlap") {
+				message := "Store statistics for a store were not kept this run; the next run carries on"
+				if permanent {
+					message = "Store statistics: a store's overlap exceeds the walk's bound; its figures cannot advance"
+				}
+				i.logger.Warn(message, "component", "storestats", "storeId", id, "error", err)
+			}
 			failures = append(failures, &storeFailure{StoreID: id, Err: err})
+		} else if i.noted.change("walk:"+id, "") {
+			i.logger.Info("Store statistics: the store's walk is progressing again", "component", "storestats", "storeId", id)
 		}
 	}
 	return rep, errors.Join(failures...)
@@ -300,7 +339,7 @@ func (i *Integration) rollStore(ctx context.Context, db *bun.DB, store map[strin
 	if errors.Is(perr, errRebuilt) {
 		return perr
 	}
-	if err = errors.Join(err, perr); err != nil || outcome != outcomeRebuildEnded {
+	if err = errors.Join(err, perr); err != nil || (outcome != outcomeRebuildEnded && !rep.rebuildEnded[id]) {
 		return err
 	}
 	// A rebuild is proven by the check its end begins, here, once its walk has

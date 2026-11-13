@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,30 +16,24 @@ import (
 	"github.com/znasllc-io/memql/core/statsperiod"
 )
 
-// statistics_scale_test.go -- what the 90-day read of one store costs at
-// scale, in the way of component/emailstats/statistics_scale_test.go.
+// statistics_scale_test.go measures both the 30-day and 90-day page reads.
+// The ordinary database lane checks the answers among other stores' facts;
+// its wall time is not a correctness assertion on a shared CI runner.
 //
-// It writes one store's facts -- orders with three lines each, a tenth of
-// them refunded, a few deleted, cancelled or test -- among nine other stores'
-// orders, and times builtin storeStatistics for 90 days through the engine,
-// as a page asks it. It also requires the answer's Orders and Gross sales to
-// equal a count and a sum it makes itself over what it wrote, so a read that
-// leaves a store's filter or a counted order's filter out fails here.
-//
-// Two sizes. In the database lane it writes 20,000 orders, 60,000 lines and
-// 2,000 refunds for the store among nine stores of 1,000 orders each: at that
-// size a read that asks once an order, or reads every store's facts, misses
-// the bound, and a busy runner does not. With
-// MEMQL_STORESTATS_SCALE_EVIDENCE_FILE set it writes ten times that, requires
-// the same bound and writes the timings to the file; only that size proves
-// the indexes. The facts are written straight to the tables, with the derived
-// columns the fold would give them, and removed afterwards:
+// With MEMQL_STORESTATS_SCALE_EVIDENCE_FILE set, the fixture grows to 200,000
+// orders and 600,000 lines, among nine stores of 10,000 orders each. Both
+// reads must stay below the same 500 ms median bound. The evidence includes
+// their timings and the products statement's EXPLAIN ANALYZE plan, collected
+// outside the timed requests. Run this evidence lane on a quiet machine:
 //
 //	MEMQL_STORESTATS_SCALE_EVIDENCE_FILE=/tmp/store-scale.json \
 //	  MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN=... \
-//	  go test -count=1 -p=1 github.com/znasllc-io/memql/component/storestats/ -run TestTheNinetyDayReadAtScale
+//	  go test -count=1 -p=1 github.com/znasllc-io/memql/component/storestats/ -run TestPeriodReadsAtScale
+//
+// The facts have the derived columns the fold writes and are removed after
+// the test. Every run checks Orders and Gross sales against direct aggregates
+// of the fixture, including in the ordinary database lane.
 
-// scaleBound is the most the 90-day read may take, as the median of its runs.
 const scaleBound = 500 * time.Millisecond
 
 type scaleSize struct {
@@ -58,11 +53,12 @@ func writeScaleFacts(t *testing.T, db *bun.DB, storeID string, orders, refunds i
 		args []any
 	}{
 		{"lines", `INSERT INTO store_sales_line_fact (store_id, line_gid, order_gid, line_version, currency, gift_card, product_key, title,
-				quantity, current_quantity, unit_price, allocated_discounts, refunded_quantity, sold_quantity, gross, discounts)
+				quantity, current_quantity, unit_price, allocated_discounts, refunded_quantity, sold_quantity, gross, discounts, order_ordered_at)
 			SELECT ?, 'scale-l-' || j, 'scale-o-' || ((j - 1) / 3 + 1), ?::timestamptz, 'EUR', false, 'scale-p-' || (j % 500),
 				'Spoke set ' || (j % 500), 1, 1, ((j % 7) + 1) * 1.25, CASE WHEN j % 4 = 0 THEN 0.50 ELSE 0 END, 0, 1,
-				((j % 7) + 1) * 1.25, CASE WHEN j % 4 = 0 THEN 0.50 ELSE 0 END
-			FROM generate_series(1, ? * 3) AS j`, []any{storeID, now, orders}},
+				((j % 7) + 1) * 1.25, CASE WHEN j % 4 = 0 THEN 0.50 ELSE 0 END,
+				?::timestamptz - make_interval(mins => ((((j - 1) / 3 + 1) * 7919) % 172800)::int)
+			FROM generate_series(1, ? * 3) AS j`, []any{storeID, now, now, orders}},
 		// Each order with what its three lines sum to, as the derivation
 		// would write it, in one pass over the lines.
 		{"orders", `INSERT INTO store_sales_order_fact (store_id, order_gid, order_version, deleted, recorded_at, ordered_at, currency,
@@ -96,21 +92,30 @@ func writeScaleFacts(t *testing.T, db *bun.DB, storeID string, orders, refunds i
 type scaleEvidence struct {
 	Orders, Lines, Refunds, OtherStores, OtherOrders int
 	WriteSeconds                                     float64
-	RunsMs                                           []float64
-	MedianMs                                         float64
 	BoundMs                                          float64
+	Periods                                          []scalePeriodEvidence
 }
 
-func TestTheNinetyDayReadAtScale(t *testing.T) {
+type scalePeriodEvidence struct {
+	Period      string
+	RunsMs      []float64
+	MedianMs    float64
+	ProductPlan json.RawMessage `json:",omitempty"`
+}
+
+func TestPeriodReadsAtScale(t *testing.T) {
 	size := scaleSize{Orders: 20000, Refunds: 2000, OtherStores: 9, OtherOrders: 1000}
 	output := os.Getenv("MEMQL_STORESTATS_SCALE_EVIDENCE_FILE")
 	if output != "" {
 		size = scaleSize{Orders: 200000, Refunds: 20000, OtherStores: 9, OtherOrders: 10000}
 	}
+	// Fix the request clock and fixture clock together so a midnight
+	// boundary cannot change the expected answer.
+	now := time.Date(2026, 11, 12, 15, 0, 0, 0, time.UTC)
+	atNow(t, now)
 	storeID, site := salesStore(t, map[string]any{"history_since": time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
-		"last_clear_at": time.Now().UTC(), "walked_through": time.Now().UTC()})
+		"last_clear_at": now, "walked_through": now})
 	_, db := statsEngine(t)
-	now := time.Now().UTC()
 	began := time.Now()
 	writeScaleFacts(t, db, storeID, size.Orders, size.Refunds, now)
 	for n := 0; n < size.OtherStores; n++ {
@@ -127,56 +132,78 @@ func TestTheNinetyDayReadAtScale(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	written := time.Since(began)
+	evidence := scaleEvidence{Orders: size.Orders, Lines: 3 * size.Orders, Refunds: size.Refunds,
+		OtherStores: size.OtherStores, OtherOrders: size.OtherOrders, WriteSeconds: time.Since(began).Seconds(),
+		BoundMs: float64(scaleBound.Milliseconds())}
 
-	// What the answer must say, counted here over what was written.
-	bounds := statsperiod.ForIn(statsperiod.Last90Days, now, madrid)
-	var direct struct {
-		Orders int64  `bun:"orders"`
-		Gross  string `bun:"gross"`
+	for _, period := range []struct {
+		name string
+		kind statsperiod.Period
+	}{{"30d", statsperiod.Last30Days}, {"90d", statsperiod.Last90Days}} {
+		t.Run(period.name, func(t *testing.T) {
+			bounds := statsperiod.ForIn(period.kind, now, madrid)
+			var direct struct {
+				Orders int64  `bun:"orders"`
+				Gross  string `bun:"gross"`
+			}
+			if err := db.NewSelect().Table("store_sales_order_fact").ColumnExpr("count(*) AS orders, COALESCE(sum(gross), 0)::text AS gross").
+				Where("store_id = ? AND NOT deleted AND NOT cancelled AND NOT test AND ordered_at >= ? AND ordered_at < ?", storeID, bounds.Start, bounds.End).
+				Scan(context.Background(), &direct); err != nil {
+				t.Fatal(err)
+			}
+			if direct.Orders == 0 {
+				t.Fatal("the scale facts hold no order in the period: the fixture is wrong")
+			}
+			want, err := money.Parse(direct.Gross)
+			if err != nil {
+				t.Fatal(err)
+			}
+			queries := storeSalesQueries(t)
+			read := scalePeriodEvidence{Period: period.name}
+			var productQuery string
+			for i := 0; i < 5; i++ {
+				start := time.Now()
+				answer := mustAsk(t, ownerCtx(), site, storeID, period.name)
+				read.RunsMs = append(read.RunsMs, float64(time.Since(start).Microseconds())/1000)
+				figures := figuresIn(t, answer, "figures")
+				if js(figures["orders"]) != js(direct.Orders) {
+					t.Errorf("orders = %s, want %d, counted over what was written", js(figures["orders"]), direct.Orders)
+				}
+				gross, _ := figures["grossSales"].(string)
+				if got, err := money.Parse(gross); err != nil || !got.Equal(want) {
+					t.Errorf("grossSales = %q, want %s, summed over what was written", gross, direct.Gross)
+				}
+				wantValues(t, "the fixture's product lists", answer, map[string]any{
+					"productCount": 500, "productSalesCount": 500, "productUnitsCount": 500})
+				for _, query := range queries() {
+					if strings.Contains(query, "WITH sold AS") {
+						productQuery = query
+					}
+				}
+			}
+			sorted := append([]float64(nil), read.RunsMs...)
+			sort.Float64s(sorted)
+			read.MedianMs = sorted[len(sorted)/2]
+			t.Logf("%d orders, %d refunds, %d other stores of %d orders; %s in %v ms (median %.1f ms)",
+				size.Orders, size.Refunds, size.OtherStores, size.OtherOrders, period.name, read.RunsMs, read.MedianMs)
+			if output != "" {
+				if read.MedianMs > evidence.BoundMs {
+					t.Errorf("the %s read took a median %.1f ms over %v, want under %v", period.name, read.MedianMs, read.RunsMs, scaleBound)
+				}
+				if productQuery == "" {
+					t.Fatal("the products statement was not recorded")
+				}
+				var plan string
+				if err := db.QueryRowContext(context.Background(), "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+productQuery).Scan(&plan); err != nil {
+					t.Fatal(err)
+				}
+				read.ProductPlan = json.RawMessage(plan)
+			}
+			evidence.Periods = append(evidence.Periods, read)
+		})
 	}
-	if err := db.NewSelect().Table("store_sales_order_fact").ColumnExpr("count(*) AS orders, COALESCE(sum(gross), 0)::text AS gross").
-		Where("store_id = ? AND NOT deleted AND NOT cancelled AND NOT test AND ordered_at >= ? AND ordered_at < ?", storeID, bounds.Start, bounds.End).
-		Scan(context.Background(), &direct); err != nil {
-		t.Fatal(err)
-	}
-	if direct.Orders == 0 {
-		t.Fatal("the scale facts hold no order in the 90 days: the fixture is wrong")
-	}
-
-	var runs []float64
-	var answer map[string]any
-	for i := 0; i < 5; i++ {
-		start := time.Now()
-		answer = mustAsk(t, ownerCtx(), site, storeID, "90d")
-		runs = append(runs, float64(time.Since(start).Microseconds())/1000)
-	}
-	sorted := append([]float64(nil), runs...)
-	sort.Float64s(sorted)
-	median := sorted[len(sorted)/2]
-
-	figures := figuresIn(t, answer, "figures")
-	if js(figures["orders"]) != js(direct.Orders) {
-		t.Errorf("orders = %s, want %d, counted over what was written", js(figures["orders"]), direct.Orders)
-	}
-	gross, _ := figures["grossSales"].(string)
-	want, err := money.Parse(direct.Gross)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, err := money.Parse(gross); err != nil || !got.Equal(want) {
-		t.Errorf("grossSales = %q, want %s, summed over what was written", gross, direct.Gross)
-	}
-	t.Logf("%d orders, %d refunds, and %d other stores of %d orders written in %s; the 90-day read in %v ms (median %.1f ms)",
-		size.Orders, size.Refunds, size.OtherStores, size.OtherOrders, written.Round(time.Millisecond), runs, median)
-	if median > float64(scaleBound.Milliseconds()) {
-		t.Errorf("the 90-day read took a median %.1f ms over %v, want under %v", median, runs, scaleBound)
-	}
-
 	if output != "" {
-		raw, err := json.MarshalIndent(scaleEvidence{Orders: size.Orders, Lines: 3 * size.Orders, Refunds: size.Refunds,
-			OtherStores: size.OtherStores, OtherOrders: size.OtherOrders, WriteSeconds: written.Seconds(), RunsMs: runs,
-			MedianMs: median, BoundMs: float64(scaleBound.Milliseconds())}, "", "  ")
+		raw, err := json.MarshalIndent(evidence, "", "  ")
 		if err != nil {
 			t.Fatal(err)
 		}

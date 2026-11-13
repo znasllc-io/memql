@@ -73,6 +73,7 @@ var writersThroughWriteTx = []string{
 	"deriveOrders",
 	"keepWatermark",
 	"keepWalked",
+	"keepCaughtUp",
 	"startWholesalePass",
 	"wholesalePage",
 	"keepWholesaleOff",

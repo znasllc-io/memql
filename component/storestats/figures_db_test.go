@@ -1067,8 +1067,8 @@ func TestAStoreWithUnreadableRowsReadsAReason(t *testing.T) {
 		want string
 	}{
 		{0, ""},
-		{1, "1 record of this store could not be read and is left out of these figures."},
-		{3, "3 records of this store could not be read and are left out of these figures."},
+		{1, "1 record of this store could not be read and is left out of its figures."},
+		{3, "3 records of this store could not be read and are left out of its figures."},
 	} {
 		storeID, site := salesStore(t, nil)
 		sell(t, storeID, one(1, nov(3), "10.00"))
@@ -1101,7 +1101,7 @@ func TestAStoreWithUnreadableRowsReadsAReason(t *testing.T) {
 		t.Fatal(err)
 	}
 	if reasons := unreadableReasons(t, ask(t, storeID, site)); len(reasons) != 1 ||
-		reasons[0]["sentence"] != "1 record of this store could not be read and is left out of these figures." {
+		reasons[0]["sentence"] != "1 record of this store could not be read and is left out of its figures." {
 		t.Errorf("one record cleared: reasons %s, want the singular", js(reasons))
 	}
 }

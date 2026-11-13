@@ -190,3 +190,10 @@ shape store storeStatisticsStore {
   redactedAt
   health
 }
+
+/// Only the installation markers needed when a store has no statistics frame.
+@row
+shape store storeStatisticsConnection {
+  redactedAt
+  uninstalledAt
+}

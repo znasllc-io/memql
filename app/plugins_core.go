@@ -144,9 +144,9 @@ import (
 	// declared in dsl/shopify/overlay/builtins.memql, which every binary loads,
 	// so a capability missing from the registry is a boot-time resolution
 	// failure.
-	_ "github.com/znasllc-io/memql/component/storestats"
 	_ "github.com/znasllc-io/memql/component/sitehealth"
 	_ "github.com/znasllc-io/memql/component/sitetraffic"
+	_ "github.com/znasllc-io/memql/component/storestats"
 	_ "github.com/znasllc-io/memql/integrations/shopify"
 	_ "github.com/znasllc-io/memql/integrations/similarity"
 	_ "github.com/znasllc-io/memql/integrations/timeutil"

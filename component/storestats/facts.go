@@ -45,10 +45,10 @@ import (
 
 // OrderFact is one mirrored order as the figures read it.
 type OrderFact struct {
-	StoreID, OrderGID   string
-	Version, RecordedAt time.Time // row.createdAt; syncedAt
-	OrderedAt           time.Time
-	Currency, BuyerKey  string
+	StoreID, OrderGID          string
+	Version, RecordedAt        time.Time // row.createdAt; syncedAt
+	OrderedAt, SourceCreatedAt time.Time
+	Currency, BuyerKey         string
 	// Cancelled, Test and TaxIncluded are what the order says; which orders
 	// count is the derivation's.
 	Cancelled, Test, TaxIncluded bool
@@ -132,6 +132,7 @@ func orderFactFrom(row fields) (OrderFact, rowKind, error) {
 		return f, rowGone, nil
 	}
 	f.OrderedAt = r.dated()
+	f.SourceCreatedAt = r.instant("sourceCreatedAt")
 	f.Currency = r.required("currencyCode")
 	r.currency, r.currencyFrom = f.Currency, "currencyCode"
 	f.BuyerKey = r.str("customerGid")
@@ -382,7 +383,7 @@ func quantityOf(v any) (int, bool) {
 // nil one. Email is left out; the check judges wholesale beside it.
 func (f OrderFact) same(g OrderFact) bool {
 	return f.StoreID == g.StoreID && f.OrderGID == g.OrderGID &&
-		f.Version.Equal(g.Version) && f.RecordedAt.Equal(g.RecordedAt) && f.OrderedAt.Equal(g.OrderedAt) &&
+		f.Version.Equal(g.Version) && f.RecordedAt.Equal(g.RecordedAt) && f.OrderedAt.Equal(g.OrderedAt) && f.SourceCreatedAt.Equal(g.SourceCreatedAt) &&
 		f.Currency == g.Currency && f.BuyerKey == g.BuyerKey &&
 		f.Cancelled == g.Cancelled && f.Test == g.Test && f.TaxIncluded == g.TaxIncluded &&
 		f.Shipping.Equal(g.Shipping) && f.Tax.Equal(g.Tax) && f.Duties.Equal(g.Duties) &&

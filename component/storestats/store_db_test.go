@@ -67,7 +67,7 @@ func verdictReply(state string, since time.Time, reasons ...map[string]any) map[
 	for _, r := range reasons {
 		rs = append(rs, r)
 	}
-	return map[string]any{"state": state, "since": since.UTC().Format(time.RFC3339), "reasons": rs, "outsideConcepts": []any{}}
+	return map[string]any{"state": state, "since": since.UTC().Format(time.RFC3339), "reasons": rs, "outsideConcepts": []any{}, "arrivingConcepts": []any{}}
 }
 
 var (
@@ -506,11 +506,11 @@ func TestAVerdictThatCannotBeReadIsNotKnown(t *testing.T) {
 	}
 	// And the default reading: a malformed reply is not read as clear.
 	for name, reply := range map[string]map[string]any{
-		"no state":           {"since": t1.Format(time.RFC3339), "reasons": []any{}, "outsideConcepts": []any{}},
-		"a since not a time": {"state": "recording", "since": "yesterday", "reasons": []any{}, "outsideConcepts": []any{}},
-		"reasons not a list": {"state": "recording", "since": t1.Format(time.RFC3339), "reasons": "none", "outsideConcepts": []any{}},
-		"a reason not a map": {"state": "recording", "since": t1.Format(time.RFC3339), "reasons": []any{"x"}, "outsideConcepts": []any{}},
-		"no reasons at all":  {"state": "recording", "since": t1.Format(time.RFC3339), "outsideConcepts": []any{}},
+		"no state":           {"since": t1.Format(time.RFC3339), "reasons": []any{}, "outsideConcepts": []any{}, "arrivingConcepts": []any{}},
+		"a since not a time": {"state": "recording", "since": "yesterday", "reasons": []any{}, "outsideConcepts": []any{}, "arrivingConcepts": []any{}},
+		"reasons not a list": {"state": "recording", "since": t1.Format(time.RFC3339), "reasons": "none", "outsideConcepts": []any{}, "arrivingConcepts": []any{}},
+		"a reason not a map": {"state": "recording", "since": t1.Format(time.RFC3339), "reasons": []any{"x"}, "outsideConcepts": []any{}, "arrivingConcepts": []any{}},
+		"no reasons at all":  {"state": "recording", "since": t1.Format(time.RFC3339), "outsideConcepts": []any{}, "arrivingConcepts": []any{}},
 	} {
 		if _, err := verdictFromReply(reply); err == nil {
 			t.Errorf("%s: the reply was read as a verdict, want it unreadable", name)
@@ -600,6 +600,7 @@ func TestALowerDefinitionRebuilds(t *testing.T) {
 	// The walk: writes the store's two facts under the generation it was
 	// handed, and walks through the instant it is set to.
 	var through time.Time
+	caughtUp := true
 	walked := 0
 	i.walkStore = func(ctx context.Context, store map[string]any, generation int64, _ time.Time, _ wholesaleState, _ *RollupReport) error {
 		if store["id"] != id {
@@ -616,7 +617,7 @@ func TestALowerDefinitionRebuilds(t *testing.T) {
 					return err
 				}
 			}
-			_, err := tx.ExecContext(ctx, `UPDATE store_sales_store SET walked_through = ? WHERE store_id = ?`, through, id)
+			_, err := tx.ExecContext(ctx, `UPDATE store_sales_store SET walked_through = ?, caught_up = ? WHERE store_id = ?`, through, caughtUp, id)
 			return err
 		})
 	}
@@ -659,11 +660,10 @@ func TestALowerDefinitionRebuilds(t *testing.T) {
 		t.Errorf("the run after the first fill's walk reached the clock left rebuilding_since %v and generation %d, want cleared and %d",
 			k.rebuildingSince, k.generation, made)
 	}
-	// The check that run began when the rebuild ended (check.go) deleted the
-	// two facts this walk writes, which no mirrored row answers for; the walk
-	// writes them again, so they are what a rebuild must end with.
-	if got := facts(); len(got) != 0 {
-		t.Errorf("the rebuild's check left the facts no row answers for: %v", got)
+	// An entirely empty mirrored source is insufficient evidence to delete
+	// facts; the conservative check preserves both until it witnesses rows.
+	if got := facts(); len(got) != 2 {
+		t.Errorf("an empty check source deleted facts: %v", got)
 	}
 	before := []string{"o-1", "o-2"}
 
@@ -672,6 +672,7 @@ func TestALowerDefinitionRebuilds(t *testing.T) {
 	exec(t, `UPDATE store_sales_store SET definition = 0 WHERE store_id = ?`, id)
 	now = now.Add(time.Minute)
 	through = now.Add(-time.Hour)
+	caughtUp = false
 	rep, err = runRollup(principalCtx(t, "storeStatisticsRollupSweep"), i, now)
 	if err != nil {
 		t.Fatal(err)
@@ -690,6 +691,7 @@ func TestALowerDefinitionRebuilds(t *testing.T) {
 	// transaction it writes the store's row in.
 	now = now.Add(time.Minute)
 	through = now.Add(-2 * time.Minute)
+	caughtUp = true
 	if _, err := runRollup(principalCtx(t, "storeStatisticsRollupSweep"), i, now); err != nil {
 		t.Fatal(err)
 	}
@@ -701,7 +703,7 @@ func TestALowerDefinitionRebuilds(t *testing.T) {
 		t.Fatal(err)
 	}
 	if k := keptRow(t, id); k.rebuildingSince.Valid || k.generation != raised {
-		t.Errorf("once the walk was within five minutes of the clock, rebuilding_since %v and generation %d, want cleared and %d", k.rebuildingSince, k.generation, raised)
+		t.Errorf("once the walk recorded that it caught up, rebuilding_since %v and generation %d, want cleared and %d", k.rebuildingSince, k.generation, raised)
 	}
 }
 
@@ -1204,7 +1206,7 @@ func TestAQuietStoreCostsOneLockedTransactionARun(t *testing.T) {
 	id := keptStore(t)
 	store := storeOf(id, nil)
 	keep(t, i, store, time.Now()) // the first fill
-	exec(t, `UPDATE store_sales_store SET walked_through = now() WHERE store_id = ?`, id)
+	exec(t, `UPDATE store_sales_store SET walked_through = now(), caught_up = true WHERE store_id = ?`, id)
 	keep(t, i, store, time.Now()) // the walk reached the clock: ends the first fill's rebuild
 	if keptRow(t, id).rebuildingSince.Valid {
 		t.Fatal("the store is still rebuilding")

@@ -92,10 +92,10 @@ import (
 // read, and the read can say how many rows a figure leaves out.
 //
 // It is counted in the run's report (RollupReport.Unreadable: what this run
-// met) and logged once per row and version, when its record is new or its
-// version moved: a re-read inside the overlap writes no line. A row with no id
-// of its own, or no write time, cannot be recorded: it is counted and logged
-// every time it is met. What depends on an unreadable line shows it too: its
+// met). New or changed unreadable records contribute to one warning per
+// store and run; a re-read inside the overlap contributes no new warning.
+// A row with no id or write time cannot be recorded and contributes whenever
+// it is met. What depends on an unreadable line shows it too: its
 // order's recorded quantities fall short of subtotalLineItemsQuantity, so
 // lines_complete is false (derive.go).
 //
@@ -160,23 +160,31 @@ func (i *Integration) walkOneStore(ctx context.Context, store map[string]any, ge
 		for _, s := range walkedSources {
 			report.Behind = append(report.Behind, id+"/"+s.source)
 		}
-		return nil
+		return writeTx(ctx, db, id, generation, func(ctx context.Context, tx bun.Tx) error {
+			return keepCaughtUp(ctx, tx, id, false)
+		})
 	}
 	floor, err := ensureFloor(ctx, i, id, now)
 	if err != nil {
-		return err
+		kept := writeTx(ctx, db, id, generation, func(ctx context.Context, tx bun.Tx) error {
+			return keepCaughtUp(ctx, tx, id, false)
+		})
+		return errors.Join(err, kept)
 	}
 	clock := time.Now
 	if i.now != nil {
 		clock = i.now
 	}
 	var failures []error
+	caughtUp := true
 	for _, s := range walkedSources {
 		if turnSpent(ctx) {
 			report.Behind = append(report.Behind, id+"/"+s.source)
+			caughtUp = false
 			continue
 		}
-		err := i.walkOneSource(ctx, db, id, s, floor, generation, clock, wholesale, report)
+		complete, err := i.walkOneSource(ctx, db, id, s, floor, generation, clock, wholesale, report)
+		caughtUp = caughtUp && complete && err == nil
 		if errors.Is(err, errRebuilt) {
 			return err
 		}
@@ -184,23 +192,38 @@ func (i *Integration) walkOneStore(ctx context.Context, store map[string]any, ge
 			failures = append(failures, err)
 		}
 	}
+	var ended bool
 	if err := writeTx(ctx, db, id, generation, func(ctx context.Context, tx bun.Tx) error {
-		return keepWalked(ctx, tx, id)
+		if err := keepWalked(ctx, tx, id); err != nil {
+			return err
+		}
+		if err := keepCaughtUp(ctx, tx, id, caughtUp); err != nil {
+			return err
+		}
+		var err error
+		ended, err = clearRebuilding(ctx, tx, id, now)
+		return err
 	}); err != nil {
 		if errors.Is(err, errRebuilt) {
 			return err
 		}
 		failures = append(failures, fmt.Errorf("store %s: keep how far the store is walked: %w", id, sanitized(err)))
 	}
+	if ended {
+		if report.rebuildEnded == nil {
+			report.rebuildEnded = map[string]bool{}
+		}
+		report.rebuildEnded[id] = true
+	}
 	return errors.Join(failures...)
 }
 
 // walkOneSource walks one source of the store from its watermark.
 func (i *Integration) walkOneSource(ctx context.Context, db *bun.DB, storeID string, s walkedSource, floor time.Time, generation int64,
-	clock func() time.Time, wholesale wholesaleState, report *RollupReport) error {
+	clock func() time.Time, wholesale wholesaleState, report *RollupReport) (bool, error) {
 	w, err := watermarkOf(ctx, db, storeID, s.source)
 	if err != nil {
-		return err
+		return false, err
 	}
 	kept := w
 	next, caughtUp, err := walkSource(ctx, i.engine, s.query, storeID, floor, w, clock, maxPagesPerRun, func(page walkPage) error {
@@ -212,14 +235,11 @@ func (i *Integration) walkOneSource(ctx context.Context, db *bun.DB, storeID str
 		report.Rows[s.source] += len(page.Rows)
 		report.Facts += res.Facts
 		report.Unreadable += res.Unreadable
-		for _, u := range res.logged {
-			i.logger.Warn("Store statistics: a mirrored row could not be read; it was recorded and no fact was written",
-				"component", "storestats", "storeId", storeID, "source", s.source, "gid", u.gid, "field", u.field, "error", u.err.Error())
-		}
+		report.unreadableLogged += len(res.logged)
 		return nil
 	})
 	if errors.Is(err, errRebuilt) {
-		return err
+		return false, err
 	}
 	// A width the walk changed with no page handed on -- a page that
 	// outlasted a read halves it -- is kept for the next run. A source with no
@@ -234,18 +254,18 @@ func (i *Integration) walkOneSource(ctx context.Context, db *bun.DB, storeID str
 			return keepWatermark(ctx, tx, storeID, s.source, next, time.Time{}, time.Time{})
 		}); kerr != nil {
 			if errors.Is(kerr, errRebuilt) {
-				return kerr
+				return false, kerr
 			}
 			err = errors.Join(err, fmt.Errorf("store %s, %s: keep the walk's window: %w", storeID, s.source, sanitized(kerr)))
 		}
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	if caughtUp.IsZero() {
 		report.Behind = append(report.Behind, storeID+"/"+s.source)
 	}
-	return nil
+	return !caughtUp.IsZero(), nil
 }
 
 // watermarkOf reads where the source's walk stands: the zero window when it
@@ -491,25 +511,26 @@ func later(a, b time.Time) time.Time {
 type orderFactRow struct {
 	bun.BaseModel `bun:"table:store_sales_order_fact,alias:f"`
 
-	StoreID                string    `bun:"store_id"`
-	OrderGID               string    `bun:"order_gid"`
-	OrderVersion           time.Time `bun:"order_version"`
-	Deleted                bool      `bun:"deleted"`
-	RecordedAt             time.Time `bun:"recorded_at"`
-	OrderedAt              time.Time `bun:"ordered_at"`
-	Currency               string    `bun:"currency"`
-	Cancelled              bool      `bun:"cancelled"`
-	Test                   bool      `bun:"test"`
-	TaxesIncluded          bool      `bun:"taxes_included"`
-	BuyerKey               string    `bun:"buyer_key"`
-	Wholesale              bool      `bun:"wholesale"`
-	Shipping               string    `bun:"shipping"`
-	Tax                    string    `bun:"tax"`
-	Duties                 string    `bun:"duties"`
-	ExpectedQuantity       int       `bun:"expected_quantity"`
-	ShopifyCurrentSubtotal *string   `bun:"shopify_current_subtotal"`
-	ShopifyTotalDiscounts  *string   `bun:"shopify_total_discounts"`
-	ShopifyTotalRefunded   *string   `bun:"shopify_total_refunded"`
+	StoreID                string     `bun:"store_id"`
+	OrderGID               string     `bun:"order_gid"`
+	OrderVersion           time.Time  `bun:"order_version"`
+	Deleted                bool       `bun:"deleted"`
+	RecordedAt             time.Time  `bun:"recorded_at"`
+	OrderedAt              time.Time  `bun:"ordered_at"`
+	SourceCreatedAt        *time.Time `bun:"source_created_at"`
+	Currency               string     `bun:"currency"`
+	Cancelled              bool       `bun:"cancelled"`
+	Test                   bool       `bun:"test"`
+	TaxesIncluded          bool       `bun:"taxes_included"`
+	BuyerKey               string     `bun:"buyer_key"`
+	Wholesale              bool       `bun:"wholesale"`
+	Shipping               string     `bun:"shipping"`
+	Tax                    string     `bun:"tax"`
+	Duties                 string     `bun:"duties"`
+	ExpectedQuantity       int        `bun:"expected_quantity"`
+	ShopifyCurrentSubtotal *string    `bun:"shopify_current_subtotal"`
+	ShopifyTotalDiscounts  *string    `bun:"shopify_total_discounts"`
+	ShopifyTotalRefunded   *string    `bun:"shopify_total_refunded"`
 }
 
 type lineFactRow struct {
@@ -589,7 +610,7 @@ func orderRowOf(storeID string, o foldedOrder) orderFactRow {
 	}
 	return orderFactRow{
 		StoreID: storeID, OrderGID: f.OrderGID, OrderVersion: f.Version,
-		RecordedAt: recordedOr(f.RecordedAt, f.Version), OrderedAt: f.OrderedAt,
+		RecordedAt: recordedOr(f.RecordedAt, f.Version), OrderedAt: f.OrderedAt, SourceCreatedAt: optionalInstant(f.SourceCreatedAt),
 		Currency: f.Currency, Cancelled: f.Cancelled, Test: f.Test, TaxesIncluded: f.TaxIncluded,
 		BuyerKey: f.BuyerKey, Wholesale: o.wholesale,
 		Shipping: amountText(f.Shipping), Tax: amountText(f.Tax), Duties: amountText(f.Duties),
@@ -924,4 +945,19 @@ func keepWalked(ctx context.Context, tx bun.Tx, storeID string) error {
 		return fmt.Errorf("keep how far the store is walked: %w", err)
 	}
 	return nil
+}
+
+// keepCaughtUp records the result of this turn, independent of wall-clock age.
+func keepCaughtUp(ctx context.Context, tx bun.Tx, storeID string, caughtUp bool) error {
+	_, err := tx.NewUpdate().TableExpr("store_sales_store").Set("caught_up = ?", caughtUp).Where("store_id = ?", storeID).Exec(ctx)
+	return err
+}
+
+// optionalInstant preserves an unknown source date as null, never as a guessed
+// date. Refund reachability must not be inferred from the processing date.
+func optionalInstant(at time.Time) *time.Time {
+	if at.IsZero() {
+		return nil
+	}
+	return &at
 }

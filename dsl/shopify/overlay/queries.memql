@@ -6,6 +6,7 @@ use shopify.generated.inventoryLevel.{ inventoryLevel, inventoryLevelMirror }
 use shopify.generated.abandonedCheckout.{ abandonedCheckout, abandonedCheckoutMirror }
 use shopify.overlay.shapes.{ storeFull }
 use shopify.overlay.shapes.{ storeStatisticsOrder, storeStatisticsLine, storeStatisticsRefund, storeStatisticsBuyer, storeStatisticsShop, storeStatisticsStore }
+use shopify.overlay.shapes.{ storeStatisticsConnection }
 use shopify.generated.shop.{ shop }
 use shopify.generated.productVariant.{ productVariant, productVariantMirror }
 use common.traits.{ isNotDeleted, statusIsPending }
@@ -535,4 +536,20 @@ query store storeStatisticsStoreAt {
   asOf      args.at ?? latest
   paginate  1
   shape     storeStatisticsStore
+}
+
+/// The admitted statistics handler reads only its bound store's connection.
+/// Store installation markers belong to the connector, not actor.userId;
+/// the handler admits the sales part and site before borrowing maintenance
+/// authority for this projection. No credentials or owner fields are read.
+@actor
+@serverOnly
+@cache(0)
+query store storeStatisticsConnection {
+  args {
+    storeId string!
+  }
+  filter row => actor.isClusterOwner == true && row.id == args.storeId
+  paginate 1
+  shape storeStatisticsConnection
 }

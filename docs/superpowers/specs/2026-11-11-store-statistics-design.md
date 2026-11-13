@@ -459,7 +459,7 @@ indexes `(store_id, ordered_at)` and `(store_id, buyer_key, ordered_at)`:
 | `lines_complete` | `BOOLEAN NOT NULL` | *derived*: the sum of `quantity` over its lines is at least `expected_quantity` (L8) |
 | `checked_at` | `TIMESTAMPTZ` | U8 |
 
-`store_sales_line_fact`, primary key `(store_id, line_gid)`, index `(store_id, order_gid)`.
+`store_sales_line_fact`, primary key `(store_id, line_gid)`, indexes `(store_id, order_gid)` and `(store_id, order_ordered_at)`. The second lets the products read select sold lines by period before joining their counted parents.
 The key is the store and the line, because a tombstone carries a row's identity and may
 carry no parent, and it must still find its fact. The index serves every read that goes
 from an order to its lines; no read looks a line up by its product, so no index is kept
@@ -475,6 +475,7 @@ by product:
 | `product_key`, `title` | `TEXT NOT NULL` | `productGid` or `title:` and the title; the line's title |
 | `quantity`, `current_quantity` | `INTEGER NOT NULL` | q0, q1 |
 | `unit_price`, `allocated_discounts` | `NUMERIC NOT NULL` | P, A |
+| `order_ordered_at` | `TIMESTAMPTZ` | *derived*: the live parent order’s `ordered_at`, null before it is folded or after it is deleted; updated with parent date corrections in the same transaction |
 | `refunded_quantity`, `sold_quantity` | `INTEGER NOT NULL` | *derived*: qr, qs |
 | `gross`, `discounts` | `NUMERIC NOT NULL` | *derived*: G(L), D(L) |
 | `checked_at` | `TIMESTAMPTZ` | U8 |
@@ -817,7 +818,7 @@ wholesale judgement); U9 is two, the first with U11; U13 is two.
 
 | Situation | What happens |
 | --- | --- |
-| A store with many thousands of orders | The read is grouped SQL over indexed tables; the scale test holds 200,000 orders, 600,000 lines and 20,000 refunds under 500 ms for 90 days when it is run on demand, and a tenth of that in the lane on every run, where it catches a read that asks once an order; only the full size proves the indexes. The first fill reads at most 40 pages of 250 of each source per minute per store, about 10,000 orders a minute, with `walked_through` and D16 keeping figures absent until it catches up. |
+| A store with many thousands of orders | The read is grouped SQL over indexed tables. The ordinary database lane checks 30-day and 90-day answers at 20,000 orders and 60,000 lines among nine other stores. The opt-in evidence test uses 200,000 orders, 600,000 lines and 20,000 refunds, requires a median below 500 ms for each period, and records the products query plans. Measured medians were 381 ms and 416 ms respectively, with host load averages of 5.46 before the run and 3.99 after it; these are measurements on that machine and load, not a general response-time guarantee. The 30-day plan used the lines’ `(store_id, order_ordered_at)` index; the broader 90-day plan selected a parallel scan. The first fill reads at most 40 pages of 250 of each source per minute per store, about 10,000 orders a minute, with `walked_through` and D16 keeping figures absent until it catches up. |
 | A long history | A read of rows written since an instant costs every version of the concept written since then, on the whole cluster (`component/memql/latest_scan_keys.go`), and a first fill, a rebuild and the check all start at the beginning; a first page over a large mirror would outlast the statement timeout on every run, as the email walk's once did. So the past is read in bounded windows, each as of its end: a day wide at first, halved when a page outlasts a read, doubled after a window that read cleanly. Only a read that reaches the clock is unbounded. Where the past begins is not a compiled date: it is an instant before the store row was first written, found once by asking the engine for the store row as of earlier and earlier instants and kept as `history_floor`. A row's own `createdAt` cannot say it, being the write time of the row's newest version; the probe holds as long as no retention prunes the store row's versions, which a test pins. The check's "within a day" holds for a store whose three sources each fit 24 runs of 40 pages; a larger one takes proportionally longer. |
 | An order with more lines than the mirror fetches | On the mirror's branch an order's lines past the first hundred are read, up to fifty pages (F22). The `lines_complete` guard stays for what that cannot reach: for any order whose recorded quantities fall short of `subtotalLineItemsQuantity`, `lines_complete` is false, every line-derived figure for its period is a floor ("or more"), and the products list says how many orders are short. |
 | A refund with more than 50 lines | `lines_complete` is false on its fact; Refunds stays exact, because it starts from `totalRefundedSet`. A missing refund line would lower Units sold, so the figure is not a floor: Units sold is absent for the period, `incompleteRefunds` counts such refunds, and the products footer says so. |

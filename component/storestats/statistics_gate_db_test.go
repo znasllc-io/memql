@@ -29,9 +29,8 @@ import (
 // THE GATE IS TWO LOCKS ON ONE DOOR. The engine judges the construct's
 // @requiresCapability("execute", "app:deployables/sales") in the organization
 // of the site the call names; the handler judges it again in Go, against the
-// site it read under the caller's own context, because a construct of
-// another source can reach the same executor without the declaration
-// (TestASecondConstructOnTheSameExecutorIsRefusedByTheHandler). Then the
+// site it read under the caller's own context. The requirement applies to
+// every invocation of this executor, regardless of its construct. Then the
 // handler holds the store to the site's own bound or preview store. Every
 // refusal of the handler's is one sentence, and none reads a store_sales_
 // table: storeSalesQueries proves it on the shared handle.
@@ -50,7 +49,7 @@ func recordingFrame(over map[string]any) map[string]any {
 		"timezone": "Europe/Madrid", "taxes_included": false, "development": false, "all_orders_readable": true,
 		"history_since": time.Date(2025, 9, 11, 22, 0, 0, 0, time.UTC), "verdict_state": "recording",
 		"verdict_reasons": []any{}, "verdict_since": at.Add(-24 * time.Hour), "last_clear_at": at,
-		"last_change_at": at.Add(-5 * time.Minute), "walked_through": at,
+		"last_change_at": at.Add(-5 * time.Minute), "walked_through": madridNow, "caught_up": true,
 	}
 	for k, v := range over {
 		frame[k] = v
@@ -413,6 +412,7 @@ func recordingOf(t *testing.T, answer map[string]any) map[string]any {
 }
 
 func TestABlockedStoreIsAnsweredAsOfItsLastClearRun(t *testing.T) {
+	atNow(t, madridNow)
 	clear := time.Date(2025, 11, 8, 9, 0, 0, 0, time.UTC)
 	const clearInMadrid = "2025-11-08T10:00:00+01:00"
 	orderCheck := []any{map[string]any{"code": "check_failing", "sentence": "Orders are not checked."}}
@@ -455,6 +455,7 @@ func TestABlockedStoreIsAnsweredAsOfItsLastClearRun(t *testing.T) {
 }
 
 func TestAReasonThatFreezesNothingIsStillInTheAnswer(t *testing.T) {
+	atNow(t, madridNow)
 	storeID := newStore(t)
 	privacy := "A privacy request has been failing for more than a day."
 	storeFrame(t, storeID, recordingFrame(map[string]any{"verdict_state": "needs attention",
@@ -568,6 +569,7 @@ func TestOneRecordedZoneIsSpelledOneWay(t *testing.T) {
 }
 
 func TestAGrantWithoutAllOrdersSaysOlderChangesAreNotRecorded(t *testing.T) {
+	atNow(t, madridNow)
 	storeID := newStore(t)
 	approval := []any{map[string]any{"code": "approval_outdated", "sentence": "Approve the app's new permissions in Shopify."}}
 	storeFrame(t, storeID, recordingFrame(map[string]any{"all_orders_readable": false, "verdict_state": "needs attention",
@@ -605,7 +607,7 @@ func TestAStoreTheWalkHasNotSeenYetIsAnsweredAsStarting(t *testing.T) {
 var answerKeys = []string{"storeId", "siteId", "storeName", "storeDomain", "destination", "currency", "timezone", "development",
 	"taxesIncluded", "olderOrderChangesNotRecorded", "period", "bucket", "start", "end", "prevStart", "historySince",
 	"lastChangeAt", "asOf", "periodZone", "recording", "rebuilding", "figures", "previous", "floors", "series", "productsBySales",
-	"productsByUnits", "productCount", "refundsWithoutItem", "incompleteOrders", "incompleteRefunds", "refundsNotRead",
+	"productsByUnits", "productCount", "productSalesCount", "productUnitsCount", "refundsWithoutItem", "incompleteOrders", "incompleteRefunds", "refundsNotRead", "refundsTooOldToRead",
 	"buyers", "wholesale", "otherCurrencies"}
 
 func TestAStartingStoresFiguresAreNullAndEveryKeyIsThere(t *testing.T) {
@@ -771,19 +773,8 @@ builtin statisticsWithoutAPart {
 	}
 }
 
-// TestAConstructOfTheSameNameInAnotherDomainDoesNotOpenTheEnginesBuiltin: a
-// domain of another source declares a builtin of the engine's builtin's name,
-// on the same executor and with no capability requirement.
-//
-// What the engine does today, pinned only as "refused, nothing read" so the
-// engine's own fix (a construct's name belonging to the engine's constructs,
-// and the execution gate failing closed) changes no assertion here:
-//   - the bare name names two constructs, and the call is "not found";
-//   - the engine's builtin lives in the namespace shopify/overlay, which no
-//     call string can name: the parser refuses the slash, and the dotted
-//     spellings are not found;
-//   - the other domain's construct, named by its own namespace, reaches the
-//     handler with no engine gate at all, and the handler refuses it.
+// Every invocation of the statistics executor preserves revenue admission,
+// regardless of how a mounted domain names its constructs.
 func TestAConstructOfTheSameNameInAnotherDomainDoesNotOpenTheEnginesBuiltin(t *testing.T) {
 	storeID, site := servedStore(t)
 	eng, _ := fixtureEngine(t, map[string]fs.FS{"storestatsfixtureb": fixtureDomain(`@executor("integration.storeStats.statistics")
@@ -807,10 +798,8 @@ builtin storeStatistics {
 	member := memberCtx(t, site, false)
 	for _, name := range []string{"storeStatistics", "shopify/overlay.storeStatistics", "shopify.overlay.storeStatistics", "shopify.storeStatistics"} {
 		answer, err := askOn(t, eng, reader, statisticsCall(name, site, storeID, "7d"))
-		// Today: "not found" for every name the engine resolves, and the
-		// parser's refusal for the slash. The engine's own fix may resolve a
-		// name to its construct instead, and then its gate or the handler
-		// refuses: those are the only refusals this call may meet.
+		// Name resolution and authorization may both refuse a request. None
+		// of those refusals may disclose a store or reach its facts.
 		meant := false
 		if err != nil {
 			for _, refusal := range []string{"not found", "unexpected token after expression", memql.CodeCapabilityNotHeld, notServed} {
@@ -837,6 +826,7 @@ builtin storeStatistics {
 // given yet. A purge comes first: a rebuild sets both, and its facts are
 // deleted before it is walked again.
 func TestAPurgingOrRebuildingStoreIsNotCurrent(t *testing.T) {
+	atNow(t, madridNow)
 	since := time.Date(2025, 11, 8, 9, 30, 0, 0, time.UTC)
 	for _, c := range []struct {
 		label   string
@@ -881,15 +871,10 @@ func TestBorrowedAuthorityIsNeverAnsweredRevenue(t *testing.T) {
 	refusedReadingNothing(t, "the holder's borrowed authority, at the handler", read, map[string]any{"nodes": len(nodes)}, err, notServed)
 }
 
-// TestTheHandlerAndTheEnginesGateAgree: for every kind of caller the review
-// probed, the handler's answer about the part is the engine's gate's, because
-// both ask the engine's one method (memql's RequirementHeldFor). The engine's
-// gate is read through the real builtin: refused with capability_not_held, or
-// passed. The handler is called directly with the same caller. Two callers
-// are left to their own tests: borrowed authority, which the handler refuses
-// on purpose (TestBorrowedAuthorityIsNeverAnsweredRevenue), and internal
-// origin, which the engine's gate passes before any requirement is judged and
-// the handler does not (TestInternalOriginIsJudgedByItsActor).
+// TestTheHandlerAndTheEnginesGateAgree checks that both judgments of a
+// person's sales part use the engine's RequirementHeldFor. Borrowed authority
+// and internal calls have their own tests below; revenue admission belongs to
+// the actor in every case.
 func TestTheHandlerAndTheEnginesGateAgree(t *testing.T) {
 	storeID, site := servedStore(t)
 	otherStore, otherSite := servedStore(t)
@@ -949,13 +934,9 @@ func TestTheHandlerAndTheEnginesGateAgree(t *testing.T) {
 	}
 }
 
-// TestInternalOriginIsJudgedByItsActor: the engine's gate passes a call with
-// internal origin before it judges any requirement (refuseBelowRequiredCapability).
-// The handler does not take internal origin as a pass: it judges the actor
-// the call carries, so the cluster's own maintenance principal is answered and
-// an actorless or connector context is not. It is the one place the handler
-// and the engine's gate still differ, kept on purpose: internal origin would
-// otherwise open the read for whatever actor the context carries.
+// TestInternalOriginIsJudgedByItsActor holds revenue admission to the actor
+// carried by the call. The maintenance principal holds the sales part; an
+// actorless or connector context does not.
 func TestInternalOriginIsJudgedByItsActor(t *testing.T) {
 	storeID, site := servedStore(t)
 	handler := statisticsHandler(t, testIntegration(t))

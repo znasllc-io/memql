@@ -67,10 +67,6 @@ var deleteBatch = 5000
 // a variable so a test can lower it.
 var purgeBudget = 20
 
-// rebuildCaughtUp is how near the clock a store's walked_through must be for
-// its rebuild to be over.
-const rebuildCaughtUp = 5 * time.Minute
-
 // allOrdersScope is the scope without which Shopify lists only a store's last
 // sixty days of orders: the test the mirror makes in stampOrdersFrom.
 const allOrdersScope = "read_all_orders"
@@ -123,6 +119,8 @@ var factTables = func() []string {
 // verdict a verdict that cannot be read changes nothing. A rollout of the
 // engine's nodes can make the read fail for some minutes; past this the store
 // is recorded as blocked, since nothing then confirms its figures are current.
+// The read uses the same bound for a stopped walk. With many stores whose
+// turns fall further apart, answering figures as of their walk is intentional.
 const verdictStaleAfter = 15 * time.Minute
 
 // The reasons this package adds to a store's kept reasons. Each has a code of
@@ -246,6 +244,9 @@ func verdictFromReply(reply map[string]any) (storeVerdict, error) {
 	}
 	outside, known := shopify.OutsideWhatTheStoreRecords(reply, walkedConcepts)
 	v.Outside = outside || !known
+	if arriving, known := shopify.HistoryArrivingFor(reply, walkedConcepts); (arriving || !known) && (v.State == shopify.VerdictRecording || v.State == shopify.VerdictNeedsAttention) {
+		v.State = shopify.VerdictStarting
+	}
 	return v, nil
 }
 
@@ -306,13 +307,14 @@ func storeDataRemoved(store map[string]any) bool {
 
 // keptFields is what keepStoreRow writes, read before the transaction.
 type keptFields struct {
-	domain, name string
-	shop         *shopFacts // nil: no live shop row, so currency, zone and tax are left as they are
-	development  *bool
-	allOrders    bool
-	ordersFrom   string // health.ordersFrom, a day; "" when there is none
-	verdict      storeVerdict
-	verdictRead  bool
+	domain, name     string
+	shop             *shopFacts // nil: no live shop row, so currency, zone and tax are left as they are
+	development      *bool
+	allOrders        bool
+	ordersFrom       string // health.ordersFrom, a day; "" when there is none
+	refundDetailFrom *time.Time
+	verdict          storeVerdict
+	verdictRead      bool
 }
 
 // keepStore is what storeState is set to. See the file's comment.
@@ -425,6 +427,15 @@ func (i *Integration) readKept(ctx context.Context, store map[string]any, id str
 		}
 	}
 	if health, ok := store["health"].(map[string]any); ok {
+		// The stamp is the beginning of a completed scan, not its earliest order.
+		// A connection without all-order access can reach sixty days back from it.
+		// Missing or malformed bookkeeping leaves the reachability unknown.
+		if !k.allOrders {
+			if began, ok := instantOf(health["refundDetailFrom"]); ok {
+				floor := began.Add(-60 * 24 * time.Hour)
+				k.refundDetailFrom = &floor
+			}
+		}
 		switch v := health["ordersFrom"].(type) {
 		case nil:
 		case string:
@@ -562,6 +573,7 @@ func keepStoreRow(ctx context.Context, tx bun.Tx, storeID string, k keptFields, 
 		Set("store_name = ?", k.name).
 		Set("development = ?", k.development).
 		Set("all_orders_readable = ?", k.allOrders).
+		Set("refund_detail_from = ?", k.refundDetailFrom).
 		Set("history_since = ?", historySince).
 		Where("store_id = ?", storeID)
 	if k.shop != nil {
@@ -634,6 +646,7 @@ func rebuildStore(ctx context.Context, tx bun.Tx, storeID string, now time.Time)
 		Set("purging = true").
 		Set("rebuilding_since = ?", now.UTC()).
 		Set("walked_through = NULL").
+		Set("caught_up = false").
 		Set("definition = ?", storeStatsDefinition).
 		Where("store_id = ?", storeID).
 		Exec(ctx); err != nil {
@@ -823,12 +836,12 @@ func forgetStore(ctx context.Context, tx bun.Tx, storeID string) (gone bool, err
 	return true, nil
 }
 
-// clearRebuilding ends a store's rebuild once its walk is within
-// rebuildCaughtUp of the clock. ended says it ended now.
+// clearRebuilding ends a rebuild only after a complete turn reached every
+// source's clock. The fact survives the spacing between turns and checks.
 func clearRebuilding(ctx context.Context, tx bun.Tx, storeID string, now time.Time) (ended bool, err error) {
 	res, err := tx.NewUpdate().TableExpr("store_sales_store").
 		Set("rebuilding_since = NULL").
-		Where("store_id = ? AND rebuilding_since IS NOT NULL AND NOT purging AND walked_through >= ?", storeID, now.UTC().Add(-rebuildCaughtUp)).
+		Where("store_id = ? AND rebuilding_since IS NOT NULL AND NOT purging AND caught_up", storeID).
 		Exec(ctx)
 	if err != nil {
 		return false, fmt.Errorf("end the store's rebuild: %w", err)

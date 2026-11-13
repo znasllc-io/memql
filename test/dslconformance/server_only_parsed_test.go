@@ -258,6 +258,9 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// The store row as it stood at an instant, which the walk reads to find
 		// when a store first existed; same reader, same reason.
 		{Path: "shopify/overlay/queries.memql", Name: "storeStatisticsStoreAt"}: true,
+		// After sales/site/store admission, the statistics handler reads only
+		// the bound store's installation markers under maintenance authority.
+		{Path: "shopify/overlay/queries.memql", Name: "storeStatisticsConnection"}: true,
 		// Capture belongs to the installation's restricted test inbox, not
 		// actor.userId: identity mail can precede a recipient account. Only
 		// the capture service writes encrypted bodies; the public read capability

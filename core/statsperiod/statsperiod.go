@@ -78,7 +78,8 @@ type Bounds struct {
 	PrevStart, PrevEnd time.Time
 	// Bucket is BucketHour, BucketDay or BucketMonth.
 	Bucket string
-	// Buckets is how many buckets [Start, End) holds.
+	// Buckets is how many buckets [Start, End) holds. Day and month buckets
+	// preserve the chosen location's offset, including daylight-saving changes.
 	Buckets int
 	// HasPrevious is false for 12m (see the package comment).
 	HasPrevious bool

@@ -242,7 +242,7 @@ func TestADerivedColumnChangedByHandIsDerivedAgain(t *testing.T) {
 // same store with its walk caught up is checked.
 func TestAStoreWhoseWalkIsBehindIsNotChecked(t *testing.T) {
 	for _, c := range []struct{ name, set, unset string }{
-		{"behind", `walked_through = now() - interval '1 hour'`, `walked_through = now()`},
+		{"behind", `caught_up = false`, `caught_up = true`},
 		{"rebuilding", `rebuilding_since = now()`, `rebuilding_since = NULL`},
 		{"purging", `purging = true`, `purging = false`},
 		{"in a wholesale pass", `wholesale_cursor = 'under way'`, `wholesale_cursor = ''`},
@@ -839,9 +839,7 @@ func checkState(t *testing.T, i *Integration, storeID string) map[string]any {
 func TestTheCheckStateSaysWhenThePassBeganEndedAndEndedClean(t *testing.T) {
 	i, id := runStore(t)
 	mirrorThreeLines(t, id)
-	if _, err := run(t, i); err != nil { // the first fill: rebuilding, no pass yet
-		t.Fatal(err)
-	}
+	keep(t, i, storeOf(id, nil), time.Now()) // registered, before the first walk
 	s := checkState(t, i, id)
 	for _, k := range []string{"passUnderWaySince", "lastStartedAt", "lastFinishedAt", "cleanAt"} {
 		if s[k] != nil {
@@ -945,11 +943,8 @@ func TestARebuildDeletesInBatchesAndEndsWithTheSameFactsAndACleanCheck(t *testin
 	if batches < 2 {
 		t.Errorf("the rebuild deleted the store's three line facts in %d batches of two, want two or more", batches)
 	}
-	if row, found := checkRowOf(t, id); found {
-		t.Errorf("a check began before the rebuild's walk had caught up: %+v", row)
-	}
-	if _, err := run(t, i); err != nil { // the walk at the clock: the rebuild ends, and its check begins
-		t.Fatal(err)
+	if _, found := checkRowOf(t, id); !found {
+		t.Error("the caught-up rebuild did not begin its check in the same turn")
 	}
 	if after := snapshot(t, id); after != before {
 		t.Errorf("the facts after the rebuild differ:\nbefore %s\nafter  %s", before, after)
@@ -991,12 +986,6 @@ func TestARebuildDuringAPassDropsThePass(t *testing.T) {
 	}
 	if _, found := checkRowOf(t, id); found {
 		t.Error("a store rebuilding got a check row")
-	}
-	if _, err := run(t, i); err != nil {
-		t.Fatal(err)
-	}
-	if _, found := checkRowOf(t, id); found {
-		t.Error("a store whose rebuild's walk has not caught up got a check row")
 	}
 	if _, err := run(t, i); err != nil {
 		t.Fatal(err)
