@@ -224,7 +224,7 @@ describe("Benchmarks", () => {
   it("is hidden from a reader, and says so in Diagnostics rather than vanishing", () => {
     installSeededAccess("reader");
     const hidden = hiddenSurfaces(OS_REGISTRY);
-    expect(hidden.some((s) => s.label.includes("Benchmarks"))).toBe(true);
+    expect(hidden.some((s) => s.label === "Cluster")).toBe(true);
   });
 
   it("is reachable by an admin, because the rows are cluster-owner tier", () => {

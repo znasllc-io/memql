@@ -32,7 +32,7 @@ import { resetIdsForTest } from "../../src/system/desks";
 import { builtinReply, withSession } from "../deployables/harness";
 import { rolesOpening } from "../seededAccess";
 import { appTileName } from "../appTile";
-import { OWNER, READER, openFromLauncher, renderShell } from "./shellHarness";
+import { OWNER, READER, renderShell } from "./shellHarness";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -791,11 +791,10 @@ describe("navigation without update guides", () => {
     expect(calls).not.toContain("acknowledgeAttention");
   });
 
-  it("keeps inaccessible Concepts sections hidden", () => {
+  it("keeps an inaccessible Concepts app out of the launcher", () => {
     connect();
     renderShell({ access: READER });
-    openFromLauncher("Concepts");
-    const nav = screen.getByRole("navigation", { name: "Concepts sections" });
-    expect(within(nav).queryByRole("button", { name: "Language" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Launcher" }));
+    expect(within(screen.getByRole("dialog", { name: "Launcher" })).queryByRole("button", { name: appTileName("Concepts") })).toBeNull();
   });
 });
