@@ -5,6 +5,14 @@ front-door site, memql#4705). A real desktop over the cluster
 (memql#4710): desks, windows, dock, files, widgets, Ask.
 Design: `docs/superpowers/specs/2026-08-26-memql-os-desktop-shell-design.md`.
 
+**Shell build** in About and Diagnostics identifies the compiled client bundle.
+The release image's SPA stage passes the native builder's pinned `MEMQL_RELEASE`
+as `MEMQL_OS_BUILD`; the server's runtime version is not used. Direct OS builds
+may set `MEMQL_OS_BUILD` explicitly. When it is empty or unset, Vite retains the
+private OS package version as its reproducible development fallback.
+`TestSpaBuildReceivesThePinnedReleaseStamp` guards the separate Docker stage's
+argument scope and its handoff to the OS build command.
+
 Sign-in requires a secure browser context with the Web Locks API. The OS
 serializes refresh-cookie responses across its tabs, including the initial
 session probe. Browsers without that capability refuse sign-in rather than

@@ -359,8 +359,12 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 # produced. Each is moved to a fixed path (/os-dist, /vscode-site-dist) so
 # both alternatives of the SPA_DIST_STAGE selector expose the bundles at one
 # path each -- the runtime's COPY cannot branch on which stage it resolved to.
+# The native builder supplies the pinned release, but the independent Node
+# stage must declare it too. An empty development value keeps Vite's package
+# fallback; no runtime server version or checkout state is substituted.
+ARG MEMQL_RELEASE=""
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    bash scripts/os/build.sh build && mv clients/os/dist /os-dist
+    MEMQL_OS_BUILD="${MEMQL_RELEASE}" bash scripts/os/build.sh build && mv clients/os/dist /os-dist
 RUN node editors/vscode/site/build.mjs && mv editors/vscode/site/dist /vscode-site-dist
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     node editors/browser/build.mjs && mv editors/browser/dist /vscode-site-dist/editor

@@ -235,6 +235,31 @@ func spaBuildStageBlock(t *testing.T, body string) string {
 	return ""
 }
 
+// The Go builder's ARGs do not cross the independent Node FROM. Without a
+// declaration in this stage, a released shell silently reports package.json's
+// fallback even though the native image build supplied its pinned release.
+func TestSpaBuildReceivesThePinnedReleaseStamp(t *testing.T) {
+	block := spaBuildStageBlock(t, readRepoFile(t, "Dockerfile"))
+	arg := regexp.MustCompile(`(?m)^ARG MEMQL_RELEASE(?:="")?\s*$`).FindStringIndex(block)
+	if arg == nil {
+		t.Fatal("spa-build must declare MEMQL_RELEASE with an empty default; the Go builder's declaration is out of scope")
+	}
+	// Join Docker continuations, then inspect the RUN that actually builds the
+	// shell, not a comment, another stage, or a stamp on the later mv command.
+	joined := strings.ReplaceAll(block, "\\\n", " ")
+	run := regexp.MustCompile(`(?m)^RUN[^\n]*\bbash scripts/os/build\.sh build\b[^\n]*$`).FindStringIndex(joined)
+	if run == nil {
+		t.Fatal("spa-build has no RUN that builds the OS")
+	}
+	argInJoined := regexp.MustCompile(`(?m)^ARG MEMQL_RELEASE(?:="")?\s*$`).FindStringIndex(joined)
+	if argInJoined == nil || argInJoined[0] > run[0] {
+		t.Fatal("spa-build must declare MEMQL_RELEASE before its OS build RUN")
+	}
+	if !strings.Contains(joined[run[0]:run[1]], `MEMQL_OS_BUILD="${MEMQL_RELEASE}" bash scripts/os/build.sh build`) {
+		t.Fatal("the OS build command must receive the pinned MEMQL_RELEASE as MEMQL_OS_BUILD, including the empty development value")
+	}
+}
+
 // copySourcesIn returns the SOURCE arguments of every COPY in a stage body --
 // every field but the last, with `--flags` dropped.
 func copySourcesIn(block string) []string {
