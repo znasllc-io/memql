@@ -53,23 +53,25 @@ func settingsCall(ids ...string) string {
 	return `query wholesaleStatisticsSettings(storeIds: ` + storeIDList(ids...) + `)`
 }
 
-// writeEntitlement writes one entitlement through the pack's own mutation,
-// as the merchant, against an application written the same way.
+// writeEntitlement seeds through the pack's internal row writers, naming the
+// merchant explicitly as production handlers do. The reads below still use
+// the merchant's ordinary actor, so their row-authorization premise is real.
 func writeEntitlement(t *testing.T, eng *memql.MemQLEngine, merchant, storeID, name, email, state string) {
 	t.Helper()
-	ctx := asSiteOwner(merchant)
+	ctx := auth.ContextWithInternalOrigin(asSiteOwner(merchant))
+	owner, when := wsQuote(userRef(merchant)), happenedNow()
 	appID := "app-stats-" + name + "-" + merchant
 	wsExec(t, eng, ctx, `createApplicationRow(applicationId: `+wsQuote(appID)+`, storeId: `+wsQuote(storeID)+
-		`, companyName: "Probe Co", applicantName: "Probe", applicantEmail: `+wsQuote(email)+`)`)
+		`, ownerUserId: `+owner+`, submittedAt: `+when+`, companyName: "Probe Co", applicantName: "Probe", applicantEmail: `+wsQuote(email)+`)`)
 	wsExec(t, eng, ctx, `writeEntitlementRow(entitlementId: `+wsQuote("ent-stats-"+name+"-"+merchant)+
 		`, applicationId: `+wsQuote(appID)+`, storeId: `+wsQuote(storeID)+`, buyerEmail: `+wsQuote(email)+
-		`, adapter: "customerTag", state: `+wsQuote(state)+`)`)
+		`, ownerUserId: `+owner+`, attemptedAt: `+when+`, adapter: "customerTag", state: `+wsQuote(state)+`)`)
 }
 
 func writeSettings(t *testing.T, eng *memql.MemQLEngine, merchant, storeID string) {
 	t.Helper()
-	wsExec(t, eng, asSiteOwner(merchant), `setWholesaleSettingsRow(settingsId: `+wsQuote("settings-stats-"+storeID)+
-		`, storeId: `+wsQuote(storeID)+`, applicationsOpen: true, entitlementAdapter: "customerTag")`)
+	wsExec(t, eng, auth.ContextWithInternalOrigin(asSiteOwner(merchant)), `setWholesaleSettingsRow(settingsId: `+wsQuote("settings-stats-"+storeID)+
+		`, ownerUserId: `+wsQuote(userRef(merchant))+`, storeId: `+wsQuote(storeID)+`, applicationsOpen: true, entitlementAdapter: "customerTag")`)
 }
 
 func buyerEmails(rows []map[string]any) []string {
