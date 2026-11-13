@@ -378,6 +378,10 @@ func (i *Integration) handleStoreHealth(ctx context.Context, args map[string]any
 		// The scopes and domains are measured against what this store's own
 		// connection asks for: a scope or domain outside it was never
 		// requested, and is neither missing nor not granted.
+		denied, err := bulkFieldsDenied(c.FieldsDenied(store.ID), states)
+		if err != nil {
+			return nil, err
+		}
 		entry := map[string]any{
 			"storeId":            store.ID,
 			"domain":             store.Domain,
@@ -390,7 +394,7 @@ func (i *Integration) handleStoreHealth(ctx context.Context, args map[string]any
 			"scopesMissing":      toAny(scopesNotApproved(store)),
 			"domainsNotGranted":  toAny(domainsNotGranted(store)),
 			"domainsOutside":     toAny(domainsOutside(store)),
-			"fieldsDenied":       fieldsDeniedAny(c.FieldsDenied(store.ID)),
+			"fieldsDenied":       fieldsDeniedAny(denied),
 			"health":             store.Health,
 			"driftLast":          drift,
 			"domains":            domains,

@@ -65,6 +65,10 @@ type backfillCursor struct {
 	// At is when this engine started the export the cursor follows
 	// (memqlsync.ReadTime): the time the origin was read for every line of it.
 	At string `json:"at,omitempty"`
+	// Omitted names optional selections the provider refused in this export.
+	// Kept through completion so another replica can report the same withheld
+	// fields: finishing the permitted rows is not full field coverage.
+	Omitted string `json:"omitted,omitempty"`
 }
 
 // originVersionRule is the write rule under which every bulk line carries the
@@ -159,12 +163,13 @@ const bulkStatusQuery = `query ShopifyBulkStatus($id: ID!) {
 
 // bulkOperation is Shopify's own view of a running export.
 type bulkOperation struct {
-	ID          string `json:"id"`
-	Status      string `json:"status"`
-	ErrorCode   string `json:"errorCode"`
-	ObjectCount string `json:"objectCount"`
-	URL         string `json:"url"`
-	CompletedAt string `json:"completedAt"`
+	ID          string   `json:"id"`
+	Status      string   `json:"status"`
+	ErrorCode   string   `json:"errorCode"`
+	ObjectCount string   `json:"objectCount"`
+	URL         string   `json:"url"`
+	CompletedAt string   `json:"completedAt"`
+	Omitted     []string `json:"-"`
 }
 
 // exported reports whether the origin counted any object in the operation's
@@ -205,6 +210,9 @@ func (c *Connector) BackfillStore(ctx context.Context, store Store, concept, cur
 	if spec == nil {
 		return memqlsync.BackfillPage{}, fmt.Errorf("shopify: %q is not a mirrored concept", concept)
 	}
+	if _, err := bulkCursorOmissions(spec.Concept, cursor); err != nil {
+		return memqlsync.BackfillPage{}, err
+	}
 	if !spec.Bulk || len(spec.BulkOps) == 0 {
 		// A domain with no bulk query is materialised with its parent or
 		// re-listed; saying so beats a silent empty page that reads like
@@ -243,6 +251,7 @@ func (c *Connector) BackfillStore(ctx context.Context, store Store, concept, cur
 			return memqlsync.BackfillPage{}, err
 		}
 		cur.At = memqlsync.ReadTime(startedAt)
+		cur.Omitted = strings.Join(uniqueSorted(append(strings.FieldsFunc(cur.Omitted, func(r rune) bool { return r == ',' }), op.Omitted...)), ",")
 		cur.OperationID = op.ID
 		cur.Line = 0
 		return memqlsync.BackfillPage{NextCursor: cur.encode()}, nil
@@ -288,7 +297,7 @@ func (c *Connector) BackfillStore(ctx context.Context, store Store, concept, cur
 				spec.Concept, store.ID, op.Status, code, cur.Restarts)
 		}
 		c.logger.Warn("shopify: restarting bulk operation", "store", store.ID, "concept", spec.Concept, "status", op.Status, "errorCode", op.ErrorCode, "restart", cur.Restarts+1)
-		return memqlsync.BackfillPage{NextCursor: backfillCursor{OpIndex: cur.OpIndex, Restarts: cur.Restarts + 1, Rule: cur.Rule}.encode()}, nil
+		return memqlsync.BackfillPage{NextCursor: backfillCursor{OpIndex: cur.OpIndex, Restarts: cur.Restarts + 1, Rule: cur.Rule, Omitted: cur.Omitted}.encode()}, nil
 	default:
 		return memqlsync.BackfillPage{NextCursor: cur.encode()}, nil
 	}
@@ -334,7 +343,7 @@ func (c *Connector) downloadGone(store Store, spec *generated.TypeSpec, cur back
 	}
 	c.logger.Warn("shopify: the bulk download is gone; starting the operation again",
 		"store", store.ID, "concept", spec.Concept, "status", gone.Status, "restart", cur.Restarts+1)
-	return memqlsync.BackfillPage{NextCursor: backfillCursor{OpIndex: cur.OpIndex, Restarts: cur.Restarts + 1, Rule: cur.Rule}.encode()}, nil
+	return memqlsync.BackfillPage{NextCursor: backfillCursor{OpIndex: cur.OpIndex, Restarts: cur.Restarts + 1, Rule: cur.Rule, Omitted: cur.Omitted}.encode()}, nil
 }
 
 // advanceOperation moves to the next bulk operation of a multi-part domain,
@@ -343,7 +352,7 @@ func (c *Connector) downloadGone(store Store, spec *generated.TypeSpec, cur back
 func (c *Connector) advanceOperation(cur backfillCursor, spec *generated.TypeSpec, note string) (memqlsync.BackfillPage, error) {
 	if cur.OpIndex+1 < len(spec.BulkOps) {
 		return memqlsync.BackfillPage{
-			NextCursor: backfillCursor{OpIndex: cur.OpIndex + 1, Restarts: cur.Restarts, Rule: cur.Rule}.encode()}, nil
+			NextCursor: backfillCursor{OpIndex: cur.OpIndex + 1, Restarts: cur.Restarts, Rule: cur.Rule, Omitted: cur.Omitted}.encode()}, nil
 	}
 	return c.finished(cur), nil
 }
@@ -354,7 +363,7 @@ func (c *Connector) advanceOperation(cur backfillCursor, spec *generated.TypeSpe
 // (refundDetailOwed): an export writes rows with no refund detail, so a read
 // of every order that began before it no longer describes them.
 func (c *Connector) finished(cur backfillCursor) memqlsync.BackfillPage {
-	return memqlsync.BackfillPage{Done: true, NextCursor: backfillCursor{Rule: cur.Rule, At: cur.At}.encode()}
+	return memqlsync.BackfillPage{Done: true, NextCursor: backfillCursor{Rule: cur.Rule, At: cur.At, Omitted: cur.Omitted}.encode()}
 }
 
 // underRule reports whether a cursor belongs to a backfill begun under
@@ -368,6 +377,30 @@ func (c *Connector) startBulkOperation(ctx context.Context, store Store, spec *g
 	if err != nil {
 		return bulkOperation{}, err
 	}
+	for prunes := 0; ; prunes++ {
+		query, omitted, err := bulkDocumentWithGrant(document, spec, c.FieldsDenied(store.ID)[generated.ConceptID(spec.Concept)])
+		if err != nil {
+			return bulkOperation{}, err
+		}
+		op, err := c.startBulkQuery(ctx, store, query)
+		if err == nil {
+			op.Omitted = omitted
+			return op, nil
+		}
+		// Only a refused, unstarted operation may be resubmitted. An accepted
+		// id alongside errors is not evidence that no export was created.
+		fields := optionalBulkDenial(err, spec)
+		if op.ID != "" || len(fields) == 0 || prunes >= maxDeniedPrunes {
+			return op, err
+		}
+		next, _, pruneErr := bulkDocumentWithGrant(query, spec, fields)
+		if pruneErr != nil || next == query || !c.noteDeniedFields(store, spec, fields) {
+			return op, err
+		}
+	}
+}
+
+func (c *Connector) startBulkQuery(ctx context.Context, store Store, document string) (bulkOperation, error) {
 	resp, err := c.adminCall(ctx, store, bulkRunMutation, "ShopifyBulkRun", map[string]any{"query": document})
 	if err != nil {
 		return bulkOperation{}, err
@@ -393,10 +426,10 @@ func (c *Connector) startBulkOperation(ctx context.Context, store Store, spec *g
 		}
 	}
 	if ueErr := userErrorsFrom(resp, "bulkOperationRunQuery"); ueErr != nil {
-		return bulkOperation{}, ueErr
+		return decoded.BulkOperationRunQuery.BulkOperation, ueErr
 	}
 	if decoded.BulkOperationRunQuery.BulkOperation.ID == "" {
-		return bulkOperation{}, fmt.Errorf("shopify: bulkOperationRunQuery returned no operation for %s", spec.Concept)
+		return bulkOperation{}, fmt.Errorf("shopify: bulkOperationRunQuery returned no operation")
 	}
 	return decoded.BulkOperationRunQuery.BulkOperation, nil
 }

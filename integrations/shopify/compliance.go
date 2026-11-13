@@ -1418,7 +1418,7 @@ func (c *Connector) dropFailedExport(ctx context.Context, stateID string, row ma
 	if cur.OperationID == "" {
 		return false, nil
 	}
-	kept := backfillCursor{Restarts: cur.Restarts, Rule: cur.Rule, At: cur.At}
+	kept := backfillCursor{Restarts: cur.Restarts, Rule: cur.Rule, At: cur.At, Omitted: cur.Omitted}
 	cursor := ""
 	if kept != (backfillCursor{}) {
 		cursor = kept.encode()

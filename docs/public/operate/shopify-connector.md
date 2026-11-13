@@ -1079,6 +1079,24 @@ refusal arrives while reading a later page of that child, the current record
 read reports the refusal; it does not record a deletion or claim that the
 partial record is complete. Later parent reads omit the denied connection.
 
+Bulk order exports use a narrower rule. Only `contract`, `fulfillmentOrders`,
+`paymentTerms`, `staffMember`, `user` and `vaultedPaymentMethods` may be omitted
+after Shopify denies them: these are the optional order selections qualified
+by the statistics projection. A denied required value, child history, root or
+unknown selection still fails the export. Other domains do not use this
+fallback. The connector retries only a refused, unstarted operation, at most
+four times after learning new denials; an accepted operation id with errors is
+not submitted again.
+
+The cursor records which of those fields the export actually omitted, through
+restarts and completion. Health and the store verdict read those exclusions
+even on another engine node. A completed export means its permitted rows were
+read, with those fields withheld; it does not mean every field was available,
+nor that the later refund-detail scan has completed. An unclassified refusal
+keeps Shopify's original explanation and error type instead of replacing it
+with only “not requested.” “Backfill now” can retry one failed domain; rereading
+health or registering the same webhooks again does not repair its history.
+
 ---
 
 ## The quarterly bump

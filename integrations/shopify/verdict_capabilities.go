@@ -302,13 +302,17 @@ func (c *Connector) storeVerdict(ctx context.Context, store Store) (Verdict, err
 		return Verdict{}, err
 	}
 	previous, _ := store.Health["verdict"].(map[string]any)
+	denied, err := bulkFieldsDenied(c.FieldsDenied(store.ID), states)
+	if err != nil {
+		return Verdict{}, err
+	}
 	return computeVerdict(verdictInput{
 		Store:           store,
 		States:          states,
 		Intervals:       sweepIntervals(c.Domains()),
 		GivenUp:         givenUp,
 		GivenUpFloor:    floor,
-		Denied:          c.FieldsDenied(store.ID),
+		Denied:          denied,
 		Previous:        previous,
 		ConnectedAt:     connectedAtOf(store),
 		Privacy:         privacy,

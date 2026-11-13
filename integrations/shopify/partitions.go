@@ -99,9 +99,13 @@ func backfillRefusal(store Store, err error) error {
 		return err
 	}
 	if refusalIsFixable(store, err.Error()) {
-		return fmt.Errorf("%w: %v", memqlsync.ErrNotGranted, err)
+		return fmt.Errorf("%w: %w", memqlsync.ErrNotGranted, err)
 	}
-	return memqlsync.NotRequested(ConnectorName)
+	// Keep the provider's field/scope explanation and typed cause. The same
+	// classification covers an unavailable feature and a denied selection;
+	// replacing both with the generic sentence made a fresh refusal impossible
+	// to distinguish from the local domain gate, even after a manual retry.
+	return fmt.Errorf("%w: %w", memqlsync.NotRequested(ConnectorName), err)
 }
 
 // ReconcilePartition sweeps one store's domain from that store's own
