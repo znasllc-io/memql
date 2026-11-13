@@ -458,7 +458,7 @@ func productionAsks(t *testing.T, root string, files map[string][]byte) []askFin
 // as a constant: Go acting as one of the engine's automations, with no
 // automation loaded to read the origin from. Each is argued here, so a new one
 // is a visible change. None of them is a path a person's request reaches
-// without first being held to the authority the principal carries.
+// without first being held to the authority needed for the bounded operation.
 var engineGoAsks = map[string]string{
 	// A node's own startup recovery of the inference waits the waiting-run
 	// sweep owns. No caller: the node acts for itself.
@@ -467,6 +467,13 @@ var engineGoAsks = map[string]string{
 	// nobody else before this line, runs the same pass the hourly automation
 	// runs, and answers only its report.
 	"github.com/znasllc-io/memql/component/retention.(*Integration).sweep: MaintenanceActor(retireDeclaredConceptVersions)": "after the handler has required a cluster owner",
+	// A missing statistics frame still needs the bound store's installation
+	// state. The handler first admits the caller's sales part, readable site,
+	// storefront kind and exact bound/preview store; this method then reads
+	// only redactedAt and uninstalledAt through its server-only projection.
+	// It returns a recording state, never the store row or other fields.
+	// TestConnectionMarkersAreReadOnlyAfterTheWholeSalesGate pins the order.
+	"github.com/znasllc-io/memql/component/storestats.(*Integration).connectionState: MaintenanceActor(storeStatisticsRollupSweep)": "after sales/site/store admission, derive only the bound store's connection state from two installation markers",
 	// The proving harness, which only the bench binary links: it applies a
 	// promotion decision as the automation that applies one.
 	"github.com/znasllc-io/memql/component/proving.(*engineLadder).DecidePromotion: MaintenanceActor(onProcedurePromotionDecided)": "bench harness, in no server binary",

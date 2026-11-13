@@ -78,7 +78,7 @@ func TestConnectionMarkersAreReadOnlyAfterTheWholeSalesGate(t *testing.T) {
 		if strings.Contains(call.query, "storeStatisticsConnection") {
 			connections++
 			ac, _ := auth.AccessFromContext(call.ctx)
-			if !auth.OriginFromContext(call.ctx).IsInternal() || ac == nil || ac.UserId != auth.MaintenanceActor("storeStatisticsRollupSweep").UserId {
+			if !auth.OriginFromContext(call.ctx).IsInternal() || !auth.IsMaintenancePrincipalOf(ac, rollupAutomation) {
 				t.Error("admitted connection read did not carry its maintenance authority")
 			}
 		}

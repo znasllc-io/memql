@@ -163,7 +163,7 @@ func testIntegration(t *testing.T) *Integration {
 // the caller's to add, as the automation runner adds it.
 func principalCtx(t *testing.T, automation string) context.Context {
 	t.Helper()
-	actor := auth.MaintenanceActor(automation)
+	actor := auth.MaintenanceActor(auth.AutomationOriginEngine, automation)
 	if actor == nil {
 		t.Fatalf("%s is not on the maintenance list, so its automation runs as a reader and every run is refused", automation)
 	}

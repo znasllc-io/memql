@@ -646,7 +646,9 @@ var (
 
 // checksPrincipal is the check's maintenance principal, as its automation
 // runs under it.
-func checksPrincipal() *auth.AccessContext { return auth.MaintenanceActor("storeStatisticsCheckSweep") }
+func checksPrincipal() *auth.AccessContext {
+	return auth.MaintenanceActor(auth.AutomationOriginEngine, "storeStatisticsCheckSweep")
+}
 
 // checkPersonCtx is a person signed in with this role, as a client calls.
 func checkPersonCtx(ac *auth.AccessContext) context.Context {
@@ -669,12 +671,17 @@ func TestOnlyTheChecksPrincipalRunsIt(t *testing.T) {
 	touched := false
 	refusing := NewIntegration(engine, func() *bun.DB { touched = true; return nil }, quietLogger())
 	for name, ctx := range map[string]context.Context{
-		"a cluster owner by hand, at internal origin": internal(&auth.AccessContext{UserId: "user-owner", Role: auth.RoleOwner}),
-		"the automation's reader actor":               internal(&auth.AccessContext{UserId: "system:automation:storeStatisticsCheckSweep", Role: auth.RoleReader}),
-		"the rollup's principal":                      internal(auth.MaintenanceActor("storeStatisticsRollupSweep")),
-		"the principal's id as a reader":              internal(&auth.AccessContext{UserId: checkPrincipal, Role: auth.RoleReader}),
-		"the principal at client origin":              asActor(checksPrincipal()),
-		"nobody at all, at internal origin":           auth.ContextWithInternalOrigin(context.Background()),
+		"a cluster owner by hand, at internal origin":         internal(&auth.AccessContext{UserId: "user-owner", Role: auth.RoleOwner}),
+		"the automation's reader actor":                       internal(&auth.AccessContext{UserId: "system:automation:storeStatisticsCheckSweep", Role: auth.RoleReader}),
+		"the rollup's principal":                              internal(auth.MaintenanceActor(auth.AutomationOriginEngine, "storeStatisticsRollupSweep")),
+		"the principal's id as a reader":                      internal(&auth.AccessContext{UserId: "system:maintenance:" + checkAutomation, Role: auth.RoleReader}),
+		"an owner bearing the principal id":                   internal(&auth.AccessContext{UserId: "system:maintenance:" + checkAutomation, Role: auth.RoleOwner}),
+		"synthetic owner metadata without a minted principal": internal(&auth.AccessContext{UserId: "system:maintenance:" + checkAutomation, Role: auth.RoleOwner, Synthetic: true, Unranked: true}),
+		"an ordinary engine automation":                       internal(auth.AutomationActor(auth.AutomationOriginEngine, "storeStatisticsCheckSweep")),
+		"a same-named mounted automation":                     internal(auth.AutomationActor(auth.AutomationOriginOther, "storeStatisticsCheckSweep")),
+		"a maintenance request from another origin":           internal(auth.MaintenanceActor(auth.AutomationOriginOther, "storeStatisticsCheckSweep")),
+		"the principal at client origin":                      asActor(checksPrincipal()),
+		"nobody at all, at internal origin":                   auth.ContextWithInternalOrigin(context.Background()),
 	} {
 		nodes, err := refusing.handleCheck(ctx, nil, 0)
 		if err == nil || nodes != nil || !strings.Contains(err.Error(), "store statistics check requires the engine maintenance principal") {
@@ -765,7 +772,7 @@ func TestAMaintenancePrincipalCannotRebuild(t *testing.T) {
 	id := foldStore(t)
 	before := keptRow(t, id).generation
 	for name, ac := range map[string]*auth.AccessContext{
-		"the rollup's principal": auth.MaintenanceActor("storeStatisticsRollupSweep"),
+		"the rollup's principal": auth.MaintenanceActor(auth.AutomationOriginEngine, "storeStatisticsRollupSweep"),
 		"the check's principal":  checksPrincipal(),
 		"an engine system actor": auth.SystemActor("shopify"),
 	} {
@@ -885,7 +892,7 @@ func TestOnlyAPersonWhoIsAClusterOwnerReadsTheCheckState(t *testing.T) {
 	for name, ctx := range map[string]context.Context{
 		"a developer":            asActor(aDeveloper),
 		"the check's principal":  auth.ContextWithInternalOrigin(asActor(checksPrincipal())),
-		"the rollup's principal": auth.ContextWithInternalOrigin(asActor(auth.MaintenanceActor("storeStatisticsRollupSweep"))),
+		"the rollup's principal": auth.ContextWithInternalOrigin(asActor(auth.MaintenanceActor(auth.AutomationOriginEngine, "storeStatisticsRollupSweep"))),
 		"an engine system actor": auth.ContextWithInternalOrigin(asActor(auth.SystemActor("shopify"))),
 	} {
 		nodes, err := i.handleCheckState(ctx, map[string]any{"storeId": id}, 0)

@@ -34,13 +34,13 @@ var (
 var errNoSuchStore = errors.New("Store statistics has no store with that id.")
 
 // admitsTheCheck is the one place handleCheck admits its caller: the check's
-// own maintenance principal, with the cluster-owner role it carries, at the
-// internal origin the automation runner gives the engine's own automations,
+// own minted maintenance principal at the internal origin the automation
+// runner gives the engine's own automations,
 // as handleRollup admits the rollup's. The check reads every store's mirror
 // and spends the database's time on a schedule; nobody runs it by hand.
 func admitsTheCheck(ctx context.Context) bool {
 	actor, ok := auth.AccessFromContext(ctx)
-	return ok && actor != nil && actor.UserId == checkPrincipal && actor.IsClusterOwner() && auth.OriginFromContext(ctx).IsInternal()
+	return ok && auth.IsMaintenancePrincipalOf(actor, checkAutomation) && auth.OriginFromContext(ctx).IsInternal()
 }
 
 // admitsAPersonWhoIsAClusterOwner is the one place handleRebuild and

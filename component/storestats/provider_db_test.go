@@ -384,11 +384,11 @@ func TestOneStoresFailureLeavesTheNextStoreWalked(t *testing.T) {
 // cluster-owner lock alone), and nobody at all. The principal at internal
 // origin runs it, through the engine, as the automation calls it.
 func TestOnlyTheRollupsPrincipalRunsIt(t *testing.T) {
-	principal := auth.MaintenanceActor("storeStatisticsRollupSweep")
+	principal := auth.MaintenanceActor(auth.AutomationOriginEngine, "storeStatisticsRollupSweep")
 	if principal == nil {
 		t.Fatal("storeStatisticsRollupSweep is not on the maintenance list, so its automation runs as a reader and every run is refused")
 	}
-	other := auth.MaintenanceActor("emailStatisticsRollupSweep")
+	other := auth.MaintenanceActor(auth.AutomationOriginEngine, "emailStatisticsRollupSweep")
 	internal := func(ac *auth.AccessContext) context.Context {
 		return auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), ac))
 	}
@@ -401,13 +401,18 @@ func TestOnlyTheRollupsPrincipalRunsIt(t *testing.T) {
 		return nil
 	}
 	for name, ctx := range map[string]context.Context{
-		"a cluster owner by hand, at internal origin":    internal(&auth.AccessContext{UserId: "user-owner", Role: auth.RoleOwner}),
-		"the automation's reader actor":                  internal(&auth.AccessContext{UserId: "system:automation:storeStatisticsRollupSweep", Role: auth.RoleReader}),
-		"another automation's principal":                 internal(other),
-		"the principal's id as a reader":                 internal(&auth.AccessContext{UserId: principal.UserId, Role: auth.RoleReader}),
-		"the principal at client origin":                 auth.ContextWithAccess(context.Background(), principal),
-		"the principal stamped client origin explicitly": auth.ContextWithClientOrigin(auth.ContextWithAccess(context.Background(), principal)),
-		"nobody at all, at internal origin":              auth.ContextWithInternalOrigin(context.Background()),
+		"a cluster owner by hand, at internal origin":         internal(&auth.AccessContext{UserId: "user-owner", Role: auth.RoleOwner}),
+		"the automation's reader actor":                       internal(&auth.AccessContext{UserId: "system:automation:storeStatisticsRollupSweep", Role: auth.RoleReader}),
+		"another automation's principal":                      internal(other),
+		"the principal's id as a reader":                      internal(&auth.AccessContext{UserId: principal.UserId, Role: auth.RoleReader}),
+		"an owner bearing the principal id":                   internal(&auth.AccessContext{UserId: principal.UserId, Role: auth.RoleOwner}),
+		"synthetic owner metadata without a minted principal": internal(&auth.AccessContext{UserId: principal.UserId, Role: auth.RoleOwner, Synthetic: true, Unranked: true}),
+		"an ordinary engine automation":                       internal(auth.AutomationActor(auth.AutomationOriginEngine, "storeStatisticsRollupSweep")),
+		"a same-named mounted automation":                     internal(auth.AutomationActor(auth.AutomationOriginOther, "storeStatisticsRollupSweep")),
+		"a maintenance request from another origin":           internal(auth.MaintenanceActor(auth.AutomationOriginOther, "storeStatisticsRollupSweep")),
+		"the principal at client origin":                      auth.ContextWithAccess(context.Background(), principal),
+		"the principal stamped client origin explicitly":      auth.ContextWithClientOrigin(auth.ContextWithAccess(context.Background(), principal)),
+		"nobody at all, at internal origin":                   auth.ContextWithInternalOrigin(context.Background()),
 	} {
 		nodes, err := refusing.handleRollup(ctx, nil, 0)
 		if err == nil || nodes != nil {

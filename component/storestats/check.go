@@ -108,10 +108,9 @@ import (
 // What a check answers and logs is counts and store ids. A row that could not
 // be read contributes to one warning per store and run with an aggregate count.
 
-// checkPrincipal is the only caller the check admits: the maintenance
-// principal its scheduled automation runs under
-// (auth.MaintenanceActor("storeStatisticsCheckSweep")).
-const checkPrincipal = "system:maintenance:storeStatisticsCheckSweep"
+// checkAutomation names the engine-owned automation whose minted maintenance
+// principal alone may run the check, at internal origin.
+const checkAutomation = "storeStatisticsCheckSweep"
 
 // The concepts of the nodes the three builtins answer with. Not DSL concepts:
 // nothing stores them, as with the rollup's report.

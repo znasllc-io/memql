@@ -59,7 +59,7 @@ func TestRequirePersonSessionRefusesEverythingElse(t *testing.T) {
 			map[string]any{"sub": "v1:identity:user:someone-else"}),
 		"anonymous":        ContextWithAnonymousActor(context.Background()),
 		"system actor":     ContextWithSystemActor(context.Background(), "edge"),
-		"maintenance":      withAccess(MaintenanceActor("auditEventRetentionSweep"), map[string]any{"sub": MaintenanceActor("auditEventRetentionSweep").UserId}),
+		"maintenance":      withAccess(MaintenanceActor(AutomationOriginEngine, "auditEventRetentionSweep"), map[string]any{"sub": MaintenanceActor(AutomationOriginEngine, "auditEventRetentionSweep").UserId}),
 		"borrowed":         ContextWithUserActor(context.Background(), sessionPerson),
 		"connector":        ContextWithConnectorActor(context.Background(), "shopify"),
 		"synthetic person": withAccess(&AccessContext{UserId: sessionPerson, Role: RoleOwner, Synthetic: true}, map[string]any{"sub": sessionPerson}),

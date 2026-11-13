@@ -21,10 +21,9 @@ import (
 // is how the email and website statistics rollups answer too.
 const rollupConcept = "integration:storeStats:rollup"
 
-// rollupPrincipal is the only caller the rollup admits: the maintenance
-// principal its scheduled automation runs under
-// (auth.MaintenanceActor("storeStatisticsRollupSweep")).
-const rollupPrincipal = "system:maintenance:storeStatisticsRollupSweep"
+// rollupAutomation names the engine-owned automation whose minted maintenance
+// principal alone may run the rollup, at internal origin.
+const rollupAutomation = "storeStatisticsRollupSweep"
 
 // Engine is what the rollup needs of the engine: the store statistics reads,
 // each a @serverOnly query, executed under walkContext.
@@ -303,7 +302,7 @@ var errNotThePrincipal = errors.New("store statistics rollup requires the engine
 // ids its lists name.
 func (i *Integration) handleRollup(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	actor, ok := auth.AccessFromContext(ctx)
-	if !ok || actor == nil || actor.UserId != rollupPrincipal || !actor.IsClusterOwner() || !auth.OriginFromContext(ctx).IsInternal() {
+	if !ok || !auth.IsMaintenancePrincipalOf(actor, rollupAutomation) || !auth.OriginFromContext(ctx).IsInternal() {
 		return nil, errNotThePrincipal
 	}
 	run, standing := i.startRun()

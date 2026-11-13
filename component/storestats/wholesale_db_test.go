@@ -31,12 +31,12 @@ const (
 	orderThree = "gid://shopify/Order/2003"
 )
 
-// wholesaleMerchant is the signed-in merchant whose actor writes the pack's
-// rows.
+// wholesaleMerchant owns the fixture rows written through the pack's internal
+// row writer, as its admitted production handlers write them.
 const wholesaleMerchant = "dbtest-storestats-merchant"
 
 func asMerchant() context.Context {
-	return auth.ContextWithUserActor(context.Background(), wholesaleMerchant)
+	return auth.ContextWithInternalOrigin(auth.ContextWithUserActor(context.Background(), wholesaleMerchant))
 }
 
 // canonicalStore is the other form a wholesale row may hold a store id in.
@@ -75,7 +75,7 @@ func packExec(t *testing.T, call string) {
 func settingsFor(t *testing.T, id, key string) {
 	t.Helper()
 	packExec(t, `setWholesaleSettingsRow(settingsId: `+langparser.QuoteString("settings-"+id)+`, storeId: `+langparser.QuoteString(key)+
-		`, applicationsOpen: true, entitlementAdapter: "customerTag")`)
+		`, ownerUserId: `+langparser.QuoteString("v1:identity:user:"+wholesaleMerchant)+`, applicationsOpen: true, entitlementAdapter: "customerTag")`)
 }
 
 // grant writes the store's entitlement name, under key, for email in state.
@@ -83,10 +83,12 @@ func settingsFor(t *testing.T, id, key string) {
 func grant(t *testing.T, id, key, name, email, state string) {
 	t.Helper()
 	app := "app-" + name + "-" + id
+	owner := langparser.QuoteString("v1:identity:user:" + wholesaleMerchant)
+	when := langparser.QuoteString(time.Now().UTC().Format(time.RFC3339Nano))
 	packExec(t, `createApplicationRow(applicationId: `+langparser.QuoteString(app)+`, storeId: `+langparser.QuoteString(key)+
-		`, companyName: "Corner Bicycle Co", applicantName: "Applicant", applicantEmail: "applicant")`)
+		`, ownerUserId: `+owner+`, submittedAt: `+when+`, companyName: "Corner Bicycle Co", applicantName: "Applicant", applicantEmail: "applicant")`)
 	packExec(t, `writeEntitlementRow(entitlementId: `+langparser.QuoteString("ent-"+name+"-"+id)+`, applicationId: `+langparser.QuoteString(app)+
-		`, storeId: `+langparser.QuoteString(key)+`, buyerEmail: `+langparser.QuoteString(email)+`, adapter: "customerTag", state: `+
+		`, ownerUserId: `+owner+`, attemptedAt: `+when+`, storeId: `+langparser.QuoteString(key)+`, buyerEmail: `+langparser.QuoteString(email)+`, adapter: "customerTag", state: `+
 		langparser.QuoteString(state)+`)`)
 }
 

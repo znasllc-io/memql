@@ -191,7 +191,7 @@ func walkContext(ctx context.Context) context.Context {
 // site and bound store. Its server-only projection contains two installation
 // markers; neither the row nor any other store fields enter the answer.
 func (i *Integration) connectionState(ctx context.Context, storeID string) (string, error) {
-	ctx = auth.ContextWithAccess(ctx, auth.MaintenanceActor("storeStatisticsRollupSweep"))
+	ctx = auth.ContextWithAccess(ctx, auth.MaintenanceActor(auth.AutomationOriginEngine, rollupAutomation))
 	res, err := i.engine.Execute(walkContext(ctx), "query storeStatisticsConnection(storeId: "+langparser.QuoteString(storeID)+")")
 	if err != nil {
 		return "", fmt.Errorf("read the store statistics connection: %w", sanitized(err))
