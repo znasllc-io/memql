@@ -24,6 +24,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/secret"
 	"github.com/znasllc-io/memql/packs/reviewspack"
 )
 
@@ -257,6 +258,9 @@ func TestLiveE2E_AWaitingReviewStagesOneEmailForTheModerator(t *testing.T) {
 // this test engine, so the send fails -- and the request is recorded as failed,
 // written as the merchant, ready for the next run to ask again.
 func TestLiveE2E_TheDailyAskIssuesTheLinkADueOrderEarned(t *testing.T) {
+	// A retryable request seals its bearer before writing it. This positive
+	// fixture needs a synthetic key; missing-key refusal is tested separately.
+	t.Setenv(secret.EnvMasterKey, strings.Repeat("17", 32))
 	eng := livePackEngine(t)
 	n := strconv.FormatInt(time.Now().UnixNano(), 36)
 	merchant := "user-reviews-ask-" + n

@@ -291,7 +291,12 @@ describe("choosing rows", () => {
     // role query over 501 buttons per click takes minutes.
     const items = screen.getAllByRole("button", { name: /^Item \d+$/ });
     expect(items).toHaveLength(501);
-    for (let i = 0; i < 500; i += 1) fireEvent.click(items[i]!);
+    // Each click queues a functional selection update. Batch only the setup
+    // clicks so this boundary test need not render all 501 rows 500 times;
+    // flush at 500, then exercise the separate 501st click below.
+    act(() => {
+      for (let i = 0; i < 500; i += 1) fireEvent.click(items[i]!);
+    });
     expect(within(bar()!).getByText("500 rows selected")).toBeTruthy();
     expect(within(bar()!).getByRole("button", { name: "Move to account" })).toBeTruthy();
     fireEvent.click(items[500]!);
