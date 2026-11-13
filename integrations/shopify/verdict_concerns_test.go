@@ -952,7 +952,7 @@ func TestTheApprovalsSentenceIsTheOneThatApplies(t *testing.T) {
 		{"shared app, the grant lacks a scope", managed(oldManagedList), false, true},
 		{"shared app, the grant holds everything, a row refused", managed(commerceSet), true, false},
 		{"shared app, no grant recorded, a row refused", managed(nil), true, false},
-		{"own app, the grant lacks a scope", own(without(ConnectScopes(), "read_customers")), false, true},
+		{"own app, the grant lacks a scope", own(without(ConnectScopes(), "read_customers", "write_customers")), false, true},
 		{"own app, the grant holds everything, a row refused", own(ConnectScopes()), true, false},
 		{"own app, no grant recorded, a row refused", own(nil), true, false},
 	} {
