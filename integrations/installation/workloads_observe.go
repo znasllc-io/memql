@@ -356,8 +356,13 @@ func (s *workloadAdmission) observeWorkload(ctx context.Context, reads *receiver
 		}
 		return nil
 	case "/Pod":
-		return s.observeWorkloadPod(ctx, reads, live, spec, false, false)
+		return s.observeWorkloadPod(ctx, reads, live, spec, false, nil)
 	case "postgresql.cnpg.io/Cluster":
+		declaredPlugin, pluginErr := workloadCNPGBackupPlugin(want)
+		livePlugin, livePluginErr := workloadCNPGBackupPlugin(spec)
+		if pluginErr != nil || livePluginErr != nil || declaredPlugin != livePlugin {
+			return errors.New("database plugin profile differs from its authored configuration")
+		}
 		count, err = databaseInstances(want)
 		if err != nil || workloadCount(status, "readyInstances", 0) != count || !workloadCondition(status, "Ready") || resourceText(status, "currentPrimary") == "" || resourceText(status, "currentPrimary") != resourceText(status, "targetPrimary") {
 			return errors.New("database instances are not ready on the requested primary")
@@ -443,8 +448,11 @@ func (s *workloadAdmission) observeOwnedWorkloadPods(ctx context.Context, reads 
 		if completed && resourceText(resourceMap(pod, "status"), "phase") == "Failed" {
 			continue
 		}
-		cnpg := object.identity.Kind == "Cluster"
-		if err := s.observeWorkloadPod(ctx, reads, pod, podSpec, completed, cnpg); err != nil {
+		var databaseSpec map[string]any
+		if object.identity.Kind == "Cluster" {
+			databaseSpec = resourceMap(object.value, "spec")
+		}
+		if err := s.observeWorkloadPod(ctx, reads, pod, podSpec, completed, databaseSpec); err != nil {
 			return err
 		}
 		if resourceText(podMeta, "name") == resourceText(resourceMap(live, "status"), "currentPrimary") {
@@ -461,8 +469,9 @@ func (s *workloadAdmission) observeOwnedWorkloadPods(ctx context.Context, reads 
 	return nil
 }
 
-func (s *workloadAdmission) observeWorkloadPod(ctx context.Context, reads *receiverReads, pod, expected map[string]any, completed, cnpg bool) error {
+func (s *workloadAdmission) observeWorkloadPod(ctx context.Context, reads *receiverReads, pod, expected map[string]any, completed bool, databaseSpec map[string]any) error {
 	spec, status := resourceMap(pod, "spec"), resourceMap(pod, "status")
+	cnpg := databaseSpec != nil
 	if err := s.observeWorkloadNode(ctx, reads, resourceText(spec, "nodeName")); err != nil {
 		return err
 	}
@@ -489,16 +498,8 @@ func (s *workloadAdmission) observeWorkloadPod(ctx context.Context, reads *recei
 			return errors.New("workload Pod container inventory is malformed")
 		}
 		if cnpg && pair[0] == "initContainers" {
-			// CNPG's one bootstrap container belongs to the separately installed
-			// operator. Verify its completion, without claiming its image was in
-			// the product release or reconstructed from a caller-supplied digest.
-			if len(actual) != 1 || len(states) != 1 {
-				return errors.New("database bootstrap profile is unsupported")
-			}
-			a, _ := actual[0].(map[string]any)
-			st, _ := states[0].(map[string]any)
-			if resourceText(a, "name") != "bootstrap-controller" || resourceText(st, "name") != "bootstrap-controller" || !workloadContainerSucceeded(st) {
-				return errors.New("database bootstrap did not complete")
+			if err := workloadCNPGInitContainers(databaseSpec, actual, states, s.platform); err != nil {
+				return err
 			}
 			continue
 		}
@@ -560,6 +561,103 @@ func (s *workloadAdmission) observeWorkloadPod(ctx context.Context, reads *recei
 		}
 	}
 	return nil
+}
+
+// CNPG generates these infrastructure containers, which are not engine release
+// images. Only the declared Barman WAL plugin has a qualified sidecar profile.
+func workloadCNPGBackupPlugin(spec map[string]any) (bool, error) {
+	plugins, ok := spec["plugins"].([]any)
+	if spec["plugins"] != nil && !ok || len(plugins) > 1 {
+		return false, errors.New("database plugin profile is unsupported")
+	}
+	if len(plugins) == 0 {
+		return false, nil
+	}
+	plugin, ok := plugins[0].(map[string]any)
+	if !ok || resourceText(plugin, "name") != "barman-cloud.cloudnative-pg.io" {
+		return false, errors.New("database plugin profile is unsupported")
+	}
+	if enabled, present := plugin["enabled"]; present {
+		value, ok := enabled.(bool)
+		if !ok {
+			return false, errors.New("database plugin enablement is malformed")
+		}
+		if !value {
+			return false, nil
+		}
+	}
+	if plugin["isWALArchiver"] != true || !receiverDNS.MatchString(resourceText(resourceMap(plugin, "parameters"), "barmanObjectName")) {
+		return false, errors.New("database backup plugin is not a declared WAL archiver")
+	}
+	return true, nil
+}
+
+func workloadCNPGInitContainers(databaseSpec map[string]any, actual, states []any, platform string) error {
+	backup, err := workloadCNPGBackupPlugin(databaseSpec)
+	if err != nil {
+		return err
+	}
+	count := 1
+	if backup {
+		count = 2
+	}
+	if len(actual) != count || len(states) != count {
+		return errors.New("database bootstrap profile is unsupported")
+	}
+	byName := map[string]map[string]any{}
+	for _, raw := range states {
+		state, ok := raw.(map[string]any)
+		name := resourceText(state, "name")
+		if !ok || name == "" || byName[name] != nil {
+			return errors.New("database bootstrap status is malformed or duplicated")
+		}
+		byName[name] = state
+	}
+	bootstrap, _ := actual[0].(map[string]any)
+	bootstrapState := byName["bootstrap-controller"]
+	if resourceText(bootstrap, "name") != "bootstrap-controller" || bootstrapState == nil || !workloadContainerSucceeded(bootstrapState) {
+		return errors.New("database bootstrap did not complete")
+	}
+	if !backup {
+		// Preserve the existing bootstrap-only operator-infrastructure profile.
+		return nil
+	}
+	sidecar, _ := actual[1].(map[string]any)
+	sidecarState := byName["plugin-barman-cloud"]
+	// This qualifies the installed default instance profile. ObjectStore
+	// custom sidecar arguments/commands require a separate qualification.
+	if resourceText(sidecar, "name") != "plugin-barman-cloud" || resourceText(sidecar, "restartPolicy") != "Always" ||
+		!sameJSON(sidecar["args"], []any{"instance"}) || (sidecar["command"] != nil && !sameJSON(sidecar["command"], []any{})) ||
+		resourceText(sidecar, "workingDir") != "" || sidecarState == nil || sidecarState["ready"] != true || sidecarState["started"] != true ||
+		resourceMap(resourceMap(sidecarState, "state"), "running") == nil || len(resourceMap(sidecarState, "state")) != 1 ||
+		resourceText(bootstrap, "restartPolicy") != "" {
+		return errors.New("database backup sidecar is outside its ready restartable-init profile")
+	}
+	// Qualified against the public OCI indices for the separately pinned stack
+	// in deploy/cnpg/install/kustomization.yaml (CNPG 1.30.0, Barman 0.14.0).
+	// A tag alone is not runtime evidence. Accept only that exact index or its
+	// verified platform manifest; upgrades/mirrors need explicit qualification.
+	if !workloadCNPGInfrastructureImage(bootstrap, bootstrapState, platform, false) || !workloadCNPGInfrastructureImage(sidecar, sidecarState, platform, true) {
+		return errors.New("database infrastructure image is outside its qualified platform profile")
+	}
+	return nil
+}
+
+func workloadCNPGInfrastructureImage(container, state map[string]any, platform string, backup bool) bool {
+	repository, tag := "ghcr.io/cloudnative-pg/cloudnative-pg", "1.30.0"
+	index := "sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb"
+	manifests := map[string]string{"linux/amd64": "sha256:091d306935cfdf646debfe78010d59ebfb572150eb6eb922b0203873c0c68841", "linux/arm64": "sha256:6c7926147fd23a053dea6605d61c013d43bfd411be3532e7500ef2d2b68bb98c"}
+	if backup {
+		repository, tag = "ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar", "v0.14.0"
+		index = "sha256:9880817c285c7afa4d195da2145064d21907405489ed6ec39abe59b1feb558a4"
+		manifests = map[string]string{"linux/amd64": "sha256:b1f980db3e97942eafd7a063fb99cda03300e651f9fe9561ff1bcbe481c157c8", "linux/arm64": "sha256:dc33620cb638a3acb73158a47b2ab41914352d688eb0494f3feaed685c945c1b"}
+	}
+	image, manifest := resourceText(container, "image"), manifests[platform]
+	if manifest == "" || (image != repository+":"+tag && image != repository+":"+tag+"@"+index && image != repository+"@"+index) {
+		return false
+	}
+	runtime := strings.TrimPrefix(resourceText(state, "imageID"), "docker-pullable://")
+	return runtime == repository+"@"+index || runtime == repository+"@"+manifest
 }
 
 func (s *workloadAdmission) observeWorkloadNode(ctx context.Context, reads *receiverReads, name string) error {
