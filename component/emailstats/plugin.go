@@ -58,9 +58,9 @@ type Integration struct {
 	bunDB  func() *bun.DB
 	logger *slog.Logger
 
-	// grants answers which organizations a statistics read's caller reaches;
-	// nil when the engine handle cannot say, and then every read answers
-	// nothing (statistics.go).
+	// grants resolves membership and effective data/email permissions using
+	// fresh authorization evidence; an incomplete engine handle leaves it nil
+	// and every statistics read answers nothing.
 	grants GrantResolver
 
 	// now is the rollup's clock at the start of a run, which the walk moves on
@@ -84,9 +84,9 @@ type Integration struct {
 //
 // The statistics read's grant resolver is ASSERTED on the engine handle, not
 // required of it: the rollup needs only Execute, and the engine every node
-// passes is one (memql.MemQLEngine.ResolveAccessGrant). A handle that is not
-// leaves grants nil, which narrows every read to nothing rather than failing
-// the rollup's wiring or widening a read.
+// passes implements the full GrantResolver. A handle missing any part leaves
+// grants nil, which narrows every read to nothing rather than failing the
+// rollup's wiring or treating membership alone as permission.
 func NewIntegration(engine Engine, bunDB func() *bun.DB, logger *slog.Logger) *Integration {
 	if logger == nil {
 		logger = slog.Default()
@@ -132,13 +132,17 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 // ANY CALLER, NARROWED, the website read's rule (component/sitetraffic):
 // there is no principal check, because what a caller reaches is decided in
 // the read by their own grant, and a caller who reaches nothing gets every
-// figure null. Only a malformed call is refused -- a period the read does not
-// offer, in a sentence that names the periods -- and before the grant is
-// read, so a malformed call costs nothing.
+// figure null. A malformed period is refused before authorization is read.
+// Failed authorization evidence or an incomplete all-organization discovery
+// is also refused, rather than shown as a complete or empty successful read.
 func (i *Integration) handleStatistics(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	period, err := statsperiod.Parse(stringArg(args, "period"), emailPeriods...)
 	if err != nil {
 		return nil, err
+	}
+	var failures *auth.ReadFailures
+	if i.grants != nil {
+		ctx, failures = i.grants.OrganizationReadContext(ctx)
 	}
 	var db *bun.DB
 	if i.bunDB != nil {
@@ -156,9 +160,12 @@ func (i *Integration) handleStatistics(ctx context.Context, args map[string]any,
 	// namedIDsArg, not a decoder that drops blanks: a list of blank ids is
 	// NAMED and names nothing, and must not read as no list at all
 	// (allowedAccounts).
-	stats, err := readStatistics(ctx, db, grant, namedIDsArg(args, "accountIds"), period, now)
+	stats, err := readStatistics(ctx, db, grant, namedIDsArg(args, "accountIds"), period, now, i.grants, failures)
 	if err != nil {
 		return nil, err
+	}
+	if failures != nil && failures.Err() != nil {
+		return nil, fmt.Errorf("email statistics: authorization could not be resolved: %w", failures.Err())
 	}
 	payload, err := json.Marshal(stats.Payload())
 	if err != nil {

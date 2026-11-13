@@ -315,7 +315,7 @@ func (f *statsFixture) of(kind string, sources []string, on time.Time, x statFac
 // read answers readStatistics over the fixture's table at statsNow.
 func (f *statsFixture) read(grant memql.AccessGrant, requested []string, p statsperiod.Period) EmailStatistics {
 	f.t.Helper()
-	s, err := readStatistics(context.Background(), f.db, grant, requested, p, statsNow)
+	s, err := readStatistics(context.Background(), f.db, grant, requested, p, statsNow, fakeGrants{grant}, nil)
 	if err != nil {
 		f.t.Fatalf("readStatistics(%+v, %q, %s): %v", grant, requested, p, err)
 	}
@@ -329,7 +329,11 @@ func memberOf(accounts ...string) memql.AccessGrant { return memql.AccessGrant{A
 // fakeGrants answers one grant for every caller.
 type fakeGrants struct{ grant memql.AccessGrant }
 
-func (g fakeGrants) ResolveAccessGrant(context.Context) memql.AccessGrant { return g.grant }
+func (g fakeGrants) ResolveAccessGrant(context.Context) memql.AccessGrant             { return g.grant }
+func (g fakeGrants) OrganizationCapable(context.Context, string, string, string) bool { return true }
+func (g fakeGrants) OrganizationReadContext(ctx context.Context) (context.Context, *auth.ReadFailures) {
+	return auth.ContextWithReadFailures(ctx)
+}
 
 // integration is the plug-in over the fixture's table at statsNow, resolving
 // grants with the resolver given (nil: none).
@@ -1177,7 +1181,7 @@ func TestTheReadKeepsThePoolsStatementTimeout(t *testing.T) {
 	f.of(kindOpenUnique, f.times(3, kindSent, day("2041-06-12"), a)[:1], day("2041-06-13"), a)
 	f.times(1, kindSubscribe, day("2041-06-13"), statFact{account: a.account, audience: f.id("aud")})
 	db, rec := recordedDB(t)
-	got, err := readStatistics(context.Background(), db, staff(), nil, statsperiod.Last7Days, statsNow)
+	got, err := readStatistics(context.Background(), db, staff(), nil, statsperiod.Last7Days, statsNow, fakeGrants{staff()}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

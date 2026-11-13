@@ -115,6 +115,8 @@ func organizationCollectionRead(fn *Function, args map[string]any) bool {
 		return ok && (value == "" || value == "deployables")
 	case fn.Name == "siteStatistics" && fn.Executor == "integration.siteTraffic.statistics":
 		return true
+	case fn.Name == "emailStatistics" && fn.Executor == "integration.emailStats.statistics":
+		return true
 	}
 	return false
 }

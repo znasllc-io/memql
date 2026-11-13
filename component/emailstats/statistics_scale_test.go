@@ -158,7 +158,7 @@ func TestStaffReadsAtScaleEvidence(t *testing.T) {
 		timing := scaleTiming{Read: who, Period: string(p)}
 		for run := 0; run < 5; run++ {
 			start := time.Now()
-			got, err := readStatistics(ctx, pool, grant.grant, grant.requested, p, now)
+			got, err := readStatistics(ctx, pool, grant.grant, grant.requested, p, now, fakeGrants{grant.grant}, nil)
 			if err != nil {
 				t.Fatalf("%s %s: %v", who, p, err)
 			}
@@ -203,7 +203,7 @@ type scaleGrant struct {
 func slowestStatements(t *testing.T, db *bun.DB, g scaleGrant, p statsperiod.Period, now time.Time) []float64 {
 	t.Helper()
 	ids, everything := allowedAccounts(g.grant, g.requested)
-	scope := orgScope{ids: ids, everything: everything}
+	scope := orgScope{ids: ids, allAccounts: everything}
 	b := statsperiod.For(p, now)
 	from := b.Start
 	if b.HasPrevious {
@@ -243,6 +243,16 @@ func slowestStatements(t *testing.T, db *bun.DB, g scaleGrant, p statsperiod.Per
 		}),
 	}
 	err := statisticsTx(context.Background(), db, func(ctx context.Context, tx bun.Tx) error {
+		if everything {
+			start := time.Now()
+			if err := tx.NewRaw(`SELECT DISTINCT account_id FROM email_stat_fact ORDER BY account_id LIMIT ?`, maxStatisticsAccounts+1).Scan(ctx, &scope.ids); err != nil {
+				return err
+			}
+			if len(scope.ids) > maxStatisticsAccounts {
+				return fmt.Errorf("statistics account bound exceeded")
+			}
+			ms = append(ms, float64(time.Since(start).Microseconds())/1000)
+		}
 		for _, step := range steps {
 			if err := step(ctx, tx); err != nil {
 				return err

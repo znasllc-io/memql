@@ -1115,7 +1115,7 @@ func TestATestRunsSendsOpensAndClicksMakeNoFact(t *testing.T) {
 
 	// What the Overview shows: one send, and the campaign alone in Top
 	// campaigns.
-	got, err := readStatistics(context.Background(), f.db, staff(), []string{f.account}, statsperiod.Last7Days, now)
+	got, err := readStatistics(context.Background(), f.db, staff(), []string{f.account}, statsperiod.Last7Days, now, fakeGrants{staff()}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1165,7 +1165,7 @@ func TestTheTestingAudiencesConsentEventsMakeNoFact(t *testing.T) {
 	}
 	wantFact(t, facts, kindBounce, memberBounced)
 
-	got, err := readStatistics(context.Background(), f.db, staff(), []string{f.account}, statsperiod.Last7Days, now)
+	got, err := readStatistics(context.Background(), f.db, staff(), []string{f.account}, statsperiod.Last7Days, now, fakeGrants{staff()}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2167,7 +2167,7 @@ func TestAFirstWalkThatCannotReadItsFirstPageStartsLater(t *testing.T) {
 	if _, err := db.NewInsert().Model(&[]factRow{{Kind: kindSent, SourceID: suffix + "-old", AccountID: suffix + "-org", CampaignID: suffix + "-camp", Day: dateArg(earlier)}}).Exec(ctx); err != nil {
 		t.Fatal(err)
 	}
-	got, err := readStatistics(ctx, db, staff(), nil, statsperiod.Last12Months, now)
+	got, err := readStatistics(ctx, db, staff(), nil, statsperiod.Last12Months, now, fakeGrants{staff()}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

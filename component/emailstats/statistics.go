@@ -10,6 +10,7 @@ import (
 
 	"github.com/uptrace/bun"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/statsperiod"
 )
@@ -24,15 +25,22 @@ import (
 //
 // email_stat_fact is this package's own table, outside the parser and the
 // row-authz filter path, so nothing upstream narrows a read of it: the gate is
-// here, and it is the caller's grant -- MemQLEngine.ResolveAccessGrant, built
-// on the row gate's own resolution of which organizations an actor reaches.
-// allowedAccounts intersects the organizations a caller names with it. One
+// here. MemQLEngine.ResolveAccessGrant supplies membership and the role's
+// organization fence; OrganizationCapable additionally applies read-data and
+// read-email decisions for each retained organization. allowedAccounts first
+// intersects the organizations a caller names with membership. One
 // they do not reach is dropped, not refused, so a client's member who names
 // another client gets exactly the answer of somebody who reaches no
 // organization: every figure null and no measuredSince, whether the named
-// organization exists or not and whatever it sent. A grant that could not be
-// resolved is empty, and so is the grant of an engine handle that cannot
-// resolve one (plugin.go): both reach nothing, never everything.
+// organization exists or not and whatever it sent. A handle without the full
+// authorization interface reaches nothing. Failed membership/grant reads are
+// reported as failures, never a successful aggregate based on partial evidence.
+//
+// Operator reads with no named organizations require global data/email read,
+// then discover a bounded set of IDs from the retained facts in the same SQL
+// snapshot and authorize each. They do not rely on today's account registry:
+// older facts may outlive its rows. Every aggregation still has an account
+// predicate, so a denial attached to one organization excludes its figures.
 //
 // The facts older than organization attribution carry an empty account_id and
 // belong to no organization anybody could name, so staff reading every
@@ -144,12 +152,25 @@ const (
 	automationJourney = "journey"
 )
 
-// GrantResolver answers which organizations the caller reaches. The engine is
-// one (memql.MemQLEngine.ResolveAccessGrant, built on the row gate's own
-// resolution); the plug-in asserts it on its engine handle, and a handle that
-// is not one narrows every read to nothing.
+// GrantResolver supplies membership, capability decisions and fresh failure-
+// tracked authorization evidence. Membership alone is not permission to read
+// email figures. The engine implements all three; an incomplete handle narrows
+// every read to nothing.
 type GrantResolver interface {
 	ResolveAccessGrant(ctx context.Context) memql.AccessGrant
+	OrganizationCapable(ctx context.Context, account, verb, resource string) bool
+	OrganizationReadContext(ctx context.Context) (context.Context, *auth.ReadFailures)
+}
+
+// maxStatisticsAccounts bounds an all-organization read's authorization work.
+// Exceeding it refuses the read; a truncated set must never look like a complete
+// aggregate. Scoped callers never enumerate the facts' organization IDs.
+const maxStatisticsAccounts = 10000
+
+func statisticsAccountReadable(ctx context.Context, resolver GrantResolver, account string) bool {
+	return resolver != nil &&
+		resolver.OrganizationCapable(ctx, account, auth.VerbRead, auth.ResourceData) &&
+		resolver.OrganizationCapable(ctx, account, auth.VerbRead, "app:email")
 }
 
 // EmailTotals are a range's figures; nil is "not measured".
@@ -283,24 +304,23 @@ func allowedAccounts(grant memql.AccessGrant, requested []string) (ids []string,
 
 // orgScope is what a read covers, after allowedAccounts.
 type orgScope struct {
-	ids        []string
-	everything bool
+	ids []string
+	// allAccounts preserves the all-organizations answer's account breakdown;
+	// it never removes the SQL filter. Every ID has already been authorized.
+	allAccounts bool
 }
 
-func (s orgScope) empty() bool { return !s.everything && len(s.ids) == 0 }
+func (s orgScope) empty() bool { return len(s.ids) == 0 }
 
 // several reports whether more than one organization is in scope, which is
 // when a read lists each one (Accounts): every organization, or more than one
 // by name.
-func (s orgScope) several() bool { return s.everything || len(s.ids) > 1 }
+func (s orgScope) several() bool { return s.allAccounts || len(s.ids) > 1 }
 
 // filter is the scope as a predicate on the account column named, and its
-// arguments. Everything is no predicate at all, so the facts with an empty
-// account_id are in it.
+// arguments. Even an operator's all-organizations read has an explicit set;
+// a global permission cannot override an account-specific denial.
 func (s orgScope) filter(column string) (string, []any) {
-	if s.everything {
-		return "TRUE", nil
-	}
 	return column + " IN (?)", []any{bun.In(s.ids)}
 }
 
@@ -308,7 +328,7 @@ func (s orgScope) filter(column string) (string, []any) {
 // requested is the accountIds argument as namedIDsArg decodes it. A period the
 // read does not offer is refused; anything the caller does not reach is
 // dropped.
-func readStatistics(ctx context.Context, db *bun.DB, grant memql.AccessGrant, requested []string, p statsperiod.Period, now time.Time) (EmailStatistics, error) {
+func readStatistics(ctx context.Context, db *bun.DB, grant memql.AccessGrant, requested []string, p statsperiod.Period, now time.Time, resolver GrantResolver, failures *auth.ReadFailures) (EmailStatistics, error) {
 	period, err := statsperiod.Parse(string(p), emailPeriods...)
 	if err != nil {
 		return EmailStatistics{}, err
@@ -320,8 +340,34 @@ func readStatistics(ctx context.Context, db *bun.DB, grant memql.AccessGrant, re
 	out := emptyStatistics(period, b)
 
 	ids, everything := allowedAccounts(grant, requested)
-	scope := orgScope{ids: ids, everything: everything}
-	if scope.empty() {
+	scope := orgScope{allAccounts: everything}
+	checkAuthorization := func() error {
+		if failures != nil && failures.Err() != nil {
+			return fmt.Errorf("email statistics: authorization could not be resolved: %w", failures.Err())
+		}
+		return nil
+	}
+	if everything {
+		// Unattributed legacy facts belong only to an operator's global read.
+		// A global denial closes that door before any fact IDs are discovered.
+		readable := statisticsAccountReadable(ctx, resolver, "")
+		if err := checkAuthorization(); err != nil {
+			return EmailStatistics{}, err
+		}
+		if !readable {
+			return out, nil
+		}
+	} else {
+		for _, id := range ids {
+			if statisticsAccountReadable(ctx, resolver, id) {
+				scope.ids = append(scope.ids, id)
+			}
+		}
+	}
+	if err := checkAuthorization(); err != nil {
+		return EmailStatistics{}, err
+	}
+	if !everything && scope.empty() {
 		// The caller reaches none of what they named, or nothing at all: the
 		// bounds and every figure null, and nothing is read -- not even
 		// measuredSince, which is a fact about the cluster's mail and not
@@ -332,6 +378,29 @@ func readStatistics(ctx context.Context, db *bun.DB, grant memql.AccessGrant, re
 		return EmailStatistics{}, errors.New("this node has no database handle, so it cannot read email statistics")
 	}
 	err = statisticsTx(ctx, db, func(ctx context.Context, tx bun.Tx) error {
+		if everything {
+			// Facts can outlive their account registry row. Discover from the
+			// retained facts, then authorize each account, rather than silently
+			// losing those historical figures by using the current registry.
+			var candidates []string
+			if err := tx.NewRaw(`SELECT DISTINCT account_id FROM email_stat_fact ORDER BY account_id LIMIT ?`, maxStatisticsAccounts+1).Scan(ctx, &candidates); err != nil {
+				return fmt.Errorf("resolve statistics organizations: %w", err)
+			}
+			if len(candidates) > maxStatisticsAccounts {
+				return errors.New("too many organizations in retained email statistics for one authorized aggregate")
+			}
+			for _, id := range candidates {
+				if statisticsAccountReadable(ctx, resolver, id) {
+					scope.ids = append(scope.ids, id)
+				}
+			}
+			if err := checkAuthorization(); err != nil {
+				return err
+			}
+			if scope.empty() {
+				return nil
+			}
+		}
 		return fillStatistics(ctx, tx, scope, b, now, &out)
 	})
 	if err != nil {

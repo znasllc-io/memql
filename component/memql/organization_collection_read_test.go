@@ -17,6 +17,11 @@ func TestOrganizationCollectionReadRequiresTheGuardedExecutor(t *testing.T) {
 		{"siteStatistics", "integration.custom.unscoped", "builtin", "", false},
 		{"otherStatistics", "integration.siteTraffic.statistics", "builtin", "", false},
 		{"siteStatistics", "integration.siteTraffic.statistics", "mutation", "", false},
+		{"emailStatistics", "integration.emailStats.statistics", "builtin", "", true},
+		{"emailStatistics", "integration.custom.unscoped", "builtin", "", false},
+		{"otherStatistics", "integration.emailStats.statistics", "builtin", "", false},
+		{"emailStatistics", "integration.emailStats.statistics", "mutation", "", false},
+		{"emailStatisticsRollup", "integration.emailStats.rollup", "builtin", "", false},
 	} {
 		fn := &Function{Name: tc.name, Executor: tc.executor, FunctionKind: tc.kind}
 		if got := organizationCollectionRead(fn, map[string]any{"resource": tc.resource}); got != tc.want {
