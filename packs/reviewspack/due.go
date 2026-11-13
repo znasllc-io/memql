@@ -146,7 +146,16 @@ func (p *Provider) askOrder(ctx, sys context.Context, site, settings map[string]
 	for _, l := range EligibleLines(order, lines, handleOf) {
 		tally["considered"]++
 		requestID := requestIDFor(storeID, orderGid, l.ProductHandle)
-		if existing, err := p.rowsFor(sys, "reviewRequestById", map[string]string{"requestId": requestID}); err == nil && len(existing) > 0 {
+		existing, err := p.rowsFor(sys, "reviewRequestById", map[string]string{"requestId": requestID})
+		if err != nil {
+			// An unread request may already have been mailed. Treating a read
+			// failure as absence would replace its token hash before Campaigns
+			// replays the accepted send, invalidating the buyer's only link.
+			// Leave the row and mail untouched; a later scan can read it again.
+			tally["failed"]++
+			continue
+		}
+		if len(existing) > 0 {
 			switch asString(existing[0]["sendState"]) {
 			case "sent", "skipped":
 				continue // asked already
