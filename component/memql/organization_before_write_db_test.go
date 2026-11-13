@@ -45,9 +45,11 @@ func hookSiteWritesOf(t *testing.T, eng *MemQLEngine, userID string, edit func(r
 }
 
 func TestTheOrganizationBoundaryJudgesTheRowBeforeWriteHooksProduced(t *testing.T) {
+	// Boot the stock DSL against its complete role catalog before installing
+	// this test's deliberately smaller set of site permissions.
+	eng, db, _ := sharedReadMergeEngine(t)
 	storePart := auth.VerbResource{Verb: auth.VerbExecute, Resource: "app:deployables/store"}
 	installSiteOrganizationCapabilities(t, storePart)
-	eng, db, _ := sharedReadMergeEngine(t)
 	t.Setenv(memqlDomainEnv, siteTestDomain)
 	previousGrants, previousMembers := auth.InstalledGrantSource(), auth.InstalledMembershipSource()
 	eng.InstallGrantResolution()
