@@ -33,13 +33,61 @@ func (j *preparationJournal) reopenPromotedCapture(ctx context.Context, installa
 	if err != nil {
 		return verifiedSourceCapture{}, err
 	}
-	if !sameJSON(record, fresh) {
+	if !samePromotedSourceBinding(record, fresh) {
 		return verifiedSourceCapture{}, errors.New("promoted source journal changed during verification")
+	}
+	if !validPromotedContinuityProgress(record, fresh) {
+		return verifiedSourceCapture{}, errors.New("promoted Application history changed during source verification")
 	}
 	if err := ctx.Err(); err != nil {
 		return verifiedSourceCapture{}, err
 	}
 	return proof, nil
+}
+
+// Source verification runs alongside the admitted Application-history guard.
+// That guard persists a new list cursor even when the Application is unchanged,
+// so comparing the entire record makes a slow source read reject its own guard.
+// Keep every immutable source/authority field in this projection. Continuity is
+// checked separately below; this does not replace the lifecycle guard or the
+// fresh Application proof and resource-version fence before an Argo effect.
+func samePromotedSourceBinding(before, after preparationRecord) bool {
+	type binding struct {
+		ID             string
+		Scope          preparationScope
+		SlotEpoch      int64
+		State          string
+		PromotedPlanID string
+		Captures       map[string]preparationCapture
+		Retirement     *preparationRetirement
+	}
+	project := func(r preparationRecord) binding {
+		return binding{r.ID, r.Scope, r.SlotEpoch, r.State, r.PromotedPlanID, r.Captures, r.Retirement}
+	}
+	return sameJSON(project(before), project(after))
+}
+
+// Cursors/resource versions are opaque Kubernetes values, not ordered numbers.
+// Only a native continuity read may advance them; both journal reads already
+// validate their intent. Recheck that contract here and refuse sticky failure,
+// lost/rebound history or a regressed generation instead of dropping this map
+// from the comparison without a replacement check.
+func validPromotedContinuityProgress(before, after preparationRecord) bool {
+	for _, r := range []preparationRecord{before, after} {
+		for key, state := range r.Continuity {
+			intent, err := continuityIntent(r, key)
+			if err != nil || state.Failed || state.Validate(intent) != nil {
+				return false
+			}
+		}
+	}
+	for key, previous := range before.Continuity {
+		current, exists := after.Continuity[key]
+		if !exists || current.Intent != previous.Intent || current.Generation < previous.Generation {
+			return false
+		}
+	}
+	return true
 }
 
 func (j *preparationJournal) promotedCapture(ctx context.Context, installation, preparation, plan, role string) (preparationRecord, sourceCapture, error) {
