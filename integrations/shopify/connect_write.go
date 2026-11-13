@@ -245,6 +245,10 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 	// ends does not take it along. A failure is logged, never the connect's.
 	kept := prior
 	kept.ID, kept.AdminTokenRef, kept.StorefrontTokenRef, kept.APIVersion = storeID, adminRef, storefrontRef, generated.APIVersion
+	// Registration must use the same grant just written in step 12. Reusing
+	// the prior scopes skips newly approved topics (or retains withdrawn ones)
+	// until a later pass, even though this job already uses the new token.
+	kept.ScopesGranted = scopes
 	kept.UninstalledAt, kept.RedactedAt = "", ""
 	if kept.Domain == "" {
 		kept.Domain = state.ShopDomain

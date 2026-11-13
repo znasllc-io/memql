@@ -117,6 +117,19 @@ func (h *writeHarness) assertNoCredential(t *testing.T) {
 
 func q(s string) string { return `"` + s + `"` }
 
+// These callback fixtures grant ConnectScopes, not every generated scope.
+// The callback must apply that grant on its first subscription pass too.
+func connectWebhookTopicCount() int {
+	store := Store{ScopesGranted: ConnectScopes()}
+	count := 0
+	for _, topic := range generated.SubscribedTopics {
+		if len(topicScopesMissingFor(store, topic)) == 0 {
+			count++
+		}
+	}
+	return count
+}
+
 // subscriptionHealth is the store health writes of the subscription pass: the
 // ones carrying its outcome. The connect's stamp of when it recorded the
 // grant (grantRecordedKey) writes the same health, carrying what the row held
@@ -294,8 +307,8 @@ func TestAFirstConnectKeepsEverythingItWasGiven(t *testing.T) {
 	}
 
 	// 15. The webhooks, and their health recorded.
-	if h.admin.countOp("ShopifyWebhookCreate") != len(generated.SubscribedTopics) {
-		t.Errorf("created %d subscriptions, want %d", h.admin.countOp("ShopifyWebhookCreate"), len(generated.SubscribedTopics))
+	if h.admin.countOp("ShopifyWebhookCreate") != connectWebhookTopicCount() {
+		t.Errorf("created %d subscriptions, want %d", h.admin.countOp("ShopifyWebhookCreate"), connectWebhookTopicCount())
 	}
 	if len(h.subscriptionHealth()) != 1 {
 		t.Error("the subscription health was not recorded")
@@ -465,7 +478,7 @@ func TestTheWebhooksDoNotHoldTheRedirect(t *testing.T) {
 		t.Fatalf("%d background jobs, want 1", len(deferred))
 	}
 	deferred[0]()
-	if h.admin.countOp("ShopifyWebhookCreate") != len(generated.SubscribedTopics) || len(h.subscriptionHealth()) != 1 {
+	if h.admin.countOp("ShopifyWebhookCreate") != connectWebhookTopicCount() || len(h.subscriptionHealth()) != 1 {
 		t.Fatal("the handed-off job did not register the webhooks and record their health")
 	}
 }
