@@ -301,7 +301,7 @@ func AccountMovesBuild(args AccountMovesArgs) string {
 	return b.String()
 }
 
-// AccountRows -- One page of a kind's rows in an account, or, when accountId is empty, in no account: {kind: "row", id, concept, primary, secondary, tertiary, status, ownerUserId, createdAt, updatedAt, followsParent, parentConcept} per row, then {kind: "page", nextCursor}, empty on the last page. primary..status are the values of the fields the kind's @displayCard names (primary is the id when it names none). followsParent is true for a row whose parent is in the same account: it moves with its parent and cannot be moved by itself; parentConcept is the kind it follows. search filters the page that was read, by its display values; it is not a search of the kind, so a page may hold fewer rows than asked while nextCursor still moves on.
+// AccountRows -- One page of a kind's rows in an account, or, when accountId is empty, in no account: {kind: "row", id, concept, primary, secondary, tertiary, status, ownerUserId, createdAt, updatedAt, followsParent, parentConcept} per row, then {kind: "page", nextCursor}, empty on the last page. primary..status are the values of the fields the kind's @displayCard names (primary is the id when it names none). followsParent is true for a row whose parent is in the same account: it moves with its parent and cannot be moved by itself; parentConcept is the kind it follows. A canonical row id or bare UUID in search reads that exact row, only if its newest head belongs to the requested account (or none); the stored id is returned unchanged and there is no next cursor. Other search text filters the page that was read by its display values, so a page may hold fewer rows than asked while nextCursor still moves on.
 type AccountRowsArgs struct {
 	// The account, bare or v1:accounts:account:<bare>; empty for rows in no account.
 	AccountId string
@@ -311,7 +311,7 @@ type AccountRowsArgs struct {
 	After string
 	// Rows per page: 50 when absent, at most 200.
 	Limit int
-	// Keep only the page's rows whose display values contain this, ignoring case.
+	// A canonical row id or bare UUID reads exactly that row in this account; other text filters the page's display values, ignoring case.
 	Search string
 }
 

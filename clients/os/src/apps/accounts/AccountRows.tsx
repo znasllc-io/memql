@@ -103,18 +103,20 @@ export function AccountRows({ accountId, concept, kind, breadcrumbs, onBack, onM
     body = <Caption>Not connected to the cluster.</Caption>;
   } else if (feed.state === "reading" && feed.rows.length === 0) {
     body = <RecordListSkeleton label="Loading rows" rows={5} />;
-  } else if (feed.rows.length === 0) {
+  } else if (feed.rows.length === 0 && !feed.hasMore) {
     body = <Caption>{searching ? "No rows match." : "No rows of this kind here."}</Caption>;
   } else {
     body = (
       <>
-        <RecordList as="ul" label={`Rows of ${kind}`}>
+        {feed.rows.length === 0 ? null : <RecordList as="ul" label={`Rows of ${kind}`}>
           {feed.rows.map((row) => (
             <li key={row.id}>
-              <KindRowLine row={row} chosen={chosen.has(row.id)} onToggle={() => toggle(row)} />
+              <KindRowLine row={row} concept={concept} chosen={chosen.has(row.id)} onToggle={() => toggle(row)} />
             </li>
           ))}
-        </RecordList>
+        </RecordList>}
+        {/* A filtered page can have no matches and still advance its cursor.
+            Keep the continuation reachable until the server finishes the read. */}
         <NextPage feed={feed} label="Loading more rows" />
       </>
     );
@@ -132,10 +134,6 @@ export function AccountRows({ accountId, concept, kind, breadcrumbs, onBack, onM
     acts.push({ label: "Move to account", tone: "primary", onAct: () => onMove(picked.map((r) => ({ concept: r.concept || concept, id: r.id }))) });
   }
 
-  // NO FILTER CHROME OVER NO CONTENT (rule 2): the search is offered once
-  // there is something to search, and stays while a search is being asked.
-  const offerSearch = searching || feed.rows.length > 0;
-
   return (
     <div className="os-app-stack os-account-rows">
       <Head
@@ -144,7 +142,9 @@ export function AccountRows({ accountId, concept, kind, breadcrumbs, onBack, onM
         breadcrumbs={breadcrumbs}
         back={{ label: "Data", onSelect: onBack }}
       >
-        {offerSearch ? <Refine search={searchText} onSearch={setSearchText} label={`Search rows of ${kind}`} /> : null}
+        {/* An exact ID is also a bounded lookup, so it must stay reachable
+            when the initial browse is empty, still reading, or refused. */}
+        <Refine search={searchText} onSearch={setSearchText} placeholder="Name or ID" label={`Search rows of ${kind}`} />
       </Head>
       {body}
       {picked.length === 0 ? null : (
@@ -158,14 +158,17 @@ export function AccountRows({ accountId, concept, kind, breadcrumbs, onBack, onM
   );
 }
 
-function KindRowLine({ row, chosen, onToggle }: { row: KindRow; chosen: boolean; onToggle: () => void }) {
-  const name = row.primary || row.id;
+function KindRowLine({ row, concept, chosen, onToggle }: { row: KindRow; concept: string; chosen: boolean; onToggle: () => void }) {
+  const identity = displayedRowId(row, concept);
+  const primaryIsId = row.primary === "" || row.primary === row.id || row.primary === identity;
+  const name = primaryIsId ? identity : row.primary;
   if (row.followsParent) {
     // NOT A CHOICE, AND IT SAYS WHY ON THE ROW rather than in a tooltip only:
     // the kind it moves with, named as the inventory names kinds, when the
     // answer carries it (`parentConcept`), and a plain sentence when not.
     return (
       <RecordRow name={name} secondary={row.secondary || undefined}>
+        {primaryIsId ? null : <span className="os-caption os-mono">{identity}</span>}
         <span className="os-caption">
           {row.parentConcept === "" ? "Moves with the row it belongs to" : `Moves with its ${kindName(row.parentConcept)}`}
         </span>
@@ -174,8 +177,19 @@ function KindRowLine({ row, chosen, onToggle }: { row: KindRow; chosen: boolean;
     );
   }
   return (
-    <RecordRow name={name} secondary={row.secondary || undefined} selected={chosen} onOpen={onToggle}>
+    <RecordRow name={name} label={primaryIsId ? name : `${name}, ${identity}`} secondary={row.secondary || undefined} selected={chosen} onOpen={onToggle}>
+      {primaryIsId ? null : <span className="os-caption os-mono">{identity}</span>}
       {row.status === "" ? null : <span className="os-caption">{row.status}</span>}
     </RecordRow>
   );
+}
+
+// Presentation only: a known canonical kind can qualify a bare row ID for
+// review. Keep an already qualified or otherwise unfamiliar ID verbatim.
+// Selection and every move call retain row.id exactly as the server returned it.
+function displayedRowId(row: KindRow, concept: string): string {
+  const kind = row.concept || concept;
+  return /^v[0-9]+:[a-z0-9/]+:[a-zA-Z0-9_]+$/.test(kind) && !row.id.includes(":")
+    ? `${kind}:${row.id}`
+    : row.id;
 }

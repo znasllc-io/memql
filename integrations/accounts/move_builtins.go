@@ -58,6 +58,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"github.com/uptrace/bun"
 
@@ -129,7 +130,7 @@ func (m *Moves) moveCapabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{Name: "rows", Description: "One page of a kind's rows in an account, or in no account: the id, the kind's display fields, owner and dates.", Handler: m.handleRows,
 			ArgsSchema: map[string]string{"accountId": "string -- the account; empty for rows in no account.", "concept": "string (required) -- the kind.",
-				"after": "string -- the cursor of the previous page.", "limit": "int -- at most 200, default 50.", "search": "string -- filters the page by its display values."}, PreserveOrder: true},
+				"after": "string -- the cursor of the previous page.", "limit": "int -- at most 200, default 50.", "search": "string -- a canonical row id or bare UUID reads exactly that row; other text filters the page by its display values."}, PreserveOrder: true},
 		{Name: "unplaced", Description: "Rows in no account, per kind, and the open conflicts awaiting a decision.", Handler: m.handleUnplaced, PreserveOrder: true},
 		{Name: "rowsMove", Description: "Move rows to an account or place rows that have none; a preview writes nothing.", Handler: m.handleRowsMove,
 			ArgsSchema: map[string]string{"rows": "[]object (required) -- {concept, id}, at most 500.", "toAccountId": "string (required) -- the destination.",
@@ -203,11 +204,19 @@ func (m *Moves) handleRows(ctx context.Context, args map[string]any, _ int) ([]m
 		}
 	}
 	after := stringArg(args, "after")
+	exactID, err := exactAccountRowSearch(concept, stringArg(args, "search"))
+	if err != nil {
+		return nil, err
+	}
 	var ids []string
-	if account == "" {
-		ids, err = memql.UnplacedRowIDs(ctx, db.DB, concept, after, limit)
-	} else {
-		ids, err = memql.AccountRowIDs(ctx, db.DB, account, concept, after, limit)
+	// Exact ids bypass the kind-wide list. The move act's alias resolution
+	// chooses the stored id; its current head below decides ownership.
+	if exactID == "" {
+		if account == "" {
+			ids, err = memql.UnplacedRowIDs(ctx, db.DB, concept, after, limit)
+		} else {
+			ids, err = memql.AccountRowIDs(ctx, db.DB, account, concept, after, limit)
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("accountRows: %w", err)
@@ -216,15 +225,39 @@ func (m *Moves) handleRows(ctx context.Context, args map[string]any, _ int) ([]m
 	// rows from the page, and a cursor that stopped at the last kept row would
 	// read the dropped ones again, so paging would never end.
 	next := ""
-	if len(ids) == limit {
+	if exactID == "" && len(ids) == limit {
 		next = ids[len(ids)-1]
 	}
 
 	heads := map[string]*rowHead{}
-	if err := memql.AccountRowHeads(ctx, db.DB, concept, ids, func(n memorynodes.MemoryNode, _ bool, first time.Time) error {
-		heads[n.ID] = &rowHead{created: first, updated: n.CreatedAt, payload: decodePayload(n.Payload)}
+	readHead := func(n memorynodes.MemoryNode, _ bool, first time.Time) error {
+		payload := decodePayload(n.Payload)
+		if exactID != "" {
+			// Compare the same newest payload we will display, never an older
+			// version that used to name this account. NULL/absent/empty is
+			// unassigned; malformed or other-account values are not a match.
+			raw, isString := payload["accountId"].(string)
+			if payload["accountId"] != nil && !isString {
+				return nil
+			}
+			if account == "" {
+				if raw != "" {
+					return nil
+				}
+			} else if raw != account && raw != canonicalPrefix+account {
+				return nil
+			}
+			ids = append(ids, n.ID)
+		}
+		heads[n.ID] = &rowHead{created: first, updated: n.CreatedAt, payload: payload}
 		return nil
-	}); err != nil {
+	}
+	if exactID != "" {
+		err = memql.AccountRowHeadByID(ctx, db.DB, concept, exactID, readHead)
+	} else {
+		err = memql.AccountRowHeads(ctx, db.DB, concept, ids, readHead)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("accountRows: %w", err)
 	}
 	// Whether each row follows its parent is the engine's own rule, the one
@@ -262,7 +295,7 @@ func (m *Moves) handleRows(ctx context.Context, args map[string]any, _ int) ([]m
 		// Search filters what this page read; it is not a search of the
 		// kind (a kind of millions of rows has no index on its display
 		// fields), which is why the cursor above moves past what it drops.
-		if search != "" && !containsFold(search, primary, secondary, tertiary, status) {
+		if exactID == "" && search != "" && !containsFold(search, primary, secondary, tertiary, status) {
 			continue
 		}
 		row := map[string]any{
@@ -286,6 +319,29 @@ func (m *Moves) handleRows(ctx context.Context, args map[string]any, _ int) ([]m
 		return nil, err
 	}
 	return append(out, n), nil
+}
+
+// An explicit row id is a bounded lookup, not display text. The common bare
+// UUID spelling is accepted too; other bare strings keep their text-search
+// meaning. ParseNodeId/BuildNodeId are the engine's canonical-id vocabulary.
+func exactAccountRowSearch(concept, search string) (string, error) {
+	search = strings.TrimSpace(search)
+	if search == "" {
+		return "", nil
+	}
+	kind, short, err := coreid.ParseNodeId(search)
+	if err == nil && kind != "" && short != "" && coreid.BuildNodeId(kind, short) == search {
+		if kind != concept {
+			return "", fmt.Errorf("this row id belongs to %s, not %s", kind, concept)
+		}
+		return search, nil
+	}
+	if len(search) == 36 {
+		if parsed, err := uuid.Parse(search); err == nil && parsed.String() == strings.ToLower(search) {
+			return coreid.BuildNodeId(concept, parsed.String()), nil
+		}
+	}
+	return "", nil
 }
 
 // requireAccount refuses a bare id that names no account row. The primary

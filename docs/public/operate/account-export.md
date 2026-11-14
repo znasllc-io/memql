@@ -200,6 +200,15 @@ not be read. The cluster checks whether the chosen kind supports accounts;
 opening it changes nothing. Select its unassigned rows and use the same move
 review and confirmation to place them.
 
+When you know a row's id, open **Refine** and paste its full id or UUID into
+**Name or ID**. This reads that row directly, even if the initial list could
+not load, and shows it only if it is currently in the account being viewed (or
+in no account on that page). Each row shows its id so equal names can be told
+apart. Select a match, then search for the next id; the selection stays until
+you clear it or leave the rows page. Review the selected rows together before
+confirming their move. A name search filters each page separately; the list
+continues loading later pages even when a page has no matches.
+
 What the act does not do:
 
 - It does not move a row that follows a parent in the same account: move the

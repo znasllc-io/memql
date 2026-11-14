@@ -2112,6 +2112,9 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 /* Account tabs stay mounted behind rows and wizards. The stack's author
    display rule must not override the browser's hidden-attribute rule. */
 .os-account-page[hidden] { display: none; }
+/* A long row ID in Refine must leave the kind heading and its controls inside
+   a narrow account page. Keep the kit's full search input on the next line. */
+.os-account-rows > .os-head { flex-wrap: wrap; }
 
 .os-head {
   display: flex;

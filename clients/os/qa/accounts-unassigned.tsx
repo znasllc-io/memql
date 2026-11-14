@@ -41,15 +41,29 @@ Object.assign(conn.query, { executeNamed: async (name: string, call: string) => 
   if (name === "accountRows") {
     if (call.includes("v1:identity:user")) throw new Error("This kind does not support accounts.");
     const concept = call.includes("v1:fylo:applicationDetail") ? "v1:fylo:applicationDetail" : "v1:reviews:review";
+    const searchLiteral = /search:\s*("(?:\\.|[^"\\])*")/.exec(call)?.[1];
+    const search = searchLiteral ? JSON.parse(searchLiteral) as string : "";
+    if (params.get("browse") === "failed" && search === "") throw new Error("The initial browse could not finish in time. A known ID can still be read.");
+    if (params.get("pages") === "filtered" && !call.includes('after: "fixture-next"')) {
+      return rowsResult([{ kind: "page", nextCursor: "fixture-next" }]);
+    }
+    const firstId = "11111111-1111-4111-8111-111111111111";
+    const secondId = "22222222-2222-4222-8222-222222222222";
+    const fixtureRows = [firstId, ...(params.get("lookup") === "exact" ? [secondId] : [])].map((id, index) => ({
+      kind: "row", id: index === 0 ? id : `${concept}:${id}`, concept,
+      primary: "Example unassigned record", secondary: "Local fixture", followsParent: false,
+    }));
+    const matches = search === "" ? fixtureRows : fixtureRows.filter((row) =>
+      row.id === search || `${concept}:${row.id}` === search || row.id === `${concept}:${search}` || row.primary.toLowerCase().includes(search.toLowerCase()));
     return rowsResult([
-      ...(params.get("rows") === "empty" ? [] : [{ kind: "row", id: "fixture-row-1", concept, primary: "Example unassigned record", secondary: "Local fixture", followsParent: false }]),
+      ...(params.get("rows") === "empty" ? [] : matches),
       { kind: "page", nextCursor: "" },
     ]);
   }
   if (name === "accountRowsMove") return rowsResult([{
     kind: call.includes("preview: true") ? "wouldMove" : "moved",
     concept: call.includes("v1:fylo:applicationDetail") ? "v1:fylo:applicationDetail" : "v1:reviews:review",
-    rows: 1,
+    rows: call.match(/\{concept:/g)?.length ?? 0,
   }]);
   return original(name, call);
 } });

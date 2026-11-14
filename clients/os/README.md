@@ -1610,6 +1610,13 @@ rules rather than repetitions of the five before it.
   with an empty account id. It does not infer account ownership from the
   declaration: `accountRows` validates the kind. This reaches unassigned stated
   kinds too; placement still requires the existing move preview and confirmation.
+  Refine stays available while the first page loads, fails or is empty. A
+  canonical row id or bare UUID reads that exact row through `accountRows`,
+  without scanning the kind, and only if its newest head is in this account
+  (or in none on the unassigned page). Other text still filters one page's
+  display values; an empty filtered page retains its continuation. Rows show
+  their canonical id to distinguish equal titles; selection retains the stored
+  id and survives another search, so several exact matches can share one review.
   Without the part, the inventory stays counts, nothing opens
   and none of these reads is asked.
 

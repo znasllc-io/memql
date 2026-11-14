@@ -24,6 +24,14 @@ uses only local fixture records and the real rows page and move wizard. Check
 `registry=failed` / `registry=pending`. The failed registry retries successfully;
 choosing **user** shows the server-refusal fixture. A fixture move writes nothing.
 
+Add `lookup=exact` for two rows with the same title and distinct canonical ids;
+`browse=failed` or `browse=pending` leaves Refine available for an exact lookup
+despite the initial read. Search for `11111111-1111-4111-8111-111111111111`, select
+it, then search for `22222222-2222-4222-8222-222222222222` and select that row to
+review both together. `pages=filtered` returns two empty filtered pages before a
+matching row; continuation must remain available. `rows=empty` keeps Refine
+available on an empty kind.
+
 Add `theme=graphite`, `theme=vellum`, or `theme=cobalt` to inspect each built-in
 palette with `mode=light` or `mode=dark`. The harness uses the production theme
 registry; Graphite is the default. `view=routing-routes` includes the shared

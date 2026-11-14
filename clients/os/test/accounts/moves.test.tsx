@@ -154,8 +154,8 @@ describe("a kind's rows", () => {
     expect(screen.queryByText("No rows of this kind here.")).toBeNull();
     await act(async () => release([{ kind: "page", nextCursor: "" }]));
     expect(await screen.findByText("No rows of this kind here.")).toBeTruthy();
-    // No search over no content.
-    expect(screen.queryByRole("button", { name: "Search rows of artifact" })).toBeNull();
+    // A known ID remains reachable even when browsing found no rows.
+    expect(screen.getByRole("button", { name: "Search rows of artifact" })).toBeTruthy();
   });
 
   it("loads the next page as the end comes into view, passing the cursor back", async () => {
@@ -184,7 +184,7 @@ describe("a kind's rows", () => {
     await openArtifacts(conn);
     await screen.findByText("Brief.pdf");
     fireEvent.click(screen.getByRole("button", { name: "Search rows of artifact" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: "con" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Name or ID" }), { target: { value: "con" } });
     await waitFor(() => expect(screen.queryByText("Brief.pdf")).toBeNull());
     expect(screen.getByText("Contract.docx")).toBeTruthy();
     expect(callsTo(conn, "accountRows").at(-1)).toBe('builtin accountRows(accountId: "a1", concept: "v1:library:artifact", limit: 50, search: "con")');
@@ -198,6 +198,52 @@ describe("a kind's rows", () => {
     refuse = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Brief.pdf")).toBeTruthy();
+  });
+
+  it.each(["failed", "pending"])("can look up an exact ID while the initial browse is %s", async (state) => {
+    const id = "0d9366e9-6259-44f2-a783-163a3a69bf3d";
+    const canonical = `v1:library:artifact:${id}`;
+    const conn = connection({ accountRows: (call) => call.includes(`search: "${canonical}"`)
+      ? [row(id, "Known record"), { kind: "page", nextCursor: "" }]
+      : state === "failed" ? new Error("Browse timed out.") : new Promise<Row[]>(() => {}) });
+    await openArtifacts(conn);
+    if (state === "failed") await screen.findByText("Browse timed out.");
+    fireEvent.click(screen.getByRole("button", { name: "Search rows of artifact" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name or ID" }), { target: { value: canonical } });
+    expect(await screen.findByRole("button", { name: `Known record, ${canonical}` })).toBeTruthy();
+    expect(callsTo(conn, "accountRows").at(-1)).toBe(`builtin accountRows(accountId: "a1", concept: "v1:library:artifact", limit: 50, search: "${canonical}")`);
+    expect(callsTo(conn, "accountRowsMove")).toEqual([]);
+  });
+
+  it("continues through empty filtered pages and reports no match only after the cursor ends", async () => {
+    const conn = connection({ accountRows: (call) => {
+      if (!call.includes('search: "needle"')) return [row("r1", "Brief.pdf"), { kind: "page", nextCursor: "" }];
+      if (call.includes('after: "c3"')) return [{ kind: "page", nextCursor: "" }];
+      return [{ kind: "page", nextCursor: call.includes('after: "c2"') ? "c3" : "c2" }];
+    } });
+    await openArtifacts(conn);
+    await screen.findByText("Brief.pdf");
+    fireEvent.click(screen.getByRole("button", { name: "Search rows of artifact" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name or ID" }), { target: { value: "needle" } });
+    await waitFor(() => expect(screen.queryByText("Brief.pdf")).toBeNull());
+    await waitFor(() => expect(document.querySelector(".os-next-page-sentinel")).not.toBeNull());
+    expect(screen.queryByText("No rows match.")).toBeNull();
+    await act(async () => intersect(document.querySelector(".os-next-page-sentinel")!));
+    await waitFor(() => expect(callsTo(conn, "accountRows").at(-1)).toContain('after: "c2"'));
+    await waitFor(() => expect(document.querySelector(".os-next-page-sentinel")).not.toBeNull());
+    expect(screen.queryByText("No rows match.")).toBeNull();
+    await act(async () => intersect(document.querySelector(".os-next-page-sentinel")!));
+    expect(await screen.findByText("No rows match.")).toBeTruthy();
+    expect(callsTo(conn, "accountRows").at(-1)).toBe('builtin accountRows(accountId: "a1", concept: "v1:library:artifact", limit: 50, after: "c3", search: "needle")');
+  });
+
+  it("shows an ID once when it already supplies the row's title", async () => {
+    const id = "0d9366e9-6259-44f2-a783-163a3a69bf3d";
+    const canonical = `v1:library:artifact:${id}`;
+    const conn = connection({ accountRows: () => [row(id, id), { kind: "page", nextCursor: "" }] });
+    await openArtifacts(conn);
+    const selected = await screen.findByRole("button", { name: canonical });
+    expect(within(selected).getAllByText(canonical)).toHaveLength(1);
   });
 });
 
@@ -232,6 +278,7 @@ describe("choosing rows", () => {
     await openArtifacts(conn);
     const follower = await screen.findByText("Brief.pdf, page 2");
     expect(follower.closest("button")).toBeNull();
+    expect(within(lineOf("Brief.pdf, page 2")).getByText("v1:library:artifact:r3")).toBeTruthy();
     expect(within(lineOf("Brief.pdf, page 2")).getByText("Moves with the row it belongs to")).toBeTruthy();
     fireEvent.click(follower);
     expect(bar()).toBeNull();
@@ -276,7 +323,7 @@ describe("choosing rows", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Brief\.pdf/ }));
     fireEvent.click(screen.getByRole("button", { name: /Contract\.docx/ }));
     fireEvent.click(screen.getByRole("button", { name: "Search rows of artifact" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: "con" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Name or ID" }), { target: { value: "con" } });
     await waitFor(() => expect(screen.queryByText("Brief.pdf")).toBeNull());
     expect(within(bar()!).getByText("2 rows selected, 1 not shown")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Contract\.docx/ }).getAttribute("aria-pressed")).toBe("true");
@@ -294,7 +341,7 @@ describe("choosing rows", () => {
     await openArtifacts(conn);
     fireEvent.click(await screen.findByRole("button", { name: /Brief\.pdf/ }));
     fireEvent.click(screen.getByRole("button", { name: "Search rows of artifact" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: "con" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Name or ID" }), { target: { value: "con" } });
     await waitFor(() => expect(screen.queryByText("Brief.pdf")).toBeNull());
     expect(within(bar()!).getByText("1 row selected, 1 not shown")).toBeTruthy();
     fireEvent.click(within(bar()!).getByRole("button", { name: "Clear" }));
@@ -308,7 +355,7 @@ describe("choosing rows", () => {
     await screen.findByText("Item 0");
     // Found once: the rows keep their elements as the choice changes, and a
     // role query over 501 buttons per click takes minutes.
-    const items = screen.getAllByRole("button", { name: /^Item \d+$/ });
+    const items = screen.getAllByRole("button", { name: /^Item \d+, v1:library:artifact:/ });
     expect(items).toHaveLength(501);
     // Each click queues a functional selection update. Batch only the setup
     // clicks so this boundary test need not render all 501 rows 500 times;
@@ -378,6 +425,41 @@ describe("the wizard", () => {
     } finally {
       removeStyles();
     }
+  });
+
+  it("keeps identically titled rows selected across exact ID lookups and moves their original stored IDs only after confirmation", async () => {
+    const firstId = "0d9366e9-6259-44f2-a783-163a3a69bf3d";
+    const firstCanonical = `v1:library:artifact:${firstId}`;
+    const secondId = "v1:library:artifact:2966bec3-17fa-46fb-944d-45096c538432";
+    const conn = connection({
+      accountRows: (call) => call.includes(`search: "${firstCanonical}"`)
+        ? [row(firstId, "Same title"), { kind: "page", nextCursor: "" }]
+        : call.includes(`search: "${secondId}"`)
+          ? [row(secondId, "Same title"), { kind: "page", nextCursor: "" }]
+          : new Error("Browse timed out."),
+      accountRowsMove: (call) => [{ kind: call.includes("preview: true") ? "wouldMove" : "moved", concept: "v1:library:artifact", rows: 2 }],
+    });
+    await openArtifacts(conn);
+    await screen.findByText("Browse timed out.");
+    fireEvent.click(screen.getByRole("button", { name: "Search rows of artifact" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name or ID" }), { target: { value: firstCanonical } });
+    fireEvent.click(await screen.findByRole("button", { name: `Same title, ${firstCanonical}` }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name or ID" }), { target: { value: secondId } });
+    fireEvent.click(await screen.findByRole("button", { name: `Same title, ${secondId}` }));
+    expect(within(bar()!).getByText("2 rows selected, 1 not shown")).toBeTruthy();
+    expect(callsTo(conn, "accountRowsMove")).toEqual([]);
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Move to account" }));
+    await screen.findByRole("heading", { name: "Move rows" });
+    expect(callsTo(conn, "accountRowsMove")).toEqual([]);
+    chooseOption(screen.getByRole("combobox", { name: "Destination account" }), "Borden Ltd");
+    await screen.findByText("Moves");
+    const rows = `[{concept: "v1:library:artifact", id: "${firstId}"}, {concept: "v1:library:artifact", id: "${secondId}"}]`;
+    expect(callsTo(conn, "accountRowsMove")).toEqual([`builtin accountRowsMove(rows: ${rows}, toAccountId: "b2", preview: true)`]);
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Move" }));
+    expect(callsTo(conn, "accountRowsMove")).toHaveLength(1);
+    pressInBar("Move");
+    await waitFor(() => expect(within(bar()!).getByText("Moved")).toBeTruthy());
+    expect(callsTo(conn, "accountRowsMove")[1]).toBe(`builtin accountRowsMove(rows: ${rows}, toAccountId: "b2", preview: false)`);
   });
 
   it("offers every account but the one the rows are in, previews, moves, and says followers follow", async () => {
@@ -674,7 +756,7 @@ describe("on the primary account", () => {
     expect(callsTo(conn, "accountRowsMove")).toEqual([]);
     expect(registry.unsubscribe).toHaveBeenCalledOnce();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Unassigned record" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Unassigned record, / }));
     fireEvent.click(within(bar()!).getByRole("button", { name: "Move to account" }));
     expect(await screen.findByRole("heading", { name: "Move rows" })).toBeTruthy();
     expect(callsTo(conn, "accountRowsMove")).toEqual([]);

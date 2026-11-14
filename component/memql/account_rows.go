@@ -47,6 +47,10 @@ package memql
 //     columns. For the export, not a request.
 //   - AccountRowCounts: the census's Rows and Versions from the account's rows
 //     only; for requests (the inventory, the status totals).
+//   - AccountRowHeadByID: the move act's resolution of one canonical/bare id,
+//     followed by that stored row's newest version or observation. A validated
+//     canonical/bare id needs at most two id probes, then one head; never a
+//     walk of the kind.
 //   - AccountRowIDs and AccountRowVersions: a page of a list, a probe per row
 //     (newestAccountSQL) and an id lookup in every chunk; not for a whole kind.
 //   - UnplacedRowIDs: a page of the rows in no account, decided as the census
@@ -859,4 +863,17 @@ func AccountRowHeads(ctx context.Context, q AccountQuerier, concept string, ids 
 		return fmt.Errorf("account row heads: %w", err)
 	}
 	return nil
+}
+
+// AccountRowHeadByID resolves one row exactly as MoveAccountRows does, then
+// reads that stored row's current head across versions and observations. The
+// accountRows caller must check the head's account before returning any of it.
+// This is a bounded operator read, not a general row-query surface: the caller
+// retains the account kind and capability gates of AccountRowHeads.
+func AccountRowHeadByID(ctx context.Context, q AccountQuerier, concept, id string, each func(newest memorynodes.MemoryNode, observed bool, firstCreatedAt time.Time) error) error {
+	row, found, err := newestRowOf(ctx, q, concept, id)
+	if err != nil || !found {
+		return err
+	}
+	return AccountRowHeads(ctx, q, concept, []string{row.ID}, each)
 }
