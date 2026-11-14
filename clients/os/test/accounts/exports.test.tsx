@@ -7,6 +7,7 @@ import { readTheBarNow, useFakeDate } from "../readTheBar";
 import { installSeededAccess, seededAccessWithout } from "../seededAccess";
 import { setEffectiveCapabilities } from "../../src/system/roles";
 import { AuthSourceProvider } from "../../src/auth/context";
+import { installAccountPageDisplayRules } from "./pageDisplay";
 
 // THE EXPORT TAB AND "EXPORT THIS ACCOUNT" (design record
 // 2026-11-12-account-export, sections F, G and K). Everything here belongs to
@@ -455,6 +456,24 @@ describe("Export this account", () => {
   const STATUS_COMPLETE = () => [exportRow("x9", {
     report: { bytes: { missing: 1, notCarriedObjects: 2, notCarriedBytes: 1024 }, scrubbedFields: [{ concept: "v1:shopify:store", field: "adminToken" }] },
   })];
+
+  it("keeps the retained account page out of layout behind the export wizard and restores it on cancel", async () => {
+    const removeStyles = installAccountPageDisplayRules();
+    try {
+      const conn = connection({});
+      await openWizard(conn);
+      const page = document.querySelector<HTMLElement>(".os-account-page")!;
+      expect(page.hidden).toBe(true);
+      expect(getComputedStyle(page).display).toBe("none");
+      pressInBar("Cancel");
+      await screen.findByRole("region", { name: "Export" });
+      expect(document.querySelector(".os-account-page")).toBe(page);
+      expect(getComputedStyle(page).display).toBe("flex");
+      expect(callsTo(conn, "accountExportPrepare")).toEqual([]);
+    } finally {
+      removeStyles();
+    }
+  });
 
   it("reads the inventory the Data tab read, and says what a file leaves out", async () => {
     const conn = connection({});

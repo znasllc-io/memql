@@ -12,7 +12,8 @@ import {
 import { InPlaceAsk } from "../../kit/pressHold";
 import type { Reading } from "../../cluster/reading";
 import { areaLabel, rowsPhrase } from "./inventory";
-import { kindName, type OpenConflict, type Unplaced, type UnplacedKind } from "./moves";
+import { kindName, type OpenConflict, type Unplaced } from "./moves";
+import { UnplacedKindPicker, type UnplacedKindChoice } from "./UnplacedKindPicker";
 import { useMoveCalls } from "./useAccounts";
 
 // THE ROWS THAT AWAIT A DECISION, AND THE ROWS IN NO ACCOUNT (design record
@@ -53,10 +54,12 @@ export function UnplacedSection({
   /** Opens the wizard on one conflict's row. */
   onPlace: (conflict: OpenConflict) => void;
   /** Opens a kind's rows in no account. */
-  onOpenKind: (kind: UnplacedKind) => void;
+  onOpenKind: (kind: UnplacedKindChoice) => void;
   /** A conflict was left out: the pages behind read again. */
   onLeftOut: () => void;
 }) {
+  const [browsing, setBrowsing] = useState(false);
+
   if (reading.state === "failed") {
     return (
       <DetailsSection title="Awaiting a decision">
@@ -93,9 +96,14 @@ export function UnplacedSection({
           </RecordList>
         )}
       </DetailsSection>
-      <DetailsSection title="In no account">
-        {kinds.length === 0 ? (
-          <Caption>Every row is in an account.</Caption>
+      <DetailsSection
+        title="In no account"
+        actions={<Button ariaLabel={browsing ? "Cancel" : "Browse a kind"} onClick={() => setBrowsing((value) => !value)}>{browsing ? "Cancel" : "Browse"}</Button>}
+      >
+        {browsing ? (
+          <UnplacedKindPicker onChoose={(kind) => { setBrowsing(false); onOpenKind(kind); }} />
+        ) : kinds.length === 0 ? (
+          <Caption>No kinds are listed. Browse a kind to check its rows.</Caption>
         ) : (
           <RecordList as="ul" label="Kinds with rows in no account">
             {kinds.map((k) => (

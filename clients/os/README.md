@@ -1604,7 +1604,13 @@ rules rather than repetitions of the five before it.
   the primary account, "Awaiting a decision" (Place, the same wizard with the
   conflict's candidates first; Leave out, asked in place) and "In no account"
   come from one call, `accountUnplaced`, and replace Existing data's own list
-  of those rows. Without the part, the inventory stays counts, nothing opens
+  of those rows. That call's counters cover engine-managed kinds only. **Browse**
+  under "In no account" follows the declared concept registry on
+  demand, independently of the account inventory, and opens the same rows page
+  with an empty account id. It does not infer account ownership from the
+  declaration: `accountRows` validates the kind. This reaches unassigned stated
+  kinds too; placement still requires the existing move preview and confirmation.
+  Without the part, the inventory stays counts, nothing opens
   and none of these reads is asked.
 
 - **THE EXPORT TAB IS THE PART `execute app:accounts/export`** (sections F, G

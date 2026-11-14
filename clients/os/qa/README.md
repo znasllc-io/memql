@@ -17,6 +17,13 @@ cd clients/os
 npx vite --config qa/vite.config.ts --port 5199 --strictPort
 ```
 
+`/accounts-unassigned.html` exercises **Our Studio → Data → In no account →
+Browse** with an unavailable inventory and no assignment counters. It
+uses only local fixture records and the real rows page and move wizard. Check
+`mode=light` / `mode=dark`, `width=narrow`, `populated=true`, `rows=empty`, and
+`registry=failed` / `registry=pending`. The failed registry retries successfully;
+choosing **user** shows the server-refusal fixture. A fixture move writes nothing.
+
 Add `theme=graphite`, `theme=vellum`, or `theme=cobalt` to inspect each built-in
 palette with `mode=light` or `mode=dark`. The harness uses the production theme
 registry; Graphite is the default. `view=routing-routes` includes the shared

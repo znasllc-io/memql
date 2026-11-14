@@ -1,12 +1,14 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import type { Concept, ConceptRegistryDelta, Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { intersect } from "../intersectionObserver";
 import { readTheBarNow, useFakeDate } from "../readTheBar";
 import { installSeededAccess, seededAccessFor, seededAccessWithout } from "../seededAccess";
 import { chooseOption } from "../selectControl";
 import { setEffectiveCapabilities } from "../../src/system/roles";
+import { areaLabel } from "../../src/apps/accounts/inventory";
+import { installAccountPageDisplayRules } from "./pageDisplay";
 
 // THE DATA TAB'S ROWS, AND MOVING THEM (design record 2026-11-12-account-export,
 // sections I and K). A kind's line opens its rows as a page under the trail;
@@ -71,6 +73,23 @@ function connection(handlers: Partial<Record<"accountRows" | "accountUnplaced" |
     return rowsResult(answer as never);
   });
   return conn;
+}
+
+/** Registry metadata does not include account ownership. Only accountRows may validate it. */
+function withKinds(conn: Conn, kinds: Concept[], readError: () => Error | null = () => null) {
+  const unsubscribe = vi.fn();
+  const subscribeConceptRegistry = vi.fn((onDelta: (delta: ConceptRegistryDelta) => void, options: { onError: (error: Error) => void }) => {
+    const error = readError();
+    if (error === null) onDelta({ generation: 1, reset: true, added: kinds, removed: [] });
+    else options.onError(error);
+    return { unsubscribe };
+  });
+  Object.assign(conn.query, { subscribeConceptRegistry });
+  return { subscribeConceptRegistry, unsubscribe };
+}
+
+function declaredKind(domain: string, entity: string): Concept {
+  return { id: `v1:${domain}:${entity}`, version: "v1", domain, entity, description: "", type: "concept" };
 }
 
 /** The calls made to one builtin, as written. */
@@ -341,6 +360,26 @@ describe("the wizard", () => {
     fireEvent.click(within(bar()!).getByRole("button", { name }));
   };
 
+  it("keeps the retained account page out of layout behind rows and the move wizard, then restores it", async () => {
+    const removeStyles = installAccountPageDisplayRules();
+    try {
+      const conn = await startMove({});
+      const page = document.querySelector<HTMLElement>(".os-account-page")!;
+      expect(page.hidden).toBe(true);
+      expect(getComputedStyle(page).display).toBe("none");
+      pressInBar("Cancel");
+      await screen.findByRole("heading", { name: "artifact" });
+      expect(getComputedStyle(page).display).toBe("none");
+      fireEvent.click(within(screen.getByRole("navigation", { name: "Breadcrumbs" })).getByRole("button", { name: "Data" }));
+      await screen.findByRole("region", { name: "Data" });
+      expect(document.querySelector(".os-account-page")).toBe(page);
+      expect(getComputedStyle(page).display).toBe("flex");
+      expect(callsTo(conn, "accountRowsMove")).toEqual([]);
+    } finally {
+      removeStyles();
+    }
+  });
+
   it("offers every account but the one the rows are in, previews, moves, and says followers follow", async () => {
     const conn = await startMove({ accountRowsMove: (call) => (call.includes("preview: true") ? PREVIEW : MOVED) });
     const picker = screen.getByRole("combobox", { name: "Destination account" });
@@ -608,6 +647,93 @@ describe("on the primary account", () => {
     expect(callsTo(conn, "accountRows")).toEqual(['builtin accountRows(accountId: "", concept: "v1:shopify:store", limit: 50)']);
   });
 
+  it.each([
+    declaredKind("reviews", "review"),
+    declaredKind("fylo", "applicationDetail"),
+  ])("opens unassigned $entity without assignment counters or a working inventory; only confirmation places it", async (kind) => {
+    // These stated kinds have no assignment-progress entries. The account
+    // inventory may time out, but neither fact may hide their unassigned rows.
+    const conn = connection({
+      accountUnplaced: () => [],
+      accountRows: () => [row("unassigned-1", "Unassigned record", { concept: kind.id }), { kind: "page", nextCursor: "" }],
+      accountRowsMove: (call) => [{ kind: call.includes("preview: true") ? "wouldMove" : "moved", concept: kind.id, rows: 1 }],
+    }, { accountInventory: new Error("inventory timed out") });
+    const registry = withKinds(conn, [kind]);
+    const data = await openData(conn, "Our Studio");
+    expect(await within(data).findByText("inventory timed out")).toBeTruthy();
+    const none = await within(data).findByRole("region", { name: "In no account" });
+    expect(within(none).queryByText("Every row is in an account.")).toBeNull();
+    expect(registry.subscribeConceptRegistry).not.toHaveBeenCalled();
+
+    fireEvent.click(within(none).getByRole("button", { name: "Browse a kind" }));
+    fireEvent.change(await screen.findByRole("combobox", { name: "Kind" }), { target: { value: kind.entity } });
+    fireEvent.click(screen.getByRole("option", { name: `${kind.entity}, ${areaLabel(kind.domain)}` }));
+    expect(await screen.findByRole("heading", { name: kind.entity })).toBeTruthy();
+    expect(crumbs()).toEqual(["Accounts", "Our Studio", "Data", "In no account", kind.entity]);
+    expect(callsTo(conn, "accountRows")).toEqual([`builtin accountRows(accountId: "", concept: "${kind.id}", limit: 50)`]);
+    expect(callsTo(conn, "accountRowsMove")).toEqual([]);
+    expect(registry.unsubscribe).toHaveBeenCalledOnce();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Unassigned record" }));
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Move to account" }));
+    expect(await screen.findByRole("heading", { name: "Move rows" })).toBeTruthy();
+    expect(callsTo(conn, "accountRowsMove")).toEqual([]);
+    chooseOption(screen.getByRole("combobox", { name: "Destination account" }), "Borden Ltd");
+    await screen.findByText("Moves");
+    expect(callsTo(conn, "accountRowsMove")).toEqual([
+      `builtin accountRowsMove(rows: [{concept: "${kind.id}", id: "unassigned-1"}], toAccountId: "b2", preview: true)`,
+    ]);
+    // The same existing review hold still protects a click that opened it.
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Move" }));
+    expect(callsTo(conn, "accountRowsMove")).toHaveLength(1);
+    readTheBarNow();
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Move" }));
+    await waitFor(() => expect(within(bar()!).getByText("Moved")).toBeTruthy());
+    expect(callsTo(conn, "accountRowsMove")[1]).toBe(
+      `builtin accountRowsMove(rows: [{concept: "${kind.id}", id: "unassigned-1"}], toAccountId: "b2", preview: false)`,
+    );
+  });
+
+  it("lets the server refuse a declared kind that does not support accounts without offering a move", async () => {
+    const conn = connection({ accountUnplaced: () => [], accountRows: () => new Error("This kind does not support accounts.") });
+    withKinds(conn, [declaredKind("identity", "user")]);
+    const data = await openData(conn, "Our Studio");
+    fireEvent.click(await within(data).findByRole("button", { name: "Browse a kind" }));
+    fireEvent.click(await screen.findByRole("option", { name: "user, People" }));
+    expect(await screen.findByText("This kind does not support accounts.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Move to account" })).toBeNull();
+    expect(callsTo(conn, "accountRowsMove")).toEqual([]);
+  });
+
+  it("retries a refused kind registry and can dismiss browsing without reading or moving rows", async () => {
+    const conn = connection({ accountUnplaced: () => [] });
+    let error: Error | null = new Error("Kinds are unavailable.");
+    const registry = withKinds(conn, [declaredKind("reviews", "review")], () => error);
+    const data = await openData(conn, "Our Studio");
+    fireEvent.click(await within(data).findByRole("button", { name: "Browse a kind" }));
+    expect(await within(data).findByText("Kinds are unavailable.")).toBeTruthy();
+    error = null;
+    fireEvent.click(within(data).getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("option", { name: "review, Reviews" })).toBeTruthy();
+    fireEvent.click(within(data).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("combobox", { name: "Kind" })).toBeNull();
+    expect(registry.unsubscribe).toHaveBeenCalledTimes(2);
+    expect(callsTo(conn, "accountRows")).toEqual([]);
+    expect(callsTo(conn, "accountRowsMove")).toEqual([]);
+  });
+
+  it("distinguishes kinds with the same name by their area and opens the chosen declaration", async () => {
+    const conn = connection({ accountUnplaced: () => [], accountRows: () => [{ kind: "page", nextCursor: "" }] });
+    withKinds(conn, [declaredKind("work", "run"), declaredKind("pipelines", "run")]);
+    const data = await openData(conn, "Our Studio");
+    fireEvent.click(await within(data).findByRole("button", { name: "Browse a kind" }));
+    expect(await screen.findByRole("option", { name: "run, Work" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("option", { name: "run, Pipelines" }));
+    expect(await screen.findByRole("heading", { name: "run" })).toBeTruthy();
+    expect(callsTo(conn, "accountRows")).toEqual(['builtin accountRows(accountId: "", concept: "v1:pipelines:run", limit: 50)']);
+    expect(callsTo(conn, "accountRowsMove")).toEqual([]);
+  });
+
   it("says a refusal of the read in the engine's words, with a retry", async () => {
     const conn = connection({ accountUnplaced: () => new Error("the assignment has not started") });
     const data = await openData(conn, "Our Studio");
@@ -642,6 +768,7 @@ describe("without the move part", () => {
     expect(within(data).queryByRole("region", { name: "In no account" })).toBeNull();
     expect(within(data).queryByRole("button", { name: /^Place / })).toBeNull();
     expect(within(data).queryByRole("button", { name: /^Leave out / })).toBeNull();
+    expect(within(data).queryByRole("button", { name: "Browse a kind" })).toBeNull();
     expect(callsTo(conn, "accountUnplaced")).toHaveLength(0);
   });
 });

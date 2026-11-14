@@ -1,7 +1,8 @@
 import { Details } from "../../kit";
 import { ExistingDataSection, InventorySection } from "./AccountInventory";
 import type { InventoryArea, InventoryConcept } from "./inventory";
-import type { OpenConflict, UnplacedKind } from "./moves";
+import type { OpenConflict } from "./moves";
+import type { UnplacedKindChoice } from "./UnplacedKindPicker";
 import { accountIsSelf, type AccountRow } from "./rows";
 import { UnplacedSection } from "./UnplacedSection";
 import { useAccountAssignmentStatus, useAccountUnplaced } from "./useAccounts";
@@ -26,8 +27,8 @@ import type { Inventory } from "./inventory";
 export interface AccountDataMoves {
   /** A kind's line in the inventory opens its rows. */
   onOpenKind: (concept: InventoryConcept, area: InventoryArea) => void;
-  /** A kind with rows in no account opens them. */
-  onOpenUnplaced: (kind: UnplacedKind) => void;
+  /** A listed or explicitly chosen kind opens its rows in no account. */
+  onOpenUnplaced: (kind: UnplacedKindChoice) => void;
   /** A conflict's Place opens the wizard. */
   onPlace: (conflict: OpenConflict) => void;
   /** A conflict was left out. */

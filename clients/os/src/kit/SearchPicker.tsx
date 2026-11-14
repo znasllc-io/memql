@@ -20,6 +20,8 @@ export interface SearchChoice {
   id: string;
   /** What the choice is called, and the option's accessible name. */
   name: string;
+  /** When short visible names repeat, include their distinguishing context. */
+  ariaLabel?: string;
   /** One quieter line under the name: an address, a kind. */
   detail?: string;
 }
@@ -144,7 +146,7 @@ export function SearchPicker({
                 id={`${listId}-${index}`}
                 role="option"
                 aria-selected={index === activeIndex}
-                aria-label={choice.name}
+                aria-label={choice.ariaLabel ?? choice.name}
                 className="os-search-picker-option"
                 data-active={index === activeIndex || undefined}
                 onMouseDown={(event) => event.preventDefault()}

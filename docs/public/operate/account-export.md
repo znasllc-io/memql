@@ -193,6 +193,13 @@ Data tab, rows awaiting a decision and rows in no account are listed; each can
 be placed in an account, and a row awaiting a decision can also be left out for
 good.
 
+The list of kinds in no account covers the kinds handled by automatic
+assignment. To check another kind, choose **Browse** under **In no
+account** and select its name. This works even if the account inventory could
+not be read. The cluster checks whether the chosen kind supports accounts;
+opening it changes nothing. Select its unassigned rows and use the same move
+review and confirmation to place them.
+
 What the act does not do:
 
 - It does not move a row that follows a parent in the same account: move the
