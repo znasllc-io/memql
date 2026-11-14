@@ -2,7 +2,7 @@ import { Details } from "../../kit";
 import { ExistingDataSection, InventorySection } from "./AccountInventory";
 import type { InventoryArea, InventoryConcept } from "./inventory";
 import type { OpenConflict } from "./moves";
-import type { UnplacedKindChoice } from "./UnplacedKindPicker";
+import type { AccountKindChoice } from "./AccountKindPicker";
 import { accountIsSelf, type AccountRow } from "./rows";
 import { UnplacedSection } from "./UnplacedSection";
 import { useAccountAssignmentStatus, useAccountUnplaced } from "./useAccounts";
@@ -27,8 +27,10 @@ import type { Inventory } from "./inventory";
 export interface AccountDataMoves {
   /** A kind's line in the inventory opens its rows. */
   onOpenKind: (concept: InventoryConcept, area: InventoryArea) => void;
+  /** An explicitly chosen kind opens its rows in this account. */
+  onBrowseKind: (kind: AccountKindChoice) => void;
   /** A listed or explicitly chosen kind opens its rows in no account. */
-  onOpenUnplaced: (kind: UnplacedKindChoice) => void;
+  onOpenUnplaced: (kind: AccountKindChoice) => void;
   /** A conflict's Place opens the wizard. */
   onPlace: (conflict: OpenConflict) => void;
   /** A conflict was left out. */
@@ -53,7 +55,7 @@ export function AccountDataTab({ account, accounts, inventory, moves, revision =
   const unplaced = useAccountUnplaced(self && moves !== undefined, revision);
   return (
     <Details>
-      <InventorySection reading={inventory} onOpenKind={moves?.onOpenKind} />
+      <InventorySection reading={inventory} onOpenKind={moves?.onOpenKind} onBrowseKind={moves?.onBrowseKind} />
       {/* EXISTING DATA, ON THE PRIMARY ACCOUNT ONLY. Assigning rows written
           before accounts were recorded is the cluster's work, not any one
           client's, and the primary account is the cluster's own page. */}

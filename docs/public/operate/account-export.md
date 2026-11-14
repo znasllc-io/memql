@@ -200,6 +200,10 @@ not be read. The cluster checks whether the chosen kind supports accounts;
 opening it changes nothing. Select its unassigned rows and use the same move
 review and confirmation to place them.
 
+To find rows already in an account when its inventory cannot be counted, use
+**Browse** in **Inventory** and choose the kind. This opens only that account's
+rows; **Browse** under **In no account** opens unassigned rows instead.
+
 When you know a row's id, open **Refine** and paste its full id or UUID into
 **Name or ID**. This reads that row directly, even if the initial list could
 not load, and shows it only if it is currently in the account being viewed (or

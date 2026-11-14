@@ -61,8 +61,8 @@ const ACCOUNTS = [
   accountRow({ id: "b2", name: "Borden Ltd", domain: "borden.test", createdAt: "2026-08-01T00:00:00Z" }),
 ];
 
-/** A connection whose four move calls answer through `handlers`. */
-function connection(handlers: Partial<Record<"accountRows" | "accountUnplaced" | "accountRowsMove" | "accountConflictLeaveOut", Handler>>, seed: Parameters<typeof fakeConnection>[0] = {}) {
+/** A connection whose inventory and move calls answer through `handlers`. */
+function connection(handlers: Partial<Record<"accountInventory" | "accountRows" | "accountUnplaced" | "accountRowsMove" | "accountConflictLeaveOut", Handler>>, seed: Parameters<typeof fakeConnection>[0] = {}) {
   const conn = fakeConnection({ clientAccountsAll: ACCOUNTS, accountInventory: INVENTORY, accountAssignmentStatus: [{ kind: "switch", enabled: true, held: false }], ...seed });
   const original = conn.query.executeNamed.getMockImplementation()!;
   conn.query.executeNamed.mockImplementation(async (name: string, call: string) => {
@@ -128,6 +128,79 @@ const bar = () => screen.queryByRole("group", { name: "What you can do with this
 
 beforeEach(holdMovePart);
 afterEach(() => installSeededAccess("owner"));
+
+describe("browsing this account by kind", () => {
+  useFakeDate();
+  it.each([
+    { name: "Our Studio", id: SELF_ACCOUNT_ID, error: "account_inventory_too_large: This account holds too many rows to count here." },
+    { name: "Acme Consulting", id: "a1", error: "Inventory timed out." },
+  ])("browses an explicit kind in $name despite unavailable inventory and retains that account through exact lookup and move review", async (account) => {
+    const kind = declaredKind("work", "goal");
+    const id = "11111111-1111-4111-8111-111111111111";
+    const canonical = `${kind.id}:${id}`;
+    const conn = connection({
+      accountUnplaced: () => [],
+      accountRows: (call) => call.includes(`search: "${canonical}"`)
+        ? [row(id, "Known goal", { concept: kind.id }), { kind: "page", nextCursor: "" }]
+        : new Error("Initial rows timed out."),
+      accountRowsMove: (call) => [{ kind: call.includes("preview: true") ? "wouldMove" : "moved", concept: kind.id, rows: 1 }],
+    }, { accountInventory: new Error(account.error) });
+    const registry = withKinds(conn, [kind]);
+    const data = await openData(conn, account.name);
+    const inventory = within(data).getByRole("region", { name: "Inventory" });
+    await within(inventory).findByRole("button", { name: "Try again" });
+    expect(registry.subscribeConceptRegistry).not.toHaveBeenCalled();
+    fireEvent.click(within(inventory).getByRole("button", { name: "Browse this account by kind" }));
+    fireEvent.click(await screen.findByRole("option", { name: "goal, Work" }));
+    await screen.findByText("Initial rows timed out.");
+    expect(crumbs()).toEqual(["Accounts", account.name, "Data", "Inventory", "goal"]);
+    expect(callsTo(conn, "accountRows")).toEqual([`builtin accountRows(accountId: "${account.id}", concept: "${kind.id}", limit: 50)`]);
+    expect(registry.unsubscribe).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "Search rows of goal" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name or ID" }), { target: { value: canonical } });
+    fireEvent.click(await screen.findByRole("button", { name: `Known goal, ${canonical}` }));
+    expect(callsTo(conn, "accountRows").at(-1)).toBe(`builtin accountRows(accountId: "${account.id}", concept: "${kind.id}", limit: 50, search: "${canonical}")`);
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Move to account" }));
+    await screen.findByRole("heading", { name: "Move rows" });
+    expect(callsTo(conn, "accountRowsMove")).toEqual([]);
+    fireEvent.click(screen.getByRole("combobox", { name: "Destination account" }));
+    expect(screen.queryByRole("option", { name: account.name })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Destination account" }), { key: "Escape" });
+    chooseOption(screen.getByRole("combobox", { name: "Destination account" }), "Borden Ltd");
+    await screen.findByText("Moves");
+    const rows = `[{concept: "${kind.id}", id: "${id}"}]`;
+    expect(callsTo(conn, "accountRowsMove")).toEqual([`builtin accountRowsMove(rows: ${rows}, toAccountId: "b2", preview: true)`]);
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Move" }));
+    expect(callsTo(conn, "accountRowsMove")).toHaveLength(1);
+    readTheBarNow();
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Move" }));
+    await waitFor(() => expect(within(bar()!).getByText("Moved")).toBeTruthy());
+    expect(callsTo(conn, "accountRowsMove")[1]).toBe(`builtin accountRowsMove(rows: ${rows}, toAccountId: "b2", preview: false)`);
+  });
+
+  it("can cancel account browsing while inventory is pending and leaves unsupported-kind validation to the server", async () => {
+    const conn = connection({
+      accountRows: () => new Error("This kind does not support accounts."),
+      accountInventory: () => new Promise<Row[]>(() => {}),
+    });
+    const registry = withKinds(conn, [declaredKind("identity", "user")]);
+    const data = await openData(conn);
+    const inventory = within(data).getByRole("region", { name: "Inventory" });
+    fireEvent.click(within(inventory).getByRole("button", { name: "Browse this account by kind" }));
+    await screen.findByRole("option", { name: "user, People" });
+    fireEvent.click(within(inventory).getByRole("button", { name: "Cancel browsing this account" }));
+    expect(within(inventory).getByText("Loading inventory")).toBeTruthy();
+    expect(registry.unsubscribe).toHaveBeenCalledOnce();
+    expect(callsTo(conn, "accountRows")).toEqual([]);
+    fireEvent.click(within(inventory).getByRole("button", { name: "Browse this account by kind" }));
+    fireEvent.click(await screen.findByRole("option", { name: "user, People" }));
+    expect(await screen.findByText("This kind does not support accounts.")).toBeTruthy();
+    expect(callsTo(conn, "accountRows")).toEqual(['builtin accountRows(accountId: "a1", concept: "v1:identity:user", limit: 50)']);
+    expect(screen.queryByRole("button", { name: "Move to account" })).toBeNull();
+    expect(callsTo(conn, "accountRowsMove")).toEqual([]);
+  });
+});
 
 describe("a kind's rows", () => {
   it("opens from the inventory as a page under the trail, and Back returns to the Data tab", async () => {
@@ -508,7 +581,8 @@ describe("the wizard", () => {
     chooseOption(screen.getByRole("combobox", { name: "Destination account" }), "Borden Ltd");
     const named = await screen.findByText("Kinds that can follow: goal");
     expect(named.textContent).not.toMatch(/\d/);
-    expect(screen.queryByText(/37/)).toBeNull();
+    // Retained account tabs can contain "37" in their read-time clock.
+    expect(within(named.closest<HTMLElement>(".os-wizard")!).queryByText(/37/)).toBeNull();
     // The bar's total is of the rows chosen and moving, never of followers.
     expect(within(bar()!).getByText("2 rows to Borden Ltd")).toBeTruthy();
   });
@@ -829,7 +903,10 @@ describe("without the move part", () => {
 
   it("keeps the inventory as counts: a kind's line does not open", async () => {
     const conn = connection({ accountRows: () => [] });
+    const registry = withKinds(conn, [declaredKind("work", "goal")]);
     const data = await openData(conn);
+    expect(within(data).queryByRole("button", { name: "Browse this account by kind" })).toBeNull();
+    expect(registry.subscribeConceptRegistry).not.toHaveBeenCalled();
     fireEvent.click(await within(data).findByRole("button", { name: /^Files, / }));
     expect(within(data).getByText("artifact")).toBeTruthy();
     expect(within(data).queryByRole("button", { name: "artifact, 3 rows" })).toBeNull();

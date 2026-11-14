@@ -1610,6 +1610,11 @@ rules rather than repetitions of the five before it.
   with an empty account id. It does not infer account ownership from the
   declaration: `accountRows` validates the kind. This reaches unassigned stated
   kinds too; placement still requires the existing move preview and confirmation.
+  The same registry picker is available through **Browse** in **Inventory**,
+  independently of its counts, including a count limit or read failure. It
+  opens rows under the account being viewed; the unassigned action alone uses
+  an empty account id. Both controls require the move part and leave kind
+  validation to `accountRows`.
   Refine stays available while the first page loads, fails or is empty. A
   canonical row id or bare UUID reads that exact row through `accountRows`,
   without scanning the kind, and only if its newest head is in this account

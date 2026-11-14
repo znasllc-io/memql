@@ -4,21 +4,23 @@ import { Button, Notice, RecordListSkeleton } from "../../kit";
 import { SearchPicker } from "../../kit/SearchPicker";
 import { useConceptRegistry } from "../concepts/useConceptRegistry";
 import { areaLabel } from "./inventory";
-import type { UnplacedKind } from "./moves";
 
-export type UnplacedKindChoice = Pick<UnplacedKind, "concept" | "name">;
+export interface AccountKindChoice {
+  concept: string;
+  name: string;
+}
 
-// Assignment progress only counts engine-managed kinds. Stated kinds may
-// still have unassigned rows, so choosing a declaration must not depend on
-// those counters or on an account inventory scan. The registry does not say
-// whether a kind belongs to accounts: accountRows validates that on opening.
+// A known kind stays reachable without a complete account inventory or
+// assignment counters. The caller chooses this account or no account; the
+// registry never infers ownership or whether a kind supports accounts.
+// accountRows validates the kind and account when the page opens.
 // Neither reading the registry nor choosing a kind writes anything.
-export function UnplacedKindPicker({ onChoose }: { onChoose: (kind: UnplacedKindChoice) => void }) {
+export function AccountKindPicker({ onChoose }: { onChoose: (kind: AccountKindChoice) => void }) {
   const [attempt, setAttempt] = useState(0);
   return <KindChoices key={attempt} onChoose={onChoose} onRetry={() => setAttempt((n) => n + 1)} />;
 }
 
-function KindChoices({ onChoose, onRetry }: { onChoose: (kind: UnplacedKindChoice) => void; onRetry: () => void }) {
+function KindChoices({ onChoose, onRetry }: { onChoose: (kind: AccountKindChoice) => void; onRetry: () => void }) {
   const id = useId();
   const registry = useConceptRegistry();
 

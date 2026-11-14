@@ -209,6 +209,7 @@ export function AccountPage({
     ? {
         onOpenKind: (concept, area) =>
           setKindPage({ accountId: account.id, concept: concept.concept, kind: concept.name, area: area.label }),
+        onBrowseKind: (k) => setKindPage({ accountId: account.id, concept: k.concept, kind: k.name, area: "Inventory" }),
         onOpenUnplaced: (k) => setKindPage({ accountId: "", concept: k.concept, kind: k.name, area: "In no account" }),
         onPlace: (c) =>
           setMovePage({

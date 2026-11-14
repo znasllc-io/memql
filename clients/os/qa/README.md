@@ -31,6 +31,11 @@ it, then search for `22222222-2222-4222-8222-222222222222` and select that row t
 review both together. `pages=filtered` returns two empty filtered pages before a
 matching row; continuation must remain available. `rows=empty` keeps Refine
 available on an empty kind.
+Add `scope=assigned` to put the fixture rows in **Our Studio** and replace the
+inventory with its count-limit notice. Choose **Browse** in **Inventory** to
+reach them; **In no account** correctly has no rows in this fixture. Combine
+it with `lookup=exact&browse=failed` to check a known goal, run or file id despite
+both unavailable counts and an unavailable first row page.
 
 Add `theme=graphite`, `theme=vellum`, or `theme=cobalt` to inspect each built-in
 palette with `mode=light` or `mode=dark`. The harness uses the production theme

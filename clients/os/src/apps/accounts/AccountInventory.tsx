@@ -31,6 +31,7 @@ import {
   type InventoryConcept,
 } from "./inventory";
 import { accountNameFrom, type AccountRow } from "./rows";
+import { AccountKindPicker, type AccountKindChoice } from "./AccountKindPicker";
 
 // The account's inventory, and the assignment of existing rows (account row
 // ownership, section H).
@@ -57,11 +58,15 @@ import { accountNameFrom, type AccountRow } from "./rows";
 export function InventorySection({
   reading,
   onOpenKind,
+  onBrowseKind,
 }: {
   reading: Reading<Inventory>;
   onOpenKind?: (concept: InventoryConcept, area: InventoryArea) => void;
+  /** Browse this account independently of its inventory counts. Move part only. */
+  onBrowseKind?: (kind: AccountKindChoice) => void;
 }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const [browsing, setBrowsing] = useState(false);
   const toggle = (key: string) =>
     setOpen((held) => {
       const next = new Set(held);
@@ -147,9 +152,18 @@ export function InventorySection({
   // thing is to print when it was taken. Absent while there is no answer:
   // the refusal carries its own retry, and a skeleton has nothing to re-read.
   return (
-    <DetailsSection title="Inventory">
-      {body}
-      {reading.value === null || reading.state === "failed" ? null : (
+    <DetailsSection
+      title="Inventory"
+      actions={onBrowseKind === undefined ? undefined : (
+        <Button ariaLabel={browsing ? "Cancel browsing this account" : "Browse this account by kind"} onClick={() => setBrowsing((value) => !value)}>
+          {browsing ? "Cancel" : "Browse"}
+        </Button>
+      )}
+    >
+      {browsing && onBrowseKind !== undefined ? (
+        <AccountKindPicker onChoose={(kind) => { setBrowsing(false); onBrowseKind(kind); }} />
+      ) : body}
+      {browsing || reading.value === null || reading.state === "failed" ? null : (
         <div className="os-account-ledger-head">
           {reading.at === null ? <span /> : (
             <Caption>

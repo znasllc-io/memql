@@ -13,7 +13,7 @@ import { InPlaceAsk } from "../../kit/pressHold";
 import type { Reading } from "../../cluster/reading";
 import { areaLabel, rowsPhrase } from "./inventory";
 import { kindName, type OpenConflict, type Unplaced } from "./moves";
-import { UnplacedKindPicker, type UnplacedKindChoice } from "./UnplacedKindPicker";
+import { AccountKindPicker, type AccountKindChoice } from "./AccountKindPicker";
 import { useMoveCalls } from "./useAccounts";
 
 // THE ROWS THAT AWAIT A DECISION, AND THE ROWS IN NO ACCOUNT (design record
@@ -54,7 +54,7 @@ export function UnplacedSection({
   /** Opens the wizard on one conflict's row. */
   onPlace: (conflict: OpenConflict) => void;
   /** Opens a kind's rows in no account. */
-  onOpenKind: (kind: UnplacedKindChoice) => void;
+  onOpenKind: (kind: AccountKindChoice) => void;
   /** A conflict was left out: the pages behind read again. */
   onLeftOut: () => void;
 }) {
@@ -101,7 +101,7 @@ export function UnplacedSection({
         actions={<Button ariaLabel={browsing ? "Cancel" : "Browse a kind"} onClick={() => setBrowsing((value) => !value)}>{browsing ? "Cancel" : "Browse"}</Button>}
       >
         {browsing ? (
-          <UnplacedKindPicker onChoose={(kind) => { setBrowsing(false); onOpenKind(kind); }} />
+          <AccountKindPicker onChoose={(kind) => { setBrowsing(false); onOpenKind(kind); }} />
         ) : kinds.length === 0 ? (
           <Caption>No kinds are listed. Browse a kind to check its rows.</Caption>
         ) : (
