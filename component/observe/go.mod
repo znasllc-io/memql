@@ -22,6 +22,7 @@ require (
 	github.com/znasllc-io/memql/component/bus v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/bus/gen v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0 // indirect
+	go.opentelemetry.io/otel/log v1.47.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
