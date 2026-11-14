@@ -226,8 +226,8 @@ require (
 	github.com/znasllc-io/memql/integrations/email v0.0.0
 	github.com/znasllc-io/memql/integrations/openai v0.0.0
 	github.com/znasllc-io/memql/integrations/stt v0.0.0
-	go.opentelemetry.io/otel v1.45.0 // indirect
-	go.opentelemetry.io/otel/trace v1.45.0 // indirect
+	go.opentelemetry.io/otel v1.47.0 // indirect
+	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.org/x/mod v0.41.0 // indirect
