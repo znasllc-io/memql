@@ -849,10 +849,81 @@ func TestFullCapacityQueuesAndPromotesInOrder(t *testing.T) {
 	require.Equal(t, 1, resumed.Position, "the waiter behind an expired one did not move up")
 }
 
+// TestALockedCallDoesNotHoldUpTheServersQueue: a waiter in a call its host has locked
+// cannot be let in, so it holds no place in the media server's line that keeps a free
+// seat from anyone else: with B's call locked, A2 behind B1 is admitted to the seat A1
+// frees. B1 keeps its entry and its arrival while it polls through the lock, and once
+// B's call is unlocked it is back in its place, ahead of everyone who queued after it.
+func TestALockedCallDoesNotHoldUpTheServersQueue(t *testing.T) {
+	cw := newCallWorld(t, "lockedline", 3)
+	if cw == nil {
+		return
+	}
+	ctx := context.Background()
+	_, a := cw.started("Host A") // seat 1 of 3
+	_, b := cw.started("Host B") // seat 2
+	_, a1, err := cw.join(a.Call.GuestToken, "A1")
+	require.NoError(t, err) // seat 3
+	qb1, b1, err := cw.join(b.Call.GuestToken, "B1")
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeQueue, qb1.Outcome)
+	require.Equal(t, 1, qb1.Position)
+	qa2, a2, err := cw.join(a.Call.GuestToken, "A2")
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeQueue, qa2.Outcome)
+	require.Equal(t, 2, qa2.Position)
+
+	// The host control is Task 7's; the lock is written as the host's write would be.
+	cw.asOwnerMutate(roomConcept, b.Call.ID, "updateCallsRoom", map[string]any{"roomId": b.Call.ID, "locked": true})
+	require.NoError(t, cw.svc.Leave(ctx, a1)) // a seat frees up
+
+	admitted, err := cw.svc.Queue(ctx, a2)
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeAdmit, admitted.Outcome,
+		"a waiter held behind a lock kept the free seat from the one behind it: %+v", admitted)
+	held, err := cw.svc.Queue(ctx, b1)
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeWait, held.Outcome)
+	require.Equal(t, "locked", held.Reason)
+
+	// Through the lock, B1 keeps polling and keeps its entry, and it is counted in nobody
+	// else's place: A3, who queues now, is first in line.
+	q3, a3, err := cw.join(a.Call.GuestToken, "A3")
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeQueue, q3.Outcome)
+	require.Equal(t, 1, q3.Position, "a waiter held behind a lock is counted in the line")
+	cw.clock.Advance(callrules.DefaultPolicy().QueueEntryTTL - time.Minute)
+	_, err = cw.svc.Queue(ctx, b1)
+	require.NoError(t, err)
+	_, err = cw.svc.Queue(ctx, a3)
+	require.NoError(t, err)
+	cw.clock.Advance(2 * time.Minute) // past the lifetime of an entry nobody polled
+
+	cw.asOwnerMutate(roomConcept, b.Call.ID, "updateCallsRoom", map[string]any{"roomId": b.Call.ID, "locked": false})
+	back, err := cw.svc.Queue(ctx, b1)
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeQueue, back.Outcome)
+	require.Equal(t, 1, back.Position, "the waiter lost its place to the lock")
+	behind, err := cw.svc.Queue(ctx, a3)
+	require.NoError(t, err)
+	require.Equal(t, 2, behind.Position, "a waiter who queued during the lock went ahead of one who queued before it")
+
+	// The next seat goes to B1, before A3.
+	require.NoError(t, cw.svc.Leave(ctx, a2))
+	early, err := cw.svc.Queue(ctx, a3)
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeQueue, early.Outcome, "a waiter took the seat of the one back in line ahead of them")
+	in, err := cw.svc.Queue(ctx, b1)
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeAdmit, in.Outcome)
+}
+
 // TestRejoinReusesTheSeat: a person who joins again keeps their seat and their media
 // identity: while seated they get a fresh pass for the same seat, after leaving they
-// take the same seat again, and a removed seat stays shut. A session seated in one open
-// call cannot join another.
+// take the same seat again, and a removed seat stays shut. A rejoin is NEVER REFUSED AS
+// FULL, in a call holding the policy's people or on a media server with no free seat,
+// because the person already holds the seat. A session seated in one open call cannot
+// join another.
 func TestRejoinReusesTheSeat(t *testing.T) {
 	cw := newCallWorld(t, "rejoin", 50)
 	if cw == nil {
@@ -898,6 +969,46 @@ func TestRejoinReusesTheSeat(t *testing.T) {
 	busy, _, err := cw.rejoin(guest, other.Call.GuestToken)
 	requireRefused(t, busy, err, callrules.ErrConflict, callrules.ReasonInAnotherCall)
 	require.Len(t, cw.seatsIn(other.Call.ID), 1, "a session seated in one call took a seat in another")
+
+	// A rejoin to a call holding the policy's people: anyone new is refused as full, and
+	// the seated guest is let back onto the same seat.
+	p := callrules.DefaultPolicy()
+	for n := cw.admittedIn(roomID); n < p.MaxPeople; n++ {
+		res, _, err := cw.join(started.Call.GuestToken, "Filler")
+		require.NoError(t, err)
+		require.Equal(t, callrules.OutcomeAdmit, res.Outcome)
+	}
+	require.Equal(t, p.MaxPeople, cw.admittedIn(roomID))
+	tooMany, _, err := cw.join(started.Call.GuestToken, "One too many")
+	requireRefused(t, tooMany, err, callrules.ErrConflict, "room_full")
+	seats := len(cw.seatsIn(roomID))
+	inFull, keptSess, err := cw.rejoin(guest, started.Call.GuestToken)
+	require.NoError(t, err, "a rejoin to a full call was refused")
+	require.Equal(t, callrules.OutcomeAdmit, inFull.Outcome)
+	require.Equal(t, guest.SeatID, keptSess.SeatID, "a rejoin to a full call took a new seat")
+	require.Equal(t, first.Identity, inFull.Identity, "a rejoin to a full call changed the media identity")
+	require.Len(t, cw.seatsIn(roomID), seats, "a rejoin to a full call wrote a seat")
+
+	// A rejoin on a media server with no free seat, in a call that is not full: the other
+	// call holds its host and a guest, the server's seats are cut to the people it
+	// carries, anyone new to that call is queued, and its seated guest is let back on.
+	firstB, guestB, err := cw.join(other.Call.GuestToken, "Guest B")
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeAdmit, firstB.Outcome)
+	cut := testMediaConfig()
+	cut.Seats = cw.admittedIn(roomID) + cw.admittedIn(other.Call.ID)
+	_, err = cw.in.Bootstrap(ctx, cut)
+	require.NoError(t, err)
+	queuedB, _, err := cw.join(other.Call.GuestToken, "Waiter")
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeQueue, queuedB.Outcome, "the media server still has a free seat")
+	seatsB := len(cw.seatsIn(other.Call.ID))
+	onFull, keptB, err := cw.rejoin(guestB, other.Call.GuestToken)
+	require.NoError(t, err, "a rejoin on a full media server was refused")
+	require.Equal(t, callrules.OutcomeAdmit, onFull.Outcome, "a rejoin on a full media server was not let back on: %+v", onFull)
+	require.Equal(t, guestB.SeatID, keptB.SeatID, "a rejoin on a full media server took a new seat")
+	require.Equal(t, firstB.Identity, onFull.Identity)
+	require.Len(t, cw.seatsIn(other.Call.ID), seatsB, "a rejoin on a full media server wrote a seat")
 
 	// A removed seat stays shut.
 	cw.asOwnerMutate(seatConcept, guest.SeatID, "updateCallsSeat", map[string]any{"seatId": guest.SeatID, "status": "removed"})

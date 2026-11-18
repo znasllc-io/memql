@@ -73,7 +73,10 @@ import (
 // place in line is inside the free seats, because only its poll's reply can carry its
 // pass; Leave frees a seat and promotes nobody. A waiter that has not polled for its
 // deployable's QueueEntryTTL is not counted, and its entry is marked expired when a
-// request of its own call next holds the gates.
+// request of its own call next holds the gates. A non-host waiter in a locked call is
+// HELD: it keeps its entry and its arrival while it polls, but counts in nobody's place
+// until its call is unlocked, so a lock never keeps a free seat from the rest of the
+// line (serverLoad.queue).
 //
 // # Join attempts
 //
@@ -378,13 +381,13 @@ func (s *Service) startGated(ctx context.Context, site callrules.SiteRef, row *s
 	if err != nil {
 		return callrules.JoinResult{}, seatRow{}, err
 	}
-	live, _ := load.queue(now, ttls)
+	live, held, _ := load.queue(now, ttls)
 	// The host's seat is the room's first join attempt.
 	window, ok, retry := callrules.CountJoinAttempt(callrules.JoinWindow{}, now, policy.RoomJoinsPerMinute, callrules.JoinWindowLength)
 	if !ok {
 		return rateRefusal(retry), seatRow{}, fmt.Errorf("%w: the room takes no join attempts", callrules.ErrConflict)
 	}
-	arrives := arrival(live, now)
+	arrives := arrival(now, live, held)
 	entry := callrules.QueueEntry{ID: id.NewShortId(), Class: callrules.ClassNewCall, EnqueuedAt: arrives, LastPollAt: arrives}
 	position := placeInLine(live, entry)
 	decision := callrules.DecideJoin(callrules.RoomState{}, callrules.JoinAsk{Kind: callrules.KindPerson, Host: true}, policy, load.free()-position)
@@ -705,12 +708,12 @@ func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room ro
 	if err != nil {
 		return callrules.JoinResult{}, out, seatRow{}, err
 	}
-	live, expired := load.queue(now, ttls)
+	live, behindLocks, expired := load.queue(now, ttls)
 	if err := s.expire(fresh, owner, current.ID, expired, now); err != nil {
 		return callrules.JoinResult{}, out, seatRow{}, err
 	}
 	host := ask.asHost || (reentry && seat.Host)
-	arrives := arrival(live, now)
+	arrives := arrival(now, live, behindLocks)
 	entry := callrules.QueueEntry{ID: id.NewShortId(), Class: callrules.ClassRunningCall, EnqueuedAt: arrives, LastPollAt: arrives}
 	position := placeInLine(live, entry)
 	decision := callrules.DecideJoin(load.roomState(*current), callrules.JoinAsk{Kind: callrules.KindPerson, Host: host}, policy, load.free()-position)
@@ -924,9 +927,12 @@ func (s *Service) pollGated(ctx context.Context, site callrules.SiteRef, room ro
 // holds the room's and the server's gates and read the room and the seat fresh under
 // them; the server's load is read here, under the same gates.
 //
-// A seat with a live queue entry asks with its own place in line. One without -- it
-// waited behind a lock, or its entry outlived its lifetime -- asks as a newcomer at the
-// back of the line, in the class it last waited in.
+// A seat whose queue entry is still waiting -- in line, or held behind its call's lock
+// (serverLoad.queue) -- keeps it: it asks with its own place in line, and its poll keeps
+// the entry alive, so a waiter held through a lock is back in its place when the lock
+// lifts. One without -- it waited behind a lock from the start, or its entry outlived
+// its lifetime -- asks as a newcomer at the back of the line, in the class it last
+// waited in.
 func (s *Service) answerWaiting(ctx context.Context, site callrules.SiteRef, room roomRow, server MediaServer, policy callrules.Policy, seat seatRow, now time.Time) (callrules.JoinResult, seatRow, error) {
 	owner := site.OwnerUserID
 	load, err := s.store.loadOn(ctx, server)
@@ -937,20 +943,24 @@ func (s *Service) answerWaiting(ctx context.Context, site callrules.SiteRef, roo
 	if err != nil {
 		return callrules.JoinResult{}, seatRow{}, err
 	}
-	live, expired := load.queue(now, ttls)
+	live, held, expired := load.queue(now, ttls)
 	if err := s.expire(ctx, owner, room.ID, expired, now); err != nil {
 		return callrules.JoinResult{}, seatRow{}, err
 	}
 	stored := load.waitingEntryOf(seat.ID)
 	_, inLine := callrules.Position(live, entryID(stored))
-	arrives := arrival(live, now)
+	_, heldBack := callrules.Position(held, entryID(stored))
+	kept := inLine || heldBack
+	arrives := arrival(now, live, held)
 	entry := callrules.QueueEntry{ID: id.NewShortId(), Class: callrules.ClassRunningCall, EnqueuedAt: arrives, LastPollAt: arrives}
 	if stored != nil {
 		entry.Class = stored.Class
-		if inLine {
+		if kept {
 			entry = stored.rule()
 		}
 	}
+	// A held entry is placed by its own arrival among those in line: the place it takes
+	// back when the lock lifts. While the lock holds, DecideJoin answers it "locked".
 	position := placeInLine(live, entry)
 	decision := callrules.DecideJoin(load.roomState(room), callrules.JoinAsk{Kind: callrules.SeatKind(seat.Kind), Host: seat.Host}, policy, load.free()-position)
 
@@ -961,14 +971,14 @@ func (s *Service) answerWaiting(ctx context.Context, site callrules.SiteRef, roo
 		if err := s.store.updateSeat(ctx, owner, seat, map[string]any{"status": seatAdmitted, "joinedAt": now}, memql.VersionTimeAfter(seat.Version, now)); err != nil {
 			return callrules.JoinResult{}, seatRow{}, err
 		}
-		if inLine {
+		if kept {
 			if err := s.store.updateQueueEntry(ctx, owner, *stored, entryAdmitted, time.Time{}, memql.VersionTimeAfter(stored.Version, now)); err != nil {
 				return callrules.JoinResult{}, seatRow{}, err
 			}
 		}
 		return callrules.JoinResult{Outcome: callrules.OutcomeAdmit}, admittedSeat, nil
 	case callrules.OutcomeQueue, callrules.OutcomeWait:
-		if inLine {
+		if kept {
 			if err := s.refreshPoll(ctx, owner, *stored, policy, now); err != nil {
 				return callrules.JoinResult{}, seatRow{}, err
 			}
@@ -992,7 +1002,7 @@ func (s *Service) answerWaiting(ctx context.Context, site callrules.SiteRef, roo
 	if err := s.store.updateSeat(ctx, owner, seat, map[string]any{"status": seatLeft, "leftAt": now}, memql.VersionTimeAfter(seat.Version, now)); err != nil {
 		return callrules.JoinResult{}, seatRow{}, err
 	}
-	if inLine {
+	if kept {
 		if err := s.store.updateQueueEntry(ctx, owner, *stored, entryExpired, time.Time{}, memql.VersionTimeAfter(stored.Version, now)); err != nil {
 			return callrules.JoinResult{}, seatRow{}, err
 		}

@@ -622,10 +622,15 @@ func (l serverLoad) roomState(room roomRow) callrules.RoomState {
 	return state
 }
 
-// queue splits the server's waiting entries into the live ones, in drain order, and
-// those past their lifetime. An entry's lifetime is its OWN deployable's policy
-// (ttlFor), since every call on the server shares the one queue.
-func (l serverLoad) queue(now time.Time, ttlFor func(roomRow) time.Duration) (live []callrules.QueueEntry, expired []queueEntryRow) {
+// queue splits the server's waiting entries three ways: the ones in line, in drain
+// order; the ones HELD behind a lock; and the ones past their lifetime. An entry's
+// lifetime is its OWN deployable's policy (ttlFor), since every call on the server
+// shares the one queue, and a held entry outlives it only as long as its waiter polls.
+func (l serverLoad) queue(now time.Time, ttlFor func(roomRow) time.Duration) (live, held []callrules.QueueEntry, expired []queueEntryRow) {
+	hosts := map[string]bool{}
+	for _, seat := range l.seats {
+		hosts[seat.ID] = seat.Host
+	}
 	byRoom := map[string][]callrules.QueueEntry{}
 	rows := map[string]queueEntryRow{}
 	for _, entry := range l.entries {
@@ -641,12 +646,24 @@ func (l serverLoad) queue(now time.Time, ttlFor func(roomRow) time.Duration) (li
 			expired = append(expired, rows[entryID])
 		}
 		for _, entry := range entries {
-			if !gone[entry.ID] {
-				live = append(live, entry)
+			if gone[entry.ID] {
+				continue
 			}
+			// A NON-HOST WAITER IN A LOCKED CALL IS HELD, NOT IN LINE. It cannot be let in
+			// while the lock holds, so a place in line would keep a seat it cannot take
+			// from everyone behind it, for as long as it keeps polling. It is not given up
+			// either: the person did not choose the lock, so the entry keeps its arrival,
+			// counts in nobody's position and in no new ask's free seats, and is back in
+			// its place the moment the call is unlocked. A host's entry is never held,
+			// because a host passes the lock (calls.DecideJoin).
+			if l.rooms[roomID].Locked && !hosts[rows[entry.ID].SeatID] {
+				held = append(held, entry)
+				continue
+			}
+			live = append(live, entry)
 		}
 	}
-	return callrules.OrderQueue(live), expired
+	return callrules.OrderQueue(live), held, expired
 }
 
 // waitingEntryOf is a seat's waiting queue entry, or nil. A seat has at most one: an
@@ -660,16 +677,19 @@ func (l serverLoad) waitingEntryOf(seatID string) *queueEntryRow {
 	return nil
 }
 
-// arrival is when a new queue entry arrives: now, or just after the newest live entry
-// when the clock says otherwise. Entries are made one at a time under the media
-// server's gate, so this is the order they were made in whatever each replica's clock
-// says. A tie would not do: calls.OrderQueue orders equal arrivals by id, which is
-// random, and could put a newcomer ahead of an entry made before it.
-func arrival(live []callrules.QueueEntry, now time.Time) time.Time {
+// arrival is when a new queue entry arrives: now, or just after the newest entry still
+// waiting, in line or held behind a lock, when the clock says otherwise. Entries are
+// made one at a time under the media server's gate, so this is the order they were made
+// in whatever each replica's clock says. A tie would not do: calls.OrderQueue orders
+// equal arrivals by id, which is random, and could put a newcomer ahead of an entry made
+// before it, a held one included once its call is unlocked.
+func arrival(now time.Time, waiting ...[]callrules.QueueEntry) time.Time {
 	newest := time.Time{}
-	for _, entry := range live {
-		if entry.EnqueuedAt.After(newest) {
-			newest = entry.EnqueuedAt
+	for _, entries := range waiting {
+		for _, entry := range entries {
+			if entry.EnqueuedAt.After(newest) {
+				newest = entry.EnqueuedAt
+			}
 		}
 	}
 	return memql.VersionTimeAfter(newest, now)
