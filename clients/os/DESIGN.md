@@ -785,7 +785,8 @@ primary heading. Do not add a back button or a breadcrumb block anywhere in an
 app body. Outside a window (a section rendered alone) there is no row, and
 `Head` keeps its inline navigation so it still works.
 
-The row reads, left to right: **Back, a hairline, the trail.**
+The row reads, left to right: **Back, a hairline, the trail.** It is 40px
+tall, the same as the window bar above it.
 
 - **Back is first, and the hairline is a boundary.** 21px separates Back from
   the first crumb (10, a 1px rule, 10) so a cursor aimed at one cannot land on

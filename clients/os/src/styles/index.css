@@ -14618,8 +14618,11 @@ button.os-cluster-mesh-peer:focus-visible {
  * heading still draws OUTSIDE a window, where there is no row.
  *
  * The 21px between Back and the first crumb (10 + 1 + 10) is the point of the
- * hairline: two targets that were one gesture apart are now visibly two. */
-.os-trail-row { flex: none; display: flex; align-items: center; min-width: 0; height: 34px; padding: 0 12px; border-bottom: 1px solid var(--os-line); }
+ * hairline: two targets that were one gesture apart are now visibly two.
+ *
+ * 40px, the window bar's own height (José, Nov 18 2026: at 34px the row
+ * read as too small under the tabs). */
+.os-trail-row { flex: none; display: flex; align-items: center; min-width: 0; height: 40px; padding: 0 12px; border-bottom: 1px solid var(--os-line); }
 .os-trail-back { appearance: none; flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--os-control-h); height: var(--os-control-h); padding: 0; border: 0; border-radius: var(--os-radius-xs); background: transparent; color: var(--os-muted); cursor: pointer; }
 .os-trail-back:hover:not(:disabled) { background: var(--os-hover); color: var(--os-ink); }
 .os-trail-back:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 1px; }
