@@ -14,6 +14,16 @@ import (
 // enumeration of the concept. A digest names one row, so each range holds one
 // row's versions. Only digests are indexed: no plain secret is ever stored.
 //
+// THE HOT PER-PARENT READS ARE INDEXED TOO. A join or a queue poll reads the seats and the
+// queue entries of ONE room, and the open-room and scheduled-call checks read the rooms and
+// scheduled calls of ONE key, on every request; without an index each enumerates every id of
+// its concept. A lookup index may serve several concepts (concepts is a list, as the guest and
+// host digest indexes show), so the same field on two concepts is one index.
+//
+// SIX INDEXES IN ALL, so the rollout builds six: key digest, session digest, guest digest
+// (room and scheduledCall), host digest (room and scheduledCall), roomId (seat and queueEntry),
+// keyId (room and scheduledCall).
+//
 // A PARTIAL INDEX STILL SCANS THE WHOLE TABLE TO BUILD, as the site access
 // indexes record: the build reads every chunk's heap once, at the rollout that
 // brings it, although no calls row exists before this release.
@@ -27,6 +37,8 @@ var callsLookupIndexes = []struct {
 	{"memory_nodes_calls_session_digest_lookup_idx", "tokenDigest", []string{"v1:calls:session"}},
 	{"memory_nodes_calls_guest_digest_lookup_idx", "guestDigest", []string{"v1:calls:room", "v1:calls:scheduledCall"}},
 	{"memory_nodes_calls_host_digest_lookup_idx", "hostDigest", []string{"v1:calls:room", "v1:calls:scheduledCall"}},
+	{"memory_nodes_calls_room_lookup_idx", "roomId", []string{"v1:calls:seat", "v1:calls:queueEntry"}},
+	{"memory_nodes_calls_key_lookup_idx", "keyId", []string{"v1:calls:room", "v1:calls:scheduledCall"}},
 }
 
 func ensureCallsLookupIndexes(ctx context.Context, db *bun.DB, logger *slog.Logger, table string) error {

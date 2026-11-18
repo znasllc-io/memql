@@ -20,16 +20,17 @@ query key callsKeyById {
   shape   callsKeyFull
 }
 
-/// Resolve a key by the SHA-256 digest of the secret presented. THE DIGEST IS THE ARGUMENT, never the secret: the plain secret exists in the caller's hand and nowhere else. An ended or expired row still answers; the calls integration decides the reply from the row and the clock. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+/// Resolve a key by the SHA-256 digest of the secret presented, within ONE SITE: a secret minted for one of an owner's deployables resolves nothing at another, as siteAccessCodeByHash does. THE DIGEST IS THE ARGUMENT, never the secret: the plain secret exists in the caller's hand and nowhere else. An ended or expired row still answers; the calls integration decides the reply from the row and the clock. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
 @serverOnly
 @unbounded("key by digest -- a digest names one row and no two rows share one")
 @actor
 @cache(0)
 query key callsKeyByDigest {
   args {
+    siteId  string!
     digest  string!  @maxLength(64) @pattern("^[0-9a-f]{64}$")
   }
-  filter  row => row.digest == args.digest && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  filter  row => row.siteId == args.siteId && row.digest == args.digest && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   callsKeyFull
 }
 
@@ -46,16 +47,17 @@ query session callsSessionById {
   shape   callsSessionFull
 }
 
-/// Resolve a session by the SHA-256 digest of the secret presented. THE DIGEST IS THE ARGUMENT, never the secret: the plain secret exists in the caller's hand and nowhere else. An ended or expired row still answers; the calls integration decides the reply from the row and the clock. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+/// Resolve a session by the SHA-256 digest of the secret presented, within ONE SITE: a secret minted for one of an owner's deployables resolves nothing at another, as siteAccessCodeByHash does. THE DIGEST IS THE ARGUMENT, never the secret: the plain secret exists in the caller's hand and nowhere else. An ended or expired row still answers; the calls integration decides the reply from the row and the clock. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
 @serverOnly
 @unbounded("session by digest -- a digest names one row and no two rows share one")
 @actor
 @cache(0)
 query session callsSessionByTokenDigest {
   args {
+    siteId  string!
     tokenDigest  string!  @maxLength(64) @pattern("^[0-9a-f]{64}$")
   }
-  filter  row => row.tokenDigest == args.tokenDigest && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  filter  row => row.siteId == args.siteId && row.tokenDigest == args.tokenDigest && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   callsSessionFull
 }
 
@@ -72,29 +74,31 @@ query room callsRoomById {
   shape   callsRoomFull
 }
 
-/// Resolve a room by the SHA-256 digest of the secret presented. THE DIGEST IS THE ARGUMENT, never the secret: the plain secret exists in the caller's hand and nowhere else. An ended or expired row still answers; the calls integration decides the reply from the row and the clock. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+/// Resolve a room by the SHA-256 digest of the secret presented, within ONE SITE: a secret minted for one of an owner's deployables resolves nothing at another, as siteAccessCodeByHash does. THE DIGEST IS THE ARGUMENT, never the secret: the plain secret exists in the caller's hand and nowhere else. An ended or expired row still answers; the calls integration decides the reply from the row and the clock. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
 @serverOnly
 @unbounded("room by digest -- a digest names one row and no two rows share one")
 @actor
 @cache(0)
 query room callsRoomByGuestDigest {
   args {
+    siteId  string!
     guestDigest  string!  @maxLength(64) @pattern("^[0-9a-f]{64}$")
   }
-  filter  row => row.guestDigest == args.guestDigest && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  filter  row => row.siteId == args.siteId && row.guestDigest == args.guestDigest && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   callsRoomFull
 }
 
-/// Resolve a room by the SHA-256 digest of the secret presented. THE DIGEST IS THE ARGUMENT, never the secret: the plain secret exists in the caller's hand and nowhere else. An ended or expired row still answers; the calls integration decides the reply from the row and the clock. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+/// Resolve a room by the SHA-256 digest of the secret presented, within ONE SITE: a secret minted for one of an owner's deployables resolves nothing at another, as siteAccessCodeByHash does. THE DIGEST IS THE ARGUMENT, never the secret: the plain secret exists in the caller's hand and nowhere else. An ended or expired row still answers; the calls integration decides the reply from the row and the clock. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
 @serverOnly
 @unbounded("room by digest -- a digest names one row and no two rows share one")
 @actor
 @cache(0)
 query room callsRoomByHostDigest {
   args {
+    siteId  string!
     hostDigest  string!  @maxLength(64) @pattern("^[0-9a-f]{64}$")
   }
-  filter  row => row.hostDigest == args.hostDigest && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  filter  row => row.siteId == args.siteId && row.hostDigest == args.hostDigest && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   callsRoomFull
 }
 
@@ -176,29 +180,31 @@ query scheduledCall callsScheduledCallById {
   shape   callsScheduledCallFull
 }
 
-/// Resolve a scheduledCall by the SHA-256 digest of the secret presented. THE DIGEST IS THE ARGUMENT, never the secret: the plain secret exists in the caller's hand and nowhere else. An ended or expired row still answers; the calls integration decides the reply from the row and the clock. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+/// Resolve a scheduledCall by the SHA-256 digest of the secret presented, within ONE SITE: a secret minted for one of an owner's deployables resolves nothing at another, as siteAccessCodeByHash does. THE DIGEST IS THE ARGUMENT, never the secret: the plain secret exists in the caller's hand and nowhere else. An ended or expired row still answers; the calls integration decides the reply from the row and the clock. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
 @serverOnly
 @unbounded("scheduledCall by digest -- a digest names one row and no two rows share one")
 @actor
 @cache(0)
 query scheduledCall callsScheduledCallByGuestDigest {
   args {
+    siteId  string!
     guestDigest  string!  @maxLength(64) @pattern("^[0-9a-f]{64}$")
   }
-  filter  row => row.guestDigest == args.guestDigest && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  filter  row => row.siteId == args.siteId && row.guestDigest == args.guestDigest && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   callsScheduledCallFull
 }
 
-/// Resolve a scheduledCall by the SHA-256 digest of the secret presented. THE DIGEST IS THE ARGUMENT, never the secret: the plain secret exists in the caller's hand and nowhere else. An ended or expired row still answers; the calls integration decides the reply from the row and the clock. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+/// Resolve a scheduledCall by the SHA-256 digest of the secret presented, within ONE SITE: a secret minted for one of an owner's deployables resolves nothing at another, as siteAccessCodeByHash does. THE DIGEST IS THE ARGUMENT, never the secret: the plain secret exists in the caller's hand and nowhere else. An ended or expired row still answers; the calls integration decides the reply from the row and the clock. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
 @serverOnly
 @unbounded("scheduledCall by digest -- a digest names one row and no two rows share one")
 @actor
 @cache(0)
 query scheduledCall callsScheduledCallByHostDigest {
   args {
+    siteId  string!
     hostDigest  string!  @maxLength(64) @pattern("^[0-9a-f]{64}$")
   }
-  filter  row => row.hostDigest == args.hostDigest && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  filter  row => row.siteId == args.siteId && row.hostDigest == args.hostDigest && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   callsScheduledCallFull
 }
 

@@ -237,9 +237,10 @@ func (e *MemQLEngine) refuseOrganizationActionCapability(ctx context.Context, fn
 // deploy came from. "publish": what visitors get, or whose authority the site's
 // shopper forms borrow (ownerUserId). Saving a newsletter connection on a site
 // whose forms are off turns them on as the person saving it, so that now asks
-// publish too (component/campaigns/newsletter.go). "calls": the calls capability
-// switch, which lets strangers into rooms on the owner's media capacity, so it asks
-// its own part (app:deployables/calls) and not the publish part.
+// publish too (component/campaigns/newsletter.go). "calls" is judged by its own
+// rule in the guard (create and change), so it carries no parts here: the switch lets
+// people into rooms on the owner's media capacity, a different consequence from
+// publishing a build, so it asks app:deployables/calls and not publish.
 //
 // Regression test: TestASiteFieldThatChangesWhatVisitorsGetAsksPublish.
 var siteFieldParts = []struct {
@@ -250,7 +251,7 @@ var siteFieldParts = []struct {
 	{"title", nil}, {"notes", nil}, {"accountId", nil},
 	{"artifactId", []string{"deploy", "publish"}}, {"packageId", []string{"deploy", "publish"}}, {"packageDeployableName", []string{"deploy", "publish"}},
 	{"hostname", []string{"publish"}}, {"kind", []string{"publish"}}, {"resolutionTail", []string{"publish"}},
-	{"apiProxy", []string{"publish"}}, {"shopperForms", []string{"publish"}}, {"calls", []string{"calls"}}, {"systemOwned", []string{"publish"}},
+	{"apiProxy", []string{"publish"}}, {"shopperForms", []string{"publish"}}, {"calls", nil}, {"systemOwned", []string{"publish"}},
 	{"extensionRuntimePath", []string{"publish"}}, {"settings", []string{"publish"}}, {"storeSettings", []string{"publish"}},
 	{"ownerUserId", []string{"publish"}},
 }
@@ -318,6 +319,15 @@ func (e *MemQLEngine) validateOrganizationSensitiveChanges(ctx context.Context, 
 			if BareShortId(stringFromAny(oldBinding[bindingStoreIdKey])) != BareShortId(stringFromAny(newBinding[bindingStoreIdKey])) {
 				require("store")
 			}
+		}
+		// calls has a rule of its own, shaped like autoDeploy's below: a create that
+		// leaves the switch off is ordinary data, and one that turns it on asks the
+		// calls part just as a later change does. siteFieldParts lists it with no
+		// parts for that reason (the form for a field judged here) because that table
+		// is applied only to an existing site, and a site created with calls on would
+		// otherwise ask no part at all and then ask only publish.
+		if changed("calls") && (!creating || boolFromAny(next["calls"])) {
+			require("calls")
 		}
 		if !creating {
 			for _, f := range siteFieldParts {

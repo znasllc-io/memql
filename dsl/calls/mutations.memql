@@ -20,10 +20,12 @@ mutation key createCallsKey {
     status  string
   }
   insert {
-    accept { siteId, digest, label, kind, status }
+    accept { siteId, digest, label }
     stamp {
       id: args.keyId
       ownerUserId: actor.userId
+      kind: args.kind ?? "test"
+      status: args.status ?? "active"
       createdAt: args.versionTime ?? now
     }
   }
@@ -112,10 +114,11 @@ mutation room createCallsRoom {
     openedAt  datetime
   }
   insert {
-    accept { siteId, deployable, keyId, mediaServerId, mediaRoom, status, locked, hostSeatId, scheduledCallId, guestDigest, hostDigest, openedAt }
+    accept { siteId, deployable, keyId, mediaServerId, mediaRoom, locked, hostSeatId, scheduledCallId, guestDigest, hostDigest, openedAt }
     stamp {
       id: args.roomId
       ownerUserId: actor.userId
+      status: args.status ?? "open"
       createdAt: args.versionTime ?? now
     }
   }
@@ -212,10 +215,11 @@ mutation queueEntry createCallsQueueEntry {
     status  string
   }
   insert {
-    accept { siteId, roomId, seatId, keyId, class, enqueuedAt, lastPollAt, status }
+    accept { siteId, roomId, seatId, keyId, class, enqueuedAt, lastPollAt }
     stamp {
       id: args.queueEntryId
       ownerUserId: actor.userId
+      status: args.status ?? "waiting"
       createdAt: args.versionTime ?? now
     }
   }
@@ -257,10 +261,11 @@ mutation scheduledCall createCallsScheduledCall {
     hostDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")
   }
   insert {
-    accept { siteId, keyId, start, end, title, status, guestDigest, hostDigest }
+    accept { siteId, keyId, start, end, title, guestDigest, hostDigest }
     stamp {
       id: args.scheduledCallId
       ownerUserId: actor.userId
+      status: args.status ?? "scheduled"
       createdAt: args.versionTime ?? now
     }
   }
@@ -302,9 +307,10 @@ mutation mediaServer createCallsMediaServer {
     credentialSecret  string
   }
   insert {
-    accept { provider, apiUrl, publicUrl, region, seats, state, credentialSecret }
+    accept { provider, apiUrl, publicUrl, region, seats, credentialSecret }
     stamp {
       id: args.mediaServerId
+      state: args.state ?? "active"
       createdAt: args.versionTime ?? now
     }
   }

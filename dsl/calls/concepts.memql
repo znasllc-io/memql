@@ -164,7 +164,7 @@ concept scheduledCall {
   end  datetime  @description("When the call is booked to end.")
   title  string  @description("The call's title in the calendar file.")
   status  enum("scheduled", "cancelled", "started", "ended")  @description("Absent reads as scheduled.")
-  roomId  string  @description("The id of the calls room once the call has started. The room names the call back (its scheduledCallId), and a relationship in both directions is a cycle the engine refuses, so only the room side declares one.")
+  roomId  string  @description("The v1:calls:room once the call has started. The room names the call back (its scheduledCallId), so this side declares no relationship: a relationship here, as the reverse of the room's, is refused as a direction conflict (the gate idBearingFieldExemptions records the exemption).")
   guestDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")  @description("SHA-256, lowercase hex, of the guest link secret.")
   hostDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")  @description("SHA-256, lowercase hex, of the host link secret.")
   accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
