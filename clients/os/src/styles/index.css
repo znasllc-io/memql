@@ -4488,6 +4488,10 @@ a.os-button {
    * a group rather than one control at a time (as Fleet's narrow heads do). */
   .os-files-main .os-head { flex-wrap: wrap; }
   .os-files-main .os-head-actions { flex-wrap: nowrap; }
+  /* A picked file's icons take a line of their own above them, so they
+   * never push Sort, Search and Add off a phone's edge. */
+  .os-files-main .os-head-actions:has(> .os-files-picked-acts) { flex-wrap: wrap; }
+  .os-files-picked-acts { flex-basis: 100%; padding-right: 0; border-right: 0; }
   /* Three tiles across a phone rather than two. */
   .os-files .os-files-grid,
   .os-files .os-files-files .os-livelist-rows { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
