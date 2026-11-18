@@ -1,0 +1,21 @@
+# deploy/media/Caddyfile.tmpl -- TLS in front of the calls media server.
+#
+# RENDERED by scripts/media/local-up.sh into ~/.memql/media/Caddyfile, with the host and
+# port of the public URL the memql-calls-media Secret hands browsers
+# (wss://media.<domain>:7443 locally), so the server answers exactly the address the bff
+# gives out. deploy/media/compose.yaml mounts it with the front door's own mkcert pair.
+
+{
+	# The certificate is the mounted pair, so nothing is obtained, renewed or redirected,
+	# and no admin endpoint is needed: the server's configuration changes only by
+	# recreating the container, which make media-up does when the rendered files change.
+	auto_https off
+	admin off
+}
+
+https://{{MEDIA_HOST}}:{{HTTPS_PORT}} {
+	tls /etc/caddy/tls/cert.pem /etc/caddy/tls/key.pem
+	# Signalling (a WebSocket upgrade) and the client's https connection check both go to
+	# LiveKit's one port; reverse_proxy carries the upgrade as it is.
+	reverse_proxy livekit:7880
+}

@@ -374,6 +374,9 @@ func TestUserSiteHostnamePolicy(t *testing.T) {
 		{"www.example.com", false, "reserved: reads as the organization's"},
 		{"admin.example.com", false, "reserved: reads as the organization's"},
 		{"mail.example.com", false, "reserved: where a mail host would land"},
+		{"voice.example.com", false, "reserved: the voice signalling host"},
+		{"turn.example.com", false, "reserved: the voice relay host"},
+		{"media.example.com", false, "reserved: the calls media servers' host suffix, which a calls page admits"},
 	}
 	for _, tc := range cases {
 		err := validateUserSiteHostname(tc.hostname, domain)
@@ -501,6 +504,29 @@ func TestSiteHostnamePolicyShapeRuleIsWaivedForPrivilegedCallers(t *testing.T) {
 		t.Fatalf("a cluster owner was refused by the SHAPE rule: %v\n"+
 			"A custom apex or a second domain is an operator deployment, and refusing it here "+
 			"would make the cluster unable to host anything but <slug>.<domain>", err)
+	}
+}
+
+// A deployable cannot be named `media`. media.<domain> is where an installation puts its
+// calls media servers (MEMQL_CALLS_MEDIA_HOST_SUFFIX, m1.media.<domain> and the like), and
+// the page policy of every deployable with calls on admits that host and every host under
+// it (component/edge/csp_calls.go). A user's site at media.<domain> would therefore be a
+// host every calls page may connect to, owned by whoever claimed the name first.
+//
+// Asserted through the write guard rather than only the pure policy, because the guard is
+// the authority: an ordinary user's create is refused by the SHAPE rule before the
+// uniqueness probe, which this engine has no database for, so a refusal that names the
+// reservation is the policy's and nothing else's.
+func TestADeployableCannotTakeTheMediaHost(t *testing.T) {
+	t.Setenv(memqlDomainEnv, "")
+	e := &MemQLEngine{}
+	err := e.validateSiteHostnamePolicy(callerCtx("user-a"),
+		map[string]any{"hostname": "media." + defaultSiteDomain}, "s1", "user-a", false, "")
+	if err == nil {
+		t.Fatal("an ordinary user was allowed to create a site at the calls media host")
+	}
+	if !strings.Contains(err.Error(), "is reserved") {
+		t.Fatalf("the create was refused, but not as a reserved name, so the media host is still claimable: %v", err)
 	}
 }
 

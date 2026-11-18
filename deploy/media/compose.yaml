@@ -1,0 +1,79 @@
+# deploy/media/compose.yaml -- one calls media server: LiveKit, the Redis it keeps room
+# state in, and Caddy terminating TLS in front of it.
+#
+# THE CALLS MEDIA SERVERS ARE OUTSIDE THE CLUSTER in every environment (an external
+# media target). This file runs one beside the local k3d cluster, started and stopped by
+# scripts/media/local-up.sh and local-down.sh (make media-up, make media-down). The
+# engine reaches it through the eight MEMQL_CALLS_MEDIA_* values in the memql-calls-media
+# Secret (integrations/calls/config.go): the bff drives LiveKit's control API at
+# http://host.k3d.internal:7880, browsers connect to wss://media.<domain>:<port> through
+# Caddy, and LiveKit's webhooks come back through the front door to
+# https://api.<domain>/inbound/livekit.
+#
+# NO VALUE IS WRITTEN HERE. The rendered LiveKit configuration (it carries both key
+# pairs), the Caddyfile, the front door's certificate authority and its TLS pair are
+# files on the operator's machine that local-up.sh names through the MEDIA_* variables,
+# and every one is required (${VAR:?...}): a hand-run `docker compose up` without them
+# refuses rather than starting a server with no keys.
+#
+# IMAGES ARE PINNED. LiveKit at v1.13.7, the version livekit.yaml.tmpl was checked
+# against and the one deploy/k8s/components/ask-voice runs: an upgrade is reviewed for
+# CreateJobToken first, which on LiveKit's development branch lets a running agent job
+# ask a self-hosted server for new passes. scripts/media/local_up_test.go pins all three.
+
+name: memql-media
+
+services:
+  livekit:
+    image: livekit/livekit-server:v1.13.7
+    command: ["--config", "/etc/livekit/livekit.yaml"]
+    restart: unless-stopped
+    depends_on: [redis]
+    environment:
+      # Webhooks go to the front door over TLS, and its certificate is the local mkcert
+      # pair, signed by a root no container trusts. SSL_CERT_FILE replaces Go's system
+      # roots with that one root, so the only TLS this server completes is to a host the
+      # root signed: locally, exactly the front door.
+      SSL_CERT_FILE: /etc/livekit/front-door-ca.pem
+      # Not read by LiveKit. A digest of the rendered files, so Compose recreates the
+      # container when they change: it reads its configuration once, at start, and a
+      # re-seeded key would otherwise keep the old one running.
+      MEDIA_CONFIG_DIGEST: "${MEDIA_CONFIG_DIGEST:?set by scripts/media/local-up.sh}"
+    extra_hosts:
+      # The api host resolves to the Docker host, where k3d publishes the front door on
+      # 443, so a webhook takes the same front door a browser does.
+      - "${MEDIA_API_HOST:?set by scripts/media/local-up.sh}:host-gateway"
+    ports:
+      # The control API, on every interface: the bff dials it from inside k3d at
+      # host.k3d.internal, the Docker host's address on the cluster's network, which a
+      # port published on loopback alone is not reachable through on Linux. Every request
+      # on it carries a token signed with one of the server's keys.
+      - "7880:7880"
+      # ICE over TCP and UDP. node_ip is 127.0.0.1 (livekit.yaml.tmpl): the browser runs
+      # on this machine, so loopback is the only address these need.
+      - "127.0.0.1:7881:7881"
+      - "127.0.0.1:7882:7882/udp"
+    volumes:
+      - "${MEDIA_CONFIG_DIR:?set by scripts/media/local-up.sh}/livekit.yaml:/etc/livekit/livekit.yaml:ro"
+      - "${MEDIA_CONFIG_DIR:?set by scripts/media/local-up.sh}/front-door-ca.pem:/etc/livekit/front-door-ca.pem:ro"
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    # Room state only, and none of it is kept: a restarted server starts empty, and the
+    # engine's reconciliation pass repairs the calls' rows from what the server reports.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+  caddy:
+    image: caddy:2.11.9-alpine
+    restart: unless-stopped
+    depends_on: [livekit]
+    environment:
+      MEDIA_CONFIG_DIGEST: "${MEDIA_CONFIG_DIGEST:?set by scripts/media/local-up.sh}"
+    ports:
+      # The public URL's port, on loopback: the browser on this machine is its only client.
+      - "127.0.0.1:${MEDIA_HTTPS_PORT:?set by scripts/media/local-up.sh}:${MEDIA_HTTPS_PORT:?set by scripts/media/local-up.sh}"
+    volumes:
+      - "${MEDIA_CONFIG_DIR:?set by scripts/media/local-up.sh}/Caddyfile:/etc/caddy/Caddyfile:ro"
+      - "${MEDIA_TLS_CERT:?set by scripts/media/local-up.sh}:/etc/caddy/tls/cert.pem:ro"
+      - "${MEDIA_TLS_KEY:?set by scripts/media/local-up.sh}:/etc/caddy/tls/key.pem:ro"

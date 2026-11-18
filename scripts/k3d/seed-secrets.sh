@@ -13,6 +13,8 @@
 #                             MEMQL_IDENTITY_SIGNING_KEY_B64,
 #                             MEMQL_NODE_BOOTSTRAP_TOKEN, DATABASE_DSN, ...)
 #   memql-db-app-creds   -- Postgres credentials for the in-cluster DB
+#   memql-calls-media    -- the eight MEMQL_CALLS_MEDIA_* values: the local calls
+#                           media server (make media-up) and its two key pairs
 #
 # Called by `make secrets` and by `make up` on first boot.
 # Safe to re-run: ordinary configuration uses `kubectl apply`; memql-secrets
@@ -52,6 +54,8 @@
 # Contract: docs/internal/design/capability-script-contract.md
 #
 # Exit codes: 0 ok | 2 bad param
+#             | 3 refused (a media credential Secret holds only part of its
+#                          key pairs: memql-voice, memql-calls-media)
 #             | 4 prerequisite missing (kubectl/cluster/ns; mkcert or its CA)
 #             | 5 op failed (unreadable existing secret; cert issuance failed;
 #                            an issuer envelope this script cannot read)
@@ -1089,6 +1093,71 @@ function seed_voice_credentials() {
     info "Voice credentials seeded."
 }
 
+# The calls media server's credentials: memql-calls-media, the eight
+# MEMQL_CALLS_MEDIA_* values (integrations/calls/config.go) the bff reads, optionally,
+# through deploy/k8s/components/calls-media. scripts/media/local-up.sh (make media-up)
+# renders the same Secret into the server it starts beside the cluster.
+#
+# Two halves with two rules, the same split as the voice credentials above:
+#   - the two key pairs (rooms and passes are signed with one, webhooks with the other)
+#     are generated once and then PRESERVED: the running media server was rendered with
+#     them and the bff seals them into the graph at boot, so a routine make secrets that
+#     rotated them would leave a server refusing every pass and every webhook until
+#     somebody restarted it. A Secret holding only part of them is refused rather than
+#     topped up, because a fresh half is a credential the running server does not have;
+#   - the four values that describe the target are written on every run, derived from
+#     the domain this run resolved, like memql-domain (seed_calls_media_credentials).
+# Resolved in main before the first write, so a refusal leaves the cluster untouched.
+function resolve_calls_media_credentials() {
+    local snapshot
+    snapshot="$(kubectl get secret memql-calls-media --namespace="$NAMESPACE" --ignore-not-found -o json)" \
+        || cap_fail 5 "could not read the calls media credentials (memql-calls-media)"
+    if [[ -n "$snapshot" ]]; then
+        CALLS_MEDIA_API_KEY="$(printf '%s' "$snapshot" | jq -r '.data.MEMQL_CALLS_MEDIA_API_KEY // empty' | b64_decode)"
+        CALLS_MEDIA_API_SECRET="$(printf '%s' "$snapshot" | jq -r '.data.MEMQL_CALLS_MEDIA_API_SECRET // empty' | b64_decode)"
+        CALLS_MEDIA_WEBHOOK_KEY="$(printf '%s' "$snapshot" | jq -r '.data.MEMQL_CALLS_MEDIA_WEBHOOK_KEY // empty' | b64_decode)"
+        CALLS_MEDIA_WEBHOOK_SECRET="$(printf '%s' "$snapshot" | jq -r '.data.MEMQL_CALLS_MEDIA_WEBHOOK_SECRET // empty' | b64_decode)"
+        [[ -n "$CALLS_MEDIA_API_KEY" && ${#CALLS_MEDIA_API_SECRET} -ge 32 \
+            && -n "$CALLS_MEDIA_WEBHOOK_KEY" && ${#CALLS_MEDIA_WEBHOOK_SECRET} -ge 32 ]] \
+            || cap_fail 3 "memql-calls-media is incomplete; restore its two key pairs, or delete it so the next run mints a new set (then run make media-up again), before seeding"
+    else
+        # Distinct keys, so the two pairs can be rotated apart; the secrets are 256
+        # random bits each, past the engine's 32-character floor.
+        CALLS_MEDIA_API_KEY="callsapi$(openssl rand -hex 12)"
+        CALLS_MEDIA_API_SECRET="$(openssl rand -hex 32)"
+        CALLS_MEDIA_WEBHOOK_KEY="callshook$(openssl rand -hex 12)"
+        CALLS_MEDIA_WEBHOOK_SECRET="$(openssl rand -hex 32)"
+    fi
+}
+
+# The four target values are the local media server's, and each is a VALUE of this
+# machine, never a branch:
+#   - docker-local is recorded on the media server row and nothing reads it to decide
+#     anything (the provider is a recorded value: integrations/calls/config.go);
+#   - the control API is http://host.k3d.internal:7880, the name k3d writes into the
+#     cluster's DNS (CoreDNS NodeHosts) for the Docker host as the cluster's network
+#     sees it, where make media-up publishes LiveKit's port. Plain http, because the hop
+#     never leaves this machine and every call on it is signed with the API secret;
+#   - the public URL is wss://media.<domain>:7443, Caddy's TLS in front of LiveKit with
+#     the front door's own mkcert pair, at the host the edge's page policy admits
+#     (media.$(MEMQL_DOMAIN), deploy/k8s/components/calls-media);
+#   - 50 seats: what room placement may put on this one server. A developer machine,
+#     sized for a few local calls, not a measured capacity.
+function seed_calls_media_credentials() {
+    kubectl create secret generic memql-calls-media --namespace="$NAMESPACE" \
+        --from-literal=MEMQL_CALLS_MEDIA_PROVIDER=docker-local \
+        --from-literal=MEMQL_CALLS_MEDIA_API_URL=http://host.k3d.internal:7880 \
+        --from-literal=MEMQL_CALLS_MEDIA_PUBLIC_URL="wss://media.${DOMAIN}:7443" \
+        --from-literal=MEMQL_CALLS_MEDIA_SEATS=50 \
+        --from-literal=MEMQL_CALLS_MEDIA_API_KEY="$CALLS_MEDIA_API_KEY" \
+        --from-literal=MEMQL_CALLS_MEDIA_API_SECRET="$CALLS_MEDIA_API_SECRET" \
+        --from-literal=MEMQL_CALLS_MEDIA_WEBHOOK_KEY="$CALLS_MEDIA_WEBHOOK_KEY" \
+        --from-literal=MEMQL_CALLS_MEDIA_WEBHOOK_SECRET="$CALLS_MEDIA_WEBHOOK_SECRET" \
+        --dry-run=client -o yaml | kubectl apply -f - >&2
+    SEEDED_COUNT=$((SEEDED_COUNT + 1))
+    info "Calls media credentials seeded (wss://media.${DOMAIN}:7443; make media-up starts the server)."
+}
+
 function seed_memql_secrets() {
     # Both values were resolved in main BEFORE any mutation -- see the note
     # there. This function only writes.
@@ -1285,6 +1354,7 @@ function main() {
     resolve_campaign_unsubscribe_secret
     resolve_github_app
     resolve_voice_credentials
+    resolve_calls_media_credentials
 
     seed_internal_ca
     seed_domain_configmap
@@ -1292,6 +1362,7 @@ function main() {
     seed_db_creds
     seed_memql_secrets
     seed_voice_credentials
+    seed_calls_media_credentials
 
     info "All local secrets seeded. The k3d cluster can now start the MemQL stack."
     info "ArgoCD reconciles automatically; check: kubectl get app memql-local -n argocd -w"

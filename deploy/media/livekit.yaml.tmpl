@@ -1,0 +1,68 @@
+# deploy/media/livekit.yaml.tmpl -- the calls media server's LiveKit configuration.
+#
+# RENDERED, NEVER READ AS IT STANDS. scripts/media/local-up.sh fills the double-brace
+# placeholders from the memql-calls-media Secret and the cluster's domain into a file
+# outside the repository (~/.memql/media/livekit.yaml, mode 0600: it carries both key
+# pairs), which deploy/media/compose.yaml mounts. Every key was checked against
+# livekit-server v1.13.7, the version the image is pinned at: its config-sample.yaml, and
+# pkg/config/config.go with the livekit/protocol webhook package it pins at that tag.
+
+port: 7880
+
+redis:
+  address: redis:6379
+
+# Two key pairs. Rooms and passes are signed with the first (MEMQL_CALLS_MEDIA_API_KEY);
+# the server signs its webhooks with the second (MEMQL_CALLS_MEDIA_WEBHOOK_KEY, named in
+# webhook.api_key below), which is the only pair the engine verifies a delivery against.
+keys:
+  "{{API_KEY}}": "{{API_SECRET}}"
+  "{{WEBHOOK_KEY}}": "{{WEBHOOK_SECRET}}"
+
+rtc:
+  tcp_port: 7881
+  # One UDP port, muxed, rather than a range: compose.yaml publishes exactly it.
+  udp_port: 7882
+  # The address the server's ICE candidates name. The browser runs on this machine and
+  # reaches the published ports at loopback; external-address discovery stays off
+  # (v1.13.7's default), so a STUN answer naming this machine's public address cannot
+  # replace it.
+  node_ip: 127.0.0.1
+
+room:
+  # The engine creates every room, with its participant limit (integrations/calls
+  # media.go CreateRoom). A pass for a room that does not exist must be refused, not
+  # open a room without that limit. How long an empty room lives is v1.13.7's default
+  # (300 s, then 20 s after the last departure); the engine re-creates a room before the
+  # first pass into one with nobody in it.
+  auto_create: false
+  enabled_codecs:
+    - mime: audio/opus
+    - mime: video/vp8
+    - mime: video/h264
+
+# Of the quality caps (cameras up to 720p, screen shares up to 1080p at 15 fps, at most
+# 10 video subscriptions per participant), only the last is something the server can
+# express: subscriptions past it stay pending until one ends. Resolution, frame rate and
+# bitrate are the publishing client's encoder settings, and a pass says which sources a
+# seat may publish, not at what quality. Audio subscriptions are not capped: one held
+# pending is a participant nobody hears.
+limit:
+  subscription_limit_video: 10
+
+webhook:
+  api_key: "{{WEBHOOK_KEY}}"
+  urls:
+    - "{{WEBHOOK_URL}}"
+  # Only the four events integrations/calls applies (events.go). Each delivery is staged
+  # as a row and opens a journal run before anything reads its event, so every other
+  # event would be that cost for nothing.
+  filter_params:
+    include_events:
+      - participant_joined
+      - participant_left
+      - track_published
+      - room_finished
+
+logging:
+  level: info

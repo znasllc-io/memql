@@ -400,3 +400,127 @@ func TestVoicePublicEndpointReachesBothCredentialsAndPagePolicy(t *testing.T) {
 		}
 	}
 }
+
+// callsMediaContainer is the slice of a rendered container the calls media wiring is
+// judged by: its env, and every envFrom source with whether it is optional.
+type callsMediaContainer struct {
+	Name    string                         `yaml:"name"`
+	Env     []struct{ Name, Value string } `yaml:"env"`
+	EnvFrom []struct {
+		SecretRef struct {
+			Name     string `yaml:"name"`
+			Optional *bool  `yaml:"optional"`
+		} `yaml:"secretRef"`
+		ConfigMapRef struct {
+			Name string `yaml:"name"`
+		} `yaml:"configMapRef"`
+	} `yaml:"envFrom"`
+}
+
+// callsMediaDeployments decodes every Deployment's containers out of a rendered overlay,
+// keyed by Deployment name.
+func callsMediaDeployments(t *testing.T, rendered string) map[string][]callsMediaContainer {
+	t.Helper()
+	out := map[string][]callsMediaContainer{}
+	decoder := yaml.NewDecoder(strings.NewReader(rendered))
+	for i := 0; ; i++ {
+		var doc struct {
+			Kind     string `yaml:"kind"`
+			Metadata struct {
+				Name string `yaml:"name"`
+			} `yaml:"metadata"`
+			Spec struct {
+				Template struct {
+					Spec struct {
+						Containers []callsMediaContainer `yaml:"containers"`
+					} `yaml:"spec"`
+				} `yaml:"template"`
+			} `yaml:"spec"`
+		}
+		err := decoder.Decode(&doc)
+		if errors.Is(err, io.EOF) {
+			return out
+		}
+		if err != nil {
+			t.Fatalf("decoding document %d of the rendered overlay: %v", i+1, err)
+		}
+		if doc.Kind == "Deployment" {
+			out[doc.Metadata.Name] = doc.Spec.Template.Spec.Containers
+		}
+	}
+}
+
+// TestCallsMediaReachesTheBFFAndTheEdge: the calls media server is wired to the two nodes
+// that need it, through deploy/k8s/components/calls-media, and to nothing else.
+//
+//   - The bff reads the eight MEMQL_CALLS_MEDIA_* values (integrations/calls/config.go)
+//     from the memql-calls-media Secret `make secrets` seeds, through envFrom marked
+//     OPTIONAL: a cluster with no such Secret is a cluster without calls, and must start
+//     exactly as it did before the component existed, rather than sit in
+//     CreateContainerConfigError waiting for a Secret nobody is going to create.
+//   - The edge gets MEMQL_CALLS_MEDIA_HOST_SUFFIX, the host every media server is at or
+//     under, which a calls page's connect-src admits (component/edge/csp_calls.go). It is
+//     derived from the domain, as the voice signalling host is above, and resolves to
+//     media.memql.localhost here: the host of the public URL the seeded Secret hands
+//     browsers (wss://media.<domain>:7443). The expansion only works because the edge
+//     mounts memql-domain, so that is asserted too.
+//   - No other node holds the media credentials. The edge in particular serves the
+//     public internet and needs a host name, not the key that mints passes.
+func TestCallsMediaReachesTheBFFAndTheEdge(t *testing.T) {
+	deployments := callsMediaDeployments(t, render(t))
+
+	var bffReads bool
+	for _, c := range deployments["bff"] {
+		for _, source := range c.EnvFrom {
+			if source.SecretRef.Name != "memql-calls-media" {
+				continue
+			}
+			bffReads = true
+			if source.SecretRef.Optional == nil || !*source.SecretRef.Optional {
+				t.Errorf("bff/%s reads memql-calls-media without optional: true; a cluster with no media "+
+					"server would never start its bff", c.Name)
+			}
+		}
+	}
+	if !bffReads {
+		t.Error("the bff does not read the memql-calls-media Secret, so no MEMQL_CALLS_MEDIA_* value reaches " +
+			"it and calls has no media server")
+	}
+
+	var suffix string
+	var edgeMountsDomain bool
+	for _, c := range deployments["edge"] {
+		for _, env := range c.Env {
+			if env.Name == "MEMQL_CALLS_MEDIA_HOST_SUFFIX" {
+				suffix = env.Value
+			}
+		}
+		for _, source := range c.EnvFrom {
+			if source.ConfigMapRef.Name == "memql-domain" {
+				edgeMountsDomain = true
+			}
+		}
+	}
+	if suffix != "media.$(MEMQL_DOMAIN)" {
+		t.Errorf("edge MEMQL_CALLS_MEDIA_HOST_SUFFIX = %q, want media.$(MEMQL_DOMAIN): the page policy must "+
+			"admit the host the bff hands browsers", suffix)
+	}
+	if !edgeMountsDomain {
+		t.Error("the edge does not mount memql-domain, so $(MEMQL_DOMAIN) in its media host suffix would " +
+			"never expand")
+	}
+
+	for name, containers := range deployments {
+		if name == "bff" {
+			continue
+		}
+		for _, c := range containers {
+			for _, source := range c.EnvFrom {
+				if source.SecretRef.Name == "memql-calls-media" {
+					t.Errorf("%s/%s reads memql-calls-media; only the bff holds the media server's credentials",
+						name, c.Name)
+				}
+			}
+		}
+	}
+}

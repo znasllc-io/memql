@@ -471,6 +471,13 @@ components:
   # adds the `bff` Deployment this patches; components apply in order.
   - ../../components/domain-derive
   - ../../components/ask-voice
+  # THE CALLS MEDIA SERVER, reached outside the cluster: the bff reads the
+  # memql-calls-media Secret `make secrets` seeds (optional, so a cluster without it
+  # boots unchanged) and the edge gets media.$(MEMQL_DOMAIN) for the page policy. The
+  # server itself is `make media-up` (scripts/media/local-up.sh), beside k3d. The same
+  # component the cloud overlay composes; after domain-derive, whose ConfigMap the
+  # suffix expands from.
+  - ../../components/calls-media
   # The database, as the SAME component every install and every tenant
   # deployment composes (epic memql#3842 / #3851). Local supplies its own values
   # rather than a tier preset: the presets describe what a customer buys, and a

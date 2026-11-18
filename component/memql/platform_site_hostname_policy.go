@@ -108,10 +108,22 @@ const defaultSiteDomain = "memql.localhost"
 // second copy is that adding one silently opens its hostname to the first user
 // who asks for it.
 //
-// These four are different: nothing in the cluster serves www / admin / mail /
-// portal today, and that is exactly why they are reserved. They are the labels
-// a person reads as the ORGANISATION's rather than a tenant's, and `mail` in
-// particular is where a mail host would land if one is ever added.
+// These are different, and fall in two groups.
+//
+// www / admin / mail / portal: nothing in the cluster serves them today, and
+// that is exactly why they are reserved. They are the labels a person reads as
+// the ORGANISATION's rather than a tenant's, and `mail` in particular is where
+// a mail host would land if one is ever added.
+//
+// voice / turn / media: hosts the platform's media servers answer at under the
+// domain without being front-door roles. `voice` and `turn` are the Ask voice
+// signalling and relay hosts (deploy/k8s/components/ask-voice). `media` is the
+// calls media servers' host suffix (MEMQL_CALLS_MEDIA_HOST_SUFFIX, media.<domain>
+// as deploy/k8s/components/calls-media derives it, m1.media.<domain> and the
+// like), and the page policy of every deployable with calls on admits that host
+// and every host under it (component/edge/csp_calls.go). A user's site at one of
+// them would take the platform's media traffic, or, at media.<domain>, be a host
+// every calls page may connect to, owned by whoever claimed the name first.
 //
 // `portal` MOVED HERE rather than being freed when the portal was retired
 // (epic memql#4984). It stopped being a front-door host and did not stop being
@@ -120,7 +132,7 @@ const defaultSiteDomain = "memql.localhost"
 // un-reserving a label is a ONE-WAY DOOR -- once somebody has claimed it,
 // taking it back is a support conversation -- while keeping it costs one
 // entry.
-var squatReservedSiteLabels = []string{"www", "admin", "mail", "portal", "voice", "turn"}
+var squatReservedSiteLabels = []string{"www", "admin", "mail", "portal", "voice", "turn", "media"}
 
 // reservedSiteLabels is the closed set of labels a user may not claim, keyed
 // lowercase.

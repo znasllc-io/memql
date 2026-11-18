@@ -126,6 +126,14 @@ case "$args" in
     printf '%s' "$FAKE_NODE_BOOTSTRAP_TOKEN_B64"; exit 0 ;;
 esac
 
+# The calls media Secret, read whole with --ignore-not-found: its JSON when the
+# scenario holds one, nothing (absent) otherwise, or a read error.
+case "$args" in
+  *"get secret memql-calls-media"*)
+    [ -n "${FAKE_CALLS_MEDIA_READ_FAILS:-}" ] && { printf 'Error from server: etcdserver: request timed out\n' >&2; exit 1; }
+    printf '%s' "${FAKE_CALLS_MEDIA_JSON:-}"; exit 0 ;;
+esac
+
 # Internal CA already seeded -> generator skipped.
 case "$args" in
   *"get secret memql-ca identity-tls"*) exit 0 ;;
@@ -199,6 +207,11 @@ type scenario struct {
 	// cases are "all six" and "some subset", and naming the subset in the
 	// test is what makes a partial-configuration case readable.
 	githubApp map[string]string
+
+	// clusterCallsMedia is the memql-calls-media Secret the cluster already
+	// holds, plaintext per key; nil means the cluster has none.
+	clusterCallsMedia   map[string]string
+	callsMediaReadFails bool
 }
 
 func repoRoot(t *testing.T) string {
@@ -345,6 +358,20 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 	}
 	for name, value := range sc.githubApp {
 		env = append(env, name+"="+value)
+	}
+	if sc.clusterCallsMedia != nil {
+		data := map[string]string{}
+		for name, value := range sc.clusterCallsMedia {
+			data[name] = enc(value)
+		}
+		doc, err := json.Marshal(map[string]any{"kind": "Secret", "data": data})
+		if err != nil {
+			t.Fatal(err)
+		}
+		env = append(env, "FAKE_CALLS_MEDIA_JSON="+string(doc))
+	}
+	if sc.callsMediaReadFails {
+		env = append(env, "FAKE_CALLS_MEDIA_READ_FAILS=1")
 	}
 	if sc.protectedSecret != nil {
 		client, err := exec.LookPath("kubectl")

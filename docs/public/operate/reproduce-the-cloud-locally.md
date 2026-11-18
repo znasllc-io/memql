@@ -204,11 +204,40 @@ following in order:
    `MEMQL_K3D_ARGOCD_TIMEOUT`, default 300s).
 6. Builds + imports the engine images (same as `make dev`) so no pod sits in
    ImagePullBackOff, then waits for every Deployment to become Available.
+7. Starts the local calls media server beside the cluster (`make media-up`,
+   below), unless `MEDIA=0`. If it does not start, `make up` fails after every
+   other step has finished, naming the reason.
 
 `make up-refresh` runs the same bring-up preceded by a purge teardown
 (`make down PURGE=1`), so the in-cluster Postgres is wiped and the
 environment repaves from scratch. It is idempotent and honors the same
 `SERVERS`/`AGENTS`/`REVISION` overrides as `make up`.
+
+### The calls media server
+
+Calls media servers are outside the cluster in every installation: a rented
+server for a cloud one, and locally three containers beside k3d (LiveKit, the
+Redis it keeps room state in, and Caddy terminating TLS in front of it), from
+`deploy/media/compose.yaml`:
+
+```bash
+make media-up     # start it (make up runs this last)
+make media-down   # stop it and remove its rendered configuration
+make up MEDIA=0   # bring the cluster up without it
+```
+
+`make secrets` seeds the `memql-calls-media` Secret the bff reads: the provider
+(`docker-local`), the control API (`http://host.k3d.internal:7880`, the Docker
+host as the cluster's network sees it), the public URL
+(`wss://media.<domain>:7443`), 50 seats, and two key pairs, one for rooms and
+passes and one for webhooks. The key pairs are generated once and kept on every
+later run. `make media-up` reads the same Secret and renders LiveKit's
+configuration into `~/.memql/media` (mode 0700, outside every checkout, since it
+holds both key pairs). Caddy serves the front door's own mkcert pair, so a
+browser that trusts the front door trusts the media server, and LiveKit's
+webhooks go back through the front door to `https://api.<domain>/inbound/livekit`.
+The bff reads the Secret optionally, so a cluster without it starts unchanged
+and calls answer that no media server is configured.
 
 ### One local stack at a time
 
@@ -342,6 +371,15 @@ After `make up`, these host ports are mapped to the k3d cluster:
 The identity (`8085`) mapping is gone: it was a second entrance to a service
 the front door already serves, which is what
 [environment-parity.md](environment-parity.md) forbids.
+
+`make media-up` publishes the local calls media server's ports, outside k3d:
+
+| Port | Service |
+|------|---------|
+| `7443` | Caddy's TLS in front of LiveKit, on loopback: the public URL browsers connect to |
+| `7880` | LiveKit's control API, on every interface: the bff reaches it at `host.k3d.internal` |
+| `7881` | ICE over TCP, on loopback |
+| `7882/udp` | ICE over UDP, on loopback |
 
 The engine overlay includes the product-neutral `bff` API head and MemQL OS,
 served by the edge at `https://os.memql.localhost/`. Product-specific clients

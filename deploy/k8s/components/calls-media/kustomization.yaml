@@ -1,0 +1,71 @@
+# CALLS MEDIA -- how the bff and the edge reach an installation's calls media servers.
+#
+# A call's media never passes through the cluster: browsers connect to a media server
+# directly, the bff drives it through its control API and LiveKit's webhooks come back
+# through the front door. The servers are an EXTERNAL media target in every
+# environment -- a container beside the cluster locally (scripts/media/local-up.sh,
+# `make media-up`), a rented server in a cloud installation -- so this component runs
+# nothing. It wires two values, one per node that needs one:
+#
+#   1. The bff reads the eight MEMQL_CALLS_MEDIA_* values (integrations/calls/config.go:
+#      provider, control API, public URL, seats, and the two key pairs) from the
+#      `memql-calls-media` Secret. Locally `make secrets` seeds it
+#      (scripts/k3d/seed-secrets.sh); a cloud installation creates it beside its other
+#      Secrets.
+#
+#      OPTIONAL, AND THAT IS THE POINT. Most installations have no media server, and the
+#      cloud overlay is the base real installations build on. Without `optional: true`
+#      every bff pod on a cluster with no such Secret would sit in
+#      CreateContainerConfigError waiting for one nobody is going to create. With it, a
+#      cluster with no media server starts exactly as it did before this component
+#      existed: none of the eight is set, calls has no media server, and a join answers
+#      no_media_server. The engine's own rule is all eight or none (a partial set refuses
+#      boot), which a Secret seeded whole cannot violate.
+#
+#      ONLY THE BFF. It runs the media bootstrap (the server row and its sealed
+#      credentials), the reconciliation pass (node="bff") and the webhooks it receives;
+#      every other node reads the media server from the graph. The edge in particular
+#      serves the public internet and needs a host name, not the key that mints passes.
+#      Rendered and asserted by overlays/render_calls_media_test.go and
+#      overlays/local/render_frontdoor_test.go.
+#
+#      APPENDED, not merged: envFrom has no patch merge key, so a strategic merge would
+#      replace the list and drop memql-secrets (the master key and the database DSN) --
+#      the same reason overlays/local/patches/bootstrap-secret-envfrom.yaml gives.
+#
+#   2. The edge gets MEMQL_CALLS_MEDIA_HOST_SUFFIX, the DNS name every media server is at
+#      or under, which the page policy of a deployable with calls on admits to
+#      connect-src (component/edge/csp_calls.go).
+#
+#      A PER-INSTALLATION VALUE DERIVED FROM THE DOMAIN, the way components/ask-voice
+#      derives the voice signalling host: media.$(MEMQL_DOMAIN), which Kubernetes expands
+#      from the memql-domain ConfigMap components/domain-derive mounts. Locally that is
+#      media.memql.localhost, the host of the public URL the seeded Secret hands browsers
+#      (wss://media.<domain>:7443); a cloud installation names its servers under it
+#      (m1.media.<domain>). No file names a domain, and nothing branches on which
+#      installation this is. An installation whose servers live under another name
+#      overrides this one value; one with no media server keeps it, and the policy then
+#      admits a host that serves nothing. `media` is a reserved site label
+#      (component/memql/platform_site_hostname_policy.go), so no deployable can claim the
+#      host the policy admits.
+#
+# ORDER: list this after components/engine-bff, which adds the `bff` Deployment patched
+# here, and after components/domain-derive, which mounts the ConfigMap the suffix expands
+# from. Components apply in listed order.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  - target: { kind: Deployment, name: bff }
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          secretRef:
+            name: memql-calls-media
+            optional: true
+  - target: { kind: Deployment, name: edge }
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: MEMQL_CALLS_MEDIA_HOST_SUFFIX, value: 'media.$(MEMQL_DOMAIN)'}

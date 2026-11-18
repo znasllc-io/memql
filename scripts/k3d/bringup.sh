@@ -31,9 +31,13 @@
 #                        not-yet-ready Postgres (which could leave an empty DB).
 #   6. wait healthy   -- block until every Deployment reports Available, then
 #                        print the status summary.
+#   7. media          -- start the local calls media server beside the cluster
+#                        (scripts/media/local-up.sh, which is make media-up),
+#                        unless --media=false (make up MEDIA=0).
 #
 # Idempotent: running it twice back-to-back yields the same healthy state
-# (down is a no-op on an absent cluster; up/dev are themselves idempotent).
+# (down is a no-op on an absent cluster; up/dev/media-up are themselves
+# idempotent).
 #
 # Honors the same env overrides as the underlying scripts: CLUSTER, SERVERS,
 # AGENTS, REVISION (plus NAMESPACE). The ArgoCD Application tracks the current
@@ -49,6 +53,8 @@
 #                  either the Secret is missing, or the certificate in it does
 #                  not cover the names this cluster is served at (memql#3384,
 #                  memql#3730). Both leave traefik serving its own default cert.
+#                  Or the local calls media server did not start (step 7),
+#                  after every other step ran.
 #
 # Refs: #2206 #2061 #2221 #3730
 
@@ -85,9 +91,23 @@ cap_spec_param "project-manifest" "path to the AppProject manifest to apply (dow
 cap_spec_param "carrier-repo"    "downstream carrier repo whose Dockerfile builds the carrier nodes"
 cap_spec_param "carrier-nodes"   "node types built from the carrier Dockerfile, comma-separated"
 cap_spec_param "carrier-context" "docker build context for carrier builds"
+cap_spec_param "media"           "start the local calls media server last, as make media-up does (flag; default: true; make up MEDIA=0 skips it)"
 #=============================================================================
 # CONFIGURATION (env-resolved defaults; cap_param flags/stdin override in main)
 #=============================================================================
+
+# The media step's script, found from the repository root rather than as a sibling
+# of this directory: this script is staged into the editor's installer, and
+# scripts/media is not (it needs deploy/media, which the installer does not ship).
+# So start_media_server tests for it and skips with a warning where it is absent,
+# the same guard run_migration puts on its root-climbing read; in a checkout it is
+# always there.
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+MEDIA_UP_SCRIPT="${REPO_ROOT}/scripts/media/local-up.sh"
+MEDIA_UP=""
+# started | skipped | unavailable | failed, and the one-line reason for the last two.
+MEDIA_STATE="skipped"
+MEDIA_DETAIL=""
 
 CLUSTER_NAME="${CLUSTER:-${MEMQL_K3D_CLUSTER:-memql}}"
 NAMESPACE="${NAMESPACE:-${MEMQL_K3D_NAMESPACE:-memql}}"
@@ -118,12 +138,15 @@ FRONT_DOOR_TLS=false
 # rather than a single boolean the reader has to interpret (memql#3730).
 FRONT_DOOR_TLS_DETAIL=""
 
-# Step labels, set in main() once --clean is known (6 steps clean, 5 fresh).
+# Step labels, set in main() once --clean and --media are known (5 steps, one
+# more for each).
+STEP_NUKE=""
 STEP_UP=""
 STEP_WAIT=""
 STEP_DEV=""
 STEP_MIGRATE=""
 STEP_HEALTHY=""
+STEP_MEDIA=""
 
 # How long to wait for ArgoCD to create the app Deployments after `up`, and
 # how long to wait for them to become Available after the image rebuild.
@@ -152,7 +175,7 @@ function section() {
 #=============================================================================
 
 function nuke() {
-    section "bringup 1/6: tearing down cluster '${CLUSTER_NAME}' (clean slate, purge)"
+    section "bringup ${STEP_NUKE}: tearing down cluster '${CLUSTER_NAME}' (clean slate, purge)"
     bash "${SCRIPT_DIR}/down.sh" --cluster="${CLUSTER_NAME}" --purge >&2
 }
 
@@ -461,6 +484,58 @@ function wait_for_healthy() {
 }
 
 #=============================================================================
+# STEP 7 -- THE LOCAL CALLS MEDIA SERVER (unless --media=false)
+#=============================================================================
+
+# start_media_server -- make media-up, as the last step.
+#
+# LAST, because it is the one step outside the cluster that depends on it: it reads its
+# configuration from the memql-calls-media Secret the bring-up seeded, and its webhooks go
+# to the front door the mesh serves. It runs whether or not the mesh became Available,
+# because nothing it does waits on a Deployment.
+#
+# A FAILURE FAILS THE BRING-UP, but only after every other step has run and been
+# reported (main checks MEDIA_STATE last): `make up` answering success with the media
+# server down would leave a cluster on which every call fails with nothing saying why.
+# MEDIA=0 is the way to bring up without it. Its envelope is captured, never forwarded:
+# this script's stdout carries exactly one envelope, its own.
+function start_media_server() {
+    section "bringup ${STEP_MEDIA}: starting the local calls media server (make media-up)"
+    if [[ ! -f "$MEDIA_UP_SCRIPT" ]]; then
+        MEDIA_STATE="unavailable"
+        MEDIA_DETAIL="${MEDIA_UP_SCRIPT} is not part of this tree"
+        warn "the local calls media server was not started: ${MEDIA_DETAIL}"
+        return 0
+    fi
+    local out rc=0
+    out="$(bash "$MEDIA_UP_SCRIPT" \
+        --cluster="${CLUSTER_NAME}" \
+        --namespace="${NAMESPACE}" \
+        ${DOMAIN:+--domain="${DOMAIN}"})" || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        MEDIA_STATE="started"
+        info "Local calls media server started (make media-down stops it)."
+        return 0
+    fi
+    MEDIA_STATE="failed"
+    MEDIA_DETAIL="$(media_failure_message "$out")"
+    error "the local calls media server did not start (exit ${rc}): ${MEDIA_DETAIL}"
+}
+
+# media_failure_message <envelope> -- the error.message of media-up's envelope, read with
+# jq where it is installed and with a pattern where it is not.
+function media_failure_message() {
+    local message=""
+    if command -v jq >/dev/null 2>&1; then
+        message="$(printf '%s' "$1" | jq -r '.error.message // empty' 2>/dev/null || true)"
+    fi
+    if [[ -z "$message" ]]; then
+        message="$(printf '%s' "$1" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p' | head -n 1)"
+    fi
+    printf '%s' "${message:-make media-up gave no reason}"
+}
+
+#=============================================================================
 # ENTRY POINT
 #=============================================================================
 
@@ -503,15 +578,28 @@ function main() {
     CARRIER_REPO="$(cap_param carrier-repo "${MEMQL_CARRIER_REPO:-}")"
     CARRIER_NODES="$(cap_param carrier-nodes "${MEMQL_CARRIER_NODES:-}")"
     CARRIER_CONTEXT="$(cap_param carrier-context "${MEMQL_CARRIER_CONTEXT:-}")"
+    # "" or "1", like the flags above. On unless asked otherwise: the local cluster is
+    # not the whole local topology without the media target calls reach.
+    if cap_bool media "true"; then MEDIA_UP=1; else MEDIA_UP=""; fi
     cap_require cluster "$CLUSTER_NAME"
     cap_require namespace "$NAMESPACE"
 
+    # Five steps, one more for a clean slate (which tears down first) and one more for
+    # the media server (which comes last).
+    local first=1 total=5
+    if [[ -n "$CLEAN" ]]; then first=2; total=$((total + 1)); fi
+    if [[ -n "$MEDIA_UP" ]]; then total=$((total + 1)); fi
+    STEP_NUKE="1/${total}"
+    STEP_UP="${first}/${total}"
+    STEP_WAIT="$((first + 1))/${total}"
+    STEP_DEV="$((first + 2))/${total}"
+    STEP_MIGRATE="$((first + 3))/${total}"
+    STEP_HEALTHY="$((first + 4))/${total}"
+    STEP_MEDIA="$((first + 5))/${total}"
     if [[ -n "$CLEAN" ]]; then
         info "MemQL local bring-up (clean slate)"
-        STEP_UP="2/6"; STEP_WAIT="3/6"; STEP_DEV="4/6"; STEP_MIGRATE="5/6"; STEP_HEALTHY="6/6"
     else
         info "MemQL local bring-up (fresh)"
-        STEP_UP="1/5"; STEP_WAIT="2/5"; STEP_DEV="3/5"; STEP_MIGRATE="4/5"; STEP_HEALTHY="5/5"
     fi
     info "Cluster:   ${CLUSTER_NAME}"
     info "Namespace: ${NAMESPACE}"
@@ -525,6 +613,9 @@ function main() {
     rebuild_images
     run_migration
     wait_for_healthy
+    if [[ -n "$MEDIA_UP" ]]; then
+        start_media_server
+    fi
 
     cap_changed
     cap_result_set     cluster "$CLUSTER_NAME"
@@ -536,6 +627,8 @@ function main() {
     cap_result_set_raw healthy "$HEALTHY"
     cap_result_set_raw frontDoorTls "$FRONT_DOOR_TLS"
     cap_result_set     frontDoorTlsDetail "$FRONT_DOOR_TLS_DETAIL"
+    cap_result_set     mediaServer "$MEDIA_STATE"
+    cap_result_set     mediaServerDetail "$MEDIA_DETAIL"
     if [[ "$FRONT_DOOR_TLS" != "true" ]]; then
         # The message now says only what the check established -- which of the
         # two front-door TLS failures this is (memql#3730). It used to assert
@@ -543,6 +636,9 @@ function main() {
         # a Secret object existed, and the case where those disagree is the one
         # that shipped.
         cap_fail 5 "the local front door has no usable TLS certificate: ${FRONT_DOOR_TLS_DETAIL}. Traefik answers with its own default self-signed certificate instead, so https://api.$(front_door_apex) and https://identity.$(front_door_apex) are untrusted. Run 'make secrets' to issue and seed the mkcert pair."
+    fi
+    if [[ "$MEDIA_STATE" == "failed" ]]; then
+        cap_fail 5 "the local calls media server did not start: ${MEDIA_DETAIL}. The rest of the bring-up finished; once that is fixed, start it with 'make media-up', or bring the cluster up without it with 'make up MEDIA=0'."
     fi
     cap_ok
 }

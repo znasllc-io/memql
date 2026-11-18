@@ -341,6 +341,14 @@ components:
   # component states the RELATIONSHIP: MEMQL_DOMAIN in, six derived values out.
   # It must follow engine-bff, which adds the `bff` Deployment it patches.
   - ../../components/domain-derive
+  # THE CALLS MEDIA SERVERS, an external media target (a rented server beside the
+  # cluster). The bff reads the eight MEMQL_CALLS_MEDIA_* values from the
+  # memql-calls-media Secret OPTIONALLY: an installation that never creates it starts
+  # exactly as before, with no media server. The edge's media host suffix is derived
+  # from the domain (media.$(MEMQL_DOMAIN)); an installation whose servers live
+  # elsewhere overrides that one value. After engine-bff and domain-derive, which add
+  # the bff and the ConfigMap it patches and expands from.
+  - ../../components/calls-media
   # THE DATABASE (epic memql#3842 / #3847 / #3850), with the `top` preset's
   # numbers: 3 instances across 3 zones, 4 vCPU / 16 GiB, 256 + 64 GiB. The
   # SHAPE comes from the component; the preset supplies only sizes.

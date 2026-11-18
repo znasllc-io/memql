@@ -195,10 +195,13 @@ db:
 # Prerequisites: docker, k3d, kubectl (brew install k3d kubectl)
 #
 # Quick start:
-#   make up          # fresh bring-up: cluster + ArgoCD + secrets + images, wait healthy
+#   make up          # fresh bring-up: cluster + ArgoCD + secrets + images, wait healthy,
+#                    # then the local calls media server (MEDIA=0 skips it)
 #   make up-refresh  # clean slate: nuke + repave (fresh DB), then the same bring-up
 #   make down        # tear down cluster
 #   make secrets     # (re-)seed k8s Secrets in a running cluster
+#   make media-up    # start the local calls media server beside the cluster
+#   make media-down  # stop it and remove its rendered configuration
 #
 # Optional env overrides:
 #   MEMQL_K3D_CLUSTER          cluster name (default: memql)
@@ -208,7 +211,7 @@ db:
 
 ##@ Local cluster (k3d + ArgoCD -- the blessed local topology, #2061)
 ##> This IS the deploy path (same manifests as the cloud) -- there is no imperative alternative.
-.PHONY: up up-refresh down secrets dev status scale
+.PHONY: up up-refresh down secrets dev status scale media-up media-down
 
 ## Fresh k3d bring-up: cluster + ArgoCD + secrets + images, wait healthy (SERVERS=2 AGENTS=1 for multi-node)
 ## install ArgoCD (pinned v2.13.3, same as the cloud), apply the memql-local
@@ -233,6 +236,7 @@ db:
 ##   make up SERVERS=2 AGENTS=1   # multi-node (see E0.5 / #2067)
 ##   make up BUILD_NODE_CPUS=16 BUILD_NODE_MEMORY=40g   # size the pipeline build node (default: two thirds of the Docker host)
 ##   make up ALLOW_BELOW_MINIMUM=1   # create the cluster on a machine below the minimum requirements (warns)
+##   make up MEDIA=0                 # skip the last step, starting the local calls media server (make media-up)
 up:
 	@bash scripts/k3d/bringup.sh \
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
@@ -255,7 +259,8 @@ up:
 		$${CARRIER_NODES:+--carrier-nodes="$${CARRIER_NODES}"} \
 		$${CARRIER_CONTEXT:+--carrier-context="$${CARRIER_CONTEXT}"} \
 		$${NO_SECRETS:+--no-secrets="$${NO_SECRETS}"} \
-		$${SWITCH:+--switch="$${SWITCH}"}
+		$${SWITCH:+--switch="$${SWITCH}"} \
+		$${MEDIA:+--media="$${MEDIA}"}
 
 ## Clean-slate local environment: nuke + repave. Tears down the cluster
 ## (wiping the in-cluster DB by construction), then runs the same bring-up
@@ -284,7 +289,8 @@ up-refresh:
 		$${CARRIER_REPO:+--carrier-repo="$${CARRIER_REPO}"} \
 		$${CARRIER_NODES:+--carrier-nodes="$${CARRIER_NODES}"} \
 		$${CARRIER_CONTEXT:+--carrier-context="$${CARRIER_CONTEXT}"} \
-		$${SWITCH:+--switch="$${SWITCH}"}
+		$${SWITCH:+--switch="$${SWITCH}"} \
+		$${MEDIA:+--media="$${MEDIA}"}
 
 # Every recipe forwards a boolean variable's VALUE (--purge="$${PURGE}"), never
 # a bare --purge: only the value can say false, so PURGE=0 keeps the context
@@ -346,6 +352,20 @@ scale:
 		--replicas=$${N:?usage: make scale N=<replicas>} \
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
 		$${NAMESPACE:+--namespace=$${NAMESPACE}}
+
+## Start the local calls media server (LiveKit, Redis, Caddy) beside the k3d cluster
+## Configured from the memql-calls-media Secret `make secrets` seeds; the
+## rendered configuration goes to ~/.memql/media. `make up` runs this last
+## unless MEDIA=0. Browsers reach it at wss://media.<domain>:7443.
+media-up:
+	@bash scripts/media/local-up.sh \
+		$${CLUSTER:+--cluster=$${CLUSTER}} \
+		$${NAMESPACE:+--namespace=$${NAMESPACE}} \
+		$${DOMAIN:+--domain="$${DOMAIN}"}
+
+## Stop the local calls media server and remove its rendered configuration
+media-down:
+	@bash scripts/media/local-down.sh
 
 .PHONY: db-image
 
