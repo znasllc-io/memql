@@ -228,7 +228,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   people waiting for an owner to finish setup. Reuse `kit/ThemeSwitch` and the
   stored OS preference; never add a separate selector to each form or to
   identity panels inside the OS.
-- Sign-in and sign-out use one quiet `EntryPending` handoff in that frame.
+- Sign-in and sign-out use one quiet `EntryPending` handoff in that frame,
+  without the theme toggle (`EntryLayout preferences={false}`): the handoff
+  shows for a moment on every reload, and a toggle there only flashes in the
+  corner. Its mark is 43px.
   Keep same-origin authorization in the current document, preserve PKCE/state
   validation, and reveal the cluster destination after its initial facts arrive.
   Do not flash form skeletons, generic account pages, or the desktop on the way
