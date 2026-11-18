@@ -2148,6 +2148,8 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   gap: 8px;
   flex-wrap: wrap;
 }
+/* Files: the picked file's acts, kept apart from the folder's Sort, Refine and Add. */
+.os-files-picked-acts { display: inline-flex; align-items: center; gap: 2px; padding-right: 8px; border-right: 1px solid var(--os-line); }
 
 /* Two-state sorting stays quiet, with the current order visible. */
 .os-sort {

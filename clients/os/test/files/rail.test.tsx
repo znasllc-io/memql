@@ -128,7 +128,7 @@ describe("the row's right-click menu", () => {
     // Driven the way a person drives it: the picker is the kit's own listbox
     // now (#4862), so a `change` event fired at the element would reach
     // nothing and leave the assertion below standing over no interaction.
-    chooseOption(screen.getByLabelText("Move to folder"), "Contracts");
+    chooseOption(screen.getByLabelText("Move to folder", { selector: ":not(.os-icon-button)" }), "Contracts");
 
     expect(connection.callsNamed("moveArtifactToFolder")).toEqual([
       'mutation moveArtifactToFolder(artifactId: "a-1", folderId: "f-a")',
@@ -202,4 +202,33 @@ describe("on a touch screen", () => {
    vi.useRealTimers();
   }
  });
+});
+
+// The owner asked (Nov 18 2026) for a picked file's acts as icons on the
+// Head, the way a deployable's page carries its own. They are the row menu's
+// entries, so the test holds the two together rather than listing them twice.
+describe("the picked file's icons on the Head", () => {
+  it("are absent until a click picks a file, then mirror its right-click menu", async () => {
+    h.connection = fakeConnection({ artifacts: [artifactRow({ id: "a-1", title: "brief.pdf" })] });
+    await renderFiles();
+    expect(screen.queryByRole("group", { name: /^Selected:/ })).toBeNull();
+
+    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
+    const acts = screen.getByRole("group", { name: "Selected: brief.pdf" });
+    const icons = within(acts).getAllByRole("button");
+    for (const icon of icons) expect(icon.querySelector("svg")).not.toBeNull();
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /brief\.pdf/ }));
+    const menu = screen.getByRole("menu", { name: "File" });
+    expect(icons.map((icon) => icon.getAttribute("aria-label")))
+      .toEqual(within(menu).getAllByRole("menuitem").map((item) => item.textContent));
+  });
+
+  it("act on the picked file: Details opens its page", async () => {
+    h.connection = fakeConnection({ artifacts: [artifactRow({ id: "a-1", title: "brief.pdf" })] });
+    await renderFiles();
+    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
+    await click(within(screen.getByRole("group", { name: "Selected: brief.pdf" })).getByRole("button", { name: "Details" }));
+    expect(screen.getByRole("region", { name: "File details" })).toBeTruthy();
+  });
 });
