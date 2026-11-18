@@ -768,20 +768,23 @@
       "concept": "v1:calls:policy",
       "file": "calls/concepts.memql",
       "fields": [
-        "deployable",
+        "accountId",
         "hostLeftGrace",
         "maxAgents",
         "maxPeople",
         "maxScheduledMinutes",
         "maxUpcomingScheduled",
+        "ownerUserId",
         "passTtl",
         "queueEntryTtl",
         "queuePoll",
         "roomJoinsPerMinute",
-        "scheduleHorizon"
+        "scheduleHorizon",
+        "siteId"
       ],
       "required": [
-        "deployable"
+        "ownerUserId",
+        "siteId"
       ]
     },
     {
@@ -10315,6 +10318,27 @@
       "kind": "field",
       "migration": "20260909010000_agent_nested_retirements.up.sql",
       "note": "Completes agent retirements in #5017, #5062 and #5164. The same migration repairs closed capabilities/providerConfig/lineage nested blocks; preserves their declared siblings and all unrelated concepts."
+    },
+    {
+      "concept": "v1:calls:policy",
+      "field": "deployable",
+      "kind": "field",
+      "waiver": "No installation holds a v1:calls:policy row: the concept arrived in 5a9a7252a on the calls branch, which no release has carried, and it was rekeyed by site before any release did, so the only rows ever written were test rows on throwaway databases.",
+      "note": "The calls policy is per site (Task 4 review, round 1): a package deployable's name is unique only together with its package, so a policy keyed by the name applied one package's limits to every other package's deployable of that name."
+    },
+    {
+      "concept": "v1:calls:policy",
+      "field": "ownerUserId",
+      "kind": "required",
+      "waiver": "No installation holds a v1:calls:policy row: the concept arrived in 5a9a7252a on the calls branch, which no release has carried, and it was rekeyed by site before any release did, so the only rows ever written were test rows on throwaway databases.",
+      "note": "The calls policy is per site (Task 4 review, round 1): a package deployable's name is unique only together with its package, so a policy keyed by the name applied one package's limits to every other package's deployable of that name."
+    },
+    {
+      "concept": "v1:calls:policy",
+      "field": "siteId",
+      "kind": "required",
+      "waiver": "No installation holds a v1:calls:policy row: the concept arrived in 5a9a7252a on the calls branch, which no release has carried, and it was rekeyed by site before any release did, so the only rows ever written were test rows on throwaway databases.",
+      "note": "The calls policy is per site (Task 4 review, round 1): a package deployable's name is unique only together with its package, so a policy keyed by the name applied one package's limits to every other package's deployable of that name."
     },
     {
       "concept": "v1:cluster:cluster",

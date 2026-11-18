@@ -380,6 +380,7 @@ func TestBootstrapFollowsAChangedEnvironment(t *testing.T) {
 //
 //	owner      a writer, a member of the account, and the site's owner
 //	developer  holds the calls part by role, and owns nothing here
+//	operator   a cluster owner, who owns nothing here
 //	stranger   a writer in no group, who holds no part
 type world struct {
 	t   *testing.T
@@ -390,14 +391,17 @@ type world struct {
 	suffix    string
 	owner     string
 	developer string
+	operator  string
 	stranger  string
 	account   string
 	group     string
 	site      string
+	second    string // a second site of the same organization, owned by owner
 	lone      string // a site tied to no organization, owned by owner
 	unowned   string // a site with no owner at all
 
-	rows []string // canonical ids this test wrote and has to take away
+	rows  []string // canonical ids this test wrote and has to take away
+	sites []string // every site this test wrote, whose calls rows go with it
 }
 
 func actorContext(userID string, role auth.Role) context.Context {
@@ -425,33 +429,57 @@ func newWorld(t *testing.T, name string) *world {
 	s := fmt.Sprintf("%s-%d-%d", name, now.Unix(), now.Nanosecond())
 	w := &world{
 		t: t, eng: eng, db: db, in: in, suffix: s,
-		owner: "cl-owner-" + s, developer: "cl-developer-" + s, stranger: "cl-stranger-" + s,
+		owner: "cl-owner-" + s, developer: "cl-developer-" + s, operator: "cl-operator-" + s, stranger: "cl-stranger-" + s,
 		account: "cl-acct-" + s, group: "cl-group-" + s,
-		site: "cl-site-" + s, lone: "cl-lone-" + s, unowned: "cl-unowned-" + s,
+		site: "cl-site-" + s, second: "cl-second-" + s, lone: "cl-lone-" + s, unowned: "cl-unowned-" + s,
 	}
 	t.Cleanup(w.sweep)
 	w.principal(w.owner, auth.RoleWriter)
 	w.principal(w.developer, auth.RoleDeveloper)
+	w.principal(w.operator, auth.RoleOwner)
 	w.principal(w.stranger, auth.RoleWriter)
 	w.organization(w.account, w.group)
 	w.join(w.group, w.owner)
 	w.siteRow(w.site, nil)
+	w.siteRow(w.second, nil)
 	w.siteRow(w.lone, map[string]any{"accountId": nil})
 	w.siteRow(w.unowned, map[string]any{"ownerUserId": nil})
 	return w
 }
 
 // sweep takes away what this test wrote: the shared lane's table is not a place to
-// leave rows behind. Keys are found by their site, since the handler mints their ids.
+// leave rows behind. A site's keys and limits are found by their site, since the
+// handlers mint their ids.
 func (w *world) sweep() {
 	ctx := context.Background()
 	for _, id := range w.rows {
 		_, _ = w.db.NewDelete().TableExpr(`"MemoryNodes"`).Where("id = ?", id).Exec(ctx)
 	}
-	for _, site := range []string{w.site, w.lone, w.unowned} {
+	for _, site := range w.sites {
 		_, _ = w.db.NewDelete().TableExpr(`"MemoryNodes"`).
-			Where("concept = ?", keyConcept).Where("payload->>'siteId' = ?", siteConcept+":"+site).Exec(ctx)
+			Where("concept IN (?, ?)", keyConcept, policyConcept).Where("payload->>'siteId' = ?", siteConcept+":"+site).Exec(ctx)
 	}
+}
+
+// installGrants turns on the engine's grant resolution for this test, so a grant
+// row is what decides, and puts back whatever answered before when it ends.
+func (w *world) installGrants() {
+	w.t.Helper()
+	grants, members := auth.InstalledGrantSource(), auth.InstalledMembershipSource()
+	w.eng.InstallGrantResolution()
+	w.t.Cleanup(func() { auth.SetGrantSource(grants); auth.SetMembershipSource(members) })
+}
+
+// grantCallsPart grants `execute app:deployables/calls` to a group: the part held
+// through an organization, which is the only way a writer comes to hold it.
+func (w *world) grantCallsPart(group string) {
+	w.t.Helper()
+	id := auth.GrantRowID(auth.SubjectKindGroup, group, auth.VerbExecute, "app:deployables/calls")
+	w.mutate(seedContext(), "writeGrant", map[string]any{
+		"grantId": id, "subjectKind": auth.SubjectKindGroup, "subjectId": group,
+		"verb": auth.VerbExecute, "resourceType": "app:deployables/calls", "effect": auth.GrantAllow, "grantedBy": "calls-seeder",
+	})
+	w.rows = append(w.rows, "v1:rbac:grant:"+id)
 }
 
 func (w *world) insert(concept, id string, payload map[string]any) {
@@ -511,6 +539,7 @@ func (w *world) siteRow(id string, over map[string]any) {
 		}
 	}
 	w.insert(siteConcept, id, payload)
+	w.sites = append(w.sites, id)
 }
 
 func (w *world) mutate(ctx context.Context, name string, args map[string]any) {
@@ -702,55 +731,67 @@ func requireSentence(t *testing.T, err error) string {
 // the policy
 // ---------------------------------------------------------------------------
 
-// TestPolicySetStoresSecondsAndReadsBackDurations: the limits of one deployable are
-// stored as whole numbers, durations in SECONDS, and read back as the rules module's
-// Policy with the shipped defaults under every value nobody set. A later call changes
-// only what it names, on the same row.
+// policyRowOf is the newest stored version of a site's limits, or nil when the site
+// has none: found by the site, since a policy is keyed by its site.
+func (w *world) policyRowOf(site string) map[string]any {
+	w.t.Helper()
+	var nodes []memorynodes.MemoryNode
+	err := w.db.NewSelect().Model(&nodes).Where("concept = ?", policyConcept).
+		Where("payload->>'siteId' = ?", siteConcept+":"+site).Order("createdAt DESC").Limit(1).Scan(context.Background())
+	require.NoError(w.t, err)
+	if len(nodes) == 0 {
+		return nil
+	}
+	var payload map[string]any
+	require.NoError(w.t, json.Unmarshal(nodes[0].Payload, &payload))
+	return payload
+}
+
+// TestPolicySetStoresSecondsAndReadsBackDurations: the limits of one site are stored as
+// whole numbers, durations in SECONDS, on a row the site's owner owns, and read back as
+// the rules module's Policy with the shipped defaults under every value nobody set. A
+// later call changes only what it names, on the same row.
 func TestPolicySetStoresSecondsAndReadsBackDurations(t *testing.T) {
 	w := newWorld(t, "policy")
 	if w == nil {
 		return
 	}
-	deployable := "desk-" + w.suffix
-	t.Cleanup(func() {
-		_, _ = w.db.NewDelete().TableExpr(`"MemoryNodes"`).Where("concept = ?", policyConcept).
-			Where("payload->>'deployable' = ?", deployable).Exec(context.Background())
-	})
 	developer := actorContext(w.developer, auth.RoleDeveloper)
 
-	rows, err := w.builtin(developer, "callsPolicySet", map[string]any{"deployable": deployable, "maxPeople": 4, "passTtl": 60})
+	rows, err := w.builtin(developer, "callsPolicySet", map[string]any{"siteId": w.site, "maxPeople": 4, "passTtl": 60})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	reply, _ := rows[0]["payload"].(map[string]any)
+	require.Equal(t, w.site, reply["siteId"])
 	require.EqualValues(t, 4, reply["maxPeople"])
 	require.EqualValues(t, 60, reply["passTtl"])
 	require.EqualValues(t, 2, reply["maxAgents"], "an unset value answers the shipped default")
 	require.EqualValues(t, 300, reply["hostLeftGrace"], "an unset duration answers the shipped default, in seconds")
 
-	policyID, _ := reply["policyId"].(string)
-	require.NotEmpty(t, policyID)
-	stored, _ := latestPayload(t, w.db, policyConcept, policyConcept+":"+policyID)
+	stored := w.policyRowOf(w.site)
+	require.NotNil(t, stored, "no limits were stored for the site")
 	require.EqualValues(t, 4, stored["maxPeople"])
 	require.EqualValues(t, 60, stored["passTtl"], "a duration is stored in whole seconds")
+	require.Equal(t, w.owner, bare(stored["ownerUserId"]), "the limits belong to the site's owner, whoever set them")
 	_, defaulted := stored["maxAgents"]
 	require.False(t, defaulted, "a value nobody set was written as if somebody had")
 
-	effective, err := w.in.store.PolicyFor(context.Background(), deployable)
+	effective, err := w.in.store.PolicyFor(context.Background(), w.owner, w.site)
 	require.NoError(t, err)
 	want := callrules.DefaultPolicy()
 	want.MaxPeople = 4
 	want.PassTTL = 60 * time.Second
 	require.Equal(t, want, effective)
 
-	_, err = w.builtin(developer, "callsPolicySet", map[string]any{"deployable": deployable, "maxAgents": 0, "queuePoll": 5})
+	_, err = w.builtin(developer, "callsPolicySet", map[string]any{"siteId": w.site, "maxAgents": 0, "queuePoll": 5})
 	require.NoError(t, err)
-	effective, err = w.in.store.PolicyFor(context.Background(), deployable)
+	effective, err = w.in.store.PolicyFor(context.Background(), w.owner, w.site)
 	require.NoError(t, err)
 	want.MaxAgents = 0
 	want.QueuePoll = 5 * time.Second
 	require.Equal(t, want, effective, "a later call lost a value it did not name")
-	require.Equal(t, 1, stateWhere(t, w.db, `concept = ? AND payload->>'deployable' = ?`, policyConcept, deployable).Ids,
-		"a deployable's limits are spread over more than one row")
+	require.Equal(t, 1, stateWhere(t, w.db, `concept = ? AND payload->>'siteId' = ?`, policyConcept, siteConcept+":"+w.site).Ids,
+		"a site's limits are spread over more than one row")
 
 	for _, tc := range []struct {
 		name string
@@ -758,6 +799,7 @@ func TestPolicySetStoresSecondsAndReadsBackDurations(t *testing.T) {
 		want string
 	}{
 		{"no people at all", map[string]any{"maxPeople": 0}, "maxPeople"},
+		{"more people than the cluster allows", map[string]any{"maxPeople": 1001}, "maxPeople"},
 		{"a pass too short to connect with", map[string]any{"passTtl": 5}, "passTtl"},
 		{"a pass longer than the ceiling", map[string]any{"passTtl": 901}, "passTtl"},
 		{"a waiter that expires before it can poll", map[string]any{"queueEntryTtl": 10, "queuePoll": 10}, "queueEntryTtl"},
@@ -765,7 +807,7 @@ func TestPolicySetStoresSecondsAndReadsBackDurations(t *testing.T) {
 		{"no change at all", map[string]any{}, "Name at least one limit"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			args := map[string]any{"deployable": deployable}
+			args := map[string]any{"siteId": w.site}
 			for k, v := range tc.args {
 				args[k] = v
 			}
@@ -774,32 +816,150 @@ func TestPolicySetStoresSecondsAndReadsBackDurations(t *testing.T) {
 			require.Contains(t, msg, tc.want)
 		})
 	}
-	effective, err = w.in.store.PolicyFor(context.Background(), deployable)
-	require.NoError(t, err)
-	require.Equal(t, want, effective, "a refused change was written")
 
-	_, err = w.builtin(actorContext(w.owner, auth.RoleWriter), "callsPolicySet", map[string]any{"deployable": deployable, "maxPeople": 3})
+	_, err = w.builtin(actorContext(w.owner, auth.RoleWriter), "callsPolicySet", map[string]any{"siteId": w.site, "maxPeople": 3})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), memql.CodeCapabilityNotHeld, "a person without the calls part set a limit")
+	inRun := common.ContextWithRun(developer, common.RunContext{RunId: "run-" + w.suffix})
+	_, err = w.builtin(inRun, "callsPolicySet", map[string]any{"siteId": w.site, "maxPeople": 3})
+	requireSentence(t, err)
+	_, err = w.builtin(developer, "callsPolicySet", map[string]any{"siteId": w.lone, "maxPeople": 3})
+	require.Contains(t, requireSentence(t, err), "No deployable you can read", "a site the caller cannot read was given limits")
+	require.Nil(t, w.policyRowOf(w.lone), "a site the caller cannot read was given limits")
+
+	effective, err = w.in.store.PolicyFor(context.Background(), w.owner, w.site)
+	require.NoError(t, err)
+	require.Equal(t, want, effective, "a refused change was written")
+}
+
+// TestPolicyIsPerSite: two deployables keep independent limits, here two of one
+// organization whose package deployable has the same name. A policy is keyed by its
+// SITE, because a package deployable's name is unique only together with its package.
+func TestPolicyIsPerSite(t *testing.T) {
+	w := newWorld(t, "persite")
+	if w == nil {
+		return
+	}
+	developer := actorContext(w.developer, auth.RoleDeveloper)
+
+	_, err := w.builtin(developer, "callsPolicySet", map[string]any{"siteId": w.site, "maxPeople": 3})
+	require.NoError(t, err)
+	_, err = w.builtin(developer, "callsPolicySet", map[string]any{"siteId": w.second, "maxAgents": 0, "hostLeftGrace": 60})
+	require.NoError(t, err)
+
+	first, err := w.in.store.PolicyFor(context.Background(), w.owner, w.site)
+	require.NoError(t, err)
+	second, err := w.in.store.PolicyFor(context.Background(), w.owner, w.second)
+	require.NoError(t, err)
+	wantFirst, wantSecond := callrules.DefaultPolicy(), callrules.DefaultPolicy()
+	wantFirst.MaxPeople = 3
+	wantSecond.MaxAgents, wantSecond.HostLeftGrace = 0, time.Minute
+	require.Equal(t, wantFirst, first, "the first site's limits took the second's")
+	require.Equal(t, wantSecond, second, "the second site's limits took the first's")
+
+	untouched, err := w.in.store.PolicyFor(context.Background(), w.owner, w.lone)
+	require.NoError(t, err)
+	require.Equal(t, callrules.DefaultPolicy(), untouched, "a site nobody set limits for does not have the defaults")
+	firstRow, secondRow := w.policyRowOf(w.site), w.policyRowOf(w.second)
+	require.NotNil(t, firstRow)
+	require.NotNil(t, secondRow)
+	require.NotEqual(t, firstRow["siteId"], secondRow["siteId"])
+}
+
+// ---------------------------------------------------------------------------
+// the part, held through one organization
+// ---------------------------------------------------------------------------
+
+// TestTheCallsPartHeldInOneOrganizationActsOnNoOther: a person who holds
+// `execute app:deployables/calls` ONLY through organization A's group, and owns a
+// deployable in A and another in B, may mint a key, switch calls and set limits on A's
+// and is refused all three on B's -- by the organization gate, since owning B's site
+// lets them read it. Nothing is written on B's.
+func TestTheCallsPartHeldInOneOrganizationActsOnNoOther(t *testing.T) {
+	w := newWorld(t, "orgpart")
+	if w == nil {
+		return
+	}
+	resetBootstrap(t, w.db)
+	w.bootstrap()
+	w.installGrants()
+	otherAccount, otherGroup, otherSite := "cl-acct-b-"+w.suffix, "cl-group-b-"+w.suffix, "cl-site-b-"+w.suffix
+	w.organization(otherAccount, otherGroup)
+	w.siteRow(otherSite, map[string]any{"accountId": otherAccount})
+	// The owner is a writer, a member of A's group and of no group of B's; the part
+	// is granted to A's group and to nobody else.
+	w.grantCallsPart(w.group)
+	person := actorContext(w.owner, auth.RoleWriter)
+
+	acts := []struct {
+		builtin string
+		args    func(site string) map[string]any
+	}{
+		{"callsTestKeyCreate", func(site string) map[string]any { return map[string]any{"siteId": site, "label": "From A"} }},
+		{"callsSiteEnable", func(site string) map[string]any { return map[string]any{"siteId": site, "on": true} }},
+		{"callsPolicySet", func(site string) map[string]any { return map[string]any{"siteId": site, "maxPeople": 2} }},
+	}
+	for _, act := range acts {
+		t.Run(act.builtin+" on the other organization's deployable", func(t *testing.T) {
+			_, err := w.builtin(person, act.builtin, act.args(otherSite))
+			require.Error(t, err, "the part held in A acted on B's deployable")
+			require.Contains(t, err.Error(), memql.CodeCapabilityNotHeld)
+		})
+	}
+	keys, err := w.db.NewSelect().TableExpr(`"MemoryNodes"`).Where("concept = ?", keyConcept).
+		Where("payload->>'siteId' = ?", siteConcept+":"+otherSite).Count(context.Background())
+	require.NoError(t, err)
+	require.Zero(t, keys, "a key was minted on B's deployable")
+	require.Nil(t, w.policyRowOf(otherSite), "limits were set on B's deployable")
+	stored, _ := latestPayload(t, w.db, siteConcept, siteConcept+":"+otherSite)
+	require.NotEqual(t, true, stored["calls"], "calls were switched on for B's deployable")
+
+	for _, act := range acts {
+		t.Run(act.builtin+" on the person's own organization's deployable", func(t *testing.T) {
+			_, err := w.builtin(person, act.builtin, act.args(w.site))
+			require.NoError(t, err, "the part held in A was refused on A's deployable")
+		})
+	}
+	require.NotNil(t, w.policyRowOf(w.site))
+	stored, _ = latestPayload(t, w.db, siteConcept, siteConcept+":"+w.site)
+	require.Equal(t, true, stored["calls"])
 }
 
 // ---------------------------------------------------------------------------
 // the media servers
 // ---------------------------------------------------------------------------
 
-// TestMediaServersNeverShowACredential: the operator's list of media servers says
-// which servers rooms are placed on, and never which secret holds a server's
-// credentials, let alone the credentials.
-func TestMediaServersNeverShowACredential(t *testing.T) {
+// TestMediaServersAreTheClusterOwnersAndShowNoCredential: the media servers are the
+// cluster's, so only a cluster owner lists them; a person holding the calls part, by
+// role or through an organization, is refused. The list says which servers rooms are
+// placed on and where browsers reach them, and never a server's control address,
+// which secret holds its credentials, or the credentials.
+func TestMediaServersAreTheClusterOwnersAndShowNoCredential(t *testing.T) {
 	w := newWorld(t, "servers")
 	if w == nil {
 		return
 	}
 	resetBootstrap(t, w.db)
 	w.bootstrap()
+	w.installGrants()
+	w.grantCallsPart(w.group)
 
-	rows, err := w.builtin(actorContext(w.developer, auth.RoleDeveloper), "callsMediaServers", map[string]any{})
-	require.NoError(t, err)
+	for name, ctx := range map[string]context.Context{
+		"a developer, who holds the part by role":           actorContext(w.developer, auth.RoleDeveloper),
+		"a writer holding the part through an organization": actorContext(w.owner, auth.RoleWriter),
+	} {
+		t.Run(name, func(t *testing.T) {
+			rows, err := w.builtin(ctx, "callsMediaServers", map[string]any{})
+			require.Nil(t, rows, "%s listed the media servers", name)
+			require.Contains(t, requireSentence(t, err), "cluster owner")
+		})
+	}
+	_, err := w.builtin(actorContext(w.stranger, auth.RoleWriter), "callsMediaServers", map[string]any{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), memql.CodeCapabilityNotHeld, "a person without the calls part reached the handler")
+
+	rows, err := w.builtin(actorContext(w.operator, auth.RoleOwner), "callsMediaServers", map[string]any{})
+	require.NoError(t, err, "the cluster owner was refused the media servers")
 	var server map[string]any
 	for _, row := range rows {
 		if payload, _ := row["payload"].(map[string]any); bare(payload["id"]) == BootstrapMediaServerID {
@@ -811,15 +971,14 @@ func TestMediaServersNeverShowACredential(t *testing.T) {
 	require.Equal(t, "wss://media.memql.localhost:7443", server["publicUrl"])
 	require.EqualValues(t, 50, server["seats"])
 	require.Equal(t, "active", server["state"])
-	_, named := server["credentialSecret"]
-	require.False(t, named, "the list names the secret holding the server's credentials")
+	for _, withheld := range []string{"apiUrl", "credentialSecret"} {
+		_, present := server[withheld]
+		require.False(t, present, "the list carries %s", withheld)
+	}
 	listed, _ := json.Marshal(rows)
 	require.NotContains(t, string(listed), SecretMediaBootstrap)
+	require.NotContains(t, string(listed), testMediaConfig().APIURL, "the list carries the server's control address")
 	requireNoSecretIn(t, string(listed))
-
-	_, err = w.builtin(actorContext(w.owner, auth.RoleWriter), "callsMediaServers", map[string]any{})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), memql.CodeCapabilityNotHeld, "a person without the calls part listed the media servers")
 }
 
 // ---------------------------------------------------------------------------

@@ -302,16 +302,25 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// capability would be inert.
 		//
 		// THE ACTOR IS WHAT BOUNDS IT, and store.go's file note sets out the three. A
-		// site's rows (a key) are read and written as the SITE'S OWNER, so a row is the
-		// owner's at birth; the cluster's rows (media servers, policies) and the sealed
-		// secrets as THE CLUSTER ACTING, a synthetic actor no request can be. The two
-		// reads and the one write that judge a person -- the site read under the caller
-		// and the site switch's write -- are deliberately NOT stamped: they run under the
-		// caller and ARE the check. The SERVER-INITIATED half is the media bootstrap at
-		// boot, which no request reaches; the REQUEST-DERIVED half is the builtins, each
-		// of which has passed the part, the organization gate and the person checks in
-		// operator.go before it stamps (operator_db_test.go).
-		"integrations/calls": "the calls capability -- server-initiated (the media bootstrap at boot) and request-derived (the four builtins, each past the part, the organization gate and a person check before it stamps); a site's rows are written as the site's owner, the cluster's rows and sealed secrets as the system actor, and the site read and site write that judge a person are never stamped",
+		// site's rows (a key, the site's limits) are read and written as the SITE'S
+		// OWNER, so a row is the owner's at birth; the cluster's rows (media servers)
+		// and the sealed secrets as THE CLUSTER ACTING, a synthetic actor no request can
+		// be. The site read that judges a person, and the switch's write of the site
+		// row, are deliberately NOT stamped: they run under the caller and ARE the
+		// check.
+		//
+		// The SERVER-INITIATED half is the media bootstrap at boot, which no request
+		// reaches. The REQUEST-DERIVED half is the four builtins, and what each has
+		// checked before it stamps differs (operator_db_test.go holds each):
+		//   - callsTestKeyCreate and callsPolicySet: the part, judged in the named
+		//     site's organization; a signed-in person and no run; the site read under
+		//     the caller, with an owner. Then the site owner's rows, as the owner.
+		//   - callsSiteEnable: the same checks, and it stamps NOTHING: its one write is
+		//     the site row, under the caller, through updateSiteCalls' own gates.
+		//   - callsMediaServers: the part, and then a cluster owner and nobody else,
+		//     checked in the handler, since the part may be granted through any
+		//     organization; it reads the cluster's servers as the system actor.
+		"integrations/calls": "the calls capability -- server-initiated (the media bootstrap at boot) and request-derived: callsTestKeyCreate and callsPolicySet stamp only after the part judged in the site's organization, a person check and the site read under the caller, and write as the site's owner; callsMediaServers stamps only for a cluster owner and reads as the system actor; callsSiteEnable stamps nothing and writes the site under the caller",
 		// component/edge records that it HONOURED a preview grant
 		// (touchSitePreviewGrant, @serverOnly). The edge already reads the
 		// site, the custom domain, the account door, the bound store and the

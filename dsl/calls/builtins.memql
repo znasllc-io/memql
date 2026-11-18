@@ -5,17 +5,18 @@
 // client-unreadable, and every query and mutation beneath them is @serverOnly.
 //
 // WHO MAY CALL. Each declares execute on app:deployables/calls, seeded on owner and developer
-// (dsl/rbac/seeds.memql), and the engine refuses every other caller before the executor runs. The two
-// that name a deployable (a test key, the site switch) are also judged against THAT deployable's
-// organization (organizationCapabilityTarget, component/memql), so the part held in one organization
-// acts on no other's deployable, and the handler reads the deployable under the caller, so a person
-// who cannot see it is refused by name before anything is written. A policy is keyed by a
-// deployable's NAME and media servers are the cluster's: rows no organization owns, judged by the
-// capability alone.
+// (dsl/rbac/seeds.memql), and the engine refuses every other caller before the executor runs. The part
+// can also be GRANTED through an organization's group, so the three acts that name a deployable (a
+// test key, the site switch, the site's limits) are judged against THAT deployable's organization
+// (organizationCapabilityTarget, component/memql): the part held in one organization acts on no
+// other's deployable. Each of the three also reads the deployable under the caller, so a person who
+// cannot see it is refused by name before anything is written. The media servers are the cluster's,
+// so their list admits a cluster owner and nobody else, a check its handler makes: holding the part,
+// by role or by grant, is not enough.
 //
 // A PERSON'S ACTS. Minting a key, switching calls and changing limits refuse a caller who is not a
 // person (the operator credential, the cluster acting) and any call inside a run: a run's journal
-// would keep a key, and what a deployable allows is an operator's decision. The list is a read.
+// would keep a key, and what a deployable allows is an operator's decision.
 //
 // @sdk, so the OS and tooling call a typed method rather than hand-building a call string.
 
@@ -56,18 +57,22 @@ builtin callsSiteEnable {
 
 /// Set any of a deployable's calls limits (v1:calls:policy, calls, plan Task 4).
 ///
-/// ONLY WHAT IS NAMED CHANGES. A limit left out keeps the value it had, and one nobody ever set is the
-/// shipped default (calls.DefaultPolicy). Counts are whole numbers and DURATIONS ARE WHOLE SECONDS.
-/// Each value is held to a range that keeps it meaningful (a room admits at least one person, a pass
-/// lives 10 to 900 seconds, a waiter polls at least once a minute and its place outlives a poll);
-/// what a deployable allows inside those ranges is the operator's to choose. Returns the effective
-/// limits: {policyId, deployable} and one field per limit.
+/// PER SITE: the limits are the site's, on a row its owner owns, because a package deployable's name
+/// is unique only together with its package. ONLY WHAT IS NAMED CHANGES: a limit left out keeps the
+/// value it had, and one nobody ever set is the shipped default (calls.DefaultPolicy). Counts are
+/// whole numbers and DURATIONS ARE WHOLE SECONDS. Every value is held to the CLUSTER'S bounds (a room
+/// of 1 to 1000 people, a pass of 10 to 900 seconds, a waiter that polls at least once a minute and
+/// whose place outlives a poll), so no site claims more than the cluster allows; what a deployable
+/// allows inside those bounds is its operator's to choose. Judged in the site's organization, and
+/// refused for a deployable the caller cannot read, one with no owner, a caller who is not a person
+/// and any call inside a run. Returns the effective limits: {policyId, siteId} and one field per
+/// limit.
 @sdk
 @executor("integration.calls.policySet")
 @requiresCapability("execute", "app:deployables/calls")
-@description("Set any of a deployable's calls limits; a limit not named keeps its value and one never set is the shipped default. Counts are whole numbers and durations are whole seconds, each held to a range that keeps it meaningful. Refused for a caller who is not a person and any call inside a run. Returns the effective limits: {policyId, deployable, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll}.")
+@description("Set any of a deployable's calls limits, which are per site; a limit not named keeps its value and one never set is the shipped default. Counts are whole numbers and durations are whole seconds, each held to the cluster's bounds so no site claims more than the cluster allows. Judged in the deployable's organization; refused for a deployable the caller cannot read, one with no owner, a caller who is not a person and any call inside a run. Returns the effective limits: {policyId, siteId, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll}.")
 builtin callsPolicySet {
-  deployable            string!  @description("The deployable's name the limits apply to, as its package names it.")
+  siteId                string!  @description("The deployable the limits are for.")
   maxPeople             int      @description("People allowed in one room, 1 to 1000.")
   maxAgents             int      @description("Agents allowed in one room, 0 to 100.")
   roomJoinsPerMinute    int      @description("Join attempts allowed per room per minute, 1 to 10000.")
@@ -82,11 +87,14 @@ builtin callsPolicySet {
 
 /// The media servers rooms are placed on (calls, plan Task 4).
 ///
-/// EVERY ACTIVE SERVER, one row each: {id, provider, apiUrl, publicUrl, region, seats, state,
-/// createdAt}. NEVER A CREDENTIAL, and never the name of the secret holding one. `provider` is the
-/// value the environment recorded (docker-local or hetzner); nothing decides by it.
+/// THE CLUSTER OWNER'S. The servers are the cluster's, so the list admits a cluster owner and nobody
+/// else, a check the handler makes: the calls part, held by role or granted through an organization,
+/// is not enough. EVERY ACTIVE SERVER, one row each: {id, provider, publicUrl, region, seats, state,
+/// createdAt}. NEVER A CREDENTIAL, never the name of the secret holding one, and never the control
+/// address, which only the engine uses. `provider` is the value the environment recorded
+/// (docker-local or hetzner); nothing decides by it.
 @sdk
 @executor("integration.calls.mediaServers")
 @requiresCapability("execute", "app:deployables/calls")
-@description("List the active media servers rooms are placed on, one row each: {id, provider, apiUrl, publicUrl, region, seats, state, createdAt}. Never a credential or the name of the secret holding one.")
+@description("List the active media servers rooms are placed on, one row each: {id, provider, publicUrl, region, seats, state, createdAt}. A cluster owner's read: refused for anyone else, whatever part they hold. Never a credential, the name of the secret holding one, or the control address.")
 builtin callsMediaServers { }

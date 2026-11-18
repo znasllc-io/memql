@@ -64,14 +64,13 @@ func organizationCapabilityTarget(fn *Function) (concept, argument string) {
 		case "siteAccessCodeCreate", "siteAccessGuestPassCreate", "siteAccessGates", "siteAccessCodesForSite":
 			return "v1:platform:site", "siteId"
 		// The calls capability (the generic calls namespace, dsl/calls). Minting a
-		// test key and switching a deployable's calls are asked about the SITE they
-		// name, so the calls part held in one organization acts on no other's
-		// deployable. callsPolicySet and callsMediaServers are NOT here, and that is
-		// the decision rather than a gap: a policy is keyed by a deployable's NAME and
-		// a media server is the cluster's, rows no organization owns, so the global
-		// capability is the whole of their gate
-		// (TestCallsActsNameTheirOrganizationTarget).
-		case "callsTestKeyCreate", "callsSiteEnable":
+		// test key, switching a deployable's calls and setting its limits (a policy
+		// is per site) are asked about the SITE they name, so the calls part held in
+		// one organization acts on no other's deployable. callsMediaServers is NOT
+		// here: the media servers are the cluster's and name no site, and its handler
+		// admits a cluster owner and nobody else, since the global capability folds
+		// in every organization's grants (TestCallsActsNameTheirOrganizationTarget).
+		case "callsTestKeyCreate", "callsSiteEnable", "callsPolicySet":
 			return "v1:platform:site", "siteId"
 		// A storefront's sales figures (the sales part): asked about the SITE the
 		// store statistics are read for.

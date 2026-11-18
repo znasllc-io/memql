@@ -1,11 +1,14 @@
 package memql
 
 import (
+	"encoding/json"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // callsConcepts is the eight concepts of the calls namespace (dsl/calls/concepts.memql).
@@ -47,6 +50,42 @@ func TestCallsConceptsAreServerWrittenAndUnreadable(t *testing.T) {
 	for name := range clientUnreadableConcepts {
 		if strings.HasPrefix(name, "v1:calls:") && memorynodes.All()[name] == nil {
 			t.Errorf("clientUnreadableConcepts names %s, which the calls namespace does not declare", name)
+		}
+	}
+}
+
+// TestCallsPolicyIsASiteRow pins the policy's key: its SITE. It was keyed by a package
+// deployable's name, which is unique only together with its package, so one package's
+// limits applied to every other package's deployable of that name, across
+// organizations. The row now names its site (required), belongs to the site's owner
+// with the cluster owner's bypass, as every other site-scoped calls row does, and has
+// no `deployable` field left to be keyed by.
+func TestCallsPolicyIsASiteRow(t *testing.T) {
+	if _, err := LoadUnifiedConcepts(nil); err != nil {
+		t.Fatalf("LoadUnifiedConcepts: %v", err)
+	}
+	c := memorynodes.All()["v1:calls:policy"]
+	if c == nil {
+		t.Fatal("v1:calls:policy is not loaded")
+	}
+	if c.RowAuthz == nil || c.RowAuthz.Tier != langparser.RowAuthzOwned || c.RowAuthz.Owner != "ownerUserId" || !c.RowAuthz.ClusterOwnerBypass {
+		t.Fatalf("v1:calls:policy declares %+v, want @rowAuthz(owner=\"ownerUserId\", clusterOwner)", c.RowAuthz)
+	}
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(c.Schemas["definition"], &schema); err != nil || len(schema.Properties) == 0 {
+		t.Fatalf("v1:calls:policy declares no fields in the loaded tree: %v", err)
+	}
+	if _, keyedByName := schema.Properties["deployable"]; keyedByName {
+		t.Error("v1:calls:policy still has a `deployable` field to be keyed by")
+	}
+	for _, field := range []string{"siteId", "ownerUserId"} {
+		if _, ok := schema.Properties[field]; !ok {
+			t.Errorf("v1:calls:policy has no %s field", field)
+		}
+		if !slices.Contains(c.RequiredFields(), field) {
+			t.Errorf("v1:calls:policy does not require %s", field)
 		}
 	}
 }

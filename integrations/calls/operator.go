@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -30,14 +29,19 @@ import (
 //
 // # Who may call
 //
-// Three layers, as integrations/siteaccess's acts have. Each builtin declares
-// `execute app:deployables/calls` (owner and developer), which the engine checks before
-// a handler runs. The two that name a deployable are also judged against THAT
-// deployable's organization (organizationCapabilityTarget, component/memql), so a part
-// held in one organization acts on no other's deployable. And the handler reads the
-// deployable UNDER THE CALLER, so a person who cannot see it is refused by name before
-// anything is written. The policy and the media servers are rows no organization owns,
-// so the capability is the whole of their gate.
+// Each builtin declares `execute app:deployables/calls` (owner and developer by role),
+// which the engine checks before a handler runs. The part can also be GRANTED through an
+// organization's group, and the global capability folds every group's grants together,
+// so the capability alone says nothing about WHICH deployables a holder may act on.
+//
+//   - The three acts that name a deployable -- a test key, the switch, the limits -- are
+//     judged against THAT deployable's organization (organizationCapabilityTarget,
+//     component/memql), so the part held in one organization acts on no other's. Each
+//     handler then reads the deployable UNDER THE CALLER, so a person who cannot see it
+//     is refused by name before anything is written, and writes the site's rows as the
+//     site's owner.
+//   - The media servers are the cluster's, shared by every deployable, so their list
+//     admits a cluster owner and nobody else, a check its handler makes.
 //
 // # A person's acts
 //
@@ -45,7 +49,8 @@ import (
 // decisions, so all three refuse a caller who names nobody (the operator credential,
 // the cluster acting, a connector) and any call made inside a run. Minting refuses a
 // run above all: a run's journal writes what each statement returned into durable rows,
-// and the key would be in them. The list reads nothing secret and is not a decision.
+// and the key would be in them. The media server list is a cluster owner's read, not a
+// decision, and asks only that.
 //
 // # The dispatch checks nothing about the arguments
 //
@@ -66,9 +71,6 @@ const resultConcept = "integration:calls:result"
 // maxLabelLength is the longest name an operator may give a key, counted in characters
 // a person sees, so a name in another alphabet is held to the same limit as one in ASCII.
 const maxLabelLength = 80
-
-// maxDeployableLength is the longest deployable name a policy is keyed by.
-const maxDeployableLength = 200
 
 // The reasons a run is refused, each with what to do instead.
 const (
@@ -214,28 +216,31 @@ func (i *Integration) siteFor(ctx context.Context, siteID string) (*siteView, er
 // the limits
 // ---------------------------------------------------------------------------
 
-// handlePolicySet sets any of a deployable's calls limits (v1:calls:policy) and answers
-// the effective limits. A limit not named keeps what it had, and one nobody ever set is
-// the shipped default (calls.DefaultPolicy). Durations are whole seconds, the
+// handlePolicySet sets any of a site's calls limits (v1:calls:policy, policy.go) and
+// answers the effective limits. A limit not named keeps what it had, and one nobody ever
+// set is the shipped default (calls.DefaultPolicy). Durations are whole seconds, the
 // concept's unit; the store converts them to and from the rules module's durations.
 //
-// THE ROW IS READ AND WRITTEN UNDER A GATE, keyed by the deployable's row, with a fresh
-// read and a version stamped after the one read: two operators changing one
-// deployable's limits at once each keep what they named, and two first writes meet at
-// one row (policyID) instead of making two.
+// A TARGETED ACT ON THE SITE, exactly as the switch is: the organization gate has judged
+// the part in the site's own organization before this runs, and the site is read here
+// under the caller. Every value is held to the cluster's bounds (policyFields), so no
+// site can claim more than the cluster allows. The row is the site owner's and is
+// written as them.
+//
+// THE ROW IS READ AND WRITTEN UNDER A GATE, keyed by the site, with a fresh read and a
+// version stamped after the one read: two operators changing one site's limits at once
+// each keep what they named, and two first writes meet at one row (policyIDFor).
 func (i *Integration) handlePolicySet(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if err := refuseInARun(ctx, limitsInARun); err != nil {
 		return nil, err
 	}
-	if _, err := requireCaller(ctx, "A deployable's calls limits are changed by a person, and this call resolves to no one. Sign in as yourself and try again."); err != nil {
+	actor, err := requireCaller(ctx, "A deployable's calls limits are changed by a person, and this call resolves to no one. Sign in as yourself and try again.")
+	if err != nil {
 		return nil, err
 	}
-	deployable := strings.TrimSpace(asString(args["deployable"]))
-	switch {
-	case deployable == "":
-		return nil, refuse("Name the deployable the calls limits are for.")
-	case utf8.RuneCountInString(deployable) > maxDeployableLength || strings.IndexFunc(deployable, unicode.IsControl) >= 0:
-		return nil, refuse("A deployable's name is at most %d characters with no control characters.", maxDeployableLength)
+	siteID := memql.BareShortId(strings.TrimSpace(asString(args["siteId"])))
+	if siteID == "" {
+		return nil, refuse("Choose a deployable to set the calls limits of.")
 	}
 	changed := map[string]int{}
 	var named []string
@@ -261,20 +266,32 @@ func (i *Integration) handlePolicySet(ctx context.Context, args map[string]any, 
 	if len(named) == 0 {
 		return nil, refuse("Name at least one limit to change.")
 	}
+	site, err := i.siteFor(ctx, siteID)
+	if err != nil {
+		return nil, i.failed("policySet", siteID, err)
+	}
+	if site.OwnerUserID == "" {
+		return nil, refuse("This deployable has no owner, so it cannot have calls limits: the limits belong to the deployable's owner. Give it an owner first.")
+	}
+	// A TEST PERSONA CAN ONLY SET THE LIMITS OF WHAT IS ITS OWN, for the key's reason:
+	// the row is written as the site's owner, and a persona borrows nobody else.
+	if auth.IsRoleTestContext(ctx) && actor != site.OwnerUserID {
+		return nil, refuse("A test persona can only set the calls limits of a deployable it owns, because the limits belong to the deployable's owner. Set them as yourself.")
+	}
 
 	pool, err := memql.ResolveWriteGatePool(i.gateDB, "calls: the calls limits", "the calls plug-in takes it from PluginContext.GateDB")
 	if err != nil {
-		return nil, i.failed("policySet", deployable, err)
+		return nil, i.failed("policySet", siteID, err)
 	}
-	release, err := memql.AcquireWriteGate(ctx, pool, "calls.policy."+policyID(deployable))
+	release, err := memql.AcquireWriteGate(ctx, pool, "calls.policy."+site.ID)
 	if err != nil {
-		return nil, i.failed("policySet", deployable, err)
+		return nil, i.failed("policySet", siteID, err)
 	}
 	defer release()
 	fresh := memql.ContextWithFreshRead(ctx)
-	prior, err := i.store.policyRowFor(fresh, deployable)
+	prior, err := i.store.policyRowFor(fresh, site.OwnerUserID, site.ID)
 	if err != nil {
-		return nil, i.failed("policySet", deployable, err)
+		return nil, i.failed("policySet", siteID, err)
 	}
 	merged := map[string]int{}
 	var priorVersion time.Time
@@ -293,11 +310,11 @@ func (i *Integration) handlePolicySet(ctx context.Context, args map[string]any, 
 	if effective.QueueEntryTTL <= effective.QueuePoll {
 		return nil, refuse("The queueEntryTtl limit must be longer than queuePoll, or a waiter's place expires before it can poll.")
 	}
-	policyRowID, err := i.store.savePolicy(fresh, prior, deployable, policyFromValues(changed), named, memql.VersionTimeAfter(priorVersion, i.now()))
+	policyRowID, err := i.store.savePolicy(fresh, site.OwnerUserID, prior, site.ID, policyFromValues(changed), named, memql.VersionTimeAfter(priorVersion, i.now()))
 	if err != nil {
-		return nil, i.failed("policySet", deployable, err)
+		return nil, i.failed("policySet", siteID, err)
 	}
-	reply := map[string]any{"policyId": policyRowID, "deployable": deployable}
+	reply := map[string]any{"policyId": policyRowID, "siteId": site.ID}
 	for _, f := range policyFields {
 		reply[f.name] = f.get(effective)
 	}
@@ -306,7 +323,7 @@ func (i *Integration) handlePolicySet(ctx context.Context, args map[string]any, 
 
 // policySetArgsSchema is the advisory schema of callsPolicySet's arguments.
 func policySetArgsSchema() map[string]string {
-	schema := map[string]string{"deployable": "string (required) -- the deployable the limits are for."}
+	schema := map[string]string{"siteId": "string (required) -- the deployable the limits are for."}
 	for _, f := range policyFields {
 		unit := ""
 		if f.seconds {
@@ -359,10 +376,19 @@ func wholeNumber(v any) (int, bool) {
 // the media servers
 // ---------------------------------------------------------------------------
 
-// handleMediaServers lists the active media servers, one row each, by id. NEVER A
-// CREDENTIAL, and never the name of the secret holding one: the row only names its
-// secret, and even the name is the engine's business, not an operator's screen's.
+// handleMediaServers lists the active media servers, one row each, by id.
+//
+// A CLUSTER OWNER'S READ, decided here. The calls part is not enough: it is held by a
+// developer's role and can be granted through any organization's group, while the media
+// servers are the cluster's, shared by every deployable. So the builtin's capability is
+// the surface and this check is the gate.
+//
+// NEVER A CREDENTIAL, never the name of the secret holding one, and never the control
+// address, which only the engine uses (mediaServer.apiUrl).
 func (i *Integration) handleMediaServers(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if ac, ok := auth.AccessFromContext(ctx); !ok || ac == nil || !ac.IsClusterOwner() {
+		return nil, refuse("The media servers are the cluster's, so only a cluster owner can list them.")
+	}
 	servers, err := i.store.ActiveMediaServers(ctx)
 	if err != nil {
 		return nil, i.failed("mediaServers", "", err)
@@ -373,7 +399,6 @@ func (i *Integration) handleMediaServers(ctx context.Context, _ map[string]any, 
 		row := map[string]any{
 			"id":        s.ID,
 			"provider":  s.Provider,
-			"apiUrl":    redactedURL(s.APIURL),
 			"publicUrl": s.PublicURL,
 			"seats":     s.Seats,
 			"state":     s.State,

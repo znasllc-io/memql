@@ -339,13 +339,14 @@ mutation mediaServer updateCallsMediaServer {
   }
 }
 
-/// Create a policy row. @serverOnly: only the calls integration, having checked what the caller proved, writes it. The row is the cluster's, so no owner is stamped. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+/// Create a policy row, one per site. @serverOnly: only the calls integration, having checked what the caller proved, writes it. `ownerUserId` is STAMPED from the actor (the site's owner) and is not an argument. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@actor
 @serverOnly
 mutation policy createCallsPolicy {
   args {
     policyId  string!
     versionTime  datetime
-    deployable  string!
+    siteId  string!
     maxPeople  int
     maxAgents  int
     roomJoinsPerMinute  int
@@ -358,9 +359,10 @@ mutation policy createCallsPolicy {
     queuePoll  int
   }
   insert {
-    accept { deployable, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
+    accept { siteId, maxPeople, maxAgents, roomJoinsPerMinute, maxUpcomingScheduled, maxScheduledMinutes, hostLeftGrace, passTtl, scheduleHorizon, queueEntryTtl, queuePoll }
     stamp {
       id: args.policyId
+      ownerUserId: actor.userId
       createdAt: args.versionTime ?? now
     }
   }

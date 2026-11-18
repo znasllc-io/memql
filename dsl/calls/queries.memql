@@ -243,7 +243,7 @@ query policy callsPolicyById {
   args {
     id  string!
   }
-  filter  row => row.id == args.id && actor.isClusterOwner == true
+  filter  row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   callsPolicyFull
 }
 
@@ -258,15 +258,15 @@ query mediaServer callsActiveMediaServers {
   shape   callsMediaServerFull
 }
 
-/// The limits of one deployable. Cluster-owned; absent fields mean the shipped defaults (calls.DefaultPolicy). actor.userId scoping is not the fix: the rows have no owner.
+/// The limits of one site, within that site: a policy is per SITE, because a package deployable's name is unique only together with its package. Absent fields mean the shipped defaults (calls.DefaultPolicy). actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
 @serverOnly
 @actor
-@unbounded("calls policy by deployable -- one row per deployable")
+@unbounded("calls policy by site -- one row per site")
 @cache(0)
-query policy callsPolicyForDeployable {
+query policy callsPolicyForSite {
   args {
-    deployable  string!
+    siteId  string!
   }
-  filter  row => row.deployable == args.deployable && actor.isClusterOwner == true
+  filter  row => row.siteId == args.siteId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   callsPolicyFull
 }

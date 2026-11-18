@@ -192,15 +192,19 @@ concept mediaServer {
 }
 
 /// A CALLS POLICY: the limits the rules module consults for one deployable, one field per calls.Policy
-/// value (durations in whole seconds). CLUSTER-OWNED. A field left absent means the shipped default
-/// (calls.DefaultPolicy); only a value the operator set overrides it. Server-written and
-/// client-unreadable.
+/// value (durations in whole seconds). PER SITE: a package deployable's name is unique only together
+/// with its package, so a policy keyed by the name would apply one package's limits to every other
+/// package's deployable of that name. Owned by the site's owner, as the other site-scoped calls rows
+/// are. A field left absent means the shipped default (calls.DefaultPolicy); only a value the
+/// operator set overrides it, and callsPolicySet holds every value inside the cluster's bounds.
+/// Server-written and client-unreadable.
 @serverWritten
-@rowAuthz(clusterOwner)
-@displayCard(primary="deployable")
-@belongsTo(cluster)
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="siteId")
+@belongsTo(account, via="siteId")
 concept policy {
-  deployable  string!  @description("The deployable these limits apply to.")
+  siteId  string!  @description("The v1:platform:site (deployable) these limits apply to. One policy per site.")
+  ownerUserId  string!  @description("The v1:identity:user who owns the site -- the row-authz key. STAMPED from the actor the write runs as and never an argument: the calls integration writes as the site's owner (borrowed authority), so this is the site's owner and never the operator who set the limits.")
   maxPeople  int  @description("calls.Policy.MaxPeople: people allowed in one room.")
   maxAgents  int  @description("calls.Policy.MaxAgents: agents allowed in one room.")
   roomJoinsPerMinute  int  @description("calls.Policy.RoomJoinsPerMinute: join attempts allowed per room per minute.")
@@ -211,4 +215,8 @@ concept policy {
   scheduleHorizon  int  @description("calls.Policy.ScheduleHorizon, in SECONDS: how far ahead a call may be booked.")
   queueEntryTtl  int  @description("calls.Policy.QueueEntryTTL, in SECONDS: how long a queue entry may go unpolled.")
   queuePoll  int  @description("calls.Policy.QueuePoll, in SECONDS: how often a waiter polls.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
+
+  @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")
+  @relationship(type="references", as="siteOwner", field="ownerUserId", target=user, direction="outgoing")
 }

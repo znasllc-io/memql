@@ -660,7 +660,7 @@ QueryClient.prototype.branchRun = function (this: QueryClient, args: BranchRunAr
 };
 
 /** The media servers rooms are placed on (calls, plan Task 4).
-EVERY ACTIVE SERVER, one row each: {id, provider, apiUrl, publicUrl, region, seats, state, createdAt}. NEVER A CREDENTIAL, and never the name of the secret holding one. `provider` is the value the environment recorded (docker-local or hetzner); nothing decides by it. */
+THE CLUSTER OWNER'S. The servers are the cluster's, so the list admits a cluster owner and nobody else, a check the handler makes: the calls part, held by role or granted through an organization, is not enough. EVERY ACTIVE SERVER, one row each: {id, provider, publicUrl, region, seats, state, createdAt}. NEVER A CREDENTIAL, never the name of the secret holding one, and never the control address, which only the engine uses. `provider` is the value the environment recorded (docker-local or hetzner); nothing decides by it. */
 export interface CallsMediaServersArgs {
 }
 
@@ -680,10 +680,10 @@ QueryClient.prototype.callsMediaServers = function (this: QueryClient, args: Cal
 };
 
 /** Set any of a deployable's calls limits (v1:calls:policy, calls, plan Task 4).
-ONLY WHAT IS NAMED CHANGES. A limit left out keeps the value it had, and one nobody ever set is the shipped default (calls.DefaultPolicy). Counts are whole numbers and DURATIONS ARE WHOLE SECONDS. Each value is held to a range that keeps it meaningful (a room admits at least one person, a pass lives 10 to 900 seconds, a waiter polls at least once a minute and its place outlives a poll); what a deployable allows inside those ranges is the operator's to choose. Returns the effective limits: {policyId, deployable} and one field per limit. */
+PER SITE: the limits are the site's, on a row its owner owns, because a package deployable's name is unique only together with its package. ONLY WHAT IS NAMED CHANGES: a limit left out keeps the value it had, and one nobody ever set is the shipped default (calls.DefaultPolicy). Counts are whole numbers and DURATIONS ARE WHOLE SECONDS. Every value is held to the CLUSTER'S bounds (a room of 1 to 1000 people, a pass of 10 to 900 seconds, a waiter that polls at least once a minute and whose place outlives a poll), so no site claims more than the cluster allows; what a deployable allows inside those bounds is its operator's to choose. Judged in the site's organization, and refused for a deployable the caller cannot read, one with no owner, a caller who is not a person and any call inside a run. Returns the effective limits: {policyId, siteId} and one field per limit. */
 export interface CallsPolicySetArgs {
-  /** The deployable's name the limits apply to, as its package names it. */
-  deployable: string;
+  /** The deployable the limits are for. */
+  siteId: string;
   /** People allowed in one room, 1 to 1000. */
   maxPeople?: number;
   /** Agents allowed in one room, 0 to 100. */
@@ -708,7 +708,7 @@ export interface CallsPolicySetArgs {
 
 export function buildCallsPolicySet(args: CallsPolicySetArgs): string {
   const parts: string[] = [];
-  parts.push("deployable: " + renderMemQLValue(args.deployable));
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
   if (args.maxPeople !== undefined) parts.push("maxPeople: " + renderMemQLValue(args.maxPeople));
   if (args.maxAgents !== undefined) parts.push("maxAgents: " + renderMemQLValue(args.maxAgents));
   if (args.roomJoinsPerMinute !== undefined) parts.push("roomJoinsPerMinute: " + renderMemQLValue(args.roomJoinsPerMinute));

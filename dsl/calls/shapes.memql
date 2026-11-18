@@ -125,7 +125,8 @@ shape mediaServer callsMediaServerFull {
 shape policy callsPolicyFull {
   row.id
   row.createdAt
-  deployable
+  siteId
+  ownerUserId
   maxPeople
   maxAgents
   roomJoinsPerMinute
@@ -136,4 +137,5 @@ shape policy callsPolicyFull {
   scheduleHorizon
   queueEntryTtl
   queuePoll
+  accountId
 }

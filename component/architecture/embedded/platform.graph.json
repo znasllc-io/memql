@@ -1149,6 +1149,8 @@
 {"from":"concept:v1:calendar:calendarEvent","to":"concept:v1:identity:user","kind":"relates","attrs":{"direction":"outgoing","field":"ownerUserId","type":"parent"}},
 {"from":"concept:v1:calls:key","to":"concept:v1:identity:user","kind":"relates","attrs":{"as":"siteOwner","direction":"outgoing","field":"ownerUserId","type":"references"}},
 {"from":"concept:v1:calls:key","to":"concept:v1:platform:site","kind":"relates","attrs":{"as":"forSite","direction":"outgoing","field":"siteId","type":"references"}},
+{"from":"concept:v1:calls:policy","to":"concept:v1:identity:user","kind":"relates","attrs":{"as":"siteOwner","direction":"outgoing","field":"ownerUserId","type":"references"}},
+{"from":"concept:v1:calls:policy","to":"concept:v1:platform:site","kind":"relates","attrs":{"as":"forSite","direction":"outgoing","field":"siteId","type":"references"}},
 {"from":"concept:v1:calls:queueEntry","to":"concept:v1:calls:key","kind":"relates","attrs":{"as":"drawnOn","direction":"outgoing","field":"keyId","type":"references"}},
 {"from":"concept:v1:calls:queueEntry","to":"concept:v1:calls:room","kind":"relates","attrs":{"direction":"outgoing","field":"roomId","type":"parent"}},
 {"from":"concept:v1:calls:queueEntry","to":"concept:v1:calls:seat","kind":"relates","attrs":{"as":"forSeat","direction":"outgoing","field":"seatId","type":"references"}},

@@ -193,7 +193,7 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "calls/queries.memql", Name: "callsMediaServerById"}:            true,
 		{Path: "calls/queries.memql", Name: "callsPolicyById"}:                 true,
 		{Path: "calls/queries.memql", Name: "callsActiveMediaServers"}:         true,
-		{Path: "calls/queries.memql", Name: "callsPolicyForDeployable"}:        true,
+		{Path: "calls/queries.memql", Name: "callsPolicyForSite"}:              true,
 		{Path: "calls/mutations.memql", Name: "createCallsKey"}:                true,
 		{Path: "calls/mutations.memql", Name: "updateCallsKey"}:                true,
 		{Path: "calls/mutations.memql", Name: "createCallsSession"}:            true,

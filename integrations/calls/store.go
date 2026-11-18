@@ -11,15 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/secret"
 	"github.com/znasllc-io/memql/core/num"
-
-	callrules "github.com/znasllc-io/memql/component/calls"
 )
 
 // store.go -- the graph seam. Every read and write is a NAMED construct rendered as
@@ -33,14 +29,15 @@ import (
 // without INTERNAL ORIGIN, whatever actor is on the context. The actor then decides,
 // and there are three:
 //
-//   - A SITE'S ROWS (a key here; rooms, seats and sessions in later work) are read and
-//     written AS THE SITE'S OWNER, with internal origin (asOwner). A create stamps
-//     ownerUserId from the actor, so a row is the site's owner's at birth and never
-//     the person who asked. Borrowed authority without internal origin is a CLIENT
-//     read of these concepts (site_access_guards.go), which is why the stamp is here.
-//   - THE CLUSTER'S ROWS (media servers, policies) and the sealed secrets are read and
-//     written AS THE CLUSTER ACTING: the system actor `system:calls`, a synthetic
-//     owner-role actor, with internal origin (asCluster). Their queries require
+//   - A SITE'S ROWS (a key and the site's limits here, policy.go; rooms, seats and
+//     sessions in later work) are read and written AS THE SITE'S OWNER, with internal
+//     origin (asOwner). A create stamps ownerUserId from the actor, so a row is the
+//     site's owner's at birth and never the person who asked. Borrowed authority
+//     without internal origin is a CLIENT read of these concepts
+//     (site_access_guards.go), which is why the stamp is here.
+//   - THE CLUSTER'S ROWS (media servers) and the sealed secrets are read and written
+//     AS THE CLUSTER ACTING: the system actor `system:calls`, a synthetic owner-role
+//     actor, with internal origin (asCluster). Their queries require
 //     actor.isClusterOwner, so a site owner's borrowed authority would read nothing.
 //   - THE SITE ITSELF is read and written UNDER THE CALLER, unstamped, and that is
 //     what makes those two calls checks rather than lookups: a person who cannot read
@@ -57,7 +54,6 @@ import (
 const (
 	keyConcept          = "v1:calls:key"
 	mediaServerConcept  = "v1:calls:mediaServer"
-	policyConcept       = "v1:calls:policy"
 	globalSecretConcept = "v1:platform:globalSecret"
 	siteConcept         = "v1:platform:site"
 )
@@ -306,148 +302,6 @@ func (s *Store) updateMediaServer(ctx context.Context, m MediaServer, priorVersi
 		"versionTime":      versionStamp(versionTime),
 	})
 	return s.write(fenced, "the media server", call, err)
-}
-
-// ---------------------------------------------------------------------------
-// policies
-// ---------------------------------------------------------------------------
-
-// policyField is one calls.Policy value as v1:calls:policy stores it. The table is the
-// ONE place a stored number becomes a Policy field and back: counts as they are, and
-// durations in WHOLE SECONDS (the concept's unit), converted here and nowhere else.
-type policyField struct {
-	name     string // the v1:calls:policy field, and the callsPolicySet argument
-	seconds  bool   // stored in seconds; a time.Duration in calls.Policy
-	min, max int    // the bounds callsPolicySet holds a value to, in the stored unit
-	get      func(callrules.Policy) int
-	set      func(*callrules.Policy, int)
-}
-
-// The bounds keep a value MEANINGFUL, and they are not product limits: what a
-// deployable sells is the operator's to set inside them. A room admits at least one
-// person (the rules refuse a room of agents); a pass lives long enough to connect
-// with and no longer than MintPass mints; a waiter polls at least once a minute.
-var policyFields = []policyField{
-	{"maxPeople", false, 1, 1000,
-		func(p callrules.Policy) int { return p.MaxPeople }, func(p *callrules.Policy, v int) { p.MaxPeople = v }},
-	{"maxAgents", false, 0, 100,
-		func(p callrules.Policy) int { return p.MaxAgents }, func(p *callrules.Policy, v int) { p.MaxAgents = v }},
-	{"roomJoinsPerMinute", false, 1, 10000,
-		func(p callrules.Policy) int { return p.RoomJoinsPerMinute }, func(p *callrules.Policy, v int) { p.RoomJoinsPerMinute = v }},
-	{"maxUpcomingScheduled", false, 0, 1000,
-		func(p callrules.Policy) int { return p.MaxUpcomingScheduled }, func(p *callrules.Policy, v int) { p.MaxUpcomingScheduled = v }},
-	{"maxScheduledMinutes", false, 1, 1440,
-		func(p callrules.Policy) int { return p.MaxScheduledMinutes }, func(p *callrules.Policy, v int) { p.MaxScheduledMinutes = v }},
-	{"hostLeftGrace", true, 0, 86400,
-		func(p callrules.Policy) int { return seconds(p.HostLeftGrace) }, func(p *callrules.Policy, v int) { p.HostLeftGrace = duration(v) }},
-	{"passTtl", true, 10, int(MaxPassTTL / time.Second),
-		func(p callrules.Policy) int { return seconds(p.PassTTL) }, func(p *callrules.Policy, v int) { p.PassTTL = duration(v) }},
-	{"scheduleHorizon", true, 0, 366 * 86400,
-		func(p callrules.Policy) int { return seconds(p.ScheduleHorizon) }, func(p *callrules.Policy, v int) { p.ScheduleHorizon = duration(v) }},
-	{"queueEntryTtl", true, 10, 86400,
-		func(p callrules.Policy) int { return seconds(p.QueueEntryTTL) }, func(p *callrules.Policy, v int) { p.QueueEntryTTL = duration(v) }},
-	{"queuePoll", true, 1, 60,
-		func(p callrules.Policy) int { return seconds(p.QueuePoll) }, func(p *callrules.Policy, v int) { p.QueuePoll = duration(v) }},
-}
-
-func seconds(d time.Duration) int  { return int(d / time.Second) }
-func duration(s int) time.Duration { return time.Duration(s) * time.Second }
-
-// policyRow is one stored v1:calls:policy: the values somebody set, by field name in
-// the stored unit, and nothing for a value nobody set.
-type policyRow struct {
-	ID, Deployable string
-	Values         map[string]int
-	Version        time.Time
-}
-
-// policyFromValues is the effective policy: the shipped defaults with every stored
-// value laid over them.
-func policyFromValues(values map[string]int) callrules.Policy {
-	p := callrules.DefaultPolicy()
-	for _, f := range policyFields {
-		if v, set := values[f.name]; set {
-			f.set(&p, v)
-		}
-	}
-	return p
-}
-
-// policyID is the row a deployable's limits are written at when it has none yet: the
-// same for every writer that asks, so two first writes meet at one row (and the gate
-// they run under lets one of them create it). A name-based UUID, because a deployable's
-// name can carry characters an id may not.
-func policyID(deployable string) string {
-	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("memql:calls:policy:"+deployable)).String()
-}
-
-// policyRowFor reads a deployable's stored limits as the cluster acting. None is
-// (nil, nil).
-func (s *Store) policyRowFor(ctx context.Context, deployable string) (*policyRow, error) {
-	call, err := langparser.RenderCall("callsPolicyForDeployable", map[string]any{"deployable": deployable})
-	rows, err := s.readAsCluster(ctx, "the deployable's calls limits", call, err)
-	if err != nil || len(rows) == 0 {
-		return nil, err
-	}
-	r := rows[0]
-	row := &policyRow{
-		ID:         memql.BareShortId(rowString(r, "id")),
-		Deployable: rowString(r, "deployable"),
-		Values:     map[string]int{},
-		Version:    rowTime(r, "createdAt"),
-	}
-	for _, f := range policyFields {
-		if v, set := rowIntPresent(r, f.name); set {
-			row.Values[f.name] = v
-		}
-	}
-	return row, nil
-}
-
-// PolicyFor is the effective policy of one deployable: the shipped defaults
-// (calls.DefaultPolicy) with every value an operator set laid over them, durations
-// converted from the stored seconds. A deployable nobody set limits for gets the
-// defaults.
-func (s *Store) PolicyFor(ctx context.Context, deployable string) (callrules.Policy, error) {
-	row, err := s.policyRowFor(memql.ContextWithFreshRead(ctx), strings.TrimSpace(deployable))
-	if err != nil {
-		return callrules.Policy{}, err
-	}
-	if row == nil {
-		return callrules.DefaultPolicy(), nil
-	}
-	return policyFromValues(row.Values), nil
-}
-
-// savePolicy writes the named values of p, in the stored unit, as the cluster acting:
-// onto the deployable's row when it has one (prior), or a new row at policyID
-// otherwise. Values p carries for fields not named are not written.
-func (s *Store) savePolicy(ctx context.Context, prior *policyRow, deployable string, p callrules.Policy, named []string, versionTime time.Time) (string, error) {
-	cluster, err := asCluster(ctx)
-	if err != nil {
-		return "", err
-	}
-	args := map[string]any{"versionTime": versionStamp(versionTime)}
-	for _, f := range policyFields {
-		for _, name := range named {
-			if name == f.name {
-				args[f.name] = f.get(p)
-			}
-		}
-	}
-	if prior == nil {
-		id := policyID(deployable)
-		args["policyId"], args["deployable"] = id, deployable
-		call, err := langparser.RenderCall("createCallsPolicy", args)
-		return id, s.write(witnessedAbsent(cluster, policyConcept, id), "the calls limits", call, err)
-	}
-	fenced, err := witnessed(cluster, policyConcept, prior.ID, prior.Version)
-	if err != nil {
-		return "", err
-	}
-	args["policyId"] = prior.ID
-	call, err := langparser.RenderCall("updateCallsPolicy", args)
-	return prior.ID, s.write(fenced, "the calls limits", call, err)
 }
 
 // ---------------------------------------------------------------------------

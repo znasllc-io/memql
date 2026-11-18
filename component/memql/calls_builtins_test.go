@@ -14,11 +14,12 @@ import (
 // alone, which looks identical on the page and lets a part held in one organization
 // act on another's deployable.
 //
-// So the targets are pinned against the SHIPPED tree: the two acts that name a
-// deployable (a test key, the site switch) and the site write the switch makes are
-// asked about the SITE. The other two name no deployable: a policy is keyed by a
-// deployable's NAME and media servers are the cluster's, both rows no organization
-// owns, so they are judged by the global capability and nothing else.
+// So the targets are pinned against the SHIPPED tree: the three acts that name a
+// deployable (a test key, the site switch, the site's limits) and the site write the
+// switch makes are asked about the SITE. The media servers name no deployable: they
+// are the cluster's, so their builtin is untargeted and its handler admits a cluster
+// owner and nobody else (integrations/calls operator.go; the behaviour is
+// operator_db_test.go's).
 func TestCallsActsNameTheirOrganizationTarget(t *testing.T) {
 	fns := loadedSiteAccessTree(t)
 
@@ -31,7 +32,7 @@ func TestCallsActsNameTheirOrganizationTarget(t *testing.T) {
 		{"callsTestKeyCreate", "builtin", "integration.calls.testKeyCreate", "v1:platform:site", "siteId"},
 		{"callsSiteEnable", "builtin", "integration.calls.siteEnable", "v1:platform:site", "siteId"},
 		{"updateSiteCalls", "mutation", "", "v1:platform:site", "siteId"},
-		{"callsPolicySet", "builtin", "integration.calls.policySet", "", ""},
+		{"callsPolicySet", "builtin", "integration.calls.policySet", "v1:platform:site", "siteId"},
 		{"callsMediaServers", "builtin", "integration.calls.mediaServers", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
