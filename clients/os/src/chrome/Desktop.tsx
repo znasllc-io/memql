@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useDraggable, useDroppable, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 
 import { newShortId, rowNumber, rowString } from "@znasllc-io/memql-sdk-core/client";
@@ -128,6 +128,7 @@ export function Desktop({
   // The desktop is a strip of plates that only the pager moves. Anything that
   // scrolls it (a focus call, a reveal) is undone at once.
   const desktopRef = useRef<HTMLDivElement>(null);
+  const slide = useDeskSlide(activeIndex, state.shell.activeDeskId, desktopRef);
   useEffect(() => {
     const el = desktopRef.current;
     if (!el) return;
@@ -541,8 +542,11 @@ export function Desktop({
           const peers = desk.windows.flatMap(id => state.shell.windows[id] ? [state.shell.windows[id]!] : []);
           const rect = placeWindows(peers, viewport, placement)[win.id]
             ?? placeWindows([{ ...win, mode: "normal" }], viewport, placement)[win.id]!;
+          const leaving = !!slide && desk.id === slide.fromDeskId && desk.id !== state.shell.activeDeskId;
+          const arriving = !!slide && desk.id === state.shell.activeDeskId;
           return <WindowFrame key={win.id} win={win} manifest={manifest} rect={rect}
-            hidden={desk.id !== state.shell.activeDeskId || win.mode === "minimized"}
+            hidden={(desk.id !== state.shell.activeDeskId && !leaving) || win.mode === "minimized"}
+            slide={leaving ? "out" : arriving ? "in" : undefined} slideDx={slide?.dx}
             deskId={desk.id} focused={state.shell.focusedWindowId === win.id} actorRole={actorRole} />;
         })}
         <p className="os-sr-only" aria-live="polite">
@@ -833,4 +837,43 @@ function SurfaceItem({
       )}
     </div>
   );
+}
+
+/**
+ * The moment a desk switch slides, so windows can ride it with the plates
+ * (the owner, Nov 2026: the background slid while apps popped in and out).
+ *
+ * Windows are stable siblings of the plates, not their children, so moving a
+ * window between desks never remounts its app. They therefore cannot inherit
+ * the plates' transform; each gets the same motion as a short keyframe of its
+ * own instead (`.os-window[data-slide]`), never a transform at rest, which
+ * would make the window a containing block for fixed content inside apps.
+ *
+ * `dx` is how far the plates travel: the index change times the desk's width.
+ * The desk being left stays drawn, inert, for one --os-duration-med; reduced
+ * motion sets that token to 0ms, and then nothing slides. A desk removed by
+ * the switch's own cleanup has no windows to draw, so it needs no case.
+ */
+function useDeskSlide(
+  activeIndex: number,
+  activeDeskId: string,
+  desktopRef: React.RefObject<HTMLDivElement | null>,
+): { fromDeskId: string; dx: number } | null {
+  const [slide, setSlide] = useState<{ fromDeskId: string; dx: number } | null>(null);
+  const last = useRef({ index: activeIndex, deskId: activeDeskId });
+  useLayoutEffect(() => {
+    const from = last.current;
+    last.current = { index: activeIndex, deskId: activeDeskId };
+    if (from.deskId === activeDeskId) return;
+    const ms = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--os-duration-med")) || 0;
+    const width = desktopRef.current?.clientWidth ?? 0;
+    if (ms <= 0 || from.index === activeIndex) {
+      setSlide(null);
+      return;
+    }
+    setSlide({ fromDeskId: from.deskId, dx: (activeIndex - from.index) * width });
+    const timer = setTimeout(() => setSlide(null), ms);
+    return () => clearTimeout(timer);
+  }, [activeIndex, activeDeskId, desktopRef]);
+  return slide;
 }
