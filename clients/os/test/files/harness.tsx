@@ -1,6 +1,6 @@
 import { parseCall } from "../callArgs";
 import type { ReactNode } from "react";
-import { act, fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { vi } from "vitest";
 import { QueryClient, Result, SubscriptionManager, type Dispatcher, type QueryCallOptions, type Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -448,4 +448,17 @@ export async function click(el: Element | null | undefined): Promise<void> {
   await act(async () => {
     fireEvent.click(el);
   });
+}
+
+/**
+ * Opens a file's details page the way a person reaches it now: a click on a
+ * file only selects it (the Places browse, Nov 2026), so the page is its
+ * right-click menu's Details.
+ */
+export async function openDetails(name: string | RegExp): Promise<void> {
+  const tile = await screen.findByRole("button", { name: typeof name === "string" ? new RegExp(name) : name });
+  await act(async () => {
+    fireEvent.contextMenu(tile);
+  });
+  await click(within(screen.getByRole("menu", { name: "File" })).getByRole("menuitem", { name: "Details" }));
 }

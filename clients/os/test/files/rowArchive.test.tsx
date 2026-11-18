@@ -26,8 +26,8 @@ beforeEach(() => {
 });
 
 async function rightClickRow(name: RegExp) {
-  const row = (await screen.findByRole("button", { name })).closest(".os-files-line");
-  if (row === null) throw new Error("the file row is not inside a drag/menu wrapper");
+  const row = (await screen.findByRole("button", { name })).closest(".os-files-tile-wrap");
+  if (row === null) throw new Error("the file tile is not inside its drag/menu wrapper");
   await act(async () => {
     fireEvent.contextMenu(row);
   });

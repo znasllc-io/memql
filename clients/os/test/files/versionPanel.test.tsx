@@ -12,7 +12,7 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 import { ARTIFACT_CONCEPT, FILE_CONCEPT } from "../../src/apps/files/concepts";
-import { artifactRow, click, emit, fakeConnection, fileRow, renderFiles, versionRow } from "./harness";
+import { artifactRow, click, emit, fakeConnection, fileRow, renderFiles, versionRow, openDetails } from "./harness";
 // Version history remains available; Files no longer replaces a file by upload.
 
 beforeEach(() => {
@@ -20,7 +20,7 @@ beforeEach(() => {
 });
 
 async function openInspector(title: string) {
-  await click(await screen.findByRole("button", { name: new RegExp(title) }));
+  await openDetails(title);
   return screen.getByRole("region", { name: "File details" });
 }
 

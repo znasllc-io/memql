@@ -12,7 +12,7 @@ vi.mock("../../src/live/connection", () => ({
 
 import { ARTIFACT_CONCEPT } from "../../src/apps/files/concepts";
 import { chooseOption, openSelect } from "../selectControl";
-import { artifactRow, click, emit, fakeConnection, renderFiles } from "./harness";
+import { artifactRow, click, emit, fakeConnection, renderFiles, openDetails } from "./harness";
 
 // Artifact labels in Files (epic memql#5009): the FACET behind Refine, and
 // the editor in the inspector.
@@ -30,7 +30,7 @@ async function openRefine() {
 }
 
 async function openInspector(title: string): Promise<HTMLElement> {
-  await click(screen.getByRole("button", { name: new RegExp(title) }));
+  await openDetails(title);
   return screen.getByRole("region", { name: "File details" });
 }
 

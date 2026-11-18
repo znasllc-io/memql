@@ -4350,6 +4350,8 @@ a.os-button {
    * box must be the positioning context -- without this it anchors to the
    * window frame and opens a window-offset away from the click. */
   position: relative;
+  /* The browse stacks its rail above the grid in a narrow window (below). */
+  container: os-files / inline-size;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -4384,18 +4386,194 @@ a.os-button {
   outline-offset: 1px;
 }
 
-/* The three-zone body. WRAP, never crush: at half-window widths the
- * inspector takes the full width below the list, and the rail keeps its
- * readable minimum. min-height 0 / min-width 0 are load-bearing -- without
- * them the flex children refuse to shrink and the WINDOW grows a horizontal
- * rail. */
-.os-files-body {
+/* ---- the Places browse (Nov 2026): rail beside one scrolling column ----
+ * The rail is the place language (DESIGN.md rule 6): Library and its folder
+ * tree, then Desktop, Materializer and Bin, on the window's own plate -- no
+ * tinted panel, no counts. The main column is the Head over a grid of folder
+ * and file tiles. min-height / min-width 0 are load-bearing: without them the
+ * children refuse to shrink and the WINDOW grows a scrollbar instead. */
+.os-files-browse {
   flex: 1;
   min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(160px, 208px) minmax(0, 1fr);
+}
+.os-files-browse[hidden] { display: none; }
+.os-files-main {
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: stretch;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  padding-left: 20px;
+  /* The hairline between rail and grid lives here: the main column stretches
+   * to the row's full height, the sticky rail does not. */
+  border-left: 1px solid var(--os-line);
+}
+.os-files-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 2px 10px 12px 0;
+}
+.os-files-rail-list { list-style: none; margin: 0; padding: 0; }
+.os-files-rail-row {
+  display: flex;
+  align-items: center;
+  height: var(--os-control-h);
+  padding-left: calc(var(--depth, 0) * 14px);
+  border-radius: var(--os-selection-radius);
+}
+.os-files-rail-row:hover { background: var(--os-wash); }
+/* Selection: straight edge, accent fill and rule (rule 1). */
+.os-files-rail-row[data-current] {
+  background: var(--os-accent-soft);
+  box-shadow: inset 2px 0 0 var(--os-accent);
+}
+.os-files-rail-twist {
+  flex: none;
+  width: 18px;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--os-muted);
+  cursor: pointer;
+}
+.os-files-rail-place {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 2px;
+  border: 0;
+  background: none;
+  color: var(--os-ink);
+  font: inherit;
+  font-size: var(--os-text-base);
+  text-align: left;
+  cursor: pointer;
+}
+.os-files-rail-place svg { flex: none; color: var(--os-muted); }
+.os-files-rail-row[data-current] .os-files-rail-place svg { color: var(--os-ink); }
+.os-files-rail-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.os-files-rail-twist:focus-visible,
+.os-files-rail-place:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: -2px;
+}
+@container os-files (max-width: 560px) {
+  .os-files-browse { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .os-files-rail { position: static; max-height: 40vh; border-right: 0; border-bottom: 1px solid var(--os-line); padding: 0 0 8px; }
+  .os-files-main { padding-left: 0; padding-top: 10px; border-left: 0; }
+  /* Sort, Search and Add keep one line together, wrapping below the title as
+   * a group rather than one control at a time (as Fleet's narrow heads do). */
+  .os-files-main .os-head { flex-wrap: wrap; }
+  .os-files-main .os-head-actions { flex-wrap: nowrap; }
+  /* Three tiles across a phone rather than two. */
+  .os-files .os-files-grid,
+  .os-files .os-files-files .os-livelist-rows { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+}
+
+/* Folder tiles, then the notices, uploads and file tiles below them. The
+ * window's page scrolls; the rail stays in view beside it (sticky, above). */
+.os-files-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* The grid: folders, then files, on one column template so the two read as
+ * one grid. Tiles are flat (rule 1): spacing and a hover wash, no boxes. */
+.os-files-grid,
+.os-files-files .os-livelist-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 4px 6px;
+}
+.os-files-files .os-livelist-row { border-radius: var(--os-selection-radius); }
+.os-files-tile-wrap { height: 100%; }
+.os-files-tile {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 12px 6px 10px;
+  border: 0;
+  border-radius: var(--os-selection-radius);
+  background: none;
+  color: var(--os-ink);
+  font: inherit;
+  text-align: center;
+  cursor: default;
+}
+.os-files-tile:hover { background: var(--os-wash); }
+/* A held finger opens the tile's menu (useLongPress), not Safari's callout. */
+.os-files-tile { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.os-files-tile[aria-pressed="true"] {
+  background: var(--os-accent-soft);
+  box-shadow: inset 0 -2px 0 var(--os-accent);
+}
+.os-files-tile:focus-visible { outline: 2px solid var(--os-accent); outline-offset: -2px; }
+.os-files-tile[data-archived] { opacity: 0.62; }
+/* Glyphs: one thin outline in the theme's quiet stroke, the way Fleet draws
+ * a machine; the type is written inside in the data face. */
+.os-files-tile-icon {
+  height: 62px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  color: var(--os-rail);
+}
+.os-files-glyph { display: block; fill: var(--os-plate); stroke: currentColor; stroke-width: 1.25; }
+.os-files-glyph-folder { width: 58px; height: 47px; fill: none; }
+.os-files-sheet { position: relative; display: block; width: 46px; height: 57px; }
+.os-files-sheet .os-files-glyph { width: 100%; height: 100%; }
+.os-files-sheet b {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  font: 500 9px/1 var(--os-font-mono);
+  letter-spacing: 0.03em;
+  color: var(--os-muted);
+}
+.os-files-tile-name {
+  max-width: 100%;
+  font-size: var(--os-text-sm);
+  line-height: 1.3;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+.os-files-rename.os-files-tile-rename {
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 4px 10px;
+}
+.os-files-rename.os-files-tile-rename input { width: 100%; flex: none; text-align: center; }
+.os-files-rename-acts { display: flex; gap: 10px; font-size: var(--os-text-sm); }
+.os-files-tile-meta {
+  margin-top: -3px;
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
 }
 
 .os-files-rename { display: flex; gap: 8px; padding: 12px 4px; }
@@ -4425,9 +4603,8 @@ a.os-button {
 }
 
 .os-files-list {
-  flex: 1 1 300px;
+  flex: none;
   min-width: 0;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -6723,11 +6900,11 @@ a.os-button {
   gap: 6px;
 }
 
-/* ---- dragging a row out of Files (memql#4784) ---- */
-.os-files-line {
+/* ---- dragging a file tile out of Files (memql#4784) ---- */
+.os-files-tile-wrap {
   touch-action: none;
 }
-.os-files-line[data-dragging] {
+.os-files-tile-wrap[data-dragging] {
   opacity: 0.55;
 }
 
@@ -15329,10 +15506,12 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-ask-question-input textarea { min-width: 0; flex: 1; resize: vertical; padding: 8px; border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); background: var(--os-surface); color: var(--os-ink); font: inherit; }
 .os-ask-question-options button:focus-visible, .os-ask-question-input textarea:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
 
-/* Files uses one content column, with folders and records in the same workspace. */
+/* Files scrolls with the window's page, folders and records in one column
+ * beside the rail. */
 .os-files > div:not([hidden]) { min-width: 0; }
-.os-files { height: auto; }
-.os-files-body { display: block; }
+/* At least the window's height, so the rail's hairline runs to the bottom
+ * edge of a short folder rather than stopping under its last tile. */
+.os-files { height: auto; min-height: 100%; }
 .os-files-list { display: block; overflow: visible; }
 .os-file-folders { margin: 0; padding: 0; list-style: none; border-bottom: 1px solid var(--os-line); }
 /* The body owns scrolling; the shared footer stays inside the app window. */

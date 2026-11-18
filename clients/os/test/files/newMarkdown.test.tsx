@@ -6,7 +6,7 @@ vi.mock("../../src/chrome/state", async () => {
   const real = await vi.importActual<typeof import("../../src/chrome/state")>("../../src/chrome/state");
   return { ...real, useOs: () => { const shell = real.useOs(); return { ...shell, actions: { ...shell.actions, openApp: h.open } }; } };
 });
-import { artifactRow, click, fakeConnection, folderRow, registryWith, renderFiles } from "./harness";
+import { artifactRow, click, fakeConnection, folderRow, registryWith, renderFiles, openDetails } from "./harness";
 import { readComposeIntent } from "../../src/items/materialize";
 import { draftFromSetup, openingStep } from "../../src/apps/materializer/make";
 
@@ -59,7 +59,7 @@ it("opens an existing composition on its finished-file page", async () => {
   fireEvent.contextMenu(row, { clientX: 30, clientY: 30 });
   await click(screen.getByRole("menuitem", { name: "Open in Materializer" }));
   expect(h.open).toHaveBeenCalledWith("materializer", "materialized", { compositionId: "composition" });
-  await click(row);
+  await openDetails(/Report.md/);
   await click(within(screen.getByRole("region", { name: "File details" })).getByRole("button", { name: "Open in Materializer" }));
   expect(h.open).toHaveBeenLastCalledWith("materializer", "materialized", { compositionId: "composition" });
 });
