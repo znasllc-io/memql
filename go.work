@@ -40,6 +40,7 @@ use (
 	./component/automations
 	./component/bus
 	./component/bus/gen
+	./component/calls
 	./component/compose
 	./component/config
 	./component/database
