@@ -156,6 +156,19 @@ regexTarget = "match"
 regexes = ['''PLANTED-ROW-SECRET-c41d55''']
 
 [[allowlists]]
+description = "Media-credential and pass-secret fixtures in the calls capability's tests (integrations/calls, test/clustere2e). NOT credentials: each is a word, `-secret-`, and then the 22 characters `0123456789abcdefghijkl` in order, often running on through the alphabet (`api-secret-0123456789abcdefghijklmnopqrstuv`). The tests need values at least 32 characters long, the length the calls configuration demands, and distinctive enough to prove they never reach an error or a printout. A generated secret never contains that sequential run, so the run is what identifies these as fixtures. Value-keyed with no `paths` (memql#3484): commit 04cf94d8c put three on main and turned secrets-current red, and a path constraint would bring the historical finding back the moment a test file moved. Anchored on the whole secret, so a value that merely contains the run does not match."
+regexTarget = "secret"
+regexes = ['''^[a-z]+(?:-[a-z]+)*-secret-0123456789abcdefghijkl[m-z]*$''']
+
+[[allowlists]]
+description = "MEMQL_MASTER_KEY fixtures in the calls capability's tests: 64 hex characters, two of them ending in the same hand-typed run `1d1e2c3b4a59687f6e5d4c3b2a19087f6e5d4c3b2a19081726354453627180`. NOT credentials: each seals and unseals secrets that a test writes into its own throwaway database. They are published in this public repository's history, so a cluster that used one as its real key would already be exposed, and suppressing them everywhere hides nothing. Exact values only (memql#3484): any other 64-character hex value still trips the scanner. Commit 04cf94d8c put the first on main and turned secrets-current red."
+regexTarget = "secret"
+regexes = [
+  '''^8f1d1e2c3b4a59687f6e5d4c3b2a19087f6e5d4c3b2a19081726354453627180$''',
+  '''^5c1d1e2c3b4a59687f6e5d4c3b2a19087f6e5d4c3b2a19081726354453627180$''',
+]
+
+[[allowlists]]
 description = "Elided RS256 JWT header in the runtime-panel docs (memql#3484). NOT a credential: `eyJhbGciOiJSUzI1NiIsImtpZCI6` is the base64 of {\"alg\":\"RS256\",\"kid\": -- byte-identical in EVERY RS256 JWT, carrying no claims and no signature. The regex is ANCHORED ON THE TRAILING LITERAL `...`, so it matches only the elided form: a real token continues past that prefix with its own payload, produces a different match, and still trips the scanner."
 regexTarget = "match"
 regexes = ['''eyJhbGciOiJSUzI1NiIsImtpZCI6\.\.\.''']
