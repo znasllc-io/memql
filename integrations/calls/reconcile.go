@@ -366,7 +366,8 @@ func (s *Service) reconcileGated(ctx context.Context, server MediaServer, hint r
 		}
 		wrote = true
 	case !v.hostPresent() && !hostGoneAt.IsZero() && v.room.HostLeftAt.IsZero():
-		// The last host seat vanished: the countdown runs from when it went.
+		// The last host seat vanished: the countdown runs from when it went (a booked
+		// call's from its booked start when that is later: host.go hostLeft).
 		if err := s.store.updateRoom(fresh, owner, v.room, map[string]any{"hostLeftAt": hostGoneAt}, memql.VersionTimeAfter(v.room.Version, now)); err != nil {
 			return reconcilePlan{}, err
 		}

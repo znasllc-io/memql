@@ -90,23 +90,25 @@ import (
 //
 // # The host-left countdown
 //
-// The countdown runs only from hostLeftAt (calls.HostLeft). The last host seat in the call
-// leaving stamps it (service.go Leave; reconciliation stamps it too when it closes a
-// vanished host seat, at that seat's leave time: its last sign of life, which a media
-// server's participant_left records as the disconnect, events.go), and a host seat let
-// back in clears it (service.go). A HOST WHO NEVER GOT IN NEVER LEFT: a call whose host
-// has been queued since Start counts nothing down. A BOOKED CALL WHOSE HOST NEVER CAME
-// counts from its booked start, or from its opening when a guest opened it after the
-// start, so a guest who arrives late is given the grace a host who left is given and does
-// not open a call that is already over; while a host seat of the call waits in line with
-// a live place, the host is coming and nothing counts. A host seat passes the lock, so it
-// only ever waits in line: once its place has expired (its holder stopped polling) the
-// host is not coming, and the countdown runs from the booked start as for a host who
-// never came. A call with a KEY HOLDER in it -- a seat whose session a key opened, the
-// key the deployable's and active -- is handed to them at once (design 8: "their pass or
-// key then covers the guests"): their seat becomes a host seat and the room's hostSeatId,
-// and the countdown is cleared. Reconciliation applies the countdown (reconcile.go), so a
-// hand-over or an end comes within one pass.
+// The countdown runs from hostLeftAt (calls.HostLeft) -- for a booked call, from its booked
+// start when that is later. The last host seat in the call leaving stamps it (service.go
+// Leave; reconciliation stamps it too when it closes a vanished host seat, at that seat's
+// leave time: its last sign of life, which a media server's participant_left records as
+// the disconnect, events.go), and a host seat let back in clears it (service.go). A BOOKED
+// CALL COUNTS FROM ITS BOOKED START AT THE EARLIEST, so a host who opens it early to check
+// it and leaves does not end it before it begins (hostLeft). A HOST WHO NEVER GOT IN NEVER
+// LEFT: a call whose host has been queued since Start counts nothing down. A BOOKED CALL
+// WHOSE HOST NEVER CAME counts from its booked start, or from its opening when a guest
+// opened it after the start, so a guest who arrives late is given the grace a host who
+// left is given and does not open a call that is already over; while a host seat of the
+// call waits in line with a live place, the host is coming and nothing counts. A host seat
+// passes the lock, so it only ever waits in line: once its place has expired (its holder
+// stopped polling) the host is not coming, and the countdown runs from the booked start
+// as for a host who never came. A call with a KEY HOLDER in it -- a seat whose session a
+// key opened, the key the deployable's and active -- is handed to them at once (design 8:
+// "their pass or key then covers the guests"): their seat becomes a host seat and the
+// room's hostSeatId, and the countdown is cleared. Reconciliation applies the countdown
+// (reconcile.go), so a hand-over or an end comes within one pass.
 //
 // # The empty-room rule
 //
@@ -502,10 +504,11 @@ func (v roomView) stillWaiting(seat seatRow, now time.Time) bool {
 // early to try the link and leaves would otherwise end it, booking and all, and the
 // interviewer arriving at the start would be refused. Before its end an emptied booked
 // call stays open, holding its key's call for up to the countdown, and the countdown ends
-// it if nobody comes (hostLeft: from hostLeftAt, or, when its host never came, from the
-// later of its booked start and its opening). A booking that is gone, or carries no end,
-// is decided as an ad hoc call's: without its start the countdown has nothing to count
-// from for a host who never came, and the call would otherwise stay open for good.
+// it if nobody comes (hostLeft: from the later of its booked start and hostLeftAt, or,
+// when its host never came, its opening), so it is never ended before its booked start. A
+// booking that is gone, or carries no end, is decided as an ad hoc call's: without its
+// start the countdown has nothing to count from for a host who never came, and the call
+// would otherwise stay open for good.
 func (s *Service) endsEmpty(ctx context.Context, v roomView, now time.Time) (bool, error) {
 	if !v.empty(now) {
 		return false, nil
@@ -593,28 +596,41 @@ func (s *Service) endRows(ctx context.Context, v roomView, reason string, now ti
 // hostLeft is what the host-left countdown says of a call now (the file note), and the
 // seat a hand-over goes to: nothing while a host is in it, or while none ever left and
 // none is due; a hand-over to a key holder in it; a countdown; or the end.
+//
+// A BOOKED CALL COUNTS FROM ITS BOOKED START AT THE EARLIEST: from the later of that start
+// and when its last host left, or, when its host never came, its opening. A host who opens
+// the call early to check it and leaves would otherwise see it end before it began,
+// booking and all, and whoever arrived at the start would be refused. With endsEmpty,
+// which ends a booked call empty only after its booked end, nothing but a host's end ends
+// a booked call before its start. A booking that is gone, or carries no start, changes
+// nothing: a host who left counts from hostLeftAt, and a call whose host never came
+// counts nothing, as before.
 func (s *Service) hostLeft(ctx context.Context, v roomView, now time.Time) (callrules.HostLeftAction, *seatRow, error) {
 	if v.hostPresent() {
 		return callrules.HostLeftNone, nil, nil
 	}
 	since := v.room.HostLeftAt
-	if since.IsZero() {
-		// A host who never got in never left. A booked call whose host never came counts
-		// from its start, or from its opening when that was later, unless its host is in
-		// line now.
-		if v.room.ScheduledCallID == "" || v.hostComing(now) {
-			return callrules.HostLeftNone, nil, nil
-		}
+	// A host who never got in never left, so an ad hoc call with none who left counts
+	// nothing; nor does a booked call whose host is in line now.
+	if since.IsZero() && (v.room.ScheduledCallID == "" || v.hostComing(now)) {
+		return callrules.HostLeftNone, nil, nil
+	}
+	if v.room.ScheduledCallID != "" {
 		booking, err := s.store.bookingByID(ctx, v.room.OwnerUserID, v.room.ScheduledCallID)
 		if err != nil {
 			return callrules.HostLeftNone, nil, err
 		}
-		if booking == nil || booking.Start.IsZero() {
+		switch {
+		case booking != nil && !booking.Start.IsZero():
+			if since.IsZero() {
+				// Its host never came: from its opening, when that was after its start.
+				since = v.room.OpenedAt
+			}
+			if booking.Start.After(since) {
+				since = booking.Start
+			}
+		case since.IsZero():
 			return callrules.HostLeftNone, nil, nil
-		}
-		since = booking.Start
-		if v.room.OpenedAt.After(since) {
-			since = v.room.OpenedAt
 		}
 	}
 	to, err := s.keyHolderIn(ctx, v)

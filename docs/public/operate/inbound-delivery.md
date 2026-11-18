@@ -26,9 +26,15 @@ triggers on the new row. No product Go, no sidecar.
 ## Nothing is admitted until you say so
 
 The route is mounted on every bff, and out of the box it answers `404` to
-everything. A source is served only when it is both **listed** and **fully
-configured**; a source that is listed but not configured is dropped and also
-answers 404, with the reason in the node's log at boot.
+everything. A source configured in the environment is served only when it is
+both **listed** and **fully configured**, and verifies by its own per-source
+policy (an HMAC, or a signed token); a source that is listed but not configured
+is dropped and also answers 404, with the reason in the node's log at boot. Two
+sources the cluster registers for itself are the exception, each verified by
+its own fixed policy from a credential the cluster stored and answering 404
+until that credential exists: `github`, for a GitHub App registered from the
+product (an HMAC), and `livekit`, for the calls media server (a signed token
+carrying the body's SHA-256).
 
 That is deliberate. A receiver serving one of five sources is a visible partial
 outage. A receiver serving five sources with one of them unsigned is a silent

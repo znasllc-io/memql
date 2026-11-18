@@ -173,7 +173,10 @@ delivery was valid and we simply could not record it, so the sender must retry
 ## 4. Security invariants
 
 1. **Deny by default.** `MEMQL_INBOUND_SOURCE_ALLOWLIST` is empty out of the
-   box and the receiver admits nothing. There is no wildcard.
+   box and the receiver admits nothing. There is no wildcard. An env-configured
+   source verifies by its per-source policy; the two sources a cluster
+   registers for itself (`github`, `livekit`) each verify by a fixed policy of
+   their own and answer 404 until their stored credential exists (5.2).
 2. **Misconfiguration fails closed.** A source an operator listed but did not
    finish configuring -- no scheme, unknown scheme, missing secret, missing
    header -- is *dropped* and answers 404. It is never admitted unverified. A

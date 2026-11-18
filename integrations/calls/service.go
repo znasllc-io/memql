@@ -1359,7 +1359,8 @@ func entryID(entry *queueEntryRow) string {
 // room is deleted -- a booked call only after its booked end, since before that an emptied
 // booked call waits for its host (host.go endsEmpty). Otherwise, when the seat was the last
 // host seat in the call, the room records when the host left (hostLeftAt), and the
-// host-left countdown reconciliation applies runs from then (host.go's file note).
+// host-left countdown reconciliation applies runs from then -- a booked call's from its
+// booked start when that is later (host.go's file note).
 //
 // THIS ROUTE IS THE HANG-UP, and the only thing that closes a seat at once. A media
 // server's participant_left is not a leave: a page refreshed and a tab closed disconnect
