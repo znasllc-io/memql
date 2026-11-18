@@ -153,7 +153,7 @@ the [precedence](memql.md#operator-precedence) and the table of
 |----------|---------|---------|
 | `==` / `!=` | Typed equality; `!=` is true on an unset field | `row.status != "archived"` |
 | `>` `>=` `<` `<=` | Comparisons | `row.count >= 10` |
-| `in` | Membership | `row.kind in ["a", "b"]`, `args.tag in row.tags` |
+| `in` | Membership; an empty list matches nothing ([memql.md](memql.md)) | `row.kind in ["a", "b"]`, `args.tag in row.tags` |
 | `startsWith` | String prefix (ANY of a list); an empty list and a blank prefix match nothing ([authoring rules](authoring-rules.md)) | `row.codeReference startsWith args.prefixes` |
 | `&&` / `\|\|` / `!` | Boolean connectives and negation | `row.folderId == args.folderId && isActiveRecord(row)` |
 | `??` | Blank-coalescing | `args.kind ?? "walkthrough"` |
