@@ -15,6 +15,7 @@ import type { FilesSettings } from "../../src/apps/files/settings";
 import { DEFAULT_FILES_SETTINGS } from "../../src/apps/files/settings";
 import type { UploadProvider } from "../../src/items/upload";
 import type { DesktopItem } from "../../src/system/desktop";
+import { FileSharesContext, type FileShares } from "../../src/apps/files/sharing";
 
 // The Files app's test harness.
 //
@@ -291,6 +292,8 @@ export async function renderFiles(opts: {
    * app is not there, and present when it is). Defaults to the real one.
    */
   registry?: OsRegistry;
+  /** Who files are shared with (sharing.tsx); nothing in a real cluster provides it yet. */
+  shares?: FileShares;
 } = {}) {
   const frame = (intent: typeof opts.intent) => (
     withSession(
@@ -301,6 +304,7 @@ export async function renderFiles(opts: {
         {...(opts.desk ? { store: deskDocumentWith(opts.desk) } : {})}
       >
         <MachinesProvider>
+          <FileSharesContext.Provider value={opts.shares ?? new Map()}>
           <FilesApp
             sectionId={opts.section ?? "browse"}
             navigate={() => {}}
@@ -311,6 +315,7 @@ export async function renderFiles(opts: {
             store={memSettingsStore(opts.settings ?? {})}
             uploads={opts.uploads ?? NO_UPLOADS}
           />
+          </FileSharesContext.Provider>
         </MachinesProvider>
       </OsProvider>,
     )

@@ -232,3 +232,33 @@ describe("the picked file's icons on the Head", () => {
     expect(screen.getByRole("region", { name: "File details" })).toBeTruthy();
   });
 });
+
+// Who a picked file is shared with, at the foot of the rail (Jesús, Nov 18
+// 2026). The engine has no share record yet, so the shares are handed in here
+// the way the OS test page stages them.
+describe("Sharing with, at the foot of the rail", () => {
+  const shares = new Map([["a-1", ["Sam Lee", "Dana Cole"]]]);
+  const twoFiles = () => fakeConnection({
+    artifacts: [artifactRow({ id: "a-1", title: "brief.pdf" }), artifactRow({ id: "a-2", title: "notes.md" })],
+  });
+
+  it("names the people only while a shared file is picked", async () => {
+    h.connection = twoFiles();
+    await renderFiles({ shares });
+    expect(screen.queryByRole("region", { name: "Sharing with" })).toBeNull();
+
+    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
+    const sharing = screen.getByRole("region", { name: "Sharing with" });
+    expect(within(sharing).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["SLSam Lee", "DCDana Cole"]);
+
+    await click(screen.getByRole("button", { name: /notes\.md/ }));
+    expect(screen.queryByRole("region", { name: "Sharing with" })).toBeNull();
+  });
+
+  it("is absent when nothing is shared, which is every real cluster today", async () => {
+    h.connection = twoFiles();
+    await renderFiles();
+    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
+    expect(screen.queryByRole("region", { name: "Sharing with" })).toBeNull();
+  });
+});
