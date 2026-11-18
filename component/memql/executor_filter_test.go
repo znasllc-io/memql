@@ -867,7 +867,9 @@ func TestIDMembershipPostFilter(t *testing.T) {
 			}
 			require.Equal(t, want, got)
 		}
-		for _, invalid := range []any{[]any{}, []any{123}, "one"} {
+		// An empty list is not invalid: it finds nothing
+		// (executor_filter_empty_membership_test.go).
+		for _, invalid := range []any{[]any{123}, "one"} {
 			_, err := nodeMatchesComparison(memorynodes.MemoryNode{ID: "one"}, &ComparisonExpression{Field: FieldReference{Parts: []string{"id"}}, Operator: op, Value: invalid}, nil)
 			require.Error(t, err)
 		}
