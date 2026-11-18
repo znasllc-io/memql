@@ -212,8 +212,8 @@ func (w *callsHopWorld) sweep() {
 	w.wipeMedia()
 }
 
-// startCall mints a key, unlocks it on replica A and starts a call there.
-func (w *callsHopWorld) startCall() callrules.StartResult {
+// hostSession mints a key and unlocks it on replica A.
+func (w *callsHopWorld) hostSession() callrules.Session {
 	w.t.Helper()
 	ctx := context.Background()
 	raw, key, err := callrules.NewKey(rand.Reader)
@@ -232,6 +232,14 @@ func (w *callsHopWorld) startCall() callrules.StartResult {
 	if err != nil {
 		w.t.Fatalf("unlock on replica A: %v", err)
 	}
+	return sess
+}
+
+// startCall mints a key, unlocks it on replica A and starts a call there.
+func (w *callsHopWorld) startCall() callrules.StartResult {
+	w.t.Helper()
+	ctx := context.Background()
+	sess := w.hostSession()
 	started, err := w.a.in.Service().Start(ctx, sess, callrules.StartBody{Name: "Host", Confirm: hopConfirmed})
 	if err != nil || started.Join.Outcome != callrules.OutcomeAdmit {
 		w.t.Fatalf("start on replica A: %+v, %v", started.Join, err)

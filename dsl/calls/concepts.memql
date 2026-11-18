@@ -154,8 +154,10 @@ concept queueEntry {
 }
 
 /// A SCHEDULED CALL: a call booked for a later time against one key. `guestDigest` and `hostDigest` are
-/// the SHA-256 digests of the links in the calendar file; the plain links are shown once. `roomId` is set
-/// when the call starts. Server-written and client-unreadable.
+/// the SHA-256 digests of the call's two links; the plain links are shown once, and a reschedule replaces
+/// both, so the old links open nothing. `roomId` is set when the first join opens the call's room, which
+/// carries the same two digests so the links find it as they find an ad hoc call's. Server-written and
+/// client-unreadable.
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="title", secondary="start", status="status")
@@ -171,6 +173,7 @@ concept scheduledCall {
   roomId  string  @description("The v1:calls:room once the call has started. The room names the call back (its scheduledCallId), so this side declares no relationship: a relationship here, as the reverse of the room's, is refused as a direction conflict (the gate idBearingFieldExemptions records the exemption).")
   guestDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")  @description("SHA-256, lowercase hex, of the guest link secret.")
   hostDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")  @description("SHA-256, lowercase hex, of the host link secret.")
+  calendarUid  string @maxLength(320)  @description("The UID of the call's calendar file, `<id>@<host>` with the deployable's public host at booking. FIXED WHEN THE CALL IS BOOKED and never written again, so the file a reschedule hands out updates the calendar entry the first one made even if the deployable's public host changed in between (a custom domain went live).")
   accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")

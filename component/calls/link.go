@@ -24,3 +24,17 @@ func NewToken(r io.Reader, n int) (string, error) {
 	}
 	return strings.ToLower(tokenEncoding.EncodeToString(buf)), nil
 }
+
+// GuestLink is a call's guest link on a deployable's public host:
+// https://<host>/#j=<guest token>. THE TOKEN RIDES THE FRAGMENT, which a
+// browser never sends to a server, so it reaches no server log and no Referer.
+func GuestLink(host, guestToken string) string {
+	return "https://" + host + "/#j=" + guestToken
+}
+
+// HostLink is a call's host link: the guest link with &h=<host token> added,
+// in the fragment for GuestLink's reason. It carries both secrets, because a
+// host joins the call the guest link names.
+func HostLink(host, guestToken, hostToken string) string {
+	return GuestLink(host, guestToken) + "&h=" + hostToken
+}

@@ -251,8 +251,11 @@ func (s *Store) keyByID(ctx context.Context, owner, keyID string) (*Key, error) 
 // ---------------------------------------------------------------------------
 
 // roomRow is one v1:calls:room. Its ids are BARE and its digests are never read back.
+// ScheduledCallID names the booking a booked call's room was opened for, and is empty for
+// an ad hoc call's.
 type roomRow struct {
 	ID, SiteID, OwnerUserID, KeyID, MediaServerID, MediaRoom, Status, HostSeatID string
+	ScheduledCallID                                                              string
 	Locked                                                                       bool
 	Window                                                                       callrules.JoinWindow
 	Version                                                                      time.Time
@@ -263,17 +266,18 @@ func (r roomRow) open() bool { return r.Status != "ended" }
 
 func roomFromRow(r map[string]any) roomRow {
 	return roomRow{
-		ID:            memql.BareShortId(rowString(r, "id")),
-		SiteID:        memql.BareShortId(rowString(r, "siteId")),
-		OwnerUserID:   memql.BareShortId(rowString(r, "ownerUserId")),
-		KeyID:         memql.BareShortId(rowString(r, "keyId")),
-		MediaServerID: memql.BareShortId(rowString(r, "mediaServerId")),
-		MediaRoom:     rowString(r, "mediaRoom"),
-		Status:        rowString(r, "status"),
-		HostSeatID:    memql.BareShortId(rowString(r, "hostSeatId")),
-		Locked:        rowBool(r, "locked"),
-		Window:        callrules.JoinWindow{StartedAt: rowTime(r, "joinWindowStartedAt"), Count: rowInt(r, "joinWindowCount")},
-		Version:       rowTime(r, "createdAt"),
+		ID:              memql.BareShortId(rowString(r, "id")),
+		SiteID:          memql.BareShortId(rowString(r, "siteId")),
+		OwnerUserID:     memql.BareShortId(rowString(r, "ownerUserId")),
+		KeyID:           memql.BareShortId(rowString(r, "keyId")),
+		MediaServerID:   memql.BareShortId(rowString(r, "mediaServerId")),
+		MediaRoom:       rowString(r, "mediaRoom"),
+		Status:          rowString(r, "status"),
+		HostSeatID:      memql.BareShortId(rowString(r, "hostSeatId")),
+		ScheduledCallID: memql.BareShortId(rowString(r, "scheduledCallId")),
+		Locked:          rowBool(r, "locked"),
+		Window:          callrules.JoinWindow{StartedAt: rowTime(r, "joinWindowStartedAt"), Count: rowInt(r, "joinWindowCount")},
+		Version:         rowTime(r, "createdAt"),
 	}
 }
 
@@ -316,10 +320,13 @@ func (s *Store) openRoomsForKey(ctx context.Context, owner, keyID string) ([]roo
 	return out, nil
 }
 
-// newRoom is what a room's create writes: digests of its links, never the links.
+// newRoom is what a room's create writes: digests of its links, never the links. A booked
+// call's room names its booking and opens locked, and has no host seat when a guest
+// opened it.
 type newRoom struct {
 	ID, SiteID, Deployable, KeyID, MediaServerID, MediaRoom, HostSeatID string
-	GuestDigest, HostDigest                                             string
+	GuestDigest, HostDigest, ScheduledCallID                            string
+	Locked                                                              bool
 	OpenedAt                                                            time.Time
 	Window                                                              callrules.JoinWindow
 }
@@ -331,7 +338,6 @@ func (s *Store) createRoom(ctx context.Context, owner string, n newRoom, version
 		"keyId":               n.KeyID,
 		"mediaServerId":       n.MediaServerID,
 		"mediaRoom":           n.MediaRoom,
-		"hostSeatId":          n.HostSeatID,
 		"guestDigest":         n.GuestDigest,
 		"hostDigest":          n.HostDigest,
 		"openedAt":            versionStamp(n.OpenedAt),
@@ -339,8 +345,15 @@ func (s *Store) createRoom(ctx context.Context, owner string, n newRoom, version
 		"joinWindowCount":     n.Window.Count,
 		"versionTime":         versionStamp(versionTime),
 	}
-	if n.Deployable != "" {
-		args["deployable"] = n.Deployable
+	// Absent rather than empty: a room a guest opened has no host seat yet, an ad hoc
+	// call's names no booking, and a deployable may have no name.
+	for name, value := range map[string]string{"deployable": n.Deployable, "hostSeatId": n.HostSeatID, "scheduledCallId": n.ScheduledCallID} {
+		if value != "" {
+			args[name] = value
+		}
+	}
+	if n.Locked {
+		args["locked"] = true
 	}
 	call, err := langparser.RenderCall("createCallsRoom", args)
 	return s.writeAs(ctx, owner, absent(roomConcept, n.ID), "the room", call, err)
@@ -603,6 +616,26 @@ func (l serverLoad) free() int {
 		}
 	}
 	return l.server.Seats - occupied
+}
+
+// classFor is the queue class a new waiter of a room takes: joining a running call when
+// somebody holds a seat in it now, and the room's own class otherwise -- a booked call's
+// that is due, or a new ad hoc call's.
+//
+// A CALL IS RUNNING ONLY ONCE SOMEBODY IS IN IT. A guest of a call whose host is still
+// queued would otherwise drain as joining a running call, ahead of that host, and sit in
+// a call with nobody hosting it while the host waited behind them. In its own class the
+// guest is behind its host by arrival, since the host's entry was made first.
+func (l serverLoad) classFor(room roomRow) callrules.QueueClass {
+	for _, seat := range l.seats {
+		if seat.RoomID == room.ID && seat.occupying() {
+			return callrules.ClassRunningCall
+		}
+	}
+	if room.ScheduledCallID != "" {
+		return callrules.ClassScheduledDue
+	}
+	return callrules.ClassNewCall
 }
 
 // roomState is one room as DecideJoin sees it: the people and agents in it now.

@@ -162,7 +162,8 @@ func (i *Integration) now() time.Time { return i.clock().UTC() }
 func (i *Integration) Store() *Store { return i.store }
 
 // Service is the calls service: unlocking a key, starting, joining, queueing and
-// leaving a call. The calls route family serves it.
+// leaving a call, and booking, moving and cancelling one for later. The calls route
+// family serves it.
 func (i *Integration) Service() *Service { return i.service }
 
 // IntegrationName implements memql.IntegrationProvider.

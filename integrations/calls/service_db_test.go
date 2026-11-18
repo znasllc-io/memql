@@ -181,7 +181,7 @@ func newCallWorld(t *testing.T, name string, seats int) *callWorld {
 // added: the world's own sweep knows only keys and limits.
 func (cw *callWorld) sweepCalls() {
 	ctx := context.Background()
-	concepts := []string{sessionConcept, roomConcept, seatConcept, queueEntryConcept}
+	concepts := []string{sessionConcept, roomConcept, seatConcept, queueEntryConcept, scheduledCallConcept}
 	for _, site := range cw.sites {
 		_, _ = cw.db.NewDelete().TableExpr(`"MemoryNodes"`).
 			Where("concept IN (?)", bun.In(concepts)).Where("payload->>'siteId' = ?", siteConcept+":"+site).Exec(ctx)
@@ -847,6 +847,51 @@ func TestFullCapacityQueuesAndPromotesInOrder(t *testing.T) {
 	resumed, err := cw.svc.Queue(ctx, g6)
 	require.NoError(t, err)
 	require.Equal(t, 1, resumed.Position, "the waiter behind an expired one did not move up")
+}
+
+// TestAGuestDoesNotQueueAheadOfItsQueuedHost: a call whose host is still queued is not
+// running yet, so a guest joining it queues in the new call's class behind its own host,
+// by arrival, and never ahead of them as someone joining a running call would. When a
+// seat frees up it goes to the host, not to a guest who would sit in a call with nobody
+// hosting it.
+func TestAGuestDoesNotQueueAheadOfItsQueuedHost(t *testing.T) {
+	cw := newCallWorld(t, "hostfirst", 2)
+	if cw == nil {
+		return
+	}
+	ctx := context.Background()
+	_, a := cw.started("Host A") // seat 1 of 2
+	_, a1, err := cw.join(a.Call.GuestToken, "A1")
+	require.NoError(t, err) // seat 2: the server is full
+
+	bHost := cw.host()
+	b, err := cw.svc.Start(ctx, bHost, callrules.StartBody{Name: "Host B", Confirm: confirmed})
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeQueue, b.Join.Outcome)
+	require.Equal(t, 1, b.Join.Position)
+	bHost, err = cw.svc.Session(ctx, cw.ref, bHost.Token)
+	require.NoError(t, err)
+
+	queued, bGuest, err := cw.join(b.Call.GuestToken, "B1")
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeQueue, queued.Outcome)
+	require.Equal(t, 2, queued.Position, "a guest queued ahead of their own call's queued host")
+	var class string
+	for _, entry := range cw.rowsOf(queueEntryConcept) {
+		if bare(entry["seatId"]) == bGuest.SeatID {
+			class, _ = entry["class"].(string)
+		}
+	}
+	require.Equal(t, "new", class, "a guest of a call nobody is in yet queued as joining a running call")
+
+	require.NoError(t, cw.svc.Leave(ctx, a1)) // a seat frees up
+	guestPoll, err := cw.svc.Queue(ctx, bGuest)
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeQueue, guestPoll.Outcome, "a guest took the seat ahead of their own queued host")
+	require.Equal(t, 2, guestPoll.Position)
+	hostPoll, err := cw.svc.Queue(ctx, bHost)
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeAdmit, hostPoll.Outcome, "the queued host was not let in first")
 }
 
 // TestALockedCallDoesNotHoldUpTheServersQueue: a waiter in a call its host has locked

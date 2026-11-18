@@ -247,6 +247,19 @@ query scheduledCall callsScheduledCallByHostDigest {
   shape   callsScheduledCallFull
 }
 
+/// One scheduledCall's two link digests, by its own id: the only read that returns a digest. The first join of a booked call copies them onto the room it opens, so both links find that room as they find an ad hoc call's, and the join holds only the link it presented (integrations/calls schedule.go). actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("scheduledCall digests by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+@cache(0)
+query scheduledCall callsScheduledCallDigestsById {
+  args {
+    id  string!
+  }
+  filter  row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsScheduledCallDigests
+}
+
 /// The scheduledCall rows of one parent, for the calls integration: scheduled calls of one key -- capped by the policy maximum of upcoming scheduled calls. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
 @serverOnly
 @unbounded("scheduled calls of one key -- capped by the policy maximum of upcoming scheduled calls")

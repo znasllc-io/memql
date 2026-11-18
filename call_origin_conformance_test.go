@@ -321,15 +321,18 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		//     checked in the handler, since the part may be granted through any
 		//     organization; it reads the cluster's servers as the system actor.
 		//
-		// The calls SERVICE (service.go, rooms.go) is the visitor's half: a person
-		// holding a key, a session or a call's link, with no MemQL identity. It stamps
-		// to look the presented secret up -- by its digest, on the one deployable it
-		// was handed, as that deployable's owner, after the secret's shape was checked
+		// The calls SERVICE (service.go, rooms.go, schedule.go) is the visitor's half: a
+		// person holding a key, a session or a call's link, with no MemQL identity. It
+		// stamps to look the presented secret up -- by its digest, on the one deployable
+		// it was handed, as that deployable's owner, after the secret's shape was checked
 		// -- and to write that deployable's calls rows as its owner once a secret
 		// resolved; a deployable and owner that do not belong together resolve nothing.
-		// A media server's load is read as the system actor, counted and never returned
-		// (service_db_test.go).
-		"integrations/calls": "the calls capability -- server-initiated (the media bootstrap at boot) and request-derived: callsTestKeyCreate and callsPolicySet stamp only after the part judged in the site's organization, a person check and the site read under the caller, and write as the site's owner; callsMediaServers stamps only for a cluster owner and reads as the system actor; callsSiteEnable stamps nothing and writes the site under the caller; the calls service stamps to look a presented key, session or link up by its digest on the named deployable as its owner, writes that deployable's calls rows as the owner only once one resolved, and reads a media server's load as the system actor without returning it",
+		// Booking, moving and cancelling a call act only for a session a key opened, on
+		// that key's own bookings. A media server's load is read as the system actor,
+		// counted and never returned, and so are a deployable's custom domains, of which
+		// only the live hostname a booked call's links are built on leaves
+		// (service_db_test.go, schedule_db_test.go).
+		"integrations/calls": "the calls capability -- server-initiated (the media bootstrap at boot) and request-derived: callsTestKeyCreate and callsPolicySet stamp only after the part judged in the site's organization, a person check and the site read under the caller, and write as the site's owner; callsMediaServers stamps only for a cluster owner and reads as the system actor; callsSiteEnable stamps nothing and writes the site under the caller; the calls service stamps to look a presented key, session or link up by its digest on the named deployable as its owner, writes that deployable's calls rows as the owner only once one resolved (a booking only for a session its own key opened), reads a media server's load as the system actor without returning it, and reads the deployable's custom domains as the system actor for the one live hostname its links are built on",
 		// component/edge records that it HONOURED a preview grant
 		// (touchSitePreviewGrant, @serverOnly). The edge already reads the
 		// site, the custom domain, the account door, the bound store and the

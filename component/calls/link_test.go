@@ -20,6 +20,17 @@ func TestNewTokenIsUnpaddedLowercaseBase32(t *testing.T) {
 	}
 }
 
+// TestLinksCarryTheirTokensInTheFragment: both links name the deployable's host and
+// carry their secrets after the '#', which a browser never sends to a server.
+func TestLinksCarryTheirTokensInTheFragment(t *testing.T) {
+	if got, want := GuestLink("calls.example.test", "guesttoken"), "https://calls.example.test/#j=guesttoken"; got != want {
+		t.Fatalf("guest link %q, want %q", got, want)
+	}
+	if got, want := HostLink("calls.example.test", "guesttoken", "hosttoken"), "https://calls.example.test/#j=guesttoken&h=hosttoken"; got != want {
+		t.Fatalf("host link %q, want %q", got, want)
+	}
+}
+
 func TestNewTokenRefusesBadInput(t *testing.T) {
 	if _, err := NewToken(bytes.NewReader(make([]byte, 8)), 16); err == nil {
 		t.Fatal("a short read must fail")

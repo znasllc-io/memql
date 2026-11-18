@@ -268,9 +268,10 @@ mutation scheduledCall createCallsScheduledCall {
     status  string
     guestDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")
     hostDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")
+    calendarUid  string @maxLength(320)
   }
   insert {
-    accept { siteId, keyId, start, end, title, guestDigest, hostDigest }
+    accept { siteId, keyId, start, end, title, guestDigest, hostDigest, calendarUid }
     stamp {
       id: args.scheduledCallId
       ownerUserId: actor.userId
@@ -280,7 +281,7 @@ mutation scheduledCall createCallsScheduledCall {
   }
 }
 
-/// Update a scheduledCall row (read-merge-validate-write). @serverOnly for createCallsScheduledCall's reason. Only the fields that change over a scheduledCall's life are accepted: its site, owner and digests never move. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+/// Update a scheduledCall row (read-merge-validate-write). @serverOnly for createCallsScheduledCall's reason. Only the fields that change over a scheduledCall's life are accepted: its site, owner and calendar UID never move, and its two digests move only when a reschedule mints new links, which is what makes the old links open nothing. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
 @serverOnly
 mutation scheduledCall updateCallsScheduledCall {
   args {
@@ -291,9 +292,11 @@ mutation scheduledCall updateCallsScheduledCall {
     title  string
     status  string
     roomId  string
+    guestDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")
+    hostDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")
   }
   update {
-    accept { start, end, title, status, roomId }
+    accept { start, end, title, status, roomId, guestDigest, hostDigest }
     stamp {
       id: args.scheduledCallId
       createdAt: args.versionTime ?? now

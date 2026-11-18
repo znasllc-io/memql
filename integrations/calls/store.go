@@ -30,7 +30,8 @@ import (
 // and there are three:
 //
 //   - A SITE'S ROWS (a key here, the site's limits in policy.go, its sessions, rooms,
-//     seats and queue entries in rooms.go) are read and written AS THE SITE'S OWNER,
+//     seats and queue entries in rooms.go, its bookings in schedule.go) are read and
+//     written AS THE SITE'S OWNER,
 //     with internal origin (asOwner). A create stamps ownerUserId from the actor, so a
 //     row is the site's owner's at birth and never the person who asked. Borrowed
 //     authority without internal origin is a CLIENT read of these concepts
@@ -41,11 +42,17 @@ import (
 //     actor.isClusterOwner, so a site owner's borrowed authority would read nothing.
 //     A media server's LOAD is read the same way (rooms.go loadOn): the calls of every
 //     deployable placed on the server share its seats, so it is counted across all of
-//     them, and nothing read that way is returned.
-//   - THE SITE ITSELF is read and written UNDER THE CALLER, unstamped, and that is
-//     what makes those two calls checks rather than lookups: a person who cannot read
-//     the deployable resolves zero rows, and the switch's write meets every gate a
-//     write of theirs meets (the part, the organization and the row's own tier).
+//     them, and nothing read that way is returned. So are a site's custom domains
+//     (schedule.go publicHost), which are cluster-owned rows a site's owner could not
+//     read; only the live hostname a booked call's links are built on leaves.
+//   - THE SITE ITSELF is read and written UNDER THE CALLER, unstamped, by the operator
+//     acts, and that is what makes those two calls checks rather than lookups: a
+//     person who cannot read the deployable resolves zero rows, and the switch's write
+//     meets every gate a write of theirs meets (the part, the organization and the
+//     row's own tier). The calls service reads it only to learn the hostname a booked
+//     call's links are built on, as the site's owner (schedule.go publicHost): a
+//     lookup, not a check, since whoever it answers holds a key or a link and has no
+//     MemQL identity to check.
 //
 // # No secret in an error
 //

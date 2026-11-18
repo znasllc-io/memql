@@ -183,8 +183,33 @@ type StartBody struct {
 	Confirm Confirmation
 }
 
+// ScheduleRequest books a call: when it starts, how many minutes it is booked
+// for, and its title in the calendar file, at most MaxScheduledTitleRunes
+// characters.
+type ScheduleRequest struct {
+	Start   time.Time
+	Minutes int
+	Title   string
+}
+
+// ScheduledCall is a booked call as its scheduler is handed it, once: its id,
+// its booked span, its title, the secrets of its two links, both links built
+// on the deployable's public host, and its calendar file. The host link seats
+// its holder as a host, the guest link as a guest. Only the links' digests are
+// stored, so the tokens and links here are the only copies there are; the
+// calendar file carries the guest link and never the host token.
+type ScheduledCall struct {
+	ID                    string
+	Start, End            time.Time
+	Title                 string
+	GuestToken, HostToken string
+	GuestLink, HostLink   string
+	ICS                   []byte
+}
+
 // The errors a calls service answers with, which a route maps to its replies.
-// A refusal that has a reason returns its JoinResult beside the error.
+// A refusal that has a reason returns its JoinResult beside the error, or,
+// for an act that answers no JoinResult, is a *Refusal.
 var (
 	// ErrNoSession: the session presented is unknown, ended or expired.
 	ErrNoSession = errors.New("calls: no session")
@@ -199,3 +224,48 @@ var (
 	// ErrConflict: the request is well formed but the call's state refuses it.
 	ErrConflict = errors.New("calls: conflict")
 )
+
+// Refusal is a refusal with a stable reason code, for an act whose answer has
+// no Reason field of its own: booking, rescheduling and cancelling a call. (A
+// join answers its reason in its JoinResult.) It unwraps to its class --
+// ErrInvalid, ErrConflict, ErrEnded or ErrForbidden -- and to its cause when
+// it has one, so errors.Is still finds the class a route maps to a reply, and
+// ReasonOf finds the code a client switches on. Detail is a sentence for a log
+// or a person; it never carries a secret.
+type Refusal struct {
+	Class  error
+	Reason string
+	Detail string
+	Cause  error
+}
+
+func (r *Refusal) Error() string {
+	text := r.Class.Error() + ": " + r.Reason
+	if r.Detail != "" {
+		text += ": " + r.Detail
+	}
+	return text
+}
+
+// Unwrap answers the class and, when there is one, the cause.
+func (r *Refusal) Unwrap() []error {
+	if r.Cause == nil {
+		return []error{r.Class}
+	}
+	return []error{r.Class, r.Cause}
+}
+
+// Refuse is a refusal of the given class with a reason code and a sentence.
+func Refuse(class error, reason, detail string) error {
+	return &Refusal{Class: class, Reason: reason, Detail: detail}
+}
+
+// ReasonOf is the reason code of a refusal, or "" for an error that carries
+// none.
+func ReasonOf(err error) string {
+	var refused *Refusal
+	if errors.As(err, &refused) {
+		return refused.Reason
+	}
+	return ""
+}

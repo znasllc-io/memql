@@ -860,6 +860,7 @@
       "file": "calls/concepts.memql",
       "fields": [
         "accountId",
+        "calendarUid",
         "end",
         "guestDigest",
         "hostDigest",
