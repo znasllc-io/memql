@@ -1,13 +1,15 @@
 import { useDroppable } from "@dnd-kit/core";
 import { Plus } from "lucide-react";
 
-import { DESK_CAP, type Desk } from "../system/desks";
+import { surfaceHasContent } from "../system/desktop";
+import { DESK_CAP, canAddDesk, type Desk } from "../system/desks";
 import { useOs } from "./state";
 
 // The desk pager (spec A): dots above the dock. Click switches; a window
 // dragged onto a dot is thrown there; a full dot dims during a window
-// drag; "+" adds a user desk. The active desk is announced politely by
-// the Desktop (aria-live), not here.
+// drag; "+" adds a user desk, and is absent while MAX_EMPTY_DESKS desks
+// are empty. The active desk is announced politely by the Desktop
+// (aria-live), not here.
 
 function PagerDot({ desk, index, active, draggingWindow }: {
   desk: Desk;
@@ -46,6 +48,7 @@ function NewDeskDrop({ visible }: { visible: boolean }) {
 export function DeskPager({ draggingWindow }: { draggingWindow: boolean }) {
   const { state, actions } = useOs();
   const { desks, activeDeskId } = state.shell;
+  const addable = canAddDesk(state.shell, (deskId) => surfaceHasContent(state.surfaces[deskId]));
   return (
     <nav className="os-pager" aria-label="Desks">
       {desks.map((desk, index) => (
@@ -59,7 +62,7 @@ export function DeskPager({ draggingWindow }: { draggingWindow: boolean }) {
       ))}
       {draggingWindow ? (
         <NewDeskDrop visible />
-      ) : (
+      ) : addable ? (
         <button
           type="button"
           className="os-pager-add"
@@ -68,7 +71,7 @@ export function DeskPager({ draggingWindow }: { draggingWindow: boolean }) {
         >
           <Plus size={10} aria-hidden />
         </button>
-      )}
+      ) : null}
     </nav>
   );
 }

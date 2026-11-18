@@ -17,6 +17,15 @@ import {
 
 export const DESK_CAP = 2;
 
+/**
+ * At most this many empty desks at once (the owner and José, Nov 2026): the
+ * desks in use plus two. You can always open a desk to work on, but "+"
+ * cannot pile up desks with nothing on them; once one gets an app, a file or
+ * a widget, another can be added. Absent, never disabled: the pager hides "+"
+ * while the limit is reached.
+ */
+export const MAX_EMPTY_DESKS = 2;
+
 export interface Desk {
   id: DeskId;
   /** "user" desks never garbage-collect; "auto" desks do when left empty. */
@@ -356,6 +365,30 @@ function topWindowOf(state: ShellState, deskId: DeskId): WindowId | null {
 }
 
 /**
+ * A desk with nothing on it: no window, no window waiting to return to it,
+ * and no items or widgets on its surface.
+ */
+export function isEmptyDesk(
+  state: ShellState,
+  desk: Desk,
+  deskHasSurfaceContent?: (deskId: DeskId) => boolean,
+): boolean {
+  return (
+    desk.windows.length === 0 &&
+    !Object.values(state.windows).some(w => w.expandedReturn?.deskId === desk.id) &&
+    !(deskHasSurfaceContent?.(desk.id) ?? false)
+  );
+}
+
+/** Whether "+" may add a desk: fewer than MAX_EMPTY_DESKS are empty. */
+export function canAddDesk(
+  state: ShellState,
+  deskHasSurfaceContent?: (deskId: DeskId) => boolean,
+): boolean {
+  return state.desks.filter((d) => isEmptyDesk(state, d, deskHasSurfaceContent)).length < MAX_EMPTY_DESKS;
+}
+
+/**
  * Drop auto-created desks that are inactive and completely empty. The desk
  * you are on is never collected under you; user-created desks never are.
  */
@@ -367,16 +400,18 @@ export function gcAutoDesks(
     (d) =>
       d.id === state.activeDeskId ||
       d.createdBy === "user" ||
-      d.windows.length > 0 ||
-      Object.values(state.windows).some(w => w.expandedReturn?.deskId === d.id) ||
-      (deskHasSurfaceContent?.(d.id) ?? false),
+      !isEmptyDesk(state, d, deskHasSurfaceContent),
   );
   if (keep.length === state.desks.length) return state;
   return { ...state, desks: keep };
 }
 
-/** Add a user desk explicitly (context menu / pager "+"). */
-export function addDesk(state: ShellState): ShellState {
+/** Add a user desk explicitly (pager "+"); refused while canAddDesk says no. */
+export function addDesk(
+  state: ShellState,
+  deskHasSurfaceContent?: (deskId: DeskId) => boolean,
+): ShellState {
+  if (!canAddDesk(state, deskHasSurfaceContent)) return state;
   const desk: Desk = { id: nextDeskId(state), createdBy: "user", windows: [] };
   return { ...state, desks: [...state.desks, desk], activeDeskId: desk.id, focusedWindowId: null };
 }

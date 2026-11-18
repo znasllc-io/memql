@@ -631,7 +631,7 @@ export function OsProvider({
         set((s) => ({ ...s, shell: switchDeskFn(s.shell, deskId, { deskHasSurfaceContent: hasContent(s) }) })),
       switchDeskBy: (delta) =>
         set((s) => ({ ...s, shell: switchDeskByFn(s.shell, delta, { deskHasSurfaceContent: hasContent(s) }) })),
-      addDesk: () => set((s) => ({ ...s, shell: addDeskFn(s.shell) })),
+      addDesk: () => set((s) => ({ ...s, shell: addDeskFn(s.shell, hasContent(s)) })),
       pinApp: (appId) => set((s) => registry.apps.some(app => app.id === appId && app.listed === false) ? s : ({ ...s, dock: pinFn(s.dock, appId) })),
       unpinApp: (appId) => set((s) => ({ ...s, dock: unpinFn(s.dock, appId) })),
       movePin: (appId, toIndex) => set((s) => ({ ...s, dock: movePinFn(s.dock, appId, toIndex) })),
