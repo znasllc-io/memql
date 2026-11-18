@@ -25,8 +25,9 @@ import (
 // queue, poll, and leave (design sections 7.7, 8 and 10). The rules are the pure
 // module's (component/calls); this file reads the state they decide from, under the
 // locks that make that state one replica's at a time, and writes what they decided. A
-// host's controls and how a call ends are host.go's, booked calls schedule.go's, and the
-// pass that repairs every call against its media server reconcile.go's.
+// host's controls and how a call ends are host.go's, booked calls schedule.go's, the
+// media server's webhooks events.go's, and the pass that repairs every call against its
+// media server reconcile.go's.
 //
 // # Bearer secrets, and what a stranger costs
 //
@@ -1355,9 +1356,15 @@ func entryID(entry *queueEntryRow) string {
 //
 // THE LAST PERSON LEAVING ENDS THE CALL: when nobody is left in it and nobody waits to
 // come in, it ends at once, empty, its booking with it (host.go endRows), and its media
-// room is deleted. Otherwise, when the seat was the last host seat in the call, the room
-// records when the host left (hostLeftAt), and the host-left countdown reconciliation
-// applies runs from then (host.go's file note).
+// room is deleted -- a booked call only after its booked end, since before that an emptied
+// booked call waits for its host (host.go endsEmpty). Otherwise, when the seat was the last
+// host seat in the call, the room records when the host left (hostLeftAt), and the
+// host-left countdown reconciliation applies runs from then (host.go's file note).
+//
+// THIS ROUTE IS THE HANG-UP, and the only thing that closes a seat at once. A media
+// server's participant_left is not a leave: a page refreshed and a tab closed disconnect
+// as a hang-up does, so a disconnect only records the seat's last sign of life, and
+// reconciliation closes the seat if it stays gone (events.go).
 func (s *Service) Leave(ctx context.Context, sess callrules.Session) error {
 	site, err := checkSite(sess.Site)
 	if err != nil {
@@ -1426,7 +1433,11 @@ func (s *Service) leaveGated(ctx context.Context, owner string, room roomRow, se
 	if err != nil {
 		return seat, false, err
 	}
-	if v.empty(now) {
+	ends, err := s.endsEmpty(fresh, v, now)
+	if err != nil {
+		return seat, false, err
+	}
+	if ends {
 		if err := s.endRows(fresh, v, callrules.EndReasonEmpty, now); err != nil {
 			return seat, false, err
 		}

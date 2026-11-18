@@ -62,10 +62,11 @@ import (
 //     time when no host seat is left in the call; a host in the call clears a stale one;
 //     then the countdown (host.go hostLeft) hands the call to a key holder in it, or finds
 //     it due to end.
-//  5. A call nobody is in and nobody waits for ends, empty, in this same gated phase; a
-//     call the countdown found due ends host_left in a second one, after its media room
-//     is deleted outside the gates (host.go's file note, "Where the media room is
-//     deleted"), and only if it is still due then (endIfDue).
+//  5. A call nobody is in and nobody waits for ends, empty, in this same gated phase -- a
+//     booked call only after its booked end (host.go endsEmpty); a call the countdown found
+//     due ends host_left in a second one, after its media room is deleted outside the
+//     gates (host.go's file note, "Where the media room is deleted"), and only if it is
+//     still due then (endIfDue).
 //
 // After each step that wrote, the call is read again before the next decides, so every
 // decision is made from rows as they stand and every write is fenced on the version it
@@ -395,7 +396,11 @@ func (s *Service) reconcileGated(ctx context.Context, server MediaServer, hint r
 	}
 
 	// 5. How the call ends, if it does.
-	if v.empty(now) {
+	empty, err := s.endsEmpty(fresh, v, now)
+	if err != nil {
+		return reconcilePlan{}, err
+	}
+	if empty {
 		if err := s.endRows(fresh, v, callrules.EndReasonEmpty, now); err != nil {
 			return reconcilePlan{}, err
 		}
@@ -434,7 +439,8 @@ func (s *Service) viewAgain(ctx context.Context, v roomView) (roomView, error) {
 // back, a host joining the line, or a key holder come in, since the first phase keeps it
 // open. Those are the only things that change its answer: the first phase marked the
 // expired entries before it decided ("The two phases", in the file note). A call that
-// emptied meanwhile ends as empty. It answers whether the call ended here.
+// emptied meanwhile ends as empty when the empty-room rule ends it (host.go endsEmpty). It
+// answers whether the call ended here.
 func (s *Service) endIfDue(ctx context.Context, hint roomRow) (bool, error) {
 	release, err := s.gates(ctx, endGates(hint)...)
 	if err != nil {
@@ -451,7 +457,11 @@ func (s *Service) endIfDue(ctx context.Context, hint roomRow) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if v.empty(now) {
+	empty, err := s.endsEmpty(fresh, v, now)
+	if err != nil {
+		return false, err
+	}
+	if empty {
 		return true, s.endRows(fresh, v, callrules.EndReasonEmpty, now)
 	}
 	action, _, err := s.hostLeft(fresh, v, now)

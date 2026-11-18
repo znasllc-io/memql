@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -32,6 +33,11 @@ var errUnverified = errors.New("signature verification failed")
 func verify(src SourceConfig, header http.Header, body []byte, now time.Time, tolerance time.Duration) (bool, error) {
 	if src.Scheme == SchemeNone {
 		return false, nil
+	}
+	// A token, not a digest: its own reading of the header, and none of the
+	// composite or timestamp handling below, which loadSource refuses for it.
+	if src.Scheme == SchemeJWTHS256BodySHA256 {
+		return verifyJWTSource(src, header, body, now, tolerance)
 	}
 
 	raw := strings.TrimSpace(header.Get(src.SignatureHeader))
@@ -138,6 +144,187 @@ func signedTimestamp(src SourceConfig, header http.Header, elements map[string]s
 			true
 	}
 	return "", "", false
+}
+
+// verifyJWTSource reads a jwt-hs256-body-sha256 source's token from its header and
+// checks it.
+//
+// THE HEADER'S WHOLE VALUE IS THE TOKEN, less the source's prefix when it configures
+// one. LiveKit's notifier, the scheme's first sender, sets the bare token as
+// Authorization with no "Bearer " (webhook/url_notifier.go send), and its own receiver
+// parses the header as it stands (webhook/verifier.go Receive). A sender that writes a
+// prefix names it in SIGNATURE_PREFIX, as an HMAC sender does. loadSource trims that
+// value, so "Bearer " arrives as "Bearer", and the space after it is trimmed off the
+// token here: a token holds no space, so trimming cannot change one that verifies.
+func verifyJWTSource(src SourceConfig, header http.Header, body []byte, now time.Time, tolerance time.Duration) (bool, error) {
+	token := strings.TrimSpace(header.Get(src.SignatureHeader))
+	if token == "" {
+		return false, fmt.Errorf("%w: header %q is absent or empty", errUnverified, src.SignatureHeader)
+	}
+	if src.SignaturePrefix != "" {
+		if !strings.HasPrefix(token, src.SignaturePrefix) {
+			return false, fmt.Errorf("%w: header %q does not carry the configured prefix %q",
+				errUnverified, src.SignatureHeader, src.SignaturePrefix)
+		}
+		token = strings.TrimSpace(strings.TrimPrefix(token, src.SignaturePrefix))
+	}
+	if err := verifyJWTBodySHA256(token, body, []byte(src.Secret), src.JWTIssuer, now, tolerance); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// jwtAlgorithm is the one algorithm the scheme accepts.
+const jwtAlgorithm = "HS256"
+
+// jwtSegment is how each of a token's three parts is encoded: base64url with no padding
+// (RFC 7515 section 2), strictly, so one value has one spelling.
+var jwtSegment = base64.RawURLEncoding.Strict()
+
+// verifyJWTBodySHA256 checks a compact JWS whose claims sign a request body:
+// authorization is the token itself (the header's value less any configured prefix),
+// body the request body as received, secret the HS256 key, and issuer the `iss` the
+// token must name. It answers nil only when every check passes, and otherwise an error
+// wrapping errUnverified, whose words name the check and never repeat what the caller
+// sent.
+//
+// THE ORDER IS THE SECURITY. Nothing is believed before the signature is checked, and
+// nothing about the signature before the algorithm is:
+//
+//  1. Three parts, and a key to check them with. An empty secret refuses everything: a
+//     source with no key verifies nothing, rather than an HMAC under the empty key.
+//  2. The header names HS256, exactly, and no critical extension. The algorithm is the
+//     SCHEME's, never the token's: "none", RS256 (the algorithm-confusion shape, where a
+//     shared secret is passed off as a public key) and every other name are refused
+//     before the signature is looked at. A `crit` header lists extensions the token
+//     says must be understood, and none is, so RFC 7515 section 4.1.11 makes it invalid.
+//  3. The signature, HMAC-SHA256 over "<header>.<claims>" under the secret, compared in
+//     constant time.
+//  4. The issuer, exactly: two keys sharing a secret are still two senders, and an empty
+//     configured issuer refuses everything rather than matching a token with none.
+//  5. exp, then nbf, each widened by tolerance for the two clocks' skew. exp is
+//     REQUIRED: a token without one is valid for ever, and so is a captured request
+//     carrying it. nbf is optional (RFC 7519 section 4.1.5). A time that is not a
+//     number is refused rather than read as zero.
+//  6. The `sha256` claim: the body's SHA-256 in standard base64, with or without its
+//     padding (the SDK writes it padded), compared in constant time. Without it a token
+//     would verify ANY body for as long as it lived.
+//
+// A token whose exp is far ahead verifies until it expires; only the secret's holder can
+// mint one. What bounds the replay of a CAPTURED request is the sender's own validity
+// (five minutes, for LiveKit) plus tolerance, and the row's identity being the body's
+// digest: a replay inside that window lands on the row the delivery made (identityKeyFor).
+func verifyJWTBodySHA256(authorization string, body, secret []byte, issuer string, now time.Time, tolerance time.Duration) error {
+	parts := strings.Split(authorization, ".")
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return fmt.Errorf("%w: the token is not three non-empty parts", errUnverified)
+	}
+	if len(secret) == 0 {
+		return fmt.Errorf("%w: the source has no secret, so no token can be checked", errUnverified)
+	}
+
+	header, err := jwtObject(parts[0])
+	if err != nil {
+		return fmt.Errorf("%w: the token's header %v", errUnverified, err)
+	}
+	if alg, ok := jwtString(header["alg"]); !ok || alg != jwtAlgorithm {
+		return fmt.Errorf("%w: the token is not signed with %s", errUnverified, jwtAlgorithm)
+	}
+	if _, ok := header["crit"]; ok {
+		return fmt.Errorf("%w: the token's header lists critical extensions, and none is understood", errUnverified)
+	}
+
+	got, err := jwtSegment.DecodeString(parts[2])
+	if err != nil {
+		return fmt.Errorf("%w: the token's signature is not unpadded base64url", errUnverified)
+	}
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte(parts[0] + "." + parts[1]))
+	if !hmac.Equal(mac.Sum(nil), got) {
+		return fmt.Errorf("%w: the token's signature does not match", errUnverified)
+	}
+
+	claims, err := jwtObject(parts[1])
+	if err != nil {
+		return fmt.Errorf("%w: the token's claims %v", errUnverified, err)
+	}
+	if issuer == "" {
+		return fmt.Errorf("%w: the source names no issuer, so no token can match it", errUnverified)
+	}
+	if iss, ok := jwtString(claims["iss"]); !ok || iss != issuer {
+		return fmt.Errorf("%w: the token does not name the source's issuer", errUnverified)
+	}
+
+	nowSecs := float64(now.UnixNano()) / float64(time.Second)
+	skew := tolerance.Seconds()
+	exp, ok := jwtNumericDate(claims["exp"])
+	if !ok {
+		return fmt.Errorf("%w: the token carries no exp that is a number, so it would never expire", errUnverified)
+	}
+	if past := nowSecs - exp; past > skew {
+		return fmt.Errorf("%w: the token expired %.0fs ago, outside the %s tolerance", errUnverified, past, tolerance)
+	}
+	if raw, present := claims["nbf"]; present {
+		nbf, ok := jwtNumericDate(raw)
+		if !ok {
+			return fmt.Errorf("%w: the token's nbf is not a number", errUnverified)
+		}
+		if ahead := nbf - nowSecs; ahead > skew {
+			return fmt.Errorf("%w: the token is valid only from %.0fs ahead, outside the %s tolerance", errUnverified, ahead, tolerance)
+		}
+	}
+
+	claimed, ok := jwtString(claims["sha256"])
+	if !ok || claimed == "" {
+		return fmt.Errorf("%w: the token carries no sha256 claim to bind it to the body", errUnverified)
+	}
+	digest, err := base64.StdEncoding.DecodeString(claimed)
+	if err != nil {
+		digest, err = base64.RawStdEncoding.DecodeString(claimed)
+	}
+	if err != nil {
+		return fmt.Errorf("%w: the token's sha256 claim is not standard base64", errUnverified)
+	}
+	sum := sha256.Sum256(body)
+	if !hmac.Equal(sum[:], digest) {
+		return fmt.Errorf("%w: the token's sha256 claim does not match the body", errUnverified)
+	}
+	return nil
+}
+
+// jwtObject decodes one of a token's first two parts into its JSON object's members.
+// Its error says which way the part was malformed and never repeats it.
+func jwtObject(segment string) (map[string]json.RawMessage, error) {
+	raw, err := jwtSegment.DecodeString(segment)
+	if err != nil {
+		return nil, errors.New("is not unpadded base64url")
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &members); err != nil || members == nil {
+		return nil, errors.New("is not a JSON object")
+	}
+	return members, nil
+}
+
+// jwtString reads a member that must be a JSON string. An absent one, null, or a value
+// of any other type is no string.
+func jwtString(raw json.RawMessage) (string, bool) {
+	var s *string
+	if len(raw) == 0 || json.Unmarshal(raw, &s) != nil || s == nil {
+		return "", false
+	}
+	return *s, true
+}
+
+// jwtNumericDate reads a NumericDate member (RFC 7519 section 2): a JSON number of
+// seconds since the epoch, which may carry a fraction. It stays a float64 -- every
+// comparison it takes part in is in seconds -- so nothing here narrows it to an integer.
+func jwtNumericDate(raw json.RawMessage) (float64, bool) {
+	var secs *float64
+	if len(raw) == 0 || json.Unmarshal(raw, &secs) != nil || secs == nil {
+		return 0, false
+	}
+	return *secs, true
 }
 
 func hmacSHA256(secret string, payload []byte) []byte {

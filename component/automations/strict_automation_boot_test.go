@@ -301,7 +301,11 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 208 -> 209: reconcileCalls, the thirty-second pass that repairs every open
 // call against its media server (the calls capability, 2026-11-18). One added,
 // none removed; measured by the strict loader.
-const shippedAutomationCount = 209
+// 209 -> 210: applyMediaEvent, which applies each of the calls media server's
+// webhooks, staged on the inbound seam, to the call it names (the calls
+// capability, 2026-11-18). One added, none removed; measured by the strict
+// loader.
+const shippedAutomationCount = 210
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

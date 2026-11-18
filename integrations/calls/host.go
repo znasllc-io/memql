@@ -18,7 +18,8 @@ import (
 // pure module's (component/calls host.go and countdown.go); this file reads the state
 // they decide from, under the gates service.go's file note describes, and writes what
 // they decided. Reconciliation (reconcile.go) applies the countdown and the empty-room
-// rule on its pass; Leave (service.go) applies them as a seat leaves.
+// rule on its pass; Leave (service.go) applies them as a seat leaves; and the media
+// server's room_finished (events.go) applies the empty-room rule.
 //
 // # Who is a host
 //
@@ -63,12 +64,13 @@ import (
 // # Ending a call
 //
 // A call ends three ways, each recorded on the room (endReason): a host ends it (ended);
-// the last person in it leaves with nobody waiting to come in (empty); or nobody hosting
-// it has been in it for the policy's HostLeftGrace and no key holder in it took over
-// (host_left). EVERY WAY WRITES ONE SEQUENCE (endRows) under the booking's, the room's and
-// the server's gates (endGates): every seat in the call or waiting leaves at that moment,
-// every waiting queue entry expires, THE BOOKING IS MARKED ENDED, and the ROOM IS WRITTEN
-// LAST. A failure part-way leaves the room open, and the next attempt -- a retried end,
+// the last person in it leaves with nobody waiting to come in (empty), which a booked
+// call does only after its booked end; or nobody hosting it has been in it for the
+// policy's HostLeftGrace and no key holder in it took over (host_left). EVERY WAY WRITES
+// ONE SEQUENCE (endRows) under the booking's, the room's and the server's gates
+// (endGates): every seat in the call or waiting leaves at that moment, every waiting
+// queue entry expires, THE BOOKING IS MARKED ENDED, and the ROOM IS WRITTEN LAST. A
+// failure part-way leaves the room open, and the next attempt -- a retried end,
 // or reconciliation's next pass -- ends it again; a booking marked ended while its room
 // is still open holds no slot and is joined through its room. Marking the booking ended
 // is what keeps a key's bookings read (callsScheduledCallsForKey) to the key's open calls
@@ -90,27 +92,31 @@ import (
 //
 // The countdown runs only from hostLeftAt (calls.HostLeft). The last host seat in the call
 // leaving stamps it (service.go Leave; reconciliation stamps it too when it closes a
-// vanished host seat, at that seat's leave time), and a host seat let back in clears it
-// (service.go). A HOST WHO NEVER GOT IN NEVER LEFT: a call whose host has been queued
-// since Start counts nothing down. A BOOKED CALL WHOSE HOST NEVER CAME counts from its
-// booked start, or from its opening when a guest opened it after the start, so a guest who
-// arrives late is given the grace a host who left is given and does not open a call that
-// is already over; while a host seat of the call waits in line with a live place, the host
-// is coming and nothing counts. A host seat passes the lock, so it only ever waits in line:
-// once its place has expired (its holder stopped polling) the host is not coming, and the
-// countdown runs from the booked start as for a host who never came. A call with a KEY
-// HOLDER in it -- a seat whose session a key opened,
-// the key the deployable's and active -- is handed to them at once (design 8: "their pass
-// or key then covers the guests"): their seat becomes a host seat and the room's
-// hostSeatId, and the countdown is cleared. Reconciliation applies the countdown
-// (reconcile.go), so a hand-over or an end comes within one pass.
+// vanished host seat, at that seat's leave time: its last sign of life, which a media
+// server's participant_left records as the disconnect, events.go), and a host seat let
+// back in clears it (service.go). A HOST WHO NEVER GOT IN NEVER LEFT: a call whose host
+// has been queued since Start counts nothing down. A BOOKED CALL WHOSE HOST NEVER CAME
+// counts from its booked start, or from its opening when a guest opened it after the
+// start, so a guest who arrives late is given the grace a host who left is given and does
+// not open a call that is already over; while a host seat of the call waits in line with
+// a live place, the host is coming and nothing counts. A host seat passes the lock, so it
+// only ever waits in line: once its place has expired (its holder stopped polling) the
+// host is not coming, and the countdown runs from the booked start as for a host who
+// never came. A call with a KEY HOLDER in it -- a seat whose session a key opened, the
+// key the deployable's and active -- is handed to them at once (design 8: "their pass or
+// key then covers the guests"): their seat becomes a host seat and the room's hostSeatId,
+// and the countdown is cleared. Reconciliation applies the countdown (reconcile.go), so a
+// hand-over or an end comes within one pass.
 //
 // # The empty-room rule
 //
 // A call nobody is in and nobody is waiting for ends at once, empty: when the last seat in
-// it leaves (service.go Leave), and on reconciliation's pass, which also ends a call whose
-// last waiter gave up. A waiting seat counts while it holds a live place in line (an
-// entry inside its deployable's QueueEntryTTL). A seat HELD BEHIND A LOCK -- a guest's,
+// it leaves (service.go Leave), on reconciliation's pass, which also ends a call whose
+// last waiter gave up, and when its media server says it closed the media room
+// (events.go room_finished). A BOOKED CALL ONLY AFTER ITS BOOKED END (endsEmpty): before
+// it, an emptied booked call stays open for its host, and the countdown above ends it if
+// nobody comes. A waiting seat counts while it holds a live place in line (an entry
+// inside its deployable's QueueEntryTTL). A seat HELD BEHIND A LOCK -- a guest's,
 // not a host's and not one a host admitted -- counts while it holds no place at all: a
 // lock keeps no entry (service.go), and a locked call with nobody hosting it is ended by
 // the countdown instead, which counts only host seats (hostComing). A seat that passes the
@@ -487,7 +493,38 @@ func (v roomView) stillWaiting(seat seatRow, now time.Time) bool {
 	return !placed && v.room.Locked && !seat.passesLock()
 }
 
-// empty reports whether nobody is in the call and nobody waits to come in.
+// endsEmpty is the empty-room rule as it ENDS a call (the file note): nobody in it and
+// nobody waiting to come in (empty), and, for a booked call, its booked end reached. Every
+// decision that may end a call empty asks this, never empty alone: a leave, both phases of
+// a pass, and a media server's room_finished.
+//
+// A BOOKED CALL IS ITS HOST'S UNTIL ITS BOOKED END. A candidate who opens an interview
+// early to try the link and leaves would otherwise end it, booking and all, and the
+// interviewer arriving at the start would be refused. Before its end an emptied booked
+// call stays open, holding its key's call for up to the countdown, and the countdown ends
+// it if nobody comes (hostLeft: from hostLeftAt, or, when its host never came, from the
+// later of its booked start and its opening). A booking that is gone, or carries no end,
+// is decided as an ad hoc call's: without its start the countdown has nothing to count
+// from for a host who never came, and the call would otherwise stay open for good.
+func (s *Service) endsEmpty(ctx context.Context, v roomView, now time.Time) (bool, error) {
+	if !v.empty(now) {
+		return false, nil
+	}
+	if v.room.ScheduledCallID == "" {
+		return true, nil
+	}
+	booking, err := s.store.bookingByID(ctx, v.room.OwnerUserID, v.room.ScheduledCallID)
+	if err != nil {
+		return false, err
+	}
+	if booking == nil || booking.End.IsZero() {
+		return true, nil
+	}
+	return !now.Before(booking.End), nil
+}
+
+// empty reports whether nobody is in the call and nobody waits to come in. It decides
+// nothing alone: a call ends empty on endsEmpty.
 func (v roomView) empty(now time.Time) bool {
 	if occupants(v.seats, v.room.ID, "") > 0 {
 		return false

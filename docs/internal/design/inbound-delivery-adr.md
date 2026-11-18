@@ -41,7 +41,8 @@ A **product-agnostic receiver on the bff** at `POST /inbound/{source}` that:
 
 1. refuses anything not on a deploy-configured **source allowlist**;
 2. verifies a per-source **HMAC signature**, with an optional timestamped
-   replay window;
+   replay window, or a per-source **token that signs the body's digest**
+   (section 5.2);
 3. stages the verified request as a `v1:platform:inboundRequest` row;
 4. answers `202` and leaves the work to whichever product automation triggers
    on `node.created` for that concept.
@@ -198,7 +199,10 @@ delivery was valid and we simply could not record it, so the sender must retry
    window is enforced in *both* directions, and the timestamp is bound into the
    signed payload (`"<ts>.<body>"`) so it cannot be rewritten after signing.
    Without one, a signature is valid forever and `dedupeKey` is the only
-   defence -- which is why it always has a value.
+   defence -- which is why it always has a value. A token-signed sender
+   (section 5.2) carries its own `exp`, which is required, so its captured
+   request is replayable only until the token expires plus the tolerance, and
+   onto the row the delivery already made.
 8. **The route is declared.** It is in `server.HandlerAuthorizedPaths()`, not
    `PublicPaths()`, so the memql#2939 boot assertion accounts for it without
    bypassing the verifier for `/inbound/*` on every verifier-consuming node.
@@ -218,13 +222,14 @@ Per source (`<NAME>` uppercased, `-` mapped to `_`):
 
 | var | required | meaning |
 |---|---|---|
-| `..._SIGNATURE_SCHEME` | yes | `hmac-sha256-hex`, `hmac-sha256-base64` or `none` |
+| `..._SIGNATURE_SCHEME` | yes | `hmac-sha256-hex`, `hmac-sha256-base64`, `jwt-hs256-body-sha256` or `none` |
 | `..._SECRET` | unless `none` | shared HMAC key |
 | `..._SIGNATURE_HEADER` | unless `none` | where the signature arrives |
 | `..._SIGNATURE_PREFIX` | no | stripped before decoding, e.g. `sha256=` |
-| `..._TIMESTAMP_HEADER` | no | enables the replay window |
+| `..._TIMESTAMP_HEADER` | no | enables the replay window; refused with `jwt-hs256-body-sha256` |
 | `..._DEDUPE_HEADER` | no | sender's idempotency key |
 | `..._MAX_BODY_BYTES` | no | the source's own body cap: a GitHub push of a long branch outgrows 256 KiB, so the `github` source defaults to GitHub's 25 MiB, and a body over the default is held in one of two turns per node |
+| `..._JWT_ISSUER` | with `jwt-hs256-body-sha256` | the `iss` the token must name; refused with any other scheme |
 
 ### 5.1 Why schemes rather than vendors
 
@@ -259,6 +264,57 @@ MEMQL_INBOUND_SOURCE_SHOPIFY_SECRET=<shared secret>
 connector's own app-level source, and the receiver drops an env source under a
 declared connector's name at boot. Today the same policy is spelled
 `shopify-custom`; see `docs/public/operate/inbound-delivery.md`.)
+
+### 5.2 A token that signs the body: `jwt-hs256-body-sha256`
+
+Added for the calls capability's media server (2026-11-18). A LiveKit server
+does not sign its webhook body with an HMAC. It mints a JWT under its webhook
+key pair -- `iss` the key, HS256 under the secret, valid five minutes -- whose
+`sha256` claim is the standard base64 of the body's SHA-256, and sends the
+token as the bare value of `Authorization`. The HMAC schemes cannot express
+that: the signature covers the claims, not the body. So the scheme list gains
+one more ENCODING, for the same reason 5.1 gives: it says how the proof is laid
+out and names no sender.
+
+`verifyJWTBodySHA256` (`component/inbound/verify.go`) checks, in this order,
+and believes nothing before the signature:
+
+1. three non-empty parts, and a secret to check them with;
+2. the header names `HS256` exactly and no `crit` extension -- `none`, `RS256`
+   (the algorithm-confusion shape) and every other name are refused before the
+   signature is looked at, because the algorithm is the scheme's, never the
+   token's;
+3. the signature, HMAC-SHA256 over `<header>.<claims>`, compared in constant
+   time, with each part strict unpadded base64url;
+4. `iss` equals the source's `JWT_ISSUER` -- two keys sharing a secret are two
+   senders, and an empty configured issuer refuses everything;
+5. `exp`, required, and `nbf` when present, each widened by
+   `MEMQL_INBOUND_TIMESTAMP_TOLERANCE_SECONDS` for skew; a time that is not a
+   number is refused rather than read as zero;
+6. the `sha256` claim equals the body's digest, padded or not, in constant
+   time -- without it a token verifies any body while it lives.
+
+Every refusal is the same flat `401`, and its logged reason never repeats what
+the caller sent.
+
+**Identity stays the body's digest.** The token can differ between two sends of
+one event (a resend is signed again), and the event's own id and time are in the
+body, so the row id is taken over the body alone and a retry lands on one row. `identityKeyFor` folds a timestamp header in
+for the two HMAC schemes only, and `loadSource` refuses `TIMESTAMP_HEADER` and
+the composite-header settings with this scheme: an unsigned value in an
+identity is attacker-multipliable (3.2).
+
+**The `livekit` source is REGISTERED, not allowlisted.** The bff answers it
+from the calls media bootstrap's sealed `calls.media.webhook` credential
+(`app/transport_inbound.go` `liveKitWebhookResolver`), in the tier between the
+environment and the connectors that `resolveSource` asks whatever
+`MEMQL_INBOUND_SOURCE_ALLOWLIST` says, so no deployment lists the name. The
+receiver holds one registered resolver, so the GitHub App's and this one are
+composed into one (`firstRegisteredSource`). An env pin on `livekit` wins, as
+env always does, and the calls builtin refuses what it verifies, because a
+secret other than the media server's did (`integrations/calls/events.go`).
+Part 1 verifies every media server's webhooks against that one credential; a
+server with keys of its own needs a lookup by issuer.
 
 ## 6. What a product writes
 
@@ -301,3 +357,5 @@ queryable, auditable and reactable with the constructs a product already uses.
 - memql#2980 -- the composite-id injectivity class 3.2 is written against.
 - `component/inbound/` -- config, verification, handler.
 - `dsl/platform/` -- concept, shape, queries, mutations.
+- `integrations/calls/events.go` and `app/transport_inbound.go` -- the
+  `livekit` source and what applies its deliveries (5.2).

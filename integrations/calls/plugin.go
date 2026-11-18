@@ -16,13 +16,14 @@ import (
 
 // plugin.go -- self-registration, and the one piece of boot work.
 //
-// REGISTERED ON EVERY NODE TYPE, for integrations/siteaccess's reason exactly: the five
+// REGISTERED ON EVERY NODE TYPE, for integrations/siteaccess's reason exactly: the six
 // builtins are declared in dsl/calls/builtins.memql, which EVERY binary loads, and a
 // capability present in the DSL and absent from the registry is a boot-time resolution
 // failure. Gating the registration by build tag would also make whether an operator can
 // mint a key depend on which replica their stream landed on. The reconciliation pass is
-// placed on bff replicas by its automation's trigger (node="bff"), not by this
-// registration.
+// placed on bff replicas by its automation's trigger (node="bff"), and a media server's
+// webhook is applied on the bff that received and staged it, which a delivery never
+// leaves (events.go); neither is placed by this registration.
 //
 // It is an INTEGRATION in the module taxonomy (module_taxonomy_test.go): it talks to a
 // media server's control API, somebody else's system, through LiveKit's client.
@@ -165,16 +166,17 @@ func (i *Integration) now() time.Time { return i.clock().UTC() }
 func (i *Integration) Store() *Store { return i.store }
 
 // Service is the calls service: unlocking a key, starting, joining, queueing and
-// leaving a call, booking, moving and cancelling one for later, a host's controls, and
-// the reconciliation pass. The calls route family serves it.
+// leaving a call, booking, moving and cancelling one for later, a host's controls, the
+// media server's webhooks, and the reconciliation pass. The calls route family serves it.
 func (i *Integration) Service() *Service { return i.service }
 
 // IntegrationName implements memql.IntegrationProvider.
 func (i *Integration) IntegrationName() string { return pluginName }
 
 // Capabilities implements memql.IntegrationProvider: the four operator acts
-// (operator.go) and the reconciliation pass the reconcileCalls automation runs
-// (reconcile.go), declared in dsl/calls/builtins.memql.
+// (operator.go), the reconciliation pass the reconcileCalls automation runs
+// (reconcile.go), and the media server's webhooks the applyMediaEvent automation applies
+// (events.go), declared in dsl/calls/builtins.memql.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{
@@ -210,6 +212,14 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Name:        "reconcile",
 			Description: "One reconciliation pass over every open call: seats repaired to what the media server shows, the host-left countdown applied, expired queue entries marked. Only the engine's own reconcileCalls automation runs it.",
 			Handler:     i.handleReconcile,
+		},
+		{
+			Name:        "applyMediaEvent",
+			Description: "Apply one of the media server's webhooks, staged as an inbound request, to the call it names. Only the engine's own applyMediaEvent automation runs it, and only on a delivery the calls media credential verified.",
+			Handler:     i.handleApplyMediaEvent,
+			ArgsSchema: map[string]string{
+				"requestId": "string (required) -- the staged v1:platform:inboundRequest row's id.",
+			},
 		},
 	}
 }

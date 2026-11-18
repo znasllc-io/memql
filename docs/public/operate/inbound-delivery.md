@@ -18,9 +18,10 @@ outbox a product stages and the engine drains; inbound is the inbox the engine
 stages and a product drains.
 
 A third party POSTs to `/inbound/{source}` on the bff. The receiver checks the
-source against a deploy-configured allowlist, verifies the request's HMAC
-signature, stages it as a `v1:platform:inboundRequest` row, and answers `202`.
-A product automation triggers on the new row. No product Go, no sidecar.
+source against a deploy-configured allowlist, verifies the request's signature
+(an HMAC of the body, or a token whose claims sign the body's digest), stages it
+as a `v1:platform:inboundRequest` row, and answers `202`. A product automation
+triggers on the new row. No product Go, no sidecar.
 
 ## Nothing is admitted until you say so
 
@@ -49,11 +50,12 @@ the source `big-corp` reads `MEMQL_INBOUND_SOURCE_BIG_CORP_*`:
 
 | var | required | meaning |
 |---|---|---|
-| `..._SIGNATURE_SCHEME` | yes | `hmac-sha256-hex`, `hmac-sha256-base64`, or `none` |
+| `..._SIGNATURE_SCHEME` | yes | `hmac-sha256-hex`, `hmac-sha256-base64`, `jwt-hs256-body-sha256`, or `none` |
 | `..._SECRET` | unless `none` | the shared HMAC key |
 | `..._SIGNATURE_HEADER` | unless `none` | which header carries the signature |
 | `..._SIGNATURE_PREFIX` | no | stripped before decoding, e.g. `sha256=` |
-| `..._TIMESTAMP_HEADER` | no | turns on the replay window |
+| `..._TIMESTAMP_HEADER` | no | turns on the replay window; refused with `jwt-hs256-body-sha256`, whose token carries its own times |
+| `..._JWT_ISSUER` | with `jwt-hs256-body-sha256` | the `iss` the sender's token must name: the key it signs as. Refused with any other scheme |
 | `..._DEDUPE_HEADER` | no | the sender's own idempotency key |
 | `..._FORWARD_HEADERS` | no | comma-separated allowlist of non-secret delivery headers to stage on the row as `headersJson` (lowercase keys). `Authorization`, `Cookie` and the signature header are never staged, whatever the list says. The body HMAC does not sign these values: they are routing metadata, not proof of who sent the request |
 | `..._MAX_BODY_BYTES` | no | this source's own body cap, in place of `MEMQL_INBOUND_MAX_BODY_BYTES`, for a sender whose real deliveries outgrow the default. A GitHub push of a long branch is far over 256 KiB, so the `github` source defaults to GitHub's own 25 MiB cap. A body over the receiver's default is held in one of two turns per node, so a raised cap does not let an unauthenticated caller exhaust the node's memory; a request that finds both turns taken is answered `503`. A body holding a turn must keep arriving -- at least 1 MiB/s after its first second, and all of it within 10 seconds -- or it is answered `408`, so a sender trickling bytes cannot sit on a turn. A request without its source's signature header never gets a turn: it is refused `401` before its body is read |
@@ -123,6 +125,38 @@ MEMQL_INBOUND_SOURCE_STRIPE_SECRET=<shared secret>
 Note there is no `..._SIGNATURE_PREFIX` here and it would not help: `v1=` is not
 a *leading* prefix, because `t=<unix>,` comes first. That is precisely the shape
 the element vars exist for.
+
+A sender that signs a token rather than the body. `jwt-hs256-body-sha256` is a
+compact JWT, signed HS256 under the shared secret, whose `sha256` claim is the
+standard base64 of the body's SHA-256. The receiver accepts HS256 and nothing
+else, checks the signature in constant time, then `iss` against `JWT_ISSUER`,
+then `exp` (required) and `nbf` widened by
+`MEMQL_INBOUND_TIMESTAMP_TOLERANCE_SECONDS`, then the digest against the body.
+The header carries the token as it is; set `..._SIGNATURE_PREFIX=Bearer` for a
+sender that writes `Bearer <token>` (the space after the prefix is ignored). A
+LiveKit-shaped sender:
+
+```bash
+MEMQL_INBOUND_SOURCE_ALLOWLIST=media
+MEMQL_INBOUND_SOURCE_MEDIA_SIGNATURE_SCHEME=jwt-hs256-body-sha256
+MEMQL_INBOUND_SOURCE_MEDIA_SIGNATURE_HEADER=Authorization
+MEMQL_INBOUND_SOURCE_MEDIA_JWT_ISSUER=<the sender's API key>
+MEMQL_INBOUND_SOURCE_MEDIA_SECRET=<the secret it signs with>
+```
+
+The row's identity is the body's digest alone, never the token, which can
+differ between two sends of one event; so a retry of one event lands on one row.
+
+**The `livekit` source specifically** is the calls capability's media server,
+and it takes none of these lines: the bff registers it for itself from the key
+pair the calls media bootstrap sealed (`MEMQL_CALLS_MEDIA_WEBHOOK_KEY` as the
+issuer, `MEMQL_CALLS_MEDIA_WEBHOOK_SECRET` as the key), as it registers a GitHub
+App's. A registered source is answered whatever the allowlist says, so do not
+add `livekit` to `MEMQL_INBOUND_SOURCE_ALLOWLIST`; a cluster with no media
+server answers `404` for it. Its deliveries are applied by the
+`applyMediaEvent` automation, which works only a delivery the media server's
+own credential verified: pin `livekit` in the environment and that pin wins,
+and every delivery it verifies is stamped `failed`.
 
 A Shopify-shaped one, for a custom app's webhook secret. The source is named
 `shopify-custom`, not `shopify`, and the name matters: an env pin on a name a
@@ -386,8 +420,9 @@ row and retain their normal authority for downstream work.
 Every sender in scope retries, so redelivery is normal.
 
 The row id is derived from `(source, <digest of the signed payload>)` -- the
-body, or `timestamp + "." + body` where the source configures a timestamp
-header. So a redelivery lands on the **same row**, and the staging mutation
+body, or `timestamp + "." + body` where an HMAC source configures a timestamp
+header (a `jwt-hs256-body-sha256` source's is always the body, whatever its
+token). So a redelivery lands on the **same row**, and the staging mutation
 preserves your handling state rather than resetting it to `received`.
 
 **The row collapses. The event may not.** The staging mutation keeps what the
@@ -470,10 +505,16 @@ hex and refuses. After that, check the secret matches the one configured at the
 sender, and that the scheme's encoding is right -- hex and base64 of the same
 digest are both "valid signatures" and neither decodes as the other.
 
+**Everything 401s from a token-signed source.** Check that `..._JWT_ISSUER` is
+the key the sender signs as (it is the token's `iss`), that the secret is that
+key's, and that the header is the token itself: a sender that writes
+`Bearer <token>` needs `..._SIGNATURE_PREFIX=Bearer`. The node log names which
+check failed.
+
 **Everything 401s only sometimes.** If the source has a `..._TIMESTAMP_HEADER`,
-the replay window is in force in both directions and clock skew between the
-sender and the node will show up as intermittent refusals. Widen
-`MEMQL_INBOUND_TIMESTAMP_TOLERANCE_SECONDS` or fix the clock.
+or signs a token, the replay window is in force in both directions and clock
+skew between the sender and the node will show up as intermittent refusals.
+Widen `MEMQL_INBOUND_TIMESTAMP_TOLERANCE_SECONDS` or fix the clock.
 
 **Rows arrive but nothing happens.** The receiver's job ends at `received`.
 Check the product automation's trigger and filter.

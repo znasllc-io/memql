@@ -4,11 +4,14 @@ package app
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/identity/githubconnect"
 	"github.com/znasllc-io/memql/component/inbound"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/server"
+	"github.com/znasllc-io/memql/integrations/calls"
 )
 
 // mountInboundEndpoints wires the inbound-delivery receiver
@@ -22,28 +25,29 @@ import (
 // the externally-reachable surface for nothing.
 //
 // It always mounts. When nothing is configured -- the default -- the receiver
-// resolves an empty source allowlist and answers 404 to everything but the one
-// source a cluster can register for itself (registeredGitHubWebhook), so
-// mounting unconditionally costs a route that admits nobody. That is preferable
-// to mounting conditionally: a conditional mount makes "did the operator set
-// the env" and "is the endpoint there" two different questions, and the
-// difference only shows up as a 404 in production either way.
+// resolves an empty source allowlist and answers 404 to everything but the two
+// sources a cluster registers for itself (registeredGitHubWebhook and
+// registeredLiveKitWebhook), so mounting unconditionally costs a route that
+// admits nobody. That is preferable to mounting conditionally: a conditional
+// mount makes "did the operator set the env" and "is the endpoint there" two
+// different questions, and the difference only shows up as a 404 in production
+// either way.
 func (a *App) mountInboundEndpoints() {
 	cfg := withGitHubPayloadCap(inbound.LoadConfig(a.Logger))
 	handler := inbound.NewHandler(cfg, &InboundEngineAdapter{Engine: a.engine}, a.Logger)
-	handler.SetRegisteredSource(a.registeredGitHubWebhook())
+	handler.SetRegisteredSource(firstRegisteredSource(a.registeredGitHubWebhook(), a.registeredLiveKitWebhook()))
 	for _, path := range server.InboundWebhookPaths() {
 		a.handleRoute("POST "+path, handler)
 	}
 	if len(cfg.Sources) == 0 {
 		// "Every request" stopped being true when a cluster could register a
-		// GitHub App for itself: that one source is admitted from the app's own
-		// stored secret, decided per request, so whether it applies is not
-		// something this line can know at boot. It says so rather than promise
-		// a 404 that a cluster with a registered app does not answer.
+		// source for itself: a GitHub App's, and the calls media server's, are
+		// each admitted from a secret the cluster stored, decided per request, so
+		// whether either applies is not something this line can know at boot. It
+		// says so rather than promise a 404 that such a cluster does not answer.
 		a.Logger.Info("inbound receiver mounted with no sources configured in the environment; every request " +
-			"is refused with 404 except the webhook of a GitHub App registered from the product " +
-			"(set MEMQL_INBOUND_SOURCE_ALLOWLIST to enable others)")
+			"is refused with 404 except the webhook of a GitHub App registered from the product and the calls " +
+			"media server's (set MEMQL_INBOUND_SOURCE_ALLOWLIST to enable others)")
 		return
 	}
 	names := make([]string, 0, len(cfg.Sources))
@@ -164,5 +168,121 @@ func githubWebhookPolicy(secret string) inbound.SourceConfig {
 		DedupeHeader:    "X-GitHub-Delivery",
 		ForwardHeaders:  append([]string(nil), githubDeliveryHeaders...),
 		MaxBodyBytes:    githubMaxPayloadBytes,
+	}
+}
+
+// firstRegisteredSource composes the sources the cluster registers for itself
+// into the ONE resolver the receiver holds: inbound.Handler.SetRegisteredSource
+// takes a single function, and a second call replaces the first, so wiring the
+// GitHub App's and the calls media server's one after the other would silently
+// leave only the last. Each is asked in turn and the first that answers a name
+// decides it; each answers its own name only, so their order decides nothing. A
+// nil resolver is skipped, and none at all composes to nil, which leaves the
+// receiver exactly as it was with no registered tier.
+func firstRegisteredSource(resolvers ...inbound.RegisteredSource) inbound.RegisteredSource {
+	var wired []inbound.RegisteredSource
+	for _, resolve := range resolvers {
+		if resolve != nil {
+			wired = append(wired, resolve)
+		}
+	}
+	if len(wired) == 0 {
+		return nil
+	}
+	return func(ctx context.Context, name string) (inbound.SourceConfig, bool) {
+		for _, resolve := range wired {
+			if src, ok := resolve(ctx, name); ok {
+				return src, true
+			}
+		}
+		return inbound.SourceConfig{}, false
+	}
+}
+
+// liveKitWebhookSource is the last segment of the URL the calls media server
+// posts its webhooks to (POST /inbound/livekit), and the source the calls
+// automation that applies them filters on: integrations/calls WebhookSource,
+// spelled once.
+const liveKitWebhookSource = calls.WebhookSource
+
+// registeredLiveKitWebhook answers the inbound policy for the calls media
+// server's webhooks (integrations/calls events.go).
+//
+// REGISTERED, NOT ALLOWLISTED. The source is admitted with the key pair the
+// calls media bootstrap sealed as calls.media.webhook from
+// MEMQL_CALLS_MEDIA_WEBHOOK_KEY and MEMQL_CALLS_MEDIA_WEBHOOK_SECRET
+// (integrations/calls config.go). The operator configures the media server
+// once, there; a MEMQL_INBOUND_SOURCE_LIVEKIT_* policy would be a second copy
+// of the same secret, free to drift from the first. resolveSource asks this
+// tier whatever MEMQL_INBOUND_SOURCE_ALLOWLIST says, so no deployment lists the
+// name, and a cluster with no media server answers 404 for it as for any
+// unknown source. An operator who does pin `livekit` in the environment wins
+// over this (resolveSource, ENV WINS), and the calls builtin then refuses every
+// delivery that pin verifies, because a secret other than the media server's
+// did (events.go handleApplyMediaEvent).
+func (a *App) registeredLiveKitWebhook() inbound.RegisteredSource {
+	if a.engine == nil {
+		return nil
+	}
+	return liveKitWebhookResolver(a.engine.ResolveSystemSecret, a.Logger)
+}
+
+// liveKitWebhookResolver resolves the calls media server's source from the
+// sealed credential, read through secret on every request, so a credential the
+// bootstrap replaced (a webhook secret rotated in the environment and a
+// restart) verifies from the next request on every replica. A cluster with no
+// media server has no credential, and the source is not answered, silently,
+// since an unconfigured cluster is the common case. One whose credential cannot
+// be used -- not decryptable under this node's MEMQL_MASTER_KEY, not a key pair,
+// a lookup that failed -- is not answered either, and the node says why in
+// words that name no value.
+func liveKitWebhookResolver(secret func(ctx context.Context, name string) (string, error), logger *slog.Logger) inbound.RegisteredSource {
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+	refused := func(name, reason string) (inbound.SourceConfig, bool) {
+		logger.Error("inbound receiver: the calls media server's webhook credential cannot be used, refusing its webhooks with 404",
+			"source", name, "secret", calls.SecretMediaWebhook, "reason", reason)
+		return inbound.SourceConfig{}, false
+	}
+	return func(ctx context.Context, name string) (inbound.SourceConfig, bool) {
+		if name != liveKitWebhookSource {
+			return inbound.SourceConfig{}, false
+		}
+		plaintext, err := secret(ctx, calls.SecretMediaWebhook)
+		switch {
+		case memql.IsVariableNotFound(err):
+			return inbound.SourceConfig{}, false
+		case memql.IsSecretUndecryptable(err):
+			return refused(name, "it cannot be decrypted with this node's MEMQL_MASTER_KEY")
+		case err != nil:
+			return refused(name, "it could not be read")
+		}
+		cred, err := calls.ParseMediaCredential(plaintext)
+		if err != nil {
+			// ParseMediaCredential's errors never repeat the value.
+			return refused(name, err.Error())
+		}
+		return liveKitWebhookPolicy(cred), true
+	}
+}
+
+// liveKitWebhookPolicy is the fixed policy for the calls media server's
+// webhooks, given its credential: a LiveKit server signs each body's SHA-256
+// into a JWT under its webhook key pair -- the key as the issuer, the secret as
+// the HS256 key -- and sends the token as the bare value of Authorization
+// (webhook/url_notifier.go send).
+//
+// NO DEDUPE HEADER AND NO TIMESTAMP HEADER, so the row's identity is the body's
+// digest alone (identityKeyFor) and a retry, which LiveKit's client sends as
+// the same bytes, lands on the row the first delivery made. Two events are
+// never one body: each carries its own id and time. No forwarded headers
+// either: the whole event is in the body.
+func liveKitWebhookPolicy(cred calls.MediaCredential) inbound.SourceConfig {
+	return inbound.SourceConfig{
+		Secret:          cred.Secret,
+		Scheme:          inbound.SchemeJWTHS256BodySHA256,
+		SignatureHeader: "Authorization",
+		JWTIssuer:       cred.Key,
 	}
 }

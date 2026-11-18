@@ -841,6 +841,8 @@
         "openedAt",
         "ownerUserId",
         "scheduledCallId",
+        "shareSeatId",
+        "shareStartedAt",
         "siteId",
         "status"
       ],

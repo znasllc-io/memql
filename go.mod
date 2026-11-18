@@ -79,7 +79,7 @@ require (
 	github.com/lithammer/shortuuid/v4 v4.2.0 // indirect
 	github.com/livekit/mageutil v0.0.0-20250511045019-0f1ff63f7731 // indirect
 	github.com/livekit/mediatransportutil v0.0.0-20260821083140-f234b534b095 // indirect
-	github.com/livekit/protocol v1.51.1-0.20260910121219-271d9cde3897 // indirect
+	github.com/livekit/protocol v1.51.1-0.20260910121219-271d9cde3897
 	github.com/livekit/psrpc v0.7.6 // indirect
 	github.com/livekit/server-sdk-go/v2 v2.19.0 // indirect
 	github.com/magefile/mage v1.17.2 // indirect

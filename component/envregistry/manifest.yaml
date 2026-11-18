@@ -637,13 +637,16 @@ variables:
   # name, so it cannot be enumerated here:
   #
   #   MEMQL_INBOUND_SOURCE_<NAME>_SECRET             the shared HMAC key
-  #   MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_SCHEME   hmac-sha256-hex | hmac-sha256-base64 | none
+  #   MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_SCHEME   hmac-sha256-hex | hmac-sha256-base64 |
+  #                                                  jwt-hs256-body-sha256 | none
   #   MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_HEADER   e.g. X-Hub-Signature-256
   #   MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_PREFIX   e.g. "sha256=" (optional)
   #   MEMQL_INBOUND_SOURCE_<NAME>_TIMESTAMP_HEADER   enables the replay window (optional)
   #   MEMQL_INBOUND_SOURCE_<NAME>_DEDUPE_HEADER      sender idempotency key (optional)
   #   MEMQL_INBOUND_SOURCE_<NAME>_MAX_BODY_BYTES     this source's own body cap (optional;
   #                                                  the github source defaults to 25 MiB)
+  #   MEMQL_INBOUND_SOURCE_<NAME>_JWT_ISSUER         the iss a jwt-hs256-body-sha256 token
+  #                                                  must name (that scheme only, required)
   #
   # <NAME> is the source name uppercased with '-' mapped to '_'. The SECRET is
   # secret material and belongs in the deployment's secret store, never in an

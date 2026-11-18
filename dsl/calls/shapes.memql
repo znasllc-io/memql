@@ -54,6 +54,8 @@ shape room callsRoomFull {
   endReason
   joinWindowStartedAt
   joinWindowCount
+  shareSeatId
+  shareStartedAt
   accountId
 }
 

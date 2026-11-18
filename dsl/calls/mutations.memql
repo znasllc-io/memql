@@ -144,9 +144,11 @@ mutation room updateCallsRoom {
     endReason  string
     joinWindowStartedAt  datetime
     joinWindowCount  int
+    shareSeatId  string
+    shareStartedAt  datetime
   }
   update {
-    accept { mediaServerId, mediaRoom, status, locked, hostSeatId, hostLeftAt, endedAt, endReason, joinWindowStartedAt, joinWindowCount }
+    accept { mediaServerId, mediaRoom, status, locked, hostSeatId, hostLeftAt, endedAt, endReason, joinWindowStartedAt, joinWindowCount, shareSeatId, shareStartedAt }
     stamp {
       id: args.roomId
       createdAt: args.versionTime ?? now

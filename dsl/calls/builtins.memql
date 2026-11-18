@@ -2,9 +2,10 @@
 //
 // The calls capability's operator acts, backed by integrations/calls (operator.go). Every
 // client-callable act on the calls rows is one of these four: the concepts are @serverWritten and
-// client-unreadable, and every query and mutation beneath them is @serverOnly. The fifth builtin,
-// callsReconcile, is the cluster's own: its handler refuses every caller but the engine's reconcileCalls
-// automation (integrations/calls reconcile.go), so no person reaches it.
+// client-unreadable, and every query and mutation beneath them is @serverOnly. The last two builtins,
+// callsReconcile and callsApplyMediaEvent, are the cluster's own: each handler refuses every caller but
+// its own engine automation, reconcileCalls and applyMediaEvent (integrations/calls reconcile.go and
+// events.go), so no person reaches either.
 //
 // WHO MAY CALL. Each declares execute on app:deployables/calls, seeded on owner and developer
 // (dsl/rbac/seeds.memql), and the engine refuses every other caller before the executor runs. The part
@@ -117,3 +118,24 @@ builtin callsMediaServers { }
 @executor("integration.calls.reconcile")
 @description("Repair every open call against what its media server shows: close the seats whose identity is gone, disconnect identities no seat holds, mark expired queue entries, apply the host-left countdown and end calls nobody is in. Refused to every caller but the engine's own reconcileCalls automation; it mints no pass and returns nothing.")
 builtin callsReconcile { }
+
+/// Apply one of the media server's webhooks to the call it names: the applyMediaEvent automation's act.
+///
+/// THE CLUSTER'S OWN, NOT @sdk, for callsReconcile's reason: its handler refuses every caller but the
+/// engine's own applyMediaEvent automation at internal origin before it reads anything (integrations/calls
+/// events.go), and it declares no capability.
+///
+/// IT READS THE DELIVERY ITSELF. It is handed the staged v1:platform:inboundRequest row's id and nothing
+/// else, and works only a delivery of the media server's source that the receiver verified with the calls
+/// media credential (signatureVerified, verifiedBy "registered"); any other is stamped failed and changes
+/// nothing. Each event is applied only when it is newer, to the second, than what the rows already record:
+/// participant_joined puts an admitted seat in the call, participant_left records the disconnect as the
+/// seat's last sign of life and leaves its closing to reconciliation (a disconnect is not a hang-up),
+/// track_published of a screen share stops every other participant's share, and room_finished ends a call
+/// only when nobody is in it or waiting for it. A connection that holds no seat in the call is disconnected
+/// again. It stamps the delivery processed. Returns {requestId, event, outcome}.
+@executor("integration.calls.applyMediaEvent")
+@description("Apply one of the media server's webhooks, staged as a v1:platform:inboundRequest, to the call it names: a seat in the call, a disconnect recorded, a new screen share taking over, an empty call ended, a connection without a seat disconnected. Refused to every caller but the engine's own applyMediaEvent automation; it works only a delivery the calls media credential verified. Returns {requestId, event, outcome}.")
+builtin callsApplyMediaEvent {
+  requestId  string!  @description("The staged delivery's row id, as the automation's trigger hands it.")
+}

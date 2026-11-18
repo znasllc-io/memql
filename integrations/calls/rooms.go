@@ -254,12 +254,13 @@ func (s *Store) keyByID(ctx context.Context, owner, keyID string) (*Key, error) 
 // roomRow is one v1:calls:room. Its ids are BARE and its digests are never read back.
 // ScheduledCallID names the booking a booked call's room was opened for, and is empty for
 // an ad hoc call's. HostLeftAt is when the last host seat in the call left, the zero time
-// while a host is in it or none ever was.
+// while a host is in it or none ever was. ShareSeatID and ShareStartedAt are the newest
+// screen share the media server reported (events.go), the zero time before any.
 type roomRow struct {
 	ID, SiteID, OwnerUserID, KeyID, MediaServerID, MediaRoom, Status, HostSeatID string
-	ScheduledCallID, EndReason                                                   string
+	ScheduledCallID, EndReason, ShareSeatID                                      string
 	Locked                                                                       bool
-	OpenedAt, HostLeftAt, EndedAt                                                time.Time
+	OpenedAt, HostLeftAt, EndedAt, ShareStartedAt                                time.Time
 	Window                                                                       callrules.JoinWindow
 	Version                                                                      time.Time
 }
@@ -279,10 +280,12 @@ func roomFromRow(r map[string]any) roomRow {
 		HostSeatID:      memql.BareShortId(rowString(r, "hostSeatId")),
 		ScheduledCallID: memql.BareShortId(rowString(r, "scheduledCallId")),
 		EndReason:       rowString(r, "endReason"),
+		ShareSeatID:     memql.BareShortId(rowString(r, "shareSeatId")),
 		Locked:          rowBool(r, "locked"),
 		OpenedAt:        rowTime(r, "openedAt"),
 		HostLeftAt:      rowTime(r, "hostLeftAt"),
 		EndedAt:         rowTime(r, "endedAt"),
+		ShareStartedAt:  rowTime(r, "shareStartedAt"),
 		Window:          callrules.JoinWindow{StartedAt: rowTime(r, "joinWindowStartedAt"), Count: rowInt(r, "joinWindowCount")},
 		Version:         rowTime(r, "createdAt"),
 	}
@@ -399,12 +402,13 @@ func (s *Store) updateRoom(ctx context.Context, owner string, prior roomRow, fie
 
 // seatRow is one v1:calls:seat. Its ids are BARE. KeyID is the key its holder unlocked
 // when a key opened the session that took it; JoinedAt is its latest admission (a
-// re-entry writes it again), LastSeenAt the last time reconciliation saw the media
-// server show its identity, and LetInAt a host's admission past the call's lock.
+// re-entry writes it again), LeftAt when it last left, LastSeenAt its last sign of life
+// (reconciliation seeing its identity on the media server, or the media server's
+// webhook about it: events.go), and LetInAt a host's admission past the call's lock.
 type seatRow struct {
 	ID, RoomID, Identity, Kind, DisplayName, Status, TermsVersion, KeyID string
 	Host, ConfirmAdult, ConfirmNoMinors                                  bool
-	JoinedAt, LastSeenAt, LetInAt                                        time.Time
+	JoinedAt, LeftAt, LastSeenAt, LetInAt                                time.Time
 	Version                                                              time.Time
 }
 
@@ -434,6 +438,7 @@ func seatFromRow(r map[string]any) seatRow {
 		ConfirmAdult:    rowBool(r, "confirmAdult"),
 		ConfirmNoMinors: rowBool(r, "confirmNoMinors"),
 		JoinedAt:        rowTime(r, "joinedAt"),
+		LeftAt:          rowTime(r, "leftAt"),
 		LastSeenAt:      rowTime(r, "lastSeenAt"),
 		LetInAt:         rowTime(r, "letInAt"),
 		Version:         rowTime(r, "createdAt"),
