@@ -4473,6 +4473,14 @@ a.os-button {
   outline: 2px solid var(--os-accent);
   outline-offset: -2px;
 }
+/* A picked file's icons take a line of their own wherever the Head cannot
+ * hold them beside Sort, Search and Add -- that line needs about 620px of
+ * the main column, so below an 860px Files window -- and never push those
+ * off the edge. Without the line beside them, the hairline goes too. */
+@container os-files (max-width: 860px) {
+  .os-files-main .os-head-actions:has(> .os-files-picked-acts) { flex-wrap: wrap; }
+  .os-files-picked-acts { flex-basis: 100%; padding-right: 0; border-right: 0; }
+}
 @container os-files (max-width: 560px) {
   .os-files-browse { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .os-files-rail { position: static; max-height: 40vh; border-right: 0; border-bottom: 1px solid var(--os-line); padding: 0 0 8px; }
@@ -4481,10 +4489,6 @@ a.os-button {
    * a group rather than one control at a time (as Fleet's narrow heads do). */
   .os-files-main .os-head { flex-wrap: wrap; }
   .os-files-main .os-head-actions { flex-wrap: nowrap; }
-  /* A picked file's icons take a line of their own above them, so they
-   * never push Sort, Search and Add off a phone's edge. */
-  .os-files-main .os-head-actions:has(> .os-files-picked-acts) { flex-wrap: wrap; }
-  .os-files-picked-acts { flex-basis: 100%; padding-right: 0; border-right: 0; }
   /* Three tiles across a phone rather than two. */
   .os-files .os-files-grid,
   .os-files .os-files-files .os-livelist-rows { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
