@@ -57,12 +57,18 @@ func (c *testClock) Advance(d time.Duration) {
 }
 
 // fakeMedia stands in for every media server's control API and records, per server,
-// what each was asked.
+// what each was asked. present is who each media room shows connected, by room name,
+// as a test sets it (setPresent): deleting a room disconnects everybody in it and
+// removing a participant disconnects them, as a media server does.
 type fakeMedia struct {
 	mu         sync.Mutex
 	created    []fakeMediaRoom
 	removed    []fakeMediaRemoval
+	deleted    []fakeMediaRef
+	muted      []fakeMediaMute
+	present    map[string][]MediaParticipant
 	failCreate error
+	failDelete error
 }
 
 type fakeMediaRoom struct {
@@ -72,6 +78,42 @@ type fakeMediaRoom struct {
 
 type fakeMediaRemoval struct {
 	Server, Room, Identity string
+}
+
+type fakeMediaRef struct {
+	Server, Room string
+}
+
+type fakeMediaMute struct {
+	Server, Room, Identity, Track string
+}
+
+// setPresent is who a media room shows connected from now on.
+func (f *fakeMedia) setPresent(room string, people ...MediaParticipant) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.present == nil {
+		f.present = map[string][]MediaParticipant{}
+	}
+	f.present[room] = slices.Clone(people)
+}
+
+func (f *fakeMedia) deletions() []fakeMediaRef {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.deleted)
+}
+
+func (f *fakeMedia) mutes() []fakeMediaMute {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.muted)
+}
+
+// person is a participant as a media server shows one: the seat's identity, a
+// person's kind, and the tracks given.
+func person(identity string, tracks ...MediaTrack) MediaParticipant {
+	return MediaParticipant{Identity: identity, Kind: string(callrules.KindPerson), Tracks: tracks}
 }
 
 func (f *fakeMedia) backend(server MediaServer, credential MediaCredential) (MediaBackend, error) {
@@ -108,20 +150,39 @@ func (b *fakeMediaServer) CreateRoom(_ context.Context, name string, max uint32)
 	return nil
 }
 
-func (b *fakeMediaServer) DeleteRoom(context.Context, string) error { return nil }
+func (b *fakeMediaServer) DeleteRoom(_ context.Context, name string) error {
+	b.media.mu.Lock()
+	defer b.media.mu.Unlock()
+	if b.media.failDelete != nil {
+		return b.media.failDelete
+	}
+	b.media.deleted = append(b.media.deleted, fakeMediaRef{Server: b.server, Room: name})
+	delete(b.media.present, name)
+	return nil
+}
 
-func (b *fakeMediaServer) Participants(context.Context, string) ([]MediaParticipant, error) {
-	return nil, nil
+func (b *fakeMediaServer) Participants(_ context.Context, room string) ([]MediaParticipant, error) {
+	b.media.mu.Lock()
+	defer b.media.mu.Unlock()
+	return slices.Clone(b.media.present[room]), nil
 }
 
 func (b *fakeMediaServer) RemoveParticipant(_ context.Context, room, identity string) error {
 	b.media.mu.Lock()
 	defer b.media.mu.Unlock()
 	b.media.removed = append(b.media.removed, fakeMediaRemoval{Server: b.server, Room: room, Identity: identity})
+	if people, ok := b.media.present[room]; ok {
+		b.media.present[room] = slices.DeleteFunc(slices.Clone(people), func(p MediaParticipant) bool { return p.Identity == identity })
+	}
 	return nil
 }
 
-func (b *fakeMediaServer) MuteTrack(context.Context, string, string, string) error { return nil }
+func (b *fakeMediaServer) MuteTrack(_ context.Context, room, identity, trackSID string) error {
+	b.media.mu.Lock()
+	defer b.media.mu.Unlock()
+	b.media.muted = append(b.media.muted, fakeMediaMute{Server: b.server, Room: room, Identity: identity, Track: trackSID})
+	return nil
+}
 
 // callWorld is one test's deployable with the calls service over it: its own
 // integration, clock and media fake, sharing the engine and the database.
@@ -918,7 +979,8 @@ func TestALockedCallDoesNotHoldUpTheServersQueue(t *testing.T) {
 	require.Equal(t, callrules.OutcomeQueue, qa2.Outcome)
 	require.Equal(t, 2, qa2.Position)
 
-	// The host control is Task 7's; the lock is written as the host's write would be.
+	// The lock is written to the row as the host's lock control writes it (host.go), so the
+	// test is about the queue and not the control (host_db_test.go holds the control).
 	cw.asOwnerMutate(roomConcept, b.Call.ID, "updateCallsRoom", map[string]any{"roomId": b.Call.ID, "locked": true})
 	require.NoError(t, cw.svc.Leave(ctx, a1)) // a seat frees up
 

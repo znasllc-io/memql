@@ -2,6 +2,7 @@ package calls
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -252,11 +253,13 @@ func (s *Store) keyByID(ctx context.Context, owner, keyID string) (*Key, error) 
 
 // roomRow is one v1:calls:room. Its ids are BARE and its digests are never read back.
 // ScheduledCallID names the booking a booked call's room was opened for, and is empty for
-// an ad hoc call's.
+// an ad hoc call's. HostLeftAt is when the last host seat in the call left, the zero time
+// while a host is in it or none ever was.
 type roomRow struct {
 	ID, SiteID, OwnerUserID, KeyID, MediaServerID, MediaRoom, Status, HostSeatID string
-	ScheduledCallID                                                              string
+	ScheduledCallID, EndReason                                                   string
 	Locked                                                                       bool
+	OpenedAt, HostLeftAt, EndedAt                                                time.Time
 	Window                                                                       callrules.JoinWindow
 	Version                                                                      time.Time
 }
@@ -275,7 +278,11 @@ func roomFromRow(r map[string]any) roomRow {
 		Status:          rowString(r, "status"),
 		HostSeatID:      memql.BareShortId(rowString(r, "hostSeatId")),
 		ScheduledCallID: memql.BareShortId(rowString(r, "scheduledCallId")),
+		EndReason:       rowString(r, "endReason"),
 		Locked:          rowBool(r, "locked"),
+		OpenedAt:        rowTime(r, "openedAt"),
+		HostLeftAt:      rowTime(r, "hostLeftAt"),
+		EndedAt:         rowTime(r, "endedAt"),
 		Window:          callrules.JoinWindow{StartedAt: rowTime(r, "joinWindowStartedAt"), Count: rowInt(r, "joinWindowCount")},
 		Version:         rowTime(r, "createdAt"),
 	}
@@ -370,15 +377,35 @@ func (s *Store) countJoin(ctx context.Context, owner string, prior roomRow, w ca
 	return s.writeAs(ctx, owner, at(roomConcept, prior.ID, prior.Version), "the room's join count", call, err)
 }
 
+// updateRoom writes the named fields of a room -- its lock, its host seat, when its host
+// left, its end -- against the version it was read at. Times are passed as time.Time and
+// stamped here; an empty string clears an optional time, the concept's convention for "no
+// value".
+func (s *Store) updateRoom(ctx context.Context, owner string, prior roomRow, fields map[string]any, versionTime time.Time) error {
+	args := map[string]any{"roomId": prior.ID, "versionTime": versionStamp(versionTime)}
+	for name, value := range fields {
+		if stamp, isTime := value.(time.Time); isTime {
+			value = versionStamp(stamp)
+		}
+		args[name] = value
+	}
+	call, err := langparser.RenderCall("updateCallsRoom", args)
+	return s.writeAs(ctx, owner, at(roomConcept, prior.ID, prior.Version), "the room", call, err)
+}
+
 // ---------------------------------------------------------------------------
 // seats
 // ---------------------------------------------------------------------------
 
-// seatRow is one v1:calls:seat. Its ids are BARE.
+// seatRow is one v1:calls:seat. Its ids are BARE. KeyID is the key its holder unlocked
+// when a key opened the session that took it; JoinedAt is its latest admission (a
+// re-entry writes it again), LastSeenAt the last time reconciliation saw the media
+// server show its identity, and LetInAt a host's admission past the call's lock.
 type seatRow struct {
-	ID, RoomID, Identity, Kind, DisplayName, Status, TermsVersion string
-	Host, ConfirmAdult, ConfirmNoMinors                           bool
-	Version                                                       time.Time
+	ID, RoomID, Identity, Kind, DisplayName, Status, TermsVersion, KeyID string
+	Host, ConfirmAdult, ConfirmNoMinors                                  bool
+	JoinedAt, LastSeenAt, LetInAt                                        time.Time
+	Version                                                              time.Time
 }
 
 // occupying reports whether the seat holds a media server's seat.
@@ -387,6 +414,11 @@ func (r seatRow) occupying() bool { return r.Status == seatAdmitted || r.Status 
 // placed reports whether the seat is in its call or waiting to be: a seat a session may
 // not leave behind for another call.
 func (r seatRow) placed() bool { return r.occupying() || r.Status == seatWaiting }
+
+// passesLock reports whether the seat comes in through its call's lock: a host seat, or
+// one a host admitted (host.go). Passing the lock is all it is: the seat is still decided
+// against the room's size and the media server's seats like any new ask.
+func (r seatRow) passesLock() bool { return r.Host || !r.LetInAt.IsZero() }
 
 func seatFromRow(r map[string]any) seatRow {
 	return seatRow{
@@ -397,9 +429,13 @@ func seatFromRow(r map[string]any) seatRow {
 		DisplayName:     rowString(r, "displayName"),
 		Status:          rowString(r, "status"),
 		TermsVersion:    rowString(r, "termsVersion"),
+		KeyID:           memql.BareShortId(rowString(r, "keyId")),
 		Host:            rowBool(r, "host"),
 		ConfirmAdult:    rowBool(r, "confirmAdult"),
 		ConfirmNoMinors: rowBool(r, "confirmNoMinors"),
+		JoinedAt:        rowTime(r, "joinedAt"),
+		LastSeenAt:      rowTime(r, "lastSeenAt"),
+		LetInAt:         rowTime(r, "letInAt"),
 		Version:         rowTime(r, "createdAt"),
 	}
 }
@@ -414,12 +450,29 @@ func (s *Store) seatByID(ctx context.Context, owner, seatID string) (*seatRow, e
 	return &seat, nil
 }
 
-// newSeat is what a seat's create writes, the three confirmations included.
+// seatsForRoom is every seat of one room, as the site's owner, ordered by id so a
+// decision over them is the same whichever replica makes it.
+func (s *Store) seatsForRoom(ctx context.Context, owner, roomID string) ([]seatRow, error) {
+	call, err := langparser.RenderCall("callsSeatsForRoom", map[string]any{"roomId": memql.BareShortId(roomID)})
+	rows, err := s.readAs(ctx, owner, "the room's seats", call, err)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]seatRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, seatFromRow(r))
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].ID < out[b].ID })
+	return out, nil
+}
+
+// newSeat is what a seat's create writes, the three confirmations included, and the key
+// its holder unlocked when a key opened their session.
 type newSeat struct {
-	ID, SiteID, RoomID, Identity, Kind, DisplayName, Status string
-	Host                                                    bool
-	Confirm                                                 callrules.Confirmation
-	JoinedAt                                                time.Time
+	ID, SiteID, RoomID, Identity, Kind, DisplayName, Status, KeyID string
+	Host                                                           bool
+	Confirm                                                        callrules.Confirmation
+	JoinedAt                                                       time.Time
 }
 
 func (s *Store) createSeat(ctx context.Context, owner string, n newSeat, versionTime time.Time) error {
@@ -440,6 +493,10 @@ func (s *Store) createSeat(ctx context.Context, owner string, n newSeat, version
 	// A seat that waits has not been taken yet.
 	if !n.JoinedAt.IsZero() {
 		args["joinedAt"] = versionStamp(n.JoinedAt)
+	}
+	// Absent rather than empty: a link's session holds no key.
+	if n.KeyID != "" {
+		args["keyId"] = n.KeyID
 	}
 	call, err := langparser.RenderCall("createCallsSeat", args)
 	return s.writeAs(ctx, owner, absent(seatConcept, n.ID), "the seat", call, err)
@@ -555,19 +612,12 @@ func (s *Store) loadOn(ctx context.Context, server MediaServer) (serverLoad, err
 	if err != nil {
 		return load, err
 	}
-	call, err := langparser.RenderCall("callsOpenRoomsOnServer", map[string]any{"mediaServerId": server.ID})
-	rows, err := s.read(cluster, "the open rooms of the media server", call, err)
+	rooms, err := s.openRoomsOn(ctx, server)
 	if err != nil {
 		return load, err
 	}
-	ids := make([]string, 0, len(rows))
-	for _, r := range rows {
-		room := roomFromRow(r)
-		// The filter asked for open rooms of this server; a row that says otherwise is
-		// not counted rather than trusted.
-		if room.ID == "" || !room.open() || room.MediaServerID != server.ID {
-			continue
-		}
+	ids := make([]string, 0, len(rooms))
+	for _, room := range rooms {
 		load.rooms[room.ID] = room
 		ids = append(ids, room.ID)
 	}
@@ -577,8 +627,8 @@ func (s *Store) loadOn(ctx context.Context, server MediaServer) (serverLoad, err
 	if len(ids) == 0 {
 		return load, nil
 	}
-	call, err = langparser.RenderCall("callsSeatsForRooms", map[string]any{"roomIds": ids})
-	rows, err = s.read(cluster, "the seats of the media server's rooms", call, err)
+	call, err := langparser.RenderCall("callsSeatsForRooms", map[string]any{"roomIds": ids})
+	rows, err := s.read(cluster, "the seats of the media server's rooms", call, err)
 	if err != nil {
 		return load, err
 	}
@@ -598,6 +648,33 @@ func (s *Store) loadOn(ctx context.Context, server MediaServer) (serverLoad, err
 		}
 	}
 	return load, nil
+}
+
+// openRoomsOn is the open rooms placed on a media server, whichever deployable each is
+// for, as the cluster acting, ordered by id: the first of loadOn's reads, and the calls
+// reconciliation walks (reconcile.go).
+func (s *Store) openRoomsOn(ctx context.Context, server MediaServer) ([]roomRow, error) {
+	cluster, err := clusterRowsAs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	call, err := langparser.RenderCall("callsOpenRoomsOnServer", map[string]any{"mediaServerId": server.ID})
+	rows, err := s.read(cluster, "the open rooms of the media server", call, err)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]roomRow, 0, len(rows))
+	for _, r := range rows {
+		room := roomFromRow(r)
+		// The filter asked for open rooms of this server; a row that says otherwise is
+		// not counted rather than trusted.
+		if room.ID == "" || !room.open() || room.MediaServerID != server.ID {
+			continue
+		}
+		out = append(out, room)
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].ID < out[b].ID })
+	return out, nil
 }
 
 func (l serverLoad) has(roomID string) bool {
@@ -638,6 +715,24 @@ func (l serverLoad) classFor(room roomRow) callrules.QueueClass {
 	return callrules.ClassNewCall
 }
 
+// othersIn is how many seats of a room hold a media server's seat now, the named one
+// aside: zero means the named seat is the only one in the call (host.go, the first pass
+// into an empty room).
+func (l serverLoad) othersIn(roomID, seatID string) int {
+	return occupants(l.seats, roomID, seatID)
+}
+
+// occupants counts the seats of a room holding a media server's seat, one seat aside.
+func occupants(seats []seatRow, roomID, aside string) int {
+	n := 0
+	for _, seat := range seats {
+		if seat.RoomID == roomID && seat.ID != aside && seat.occupying() {
+			n++
+		}
+	}
+	return n
+}
+
 // roomState is one room as DecideJoin sees it: the people and agents in it now.
 func (l serverLoad) roomState(room roomRow) callrules.RoomState {
 	state := callrules.RoomState{Ended: !room.open(), Locked: room.Locked}
@@ -660,9 +755,9 @@ func (l serverLoad) roomState(room roomRow) callrules.RoomState {
 // lifetime is its OWN deployable's policy (ttlFor), since every call on the server
 // shares the one queue, and a held entry outlives it only as long as its waiter polls.
 func (l serverLoad) queue(now time.Time, ttlFor func(roomRow) time.Duration) (live, held []callrules.QueueEntry, expired []queueEntryRow) {
-	hosts := map[string]bool{}
+	passes := map[string]bool{}
 	for _, seat := range l.seats {
-		hosts[seat.ID] = seat.Host
+		passes[seat.ID] = seat.passesLock()
 	}
 	byRoom := map[string][]callrules.QueueEntry{}
 	rows := map[string]queueEntryRow{}
@@ -688,8 +783,10 @@ func (l serverLoad) queue(now time.Time, ttlFor func(roomRow) time.Duration) (li
 			// either: the person did not choose the lock, so the entry keeps its arrival,
 			// counts in nobody's position and in no new ask's free seats, and is back in
 			// its place the moment the call is unlocked. A host's entry is never held,
-			// because a host passes the lock (calls.DecideJoin).
-			if l.rooms[roomID].Locked && !hosts[rows[entry.ID].SeatID] {
+			// because a host passes the lock (calls.DecideJoin), and neither is the entry
+			// of a seat a host admitted, which passes it too (seatRow.passesLock): admitting
+			// a held waiter puts its entry back in line at its own arrival.
+			if l.rooms[roomID].Locked && !passes[rows[entry.ID].SeatID] {
 				held = append(held, entry)
 				continue
 			}

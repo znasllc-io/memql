@@ -2,7 +2,9 @@
 //
 // The calls capability's operator acts, backed by integrations/calls (operator.go). Every
 // client-callable act on the calls rows is one of these four: the concepts are @serverWritten and
-// client-unreadable, and every query and mutation beneath them is @serverOnly.
+// client-unreadable, and every query and mutation beneath them is @serverOnly. The fifth builtin,
+// callsReconcile, is the cluster's own: its handler refuses every caller but the engine's reconcileCalls
+// automation (integrations/calls reconcile.go), so no person reaches it.
 //
 // WHO MAY CALL. Each declares execute on app:deployables/calls, seeded on owner and developer
 // (dsl/rbac/seeds.memql), and the engine refuses every other caller before the executor runs. The part
@@ -98,3 +100,19 @@ builtin callsPolicySet {
 @requiresCapability("execute", "app:deployables/calls")
 @description("List the active media servers rooms are placed on, one row each: {id, provider, publicUrl, region, seats, state, createdAt}. A cluster owner's read: refused for anyone else, whatever part they hold. Never a credential, the name of the secret holding one, or the control address.")
 builtin callsMediaServers { }
+
+/// Repair every open call against what its media server shows: the reconcileCalls automation's act.
+///
+/// THE CLUSTER'S OWN, NOT @sdk. Its handler refuses every caller but the engine's own reconcileCalls
+/// automation at internal origin -- a person, the cluster's operator, the cluster acting outside that
+/// automation, any other automation -- before it reads anything (integrations/calls reconcile.go). It
+/// declares no capability for that reason: no part a person holds would make the call theirs to make.
+///
+/// Call by call, under each call's locks: a seat in the call whose identity the media server no longer
+/// shows is closed at its last seen time; an identity no seat in the call holds -- a stranger, a removed
+/// seat back on a pass it still holds -- is disconnected; the host-left countdown is applied, handing the
+/// call to a key holder in it or ending it; the queue's expired entries are marked; and a call nobody is in
+/// or waiting for is ended. It mints no pass. Returns nothing.
+@executor("integration.calls.reconcile")
+@description("Repair every open call against what its media server shows: close the seats whose identity is gone, disconnect identities no seat holds, apply the host-left countdown, mark expired queue entries and end calls nobody is in. Refused to every caller but the engine's own reconcileCalls automation; it mints no pass and returns nothing.")
+builtin callsReconcile { }

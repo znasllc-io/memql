@@ -298,7 +298,10 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 207 -> 208: storeStatisticsCheckSweep, the hourly check of every store's
 // statistics facts against its mirrored rows (2026-11-12). One added, none
 // removed; measured by the strict loader.
-const shippedAutomationCount = 208
+// 208 -> 209: reconcileCalls, the thirty-second pass that repairs every open
+// call against its media server (the calls capability, 2026-11-18). One added,
+// none removed; measured by the strict loader.
+const shippedAutomationCount = 209
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

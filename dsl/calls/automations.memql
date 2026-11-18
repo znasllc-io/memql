@@ -1,0 +1,26 @@
+// automations.memql
+//
+// The calls capability's one automation: reconciliation, backed by integrations/calls
+// (reconcile.go). An automation loads only from its domain's automations.memql
+// (dsl/construct_placement.go), which is why this file exists.
+
+/// Repair every open call against what its media server shows, every thirty seconds.
+///
+/// WHY A PASS AT ALL. A media server's own list of who is connected is the truth about a call, and the
+/// rows only follow it: a participant who drops without a word leaves a seat holding one of the server's
+/// seats; a removed participant can come back on a pass a self-hosted server cannot revoke; a waiter who
+/// closed their tab leaves a place in line; and a host who left leaves a countdown that only a later
+/// request would otherwise notice. The pass reads each call's participant list and repairs the call's rows
+/// to it, call by call, under each call's own locks (callsReconcile). It mints no pass: a waiter whose turn
+/// has come is let in on its own next poll.
+///
+/// PLACED on one bff replica at a time, behind the cluster lease `calls-reconcile`: the pass is the
+/// cluster's work, not a replica's, and two replicas running it at once would only repeat each other.
+/// Every call is still decided under its own locks, so a lease that changes hands mid-pass costs a repeat
+/// and nothing else. single: a pass that outlasts thirty seconds is not overlapped by the next one in this
+/// process.
+@trigger(schedule="*/30 * * * * *", node="bff", lease="calls-reconcile")
+@mode(single)
+automation reconcileCalls {
+  builtin callsReconcile()
+}

@@ -16,11 +16,13 @@ import (
 
 // plugin.go -- self-registration, and the one piece of boot work.
 //
-// REGISTERED ON EVERY NODE TYPE, for integrations/siteaccess's reason exactly: the four
+// REGISTERED ON EVERY NODE TYPE, for integrations/siteaccess's reason exactly: the five
 // builtins are declared in dsl/calls/builtins.memql, which EVERY binary loads, and a
 // capability present in the DSL and absent from the registry is a boot-time resolution
 // failure. Gating the registration by build tag would also make whether an operator can
-// mint a key depend on which replica their stream landed on.
+// mint a key depend on which replica their stream landed on. The reconciliation pass is
+// placed on bff replicas by its automation's trigger (node="bff"), not by this
+// registration.
 //
 // It is an INTEGRATION in the module taxonomy (module_taxonomy_test.go): it talks to a
 // media server's control API, somebody else's system, through LiveKit's client.
@@ -30,8 +32,9 @@ import (
 // A partial or unusable media configuration REFUSES BOOT here, in the factory, and so
 // does one whose credentials cannot be sealed (MEMQL_MASTER_KEY missing or malformed):
 // either way the node would run with a calls capability that fails at its first use.
-// No configuration is not a refusal: it is a cluster without calls, and the four
-// builtins still register and refuse with a sentence when asked.
+// No configuration is not a refusal: it is a cluster without calls, and the operator
+// builtins still register and refuse with a sentence when asked; a reconciliation pass
+// there finds no media server and does nothing.
 //
 // The bootstrap itself does not run in the factory. A factory runs before the engine
 // has started, and the bootstrap reads and writes rows through it, so it waits for the
@@ -162,15 +165,16 @@ func (i *Integration) now() time.Time { return i.clock().UTC() }
 func (i *Integration) Store() *Store { return i.store }
 
 // Service is the calls service: unlocking a key, starting, joining, queueing and
-// leaving a call, and booking, moving and cancelling one for later. The calls route
-// family serves it.
+// leaving a call, booking, moving and cancelling one for later, a host's controls, and
+// the reconciliation pass. The calls route family serves it.
 func (i *Integration) Service() *Service { return i.service }
 
 // IntegrationName implements memql.IntegrationProvider.
 func (i *Integration) IntegrationName() string { return pluginName }
 
 // Capabilities implements memql.IntegrationProvider: the four operator acts
-// (operator.go), declared in dsl/calls/builtins.memql.
+// (operator.go) and the reconciliation pass the reconcileCalls automation runs
+// (reconcile.go), declared in dsl/calls/builtins.memql.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{
@@ -201,6 +205,11 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Name:        "mediaServers",
 			Description: "The active media servers rooms are placed on, one row each, never a credential or the name of the secret holding one.",
 			Handler:     i.handleMediaServers,
+		},
+		{
+			Name:        "reconcile",
+			Description: "One reconciliation pass over every open call: seats repaired to what the media server shows, the host-left countdown applied, expired queue entries marked. Only the engine's own reconcileCalls automation runs it.",
+			Handler:     i.handleReconcile,
 		},
 	}
 }

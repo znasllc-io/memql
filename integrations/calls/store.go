@@ -35,7 +35,10 @@ import (
 //     with internal origin (asOwner). A create stamps ownerUserId from the actor, so a
 //     row is the site's owner's at birth and never the person who asked. Borrowed
 //     authority without internal origin is a CLIENT read of these concepts
-//     (site_access_guards.go), which is why the stamp is here.
+//     (site_access_guards.go), which is why the stamp is here. Reconciliation
+//     (reconcile.go) has no session and no site handed to it: it finds the open rooms
+//     through the media servers' load, as the cluster acting, and then reads and
+//     writes each room's rows as THAT ROOM'S site owner, the owner the room row names.
 //   - THE CLUSTER'S ROWS (media servers) and the sealed secrets are read and written
 //     AS THE CLUSTER ACTING: the system actor `system:calls`, a synthetic owner-role
 //     actor, with internal origin (asCluster). Their queries require
@@ -237,6 +240,21 @@ func (s *Store) MediaServerByID(ctx context.Context, id string) (*MediaServer, e
 func (s *Store) ActiveMediaServers(ctx context.Context) ([]MediaServer, error) {
 	call, err := langparser.RenderCall("callsActiveMediaServers", nil)
 	rows, err := s.readAsCluster(ctx, "the active media servers", call, err)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MediaServer, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, mediaServerFromRow(r))
+	}
+	return out, nil
+}
+
+// MediaServersNotRemoved is every media server that may still carry calls -- active or
+// draining -- as the cluster acting: what reconciliation walks (reconcile.go).
+func (s *Store) MediaServersNotRemoved(ctx context.Context) ([]MediaServer, error) {
+	call, err := langparser.RenderCall("callsMediaServersNotRemoved", nil)
+	rows, err := s.readAsCluster(ctx, "the media servers not removed", call, err)
 	if err != nil {
 		return nil, err
 	}

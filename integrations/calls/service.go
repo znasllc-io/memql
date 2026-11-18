@@ -24,7 +24,9 @@ import (
 // seated as its host; people join by link, wait behind a lock or in the media server's
 // queue, poll, and leave (design sections 7.7, 8 and 10). The rules are the pure
 // module's (component/calls); this file reads the state they decide from, under the
-// locks that make that state one replica's at a time, and writes what they decided.
+// locks that make that state one replica's at a time, and writes what they decided. A
+// host's controls and how a call ends are host.go's, booked calls schedule.go's, and the
+// pass that repairs every call against its media server reconcile.go's.
 //
 // # Bearer secrets, and what a stranger costs
 //
@@ -58,14 +60,18 @@ import (
 //     because the overlap check spans every booking of the key. Where one call per key
 //     holds, and where it does not, is schedule.go's file note.
 //   - "calls.scheduled.<id>" serializes one booking: its moves, its cancel and the join
-//     that opens its room, so two first joins on two replicas open one room.
+//     that opens its room, so two first joins on two replicas open one room, and the end
+//     of that room, which marks the booking ended: a decision that may end a call -- a
+//     leave, a host's end, reconciliation -- takes the booking's gate before the room's
+//     (host.go endGates).
 //
 // Every write that takes or frees a server seat or changes a queue entry holds the
-// room's gate and the server's together. The ORDER IS FIXED -- key, then booking, then
-// room, then server -- and every caller takes its gates in one call in that order, which
-// rules out two callers each holding a lock the other waits for. A room's server never
-// changes after placement, so it is read before the gates are taken and the room is read
-// again inside them.
+// room's gate and the server's together; so does every host control that writes, since
+// a lock or an admission changes who stands in the server's queue. The ORDER IS FIXED --
+// key, then booking, then room, then server -- and every caller takes its gates in one
+// call in that order, which rules out two callers each holding a lock the other waits
+// for. A room's server never changes after placement, so it is read before the gates are
+// taken and the room is read again inside them.
 //
 // # Capacity and the queue
 //
@@ -80,10 +86,12 @@ import (
 // place in line is inside the free seats, because only its poll's reply can carry its
 // pass; Leave frees a seat and promotes nobody. A waiter that has not polled for its
 // deployable's QueueEntryTTL is not counted, and its entry is marked expired when a
-// request of its own call next holds the gates. A non-host waiter in a locked call is
-// HELD: it keeps its entry and its arrival while it polls, but counts in nobody's place
-// until its call is unlocked, so a lock never keeps a free seat from the rest of the
-// line (serverLoad.queue).
+// request of its own call next holds the gates, or by reconciliation's pass, whichever
+// comes first. A waiter in a locked call that does not pass the lock (no host seat, and
+// not admitted by a host: seatRow.passesLock) is HELD: it keeps its entry and its arrival
+// while it polls, but counts in nobody's place until its call is unlocked or a host
+// admits it, so a lock never keeps a free seat from the rest of the line
+// (serverLoad.queue).
 //
 // # Join attempts
 //
@@ -102,7 +110,9 @@ import (
 // nobody in it, and Start refuses its key while any room of the key is open. A join writes
 // the room's count first (the attempt counts whatever follows), then the session, then the
 // seat: a session pointing at a seat that was never written is seated nowhere, which the
-// next join reads as free.
+// next join reads as free. Ending a call writes its seats, its queue entries and its
+// booking before the room (host.go endRows), so an end cut short leaves an open call that
+// the next attempt ends again.
 
 // tokenBytes is the randomness in a session token and in each link: 160 bits, which no
 // guessing at any request rate reaches, spelled as 32 symbols by calls.NewToken.
@@ -445,7 +455,7 @@ func (s *Service) placeRoom(ctx context.Context, policy callrules.Policy) (place
 		return placedRoom{}, callrules.JoinResult{}, fmt.Errorf("calls: reach media server %s: %w", server.ID, err)
 	}
 	placed := placedRoom{server: *server, credential: credential, roomID: id.NewShortId()}
-	if err := backend.CreateRoom(ctx, placed.roomID, uint32(policy.MaxPeople+policy.MaxAgents+1)); err != nil {
+	if err := backend.CreateRoom(ctx, placed.roomID, mediaRoomLimit(policy)); err != nil {
 		return placedRoom{}, callrules.JoinResult{}, fmt.Errorf("calls: open the call's media room: %w", err)
 	}
 	return placed, callrules.JoinResult{}, nil
@@ -514,7 +524,7 @@ func (s *Service) openRoom(ctx context.Context, site callrules.SiteRef, server M
 
 	seat := seatRow{
 		ID: id.NewShortId(), RoomID: o.roomID, Identity: o.identity, Kind: string(callrules.KindPerson),
-		DisplayName: ask.name, Status: seatWaiting, Host: o.host,
+		DisplayName: ask.name, Status: seatWaiting, Host: o.host, KeyID: held.keyHeld(),
 	}
 	joinedAt := time.Time{}
 	if decision.Outcome == callrules.OutcomeAdmit {
@@ -527,6 +537,7 @@ func (s *Service) openRoom(ctx context.Context, site callrules.SiteRef, server M
 	if err := s.store.createSeat(ctx, owner, newSeat{
 		ID: seat.ID, SiteID: site.SiteID, RoomID: o.roomID, Identity: seat.Identity, Kind: seat.Kind,
 		DisplayName: seat.DisplayName, Status: seat.Status, Host: seat.Host, Confirm: ask.confirm, JoinedAt: joinedAt,
+		KeyID: seat.KeyID,
 	}, now); err != nil {
 		return callrules.JoinResult{}, out, seatRow{}, err
 	}
@@ -693,14 +704,50 @@ func (s *Service) joinRoom(ctx context.Context, site callrules.SiteRef, room roo
 	if err != nil {
 		return callrules.JoinResult{}, held.state(sess, site), err
 	}
-	result, out, seat, err := s.joinGated(ctx, site, room, *server, policy, held, ask)
+	result, out, seat, alone, err := s.joinGated(ctx, site, room, *server, policy, held, ask)
 	if err != nil || result.Outcome != callrules.OutcomeAdmit {
 		return result, out, err
+	}
+	if alone {
+		if err := s.reopenMediaRoom(ctx, *server, credential, room, policy); err != nil {
+			return callrules.JoinResult{}, out, err
+		}
 	}
 	if result, err = admitted(*server, credential, room.MediaRoom, seat, policy); err != nil {
 		return callrules.JoinResult{}, out, err
 	}
 	return result, out, nil
+}
+
+// reopenMediaRoom opens a call's media room again, with its limits, before the first pass
+// into a room with nobody in it: a pass handed to the only person in the call. A media
+// server closes a room nobody has been in for a while -- a host queued past its
+// empty-room timeout, a call whose people all left while somebody waited -- and a
+// participant who connected then would find the room gone, or opened again by the
+// connection with none of the call's limits. Opening a room the server still has is
+// answered with that room and changes nothing (livekit-server v1.13.7 RoomManager.
+// CreateRoom returns a room it holds before its allocator is reached), so the cost of a
+// room that was still open is one control call. "Only person" is the rows' word for it
+// (the seat the admission decided is the only one holding a media server's seat), so it
+// costs no read of the media server. KNOWN LIMITATION: of two people let in one after the
+// other into a room nobody was in, the first is alone and the second is not; the second
+// may connect before the first's call has opened the room, and the room is then opened
+// by that connection without the call's limits.
+func (s *Service) reopenMediaRoom(ctx context.Context, server MediaServer, credential MediaCredential, room roomRow, policy callrules.Policy) error {
+	backend, err := s.media(server, credential)
+	if err != nil {
+		return fmt.Errorf("calls: reach media server %s: %w", server.ID, err)
+	}
+	if err := backend.CreateRoom(ctx, room.MediaRoom, mediaRoomLimit(policy)); err != nil {
+		return fmt.Errorf("calls: open the call's media room again: %w", err)
+	}
+	return nil
+}
+
+// mediaRoomLimit is how many connections a call's media room admits: every person, every
+// agent and the sampler.
+func mediaRoomLimit(policy callrules.Policy) uint32 {
+	return uint32(max(policy.MaxPeople, 0) + max(policy.MaxAgents, 0) + 1)
 }
 
 // joinAsk is what a join brings to its gated phase.
@@ -755,11 +802,19 @@ func (s *Service) roomFor(ctx context.Context, site callrules.SiteRef, pepper []
 
 // joinGated is a join's decision and its writes, under the room's and the server's
 // gates. It answers an admission without a pass (the caller mints it once the gates
-// are released), the session the joiner now holds, and the seat.
-func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room roomRow, server MediaServer, policy callrules.Policy, held *sessionRow, ask joinAsk) (callrules.JoinResult, callrules.Session, seatRow, error) {
+// are released), the session the joiner now holds, the seat, and whether the seat let in
+// is the only one in the call now (alone: reopenMediaRoom).
+//
+// A HOST BACK IN THE CALL CLEARS THE COUNTDOWN. When the decision lets a host seat in --
+// a host's re-entry, or anyone holding the host link -- and the room records that its
+// last host left (hostLeftAt), the record is cleared in the same decision: the
+// countdown runs only while nobody hosting the call is in it (host.go). A host who
+// re-enters into the queue is not back yet, and clears nothing until their own poll lets
+// them in (answerWaiting).
+func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room roomRow, server MediaServer, policy callrules.Policy, held *sessionRow, ask joinAsk) (callrules.JoinResult, callrules.Session, seatRow, bool, error) {
 	release, err := s.gates(ctx, roomGate(room.ID), serverGate(server.ID))
 	if err != nil {
-		return callrules.JoinResult{}, held.stateOf(ask.token, site), seatRow{}, err
+		return callrules.JoinResult{}, held.stateOf(ask.token, site), seatRow{}, false, err
 	}
 	defer release()
 	fresh := memql.ContextWithFreshRead(ctx)
@@ -768,29 +823,33 @@ func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room ro
 
 	current, err := s.store.roomByID(fresh, owner, room.ID)
 	if err != nil {
-		return callrules.JoinResult{}, held.stateOf(ask.token, site), seatRow{}, err
+		return callrules.JoinResult{}, held.stateOf(ask.token, site), seatRow{}, false, err
 	}
 	if current == nil {
-		return callrules.JoinResult{}, held.stateOf(ask.token, site), seatRow{}, fmt.Errorf("%w: the call is gone", callrules.ErrNotFound)
+		return callrules.JoinResult{}, held.stateOf(ask.token, site), seatRow{}, false, fmt.Errorf("%w: the call is gone", callrules.ErrNotFound)
 	}
 	if !current.open() {
-		return refuseJoin("call_ended"), held.stateOf(ask.token, site), seatRow{}, fmt.Errorf("%w: the call has ended", callrules.ErrEnded)
+		return refuseJoin("call_ended"), held.stateOf(ask.token, site), seatRow{}, false, fmt.Errorf("%w: the call has ended", callrules.ErrEnded)
 	}
 	// THE ATTEMPT IS COUNTED BEFORE ANYTHING IS DECIDED, and past the limit nothing is
 	// written at all.
 	window, ok, retry := callrules.CountJoinAttempt(current.Window, now, policy.RoomJoinsPerMinute, callrules.JoinWindowLength)
 	if !ok {
-		return rateRefusal(retry), held.stateOf(ask.token, site), seatRow{}, fmt.Errorf("%w: the call has taken its join attempts for this minute", callrules.ErrConflict)
+		return rateRefusal(retry), held.stateOf(ask.token, site), seatRow{}, false, fmt.Errorf("%w: the call has taken its join attempts for this minute", callrules.ErrConflict)
 	}
-	if err := s.store.countJoin(fresh, owner, *current, window, memql.VersionTimeAfter(current.Version, now)); err != nil {
-		return callrules.JoinResult{}, held.stateOf(ask.token, site), seatRow{}, err
+	counted := memql.VersionTimeAfter(current.Version, now)
+	if err := s.store.countJoin(fresh, owner, *current, window, counted); err != nil {
+		return callrules.JoinResult{}, held.stateOf(ask.token, site), seatRow{}, false, err
 	}
+	// The room as written: a second write to it in this decision (a host back in the
+	// call) is fenced on this version, not on the one read.
+	current.Version, current.Window = counted, window
 
 	// The session and its seat, as they are now.
 	var seat *seatRow
 	if held != nil {
 		if held, err = s.store.sessionByID(fresh, owner, held.ID); err != nil {
-			return callrules.JoinResult{}, callrules.Session{}, seatRow{}, err
+			return callrules.JoinResult{}, callrules.Session{}, seatRow{}, false, err
 		}
 		if !held.usable(now) {
 			held = nil
@@ -798,7 +857,7 @@ func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room ro
 	}
 	if held != nil && held.SeatID != "" {
 		if seat, err = s.store.seatByID(fresh, owner, held.SeatID); err != nil {
-			return callrules.JoinResult{}, held.stateOf(ask.token, site), seatRow{}, err
+			return callrules.JoinResult{}, held.stateOf(ask.token, site), seatRow{}, false, err
 		}
 	}
 	out := held.stateOf(ask.token, site)
@@ -808,25 +867,29 @@ func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room ro
 	case seat != nil && seat.RoomID == current.ID:
 		switch {
 		case seat.Status == seatRemoved:
-			return refuseJoin(callrules.ReasonRemoved), out, seatRow{}, fmt.Errorf("%w: the host removed this seat", callrules.ErrForbidden)
+			return refuseJoin(callrules.ReasonRemoved), out, seatRow{}, false, fmt.Errorf("%w: the host removed this seat", callrules.ErrForbidden)
 		case seat.occupying():
 			// A REJOIN: the same seat and identity, a fresh pass, nothing counted against
 			// the room's size or the server's seats.
 			rejoined, err := s.recordJoin(fresh, owner, *seat, ask, nil, now)
 			if err != nil {
-				return callrules.JoinResult{}, out, seatRow{}, err
+				return callrules.JoinResult{}, out, seatRow{}, false, err
 			}
-			return callrules.JoinResult{Outcome: callrules.OutcomeAdmit}, out, rejoined, nil
+			alone, err := s.aloneIn(fresh, owner, current.ID, seat.ID)
+			if err != nil {
+				return callrules.JoinResult{}, out, seatRow{}, false, err
+			}
+			return callrules.JoinResult{Outcome: callrules.OutcomeAdmit}, out, rejoined, alone, nil
 		case seat.Status == seatWaiting:
 			// A WAITING SEAT STAYS WAITING: it keeps its seat, its queue entry and its
 			// place in line, and is answered exactly as its poll would answer it, so a
 			// rejoin can neither skip the line nor lose a place the poll would keep.
 			recorded, err := s.recordJoin(fresh, owner, *seat, ask, nil, now)
 			if err != nil {
-				return callrules.JoinResult{}, out, seatRow{}, err
+				return callrules.JoinResult{}, out, seatRow{}, false, err
 			}
-			result, after, err := s.answerWaiting(fresh, site, *current, server, policy, recorded, now)
-			return result, out, after, err
+			result, after, alone, err := s.answerWaiting(fresh, site, *current, server, policy, recorded, now)
+			return result, out, after, alone, err
 		default:
 			// A seat that left takes a counted join, on the same row.
 			reentry = true
@@ -834,54 +897,59 @@ func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room ro
 	case seat != nil && seat.placed():
 		other, err := s.store.roomByID(fresh, owner, seat.RoomID)
 		if err != nil {
-			return callrules.JoinResult{}, out, seatRow{}, err
+			return callrules.JoinResult{}, out, seatRow{}, false, err
 		}
 		if other != nil && other.open() {
-			return refuseJoin(callrules.ReasonInAnotherCall), out, seatRow{}, fmt.Errorf("%w: the session is in another call", callrules.ErrConflict)
+			return refuseJoin(callrules.ReasonInAnotherCall), out, seatRow{}, false, fmt.Errorf("%w: the session is in another call", callrules.ErrConflict)
 		}
 	}
 
 	// A NEW JOIN, decided against the room and the server's load.
 	load, err := s.store.loadOn(fresh, server)
 	if err != nil {
-		return callrules.JoinResult{}, out, seatRow{}, err
+		return callrules.JoinResult{}, out, seatRow{}, false, err
 	}
 	ttls, err := s.queueLifetimes(fresh, site, policy, load)
 	if err != nil {
-		return callrules.JoinResult{}, out, seatRow{}, err
+		return callrules.JoinResult{}, out, seatRow{}, false, err
 	}
 	live, behindLocks, expired := load.queue(now, ttls)
 	if err := s.expire(fresh, owner, current.ID, expired, now); err != nil {
-		return callrules.JoinResult{}, out, seatRow{}, err
+		return callrules.JoinResult{}, out, seatRow{}, false, err
 	}
 	host := ask.asHost || (reentry && seat.Host)
+	// A seat a host admitted passes the lock on its way back in as a host does
+	// (seatRow.passesLock); it is not a host for anything else.
+	passes := host || (reentry && seat.passesLock())
 	arrives := arrival(now, live, behindLocks)
 	entry := callrules.QueueEntry{ID: id.NewShortId(), Class: load.classFor(*current), EnqueuedAt: arrives, LastPollAt: arrives}
 	position := placeInLine(live, entry)
-	decision := callrules.DecideJoin(load.roomState(*current), callrules.JoinAsk{Kind: callrules.KindPerson, Host: host}, policy, load.free()-position)
+	decision := callrules.DecideJoin(load.roomState(*current), callrules.JoinAsk{Kind: callrules.KindPerson, Host: passes}, policy, load.free()-position)
 	if decision.Outcome == callrules.OutcomeRefuse {
-		return refuseJoin(decision.Reason), out, seatRow{}, fmt.Errorf("%w: %s", callrules.ErrConflict, decision.Reason)
+		return refuseJoin(decision.Reason), out, seatRow{}, false, fmt.Errorf("%w: %s", callrules.ErrConflict, decision.Reason)
 	}
 
 	taken := seatRow{
 		ID: id.NewShortId(), RoomID: current.ID, Kind: string(callrules.KindPerson),
-		DisplayName: ask.name, Status: seatWaiting, Host: host,
+		DisplayName: ask.name, Status: seatWaiting, Host: host, KeyID: held.keyHeld(),
 	}
 	if reentry {
-		taken.ID, taken.Identity = seat.ID, seat.Identity
+		taken.ID, taken.Identity, taken.KeyID, taken.LetInAt = seat.ID, seat.Identity, seat.KeyID, seat.LetInAt
 	} else if taken.Identity, err = callrules.NewToken(s.random, identityBytes); err != nil {
-		return callrules.JoinResult{}, out, seatRow{}, err
+		return callrules.JoinResult{}, out, seatRow{}, false, err
 	}
 	joinedAt := time.Time{}
 	if decision.Outcome == callrules.OutcomeAdmit {
 		taken.Status, joinedAt = seatAdmitted, now
 	}
+	// Counted before this seat is written, so the seat itself is not among them.
+	alone := load.othersIn(current.ID, taken.ID) == 0
 
 	// The session first: a session pointing at a seat that was never written is seated
 	// nowhere, which the next join reads as free.
 	out, refused, err := s.seatJoiner(fresh, site, held, ask, out, taken.ID, current.ID, now)
 	if err != nil {
-		return refused, out, seatRow{}, err
+		return refused, out, seatRow{}, false, err
 	}
 	if reentry {
 		fields := map[string]any{"status": taken.Status, "host": taken.Host}
@@ -889,13 +957,14 @@ func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room ro
 			fields["joinedAt"] = joinedAt
 		}
 		if _, err := s.recordJoin(fresh, owner, *seat, ask, fields, now); err != nil {
-			return callrules.JoinResult{}, out, seatRow{}, err
+			return callrules.JoinResult{}, out, seatRow{}, false, err
 		}
 	} else if err := s.store.createSeat(fresh, owner, newSeat{
 		ID: taken.ID, SiteID: site.SiteID, RoomID: current.ID, Identity: taken.Identity, Kind: taken.Kind,
 		DisplayName: taken.DisplayName, Status: taken.Status, Host: taken.Host, Confirm: ask.confirm, JoinedAt: joinedAt,
+		KeyID: taken.KeyID,
 	}, now); err != nil {
-		return callrules.JoinResult{}, out, seatRow{}, err
+		return callrules.JoinResult{}, out, seatRow{}, false, err
 	}
 	switch decision.Outcome {
 	case callrules.OutcomeQueue:
@@ -903,13 +972,39 @@ func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room ro
 			ID: entry.ID, SiteID: site.SiteID, RoomID: current.ID, SeatID: taken.ID, KeyID: current.KeyID,
 			Class: entry.Class, EnqueuedAt: entry.EnqueuedAt,
 		}, now); err != nil {
-			return callrules.JoinResult{}, out, seatRow{}, err
+			return callrules.JoinResult{}, out, seatRow{}, false, err
 		}
-		return queued(decision.Reason, position, policy), out, taken, nil
+		return queued(decision.Reason, position, policy), out, taken, false, nil
 	case callrules.OutcomeWait:
-		return waited(decision.Reason, policy), out, taken, nil
+		return waited(decision.Reason, policy), out, taken, false, nil
 	}
-	return callrules.JoinResult{Outcome: callrules.OutcomeAdmit}, out, taken, nil
+	if taken.Host {
+		if err := s.hostIsBack(fresh, owner, *current, now); err != nil {
+			return callrules.JoinResult{}, out, seatRow{}, false, err
+		}
+	}
+	return callrules.JoinResult{Outcome: callrules.OutcomeAdmit}, out, taken, alone, nil
+}
+
+// hostIsBack clears a room's record that its last host left (hostLeftAt), now that a host
+// seat is in the call again, fenced on the version the caller holds. A room with no such
+// record is not written.
+func (s *Service) hostIsBack(ctx context.Context, owner string, room roomRow, now time.Time) error {
+	if room.HostLeftAt.IsZero() {
+		return nil
+	}
+	return s.store.updateRoom(ctx, owner, room, map[string]any{"hostLeftAt": ""}, memql.VersionTimeAfter(room.Version, now))
+}
+
+// aloneIn reports whether a seat is the only one of its room holding a media server's
+// seat, from the room's seats read fresh: a rejoin and a repeated poll read no server
+// load, so this is their one read for it.
+func (s *Service) aloneIn(ctx context.Context, owner, roomID, seatID string) (bool, error) {
+	seats, err := s.store.seatsForRoom(ctx, owner, roomID)
+	if err != nil {
+		return false, err
+	}
+	return occupants(seats, roomID, seatID) == 0, nil
 }
 
 // seatJoiner records on the joiner's session the seat a join gave them: a new session
@@ -1033,19 +1128,24 @@ func (s *Service) Queue(ctx context.Context, sess callrules.Session) (callrules.
 	if err != nil {
 		return callrules.JoinResult{}, err
 	}
-	result, after, err := s.pollGated(ctx, site, *room, *server, policy, seat.ID)
+	result, after, alone, err := s.pollGated(ctx, site, *room, *server, policy, seat.ID)
 	if err != nil || result.Outcome != callrules.OutcomeAdmit {
 		return result, err
+	}
+	if alone {
+		if err := s.reopenMediaRoom(ctx, *server, credential, *room, policy); err != nil {
+			return callrules.JoinResult{}, err
+		}
 	}
 	return admitted(*server, credential, room.MediaRoom, after, policy)
 }
 
 // pollGated is a poll's decision and its writes, under the room's and the server's
-// gates.
-func (s *Service) pollGated(ctx context.Context, site callrules.SiteRef, room roomRow, server MediaServer, policy callrules.Policy, seatID string) (callrules.JoinResult, seatRow, error) {
+// gates. It answers as joinGated does, alone included.
+func (s *Service) pollGated(ctx context.Context, site callrules.SiteRef, room roomRow, server MediaServer, policy callrules.Policy, seatID string) (callrules.JoinResult, seatRow, bool, error) {
 	release, err := s.gates(ctx, roomGate(room.ID), serverGate(server.ID))
 	if err != nil {
-		return callrules.JoinResult{}, seatRow{}, err
+		return callrules.JoinResult{}, seatRow{}, false, err
 	}
 	defer release()
 	fresh := memql.ContextWithFreshRead(ctx)
@@ -1053,27 +1153,31 @@ func (s *Service) pollGated(ctx context.Context, site callrules.SiteRef, room ro
 	now := s.now()
 	current, err := s.store.roomByID(fresh, owner, room.ID)
 	if err != nil {
-		return callrules.JoinResult{}, seatRow{}, err
+		return callrules.JoinResult{}, seatRow{}, false, err
 	}
 	if current == nil {
-		return callrules.JoinResult{}, seatRow{}, fmt.Errorf("%w: the call is gone", callrules.ErrNotFound)
+		return callrules.JoinResult{}, seatRow{}, false, fmt.Errorf("%w: the call is gone", callrules.ErrNotFound)
 	}
 	if !current.open() {
-		return refuseJoin("call_ended"), seatRow{}, fmt.Errorf("%w: the call has ended", callrules.ErrEnded)
+		return refuseJoin("call_ended"), seatRow{}, false, fmt.Errorf("%w: the call has ended", callrules.ErrEnded)
 	}
 	seat, err := s.store.seatByID(fresh, owner, seatID)
 	if err != nil {
-		return callrules.JoinResult{}, seatRow{}, err
+		return callrules.JoinResult{}, seatRow{}, false, err
 	}
 	switch {
 	case seat == nil:
-		return callrules.JoinResult{}, seatRow{}, fmt.Errorf("%w: the seat is gone", callrules.ErrNotFound)
+		return callrules.JoinResult{}, seatRow{}, false, fmt.Errorf("%w: the seat is gone", callrules.ErrNotFound)
 	case seat.Status == seatRemoved:
-		return refuseJoin(callrules.ReasonRemoved), seatRow{}, fmt.Errorf("%w: the host removed this seat", callrules.ErrForbidden)
+		return refuseJoin(callrules.ReasonRemoved), seatRow{}, false, fmt.Errorf("%w: the host removed this seat", callrules.ErrForbidden)
 	case seat.occupying():
-		return callrules.JoinResult{Outcome: callrules.OutcomeAdmit}, *seat, nil
+		alone, err := s.aloneIn(fresh, owner, current.ID, seat.ID)
+		if err != nil {
+			return callrules.JoinResult{}, seatRow{}, false, err
+		}
+		return callrules.JoinResult{Outcome: callrules.OutcomeAdmit}, *seat, alone, nil
 	case seat.Status != seatWaiting:
-		return callrules.JoinResult{}, seatRow{}, fmt.Errorf("%w: the seat has left the call", callrules.ErrNotFound)
+		return callrules.JoinResult{}, seatRow{}, false, fmt.Errorf("%w: the seat has left the call", callrules.ErrNotFound)
 	}
 	return s.answerWaiting(fresh, site, *current, server, policy, *seat, now)
 }
@@ -1087,20 +1191,24 @@ func (s *Service) pollGated(ctx context.Context, site callrules.SiteRef, room ro
 // the entry alive, so a waiter held through a lock is back in its place when the lock
 // lifts. One without -- it waited behind a lock from the start, or its entry outlived
 // its lifetime -- asks as a newcomer at the back of the line, in the class its call's
-// state gives it now (serverLoad.classFor), as any new ask does.
-func (s *Service) answerWaiting(ctx context.Context, site callrules.SiteRef, room roomRow, server MediaServer, policy callrules.Policy, seat seatRow, now time.Time) (callrules.JoinResult, seatRow, error) {
+// state gives it now (serverLoad.classFor), as any new ask does. A seat a host admitted
+// (host.go) passes the lock and is decided exactly so: admitted when the server has a
+// seat for it after the line ahead, queued otherwise; its admission never handed out a
+// pass, so this poll's reply is the only one that carries it. It answers, for an
+// admission, whether the seat is the only one in the call now (alone: reopenMediaRoom).
+func (s *Service) answerWaiting(ctx context.Context, site callrules.SiteRef, room roomRow, server MediaServer, policy callrules.Policy, seat seatRow, now time.Time) (callrules.JoinResult, seatRow, bool, error) {
 	owner := site.OwnerUserID
 	load, err := s.store.loadOn(ctx, server)
 	if err != nil {
-		return callrules.JoinResult{}, seatRow{}, err
+		return callrules.JoinResult{}, seatRow{}, false, err
 	}
 	ttls, err := s.queueLifetimes(ctx, site, policy, load)
 	if err != nil {
-		return callrules.JoinResult{}, seatRow{}, err
+		return callrules.JoinResult{}, seatRow{}, false, err
 	}
 	live, held, expired := load.queue(now, ttls)
 	if err := s.expire(ctx, owner, room.ID, expired, now); err != nil {
-		return callrules.JoinResult{}, seatRow{}, err
+		return callrules.JoinResult{}, seatRow{}, false, err
 	}
 	stored := load.waitingEntryOf(seat.ID)
 	_, inLine := callrules.Position(live, entryID(stored))
@@ -1114,25 +1222,32 @@ func (s *Service) answerWaiting(ctx context.Context, site callrules.SiteRef, roo
 	// A held entry is placed by its own arrival among those in line: the place it takes
 	// back when the lock lifts. While the lock holds, DecideJoin answers it "locked".
 	position := placeInLine(live, entry)
-	decision := callrules.DecideJoin(load.roomState(room), callrules.JoinAsk{Kind: callrules.SeatKind(seat.Kind), Host: seat.Host}, policy, load.free()-position)
+	// A host seat, and a seat a host admitted, pass the lock (seatRow.passesLock).
+	decision := callrules.DecideJoin(load.roomState(room), callrules.JoinAsk{Kind: callrules.SeatKind(seat.Kind), Host: seat.passesLock()}, policy, load.free()-position)
 
 	switch decision.Outcome {
 	case callrules.OutcomeAdmit:
 		admittedSeat := seat
 		admittedSeat.Status = seatAdmitted
 		if err := s.store.updateSeat(ctx, owner, seat, map[string]any{"status": seatAdmitted, "joinedAt": now}, memql.VersionTimeAfter(seat.Version, now)); err != nil {
-			return callrules.JoinResult{}, seatRow{}, err
+			return callrules.JoinResult{}, seatRow{}, false, err
 		}
 		if kept {
 			if err := s.store.updateQueueEntry(ctx, owner, *stored, entryAdmitted, time.Time{}, memql.VersionTimeAfter(stored.Version, now)); err != nil {
-				return callrules.JoinResult{}, seatRow{}, err
+				return callrules.JoinResult{}, seatRow{}, false, err
 			}
 		}
-		return callrules.JoinResult{Outcome: callrules.OutcomeAdmit}, admittedSeat, nil
+		if seat.Host {
+			// A host is back in the call: the countdown stops (joinGated's note).
+			if err := s.hostIsBack(ctx, owner, room, now); err != nil {
+				return callrules.JoinResult{}, seatRow{}, false, err
+			}
+		}
+		return callrules.JoinResult{Outcome: callrules.OutcomeAdmit}, admittedSeat, load.othersIn(room.ID, seat.ID) == 0, nil
 	case callrules.OutcomeQueue, callrules.OutcomeWait:
 		if kept {
 			if err := s.refreshPoll(ctx, owner, *stored, policy, now); err != nil {
-				return callrules.JoinResult{}, seatRow{}, err
+				return callrules.JoinResult{}, seatRow{}, false, err
 			}
 		} else if decision.Outcome == callrules.OutcomeQueue {
 			// A lock-waiter let through into a full server, or a waiter back after its
@@ -1141,25 +1256,25 @@ func (s *Service) answerWaiting(ctx context.Context, site callrules.SiteRef, roo
 				ID: entry.ID, SiteID: site.SiteID, RoomID: room.ID, SeatID: seat.ID, KeyID: room.KeyID,
 				Class: entry.Class, EnqueuedAt: entry.EnqueuedAt,
 			}, now); err != nil {
-				return callrules.JoinResult{}, seatRow{}, err
+				return callrules.JoinResult{}, seatRow{}, false, err
 			}
 		}
 		if decision.Outcome == callrules.OutcomeWait {
-			return waited(decision.Reason, policy), seat, nil
+			return waited(decision.Reason, policy), seat, false, nil
 		}
-		return queued(decision.Reason, position, policy), seat, nil
+		return queued(decision.Reason, position, policy), seat, false, nil
 	}
 	// The call can no longer take this seat (it filled while they waited): the seat
 	// leaves, and its place in line goes to whoever is next.
 	if err := s.store.updateSeat(ctx, owner, seat, map[string]any{"status": seatLeft, "leftAt": now}, memql.VersionTimeAfter(seat.Version, now)); err != nil {
-		return callrules.JoinResult{}, seatRow{}, err
+		return callrules.JoinResult{}, seatRow{}, false, err
 	}
 	if kept {
 		if err := s.store.updateQueueEntry(ctx, owner, *stored, entryExpired, time.Time{}, memql.VersionTimeAfter(stored.Version, now)); err != nil {
-			return callrules.JoinResult{}, seatRow{}, err
+			return callrules.JoinResult{}, seatRow{}, false, err
 		}
 	}
-	return refuseJoin(decision.Reason), seatRow{}, fmt.Errorf("%w: %s", callrules.ErrConflict, decision.Reason)
+	return refuseJoin(decision.Reason), seatRow{}, false, fmt.Errorf("%w: %s", callrules.ErrConflict, decision.Reason)
 }
 
 // refreshPoll records a waiter's poll on its entry -- at most once a minute, and twice
@@ -1237,6 +1352,12 @@ func entryID(entry *queueEntryRow) string {
 // identity disconnected, so a client that left without hanging up does not stay in the
 // call on a seat the server counts as free. Leaving a seat that is gone already, or
 // with a session seated nowhere, is not an error: the state asked for holds.
+//
+// THE LAST PERSON LEAVING ENDS THE CALL: when nobody is left in it and nobody waits to
+// come in, it ends at once, empty, its booking with it (host.go endRows), and its media
+// room is deleted. Otherwise, when the seat was the last host seat in the call, the room
+// records when the host left (hostLeftAt), and the host-left countdown reconciliation
+// applies runs from then (host.go's file note).
 func (s *Service) Leave(ctx context.Context, sess callrules.Session) error {
 	site, err := checkSite(sess.Site)
 	if err != nil {
@@ -1250,65 +1371,79 @@ func (s *Service) Leave(ctx context.Context, sess callrules.Session) error {
 	if err != nil || seat == nil || room == nil {
 		return err
 	}
-	left, err := s.leaveGated(ctx, site.OwnerUserID, *room, seat.ID)
-	if err != nil || left == nil || !left.occupying() {
+	left, ended, err := s.leaveGated(ctx, site.OwnerUserID, *room, seat.ID)
+	if err != nil || left == nil {
 		return err
 	}
 	// After the gates: a media server slow to answer must not hold up the server's
 	// admissions. Best effort, and logged by the room and seat only.
-	if err := s.disconnect(ctx, *room, left.Identity); err != nil {
-		s.logger.Warn("calls: a seat left but its media identity could not be disconnected", "component", pluginName,
-			"room", room.ID, "seat", left.ID, "reason", failureReason(err))
+	if left.occupying() {
+		if err := s.disconnect(ctx, *room, left.Identity); err != nil {
+			s.logger.Warn("calls: a seat left but its media identity could not be disconnected", "component", pluginName,
+				"room", room.ID, "seat", left.ID, "reason", failureReason(err))
+		}
+	}
+	// Nobody is in an empty call by the rows' account, so its media room is cleared up
+	// rather than ended: best effort, as a media server closes an empty room itself.
+	if ended {
+		if err := s.deleteMediaRoom(ctx, *room); err != nil {
+			s.logger.Warn("calls: a call ended empty but its media room could not be deleted", "component", pluginName,
+				"room", room.ID, "reason", failureReason(err))
+		}
 	}
 	return nil
 }
 
-// leaveGated writes a seat's leaving under its room's and its server's gates, and
-// answers the seat as it was, or nil when it had left already.
-func (s *Service) leaveGated(ctx context.Context, owner string, room roomRow, seatID string) (*seatRow, error) {
-	release, err := s.gates(ctx, roomGate(room.ID), serverGate(room.MediaServerID))
+// leaveGated writes a seat's leaving under its call's gates (host.go endGates, since the
+// leave may end the call), and answers the seat as it was, or nil when it had left
+// already, and whether the call ended with it.
+func (s *Service) leaveGated(ctx context.Context, owner string, room roomRow, seatID string) (*seatRow, bool, error) {
+	release, err := s.gates(ctx, endGates(room)...)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer release()
 	fresh := memql.ContextWithFreshRead(ctx)
 	now := s.now()
 	seat, err := s.store.seatByID(fresh, owner, seatID)
 	if err != nil || seat == nil || !seat.placed() {
-		return nil, err
+		return nil, false, err
 	}
 	if err := s.store.updateSeat(fresh, owner, *seat, map[string]any{"status": seatLeft, "leftAt": now}, memql.VersionTimeAfter(seat.Version, now)); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if seat.Status == seatWaiting {
-		entries, err := s.store.queueEntriesForRoom(fresh, owner, room.ID)
-		if err != nil {
-			return nil, err
-		}
-		for _, entry := range entries {
-			if entry.SeatID != seat.ID || !entry.waiting() {
-				continue
-			}
-			if err := s.store.updateQueueEntry(fresh, owner, entry, entryExpired, time.Time{}, memql.VersionTimeAfter(entry.Version, now)); err != nil {
-				return nil, err
-			}
+		if err := s.giveUpPlace(fresh, owner, room.ID, seat.ID, now); err != nil {
+			return nil, false, err
 		}
 	}
-	return seat, nil
+	current, err := s.store.roomByID(fresh, owner, room.ID)
+	if err != nil || current == nil || !current.open() {
+		return seat, false, err
+	}
+	// The call as the leave left it: the seat just written is out of it.
+	v, err := s.viewRoom(fresh, *current)
+	if err != nil {
+		return seat, false, err
+	}
+	if v.empty(now) {
+		if err := s.endRows(fresh, v, callrules.EndReasonEmpty, now); err != nil {
+			return seat, false, err
+		}
+		return seat, true, nil
+	}
+	if seat.Host && seat.occupying() && !v.hostPresent() && current.HostLeftAt.IsZero() {
+		if err := s.store.updateRoom(fresh, owner, *current, map[string]any{"hostLeftAt": now}, memql.VersionTimeAfter(current.Version, now)); err != nil {
+			return seat, false, err
+		}
+	}
+	return seat, false, nil
 }
 
 // disconnect asks a call's media server to drop one identity from its media room.
 func (s *Service) disconnect(ctx context.Context, room roomRow, identity string) error {
-	server, err := s.store.MediaServerByID(ctx, room.MediaServerID)
-	if err != nil || server == nil {
-		return err
-	}
-	credential, err := s.credential(ctx, *server)
-	if err != nil {
-		return err
-	}
-	backend, err := s.media(*server, credential)
-	if err != nil {
+	backend, err := s.backendFor(ctx, room)
+	if err != nil || backend == nil {
 		return err
 	}
 	return backend.RemoveParticipant(ctx, room.MediaRoom, identity)
@@ -1444,6 +1579,16 @@ func (r *sessionRow) stateOf(token string, site callrules.SiteRef) callrules.Ses
 		return callrules.Session{}
 	}
 	return sessionOf(r, token, site)
+}
+
+// keyHeld is the key a session was opened with, or "" for a link's session or none: what
+// a seat the session takes records (seatRow.KeyID), from the session row and never from
+// the request.
+func (r *sessionRow) keyHeld() string {
+	if r == nil {
+		return ""
+	}
+	return r.KeyID
 }
 
 // keyActive is the key concept's rule: an absent status reads as active.

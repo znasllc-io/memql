@@ -43,16 +43,16 @@ import (
 // the key's other bookings and never against itself. The check spans every booking of the
 // key that may hold a slot, so booking and moving hold the key's gate.
 //
-// THE READ IS BOUNDED ONLY ONCE ENDING A ROOM MARKS ITS BOOKING ENDED, and no code does
-// that yet. The read is filtered to bookings that may still hold a slot
-// (callsScheduledCallsForKey), but a started booking stays in it until it is marked ended,
-// and heldSpan reads each started booking's room under the key's gate. A booking whose room
-// has ended stops counting toward the key's MaxUpcomingScheduled at once (heldSpan), but the
-// read and those room reads stay small only once whatever ends a room -- its host ending
-// it, the host-left countdown, the room emptying, reconciliation -- also marks the room's
-// booking ended; each of those must. No code ends a room yet, so until one does, every
-// booking ever opened stays in the read and counts toward the key's MaxUpcomingScheduled
-// for good.
+// EVERY WAY A ROOM ENDS MARKS ITS BOOKING ENDED, which is what keeps the read small. The
+// read is filtered to bookings that may still hold a slot (callsScheduledCallsForKey), and
+// a started booking stays in it until it is marked ended, with heldSpan reading each
+// started booking's room under the key's gate. Its host ending it, the room emptying, the
+// host-left countdown and reconciliation all end a room through one write sequence that
+// marks the room's booking ended before the room itself (host.go endRows, endBooking
+// below), so a started booking leaves the read when its call ends and the read is the
+// key's open calls and its upcoming bookings, which the policy caps. A booking whose room
+// ended but which an interrupted end left started holds nothing either (heldSpan), and is
+// marked ended when the next attempt ends the room.
 //
 // # One call per key, and where it does not hold
 //
@@ -409,10 +409,9 @@ func (s *Service) bookingOf(ctx context.Context, h keyHolder, callID string) (*b
 // booking or a move is checked against, and what counts toward the key's
 // MaxUpcomingScheduled. The read returns only bookings that may still hold a slot
 // (callsScheduledCallsForKey), and heldSpan decides each from the service's own clock. It
-// leaves out a key's past, cancelled and ended bookings, but it keeps every started one
-// until that booking is marked ended, which nothing does until ending a room marks its
-// booking ended (the file note): only then is its size bounded by the cap rather than by
-// the bookings the key ever opened.
+// leaves out a key's past, cancelled and ended bookings, and keeps a started one until its
+// call ends, which marks it ended (the file note), so its size is the key's open calls
+// and upcoming bookings rather than every booking the key ever opened.
 func (s *Service) upcoming(ctx context.Context, owner, keyID string, now time.Time, except string) ([]callrules.Interval, error) {
 	rows, err := s.store.bookingsForKey(ctx, owner, keyID)
 	if err != nil {
@@ -441,9 +440,8 @@ func (s *Service) upcoming(ctx context.Context, owner, keyID string, now time.Ti
 // end and now, and it counts against the key however long it runs. Once its room has
 // ended it holds nothing. A booking marked started whose room was never written opened
 // nothing (bookedRoom), and holds its booked span as a booking does. Each started booking
-// costs a read of its room here, under the key's gate, until it is marked ended (the file
-// note); and since no code ends a room yet, a booking once opened holds its slot and counts
-// toward the cap for good until something does.
+// costs a read of its room here, under the key's gate, until its call ends and marks it
+// ended (the file note).
 //
 // WHAT THE RUNNING SPAN DOES AND DOES NOT DO. Every booking starts at or after now
 // (ValidateSchedule's first rule), and spans are half-open, so a span running to now
@@ -509,9 +507,28 @@ func (s *Service) bookedRoom(ctx context.Context, owner string, b bookingRow) (*
 	return room, nil
 }
 
-// bookingGate serializes one booking: its moves, its cancel and the join that opens its
-// room. It comes after the key's gate and before any room's (service.go's file note).
+// bookingGate serializes one booking: its moves, its cancel, the join that opens its room
+// and the end of that room (host.go endGates). It comes after the key's gate and before
+// any room's (service.go's file note).
 func bookingGate(callID string) string { return "calls.scheduled." + memql.BareShortId(callID) }
+
+// endBooking marks a call's booking ended as its room ends, inside the end's own write
+// sequence and under the booking's gate the caller holds (host.go endRows): the booking
+// the room was opened for, while it is started and names this room. A booking that is
+// not -- an ad hoc call's room names none -- is left alone.
+func (s *Service) endBooking(ctx context.Context, owner string, room roomRow, now time.Time) error {
+	if room.ScheduledCallID == "" {
+		return nil
+	}
+	b, err := s.store.bookingByID(ctx, owner, room.ScheduledCallID)
+	if err != nil || b == nil {
+		return err
+	}
+	if b.status() != callrules.BookingStarted || b.RoomID != room.ID {
+		return nil
+	}
+	return s.store.updateBooking(ctx, owner, *b, map[string]any{"status": callrules.BookingEnded}, memql.VersionTimeAfter(b.Version, now))
+}
 
 // ---------------------------------------------------------------------------
 // the request, the calendar file

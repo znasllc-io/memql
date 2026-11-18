@@ -172,9 +172,10 @@ mutation seat createCallsSeat {
     confirmNoMinors  bool
     termsVersion  string
     joinedAt  datetime
+    keyId  string
   }
   insert {
-    accept { siteId, roomId, identity, kind, displayName, host, status, confirmAdult, confirmNoMinors, termsVersion, joinedAt }
+    accept { siteId, roomId, identity, kind, displayName, host, status, confirmAdult, confirmNoMinors, termsVersion, joinedAt, keyId }
     stamp {
       id: args.seatId
       ownerUserId: actor.userId
@@ -183,7 +184,7 @@ mutation seat createCallsSeat {
   }
 }
 
-/// Update a seat row (read-merge-validate-write). @serverOnly for createCallsSeat's reason. Only the fields that change over a seat's life are accepted: its site, owner and digests never move. The three confirmations are among them because every join confirms again, a rejoin included, and the seat records what its latest join confirmed (a newer terms version above all). actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+/// Update a seat row (read-merge-validate-write). @serverOnly for createCallsSeat's reason. Only the fields that change over a seat's life are accepted: its site, owner, digests and the key its holder unlocked never move. The three confirmations are among them because every join confirms again, a rejoin included, and the seat records what its latest join confirmed (a newer terms version above all); so are reconciliation's lastSeenAt and a host's letInAt. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
 @serverOnly
 mutation seat updateCallsSeat {
   args {
@@ -197,9 +198,11 @@ mutation seat updateCallsSeat {
     termsVersion  string
     joinedAt  datetime
     leftAt  datetime
+    lastSeenAt  datetime
+    letInAt  datetime
   }
   update {
-    accept { displayName, host, status, confirmAdult, confirmNoMinors, termsVersion, joinedAt, leftAt }
+    accept { displayName, host, status, confirmAdult, confirmNoMinors, termsVersion, joinedAt, leftAt, lastSeenAt, letInAt }
     stamp {
       id: args.seatId
       createdAt: args.versionTime ?? now

@@ -337,9 +337,8 @@ func TestScheduleRefusesOverlapOnOneKey(t *testing.T) {
 // cancelled, not ended, and ending after now or started -- so a key's past, cancelled and
 // ended bookings never reach it. A key whose past, cancelled and ended bookings outnumber
 // MaxUpcomingScheduled still books, up to the cap. A started booking is read whatever its
-// end until it is marked ended, which nothing does until ending a room marks its booking
-// ended (schedule.go's file note); this one opened no room before its end passed, so it is
-// read and holds nothing.
+// end until its call ends and marks it ended (schedule.go's file note); this one opened no
+// room before its end passed, so nothing ended it: it is read and holds nothing.
 func TestAKeysBookingsReadOnlyThoseThatHoldASlot(t *testing.T) {
 	cw := newCallWorld(t, "slots", 50)
 	if cw == nil {
@@ -615,7 +614,12 @@ func TestHostLinkGrantsHostAndCreatorNeedNotAttend(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, callrules.OutcomeWait, second.Outcome)
 	cw.bookingRoom(sc.ID)
-	require.Len(t, cw.media.rooms(), 1, "a later join opened a second media room")
+	// The host was the only person in the call, so their pass was preceded by opening
+	// the media room again (host.go, the first pass into an empty room); every room
+	// opened is still this one.
+	for _, opened := range cw.media.rooms() {
+		require.Equal(t, roomID, opened.Name, "a later join opened a second media room")
+	}
 }
 
 // TestJoinBeforeStartAfterCancelAfterEnd: a booked call's links are answered at once,

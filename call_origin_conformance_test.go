@@ -297,7 +297,7 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		"integrations/siteaccess": "deployable access codes -- the builtins' reads and writes over rows no client reads, each past the part and the organization gate; a code's reads for an act keep the caller's actor so the tier decides, the store's own reads and updates run as the cluster acting so a row's owner decides nothing, the two creates run as the site's owner, and the site read that authorizes an act is never stamped (design record 2026-10-29)",
 		// integrations/calls is every read and write of the generic calls capability's
 		// rows (dsl/calls). Every v1:calls concept is @serverWritten and on
-		// clientUnreadableConcepts, and every construct beneath the four builtins is
+		// clientUnreadableConcepts, and every construct beneath the five builtins is
 		// @serverOnly, so without the stamp no row is written and no read answers: the
 		// capability would be inert.
 		//
@@ -310,8 +310,13 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// check.
 		//
 		// The SERVER-INITIATED half is the media bootstrap at boot, which no request
-		// reaches. The REQUEST-DERIVED half is the four builtins, and what each has
-		// checked before it stamps differs (operator_db_test.go holds each):
+		// reaches, and reconciliation (reconcile.go): the callsReconcile builtin runs only
+		// for the engine's own reconcileCalls automation at internal origin, refusing
+		// every other caller before it reads (reconcile_db_test.go), and reads the open
+		// rooms through the media servers as the system actor and each room's rows as
+		// the owner the room row names. The REQUEST-DERIVED half is the four operator
+		// builtins, and what each has checked before it stamps differs
+		// (operator_db_test.go holds each):
 		//   - callsTestKeyCreate and callsPolicySet: the part, judged in the named
 		//     site's organization; a signed-in person and no run; the site read under
 		//     the caller, with an owner. Then the site owner's rows, as the owner.
@@ -328,11 +333,13 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// -- and to write that deployable's calls rows as its owner once a secret
 		// resolved; a deployable and owner that do not belong together resolve nothing.
 		// Booking, moving and cancelling a call act only for a session a key opened, on
-		// that key's own bookings. A media server's load is read as the system actor,
+		// that key's own bookings; a host control only for a session whose seat is a
+		// host seat in the call now, on that call's own seats (host_db_test.go). A media
+		// server's load is read as the system actor,
 		// counted and never returned, and so are a deployable's custom domains, of which
 		// only the live hostname a booked call's links are built on leaves
 		// (service_db_test.go, schedule_db_test.go).
-		"integrations/calls": "the calls capability -- server-initiated (the media bootstrap at boot) and request-derived: callsTestKeyCreate and callsPolicySet stamp only after the part judged in the site's organization, a person check and the site read under the caller, and write as the site's owner; callsMediaServers stamps only for a cluster owner and reads as the system actor; callsSiteEnable stamps nothing and writes the site under the caller; the calls service stamps to look a presented key, session or link up by its digest on the named deployable as its owner, writes that deployable's calls rows as the owner only once one resolved (a booking only for a session its own key opened), reads a media server's load as the system actor without returning it, and reads the deployable's custom domains as the system actor for the one live hostname its links are built on",
+		"integrations/calls": "the calls capability -- server-initiated (the media bootstrap at boot) and request-derived: callsTestKeyCreate and callsPolicySet stamp only after the part judged in the site's organization, a person check and the site read under the caller, and write as the site's owner; callsMediaServers stamps only for a cluster owner and reads as the system actor; callsSiteEnable stamps nothing and writes the site under the caller; the calls service stamps to look a presented key, session or link up by its digest on the named deployable as its owner, writes that deployable's calls rows as the owner only once one resolved (a booking only for a session its own key opened, a host control only for a host seat in the call), reads a media server's load as the system actor without returning it, and reads the deployable's custom domains as the system actor for the one live hostname its links are built on; callsReconcile stamps only for the engine's own reconcileCalls automation, reads the open rooms through the media servers as the system actor and writes each room's rows as the owner the room names",
 		// component/edge records that it HONOURED a preview grant
 		// (touchSitePreviewGrant, @serverOnly). The edge already reads the
 		// site, the custom domain, the account door, the bound store and the
