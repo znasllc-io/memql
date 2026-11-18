@@ -260,9 +260,9 @@ query scheduledCall callsScheduledCallDigestsById {
   shape   callsScheduledCallDigests
 }
 
-/// The bookings of one key that may still hold a slot of its time: not cancelled, not ended, and ending after now or started. What a new booking or a move is checked against, under the key's lock, and what counts toward the policy's maximum of upcoming bookings, which is what bounds it: a key's past, cancelled and ended bookings are never read, however many it made. A STARTED booking is read whatever its booked end, because a call running past its end still holds its slot until its room ends; the calls integration reads that room and decides (integrations/calls schedule.go upcoming). actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+/// The bookings of one key that may still hold a slot of its time: not cancelled, not ended, and ending after now or started. What a new booking or a move is checked against, under the key's lock, and what counts toward the policy's maximum of upcoming bookings. A key's past, cancelled and ended bookings are never read, however many it made. A STARTED booking is read whatever its booked end, because a call running past its end still holds its slot until its room ends; the calls integration reads that room and decides (integrations/calls schedule.go upcoming). SO THE READ IS BOUNDED ONLY ONCE ENDING A ROOM MARKS ITS BOOKING ENDED: whatever ends a room (its host ending it, the host-left countdown, the room emptying, reconciliation) must mark the room's booking ended, and until something does, every booking the key ever opened stays in this read. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
 @serverOnly
-@unbounded("bookings of one key that may still hold a slot -- capped by the policy maximum of upcoming scheduled calls, and the key's calls still running past their booked end")
+@unbounded("bookings of one key that may still hold a slot -- the upcoming ones the policy caps, plus every opened one not yet marked ended; bounded only once ending a room marks its booking ended")
 @actor
 @cache(0)
 query scheduledCall callsScheduledCallsForKey {

@@ -286,8 +286,10 @@ func TestScheduleValidatesTheBookingAndWhoMayBook(t *testing.T) {
 	require.Len(t, cw.rowsOf(scheduledCallConcept), 1, "a refused booking was written")
 }
 
-// TestScheduleRefusesOverlapOnOneKey: a key holds one call at a time, so a booking that
-// overlaps another of the key's is refused as a conflict and writes nothing. Back-to-back
+// TestScheduleRefusesOverlapOnOneKey: a key's bookings never overlap as booked intervals,
+// so a booking that overlaps another of the key's is refused as a conflict and writes
+// nothing (what that does and does not promise once calls open is schedule.go's file
+// note). Back-to-back
 // bookings do not overlap, another key's bookings are its own, a move is checked against
 // the key's other bookings and never against itself, and a cancelled or ended booking
 // frees its slot. A key holds at most the policy's upcoming bookings.
@@ -332,10 +334,12 @@ func TestScheduleRefusesOverlapOnOneKey(t *testing.T) {
 
 // TestAKeysBookingsReadOnlyThoseThatHoldASlot: the read a booking is checked against,
 // under the key's lock, returns only the bookings that may still hold a slot -- not
-// cancelled, not ended, and ending after now or started -- so its size is the policy's
-// cap and not the key's history. A key whose past, cancelled and ended bookings outnumber
+// cancelled, not ended, and ending after now or started -- so a key's past, cancelled and
+// ended bookings never reach it. A key whose past, cancelled and ended bookings outnumber
 // MaxUpcomingScheduled still books, up to the cap. A started booking is read whatever its
-// end, and holds nothing once it is over (here it opened no room before its end passed).
+// end until it is marked ended, which nothing does until ending a room marks its booking
+// ended (schedule.go's file note); this one opened no room before its end passed, so it is
+// read and holds nothing.
 func TestAKeysBookingsReadOnlyThoseThatHoldASlot(t *testing.T) {
 	cw := newCallWorld(t, "slots", 50)
 	if cw == nil {
@@ -397,8 +401,9 @@ func TestARunningCallHoldsItsSlotUntilItsRoomEnds(t *testing.T) {
 // TestABackToBackBookingOpensEarlyWhileThePreviousCallRuns: back-to-back bookings on one
 // key are allowed -- an agent books one interview per candidate, each ending as the next
 // begins -- and the second opens in its early window while the first's room is still
-// open, so the key has two calls at once. It is one of the two overlaps a key's calls
-// keep (schedule.go's file note); what an overlap costs comes with payments.
+// open, so the key has two calls at once. A booked opening does not look at the key's open
+// rooms for exactly this case (schedule.go's file note); what an overlap costs comes with
+// payments.
 func TestABackToBackBookingOpensEarlyWhileThePreviousCallRuns(t *testing.T) {
 	cw := newCallWorld(t, "backtoback", 50)
 	if cw == nil {

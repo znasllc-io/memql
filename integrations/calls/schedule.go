@@ -41,20 +41,35 @@ import (
 // booked end; a STARTED one holds its slot until its room ends, however long the call runs
 // past its booked end; a cancelled or ended one holds nothing. A move is checked against
 // the key's other bookings and never against itself. The check spans every booking of the
-// key that may hold a slot, so booking and moving hold the key's gate, and that read is
-// filtered to those bookings (callsScheduledCallsForKey), so the policy's cap bounds it.
+// key that may hold a slot, so booking and moving hold the key's gate.
 //
-// TWO OVERLAPS REMAIN, the only ways a key has two calls at once. Opening a booked call's
-// room does not look at the key's open rooms, and Start does not look at the key's
-// bookings:
-//   - an ad hoc call started before a booked slot and still running when the slot comes
-//     overlaps it;
-//   - a booking opened in its early window (ScheduledCallOpensEarly) while the key's
-//     previous call still runs overlaps that call. That is a back-to-back booking -- the
-//     core use, one interview per candidate, each ending as the next begins -- or one booked
-//     to start after a call that is running past its booked end, since a running call's span
-//     reaches only to now and every booking starts at or after now.
-// Both are allowed; what an overlap costs comes with payments.
+// THE READ IS BOUNDED ONLY ONCE ENDING A ROOM MARKS ITS BOOKING ENDED, and no code does
+// that yet. The read is filtered to bookings that may still hold a slot
+// (callsScheduledCallsForKey), but a started booking stays in it until it is marked ended,
+// and heldSpan reads each started booking's room under the key's gate. A booking whose room
+// has ended stops counting toward the key's MaxUpcomingScheduled at once (heldSpan), but the
+// read and those room reads stay small only once whatever ends a room -- its host ending
+// it, the host-left countdown, the room emptying, reconciliation -- also marks the room's
+// booking ended; each of those must. No code ends a room yet, so until one does, every
+// booking ever opened stays in the read and counts toward the key's MaxUpcomingScheduled
+// for good.
+//
+// # One call per key, and where it does not hold
+//
+// ONE CALL PER KEY HOLDS BETWEEN AD HOC CALLS: Start refuses while any room of the key is
+// open, booked or not (openRefusal, key_in_call). AMONG BOOKED CALLS IT HOLDS AS
+// INTERVALS AT BOOKING TIME: no two of a key's bookings overlap. It does not hold at
+// opening. A booked room opens anywhere in its window, from ScheduledCallOpensEarly before
+// its start to its booked end (DecideBookingJoin), whatever else the key has open, and Start
+// ignores the key's bookings. So a key can have two rooms open at once whenever a booked
+// opening and another open room of the key coincide: a back-to-back booking opened while
+// the previous call runs, early or after its own start; a booking opened while an earlier
+// call runs past its booked end; an ad hoc call started inside a booking's window before the
+// booking opens.
+//
+// A BOOKED OPENING DOES NOT LOOK AT THE KEY'S OPEN ROOMS because a back-to-back booking must
+// be able to open while the previous call runs: that is the core use, one interview per
+// candidate, each ending as the next begins. What an overlap costs comes with payments.
 //
 // # Links and the calendar file
 //
@@ -113,7 +128,7 @@ import (
 //
 // A booking's links exist only in its reply. If a Schedule's reply is lost after the
 // booking was written, the booking holds its slot until its end with links nobody has;
-// part 1 lists no key's bookings to find it by. A lost Reschedule reply is recoverable:
+// nothing lists a key's bookings yet to find it by. A lost Reschedule reply is recoverable:
 // the scheduler still has the id, and moving it again mints another pair.
 
 // scheduledCallConcept is the booking's concept.
@@ -393,8 +408,11 @@ func (s *Service) bookingOf(ctx context.Context, h keyHolder, callID string) (*b
 // upcoming is the spans a key's bookings hold at now, but the one named by except: what a
 // booking or a move is checked against, and what counts toward the key's
 // MaxUpcomingScheduled. The read returns only bookings that may still hold a slot
-// (callsScheduledCallsForKey), so its size is bounded by that cap rather than by the
-// key's history; heldSpan decides each from the service's own clock.
+// (callsScheduledCallsForKey), and heldSpan decides each from the service's own clock. It
+// leaves out a key's past, cancelled and ended bookings, but it keeps every started one
+// until that booking is marked ended, which nothing does until ending a room marks its
+// booking ended (the file note): only then is its size bounded by the cap rather than by
+// the bookings the key ever opened.
 func (s *Service) upcoming(ctx context.Context, owner, keyID string, now time.Time, except string) ([]callrules.Interval, error) {
 	rows, err := s.store.bookingsForKey(ctx, owner, keyID)
 	if err != nil {
@@ -422,13 +440,16 @@ func (s *Service) upcoming(ctx context.Context, owner, keyID string, now time.Ti
 // at its booked end, so while its room is open its span runs to the later of its booked
 // end and now, and it counts against the key however long it runs. Once its room has
 // ended it holds nothing. A booking marked started whose room was never written opened
-// nothing (bookedRoom), and holds its booked span as a booking does.
+// nothing (bookedRoom), and holds its booked span as a booking does. Each started booking
+// costs a read of its room here, under the key's gate, until it is marked ended (the file
+// note); and since no code ends a room yet, a booking once opened holds its slot and counts
+// toward the cap for good until something does.
 //
 // WHAT THE RUNNING SPAN DOES AND DOES NOT DO. Every booking starts at or after now
 // (ValidateSchedule's first rule), and spans are half-open, so a span running to now
-// overlaps no booking that can be made: what it changes is the count. A booking whose
-// early window opens while the key's call still runs is one of the two overlaps a key's
-// calls keep (the file note).
+// overlaps no booking that can be made: what it changes is the count. A booking made while
+// a call runs late can still open while that call runs, as any booked opening can while
+// another room of the key is open (the file note).
 func (s *Service) heldSpan(ctx context.Context, owner string, b bookingRow, now time.Time) (callrules.Interval, bool, error) {
 	span := callrules.Interval{Start: b.Start, End: b.End}
 	switch b.status() {
@@ -591,7 +612,8 @@ func (s *Service) joinBooking(ctx context.Context, site callrules.SiteRef, sess 
 		return refused, held.state(sess, site), err
 	}
 	// A BOOKED CALL'S FIRST JOIN DOES NOT ASK THE KEY'S OPEN ROOMS (oneCallPerKey false):
-	// the booking held its slot, and the overlaps that leaves are the file note's two.
+	// a back-to-back booking must be able to open while the previous call runs. So it opens
+	// whatever else the key has open (the file note's "one call per key").
 	if refused, err := s.openRefusal(ctx, site, b.KeyID, held, false); err != nil {
 		return refused, held.state(sess, site), err
 	}

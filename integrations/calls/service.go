@@ -54,9 +54,9 @@ import (
 //     the server's. Two calls have two room gates, so without this one two joins to
 //     two calls could each take the server's last seat.
 //   - "calls.key.<id>" serializes one key's calls and bookings: Start takes it so it opens
-//     no call on a key with one open, and booking or moving a call takes it because the
-//     overlap check spans every booking of the key (schedule.go, whose file note names the
-//     two overlaps a key's calls keep).
+//     no call while any room of the key is open, and booking or moving a call takes it
+//     because the overlap check spans every booking of the key. Where one call per key
+//     holds, and where it does not, is schedule.go's file note.
 //   - "calls.scheduled.<id>" serializes one booking: its moves, its cancel and the join
 //     that opens its room, so two first joins on two replicas open one room.
 //
@@ -98,10 +98,11 @@ import (
 // Writes run in an order chosen so a failure part-way leaves nothing that blocks a
 // retry. Opening a call -- Start, or a booked call's first join -- opens the media room
 // before any row (placeRoom) and writes the room row LAST (openRoom, the one place a call's
-// room is opened): a room row whose seat was never written would hold its key's one call
-// open with nobody in it. A join writes the room's count first (the attempt counts whatever follows),
-// then the session, then the seat: a session pointing at a seat that was never written
-// is seated nowhere, which the next join reads as free.
+// room is opened): a room row whose seat was never written would be an open call with
+// nobody in it, and Start refuses its key while any room of the key is open. A join writes
+// the room's count first (the attempt counts whatever follows), then the session, then the
+// seat: a session pointing at a seat that was never written is seated nowhere, which the
+// next join reads as free.
 
 // tokenBytes is the randomness in a session token and in each link: 160 bits, which no
 // guessing at any request rate reaches, spelled as 32 symbols by calls.NewToken.
@@ -234,8 +235,10 @@ func sessionOf(row *sessionRow, token string, site callrules.SiteRef) callrules.
 // host: on the active media server with the most free seats, in a media room named by
 // the room's short id with a place for every person, every agent and the sampler. The
 // host is admitted or, when the server is full, queued behind everyone joining a call
-// already running. Start opens no call on a key with one open; the two overlaps a key's
-// calls keep come from its bookings (schedule.go).
+// already running. Start opens no call while any room of the key is open, booked or not.
+// It does not look at the key's bookings, though, and a booked call's room opens whatever
+// else the key has open, so a key can still have two rooms open at once (schedule.go's
+// file note, "One call per key").
 func (s *Service) Start(ctx context.Context, sess callrules.Session, body callrules.StartBody) (callrules.StartResult, error) {
 	name, confirm, err := checkJoiner(body.Name, body.Confirm)
 	if err != nil {
@@ -349,7 +352,8 @@ func (s *Service) keyHolderOf(ctx context.Context, sess callrules.Session) (keyH
 // running (one browser is in one call at a time). With oneCallPerKey -- Start -- a key
 // with a call open is refused too, and the key's state comes first, so a holder starting
 // again in their own open call hears that the key is in a call. A booked call's first
-// join does not ask it: the booking held its slot (schedule.go's file note).
+// join does not ask it, because a back-to-back booking must be able to open while the
+// previous call runs (schedule.go's file note).
 func (s *Service) openRefusal(ctx context.Context, site callrules.SiteRef, keyID string, held *sessionRow, oneCallPerKey bool) (callrules.JoinResult, error) {
 	opens, err := s.keyOpensCalls(ctx, site, keyID)
 	if err != nil {
@@ -472,7 +476,8 @@ type roomOpening struct {
 //
 // THE WRITES RUN session, seat, queue entry, then whatever the caller writes before the
 // room (beforeRoom: a booked call marks its booking started), and the ROOM LAST: a room
-// row whose seat was never written would hold its key's one call open with nobody in it.
+// row whose seat was never written would be an open call with nobody in it, refusing its
+// key's Start while it stayed open.
 // It answers the opener's admission without a pass (minted once the gates are released), a
 // wait or a place in the queue, the session the opener now holds, and their seat.
 func (s *Service) openRoom(ctx context.Context, site callrules.SiteRef, server MediaServer, policy callrules.Policy, held *sessionRow, ask joinAsk, o roomOpening, out callrules.Session, beforeRoom func(context.Context, time.Time) error, now time.Time) (callrules.JoinResult, callrules.Session, seatRow, error) {
