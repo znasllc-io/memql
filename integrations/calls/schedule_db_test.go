@@ -82,6 +82,35 @@ func requireReason(t *testing.T, err error, class error, reason string) {
 	require.Equal(t, reason, callrules.ReasonOf(err), "refused for the wrong reason: %v", err)
 }
 
+// writeBooking writes a booking on a session's key straight through the store, over the
+// span the test names (the store checks nothing; Schedule is what checks), with the status
+// it names, and answers its id.
+func (cw *callWorld) writeBooking(sess callrules.Session, start, end time.Time, status string) string {
+	cw.t.Helper()
+	links, err := cw.svc.mintLinks()
+	require.NoError(cw.t, err)
+	callID := id.NewShortId()
+	require.NoError(cw.t, cw.calls.store.createBooking(context.Background(), cw.owner, newBooking{
+		ID: callID, SiteID: cw.site, KeyID: sess.KeyID, Start: start, End: end,
+		GuestDigest: callrules.Digest(cw.pepper(), []byte(links.GuestToken)),
+		HostDigest:  callrules.Digest(cw.pepper(), []byte(links.HostToken)),
+		CalendarUID: callID + "@" + cw.siteHost(),
+	}, time.Now()))
+	if status != "" {
+		cw.asOwnerMutate(scheduledCallConcept, callID, "updateCallsScheduledCall", map[string]any{"scheduledCallId": callID, "status": status})
+	}
+	return callID
+}
+
+// capUpcoming sets the site's MaxUpcomingScheduled.
+func (cw *callWorld) capUpcoming(n int) {
+	cw.t.Helper()
+	p := callrules.DefaultPolicy()
+	p.MaxUpcomingScheduled = n
+	_, err := cw.calls.store.savePolicy(context.Background(), cw.owner, nil, cw.site, p, []string{"maxUpcomingScheduled"}, time.Now())
+	require.NoError(cw.t, err)
+}
+
 // bookingRoom is the one room a booking opened, read off the table.
 func (cw *callWorld) bookingRoom(callID string) (string, map[string]any) {
 	cw.t.Helper()
@@ -299,6 +328,99 @@ func TestScheduleRefusesOverlapOnOneKey(t *testing.T) {
 	requireReason(t, err, callrules.ErrConflict, callrules.ReasonTooManyUpcoming)
 	cw.clock.Advance(2*time.Hour + time.Second) // "Right before A" is over
 	cw.booked(sess, 10*time.Hour, 30, "In the place of one that ended")
+}
+
+// TestAKeysBookingsReadOnlyThoseThatHoldASlot: the read a booking is checked against,
+// under the key's lock, returns only the bookings that may still hold a slot -- not
+// cancelled, not ended, and ending after now or started -- so its size is the policy's
+// cap and not the key's history. A key whose past, cancelled and ended bookings outnumber
+// MaxUpcomingScheduled still books, up to the cap. A started booking is read whatever its
+// end, and holds nothing once it is over (here it opened no room before its end passed).
+func TestAKeysBookingsReadOnlyThoseThatHoldASlot(t *testing.T) {
+	cw := newCallWorld(t, "slots", 50)
+	if cw == nil {
+		return
+	}
+	ctx := context.Background()
+	sess := cw.host()
+	cw.capUpcoming(2)
+
+	// Wall-clock times, which the read compares against the engine's own clock.
+	wall := time.Now().UTC().Truncate(time.Second)
+	ahead := cw.writeBooking(sess, wall.Add(time.Hour), wall.Add(2*time.Hour), "")
+	startedLongAgo := cw.writeBooking(sess, wall.Add(-2*time.Hour), wall.Add(-time.Hour), callrules.BookingStarted)
+	for i := 0; i < 3; i++ {
+		at := func(hours int) time.Time { return wall.Add(time.Duration(hours) * time.Hour) }
+		cw.writeBooking(sess, at(-6-2*i), at(-5-2*i), "") // nobody opened it before its end
+		cw.writeBooking(sess, at(10+2*i), at(11+2*i), callrules.BookingCancelled)
+		cw.writeBooking(sess, at(20+2*i), at(21+2*i), callrules.BookingEnded)
+	}
+	require.Len(t, cw.rowsOf(scheduledCallConcept), 11)
+
+	read, err := cw.calls.store.bookingsForKey(ctx, cw.owner, sess.KeyID)
+	require.NoError(t, err)
+	var ids []string
+	for _, b := range read {
+		ids = append(ids, b.ID)
+	}
+	require.ElementsMatch(t, []string{ahead, startedLongAgo}, ids, "the key's bookings read returned bookings that hold no slot")
+
+	cw.booked(sess, 30*time.Hour, 30, "Within the cap")
+	_, err = cw.book(sess, 40*time.Hour, 30, "Past the cap")
+	requireReason(t, err, callrules.ErrConflict, callrules.ReasonTooManyUpcoming)
+}
+
+// TestARunningCallHoldsItsSlotUntilItsRoomEnds: a booked call that runs past its booked
+// end still holds its key's slot, its span running to now, so it counts toward the key's
+// MaxUpcomingScheduled however long it runs; once its room ends it holds nothing.
+func TestARunningCallHoldsItsSlotUntilItsRoomEnds(t *testing.T) {
+	cw := newCallWorld(t, "runover", 50)
+	if cw == nil {
+		return
+	}
+	sess := cw.host()
+	cw.capUpcoming(1)
+	late := cw.booked(sess, 5*time.Minute, 30, "Running late")
+	in, _, err := cw.joinBy(callrules.JoinBody{HostToken: late.HostToken, Name: "Host"})
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeAdmit, in.Outcome)
+	roomID, _ := cw.bookingRoom(late.ID)
+
+	cw.clock.Advance(45 * time.Minute) // ten minutes past its booked end, and still running
+	_, err = cw.book(sess, time.Hour, 30, "While it runs over")
+	requireReason(t, err, callrules.ErrConflict, callrules.ReasonTooManyUpcoming)
+
+	cw.asOwnerMutate(roomConcept, roomID, "updateCallsRoom", map[string]any{"roomId": roomID, "status": "ended"})
+	cw.booked(sess, time.Hour, 30, "Once it has ended")
+}
+
+// TestABackToBackBookingOpensEarlyWhileThePreviousCallRuns: back-to-back bookings on one
+// key are allowed -- an agent books one interview per candidate, each ending as the next
+// begins -- and the second opens in its early window while the first's room is still
+// open, so the key has two calls at once. It is one of the two overlaps a key's calls
+// keep (schedule.go's file note); what an overlap costs comes with payments.
+func TestABackToBackBookingOpensEarlyWhileThePreviousCallRuns(t *testing.T) {
+	cw := newCallWorld(t, "backtoback", 50)
+	if cw == nil {
+		return
+	}
+	sess := cw.host()
+	first := cw.booked(sess, 5*time.Minute, 30, "First interview")
+	second := cw.booked(sess, 35*time.Minute, 30, "Second interview") // starts as the first ends
+
+	in, _, err := cw.joinBy(callrules.JoinBody{HostToken: first.HostToken, Name: "Interviewer"})
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeAdmit, in.Outcome)
+	firstRoom, _ := cw.bookingRoom(first.ID)
+
+	cw.clock.Advance(26 * time.Minute) // nine minutes before the second's start
+	next, _, err := cw.joinBy(callrules.JoinBody{HostToken: second.HostToken, Name: "Next interviewer"})
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeAdmit, next.Outcome, "a back-to-back booking did not open in its early window")
+	secondRoom, room := cw.bookingRoom(second.ID)
+	require.NotEqual(t, firstRoom, secondRoom)
+	require.Equal(t, "open", cw.row(roomConcept, firstRoom)["status"], "the first call was cut")
+	require.Equal(t, sess.KeyID, bare(room["keyId"]))
 }
 
 // TestRescheduleMintsNewLinksUnderTheSameUID: moving a booking keeps its id and its

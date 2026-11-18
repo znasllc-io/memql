@@ -45,3 +45,23 @@ func TestCallsCapacityReadsStartFromTheirLookups(t *testing.T) {
 		})
 	}
 }
+
+// THE KEY'S BOOKINGS READ STARTS FROM ITS LOOKUP INDEX, its status and end terms beside
+// it. Every booking and move reads the bookings of its key under the key's write gate
+// (integrations/calls schedule.go upcoming), filtered to those that may still hold a slot;
+// a read that did not start from the keyId lookup would enumerate every booking of the
+// concept while that lock is held.
+func TestCallsKeyBookingsReadStartsFromItsLookup(t *testing.T) {
+	eng, db, _ := sharedReadMergeEngine(t)
+	if eng == nil {
+		return
+	}
+	hook := &latestPlanCapture{}
+	db.AddQueryHook(hook)
+	reader := auth.ContextWithInternalOrigin(clusterOwnerCtx("v1:identity:user:calls-bookings-reader"))
+	_, scans := capturedScans(t, eng, hook, reader, `query callsScheduledCallsForKey(keyId: "bookings-key")`)
+	require.NotEmpty(t, scans, "the read issued no concept scan")
+	lookup := lookupSubquery(t, scans[0])
+	require.Contains(t, lookup, "(payload->>'keyId')", "the read does not start from the keyId lookup index")
+	require.Contains(t, lookup, "v1:calls:key:bookings-key", "the read does not compare the key id canonical, as the rows store it")
+}

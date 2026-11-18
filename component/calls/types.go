@@ -93,8 +93,8 @@ const (
 	// ReasonInAnotherCall: the session holds a seat in another call that is
 	// still open, and one browser is in one call at a time.
 	ReasonInAnotherCall = "in_another_call"
-	// ReasonKeyInCall: the key already has a call open, and a key holds one
-	// call at a time.
+	// ReasonKeyInCall: the key already has a call open, and Start opens no
+	// second call on it.
 	ReasonKeyInCall = "key_in_call"
 	// ReasonNoMediaServer: no media server is taking new calls.
 	ReasonNoMediaServer = "no_media_server"

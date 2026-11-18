@@ -53,9 +53,10 @@ import (
 //     call placed on it, whichever deployable each is for, and the queue for them is
 //     the server's. Two calls have two room gates, so without this one two joins to
 //     two calls could each take the server's last seat.
-//   - "calls.key.<id>" serializes one key's calls and bookings: Start takes it so a key
-//     holds one call at a time, and booking or moving a call takes it because the
-//     overlap check spans every booking of the key (schedule.go).
+//   - "calls.key.<id>" serializes one key's calls and bookings: Start takes it so it opens
+//     no call on a key with one open, and booking or moving a call takes it because the
+//     overlap check spans every booking of the key (schedule.go, whose file note names the
+//     two overlaps a key's calls keep).
 //   - "calls.scheduled.<id>" serializes one booking: its moves, its cancel and the join
 //     that opens its room, so two first joins on two replicas open one room.
 //
@@ -95,9 +96,10 @@ import (
 // # What survives a failure part-way
 //
 // Writes run in an order chosen so a failure part-way leaves nothing that blocks a
-// retry. Start opens the media room before any row and writes the room row LAST: a
-// room row whose seat was never written would hold its key's one call open with nobody
-// in it. A join writes the room's count first (the attempt counts whatever follows),
+// retry. Opening a call -- Start, or a booked call's first join -- opens the media room
+// before any row (placeRoom) and writes the room row LAST (openRoom, the one place a call's
+// room is opened): a room row whose seat was never written would hold its key's one call
+// open with nobody in it. A join writes the room's count first (the attempt counts whatever follows),
 // then the session, then the seat: a session pointing at a seat that was never written
 // is seated nowhere, which the next join reads as free.
 
@@ -232,112 +234,143 @@ func sessionOf(row *sessionRow, token string, site callrules.SiteRef) callrules.
 // host: on the active media server with the most free seats, in a media room named by
 // the room's short id with a place for every person, every agent and the sampler. The
 // host is admitted or, when the server is full, queued behind everyone joining a call
-// already running. A key holds one call at a time.
+// already running. Start opens no call on a key with one open; the two overlaps a key's
+// calls keep come from its bookings (schedule.go).
 func (s *Service) Start(ctx context.Context, sess callrules.Session, body callrules.StartBody) (callrules.StartResult, error) {
 	name, confirm, err := checkJoiner(body.Name, body.Confirm)
 	if err != nil {
 		return callrules.StartResult{}, err
 	}
-	site, err := checkSite(sess.Site)
-	if err != nil {
-		return callrules.StartResult{}, fmt.Errorf("%w: %v", callrules.ErrNoSession, err)
-	}
-	row, pepper, err := s.session(ctx, site, sess.Token, s.now())
+	h, err := s.keyHolderOf(ctx, sess)
 	if err != nil {
 		return callrules.StartResult{}, err
 	}
-	// ONLY A SESSION A KEY OPENED STARTS A CALL. A session a call's host link opened is
-	// that call's host and holds no key, so it starts nothing on the key's account; a
-	// guest's starts nothing at all.
-	if row.Kind != callrules.SessionHost || row.KeyID == "" {
-		return callrules.StartResult{}, fmt.Errorf("%w: only a session opened with a key starts a call", callrules.ErrForbidden)
-	}
-	policy, err := s.store.PolicyFor(ctx, site.OwnerUserID, site.SiteID)
+	policy, err := s.store.PolicyFor(ctx, h.site.OwnerUserID, h.site.SiteID)
 	if err != nil {
 		return callrules.StartResult{}, err
 	}
 	// The gated phase asks all of this again. Asking first, without the gates, is what
 	// keeps a refused Start from taking a lock or opening a media room.
-	if refused, err := s.startRefusal(ctx, site, row); err != nil {
+	if refused, err := s.openRefusal(ctx, h.site, h.row.KeyID, h.row, true); err != nil {
 		return callrules.StartResult{Join: refused}, err
 	}
-	server, err := s.place(ctx)
+	placed, refused, err := s.placeRoom(ctx, policy)
+	if err != nil {
+		return callrules.StartResult{Join: refused}, err
+	}
+	links, err := s.mintLinks()
 	if err != nil {
 		return callrules.StartResult{}, err
 	}
-	if server == nil {
-		return callrules.StartResult{Join: refuseJoin(callrules.ReasonNoMediaServer)},
-			fmt.Errorf("%w: no media server is taking new calls", callrules.ErrConflict)
-	}
-	credential, err := s.credential(ctx, *server)
+	links.ID = placed.roomID
+	identity, err := callrules.NewToken(s.random, identityBytes)
 	if err != nil {
 		return callrules.StartResult{}, err
 	}
-	backend, err := s.media(*server, credential)
-	if err != nil {
-		return callrules.StartResult{}, fmt.Errorf("calls: reach media server %s: %w", server.ID, err)
-	}
-	call := startedCall{roomID: id.NewShortId(), name: name, confirm: confirm}
-	// THE MEDIA ROOM BEFORE ANY ROW, and outside the gates. Before any row so a room
-	// that could not be opened leaves nothing behind; outside the gates because the
-	// server's gate serializes every admission on the server, and a network call under
-	// it would hold all of them up. A gated check that refuses after this leaves an
-	// empty media room, which the server closes on its own.
-	if err := backend.CreateRoom(ctx, call.roomID, uint32(policy.MaxPeople+policy.MaxAgents+1)); err != nil {
-		return callrules.StartResult{}, fmt.Errorf("calls: open the call's media room: %w", err)
-	}
-	links := callrules.CallLinks{ID: call.roomID}
-	if links.GuestToken, err = callrules.NewToken(s.random, tokenBytes); err != nil {
-		return callrules.StartResult{}, err
-	}
-	if links.HostToken, err = callrules.NewToken(s.random, tokenBytes); err != nil {
-		return callrules.StartResult{}, err
-	}
-	if call.identity, err = callrules.NewToken(s.random, identityBytes); err != nil {
-		return callrules.StartResult{}, err
-	}
-	call.guestDigest = callrules.Digest(pepper, []byte(links.GuestToken))
-	call.hostDigest = callrules.Digest(pepper, []byte(links.HostToken))
-
-	host, seat, err := s.startGated(ctx, site, row, policy, *server, call)
+	ask := joinAsk{name: name, confirm: confirm, asHost: true, pepper: h.pepper}
+	host, seat, err := s.startGated(ctx, h, policy, placed.server, ask, roomOpening{
+		roomID: placed.roomID, identity: identity, keyID: h.row.KeyID, host: true, class: callrules.ClassNewCall,
+		guestDigest: callrules.Digest(h.pepper, []byte(links.GuestToken)), hostDigest: callrules.Digest(h.pepper, []byte(links.HostToken)),
+	})
 	if err != nil || host.Outcome == callrules.OutcomeRefuse {
 		return callrules.StartResult{Join: host}, err
 	}
 	if host.Outcome == callrules.OutcomeAdmit {
-		if host, err = admitted(*server, credential, call.roomID, seat, policy); err != nil {
+		if host, err = admitted(placed.server, placed.credential, placed.roomID, seat, policy); err != nil {
 			return callrules.StartResult{}, err
 		}
 	}
 	return callrules.StartResult{Call: links, Join: host}, nil
 }
 
-// startedCall is what Start decided before its gates: the room's id, its links'
-// digests and the host's seat.
-type startedCall struct {
-	roomID, guestDigest, hostDigest, identity, name string
-	confirm                                         callrules.Confirmation
+// startGated is Start's own checks under the key's, the new room's and the server's
+// gates -- the holder's session still opens anything, and openRefusal again, the key's
+// open rooms included -- and then the opening every call shares (openRoom). It answers
+// the host's admission without a pass (the caller mints it once the gates are released)
+// and the host's seat.
+func (s *Service) startGated(ctx context.Context, h keyHolder, policy callrules.Policy, server MediaServer, ask joinAsk, o roomOpening) (callrules.JoinResult, seatRow, error) {
+	release, err := s.gates(ctx, keyGate(h.row.KeyID), roomGate(o.roomID), serverGate(server.ID))
+	if err != nil {
+		return callrules.JoinResult{}, seatRow{}, err
+	}
+	defer release()
+	fresh := memql.ContextWithFreshRead(ctx)
+	now := s.now()
+	current, err := s.store.sessionByID(fresh, h.site.OwnerUserID, h.row.ID)
+	if err != nil {
+		return callrules.JoinResult{}, seatRow{}, err
+	}
+	if !current.usable(now) {
+		return callrules.JoinResult{}, seatRow{}, fmt.Errorf("%w: the session ended", callrules.ErrNoSession)
+	}
+	if refused, err := s.openRefusal(fresh, h.site, current.KeyID, current, true); err != nil {
+		return refused, seatRow{}, err
+	}
+	result, _, seat, err := s.openRoom(fresh, h.site, server, policy, current, ask, o, callrules.Session{}, nil, now)
+	return result, seat, err
 }
 
-// startRefusal is what refuses a Start before anything is placed: a key that is not
-// active, a key with a call open, and a session seated in a call still running. The
-// key comes first so a holder starting again in their own open call hears that the key
-// is in a call.
-func (s *Service) startRefusal(ctx context.Context, site callrules.SiteRef, row *sessionRow) (callrules.JoinResult, error) {
-	key, err := s.store.keyByID(ctx, site.OwnerUserID, row.KeyID)
+// ---------------------------------------------------------------------------
+// opening a call's room, which Start and a booked call's first join share
+// ---------------------------------------------------------------------------
+
+// keyHolder is a session a key opened, on its deployable, with the pepper its call's links
+// are digested under: who starts a call, and who books, moves or cancels one.
+type keyHolder struct {
+	site   callrules.SiteRef
+	row    *sessionRow
+	pepper []byte
+}
+
+// keyHolderOf resolves the session presented to start, book, move or cancel a call. Only
+// its token and its deployable are trusted (the file note); the key's state is asked
+// under the gates (openRefusal, heldKey).
+func (s *Service) keyHolderOf(ctx context.Context, sess callrules.Session) (keyHolder, error) {
+	site, err := checkSite(sess.Site)
+	if err != nil {
+		return keyHolder{}, fmt.Errorf("%w: %v", callrules.ErrNoSession, err)
+	}
+	row, pepper, err := s.session(ctx, site, sess.Token, s.now())
+	if err != nil {
+		return keyHolder{}, err
+	}
+	// ONLY A SESSION A KEY OPENED STARTS OR BOOKS A CALL. A session a call's host link
+	// opened is that call's host and holds no key, so it starts and books nothing on the
+	// key's account; a guest's starts and books nothing at all.
+	if row.Kind != callrules.SessionHost || row.KeyID == "" {
+		return keyHolder{}, fmt.Errorf("%w: only a session opened with a key starts, books, moves or cancels a call", callrules.ErrForbidden)
+	}
+	return keyHolder{site: site, row: row, pepper: pepper}, nil
+}
+
+// openRefusal is what refuses opening a call's room before anything is placed, asked
+// again under the gates: a key that is not the deployable's or not active (a frozen or
+// banned key opens no new call, booked or not), and a session seated in a call still
+// running (one browser is in one call at a time). With oneCallPerKey -- Start -- a key
+// with a call open is refused too, and the key's state comes first, so a holder starting
+// again in their own open call hears that the key is in a call. A booked call's first
+// join does not ask it: the booking held its slot (schedule.go's file note).
+func (s *Service) openRefusal(ctx context.Context, site callrules.SiteRef, keyID string, held *sessionRow, oneCallPerKey bool) (callrules.JoinResult, error) {
+	opens, err := s.keyOpensCalls(ctx, site, keyID)
 	if err != nil {
 		return callrules.JoinResult{}, err
 	}
-	if key == nil || key.SiteID != site.SiteID || !keyActive(key.Status) {
+	if !opens {
 		return refuseJoin(callrules.ReasonKeyNotActive), fmt.Errorf("%w: the key opens no new call", callrules.ErrForbidden)
 	}
-	open, err := s.store.openRoomsForKey(ctx, site.OwnerUserID, key.ID)
-	if err != nil {
-		return callrules.JoinResult{}, err
+	if oneCallPerKey {
+		open, err := s.store.openRoomsForKey(ctx, site.OwnerUserID, keyID)
+		if err != nil {
+			return callrules.JoinResult{}, err
+		}
+		if len(open) > 0 {
+			return refuseJoin(callrules.ReasonKeyInCall), fmt.Errorf("%w: the key already has a call open", callrules.ErrConflict)
+		}
 	}
-	if len(open) > 0 {
-		return refuseJoin(callrules.ReasonKeyInCall), fmt.Errorf("%w: the key already has a call open", callrules.ErrConflict)
+	if held == nil {
+		return callrules.JoinResult{}, nil
 	}
-	busy, err := s.seatedElsewhere(ctx, site.OwnerUserID, row, "")
+	busy, err := s.seatedElsewhere(ctx, site.OwnerUserID, held, "")
 	if err != nil {
 		return callrules.JoinResult{}, err
 	}
@@ -347,103 +380,183 @@ func (s *Service) startRefusal(ctx context.Context, site callrules.SiteRef, row 
 	return callrules.JoinResult{}, nil
 }
 
-// startGated is Start's decision and its writes, under the key's, the new room's and
-// the server's gates. It answers the host's admission without a pass (the caller mints
-// it once the gates are released) and the host's seat.
-func (s *Service) startGated(ctx context.Context, site callrules.SiteRef, row *sessionRow, policy callrules.Policy, server MediaServer, call startedCall) (callrules.JoinResult, seatRow, error) {
-	release, err := s.gates(ctx, keyGate(row.KeyID), roomGate(call.roomID), serverGate(server.ID))
+// keyOpensCalls reports whether a key is the deployable's and active: the one rule every
+// act on a key's account asks, since a frozen or banned key starts, opens, books, moves
+// and cancels no call.
+func (s *Service) keyOpensCalls(ctx context.Context, site callrules.SiteRef, keyID string) (bool, error) {
+	key, err := s.store.keyByID(ctx, site.OwnerUserID, keyID)
 	if err != nil {
-		return callrules.JoinResult{}, seatRow{}, err
+		return false, err
 	}
-	defer release()
-	fresh := memql.ContextWithFreshRead(ctx)
-	owner := site.OwnerUserID
-	now := s.now()
+	return key != nil && key.SiteID == site.SiteID && keyActive(key.Status), nil
+}
 
-	current, err := s.store.sessionByID(fresh, owner, row.ID)
+// mintLinks is a call's two link secrets, guest and host, each handed out once and stored
+// only as its digest: a started call's (Start) and a booked call's (Schedule, and the
+// Reschedule that replaces them).
+func (s *Service) mintLinks() (callrules.CallLinks, error) {
+	var links callrules.CallLinks
+	var err error
+	if links.GuestToken, err = callrules.NewToken(s.random, tokenBytes); err != nil {
+		return links, err
+	}
+	if links.HostToken, err = callrules.NewToken(s.random, tokenBytes); err != nil {
+		return links, err
+	}
+	return links, nil
+}
+
+// placedRoom is where a new call is placed: its media server, the server's credential,
+// and the room's id, which names its media room too.
+type placedRoom struct {
+	server     MediaServer
+	credential MediaCredential
+	roomID     string
+}
+
+// placeRoom places a new call on the active media server with the most free seats and
+// opens its media room there, named by the new room's id, with a place for every person,
+// every agent and the sampler. No server taking new calls is a refusal, answered beside
+// its error.
+//
+// THE MEDIA ROOM BEFORE ANY ROW, and outside the gates. Before any row so a room that could
+// not be opened leaves nothing behind; outside the gates because the server's gate
+// serializes every admission on the server, and a network call under it would hold all of
+// them up. A gated check that refuses after this leaves an empty media room, which the
+// server closes on its own.
+func (s *Service) placeRoom(ctx context.Context, policy callrules.Policy) (placedRoom, callrules.JoinResult, error) {
+	server, err := s.place(ctx)
 	if err != nil {
-		return callrules.JoinResult{}, seatRow{}, err
+		return placedRoom{}, callrules.JoinResult{}, err
 	}
-	if !current.usable(now) {
-		return callrules.JoinResult{}, seatRow{}, fmt.Errorf("%w: the session ended", callrules.ErrNoSession)
+	if server == nil {
+		return placedRoom{}, refuseJoin(callrules.ReasonNoMediaServer), fmt.Errorf("%w: no media server is taking new calls", callrules.ErrConflict)
 	}
-	if refused, err := s.startRefusal(fresh, site, current); err != nil {
-		return refused, seatRow{}, err
-	}
-	// A drain between placement and the gate takes the server out of placement; the
-	// holder asks again and is placed elsewhere.
-	placed, err := s.store.MediaServerByID(fresh, server.ID)
+	credential, err := s.credential(ctx, *server)
 	if err != nil {
-		return callrules.JoinResult{}, seatRow{}, err
+		return placedRoom{}, callrules.JoinResult{}, err
+	}
+	backend, err := s.media(*server, credential)
+	if err != nil {
+		return placedRoom{}, callrules.JoinResult{}, fmt.Errorf("calls: reach media server %s: %w", server.ID, err)
+	}
+	placed := placedRoom{server: *server, credential: credential, roomID: id.NewShortId()}
+	if err := backend.CreateRoom(ctx, placed.roomID, uint32(policy.MaxPeople+policy.MaxAgents+1)); err != nil {
+		return placedRoom{}, callrules.JoinResult{}, fmt.Errorf("calls: open the call's media room: %w", err)
+	}
+	return placed, callrules.JoinResult{}, nil
+}
+
+// roomOpening is a new call's room as the opening decides it: everything Start and a booked
+// call's first join decide differently, and nothing else.
+type roomOpening struct {
+	roomID, identity        string               // the room, which names its media room; the opener's media identity
+	keyID                   string               // the key the call runs on
+	host, locked            bool                 // the opener takes a host seat; the room opens locked
+	class                   callrules.QueueClass // the opener's place in the server's queue when it is full
+	guestDigest, hostDigest string               // the room's links
+	scheduledCallID         string               // the booking a booked call's room is opened for
+}
+
+// openRoom decides a new call's first seat and writes the call. The caller holds the new
+// room's gate and its server's, behind its own first gate (a key's or a booking's), has
+// read the opener's session fresh under them (held, nil for a joiner who brought none) and
+// has asked what refuses its kind of opening. This is what every opening asks alike:
+//
+//   - the server again, since a drain between placement and the gate takes it out of
+//     placement (the opener asks again and is placed elsewhere);
+//   - the server's load, read under its gate, and the opener's place in its queue, in the
+//     opening's class;
+//   - the opener's seat as the room's first join attempt (calls.CountJoinAttempt);
+//   - DecideJoin over an empty room, locked or not.
+//
+// THE WRITES RUN session, seat, queue entry, then whatever the caller writes before the
+// room (beforeRoom: a booked call marks its booking started), and the ROOM LAST: a room
+// row whose seat was never written would hold its key's one call open with nobody in it.
+// It answers the opener's admission without a pass (minted once the gates are released), a
+// wait or a place in the queue, the session the opener now holds, and their seat.
+func (s *Service) openRoom(ctx context.Context, site callrules.SiteRef, server MediaServer, policy callrules.Policy, held *sessionRow, ask joinAsk, o roomOpening, out callrules.Session, beforeRoom func(context.Context, time.Time) error, now time.Time) (callrules.JoinResult, callrules.Session, seatRow, error) {
+	owner := site.OwnerUserID
+	placed, err := s.store.MediaServerByID(ctx, server.ID)
+	if err != nil {
+		return callrules.JoinResult{}, out, seatRow{}, err
 	}
 	if placed == nil || placed.State != "active" {
-		return refuseJoin(callrules.ReasonNoMediaServer), seatRow{}, fmt.Errorf("%w: the media server stopped taking new calls", callrules.ErrConflict)
+		return refuseJoin(callrules.ReasonNoMediaServer), out, seatRow{}, fmt.Errorf("%w: the media server stopped taking new calls", callrules.ErrConflict)
 	}
-	load, err := s.store.loadOn(fresh, *placed)
+	load, err := s.store.loadOn(ctx, *placed)
 	if err != nil {
-		return callrules.JoinResult{}, seatRow{}, err
+		return callrules.JoinResult{}, out, seatRow{}, err
 	}
-	ttls, err := s.queueLifetimes(fresh, site, policy, load)
+	ttls, err := s.queueLifetimes(ctx, site, policy, load)
 	if err != nil {
-		return callrules.JoinResult{}, seatRow{}, err
+		return callrules.JoinResult{}, out, seatRow{}, err
 	}
-	live, held, _ := load.queue(now, ttls)
-	// The host's seat is the room's first join attempt.
+	live, heldBack, _ := load.queue(now, ttls)
 	window, ok, retry := callrules.CountJoinAttempt(callrules.JoinWindow{}, now, policy.RoomJoinsPerMinute, callrules.JoinWindowLength)
 	if !ok {
-		return rateRefusal(retry), seatRow{}, fmt.Errorf("%w: the room takes no join attempts", callrules.ErrConflict)
+		return rateRefusal(retry), out, seatRow{}, fmt.Errorf("%w: the room takes no join attempts", callrules.ErrConflict)
 	}
-	arrives := arrival(now, live, held)
-	entry := callrules.QueueEntry{ID: id.NewShortId(), Class: callrules.ClassNewCall, EnqueuedAt: arrives, LastPollAt: arrives}
+	arrives := arrival(now, live, heldBack)
+	entry := callrules.QueueEntry{ID: id.NewShortId(), Class: o.class, EnqueuedAt: arrives, LastPollAt: arrives}
 	position := placeInLine(live, entry)
-	decision := callrules.DecideJoin(callrules.RoomState{}, callrules.JoinAsk{Kind: callrules.KindPerson, Host: true}, policy, load.free()-position)
-	if decision.Outcome != callrules.OutcomeAdmit && decision.Outcome != callrules.OutcomeQueue {
-		// An empty room refuses a host only under a policy with no people, which the
+	decision := callrules.DecideJoin(callrules.RoomState{Locked: o.locked}, callrules.JoinAsk{Kind: callrules.KindPerson, Host: o.host}, policy, load.free()-position)
+	if decision.Outcome == callrules.OutcomeRefuse {
+		// An empty room refuses its opener only under a policy with no people, which the
 		// cluster's bounds forbid; refused rather than seated if it ever does.
-		return refuseJoin(decision.Reason), seatRow{}, fmt.Errorf("%w: %s", callrules.ErrConflict, decision.Reason)
+		return refuseJoin(decision.Reason), out, seatRow{}, fmt.Errorf("%w: %s", callrules.ErrConflict, decision.Reason)
 	}
 
 	seat := seatRow{
-		ID: id.NewShortId(), RoomID: call.roomID, Identity: call.identity, Kind: string(callrules.KindPerson),
-		DisplayName: call.name, Status: seatAdmitted, Host: true,
+		ID: id.NewShortId(), RoomID: o.roomID, Identity: o.identity, Kind: string(callrules.KindPerson),
+		DisplayName: ask.name, Status: seatWaiting, Host: o.host,
 	}
-	joinedAt := now
-	if decision.Outcome == callrules.OutcomeQueue {
-		seat.Status, joinedAt = seatWaiting, time.Time{}
+	joinedAt := time.Time{}
+	if decision.Outcome == callrules.OutcomeAdmit {
+		seat.Status, joinedAt = seatAdmitted, now
 	}
-	// The order is the file note's: the session, the seat, its queue entry, and the room
-	// last.
-	if err := s.store.seatSession(fresh, owner, current, seat.ID, call.roomID, memql.VersionTimeAfter(current.Version, now)); err != nil {
-		if errors.Is(err, memql.ErrRowVersionChanged) {
-			return refuseJoin(callrules.ReasonInAnotherCall), seatRow{}, s.movedSession(err)
-		}
-		return callrules.JoinResult{}, seatRow{}, err
+	out, refused, err := s.seatJoiner(ctx, site, held, ask, out, seat.ID, o.roomID, now)
+	if err != nil {
+		return refused, out, seatRow{}, err
 	}
-	if err := s.store.createSeat(fresh, owner, newSeat{
-		ID: seat.ID, SiteID: site.SiteID, RoomID: call.roomID, Identity: seat.Identity, Kind: seat.Kind,
-		DisplayName: seat.DisplayName, Status: seat.Status, Host: true, Confirm: call.confirm, JoinedAt: joinedAt,
+	if err := s.store.createSeat(ctx, owner, newSeat{
+		ID: seat.ID, SiteID: site.SiteID, RoomID: o.roomID, Identity: seat.Identity, Kind: seat.Kind,
+		DisplayName: seat.DisplayName, Status: seat.Status, Host: seat.Host, Confirm: ask.confirm, JoinedAt: joinedAt,
 	}, now); err != nil {
-		return callrules.JoinResult{}, seatRow{}, err
+		return callrules.JoinResult{}, out, seatRow{}, err
 	}
 	if decision.Outcome == callrules.OutcomeQueue {
-		if err := s.store.createQueueEntry(fresh, owner, newQueueEntry{
-			ID: entry.ID, SiteID: site.SiteID, RoomID: call.roomID, SeatID: seat.ID, KeyID: current.KeyID,
+		if err := s.store.createQueueEntry(ctx, owner, newQueueEntry{
+			ID: entry.ID, SiteID: site.SiteID, RoomID: o.roomID, SeatID: seat.ID, KeyID: o.keyID,
 			Class: entry.Class, EnqueuedAt: entry.EnqueuedAt,
 		}, now); err != nil {
-			return callrules.JoinResult{}, seatRow{}, err
+			return callrules.JoinResult{}, out, seatRow{}, err
 		}
 	}
-	if err := s.store.createRoom(fresh, owner, newRoom{
-		ID: call.roomID, SiteID: site.SiteID, Deployable: site.Deployable, KeyID: current.KeyID,
-		MediaServerID: server.ID, MediaRoom: call.roomID, HostSeatID: seat.ID,
-		GuestDigest: call.guestDigest, HostDigest: call.hostDigest, OpenedAt: now, Window: window,
+	if beforeRoom != nil {
+		if err := beforeRoom(ctx, now); err != nil {
+			return callrules.JoinResult{}, out, seatRow{}, err
+		}
+	}
+	hostSeat := ""
+	if seat.Host {
+		hostSeat = seat.ID
+	}
+	if err := s.store.createRoom(ctx, owner, newRoom{
+		ID: o.roomID, SiteID: site.SiteID, Deployable: site.Deployable, KeyID: o.keyID,
+		MediaServerID: server.ID, MediaRoom: o.roomID, HostSeatID: hostSeat,
+		GuestDigest: o.guestDigest, HostDigest: o.hostDigest, ScheduledCallID: o.scheduledCallID, Locked: o.locked,
+		OpenedAt: now, Window: window,
 	}, now); err != nil {
-		return callrules.JoinResult{}, seatRow{}, err
+		return callrules.JoinResult{}, out, seatRow{}, err
 	}
-	if decision.Outcome == callrules.OutcomeQueue {
-		return queued(decision.Reason, position, policy), seat, nil
+	switch decision.Outcome {
+	case callrules.OutcomeQueue:
+		return queued(decision.Reason, position, policy), out, seat, nil
+	case callrules.OutcomeWait:
+		return waited(decision.Reason, policy), out, seat, nil
 	}
-	return callrules.JoinResult{Outcome: callrules.OutcomeAdmit}, seat, nil
+	return callrules.JoinResult{Outcome: callrules.OutcomeAdmit}, out, seat, nil
 }
 
 // place is the active media server with the most free seats, ties broken by id. Nil is
@@ -1243,7 +1356,7 @@ func (s *Service) movedSession(err error) error {
 }
 
 // gates takes the write gates of one decision, in the order given, which every caller
-// keeps as key, room, server (see the file note).
+// keeps as key, booking, room, server (see the file note).
 func (s *Service) gates(ctx context.Context, keys ...string) (func(), error) {
 	pool, err := memql.ResolveWriteGatePool(s.gateDB, "calls: a call's admission", "the calls plug-in takes it from PluginContext.GateDB")
 	if err != nil {

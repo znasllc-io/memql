@@ -36,16 +36,25 @@ import (
 //
 // # A booking holds its slot
 //
-// A key holds one call at a time, so a booking may not overlap another of the key's that
-// is still ahead or running (ValidateSchedule against the key's upcoming spans); a
-// cancelled or ended booking, and one whose booked end has passed, holds nothing, and a
-// move is checked against the key's other bookings and never itself. The check spans
-// every booking of the key, so booking and moving hold the key's gate.
+// A booking may not overlap another of its key's that still holds a slot (ValidateSchedule
+// against the key's upcoming spans, heldSpan). A booking holds its booked span until its
+// booked end; a STARTED one holds its slot until its room ends, however long the call runs
+// past its booked end; a cancelled or ended one holds nothing. A move is checked against
+// the key's other bookings and never against itself. The check spans every booking of the
+// key that may hold a slot, so booking and moving hold the key's gate, and that read is
+// filtered to those bookings (callsScheduledCallsForKey), so the policy's cap bounds it.
 //
-// KNOWN LIMITATION: Start refuses while the key has a room open, but it does not look at
-// the key's bookings, and opening a booked call's room does not look at the key's open
-// rooms, because the booking holds its slot. An ad hoc call started before a booked slot
-// and still running when the slot comes can overlap it.
+// TWO OVERLAPS REMAIN, the only ways a key has two calls at once. Opening a booked call's
+// room does not look at the key's open rooms, and Start does not look at the key's
+// bookings:
+//   - an ad hoc call started before a booked slot and still running when the slot comes
+//     overlaps it;
+//   - a booking opened in its early window (ScheduledCallOpensEarly) while the key's
+//     previous call still runs overlaps that call. That is a back-to-back booking -- the
+//     core use, one interview per candidate, each ending as the next begins -- or one booked
+//     to start after a call that is running past its booked end, since a running call's span
+//     reaches only to now and every booking starts at or after now.
+// Both are allowed; what an overlap costs comes with payments.
 //
 // # Links and the calendar file
 //
@@ -72,10 +81,11 @@ import (
 // until the call opens; a cancelled booking cancelled; an ended one, or one whose end
 // passed with nobody having opened it, call_ended. Each answer is immediate and writes
 // nothing: no gate, no session, no seat, no place in a queue. Inside the window the first
-// join opens the room as Start opens one -- on the active media server with the most free
-// seats, its media room created before any row -- on the booking's key, LOCKED (a booked
-// call's waiting room is on by default: the host admits each person), and carrying the
-// booking's id and both of its links' digests. The digests are what make every later join
+// join opens the room THROUGH THE SAME OPENING START USES (service.go placeRoom and
+// openRoom) -- on the active media server with the most free seats, its media room created
+// before any row -- on the booking's key, LOCKED (a booked call's waiting room is on by
+// default: the host admits each person), and carrying the booking's id and both of its
+// links' digests. The digests are what make every later join
 // find the room by its link as an ad hoc call's joins find theirs. A host link's holder
 // passes the lock and a guest waits; when the server is full the joiner queues in the
 // booked call's class, ClassScheduledDue.
@@ -134,7 +144,7 @@ func (s *Service) Schedule(ctx context.Context, sess callrules.Session, req call
 	if err != nil {
 		return none, err
 	}
-	h, err := s.holder(ctx, sess)
+	h, err := s.keyHolderOf(ctx, sess)
 	if err != nil {
 		return none, err
 	}
@@ -170,7 +180,7 @@ func (s *Service) Schedule(ctx context.Context, sess callrules.Session, req call
 
 // bookGated is a booking's check against the key's other bookings and its write, under
 // the key's gate. It answers the time the booking was decided at.
-func (s *Service) bookGated(ctx context.Context, h bookingHolder, policy callrules.Policy, n newBooking) (time.Time, error) {
+func (s *Service) bookGated(ctx context.Context, h keyHolder, policy callrules.Policy, n newBooking) (time.Time, error) {
 	release, err := s.gates(ctx, keyGate(h.row.KeyID))
 	if err != nil {
 		return time.Time{}, err
@@ -202,7 +212,7 @@ func (s *Service) Reschedule(ctx context.Context, sess callrules.Session, callID
 	if err != nil {
 		return none, err
 	}
-	h, err := s.holder(ctx, sess)
+	h, err := s.keyHolderOf(ctx, sess)
 	if err != nil {
 		return none, err
 	}
@@ -242,7 +252,7 @@ func (s *Service) Reschedule(ctx context.Context, sess callrules.Session, callID
 
 // moveGated is a move's decision and its write, under the key's gate and the booking's.
 // It answers the booking as written and the time it was decided at.
-func (s *Service) moveGated(ctx context.Context, h bookingHolder, callID string, policy callrules.Policy, title string, span callrules.Interval, links callrules.CallLinks) (bookingRow, time.Time, error) {
+func (s *Service) moveGated(ctx context.Context, h keyHolder, callID string, policy callrules.Policy, title string, span callrules.Interval, links callrules.CallLinks) (bookingRow, time.Time, error) {
 	release, err := s.gates(ctx, keyGate(h.row.KeyID), bookingGate(callID))
 	if err != nil {
 		return bookingRow{}, time.Time{}, err
@@ -302,7 +312,7 @@ func (s *Service) moveGated(ctx context.Context, h bookingHolder, callID string,
 // answered that the call was cancelled. Cancelling a cancelled booking changes nothing
 // and is not an error; a started call is a conflict, and an ended one has ended.
 func (s *Service) Cancel(ctx context.Context, sess callrules.Session, callID string) error {
-	h, err := s.holder(ctx, sess)
+	h, err := s.keyHolderOf(ctx, sess)
 	if err != nil {
 		return err
 	}
@@ -340,37 +350,9 @@ func (s *Service) Cancel(ctx context.Context, sess callrules.Session, callID str
 	return s.store.updateBooking(fresh, owner, *current, map[string]any{"status": callrules.BookingCancelled}, memql.VersionTimeAfter(current.Version, now))
 }
 
-// bookingHolder is who acts on a booking: the deployable, the key holder's session, and
-// the pepper the booking's links are digested under.
-type bookingHolder struct {
-	site   callrules.SiteRef
-	row    *sessionRow
-	pepper []byte
-}
-
-// holder resolves the session that books, moves or cancels a call: one a key opened, on
-// this deployable. Only its token and deployable are trusted (service.go's file note);
-// the key's state is asked under the gates (heldKey).
-func (s *Service) holder(ctx context.Context, sess callrules.Session) (bookingHolder, error) {
-	site, err := checkSite(sess.Site)
-	if err != nil {
-		return bookingHolder{}, fmt.Errorf("%w: %v", callrules.ErrNoSession, err)
-	}
-	row, pepper, err := s.session(ctx, site, sess.Token, s.now())
-	if err != nil {
-		return bookingHolder{}, err
-	}
-	// ONLY A SESSION A KEY OPENED BOOKS A CALL, for Start's reason: a host link's session
-	// holds no key, and a guest's holds nothing.
-	if row.Kind != callrules.SessionHost || row.KeyID == "" {
-		return bookingHolder{}, fmt.Errorf("%w: only a session opened with a key books, moves or cancels a call", callrules.ErrForbidden)
-	}
-	return bookingHolder{site: site, row: row, pepper: pepper}, nil
-}
-
-// heldKey asks again, under the gates, what holder asked: that the session still opens
-// anything, and that its key is the deployable's and active.
-func (s *Service) heldKey(ctx context.Context, h bookingHolder, now time.Time) error {
+// heldKey asks again, under the gates, what keyHolderOf asked: that the session still
+// opens anything, and that its key is the deployable's and active (keyOpensCalls).
+func (s *Service) heldKey(ctx context.Context, h keyHolder, now time.Time) error {
 	current, err := s.store.sessionByID(ctx, h.site.OwnerUserID, h.row.ID)
 	if err != nil {
 		return err
@@ -378,11 +360,11 @@ func (s *Service) heldKey(ctx context.Context, h bookingHolder, now time.Time) e
 	if !current.usable(now) {
 		return fmt.Errorf("%w: the session ended", callrules.ErrNoSession)
 	}
-	key, err := s.store.keyByID(ctx, h.site.OwnerUserID, h.row.KeyID)
+	opens, err := s.keyOpensCalls(ctx, h.site, h.row.KeyID)
 	if err != nil {
 		return err
 	}
-	if key == nil || key.SiteID != h.site.SiteID || !keyActive(key.Status) {
+	if !opens {
 		return callrules.Refuse(callrules.ErrForbidden, callrules.ReasonKeyNotActive, "the key books, moves and cancels no call")
 	}
 	return nil
@@ -390,7 +372,7 @@ func (s *Service) heldKey(ctx context.Context, h bookingHolder, now time.Time) e
 
 // bookingOf is the booking a holder names by id: ErrNotFound when the deployable's owner
 // holds none under it, ErrForbidden when it is another deployable's or another key's.
-func (s *Service) bookingOf(ctx context.Context, h bookingHolder, callID string) (*bookingRow, error) {
+func (s *Service) bookingOf(ctx context.Context, h keyHolder, callID string) (*bookingRow, error) {
 	callID = memql.BareShortId(strings.TrimSpace(callID))
 	if callID == "" {
 		return nil, fmt.Errorf("%w: no call is named", callrules.ErrInvalid)
@@ -408,7 +390,11 @@ func (s *Service) bookingOf(ctx context.Context, h bookingHolder, callID string)
 	return b, nil
 }
 
-// upcoming is the spans a key's bookings hold at now, but the one named by except.
+// upcoming is the spans a key's bookings hold at now, but the one named by except: what a
+// booking or a move is checked against, and what counts toward the key's
+// MaxUpcomingScheduled. The read returns only bookings that may still hold a slot
+// (callsScheduledCallsForKey), so its size is bounded by that cap rather than by the
+// key's history; heldSpan decides each from the service's own clock.
 func (s *Service) upcoming(ctx context.Context, owner, keyID string, now time.Time, except string) ([]callrules.Interval, error) {
 	rows, err := s.store.bookingsForKey(ctx, owner, keyID)
 	if err != nil {
@@ -416,11 +402,54 @@ func (s *Service) upcoming(ctx context.Context, owner, keyID string, now time.Ti
 	}
 	var spans []callrules.Interval
 	for _, b := range rows {
-		if b.ID != except && b.holdsSlot(now) {
-			spans = append(spans, callrules.Interval{Start: b.Start, End: b.End})
+		if b.ID == except {
+			continue
+		}
+		span, holds, err := s.heldSpan(ctx, owner, b, now)
+		if err != nil {
+			return nil, err
+		}
+		if holds {
+			spans = append(spans, span)
 		}
 	}
 	return spans, nil
+}
+
+// heldSpan is the span of the key's time a booking holds at now, and whether it holds
+// any. A booking holds its booked span until its booked end, unless it was cancelled or
+// ended. A STARTED booking holds its slot until its ROOM ENDS: a live call is never cut
+// at its booked end, so while its room is open its span runs to the later of its booked
+// end and now, and it counts against the key however long it runs. Once its room has
+// ended it holds nothing. A booking marked started whose room was never written opened
+// nothing (bookedRoom), and holds its booked span as a booking does.
+//
+// WHAT THE RUNNING SPAN DOES AND DOES NOT DO. Every booking starts at or after now
+// (ValidateSchedule's first rule), and spans are half-open, so a span running to now
+// overlaps no booking that can be made: what it changes is the count. A booking whose
+// early window opens while the key's call still runs is one of the two overlaps a key's
+// calls keep (the file note).
+func (s *Service) heldSpan(ctx context.Context, owner string, b bookingRow, now time.Time) (callrules.Interval, bool, error) {
+	span := callrules.Interval{Start: b.Start, End: b.End}
+	switch b.status() {
+	case callrules.BookingCancelled, callrules.BookingEnded:
+		return span, false, nil
+	case callrules.BookingStarted:
+		room, err := s.bookedRoom(ctx, owner, b)
+		if err != nil {
+			return span, false, err
+		}
+		if room != nil {
+			if !room.open() {
+				return span, false, nil
+			}
+			if now.After(span.End) {
+				span.End = now
+			}
+			return span, true, nil
+		}
+	}
+	return span, now.Before(b.End), nil
 }
 
 // standing is where a booking stands for a move or a cancel: cancelled; ended -- it ended,
@@ -457,18 +486,6 @@ func (s *Service) bookedRoom(ctx context.Context, owner string, b bookingRow) (*
 		return nil, err
 	}
 	return room, nil
-}
-
-func (s *Service) mintLinks() (callrules.CallLinks, error) {
-	var links callrules.CallLinks
-	var err error
-	if links.GuestToken, err = callrules.NewToken(s.random, tokenBytes); err != nil {
-		return links, err
-	}
-	if links.HostToken, err = callrules.NewToken(s.random, tokenBytes); err != nil {
-		return links, err
-	}
-	return links, nil
 }
 
 // bookingGate serializes one booking: its moves, its cancel and the join that opens its
@@ -573,37 +590,24 @@ func (s *Service) joinBooking(ctx context.Context, site callrules.SiteRef, sess 
 	if refused, err := bookingJoinRefusal(*b, s.now()); err != nil {
 		return refused, held.state(sess, site), err
 	}
-	if refused, err := s.openRefusal(ctx, site, *b, held); err != nil {
+	// A BOOKED CALL'S FIRST JOIN DOES NOT ASK THE KEY'S OPEN ROOMS (oneCallPerKey false):
+	// the booking held its slot, and the overlaps that leaves are the file note's two.
+	if refused, err := s.openRefusal(ctx, site, b.KeyID, held, false); err != nil {
 		return refused, held.state(sess, site), err
 	}
 	policy, err := s.store.PolicyFor(ctx, owner, site.SiteID)
 	if err != nil {
 		return callrules.JoinResult{}, held.state(sess, site), err
 	}
-	server, err := s.place(ctx)
+	placed, refused, err := s.placeRoom(ctx, policy)
+	if err != nil {
+		return refused, held.state(sess, site), err
+	}
+	identity, err := callrules.NewToken(s.random, identityBytes)
 	if err != nil {
 		return callrules.JoinResult{}, held.state(sess, site), err
 	}
-	if server == nil {
-		return refuseJoin(callrules.ReasonNoMediaServer), held.state(sess, site), fmt.Errorf("%w: no media server is taking new calls", callrules.ErrConflict)
-	}
-	credential, err := s.credential(ctx, *server)
-	if err != nil {
-		return callrules.JoinResult{}, held.state(sess, site), err
-	}
-	backend, err := s.media(*server, credential)
-	if err != nil {
-		return callrules.JoinResult{}, held.state(sess, site), fmt.Errorf("calls: reach media server %s: %w", server.ID, err)
-	}
-	call := openingCall{roomID: id.NewShortId()}
-	if call.identity, err = callrules.NewToken(s.random, identityBytes); err != nil {
-		return callrules.JoinResult{}, held.state(sess, site), err
-	}
-	// The media room before any row and outside the gates, for Start's reasons.
-	if err := backend.CreateRoom(ctx, call.roomID, uint32(policy.MaxPeople+policy.MaxAgents+1)); err != nil {
-		return callrules.JoinResult{}, held.state(sess, site), fmt.Errorf("calls: open the call's media room: %w", err)
-	}
-	opened, err := s.openGated(ctx, site, *b, *server, policy, held, ask, call)
+	opened, err := s.openGated(ctx, site, *b, placed.server, policy, held, ask, placed.roomID, identity)
 	if err != nil {
 		return opened.result, opened.out, err
 	}
@@ -613,7 +617,7 @@ func (s *Service) joinBooking(ctx context.Context, site callrules.SiteRef, sess 
 	if opened.result.Outcome != callrules.OutcomeAdmit {
 		return opened.result, opened.out, nil
 	}
-	result, err := admitted(*server, credential, call.roomID, opened.seat, policy)
+	result, err := admitted(placed.server, placed.credential, placed.roomID, opened.seat, policy)
 	if err != nil {
 		return callrules.JoinResult{}, opened.out, err
 	}
@@ -644,33 +648,6 @@ func bookingJoinRefusal(b bookingRow, now time.Time) (callrules.JoinResult, erro
 	return refused, fmt.Errorf("%w: the call has ended", callrules.ErrEnded)
 }
 
-// openRefusal is what refuses an opening join before anything is placed: the booking's
-// key frozen, banned or gone, and a session seated in a call still running.
-func (s *Service) openRefusal(ctx context.Context, site callrules.SiteRef, b bookingRow, held *sessionRow) (callrules.JoinResult, error) {
-	key, err := s.store.keyByID(ctx, site.OwnerUserID, b.KeyID)
-	if err != nil {
-		return callrules.JoinResult{}, err
-	}
-	if key == nil || key.SiteID != site.SiteID || !keyActive(key.Status) {
-		return refuseJoin(callrules.ReasonKeyNotActive), fmt.Errorf("%w: the call's key opens no call", callrules.ErrForbidden)
-	}
-	if held == nil {
-		return callrules.JoinResult{}, nil
-	}
-	busy, err := s.seatedElsewhere(ctx, site.OwnerUserID, held, "")
-	if err != nil {
-		return callrules.JoinResult{}, err
-	}
-	if busy {
-		return refuseJoin(callrules.ReasonInAnotherCall), fmt.Errorf("%w: the session is in another call", callrules.ErrConflict)
-	}
-	return callrules.JoinResult{}, nil
-}
-
-// openingCall is what the opening join decided before its gates: the new room's id, which
-// names its media room too, and the opener's media identity.
-type openingCall struct{ roomID, identity string }
-
 // opening is the opening join's answer: an admission without a pass (minted once the gates
 // are released), a wait or a place in the queue, with the session the joiner now holds
 // and their seat -- or the room another join opened meanwhile (joinIn), which the caller
@@ -682,10 +659,14 @@ type opening struct {
 	joinIn *roomRow
 }
 
-// openGated is the opening join's decision and its writes, under the booking's, the new
-// room's and the server's gates.
-func (s *Service) openGated(ctx context.Context, site callrules.SiteRef, b bookingRow, server MediaServer, policy callrules.Policy, held *sessionRow, ask joinAsk, call openingCall) (opening, error) {
-	release, err := s.gates(ctx, bookingGate(b.ID), roomGate(call.roomID), serverGate(server.ID))
+// openGated is a booked call's own checks under the booking's, the new room's and the
+// server's gates -- the booking found again by its link, not opened meanwhile and still
+// due, the joiner's session fresh, openRefusal again -- and then the opening every call
+// shares (service.go openRoom), for a booked call: locked, its opener a host only by the
+// host link, carrying the booking's id and digests, and the booking marked started just
+// before the room is written.
+func (s *Service) openGated(ctx context.Context, site callrules.SiteRef, b bookingRow, server MediaServer, policy callrules.Policy, held *sessionRow, ask joinAsk, roomID, identity string) (opening, error) {
+	release, err := s.gates(ctx, bookingGate(b.ID), roomGate(roomID), serverGate(server.ID))
 	if err != nil {
 		return opening{out: held.stateOf(ask.token, site)}, err
 	}
@@ -718,97 +699,29 @@ func (s *Service) openGated(ctx context.Context, site callrules.SiteRef, b booki
 		}
 	}
 	out := held.stateOf(ask.token, site)
-	if refused, err := s.openRefusal(fresh, site, *current, held); err != nil {
+	if refused, err := s.openRefusal(fresh, site, current.KeyID, held, false); err != nil {
 		return opening{result: refused, out: out}, err
-	}
-	// A drain between placement and the gate takes the server out of placement; the
-	// joiner asks again and is placed elsewhere.
-	placed, err := s.store.MediaServerByID(fresh, server.ID)
-	if err != nil {
-		return opening{out: out}, err
-	}
-	if placed == nil || placed.State != "active" {
-		return opening{result: refuseJoin(callrules.ReasonNoMediaServer), out: out}, fmt.Errorf("%w: the media server stopped taking new calls", callrules.ErrConflict)
-	}
-	load, err := s.store.loadOn(fresh, *placed)
-	if err != nil {
-		return opening{out: out}, err
-	}
-	ttls, err := s.queueLifetimes(fresh, site, policy, load)
-	if err != nil {
-		return opening{out: out}, err
-	}
-	live, heldBack, _ := load.queue(now, ttls)
-	// The opening join is the room's first join attempt.
-	window, ok, retry := callrules.CountJoinAttempt(callrules.JoinWindow{}, now, policy.RoomJoinsPerMinute, callrules.JoinWindowLength)
-	if !ok {
-		return opening{result: rateRefusal(retry), out: out}, fmt.Errorf("%w: the room takes no join attempts", callrules.ErrConflict)
-	}
-	arrives := arrival(now, live, heldBack)
-	entry := callrules.QueueEntry{ID: id.NewShortId(), Class: callrules.ClassScheduledDue, EnqueuedAt: arrives, LastPollAt: arrives}
-	position := placeInLine(live, entry)
-	// LOCKED: a booked call's waiting room is on until its host lets people in.
-	decision := callrules.DecideJoin(callrules.RoomState{Locked: true}, callrules.JoinAsk{Kind: callrules.KindPerson, Host: ask.asHost}, policy, load.free()-position)
-	if decision.Outcome == callrules.OutcomeRefuse {
-		return opening{result: refuseJoin(decision.Reason), out: out}, fmt.Errorf("%w: %s", callrules.ErrConflict, decision.Reason)
 	}
 	guestDigest, hostDigest, err := s.store.bookingDigests(fresh, owner, current.ID)
 	if err != nil {
 		return opening{out: out}, err
 	}
-
-	seat := seatRow{
-		ID: id.NewShortId(), RoomID: call.roomID, Identity: call.identity, Kind: string(callrules.KindPerson),
-		DisplayName: ask.name, Status: seatWaiting, Host: ask.asHost,
+	// THE BOOKING IS MARKED STARTED, naming its room, after the seat and before the room is
+	// written (the file note's write order), fenced on the version read under its gate.
+	markStarted := func(ctx context.Context, now time.Time) error {
+		return s.store.updateBooking(ctx, owner, *current, map[string]any{
+			"status": callrules.BookingStarted, "roomId": roomID,
+		}, memql.VersionTimeAfter(current.Version, now))
 	}
-	joinedAt := time.Time{}
-	if decision.Outcome == callrules.OutcomeAdmit {
-		seat.Status, joinedAt = seatAdmitted, now
-	}
-	// The order is the file note's: the session, the seat, its queue entry, the booking,
-	// and the room last.
-	out, refused, err := s.seatJoiner(fresh, site, held, ask, out, seat.ID, call.roomID, now)
-	if err != nil {
-		return opening{result: refused, out: out}, err
-	}
-	if err := s.store.createSeat(fresh, owner, newSeat{
-		ID: seat.ID, SiteID: site.SiteID, RoomID: call.roomID, Identity: seat.Identity, Kind: seat.Kind,
-		DisplayName: seat.DisplayName, Status: seat.Status, Host: seat.Host, Confirm: ask.confirm, JoinedAt: joinedAt,
-	}, now); err != nil {
-		return opening{out: out}, err
-	}
-	if decision.Outcome == callrules.OutcomeQueue {
-		if err := s.store.createQueueEntry(fresh, owner, newQueueEntry{
-			ID: entry.ID, SiteID: site.SiteID, RoomID: call.roomID, SeatID: seat.ID, KeyID: current.KeyID,
-			Class: entry.Class, EnqueuedAt: entry.EnqueuedAt,
-		}, now); err != nil {
-			return opening{out: out}, err
-		}
-	}
-	if err := s.store.updateBooking(fresh, owner, *current, map[string]any{
-		"status": callrules.BookingStarted, "roomId": call.roomID,
-	}, memql.VersionTimeAfter(current.Version, now)); err != nil {
-		return opening{out: out}, err
-	}
-	hostSeat := ""
-	if seat.Host {
-		hostSeat = seat.ID
-	}
-	if err := s.store.createRoom(fresh, owner, newRoom{
-		ID: call.roomID, SiteID: site.SiteID, Deployable: site.Deployable, KeyID: current.KeyID,
-		MediaServerID: server.ID, MediaRoom: call.roomID, HostSeatID: hostSeat,
-		GuestDigest: guestDigest, HostDigest: hostDigest, ScheduledCallID: current.ID, Locked: true,
-		OpenedAt: now, Window: window,
-	}, now); err != nil {
-		return opening{out: out}, err
-	}
-	switch decision.Outcome {
-	case callrules.OutcomeQueue:
-		return opening{result: queued(decision.Reason, position, policy), out: out, seat: seat}, nil
-	case callrules.OutcomeWait:
-		return opening{result: waited(decision.Reason, policy), out: out, seat: seat}, nil
-	}
-	return opening{result: callrules.JoinResult{Outcome: callrules.OutcomeAdmit}, out: out, seat: seat}, nil
+	result, out, seat, err := s.openRoom(fresh, site, server, policy, held, ask, roomOpening{
+		roomID: roomID, identity: identity, keyID: current.KeyID,
+		// A host link's holder takes a host seat and passes the lock; the room opens LOCKED,
+		// its waiting room on until its host lets people in; a full server queues the
+		// opener as a booked call that is due.
+		host: ask.asHost, locked: true, class: callrules.ClassScheduledDue,
+		guestDigest: guestDigest, hostDigest: hostDigest, scheduledCallID: current.ID,
+	}, out, markStarted, now)
+	return opening{result: result, out: out, seat: seat}, err
 }
 
 // ---------------------------------------------------------------------------
@@ -842,16 +755,6 @@ func (r bookingRow) status() string {
 		return callrules.BookingScheduled
 	}
 	return r.Status
-}
-
-// holdsSlot reports whether the booking holds its span of the key's time at now: until
-// its booked end, unless it was cancelled or ended.
-func (r bookingRow) holdsSlot(now time.Time) bool {
-	switch r.status() {
-	case callrules.BookingCancelled, callrules.BookingEnded:
-		return false
-	}
-	return now.Before(r.End)
 }
 
 func bookingFromRow(r map[string]any) bookingRow {
@@ -903,7 +806,9 @@ func (s *Store) bookingByLink(ctx context.Context, owner, siteID, digest string,
 	return s.oneBooking(ctx, owner, "a booking by its guest link", call, err)
 }
 
-// bookingsForKey is every booking one key holds or held.
+// bookingsForKey is the bookings of one key that may still hold a slot: not cancelled,
+// not ended, and ending after now or started, by the engine's clock
+// (callsScheduledCallsForKey). The service decides each from its own (heldSpan).
 func (s *Store) bookingsForKey(ctx context.Context, owner, keyID string) ([]bookingRow, error) {
 	call, err := langparser.RenderCall("callsScheduledCallsForKey", map[string]any{"keyId": memql.BareShortId(keyID)})
 	rows, err := s.readBookings(ctx, owner, "the key's bookings", call, err)
