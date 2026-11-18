@@ -1,8 +1,10 @@
 import { LoadMore } from "../../kit/LoadMore";
 import type { LibraryArtifactsFeed } from "./useLibrary";
 import { usePageScroll } from "../../kit/pageNavigation";
-import { useEffect, useRef, useState } from "react";
-import { FilePlus, FolderPlus, Upload } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Download, FilePlus, FileText, FolderInput, FolderPlus, Layers, Monitor, RotateCcw, SquareArrowOutUpRight, Trash2, Upload } from "lucide-react";
+import { IconButton } from "../../kit/IconButton";
+import { Mark } from "../../chrome/Mark";
 import {
   newShortId,
   rowNumber,
@@ -13,7 +15,7 @@ import {
 
 import { useAuthSource } from "../../auth/context";
 import { useSession } from "../../chrome/access";
-import { ContextMenu } from "../../chrome/ContextMenu";
+import { ContextMenu, type MenuEntry } from "../../chrome/ContextMenu";
 import { useOs } from "../../chrome/state";
 import { canOpen } from "../../system/registry";
 import { openInVsCode, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
@@ -451,7 +453,7 @@ export function BrowseSection({
     uploadFiles(Array.from(event.dataTransfer.files), destinationFolderId);
   };
 
-  const rowMenuEntries = (row: ArtifactRow) => {
+  const rowMenuEntries = (row: ArtifactRow): MenuEntry[] => {
     // An explicit request, so it OPENS Ask (askAbout); absent where the host
     // has no Ask to open rather than an entry that does nothing.
     const ask = askAbout
@@ -549,6 +551,10 @@ export function BrowseSection({
 
   const selected = content.find((r) => r.id === selectedId)
     ?? (explicitSelection?.id === selectedId ? explicitSelection : null);
+  // The picked file, for the Head's icons. Absent once it leaves the list --
+  // deleted, moved away, or filtered out -- so the icons never act on a file
+  // nobody can see.
+  const pickedRow = picked === "" ? null : content.find((r) => r.id === picked) ?? null;
   const archivedFolderIdSet = new Set(archivedFolders.map((f) => f.id));
   const searching = filter.search.trim() !== "";
   const accountOptions = useAccountOptions();
@@ -699,6 +705,20 @@ export function BrowseSection({
             button, and each lands in the folder currently being looked at.
             Sort and Refine stand beside it on the Head's line now that there
             are no location tabs to carry them (rules 2 and 3). */}
+        {/* THE PICKED FILE'S ACTS, AS ICONS (owner, Nov 18 2026), the way a
+            deployable's page carries its own. The same entries as the file's
+            right-click menu, so the two can never disagree; an entry the menu
+            would show disabled is absent here (rule 12). A hairline keeps
+            them apart from Sort, Refine and Add, which are about the folder. */}
+        {pickedRow !== null && selected === null ? (
+          <span className="os-files-picked-acts" role="group" aria-label={`Selected: ${artifactName(pickedRow)}`}>
+            {rowMenuEntries(pickedRow).filter((entry) => !entry.disabled).map((entry) => (
+              <IconButton key={entry.id} label={entry.label} onClick={entry.onSelect}>
+                {PICKED_ICON[entry.id]}
+              </IconButton>
+            ))}
+          </span>
+        ) : null}
         <SortControl
           ascending={filter.sortAscending}
           onToggle={() => patch({ sortAscending: !filter.sortAscending })}
@@ -1258,3 +1278,17 @@ function UploadPlaceholder({ task }: { task: UploadTask }) {
     </div>
   );
 }
+
+// One icon per row-menu entry id. An id with no icon here renders an empty
+// button, which the test over every entry catches.
+const PICKED_ICON: Record<string, ReactNode> = {
+  open: <SquareArrowOutUpRight size={16} aria-hidden />,
+  download: <Download size={16} aria-hidden />,
+  details: <FileText size={16} aria-hidden />,
+  desk: <Monitor size={16} aria-hidden />,
+  move: <FolderInput size={16} aria-hidden />,
+  materializer: <Layers size={16} aria-hidden />,
+  ask: <Mark size={16} aria-hidden />,
+  archive: <Trash2 size={16} aria-hidden />,
+  restore: <RotateCcw size={16} aria-hidden />,
+};

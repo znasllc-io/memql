@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { act } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -50,7 +50,7 @@ describe("archiving from a file row", () => {
     expect(screen.getByText('Move "cut-03.mov" to the Bin?')).toBeTruthy();
     // The action KEEPS ITS NAME through the flow.
     await readTheBar();
-    await click(screen.getByRole("button", { name: "Move to Bin" }));
+    await click(within(document.querySelector(".os-files-confirm") as HTMLElement).getByRole("button", { name: "Move to Bin" }));
     expect(connection.callsNamed("archiveArtifact")).toHaveLength(1);
     expect(connection.callsNamed("archiveArtifact")[0]).toContain('artifactId: "a-1"');
   });
@@ -126,12 +126,12 @@ describe("archiving from a file row, one double-click later", () => {
   it("does not move the file on the second click of the click that asked, and does once it is read", async () => {
     const connection = await ask();
     betweenTheClicks();
-    await click(screen.getByRole("button", { name: "Move to Bin" }));
+    await click(within(document.querySelector(".os-files-confirm") as HTMLElement).getByRole("button", { name: "Move to Bin" }));
     expect(connection.callsNamed("archiveArtifact")).toHaveLength(0);
     expect(screen.getByText('Move "cut-03.mov" to the Bin?')).toBeTruthy();
 
     await readTheBar();
-    await click(screen.getByRole("button", { name: "Move to Bin" }));
+    await click(within(document.querySelector(".os-files-confirm") as HTMLElement).getByRole("button", { name: "Move to Bin" }));
     expect(connection.callsNamed("archiveArtifact")).toHaveLength(1);
   });
 
@@ -163,11 +163,11 @@ describe("archiving from a file row, one double-click later", () => {
     await click(screen.getByRole("menuitem", { name: "Move to Bin" }));
     expect(screen.getByText('Move "cut-04.mov" to the Bin?')).toBeTruthy();
     betweenTheClicks();
-    await click(screen.getByRole("button", { name: "Move to Bin" }));
+    await click(within(document.querySelector(".os-files-confirm") as HTMLElement).getByRole("button", { name: "Move to Bin" }));
     expect(connection.callsNamed("archiveArtifact")).toHaveLength(0);
 
     await readTheBar();
-    await click(screen.getByRole("button", { name: "Move to Bin" }));
+    await click(within(document.querySelector(".os-files-confirm") as HTMLElement).getByRole("button", { name: "Move to Bin" }));
     expect(connection.callsNamed("archiveArtifact")).toHaveLength(1);
     expect(connection.callsNamed("archiveArtifact")[0]).toContain('artifactId: "a-2"');
   });
