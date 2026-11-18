@@ -25,21 +25,19 @@ import { FolderSelect, folderOptions } from "../../items/FolderSelect";
 import { planArchive, readArchiveMembers, runArchiveWalk, subtreeHoldsArtifact } from "./actions/archive";
 
 import { composeIntent, MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, MATERIALIZER_MADE_SECTION } from "../../items/materialize";
-import { kindGlyph } from "./glyphs";
-import { LocalTabs } from "../../kit/LocalTabs";
 import { AddButton } from "../../kit/AddButton";
 import { InPlaceAsk } from "../../kit/pressHold";
 import { FileFolders } from "./FileFolders";
+import { FilesRail } from "./Rail";
+import { FileTile } from "./Tiles";
 import {
   Button,
   Caption,
-  Chip,
   formatBytes,
   Head,
   LiveList,
   Notice,
   Refine,
-  RecordRow,
   listCount,
   Select,
   SortControl,
@@ -48,12 +46,10 @@ import {
 import type { Breadcrumb } from "../../kit/Breadcrumbs";
 import { useMachinePresence } from "../../live/machines";
 import type { LiveView } from "../../live/liveView";
-import { useDraggable } from "@dnd-kit/core";
 import { SOURCE_VALUES } from "./concepts";
 import type { FilesFilter, FilesPlace, KindFilter } from "./filters";
 import type { FolderRow } from "./rows";
 import type { FolderTree, MaterializedRail, TreeNode } from "./fold";
-import type { BinDropPayload } from "../bin/concepts";
 import { binItemFromArtifact } from "../bin/rows";
 import { planRestore, runRestore } from "../bin/restore";
 import {
@@ -69,12 +65,15 @@ import { ACCOUNT_ANY, ACCOUNT_NONE, LABEL_ANY } from "./filters";
 import { Inspector } from "./Inspector";
 import type { UploadTask, UploadTasksApi } from "./useUploadTasks";
 
-// The browse (design D1, reshaped by epic memql#4842): rail, list, inspector
-// -- three readings of the feeds the app root retains, sharing one selection.
-// The rail offers three PLACES -- Library, Desktop, Bin -- and the top of
-// the section is a Head, a quiet sort, one Refine affordance and the Upload
-// primary (DESIGN.md rules 1-3): filter chrome appears when a question is
-// being asked, never as furniture.
+// The browse (design D1, reshaped by epic memql#4842, then the "Places"
+// redesign of Nov 2026): a rail of places and the Library's folder tree on the
+// left, and on the right a Head (quiet sort, one Refine affordance, the one Add
+// control -- DESIGN.md rules 1-3) over a grid of folders and files.
+//
+// A CLICK ON A FILE ONLY SELECTS IT. The owner asked for no panel popping up on
+// a click: double-click or Enter opens the file, and right-click holds its
+// verbs, among them Details, which replaces the grid with the file's page (the
+// Inspector -- labels, client, versions), so nothing that page offers is lost.
 
 const KIND_TABS: Array<{ value: KindFilter; label: string }> = [
   { value: "all", label: "All" },
@@ -203,6 +202,9 @@ export function BrowseSection({
   // way every other refusal in this app does.
   const [rowMove, setRowMove] = useState<ArtifactRow | null>(null);
   const [vsNoAnswer, setVsNoAnswer] = useState(false);
+  // The grid's selection: which file a click picked. It opens nothing; it only
+  // marks the file a right-click, Enter or double-click is about.
+  const [picked, setPicked] = useState("");
 
   // Every heavy verb the row menu offers is the inspector's verb, reached by
   // the SAME function -- the download decision is shared in actions/download,
@@ -486,6 +488,9 @@ export function BrowseSection({
       label: "Download",
       onSelect: () => void downloadRow(row),
     };
+    // The file's page -- origin, client, labels, versions -- now that a click
+    // no longer opens it. It replaces the grid, with the way back in the trail.
+    const details = { id: "details", label: "Details", onSelect: () => onSelect(row.id) };
     if (row.archived) {
       return [
         {
@@ -497,14 +502,20 @@ export function BrowseSection({
           onSelect: () => void restoreOneRow(row),
         },
         download,
+        details,
         ...openInMaterializer,
         ...ask,
       ];
     }
+    // The owner's order: Open and Download first, Move to Bin last. Rename and
+    // Share with, which he also asked for, are absent until the engine can do
+    // them (rule 12: absent, never disabled) -- there is no file rename and no
+    // sharing in the Library yet.
     return [
-      ...(!isZipArtifact(row) ? [{ id: "open", label: "Open in editor", onSelect: () => openVsCodeFor(row) }] : []),
-      { id: "desk", label: "Send to desktop", onSelect: () => sendRowToDesk(row) },
+      ...(!isZipArtifact(row) ? [{ id: "open", label: "Open", onSelect: () => openVsCodeFor(row) }] : []),
       download,
+      details,
+      { id: "desk", label: "Send to desktop", onSelect: () => sendRowToDesk(row) },
       {
         id: "move",
         label: "Move to folder",
@@ -668,7 +679,16 @@ export function BrowseSection({
       }}
       onDrop={onDrop}
     >
-      <div hidden={selected !== null}>
+      <div hidden={selected !== null} className="os-files-browse">
+      <FilesRail
+        tree={tree}
+        place={filter.place}
+        folderId={filter.folderId ?? ""}
+        onPlace={(place) => { onSelect(""); setPicked(""); patch({ place, folderId: "", search: "" }); }}
+        onFolder={(folderId) => { onSelect(""); setPicked(""); patch({ place: "library", folderId, search: "" }); }}
+        onFolderMenu={(x, y, node) => setFolderMenu({ x, y, node })}
+      />
+      <div className="os-files-main">
       <Head navigationKey={`browse:${filter.place}:${filter.folderId ?? ""}`} title={headTitle} breadcrumbs={headTrail} navigation={selected === null} back={filter.folderId ? {label: PLACE_TITLE[filter.place], onSelect: () => patch({folderId: tree.byId.get(filter.folderId!)?.folder.parentFolderId ?? ""})} : undefined} meta={listCount(list?.snapshot, listedCount) === undefined ? undefined : `${listedCount}${artifacts.hasMore ? "+" : ""}`}>
         {/* ONE WAY TO ADD SOMETHING (DESIGN.md rule 1: at most one primary
             action). Uploading a file and making a folder are the same
@@ -676,37 +696,9 @@ export function BrowseSection({
             places: a primary button up here and a rail ACTION wedged between
             the Library tree and the Desktop place, where it read as a folder
             you could open. The rail action is gone; the answers live on this
-            button, and each lands in the folder currently being looked at. */}
-        <AddMenu
-          disabled={connection === null}
-          destinationName={destinationFolderId === "" ? "Library" : folderNameOf(destinationFolderId)}
-          onUpload={() => pickRef.current?.click()}
-          onNewMarkdown={canOpen(registry, MATERIALIZER_APP_ID) ? () => actions.openApp(
-            MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, composeIntent({
-              format: "markdown",
-              ...(destinationFolderId ? { folderId: destinationFolderId } : {}),
-              returnTo: { appId: "files", sectionId: "browse" },
-            }),
-          ) : undefined}
-          onNewFolder={() => void newFolderIn(destinationFolderId)}
-        />
-      </Head>
-      <input
-        ref={pickRef}
-        type="file"
-        multiple
-        hidden
-        aria-label="Pick files to upload"
-        onChange={(event) => {
-          const files = Array.from(event.target.files ?? []);
-          event.target.value = "";
-          if (files.length > 0) uploadFiles(files, destinationFolderId);
-        }}
-      />
-
-      <LocalTabs label="File locations" value={filter.place} onChange={place => { onSelect(""); patch({place, folderId:"", search:""}); }}
-        options={[["library","Library"],["desktop","Desktop"],["materializer","Materializer"],["bin","Bin"]]}
-        actions={<>
+            button, and each lands in the folder currently being looked at.
+            Sort and Refine stand beside it on the Head's line now that there
+            are no location tabs to carry them (rules 2 and 3). */}
         <SortControl
           ascending={filter.sortAscending}
           onToggle={() => patch({ sortAscending: !filter.sortAscending })}
@@ -790,7 +782,33 @@ export function BrowseSection({
             </Select>
           )}
         </Refine>
-        </>} />
+        <AddMenu
+          disabled={connection === null}
+          destinationName={destinationFolderId === "" ? "Library" : folderNameOf(destinationFolderId)}
+          onUpload={() => pickRef.current?.click()}
+          onNewMarkdown={canOpen(registry, MATERIALIZER_APP_ID) ? () => actions.openApp(
+            MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, composeIntent({
+              format: "markdown",
+              ...(destinationFolderId ? { folderId: destinationFolderId } : {}),
+              returnTo: { appId: "files", sectionId: "browse" },
+            }),
+          ) : undefined}
+          onNewFolder={() => void newFolderIn(destinationFolderId)}
+        />
+      </Head>
+      <input
+        ref={pickRef}
+        type="file"
+        multiple
+        hidden
+        aria-label="Pick files to upload"
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? []);
+          event.target.value = "";
+          if (files.length > 0) uploadFiles(files, destinationFolderId);
+        }}
+      />
+
       {railNote ? <Caption>{railNote}</Caption> : null}
       <div className="os-files-body">
         <FileFolders folders={visibleFolders} counts={counts} loading={foldersState === "seeding"}
@@ -879,6 +897,7 @@ export function BrowseSection({
           {tasks.map((task) => (
             <UploadPlaceholder key={task.id} task={task} />
           ))}
+          <div className="os-files-files">
           <LiveList<ArtifactRow>
             key={`${filter.place}|${filter.folderId ?? "~"}|${filter.kind}|${filter.source}|${filter.accountId}|${filter.label}|${filter.search}`}
             source={list}
@@ -886,25 +905,35 @@ export function BrowseSection({
             fingerprint={artifactFingerprint}
             label={headTitle}
             emptyText={emptyText}
-            renderRow={(row, tick) => (
-              <FileLine
-                row={row}
-                composition={materialized.get(row.id) ?? null}
-                tick={tick}
-                searching={searching || !filter.folderId}
-                folderNameOf={folderNameOf}
-                presence={presence}
-                deskIndex={
-                  filter.place === "desktop" && desksWithItems > 1
-                    ? (deskIndexByArtifactId.get(row.id) ?? null)
-                    : null
-                }
-                open={selectedId === row.id}
-                onToggle={() => onSelect(selectedId === row.id ? "" : row.id)}
-                onMenu={(x, y) => setRowMenu({ x, y, row })}
-              />
-            )}
+            renderRow={(row, tick) => {
+              // What the list row used to print beside the name -- where the
+              // file came from, its folder while searching, its desk -- now
+              // rides the tile's tooltip, so the grid shows names alone.
+              const story = fileStory(row, row.producedByWorkerId ? presence(row.producedByWorkerId) : null, materialized.get(row.id) ?? null);
+              const deskIndex = filter.place === "desktop" && desksWithItems > 1 ? (deskIndexByArtifactId.get(row.id) ?? null) : null;
+              const hint = [
+                story.sentence,
+                (searching || !filter.folderId) && row.folderId !== "" ? `In ${folderNameOf(row.folderId)}` : "",
+                deskIndex !== null ? `On desk ${deskIndex + 1}` : "",
+                row.kind === "document" && row.validationStatus !== "" ? `Validation: ${row.validationStatus}` : "",
+              ].filter(Boolean).join(" · ");
+              return (
+                <FileTile
+                  row={row}
+                  picked={picked === row.id}
+                  dim={row.archived}
+                  hint={hint}
+                  tick={tick}
+                  onPick={() => setPicked(row.id)}
+                  // An archived file has nothing to open in an editor; its page
+                  // is where Restore and its history are.
+                  onOpen={() => (row.archived ? onSelect(row.id) : openVsCodeFor(row))}
+                  onMenu={(x, y) => setRowMenu({ x, y, row })}
+                />
+              );
+            }}
           />
+          </div>
           <LoadMore feed={artifacts} />
           {facetsError ? <Caption>Folder counts and label options could not be updated. {facetsError}</Caption> : null}
           {/* THE EMPTY STATE OFFERS THE WAY OUT (DESIGN.md rule 4's shape:
@@ -919,8 +948,7 @@ export function BrowseSection({
             </div>
           ) : null}
         </div>
-
-
+      </div>
       </div>
 
       </div>
@@ -1227,92 +1255,6 @@ function UploadPlaceholder({ task }: { task: UploadTask }) {
           ))}
         </>
       ) : null}
-    </div>
-  );
-}
-
-function FileLine({
-  row,
-  composition,
-  tick,
-  searching,
-  folderNameOf,
-  presence,
-  deskIndex,
-  open,
-  onToggle,
-  onMenu,
-}: {
-  row: ArtifactRow;
-  composition: CompositionRow | null;
-  tick: "added" | "updated" | null;
-  searching: boolean;
-  folderNameOf: (folderId: string) => string;
-  presence: (workerId: string) => { name?: string; online: boolean } | null;
-  /** Which desk holds this row (0-based), when more than one desk holds
-   *  items; null renders nothing. */
-  deskIndex: number | null;
-  /** The origin link state (epic memql#4783), or "" for a file with no origin
-   *  to link to -- which is most of them, and renders nothing. */
-  open: boolean;
-  onToggle: () => void;
-  onMenu: (x: number, y: number) => void;
-}) {
-  const story = fileStory(row, row.producedByWorkerId ? presence(row.producedByWorkerId) : null, composition);
-  // DRAGGABLE TO THE BIN (memql#4784). The payload travels with the drag,
-  // because the dock holds no Library feed of its own.
-  //
-  // The listeners go on a WRAPPER rather than on the row button, and dnd-kit's
-  // `attributes` are deliberately not spread: they set role="button" and a
-  // tabIndex, which on a div wrapping a button is a second interactive element
-  // announcing the same thing. That costs the keyboard drag, which is the
-  // right trade here -- archiving already has two keyboard-reachable routes
-  // (the inspector's Archive button and the row's own action), and neither of
-  // them is a drag.
-  const draggable = useDraggable({
-    id: `artifact:${row.id}`,
-    data: {
-      artifactId: row.id,
-      name: artifactName(row),
-      folder: false,
-      deskItemId: "",
-    } satisfies BinDropPayload,
-  });
-  return (
-    <div
-      ref={draggable.setNodeRef}
-      className="os-files-line"
-      data-dragging={draggable.isDragging || undefined}
-      onContextMenu={(event) => {
-        // The shell's right-click rule: a surface with its own menu says so,
-        // and stops the root handler from re-enabling the browser's.
-        event.preventDefault();
-        event.stopPropagation();
-        onMenu(event.clientX, event.clientY);
-      }}
-      {...draggable.listeners}
-    >
-    <RecordRow
-      icon={kindGlyph(row.kind)}
-      name={artifactName(row)}
-      current={!row.archived}
-      dim={row.archived}
-      open={open}
-      onOpen={onToggle}
-      secondary={story.sentence}
-      stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-    >
-      {searching && row.folderId !== "" ? (
-        <Chip tone="muted">in {folderNameOf(row.folderId)}</Chip>
-      ) : null}
-      {deskIndex !== null ? <Chip tone="muted">Desk {deskIndex + 1}</Chip> : null}
-      {row.kind === "document" && row.validationStatus !== "" ? (
-        <Chip tone="muted" title="The training pipeline's verdict on this document">
-          {row.validationStatus}
-        </Chip>
-      ) : null}
-
-    </RecordRow>
     </div>
   );
 }

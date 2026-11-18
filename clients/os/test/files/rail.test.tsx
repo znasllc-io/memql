@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // The connection seam, mocked at the MODULE so the real LiveCollection
@@ -13,7 +13,7 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 import { chooseOption } from "../selectControl";
-import { artifactRow, click, fakeConnection, folderRow, renderFiles } from "./harness";
+import { artifactRow, click, fakeConnection, folderRow, renderFiles, openDetails } from "./harness";
 
 // The rail's disclosures, the one Add control, and the row's menu.
 //
@@ -70,16 +70,17 @@ describe("the row's right-click menu", () => {
 
     fireEvent.contextMenu(screen.getByRole("button", { name: /brief\.pdf/ }));
     const menu = screen.getByRole("menu", { name: "File" });
-    for (const name of [
-      "Open in editor",
-      "Send to desktop",
+    // The owner's order: Open and Download first, Move to Bin last, and
+    // Details -- the file's page, which a click no longer opens -- among them.
+    expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "Open",
       "Download",
+      "Details",
+      "Send to desktop",
       "Move to folder",
       "Ask about this file",
       "Move to Bin",
-    ]) {
-      expect(within(menu).getByRole("menuitem", { name })).toBeTruthy();
-    }
+    ]);
     expect(within(menu).queryByRole("menuitem", { name: "Upload new version" })).toBeNull();
     expect(screen.queryByLabelText("Choose a file to upload as the new version")).toBeNull();
   });
@@ -137,18 +138,68 @@ describe("the row's right-click menu", () => {
 
 
 describe("Files workspace navigation", () => {
- it("uses ordered tabs and returns from details to the same folder", async () => {
+ // The rail's places and folders, not its disclosure buttons.
+ const placesIn = (rail: HTMLElement) => within(rail).getAllByRole("button").filter(button => !button.hasAttribute("aria-expanded")).map(button => button.textContent);
+
+ it("lists the Library's folders, then the places, and returns from details to the same folder", async () => {
   h.connection = fakeConnection({folders:[folderRow({id:"research",name:"Research"})],artifacts:[artifactRow({id:"paper",title:"paper.md",folderId:"research"})]});
   await renderFiles();
-  const tabs=screen.getByRole("navigation",{name:"File locations"});
-  expect(within(tabs).getAllByRole("button").map(button=>button.textContent)).toEqual(["Library","Desktop","Materializer","Bin"]);
-  expect(within(tabs).getByRole("button",{name:"Library"}).getAttribute("aria-current")).toBe("page");
+  const rail=screen.getByRole("navigation",{name:"File locations"});
+  expect(placesIn(rail)).toEqual(["Library","Research","Desktop","Materializer","Bin"]);
+  expect(within(rail).getByRole("button",{name:"Library"}).getAttribute("aria-current")).toBe("page");
   expect(screen.getByRole("button",{name:/paper.md/})).toBeTruthy();
-  await click(screen.getByRole("button",{name:"Open folder Research"}));
-  await click(screen.getByRole("button",{name:/paper.md/}));
+  await click(within(rail).getByRole("button",{name:"Research"}));
+  expect(within(rail).getByRole("button",{name:"Research"}).getAttribute("aria-current")).toBe("page");
+  expect(screen.getByRole("heading",{name:"Research"})).toBeTruthy();
+  await openDetails(/paper.md/);
   expect(screen.queryByRole("navigation",{name:"File locations"})).toBeNull();
   await click(screen.getByRole("button",{name:"Back to Research"}));
   expect(screen.getByRole("heading",{name:"Research"})).toBeTruthy();
   expect(screen.getByRole("button",{name:/paper.md/})).toBeTruthy();
+ });
+
+ it("selects a file on a click and opens nothing", async () => {
+  h.connection = fakeConnection({artifacts:[artifactRow({id:"paper",title:"paper.md"})]});
+  await renderFiles();
+  const tile = screen.getByRole("button",{name:/paper.md/});
+  expect(tile.getAttribute("aria-pressed")).toBe("false");
+  await click(tile);
+  expect(tile.getAttribute("aria-pressed")).toBe("true");
+  expect(screen.queryByRole("region",{name:"File details"})).toBeNull();
+  expect(screen.getByRole("navigation",{name:"File locations"})).toBeTruthy();
+ });
+
+ it("folds a folder's children away and keeps the way to the open folder showing", async () => {
+  h.connection = fakeConnection({folders:[folderRow({id:"research",name:"Research"}),folderRow({id:"lab",name:"Lab data",parentFolderId:"research"})]});
+  await renderFiles();
+  const rail=screen.getByRole("navigation",{name:"File locations"});
+  expect(within(rail).queryByRole("button",{name:"Lab data"})).toBeNull();
+  await click(within(rail).getByRole("button",{name:"Show folders in Research"}));
+  await click(within(rail).getByRole("button",{name:"Lab data"}));
+  expect(within(rail).getByRole("button",{name:"Lab data"}).getAttribute("aria-current")).toBe("page");
+  await click(within(rail).getByRole("button",{name:"Hide folders in Library"}));
+  expect(within(rail).queryByRole("button",{name:"Research"})).toBeNull();
+ });
+});
+
+describe("on a touch screen", () => {
+ // Safari on iPhone and iPad sends no contextmenu on a long press, and a tap
+ // on a file only selects it, so a held finger is how the menu is reached.
+ it("opens a file's menu on a held finger, and a tap only selects", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+   h.connection = fakeConnection({artifacts:[artifactRow({id:"paper",title:"paper.md"})]});
+   await renderFiles();
+   const tile = screen.getByRole("button",{name:/paper.md/});
+   fireEvent.pointerDown(tile, { pointerType: "touch", clientX: 40, clientY: 40 });
+   fireEvent.pointerUp(tile, { pointerType: "touch" });
+   expect(screen.queryByRole("menu",{name:"File"})).toBeNull();
+   fireEvent.pointerDown(tile, { pointerType: "touch", clientX: 40, clientY: 40 });
+   await act(async () => { vi.advanceTimersByTime(600); });
+   expect(screen.getByRole("menu",{name:"File"})).toBeTruthy();
+   expect(tile.getAttribute("aria-pressed")).toBe("true");
+  } finally {
+   vi.useRealTimers();
+  }
  });
 });

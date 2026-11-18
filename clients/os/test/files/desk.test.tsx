@@ -14,7 +14,7 @@ import { LocalDesktopStore, DESKTOP_STORE_KEY } from "../../src/system/store";
 import type { OsRuntimeConfig } from "../../src/cluster/config";
 import type { UploadProvider } from "../../src/items/upload";
 import { ARTIFACT_CONCEPT } from "../../src/apps/files/concepts";
-import { artifactRow, click, fakeConnection, renderFiles } from "./harness";
+import { artifactRow, click, fakeConnection, renderFiles, openDetails } from "./harness";
 
 // The desk half of the unification (epic #4723, reshaped by epic memql#4842):
 // a desk folder is a real desktop icon -- click selects, double-click opens
@@ -156,7 +156,7 @@ describe("send to desktop", () => {
     });
     h.connection = connection;
     await renderFiles();
-    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
+    await openDetails(/brief\.pdf/);
     const inspector = screen.getByRole("region", { name: "File details" });
     await click(within(inspector).getByRole("button", { name: "Send to desktop" }));
     expect(within(inspector).getByText("On the desk.")).toBeTruthy();

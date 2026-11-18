@@ -16,7 +16,7 @@ vi.mock("../../src/live/connection", () => ({
   useOsConnection: () => h.connection,
 }));
 
-import { artifactRow, click, fakeConnection, folderRow, renderFiles } from "./harness";
+import { artifactRow, click, fakeConnection, folderRow, renderFiles, openDetails } from "./harness";
 
 /** What a real artifact id looks like: one unbreakable word, wider than the
  *  panel it lands in. The whole overflow story is about this string. */
@@ -27,7 +27,7 @@ beforeEach(() => {
 });
 
 async function openInspector(title: string): Promise<HTMLElement> {
-  await click(screen.getByRole("button", { name: new RegExp(title) }));
+  await openDetails(title);
   return screen.getByRole("region", { name: "File details" });
 }
 

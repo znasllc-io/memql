@@ -11,7 +11,7 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 import { ARTIFACT_CONCEPT } from "../../src/apps/files/concepts";
-import { artifactRow, click, emit, fakeConnection, folderRow, renderFiles } from "./harness";
+import { artifactRow, click, emit, fakeConnection, folderRow, renderFiles, openDetails } from "./harness";
 import { betweenTheClicks, readTheBar, useFakeDate } from "../readTheBar";
 
 // The browse surface (epic #4722): live rows with the arrival cue in both
@@ -256,7 +256,7 @@ describe("the inspector", () => {
     });
     h.connection = connection;
     await renderFiles();
-    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
+    await openDetails(/brief\.pdf/);
     const inspector = screen.getByRole("region", { name: "File details" });
     expect(within(inspector).getByText("Uploaded here")).toBeTruthy();
   });
@@ -268,7 +268,7 @@ describe("the inspector", () => {
     });
     h.connection = connection;
     await renderFiles({ settings: { confirmBeforeArchive: false } });
-    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
+    await openDetails(/brief\.pdf/);
     const inspector = screen.getByRole("region", { name: "File details" });
     await click(within(inspector).getByRole("button", { name: "Delete" }));
     expect(
@@ -282,7 +282,7 @@ describe("the inspector", () => {
     });
     h.connection = connection;
     await renderFiles();
-    await click(screen.getByRole("button", { name: /brief\.pdf/ }));
+    await openDetails(/brief\.pdf/);
     const inspector = screen.getByRole("region", { name: "File details" });
     await click(within(inspector).getByRole("button", { name: "Delete" }));
     const footer = within(inspector).getByRole("group", { name: "What you can do with this" });
