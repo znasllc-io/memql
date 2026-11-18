@@ -453,16 +453,16 @@ function FilesSettingsSection({
         </fieldset>
 
         <fieldset className="os-field-group">
-          <legend>Archiving</legend>
+          <legend>Deleting</legend>
           <Check
             checked={settings.confirmBeforeArchive}
             onChange={(confirmBeforeArchive) => update({ confirmBeforeArchive })}
           >
-            Ask before archiving
+            Ask before deleting
           </Check>
           <p className="os-caption">
-            The confirm names what is about to move -- for a folder, the live count of everything
-            inside it. Archiving never deletes: everything archived lives in the Bin -- the
+            The confirm names what is about to go -- for a folder, the live count of everything
+            inside it. A deleted file is never erased: it waits in the Bin -- the
             browse rail's third place, and the app in the dock -- where it can be put back.
           </p>
         </fieldset>

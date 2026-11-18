@@ -223,7 +223,7 @@ export function Inspector({
   const archive = useCallback(async () => {
     const query = connection?.query ?? null;
     if (query === null) {
-      setArchiveError("Not connected to the cluster, so nothing was archived.");
+      setArchiveError("Not connected to the cluster, so nothing was deleted.");
       return;
     }
     setConfirmingArchive(false);
@@ -271,7 +271,7 @@ export function Inspector({
       });
       if (row.folderId !== "" && archivedFolderIds.has(row.folderId)) {
         await query.moveArtifactToFolder({ artifactId: row.id, folderId: "" });
-        setDeskNote("Restored to the Library root -- its folder is still archived.");
+        setDeskNote("Restored to the Library root -- its folder is still in the Bin.");
       }
     } catch (err: unknown) {
       setArchiveError(describe(err));

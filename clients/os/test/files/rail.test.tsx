@@ -70,7 +70,7 @@ describe("the row's right-click menu", () => {
 
     fireEvent.contextMenu(screen.getByRole("button", { name: /brief\.pdf/ }));
     const menu = screen.getByRole("menu", { name: "File" });
-    // The owner's order: Open and Download first, Move to Bin last, and
+    // The owner's order: Open and Download first, Delete last, and
     // Details -- the file's page, which a click no longer opens -- among them.
     expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
       "Open",
@@ -79,7 +79,7 @@ describe("the row's right-click menu", () => {
       "Send to desktop",
       "Move to folder",
       "Ask about this file",
-      "Move to Bin",
+      "Delete",
     ]);
     expect(within(menu).queryByRole("menuitem", { name: "Upload new version" })).toBeNull();
     expect(screen.queryByLabelText("Choose a file to upload as the new version")).toBeNull();
@@ -112,7 +112,7 @@ describe("the row's right-click menu", () => {
     expect(within(menu).getByRole("menuitem", { name: "Restore" })).toBeTruthy();
     // Archiving something already archived is not an action, and offering it
     // would be the menu describing a state it can see is not the case.
-    expect(within(menu).queryByRole("menuitem", { name: "Move to Bin" })).toBeNull();
+    expect(within(menu).queryByRole("menuitem", { name: "Delete" })).toBeNull();
   });
 
   it("re-files a row from the menu, which is where re-filing lives now", async () => {

@@ -268,7 +268,7 @@ export function BrowseSection({
   const archiveOneRow = async (row: ArtifactRow) => {
     const query = connection?.query ?? null;
     if (query === null) {
-      refuse("The archive was refused.", "The file is where it was.", "Not connected to the cluster.");
+      refuse("The file was not deleted.", "The file is where it was.", "Not connected to the cluster.");
       return;
     }
     setRowArchive(null);
@@ -278,7 +278,7 @@ export function BrowseSection({
       // this list on the same feed, and it arrives in the Bin.
       await query.archiveArtifact({ artifactId: row.id });
     } catch (err: unknown) {
-      refuse("The archive was refused.", "The file is where it was.", err);
+      refuse("The file was not deleted.", "The file is where it was.", err);
     }
   };
 
@@ -293,7 +293,7 @@ export function BrowseSection({
   const restoreOneRow = async (row: ArtifactRow) => {
     const query = connection?.query ?? null;
     if (query === null) {
-      refuse("The restore was refused.", "The file is still archived.", "Not connected to the cluster.");
+      refuse("The restore was refused.", "The file is still in the Bin.", "Not connected to the cluster.");
       return;
     }
     setRowNote(null);
@@ -313,7 +313,7 @@ export function BrowseSection({
         await query.moveArtifactToFolder({ artifactId: row.id, folderId: "" });
       }
     } catch (err: unknown) {
-      refuse("The restore was refused.", "The file is still archived.", err);
+      refuse("The restore was refused.", "The file is still in the Bin.", err);
     }
   };
 
@@ -356,7 +356,7 @@ export function BrowseSection({
   const runFolderArchive = async (folderId: string) => {
     const query = connection?.query ?? null;
     if (query === null) {
-      setArchiveError("Not connected to the cluster, so nothing was archived.");
+      setArchiveError("Not connected to the cluster, so nothing was deleted.");
       return;
     }
     setPendingArchive("");
@@ -526,11 +526,12 @@ export function BrowseSection({
       ...ask,
       {
         id: "archive",
-        // "Move to Bin" rather than "Delete": the action's name has to be what
-        // it DOES, and nothing here deletes. It keeps that name through the
-        // whole flow, which is why the confirm below says the same and the Bin
-        // says the item is in it.
-        label: "Move to Bin",
+        // José's call (Nov 18 2026): the verb a person sees for this is "Delete",
+        // everywhere files are concerned. A deleted file still goes to the Bin and
+        // Restore puts it back; the confirm's second line says so, and an empty
+        // folder, which is removed for good, says that instead. Code names keep
+        // "archive" because that is the engine's mutation.
+        label: "Delete",
         disabled: connection === null,
         onSelect: () =>
           confirmBeforeArchive ? setRowArchive(row) : void archiveOneRow(row),
@@ -583,7 +584,7 @@ export function BrowseSection({
     : filter.place === "desktop"
       ? "Nothing on your desks. Send a file to the desk from the Library, or drop one onto the desk."
       : filter.place === "bin"
-        ? "The Bin is empty. Archiving from the Library keeps files here, not deleted."
+        ? "The Bin is empty. A file you delete from the Library waits here until you put it back."
         : filter.place === "materializer"
           ? "Nothing has been materialized yet. The Materializer composes a file -- a document, a spreadsheet, a PDF -- out of what is in the memory graph."
           : "Nothing in your Library yet. Drop a file onto the desk or upload one here.";
@@ -831,13 +832,11 @@ export function BrowseSection({
               <Button onClick={() => setDropRefusal("")}>Dismiss</Button>
             </Notice>
           ) : null}
-          {/* THE CONFIRM NAMES THE DISPOSITION IT IS ABOUT TO PERFORM, and
-              the button keeps that name through the flow. A folder holding no
-              file at any depth is deleted rather than archived, so offering
-              to "archive" it and then removing it from every surface would be
-              the interface saying one thing and doing another -- on the one
-              action in this app that a person cannot undo by clicking
-              Restore. */}
+          {/* THE CONFIRM SAYS WHAT HAPPENS TO THE FOLDER. The act is "Delete"
+              either way (José, Nov 18 2026), so the second line carries the
+              difference: a folder holding files goes to the Bin, where Restore
+              puts it back; a folder holding no file at any depth is removed
+              for good -- the one act in this app Restore cannot undo. */}
           {pendingArchive !== "" ? (
             (() => {
               if (!folderCheck || folderCheck.id !== pendingArchive) return <Caption>Checking folder contents…</Caption>;
@@ -857,24 +856,24 @@ export function BrowseSection({
                     tone="warn"
                     sentence={
                       keeping
-                        ? `Archive "${name}" and its ${plan.itemCount} items?`
+                        ? `Delete "${name}" and its ${plan.itemCount} items?`
                         : `Delete "${name}"?`
                     }
                     next={
                       keeping
-                        ? `Everything inside archives too, children first, and lives under Archive where Restore puts it back.${
+                        ? `Everything inside goes to the Bin too, children first, and Restore puts it back.${
                             emptied > 0
-                              ? ` The ${emptied} empty ${emptied === 1 ? "folder" : "folders"} inside are deleted instead -- there is nothing in them to put back.`
+                              ? ` The ${emptied} empty ${emptied === 1 ? "folder" : "folders"} inside are removed for good -- there is nothing in them to put back.`
                               : ""
                           }`
                         : `It holds no files at any depth${
                             emptied > 1 ? `, and nor do the ${emptied - 1} folders inside it` : ""
-                          }. There is nothing to put back, so it is removed from every surface rather than kept in the Bin.`
+                          }. There is nothing to put back, so it is removed for good rather than kept in the Bin.`
                     }
                   >
                     <div className="os-files-confirm">
                       <Button tone="danger" onClick={() => void runFolderArchive(pendingArchive)}>
-                        {keeping ? "Archive" : "Delete"}
+                        Delete
                       </Button>
                       <Button onClick={() => setPendingArchive("")}>Cancel</Button>
                     </div>
@@ -885,12 +884,12 @@ export function BrowseSection({
           ) : null}
           {archiveProgress !== null ? (
             <Caption>
-              Archiving -- {archiveProgress.done} of {archiveProgress.total}. Interrupting is safe:
-              running it again archives only the remainder.
+              Deleting -- {archiveProgress.done} of {archiveProgress.total}. Interrupting is safe:
+              running it again deletes only the remainder.
             </Caption>
           ) : null}
           {archiveError !== "" ? (
-            <Notice tone="error" sentence="The archive stopped." detail={archiveError}>
+            <Notice tone="error" sentence="Deleting stopped." detail={archiveError}>
               <Button onClick={() => setArchiveError("")}>Dismiss</Button>
             </Notice>
           ) : null}
@@ -986,7 +985,7 @@ export function BrowseSection({
         <ContextMenu
           x={archivedFolderMenu.x}
           y={archivedFolderMenu.y}
-          label="Archived folder"
+          label="Deleted folder"
           entries={[
             {
               id: "restore",
@@ -1005,12 +1004,12 @@ export function BrowseSection({
         <InPlaceAsk>
           <Notice
             tone="warn"
-            sentence={`Move "${artifactName(rowArchive)}" to the Bin?`}
-            next="Nothing is deleted -- it keeps its bytes, its history and everywhere it came from, and the Bin can put it back."
+            sentence={`Delete "${artifactName(rowArchive)}"?`}
+            next="It goes to the Bin with its bytes, its history and everywhere it came from, and the Bin can put it back."
           >
             <div className="os-files-confirm">
               <Button tone="danger" onClick={() => void archiveOneRow(rowArchive)}>
-                Move to Bin
+                Delete
               </Button>
               <Button onClick={() => setRowArchive(null)}>Cancel</Button>
             </div>
@@ -1086,13 +1085,14 @@ export function BrowseSection({
             },
             {
               id: "archive",
-              // The verb the menu offers is the one that will happen. An
-              // empty folder is deleted, and calling that "Archive" here and
-              // "Delete" in the confirm one click later would teach somebody
-              // that the two words mean the same thing in this app.
+              // José's call (Nov 18 2026): the verb a person sees for this is "Delete",
+              // everywhere files are concerned. A deleted file still goes to the Bin and
+              // Restore puts it back; the confirm's second line says so, and an empty
+              // folder, which is removed for good, says that instead. Code names keep
+              // "archive" because that is the engine's mutation.
               label: !folderCheck || folderCheck.id !== folderMenu.node.folder.id ? "Checking contents…"
                 : folderCheck.error ? "Folder check failed"
-                : subtreeHoldsArtifact(tree, folderCheck.rows, folderMenu.node.folder.id) ? "Archive" : "Delete",
+                : "Delete",
               disabled: connection === null || !folderCheck || folderCheck.id !== folderMenu.node.folder.id || !!folderCheck.error,
               onSelect: () =>
                 confirmBeforeArchive

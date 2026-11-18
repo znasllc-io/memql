@@ -27,13 +27,13 @@ import { artifactName, isContentKind, type ArtifactRow } from "./rows";
 // composition rows' `outputFileId` against each artifact's backing file.
 //
 // THE PLACE IS `bin`, NOT `archive` (epic memql#4981). One destination had
-// two names: the row menu's verb has always been "Move to Bin", the dock
+// two names: the row menu's verb was "Move to Bin", the dock
 // fixture it lands in is the Bin app, and the rail alone called it Archive.
 // A person who archives a file from the menu and then goes looking for
 // "Bin" in the rail found "Archive" instead and had to work out that they
-// are the same place. ARCHIVE STAYS AS THE VERB -- archiving is what you do,
-// the Bin is where it goes -- so `confirmBeforeArchive`, `planArchive` and
-// the confirm's own wording are deliberately untouched.
+// are the same place. In CODE, archive stays the verb -- `confirmBeforeArchive`,
+// `planArchive` -- because it is the engine's mutation. What a person reads
+// is "Delete" (José, Nov 18 2026), and the Bin is where a deleted file waits.
 
 /** No client constraint. */
 export const ACCOUNT_ANY = "all";

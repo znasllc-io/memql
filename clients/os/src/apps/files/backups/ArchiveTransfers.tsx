@@ -14,7 +14,7 @@ import { LoadMore } from "../../../kit/LoadMore";
 import { flatten } from "../../../kit/rows";
 import { useDebouncedValue } from "../../../logs/useDebouncedValue";
 
-const actionLabel: Record<TransferAction, string> = { pause: "Pause", resume: "Resume", cancel: "Cancel transfer", trash: "Move to Bin", restore: "Restore", purge: "Purge" };
+const actionLabel: Record<TransferAction, string> = { pause: "Pause", resume: "Resume", cancel: "Cancel transfer", trash: "Delete", restore: "Restore", purge: "Purge" };
 export function ArchiveTransfers({ machines, refresh, onDownload }: { machines: readonly MachineRow[]; refresh: number; onDownload: (source: BackupTransfer) => void }) {
   const connection = useOsConnection();
   const visible = useContext(LiveReadVisibility);

@@ -81,7 +81,7 @@ describe("the question over the Bin, one double-click later", () => {
     expect(h.dock).not.toBeNull();
     await dropFile("a-1", "cut-03.mov");
     const dock = document.querySelector("[data-os-dock]") as HTMLElement;
-    expect(within(dock).getByText('Archive "cut-03.mov"?')).toBeTruthy();
+    expect(within(dock).getByText('Delete "cut-03.mov"?')).toBeTruthy();
     return { archiveArtifact, dock, dropFile };
   }
 
@@ -99,14 +99,14 @@ describe("the question over the Bin, one double-click later", () => {
     const { archiveArtifact, dock } = await drop();
     betweenTheClicks();
     await act(async () => {
-      fireEvent.click(within(dock).getByRole("button", { name: "Archive" }));
+      fireEvent.click(within(dock).getByRole("button", { name: "Delete" }));
     });
     expect(archiveArtifact).not.toHaveBeenCalled();
-    expect(within(dock).getByText('Archive "cut-03.mov"?')).toBeTruthy();
+    expect(within(dock).getByText('Delete "cut-03.mov"?')).toBeTruthy();
 
     await readTheBar();
     await act(async () => {
-      fireEvent.click(within(dock).getByRole("button", { name: "Archive" }));
+      fireEvent.click(within(dock).getByRole("button", { name: "Delete" }));
     });
     expect(archiveArtifact).toHaveBeenCalledTimes(1);
   });
@@ -117,12 +117,12 @@ describe("the question over the Bin, one double-click later", () => {
     await act(async () => {
       fireEvent.click(within(dock).getByRole("button", { name: "Cancel" }));
     });
-    expect(within(dock).getByText('Archive "cut-03.mov"?')).toBeTruthy();
+    expect(within(dock).getByText('Delete "cut-03.mov"?')).toBeTruthy();
     await readTheBar();
     await act(async () => {
       fireEvent.click(within(dock).getByRole("button", { name: "Cancel" }));
     });
-    expect(within(dock).queryByText('Archive "cut-03.mov"?')).toBeNull();
+    expect(within(dock).queryByText('Delete "cut-03.mov"?')).toBeNull();
     expect(archiveArtifact).not.toHaveBeenCalled();
   });
 
@@ -134,20 +134,20 @@ describe("the question over the Bin, one double-click later", () => {
     const { archiveArtifact, dock, dropFile } = await drop();
     await readTheBar();
     await dropFile("a-2", "cut-04.mov");
-    expect(within(dock).getByText('Archive "cut-04.mov"?')).toBeTruthy();
-    expect(within(dock).queryByText('Archive "cut-03.mov"?')).toBeNull();
+    expect(within(dock).getByText('Delete "cut-04.mov"?')).toBeTruthy();
+    expect(within(dock).queryByText('Delete "cut-03.mov"?')).toBeNull();
 
     betweenTheClicks();
     await act(async () => {
-      fireEvent.click(within(dock).getByRole("button", { name: "Archive" }));
+      fireEvent.click(within(dock).getByRole("button", { name: "Delete" }));
     });
     expect(archiveArtifact).not.toHaveBeenCalled();
-    expect(within(dock).getByText('Archive "cut-04.mov"?')).toBeTruthy();
+    expect(within(dock).getByText('Delete "cut-04.mov"?')).toBeTruthy();
 
     // Read, it archives the file it asks about -- not the one it asked about before.
     await readTheBar();
     await act(async () => {
-      fireEvent.click(within(dock).getByRole("button", { name: "Archive" }));
+      fireEvent.click(within(dock).getByRole("button", { name: "Delete" }));
     });
     expect(archiveArtifact).toHaveBeenCalledTimes(1);
     expect(archiveArtifact).toHaveBeenCalledWith({ artifactId: "a-2" });

@@ -146,16 +146,16 @@ describe("the folder rail", () => {
     h.connection = connection;
     await renderFiles();
     fireEvent.contextMenu(screen.getByRole("button", { name: /Open folder Client videos/ }));
-    await click(await screen.findByRole("menuitem", { name: "Archive" }));
-    expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
+    await click(await screen.findByRole("menuitem", { name: "Delete" }));
+    expect(screen.getByText(/Delete "Client videos" and its 2 items\?/)).toBeTruthy();
     // The rail's place is named Bin now, but the ROW menu's own verb is
     // still Archive, so the
     // confirm's own action is reached inside its notice.
     const confirm = screen
-      .getByText(/Archive "Client videos" and its 2 items\?/)
+      .getByText(/Delete "Client videos" and its 2 items\?/)
       .closest(".os-notice") as HTMLElement;
     await readTheBar();
-    await click(within(confirm).getByRole("button", { name: "Archive" }));
+    await click(within(confirm).getByRole("button", { name: "Delete" }));
     // Contents first, then the folder -- the children-first walk, as real
     // rendered calls.
     expect(connection.callsNamed("archiveArtifact")).toEqual([
@@ -169,7 +169,7 @@ describe("the folder rail", () => {
 });
 
 // The folder's question opens where the menu item that asked it was (memql#6033):
-// outside any bar, so the second click of a double-click on "Archive" used to
+// outside any bar, so the second click of a double-click on "Delete" used to
 // answer it before it had been read.
 describe("a folder's archive, one double-click later", () => {
   useFakeDate();
@@ -185,21 +185,21 @@ describe("a folder's archive, one double-click later", () => {
     h.connection = connection;
     await renderFiles();
     fireEvent.contextMenu(screen.getByRole("button", { name: /Open folder Client videos/ }));
-    await click(await screen.findByRole("menuitem", { name: "Archive" }));
-    const confirm = screen.getByText(/Archive "Client videos" and its 2 items\?/).closest(".os-notice") as HTMLElement;
+    await click(await screen.findByRole("menuitem", { name: "Delete" }));
+    const confirm = screen.getByText(/Delete "Client videos" and its 2 items\?/).closest(".os-notice") as HTMLElement;
     return { connection, confirm };
   }
 
   it("does not archive on the second click of the click that asked, and does once it is read", async () => {
     const { connection, confirm } = await ask();
     betweenTheClicks();
-    await click(within(confirm).getByRole("button", { name: "Archive" }));
+    await click(within(confirm).getByRole("button", { name: "Delete" }));
     expect(connection.callsNamed("archiveLibraryFolder")).toEqual([]);
     expect(connection.callsNamed("archiveArtifact")).toEqual([]);
-    expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
+    expect(screen.getByText(/Delete "Client videos" and its 2 items\?/)).toBeTruthy();
 
     await readTheBar();
-    await click(within(confirm).getByRole("button", { name: "Archive" }));
+    await click(within(confirm).getByRole("button", { name: "Delete" }));
     expect(connection.callsNamed("archiveLibraryFolder")).toHaveLength(1);
   });
 
@@ -207,10 +207,10 @@ describe("a folder's archive, one double-click later", () => {
     const { connection, confirm } = await ask();
     betweenTheClicks();
     await click(within(confirm).getByRole("button", { name: "Cancel" }));
-    expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
+    expect(screen.getByText(/Delete "Client videos" and its 2 items\?/)).toBeTruthy();
     await readTheBar();
     await click(within(confirm).getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByText(/Archive "Client videos" and its 2 items\?/)).toBeNull();
+    expect(screen.queryByText(/Delete "Client videos" and its 2 items\?/)).toBeNull();
     expect(connection.callsNamed("archiveLibraryFolder")).toEqual([]);
   });
 
@@ -228,19 +228,19 @@ describe("a folder's archive, one double-click later", () => {
     h.connection = connection;
     await renderFiles();
     fireEvent.contextMenu(screen.getByRole("button", { name: /Open folder Client videos/ }));
-    await click(await screen.findByRole("menuitem", { name: "Archive" }));
-    expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
+    await click(await screen.findByRole("menuitem", { name: "Delete" }));
+    expect(screen.getByText(/Delete "Client videos" and its 2 items\?/)).toBeTruthy();
     await readTheBar();
 
     fireEvent.contextMenu(screen.getByRole("button", { name: /Open folder Old reels/ }));
-    await click(await screen.findByRole("menuitem", { name: "Archive" }));
-    const confirm = screen.getByText(/Archive "Old reels" and its 2 items\?/).closest(".os-notice") as HTMLElement;
+    await click(await screen.findByRole("menuitem", { name: "Delete" }));
+    const confirm = screen.getByText(/Delete "Old reels" and its 2 items\?/).closest(".os-notice") as HTMLElement;
     betweenTheClicks();
-    await click(within(confirm).getByRole("button", { name: "Archive" }));
+    await click(within(confirm).getByRole("button", { name: "Delete" }));
     expect(connection.callsNamed("archiveLibraryFolder")).toEqual([]);
 
     await readTheBar();
-    await click(within(confirm).getByRole("button", { name: "Archive" }));
+    await click(within(confirm).getByRole("button", { name: "Delete" }));
     expect(connection.callsNamed("archiveLibraryFolder")).toEqual(['mutation archiveLibraryFolder(folderId: "f-old")']);
   });
 });
