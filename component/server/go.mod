@@ -16,6 +16,7 @@ require (
 	github.com/znasllc-io/memql/component/auth v0.0.0
 	github.com/znasllc-io/memql/component/automations v0.0.0
 	github.com/znasllc-io/memql/component/bus v0.0.0
+	github.com/znasllc-io/memql/component/calls v0.0.0
 	github.com/znasllc-io/memql/component/database v0.0.0
 	github.com/znasllc-io/memql/component/events v0.0.0
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0
@@ -157,3 +158,5 @@ replace github.com/znasllc-io/memql/component/metrics => ../metrics
 replace github.com/znasllc-io/memql/component/frontdoor => ../frontdoor
 
 replace github.com/znasllc-io/memql/component/work => ../work
+
+replace github.com/znasllc-io/memql/component/calls => ../calls

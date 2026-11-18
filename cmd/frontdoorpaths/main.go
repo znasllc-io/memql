@@ -319,6 +319,23 @@ var servedButNotExternallyRouted = map[string]declaration{
 		"HandlerAuthorizedPaths(); this classification is what keeps that a defence in depth rather " +
 		"than the only control.",
 		server.AccessSurfacePaths},
+	"CallsSelfAuthenticatedPaths": {"The ten exact routes of a deployable's calls surface, where the " +
+		"bearer verifier steps aside so the calls handler can check the edge's stamp, the site and the " +
+		"key, link or session itself. They must stay edge-only just like CallsSurfacePaths; " +
+		"self-authentication does not permit a direct api.<domain> ingress.",
+		server.CallsSelfAuthenticatedPaths},
+	"CallsSurfacePaths": {"POST /calls/unlock, GET /calls/session, POST /calls/start, POST /calls/schedule, " +
+		"POST /calls/reschedule, POST /calls/cancel, POST /calls/join, GET /calls/queue, POST /calls/host and " +
+		"POST /calls/leave -- a deployable's calls surface (owner-approved 2026-11-17). The bff serves them and " +
+		"they are in HandlerAuthorizedPaths(), so this is the inverted pricing exactly: adding a rule here would " +
+		"not cost a 404, it would publish at api.<domain> the routes that trade a key for a session and seat a " +
+		"person in a call, with none of what the edge puts in front of them. The only intended caller is the " +
+		"EDGE, which reaches bff-http in-cluster having checked the site's calls switch, applied the body " +
+		"caps and rate limits, and stamped the site and owner after stripping any copy the client sent. The " +
+		"handler still fails closed without the stamp, which is what earns its place in " +
+		"HandlerAuthorizedPaths(); this classification is what keeps that a defence in depth rather than the " +
+		"only control.",
+		server.CallsSurfacePaths},
 	"ShopperSelfAuthenticatedPaths": {"Exact pack-declared shopper routes use the handler's " +
 		"site/owner/store authorization. They must stay edge-only just like ShopperSurfacePaths; " +
 		"self-authentication does not permit a direct api.<domain> ingress.",

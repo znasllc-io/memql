@@ -498,6 +498,41 @@ func TestTheAccessSurfaceRemainsWithheldFromIngress(t *testing.T) {
 	}
 }
 
+// THE CALLS SURFACE NEVER REACHES THE FRONT DOOR, the prefix or any exact route. A rule
+// here would publish, at api.<domain>, the routes that trade a key for a session and seat a
+// person in a call, with none of the switch, caps and rate limits the edge puts in front of
+// them.
+func TestTheCallsSurfaceRemainsWithheldFromIngress(t *testing.T) {
+	emitted := collect()
+	if len(server.CallsSurfacePaths()) == 0 || len(server.CallsSelfAuthenticatedPaths()) == 0 {
+		t.Fatal("the surface declares nothing, so this proves nothing")
+	}
+	for _, path := range emitted {
+		if path == "/calls" || strings.HasPrefix(path, "/calls/") {
+			t.Fatalf("calls route exposed at API ingress: %s", path)
+		}
+	}
+	// The premise: both aggregates really do carry it, so it is the classification keeping
+	// it out rather than nobody having declared it.
+	for _, want := range []struct {
+		name  string
+		paths []string
+	}{
+		{"HandlerAuthorizedPaths", server.HandlerAuthorizedPaths()},
+		{"SelfAuthenticatedPaths", server.SelfAuthenticatedPaths()},
+	} {
+		found := false
+		for _, path := range want.paths {
+			if strings.HasPrefix(path, "/calls/") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s() does not carry the calls surface, so this test proves nothing", want.name)
+		}
+	}
+}
+
 func TestDeclaredShopperRoutesRemainWithheldFromIngress(t *testing.T) {
 	memql.ResetShopperSurfaceForTest()
 	t.Cleanup(memql.ResetShopperSurfaceForTest)

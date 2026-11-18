@@ -10,6 +10,33 @@ import (
 
 var tokenEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
+// TokenBytes is the randomness in every session token and call link a calls service
+// issues: 160 bits, which no guessing at any request rate reaches. It is the capability's
+// constant, beside its spelling, so the service that issues a token and a route that
+// refuses one before reading anything hold it to the same shape.
+const TokenBytes = 20
+
+// tokenSymbols is how many symbols NewToken spells TokenBytes as.
+var tokenSymbols = tokenEncoding.EncodedLen(TokenBytes)
+
+// TokenWellFormed reports whether s is exactly what NewToken(r, TokenBytes) makes: that
+// many symbols of lowercase RFC 4648 base32, unpadded, and nothing around them. A presented
+// token that is not was never issued, which a server can say without reading anything, so a
+// guess of the wrong shape costs no read. Callers trim what a person typed first; the
+// check itself takes nothing on trust.
+func TokenWellFormed(s string) bool {
+	if len(s) != tokenSymbols {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < 'a' || c > 'z') && (c < '2' || c > '7') {
+			return false
+		}
+	}
+	return true
+}
+
 // NewToken reads exactly n random bytes from r and returns them as RFC 4648
 // base32 in lowercase with no padding. It adds no prefix: a caller that needs
 // one (a session code) prepends its own. A short read or a non-positive n is

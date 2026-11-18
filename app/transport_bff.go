@@ -52,6 +52,10 @@ func (a *App) transportBFF() {
 	// the shopper surface's reason: the edge forwards to this node, and the caller is a
 	// visitor with a code and no MemQL identity.
 	a.mountAccessSurface()
+	// A deployable's calls surface (owner-approved 2026-11-17). Bff-only for the access
+	// surface's reason: the edge forwards to this node, and the caller is a person with a
+	// key, a call's link or the session one opened, and no MemQL identity.
+	a.mountCallsSurface()
 	// Campaign open + click tracking (GET /t/o/{token}, GET /t/c/{token},
 	// memql#4823). Bff-only for the same reason the unsubscribe endpoint
 	// above is: the caller is the recipient's mail client or browser, and

@@ -1123,6 +1123,34 @@ func AccessSurfacePaths() []string {
 	return pathsWithBase(memql.AccessSurfacePathPrefix)
 }
 
+// CallsSurfacePaths declares the base a deployable's CALLS SURFACE mounts under on the bff:
+// POST /calls/unlock, GET /calls/session, POST /calls/start, POST /calls/schedule, POST
+// /calls/reschedule, POST /calls/cancel, POST /calls/join, GET /calls/queue, POST /calls/host
+// and POST /calls/leave, served by the calls handler (calls_handler.go). A hosted site
+// reaches them on its OWN origin under /_memql/calls, which the edge maps to these, as it
+// does for the access surface above. Nothing else in the tree mounts /calls/.
+//
+// A PREFIX, because that is the mount: GET and POST on one base, with the handler answering
+// 404 for everything that is not one of its ten pairs, so "there is nothing here" has one
+// answer rather than a 405 a prober can tell apart. What the verifier steps aside for is
+// narrower, and is CallsSelfAuthenticatedPaths.
+//
+// WHY HTTP AT ALL. Owner-approved exception, 2026-11-17. A person joining a call has no
+// MemQL identity to open a stream with, and only an HTTP response can set an HttpOnly
+// cookie, so the other party dictates the wire.
+//
+// IN HandlerAuthorizedPaths(), NOT PublicPaths(), for ShopperSurfacePaths' reason: the
+// handler authorizes every request itself and FAILS CLOSED WITH NO CREDENTIALS. A request
+// carrying no edge stamp reaches no read and no write.
+//
+// AND CLASSIFIED servedButNotExternallyRouted in cmd/frontdoorpaths: the edge is the only
+// intended caller, and a front-door rule would publish at api.<domain> the routes that trade
+// a key for a session and seat a person in a call, with none of the switch, caps and rate
+// limits the edge puts in front of them.
+func CallsSurfacePaths() []string {
+	return pathsWithBase(memql.CallsSurfacePathPrefix)
+}
+
 // ArtifactPaths returns the paths the Library's two byte-bearing routes mount
 // under (memql#4341): POST /artifacts and GET /artifacts/{id}/content, served
 // by ArtifactHandler on the bff.

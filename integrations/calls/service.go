@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -35,8 +34,11 @@ import (
 // only as calls.Digest under the keys' pepper and looked up within one deployable, so
 // a secret of one deployable opens nothing at another, and a plain secret is handed
 // out once and never stored or logged. A presented secret's SHAPE is checked before
-// anything is read (a key must parse; a token or a link is exactly what NewToken makes
-// of tokenBytes), so a guess of the wrong shape costs no read.
+// anything is read (a key must parse, calls.ParseKey; a token or a link must be exactly
+// what NewToken makes of calls.TokenBytes, calls.TokenWellFormed), so a guess of the wrong
+// shape costs no read. The calls route family asks the same two rules before it reads the
+// site, so the shape a route refuses unread and the shape this service refuses are one
+// rule.
 //
 // A SESSION IS READ AGAIN ON EVERY CALL. Start, Queue and Leave take the Session a
 // caller holds and trust only its token and its deployable: the row the token names
@@ -115,9 +117,9 @@ import (
 // booking before the room (host.go endRows), so an end cut short leaves an open call that
 // the next attempt ends again.
 
-// tokenBytes is the randomness in a session token and in each link: 160 bits, which no
-// guessing at any request rate reaches, spelled as 32 symbols by calls.NewToken.
-const tokenBytes = 20
+// tokenBytes is the randomness in a session token and in each link (calls.TokenBytes:
+// 160 bits, spelled as 32 symbols by calls.NewToken).
+const tokenBytes = callrules.TokenBytes
 
 // identityBytes is the randomness in a seat's media identity. An identity is a
 // participant's name on the media server, which every participant sees, so it is
@@ -131,10 +133,6 @@ const (
 	maxDisplayNameRunes  = 64
 	maxTermsVersionRunes = 64
 )
-
-// issuedToken is every token and link this service hands out (calls.NewToken over
-// tokenBytes).
-var issuedToken = regexp.MustCompile(`^[a-z2-7]{32}$`)
 
 // Service is the calls service. New builds it beside the integration's operator acts,
 // over the same store, gate pool, pepper, clock and randomness.
@@ -214,7 +212,7 @@ func (s *Service) Session(ctx context.Context, site callrules.SiteRef, token str
 // shape before anything is read, and an unknown, ended or expired one after.
 func (s *Service) session(ctx context.Context, site callrules.SiteRef, token string, now time.Time) (*sessionRow, []byte, error) {
 	token = strings.TrimSpace(token)
-	if !issuedToken.MatchString(token) {
+	if !callrules.TokenWellFormed(token) {
 		return nil, nil, fmt.Errorf("%w: no session token of that shape is ever issued", callrules.ErrNoSession)
 	}
 	pepper, err := s.pepperOr(ctx, callrules.ErrNoSession)
@@ -632,7 +630,7 @@ func (s *Service) Join(ctx context.Context, site callrules.SiteRef, sess *callru
 	if link == "" && !presented {
 		return callrules.JoinResult{}, none, fmt.Errorf("%w: a join names its call, with a link or a session seated in it", callrules.ErrInvalid)
 	}
-	if link != "" && !issuedToken.MatchString(link) {
+	if link != "" && !callrules.TokenWellFormed(link) {
 		return callrules.JoinResult{}, none, fmt.Errorf("%w: no link of that shape is ever issued", callrules.ErrNotFound)
 	}
 	site, err = checkSite(site)
@@ -655,7 +653,7 @@ func (s *Service) Join(ctx context.Context, site callrules.SiteRef, sess *callru
 	var held *sessionRow
 	if presented {
 		token := strings.TrimSpace(sess.Token)
-		if issuedToken.MatchString(token) {
+		if callrules.TokenWellFormed(token) {
 			found, err := s.store.sessionByDigest(ctx, owner, site.SiteID, callrules.Digest(pepper, []byte(token)))
 			if err != nil {
 				return callrules.JoinResult{}, none, err

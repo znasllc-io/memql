@@ -178,6 +178,25 @@ func HandlerAuthorizedPaths() []string {
 	// trusted because the route is classified servedButNotExternallyRouted, which is a
 	// property of the generated ingress rather than of this code.
 	paths = append(paths, AccessSurfacePaths()...)
+	// POST /calls/unlock, GET /calls/session, POST /calls/start, POST /calls/schedule, POST
+	// /calls/reschedule, POST /calls/cancel, POST /calls/join, GET /calls/queue, POST
+	// /calls/host + POST /calls/leave -- a deployable's CALLS SURFACE (owner-approved
+	// 2026-11-17). The caller is a person joining or hosting a call, with a key, a call's link
+	// or the session one of those opened, and no MemQL identity, so this cannot be an
+	// ordinary authenticated route.
+	//
+	// It qualifies under the rule above: with no credentials it fails CLOSED, and
+	// "credentials" here means the edge's stamp and then a key, a link or the session's
+	// cookie. A request with no stamp reaches no read and no write, and neither does one
+	// whose key, link or cookie could not have been issued. Past those, the site is read
+	// again UNDER the stamped owner, the row's own owner has to equal the stamp and its calls
+	// switch has to be on, so a forged owner reads nothing; and the service opens nothing
+	// without a key, a link or a session it still honours, on that site and no other.
+	//
+	// The same qualification as the two entries above, and it is as real: the stamp is
+	// trusted because the routes are classified servedButNotExternallyRouted, which is a
+	// property of the generated ingress rather than of this code.
+	paths = append(paths, CallsSurfacePaths()...)
 	paths = append(paths, UnsubscribePaths()...)
 	// GET /t/o/{token} + GET /t/c/{token} -- the campaign open- and
 	// click-tracking endpoints (memql#4823). Authorized by the HMAC-signed
@@ -306,7 +325,28 @@ func SelfAuthenticatedPaths() []string {
 	paths = append(paths, EmailLinkPaths()...)
 	paths = append(paths, AzureEmailFeedbackPaths()...)
 	paths = append(paths, AccessSelfAuthenticatedPaths()...)
+	paths = append(paths, CallsSelfAuthenticatedPaths()...)
 	return append(paths, ShopperSelfAuthenticatedPaths()...)
+}
+
+// CallsSelfAuthenticatedPaths returns the ten exact routes of the calls surface.
+//
+// WITHOUT THIS LIST THE SURFACE DOES NOT EXIST, for AccessSelfAuthenticatedPaths' reason: the
+// bff installs a verifier ahead of its mux, a person joining a call carries no MemQL
+// credential and never will, and HandlerAuthorizedPaths() is read only where no verifier
+// runs, so every request from a browser would be a 401 that names nothing. The bearer
+// verifier steps aside so the calls handler can check the edge's stamp, the site and the
+// key, link or session itself, which is the certification the third tier asks for.
+//
+// EXACT ROUTES, and no prefix: anything mounted beneath /calls/ later stays protected until
+// somebody decides otherwise. They come off the handler's own table, so the routes it
+// answers and the routes exempted for it cannot be two lists.
+func CallsSelfAuthenticatedPaths() []string {
+	var paths []string
+	for _, route := range callsRoutes {
+		paths = append(paths, pathsWithBase(route.path)...)
+	}
+	return paths
 }
 
 // AccessSelfAuthenticatedPaths returns the five exact routes of the access surface.

@@ -102,7 +102,10 @@ shape inboundRequest inboundRequestBrief {
 }
 
 /// Full projection of v1:platform:site -- what the edge needs to serve a request and what the
-/// portal's site list renders.
+/// portal's site list renders. `calls` is here because the calls surface's two halves both read
+/// the switch off this projection: the edge to decide whether a deployable's origin answers the
+/// calls routes, and the bff to check it again on the site it reads under the stamped owner. A
+/// concept field is not a readable field, and without it both would read every site as off.
 @row
 shape site siteFull {
   extensionRuntimePath
@@ -115,6 +118,7 @@ shape site siteFull {
   status
   apiProxy
   shopperForms
+  calls
   systemOwned
   title
   notes
