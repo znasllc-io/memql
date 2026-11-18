@@ -74,6 +74,9 @@ var payloadLookups = []payloadLookup{
 	// one room, and the rooms and scheduled calls of one key.
 	{index: "memory_nodes_calls_room_lookup_idx", field: "roomId", concepts: []string{"v1:calls:seat", "v1:calls:queueEntry"}},
 	{index: "memory_nodes_calls_key_lookup_idx", field: "keyId", concepts: []string{"v1:calls:room", "v1:calls:scheduledCall"}},
+	// The capacity read every join, start and queue poll makes: the open rooms of one
+	// media server, whose seats every call on it shares.
+	{index: "memory_nodes_calls_media_server_lookup_idx", field: "mediaServerId", concepts: []string{"v1:calls:room"}},
 	// The datasync retry pass (inboundRequestsDueForRetry, every minute) and
 	// the given-up list read the FAILED deliveries; partial on that status, so
 	// the range is the deliveries that ever failed and never the inbox, whose

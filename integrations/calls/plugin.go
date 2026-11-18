@@ -97,7 +97,9 @@ func engineReady(engine memql.IntegrationEngineAccess) <-chan struct{} {
 }
 
 // Deps is what the integration is built from. Random and Now are the randomness and
-// the clock, for a test to pin; nil means crypto/rand and time.Now.
+// the clock, for a test to pin; nil means crypto/rand and time.Now. NewMediaBackend
+// builds one media server's control API from its row and its credential, so a test
+// can stand a fake in for every server; nil means LiveKit's (liveKitFor).
 type Deps struct {
 	Engine              Engine
 	GateDB              func() *sql.DB
@@ -105,18 +107,21 @@ type Deps struct {
 	Logger              *slog.Logger
 	Random              io.Reader
 	Now                 func() time.Time
+	NewMediaBackend     func(server MediaServer, credential MediaCredential) (MediaBackend, error)
 }
 
 // Integration is the calls capability's Go half.
 type Integration struct {
-	store  *Store
-	gateDB func() *sql.DB
-	logger *slog.Logger
-	random io.Reader
-	clock  func() time.Time
+	store   *Store
+	gateDB  func() *sql.DB
+	logger  *slog.Logger
+	random  io.Reader
+	clock   func() time.Time
+	service *Service
 }
 
-// New builds the integration.
+// New builds the integration, and the calls service over the same store, gate pool,
+// pepper, clock and randomness (service.go).
 func New(d Deps) *Integration {
 	i := &Integration{
 		store:  NewStore(d.Engine, d.ResolveSystemSecret),
@@ -134,13 +139,31 @@ func New(d Deps) *Integration {
 	if i.clock == nil {
 		i.clock = time.Now
 	}
+	media := d.NewMediaBackend
+	if media == nil {
+		media = liveKitFor
+	}
+	i.service = &Service{
+		store: i.store, gateDB: i.gateDB, pepper: i.pepper, random: i.random,
+		now: i.now, media: media, logger: i.logger,
+	}
 	return i
+}
+
+// liveKitFor is a media server's control API as LiveKit's room service, at the server's
+// control address and signed with its credential.
+func liveKitFor(server MediaServer, credential MediaCredential) (MediaBackend, error) {
+	return NewLiveKitBackend(server.APIURL, credential.Key, credential.Secret)
 }
 
 func (i *Integration) now() time.Time { return i.clock().UTC() }
 
 // Store is the integration's graph seam, for the later halves of the capability.
 func (i *Integration) Store() *Store { return i.store }
+
+// Service is the calls service: unlocking a key, starting, joining, queueing and
+// leaving a call. The calls route family serves it.
+func (i *Integration) Service() *Service { return i.service }
 
 // IntegrationName implements memql.IntegrationProvider.
 func (i *Integration) IntegrationName() string { return pluginName }

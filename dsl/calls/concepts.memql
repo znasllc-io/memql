@@ -48,6 +48,7 @@ concept session {
   kind  enum("host", "guest")  @description("Which side of the call the pass is for.")
   keyId  string  @description("The v1:calls:key this pass was drawn against.")
   seatId  string  @description("The v1:calls:seat the pass occupies, once it has one.")
+  roomId  string  @description("The v1:calls:room of that seat, written with it, so a session says which call it is in without a read of its seat.")
   expiresAt  datetime  @description("When the pass stops opening anything. Compared against the engine's clock at request time.")
   endedAt  datetime  @description("When the pass was ended early, or empty. A SOFT end: the row stays.")
   accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
@@ -56,6 +57,7 @@ concept session {
   @relationship(type="references", as="siteOwner", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", as="drawnOn", field="keyId", target=key, direction="outgoing")
   @relationship(type="references", as="heldFor", field="seatId", target=seat, direction="outgoing")
+  @relationship(type="references", as="seatedIn", field="roomId", target=room, direction="outgoing")
 }
 
 /// A CALLS ROOM: one call on one media server. `guestDigest` and `hostDigest` are the SHA-256 digests of
@@ -83,6 +85,8 @@ concept room {
   openedAt  datetime  @description("When the room opened.")
   endedAt  datetime  @description("When the room ended, or empty.")
   endReason  string  @description("Why the room ended, as a stable code.")
+  joinWindowStartedAt  datetime  @description("When the room's current one-minute window of join attempts opened (calls.CountJoinAttempt). Counted on the room so every replica counts the same attempts.")
+  joinWindowCount  int  @description("How many join attempts the current window has taken, refused ones included; the policy's roomJoinsPerMinute caps it.")
   accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
 
   @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")

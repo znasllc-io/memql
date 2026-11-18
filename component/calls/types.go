@@ -5,7 +5,10 @@
 // (purity_test.go holds the package to the standard library).
 package calls
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // SeatKind says what occupies a seat. Only people count against MaxPeople and
 // only agents against MaxAgents; avatars and samplers ride on their owner's
@@ -80,3 +83,119 @@ type Decision struct {
 	Outcome Outcome
 	Reason  string
 }
+
+// The reason codes a calls service adds to DecideJoin's own (call_ended,
+// room_full, agent_seats_full, locked, capacity). Each is stable: a client
+// switches on it, and a route maps ReasonRate to "try again after".
+const (
+	// ReasonRate: the room has taken its join attempts for this minute.
+	ReasonRate = "rate"
+	// ReasonInAnotherCall: the session holds a seat in another call that is
+	// still open, and one browser is in one call at a time.
+	ReasonInAnotherCall = "in_another_call"
+	// ReasonKeyInCall: the key already has a call open, and a key holds one
+	// call at a time.
+	ReasonKeyInCall = "key_in_call"
+	// ReasonNoMediaServer: no media server is taking new calls.
+	ReasonNoMediaServer = "no_media_server"
+	// ReasonRemoved: the host removed this seat from the call.
+	ReasonRemoved = "removed"
+	// ReasonKeyNotActive: the key is frozen or banned, and opens no new call.
+	ReasonKeyNotActive = "key_not_active"
+)
+
+// SiteRef names the deployable a calls request is for: the site, its owner,
+// as whom every calls row of the site is read and written, and the
+// deployable's name, which a room records. A route builds it from the site it
+// resolved and checked; the calls rows themselves are what bind a secret to
+// this pair, so a site and owner that do not belong together find nothing.
+type SiteRef struct {
+	SiteID, OwnerUserID, Deployable string
+}
+
+// The two kinds of session. A host session is opened by a key, or by a call's
+// host link; a guest session by the call's guest link.
+const (
+	SessionHost  = "host"
+	SessionGuest = "guest"
+)
+
+// SessionLifetime is how long a session opens anything. It is the
+// capability's constant, not a policy value: a session is a browser's hold on
+// a seat, and a key holder unlocks again tomorrow.
+const SessionLifetime = 24 * time.Hour
+
+// Session is one bearer session as its holder presents it. Token is the
+// secret the holder keeps (a cookie), handed out once; the store keeps only
+// its digest. Site is where the session was opened, which is where every call
+// it makes is answered.
+type Session struct {
+	Token                 string
+	Kind                  string
+	KeyID, SeatID, RoomID string
+	ExpiresAt             time.Time
+	Site                  SiteRef
+}
+
+// CallLinks is a call's id and its two link secrets, handed out once. The
+// host link seats its holder as a host; the guest link as a guest.
+type CallLinks struct {
+	ID, GuestToken, HostToken string
+}
+
+// Confirmation is what every person confirms at every join: that they are 18
+// or older, that no one under 18 will appear on their camera or screen, and
+// the version of the terms they accept. Each seat records all three.
+type Confirmation struct {
+	Adult, NoMinors bool
+	Terms           string
+}
+
+// JoinBody is one join request: at most one of the two links, the name the
+// person shows in this call, and their confirmation.
+type JoinBody struct {
+	Token, HostToken, Name string
+	Confirm                Confirmation
+}
+
+// JoinResult answers a join, a start's host seat or a poll. An admit carries
+// the media server's address, a pass and the seat's media identity, and the
+// pass's lifetime; a wait or a queue says when to ask again and, for a queue,
+// the place in line, counted from one; a refusal carries its reason.
+type JoinResult struct {
+	Outcome                     Outcome
+	URL, Pass, Identity, Reason string
+	Host                        bool
+	ExpiresIn, RetryAfter       time.Duration
+	Position                    int
+}
+
+// StartResult is a started call's links and what became of its host.
+type StartResult struct {
+	Call CallLinks
+	Join JoinResult
+}
+
+// StartBody is what a host starts a call with: the host's display name and
+// the confirmation every seat records.
+type StartBody struct {
+	Name    string
+	Confirm Confirmation
+}
+
+// The errors a calls service answers with, which a route maps to its replies.
+// A refusal that has a reason returns its JoinResult beside the error.
+var (
+	// ErrNoSession: the session presented is unknown, ended or expired.
+	ErrNoSession = errors.New("calls: no session")
+	// ErrNotFound: the key or link presented opens nothing on this deployable.
+	ErrNotFound = errors.New("calls: not found")
+	// ErrEnded: the call has ended.
+	ErrEnded = errors.New("calls: the call has ended")
+	// ErrForbidden: the session or key may not do this.
+	ErrForbidden = errors.New("calls: not allowed")
+	// ErrInvalid: the request itself is malformed or incomplete.
+	ErrInvalid = errors.New("calls: invalid request")
+	// ErrConflict: the request is well formed but the call's state refuses it.
+	ErrConflict = errors.New("calls: conflict")
+)

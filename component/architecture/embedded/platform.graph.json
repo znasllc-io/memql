@@ -1169,6 +1169,7 @@
 {"from":"concept:v1:calls:seat","to":"concept:v1:identity:user","kind":"relates","attrs":{"as":"siteOwner","direction":"outgoing","field":"ownerUserId","type":"references"}},
 {"from":"concept:v1:calls:seat","to":"concept:v1:platform:site","kind":"relates","attrs":{"as":"forSite","direction":"outgoing","field":"siteId","type":"references"}},
 {"from":"concept:v1:calls:session","to":"concept:v1:calls:key","kind":"relates","attrs":{"as":"drawnOn","direction":"outgoing","field":"keyId","type":"references"}},
+{"from":"concept:v1:calls:session","to":"concept:v1:calls:room","kind":"relates","attrs":{"as":"seatedIn","direction":"outgoing","field":"roomId","type":"references"}},
 {"from":"concept:v1:calls:session","to":"concept:v1:calls:seat","kind":"relates","attrs":{"as":"heldFor","direction":"outgoing","field":"seatId","type":"references"}},
 {"from":"concept:v1:calls:session","to":"concept:v1:identity:user","kind":"relates","attrs":{"as":"siteOwner","direction":"outgoing","field":"ownerUserId","type":"references"}},
 {"from":"concept:v1:calls:session","to":"concept:v1:platform:site","kind":"relates","attrs":{"as":"forSite","direction":"outgoing","field":"siteId","type":"references"}},

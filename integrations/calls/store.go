@@ -29,16 +29,19 @@ import (
 // without INTERNAL ORIGIN, whatever actor is on the context. The actor then decides,
 // and there are three:
 //
-//   - A SITE'S ROWS (a key and the site's limits here, policy.go; rooms, seats and
-//     sessions in later work) are read and written AS THE SITE'S OWNER, with internal
-//     origin (asOwner). A create stamps ownerUserId from the actor, so a row is the
-//     site's owner's at birth and never the person who asked. Borrowed authority
-//     without internal origin is a CLIENT read of these concepts
+//   - A SITE'S ROWS (a key here, the site's limits in policy.go, its sessions, rooms,
+//     seats and queue entries in rooms.go) are read and written AS THE SITE'S OWNER,
+//     with internal origin (asOwner). A create stamps ownerUserId from the actor, so a
+//     row is the site's owner's at birth and never the person who asked. Borrowed
+//     authority without internal origin is a CLIENT read of these concepts
 //     (site_access_guards.go), which is why the stamp is here.
 //   - THE CLUSTER'S ROWS (media servers) and the sealed secrets are read and written
 //     AS THE CLUSTER ACTING: the system actor `system:calls`, a synthetic owner-role
 //     actor, with internal origin (asCluster). Their queries require
 //     actor.isClusterOwner, so a site owner's borrowed authority would read nothing.
+//     A media server's LOAD is read the same way (rooms.go loadOn): the calls of every
+//     deployable placed on the server share its seats, so it is counted across all of
+//     them, and nothing read that way is returned.
 //   - THE SITE ITSELF is read and written UNDER THE CALLER, unstamped, and that is
 //     what makes those two calls checks rather than lookups: a person who cannot read
 //     the deployable resolves zero rows, and the switch's write meets every gate a

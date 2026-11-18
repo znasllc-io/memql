@@ -139,13 +139,21 @@ func (i *Integration) handleTestKeyCreate(ctx context.Context, args map[string]a
 	})
 }
 
+// errNoPepper is the cause behind the refusal of a cluster whose media bootstrap has
+// never run: no pepper, so no key was ever minted and none can be looked up. The calls
+// service (service.go) asks for it by identity, not by the sentence.
+var errNoPepper = errors.New("calls: no key pepper: no media server has been configured")
+
 // pepper is the key pepper, read fresh: the bootstrap writes it, and a node that cached
 // its absence would refuse every mint for as long as the cache held.
 func (i *Integration) pepper(ctx context.Context) ([]byte, error) {
 	stored, err := i.store.resolveSecret(ctx, SecretKeyPepper)
 	switch {
 	case memql.IsVariableNotFound(err):
-		return nil, refuse("Calls are not set up on this cluster yet: no media server has been configured, so there is nothing for a key to open. Ask a cluster operator to add one.")
+		return nil, &refusal{
+			sentence: "Calls are not set up on this cluster yet: no media server has been configured, so there is nothing for a key to open. Ask a cluster operator to add one.",
+			cause:    errNoPepper,
+		}
 	case err != nil:
 		return nil, err
 	}

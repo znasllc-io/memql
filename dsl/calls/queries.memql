@@ -115,6 +115,19 @@ query room callsOpenRoomsForKey {
   shape   callsRoomFull
 }
 
+/// The open rooms placed on one media server, whichever deployable each is for: a server's seats are shared by every call on it, so its free seats are counted across all of them (integrations/calls rooms.go). Read as the cluster acting. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("open rooms of one media server -- bounded by how many calls the server's seats can carry")
+@actor
+@cache(0)
+query room callsOpenRoomsOnServer {
+  args {
+    mediaServerId  string!
+  }
+  filter  row => row.mediaServerId == args.mediaServerId && isOpen(row) && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsRoomFull
+}
+
 /// One seat row by its own id. The calls integration reads it before it writes, and to answer a request that names it. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
 @serverOnly
 @unbounded("seat by id -- bounded to a single row (id is the row's own primary key)")
@@ -141,6 +154,19 @@ query seat callsSeatsForRoom {
   shape   callsSeatFull
 }
 
+/// The seat rows of a set of rooms, for the calls integration: the seats of the open rooms on one media server, in one read rather than one per room. A reference field is stored canonical and a bare id compared with it matches nothing, so the ids are made canonical here. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("seats of the open rooms of one media server -- bounded by the room-size limits of the calls policy")
+@actor
+@cache(0)
+query seat callsSeatsForRooms {
+  args {
+    roomIds  []string!
+  }
+  filter  row => row.roomId in args.roomIds.select(candidate => canonicalId(candidate, room)) && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsSeatFull
+}
+
 /// One queueEntry row by its own id. The calls integration reads it before it writes, and to answer a request that names it. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
 @serverOnly
 @unbounded("queueEntry by id -- bounded to a single row (id is the row's own primary key)")
@@ -164,6 +190,19 @@ query queueEntry callsQueueEntriesForRoom {
     roomId  string!
   }
   filter  row => row.roomId == args.roomId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsQueueEntryFull
+}
+
+/// The queueEntry rows of a set of rooms, for the calls integration: the queue of one media server, which every call on it shares, in one read rather than one per room. A reference field is stored canonical and a bare id compared with it matches nothing, so the ids are made canonical here. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("queue entries of the open rooms of one media server -- bounded by the queue entry lifetime and the join rate of the calls policy")
+@actor
+@cache(0)
+query queueEntry callsQueueEntriesForRooms {
+  args {
+    roomIds  []string!
+  }
+  filter  row => row.roomId in args.roomIds.select(candidate => canonicalId(candidate, room)) && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   callsQueueEntryFull
 }
 

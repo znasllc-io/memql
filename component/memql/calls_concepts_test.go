@@ -92,11 +92,14 @@ func TestCallsPolicyIsASiteRow(t *testing.T) {
 
 // TestCallsHotReadsHaveLookupIndexes holds payloadLookups to the reads the join and
 // queue paths make on every request: seats and queue entries of one room, rooms and
-// scheduled calls of one key. Without an index each enumerates every id of its concept.
+// scheduled calls of one key, and the open rooms of one media server, which the
+// capacity count reads under the server's gate. Without an index each enumerates every
+// id of its concept.
 func TestCallsHotReadsHaveLookupIndexes(t *testing.T) {
 	for _, c := range []struct{ concept, field string }{
 		{"v1:calls:seat", "roomId"}, {"v1:calls:queueEntry", "roomId"},
 		{"v1:calls:room", "keyId"}, {"v1:calls:scheduledCall", "keyId"},
+		{"v1:calls:room", "mediaServerId"},
 		{"v1:calls:key", "digest"}, {"v1:calls:session", "tokenDigest"},
 		{"v1:calls:room", "guestDigest"}, {"v1:calls:room", "hostDigest"},
 		{"v1:calls:scheduledCall", "guestDigest"}, {"v1:calls:scheduledCall", "hostDigest"},

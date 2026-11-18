@@ -25,6 +25,7 @@ shape session callsSessionFull {
   kind
   keyId
   seatId
+  roomId
   expiresAt
   endedAt
   accountId
@@ -49,6 +50,8 @@ shape room callsRoomFull {
   openedAt
   endedAt
   endReason
+  joinWindowStartedAt
+  joinWindowCount
   accountId
 }
 

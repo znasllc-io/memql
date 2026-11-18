@@ -62,10 +62,11 @@ mutation session createCallsSession {
     kind  string
     keyId  string
     seatId  string
+    roomId  string
     expiresAt  datetime
   }
   insert {
-    accept { siteId, tokenDigest, kind, keyId, seatId, expiresAt }
+    accept { siteId, tokenDigest, kind, keyId, seatId, roomId, expiresAt }
     stamp {
       id: args.sessionId
       ownerUserId: actor.userId
@@ -81,11 +82,12 @@ mutation session updateCallsSession {
     sessionId  string!
     versionTime  datetime
     seatId  string
+    roomId  string
     expiresAt  datetime
     endedAt  datetime
   }
   update {
-    accept { seatId, expiresAt, endedAt }
+    accept { seatId, roomId, expiresAt, endedAt }
     stamp {
       id: args.sessionId
       createdAt: args.versionTime ?? now
@@ -112,9 +114,11 @@ mutation room createCallsRoom {
     guestDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")
     hostDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")
     openedAt  datetime
+    joinWindowStartedAt  datetime
+    joinWindowCount  int
   }
   insert {
-    accept { siteId, deployable, keyId, mediaServerId, mediaRoom, locked, hostSeatId, scheduledCallId, guestDigest, hostDigest, openedAt }
+    accept { siteId, deployable, keyId, mediaServerId, mediaRoom, locked, hostSeatId, scheduledCallId, guestDigest, hostDigest, openedAt, joinWindowStartedAt, joinWindowCount }
     stamp {
       id: args.roomId
       ownerUserId: actor.userId
@@ -138,9 +142,11 @@ mutation room updateCallsRoom {
     hostLeftAt  datetime
     endedAt  datetime
     endReason  string
+    joinWindowStartedAt  datetime
+    joinWindowCount  int
   }
   update {
-    accept { mediaServerId, mediaRoom, status, locked, hostSeatId, hostLeftAt, endedAt, endReason }
+    accept { mediaServerId, mediaRoom, status, locked, hostSeatId, hostLeftAt, endedAt, endReason, joinWindowStartedAt, joinWindowCount }
     stamp {
       id: args.roomId
       createdAt: args.versionTime ?? now
@@ -177,7 +183,7 @@ mutation seat createCallsSeat {
   }
 }
 
-/// Update a seat row (read-merge-validate-write). @serverOnly for createCallsSeat's reason. Only the fields that change over a seat's life are accepted: its site, owner and digests never move. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+/// Update a seat row (read-merge-validate-write). @serverOnly for createCallsSeat's reason. Only the fields that change over a seat's life are accepted: its site, owner and digests never move. The three confirmations are among them because every join confirms again, a rejoin included, and the seat records what its latest join confirmed (a newer terms version above all). actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
 @serverOnly
 mutation seat updateCallsSeat {
   args {
@@ -186,11 +192,14 @@ mutation seat updateCallsSeat {
     displayName  string
     host  bool
     status  string
+    confirmAdult  bool
+    confirmNoMinors  bool
+    termsVersion  string
     joinedAt  datetime
     leftAt  datetime
   }
   update {
-    accept { displayName, host, status, joinedAt, leftAt }
+    accept { displayName, host, status, confirmAdult, confirmNoMinors, termsVersion, joinedAt, leftAt }
     stamp {
       id: args.seatId
       createdAt: args.versionTime ?? now
