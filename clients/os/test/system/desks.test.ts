@@ -5,6 +5,8 @@ import {
   cycleWindowMode,
   focusWindow,
   addDesk,
+  canAddDesk,
+  MAX_EMPTY_DESKS,
   closeWindow,
   consumeIntent,
   DESK_CAP,
@@ -167,6 +169,27 @@ describe("desk lifecycle", () => {
     expect(s.activeDeskId).toBe(s.desks[0]!.id);
     s = switchDeskBy(s, -1);
     expect(s.activeDeskId).toBe(s.desks[0]!.id);
+  });
+});
+
+describe("the empty-desk limit (owner, Nov 2026)", () => {
+  it("allows the desks in use plus two empty ones, and refuses a third empty desk", () => {
+    expect(MAX_EMPTY_DESKS).toBe(2);
+    let s = addDesk(initialShell());
+    expect(s.desks).toHaveLength(2);
+    expect(canAddDesk(s)).toBe(false);
+    expect(addDesk(s)).toBe(s);
+  });
+
+  it("allows another desk once an empty one gets a window or surface content", () => {
+    let s = addDesk(initialShell());
+    s = openApp(s, "a").state;
+    expect(canAddDesk(s)).toBe(true);
+    s = addDesk(s);
+    expect(s.desks).toHaveLength(3);
+    expect(canAddDesk(s)).toBe(false);
+    const third = s.desks[2]!.id;
+    expect(canAddDesk(s, (id) => id === third)).toBe(true);
   });
 });
 

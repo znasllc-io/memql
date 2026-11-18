@@ -234,6 +234,23 @@ describe("desk switch motion (owner, Nov 2026)", () => {
   });
 });
 
+describe("the empty-desk limit (owner, Nov 2026)", () => {
+  it("hides New desk while two desks are empty and brings it back once one is used", () => {
+    // The first desk holds the seeded Ask widget, so it is in use: a second
+    // and a third desk may be added, then no more until one gets something.
+    renderShell();
+    const pager = screen.getByRole("navigation", { name: "Desks" });
+    fireEvent.click(within(pager).getByRole("button", { name: "New desk" }));
+    fireEvent.click(within(pager).getByRole("button", { name: "New desk" }));
+    expect(screen.getByText("Desk 3 of 3")).toBeTruthy();
+    expect(within(pager).queryByRole("button", { name: "New desk" })).toBeNull();
+    openFromLauncher("Files");
+    fireEvent.click(within(pager).getByRole("button", { name: "New desk" }));
+    expect(screen.getByText("Desk 4 of 4")).toBeTruthy();
+    expect(within(pager).queryByRole("button", { name: "New desk" })).toBeNull();
+  });
+});
+
 describe("dock pins (spec K bullet 3)", () => {
   it("pins from the context menu and persists across a remount", () => {
     const storage = memStorage();
