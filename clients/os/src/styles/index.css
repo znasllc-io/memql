@@ -4500,6 +4500,24 @@ a.os-button {
   .os-files .os-files-grid,
   .os-files .os-files-files .os-livelist-rows { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
 }
+/* WHO THE PICKED FILE IS SHARED WITH, at the foot of the rail's column
+ * (Files: sharing.tsx). The rail and the list are placed explicitly so this
+ * can share the rail's cell; sticky to the window's bottom edge, so a long
+ * list never scrolls it away. On a narrow window it sits between the rail and
+ * the list instead. */
+.os-files-browse > .os-files-rail { grid-column: 1; grid-row: 1; }
+.os-files-browse > .os-files-main { grid-column: 2; grid-row: 1; }
+.os-files-sharing { grid-column: 1; grid-row: 1; align-self: end; position: sticky; bottom: 0; margin-right: 10px; padding: 12px 0 8px; border-top: 1px solid var(--os-line); background: var(--os-glass-solid); }
+.os-files-sharing-head { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: var(--os-text-sm); font-weight: 500; color: var(--os-muted); }
+.os-files-sharing-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.os-files-sharing-list li { display: flex; align-items: center; gap: 10px; min-height: var(--os-control-h); color: var(--os-ink); }
+.os-files-sharing-ava { display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--os-line); font-size: 10.5px; color: var(--os-muted); }
+@container os-files (max-width: 560px) {
+  .os-files-browse > .os-files-main { grid-column: 1; grid-row: 2; }
+  .os-files-browse:has(> .os-files-sharing) { grid-template-rows: auto auto minmax(0, 1fr); }
+  .os-files-browse:has(> .os-files-sharing) > .os-files-main { grid-row: 3; }
+  .os-files-sharing { grid-row: 2; align-self: start; position: static; margin: 0; padding: 10px 0; border-top: 0; border-bottom: 1px solid var(--os-line); }
+}
 
 /* Folder tiles, then the notices, uploads and file tiles below them. The
  * window's page scrolls; the rail stays in view beside it (sticky, above). */

@@ -28,6 +28,7 @@ import { RESOURCE_PAGE_VIEWS } from "./resourcePageScenes";
 import { MATERIALIZER_VIEWS } from "./materializerScenes";
 import { FilesApp } from "../src/apps/files/FilesApp";
 import { LocalFilesSettingsStore } from "../src/apps/files/settings";
+import { FileSharesContext } from "../src/apps/files/sharing";
 import { fakeConnection as filesConnection, artifactRow as filesArtifact, folderRow as filesFolder, fileRow as filesFile, versionRow as filesVersion, watchedFolderRow, withSession as filesSession } from "../test/files/harness";
 import { EmailApp } from "../src/apps/email/EmailApp";
 import { AzureEmailConnections } from "../src/modules/connections/AzureEmailConnections";
@@ -2457,6 +2458,14 @@ document.documentElement.style.colorScheme = mode;
 
 createRoot(document.getElementById("root")!).render(<App />);
 
+// Staged shares (sharing.tsx): the engine has no share record yet, so the test
+// page names who a few sample files are shared with, to judge "Sharing with".
+const STAGED_SHARES: ReadonlyMap<string, readonly string[]> = new Map([
+ ["quarterly", ["Sam Lee"]],
+ ["site", ["Sam Lee", "Dana Cole"]],
+ ["grant", ["Dana Cole"]],
+]);
+
 function filesPreview(section: string, empty = false) {
  return {
   connect: () => filesConnection(empty ? {} : {
@@ -2469,7 +2478,7 @@ function filesPreview(section: string, empty = false) {
    machines:[fleetMachineRow({id:"studio",name:"Studio mini",capabilities:["HEADLESS"]})],
    backups:[watchedFolderRow({id:"research-backup",workerId:"studio",localPath:"/Users/ana/Research",folderId:"research",intervalMinutes:1440,originState:"ok",filesSeen:18,bytesSeen:3400000,lastSweepAt:new Date().toISOString()}),watchedFolderRow({id:"reports-backup",workerId:"studio",localPath:"/Users/ana/Reports",folderId:"reports",status:"paused",intervalMinutes:10080})],
   }),
-  wrap: (el: JSX.Element) => filesSession(<OsProvider registry={OS_REGISTRY} actorRole="owner" grid={{cols:8,rows:5}}><MachinesProvider>{el}</MachinesProvider></OsProvider>),
+  wrap: (el: JSX.Element) => filesSession(<OsProvider registry={OS_REGISTRY} actorRole="owner" grid={{cols:8,rows:5}}><MachinesProvider><FileSharesContext.Provider value={empty ? new Map() : STAGED_SHARES}>{el}</FileSharesContext.Provider></MachinesProvider></OsProvider>),
   render: () => <FilesQa section={section} />,
  };
 }

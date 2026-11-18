@@ -31,6 +31,7 @@ import { AddButton } from "../../kit/AddButton";
 import { InPlaceAsk } from "../../kit/pressHold";
 import { FileFolders } from "./FileFolders";
 import { FilesRail } from "./Rail";
+import { SharingWith, useFileShares } from "./sharing";
 import { FileTile } from "./Tiles";
 import {
   Button,
@@ -556,6 +557,8 @@ export function BrowseSection({
   // deleted, moved away, or filtered out -- so the icons never act on a file
   // nobody can see.
   const pickedRow = picked === "" ? null : content.find((r) => r.id === picked) ?? null;
+  const shares = useFileShares();
+  const sharingWith = pickedRow === null ? [] : shares.get(pickedRow.id) ?? [];
   const archivedFolderIdSet = new Set(archivedFolders.map((f) => f.id));
   const searching = filter.search.trim() !== "";
   const accountOptions = useAccountOptions();
@@ -695,6 +698,7 @@ export function BrowseSection({
         onFolder={(folderId) => { onSelect(""); setPicked(""); patch({ place: "library", folderId, search: "" }); }}
         onFolderMenu={(x, y, node) => setFolderMenu({ x, y, node })}
       />
+      {sharingWith.length > 0 ? <SharingWith names={sharingWith} /> : null}
       <div className="os-files-main">
       <Head navigationKey={`browse:${filter.place}:${filter.folderId ?? ""}`} title={headTitle} breadcrumbs={headTrail} navigation={selected === null} back={filter.folderId ? {label: PLACE_TITLE[filter.place], onSelect: () => patch({folderId: tree.byId.get(filter.folderId!)?.folder.parentFolderId ?? ""})} : undefined} meta={listCount(list?.snapshot, listedCount) === undefined ? undefined : `${listedCount}${artifacts.hasMore ? "+" : ""}`}>
         {/* ONE WAY TO ADD SOMETHING (DESIGN.md rule 1: at most one primary
