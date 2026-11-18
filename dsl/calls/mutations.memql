@@ -316,12 +316,13 @@ mutation mediaServer createCallsMediaServer {
   }
 }
 
-/// Update a mediaServer row (read-merge-validate-write). @serverOnly for createCallsMediaServer's reason. Only the fields that change over a mediaServer's life are accepted: its site, owner and digests never move. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+/// Update a mediaServer row (read-merge-validate-write). @serverOnly for createCallsMediaServer's reason. Only the fields that change over a mediaServer's life are accepted: its site, owner and digests never move. `provider` is among them because the bootstrap server is whatever the environment names, and an operator may move it to another provider. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
 @serverOnly
 mutation mediaServer updateCallsMediaServer {
   args {
     mediaServerId  string!
     versionTime  datetime
+    provider  string
     apiUrl  string
     publicUrl  string
     region  string
@@ -330,7 +331,7 @@ mutation mediaServer updateCallsMediaServer {
     credentialSecret  string
   }
   update {
-    accept { apiUrl, publicUrl, region, seats, state, credentialSecret }
+    accept { provider, apiUrl, publicUrl, region, seats, state, credentialSecret }
     stamp {
       id: args.mediaServerId
       createdAt: args.versionTime ?? now

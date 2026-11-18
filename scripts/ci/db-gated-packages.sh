@@ -302,6 +302,16 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # versions spell the account both ways counts once. What the complement now
 # means, having looked: the package moves from go-checks to db-tests whole; it
 # has no test that does not read the database.
+# The generic calls capability added `integrations/calls`. Its media bootstrap
+# and operator acts are claims about what the rows hold afterwards and who the
+# engine took each read and write to be: one media server version and one key
+# pepper when two replicas boot at once (the write gate and the fresh read under
+# it), nothing written by a second boot, a key's row holding its digest and no
+# row anywhere holding the key, and the part and organization gates a person's
+# call crosses. A fake engine has none of those. What the complement now means,
+# having looked: the package moves from go-checks to db-tests whole, and its
+# config, pass and media-backend suites are unit tests that now run beside a
+# database they ignore.
 readonly DB_GATED_TREES=(
     component/filebackups
 	"app"
@@ -327,6 +337,7 @@ readonly DB_GATED_TREES=(
 	"component/sitetraffic"
 	"component/worker"
 	"integrations/accounts"
+	"integrations/calls"
 	"integrations/compose"
 	"integrations/embedding"
 	"integrations/knowledge"
@@ -521,6 +532,22 @@ readonly DB_GATED_TREES=(
 # run in THIS lane. It is NOT db-gated and must not join DB_GATED_TREES: it
 # reads and writes bytes and reaches no database.
 #
+# The generic calls capability added `component/calls`: the pure call rules
+# (admission, queue order, the host-left countdown, schedules, grants, keys,
+# links and calendar files), standard library only. It is a module for
+# procedure's reason and no other: `integrations/calls` imports it and lives in
+# the `integrations` module, which cannot import a root-module package with
+# GOWORK=off. What the complement now means, MEASURED:
+#
+#	go list github.com/znasllc-io/memql/... | grep -cE 'component/calls$'
+#	  1
+#	scripts/ci/db-gated-packages.sh --complement | grep -cE 'component/calls$'
+#	  1
+#
+# It is enumerated in workspace mode and sits in the complement, so its tests
+# run in THIS lane. It is NOT db-gated and must not join DB_GATED_TREES: its
+# purity_test.go makes "reaches no database" a build-graph fact.
+#
 # Cockpit is a separate release module already included by go.work. Its
 # packages remain in the non-DB complement: the generic Go lanes own unit
 # tests/build/vet, as memql-package.yaml declares. The separate Cockpit lanes
@@ -536,6 +563,7 @@ readonly KNOWN_GO_MOD_DIRS=(
 	"component/automations"
 	"component/bus"
 	"component/bus/gen"
+	"component/calls"
 	"component/compose"
 	"component/config"
 	"component/database"

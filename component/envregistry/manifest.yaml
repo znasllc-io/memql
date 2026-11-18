@@ -110,6 +110,22 @@ secrets:
     optional: true
     description: "Deploy-gate only (#2179): path to a file holding a class=service_account JWT, written by the deploy-gate self-mint init container; deploy-gate-check prefers it over the static MEMQL_SVC_JWT secret."
 
+  # --- calls media server (the other six values are under `variables:`) ---
+
+  - name: MEMQL_CALLS_MEDIA_API_SECRET
+    component: calls
+    scope: node
+    kind: integration
+    optional: true
+    description: "The secret of the calls media server's key pair, at least 32 characters, that rooms and passes are signed with. Sealed into the calls.media.bootstrap global secret at boot and never sent to a client. One of the eight MEMQL_CALLS_MEDIA_* values, set all or none."
+
+  - name: MEMQL_CALLS_MEDIA_WEBHOOK_SECRET
+    component: calls
+    scope: node
+    kind: integration
+    optional: true
+    description: "The secret, at least 32 characters, of the key pair the calls media server signs its webhooks with. Sealed into the calls.media.webhook global secret at boot. One of the eight MEMQL_CALLS_MEDIA_* values, set all or none."
+
   # --- operator evaluation tooling ---
 
   - name: MEMQL_EVALUATION_TOKEN
@@ -1666,6 +1682,46 @@ variables:
     optional: true
     secret: true
     description: "LiveKit signing secret, at least 32 characters; never sent to clients."
+
+  # --- calls media server (integrations/calls/config.go) ---
+  #
+  # The media server rooms of the generic calls capability are placed on. EIGHT
+  # values read together: all of them, or none (a cluster without calls). A
+  # partial or unusable set refuses boot. The two secrets are in `secrets:`
+  # above. A node carrying them records the server as
+  # v1:calls:mediaServer:bootstrap and seals both key pairs into global secrets
+  # at boot; media never passes through MemQL.
+
+  - name: MEMQL_CALLS_MEDIA_PROVIDER
+    component: calls
+    scope: node
+    optional: true
+    description: "What runs the calls media server: docker-local (a container beside the local cluster) or hetzner. Recorded on the media server row and never branched on. One of the eight MEMQL_CALLS_MEDIA_* values, set all or none."
+  - name: MEMQL_CALLS_MEDIA_API_URL
+    component: calls
+    scope: node
+    optional: true
+    description: "The calls media server's control API, http, https, ws or wss, which the engine calls to create and end rooms and to act on participants. One of the eight MEMQL_CALLS_MEDIA_* values, set all or none."
+  - name: MEMQL_CALLS_MEDIA_PUBLIC_URL
+    component: calls
+    scope: node
+    optional: true
+    description: "The wss or https address browsers connect to the calls media server at. One of the eight MEMQL_CALLS_MEDIA_* values, set all or none."
+  - name: MEMQL_CALLS_MEDIA_SEATS
+    component: calls
+    scope: node
+    optional: true
+    description: "How many seats the calls media server carries, a positive whole number, for room placement. One of the eight MEMQL_CALLS_MEDIA_* values, set all or none."
+  - name: MEMQL_CALLS_MEDIA_API_KEY
+    component: calls
+    scope: node
+    optional: true
+    description: "The API key of the calls media server's key pair that rooms and passes are signed with: the passes' issuer, not secret. One of the eight MEMQL_CALLS_MEDIA_* values, set all or none."
+  - name: MEMQL_CALLS_MEDIA_WEBHOOK_KEY
+    component: calls
+    scope: node
+    optional: true
+    description: "The API key of the key pair the calls media server signs its webhooks with: the webhook tokens' issuer, not secret. One of the eight MEMQL_CALLS_MEDIA_* values, set all or none."
 
   # --- streaming transcription (epic memql#4988) ---
   #

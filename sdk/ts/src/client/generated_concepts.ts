@@ -1140,6 +1140,7 @@ export const BoundConcepts = {
   updateSenderIdentity: "v1:campaigns:senderIdentity",
   updateSiteAccount: "v1:platform:site",
   updateSiteBundle: "v1:platform:site",
+  updateSiteCalls: "v1:platform:site",
   updateSitePreviewBinding: "v1:platform:site",
   updateSiteResolutionTail: "v1:platform:site",
   updateSiteSettings: "v1:platform:site",

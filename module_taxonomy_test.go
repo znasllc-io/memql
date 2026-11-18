@@ -59,6 +59,10 @@ var pluginKinds = map[string]moduleKind{
 	"releaseDiscovery": kindIntegration, // another installation's authenticated gRPC release catalog
 	"shopify":          kindIntegration, // Storefront + Admin APIs
 	"storage":          kindIntegration, // Azure Blob
+	// The generic calls capability (dsl/calls): it drives a media server's control
+	// API (LiveKit's room service) to create and end rooms and act on participants,
+	// somebody else's system, which is the whole test. Media never passes through it.
+	"calls": kindIntegration,
 
 	// --- COMPONENTS: engine internals an operator cannot switch off. ---
 	// Turning any of these off does not remove a feature, it breaks the

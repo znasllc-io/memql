@@ -30,7 +30,7 @@ func organizationCapabilityTarget(fn *Function) (concept, argument string) {
 		// bound mutation may choose other names and keeps the public DSL's
 		// original capability semantics; its writes still meet row guards.
 		switch fn.Name {
-		case "updateSiteStatus", "updateSiteStoreBinding", "setSiteCandidate", "clearSiteCandidate", "promoteSiteCandidate", "updateSitePreviewBinding", "deleteSite":
+		case "updateSiteStatus", "updateSiteStoreBinding", "setSiteCandidate", "clearSiteCandidate", "promoteSiteCandidate", "updateSitePreviewBinding", "deleteSite", "updateSiteCalls":
 			if fn.BoundConcept == "v1:platform:site" {
 				return fn.BoundConcept, "siteId"
 			}
@@ -62,6 +62,16 @@ func organizationCapabilityTarget(fn *Function) (concept, argument string) {
 		// mutation beneath them is @serverOnly
 		// (TestEveryClientCallableAccessCodeActIsAGatedBuiltin).
 		case "siteAccessCodeCreate", "siteAccessGuestPassCreate", "siteAccessGates", "siteAccessCodesForSite":
+			return "v1:platform:site", "siteId"
+		// The calls capability (the generic calls namespace, dsl/calls). Minting a
+		// test key and switching a deployable's calls are asked about the SITE they
+		// name, so the calls part held in one organization acts on no other's
+		// deployable. callsPolicySet and callsMediaServers are NOT here, and that is
+		// the decision rather than a gap: a policy is keyed by a deployable's NAME and
+		// a media server is the cluster's, rows no organization owns, so the global
+		// capability is the whole of their gate
+		// (TestCallsActsNameTheirOrganizationTarget).
+		case "callsTestKeyCreate", "callsSiteEnable":
 			return "v1:platform:site", "siteId"
 		// A storefront's sales figures (the sales part): asked about the SITE the
 		// store statistics are read for.

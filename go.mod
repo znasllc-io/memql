@@ -34,6 +34,7 @@ require (
 	filippo.io/age v1.3.2 // indirect
 	filippo.io/hpke v0.4.0 // indirect
 	github.com/oschwald/maxminddb-golang/v2 v2.1.1 // indirect
+	github.com/znasllc-io/memql/component/calls v0.0.0 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 )
 
@@ -276,6 +277,8 @@ replace github.com/znasllc-io/memql/component/fileprocessor => ./component/filep
 replace github.com/znasllc-io/memql/component/healing => ./component/healing
 
 replace github.com/znasllc-io/memql/component/bus => ./component/bus
+
+replace github.com/znasllc-io/memql/component/calls => ./component/calls
 
 replace github.com/znasllc-io/memql/component/compose => ./component/compose
 

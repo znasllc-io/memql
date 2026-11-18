@@ -284,6 +284,12 @@ var appPartGrants = map[string][]Role{
 	// visitor into part of a site the public cannot see, and ends them, and a
 	// person may be trusted to deploy without being trusted to do that.
 	"app:deployables/access": {RoleOwner, RoleDeveloper},
+	// Turning a deployable's calls capability on and minting its calls keys,
+	// setting its calls limits and reading the media servers (the generic calls
+	// namespace, dsl/calls). Owner and developer, a part of its own for
+	// `access`'s reason: a calls deployable admits strangers to rooms on the
+	// cluster's media capacity, a different consequence from publishing a build.
+	"app:deployables/calls": {RoleOwner, RoleDeveloper},
 	// A deployable's Health figures on its Statistics page (owner's direction,
 	// 2026-11-10): for the people who run the site, not for a client reading
 	// their storefront's visitors. component/sitetraffic blanks the figures for
