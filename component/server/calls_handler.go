@@ -62,6 +62,13 @@ import (
 // Leaving a call does not end the session: a key holder starts the next call on it, and a
 // guest who hung up comes back on the same seat.
 //
+// A HOST'S PAGE POLLS GET /session, about every three seconds, to see who is knocking. To a
+// host seat in an open call the session answers the call's roster as well (integrations/calls
+// host.go): the seats in the call, each with its media identity so a page can match the media
+// server's participants to seats, and the seats waiting to come in, in line order. Its seat
+// ids are the ones POST /host takes; nothing else tells a page whom a waiter is, since a
+// waiter is not in the media room. Every other session's answer carries no roster.
+//
 // # Every answer in one place
 //
 // The service answers with an error class (component/calls ErrNoSession ... ErrConflict)
@@ -123,6 +130,9 @@ type CallsService interface {
 	SiteAsOwner(ctx context.Context, siteID, owner string) (*CallsSite, error)
 	Unlock(ctx context.Context, site calls.SiteRef, key string) (calls.Session, error)
 	Session(ctx context.Context, site calls.SiteRef, token string) (calls.Session, error)
+	// Roster is the call a session's host seat is in, as the host controls name it, or nil
+	// for a session that is not a host seat in an open call. A read that writes nothing.
+	Roster(ctx context.Context, sess calls.Session) (*calls.Roster, error)
 	Start(ctx context.Context, sess calls.Session, body calls.StartBody) (calls.StartResult, error)
 	Schedule(ctx context.Context, sess calls.Session, req calls.ScheduleRequest) (calls.ScheduledCall, error)
 	Reschedule(ctx context.Context, sess calls.Session, callID string, req calls.ScheduleRequest) (calls.ScheduledCall, error)
@@ -451,9 +461,17 @@ func (h *callsHandler) serveUnlock(w http.ResponseWriter, r *http.Request, c cal
 		return
 	}
 	setCallsCookie(w, sess.Token)
-	h.write(w, http.StatusOK, h.sessionReply(sess))
+	h.write(w, http.StatusOK, h.sessionReply(sess, nil))
 }
 
+// serveSession says what the cookie holds, and to a host seat in an open call, who is in
+// the call and who is knocking (the roster). A HOST'S PAGE POLLS THIS, about every three
+// seconds, the queue's own pace, to see who waits to be let in: nothing else tells it, since
+// a waiter is not in the media room.
+//
+// THE SERVICE DECIDES WHO IS A HOST, from the seat, so the roster is asked of every seated
+// session: a session's kind does not say, because a guest's session can hold a host seat by
+// the host link. A session seated nowhere has no call to list, and costs no roster read.
 func (h *callsHandler) serveSession(w http.ResponseWriter, r *http.Request, c callsCall) {
 	if !h.requireSession(w, c) || !h.resolveSite(w, r, &c) {
 		return
@@ -463,7 +481,14 @@ func (h *callsHandler) serveSession(w http.ResponseWriter, r *http.Request, c ca
 		h.refuse(w, c, err, calls.JoinResult{})
 		return
 	}
-	h.write(w, http.StatusOK, h.sessionReply(sess))
+	var roster *calls.Roster
+	if strings.TrimSpace(sess.SeatID) != "" {
+		if roster, err = h.svc.Roster(r.Context(), c.session()); err != nil {
+			h.refuse(w, c, err, calls.JoinResult{})
+			return
+		}
+	}
+	h.write(w, http.StatusOK, h.sessionReply(sess, roster))
 }
 
 // callsConfirmBody is the three confirmations every seat records.
@@ -807,9 +832,36 @@ type callsSessionReply struct {
 	RoomID      string `json:"roomId,omitempty"`
 	ExpiresAt   string `json:"expiresAt"`
 	ExpiresInMs int64  `json:"expiresInMs"`
+	// Roster is there for a host seat in an open call and absent for every other session.
+	Roster *callsRosterReply `json:"roster,omitempty"`
 }
 
-func (h *callsHandler) sessionReply(sess calls.Session) callsSessionReply {
+// callsRosterReply is a host's roster on the wire: the seat ids POST /host takes, bare, and
+// an in-call seat's media identity, so a page matches the media server's participants to
+// seats. NO SECRET IS IN IT: no token, no digest and no key id, whose presence would tell a
+// page which seats could take the call over. Two lists, each a list when empty.
+type callsRosterReply struct {
+	InCall  []callsRosterSeatReply   `json:"inCall"`
+	Waiting []callsRosterWaiterReply `json:"waiting"`
+}
+
+type callsRosterSeatReply struct {
+	Seat        string `json:"seat"`
+	DisplayName string `json:"displayName"`
+	Kind        string `json:"kind"`
+	Host        bool   `json:"host"`
+	Status      string `json:"status"`
+	Identity    string `json:"identity"`
+}
+
+type callsRosterWaiterReply struct {
+	Seat        string `json:"seat"`
+	DisplayName string `json:"displayName"`
+	Kind        string `json:"kind"`
+	Since       string `json:"since,omitempty"`
+}
+
+func (h *callsHandler) sessionReply(sess calls.Session, roster *calls.Roster) callsSessionReply {
 	return callsSessionReply{
 		Kind:        sess.Kind,
 		KeyID:       memql.BareShortId(sess.KeyID),
@@ -817,7 +869,31 @@ func (h *callsHandler) sessionReply(sess calls.Session) callsSessionReply {
 		RoomID:      memql.BareShortId(sess.RoomID),
 		ExpiresAt:   sess.ExpiresAt.UTC().Format(time.RFC3339Nano),
 		ExpiresInMs: callsMs(sess.ExpiresAt.Sub(h.now())),
+		Roster:      rosterReply(roster),
 	}
+}
+
+func rosterReply(roster *calls.Roster) *callsRosterReply {
+	if roster == nil {
+		return nil
+	}
+	out := &callsRosterReply{InCall: []callsRosterSeatReply{}, Waiting: []callsRosterWaiterReply{}}
+	for _, seat := range roster.InCall {
+		out.InCall = append(out.InCall, callsRosterSeatReply{
+			Seat: memql.BareShortId(seat.Seat), DisplayName: seat.DisplayName, Kind: seat.Kind,
+			Host: seat.Host, Status: seat.Status, Identity: seat.Identity,
+		})
+	}
+	for _, waiter := range roster.Waiting {
+		since := ""
+		if !waiter.Since.IsZero() {
+			since = waiter.Since.UTC().Format(time.RFC3339Nano)
+		}
+		out.Waiting = append(out.Waiting, callsRosterWaiterReply{
+			Seat: memql.BareShortId(waiter.Seat), DisplayName: waiter.DisplayName, Kind: waiter.Kind, Since: since,
+		})
+	}
+	return out
 }
 
 // callsJoinReply is a JoinResult on the wire, its durations in milliseconds. An admission

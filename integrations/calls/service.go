@@ -955,6 +955,11 @@ func (s *Service) joinGated(ctx context.Context, site callrules.SiteRef, room ro
 		if !joinedAt.IsZero() {
 			fields["joinedAt"] = joinedAt
 		}
+		// A seat that left and comes back to wait begins waiting again now: a host's roster
+		// says since when (host.go), and the first wait's time would be a stint ago.
+		if taken.Status == seatWaiting {
+			fields["waitingSince"] = now
+		}
 		if _, err := s.recordJoin(fresh, owner, *seat, ask, fields, now); err != nil {
 			return callrules.JoinResult{}, out, seatRow{}, false, err
 		}

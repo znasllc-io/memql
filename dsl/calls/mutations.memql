@@ -175,9 +175,10 @@ mutation seat createCallsSeat {
     termsVersion  string
     joinedAt  datetime
     keyId  string
+    waitingSince  datetime
   }
   insert {
-    accept { siteId, roomId, identity, kind, displayName, host, status, confirmAdult, confirmNoMinors, termsVersion, joinedAt, keyId }
+    accept { siteId, roomId, identity, kind, displayName, host, status, confirmAdult, confirmNoMinors, termsVersion, joinedAt, keyId, waitingSince }
     stamp {
       id: args.seatId
       ownerUserId: actor.userId
@@ -202,9 +203,10 @@ mutation seat updateCallsSeat {
     leftAt  datetime
     lastSeenAt  datetime
     letInAt  datetime
+    waitingSince  datetime
   }
   update {
-    accept { displayName, host, status, confirmAdult, confirmNoMinors, termsVersion, joinedAt, leftAt, lastSeenAt, letInAt }
+    accept { displayName, host, status, confirmAdult, confirmNoMinors, termsVersion, joinedAt, leftAt, lastSeenAt, letInAt, waitingSince }
     stamp {
       id: args.seatId
       createdAt: args.versionTime ?? now

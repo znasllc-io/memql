@@ -907,7 +907,8 @@
         "roomId",
         "siteId",
         "status",
-        "termsVersion"
+        "termsVersion",
+        "waitingSince"
       ],
       "required": [
         "ownerUserId",

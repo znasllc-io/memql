@@ -139,6 +139,10 @@ type callsFakeService struct {
 	siteErr        error
 	// sessions are the tokens the service honours, and what each one is.
 	sessions map[string]calls.Session
+	// rosters are what Roster answers, by session token: the call a host seat is in. A
+	// token with none answers no roster, as the service answers a guest's seat, a host seat
+	// outside the call and an ended call.
+	rosters  map[string]*calls.Roster
 	refusals map[string]callsFakeRefusal
 	got      []callsFakeCall
 }
@@ -207,7 +211,12 @@ func (f *callsFakeService) Unlock(_ context.Context, site calls.SiteRef, key str
 	}
 	sess := calls.Session{Token: f.secrets.hostSession, Kind: calls.SessionHost, KeyID: callsTestKeyID,
 		ExpiresAt: callsT0.Add(calls.SessionLifetime), Site: site}
-	f.sessions[sess.Token] = sess
+	// One row per key: an unlock with the rig's key answers its session as a new one, and
+	// leaves the row the rig seated alone, so the order tests run their routes in is not a
+	// test of its own.
+	if _, held := f.sessions[sess.Token]; !held {
+		f.sessions[sess.Token] = sess
+	}
 	return sess, nil
 }
 
@@ -217,6 +226,17 @@ func (f *callsFakeService) Session(_ context.Context, site calls.SiteRef, token 
 		return calls.Session{}, r.err
 	}
 	return f.known(calls.Session{Token: token, Site: site})
+}
+
+func (f *callsFakeService) Roster(_ context.Context, sess calls.Session) (*calls.Roster, error) {
+	f.record(callsFakeCall{op: "Roster", session: &sess})
+	if r, ok := f.refusal("Roster"); ok {
+		return nil, r.err
+	}
+	if _, err := f.known(sess); err != nil {
+		return nil, err
+	}
+	return f.rosters[sess.Token], nil
 }
 
 func (f *callsFakeService) Start(_ context.Context, sess calls.Session, body calls.StartBody) (calls.StartResult, error) {
@@ -380,6 +400,7 @@ func newCallsRig(t *testing.T) *callsRig {
 		site:     &CallsSite{ID: callsTestSite, OwnerUserID: callsTestOwner, DeployableName: callsTestDeployable, Calls: true},
 		admits:   map[string]bool{callsTestOwner: true, callsTestMember: true},
 		sessions: map[string]calls.Session{},
+		rosters:  map[string]*calls.Roster{},
 		refusals: map[string]callsFakeRefusal{},
 	}
 	// THE SITE'S KEY HOLDER IS ALREADY IN, so every route that takes a session has one to
@@ -944,11 +965,13 @@ func TestACallsBodyIsRefusedBeforeAnythingIsRead(t *testing.T) {
 
 // A CREDENTIAL OF THE RIGHT SHAPE PAYS FOR THE SITE, and then the service does the rest:
 // one read of the site, then the one call the route makes. A session is not resolved first,
-// because the service reads the row its token names on every call it is handed.
+// because the service reads the row its token names on every call it is handed. A status
+// check of a session seated in a call asks for the call's roster as well, which the service
+// answers only to a host seat in it.
 func TestWhatACallsRequestCosts(t *testing.T) {
 	rig := newCallsRig(t)
 	want := map[string][]string{
-		"unlock": {"SiteAsOwner", "Unlock"}, "session": {"SiteAsOwner", "Session"},
+		"unlock": {"SiteAsOwner", "Unlock"}, "session": {"SiteAsOwner", "Session", "Roster"},
 		"start": {"SiteAsOwner", "Start"}, "schedule": {"SiteAsOwner", "Schedule"},
 		"reschedule": {"SiteAsOwner", "Reschedule"}, "cancel": {"SiteAsOwner", "Cancel"},
 		"join": {"SiteAsOwner", "Join"}, "queue": {"SiteAsOwner", "Queue"},
@@ -1186,6 +1209,146 @@ func TestJoinSetsTheSeatCookieAndUnlockSetsTheHostCookie(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// the roster a host polls
+// ---------------------------------------------------------------------------
+
+// callsRosterReply is a session reply's roster as a client reads it.
+type callsRosterReplyBody struct {
+	Roster *struct {
+		InCall []struct {
+			Seat, DisplayName, Kind, Status, Identity string
+			Host                                      bool
+		} `json:"inCall"`
+		Waiting []struct {
+			Seat, DisplayName, Kind, Since string
+		} `json:"waiting"`
+	} `json:"roster"`
+}
+
+func callsRosterFrom(t *testing.T, rec *httptest.ResponseRecorder) callsRosterReplyBody {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var body callsRosterReplyBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("not an object: %v: %s", err, rec.Body.String())
+	}
+	return body
+}
+
+// THE HOST'S CLIENT POLLS ITS SESSION TO SEE WHO IS KNOCKING, and the roster is what names
+// the seats its controls act on: the ids it lists are the ids POST /host takes.
+func TestAHostsSessionCarriesTheCallsRoster(t *testing.T) {
+	hostSeat := calls.RosterSeat{Seat: callsTestSeatID, DisplayName: "Ada", Kind: "person", Host: true, Status: "in_call", Identity: "identity1"}
+	guestSeat := calls.RosterSeat{Seat: "seat2", DisplayName: "Grace", Kind: "person", Status: "admitted", Identity: "identity2"}
+	waiter := calls.RosterWaiter{Seat: "seat3", DisplayName: "Lin", Kind: "person", Since: callsT0.Add(-30 * time.Second)}
+
+	t.Run("a host's session reply lists a waiting seat behind the lock, and POST /host admit with that seat id lets it in", func(t *testing.T) {
+		rig := newCallsRig(t)
+		rig.svc.rosters[rig.secrets.hostSession] = &calls.Roster{InCall: []calls.RosterSeat{hostSeat}, Waiting: []calls.RosterWaiter{waiter}}
+		roster := callsRosterFrom(t, rig.get("/calls/session", rig.secrets.hostSession)).Roster
+		if roster == nil || len(roster.Waiting) != 1 || roster.Waiting[0].Seat != "seat3" {
+			t.Fatalf("roster = %+v, want the waiting seat", roster)
+		}
+		rec := rig.post("/calls/host", callsJSON(t, map[string]string{"action": calls.HostAdmit, "seat": roster.Waiting[0].Seat}), rig.secrets.hostSession)
+		assertCallsReply(t, rec, http.StatusNoContent, "")
+		if got, want := rig.svc.last().host, (calls.HostActionRequest{Action: calls.HostAdmit, Seat: "seat3"}); got != want {
+			t.Fatalf("host control = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("it lists an in-call seat that the host can then mute and remove by that id", func(t *testing.T) {
+		rig := newCallsRig(t)
+		rig.svc.rosters[rig.secrets.hostSession] = &calls.Roster{InCall: []calls.RosterSeat{hostSeat, guestSeat}}
+		roster := callsRosterFrom(t, rig.get("/calls/session", rig.secrets.hostSession)).Roster
+		if roster == nil || len(roster.InCall) != 2 || roster.InCall[1].Seat != "seat2" || roster.InCall[1].Identity != "identity2" {
+			t.Fatalf("roster = %+v, want the guest in the call with its media identity", roster)
+		}
+		for _, action := range []string{calls.HostMute, calls.HostRemove} {
+			rec := rig.post("/calls/host", callsJSON(t, map[string]string{"action": action, "seat": roster.InCall[1].Seat}), rig.secrets.hostSession)
+			assertCallsReply(t, rec, http.StatusNoContent, "")
+			if got, want := rig.svc.last().host, (calls.HostActionRequest{Action: action, Seat: "seat2"}); got != want {
+				t.Fatalf("host control = %+v, want %+v", got, want)
+			}
+		}
+	})
+
+	// THE SERVICE DECIDES WHO IS A HOST, from the seat and never the session's kind: a
+	// guest's session can hold a host seat by the host link, and a key's can hold a guest's.
+	// So the handler asks, and a roster it is not given is a field it does not write.
+	t.Run("a guest's session reply has no roster", func(t *testing.T) {
+		rig := newCallsRig(t)
+		rig.svc.rosters[rig.secrets.hostSession] = &calls.Roster{InCall: []calls.RosterSeat{hostSeat, guestSeat}}
+		rig.svc.sessions[rig.secrets.guestSession] = calls.Session{Kind: calls.SessionGuest, SeatID: "seat2", RoomID: callsTestRoomID,
+			ExpiresAt: callsT0.Add(calls.SessionLifetime), Site: calls.SiteRef{SiteID: callsTestSite}}
+		rec := rig.get("/calls/session", rig.secrets.guestSession)
+		assertCallsReply(t, rec, http.StatusOK,
+			`{"kind":"guest","seatId":"seat2","roomId":"room1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000}`)
+	})
+
+	t.Run("an ended call's host session has no roster", func(t *testing.T) {
+		rig := newCallsRig(t)
+		rec := rig.get("/calls/session", rig.secrets.hostSession)
+		assertCallsReply(t, rec, http.StatusOK,
+			`{"kind":"host","keyId":"key1","seatId":"seat1","roomId":"room1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000}`)
+		if got := rig.svc.ops(); !reflect.DeepEqual(got, []string{"SiteAsOwner", "Session", "Roster"}) {
+			t.Fatalf("calls = %v: the service was not asked, so the handler decided who is a host", got)
+		}
+	})
+
+	// The Go names in lowerCamel, ids bare as every wire has them, a time in RFC 3339, and
+	// an empty list a list. Nothing in it is a secret: no token, no digest, no key id.
+	t.Run("the roster on the wire", func(t *testing.T) {
+		rig := newCallsRig(t)
+		canonical := guestSeat
+		canonical.Seat = "v1:calls:seat:seat2"
+		rig.svc.rosters[rig.secrets.hostSession] = &calls.Roster{InCall: []calls.RosterSeat{hostSeat, canonical}}
+		rec := rig.get("/calls/session", rig.secrets.hostSession)
+		assertCallsReply(t, rec, http.StatusOK,
+			`{"kind":"host","keyId":"key1","seatId":"seat1","roomId":"room1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000,`+
+				`"roster":{"inCall":[`+
+				`{"seat":"seat1","displayName":"Ada","kind":"person","host":true,"status":"in_call","identity":"identity1"},`+
+				`{"seat":"seat2","displayName":"Grace","kind":"person","host":false,"status":"admitted","identity":"identity2"}],`+
+				`"waiting":[]}}`)
+
+		rig.svc.rosters[rig.secrets.hostSession] = &calls.Roster{InCall: []calls.RosterSeat{hostSeat}, Waiting: []calls.RosterWaiter{waiter}}
+		rec = rig.get("/calls/session", rig.secrets.hostSession)
+		if !strings.Contains(rec.Body.String(), `"waiting":[{"seat":"seat3","displayName":"Lin","kind":"person","since":"2026-11-18T11:59:30Z"}]`) {
+			t.Fatalf("body = %s", rec.Body.String())
+		}
+	})
+
+	// A SESSION SEATED NOWHERE HAS NO CALL TO LIST, which the session itself says, so its
+	// status check costs no roster read.
+	t.Run("a session seated nowhere is not asked for a roster", func(t *testing.T) {
+		rig := newCallsRig(t)
+		unseated := rig.secrets.linkSession
+		rig.svc.sessions[unseated] = calls.Session{Kind: calls.SessionHost, KeyID: callsTestKeyID,
+			ExpiresAt: callsT0.Add(calls.SessionLifetime), Site: calls.SiteRef{SiteID: callsTestSite}}
+		var rec *httptest.ResponseRecorder
+		cost := rig.costOf(func() { rec = rig.get("/calls/session", unseated) })
+		assertCallsReply(t, rec, http.StatusOK, `{"kind":"host","keyId":"key1","expiresAt":"2026-11-19T12:00:00Z","expiresInMs":86400000}`)
+		if want := []string{"SiteAsOwner", "Session"}; !reflect.DeepEqual(cost, want) {
+			t.Fatalf("cost = %v, want %v", cost, want)
+		}
+	})
+
+	t.Run("a roster that could not be read is answered as any failure", func(t *testing.T) {
+		rig := newCallsRig(t)
+		rig.svc.refusals["Roster"] = callsFakeRefusal{err: calls.ErrNoSession}
+		rec := rig.get("/calls/session", rig.secrets.hostSession)
+		assertCallsReply(t, rec, http.StatusUnauthorized, `{"error":"no_session"}`)
+		assertCallsCookieCleared(t, rec)
+
+		rig.svc.refusals["Roster"] = callsFakeRefusal{err: errors.New("calls: read the room's seats: the engine did not complete the statement")}
+		rec = rig.get("/calls/session", rig.secrets.hostSession)
+		assertCallsReply(t, rec, http.StatusBadGateway, `{"error":"failed"}`)
+		assertNoCallsCookie(t, rec)
+	})
+}
+
+// ---------------------------------------------------------------------------
 // what the service is handed
 // ---------------------------------------------------------------------------
 
@@ -1216,8 +1379,9 @@ func TestTheCallsServiceIsHandedTheRowsSite(t *testing.T) {
 			t.Errorf("%s was handed the session %+v, want the token the cookie carried", c.op, c.session)
 		}
 	}
-	if served != 10 {
-		t.Fatalf("the service served %d of the ten routes: %v", served, rig.svc.ops())
+	// Ten routes, and the roster the status check of a seated session asks for as well.
+	if served != 11 {
+		t.Fatalf("the service served %d calls for the ten routes and the roster: %v", served, rig.svc.ops())
 	}
 }
 

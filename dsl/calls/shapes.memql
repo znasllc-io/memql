@@ -80,6 +80,7 @@ shape seat callsSeatFull {
   keyId
   lastSeenAt
   letInAt
+  waitingSince
   accountId
 }
 

@@ -409,7 +409,10 @@ type seatRow struct {
 	ID, RoomID, Identity, Kind, DisplayName, Status, TermsVersion, KeyID string
 	Host, ConfirmAdult, ConfirmNoMinors                                  bool
 	JoinedAt, LeftAt, LastSeenAt, LetInAt                                time.Time
-	Version                                                              time.Time
+	// WaitingSince is when the seat last began waiting to come in (the concept's
+	// waitingSince). Read it only while the seat is waiting.
+	WaitingSince time.Time
+	Version      time.Time
 }
 
 // occupying reports whether the seat holds a media server's seat.
@@ -441,6 +444,7 @@ func seatFromRow(r map[string]any) seatRow {
 		LeftAt:          rowTime(r, "leftAt"),
 		LastSeenAt:      rowTime(r, "lastSeenAt"),
 		LetInAt:         rowTime(r, "letInAt"),
+		WaitingSince:    rowTime(r, "waitingSince"),
 		Version:         rowTime(r, "createdAt"),
 	}
 }
@@ -495,9 +499,13 @@ func (s *Store) createSeat(ctx context.Context, owner string, n newSeat, version
 		"termsVersion":    n.Confirm.Terms,
 		"versionTime":     versionStamp(versionTime),
 	}
-	// A seat that waits has not been taken yet.
+	// A seat that waits has not been taken yet, and begins waiting as it is written: every
+	// path that seats somebody waiting (a join, or the opening of a call) writes it here.
 	if !n.JoinedAt.IsZero() {
 		args["joinedAt"] = versionStamp(n.JoinedAt)
+	}
+	if n.Status == seatWaiting {
+		args["waitingSince"] = versionStamp(versionTime)
 	}
 	// Absent rather than empty: a link's session holds no key.
 	if n.KeyID != "" {

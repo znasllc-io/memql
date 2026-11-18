@@ -61,6 +61,24 @@ import (
 //     that left or was removed is ErrConflict (not_waiting).
 //   - end deletes the media room, then ends the call (endRows).
 //
+// # The roster
+//
+// A HOST SEES WHOM ITS CONTROLS NAME through the call's roster (Roster, calls.Roster): the
+// seats in the call in the order they were let in (joinedAt, which every admission writes),
+// each with its media identity, so a client matches the media server's participants to
+// seats; and the seats waiting to come in, in line order, each with when it began waiting
+// (waitingSince, written whenever a seat begins to wait). LINE ORDER is the order the call's
+// waiters would come in: first those holding a place in the media server's line, in that
+// line's order (calls.OrderQueue: class, then arrival), then those held behind the lock with
+// no place, by when they began waiting, since a lifted lock sends each of them to the back of
+// the line on its own next poll. The roster is the host's alone, by the rule for who is a
+// host above: anybody else, and an ended call, read none (nil, not an error). It is a read
+// that writes nothing, made fresh on every ask, since a host's page polls it to see who is
+// knocking. KNOWN LIMITATION: a waiter held behind the lock keeps no record of its polls, so
+// one who closed the page is listed until the call ends or a host removes them; and a
+// waiter whose place in line ran out is listed in its old place until its entry is marked
+// expired.
+//
 // # Ending a call
 //
 // A call ends three ways, each recorded on the room (endReason): a host ends it (ended);
@@ -230,6 +248,102 @@ func notHost() error {
 
 func callEnded() error {
 	return callrules.Refuse(callrules.ErrEnded, callrules.ReasonCallEnded, "the call has ended")
+}
+
+// ---------------------------------------------------------------------------
+// the roster
+// ---------------------------------------------------------------------------
+
+// Roster is the call a session's host seat is in, as the host controls name it (the file
+// note): nil for a session that is not a host seat in an open call, ErrNoSession for one
+// that opens nothing. A read that writes nothing, answered by the database.
+func (s *Service) Roster(ctx context.Context, sess callrules.Session) (*callrules.Roster, error) {
+	fresh := memql.ContextWithFreshRead(ctx)
+	h, err := s.hostOf(fresh, sess)
+	// NOT A HOST IN AN OPEN CALL IS NO ROSTER, NOT A REFUSAL: a guest, a seat outside the
+	// call, a session seated nowhere and an ended call all ask their session about
+	// themselves, and only a host is told about the others.
+	if errors.Is(err, callrules.ErrForbidden) || errors.Is(err, callrules.ErrEnded) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	owner := h.site.OwnerUserID
+	seats, err := s.store.seatsForRoom(fresh, owner, h.room.ID)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := s.store.queueEntriesForRoom(fresh, owner, h.room.ID)
+	if err != nil {
+		return nil, err
+	}
+	return rosterOf(seats, entries), nil
+}
+
+// rosterOf orders one call's seats into its roster (the file note's order). Ties fall to
+// the seat's id, so two reads of the same rows list them the same way.
+func rosterOf(seats []seatRow, entries []queueEntryRow) *callrules.Roster {
+	roster := &callrules.Roster{InCall: []callrules.RosterSeat{}, Waiting: []callrules.RosterWaiter{}}
+	var in, waiting []seatRow
+	for _, seat := range seats {
+		switch {
+		case seat.occupying():
+			in = append(in, seat)
+		case seat.Status == seatWaiting:
+			waiting = append(waiting, seat)
+		}
+	}
+	slices.SortStableFunc(in, func(a, b seatRow) int {
+		if c := a.JoinedAt.Compare(b.JoinedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	for _, seat := range in {
+		roster.InCall = append(roster.InCall, callrules.RosterSeat{
+			Seat: seat.ID, DisplayName: seat.DisplayName, Kind: seat.Kind, Status: seat.Status, Identity: seat.Identity, Host: seat.Host,
+		})
+	}
+
+	// A waiter's place in line is its waiting entry, the newest when somehow there are two.
+	places := map[string]callrules.QueueEntry{}
+	for _, entry := range entries {
+		if !entry.waiting() || entry.SeatID == "" {
+			continue
+		}
+		if prior, held := places[entry.SeatID]; !held || entry.EnqueuedAt.After(prior.EnqueuedAt) {
+			places[entry.SeatID] = entry.rule()
+		}
+	}
+	var line []callrules.QueueEntry
+	seatOf := map[string]seatRow{}
+	var behind []seatRow
+	for _, seat := range waiting {
+		if place, inLine := places[seat.ID]; inLine {
+			line = append(line, place)
+			seatOf[place.ID] = seat
+			continue
+		}
+		behind = append(behind, seat)
+	}
+	slices.SortStableFunc(behind, func(a, b seatRow) int {
+		if c := a.WaitingSince.Compare(b.WaitingSince); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	ordered := make([]seatRow, 0, len(waiting))
+	for _, place := range callrules.OrderQueue(line) {
+		ordered = append(ordered, seatOf[place.ID])
+	}
+	ordered = append(ordered, behind...)
+	for _, seat := range ordered {
+		roster.Waiting = append(roster.Waiting, callrules.RosterWaiter{
+			Seat: seat.ID, DisplayName: seat.DisplayName, Kind: seat.Kind, Since: seat.WaitingSince,
+		})
+	}
+	return roster
 }
 
 // ---------------------------------------------------------------------------

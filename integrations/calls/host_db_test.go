@@ -3,11 +3,13 @@ package calls
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uptrace/bun"
 
 	callrules "github.com/znasllc-io/memql/component/calls"
 	"github.com/znasllc-io/memql/core/id"
@@ -886,4 +888,197 @@ func TestTheFirstPassIntoAnEmptyRoomOpensItsMediaRoomAgain(t *testing.T) {
 	cw.media.failCreate = nil
 	cw.media.mu.Unlock()
 	require.Equal(t, "admitted", cw.row(seatConcept, bHost.SeatID)["status"])
+}
+
+// ---------------------------------------------------------------------------
+// the roster
+// ---------------------------------------------------------------------------
+
+// callsVersions is every stored version of every calls row of this test's site: what a
+// read that writes nothing leaves exactly as it was.
+func (cw *callWorld) callsVersions() int {
+	cw.t.Helper()
+	concepts := []string{sessionConcept, roomConcept, seatConcept, queueEntryConcept, scheduledCallConcept}
+	return stateWhere(cw.t, cw.db, `concept IN (?) AND payload->>'siteId' = ?`, bun.In(concepts), siteConcept+":"+cw.site).Versions
+}
+
+// roster is the roster a session reads, which must not fail.
+func (cw *callWorld) roster(sess callrules.Session) *callrules.Roster {
+	cw.t.Helper()
+	roster, err := cw.svc.Roster(context.Background(), sess)
+	require.NoError(cw.t, err)
+	return roster
+}
+
+// rosterSeats is the ids a roster lists in the call, in order.
+func rosterSeats(roster *callrules.Roster) []string {
+	out := []string{}
+	for _, seat := range roster.InCall {
+		out = append(out, seat.Seat)
+	}
+	return out
+}
+
+// TestTheRosterNamesTheSeatsAHostActsOn: a host seat in an open call reads the call's
+// roster -- the seats in it in the order they were let in, each with the media identity a
+// client matches the media server's participants by, and the seats waiting to come in, in
+// line order, each with when it began waiting -- and the ids it names are the ids the host
+// controls take. Reading it writes nothing. A guest's seat, a host seat that has left, a
+// session seated nowhere and an ended call read no roster at all.
+func TestTheRosterNamesTheSeatsAHostActsOn(t *testing.T) {
+	t.Run("a host's session lists a waiting seat behind the lock, and admit with that seat id lets it in", func(t *testing.T) {
+		cw := newCallWorld(t, "rosteradmit", 50)
+		if cw == nil {
+			return
+		}
+		ctx := context.Background()
+		hostSess, started := cw.started("Host")
+		require.NoError(t, cw.act(hostSess, callrules.HostLock, ""))
+		cw.clock.Advance(time.Second)
+		knocked := cw.clock.Now()
+		res, waiter, err := cw.join(started.Call.GuestToken, "Knocking")
+		require.NoError(t, err)
+		require.Equal(t, callrules.OutcomeWait, res.Outcome)
+		cw.clock.Advance(30 * time.Second)
+
+		before := cw.callsVersions()
+		roster := cw.roster(hostSess)
+		require.Equal(t, before, cw.callsVersions(), "reading the roster wrote a row")
+		require.NotNil(t, roster, "a host seat in an open call read no roster")
+		require.Equal(t, []callrules.RosterSeat{{
+			Seat: hostSess.SeatID, DisplayName: "Host", Kind: "person", Host: true, Status: "admitted", Identity: started.Join.Identity,
+		}}, roster.InCall)
+		require.Equal(t, []callrules.RosterWaiter{{Seat: waiter.SeatID, DisplayName: "Knocking", Kind: "person", Since: knocked}}, roster.Waiting,
+			"the waiter is not listed, or not as waiting since it knocked")
+
+		require.NoError(t, cw.act(hostSess, callrules.HostAdmit, roster.Waiting[0].Seat))
+		in, err := cw.svc.Queue(ctx, waiter)
+		require.NoError(t, err)
+		require.Equal(t, callrules.OutcomeAdmit, in.Outcome, "the seat the roster named was not let in")
+
+		roster = cw.roster(hostSess)
+		require.Empty(t, roster.Waiting)
+		require.Len(t, roster.InCall, 2)
+		require.Equal(t, waiter.SeatID, roster.InCall[1].Seat, "the seat let in last is not listed last")
+		require.Equal(t, in.Identity, roster.InCall[1].Identity)
+		require.False(t, roster.InCall[1].Host)
+	})
+
+	t.Run("it lists an in-call seat that the host can then mute and remove by that id", func(t *testing.T) {
+		cw := newCallWorld(t, "rostermute", 50)
+		if cw == nil {
+			return
+		}
+		hostSess, started := cw.started("Host")
+		// Let in after the host, so admission order is the clock's and not the seat ids'.
+		cw.clock.Advance(time.Second)
+		in, guest, err := cw.join(started.Call.GuestToken, "Guest")
+		require.NoError(t, err)
+		require.Equal(t, callrules.OutcomeAdmit, in.Outcome)
+
+		roster := cw.roster(hostSess)
+		require.Len(t, roster.InCall, 2)
+		listed := roster.InCall[1]
+		require.Equal(t, callrules.RosterSeat{Seat: guest.SeatID, DisplayName: "Guest", Kind: "person", Status: "admitted", Identity: in.Identity}, listed)
+
+		roomID := started.Call.ID
+		cw.media.setPresent(roomID, person(listed.Identity, MediaTrack{SID: "TR_mic", Source: "microphone"}))
+		require.NoError(t, cw.act(hostSess, callrules.HostMute, listed.Seat))
+		require.Equal(t, []fakeMediaMute{{Server: BootstrapMediaServerID, Room: roomID, Identity: in.Identity, Track: "TR_mic"}}, cw.media.mutes(),
+			"the mute did not reach the seat the roster named")
+		require.NoError(t, cw.act(hostSess, callrules.HostRemove, listed.Seat))
+		require.Equal(t, "removed", cw.row(seatConcept, guest.SeatID)["status"])
+		require.Equal(t, []string{hostSess.SeatID}, rosterSeats(cw.roster(hostSess)), "a removed seat is still listed in the call")
+	})
+
+	// THE SEAT DECIDES, NOT THE SESSION'S KIND: a roster is the call of a host seat in it.
+	t.Run("a guest's session, a session seated nowhere and a host who has left read no roster", func(t *testing.T) {
+		cw := newCallWorld(t, "rosterguest", 50)
+		if cw == nil {
+			return
+		}
+		ctx := context.Background()
+		hostSess, started := cw.started("Host")
+		_, guest, err := cw.join(started.Call.GuestToken, "Guest")
+		require.NoError(t, err)
+		require.Nil(t, cw.roster(guest), "a guest's seat read the roster")
+		require.Nil(t, cw.roster(cw.host()), "a session seated nowhere read a roster")
+
+		// The guest keeps the call open, so the host is outside a call that still runs.
+		require.NoError(t, cw.svc.Leave(ctx, hostSess))
+		require.Nil(t, cw.roster(hostSess), "a host who left read the roster")
+
+		_, err = cw.svc.Roster(ctx, callrules.Session{Token: strings.Repeat("a", 32), Site: cw.ref})
+		require.ErrorIs(t, err, callrules.ErrNoSession, "a session that opens nothing is not a session with no roster")
+	})
+
+	t.Run("an ended call's host session reads no roster", func(t *testing.T) {
+		cw := newCallWorld(t, "rosterended", 50)
+		if cw == nil {
+			return
+		}
+		hostSess, _ := cw.started("Host")
+		require.NotNil(t, cw.roster(hostSess))
+		require.NoError(t, cw.act(hostSess, callrules.HostEnd, ""))
+		require.Nil(t, cw.roster(hostSess), "an ended call's host read its roster")
+	})
+
+	// LINE ORDER: a seat with a place in the media server's line keeps it when the lock lifts,
+	// while one held behind the lock from the start has none and asks at the back. So the one
+	// in line comes first, although the other began waiting earlier.
+	t.Run("the waiting seats are listed in line order, a place in line before one behind the lock", func(t *testing.T) {
+		cw := newCallWorld(t, "rosterline", 50)
+		if cw == nil {
+			return
+		}
+		ctx := context.Background()
+		hostSess, started := cw.started("Host")
+		require.NoError(t, cw.act(hostSess, callrules.HostLock, ""))
+		cw.clock.Advance(time.Second)
+		lockedAt := cw.clock.Now()
+		res, behind, err := cw.join(started.Call.GuestToken, "Behind the lock")
+		require.NoError(t, err)
+		require.Equal(t, callrules.OutcomeWait, res.Outcome)
+
+		cut := testMediaConfig()
+		cut.Seats = cw.admittedIn(started.Call.ID)
+		_, err = cw.in.Bootstrap(ctx, cut)
+		require.NoError(t, err)
+		require.NoError(t, cw.act(hostSess, callrules.HostUnlock, ""))
+		cw.clock.Advance(time.Second)
+		queuedAt := cw.clock.Now()
+		res, inLine, err := cw.join(started.Call.GuestToken, "In line")
+		require.NoError(t, err)
+		require.Equal(t, callrules.OutcomeQueue, res.Outcome)
+		require.NoError(t, cw.act(hostSess, callrules.HostLock, ""))
+
+		require.Equal(t, []callrules.RosterWaiter{
+			{Seat: inLine.SeatID, DisplayName: "In line", Kind: "person", Since: queuedAt},
+			{Seat: behind.SeatID, DisplayName: "Behind the lock", Kind: "person", Since: lockedAt},
+		}, cw.roster(hostSess).Waiting)
+	})
+
+	// A SEAT THAT LEFT AND COMES BACK TO WAIT is waiting since it came back, not since the
+	// first time it waited.
+	t.Run("a seat that comes back to wait is waiting since it came back", func(t *testing.T) {
+		cw := newCallWorld(t, "rosteragain", 50)
+		if cw == nil {
+			return
+		}
+		ctx := context.Background()
+		hostSess, started := cw.started("Host")
+		in, guest, err := cw.join(started.Call.GuestToken, "Guest")
+		require.NoError(t, err)
+		require.Equal(t, callrules.OutcomeAdmit, in.Outcome)
+		require.NoError(t, cw.svc.Leave(ctx, guest))
+		require.NoError(t, cw.act(hostSess, callrules.HostLock, ""))
+		cw.clock.Advance(time.Minute)
+		back := cw.clock.Now()
+		res, again, err := cw.rejoin(guest, started.Call.GuestToken)
+		require.NoError(t, err)
+		require.Equal(t, callrules.OutcomeWait, res.Outcome)
+		require.Equal(t, guest.SeatID, again.SeatID, "the rejoin took a second seat")
+
+		require.Equal(t, []callrules.RosterWaiter{{Seat: guest.SeatID, DisplayName: "Again", Kind: "person", Since: back}}, cw.roster(hostSess).Waiting)
+	})
 }
