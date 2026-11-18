@@ -191,6 +191,49 @@ describe("windows and desks (spec K bullets 2-3)", () => {
   });
 });
 
+describe("desk switch motion (owner, Nov 2026)", () => {
+  it("slides the windows with the desks: the desk left stays drawn and inert for one slide", () => {
+    document.documentElement.style.setProperty("--os-duration-med", "260ms");
+    try {
+      renderShell();
+      openFromLauncher("Files");
+      openFromLauncher("Fleet");
+      openFromLauncher("Deployables"); // desk 2
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      fireEvent.keyDown(window, { key: "ArrowLeft", ctrlKey: true, shiftKey: true });
+      const leaving = document.querySelector("[data-os-window='deployables']") as HTMLElement;
+      const arriving = document.querySelector("[data-os-window='files']") as HTMLElement;
+      expect(leaving.hasAttribute("hidden")).toBe(false);
+      expect(leaving.getAttribute("data-slide")).toBe("out");
+      expect(leaving.hasAttribute("inert")).toBe(true);
+      expect(arriving.getAttribute("data-slide")).toBe("in");
+      act(() => { vi.advanceTimersByTime(260); });
+      expect(leaving.hasAttribute("hidden")).toBe(true);
+      expect(leaving.hasAttribute("data-slide")).toBe(false);
+      expect(arriving.hasAttribute("data-slide")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      document.documentElement.style.removeProperty("--os-duration-med");
+    }
+  });
+
+  it("does not slide under reduced motion, where the duration token is 0ms", () => {
+    document.documentElement.style.setProperty("--os-duration-med", "0ms");
+    try {
+      renderShell();
+      openFromLauncher("Files");
+      openFromLauncher("Fleet");
+      openFromLauncher("Deployables");
+      fireEvent.keyDown(window, { key: "ArrowLeft", ctrlKey: true, shiftKey: true });
+      const leaving = document.querySelector("[data-os-window='deployables']") as HTMLElement;
+      expect(leaving.hasAttribute("hidden")).toBe(true);
+      expect(document.querySelector("[data-slide]")).toBeNull();
+    } finally {
+      document.documentElement.style.removeProperty("--os-duration-med");
+    }
+  });
+});
+
 describe("dock pins (spec K bullet 3)", () => {
   it("pins from the context menu and persists across a remount", () => {
     const storage = memStorage();
