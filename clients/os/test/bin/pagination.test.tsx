@@ -11,7 +11,7 @@ beforeEach(() => { h.connection = fakeConnection({ archived: artifacts, archived
 afterEach(cleanup);
 it("merges ten recent archived resources and retains the twenty-row window on reopen", async () => {
   const first = await renderBin();
-  const rows = () => within(screen.getByRole("list", { name: "Archived items" })).getAllByRole("button");
+  const rows = () => within(screen.getByRole("list", { name: "Deleted items" })).getAllByRole("button");
   expect(rows()).toHaveLength(10);
   expect(rows()[0]?.textContent).toContain("Folder 24");
   expect(rows()[1]?.textContent).toContain("Archived 24");
@@ -31,7 +31,7 @@ it("finds a machine name outside the first page and leaves other owners' events 
   fireEvent.click(screen.getByRole("button", { name: "Search the Bin" }));
   fireEvent.change(screen.getByPlaceholderText("Name, description, label or machine"), { target: { value: "RESEARCH" } });
   await screen.findByText("Archived 00");
-  expect(within(screen.getByRole("list", { name: "Archived items" })).getAllByRole("button")).toHaveLength(1);
+  expect(within(screen.getByRole("list", { name: "Deleted items" })).getAllByRole("button")).toHaveLength(1);
   expect(h.connection.callsNamed("libraryArtifactsBrowse").at(-1)).toContain('search: "RESEARCH"');
   await act(async () => h.connection.subscriptions.emit("v1:library:artifact", artifactRow({ id: "foreign", ownerUserId: "someone-else", archived: true, title: "Research private" })));
   expect(screen.queryByText("Research private")).toBeNull();

@@ -177,7 +177,7 @@ export function BinDetail({
     facts.uploadedFromWorkerName || item.producedByWorkerName || machine?.name || "";
 
   return (
-    <aside className="os-bin-detail" aria-label="Archived item details">
+    <aside className="os-bin-detail" aria-label="Deleted item details">
       <header className="os-files-inspector-head">
         <span className="os-files-inspector-glyph">
           {item.kind === "folder" ? <FolderOpen size={18} aria-hidden /> : kindGlyph(item.contentKind, 18)}
@@ -229,7 +229,7 @@ export function BinDetail({
           <Fact
             label="Last changed"
             value={formatMoment(item.changedAt)}
-            title="An archive re-writes the row, so for most items in the Bin this is when it was archived."
+            title="Deleting re-writes the row, so for most items in the Bin this is when it was deleted."
           />
         ) : null}
         <Fact label="Id" value={item.id} mono />

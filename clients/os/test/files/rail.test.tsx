@@ -76,7 +76,7 @@ describe("the row's right-click menu", () => {
       "Download",
       "Move to folder",
       "Ask about this file",
-      "Move to Bin",
+      "Delete",
     ]) {
       expect(within(menu).getByRole("menuitem", { name })).toBeTruthy();
     }
@@ -111,7 +111,7 @@ describe("the row's right-click menu", () => {
     expect(within(menu).getByRole("menuitem", { name: "Restore" })).toBeTruthy();
     // Archiving something already archived is not an action, and offering it
     // would be the menu describing a state it can see is not the case.
-    expect(within(menu).queryByRole("menuitem", { name: "Move to Bin" })).toBeNull();
+    expect(within(menu).queryByRole("menuitem", { name: "Delete" })).toBeNull();
   });
 
   it("re-files a row from the menu, which is where re-filing lives now", async () => {
