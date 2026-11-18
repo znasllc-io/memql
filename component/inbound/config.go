@@ -41,6 +41,20 @@ const (
 const (
 	SchemeHMACSHA256Hex    = "hmac-sha256-hex"
 	SchemeHMACSHA256Base64 = "hmac-sha256-base64"
+	// SchemeJWTHS256BodySHA256 is a compact JWT, signed HS256 under the shared
+	// secret, whose claims carry the body's SHA-256 in standard base64 (`sha256`)
+	// beside the usual `iss`, `exp` and `nbf`. The signature covers the claims
+	// and the claims cover the body, so the token proves the body without the
+	// HMAC being taken over the body itself (verifyJWTBodySHA256).
+	//
+	// STILL AN ENCODING, NOT A VENDOR. It says how the proof is laid out, the
+	// question the two HMAC schemes answer, and names nobody: a LiveKit media
+	// server's webhooks are the first sender to use it (the calls capability
+	// registers that source, app/transport_inbound.go), and any sender signing a
+	// body digest into a JWT is configured the same way. The token carries its
+	// own times, so a source using it takes no timestamp header, and the issuer it
+	// must name is part of the source's policy (SourceConfig.JWTIssuer).
+	SchemeJWTHS256BodySHA256 = "jwt-hs256-body-sha256"
 	// SchemeNone accepts without verifying. It exists for a sender that is
 	// already behind another trust boundary (a mesh-internal producer, a
 	// gateway that verified upstream) and it must be spelled out per source:
@@ -126,6 +140,13 @@ type SourceConfig struct {
 	// before the signature check runs -- because Handler holds such a body only
 	// in one of a bounded number of turns (largeBodyReads).
 	MaxBodyBytes int
+	// JWTIssuer is the `iss` a SchemeJWTHS256BodySHA256 token must carry: the
+	// key the sender signs as. Required by that scheme and meaningless to the
+	// others, which refuse it (loadSource). A token that verifies under the
+	// secret but names another issuer is refused, because two keys sharing one
+	// secret are still two senders, and an empty issuer would match any token
+	// that left the claim out.
+	JWTIssuer string
 
 	// verifiedBy is the tier that resolved this policy, stamped on the staged
 	// row (memql#5795). Unexported on purpose: resolveSource sets it from
@@ -158,7 +179,8 @@ type Config struct {
 // Per source <NAME> (uppercased, '-' -> '_'):
 //
 //	MEMQL_INBOUND_SOURCE_<NAME>_SECRET
-//	MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_SCHEME   hmac-sha256-hex | hmac-sha256-base64 | none
+//	MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_SCHEME   hmac-sha256-hex | hmac-sha256-base64 |
+//	                                               jwt-hs256-body-sha256 | none
 //	MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_HEADER
 //	MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_PREFIX
 //	MEMQL_INBOUND_SOURCE_<NAME>_TIMESTAMP_HEADER
@@ -169,6 +191,8 @@ type Config struct {
 //	MEMQL_INBOUND_SOURCE_<NAME>_TIMESTAMP_ELEMENT   e.g. "t"
 //	MEMQL_INBOUND_SOURCE_<NAME>_MAX_BODY_BYTES      this source's own body cap;
 //	                                               default MEMQL_INBOUND_MAX_BODY_BYTES
+//	MEMQL_INBOUND_SOURCE_<NAME>_JWT_ISSUER          the iss a jwt-hs256-body-sha256 token
+//	                                               must name; that scheme only
 //
 // FORWARD_HEADERS is the only way an ENV source stages delivery metadata: with
 // it unset the row carries `headersJson: "{}"`, whatever the sender sent. A
@@ -257,6 +281,15 @@ func loadSource(name string) (SourceConfig, error) {
 		ElementSeparator: strings.TrimSpace(os.Getenv(prefix + "ELEMENT_SEPARATOR")),
 		SignatureElement: strings.TrimSpace(os.Getenv(prefix + "SIGNATURE_ELEMENT")),
 		TimestampElement: strings.TrimSpace(os.Getenv(prefix + "TIMESTAMP_ELEMENT")),
+		JWTIssuer:        strings.TrimSpace(os.Getenv(prefix + "JWT_ISSUER")),
+	}
+	// Before the scheme switch too, for the cap's reason below: an issuer on a
+	// source whose scheme carries no token -- an unverified one included -- would
+	// read as checked and check nothing, and an operator who wrote it meant
+	// something by it.
+	if src.JWTIssuer != "" && src.Scheme != SchemeJWTHS256BodySHA256 {
+		return SourceConfig{}, fmt.Errorf("%sJWT_ISSUER is set but %sSIGNATURE_SCHEME=%q carries no token to name an issuer: "+
+			"set the scheme to %q, or remove JWT_ISSUER", prefix, prefix, src.Scheme, SchemeJWTHS256BodySHA256)
 	}
 	// Before the scheme switch, which returns early for "none": an unverified
 	// source is the one that most needs a cap of its own to be the one it gets.
@@ -274,20 +307,26 @@ func loadSource(name string) (SourceConfig, error) {
 	switch src.Scheme {
 	case SchemeNone:
 		return src, nil
-	case SchemeHMACSHA256Hex, SchemeHMACSHA256Base64:
+	case SchemeHMACSHA256Hex, SchemeHMACSHA256Base64, SchemeJWTHS256BodySHA256:
 	case "":
-		return SourceConfig{}, fmt.Errorf("%sSIGNATURE_SCHEME is unset -- set it to %q, %q or, "+
+		return SourceConfig{}, fmt.Errorf("%sSIGNATURE_SCHEME is unset -- set it to %q, %q, %q or, "+
 			"to accept unverified, an explicit %q", prefix,
-			SchemeHMACSHA256Hex, SchemeHMACSHA256Base64, SchemeNone)
+			SchemeHMACSHA256Hex, SchemeHMACSHA256Base64, SchemeJWTHS256BodySHA256, SchemeNone)
 	default:
-		return SourceConfig{}, fmt.Errorf("%sSIGNATURE_SCHEME=%q is not a known scheme (want %q, %q or %q)",
-			prefix, src.Scheme, SchemeHMACSHA256Hex, SchemeHMACSHA256Base64, SchemeNone)
+		return SourceConfig{}, fmt.Errorf("%sSIGNATURE_SCHEME=%q is not a known scheme (want %q, %q, %q or %q)",
+			prefix, src.Scheme, SchemeHMACSHA256Hex, SchemeHMACSHA256Base64, SchemeJWTHS256BodySHA256, SchemeNone)
 	}
 	if src.Secret == "" {
 		return SourceConfig{}, fmt.Errorf("%sSECRET is empty, so the signature could not be checked", prefix)
 	}
 	if src.SignatureHeader == "" {
 		return SourceConfig{}, fmt.Errorf("%sSIGNATURE_HEADER is unset, so there is nothing to check", prefix)
+	}
+	if src.Scheme == SchemeJWTHS256BodySHA256 {
+		if err := checkJWTSource(src, prefix); err != nil {
+			return SourceConfig{}, err
+		}
+		return src, nil
 	}
 
 	// The composite-header trio is all-or-nothing, and each half is refused
@@ -320,6 +359,31 @@ func loadSource(name string) (SourceConfig, error) {
 		}
 	}
 	return src, nil
+}
+
+// checkJWTSource holds a jwt-hs256-body-sha256 source to what that scheme can honour.
+//
+// THE ISSUER IS REQUIRED: without one, a token signed under the secret would verify
+// whichever key it named. A TIMESTAMP HEADER AND A COMPOSITE HEADER ARE REFUSED, each
+// for its own reason. The token carries its own times, so a timestamp header beside it
+// was never signed, and folded into the row's identity (identityKeyFor) an unsigned value
+// would let one captured delivery mint a row per value. And the token is the header's
+// whole value, so there are no elements to select. Each is refused rather than ignored,
+// because an operator who wrote one meant something by it.
+func checkJWTSource(src SourceConfig, prefix string) error {
+	if src.JWTIssuer == "" {
+		return fmt.Errorf("%sJWT_ISSUER is unset, so a token signed under the secret would verify whichever key it named: "+
+			"set it to the key the sender signs as", prefix)
+	}
+	if src.TimestampHeader != "" {
+		return fmt.Errorf("%sTIMESTAMP_HEADER is set, but a %q token carries its own times, so that header's value "+
+			"was never signed: remove it", prefix, SchemeJWTHS256BodySHA256)
+	}
+	if src.ElementSeparator != "" || src.SignatureElement != "" || src.TimestampElement != "" {
+		return fmt.Errorf("%sELEMENT_SEPARATOR, SIGNATURE_ELEMENT and TIMESTAMP_ELEMENT describe a header of k=v elements, "+
+			"and a %q header is one token: remove them", prefix, SchemeJWTHS256BodySHA256)
+	}
+	return nil
 }
 
 // envSuffix maps a source name onto the env-var spelling of it.

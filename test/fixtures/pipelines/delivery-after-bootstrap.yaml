@@ -113,6 +113,7 @@ pipeline:
       - component/sitetraffic
       - component/worker
       - integrations/accounts
+      - integrations/calls
       - integrations/compose
       - integrations/embedding
       - integrations/knowledge

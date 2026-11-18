@@ -1,0 +1,9 @@
+[
+  {
+    "advisory": "GHSA-fc5q-39xc-vjpf",
+    "package": "picomatch",
+    "expires": "2026-12-01",
+    "reason": "picomatch ReDoS has no fixed release (latest 4.0.7; advisory widened 2026-11-17). It reaches only build and test tools (vite, vitest, @vscode/test-web) in clients/os, editors/browser and editors/vscode, never shipped code.",
+    "decided": "owner, 2026-11-17"
+  }
+]

@@ -1,0 +1,163 @@
+// shapes.memql
+//
+// One projection per calls concept. A digest is FILTERED on and never read back, so no shape carries one,
+// with ONE exception, callsScheduledCallDigests: the room a booked call opens carries the booking's two
+// digests, and the join that opens it holds only the link it presented.
+
+/// The key row as the calls integration reads it. No digest is projected.
+@row
+shape key callsKeyFull {
+  row.id
+  row.createdAt
+  siteId
+  ownerUserId
+  label
+  kind
+  status
+  accountId
+}
+
+/// The session row as the calls integration reads it. No digest is projected.
+@row
+shape session callsSessionFull {
+  row.id
+  row.createdAt
+  siteId
+  ownerUserId
+  kind
+  keyId
+  seatId
+  roomId
+  expiresAt
+  endedAt
+  accountId
+}
+
+/// The room row as the calls integration reads it. No digest is projected.
+@row
+shape room callsRoomFull {
+  row.id
+  row.createdAt
+  siteId
+  ownerUserId
+  deployable
+  keyId
+  mediaServerId
+  mediaRoom
+  status
+  locked
+  hostSeatId
+  hostLeftAt
+  scheduledCallId
+  openedAt
+  endedAt
+  endReason
+  joinWindowStartedAt
+  joinWindowCount
+  shareSeatId
+  shareStartedAt
+  accountId
+}
+
+/// The seat row as the calls integration reads it. No digest is projected.
+@row
+shape seat callsSeatFull {
+  row.id
+  row.createdAt
+  siteId
+  ownerUserId
+  roomId
+  identity
+  kind
+  displayName
+  host
+  status
+  confirmAdult
+  confirmNoMinors
+  termsVersion
+  joinedAt
+  leftAt
+  keyId
+  lastSeenAt
+  letInAt
+  accountId
+}
+
+/// The queueEntry row as the calls integration reads it. No digest is projected.
+@row
+shape queueEntry callsQueueEntryFull {
+  row.id
+  row.createdAt
+  siteId
+  ownerUserId
+  roomId
+  seatId
+  keyId
+  class
+  enqueuedAt
+  lastPollAt
+  status
+  accountId
+}
+
+/// The scheduledCall row as the calls integration reads it. No digest is projected.
+@row
+shape scheduledCall callsScheduledCallFull {
+  row.id
+  row.createdAt
+  siteId
+  ownerUserId
+  keyId
+  start
+  end
+  title
+  status
+  roomId
+  calendarUid
+  accountId
+}
+
+/// A scheduledCall's two link digests and nothing else: THE ONE SHAPE THAT PROJECTS A DIGEST. The first join
+/// of a booked call opens its room, and the room carries both digests so either link finds it as an ad hoc
+/// call's links find theirs; that join presented one link and can derive only its digest. Read only by
+/// callsScheduledCallDigestsById, under the gate that opens the room (integrations/calls schedule.go).
+@row
+shape scheduledCall callsScheduledCallDigests {
+  row.id
+  guestDigest
+  hostDigest
+}
+
+/// The mediaServer row as the calls integration reads it. No digest is projected.
+@row
+shape mediaServer callsMediaServerFull {
+  row.id
+  row.createdAt
+  provider
+  apiUrl
+  publicUrl
+  region
+  seats
+  state
+  credentialSecret
+}
+
+/// The policy row as the calls integration reads it. No digest is projected.
+@row
+shape policy callsPolicyFull {
+  row.id
+  row.createdAt
+  siteId
+  ownerUserId
+  maxPeople
+  maxAgents
+  roomJoinsPerMinute
+  maxUpcomingScheduled
+  maxScheduledMinutes
+  hostLeftGrace
+  passTtl
+  scheduleHorizon
+  queueEntryTtl
+  queuePoll
+  accountId
+}

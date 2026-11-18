@@ -8349,6 +8349,31 @@ QueryClient.prototype.updateSiteBundle = function (this: QueryClient, args: Upda
   return this.executeNamed("updateSiteBundle", buildUpdateSiteBundle(args), opts);
 };
 
+/** Turn the CALLS capability on or off for this deployable (the generic calls capability, dsl/calls): whether its own origin serves the calls routes, rooms people join with a key and no MemQL account.
+THE ONE WRITER OF `calls`, and the write callsSiteEnable makes AS THE PERSON ASKING. It carries the part itself, and organizationCapabilityTarget names its target, so it is judged in the deployable's organization whether a person calls it directly or through the builtin; the site's row tier decides who may write the row, and validateOrganizationSensitiveChanges asks the organization's calls part for the change itself. `calls boolean!` rather than an optional with `?? false`, for updateSiteShopperForms' reason: off is a deliberate act that must be expressible as a write. */
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteCalls"] in generated_concepts.ts).
+export interface UpdateSiteCallsArgs {
+  siteId: string;
+  calls: boolean;
+}
+
+export function buildUpdateSiteCalls(args: UpdateSiteCallsArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  parts.push("calls: " + renderMemQLValue(args.calls));
+  return "mutation updateSiteCalls(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateSiteCalls(args: UpdateSiteCallsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateSiteCalls = function (this: QueryClient, args: UpdateSiteCallsArgs = {} as UpdateSiteCallsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateSiteCalls", buildUpdateSiteCalls(args), opts);
+};
+
 /** Point a storefront's CANDIDATE at the development store it is exercised against, or clear it (epic memql#5531, design D8).
 The preview binding's twin is `binding`, and the two are separate fields for the reason the whole epic exists: `binding` is the store shoppers reach, and a version being exercised must never be able to reach it. Written whole as {storeId} rather than merged, for updateSiteStoreBinding's reason -- a read-merge would let a retired shape survive beside the reference. An empty storeId writes an empty object, the unbound state, so detaching a development store stays expressible.
 THE STORE MUST BE A DEVELOPMENT STORE. v1:shopify:store.isDevelopment is a fact about somebody else's system, recorded on the store row when it is attached, and a preview binding naming a store without it is REFUSED -- that is the second direction of the go-live guard, and the reason it matters is that the failure it prevents is silent: a preview against the live store looks exactly like a preview, right up to the test payment landing in the merchant's real orders.

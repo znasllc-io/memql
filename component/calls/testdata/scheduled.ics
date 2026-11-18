@@ -1,0 +1,18 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Example//Calls//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:call-1\;a\,b@example.invalid
+DTSTAMP:20261117T090005Z
+DTSTART:20261201T133000Z
+DTEND:20261201T143000Z
+SUMMARY:Planning\, part 1\; agenda\\notes
+DESCRIPTION:First line.\nSecond line\, with a comma\; a semicolon\; a backs
+ lash \\ and a long tail that must fold across several lines\, including a 
+ multi-byte character right here: café ééééééééééééééééé
+ ééé end.
+URL:https://calls.example.invalid/join?room=abc&x=1,2;3
+END:VEVENT
+END:VCALENDAR

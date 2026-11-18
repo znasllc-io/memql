@@ -1606,6 +1606,13 @@ each finding. Only findings are relaxed: govulncheck's exit 3, and
 requests, pushes, merge groups and scheduled runs fail on findings as before,
 so an advisory is fixed in a pull request rather than discovered by a release.
 
+An npm advisory with no fixed release can be waived until a date in
+`scripts/ci/npm-audit-exceptions.json` (owner decision, 2026-11-17). The waiver
+applies only while its entry names that advisory and package, its `expires`
+date has not arrived, and every install path of the package is a development
+dependency in the lockfile. The step logs each waiver as a warning and records
+it in `summary.json`; every other finding fails as before.
+
 The longest audit steps outlast the default 2-hour run ceiling. Operators must
 budget the complete run, including queue time, and configure both agent and
 Workbench consistently. `components/pipelines-long-runs` offers an explicit

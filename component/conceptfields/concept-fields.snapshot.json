@@ -716,6 +716,242 @@
       }
     },
     {
+      "concept": "v1:calls:key",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "digest",
+        "kind",
+        "label",
+        "ownerUserId",
+        "siteId",
+        "status"
+      ],
+      "required": [
+        "digest",
+        "ownerUserId",
+        "siteId"
+      ],
+      "enums": {
+        "kind": [
+          "paid",
+          "test"
+        ],
+        "status": [
+          "active",
+          "banned",
+          "frozen"
+        ]
+      }
+    },
+    {
+      "concept": "v1:calls:mediaServer",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "apiUrl",
+        "credentialSecret",
+        "provider",
+        "publicUrl",
+        "region",
+        "seats",
+        "state"
+      ],
+      "enums": {
+        "state": [
+          "active",
+          "draining",
+          "removed"
+        ]
+      }
+    },
+    {
+      "concept": "v1:calls:policy",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "hostLeftGrace",
+        "maxAgents",
+        "maxPeople",
+        "maxScheduledMinutes",
+        "maxUpcomingScheduled",
+        "ownerUserId",
+        "passTtl",
+        "queueEntryTtl",
+        "queuePoll",
+        "roomJoinsPerMinute",
+        "scheduleHorizon",
+        "siteId"
+      ],
+      "required": [
+        "ownerUserId",
+        "siteId"
+      ]
+    },
+    {
+      "concept": "v1:calls:queueEntry",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "class",
+        "enqueuedAt",
+        "keyId",
+        "lastPollAt",
+        "ownerUserId",
+        "roomId",
+        "seatId",
+        "siteId",
+        "status"
+      ],
+      "required": [
+        "ownerUserId",
+        "roomId",
+        "siteId"
+      ],
+      "enums": {
+        "class": [
+          "new",
+          "running",
+          "scheduled"
+        ],
+        "status": [
+          "admitted",
+          "expired",
+          "waiting"
+        ]
+      }
+    },
+    {
+      "concept": "v1:calls:room",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "deployable",
+        "endReason",
+        "endedAt",
+        "guestDigest",
+        "hostDigest",
+        "hostLeftAt",
+        "hostSeatId",
+        "joinWindowCount",
+        "joinWindowStartedAt",
+        "keyId",
+        "locked",
+        "mediaRoom",
+        "mediaServerId",
+        "openedAt",
+        "ownerUserId",
+        "scheduledCallId",
+        "shareSeatId",
+        "shareStartedAt",
+        "siteId",
+        "status"
+      ],
+      "required": [
+        "ownerUserId",
+        "siteId"
+      ],
+      "enums": {
+        "status": [
+          "ended",
+          "open"
+        ]
+      }
+    },
+    {
+      "concept": "v1:calls:scheduledCall",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "calendarUid",
+        "end",
+        "guestDigest",
+        "hostDigest",
+        "keyId",
+        "ownerUserId",
+        "roomId",
+        "siteId",
+        "start",
+        "status",
+        "title"
+      ],
+      "required": [
+        "ownerUserId",
+        "siteId"
+      ],
+      "enums": {
+        "status": [
+          "cancelled",
+          "ended",
+          "scheduled",
+          "started"
+        ]
+      }
+    },
+    {
+      "concept": "v1:calls:seat",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "confirmAdult",
+        "confirmNoMinors",
+        "displayName",
+        "host",
+        "identity",
+        "joinedAt",
+        "keyId",
+        "kind",
+        "lastSeenAt",
+        "leftAt",
+        "letInAt",
+        "ownerUserId",
+        "roomId",
+        "siteId",
+        "status",
+        "termsVersion"
+      ],
+      "required": [
+        "ownerUserId",
+        "roomId",
+        "siteId"
+      ],
+      "enums": {
+        "status": [
+          "admitted",
+          "in_call",
+          "left",
+          "removed",
+          "waiting"
+        ]
+      }
+    },
+    {
+      "concept": "v1:calls:session",
+      "file": "calls/concepts.memql",
+      "fields": [
+        "accountId",
+        "endedAt",
+        "expiresAt",
+        "keyId",
+        "kind",
+        "ownerUserId",
+        "roomId",
+        "seatId",
+        "siteId",
+        "tokenDigest"
+      ],
+      "required": [
+        "ownerUserId",
+        "siteId",
+        "tokenDigest"
+      ],
+      "enums": {
+        "kind": [
+          "guest",
+          "host"
+        ]
+      }
+    },
+    {
       "concept": "v1:campaigns:audience",
       "file": "campaigns/concepts.memql",
       "fields": [
@@ -5075,6 +5311,7 @@
         "artifactId",
         "binding",
         "bundleRef",
+        "calls",
         "candidateRef",
         "deleted",
         "extensionRuntimePath",
@@ -10090,6 +10327,27 @@
       "kind": "field",
       "migration": "20260909010000_agent_nested_retirements.up.sql",
       "note": "Completes agent retirements in #5017, #5062 and #5164. The same migration repairs closed capabilities/providerConfig/lineage nested blocks; preserves their declared siblings and all unrelated concepts."
+    },
+    {
+      "concept": "v1:calls:policy",
+      "field": "deployable",
+      "kind": "field",
+      "waiver": "No installation holds a v1:calls:policy row: the concept arrived in 5a9a7252a on the calls branch, which no release has carried, and it was rekeyed by site before any release did, so the only rows ever written were test rows on throwaway databases.",
+      "note": "The calls policy is per site (Task 4 review, round 1): a package deployable's name is unique only together with its package, so a policy keyed by the name applied one package's limits to every other package's deployable of that name."
+    },
+    {
+      "concept": "v1:calls:policy",
+      "field": "ownerUserId",
+      "kind": "required",
+      "waiver": "No installation holds a v1:calls:policy row: the concept arrived in 5a9a7252a on the calls branch, which no release has carried, and it was rekeyed by site before any release did, so the only rows ever written were test rows on throwaway databases.",
+      "note": "The calls policy is per site (Task 4 review, round 1): a package deployable's name is unique only together with its package, so a policy keyed by the name applied one package's limits to every other package's deployable of that name."
+    },
+    {
+      "concept": "v1:calls:policy",
+      "field": "siteId",
+      "kind": "required",
+      "waiver": "No installation holds a v1:calls:policy row: the concept arrived in 5a9a7252a on the calls branch, which no release has carried, and it was rekeyed by site before any release did, so the only rows ever written were test rows on throwaway databases.",
+      "note": "The calls policy is per site (Task 4 review, round 1): a package deployable's name is unique only together with its package, so a policy keyed by the name applied one package's limits to every other package's deployable of that name."
     },
     {
       "concept": "v1:cluster:cluster",

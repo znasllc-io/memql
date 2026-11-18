@@ -46,7 +46,10 @@ func TestResultCachePostureIsPinned(t *testing.T) {
 	// expired code stops opening the site at that instant (access codes design
 	// record, 2026-10-29, D11, owner-approved the same day). Its reason is in
 	// the adoption table of the caching design record, beside identity's.
-	wantDenylist := []string{"v1:identity:", "v1:platform:siteAccess"}
+	// The third is the calls capability (v1:calls:): its keys, passes and links are
+	// bearer credentials whose revocation, freezing or expiry must take effect on the
+	// next request, so no default-on caching.
+	wantDenylist := []string{"v1:identity:", "v1:platform:siteAccess", "v1:calls:"}
 	if !reflect.DeepEqual(cacheDenylistedConceptPrefixes, wantDenylist) {
 		t.Errorf("cacheDenylistedConceptPrefixes = %v, want exactly %v.\n"+
 			"EMPTYING it would let authn/authz state ride the 60s default: a revoked session, a "+

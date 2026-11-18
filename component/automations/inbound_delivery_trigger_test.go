@@ -103,13 +103,16 @@ func TestNoShippedAutomationFiresOnAWorkedInboundDelivery(t *testing.T) {
 	// The ones this rule was written for. A rename or a move is a deliberate
 	// edit of this list; an automation missing from the tree is a test that
 	// would otherwise pass by testing nothing.
-	for _, want := range []string{"dispatchInboundToConnector", "ingestCampaignFeedback", "notePackageUpstreamFromWebhook", "triggerPipelinesOnGitHubDelivery"} {
+	for _, want := range []string{"applyMediaEvent", "dispatchInboundToConnector", "ingestCampaignFeedback", "notePackageUpstreamFromWebhook", "triggerPipelinesOnGitHubDelivery"} {
 		if !strings.Contains(" "+strings.Join(names, " ")+" ", " "+want+" ") {
 			t.Fatalf("%s is not among the shipped automations on %s: %v", want, inboundRequestConcept, names)
 		}
 	}
 
-	sources := []string{"github", "shopify", "graph-mailbox", "anything-else"}
+	// livekit is the calls media server's source (integrations/calls WebhookSource):
+	// applyMediaEvent filters on it, and the control below needs a source each
+	// automation fires for.
+	sources := []string{"github", "livekit", "shopify", "graph-mailbox", "anything-else"}
 	for _, a := range automations {
 		t.Run(a.Name, func(t *testing.T) {
 			// One refusal is the whole finding: the first worked delivery that

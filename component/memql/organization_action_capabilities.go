@@ -12,7 +12,7 @@ import (
 
 func organizationDeployableCapability(resource string) bool {
 	switch resource {
-	case "app:deployables/deploy", "app:deployables/publish", "app:deployables/retire", "app:pipelines/repositories", "app:deployables/preview", "app:deployables/store", "app:deployables/access", "app:deployables/reviews", "app:deployables/wholesale", "app:deployables/sales":
+	case "app:deployables/deploy", "app:deployables/publish", "app:deployables/retire", "app:pipelines/repositories", "app:deployables/preview", "app:deployables/store", "app:deployables/access", "app:deployables/reviews", "app:deployables/wholesale", "app:deployables/sales", "app:deployables/calls":
 		return true
 	}
 	return false
@@ -30,7 +30,7 @@ func organizationCapabilityTarget(fn *Function) (concept, argument string) {
 		// bound mutation may choose other names and keeps the public DSL's
 		// original capability semantics; its writes still meet row guards.
 		switch fn.Name {
-		case "updateSiteStatus", "updateSiteStoreBinding", "setSiteCandidate", "clearSiteCandidate", "promoteSiteCandidate", "updateSitePreviewBinding", "deleteSite":
+		case "updateSiteStatus", "updateSiteStoreBinding", "setSiteCandidate", "clearSiteCandidate", "promoteSiteCandidate", "updateSitePreviewBinding", "deleteSite", "updateSiteCalls":
 			if fn.BoundConcept == "v1:platform:site" {
 				return fn.BoundConcept, "siteId"
 			}
@@ -62,6 +62,15 @@ func organizationCapabilityTarget(fn *Function) (concept, argument string) {
 		// mutation beneath them is @serverOnly
 		// (TestEveryClientCallableAccessCodeActIsAGatedBuiltin).
 		case "siteAccessCodeCreate", "siteAccessGuestPassCreate", "siteAccessGates", "siteAccessCodesForSite":
+			return "v1:platform:site", "siteId"
+		// The calls capability (the generic calls namespace, dsl/calls). Minting a
+		// test key, switching a deployable's calls and setting its limits (a policy
+		// is per site) are asked about the SITE they name, so the calls part held in
+		// one organization acts on no other's deployable. callsMediaServers is NOT
+		// here: the media servers are the cluster's and name no site, and its handler
+		// admits a cluster owner and nobody else, since the global capability folds
+		// in every organization's grants (TestCallsActsNameTheirOrganizationTarget).
+		case "callsTestKeyCreate", "callsSiteEnable", "callsPolicySet":
 			return "v1:platform:site", "siteId"
 		// A storefront's sales figures (the sales part): asked about the SITE the
 		// store statistics are read for.
@@ -237,7 +246,10 @@ func (e *MemQLEngine) refuseOrganizationActionCapability(ctx context.Context, fn
 // deploy came from. "publish": what visitors get, or whose authority the site's
 // shopper forms borrow (ownerUserId). Saving a newsletter connection on a site
 // whose forms are off turns them on as the person saving it, so that now asks
-// publish too (component/campaigns/newsletter.go).
+// publish too (component/campaigns/newsletter.go). "calls" is judged by its own
+// rule in the guard (create and change), so it carries no parts here: the switch lets
+// people into rooms on the owner's media capacity, a different consequence from
+// publishing a build, so it asks app:deployables/calls and not publish.
 //
 // Regression test: TestASiteFieldThatChangesWhatVisitorsGetAsksPublish.
 var siteFieldParts = []struct {
@@ -248,7 +260,7 @@ var siteFieldParts = []struct {
 	{"title", nil}, {"notes", nil}, {"accountId", nil},
 	{"artifactId", []string{"deploy", "publish"}}, {"packageId", []string{"deploy", "publish"}}, {"packageDeployableName", []string{"deploy", "publish"}},
 	{"hostname", []string{"publish"}}, {"kind", []string{"publish"}}, {"resolutionTail", []string{"publish"}},
-	{"apiProxy", []string{"publish"}}, {"shopperForms", []string{"publish"}}, {"systemOwned", []string{"publish"}},
+	{"apiProxy", []string{"publish"}}, {"shopperForms", []string{"publish"}}, {"calls", nil}, {"systemOwned", []string{"publish"}},
 	{"extensionRuntimePath", []string{"publish"}}, {"settings", []string{"publish"}}, {"storeSettings", []string{"publish"}},
 	{"ownerUserId", []string{"publish"}},
 }
@@ -316,6 +328,15 @@ func (e *MemQLEngine) validateOrganizationSensitiveChanges(ctx context.Context, 
 			if BareShortId(stringFromAny(oldBinding[bindingStoreIdKey])) != BareShortId(stringFromAny(newBinding[bindingStoreIdKey])) {
 				require("store")
 			}
+		}
+		// calls has a rule of its own, shaped like autoDeploy's below: a create that
+		// leaves the switch off is ordinary data, and one that turns it on asks the
+		// calls part just as a later change does. siteFieldParts lists it with no
+		// parts for that reason (the form for a field judged here) because that table
+		// is applied only to an existing site, and a site created with calls on would
+		// otherwise ask no part at all and then ask only publish.
+		if changed("calls") && (!creating || boolFromAny(next["calls"])) {
+			require("calls")
 		}
 		if !creating {
 			for _, f := range siteFieldParts {

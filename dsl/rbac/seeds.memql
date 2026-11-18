@@ -767,6 +767,15 @@ seed capability cap-owner-execute-app-deployables-access { roleSlug: "owner"  ve
 @description("developer: the access part of the Deployables app -- mint, regenerate, re-time and remove the access codes that open part of a deployable to a named visitor (deployable access codes, design record 2026-10-29).")
 seed capability cap-developer-execute-app-deployables-access { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/access"  predefined: true }
 
+// ---- app:deployables/calls -- turn a deployable's calls capability on and manage its keys ----
+//
+// OWNER AND DEVELOPER, as the parts above, and a part of its own: a calls deployable spends media
+// server capacity and admits strangers to rooms, a different consequence from publishing a build.
+@description("owner: the calls part of the Deployables app -- turn the calls capability on for a deployable and manage its keys.")
+seed capability cap-owner-execute-app-deployables-calls { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/calls"  predefined: true }
+@description("developer: the calls part of the Deployables app -- turn the calls capability on for a deployable and manage its keys.")
+seed capability cap-developer-execute-app-deployables-calls { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/calls"  predefined: true }
+
 // ---- app:deployables/health -- a deployable's Health figures on its Statistics page ----
 //
 // OWNER AND DEVELOPER (owner's direction, 2026-11-10): requests, errors, not
