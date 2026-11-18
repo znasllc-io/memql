@@ -75,7 +75,8 @@ describe("sign-in and sign-out handoffs", () => {
     const previousSource = h.sources.at(-1);
     expect(screen.queryByRole("heading")).toBeNull();
     expect(screen.getByRole("status")).toBeTruthy();
-    expect(screen.getAllByRole("group", { name: "Color theme" })).toHaveLength(1);
+    // The loading handoff carries no theme switch (owner, Nov 2026); sign-in pages keep theirs.
+    expect(screen.queryByRole("group", { name: "Color theme" })).toBeNull();
     await act(async () => t.logout.resolve(json({})));
     await waitFor(() => expect(location.pathname).toBe("/identity/authorize"));
     expect(screen.queryByRole("heading")).toBeNull();
