@@ -3,10 +3,62 @@ package calls
 import (
 	"bytes"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
+
+// TestRenderICSStructureIsIndependentOfTheGolden checks the rendered bytes
+// against rules and a hand-written list of logical lines, so it still fails
+// if the golden file were regenerated from a wrong renderer.
+func TestRenderICSStructureIsIndependentOfTheGolden(t *testing.T) {
+	out := string(RenderICS(goldenEvent()))
+	if !strings.HasSuffix(out, "\r\n") {
+		t.Fatal("the file must end with CRLF")
+	}
+	bare := strings.ReplaceAll(out, "\r\n", "")
+	if strings.Contains(bare, "\r") || strings.Contains(bare, "\n") {
+		t.Fatal("a bare CR or LF occurs")
+	}
+	physical := strings.Split(strings.TrimSuffix(out, "\r\n"), "\r\n")
+	for i, l := range physical {
+		if len(l) > 75 {
+			t.Fatalf("physical line %d is %d octets", i, len(l))
+		}
+		if !utf8.ValidString(l) {
+			t.Fatalf("physical line %d splits a UTF-8 sequence: %q", i, l)
+		}
+		if strings.HasPrefix(l, "ATTENDEE") {
+			t.Fatal("no ATTENDEE line")
+		}
+	}
+
+	want := []string{
+		"BEGIN:VCALENDAR",
+		"VERSION:2.0",
+		"PRODID:-//Example//Calls//EN",
+		"CALSCALE:GREGORIAN",
+		"METHOD:PUBLISH",
+		"BEGIN:VEVENT",
+		`UID:call-1\;a\,b@example.invalid`,
+		"DTSTAMP:20261117T090005Z",
+		"DTSTART:20261201T133000Z",
+		"DTEND:20261201T143000Z",
+		`SUMMARY:Planning\, part 1\; agenda\\notes`,
+		`DESCRIPTION:First line.\nSecond line\, with a comma\; a semicolon\; a backslash \\ and a long tail ` +
+			`that must fold across several lines\, including a multi-byte character right here: caf` + "é " +
+			strings.Repeat("é", 20) + " end.",
+		"URL:https://calls.example.invalid/join?room=abc&x=1,2;3",
+		"END:VEVENT",
+		"END:VCALENDAR",
+	}
+	got := strings.Split(strings.TrimSuffix(strings.ReplaceAll(out, "\r\n ", ""), "\r\n"), "\r\n")
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unfolded lines differ.\n got: %q\nwant: %q", got, want)
+	}
+}
 
 func goldenEvent() CalendarEvent {
 	zone := time.FixedZone("x", 2*3600)

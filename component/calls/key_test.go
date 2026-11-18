@@ -76,6 +76,28 @@ func TestParseKeyIsCaseInsensitiveAndRejectsATypo(t *testing.T) {
 	}
 }
 
+// An unweighted sum catches every substitution but not a swap of two
+// neighbours; the position weights are what make this pass.
+func TestParseKeyRejectsSwappedNeighbours(t *testing.T) {
+	_, formatted, _ := NewKey(bytes.NewReader([]byte("0123456789abcdef")))
+	body := formatted[len(KeyPrefix):]
+	swapped := 0
+	for i := 0; i+1 < keyDataSymbols; i++ {
+		if body[i] == body[i+1] {
+			continue
+		}
+		b := []byte(body)
+		b[i], b[i+1] = b[i+1], b[i]
+		swapped++
+		if _, err := ParseKey(KeyPrefix + string(b)); err == nil {
+			t.Fatalf("swap at %d was accepted", i)
+		}
+	}
+	if swapped == 0 {
+		t.Fatal("test key has no different neighbours")
+	}
+}
+
 func TestParseKeyErrorsAreDistinct(t *testing.T) {
 	_, formatted, _ := NewKey(bytes.NewReader([]byte("0123456789abcdef")))
 	body := formatted[len(KeyPrefix):]
