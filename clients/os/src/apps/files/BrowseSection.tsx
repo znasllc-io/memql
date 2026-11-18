@@ -507,7 +507,7 @@ export function BrowseSection({
         ...ask,
       ];
     }
-    // The owner's order: Open and Download first, Move to Bin last. Rename and
+    // The owner's order: Open and Download first, Delete last. Rename and
     // Share with, which he also asked for, are absent until the engine can do
     // them (rule 12: absent, never disabled) -- there is no file rename and no
     // sharing in the Library yet.
