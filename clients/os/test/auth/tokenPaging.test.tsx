@@ -35,7 +35,9 @@ describe("personal token scroll pages", () => {
     expect(list.querySelectorAll(".os-record-row")).toHaveLength(2);
     expect(within(list).getByText("First updated")).toBeTruthy();
     expect(screen.getByText("fixture-one-time")).toBeTruthy();
-    expect(screen.getAllByText("End of list")).toHaveLength(1);
+    // The footer turns from the loading skeleton to "End of list" in a commit
+    // after the rows land, so a loaded runner can see "Older" before it.
+    expect(await screen.findAllByText("End of list")).toHaveLength(1);
     expect(fetcher).toHaveBeenCalledTimes(3);
     for (const [url, options] of fetcher.mock.calls.slice(1)) {
       expect(String(url)).toContain("/me/tokens?cursor=older");

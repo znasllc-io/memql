@@ -245,7 +245,8 @@ describe("a kind's rows", () => {
     expect(await screen.findByText("Contract.docx")).toBeTruthy();
     expect(screen.getByText("Brief.pdf")).toBeTruthy();
     expect(callsTo(conn, "accountRows")[1]).toBe('builtin accountRows(accountId: "a1", concept: "v1:library:artifact", limit: 50, after: "c2")');
-    expect(screen.getByText("End of list")).toBeTruthy();
+    // "End of list" can render a commit after the new rows; wait for it.
+    expect(await screen.findByText("End of list")).toBeTruthy();
   });
 
   it("searches through Refine, by asking the engine", async () => {
