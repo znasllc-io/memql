@@ -1,0 +1,214 @@
+// concepts.memql
+//
+// The generic CALLS capability: video-call rooms, seats, passes for a media server, scheduled calls and an
+// admission queue. Product-neutral. Every concept is server-written and client-unreadable
+// (component/memql/site_access_guards.go clientUnreadableConcepts): the calls integration reads and writes
+// these rows as the site's owner (borrowed authority) and the browser never reads a v1:calls row directly.
+// Only digests of bearer secrets are stored. The `site.calls` switch (dsl/platform) turns the capability on.
+
+use identity.concepts.{ user }
+use platform.concepts.{ site }
+
+/// A CALLS KEY: the bearer credential that meters a deployable's calls. Only the SHA-256 digest of the
+/// plain key is stored (`digest`); the plain key is shown once when it is minted and never again, so a
+/// leaked ROW is not a leaked key. `status` is the operator's switch: frozen keys open no new rooms and
+/// banned keys are refused outright. Server-written and client-unreadable (clientUnreadableConcepts):
+/// the calls integration is the only reader and writer, as the site's owner.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="kind", secondary="siteId", status="status")
+@belongsTo(account, via="siteId", stays="signin")
+concept key {
+  siteId  string!  @description("The v1:platform:site (deployable) this row belongs to.")
+  ownerUserId  string!  @description("The v1:identity:user who owns the site -- the row-authz key. STAMPED from the actor the write runs as and never an argument: the calls integration writes as the site's owner (borrowed authority), so this is the site's owner and never a visitor.")
+  digest  string! @maxLength(64) @pattern("^[0-9a-f]{64}$")  @description("SHA-256, lowercase hex, of the plain key. THE PLAIN KEY IS NEVER STORED. Looked up by callsKeyByDigest.")
+  label  string  @description("The operator's name for the key. Never sent to a caller.")
+  kind  enum("test", "paid")  @description("Whether the key spends real balance. Absent reads as test.")
+  status  enum("active", "frozen", "banned")  @description("Absent reads as active.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
+
+  @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")
+  @relationship(type="references", as="siteOwner", field="ownerUserId", target=user, direction="outgoing")
+}
+
+/// A CALLS SESSION: one short-lived pass a host or a guest holds to join one room. Only the digest of
+/// the plain token is stored (`tokenDigest`). THE ROW EXPIRES: @retention(ttl="30d", keepLatest=false,
+/// archive="none") deletes the whole row thirty days after it was written, with no copy in object
+/// storage; a digest has no value once the pass has ended and no pass outlives its `expiresAt`.
+/// Server-written and client-unreadable, for siteAccessSession's reason.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@retention(ttl="30d", keepLatest=false, archive="none")
+@displayCard(primary="kind", secondary="siteId", tertiary="expiresAt")
+@belongsTo(account, via="siteId", stays="signin")
+concept session {
+  siteId  string!  @description("The v1:platform:site (deployable) this row belongs to.")
+  ownerUserId  string!  @description("The v1:identity:user who owns the site -- the row-authz key. STAMPED from the actor the write runs as and never an argument: the calls integration writes as the site's owner (borrowed authority), so this is the site's owner and never a visitor.")
+  tokenDigest  string! @maxLength(64) @pattern("^[0-9a-f]{64}$")  @description("SHA-256, lowercase hex, of the plain pass token. THE PLAIN TOKEN IS NEVER STORED.")
+  kind  enum("host", "guest")  @description("Which side of the call the pass is for.")
+  keyId  string  @description("The v1:calls:key this pass was drawn against.")
+  seatId  string  @description("The v1:calls:seat the pass occupies, once it has one.")
+  expiresAt  datetime  @description("When the pass stops opening anything. Compared against the engine's clock at request time.")
+  endedAt  datetime  @description("When the pass was ended early, or empty. A SOFT end: the row stays.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
+
+  @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")
+  @relationship(type="references", as="siteOwner", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="drawnOn", field="keyId", target=key, direction="outgoing")
+  @relationship(type="references", as="heldFor", field="seatId", target=seat, direction="outgoing")
+}
+
+/// A CALLS ROOM: one call on one media server. `guestDigest` and `hostDigest` are the SHA-256 digests of
+/// the guest and host links; the plain links are shown once. A room ends when its host leaves and the
+/// grace period passes (`hostLeftAt`), or when it is ended explicitly (`endReason`). Server-written and
+/// client-unreadable.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="mediaRoom", secondary="siteId", status="status")
+@belongsTo(account, via="siteId")
+concept room {
+  siteId  string!  @description("The v1:platform:site (deployable) this row belongs to.")
+  ownerUserId  string!  @description("The v1:identity:user who owns the site -- the row-authz key. STAMPED from the actor the write runs as and never an argument: the calls integration writes as the site's owner (borrowed authority), so this is the site's owner and never a visitor.")
+  deployable  string  @description("The deployable's name, for the calls policy lookup.")
+  keyId  string  @description("The v1:calls:key that opened the room.")
+  mediaServerId  string  @description("The v1:calls:mediaServer carrying the room.")
+  mediaRoom  string  @description("The room's name on the media server.")
+  status  enum("open", "ended")  @description("Absent reads as open.")
+  locked  bool  @description("A locked room admits nobody new.")
+  hostSeatId  string  @description("The v1:calls:seat that hosts the room.")
+  hostLeftAt  datetime  @description("When the host left, or empty. Starts the host-left countdown.")
+  scheduledCallId  string  @description("The v1:calls:scheduledCall this room was opened for, if any.")
+  guestDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")  @description("SHA-256, lowercase hex, of the guest link secret.")
+  hostDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")  @description("SHA-256, lowercase hex, of the host link secret.")
+  openedAt  datetime  @description("When the room opened.")
+  endedAt  datetime  @description("When the room ended, or empty.")
+  endReason  string  @description("Why the room ended, as a stable code.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
+
+  @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")
+  @relationship(type="references", as="siteOwner", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="openedWith", field="keyId", target=key, direction="outgoing")
+  @relationship(type="references", as="carriedBy", field="mediaServerId", target=mediaServer, direction="outgoing")
+  @relationship(type="references", as="hostedBy", field="hostSeatId", target=seat, direction="outgoing")
+  @relationship(type="references", as="openedFor", field="scheduledCallId", target=scheduledCall, direction="outgoing")
+}
+
+/// A CALLS SEAT: one participant's place in one room. `kind` is the rules module's SeatKind (person, agent,
+/// avatar, sampler). The three confirmations record what the participant attested to before the seat was
+/// admitted. Server-written and client-unreadable.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="displayName", secondary="roomId", status="status")
+@belongsTo(account, via="siteId")
+concept seat {
+  siteId  string!  @description("The v1:platform:site (deployable) this row belongs to.")
+  ownerUserId  string!  @description("The v1:identity:user who owns the site -- the row-authz key. STAMPED from the actor the write runs as and never an argument: the calls integration writes as the site's owner (borrowed authority), so this is the site's owner and never a visitor.")
+  roomId  string!  @description("The v1:calls:room this seat is in.")
+  identity  string  @description("The participant's identity on the media server.")
+  kind  string  @description("person, agent, avatar or sampler (calls.SeatKind).")
+  displayName  string  @description("The name other participants see.")
+  host  bool  @description("True for the room's host seat.")
+  status  enum("waiting", "admitted", "in_call", "left", "removed")  @description("Where the seat is on its walk.")
+  confirmAdult  bool  @description("The participant attested to being an adult.")
+  confirmNoMinors  bool  @description("The participant attested to there being no minors on their side.")
+  termsVersion  string  @description("The version of the terms the participant accepted.")
+  joinedAt  datetime  @description("When the seat was taken.")
+  leftAt  datetime  @description("When the participant left, or empty.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
+
+  @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")
+  @relationship(type="references", as="siteOwner", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="roomId", target=room, direction="outgoing")
+}
+
+/// A CALLS QUEUE ENTRY: one request waiting to be admitted, ordered by the rules module's class and
+/// `enqueuedAt`. `lastPollAt` is how the waiter proves it is still there. THE ROW EXPIRES after 30 days
+/// (keepLatest=false, archive="none"): an admission wait has no value as a record once it is over.
+/// Server-written and client-unreadable.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@retention(ttl="30d", keepLatest=false, archive="none")
+@displayCard(primary="class", secondary="roomId", status="status")
+@belongsTo(account, via="siteId", stays="transit")
+concept queueEntry {
+  siteId  string!  @description("The v1:platform:site (deployable) this row belongs to.")
+  ownerUserId  string!  @description("The v1:identity:user who owns the site -- the row-authz key. STAMPED from the actor the write runs as and never an argument: the calls integration writes as the site's owner (borrowed authority), so this is the site's owner and never a visitor.")
+  roomId  string!  @description("The v1:calls:room the entry waits to join.")
+  seatId  string  @description("The v1:calls:seat the entry would take.")
+  keyId  string  @description("The v1:calls:key the entry is drawn against.")
+  class  enum("running", "scheduled", "new")  @description("Admission class: a running call outranks a scheduled one, which outranks a new one.")
+  enqueuedAt  datetime  @description("When the entry joined the queue.")
+  lastPollAt  datetime  @description("When the waiter last confirmed it was still waiting.")
+  status  enum("waiting", "admitted", "expired")  @description("Absent reads as waiting.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
+
+  @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")
+  @relationship(type="references", as="siteOwner", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="roomId", target=room, direction="outgoing")
+  @relationship(type="references", as="forSeat", field="seatId", target=seat, direction="outgoing")
+  @relationship(type="references", as="drawnOn", field="keyId", target=key, direction="outgoing")
+}
+
+/// A SCHEDULED CALL: a call booked for a later time against one key. `guestDigest` and `hostDigest` are
+/// the SHA-256 digests of the links in the calendar file; the plain links are shown once. `roomId` is set
+/// when the call starts. Server-written and client-unreadable.
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="title", secondary="start", status="status")
+@belongsTo(account, via="siteId")
+concept scheduledCall {
+  siteId  string!  @description("The v1:platform:site (deployable) this row belongs to.")
+  ownerUserId  string!  @description("The v1:identity:user who owns the site -- the row-authz key. STAMPED from the actor the write runs as and never an argument: the calls integration writes as the site's owner (borrowed authority), so this is the site's owner and never a visitor.")
+  keyId  string  @description("The v1:calls:key the call is booked against.")
+  start  datetime  @description("When the call starts.")
+  end  datetime  @description("When the call is booked to end.")
+  title  string  @description("The call's title in the calendar file.")
+  status  enum("scheduled", "cancelled", "started", "ended")  @description("Absent reads as scheduled.")
+  roomId  string  @description("The id of the calls room once the call has started. The room names the call back (its scheduledCallId), and a relationship in both directions is a cycle the engine refuses, so only the room side declares one.")
+  guestDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")  @description("SHA-256, lowercase hex, of the guest link secret.")
+  hostDigest  string @maxLength(64) @pattern("^[0-9a-f]{64}$")  @description("SHA-256, lowercase hex, of the host link secret.")
+  accountId  string  @description("The account this row belongs to (see @belongsTo). The engine fills it in at insert and carries it forward on every update.")
+
+  @relationship(type="references", as="forSite", field="siteId", target=site, direction="outgoing")
+  @relationship(type="references", as="siteOwner", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="bookedWith", field="keyId", target=key, direction="outgoing")
+}
+
+/// A MEDIA SERVER: one LiveKit-compatible server rooms are placed on. CLUSTER-OWNED: the cluster owner
+/// manages the fleet, and no site owns one. `credentialSecret` NAMES a secret (it is not the secret): the
+/// value is read through the secret store at use. Server-written and client-unreadable.
+@serverWritten
+@rowAuthz(clusterOwner)
+@displayCard(primary="publicUrl", secondary="region", status="state")
+@belongsTo(cluster)
+concept mediaServer {
+  provider  string  @description("The media server software, for instance livekit.")
+  apiUrl  string  @description("The server's control API address, used only by the engine.")
+  publicUrl  string  @description("The address participants' browsers connect to.")
+  region  string  @description("Where the server runs, for placement.")
+  seats  int  @description("How many seats the server can carry.")
+  state  enum("active", "draining", "removed")  @description("A draining server takes no new rooms; a removed one is gone. Absent reads as active.")
+  credentialSecret  string  @description("The NAME of the globalSecret holding the server's API credentials.")
+}
+
+/// A CALLS POLICY: the limits the rules module consults for one deployable, one field per calls.Policy
+/// value (durations in whole seconds). CLUSTER-OWNED. A field left absent means the shipped default
+/// (calls.DefaultPolicy); only a value the operator set overrides it. Server-written and
+/// client-unreadable.
+@serverWritten
+@rowAuthz(clusterOwner)
+@displayCard(primary="deployable")
+@belongsTo(cluster)
+concept policy {
+  deployable  string!  @description("The deployable these limits apply to.")
+  maxPeople  int  @description("calls.Policy.MaxPeople: people allowed in one room.")
+  maxAgents  int  @description("calls.Policy.MaxAgents: agents allowed in one room.")
+  roomJoinsPerMinute  int  @description("calls.Policy.RoomJoinsPerMinute: join attempts allowed per room per minute.")
+  maxUpcomingScheduled  int  @description("calls.Policy.MaxUpcomingScheduled: upcoming scheduled calls allowed per key.")
+  maxScheduledMinutes  int  @description("calls.Policy.MaxScheduledMinutes: the longest a scheduled call may be, in minutes.")
+  hostLeftGrace  int  @description("calls.Policy.HostLeftGrace, in SECONDS: how long a room outlives its host.")
+  passTtl  int  @description("calls.Policy.PassTTL, in SECONDS: how long a pass lives.")
+  scheduleHorizon  int  @description("calls.Policy.ScheduleHorizon, in SECONDS: how far ahead a call may be booked.")
+  queueEntryTtl  int  @description("calls.Policy.QueueEntryTTL, in SECONDS: how long a queue entry may go unpolled.")
+  queuePoll  int  @description("calls.Policy.QueuePoll, in SECONDS: how often a waiter polls.")
+}

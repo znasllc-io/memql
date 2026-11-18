@@ -1,0 +1,139 @@
+// shapes.memql
+//
+// One projection per calls concept. A digest is FILTERED on and never read back, so no shape carries one.
+
+/// The key row as the calls integration reads it. No digest is projected.
+@row
+shape key callsKeyFull {
+  row.id
+  row.createdAt
+  siteId
+  ownerUserId
+  label
+  kind
+  status
+  accountId
+}
+
+/// The session row as the calls integration reads it. No digest is projected.
+@row
+shape session callsSessionFull {
+  row.id
+  row.createdAt
+  siteId
+  ownerUserId
+  kind
+  keyId
+  seatId
+  expiresAt
+  endedAt
+  accountId
+}
+
+/// The room row as the calls integration reads it. No digest is projected.
+@row
+shape room callsRoomFull {
+  row.id
+  row.createdAt
+  siteId
+  ownerUserId
+  deployable
+  keyId
+  mediaServerId
+  mediaRoom
+  status
+  locked
+  hostSeatId
+  hostLeftAt
+  scheduledCallId
+  openedAt
+  endedAt
+  endReason
+  accountId
+}
+
+/// The seat row as the calls integration reads it. No digest is projected.
+@row
+shape seat callsSeatFull {
+  row.id
+  row.createdAt
+  siteId
+  ownerUserId
+  roomId
+  identity
+  kind
+  displayName
+  host
+  status
+  confirmAdult
+  confirmNoMinors
+  termsVersion
+  joinedAt
+  leftAt
+  accountId
+}
+
+/// The queueEntry row as the calls integration reads it. No digest is projected.
+@row
+shape queueEntry callsQueueEntryFull {
+  row.id
+  row.createdAt
+  siteId
+  ownerUserId
+  roomId
+  seatId
+  keyId
+  class
+  enqueuedAt
+  lastPollAt
+  status
+  accountId
+}
+
+/// The scheduledCall row as the calls integration reads it. No digest is projected.
+@row
+shape scheduledCall callsScheduledCallFull {
+  row.id
+  row.createdAt
+  siteId
+  ownerUserId
+  keyId
+  start
+  end
+  title
+  status
+  roomId
+  accountId
+}
+
+/// The mediaServer row as the calls integration reads it. No digest is projected.
+@row
+shape mediaServer callsMediaServerFull {
+  row.id
+  row.createdAt
+  provider
+  apiUrl
+  publicUrl
+  region
+  seats
+  state
+  credentialSecret
+}
+
+/// The policy row as the calls integration reads it. No digest is projected.
+@row
+shape policy callsPolicyFull {
+  row.id
+  row.createdAt
+  deployable
+  maxPeople
+  maxAgents
+  roomJoinsPerMinute
+  maxUpcomingScheduled
+  maxScheduledMinutes
+  hostLeftGrace
+  passTtl
+  scheduleHorizon
+  queueEntryTtl
+  queuePoll
+}

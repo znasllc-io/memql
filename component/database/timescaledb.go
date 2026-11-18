@@ -101,6 +101,7 @@ func registerTimescaleMigrations(m *migrate.Migrations, logger *slog.Logger) {
 	registerSiteAccessLookupIndexes(m, logger)
 	registerInboundFailedLookupIndex(m, logger)
 	registerAccountIndex(m, logger)
+	registerCallsLookupIndexes(m, logger)
 }
 
 func timescaleExtensionPostHook(fallbackLogger *slog.Logger) PostMigrationHook {

@@ -1,0 +1,266 @@
+// queries.memql
+//
+// Every query here is @serverOnly: only the calls integration reads these rows, as the site's owner
+// (borrowed authority) or as the cluster acting. The owned concepts state the owner tier as a top-level
+// conjunct, as siteAccessSessionByToken does; actor.userId scoping alone is not the fix for a digest lookup,
+// because a client-callable lookup by digest is an oracle for guessed secrets.
+
+use common.traits.{ isOpen }
+
+/// One key row by its own id. The calls integration reads it before it writes, and to answer a request that names it. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("key by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+@cache(0)
+query key callsKeyById {
+  args {
+    id  string!
+  }
+  filter  row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsKeyFull
+}
+
+/// Resolve a key by the SHA-256 digest of the secret presented. THE DIGEST IS THE ARGUMENT, never the secret: the plain secret exists in the caller's hand and nowhere else. An ended or expired row still answers; the calls integration decides the reply from the row and the clock. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("key by digest -- a digest names one row and no two rows share one")
+@actor
+@cache(0)
+query key callsKeyByDigest {
+  args {
+    digest  string!  @maxLength(64) @pattern("^[0-9a-f]{64}$")
+  }
+  filter  row => row.digest == args.digest && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsKeyFull
+}
+
+/// One session row by its own id. The calls integration reads it before it writes, and to answer a request that names it. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("session by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+@cache(0)
+query session callsSessionById {
+  args {
+    id  string!
+  }
+  filter  row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsSessionFull
+}
+
+/// Resolve a session by the SHA-256 digest of the secret presented. THE DIGEST IS THE ARGUMENT, never the secret: the plain secret exists in the caller's hand and nowhere else. An ended or expired row still answers; the calls integration decides the reply from the row and the clock. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("session by digest -- a digest names one row and no two rows share one")
+@actor
+@cache(0)
+query session callsSessionByTokenDigest {
+  args {
+    tokenDigest  string!  @maxLength(64) @pattern("^[0-9a-f]{64}$")
+  }
+  filter  row => row.tokenDigest == args.tokenDigest && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsSessionFull
+}
+
+/// One room row by its own id. The calls integration reads it before it writes, and to answer a request that names it. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("room by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+@cache(0)
+query room callsRoomById {
+  args {
+    id  string!
+  }
+  filter  row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsRoomFull
+}
+
+/// Resolve a room by the SHA-256 digest of the secret presented. THE DIGEST IS THE ARGUMENT, never the secret: the plain secret exists in the caller's hand and nowhere else. An ended or expired row still answers; the calls integration decides the reply from the row and the clock. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("room by digest -- a digest names one row and no two rows share one")
+@actor
+@cache(0)
+query room callsRoomByGuestDigest {
+  args {
+    guestDigest  string!  @maxLength(64) @pattern("^[0-9a-f]{64}$")
+  }
+  filter  row => row.guestDigest == args.guestDigest && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsRoomFull
+}
+
+/// Resolve a room by the SHA-256 digest of the secret presented. THE DIGEST IS THE ARGUMENT, never the secret: the plain secret exists in the caller's hand and nowhere else. An ended or expired row still answers; the calls integration decides the reply from the row and the clock. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("room by digest -- a digest names one row and no two rows share one")
+@actor
+@cache(0)
+query room callsRoomByHostDigest {
+  args {
+    hostDigest  string!  @maxLength(64) @pattern("^[0-9a-f]{64}$")
+  }
+  filter  row => row.hostDigest == args.hostDigest && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsRoomFull
+}
+
+/// The room rows of one parent, for the calls integration: open rooms of one key -- a key opens few rooms at a time, capped by the policy. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("open rooms of one key -- a key opens few rooms at a time, capped by the policy")
+@actor
+@cache(0)
+query room callsOpenRoomsForKey {
+  args {
+    keyId  string!
+  }
+  filter  row => row.keyId == args.keyId && isOpen(row) && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsRoomFull
+}
+
+/// One seat row by its own id. The calls integration reads it before it writes, and to answer a request that names it. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("seat by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+@cache(0)
+query seat callsSeatById {
+  args {
+    id  string!
+  }
+  filter  row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsSeatFull
+}
+
+/// The seat rows of one parent, for the calls integration: seats of one room -- bounded by the room-size limits of the calls policy. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("seats of one room -- bounded by the room-size limits of the calls policy")
+@actor
+@cache(0)
+query seat callsSeatsForRoom {
+  args {
+    roomId  string!
+  }
+  filter  row => row.roomId == args.roomId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsSeatFull
+}
+
+/// One queueEntry row by its own id. The calls integration reads it before it writes, and to answer a request that names it. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("queueEntry by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+@cache(0)
+query queueEntry callsQueueEntryById {
+  args {
+    id  string!
+  }
+  filter  row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsQueueEntryFull
+}
+
+/// The queueEntry rows of one parent, for the calls integration: queue entries of one room -- bounded by the queue entry lifetime and the join rate of the calls policy. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("queue entries of one room -- bounded by the queue entry lifetime and the join rate of the calls policy")
+@actor
+@cache(0)
+query queueEntry callsQueueEntriesForRoom {
+  args {
+    roomId  string!
+  }
+  filter  row => row.roomId == args.roomId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsQueueEntryFull
+}
+
+/// One scheduledCall row by its own id. The calls integration reads it before it writes, and to answer a request that names it. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("scheduledCall by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+@cache(0)
+query scheduledCall callsScheduledCallById {
+  args {
+    id  string!
+  }
+  filter  row => row.id == args.id && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsScheduledCallFull
+}
+
+/// Resolve a scheduledCall by the SHA-256 digest of the secret presented. THE DIGEST IS THE ARGUMENT, never the secret: the plain secret exists in the caller's hand and nowhere else. An ended or expired row still answers; the calls integration decides the reply from the row and the clock. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("scheduledCall by digest -- a digest names one row and no two rows share one")
+@actor
+@cache(0)
+query scheduledCall callsScheduledCallByGuestDigest {
+  args {
+    guestDigest  string!  @maxLength(64) @pattern("^[0-9a-f]{64}$")
+  }
+  filter  row => row.guestDigest == args.guestDigest && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsScheduledCallFull
+}
+
+/// Resolve a scheduledCall by the SHA-256 digest of the secret presented. THE DIGEST IS THE ARGUMENT, never the secret: the plain secret exists in the caller's hand and nowhere else. An ended or expired row still answers; the calls integration decides the reply from the row and the clock. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("scheduledCall by digest -- a digest names one row and no two rows share one")
+@actor
+@cache(0)
+query scheduledCall callsScheduledCallByHostDigest {
+  args {
+    hostDigest  string!  @maxLength(64) @pattern("^[0-9a-f]{64}$")
+  }
+  filter  row => row.hostDigest == args.hostDigest && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsScheduledCallFull
+}
+
+/// The scheduledCall rows of one parent, for the calls integration: scheduled calls of one key -- capped by the policy maximum of upcoming scheduled calls. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("scheduled calls of one key -- capped by the policy maximum of upcoming scheduled calls")
+@actor
+@cache(0)
+query scheduledCall callsScheduledCallsForKey {
+  args {
+    keyId  string!
+  }
+  filter  row => row.keyId == args.keyId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   callsScheduledCallFull
+}
+
+/// One mediaServer row by its own id. The calls integration reads it before it writes, and to answer a request that names it. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("mediaServer by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+@cache(0)
+query mediaServer callsMediaServerById {
+  args {
+    id  string!
+  }
+  filter  row => row.id == args.id && actor.isClusterOwner == true
+  shape   callsMediaServerFull
+}
+
+/// One policy row by its own id. The calls integration reads it before it writes, and to answer a request that names it. actor.userId scoping is not the fix: the calls integration runs as the site owner or the cluster, so a caller term would decide nothing, and what @serverOnly withholds is the WIRE.
+@serverOnly
+@unbounded("policy by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+@cache(0)
+query policy callsPolicyById {
+  args {
+    id  string!
+  }
+  filter  row => row.id == args.id && actor.isClusterOwner == true
+  shape   callsPolicyFull
+}
+
+/// The media servers rooms may be placed on: every server whose state is active. Cluster-owned rows, read by the
+/// calls integration as the cluster acting; actor.userId scoping is not the fix, as the rows have no owner.
+@serverOnly
+@actor
+@unbounded("active media servers -- the fleet an operator runs, a handful of rows")
+@cache(0)
+query mediaServer callsActiveMediaServers {
+  filter  row => row.state == "active" && actor.isClusterOwner == true
+  shape   callsMediaServerFull
+}
+
+/// The limits of one deployable. Cluster-owned; absent fields mean the shipped defaults (calls.DefaultPolicy). actor.userId scoping is not the fix: the rows have no owner.
+@serverOnly
+@actor
+@unbounded("calls policy by deployable -- one row per deployable")
+@cache(0)
+query policy callsPolicyForDeployable {
+  args {
+    deployable  string!
+  }
+  filter  row => row.deployable == args.deployable && actor.isClusterOwner == true
+  shape   callsPolicyFull
+}

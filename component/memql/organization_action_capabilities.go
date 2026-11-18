@@ -12,7 +12,7 @@ import (
 
 func organizationDeployableCapability(resource string) bool {
 	switch resource {
-	case "app:deployables/deploy", "app:deployables/publish", "app:deployables/retire", "app:pipelines/repositories", "app:deployables/preview", "app:deployables/store", "app:deployables/access", "app:deployables/reviews", "app:deployables/wholesale", "app:deployables/sales":
+	case "app:deployables/deploy", "app:deployables/publish", "app:deployables/retire", "app:pipelines/repositories", "app:deployables/preview", "app:deployables/store", "app:deployables/access", "app:deployables/reviews", "app:deployables/wholesale", "app:deployables/sales", "app:deployables/calls":
 		return true
 	}
 	return false
@@ -237,7 +237,9 @@ func (e *MemQLEngine) refuseOrganizationActionCapability(ctx context.Context, fn
 // deploy came from. "publish": what visitors get, or whose authority the site's
 // shopper forms borrow (ownerUserId). Saving a newsletter connection on a site
 // whose forms are off turns them on as the person saving it, so that now asks
-// publish too (component/campaigns/newsletter.go).
+// publish too (component/campaigns/newsletter.go). "calls": the calls capability
+// switch, which lets strangers into rooms on the owner's media capacity, so it asks
+// its own part (app:deployables/calls) and not the publish part.
 //
 // Regression test: TestASiteFieldThatChangesWhatVisitorsGetAsksPublish.
 var siteFieldParts = []struct {
@@ -248,7 +250,7 @@ var siteFieldParts = []struct {
 	{"title", nil}, {"notes", nil}, {"accountId", nil},
 	{"artifactId", []string{"deploy", "publish"}}, {"packageId", []string{"deploy", "publish"}}, {"packageDeployableName", []string{"deploy", "publish"}},
 	{"hostname", []string{"publish"}}, {"kind", []string{"publish"}}, {"resolutionTail", []string{"publish"}},
-	{"apiProxy", []string{"publish"}}, {"shopperForms", []string{"publish"}}, {"systemOwned", []string{"publish"}},
+	{"apiProxy", []string{"publish"}}, {"shopperForms", []string{"publish"}}, {"calls", []string{"calls"}}, {"systemOwned", []string{"publish"}},
 	{"extensionRuntimePath", []string{"publish"}}, {"settings", []string{"publish"}}, {"storeSettings", []string{"publish"}},
 	{"ownerUserId", []string{"publish"}},
 }

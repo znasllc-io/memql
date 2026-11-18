@@ -71,6 +71,7 @@ const (
 var cacheDenylistedConceptPrefixes = []string{
 	"v1:identity:",
 	"v1:platform:siteAccess",
+	"v1:calls:",
 }
 
 // isCacheDenylistedConcept reports whether a single concept id falls under
