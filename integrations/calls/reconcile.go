@@ -52,23 +52,34 @@ import (
 //     lets in holds a seat (only people are seated so far); a kind that connects without
 //     one -- the safety sampler -- will need a seat, or an exemption here, or the pass
 //     disconnects it.
-//  3. The host: a host seat closed in step 1 stamps the room's hostLeftAt at its leave
-//     time when no host seat is left in the call; a host in the call clears a stale one;
-//     then the countdown (host.go hostLeft) hands the call to a key holder in it, or finds
-//     it due to end.
-//  4. The queue: every waiting entry of the call past its deployable's QueueEntryTTL is
+//  3. The queue: every waiting entry of the call past its deployable's QueueEntryTTL is
 //     marked expired -- the calls whose own requests mark theirs are the busy ones; this
 //     reaches the quiet ones. Nobody is admitted and no pass is minted: a waiter whose
 //     turn has come is let in on its own next poll, the only reply that can carry its
-//     pass (service.go).
+//     pass (service.go). This comes BEFORE the host and the empty decisions, for step 5's
+//     reason.
+//  4. The host: a host seat closed in step 1 stamps the room's hostLeftAt at its leave
+//     time when no host seat is left in the call; a host in the call clears a stale one;
+//     then the countdown (host.go hostLeft) hands the call to a key holder in it, or finds
+//     it due to end.
 //  5. A call nobody is in and nobody waits for ends, empty, in this same gated phase; a
 //     call the countdown found due ends host_left in a second one, after its media room
 //     is deleted outside the gates (host.go's file note, "Where the media room is
-//     deleted"), and only if it is still due then.
+//     deleted"), and only if it is still due then (endIfDue).
 //
 // After each step that wrote, the call is read again before the next decides, so every
 // decision is made from rows as they stand and every write is fenced on the version it
 // was decided from.
+//
+// THE TWO PHASES OF A host_left END DECIDE FROM THE SAME ROWS. The first marks every
+// expired entry before it decides, so endIfDue reads what the first phase decided from,
+// and anything else between them is written by somebody else: a host let in, a host
+// joining the line, a key holder coming in, a leave. Each of those is a real reason to
+// change the decision. An entry whose lifetime runs out in between can only take a seat
+// out of the count of those waiting, never put one in, and a host seat counts as coming
+// only with a live place (host.go stillWaiting), so it cannot turn a due end into none. A
+// pass therefore never deletes a call's media room and then keeps the call open because of
+// a row it wrote itself.
 //
 // # What a pass costs
 //
@@ -236,7 +247,8 @@ func (s *Service) reconcileRoom(ctx context.Context, server MediaServer, backend
 	return nil
 }
 
-// reconcileGated is steps 1 to 5 of the file note, under the call's gates.
+// reconcileGated is steps 1 to 5 of the file note, under the call's gates, in the note's
+// order: the seats, the identities, the queue, the host, and how the call ends.
 func (s *Service) reconcileGated(ctx context.Context, server MediaServer, hint roomRow, present []MediaParticipant, tally *reconcileTally) (reconcilePlan, error) {
 	release, err := s.gates(ctx, endGates(hint)...)
 	if err != nil {
@@ -317,7 +329,32 @@ func (s *Service) reconcileGated(ctx context.Context, server MediaServer, hint r
 		}
 	}
 
-	// 3. The host.
+	// 3. The queue's expired entries, marked BEFORE the host and the empty decisions, so
+	// this phase decides from the rows endIfDue reads again: a pass never deletes a call's
+	// media room on a decision that an entry it marked itself then reverses (the file note).
+	var waiting []callrules.QueueEntry
+	rows := map[string]queueEntryRow{}
+	for _, entry := range v.entries {
+		if entry.waiting() {
+			waiting = append(waiting, entry.rule())
+			rows[entry.ID] = entry
+		}
+	}
+	expired := callrules.ExpiredEntries(waiting, now, v.policy.QueueEntryTTL)
+	for _, entryID := range expired {
+		entry := rows[entryID]
+		if err := s.store.updateQueueEntry(fresh, owner, entry, entryExpired, time.Time{}, memql.VersionTimeAfter(entry.Version, now)); err != nil {
+			return reconcilePlan{}, err
+		}
+		tally.expired++
+	}
+	if len(expired) > 0 {
+		if v, err = s.viewAgain(fresh, v); err != nil {
+			return reconcilePlan{}, err
+		}
+	}
+
+	// 4. The host.
 	wrote = false
 	switch {
 	case v.hostPresent() && !v.room.HostLeftAt.IsZero():
@@ -357,29 +394,6 @@ func (s *Service) reconcileGated(ctx context.Context, server MediaServer, hint r
 		due = true
 	}
 
-	// 4. The queue's expired entries.
-	var waiting []callrules.QueueEntry
-	rows := map[string]queueEntryRow{}
-	for _, entry := range v.entries {
-		if entry.waiting() {
-			waiting = append(waiting, entry.rule())
-			rows[entry.ID] = entry
-		}
-	}
-	expired := callrules.ExpiredEntries(waiting, now, v.policy.QueueEntryTTL)
-	for _, entryID := range expired {
-		entry := rows[entryID]
-		if err := s.store.updateQueueEntry(fresh, owner, entry, entryExpired, time.Time{}, memql.VersionTimeAfter(entry.Version, now)); err != nil {
-			return reconcilePlan{}, err
-		}
-		tally.expired++
-	}
-	if len(expired) > 0 {
-		if v, err = s.viewAgain(fresh, v); err != nil {
-			return reconcilePlan{}, err
-		}
-	}
-
 	// 5. How the call ends, if it does.
 	if v.empty(now) {
 		if err := s.endRows(fresh, v, callrules.EndReasonEmpty, now); err != nil {
@@ -417,7 +431,9 @@ func (s *Service) viewAgain(ctx context.Context, v roomView) (roomView, error) {
 
 // endIfDue is the second gated phase of a host_left end (the file note's step 5): the
 // call read again, fresh, and ended only if the countdown still finds it due -- a host
-// back, or a key holder come in, since the first phase keeps it open. A call that
+// back, a host joining the line, or a key holder come in, since the first phase keeps it
+// open. Those are the only things that change its answer: the first phase marked the
+// expired entries before it decided ("The two phases", in the file note). A call that
 // emptied meanwhile ends as empty. It answers whether the call ended here.
 func (s *Service) endIfDue(ctx context.Context, hint roomRow) (bool, error) {
 	release, err := s.gates(ctx, endGates(hint)...)

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	callrules "github.com/znasllc-io/memql/component/calls"
@@ -447,6 +448,79 @@ func TestABookedCallWhoseHostNeverCameCountsFromItsStart(t *testing.T) {
 	cw.clock.Advance(time.Second)
 	cw.reconcile()
 	require.Equal(t, "ended", cw.row(roomConcept, lateRoom)["status"])
+}
+
+// TestABookedCallWhoseQueuedHostGaveUpEnds: a host passes a booked call's lock, so a host
+// who opens the call with its host link while the media server is full waits only for a
+// seat, with a place in line. One who stops polling gives that place up after the queue
+// entry's lifetime, and is not coming any more. The automation's passes then end the call
+// -- empty when nobody else waits, host_left by the countdown from its booked start when a
+// guest waits behind the lock -- its booking is marked ended, and its key starts a call
+// again. No pass deletes the media room of a call it leaves open.
+func TestABookedCallWhoseQueuedHostGaveUpEnds(t *testing.T) {
+	cw := newCallWorld(t, "hostgaveup", 1)
+	if cw == nil {
+		return
+	}
+	ctx := context.Background()
+	hostA, a := cw.started("Host A") // the server's one seat
+	cw.media.setPresent(a.Call.ID, person(a.Join.Identity))
+
+	// Two booked calls on two keys, each opened by its host link and queued behind A; the
+	// second has a guest waiting behind its lock too.
+	alone, withGuest := cw.host(), cw.host()
+	x := cw.booked(alone, 5*time.Minute, 30, "Host alone")
+	y := cw.booked(withGuest, 5*time.Minute, 30, "Host and a guest")
+	for _, sc := range []callrules.ScheduledCall{x, y} {
+		queued, _, err := cw.joinBy(callrules.JoinBody{HostToken: sc.HostToken, Name: "Host " + sc.Title})
+		require.NoError(t, err)
+		require.Equal(t, callrules.OutcomeQueue, queued.Outcome, "the host link was not queued on the full server")
+	}
+	waits, _, err := cw.joinBy(callrules.JoinBody{Token: y.GuestToken, Name: "Guest"})
+	require.NoError(t, err)
+	require.Equal(t, callrules.OutcomeWait, waits.Outcome)
+	roomX, _ := cw.bookingRoom(x.ID)
+	roomY, _ := cw.bookingRoom(y.ID)
+	require.Equal(t, true, cw.row(roomConcept, roomX)["locked"])
+
+	// Nobody polls again. The automation passes every thirty seconds, past the queue
+	// entry's lifetime and past the booked start plus the grace, and no pass may delete
+	// the media room of a call it leaves open.
+	p := callrules.DefaultPolicy()
+	until := x.Start.Add(p.HostLeftGrace)
+	if expiry := cw.clock.Now().Add(p.QueueEntryTTL); expiry.After(until) {
+		until = expiry
+	}
+	until = until.Add(2 * time.Minute)
+	deletedOpen := map[string]bool{}
+	for cw.clock.Now().Before(until) {
+		cw.clock.Advance(30 * time.Second)
+		cw.reconcile()
+		for _, deleted := range cw.media.deletions() {
+			if cw.row(roomConcept, deleted.Room)["status"] != "ended" {
+				deletedOpen[deleted.Room] = true
+			}
+		}
+	}
+	assert.Empty(t, deletedOpen, "a pass deleted the media room of a call it left open")
+	ended := cw.row(roomConcept, roomX)
+	assert.Equal(t, "ended", ended["status"], "a booked call whose queued host gave up stayed open")
+	assert.Equal(t, callrules.EndReasonEmpty, ended["endReason"])
+	assert.Equal(t, callrules.BookingEnded, cw.row(scheduledCallConcept, x.ID)["status"])
+	ended = cw.row(roomConcept, roomY)
+	assert.Equal(t, "ended", ended["status"], "a booked call with a guest waiting for a host who gave up stayed open")
+	assert.Equal(t, callrules.EndReasonHostLeft, ended["endReason"])
+	assert.Equal(t, callrules.BookingEnded, cw.row(scheduledCallConcept, y.ID)["status"])
+
+	// Both keys start calls again once A frees the server's seat: the first is let in and
+	// the second queues behind it, and neither is refused for a call still open.
+	require.NoError(t, cw.svc.Leave(ctx, hostA))
+	restart, err := cw.svc.Start(ctx, alone, callrules.StartBody{Name: "Host X", Confirm: confirmed})
+	assert.NoError(t, err, "the key of a booked call whose host gave up starts no call")
+	assert.Equal(t, callrules.OutcomeAdmit, restart.Join.Outcome)
+	behind, err := cw.svc.Start(ctx, withGuest, callrules.StartBody{Name: "Host Y", Confirm: confirmed})
+	assert.NoError(t, err, "the key of a booked call whose host gave up starts no call")
+	assert.Equal(t, callrules.OutcomeQueue, behind.Join.Outcome)
 }
 
 // TestTheLastPersonLeavingEndsTheCall: a call ends at once, empty, when the last person

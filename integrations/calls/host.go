@@ -95,8 +95,11 @@ import (
 // since Start counts nothing down. A BOOKED CALL WHOSE HOST NEVER CAME counts from its
 // booked start, or from its opening when a guest opened it after the start, so a guest who
 // arrives late is given the grace a host who left is given and does not open a call that
-// is already over; while a host seat of the call waits in line, the host is coming and
-// nothing counts. A call with a KEY HOLDER in it -- a seat whose session a key opened,
+// is already over; while a host seat of the call waits in line with a live place, the host
+// is coming and nothing counts. A host seat passes the lock, so it only ever waits in line:
+// once its place has expired (its holder stopped polling) the host is not coming, and the
+// countdown runs from the booked start as for a host who never came. A call with a KEY
+// HOLDER in it -- a seat whose session a key opened,
 // the key the deployable's and active -- is handed to them at once (design 8: "their pass
 // or key then covers the guests"): their seat becomes a host seat and the room's
 // hostSeatId, and the countdown is cleared. Reconciliation applies the countdown
@@ -107,12 +110,15 @@ import (
 // A call nobody is in and nobody is waiting for ends at once, empty: when the last seat in
 // it leaves (service.go Leave), and on reconciliation's pass, which also ends a call whose
 // last waiter gave up. A waiting seat counts while it holds a live place in line (an
-// entry inside its deployable's QueueEntryTTL), and, in a locked call, while it holds
-// none: a lock keeps no entry (service.go), and a locked call with nobody hosting it is
-// ended by the countdown instead. A waiter in an unlocked call with no live entry has
-// given up its place. KNOWN LIMITATION: a waiter behind a lock its host has just lifted
-// holds no entry until its next poll, so a call whose last person leaves in that moment
-// ends with that waiter still asking.
+// entry inside its deployable's QueueEntryTTL). A seat HELD BEHIND A LOCK -- a guest's,
+// not a host's and not one a host admitted -- counts while it holds no place at all: a
+// lock keeps no entry (service.go), and a locked call with nobody hosting it is ended by
+// the countdown instead, which counts only host seats (hostComing). A seat that passes the
+// lock (seatRow.passesLock) waits only in line, and with no live place it has given up,
+// as has a waiter in an unlocked call with no live entry (stillWaiting). KNOWN
+// LIMITATION: a waiter behind a lock its host has just lifted, or one a host has just
+// admitted, holds no entry until its next poll, so a call whose last person leaves in
+// that moment ends with that waiter still asking.
 
 // Host makes one host control with a session (the file note).
 func (s *Service) Host(ctx context.Context, sess callrules.Session, req callrules.HostActionRequest) error {
@@ -454,8 +460,16 @@ func (v roomView) hostPresent() bool {
 }
 
 // stillWaiting reports whether a seat still waits to come into the call (the file note's
-// empty-room rule): it holds a live place in line, or, in a locked call, it holds no
-// place at all and waits behind the lock.
+// empty-room rule): it holds a live place in line, or it is held behind the call's lock,
+// which keeps no place at all.
+//
+// ONLY A SEAT THE LOCK HOLDS waits with no place. A seat that passes the lock -- a host
+// seat, or one a host admitted (seatRow.passesLock) -- is never held behind it: it waits
+// only for a seat on the media server, and a seat is waited for in line, so once its
+// place has expired it has given that place up, whether or not anything has marked the
+// entry expired yet. Counting it as held would keep a booked call whose queued host gave
+// up open for good: a host seat that waits counts as the host coming (hostComing), which
+// stops the countdown, and as somebody waiting, which keeps the call from ending empty.
 func (v roomView) stillWaiting(seat seatRow, now time.Time) bool {
 	if seat.Status != seatWaiting {
 		return false
@@ -470,7 +484,7 @@ func (v roomView) stillWaiting(seat seatRow, now time.Time) bool {
 			return true
 		}
 	}
-	return !placed && v.room.Locked
+	return !placed && v.room.Locked && !seat.passesLock()
 }
 
 // empty reports whether nobody is in the call and nobody waits to come in.
@@ -486,7 +500,9 @@ func (v roomView) empty(now time.Time) bool {
 	return true
 }
 
-// hostComing reports whether a host seat of the call still waits to come in.
+// hostComing reports whether a host seat of the call still waits to come in. A host seat
+// passes the lock, so it waits only with a live place in line (stillWaiting): a host who
+// stopped polling for its deployable's QueueEntryTTL is not coming.
 func (v roomView) hostComing(now time.Time) bool {
 	for _, seat := range v.seats {
 		if seat.Host && v.stillWaiting(seat, now) {

@@ -108,11 +108,12 @@ builtin callsMediaServers { }
 /// automation, any other automation -- before it reads anything (integrations/calls reconcile.go). It
 /// declares no capability for that reason: no part a person holds would make the call theirs to make.
 ///
-/// Call by call, under each call's locks: a seat in the call whose identity the media server no longer
-/// shows is closed at its last seen time; an identity no seat in the call holds -- a stranger, a removed
-/// seat back on a pass it still holds -- is disconnected; the host-left countdown is applied, handing the
-/// call to a key holder in it or ending it; the queue's expired entries are marked; and a call nobody is in
-/// or waiting for is ended. It mints no pass. Returns nothing.
+/// Call by call, under each call's locks, in this order: a seat in the call whose identity the media
+/// server no longer shows is closed at its last seen time; an identity no seat in the call holds -- a
+/// stranger, a removed seat back on a pass it still holds -- is disconnected; the queue's expired entries
+/// are marked; the host-left countdown is applied, handing the call to a key holder in it or ending it;
+/// and a call nobody is in or waiting for is ended. The queue comes before the countdown so the decision
+/// to end a call and its end are made from the same rows. It mints no pass. Returns nothing.
 @executor("integration.calls.reconcile")
-@description("Repair every open call against what its media server shows: close the seats whose identity is gone, disconnect identities no seat holds, apply the host-left countdown, mark expired queue entries and end calls nobody is in. Refused to every caller but the engine's own reconcileCalls automation; it mints no pass and returns nothing.")
+@description("Repair every open call against what its media server shows: close the seats whose identity is gone, disconnect identities no seat holds, mark expired queue entries, apply the host-left countdown and end calls nobody is in. Refused to every caller but the engine's own reconcileCalls automation; it mints no pass and returns nothing.")
 builtin callsReconcile { }
