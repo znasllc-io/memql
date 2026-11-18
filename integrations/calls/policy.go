@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 
@@ -19,7 +20,7 @@ import (
 // only together with its package, so one package's limits reached every other
 // package's deployable of that name, across organizations. It is now one row per site,
 // at the site's own id (policyIDFor), owned by the site's owner and read and written as
-// them with internal origin (asOwner), as a key is. The operator who set a limit is
+// them with internal origin (policyContext, over asOwner), as a key is. The operator who set a limit is
 // not its owner: the row stays the site's whoever changes it.
 //
 // # The bounds are the cluster's
@@ -96,10 +97,26 @@ func policyFromValues(values map[string]int) callrules.Policy {
 // run under lets one of them create it).
 func policyIDFor(siteID string) string { return memql.BareShortId(siteID) }
 
+// policyContext is the context a site's policy row is read and written under: the
+// site's owner, with internal origin. asOwner already stamps the origin; it is stamped
+// again here because callsPolicyForSite, createCallsPolicy and updateCallsPolicy are
+// @serverOnly, and the server-only caller gate
+// (test/dslconformance/server_only_callers_stamp_test.go) asks the file that renders a
+// @serverOnly call to stamp the origin itself, so the stamp stays visible beside the
+// calls it admits. A blank owner answers false with the context unchanged, as asOwner's
+// does.
+func policyContext(ctx context.Context, owner string) (context.Context, bool) {
+	owned, ok := asOwner(ctx, owner)
+	if !ok {
+		return ctx, false
+	}
+	return auth.ContextWithInternalOrigin(owned), true
+}
+
 // policyRowFor reads a site's stored limits as the site's owner, within that site. None
 // is (nil, nil).
 func (s *Store) policyRowFor(ctx context.Context, owner, siteID string) (*policyRow, error) {
-	owned, ok := asOwner(ctx, owner)
+	owned, ok := policyContext(ctx, owner)
 	if !ok {
 		return nil, errNoOwner
 	}
@@ -143,7 +160,7 @@ func (s *Store) PolicyFor(ctx context.Context, owner, siteID string) (callrules.
 // at policyIDFor otherwise (fenced on its absence). Values p carries for fields not
 // named are not written, so they keep what they had.
 func (s *Store) savePolicy(ctx context.Context, owner string, prior *policyRow, siteID string, p callrules.Policy, named []string, versionTime time.Time) (string, error) {
-	owned, ok := asOwner(ctx, owner)
+	owned, ok := policyContext(ctx, owner)
 	if !ok {
 		return "", errNoOwner
 	}
